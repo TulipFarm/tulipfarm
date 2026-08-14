@@ -6,11 +6,6 @@ import { expect, test, vi } from "vitest";
 import type { ConversationSummary } from "~/lib/conversations";
 import ChatsRoute from "./_app.chats";
 
-/*
- * Route smoke tests, mirroring knowledge.documents.routes.test.tsx: mock useLoaderData + the
- * `~/lib/conversations` client and `~/lib/conversations-context`, then render the Component directly
- * (Link/portal need router + document → createRemixStub at "/").
- */
 vi.mock("@remix-run/react", async () => {
   const actual = await vi.importActual<typeof import("@remix-run/react")>("@remix-run/react");
   return { ...actual, useLoaderData: vi.fn(), useRouteError: vi.fn() };

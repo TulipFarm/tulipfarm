@@ -1,19 +1,6 @@
 /**
- * Durable invalidation of everything a source leaves behind (SPEC §14.1).
- *
- * An ACL change, a revision bump, a revocation, or a deletion does not just change what retrieval
- * *decides* — it obsoletes derived artifacts that already exist: keyword postings, vectors, cached
- * answers, summaries, assembled Contexts, and citations. Those live in different stores, so
- * convergence is a durable job with per-target progress, not a best-effort fan-out.
- *
- * Two properties this module exists to guarantee:
- * - **Resumability.** A target that fails leaves the job pending with the targets that *did* purge
- *   recorded, so a retry finishes the remainder instead of starting over or silently stopping.
- * - **Observability.** {@link invalidationStatus} answers "has this source converged yet?" from
- *   durable state, so revocation is verifiable rather than assumed.
- *
- * Retrieval never waits on any of this: `acl.ts` denies a revoked or deleted source at read time.
- * Invalidation removes the residue; it is not the access control.
+ * Durable invalidation purges all derived artifacts with per-target progress; retrieval still
+ * denies revoked/deleted sources at read time and never waits for this residue cleanup.
  */
 
 /** Every kind of derived artifact that inherits a source's authorization and must be purged. */

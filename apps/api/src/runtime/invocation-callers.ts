@@ -4,18 +4,12 @@ import type { DurableInvocationGateway, RunInvocation } from "@tulipfarm/run-ker
 import { INTEGRATION_REQUEST_SCHEMA_REF, MANUAL_REQUEST_SCHEMA_REF } from "@tulipfarm/schema";
 import type { IngressJobPayload } from "../ingress/routes";
 
-/**
- * Content-addressed idempotency for callers with no client-supplied key: an identical redelivery
- * resolves to the Run its first delivery already minted instead of running the work twice.
- */
+/** Content-addressed idempotency for callers without a client key. */
 function digest(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
-/**
- * Starts a Routine from a platform tool call. The Run's request Artifact holds the trigger exactly
- * as the caller stated it, so the Routine's inputs survive a crash between minting and execution.
- */
+/** Request Artifact stores Routine inputs exactly so they survive crashes before execution. */
 export function manualRoutineTrigger(invocations: DurableInvocationGateway) {
   return async (
     slug: string,
@@ -37,22 +31,12 @@ export function manualRoutineTrigger(invocations: DurableInvocationGateway) {
   };
 }
 
-/**
- * Starts a Run for one verified channel or Integration delivery.
- *
- * The envelope is stored exactly as received. Normalizing a delivery into a Chat turn needs the
- * manifest classifier, which runs in the worker (PR 3) and produces its own derived Artifact — so
- * the raw delivery stays replayable and auditable, and no reply-relevant field is lost to a
- * transform this side of the ack.
- *
- * `initiator` and `effectiveSubject` are both the Integration: no human has been resolved yet, and
- * claiming one here would attribute the Run to a sender nothing verified.
- */
+/** Starts a verified delivery Run; stores the raw envelope and attributes it to the Integration. */
 export function integrationInvoker(invocations: DurableInvocationGateway) {
   return async (job: IngressJobPayload): Promise<void> => {
     // An Integration whose manifest declares no `context_headers` arrives with `headers` explicitly
     // `undefined`, and canonicalization rejects a key JSON would erase rather than hash something
-    // the payload does not say. Omit the key instead: the delivery is unchanged, and a manifest with
+    // the payload does not say. Omit the key: delivery is unchanged, and a manifest with
     // no context headers cannot fail its Artifact.
     const payload: IngressJobPayload =
       job.headers === undefined ? { slug: job.slug, body: job.body } : job;
@@ -70,16 +54,7 @@ export function integrationInvoker(invocations: DurableInvocationGateway) {
   };
 }
 
-/**
- * Starts a Routine from a `cron`/`interval`/`datetime` `x-triggers` fire (the schedule
- * dispatcher — see `apps/api/src/schedule/`). Reuses `MANUAL_REQUEST_SCHEMA_REF` for the same
- * reason `triggerRunStarter` does: the Worker's Routine executor only reconstructs a manual
- * request (`{slug, inputs}`) from the request Artifact.
- *
- * `initiator`/`effectiveSubject` are always the fixed `service:cron-scheduler` identity — a
- * schedule fire has no human or Integration caller to attribute the Run to, and this must never be
- * confused with `manualRoutineTrigger`'s `agent:assistant` (a chat-initiated Run).
- */
+/** Scheduled Routine Runs use `service:cron-scheduler` and the manual Artifact shape. */
 export function scheduledRoutineTrigger(invocations: DurableInvocationGateway) {
   return async (input: {
     readonly slug: string;
@@ -103,15 +78,7 @@ export function scheduledRoutineTrigger(invocations: DurableInvocationGateway) {
   };
 }
 
-/**
- * Starts a Routine from a bound Trigger invocation. Reuses `MANUAL_REQUEST_SCHEMA_REF` rather than
- * a Trigger-specific schema: the Worker's Routine executor only reconstructs a manual request
- * (`{slug, inputs}`) from the request Artifact, so a Trigger-invoked Run must publish the same shape
- * or the Worker parks it for reconciliation instead of executing it.
- *
- * `initiator` and `effectiveSubject` are both the Trigger's authored background identity — never the
- * event's principal, so a caller cannot borrow authority beyond what the Trigger declared.
- */
+/** Trigger Routine Runs use the Trigger's authored identity, never the event principal. */
 export function triggerRunStarter(invocations: DurableInvocationGateway) {
   return async (
     invocation: RunInvocation

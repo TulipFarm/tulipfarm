@@ -9,12 +9,7 @@ import {
 } from "react";
 import { listPendingApprovals, type PendingApproval } from "~/lib/approvals";
 
-/*
- * Single source of truth for app-wide pending approvals. Mounted once in the `_app` shell, it polls
- * GET /api/v1/chat/approvals every ~4s; the sidebar badge and the Approvals page both read this one
- * context (`count = approvals.length`), and decide handlers call `refresh()` to reconcile after a
- * decision. Ephemeral, single-instance V1 — no global SSE channel, no durable store.
- */
+/* Single V1 approval source: poll every ~4s; decisions call `refresh()` to reconcile. */
 
 const POLL_INTERVAL_MS = 4000;
 

@@ -4,9 +4,8 @@ import { Button } from "~/components/ui/button";
 import type { SpaceInput } from "~/lib/knowledge-api";
 
 /*
- * Create/edit form for an OKF space (name, description). Mirrors the space-form look and
- * server-authoritative error handling; empty optional fields submit as null. A 409 (name taken) is
- * surfaced by the route as `formError`.
+ * Mirrors the space-form look and server-authoritative error handling; empty optional fields
+ * submit as null.
  */
 const inputClass =
   "w-full rounded-sm border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-60";
@@ -32,7 +31,6 @@ export function SpaceForm({
 }: SpaceFormProps) {
   const [name, setName] = useState(initial?.name ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
-  // Client-side required-name check, so an empty submit never round-trips to a server 400.
   const [nameError, setNameError] = useState<string | null>(null);
 
   function handleSubmit(e: FormEvent) {
@@ -48,7 +46,6 @@ export function SpaceForm({
     });
   }
 
-  // Local required-check takes precedence over any server-side field error.
   const shownNameError = nameError ?? fieldErrors.name;
 
   return (

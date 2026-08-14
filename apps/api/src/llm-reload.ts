@@ -3,15 +3,7 @@ import type { EmbeddingService, LlmService } from "@tulipfarm/llm";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { Logger, SoulLoader } from "@tulipfarm/soul";
 
-/**
- * Reload the LLM config on every `soul.synced` event without restarting.
- *
- * Reloads the soul (re-reads `soul.yaml#llm`) then re-initialises the
- * LlmService and EmbeddingService, which re-validate and rebuild from the new
- * config. Both `SoulLoader.reload` and the service `init`s validate/build before
- * mutating their own state, so a failed reload leaves the running server on its
- * previously-loaded, valid config (LLM-V1-003 AC4).
- */
+/** Reloads LLM config on `soul.synced`; failed validation leaves prior valid config active. */
 export function registerLlmReload(
   gitSync: EventEmitter,
   soulLoader: SoulLoader,

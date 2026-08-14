@@ -1,15 +1,6 @@
 import { githubExternalSubject, parseRepositoryRef } from "./scope";
 
-/**
- * GitHub webhook normalization (SPEC §9.2, §15).
- *
- * GitHub delivers signed webhooks, so this Integration never polls with a stored credential. The
- * ingress verifies the HMAC and deduplicates on the delivery id *before* anything here runs; this
- * module only projects a verified payload onto the typed event the Trigger layer consumes.
- * A payload that cannot be fully identified — no repository, no installation, no sender — is
- * rejected rather than defaulted, because each of those fields bounds a later authorization
- * decision. Denials carry a code only, never payload content.
- */
+/** Normalize only HMAC-verified, delivery-deduped GitHub webhooks; reject missing auth bounds. */
 
 export const GITHUB_SIGNATURE_HEADER = "x-hub-signature-256";
 export const GITHUB_DELIVERY_HEADER = "x-github-delivery";
@@ -252,7 +243,7 @@ export interface GitHubPushEvent {
   readonly sender: { readonly login: string; readonly externalId: string };
 }
 
-/** Push carries no `action` field — a payload with `ref`/`commits` but no `action` is the signal. */
+/** Push has no `action`; `ref`/`commits` without `action` is the signal. */
 export function normalizeGitHubPushEvent(payload: unknown): GitHubPushEvent {
   const root = requiredObject(payload);
   if (typeof root.action === "string") throw new GitHubEventError("malformed_payload");

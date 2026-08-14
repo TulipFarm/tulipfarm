@@ -15,17 +15,6 @@ import { renderVarTemplate } from "../../ingress/template";
 import { bundledIntegrationsDir } from "../../soul/integrations/bundled";
 import { buildDeclarativeTools, declarativeToolName } from "./tools";
 
-/**
- * Telegram is the proof that a whole CHANNEL — not just a set of agent Tools — can be declared.
- * It ships a manifest, an OpenAPI document, and a sandboxed classifier, and no TypeScript the host
- * has to know about. Reads the shipped files rather than fixtures, so this fails when the real
- * integration breaks rather than when a copy of it does.
- *
- * The binding checks below are the ones with teeth: an `ingress.chat.reply` binding is executed by
- * name against this integration's own compiled Tools, so a manifest can name a Tool that does not
- * exist, or fill it with arguments its schema rejects, and nothing fails until a real person sends
- * a real message and gets silence back.
- */
 describe("telegram bundled integration", () => {
   let manifest: IntegrationManifest;
   let spec: unknown;
@@ -69,9 +58,6 @@ describe("telegram bundled integration", () => {
   });
 
   it("is bundled, because a channel is code and third-party ingress stays refused", () => {
-    // Not a defect in this manifest — the trust boundary. A classifier is a code module, so only
-    // integrations shipped in this repo may declare one. Asserted here so that boundary cannot be
-    // relaxed silently by someone making a third-party channel work.
     expect(validateThirdPartyManifest(manifest)).toEqual([
       "ingress.handler is a code module; third-party integrations cannot declare ingress in this version",
     ]);
@@ -88,8 +74,6 @@ describe("telegram bundled integration", () => {
   });
 
   it("carries the credential in the path, which is where Telegram wants it", () => {
-    // The host must stay literal even so, or the destination allow-list would stop pinning one
-    // origin — see resolveBaseUrl.
     expect(manifest.egress?.type === "openapi" && manifest.egress.base_url).toBe(
       "https://api.telegram.org/bot{token}"
     );
@@ -99,8 +83,6 @@ describe("telegram bundled integration", () => {
   it("gates sending behind approval and leaves lookups ungated", () => {
     const mutating = Object.fromEntries(build().tools.map((tool) => [tool.name, tool.mutating]));
     expect(mutating.telegram_send_message).toBe(true);
-    // Telegram models both reads as POSTs; without the manifest's default these would ask an
-    // operator to approve looking up a display name.
     expect(mutating.telegram_read_chat).toBe(false);
     expect(mutating.telegram_read_chat_member).toBe(false);
   });
@@ -132,7 +114,6 @@ describe("telegram bundled integration", () => {
 
   it("fills those Tools with arguments their own schemas accept", () => {
     const tools = new Map(build().tools.map((tool) => [tool.name, tool]));
-    // Every var the classifier can produce, as the ingress engine renders them: strings.
     const vars = { chat: "-100", message: "7", topic: "31", sender: "42", text: "hello" };
 
     for (const [name, binding] of Object.entries(manifest.ingress?.chat?.reply ?? {})) {
@@ -157,7 +138,6 @@ describe("telegram bundled integration", () => {
   });
 });
 
-/** Mirrors the ingress engine's arg rendering, which templates strings anywhere in the tree. */
 function render(value: unknown, vars: Record<string, string>): unknown {
   if (typeof value === "string") return renderVarTemplate(value, vars);
   if (Array.isArray(value)) return value.map((entry) => render(entry, vars));

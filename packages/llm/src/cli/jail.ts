@@ -2,13 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-/**
- * A CLI provider spawns a real coding-agent binary, which reads its own config from `$HOME` (API
- * keys, MCP servers, hooks, skills). Pointing `HOME` at a fresh directory per call — never the
- * host user's home — is what stops a subscription turn from picking up ambient host config or
- * leaking the operator's own CLI session into TulipFarm inference. Ported from
- * `qm/src/harness/claude-harness.ts`.
- */
+/** Fresh per-call HOME prevents CLI providers from inheriting host config or sessions. */
 export interface CliJail {
   readonly home: string;
   cleanup(): void;
@@ -39,11 +33,7 @@ const BASE_ENV_PASSTHROUGH = [
   "ALL_PROXY",
 ] as const;
 
-/**
- * Build a jailed child env: `HOME` pinned to the jail, an explicit allowlist copied from the host
- * process env, plus caller-supplied vars (e.g. the credential). Everything else — most importantly
- * `DATABASE_URL`, `ENCRYPTION_KEY`, and every other provider's secret — is absent by construction.
- */
+/** Jailed env copies only an allowlist plus explicit vars; other credentials are absent. */
 export function jailedEnv(
   source: NodeJS.ProcessEnv,
   home: string,

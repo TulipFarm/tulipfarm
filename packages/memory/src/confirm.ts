@@ -1,11 +1,4 @@
-/**
- * Confirmation of inferred Memory (SPEC §14.2).
- *
- * An inferred statement lives here — outside the assertion store — until the scope's owner
- * confirms it. Denial and expiry are not failures to handle later: they delete the pending record
- * and leave nothing durable behind. That is the whole point of the split, so an Agent cannot
- * bootstrap a belief into memory by inferring it and waiting.
- */
+/** Inferred Memory stays pending until owner confirmation; denial/expiry leaves nothing durable. */
 
 import type { MemoryAssertion, MemoryDeps, RememberRequest } from "./memory";
 import { commitAssertion } from "./memory";
@@ -94,19 +87,7 @@ export type ResolvePendingResult =
   | { readonly outcome: "expired" }
   | { readonly outcome: "not_found" };
 
-/**
- * Resolve one pending inferred memory.
- *
- * The confirming principal is reauthorized against the target scope — a confirmation prompt
- * answered by the wrong person confirms nothing, and leaves the record for the real owner.
- *
- * `denied` and `not_found` are deliberately distinct: an attempt to resolve someone else's
- * pending memory is a security-relevant event, and collapsing it here would destroy the signal
- * audit needs. The distinction is for the caller, never for the requester — a caller that
- * forwards `reason` to an unauthorized principal turns it into an existence oracle for
- * `pendingId`. Collapse `denied`-with-`reason` into the same response as `not_found` at every
- * boundary you expose. See `registerPendingMemoryRoutes` in apps/api/src/memory/routes.ts.
- */
+/** Reauthorizes confirmation; API boundaries must collapse `denied` into `not_found`. */
 export async function resolvePendingMemory(
   deps: MemoryDeps,
   request: ResolvePendingRequest,

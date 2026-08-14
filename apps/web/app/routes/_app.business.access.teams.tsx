@@ -1,9 +1,4 @@
-/*
- * Access › Teams — "these people all get the same thing".
- *
- * The list is the fast path: find the team, open it, then change access or membership in the
- * sheet. A business with a hundred teams should scan like an address book, not a stack of forms.
- */
+/* A business with a hundred teams should scan like an address book, not a stack of forms. */
 
 import { type MetaFunction, useLoaderData, useRevalidator, useRouteError } from "@remix-run/react";
 import { Plus, UserPlus } from "lucide-react";
@@ -59,8 +54,6 @@ export async function clientLoader() {
     listGroups(),
     listRoles(),
     listUsers(),
-    // A deployment without the authoring routes wired still renders this page; it simply cannot
-    // offer "create a level" from here.
     listCapabilities().catch(() => null),
   ]);
   const teams = await Promise.all(groups.map((group) => getGroup(group.id)));
@@ -621,17 +614,10 @@ function teamCountLabel(count: number): string {
   return count === 1 ? "team" : "teams";
 }
 
-/**
- * What membership actually buys, flattened across every Role the team holds.
- *
- * A Role whose definition is missing contributes nothing rather than being skipped silently in a
- * way that reads as "this team grants less" — the unresolved id still shows in the Role list below.
- */
 function teamCapabilities(team: AuthzGroupDetail, roleById: Map<string, AuthzRole>): AuthzGrant[] {
   return team.roles.flatMap((held) => roleById.get(held.roleId)?.grants ?? []);
 }
 
-/** Teams are stored under a slug; show the words back. */
 export function teamTitle(teamId: string): string {
   const words = teamId.replaceAll(/[._-]+/g, " ").trim();
   if (words.length === 0) return teamId;

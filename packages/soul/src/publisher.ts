@@ -33,12 +33,7 @@ export interface PublishCommittedTreeRequest {
   readonly actor: CommitActor;
 }
 
-/**
- * Turns one durable Soul git commit into the immutable execution bundle read side.
- *
- * The class owns no concrete IO: callers inject the committed-tree reader, compiler, signer, and
- * coordinator so the API can compose production ports while tests use in-memory ones.
- */
+/** Compile, sign, and enqueue publication for one durable Soul git commit. */
 export class SoulPublisher {
   constructor(private readonly options: SoulPublisherOptions) {}
 
@@ -60,13 +55,7 @@ export class SoulPublisher {
     );
   }
 
-  /**
-   * Bring `soul_active_bundles` back in step with git HEAD — the single reconciliation point for
-   * every way HEAD can move without the post-commit hook firing. Both first boot of a
-   * never-published deployment and commits arriving over remote sync leave the active bundle
-   * behind git; publishing whatever HEAD points at now heals both. Idempotent and cheap when
-   * already in step, so it is safe to call on every boot and every pull.
-   */
+  /** Reconcile active bundles with git HEAD; first boot may run before migrations finish. */
   async reconcile(businessId: string, actor: CommitActor): Promise<void> {
     const gitState = this.options.gitState;
     if (gitState === undefined) {

@@ -36,10 +36,7 @@ export async function resolveApiKey(
           `or use api_key_ref: env://VAR. (${err.message})`
       );
     }
-    // A stored-but-undecryptable credential (e.g. ENCRYPTION_KEY changed since it was saved) is a
-    // credential problem, not an internal fault: treat it like an unavailable secret so init skips
-    // this provider with a warning instead of aborting boot. The credential surfaces as broken when
-    // the provider is actually used (tier unavailable / re-enter prompt), not at startup.
+    // Undecryptable stored credentials skip this provider at init; use surfaces the broken tier.
     if (err instanceof DecryptError) {
       throw new LlmCredentialError(
         `LLM credential "${api_key_ref}" could not be decrypted — the encryption key may have ` +
@@ -69,11 +66,7 @@ async function resolveStored(
 
 /** Per-call knobs a caller can impose on the built model. */
 export interface CreateModelOptions {
-  /**
-   * Wall clock for one model call. A Subscription Provider spawns a real subprocess and bounds the
-   * whole turn; it defaults generously — right for a chat turn — which is wrong for a credential
-   * probe running inside an HTTP request, so `/setup` passes a short one (see setup's LLM step).
-   */
+  /** Wall clock for one model call; `/setup` passes a short probe timeout. */
   timeoutMs?: number;
 }
 
@@ -84,8 +77,7 @@ export async function createModel(
 ): Promise<LanguageModelV4> {
   const info = llmProviderById(entry.provider);
 
-  // API key: an explicit api_key_ref (incl. env://VAR escape) wins; otherwise the provider's
-  // registry secret field. An optional key (e.g. local openai-compatible) may legitimately be unset.
+  // API key: explicit api_key_ref wins; optional keys may be unset.
   const apiKeyField = info ? providerField(info, "api_key") : undefined;
   let apiKey: string | undefined;
   if (entry.api_key_ref) {
@@ -128,18 +120,11 @@ export async function createModel(
       return new ClassifiedLanguageModel(p(entry.model));
     }
     case "claude-code": {
-      // Not an API key — `apiKey` above resolved the claude-code-oauth-token secret (role:
-      // "api_key"). A Subscription Provider is not wrapped in ClassifiedLanguageModel: its errors
-      // already arrive as a plain Error or an LlmProviderError, not the AI SDK's APICallError
-      // shape that classifier inspects.
+      // Subscription Provider errors are already plain Error/LlmProviderError.
       return new ClaudeCodeModel(entry.model, apiKey, options.timeoutMs);
     }
     case "codex": {
-      // Likewise not an API key: `apiKey` is the whole `auth.json` blob, stored under the registry's
-      // `codex-auth-json` field. The write-back closure is what keeps a subscription usable past
-      // its first access-token expiry — Codex rotates the file itself, and the jail holding it is
-      // deleted when the turn ends. Keyed on the same field the blob was read from, so a rotation
-      // can never land on another provider's secret.
+      // `apiKey` is Codex `auth.json`; write back to the same field before deleting the jail.
       const key = entry.api_key_ref ?? apiKeyField?.key;
       const persist =
         key && !key.startsWith("env://")

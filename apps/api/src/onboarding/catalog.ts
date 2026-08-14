@@ -1,9 +1,4 @@
-/*
- * Static seed catalog for the normal-chat suggestion layer (ONBOARDING ONB-V1-002/003).
- * Each entry is a candidate onboarding suggestion. `resources` is the match key: the resource
- * name(s) the suggestion would create — an entry is hidden once any of them already exists in the
- * soul. `label` is the chip text; `prompt` is the message seeded into chat on tap.
- */
+/** Static onboarding suggestions for the normal Chat surface. */
 
 export interface SuggestionEntry {
   /** Stable id, e.g. "tickets". */

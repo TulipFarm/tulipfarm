@@ -2,13 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-/**
- * Machine verification of the legacy-bypass inventory.
- *
- * The inventory at `docs/architecture/legacy-inventory.md` is the historical record of every
- * removed bypass. Cutover has completed, so every listed path must now be absent while each row
- * remains as historical evidence.
- */
+/** Verifies removed legacy-bypass paths stay absent while the inventory remains evidence. */
 
 /** Walk up from this file to the pnpm workspace root (worktree-safe). */
 function repoRoot(): string {

@@ -1,12 +1,6 @@
 /**
- * Canonical runtime shape of a Knowledge source (SPEC §14.1).
- *
- * Every Integration that contributes Knowledge captures source identity, the ACL or access-check
- * mechanism, revision, owner/tenant, classification, and provenance. This module owns that record;
- * `acl.ts` is the only place it becomes an access decision. The authored counterpart lives in
- * `@tulipfarm/schema` as the `KnowledgeSource` definition — {@link knowledgeSourceFromDefinition}
- * keeps the two in lockstep so an authored source can never describe an access-control mode the
- * runtime does not understand.
+ * Runtime Knowledge source record; `acl.ts` is the only place it becomes an access decision, and
+ * `knowledgeSourceFromDefinition` keeps authored access-control modes in lockstep.
  */
 
 import type { KnowledgeSourceDefinition } from "@tulipfarm/schema";
@@ -14,11 +8,7 @@ import type { KnowledgeSourceDefinition } from "@tulipfarm/schema";
 /** Lifecycle of the external record behind a source. Anything but `active` is unreachable. */
 export type KnowledgeSourceStatus = "active" | "revoked" | "deleted";
 
-/**
- * Whether the source's access control is trustworthy right now. `unverifiable` is what an
- * Integration reports when it could not read the provider's permissions — it denies (SPEC §14.1
- * "if the source cannot provide verifiable access, retrieval is denied"), it does not fall back.
- */
+/** `unverifiable` access control denies rather than falling back to cached or empty ACLs. */
 export type KnowledgeSourceVerification = "verified" | "unverifiable";
 
 export interface KnowledgePrincipalRef {
@@ -26,7 +16,7 @@ export interface KnowledgePrincipalRef {
   readonly id: string;
 }
 
-/** Live provider authorization: every sensitive read revalidates, bounded by `maximumAgeSeconds`. */
+/** Live provider authorization revalidates every sensitive read within `maximumAgeSeconds`. */
 export interface LiveAccessControl {
   readonly mode: "live";
   readonly maximumAgeSeconds: number;
@@ -122,12 +112,7 @@ export interface KnowledgeSourceRuntimeInput {
   readonly acl?: KnowledgeAclSnapshot;
 }
 
-/**
- * Project an authored `KnowledgeSource` definition plus the current sync observation into the
- * runtime record. A snapshot-mode source with no captured ACL is returned as `unverifiable`
- * rather than as an empty allow list, so a mis-synced source denies loudly instead of quietly
- * matching nothing.
- */
+/** Missing snapshot ACLs project to `unverifiable`, not an empty allow list. */
 export function knowledgeSourceFromDefinition(
   definition: KnowledgeSourceDefinition,
   runtime: KnowledgeSourceRuntimeInput

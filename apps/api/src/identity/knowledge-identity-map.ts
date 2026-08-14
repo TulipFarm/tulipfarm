@@ -2,12 +2,7 @@ import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { EmittedPrincipalRef, KnowledgeIdentityMapPort } from "@tulipfarm/integrations";
 import type { ExternalIdentityRepo } from "./external-links";
 
-/**
- * Resolves a Knowledge source adapter's external subject (a Slack member id) to the Tulip
- * principal it maps to, via the same `external_identity_mappings` table the live chat path uses
- * (`resolveExternalIdentity`). No new storage. An unmapped or expired subject returns `undefined`
- * — the adapter drops it from the ACL rather than granting implicit access.
- */
+/** Maps external Knowledge subjects to Tulip principals; unmapped subjects grant no access. */
 export class ExternalLinkKnowledgeIdentityMap implements KnowledgeIdentityMapPort {
   constructor(private readonly repo: ExternalIdentityRepo) {}
 

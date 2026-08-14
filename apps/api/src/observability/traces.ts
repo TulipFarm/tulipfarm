@@ -1,11 +1,6 @@
 import type { OtlpTarget } from "./metrics";
 
-/**
- * Dependency-free OTLP/HTTP-JSON trace export to Grafana Cloud (Tempo). One trace per chat turn: a
- * root `turn` span with child `llm_call` / `tool_call` spans, accumulated per conversation between
- * turn boundaries (single-tenant V1 runs turns sequentially per conversation). Spans are timed from
- * event arrival minus the step's durationMs. Only started when observability is enabled.
- */
+/** Dependency-free OTLP trace export: one buffered trace per chat turn when enabled. */
 
 export interface TracesSink {
   spanStep(conversationId: string, d: SpanInput): void;

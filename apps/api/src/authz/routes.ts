@@ -1,17 +1,4 @@
-/**
- * Admin authorization REST surface (Stage 3). Lets an owner read, author, and inspect authority
- * grants *before* Stage 4 flips the gate to default-deny.
- *
- * Every route is admin-gated by {@link requireDeploymentAdmin}: authorization changes must
- * themselves be authorized (design doc invariant 5 / D8). The gate follows the same fail-closed
- * idiom `soul/resource-types/routes.ts` and `soul/publication-routes.ts` use — only a `user`
- * principal whose `role` is `admin` passes, so an API client (which carries no role) is refused.
- * This surface's admin gate is cited in `identity/roles.ts` `ADMIN_ONLY_SURFACES` and enforced by
- * the `role-catalog-fitness` ratchet.
- *
- * Nothing here begins *enforcing* authorization on other requests — Stage 4 owns that flip. These
- * routes only read and write the durable authority state the gate will later consume.
- */
+/** Admin-only grant editor; it does not enable enforcement on other requests. */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
@@ -45,10 +32,7 @@ const AUTHZ_WRITE_WINDOW_MS = 60_000;
 
 const idParam = { type: "string", minLength: 1 } as const;
 
-/**
- * Fail-closed admin gate. An API client presents no `role`, so `role !== "admin"` denies it; only a
- * signed-in `user` administrator passes. Mirrors `soul/publication-routes.ts` `requireOperator`.
- */
+/** Fail closed: API clients have no role, and only signed-in admin users pass. */
 const requireDeploymentAdmin: PreHandler = async (req, reply) => {
   if (!req.principal) {
     await reply.code(401).send({ error: "unauthorized" });
@@ -77,7 +61,6 @@ const MUTATION_STATUS: Readonly<Record<MutationErrorCode, 400 | 404 | 409>> = {
   last_owner: 409,
 };
 
-/** Sends `200 {status:"ok"}` on success, or the mapped error status with the reason message. */
 function sendMutation(reply: FastifyReply, result: MutationResult): FastifyReply {
   if (result.ok) return reply.code(200).send({ status: "ok" });
   return reply.code(MUTATION_STATUS[result.code]).send({ error: result.message });
@@ -100,8 +83,6 @@ export function registerAuthzRoutes(
   const gate: PreHandler[] = rateLimitHook
     ? [rateLimitHook, requireAuth, requireDeploymentAdmin]
     : [requireAuth, requireDeploymentAdmin];
-
-  // ── Read ──────────────────────────────────────────────────────────────────
 
   app.get(
     "/api/v1/authz/roles",
@@ -320,8 +301,6 @@ export function registerAuthzRoutes(
     }
   );
 
-  // ── Explain ─────────────────────────────────────────────────────────────────
-
   app.post(
     "/api/v1/authz/explain",
     {
@@ -386,8 +365,6 @@ export function registerAuthzRoutes(
     }
   );
 
-  // ── Role definition authoring (Soul-only — reports the missing path, never forges a row) ─────
-
   app.post(
     "/api/v1/authz/roles",
     {
@@ -418,8 +395,6 @@ export function registerAuthzRoutes(
       }
     }
   );
-
-  // ── Assign / revoke Roles ────────────────────────────────────────────────────
 
   app.post(
     "/api/v1/authz/roles/:roleId/assignments",
@@ -492,8 +467,6 @@ export function registerAuthzRoutes(
       return sendMutation(reply, await service.revokeRole(roleId, principalId, actorFrom(req)));
     }
   );
-
-  // ── Groups ───────────────────────────────────────────────────────────────────
 
   app.post(
     "/api/v1/authz/groups",

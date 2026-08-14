@@ -1,14 +1,7 @@
 import type { PendingMemory, PendingMemoryStore, RememberRequest } from "@tulipfarm/memory";
 import type { Queryable } from "../db";
 
-/**
- * Durable `PendingMemoryStore` over `memory_pending`.
- *
- * A pending record is an inferred statement that is *not* memory yet, so it lives in its own table
- * rather than as a status on an Assertion — no query that reads `memory_assertions` can reach it
- * by forgetting a `WHERE` clause. `delete` is the only exit besides confirmation, and it is a hard
- * delete: a denied or expired inference must leave nothing behind.
- */
+/** Pending inferred statements live outside `memory_assertions`; rejects are hard-deleted. */
 export class PgPendingMemoryStore implements PendingMemoryStore {
   constructor(private readonly db: Queryable) {}
 
@@ -55,14 +48,7 @@ export class PgPendingMemoryStore implements PendingMemoryStore {
     };
   }
 
-  /**
-   * The pending records one principal may act on, oldest first.
-   *
-   * Filtered by scope owner in SQL rather than listed-then-authorized: a review queue that fetched
-   * everything and filtered afterwards would already have leaked what other people were asked to
-   * confirm through its counts and its timing. Expired records are excluded — resolving one is a
-   * no-op, so offering it is only a way to waste someone's attention.
-   */
+  /** Lists only this principal's non-expired records; SQL filters before anything can leak. */
   async listForPrincipal(
     businessId: string,
     principalId: string,

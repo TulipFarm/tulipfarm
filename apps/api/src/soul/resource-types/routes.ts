@@ -94,15 +94,7 @@ const ResourceTypeSchema = {
 const SOUL_WRITE_LIMIT = 60;
 const SOUL_WRITE_WINDOW_MS = 60_000;
 
-/**
- * A Resource's `domain` is the wall between an HR record and an engineering one: the member
- * allow-list grants every member `record.*` on *domainless* requests, so setting, changing or
- * removing a domain is what decides whether a Resource is walled at all. Authoring the record
- * *schema* stays open to members; deciding its **domain** does not.
- *
- * Fails closed for non-user principals (API clients carry no role), matching
- * `soul/publication-routes.ts`.
- */
+/** Resource `domain` changes are the HR/engineering wall and require admin; schema edits do not. */
 function isDeploymentAdmin(req: FastifyRequest): boolean {
   return req.principal?.kind === "user" && req.principal.role === "admin";
 }
@@ -360,8 +352,6 @@ export function registerResourceTypeRoutes(
       return reply.code(204).send();
     }
   );
-
-  // ── Hook routes ───────────────────────────────────────────────────────────
 
   const HookResponseSchema = {
     type: "object",

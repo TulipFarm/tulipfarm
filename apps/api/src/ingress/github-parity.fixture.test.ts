@@ -6,14 +6,6 @@ import { analyzeHook } from "@tulipfarm/sandbox";
 import { beforeAll, describe, expect, it } from "vitest";
 import { createHookExecutor } from "../hooks/executor";
 
-/*
- * Parity guard for the github reference integration (events-only ingress): runs a vendored copy
- * of the integrations repo's github/ingress.ts (__fixtures__/github-ingress.hook.txt) through
- * the real isolated-vm sandbox. The fixture is TEST DATA, not shipped code — keep it
- * byte-identical to TulipFarm/integrations github/ingress.ts.
- */
-
-// isolated-vm has no abi141 prebuild (same caveat as hooks/routine-sandbox.test.ts).
 const nodeMajor = parseInt(process.version.slice(1).split(".")[0], 10);
 const skipNoIsovm = nodeMajor === 25;
 

@@ -32,11 +32,7 @@ export interface DeliveryPollLoopDeps {
   internalApi: InternalApiClient;
   delivery: SlackDeliveryAdapter;
   credential: string;
-  /**
-   * When supplied, checks each still-running row for an open tool-call approval every tick and
-   * posts the Approve/Deny prompt (plan §5) the first time one appears. Omitted for providers or
-   * test setups that don't need interactive approvals.
-   */
+  /** Optional approval prompt hook; omitted when a provider/test does not need approvals. */
   http?: IntegrationHttpPort;
   /** Best-effort display name for the Agent that answered; falls back to the raw `agentId`. */
   agentDisplayName?: (agentId: string) => string;
@@ -198,7 +194,7 @@ async function pollLoop(signal: AbortSignal, deps: DeliveryPollLoopDeps): Promis
   }
 }
 
-/** Polls `channel_run_deliveries` for terminal Runs and drives §10's status rotation. */
+/** Polls terminal Run deliveries and drives status rotation. */
 export function startDeliveryPollLoop(
   signal: AbortSignal,
   deps: DeliveryPollLoopDeps

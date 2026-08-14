@@ -1,24 +1,6 @@
 /**
- * Recall ranking (SPEC §14.2, M2).
- *
- * Two stages, deliberately separated:
- *
- * 1. **Fusion.** Each retrieval arm — vector, lexical, entity — contributes a *ranking*, and the
- *    arms are fused by Reciprocal Rank Fusion rather than by score. Arm scores are on
- *    incomparable scales (cosine distance vs. `ts_rank` vs. an overlap count), so fusing on score
- *    would let whichever arm happens to produce larger numbers dominate. RRF only reads position,
- *    and cross-arm agreement is what lifts a result. This matches `KnowledgeService`'s page
- *    retrieval, deliberately: two retrieval paths that rank differently would be two behaviours to
- *    reason about.
- *
- * 2. **Reranking.** Fusion answers "what matches"; it says nothing about whether a match still
- *    matters. Recency decay and importance are applied on top, multiplicatively, so a stale or
- *    trivial assertion is attenuated rather than reordered outright — a strong topical match
- *    stays ahead of a weak-but-fresh one.
- *
- * Everything here is pure. Authorization is not a ranking concern and must not become one: the
- * caller authorizes candidates and only then truncates, so a withheld assertion cannot influence
- * the order of what is returned, nor occupy one of the top-k slots.
+ * Recall ranking fuses authorized vector/lexical/entity rankings by RRF, then attenuates by
+ * recency and importance; unauthorized assertions must not affect order or top-k pressure.
  */
 
 import type { MemoryAssertion } from "./memory";
@@ -34,9 +16,7 @@ export interface MemoryCandidateSignals {
 export interface MemoryRankingOptions {
   readonly now: Date;
   /**
-   * Days after which recency weight halves. Memory is mostly slow-moving (a timezone, a
-   * preferred name), so the default is deliberately long — recency should break ties, not
-   * override relevance.
+   * Recency should break ties in slow-moving memory, not override relevance.
    */
   readonly halfLifeDays?: number;
   /** How much importance may swing the fused score, as a fraction. 0 disables it. */
@@ -48,11 +28,7 @@ export interface RankedMemoryAssertion {
   readonly score: number;
 }
 
-/**
- * RRF's rank offset. 60 is the value from the original RRF paper and the one
- * `KnowledgeService.hybridSearchPages` uses; it flattens the head of each arm enough that the top
- * result of a single arm cannot outweigh agreement between two.
- */
+/** RRF offset 60 matches KnowledgeService and lets cross-arm agreement beat one arm's top hit. */
 export const RRF_K = 60;
 
 export const DEFAULT_HALF_LIFE_DAYS = 180;
@@ -101,12 +77,7 @@ export function importanceWeight(assertion: MemoryAssertion, weight: number): nu
   return 1 + weight * (clamped - 0.5);
 }
 
-/**
- * Rerank already-authorized candidates by fused relevance, attenuated by recency and importance.
- *
- * Assertions with no fused score are dropped rather than ranked last: they matched no arm, and
- * padding a relevance-ranked list with irrelevant entries is worse than returning fewer.
- */
+/** Drops candidates with no fused score rather than padding relevance results. */
 export function rankMemoryCandidates(
   assertions: readonly MemoryAssertion[],
   fused: ReadonlyMap<string, number>,

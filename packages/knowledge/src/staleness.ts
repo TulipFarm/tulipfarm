@@ -1,13 +1,4 @@
-/**
- * Staleness detection and convergence (SPEC §14.1).
- *
- * `acl.ts` already *denies* a source whose cached ACL is older than its explicit TTL. That is the
- * safe half of the story and, on its own, a trap: a source nobody re-syncs stays denied forever and
- * looks like a permissions bug. This module is the other half — it finds sources past their TTL and
- * enqueues durable revalidation, so staleness converges back to a decision instead of sitting.
- *
- * A snapshot source with no captured ACL at all counts as stale, never as fresh.
- */
+/** Stale ACL evidence denies access and must enqueue revalidation; missing snapshot ACL is stale. */
 
 import type { InvalidationDeps } from "./invalidate";
 import { enqueueInvalidation } from "./invalidate";
@@ -25,11 +16,7 @@ function ageSeconds(from: string, now: Date): number {
   return Math.floor((now.getTime() - parsed) / 1000);
 }
 
-/**
- * How old this source's authorization evidence is, against the TTL the source itself declares.
- * A snapshot source is measured from when its ACL was captured; a live source holds no cached ACL,
- * so it is measured from its last confirmed sync.
- */
+/** Measures auth-evidence age from snapshot ACL capture or last confirmed live sync. */
 export function evaluateStaleness(source: KnowledgeSourceRecord, now: Date): StalenessEvaluation {
   const { accessControl } = source;
   if (accessControl.mode === "snapshot") {
@@ -48,10 +35,7 @@ export interface StaleSource {
   readonly ageSeconds: number;
 }
 
-/**
- * Sources whose authorization evidence is past its TTL. Revoked and deleted sources are skipped —
- * they are already unreachable, and revalidating them would only churn the queue.
- */
+/** Finds sources past ACL TTL; revoked/deleted sources are already unreachable. */
 export async function selectStaleSources(
   deps: { readonly sources: KnowledgeSourceStore },
   businessId: string,
@@ -71,11 +55,7 @@ export interface StaleRevalidationDeps extends Pick<InvalidationDeps, "queue" | 
   readonly sources: KnowledgeSourceStore;
 }
 
-/**
- * Enqueue revalidation for every stale source that does not already have one outstanding, and
- * return how many were enqueued. Skipping sources with a pending job keeps a periodic sweep
- * idempotent rather than compounding a backlog.
- */
+/** Enqueues one revalidation per stale source; pending jobs make sweeps idempotent. */
 export async function enqueueStaleRevalidation(
   deps: StaleRevalidationDeps,
   businessId: string

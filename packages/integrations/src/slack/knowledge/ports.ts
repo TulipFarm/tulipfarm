@@ -1,11 +1,4 @@
-/**
- * Provider-neutral Slack Knowledge boundary (SPEC §15: concrete transports live in
- * `apps/integration-worker`, never here).
- *
- * `listMembers` returning `undefined` means "membership could not be established", which becomes an
- * `unverifiable` source that denies on retrieval. It never means "no restrictions" — a private
- * channel whose membership we cannot read is the exact case that must not become readable.
- */
+/** Slack membership `undefined` means unverifiable and denying, never unrestricted. */
 
 export type SlackChannelKind = "public" | "private" | "dm" | "group_dm";
 
@@ -15,7 +8,6 @@ export interface SlackKnowledgeChannel {
   readonly kind: SlackChannelKind;
   readonly teamId: string;
   readonly archived: boolean;
-  /** Classification labels configured for this channel; absent falls back to the kind default. */
   readonly classification?: readonly string[];
 }
 
@@ -26,7 +18,6 @@ export interface SlackKnowledgeMessage {
   readonly threadTs?: string;
   readonly userExternalId: string;
   readonly text: string;
-  /** Set when the message was edited; becomes the chunk revision. */
   readonly editedTs?: string;
   /** Tombstone from the change feed: the message text must be removed from the index. */
   readonly deleted?: boolean;
@@ -49,10 +40,7 @@ export interface SlackKnowledgeCheckpoint {
   readonly updatedAt: string;
 }
 
-/**
- * Durable per-channel resume position. Per channel rather than per workspace so one unreadable or
- * failing channel cannot stall, or silently skip, every other channel's sync.
- */
+/** Per-channel checkpoints prevent one bad channel from stalling or skipping the workspace. */
 export interface SlackKnowledgeCheckpointStore {
   load(integrationId: string, channelId: string): Promise<SlackKnowledgeCheckpoint | undefined>;
   save(checkpoint: SlackKnowledgeCheckpoint): Promise<void>;

@@ -1,12 +1,4 @@
-/**
- * Agent version publication gate (SPEC §10).
- *
- * An action-capable Agent may only be published with eval evidence and an activation verdict that
- * allowed it. The verdict is produced by `@tulipfarm/agent-runtime`, but this package must not
- * import it (see `docs/architecture/dependency-rules.md`), so the verdict shape is declared here
- * structurally: the runtime's `ActivationVerdict` satisfies it, and the gate stays a pure function
- * of the evidence handed to it.
- */
+/** Agent publication gate: action-capable Agents need eval evidence and an allowed verdict. */
 
 export interface ActivationAllowed {
   readonly decision: "allowed";

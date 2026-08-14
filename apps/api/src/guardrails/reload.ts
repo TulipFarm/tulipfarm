@@ -8,16 +8,7 @@ type ReloadLogger = {
   warn: (obj: unknown, msg?: string) => void;
 };
 
-/**
- * Reload the guardrails policy on every `soul.synced` event without restarting.
- *
- * Reloads the soul (re-reads `guardrails.yaml`) then re-initialises the
- * GuardrailsService, which validates and rebuilds the guard arrays into locals
- * before swapping them in. `SoulLoader.reload` and `GuardrailsService.init` both
- * validate/build before mutating their own state, and `init` falls back to the
- * default policy on an invalid config, so a failed reload leaves the running
- * server guarded on its previously-loaded policy (mirrors `registerLlmReload`).
- */
+/** Reload on `soul.synced`; failed reloads keep the prior/default guardrail policy active. */
 export function registerGuardrailsReload(
   gitSync: EventEmitter,
   soulLoader: SoulLoader,

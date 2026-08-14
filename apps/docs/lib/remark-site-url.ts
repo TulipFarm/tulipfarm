@@ -1,10 +1,4 @@
-/**
- * Replaces the `{{SITE_URL}}` token with the canonical site URL before the content
- * reaches the syntax highlighter. Install commands live inside ```bash fences, which are
- * literal text and cannot interpolate a constant — substituting at the remark (mdast)
- * stage keeps them real code blocks, so Shiki highlighting, the copy button, and the
- * generated llms.txt output all keep working while the domain stays in one place.
- */
+/** Replace `{{SITE_URL}}` at mdast time so fenced commands stay real code blocks. */
 
 // Must stay a relative import. fumadocs-mdx bundles source.config.ts with esbuild, which
 // inlines relative imports but leaves bare specifiers external; the emitted

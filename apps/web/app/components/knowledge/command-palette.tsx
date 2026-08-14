@@ -1,9 +1,3 @@
-/*
- * ⌘K knowledge command palette. Opens on ⌘K/Ctrl-K or the `knowledge:open-search` window event (the
- * sidebar search box dispatches the latter). Drives the shared usePageSearch hook (server-side ranked,
- * so cmdk's own filter is off), groups hits by space, highlights the matched snippet, and navigates to
- * the page on select. A blank query shows recent pages; a scope toggle limits to the current space.
- */
 import { useNavigate } from "@remix-run/react";
 import { Command } from "cmdk";
 import { type ReactNode, useEffect, useState } from "react";
@@ -14,15 +8,11 @@ import { usePageSearch } from "./use-page-search";
 
 export const OPEN_SEARCH_EVENT = "knowledge:open-search";
 
-// Highlight the typed prefix at each word start. ts_headline marks whole lexemes server-side, but an
-// as-you-type box should highlight only what the user typed ("fri" → "Fri" in "Friday"), so the ranges
-// are computed client-side from the live query against the snippet text.
 export function queryHighlightRanges(text: string, query: string): Array<[number, number]> {
   const terms = query.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
   if (terms.length === 0) return [];
   const ranges: Array<[number, number]> = [];
   for (const term of terms) {
-    // Word-start prefix match (mirrors the `term:*` FTS), terms are alnum so safe to inline.
     const re = new RegExp(`(?<![\\p{L}\\p{N}])${term}`, "giu");
     for (const m of text.matchAll(re)) {
       const idx = m.index ?? 0;
@@ -77,7 +67,6 @@ export function CommandPalette({ spaceId }: { spaceId?: string | null }) {
   const { query, setQuery, scope, setScope, results, loading, isZeroQuery } =
     usePageSearch(spaceId);
 
-  // ⌘K / Ctrl-K toggles; the sidebar box opens via the shared event.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
@@ -94,7 +83,6 @@ export function CommandPalette({ spaceId }: { spaceId?: string | null }) {
     };
   }, []);
 
-  // Space-name lookup for the result group headers (small, cached once the palette first opens).
   useEffect(() => {
     if (!open || spaceNames.size > 0) return;
     listSpaces()
@@ -107,7 +95,6 @@ export function CommandPalette({ spaceId }: { spaceId?: string | null }) {
     navigate(pageHref(hit.pageId, hit.path));
   };
 
-  // Stable group order by first appearance (results already ranked).
   const groups: Array<{ spaceId: string | null; hits: PageSearchHit[] }> = [];
   for (const hit of results) {
     const g = groups.find((x) => x.spaceId === hit.spaceId);

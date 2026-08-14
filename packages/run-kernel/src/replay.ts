@@ -3,13 +3,7 @@ import type { CompiledRoutine } from "./routine/compiler";
 import { type SimulationFixture, type SimulationResult, simulateRoutine } from "./simulate";
 
 /**
- * Replay of a finished Run (SPEC §9.2).
- *
- * Replay creates a new **simulation** Run by default: the recorded fixture is re-executed with
- * effect previews only, and the result is diffed against what the original Run produced, so a
- * Routine change is visible before anything touches a live system. A live replay is a separate,
- * explicitly authorized act — it requires the live-replay grant and a *fresh* effect identity, so
- * a replay can never quietly reuse the identity or credentials the original Run held.
+ * Replay is simulation by default; live replay needs explicit grant and a fresh effect identity.
  */
 
 export type ReplayErrorCode =
@@ -50,7 +44,6 @@ export interface RecordedRun {
     readonly authoredVersion: number;
     readonly digest: string;
   };
-  /** The clock, model, Tool, and event values the original Run observed. */
   readonly fixture: SimulationFixture;
   readonly steps: readonly RecordedStep[];
 }
@@ -58,7 +51,6 @@ export interface RecordedRun {
 export interface ReplayEffectIdentity {
   readonly principalKind: string;
   readonly principalId: string;
-  /** When this identity was minted; a replay may not reuse an old one. */
   readonly issuedAtMs: number;
 }
 
@@ -103,11 +95,7 @@ export type ReplayPlan =
       readonly trigger: JsonObject;
     };
 
-/**
- * Compare a recorded Run's States against a fresh simulation. Recorded order is authoritative:
- * a State the simulation no longer reaches is `removed`, one it newly reaches is `added`, and one
- * whose output hash moved is `output_changed`.
- */
+/** Recorded order is authoritative for `removed`, `added`, and `output_changed` diffs. */
 export function diffSimulation(
   recorded: readonly RecordedStep[],
   candidate: SimulationResult
@@ -134,7 +122,6 @@ export function diffSimulation(
   return { identical: states.length === 0, states };
 }
 
-/** Plan a replay of `recorded`, defaulting to a simulation Run and gating the live path. */
 export function planReplay(
   recorded: RecordedRun,
   routine: CompiledRoutine,

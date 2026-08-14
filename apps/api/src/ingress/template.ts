@@ -1,10 +1,6 @@
 import type { BodyMatch } from "@tulipfarm/soul";
 
-/**
- * Tiny declarative templating shared by the ingress engine. Two flavors, both `{…}` delimited:
- * body templates resolve dot-paths into the webhook payload (with `|` fallbacks), var templates
- * substitute from a flat map the caller assembled. No expressions, no sandbox — hot-path safe.
- */
+/** Small hot-path `{...}` templating only: dot paths, fallbacks, flat vars; no expressions. */
 
 /** Resolve a dot-path ("event.channel") into a nested object; undefined when any hop is missing. */
 export function dotPath(obj: unknown, path: string): unknown {

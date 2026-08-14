@@ -28,13 +28,7 @@ export interface ChatTurnDeps {
   readonly now?: () => Date;
 }
 
-/**
- * Dispatches one interactive Turn through the persist-first gateway.
- *
- * The gateway's idempotency key is `${turnId}:${attempt}`, so re-dispatching a Turn whose Run
- * reference was lost resolves to the Run it already minted, while a `same_turn` retry (a higher
- * attempt) legitimately mints a new one.
- */
+/** Dispatches one Turn with a stable attempt idempotency key. */
 function chatRunLauncher(
   invocations: DurableInvocationGateway,
   submission: ChatTurnSubmission
@@ -61,10 +55,7 @@ function chatRunLauncher(
   };
 }
 
-/**
- * A `ConversationService` bound to one submission, because the request payload and the submitting
- * principal are what the Run is minted from and neither is carried on the `RunLauncher` port.
- */
+/** Bound per submission because payload and principal define the Run request. */
 export function chatConversationService(
   deps: ChatTurnDeps,
   submission: ChatTurnSubmission
@@ -72,9 +63,7 @@ export function chatConversationService(
   return new ConversationService({
     store: deps.store,
     runs: chatRunLauncher(deps.invocations, submission),
-    // The route authenticated this principal; a Turn is authorized when it stays inside that
-    // principal's own business. No ability vocabulary is enforced in this deployment, so the grant
-    // claims none rather than inventing names nothing checks.
+    // Authorization is scoped to the submitting principal's business; no unchecked grant names.
     authorize: async (_action, businessId) =>
       businessId === submission.principal.businessId
         ? {

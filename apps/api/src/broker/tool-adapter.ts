@@ -13,7 +13,6 @@ import {
 
 type AjvErrors = ReturnType<typeof ajv.compile>["errors"];
 
-/** Outcome of the tool-call guard hook. */
 export type ToolGuardOutcome =
   | { blocked: true; reason: string }
   | { blocked: false; args: unknown };
@@ -35,13 +34,7 @@ function argumentErrors(errors: AjvErrors): string {
 
 export const TOOL_TIMEOUT_MS = 30_000;
 export const MAX_PRESENTATION_CORRECTIVE_ATTEMPTS = 2;
-/**
- * Whether a Tool presents to a surface, read from its own declaration.
- *
- * This was a third hand-maintained copy of the same three names. A Tool that presents but is
- * missing from such a list is exposed without a surface *and* escapes the corrective-attempt limit
- * below — so the list drifting silently weakened a guard, rather than merely mislabelling a Tool.
- */
+/** Read surface availability from Tool declarations to avoid drift. */
 function presentsToSurface(toolDefinition: { definition?: { availableTo?: ToolAvailability } }) {
   return toolDefinition.definition?.availableTo?.requiresPresentation === true;
 }
@@ -55,10 +48,7 @@ function withToolTimeout(p: Promise<ToolCallResult>): Promise<ToolCallResult> {
   ]);
 }
 
-/**
- * Compatibility adapter from published Tool definitions to the AI SDK. Exposure is always
- * default-deny: the caller must provide the exact Tool allowlist produced by authorization.
- */
+/** Default-deny adapter: callers must pass the exact authorized Tool allowlist. */
 export class ToolRegistry {
   private readonly tools = new Map<string, ToolDef>();
   constructor(private readonly options: { defaultDeny?: boolean } = {}) {}
@@ -143,10 +133,9 @@ export class ToolRegistry {
                 `${argumentErrors(v.errors)}.${shapeHint}${correctionHint}`
               );
             }
-            // Tool-call guard (GR-V1-001): runs after arg-validate, before the approval gate. A `block`
-            // returns a denial the LLM sees. A `pass`/transform yields effectiveArgs — the
-            // transform path is plumbed but unused by V1 guards, so effectiveArgs is NOT re-validated
-            // against the tool schema (no V1 guard mutates tool args). Undefined → byte-identical to before.
+            // Tool-call guard (GR-V1-001): after arg-validate, before approval. `block` denies;
+            // `pass`/transform yields effectiveArgs. V1 guards do not mutate args, so effectiveArgs
+            // is not re-validated. Undefined stays byte-identical.
             let effectiveArgs = args;
             if (runToolCallGuard) {
               const g = await runToolCallGuard({ tool: t, args, ctx, toolCallId: opts.toolCallId });
@@ -157,9 +146,7 @@ export class ToolRegistry {
               }
               effectiveArgs = g.args;
             }
-            // Mode-gated approval: a mutating tool under approval-required suspends here until a human
-            // decides. Deliberately OUTSIDE coordinator + withToolTimeout — the wait can be minutes, and
-            // sibling approval requests must not serialize behind each other or auto-fail at 30s.
+            // Approval waits outside timeouts: minutes are allowed, siblings do not block.
             if (
               ctx.autonomy === "approval-required" &&
               t.mutating &&

@@ -1,24 +1,4 @@
-/**
- * Bi-temporal contradiction handling (SPEC §14.4).
- *
- * When a new statement contradicts one already stored, the old one is not deleted and not
- * overwritten — its *valid interval* is closed. "Works at Acme" does not become false; it becomes
- * true-until-March. That is what makes `validAt` recall answerable, and it is the difference
- * between a memory store and a cache.
- *
- * Deciding *whether* two statements contradict needs a language model, and this package may not
- * depend on one (`docs/architecture/dependency-rules.md`). So the judgment is a port, exactly like
- * extraction is, and everything that makes the operation *safe* lives here where it cannot be
- * bypassed by swapping the model:
- *
- * - a contradiction never crosses a scope boundary,
- * - a prior the port was not shown can never be closed,
- * - and a less-trusted statement can never invalidate a more-trusted one.
- *
- * That last rule is the one that matters most. Without it, a single inferred sentence could quietly
- * retire something the user stated outright — which is precisely the memory-poisoning path the
- * extraction screen exists to close.
- */
+/** Contradictions close valid intervals; local checks enforce scope, offered rows, and trust rank. */
 
 import type { MemoryAssertion, MemoryDeps, MemoryTrustTier } from "./memory";
 import type { MemoryScopeRequest } from "./scope";
@@ -32,12 +12,7 @@ import {
   startMemorySpan,
 } from "./telemetry";
 
-/**
- * Judges which of the offered priors a new statement contradicts.
- *
- * Returns assertion ids. Anything it returns that was not offered is discarded — model output is
- * untrusted here for the same reason it is untrusted in extraction.
- */
+/** Judge returns offered prior ids only; any unoffered id is discarded. */
 export interface MemoryContradictionPort {
   contradicts(input: MemoryContradictionInput): Promise<readonly string[]>;
 }
@@ -52,12 +27,7 @@ export interface MemoryContradictionInput {
   }[];
 }
 
-/**
- * How much a statement's origin is trusted, as a comparable rank.
- *
- * Ordered, not just distinct: the whole point is that `user_stated` outranks everything, so a fact
- * inferred from a Slack thread cannot close a fact the user typed.
- */
+/** Origin trust is ordered so lower-trust statements cannot close higher-trust ones. */
 const TRUST_RANK: Record<MemoryTrustTier, number> = {
   user_stated: 3,
   agent_inferred: 2,
@@ -69,13 +39,7 @@ export function normalizeSubject(subject: string): string {
   return subject.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-/**
- * Whether `candidate` is even eligible to be contradicted by `next`.
- *
- * Everything structural is decided here rather than by the port, so a port that answers "yes" to
- * everything still cannot do damage: it can only ever close rows that already passed every one of
- * these checks.
- */
+/** Structural eligibility is enforced before the judge, so a bad port cannot close unsafe rows. */
 export function isContradictionCandidate(
   next: Pick<MemoryAssertion, "assertionId" | "subject" | "trustTier" | "validFrom">,
   candidate: MemoryAssertion
@@ -98,13 +62,7 @@ export interface ResolveContradictionsResult {
   readonly considered: number;
 }
 
-/**
- * Close the valid interval of every prior the new assertion contradicts.
- *
- * Called after the new assertion is stored, and best-effort by construction: the statement the user
- * just made is already durable, so a judge that is slow, absent, or wrong costs some tidiness in
- * recall, never the write itself.
- */
+/** Best-effort post-write contradiction cleanup; judge failure leaves stale recall, not a failed save. */
 export async function resolveContradictions(
   deps: MemoryDeps,
   next: MemoryAssertion,

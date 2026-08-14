@@ -10,11 +10,8 @@ import {
 } from "./compiler";
 
 /**
- * The three Routine shapes SPEC §9.1 allows — a simple one-Agent automation, an explicit
- * authored graph, and a Run-local plan an Agent proposes inside a published envelope — all
- * reduce to one {@link CompiledRoutine}. State processors therefore never branch on "which kind
- * of Routine is this": a generated plan is bounded, permission-checked, and compiled by exactly
- * the same rules as a published graph, and it never mutates the published Routine it runs under.
+ * All Routine shapes reduce to one `CompiledRoutine`; generated plans are bounded,
+ * permission-checked, and never mutate the published Routine.
  */
 
 function definition(
@@ -47,7 +44,6 @@ export interface SingleAgentRoutineInput {
   readonly maxRepairAttempts?: number;
 }
 
-/** Compile the degenerate one-Agent Routine: a single bounded Agent State that ends the Run. */
 export function compileSingleAgentRoutine(input: SingleAgentRoutineInput): CompiledRoutine {
   const state: routineSchema.RoutineState = {
     type: "agent",
@@ -96,11 +92,7 @@ function refName(state: routineSchema.RoutineState, key: string): string | null 
   return typeof name === "string" ? name : null;
 }
 
-/**
- * Compile a bounded Agent-proposed child plan. Everything the envelope did not explicitly permit
- * is denied — State types, Agents, Tools, plan size, and per-construct bounds — before the plan
- * reaches the shared compiler, so a generated plan cannot widen the Run it was proposed inside.
- */
+/** Envelope omissions deny State types, Agents, Tools, size, and construct bounds. */
 export function compileGeneratedChildPlan(
   envelope: ChildPlanEnvelope,
   states: readonly routineSchema.RoutineState[],

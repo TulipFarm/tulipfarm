@@ -6,12 +6,7 @@ import { analyzeHook } from "@tulipfarm/sandbox";
 import { beforeAll, describe, expect, it } from "vitest";
 import { createHookExecutor } from "../hooks/executor";
 
-/*
- * Parity guard for the REFERENCE integration: runs a vendored copy of the integrations repo's
- * slack/ingress.ts (__fixtures__/slack-ingress.hook.txt) through the real isolated-vm sandbox
- * and asserts the full classification matrix the old built-in adapter enforced. The fixture is
- * TEST DATA, not shipped code — keep it byte-identical to TulipFarm/integrations slack/ingress.ts.
- */
+/* Parity guard: fixture stays byte-identical to TulipFarm/integrations slack/ingress.ts. */
 
 // isolated-vm has no abi141 prebuild (same caveat as hooks/routine-sandbox.test.ts).
 const nodeMajor = parseInt(process.version.slice(1).split(".")[0], 10);

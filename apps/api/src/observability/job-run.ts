@@ -1,11 +1,6 @@
 import type { ObservabilityService } from "./service";
 
-/**
- * Wrap a pg-boss job handler so each run is recorded as a `job` obs_event with its wall-clock
- * duration and ok/error status (queue name in attributes). Best-effort + decoupled from the
- * activity feed's `recordJobRun` (a job can be wrapped by both). The obs write is fire-and-forget;
- * the job's own error is always re-thrown so pg-boss still sees the failure and retries.
- */
+/** Records best-effort job obs events; always rethrows job errors so pg-boss retries. */
 export async function recordObsJobRun<T>(
   obs: ObservabilityService | undefined,
   queue: string,

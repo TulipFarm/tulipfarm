@@ -1,14 +1,4 @@
-/**
- * Access levels — the REST surface over Soul-authored Roles.
- *
- * Admin-gated for the same reason `authz/routes.ts` is: authorization changes must themselves be
- * authorized. The gate is the fail-closed `kind === "user" && role === "admin"` idiom used by
- * `soul/publication-routes.ts`, so an API client — which carries no role — is refused.
- *
- * `GET /capabilities` is deliberately on the *same* gate as the writes even though it only reads.
- * The catalog is a complete map of every action this deployment can grant and which Tool needs it;
- * that is reconnaissance, and it is only useful to someone who can also author a level.
- */
+/** Admin-gated REST surface over Soul-authored Roles. */
 
 import type { GitSyncService } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -125,18 +115,9 @@ export interface LevelRouteDeps {
   readonly gitSync: GitSyncService;
   readonly catalog: () => CapabilityCatalog;
   readonly reconcile: () => Promise<void>;
-  /**
-   * Resolves the caller into `req.principal`. Required, not optional: `requireDeploymentAdmin`
-   * reads the principal the hook sets, so omitting it does not open the routes — it closes them
-   * permanently, answering 401 to the admin as readily as to a stranger.
-   */
+  /** Resolves `req.principal` before the admin gate reads it. */
   readonly requireAuth: PreHandler;
-  /**
-   * Records the write to the audit ledger, as every sibling `soul/*` route does. An access level
-   * is the most consequential Soul artifact there is — it decides what everybody else may do — so
-   * a deployment that cannot say who created or deleted one has lost the thread it would most
-   * want to pull. Optional only because the audit service itself is optional at boot.
-   */
+  /** Audits Role writes because Roles change authorization. */
   readonly auditWrite?: SoulAuditWriter;
   readonly rateLimiter?: RateLimiter;
 }

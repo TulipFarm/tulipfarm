@@ -38,11 +38,7 @@ export interface SecretRepo {
   listLegacyKeys(): Promise<string[]>;
 }
 
-/**
- * Minimal SQL executor — the structural shape of `pg.Pool` (and the PGlite test client).
- * Defined locally so this package depends on neither `pg` nor the app; the caller injects
- * a real pool.
- */
+/** Local SQL shape; caller injects pg or PGlite without this package depending on either. */
 export interface Queryable {
   query(text: string, params?: unknown[]): Promise<{ rows: Record<string, unknown>[] }>;
 }

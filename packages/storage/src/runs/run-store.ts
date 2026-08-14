@@ -229,11 +229,7 @@ const ATTEMPT_EVENT_SQL =
   "'claimed', 'started', 'waiting', 'succeeded', 'failed', 'cancelled', " +
   "'lease_expired', 'reconciliation_required'";
 
-/**
- * Backs the operational Run browser's keyset page order. Exported separately from
- * {@link RUN_STORAGE_STATEMENTS} so a deployment created before the browser existed picks it up
- * through its own migration instead of silently sequential-scanning `runs`.
- */
+/** Separate Run browser keyset index for migrations added after base Run storage. */
 export const RUN_BROWSE_STORAGE_STATEMENTS: readonly string[] = [
   `CREATE INDEX IF NOT EXISTS runs_recent_idx
     ON runs (business_id, created_at DESC, id DESC)`,
@@ -572,11 +568,7 @@ export class RunStore {
     });
   }
 
-  /**
-   * Inserts one later State, or returns the identical State a previous attempt already inserted.
-   * The first scheduling timestamp wins; a retry may use a later clock value but cannot change the
-   * State definition or its resolved input under the same durable key.
-   */
+  /** Idempotent later-State insert; first schedule timestamp and resolved input win. */
   async ensureState(input: EnsureStateInput): Promise<EnsureStateResult> {
     return this.transactions.withTransaction(async (transaction) => {
       const inserted = await transaction.query<StateRow>(
@@ -619,11 +611,7 @@ export class RunStore {
     });
   }
 
-  /**
-   * One page of a business's Runs, newest first. Keyset paging on `(created_at, id)` — an offset
-   * would skip or repeat rows as new Runs land between pages, which an operator watching a live
-   * system would see as Runs vanishing.
-   */
+  /** Keyset-paged newest Runs; offsets would skip/repeat under live inserts. */
   async list(input: ListRunsInput): Promise<RunPage> {
     const limit = Math.min(Math.max(Math.trunc(input.limit), 1), MAX_RUN_PAGE_SIZE);
     const cursor = decodeRunCursor(input.cursor);

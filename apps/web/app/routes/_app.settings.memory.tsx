@@ -65,13 +65,7 @@ export default function SettingsMemory() {
   );
 }
 
-/**
- * Standing instructions the participant writes themselves.
- *
- * Deliberately separate from saved memory below: these are authored and permanent, while memory is
- * observed and revisable. Conflating them was the old page's core problem — it offered only the
- * assistant's guesses and no way to simply state a preference.
- */
+/** Instructions are user-authored and permanent; memory is observed and revisable. */
 function InstructionsPanel({ saved }: { saved: string }) {
   const revalidator = useRevalidator();
   const [value, setValue] = useState(saved);
@@ -144,10 +138,6 @@ function InstructionsPanel({ saved }: { saved: string }) {
   );
 }
 
-/**
- * The confirmation gate. Nothing here is remembered yet — that is the whole point of the section,
- * so it sits above the saved list rather than below it.
- */
 function SuggestedPanel({ pending }: { pending: PendingMemory[] }) {
   const revalidator = useRevalidator();
   const [busy, setBusy] = useState(false);

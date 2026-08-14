@@ -38,11 +38,7 @@ export class MemoryRateLimiter implements RateLimiter {
   }
 }
 
-/**
- * Production limiter backed by Postgres (the `rate_limits` table). Fixed-window
- * counter (D7): one row per (key, window). Avoids the row-per-request bloat a
- * sliding window would create at single-tenant scale.
- */
+/** Postgres fixed-window limiter: one row per (key, window). */
 export class PgRateLimiter implements RateLimiter {
   constructor(private readonly q: Queryable) {}
 

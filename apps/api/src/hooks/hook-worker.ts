@@ -4,19 +4,13 @@ import { serveHookRequests } from "@tulipfarm/sandbox";
 import { Pool } from "pg";
 import { rowToResourceDoc, tableName } from "../resources/schema";
 
-/**
- * The API's hook sandbox thread: the isolate logic lives in `@tulipfarm/sandbox`, and this file
- * supplies only what that isolate is allowed to reach in this application — one read-only lookup
- * against the resource tables.
- */
+/** API hook sandbox port: the isolate gets only one read-only resource lookup. */
 
 let pool: Pool | null = null;
 
 function getPool(): Pool {
   if (!pool) {
-    // The pool serving user-authored hook code: pinned to the restricted runtime role where one
-    // exists, and bounded by the shared timeouts, so a hook cannot hold a connection open or run
-    // an unbounded query. `max` is deliberately small — one sandbox thread needs very few.
+    // User-authored hooks use the restricted role when present; keep the pool small and bounded.
     const roleOptions = workerData.roleOptions as string | undefined;
     pool = new Pool({
       connectionString: workerData.connectionString as string,

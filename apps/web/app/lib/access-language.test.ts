@@ -65,11 +65,7 @@ describe("describeResourceType", () => {
     expect(describeResourceType("*")).toBe("everything");
   });
 
-  /*
-   * A resource type nobody mapped must still render, and it must render as *itself*. Folding an
-   * unknown type into a friendly area would be the one failure mode that matters here: it would
-   * claim an owner granted something narrower or broader than they did.
-   */
+  /* Unknown resource types must render as themselves, not a guessed friendly area. */
   test("renders an unmapped resource type as its own name", () => {
     expect(describeResourceType("payroll_ledger")).toBe("payroll ledger");
   });
@@ -101,20 +97,13 @@ describe("describeGrant", () => {
     );
   });
 
-  /*
-   * Effect is deliberately absent from the phrase. An allow and a deny that read alike would be
-   * indistinguishable at list length, so the caller renders the effect as its own signal.
-   */
+  /* Effect stays outside the phrase so allow and deny do not read alike. */
   test("says nothing about allow or deny", () => {
     const allow = describeGrant(grant({ effect: "allow", action: "record.read" }));
     const deny = describeGrant(grant({ effect: "deny", action: "record.read" }));
     expect(allow).toBe(deny);
   });
 
-  /*
-   * Composing the verb literally gave "Full access to people and access", which reads as though
-   * "access" belongs to the verb. An unrestricted action is a single English word instead.
-   */
   test("an unrestricted action reads as one verb, not as a phrase glued to its object", () => {
     expect(describeGrant(grant({ action: "*", resourceType: "authz.role" }))).toBe(
       "Manage people and access"
@@ -151,10 +140,7 @@ describe("summarizeRole", () => {
     expect(summary.unrestricted).toBe(false);
   });
 
-  /*
-   * A deny is not reach. Counting one would put "People and access" on a Role whose only mention
-   * of it is a prohibition — the exact inversion an owner cannot afford to misread.
-   */
+  /* A deny is not reach; counting it would invert what the owner sees. */
   test("ignores denies when working out what a Role covers", () => {
     const summary = summarizeRole(
       role({
@@ -167,11 +153,7 @@ describe("summarizeRole", () => {
     expect(summary.areas.map((area) => area.id)).toEqual(["everyday"]);
   });
 
-  /*
-   * A wildcard resource type is a scope, so the action names the area. Read literally it resolved
-   * to the catch-all area and every coverage line ending in "and everything" — the same
-   * wildcard-as-scale mistake that badged `member` Unrestricted.
-   */
+  /* A wildcard resource type is scope, not scale. */
   test("names a wildcard grant by its action, not by everything", () => {
     const summary = summarizeRole(
       role({ grants: [grant({ action: "record.create", resourceType: "*" })] })
@@ -201,11 +183,7 @@ describe("roleTitle", () => {
 });
 
 describe("actionFor", () => {
-  /*
-   * Records namespace their actions by the *family*: a grant reads `record.read`, never
-   * `record.customer.read`. Scoping the verb to the individual type would compile to an action no
-   * grant can match, and the check would report a denial the real gate would never produce.
-   */
+  /* Record actions are namespaced by family, never individual resource type. */
   test("scopes a record verb to the family, not to the type", () => {
     expect(actionFor("record.customer", "read")).toBe("record.read");
     expect(actionFor("record", "delete")).toBe("record.delete");
@@ -215,20 +193,12 @@ describe("actionFor", () => {
     expect(actionFor("platform.knowledge", "read")).toBe("platform.knowledge.read");
   });
 
-  /*
-   * `grantMatches` refuses to match any grant against a wildcard request, so "do anything with"
-   * abstained on every grant and rendered an authoritative-looking denial for an owner holding
-   * `allow * on *`. The verb is no longer offered, and nothing composes one.
-   */
+  /* No verb is offered for wildcard requests because `grantMatches` refuses them. */
   test("does not offer a verb the gate can only ever answer no to", () => {
     expect(CHECKABLE_VERBS.map((verb) => verb.value)).not.toContain("*");
   });
 
-  /*
-   * These three surfaces do not speak CRUD. Composing `integration.create` produced an action that
-   * exists nowhere, so it matched neither the allows nor the explicit deny and the page reported
-   * "Nobody has given them this yet" with a remedy that a deny would beat anyway.
-   */
+  /* These surfaces do not speak CRUD; composing CRUD actions would create false denials. */
   test("names the real action for a surface whose vocabulary is not CRUD", () => {
     expect(actionFor("integration", "create")).toBe("integration.connect");
     expect(actionFor("secret", "delete")).toBe("secret.delete");
@@ -240,11 +210,7 @@ describe("actionFor", () => {
     expect(actionFor("authz", "update")).toBeNull();
   });
 
-  /*
-   * The level builder grants Records capabilities on the bare `record` family, so if this screen
-   * cannot be asked about that family then the most likely level an owner will ever build is the
-   * one level they cannot verify here.
-   */
+  /* The check surface must include the bare `record` family used by level grants. */
   test("offers the record family itself, which is what a Records level grants", () => {
     expect(CHECKABLE_THINGS.map((thing) => thing.value)).toContain("record");
     expect(actionFor("record", "create")).toBe("record.create");
@@ -292,12 +258,7 @@ describe("joinWords", () => {
   });
 });
 
-/*
- * The page's whole purpose is to never show database vocabulary. A resource type that no area
- * claims falls through to its raw name, which is how "Full access to authz assignment" reached a
- * screenshot. These lock the families down: naming a parent claims its children, so a Soul-authored
- * Role that reaches for `authz.role` reads as access, not as a table.
- */
+/* Resource areas must avoid database vocabulary; parent names claim their children. */
 test("an area claims the children of the types it owns", () => {
   for (const child of ["authz.role", "authz.assignment", "authz.relation"]) {
     expect(areaForResourceType(child)?.id).toBe("people");
@@ -336,11 +297,7 @@ test("a wholly unknown top-level type is still shown as itself, never widened", 
   expect(describeResourceType("quantum_flux")).toBe("quantum flux");
 });
 
-/*
- * `resourceType: "*"` is a scope, not a scale. The member Role grants `record.create` on `*`,
- * meaning "create records, on any resource" — rendered literally it said "Add to everything", which
- * both overstates the grant and reads as alarming next to a list of ordinary permissions.
- */
+/* `resourceType: "*"` means any resource of that family, not every capability. */
 describe("a wildcard resource type", () => {
   test("takes its object from the action's own family", () => {
     expect(describeGrant(grant({ action: "record.create", resourceType: "*" }))).toBe(
@@ -367,12 +324,7 @@ describe("a wildcard resource type", () => {
   });
 });
 
-/*
- * The same wildcard-as-scale error that produced "Add to everything", one layer up. `member`
- * allows `record.create` on `*` — records anywhere, not anything anywhere — and badging that Role
- * "Unrestricted" contradicted its own blurb ("Cannot manage people or settings") on the line
- * above. A Role is unbounded only when both halves are wild.
- */
+/* A Role is unrestricted only when both action and resource are wild. */
 test("a wildcard resource type alone does not make a Role unrestricted", () => {
   const summary = summarizeRole(
     role({

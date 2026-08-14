@@ -1,16 +1,3 @@
-/**
- * Proves a Tool declared with `defineTool` produces a spec the published `ToolContract` schema
- * accepts.
- *
- * The framework's whole claim is that a locally-defined Tool and an imported one (OpenAPI, MCP,
- * third-party manifest) are indistinguishable to the catalog and the gate. That claim is only true
- * if `toolContractSpecOf` output actually validates — otherwise every local Tool would fail at
- * publication time, and the equivalence would be an assertion in a comment rather than a fact.
- *
- * This lives in the API app rather than beside `defineTool` because it needs the real registry:
- * checking a hand-written example would prove only that the example was written correctly.
- */
-
 import type { EgressHttpPort, EgressHttpRequest } from "@tulipfarm/integrations";
 import { ajv, ToolContractDefinitionSchema } from "@tulipfarm/schema";
 import type { SecretsService } from "@tulipfarm/secrets";
@@ -187,7 +174,6 @@ function declarativeDefinitions(): readonly LabeledDefinition[] {
   return definitionsFrom("declarative", tools);
 }
 
-/** Argument shapes wide enough to make each family's derivation produce something. */
 const PROBE_ARGUMENTS: readonly unknown[] = [
   {},
   { type: "ticket", id: "t-1" },
@@ -215,10 +201,6 @@ function sameStrings(left: readonly string[], right: readonly string[]): boolean
 }
 
 describe("published contract projection", () => {
-  // Every family builder silently drops Tools whose `definition` is absent, so a family that
-  // contributed nothing would let the projection assertions below pass while proving nothing about
-  // it. That is precisely how the imported half of the "in-house and imported are indistinguishable"
-  // claim went untested long enough for a real defect to hide in it. Assert the corpus first.
   it("draws its corpus from every Tool family, in-house and imported alike", () => {
     const counts = new Map<string, number>();
     for (const { family } of allDefinitions()) {
@@ -290,39 +272,18 @@ describe("published contract projection", () => {
 });
 
 describe("every Tool's authority is expressible as a grant", () => {
-  /**
-   * A Tool declares the resource its authority is written against; a Role grants a resource type.
-   * `grantMatches` compares those two strings **exactly**, so the only thing standing between a
-   * declared resource and a grant that can never match it is whoever typed both. Nothing checked
-   * that they agreed, and they did not: every provider and platform Tool derived a target in a
-   * namespace of its own invention while the deployment Roles granted a third set of names.
-   *
-   * The failure mode is silent in the worst possible way. An unmatchable resource does not error —
-   * it denies, and it denies *after* the gate turns on, for a Tool whose declaration looks correct
-   * in isolation. This asserts the two vocabularies are the same vocabulary.
-   */
   const grantableTypes = new Set<string>(
     DEPLOYMENT_ROLES.flatMap((role) =>
       role.grants.filter((grant) => grant.effect === "allow").map((grant) => grant.resourceType)
     )
   );
 
-  /**
-   * A declarative integration is compiled from a manifest the operator connects at runtime, so its
-   * `integration.<slug>` resource cannot exist in a built-in Role. Reaching it needs an
-   * operator-authored Role, which is the documented path — but the exemption is written down here
-   * rather than inferred from the prefix, so a *built-in* provider can never slip through it.
-   */
   const OPERATOR_AUTHORED_RESOURCES = new Set(["integration.google-docs"]);
 
   it("declares no resource that no built-in Role can grant", () => {
     const ungrantable = new Set<string>();
     for (const { definition } of allDefinitions()) {
       for (const resource of definition.authorization.resources ?? []) {
-        // A grant of `integration` does *not* cover `integration.github`: `grantMatches` compares
-        // the type as an exact string, so a prefix rule here would hide the very gap this checks
-        // for. Built-in providers must therefore be named. Resources belonging to an integration
-        // the operator connects at runtime cannot be enumerated ahead of time, and are exempt.
         if (grantableTypes.has(resource) || OPERATOR_AUTHORED_RESOURCES.has(resource)) continue;
         ungrantable.add(`${definition.name}: ${resource}`);
       }
@@ -331,8 +292,6 @@ describe("every Tool's authority is expressible as a grant", () => {
   });
 
   it("derives no target type outside the resource its Tool declares", () => {
-    // The gate checks derived targets *instead of* the static resources, so a derived type that is
-    // not itself grantable both denies the call and silences the declared resource.
     const escaped: string[] = [];
     for (const { definition } of allDefinitions()) {
       const declared = new Set(definition.authorization.resources ?? []);
@@ -342,7 +301,6 @@ describe("every Tool's authority is expressible as a grant", () => {
         try {
           derived = definition.targetsFor(args);
         } catch {
-          // `targetsFor` reports definition defects by throwing; that is covered by define.test.ts.
           continue;
         }
         for (const target of derived) {
@@ -357,11 +315,6 @@ describe("every Tool's authority is expressible as a grant", () => {
   });
 
   it("declares a data class on every Tool, and a chat DLP rule for every class declared", () => {
-    // `checkDlpBoundary` denies `unclassified_data` before it looks at a single rule, so a Tool
-    // that names no `dataClasses` is refused by the gate no matter what authority its caller
-    // holds. That makes classification a hard requirement of defining a Tool rather than a
-    // convention — and makes this check the thing that says so at build time instead of at the
-    // first denied call in production.
     const permitted = new Set(CHAT_DLP_RULES.map((rule) => rule.dataClass));
     const unclassified: string[] = [];
     const unpermitted: string[] = [];
@@ -380,10 +333,6 @@ describe("every Tool's authority is expressible as a grant", () => {
   });
 
   it("keeps surface-bound Tools declaring the surface they need", () => {
-    // Until this stage two hand-maintained name lists held this, and retiring them for each Tool's
-    // own `availableTo` moved the guarantee without holding it anywhere. Naming the Tools here is
-    // the point: these specific ones are meaningless off their surface — `navigate_to` in Slack has
-    // no browser to navigate — so losing a declaration offers the model a Tool that cannot work.
     const availability = new Map(
       allDefinitions().map(({ definition }) => [definition.name, definition.availableTo])
     );

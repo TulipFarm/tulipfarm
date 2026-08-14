@@ -6,12 +6,7 @@ import type { AuthorityPrincipal } from "../identity/authority-layers";
 import { DEPLOYMENT_ROLES } from "../identity/roles";
 import { LiveRecordAuthorizer, recordTargets } from "./authorize";
 
-/**
- * These tests run the **real** `DEPLOYMENT_ROLES` grants through the **real** decision function.
- * A fake layer would prove only that the plumbing calls something; the property that matters is
- * that the REST door reaches the same verdict the Tool door does for the same principal, and only
- * the shipped grants can show that.
- */
+/** Uses real role grants and the real decision function to catch policy drift. */
 
 function loaderWith(resources: readonly SoulResource[]): SoulLoader {
   return { resources: new Map(resources.map((r) => [r.name, r])) } as unknown as SoulLoader;

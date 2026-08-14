@@ -1,9 +1,3 @@
-/*
- * Client for per-message thumbs up/down feedback (FB-V1). Mirrors lib/conversations.ts conventions:
- * cookie-first auth via the shared api.ts helpers, ApiError on non-2xx. The capture layer for a
- * future self-improvement loop — no reads feed any agent yet.
- */
-
 import { apiDelete, apiGet, apiWrite } from "./api";
 
 export type FeedbackRating = "up" | "down";

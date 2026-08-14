@@ -8,14 +8,7 @@ import {
 import { parse as parseYaml } from "yaml";
 import { readContainedFile } from "./safe-fs";
 
-/**
- * Resolving a definition file is the one place the reader and the writer must agree, so both ask
- * the same registry rather than hardcoding a filename. The writer emits `definitionPath()`; this
- * reads that first and falls back to `legacyDefinitionCandidates()`.
- *
- * Without this the two halves drift silently in the worst possible direction: the gateway writes a
- * canonical `agent.yaml` the loader cannot see, so a successful write makes an artifact vanish.
- */
+/** Reader and writer both resolve definition paths from the schema registry to prevent drift. */
 
 export interface ResolvedDefinition {
   /** Repo-relative path the definition was actually read from. */
@@ -55,11 +48,7 @@ export async function resolveDefinition(
   return undefined;
 }
 
-/**
- * The in-memory shape every consumer of an agent or skill still expects: the legacy
- * frontmatter-plus-body pair. The canonical envelope splits those across two files, so reading it
- * means recombining them — the exact inverse of `convertLegacyAgent`.
- */
+/** Legacy agent/skill view: frontmatter plus body recomposed from the canonical envelope. */
 export interface FrontmatterArtifact {
   readonly frontmatter: Record<string, unknown>;
   readonly body: string;
@@ -69,11 +58,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/**
- * Flattens a canonical definition envelope back to the legacy view. `spec` fields map one-to-one
- * onto frontmatter keys (that is how the forward converter builds them), `metadata.displayName`
- * carries the authored name, and `spec.instructions.path` names the companion holding the body.
- */
+/** Inverse of conversion: spec fields become frontmatter, instructions path becomes body. */
 export async function readFrontmatterArtifact(
   soulPath: string,
   _kind: ArtifactKind,

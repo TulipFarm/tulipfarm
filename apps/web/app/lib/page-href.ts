@@ -1,11 +1,4 @@
-/*
- * Canonical page URL helpers. Pages are addressed by their stable page UUID
- * (`/knowledge/pages/<id>/<slug>`), Notion-style — the trailing slug is cosmetic and ignored on
- * load. A `PageResolver` (built once from `listAllPages()`) maps a path reference — same-space
- * `(spaceId, path)` or cross-space `(spaceName, path)` — to its page id, and an id back to its
- * page ref (for the sidebar active-highlight and slug). The OKF link *source* stays path-based; only
- * the rendered href is uuid-based, so resolution happens at render time.
- */
+/* Rendered page hrefs use stable UUID routes; OKF sources stay path-based. */
 import type { SpacePageRef } from "./knowledge-api";
 
 const BASE = "/knowledge/pages";

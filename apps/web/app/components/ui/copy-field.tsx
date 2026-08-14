@@ -5,13 +5,9 @@ import { copyText } from "~/lib/clipboard";
 import { cn } from "~/lib/utils";
 
 /*
- * A value the operator has to move somewhere else by hand — a webhook URL to paste into a
- * provider's settings, an invite link to send.
- *
- * Confirmation is the point. `copyText` falls back to `execCommand` on insecure origins and can
- * still fail outright, so a button that looks identical whether or not the copy landed leaves the
- * operator pasting stale clipboard contents into a provider's form and wondering why setup broke.
- * The label reverts on a timer so a second copy is visibly acknowledged too.
+ * `copyText` falls back to `execCommand` on insecure origins and can still fail outright, so a
+ * button that looks identical whether or not the copy landed leaves the operator pasting stale
+ * clipboard contents into a provider's form and wondering why setup broke.
  */
 
 const REVERT_MS = 2000;
@@ -22,7 +18,6 @@ export function CopyField({
   className,
 }: {
   value: string;
-  /** Accessible name for the button, when several copyable values share a screen. */
   label?: string;
   className?: string;
 }) {

@@ -1,15 +1,6 @@
 /**
- * Source authorization (SPEC §14.1). This is the single seam where a Knowledge source becomes an
- * access decision, and it runs *before* any candidate selection, ranking, or metadata disclosure
- * (`retrieve.ts` cannot rank without the allow list this module produces).
- *
- * Every path is default-deny: a source from another business, a revoked/deleted record, an
- * unverifiable ACL, a snapshot past its explicit TTL, a drifted ACL revision, a provider that
- * cannot answer a live check, or an empty principal list all deny. There is no fallback from a
- * failed live check to a cached one — a stale answer is exactly the answer an attacker wants.
- *
- * Denials carry a stable reason code only. Provider errors, file names, ACL contents, and
- * principal identities never appear in a decision, an error message, or a log line.
+ * Source authorization is default-deny before retrieval can disclose metadata. Denial evidence
+ * contains stable reason codes only, never provider errors, names, ACLs, principals, or content.
  */
 
 import type { KnowledgeAclSnapshot, KnowledgePrincipalRef, KnowledgeSourceRecord } from "./source";
@@ -37,11 +28,7 @@ export interface SourceAccessRequest {
   readonly principals: readonly KnowledgePrincipalRef[];
 }
 
-/**
- * Provider-side authorization for sources whose ACL cannot be snapshotted safely. `undefined`
- * means "could not determine" and denies; implementations must not translate an outage into a
- * permissive answer.
- */
+/** `undefined` means the provider could not determine access and must deny. */
 export interface LiveSourceAuthorizationPort {
   check(input: {
     readonly businessId: string;
@@ -75,11 +62,7 @@ function aclPermits(
   );
 }
 
-/**
- * Decide one source read. The returned reason is the narrowest one that actually blocked the
- * request so operators can distinguish "not synced" from "not permitted" — the decision itself
- * never becomes more permissive because of it.
- */
+/** Returns the narrowest blocking reason without making the decision more permissive. */
 export async function decideSourceAccess(
   source: KnowledgeSourceRecord,
   request: SourceAccessRequest,

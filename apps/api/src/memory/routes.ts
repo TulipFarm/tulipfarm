@@ -34,12 +34,7 @@ function toApiEntry(e: MemoryAssertionView): Record<string, unknown> {
   };
 }
 
-/**
- * User-facing CRUD over the caller's own Memory (the `<memory>` facts the assistant
- * saves, plus preferences the user sets). List + upsert (`PUT` creates or replaces by key) +
- * delete. The per-entry caps (`MAX_KEY_CHARS`, `MAX_VALUE_CHARS`) are enforced on writes, same
- * as the agent write path; everything is scoped to the authenticated user.
- */
+/** User-scoped Memory CRUD; writes enforce the same caps as the agent path. */
 export function registerMemoryRoutes(
   app: FastifyInstance,
   service: MemoryService,
@@ -330,11 +325,7 @@ const PendingMemorySchema = {
   },
 } as const;
 
-/**
- * What the review queue shows. Deliberately not the stored record: `target` names the scope owner
- * and `provenance` names the Run and the evidence, none of which the reviewer needs and all of
- * which is internal.
- */
+/** Review rows hide internal target/provenance details. */
 function toApiPending(p: PendingMemory): Record<string, unknown> {
   return {
     pendingId: p.pendingId,
@@ -347,14 +338,7 @@ function toApiPending(p: PendingMemory): Record<string, unknown> {
   };
 }
 
-/**
- * The confirmation gate's user-facing half (Settings -> Memory).
- *
- * Nothing extraction infers is memory until it comes through here. Both routes are scoped to the
- * authenticated user by the engine, not by this layer: `listPending` filters on the scope owner in
- * SQL, and `resolve` reauthorizes the deciding principal — so guessing another user's `pendingId`
- * neither confirms nor reveals anything.
- */
+/** Only this user-scoped confirmation gate turns inferred candidates into Memory. */
 function registerPendingMemoryRoutes(
   app: FastifyInstance,
   extraction: MemoryExtractionService,

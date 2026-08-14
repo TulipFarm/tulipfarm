@@ -2,11 +2,7 @@ import { pgPoolTuning } from "@tulipfarm/constants";
 import type { Queryable as StorageQueryable, TransactionPort } from "@tulipfarm/storage";
 import { Pool } from "pg";
 
-/**
- * Minimal query surface this app needs. Deliberately a local copy of the same shape `apps/api`
- * uses: an application may not import another application, and `@tulipfarm/storage` owns only the
- * provider-neutral port, not the `pg` wiring.
- */
+/** Local query shape; apps cannot import each other, and storage owns only neutral ports. */
 export interface Queryable {
   query(text: string, params?: unknown[]): Promise<{ rows: Record<string, unknown>[] }>;
 }

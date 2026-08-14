@@ -1,19 +1,4 @@
-/**
- * ACL-first retrieval (SPEC §14.1). The order is fixed and is the whole point of this module:
- *
- *   1. load the business's sources,
- *   2. authorize every one of them (`acl.ts`),
- *   3. only then hand the *authorized* id set to the index for ranking,
- *   4. re-check what came back against the same set.
- *
- * Nothing about an unauthorized source reaches the caller: not its id, revision, digest, snippet,
- * or classification. Exclusions are reported as reason counts, which is enough to explain "you are
- * missing results" without disclosing that a particular restricted document exists.
- *
- * The cache is an accelerator, never an authority. Its key binds principal, Guardrail epoch, and
- * Context epoch, and a hit is only served after every cached source is re-authorized at its
- * current revision — so an ACL change, a revision bump, or a deletion cannot be served from cache.
- */
+/** ACL-first retrieval authorizes before ranking, re-checks ids, and reauthorizes cache hits. */
 
 import type { AuditEventInput } from "@tulipfarm/audit";
 import { canonicalHash } from "@tulipfarm/schema";
@@ -109,10 +94,7 @@ function sortedPrincipals(principals: readonly KnowledgePrincipalRef[]): string[
   return principals.map((principal) => `${principal.kind}:${principal.id}`).sort();
 }
 
-/**
- * The cache key is the authorization context, not just the question. Two principals, two Guardrail
- * epochs, or two Context epochs can never collide onto one entry.
- */
+/** Cache keys bind question, principal, Guardrail epoch, and Context epoch. */
 export function buildRetrievalCacheKey(request: RetrievalRequest): string {
   return canonicalHash({
     businessId: request.businessId,

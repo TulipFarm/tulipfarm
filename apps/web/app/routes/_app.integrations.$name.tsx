@@ -32,18 +32,6 @@ import {
 } from "~/lib/integrations";
 import { useIsAdmin } from "~/lib/use-session-user";
 
-/*
- * One integration, as a document rather than a settings form (mirrors knowledge/page-detail.tsx):
- * identity, then what it does and what it costs you to say yes, then the connect flow, then the
- * provider-shaped state only some integrations have.
- *
- * What is deliberately NOT here: the old `type` / `transport` metadata box. Those describe how
- * TulipFarm reaches the provider — `egress.type` reads "none" for both bundled integrations — and
- * answer a question no operator has. What they actually want to know before connecting is what
- * agents will be able to do and what authority they are handing over, so those are the two
- * sections that replaced it.
- */
-
 export const meta: MetaFunction = () => [{ title: "Integration · tulipfarm" }];
 
 export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
@@ -75,11 +63,7 @@ export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
   return { integration, routesError, githubInstallations };
 }
 
-/*
- * The auth broker reports a failed provider round trip as a reason code on the redirect back, so
- * the operator lands on this page rather than on a raw JSON body. Each one needs a sentence saying
- * what to do next; the codes are the closed set in `AuthBrokerError`.
- */
+/* Redirect error codes are the closed set in `AuthBrokerError`. */
 const CALLBACK_REASON: Record<string, string> = {
   unknown_step: "That setup step no longer exists. Reload the page and start again.",
   invalid_state: "This setup link expired or was already used. Start the step again.",
@@ -112,12 +96,7 @@ function SectionHeading({ children }: { children: React.ReactNode }) {
   return <h2 className="text-sm font-semibold text-foreground">{children}</h2>;
 }
 
-/**
- * What connecting hands over, in the provider's own words.
- *
- * Deliberately rendered even after connecting: an operator auditing what a deployment can reach
- * should not have to disconnect to find out.
- */
+/** Keep consent visible after connection for audits. */
 function GrantList({ grants }: { grants: IntegrationGrant[] }) {
   return (
     <ul className="flex flex-col divide-y divide-border rounded-md border border-border">
@@ -126,9 +105,7 @@ function GrantList({ grants }: { grants: IntegrationGrant[] }) {
           key={`${grant.label}:${grant.access ?? ""}`}
           className="flex flex-col gap-1 px-4 py-2.5 sm:flex-row sm:items-center sm:gap-3"
         >
-          {/* Fixed columns: the scope and its access level are what an operator compares down the
-              list, and ragged columns make that a re-read of every row. Below `sm` there is no room
-              for three columns without shredding the description, so the row stacks instead. */}
+          {/* Fixed columns keep scope/access comparisons aligned; rows stack below `sm`. */}
           <span className="flex items-center gap-2 sm:contents">
             <code className="text-xs text-foreground sm:w-40 sm:shrink-0 sm:truncate">
               {grant.label}

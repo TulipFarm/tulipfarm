@@ -3,12 +3,7 @@ import type { IntegrationHttpPort, IntegrationHttpRequest } from "@tulipfarm/int
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ensureGitHubInstallation } from "./github-install";
 
-/*
- * What recording an installation must do once the declarative auth flow has produced the App
- * credentials and an installation id. The credential *acquisition* is the generic broker's and is
- * covered by `auth-broker.test.ts`; this covers only the GitHub-specific bookkeeping that used to
- * be tangled into the deleted `/install/callback` route.
- */
+/** Recording starts after generic auth produces App credentials and an installation id. */
 
 class FakeSecretsService {
   store = new Map<string, string>();

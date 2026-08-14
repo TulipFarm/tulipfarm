@@ -1,17 +1,7 @@
 import type { MemoryContradictionInput, MemoryContradictionPort } from "@tulipfarm/memory";
 import { generateText, type LanguageModel } from "ai";
 
-/**
- * LLM-backed contradiction judging (SPEC §14.4).
- *
- * Answers one narrow question — which of these stored statements can no longer be true, now that
- * this one is? — and nothing else. It does not decide what happens next: closing a valid interval,
- * checking scope, and comparing trust tiers all happen in `@tulipfarm/memory`, where a change of
- * model cannot reach them.
- *
- * That division is deliberate. This module's output is untrusted, so it is deliberately given the
- * weakest possible authority: a list of ids, filtered afterwards against the exact set it was shown.
- */
+/** LLM contradiction output is untrusted ids, filtered afterward against exactly what it saw. */
 
 /** How many priors the judge is shown at once. Beyond this the prompt stops being answerable. */
 export const MAX_JUDGED_PRIORS = 10;
@@ -30,13 +20,7 @@ const JUDGE_PROMPT = [
   'Return strict JSON and nothing else: {"contradicted":["<id>", ...]}',
 ].join("\n");
 
-/**
- * Pulls the id list out of a model response.
- *
- * Anything unparseable yields no ids, which leaves both statements standing. That is the safe
- * direction of failure: a stale fact alongside a current one is visible and recoverable, whereas a
- * wrongly closed interval quietly removes something true.
- */
+/** Unparseable model output yields no ids, preserving facts instead of wrongly closing them. */
 export function contradictedIdsFromResponse(raw: string): readonly string[] {
   const start = raw.indexOf("{");
   const end = raw.lastIndexOf("}");

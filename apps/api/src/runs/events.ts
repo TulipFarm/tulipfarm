@@ -3,7 +3,6 @@ import { ErrorSchema } from "../auth/schemas";
 import { formatSseEvent, writeSseHeaders } from "../chat/sse";
 import { makeRateLimitHook, type RateLimiter } from "../rate-limit";
 
-/** Who a persisted Run event may be shown to (mirrors `@tulipfarm/storage`'s `RunEventAudience`). */
 export type RunEventAudience = "participant" | "operator";
 
 export interface RunEventRecord {
@@ -14,7 +13,6 @@ export interface RunEventRecord {
   readonly occurredAt: string;
 }
 
-/** Read-only surface of the persisted Run event stream. The stream never writes Run state. */
 export interface RunEventReader {
   list(
     businessId: string,
@@ -27,13 +25,11 @@ export interface RunStatusReader {
   find(businessId: string, runId: string): Promise<{ status: string } | null>;
 }
 
-/** Reader's access to one Run, re-checked on every poll so a revoked grant closes the stream. */
 export interface RunStreamGrant {
   readonly businessId: string;
   readonly audiences: readonly RunEventAudience[];
 }
 
-/** Minimal writable surface an SSE stream needs; a Node `ServerResponse` satisfies it. */
 export interface SseSink {
   readonly destroyed: boolean;
   write(chunk: string): boolean;
@@ -67,11 +63,8 @@ const DEFAULT_POLL_INTERVAL_MS = 500;
 const DEFAULT_PAGE_SIZE = 200;
 
 /**
- * Streams a Run's persisted events over SSE (SPEC §18). Delivery starts strictly after the
- * client's cursor, so a reconnect replays in order with no duplicates; the stream is a pure reader,
- * so losing it — or never reading it — cannot change the Run. Authorization is re-checked every
- * poll, a slow consumer is respected through backpressure, and the stream ends once the Run is
- * terminal and its backlog is fully delivered.
+ * SSE replay has no duplicates, rechecks authorization, respects backpressure, and drains terminal
+ * Runs.
  */
 export async function streamRunEvents(
   sink: SseSink,
@@ -138,7 +131,6 @@ type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 export interface RunEventRouteDeps {
   readonly events: RunEventReader;
   readonly runs: RunStatusReader;
-  /** Resolves the caller's grant for a Run; `null` denies the stream. */
   readonly authorize: (req: FastifyRequest, runId: string) => Promise<RunStreamGrant | null>;
   readonly pollIntervalMs?: number;
   readonly pageSize?: number;
@@ -155,7 +147,6 @@ export function parseAfterCursor(
   return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : 0;
 }
 
-/** Adapts a hijacked Fastify reply to the sink `streamRunEvents` writes through. */
 export function sinkFor(reply: FastifyReply): SseSink {
   const raw = reply.raw;
   return {
@@ -171,11 +162,9 @@ export function sinkFor(reply: FastifyReply): SseSink {
   };
 }
 
-/** Each stream holds a connection open, so cap how fast one client may (re)open them. */
 const STREAM_LIMIT = 30;
 const STREAM_WINDOW_MS = 60_000;
 
-/** `GET /api/v1/runs/:id/events` — persisted Run event stream with cursor recovery (SPEC §18). */
 export function registerRunEventRoutes(
   app: FastifyInstance,
   deps: RunEventRouteDeps,

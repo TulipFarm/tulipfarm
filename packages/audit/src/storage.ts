@@ -1,10 +1,4 @@
-/**
- * Append-only persistence for audit events (SPEC §20: "Events are appended in PostgreSQL for
- * query and hash-linked into signed, sealed immutable segments in independently protected blob
- * storage"). This module defines the query-side repository contract; a PostgreSQL adapter
- * implements the same {@link AuditEventRepo} contract, and sealing to blob storage is a separate
- * concern layered on top of `listChain`.
- */
+/** Append-only audit query contract; sealing to immutable blob storage layers on `listChain`. */
 
 import { recomputeEventHash } from "./chain";
 import type { AuditEvent } from "./event";
@@ -35,9 +29,7 @@ export class AuditAppendConflictError extends Error {
 
 export interface AuditEventRepo {
   /**
-   * Compare-and-append `event`. Implementations must reject unless `chainIndex` and
-   * `previousHash` still describe the current tail, and must enforce this in the same durable
-   * transaction as the insert.
+   * Compare-and-append must reject stale chain tails in the same durable transaction as the insert.
    */
   append(event: AuditEvent): Promise<void>;
   /** The most recently appended event for `businessId`, or `undefined` if the chain is empty. */

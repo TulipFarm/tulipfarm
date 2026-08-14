@@ -1,12 +1,4 @@
-/**
- * Provider-neutral blob store port.
- *
- * Capability id `blob` (required-to-serve, not correctness-critical — see
- * `@tulipfarm/observability` capability catalog). Large immutable payloads are
- * content-addressed with a hash and provider-neutral references (SPEC §19); a
- * filesystem or S3-compatible adapter is sufficient initially. Refs carry no
- * provider type and no secret.
- */
+/** Provider-neutral blob refs are content-addressed, integrity-hashed, and carry no secrets. */
 
 export interface BlobRef {
   /** Storage key. Implementations may make this equal to `hash` (content-addressed). */

@@ -27,12 +27,7 @@ export interface ProceduralCorrectionInput {
   readonly runId?: string;
 }
 
-/**
- * User-facing Memory lifecycle operations that do not fit the legacy key/value surface.
- *
- * The package owns authorization and audit shape; this service owns only Postgres composition and
- * the deployment's default user-private target.
- */
+/** Memory lifecycle composition; auth/audit shape lives in the package. */
 export class MemoryLifecycleService {
   private readonly store: PgMemoryAssertionStore;
   private readonly pending: PgPendingMemoryStore;

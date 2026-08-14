@@ -10,15 +10,7 @@ import {
   installIntegrationFromSource,
 } from "./install";
 
-/*
- * Browse and install integrations.
- *
- * Browsing lives on the catalog itself (`GET /api/v1/integrations`), which already merges the
- * curated `integrations/registry.yml` entries with what is present; these are the two routes that
- * act on a git repo an operator names. A curated entry is only a shortcut to a source — installing
- * it runs exactly the same clone/validate/write as pasting the URL by hand, so nothing is trusted
- * for being listed.
- */
+/* Installing curated integrations uses the same clone/validate/write path as a pasted repo URL. */
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 

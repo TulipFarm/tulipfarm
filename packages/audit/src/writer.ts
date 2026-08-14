@@ -1,8 +1,4 @@
-/**
- * Single append path for audit evidence (SPEC §20). Computes chain linkage (`chainIndex`,
- * `previousHash`, `hash`) from the business's current chain tail, then appends through the repo.
- * This is the only place a chained hash is produced — callers never set it themselves.
- */
+/** Only append path that computes audit chain linkage; callers never set hashes. */
 
 import { randomUUID } from "node:crypto";
 import { computeEventHash } from "./chain";

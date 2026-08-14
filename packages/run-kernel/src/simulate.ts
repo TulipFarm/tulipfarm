@@ -6,15 +6,8 @@ import { decideBranch } from "./routine/states/branch";
 import { type StepOutcome, stateOutcome } from "./routine/states/step";
 
 /**
- * Deterministic Routine simulation (SPEC §9.2).
- *
- * A simulation executes an already-compiled Routine against a fixture clock, fixture model
- * outputs, fixture Tool results, and fixture events. It has no ports: there is nothing here to
- * lease a Secret with and nothing to dispatch an effect through, so a simulated Run cannot touch
- * a live system even by mistake. A `tool` State produces an {@link EffectPreview} — what would
- * have been dispatched, under which identity, with which resolved input — and the Run continues
- * from the fixture result. Two simulations of the same Routine and fixture produce byte-identical
- * results, including {@link SimulationResult.resultHash}, which is what makes replay diffable.
+ * Simulation uses fixture clock, model outputs, Tool results, and events; it has no live ports,
+ * emits `EffectPreview`s, and identical inputs yield identical result hashes.
  */
 
 export type SimulationErrorCode =
@@ -25,7 +18,6 @@ export type SimulationErrorCode =
   | "step_budget_exceeded"
   | "unknown_state";
 
-/** A simulation denial. Carries only `code:subject` — never a fixture value or a Secret. */
 export class SimulationError extends Error {
   constructor(
     readonly code: SimulationErrorCode,
@@ -38,17 +30,12 @@ export class SimulationError extends Error {
 }
 
 export interface SimulationFixture {
-  /** Wall clock the simulation starts at. Nothing here reads the host clock. */
   readonly startedAtMs: number;
-  /** Deterministic clock advance per executed State. */
   readonly tickMs?: number;
   readonly input?: JsonObject;
   readonly trigger?: JsonObject;
-  /** `agent` State name → the model output to use instead of calling a provider. */
   readonly model?: Readonly<Record<string, JsonObject>>;
-  /** `tool`/`compensate` State name → the result to use instead of dispatching. */
   readonly tools?: Readonly<Record<string, JsonObject>>;
-  /** Waiting State name → the event, decision, or submission that resumes it. */
   readonly events?: Readonly<Record<string, JsonObject>>;
 }
 
@@ -59,12 +46,10 @@ export interface SimulationOptions {
 
 export const DEFAULT_MAX_SIMULATION_STEPS = 500;
 
-/** What a `tool` or `compensate` State would have dispatched, had this been a live Run. */
 export interface EffectPreview {
   readonly stateName: string;
   readonly toolRef: string;
   readonly action: string;
-  /** The declared Secret *reference*; simulation never resolves it to a value. */
   readonly credentialRef: string | null;
   readonly identity: { readonly principalKind: string; readonly principalId: string };
   readonly input: Readonly<Record<string, unknown>>;
@@ -253,7 +238,6 @@ function execute(
   throw new SimulationError("state_not_simulable", state.name);
 }
 
-/** Execute a compiled Routine against a fixture, previewing effects instead of dispatching them. */
 export function simulateRoutine(
   routine: CompiledRoutine,
   fixture: SimulationFixture,

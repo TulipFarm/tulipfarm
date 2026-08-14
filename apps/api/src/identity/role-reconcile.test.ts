@@ -90,12 +90,7 @@ describe("reconcileSoulRoles", () => {
     expect((await roles.listRoles(BUSINESS)).map((r) => r.id)).toEqual(["a"]);
   });
 
-  /**
-   * `deleteRole` cascades to `role_assignments` and `group_role_assignments`. So "the projection
-   * failed, therefore this Role is absent from Soul, therefore delete it" destroys a live Role and
-   * every grant of it on a transient database blip — and re-authoring in Soul restores the
-   * definition but not who held it. A failure means the desired set is *unknown*, not *empty*.
-   */
+  /** Projection failure means desired Roles are unknown, not empty; never reap on failure. */
   it("does not reap when a projection failed — an unknown desired set is not an empty one", async () => {
     const roles = new InMemoryRoleRepo();
     await reconcileSoulRoles(roles, soulRoles(soulRole("a"), soulRole("b")), BUSINESS);
@@ -114,13 +109,7 @@ describe("reconcileSoulRoles", () => {
     expect(log.warn).toHaveBeenCalledWith(expect.stringContaining("skipped the reap"));
   });
 
-  /**
-   * `RoleGrantSchema` accepts constructs the compiler refuses (`audiences`, non-`equals`
-   * operators), and nothing validates a Role through the compiler at publish time. Compiling the
-   * whole catalog eagerly meant one such artifact threw before anything was written — taking the
-   * API down on boot, and on a running instance silently stopping all projection *and* all reaping
-   * from then on, so revocation-by-Soul-deletion quietly failed. One bad artifact must not do that.
-   */
+  /** One bad Role artifact must not stop boot, projection, or revocation-by-Soul-deletion. */
   it("contains a single uncompilable Role rather than losing the whole catalog", async () => {
     const roles = new InMemoryRoleRepo();
     const log = logger();

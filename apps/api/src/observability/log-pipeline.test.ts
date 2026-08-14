@@ -7,11 +7,7 @@ import { runPgMigrations } from "../pg-migrate";
 import { makePglite } from "../test/pglite";
 import { PgLogRepo } from "./log-repo";
 
-/**
- * The seam every other test stubs: a real Fastify error travelling through the pino tee stream,
- * the sink, and into `log_event`. The unit tests cover each hop in isolation, so a break here would
- * be a wiring break — the one class of bug that only shows up assembled.
- */
+/** Assembled Fastify-to-log_event test for wiring bugs that unit tests of each hop cannot catch. */
 
 let app: FastifyInstance;
 let db: PGlite;

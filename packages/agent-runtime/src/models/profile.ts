@@ -6,15 +6,8 @@ import type {
   ModelProfileDenialReason as SchemaModelProfileDenialReason,
 } from "@tulipfarm/schema";
 
-/**
- * ModelProfile routing (SPEC §17). Model use is guardrail-driven through Soul-authored
- * ModelProfiles, never hard-coded in an Agent. A profile is usable only when it independently
- * meets every capability, Tool, structured-output, context, data-handling, residency, and budget
- * constraint of the request — and a fallback must meet exactly the same constraints, so degrading
- * to a weaker model is a denial rather than a silent downgrade.
- */
+/** Governed ModelProfile routing; fallbacks must satisfy the same constraints. */
 
-/** A published ModelProfile, flattened to the fields routing depends on. */
 export interface RoutableModelProfile extends ModelProfileSpec {
   readonly profileId: string;
   readonly reasoning: ModelReasoningLevel;
@@ -24,24 +17,18 @@ export interface ModelProfileCatalog {
   get(profileId: string): RoutableModelProfile | undefined;
 }
 
-/** What the caller needs from a model for this Run, derived from Guardrail, Agent, and Context. */
 export interface ModelRequirements {
   readonly needsTools: boolean;
   readonly needsStructuredOutput: boolean;
   readonly estimatedContextTokens: number;
   readonly estimatedCostUsd?: number;
-  /** Sensitive work keeps caching off regardless of what the profile permits (SPEC §17). */
   readonly sensitive: boolean;
-  /** Whether the data may be used for provider training. Defaults to forbidden. */
   readonly allowTraining?: boolean;
   readonly residency?: string;
   readonly dataRetention?: ModelDataRetention;
   readonly maxLatencyMs?: number;
   readonly requiredCapabilityClass?: string;
-  /**
-   * Content kinds this turn must send to / receive from the model. Omitted means text-only. A
-   * profile that cannot carry one of them is denied, never quietly handed content it would drop.
-   */
+  /** Required modalities must be declared; unsupported content is denied, never dropped. */
   readonly inputModalities?: readonly ModelModality[];
   readonly outputModalities?: readonly ModelModality[];
 }
@@ -57,7 +44,6 @@ export type ModelProfileSelection =
   | {
       readonly outcome: "selected";
       readonly profileId: string;
-      /** Primary first, then every fallback that satisfies the same constraints, in order. */
       readonly chain: readonly RoutableModelProfile[];
       readonly cacheAllowed: boolean;
       readonly rejectedFallbacks: readonly ModelProfileAttempt[];
@@ -69,19 +55,15 @@ export type ModelProfileSelection =
       readonly attempts: readonly ModelProfileAttempt[];
     };
 
-/**
- * Data retention strength, narrowest first. A profile may never retain more than requested.
- */
+/** Retention strength, narrowest first; a profile may never retain more than requested. */
 const RETENTION_RANK: Readonly<Record<ModelDataRetention, number>> = {
   none: 0,
   zero_retention: 1,
   provider_default: 2,
 };
 
-/** Text-only is the honest default for a profile authored before modality existed. */
 const DEFAULT_MODALITIES: readonly ModelModality[] = ["text"];
 
-/** Every required modality must be declared by the profile; an undeclared kind is unsupported. */
 function covers(
   declared: readonly ModelModality[] | undefined,
   required: readonly ModelModality[] | undefined
@@ -91,10 +73,7 @@ function covers(
   return required.every((modality) => supported.includes(modality));
 }
 
-/**
- * Checks one candidate against the request. Returns the first violated constraint so denial
- * evidence names a cause rather than a generic rejection.
- */
+/** Checks one candidate and returns the first violated constraint for denial evidence. */
 export function checkModelProfile(
   profile: RoutableModelProfile,
   requirements: ModelRequirements
@@ -156,11 +135,7 @@ export function checkModelProfile(
   return null;
 }
 
-/**
- * Resolves the named profile plus its ordered, constraint-equivalent fallback chain. The primary
- * profile decides the outcome: a primary that fails any constraint denies outright instead of
- * quietly routing to a fallback that would have been chosen for a weaker request.
- */
+/** Resolve primary plus constraint-equivalent fallbacks; primary failure denies outright. */
 export function selectModelProfile(
   profileId: string,
   requirements: ModelRequirements,

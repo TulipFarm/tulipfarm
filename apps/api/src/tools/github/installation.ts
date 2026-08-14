@@ -1,12 +1,7 @@
 import type { GitHubPermissionLevel } from "@tulipfarm/integrations";
 import type { IntegrationStore } from "@tulipfarm/storage";
 
-/**
- * One active GitHub App installation for this business, projected from `IntegrationStore`'s
- * runtime rows into exactly what credential minting and Tool-call context resolution need. A
- * deliberate local copy of `apps/worker/src/routine/github-installation.ts` — an application may
- * not import another application (`docs/architecture/dependency-rules.md`).
- */
+/** Local projection of active GitHub installations for credential minting and scope checks. */
 export interface GitHubInstallationRecord {
   readonly integrationId: string;
   readonly installationId: string;
@@ -51,13 +46,7 @@ interface CachedListing {
   readonly expiresAt: number;
 }
 
-/**
- * Reads `integration_apps`/`integrations`/`integration_access_grants` rows. Called once per Tool
- * call by both `InstallationScopeGitHubContextResolver` and `GitHubInstallationTokenProvider`
- * (they share one instance, see `compose.ts`), so a short TTL cache turns what would otherwise be
- * two store reads per dispatch into one every `ttlMs` — bounded short enough that a revoked
- * installation or changed repo grant is picked up within one TTL window, not cached indefinitely.
- */
+/** Short-TTL store read shared by scope and credential resolution. */
 export class StoreGitHubInstallationDirectory implements GitHubInstallationDirectory {
   private readonly now: () => Date;
   private readonly ttlMs: number;

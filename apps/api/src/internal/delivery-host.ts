@@ -21,30 +21,7 @@ import { dotPath, renderBodyTemplate } from "../ingress/template";
 import { isSecretRef } from "../integrations/connection-env";
 import type { HostedRunReader } from "./turn-host";
 
-/**
- * The internal delivery host — what a channel Run calls back into (plan §6).
- *
- * A verified Integration delivery is acknowledged and stored as a Run before anything interprets
- * it. The Worker then executes that Run: it classifies the envelope in its own sandbox and comes
- * back here to turn a `chat` decision into a Turn, an `event` decision into a recorded event, and
- * a finished turn into a reply on the channel it came from. Everything it needs that lives in this
- * app — the Soul manifest, the conversation tables, the identity mappings, the Integration's own
- * MCP tools — it reaches only through this class.
- *
- * The same rule as the turn host governs it: **the caller states which Run, never as whom.** The
- * slug, the envelope, the thread key, and the manifest are all re-derived from the Run's immutable
- * request Artifact, so a worker cannot claim a delivery arrived on an Integration it did not, nor
- * point a reply at a thread the delivery never named.
- *
- * Two things deliberately never cross to the Worker:
- *
- *  - **The bind link.** An unlinked sender is answered here, in this process, because that link is
- *    a credential: it is the one thing that can attach a channel identity to an account. The Worker
- *    is told only that the sender was unlinked.
- *  - **The reply text.** `postReplyForAttempt` posts the assistant Message this Run's completion
- *    *names*. A worker can say which attempt finished and how, but it cannot dictate the words
- *    posted into somebody's Slack — those are read back out of the durable conversation.
- */
+/** Delivery host: re-derive delivery facts from the Run; never send bind links/text to Worker. */
 
 /** User-facing replies for turns that produced no answer — generic on purpose. */
 const GUARD_BLOCK_REPLY = "I can't help with that request.";
@@ -92,19 +69,11 @@ export interface DeliveryDescription {
   readonly headers: Record<string, string>;
   /** The Integration's `classify` module and the hash the sandbox must verify it against. */
   readonly classifier: { readonly source: string; readonly hash: string };
-  /**
-   * Whether this thread is already mapped to a Conversation. Computed here because the classifier
-   * runs in an isolate with no I/O, and thread-following (`requireExistingThread`) is the one
-   * decision it cannot make for itself.
-   */
+  /** Thread mapping is computed here because the isolate has no I/O. */
   readonly hasThreadMapping: boolean;
   readonly chatEnabled: boolean;
   readonly eventsEnabled: boolean;
-  /**
-   * The `ingress.context_env` values, so a classifier can recognise its own integration — a
-   * Telegram update names no bot. Secret vars are rejected at load and skipped again here, so
-   * this can only ever carry configuration.
-   */
+  /** Non-secret `ingress.context_env` values for classifier self-identification. */
   readonly env: Record<string, string>;
 }
 
@@ -163,17 +132,7 @@ export class IngressDeliveryHost {
     };
   }
 
-  /**
-   * Turns a `chat` decision into a Turn on **this** Run.
-   *
-   * Nothing here mints a second Run. The delivery's Run is the one that answers, so the Artifact
-   * lineage, the event stream, and the Turn all name the same execution — which is what makes a
-   * Slack turn and a web turn the same object to every reader.
-   *
-   * Idempotent by construction: a Run that already names a Turn returns it. A Worker killed between
-   * attaching and answering therefore resumes the conversation it started rather than posting the
-   * sender's message into it twice.
-   */
+  /** Turns a `chat` decision into one Turn on this Run; idempotent if a Turn already exists. */
   async attachChat(
     businessId: string,
     runId: string,
@@ -330,14 +289,7 @@ export class IngressDeliveryHost {
     return { outcome: "recorded", eventId: record.id };
   }
 
-  /**
-   * Posts the answer this attempt recorded back to the channel the delivery came from.
-   *
-   * The text is read out of the durable conversation — the assistant Message the attempt's
-   * completion names — never taken from the caller. `outcome` only chooses between this app's own
-   * replies when there is no answer to post, so the worst a compromised worker achieves is one of
-   * two fixed sentences.
-   */
+  /** Posts text read from the durable assistant Message, never caller-supplied text. */
   async postReplyForAttempt(
     businessId: string,
     runId: string,
@@ -391,11 +343,7 @@ export class IngressDeliveryHost {
     return answer?.content.trim() || ERROR_REPLY;
   }
 
-  /**
-   * Answers an unlinked sender with a single-use bind link — from this process, never through the
-   * Worker. The link is the one credential in this flow that can attach a channel identity to an
-   * account, so it is written straight into the reply binding and returned to nobody.
-   */
+  /** Sends single-use bind links from this process only; the Worker never receives them. */
   private async offerBind(
     delivery: DeliveryAuthority,
     chat: ChatIngressConfig,
@@ -433,13 +381,7 @@ export class IngressDeliveryHost {
     return this.options.threads.exists(delivery.slug, delivery.threadKey);
   }
 
-  /**
-   * Resolves what one delivery Run is, from the Run and its immutable request Artifact.
-   *
-   * Three refusals, in order: a Run that is not running has no executor entitled to act on it, a
-   * Run minted by anything but a delivery is not this host's to answer, and an Integration that has
-   * since been disconnected or lost its handler can no longer be spoken for.
-   */
+  /** Resolves a delivery Run from its immutable request Artifact and refuses stale authority. */
   private async authority(businessId: string, runId: string): Promise<DeliveryAuthority> {
     const run = await this.options.runs.find(businessId, runId);
     if (run === null) throw new DeliveryDeniedError("run_not_found");
@@ -492,13 +434,7 @@ export class IngressDeliveryHost {
   }
 }
 
-/**
- * The manifest-declared, non-secret slice of connection env a classifier is entitled to see.
- *
- * Secret vars are already rejected at soul load, so this is the second of two gates rather than
- * the only one: unresolved `secret://` references are skipped here too, so a var that becomes
- * secret later degrades to absent instead of leaking a reference into untrusted code.
- */
+/** Classifier-visible connection env; unresolved `secret://` refs are omitted, never leaked. */
 function classifierEnv(
   declared: readonly string[] | undefined,
   env: Record<string, string> | undefined

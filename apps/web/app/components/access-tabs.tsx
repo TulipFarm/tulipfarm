@@ -1,20 +1,7 @@
 import { NavLink } from "@remix-run/react";
 import { cn } from "~/lib/utils";
 
-/*
- * Tab nav shared by the three Access panes.
- *
- * The split is by the question the reader arrived with, not by the shape of the data behind it.
- * **People** answers "what can Priya do, and how do I change it" — the reason almost everyone opens
- * this page. **Teams** is the shortcut for "these five people all get the same thing". **Check** is
- * the one surface that can say *why* something was refused, so it stays, but it stays last: it is
- * where you go after something went wrong, not where you start.
- *
- * An earlier version led with Groups, which is the storage model rather than anyone's question, and
- * asked for a raw principal id before it would tell you anything.
- *
- * `end` on People so it is not marked active while on a sibling.
- */
+/* `end` keeps People inactive on sibling routes. */
 const tabs = [
   { to: "/business/access", label: "People", end: true },
   { to: "/business/access/teams", label: "Teams", end: false },

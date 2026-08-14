@@ -208,10 +208,6 @@ test("says what membership actually buys, in plain words", async () => {
   expect(screen.getByText("View Customer records")).toBeInTheDocument();
 });
 
-/*
- * The old form demanded a "Group ID" and a slug like `support-operators` before it would do
- * anything. Nobody should have to invent an identifier; the identifier is derived and confirmed.
- */
 test("derives the identifier from a typed name instead of asking for one", async () => {
   const user = userEvent.setup();
   renderPage();
@@ -336,10 +332,6 @@ test("clicking a row opens the right side sheet", async () => {
   expect(screen.getByText("People in this team")).toBeInTheDocument();
 });
 
-/*
- * Adding somebody used to mean typing a principal id into a free-text box. The picker offers real
- * accounts, and only those not already in the team.
- */
 test("adds a person from a picker of real accounts, excluding current members", async () => {
   const user = await openTeam("Front of house");
 
@@ -405,10 +397,7 @@ test("removes a person only after a confirmation step", async () => {
   await waitFor(() => expect(removeGroupMember).toHaveBeenCalledWith("front-of-house", PRIYA_ID));
 });
 
-/*
- * Deleting a team silently revokes whatever every member inherited through it. The confirmation
- * names how many people that is, rather than saying "are you sure".
- */
+/* Deleting a team must name how many members lose inherited access. */
 test("names the blast radius before deleting a team", async () => {
   const user = await openTeam("Front of house");
 
@@ -427,11 +416,7 @@ test("tells an owner teams are optional rather than showing a bare empty list", 
   expect(screen.getByText(/You do not need one/)).toBeInTheDocument();
 });
 
-/*
- * The server checks this for a direct assignment and does not for a team one, and the cost is not
- * a rejected click: resolution asserts the same rule per member and fails the whole authority
- * layer closed, so one wrong grant here strips every member of everything at once.
- */
+/* Team assignments must be valid for every member or the authority layer fails closed. */
 test("does not offer a team a Role that a person may not hold", async () => {
   await openTeam("Kitchen");
 

@@ -36,11 +36,7 @@ export interface ListRunEventsOptions {
 
 export const DEFAULT_RUN_EVENT_PAGE_SIZE = 500;
 
-/**
- * Persisted Run event stream (SPEC §§18, 19). Every event a client can observe is durable and
- * numbered, so a dropped connection is recovered by replaying `?after=<sequence>` rather than by
- * re-deriving Run state — losing the stream never changes the Run.
- */
+/** Durable numbered Run event stream; reconnects replay by `?after=<sequence>`. */
 export const RUN_EVENT_STORAGE_STATEMENTS: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS run_events (
     business_id      text NOT NULL,
@@ -70,15 +66,7 @@ export const RUN_EVENT_STORAGE_STATEMENTS: readonly string[] = [
 /** The channel a reader listens on to be told an event landed. */
 export const RUN_EVENT_NOTIFY_CHANNEL = "run_events";
 
-/**
- * A wake-up hint for readers, and nothing more.
- *
- * The notification carries `<run_id>:<sequence>` so a listener knows which stream advanced, but a
- * reader must still fetch by cursor: notifications are not delivered to a disconnected listener and
- * are dropped outright if the queue overflows. Losing every notification therefore costs latency
- * (the reader falls back to its poll interval) and never correctness — which is why this is a
- * separate statement set rather than something the append path depends on.
- */
+/** Notifications are hints only; readers must fetch by cursor. */
 export const RUN_EVENT_NOTIFY_STATEMENTS: readonly string[] = [
   `CREATE OR REPLACE FUNCTION notify_run_event()
     RETURNS trigger LANGUAGE plpgsql AS $$
@@ -122,11 +110,7 @@ function persistedRunEvent(row: RunEventRow): PersistedRunEvent {
 export class RunEventStore {
   constructor(private readonly transactions: TransactionPort) {}
 
-  /**
-   * Appends one event. The Run row is locked while the next sequence is derived, so concurrent
-   * producers cannot mint the same cursor; a repeated `idempotencyKey` returns the recorded event
-   * unchanged instead of emitting a second copy.
-   */
+  /** Locks the Run row for sequence minting; repeated `idempotencyKey` returns the same event. */
   async append(input: AppendRunEventInput): Promise<PersistedRunEvent> {
     return this.transactions.withTransaction(async (transaction) => {
       await transaction.query("SELECT id FROM runs WHERE business_id = $1 AND id = $2 FOR UPDATE", [

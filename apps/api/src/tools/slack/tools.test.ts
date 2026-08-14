@@ -12,12 +12,6 @@ import type { RequestContext } from "../types";
 import { buildSlackTooling } from "./compose";
 import { buildSlackTools } from "./tools";
 
-/**
- * Exercises `buildSlackTools()`'s `ToolDef.execute()` against a real `buildSlackTooling()` object
- * graph (channel resolution, `SlackToolAdapter` dispatch), faking only the two edges outside this
- * app's control — same shape as `../github/tools.test.ts`.
- */
-
 const BUSINESS_ID = "biz-triage";
 
 function fakeSecretsService(): () => Promise<SecretsService> {
@@ -331,7 +325,6 @@ describe("buildSlackTools", () => {
 });
 
 describe("intents carry the Tool's derived targets", () => {
-  /** Captures what the handler actually reserved, which is where the intent becomes durable. */
   class RecordingEffectStore extends MemoryEffectStore {
     readonly intents: ToolIntent[] = [];
     override async reserve(input: ReserveEffectInput) {

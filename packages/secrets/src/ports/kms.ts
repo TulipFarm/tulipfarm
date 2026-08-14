@@ -1,15 +1,6 @@
 /**
- * Provider-neutral KMS (master-key) port.
- *
- * Capability id `kms` (required-to-serve, fail-closed — see
- * `@tulipfarm/observability` capability catalog). A master key wraps per-secret
- * data-encryption keys (SPEC §13). Adapters may be local managed keys, a cloud
- * KMS, or a Vault-compatible service, but the port never exposes the master key
- * itself and never returns a provider-specific type across the boundary:
- * `MasterKeyRef` is an opaque discriminator for rotation/audit and `WrappedKey`
- * is opaque ciphertext. `unwrap` yields raw DEK bytes only for immediate
- * in-memory use by the authorized secret broker — that plaintext never reaches a
- * prompt, log, audit payload, artifact, or error.
+ * Provider-neutral KMS port: unwrap exposes raw DEKs only for immediate broker use; plaintext must
+ * never reach prompts, logs, audit payloads, artifacts, or errors.
  */
 
 export interface MasterKeyRef {

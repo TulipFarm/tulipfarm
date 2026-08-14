@@ -46,11 +46,7 @@ export interface LogQueryable {
 
 const INSERT_COLUMNS = 10;
 
-/**
- * The single writer for `log_event`, shared by every process that emits records. One multi-row
- * INSERT per flush: a statement per record would turn a burst of failures — exactly when a process
- * is least healthy — into a burst of round trips.
- */
+/** Shared `log_event` writer; flushes use one multi-row INSERT. */
 export class PgLogWriter implements LogWriter {
   constructor(private readonly database: LogQueryable) {}
 
@@ -90,8 +86,7 @@ export class PgLogPruner {
   constructor(private readonly database: LogQueryable) {}
 
   async deleteOlderThan(cutoff: Date): Promise<number> {
-    // RETURNING id so the count works across the Queryable contract (pg + PGlite), which exposes
-    // only `rows`, not `rowCount`. Mirrors PgObservabilityPruner.
+    // Use `RETURNING` because Queryable exposes rows, not rowCount.
     const result = await this.database.query("DELETE FROM log_event WHERE ts < $1 RETURNING id", [
       cutoff,
     ]);
@@ -120,11 +115,7 @@ export interface BatchingLogSinkOptions {
   /** Hard ceiling on buffered records. Default 500. */
   maxBuffer?: number;
   now?: () => Date;
-  /**
-   * Record id generator. Injected rather than importing `node:crypto` because this package targets
-   * `lib: ES2022` with no platform types — see the class comment on why that is worth preserving.
-   * Defaults to `globalThis.crypto.randomUUID`, present in Node 19+ and every browser.
-   */
+  /** Record id generator; injected to keep this package platform-neutral. */
   newId?: () => string;
   /**
    * Where a failed write is reported. Defaults to `console.error`, the one logging call that is
@@ -137,14 +128,10 @@ export interface BatchingLogSinkOptions {
 
 const MESSAGE_MAX = 8_000;
 const STACK_MAX = 16_000;
-/** Ceiling on `stop()` flush passes, so a process still emitting errors cannot stall its own exit. */
+/** Ceiling on `stop()` flush passes so logging cannot stall process exit. */
 const STOP_MAX_PASSES = 5;
 
-/**
- * The three platform capabilities the default options reach for, typed narrowly rather than by
- * widening `lib`/`types`. Pulling in `node` or `dom` here would make every consumer of this package
- * inherit that environment; declaring exactly what is touched keeps the dependency visible and small.
- */
+/** Narrow platform globals so consumers do not inherit Node or DOM types. */
 interface PlatformGlobals {
   crypto?: { randomUUID?: () => string };
   setInterval?: (callback: () => void, ms: number) => unknown;
@@ -177,23 +164,7 @@ function truncate(value: string, max: number): string {
   return value.length <= max ? value : `${value.slice(0, max)}… [truncated]`;
 }
 
-/**
- * Buffers log records and writes them in batches.
- *
- * The governing constraint is that observing a process must never harm it. So `capture` is
- * synchronous, allocation-light, and cannot throw; the buffer is bounded; and a failed write is
- * reported on `stderr` directly rather than through a logger — routing it back through the logger
- * would feed the sink that just failed and loop.
- *
- * On overflow the **incoming** record is dropped rather than the oldest. Overflow only happens
- * during a storm, and in a storm the earliest records are the root cause while later ones are
- * cascade noise. Dropping the newest is also O(1). The count is not silently swallowed: the next
- * successful flush carries a synthetic record naming how many were lost.
- *
- * Timers, id generation and the failure channel are injected rather than imported. This package
- * compiles against `lib: ES2022` with no platform types so that it stays usable from any runtime,
- * and reaching for `node:crypto`/`process` here would quietly make it Node-only for every consumer.
- */
+/** Bounded, non-throwing log sink; overflow drops newest and reports loss on next flush. */
 export class BatchingLogSink {
   private buffer: LogEventRecord[] = [];
   private dropped = 0;
@@ -288,9 +259,7 @@ export class BatchingLogSink {
     try {
       await this.writer.insertMany(batch);
     } catch (error) {
-      // Straight to stderr: a logger call here would re-enter the sink that just failed. The batch
-      // is deliberately not re-queued — retrying an unavailable database would grow the buffer
-      // without bound and turn a storage blip into memory pressure.
+      // Do not log or requeue here: both can loop or grow memory during storage failure.
       const reason = error instanceof Error ? error.message : String(error);
       this.onWriteError(
         `[observability] log sink write failed, ${batch.length} record(s) lost: ${reason}`
@@ -303,15 +272,7 @@ export class BatchingLogSink {
     this.stopTimer = this.schedule(() => void this.flush(), this.flushIntervalMs);
   }
 
-  /**
-   * Stop the timer and persist what is buffered — called on graceful shutdown.
-   *
-   * Loops rather than flushing once: `flush()` joins an in-flight write, but `drain()` swaps the
-   * buffer *before* awaiting, so anything captured during that write lands in a fresh buffer the
-   * joined promise never covers. A single flush could therefore return with records still pending,
-   * and the caller closes the pool immediately afterwards. Bounded so a logger that keeps emitting
-   * during shutdown cannot stall the exit.
-   */
+  /** Stop the timer and flush bounded passes so shutdown cannot stall on new records. */
   async stop(): Promise<void> {
     this.stopTimer?.();
     this.stopTimer = null;
@@ -322,11 +283,7 @@ export class BatchingLogSink {
   }
 }
 
-/**
- * Normalizes the many shapes an error arrives in. A thrown non-Error (a string, an object from a
- * rejected fetch) still has to produce a readable line, because the moment an operator needs this
- * table is exactly when something threw something unusual.
- */
+/** Normalizes Error and non-Error throws into readable log fields. */
 export function describeError(error: unknown): { message: string; stack: string | null } {
   if (error instanceof Error) {
     return { message: error.message || error.name, stack: error.stack ?? null };

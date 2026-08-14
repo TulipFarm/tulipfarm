@@ -13,11 +13,7 @@ import type {
 import { buildAuthorizeUrl, renderDeep, startAuthStep } from "../../integrations/auth-broker";
 import { loadBundledIntegrations } from "./bundled";
 
-/*
- * Contract tests against the manifests actually shipped in `integrations/`, not fixtures. A
- * manifest that declares an unreachable step or an unsealed credential is a production defect, and
- * these are the only tests that would catch it before a release.
- */
+/* Contract tests for shipped integration manifests, not fixtures. */
 
 const logger = { info() {}, warn() {}, error() {}, debug() {} };
 
@@ -139,7 +135,7 @@ describe("slack manifest", () => {
 
   it("walks the operator through the steps in order as values arrive", async () => {
     const manifest = await slack();
-    // The app-manifest step writes nothing, so the flow opens on the credentials the operator types.
+    // The app-manifest step writes nothing, so the flow opens on operator-typed credentials.
     expect(nextAuthStep(manifest, {})?.index).toBe(1);
     expect(
       nextAuthStep(manifest, {
@@ -174,13 +170,7 @@ describe("slack manifest", () => {
     expect(written).toContain("SLACK_TEAM_ID");
   });
 
-  /*
-   * docs/architecture/github-app-manifest.md calls the base-install permission set a locked
-   * decision, and that file is now the contract for a manifest that is actually posted to GitHub
-   * rather than a description of one registered by hand. Silent drift would either over-grant
-   * (asking every customer for access nobody approved) or under-grant (breaking Tools at runtime),
-   * and neither shows up in any other test.
-   */
+  /* Base-install GitHub permissions are locked; catch over-grant or under-grant drift. */
   it("requests exactly the permissions the locked App decision documents", async () => {
     const bundled = await loadBundledIntegrations(logger);
     const steps = resolveAuthSteps(
@@ -202,12 +192,7 @@ describe("slack manifest", () => {
     );
   });
 
-  /*
-   * `grants` is what the operator reads before deciding to connect; `default_permissions` is what
-   * GitHub is actually asked for. They are written in two places because TulipFarm does not parse
-   * the provider-defined App manifest, so nothing but this test stops them from disagreeing — and
-   * a UI that under-reports the authority being handed over is worse than one that shows none.
-   */
+  /* UI `grants` must match GitHub `default_permissions`; TulipFarm does not parse the manifest. */
   it("shows the operator exactly the permissions it asks GitHub for", async () => {
     const bundled = await loadBundledIntegrations(logger);
     const manifest = bundled.get("github")?.manifest;

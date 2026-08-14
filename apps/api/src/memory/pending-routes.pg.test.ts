@@ -15,14 +15,7 @@ import { EngineMemoryRepo } from "./engine-repo";
 import { MemoryExtractionService } from "./extraction-service";
 import { MemoryService } from "./service";
 
-/**
- * The review queue over HTTP.
- *
- * The interesting cases are the ones where the caller is not who the record belongs to. A pending
- * memory is a statement about a person, so listing it, confirming it, or even learning that it
- * exists all have to be closed to everyone else — including through the 404-vs-403 distinction,
- * which is why a stranger's confirm and a nonexistent id have to answer identically.
- */
+/** Pending-memory HTTP access is owner-only, including 404-vs-403 behavior. */
 
 class FakeUserRepo implements UserRepo {
   private users: UserDoc[] = [];

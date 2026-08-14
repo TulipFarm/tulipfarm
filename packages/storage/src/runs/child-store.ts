@@ -22,12 +22,7 @@ export interface LinkChildInput {
   readonly createdAt: string;
 }
 
-/**
- * Parent/child Run links (SPEC §19 runtime group). The link stores the authority the child was
- * *narrowed* to, and the database makes that record un-widenable: authority is immutable once
- * written and a detach can never be undone, so cancellation propagation and audit always read the
- * same durable fact.
- */
+/** Child Run authority is immutable and un-widenable; detach cannot be undone. */
 export const CHILD_STORAGE_STATEMENTS: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS run_child_links (
     business_id     text NOT NULL,
@@ -92,7 +87,7 @@ const CHILD_LINK_COLUMNS = "parent_run_id, child_run_id, authority, detached_at,
 export class ChildLinkStore {
   constructor(private readonly transactions: TransactionPort) {}
 
-  /** Links a child under a narrowed authority. Re-linking returns the original, never a wider one. */
+  /** Links a child under narrowed authority; re-linking never widens it. */
   async link(input: LinkChildInput): Promise<PersistedChildLink> {
     return this.transactions.withTransaction(async (transaction) => {
       const inserted = await transaction.query<ChildLinkRow>(
@@ -122,7 +117,7 @@ export class ChildLinkStore {
     });
   }
 
-  /** Detaches a child so parent cancellation stops propagating to it. Detaching twice is a no-op. */
+  /** Detaches a child from parent cancellation; repeated detach is a no-op. */
   async detach(
     businessId: string,
     parentRunId: string,

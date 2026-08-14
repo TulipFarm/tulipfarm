@@ -1,13 +1,7 @@
 import type { IntegrationManifest } from "@tulipfarm/soul";
 import { authSecretEnvNames } from "@tulipfarm/soul";
 
-/**
- * Secret env handling for integration connections. connection.yaml lives in the soul git repo
- * (committed and pushed to the user's upstream), so secret-flagged env values must never be
- * written there in plaintext. Instead they are stored in the encrypted secrets store and the
- * file carries an opaque `secret://<key>` reference, resolved back at point-of-use (MCP
- * transport start, ingress HMAC verification).
- */
+/** Secrets in committed connection.yaml must be stored as `secret://` refs. */
 
 export const SECRET_REF_PREFIX = "secret://";
 
@@ -35,18 +29,7 @@ export class ForeignSecretRefError extends Error {
   }
 }
 
-/**
- * Replace secret-flagged env values with `secret://` references, persisting each value to the
- * secrets store. Values that are already references pass through untouched (reconnect flows
- * resubmit the stored form). Returns a new object safe to write to connection.yaml.
- *
- * A reference is only honoured when it names *this* integration's own key for *that* env var,
- * which is the only reference a legitimate resubmission can carry. Accepting any other one would
- * turn connect into a read primitive for the whole secrets store: env values are resolved and
- * templated into the URLs the auth broker hands back (`{GITHUB_APP_SLUG}` and friends), so
- * `secret://some-other-key` would come straight back to the caller in a redirect. The secrets API
- * deliberately never returns values, and this must not become the way around that.
- */
+/** Seals secret env values to `secret://` refs; missing optional secrets are omitted. */
 export async function sealConnectionEnv(
   integrationName: string,
   manifest: IntegrationManifest,
@@ -74,11 +57,7 @@ export async function sealConnectionEnv(
   return sealed;
 }
 
-/**
- * Resolve `secret://` references back to plaintext for runtime use. Plain values pass through,
- * so pre-existing plaintext connection.yaml files keep working. A missing secret throws — the
- * callers (MCP connect, ingress verify) already treat failures as "not connected".
- */
+/** Resolves `secret://` refs for runtime use; plaintext values pass through for migration. */
 export async function resolveConnectionEnv(
   env: Record<string, string>,
   secrets: ConnectionSecretStore

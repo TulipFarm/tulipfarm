@@ -1,15 +1,6 @@
 import type { ModelSpec } from "@tulipfarm/schema";
 
-/**
- * CLI providers never resolve against the LiteLLM catalog (`packages/llm/src/model-spec.ts`) —
- * there is no API pricing to fetch for a subscription turn. `validateRoutingCapacity`
- * (`apps/api/src/soul/llm-config/routes.ts`) still hard-rejects any provider entry lacking a
- * verified `max_input_tokens`, so this table is the static fallback `enrichSpecs` reaches for
- * instead of the catalog. Costs are deliberately omitted — a subscription turn has no per-token
- * price, and pinning the API-equivalent number would corrupt cost budgets and
- * `llm_cost_usd_total`. `mode` is fixed to `"chat"` since every model reachable through a CLI
- * provider is a chat model.
- */
+/** Static CLI specs supply context windows only; subscription turns must not get token prices. */
 const CLI_MODEL_SPECS: Record<string, Record<string, ModelSpec>> = {
   "claude-code": {
     opus: {
@@ -40,12 +31,7 @@ const CLI_MODEL_SPECS: Record<string, Record<string, ModelSpec>> = {
       supports_reasoning: false,
     },
   },
-  /**
-   * Codex model slugs as published by `@openai/codex` 0.147.0. The three GPT-5.6 tiers map onto the
-   * same shape as the Claude aliases above — `sol` is the flagship, `terra` the balanced tier,
-   * `luna` the low-latency one — so an operator picking "the big one" or "the fast one" gets a
-   * comparable choice on either subscription.
-   */
+  /** Codex slugs from `@openai/codex` 0.147.0; sol/terra/luna mirror Claude tiers. */
   codex: {
     "gpt-5.6-sol": {
       max_input_tokens: 272_000,
@@ -93,21 +79,13 @@ export function cliModelSpec(provider: string, model: string): ModelSpec | undef
   return models ? lookup(models, model) : undefined;
 }
 
-/** Known model ids for a CLI provider, to populate the Settings model picker (no LiteLLM catalog entry exists). */
+/** CLI model ids for Settings; no LiteLLM catalog entry exists. */
 export function cliModelIds(provider: string): string[] {
   const models = CLI_MODEL_SPECS[provider];
   return models ? Object.keys(models) : [];
 }
 
-/**
- * Whether a provider id is a Subscription Provider — i.e. billed by a personal plan, not per token.
- *
- * Cost must be suppressed for these, and suppression cannot be left to "the model id happens to
- * miss the price map": `priceFor` falls back to a longest-family-prefix match, so an operator who
- * types `claude-sonnet-4-6` instead of the `sonnet` alias would have the full Anthropic API price
- * billed into the cost budget and `llm_cost_usd_total` for a turn that cost nothing per token.
- * Derived from the spec table so a provider added there is unpriced by construction.
- */
+/** Subscription providers are explicitly unpriced; do not rely on price-map misses. */
 export function isSubscriptionProvider(provider: string): boolean {
   return provider in CLI_MODEL_SPECS;
 }

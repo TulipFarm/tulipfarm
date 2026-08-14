@@ -1,9 +1,7 @@
 /*
- * `navigator.clipboard` is a secure-context-only API — it is undefined when the app is served over
- * plain http from a LAN IP, so reading `.writeText` off it throws. Fall back to the legacy
- * `document.execCommand("copy")` path, which still works on insecure origins.
- *
- * Returns whether the text made it to the clipboard so callers can skip their "copied" state.
+ * `navigator.clipboard` is a secure-context-only API — it is undefined when the app is served
+ * over plain http from a LAN IP, so reading `.writeText` off it throws. Returns whether the
+ * text made it to the clipboard so callers can skip their "copied" state.
  */
 
 export async function copyText(text: string): Promise<boolean> {
@@ -11,9 +9,7 @@ export async function copyText(text: string): Promise<boolean> {
     try {
       await navigator.clipboard.writeText(text);
       return true;
-    } catch {
-      // Permission denied or a transient failure — fall through to the legacy path.
-    }
+    } catch {}
   }
 
   const textarea = document.createElement("textarea");

@@ -1,6 +1,5 @@
 import type { SoulAgent } from "@tulipfarm/soul";
 
-/** Bundled forge Skills surfaced by the default chat harness. */
 export const FORGE_SKILL_NAMES = [
   "resource-forge",
   "skill-forge",
@@ -18,7 +17,6 @@ export const FORGE_SKILL_NAMES = [
 export interface PlatformAgent extends SoulAgent {
   /** Tool names this agent may call. Undefined means every registered tool. */
   toolAllowlist?: readonly string[];
-  /** Bundled forge Skill names surfaced to this Agent and loadable via `load_skill`. */
   forgeSkills?: readonly string[];
 }
 
@@ -88,7 +86,6 @@ creation work:
 If the Soul already has custom resource types or agents, acknowledge the existing setup and add to it.
 Generated artifacts are additive; never modify or remove existing ones unless the user asks.`;
 
-/** Normal chat's built-in harness — answers and builds when no Soul agent is selected. */
 export const DEFAULT_ASSISTANT: PlatformAgent = {
   name: DEFAULT_ASSISTANT_NAME,
   frontmatter: {
@@ -101,7 +98,6 @@ export const DEFAULT_ASSISTANT: PlatformAgent = {
   forgeSkills: FORGE_SKILL_NAMES,
 };
 
-/** Returns the default harness only for a normal-chat identity. */
 export function getDefaultAssistant(name: string | undefined): PlatformAgent | undefined {
   return name === DEFAULT_ASSISTANT_NAME ? DEFAULT_ASSISTANT : undefined;
 }

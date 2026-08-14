@@ -6,15 +6,7 @@ import { listAllPages } from "~/lib/knowledge-api";
 import { listSkills } from "~/lib/skills";
 import type { MentionKind } from "./editor/mention-config";
 
-/*
- * The catalog of mentionable entities (agents / skills / resource types / knowledge pages) used to
- * highlight and explain `@`/`/`/`#`/`~` tags inside rendered user messages. Each entry pairs the
- * literal serialized phrase ("@<label>", "/<name>", "#<name>", "~<title>") with the entity's metadata,
- * so a chip in the transcript can both match (highlight) and describe (hover card) the tag. Fetched
- * once on mount; failures per kind degrade to empty (the message still renders, just without that
- * kind's chips). Knowledge pages come from the full page list — same "fetch the whole set" approach as
- * the other kinds, so a persisted `~knowledge` mention rehydrates without any per-message storage.
- */
+/* Mention catalog fetch failures degrade per kind to empty chips, not failed rendering. */
 export interface MentionEntry {
   kind: MentionKind;
   /** The literal text the composer serialized for this mention (the highlight key). */

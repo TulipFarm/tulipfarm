@@ -4,9 +4,9 @@ import { Button } from "~/components/ui/button";
 import { applyThemePreference, currentTheme, type ResolvedTheme } from "~/lib/theme";
 
 /*
- * The rail shortcut. It flips between light and dark directly — a one-click control cannot express
- * "follow the system", so choosing it is deliberately left to Settings › Appearance, and using this
- * toggle sets an explicit preference. Reads back on "themechange" so it stays in sync with that page.
+ * It flips between light and dark directly — a one-click control cannot express "follow the
+ * system", so choosing it is deliberately left to Settings › Appearance, and using this toggle
+ * sets an explicit preference.
  */
 export function ThemeToggle({ iconOnly = false }: { iconOnly?: boolean }) {
   const [theme, setTheme] = useState<ResolvedTheme>("light");

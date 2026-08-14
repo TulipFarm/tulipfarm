@@ -1,16 +1,4 @@
-/**
- * What a Knowledge Integration emits (SPEC §14.1, §15).
- *
- * `@tulipfarm/integrations` may not import `@tulipfarm/knowledge` (see
- * `docs/architecture/dependency-rules.md`), so this is the provider-neutral emission contract the
- * source adapters produce and the composing application feeds into the Knowledge store. It is
- * structurally identical to `KnowledgeSourceRecord`/`KnowledgeIndexEntry`; `apps/worker` owns the
- * conformance test that keeps the two shapes from drifting.
- *
- * Every field an adapter cannot establish honestly has a fail-closed representation: a source whose
- * permissions could not be read is emitted as `unverifiable` (which denies) rather than omitted or
- * defaulted to an empty-but-verified ACL.
- */
+/** Provider-neutral Knowledge emissions; unverifiable permissions deny instead of defaulting. */
 
 export type EmittedSourceStatus = "active" | "revoked" | "deleted";
 export type EmittedSourceVerification = "verified" | "unverifiable";
@@ -73,13 +61,7 @@ export interface KnowledgeChunkEmission {
   readonly text: string;
 }
 
-/**
- * Where an adapter hands its work off. The two removal methods are not optimisations: a deleted or
- * revoked source must lose its indexed text in the same pass that marks it deleted, so a crash
- * between the two cannot leave readable content behind an unreachable record. `removeChunk` is the
- * same guarantee at message granularity, for sources where individual items are deleted while the
- * source itself stays live.
- */
+/** Removal methods must run with deletion/revocation so indexed text cannot outlive access. */
 export interface KnowledgeEmissionSink {
   emitSource(source: KnowledgeSourceEmission): Promise<void>;
   emitChunk(chunk: KnowledgeChunkEmission): Promise<void>;
@@ -87,11 +69,7 @@ export interface KnowledgeEmissionSink {
   removeChunk(businessId: string, sourceId: string, chunkId: string): Promise<void>;
 }
 
-/**
- * Resolve an external subject (a Drive permission holder, a Slack member) to the Tulip principals
- * it maps to. `undefined` drops that subject from the ACL — an unmapped external identity never
- * becomes an implicit grant, and never borrows another principal's identity.
- */
+/** `undefined` drops the external subject; unmapped identities never become implicit grants. */
 export interface KnowledgeIdentityMapPort {
   resolve(input: {
     readonly businessId: string;

@@ -19,11 +19,7 @@ export function planFormWait(state: CompiledState, ctx: FormWaitContext): Regist
   return planStateWait(state, ctx, { kind: "form", principals: ctx.principals });
 }
 
-/**
- * Validate a submission against the State's own declared output schema before the Run continues.
- * A form State with no declared schema is a denial rather than an unvalidated pass-through, and a
- * schema failure never echoes the submitted value — it may carry protected data.
- */
+/** Forms require an output schema, and schema errors never echo protected submitted values. */
 export function resolveFormSubmission(
   state: CompiledState,
   validator: TypedOutputValidator,

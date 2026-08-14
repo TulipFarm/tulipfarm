@@ -1,12 +1,6 @@
 /**
- * Safe deterministic expression language for compiled Routine graphs (SPEC §9.1).
- *
- * Branch conditions, `foreach` collections, loop conditions, and input mappings are authored
- * data, so they are parsed into a closed AST rather than handed to a JavaScript evaluator.
- * The language has no assignment, no statements, no member calls, no iteration, and no access
- * to ambient state: an expression can only read the scope roots its compilation declares and
- * call functions from a fixed pure allowlist. Given the same source and scope it always yields
- * the same value, which is what makes replay and simulation comparable to a live Run.
+ * Expressions parse to a closed, pure AST: no assignment, statements, member calls, iteration, or
+ * ambient state; same source and scope must yield the same value.
  */
 
 export type ExpressionErrorCode =
@@ -93,8 +87,6 @@ const FUNCTIONS: Readonly<Record<string, { arity: number | "variadic"; call: Pur
   },
 };
 
-// ── Tokenizer ─────────────────────────────────────────────────────────────────
-
 type TokenKind = "number" | "string" | "ident" | "punct" | "eof";
 interface Token {
   kind: TokenKind;
@@ -173,8 +165,6 @@ function tokenize(source: string): Token[] {
   tokens.push({ kind: "eof", value: "" });
   return tokens;
 }
-
-// ── AST ───────────────────────────────────────────────────────────────────────
 
 type Segment = { kind: "property"; name: string } | { kind: "index"; expression: Node };
 
@@ -344,8 +334,6 @@ class Parser {
   }
 }
 
-// ── Evaluation ────────────────────────────────────────────────────────────────
-
 function readProperty(target: unknown, key: string | number): unknown {
   if (target === null || target === undefined) return undefined;
   if (typeof key === "number") {
@@ -507,7 +495,6 @@ export function compileExpression(
   });
 }
 
-/** Convenience for conditions: evaluates and coerces to a boolean. */
 export function evaluateCondition(
   expression: CompiledExpression,
   scope: Readonly<Record<string, unknown>>

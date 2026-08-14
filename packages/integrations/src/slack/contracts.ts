@@ -4,12 +4,7 @@ import {
   type ToolContractSpec,
 } from "@tulipfarm/schema";
 
-/**
- * Published Slack ToolContracts. Mirrors `../github/contracts.ts`'s shape: Slack has no native
- * idempotency key for `chat.postMessage`, so the send Tool declares `idempotency.strategy:
- * "reconcile"` and is not safe to blind-retry — an ambiguous send must be reconciled against
- * channel history, not repeated.
- */
+/** Slack send is not blind-retry-safe; ambiguous sends reconcile against channel history. */
 
 export const SLACK_ADAPTER_REF = "integration:slack";
 

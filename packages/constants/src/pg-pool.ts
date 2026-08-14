@@ -1,21 +1,4 @@
-/**
- * One pool configuration for every process that talks to Postgres.
- *
- * All three services previously built `new Pool({ connectionString })` and took node-postgres'
- * defaults. Two of those defaults are actively dangerous away from a local Docker container:
- *
- * - `connectionTimeoutMillis` defaults to **0 — wait forever**. If Postgres is unreachable or the
- *   connection limit is exhausted, requests queue indefinitely instead of failing, so the service
- *   stops responding without ever reporting an error.
- * - There is no `statement_timeout` or `idle_in_transaction_session_timeout`, so one runaway query
- *   or one leaked transaction holds a connection — and any locks it took — until the process dies.
- *
- * SSL is deliberately *not* configured here. `pg` already parses `sslmode` out of the connection
- * string, so pointing `DATABASE_URL` at a managed host works unchanged. Note that the current
- * `pg-connection-string` treats `sslmode=require` as `verify-full` (full certificate
- * verification); a host with a private CA needs `sslmode=no-verify` or a `ca` in the URL. Setting
- * `ssl` here would silently override that choice for every deployment.
- */
+/** Shared Postgres pool timeouts fail fast; SSL stays in `DATABASE_URL`, not code. */
 
 export interface PgPoolTuning {
   max: number;
@@ -46,12 +29,7 @@ export const DEFAULT_IDLE_IN_TRANSACTION_TIMEOUT_MS = 60_000;
 /** Fail fast instead of queueing forever when the database is unreachable or saturated. */
 export const DEFAULT_CONNECTION_TIMEOUT_MS = 10_000;
 
-/**
- * Pool tuning shared by the API, worker, and integration worker.
- *
- * `overrides` exists for the migration pool, which needs a small `max` and no statement timeout —
- * a `CREATE INDEX` on a large table legitimately runs for minutes and must not be killed halfway.
- */
+/** Shared app pool tuning; migration pools override limits and statement timeout. */
 export function pgPoolTuning(overrides: Partial<PgPoolTuning> = {}): PgPoolTuning {
   const statementTimeout = envInt("PG_STATEMENT_TIMEOUT_MS", DEFAULT_STATEMENT_TIMEOUT_MS);
   const idleInTransaction = envInt(

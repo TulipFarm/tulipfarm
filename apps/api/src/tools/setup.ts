@@ -26,11 +26,7 @@ import { SURFACE_TOOLS } from "../surfaces/tools";
 import { type ApiToolDefinition, toToolDef } from "./define";
 import type { RequestContext, ToolDef } from "./types";
 
-/**
- * Builds the startup ToolRegistry by adapting module-specific tool definitions to the
- * canonical ToolDef shape. Services are closed over so only the per-request RequestContext
- * (userId, agentId) is needed at call time.
- */
+/** Build the startup ToolRegistry; handlers close over services and receive RequestContext. */
 export function buildToolRegistry(services: {
   memory?: MemoryService;
   /** Durable relevance recall. Absent leaves `recall_memory` reporting itself unavailable. */
@@ -45,23 +41,14 @@ export function buildToolRegistry(services: {
   skillTools?: SkillToolContext;
   surfaceComponents?: SurfaceComponentToolContext;
   platform?: PlatformToolContext;
-  /** GitHub chat tool family — pre-built ToolDefs (see `tools/github/tools.ts`'s `buildGitHubTools`).
-   * Registered unconditionally when GitHub composition is available; per-turn visibility is gated
-   * separately on live install status (`chat/turn-helpers.ts`), not on registration. */
+  /** GitHub ToolDefs; registered when composed, with live install visibility gated per turn. */
   github?: readonly ToolDef[];
-  /** Slack chat tool family — pre-built ToolDefs (see `tools/slack/tools.ts`'s `buildSlackTools`). */
+  /** Slack chat ToolDefs from `tools/slack/tools.ts`. */
   slack?: readonly ToolDef[];
 }): ToolRegistry {
   const registry = new ToolRegistry({ defaultDeny: true });
 
-  /**
-   * Registers a family, binding the per-request context its handlers were written against.
-   *
-   * Every family previously repeated this loop with its own hand-written `ToolDef` literal, which
-   * is how tier, `requiresApproval` and the authorization declaration could drift apart from the
-   * Tool they described. The declaration now travels with the Tool, so registration has nothing
-   * left to restate.
-   */
+  /** Register a family while binding per-request context; declarations travel with each Tool. */
   function registerFamily<Ctx>(
     definitions: readonly ApiToolDefinition<Ctx>[],
     contextFor: (ctx: RequestContext) => Ctx
@@ -75,8 +62,7 @@ export function buildToolRegistry(services: {
     const svc = services.memory;
     const recall = services.memoryRecall;
     const lifecycle = services.memoryLifecycle;
-    // A tool that cannot run should not be offered: without the service it needs wired, the tool is
-    // left unregistered rather than registered to report itself unavailable.
+    // Do not offer a Tool whose required service is absent.
     const unavailable = new Set<ApiToolDefinition<ToolContext>>();
     if (recall === undefined) unavailable.add(recallMemoryTool);
     if (lifecycle === undefined) unavailable.add(rememberCorrectionTool);
@@ -139,8 +125,7 @@ export function buildToolRegistry(services: {
 
   if (services.platform !== undefined) {
     const ctx = services.platform;
-    // routineContext is per-call (routine-spawned headless turns), not a service — merge it from
-    // the RequestContext so call_skill/complete_state see the run they belong to.
+    // `routineContext` is per-call; merge it so routine Tools see their Run.
     registerFamily(PLATFORM_TOOLS, (reqCtx) =>
       reqCtx.routineContext
         ? { ...ctx, routineContext: reqCtx.routineContext, requestContext: reqCtx }
@@ -148,8 +133,7 @@ export function buildToolRegistry(services: {
     );
   }
 
-  // Surface and frontend Tools read the per-request RequestContext directly (client context) and
-  // return client-action descriptors, so they are already `ToolDef`s with no services to close over.
+  // Surface/frontend Tools already read RequestContext and need no service closure.
   for (const tool of [...SURFACE_TOOLS, ...FRONTEND_TOOLS]) {
     registry.register(tool);
   }

@@ -1,15 +1,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 
-/**
- * Newline-delimited JSON-RPC 2.0 over `codex app-server` stdio.
- *
- * Ported from `qm/src/harness/codex-app-server.ts`. Codex exposes no in-process SDK — unlike
- * Claude Code, whose `@anthropic-ai/claude-agent-sdk` owns the subprocess — so this adapter speaks
- * the wire protocol itself. Kept deliberately free of TulipFarm concepts so the parts that can
- * strand a turn (a write racing a close, a half-read line, a child that ignores SIGTERM) are
- * testable on their own, against a fake binary.
- */
+/** JSON-RPC over Codex stdio; TulipFarm-free so subprocess races are unit-testable. */
 
 export class CodexRpcError extends Error {
   constructor(message: string) {
@@ -35,19 +27,9 @@ export interface CodexRpcOptions {
   readonly env: NodeJS.ProcessEnv;
   onNotification(method: string, params: unknown): void;
   onRequest(method: string, params: unknown): Promise<unknown>;
-  /**
-   * The reply to a server request has been written. Anything that ends the turn belongs here rather
-   * than inside `onRequest`: writes are serialized, so work started before the reply is queued gets
-   * ordered ahead of it, and a teardown that overtakes the reply leaves the server waiting on an
-   * answer that was never flushed.
-   */
+  /** Queue turn-ending work after reply writes so teardown cannot overtake the answer. */
   onRequestReplied?(method: string, params: unknown): void;
-  /**
-   * The child is gone. Called exactly once, whether it exited on its own or was killed by
-   * `close()`. Without it a consumer waiting on notifications would wait forever for a turn that
-   * can no longer produce any — the pending-request map is failed on exit, but a turn is driven by
-   * notifications, and those simply stop.
-   */
+  /** Called once on child exit/kill so notification consumers do not wait forever. */
   onClose?(error: Error): void;
 }
 
@@ -55,7 +37,7 @@ export interface CodexRpcOptions {
 const FLUSH_GRACE_MS = 1_000;
 /** How long a `SIGTERM`ed child gets before `SIGKILL`. */
 const KILL_GRACE_MS = 2_000;
-/** Bytes of the child's stderr kept for the exit message. Bounded: a chatty child must not grow unboundedly. */
+/** Bounded child stderr kept for the exit message; chatty children must not grow memory. */
 const STDERR_TAIL_BYTES = 16_384;
 
 export class CodexRpc {
@@ -65,9 +47,9 @@ export class CodexRpc {
     JsonRpcId,
     { resolve(value: unknown): void; reject(error: Error): void }
   >();
-  /** Writes are serialized: two concurrent `write`s can interleave and split a JSON line in half. */
+  /** Serialize writes so concurrent calls cannot split a JSON line in half. */
   private writeTail = Promise.resolve();
-  /** Inbound lines are handled in order, so a notification cannot overtake the request it belongs to. */
+  /** Handle inbound lines in order so notifications cannot overtake their request. */
   private eventTail = Promise.resolve();
   private stderr = "";
   private closed = false;
@@ -75,9 +57,7 @@ export class CodexRpc {
   private readonly exited: Promise<void>;
 
   constructor(private readonly options: CodexRpcOptions) {
-    // `bin/codex.js` is an ESM shim that locates the native binary for this platform. Running it
-    // under `process.execPath` rather than relying on a shebang or a `.bin` shim keeps it working
-    // in a container where PATH is minimal and node_modules layout is pnpm's, not npm's.
+    // Run Codex's ESM shim under this Node so pnpm layout and minimal container PATH still work.
     this.process = spawn(process.execPath, [options.scriptPath, "app-server"], {
       cwd: options.cwd,
       env: options.env,
@@ -106,15 +86,11 @@ export class CodexRpc {
       this.stderr = `${this.stderr}${chunk.toString()}`.slice(-STDERR_TAIL_BYTES);
     });
 
-    // A write to a child that has already gone emits EPIPE on the stream as well as failing the
-    // write callback. An unhandled `error` event on a stream is fatal to the whole process, so a
-    // Codex subprocess dying at the wrong moment would take the API down with it. The failed write
-    // is already reported through the callback, and the real cause through `closeError`.
+    // Child-exit writes emit stream `error` and callback failure; swallow the former to avoid a
+    // process crash, while the callback/close path reports the cause.
     this.process.stdin?.on("error", () => {});
 
-    // A spawn failure emits **both** `error` and `close`, so the notification is latched: the
-    // caller is told once, with the first (more specific) cause, rather than twice with the
-    // second overwriting the reason the child never started.
+    // Spawn failure emits `error` and `close`; latch the first cause so it is reported once.
     let notified = false;
     const notifyClosed = (error: Error) => {
       this.closed = true;
@@ -179,15 +155,8 @@ export class CodexRpc {
       await this.exited;
       return;
     }
-    // Give queued writes a chance to leave before the child is killed. A turn ends the instant a
-    // tool call is captured, so the reply to the server's `item/tool/call` request is written on
-    // the way out — killing first would guarantee it never left at all.
-    //
-    // This is best-effort and deliberately not the delivery guarantee: a write resolves when the
-    // OS accepts it into the pipe, not when the child has read it, so anything that *must* be
-    // processed has to be confirmed by the caller with a round trip (see `turn/interrupt` in
-    // `codex.ts`). Draining is a loop rather than a single await because answering one message can
-    // queue the next, and bounded because a child that stopped reading must not hold teardown open.
+    // Best-effort bounded drain: let queued tool replies reach the pipe before kill, but callers
+    // need a round trip for delivery guarantees.
     const deadline = Date.now() + FLUSH_GRACE_MS;
     for (let tail = this.writeTail; Date.now() < deadline; tail = this.writeTail) {
       await Promise.race([
@@ -212,7 +181,6 @@ export class CodexRpc {
       throw new Error(`codex app-server emitted invalid JSON: ${line.slice(0, 500)}`);
     }
 
-    // A response: has an id, carries no method.
     if (message.id !== undefined && !message.method) {
       const waiter = this.pending.get(message.id);
       if (!waiter) return;
@@ -238,7 +206,7 @@ export class CodexRpc {
       return;
     }
 
-    // A request from the server. It blocks the turn until answered, so both outcomes must reply.
+    // Server requests block the turn; both outcomes must reply.
     try {
       const result = await this.options.onRequest(message.method, message.params);
       await this.send({ id: message.id, result });
@@ -260,7 +228,7 @@ export class CodexRpc {
         stdin.write(line, (error) => (error ? reject(error) : resolve()));
       });
     });
-    // The tail must not inherit the rejection, or one failed write poisons every later one.
+    // Do not let one failed write poison later writes.
     this.writeTail = operation.catch(() => undefined);
     return operation;
   }

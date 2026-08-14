@@ -14,7 +14,6 @@ import type {
 } from "@tulipfarm/storage";
 import { type JsonObject, TypedOutputError, type TypedOutputValidator } from "./outputs";
 
-/** Narrow surface `ArtifactService` needs; `@tulipfarm/storage`'s `ArtifactStore` satisfies it. */
 export interface ArtifactStorePort {
   put(input: PutArtifactInput): Promise<PutArtifactResult>;
   find(businessId: string, artifactId: string): Promise<PersistedArtifact | null>;
@@ -37,7 +36,6 @@ export interface PublishArtifactInput {
   readonly redaction: ArtifactRedaction;
   readonly producer: ArtifactProducer;
   readonly createdAt: string;
-  /** Artifacts this output was derived from; recorded as `derived_from` lineage edges. */
   readonly derivedFrom?: readonly string[];
 }
 
@@ -83,9 +81,7 @@ export interface FileArtifactContent {
 export interface ArtifactReadRequest {
   readonly businessId: string;
   readonly artifactId: string;
-  /** Principal ref (`kind:id`) the read is performed for. */
   readonly reader: string;
-  /** Classifications the downstream Context may carry; the Artifact must stay within them. */
   readonly allowedClassifications: readonly string[];
   readonly now: Date;
 }
@@ -122,7 +118,6 @@ function isJsonObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** True when a JSON pointer (`/a/b`) still resolves inside the content. */
 function hasPointer(content: JsonObject, pointer: string): boolean {
   const segments = pointer.split("/").slice(1);
   let cursor: unknown = content;
@@ -136,10 +131,8 @@ function hasPointer(content: JsonObject, pointer: string): boolean {
 }
 
 /**
- * Immutable typed outputs and Artifacts (SPEC §7.2). Publishing AJV-validates the output, hashes
- * it canonically, and stores it once with its classification, ACL, retention, and redaction
- * metadata. Reading re-checks authorization, classification, retention, content hash, and schema,
- * so unauthorized, tampered, or schema-invalid output never reaches a downstream Context.
+ * Artifacts are hash-checked, schema-checked, authorization-checked, and stored once with
+ * classification, ACL, retention, and redaction metadata.
  */
 export class ArtifactService {
   constructor(
@@ -198,7 +191,6 @@ export class ArtifactService {
     };
   }
 
-  /** Publish immutable raw bytes while keeping the existing typed-JSON Artifact path unchanged. */
   async publishFile(input: PublishFileArtifactInput): Promise<PublishedFileArtifact> {
     if (!this.blobs) throw new ArtifactAccessError("artifact_blob_unavailable", input.id);
     if (
@@ -306,7 +298,6 @@ export class ArtifactService {
     return this.materialize(artifact);
   }
 
-  /** Applies the same denials to an Artifact already resolved through a named output mapping. */
   async open(artifact: PersistedArtifact, request: ArtifactReadRequest): Promise<ArtifactContent> {
     this.authorize(artifact, request);
     return this.materialize(artifact);

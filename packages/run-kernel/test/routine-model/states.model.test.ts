@@ -13,13 +13,8 @@ import { isWaitSatisfied } from "../../src/waits";
 import { forEachCase, intBetween, pick } from "./support";
 
 /**
- * Reference model for the State processors and wait aggregation (SPEC §9.1, §9.2).
- *
- * Each property is stated over the processor's whole input space rather than one authored graph:
- * a fan-out never exceeds its concurrency bound, a join is in exactly one of three states and
- * agrees with a counting model, an aggregation is monotone in its signals, and a branch is a
- * function of its Context. These are the invariants a Run's durability rests on, so they are
- * checked over generated inputs instead of examples.
+ * Reference model: fan-out stays bounded, joins match counting, aggregation is monotone, and
+ * branches are pure Context functions.
  */
 
 const IDENTITY_CEILING: IdentityCeiling = {
@@ -62,7 +57,6 @@ function buildFanOut(maxConcurrency: number) {
   return state;
 }
 
-/** One compiled graph per concurrency bound — compilation is deterministic in that bound. */
 const fanOuts = new Map<number, ReturnType<typeof buildFanOut>>();
 
 function compileFanOut(maxConcurrency: number) {

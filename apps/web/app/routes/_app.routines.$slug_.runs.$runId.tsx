@@ -17,12 +17,7 @@ export async function clientLoader({ params }: { params: { slug: string; runId: 
 
 const TERMINAL = new Set(["succeeded", "failed", "cancelled"]);
 
-/**
- * Live progress: EventSource against the run SSE endpoint, resuming from the last
- * journaled seq. A `finish` with reason "suspended" means the run is sleeping/waiting —
- * the stream closes; we revalidate to pick up the new status and reconnect on the next
- * revalidation if the run woke up.
- */
+/** Suspended run streams close; revalidation picks up status and reconnects after wake. */
 function useRunEvents(
   slug: string,
   runId: string,

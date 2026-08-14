@@ -10,50 +10,13 @@ import {
 const apiVersion = DEFINITION_API_VERSION;
 const idPattern =
   "^(?:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[0-9A-HJKMNP-TV-Z]{26})$";
-// Admits `_` as well as `-`: grants are written against Tool vocabulary, and those strings carry
-// snake_case segments (`soul.resource_type`) plus vocabulary imported verbatim from third-party
-// OpenAPI operations. No separator canonicalization happens when grants are compared, so authors
-// must copy the Tool's exact action/resource string; `soul.resource_type` and `soul.resource-type`
-// are intentionally distinct.
+// Grants match Tool vocabulary exactly; `_` and `-` are distinct and both allowed.
 const slugPattern = "^[a-z][a-z0-9_]*(?:[-_][a-z0-9_]+)*$";
-/**
- * Grant vocabulary. Two distinct rules govern the axes below — keep them apart, they pull opposite
- * ways:
- *
- * 1. **No unbounded authority.** An authored Role must not be able to express `actions: ["*"]` or
- *    `resource.types: ["*"]`. This is deliberate (see the `rejects wildcard authority` contract
- *    test): authored roles enumerate, so least privilege is the default and HR/engineering
- *    separation is expressed explicitly. The built-in deployment catalog in
- *    `apps/api/src/identity/roles.ts` *is* coarse — 35 of its grants use `actions: ["*"]` — but that
- *    is reviewed code, not user input, and it is not required to round-trip through this schema.
- *    Rejection here fails **loudly** at authoring time, so it is safe.
- *
- * 2. **No dead grants.** `grantMatches` (`packages/authz/src/grants.ts`) honours a bare `*` only for
- *    `action`, `resourceType`, `recordSelector` and `domain`; every other axis is compared
- *    literally, and on those axes *absence* already means "covers anything". So `record.*`,
- *    `tool.*`, `fields: ["*"]` and `destinations: ["*"]` would each match nothing at all. Under
- *    default-deny that is a grant an admin believes they authored which silently denies every call —
- *    the dangerous case, because it is invisible. These must fail loudly too.
- *
- * Deliberately NOT the same as `ACTION_NAME_PATTERN` / `RESOURCE_NAME_PATTERN` in
- * `packages/tool-broker/src/define.ts`. Those validate what a *Tool declares it touches*; these name
- * *what a grant covers*.
- */
+/** Grant vocabulary rejects unbounded authority and dead wildcards; not Tool IO vocabulary. */
 const actionPattern = "^[a-z][a-z0-9_-]*(?:\\.[a-z][a-z0-9_-]*)+$";
 // Rejects a literal `*` on axes the matcher compares literally. Absence is how "any" is expressed.
 const notWildcardPattern = "^(?!\\*$).+$";
-/**
- * Both rules above land on this one axis, in opposite directions:
- *
- *   - `*` is REJECTED under rule 1. It is the only wildcard `grantMatches` honours, which is
- *     precisely why an authored Role may not use it — `{ type: "*" }` is unbounded authority. The
- *     built-in catalog does use it, but that is reviewed code and never round-trips through here.
- *   - `record.*` / `tool.*` are REJECTED under rule 2. The matcher compares them literally against
- *     a type that can never exist, so the grant silently matches nothing. If prefix wildcards are
- *     ever wanted, `grantMatches` must implement them first and this pattern relaxed with it.
- *
- * So the axis admits exactly one thing: a concrete one- or two-segment resource name.
- */
+/** Resource types must be concrete one- or two-segment names; no bare or prefix wildcards. */
 const resourcePattern = "^[a-z][a-z0-9_-]*(?:\\.[a-z0-9_-]+)?$";
 const domainPattern = `^(?:\\*|${slugPattern.slice(1, -1)})$`;
 const dateTimePattern =
@@ -104,14 +67,7 @@ export const RoleGrantSchema = Type.Object(
       minItems: 1,
       uniqueItems: true,
     }),
-    /**
-     * Required, and deliberately so. `resource.types: ["*"]` is rejected by `resourcePattern`
-     * because an unbounded grant must fail loudly rather than be authored by accident. Making the
-     * whole block optional reopened exactly that hole through a quieter door: the compiler
-     * substitutes `["*"]` for an absent selector, and `grantMatches` honours `*` on the
-     * resourceType axis as a true wildcard — so omitting `resource` produced a grant row
-     * byte-identical to the one the pattern refuses. An author must now name what a grant is over.
-     */
+    /** Required so authors name grant scope; omission would compile to wildcard authority. */
     resource: ResourceSelectorSchema,
     fields: Type.Optional(
       Type.Array(Type.String({ minLength: 1, pattern: notWildcardPattern }), {

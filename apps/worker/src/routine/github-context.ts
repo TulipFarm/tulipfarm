@@ -13,15 +13,7 @@ import type { ToolIntent } from "@tulipfarm/tool-broker";
 import { selectGitHubInstallation } from "./github-credentials";
 import type { GitHubInstallationDirectory } from "./github-installation";
 
-/**
- * Installation-scope-only authorization for GitHub Tool calls (Phase 3 decision): no Soul-authored
- * AccessGrant compilation exists yet, and `assertIntegrationAccess` hard-denies an empty grant
- * list, so this resolver synthesizes an AccessGrant that trivially matches its own principal and
- * exactly the one repository the intent names. The real narrowing — which repository, at which
- * permission level — is `GitHubAdapter`'s installation-scope check against Phase 2's stored scope;
- * this grant adds nothing beyond satisfying the shape the adapter also checks. Real Soul-authored
- * AccessGrants are a later phase, once PR contracts force the question concretely.
- */
+/** Synthesizes minimal GitHub grants; adapter installation-scope checks do real narrowing. */
 
 const SYNTHETIC_PRINCIPAL: { readonly kind: "user" | "agent" | "role"; readonly id: string } = {
   kind: "role",
@@ -87,12 +79,7 @@ function syntheticOrgGrant(integrationId: string, owner: string): AccessGrantDef
   };
 }
 
-/**
- * Resolves a Tool intent's repository against this business's active GitHub installations
- * (`GitHubInstallationDirectory`) and builds the scope + synthesized grant `GitHubAdapter` needs.
- * `undefined` when no installation covers the named repository — the adapter reports that as
- * `integration_context_unresolved`, never a guessed scope.
- */
+/** Returns `undefined` when no installation covers the target; never guesses scope. */
 export class InstallationScopeGitHubContextResolver implements GitHubContextResolver {
   constructor(
     private readonly businessId: string,
@@ -108,10 +95,7 @@ export class InstallationScopeGitHubContextResolver implements GitHubContextReso
     const repository = repositoryArgument(intent);
     if (repository === undefined) return undefined;
 
-    // Two active installations both listing the same repository — a stale row from a reinstall, or
-    // a transient org-transfer overlap — refuses here rather than guessing which token scope the
-    // caller never chose. `selectGitHubInstallation` is the same matcher the credential provider
-    // uses, so scope and credential can never resolve to different installations.
+    // Use the credential provider's matcher so scope and credential cannot diverge.
     const installation = selectGitHubInstallation(
       await this.installations.list(),
       { kind: "repository", repository },

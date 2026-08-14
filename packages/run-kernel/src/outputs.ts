@@ -4,7 +4,6 @@ import Ajv2020, { type ValidateFunction } from "ajv/dist/2020";
 export type JsonObject = Record<string, unknown>;
 
 export interface OutputSchemaRegistration {
-  /** Stable reference stored on the Artifact, e.g. `<bundle digest>#/states/classify/output`. */
   readonly ref: string;
   readonly schema: JsonObject;
 }
@@ -43,11 +42,7 @@ function isJsonObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/**
- * AJV validation for every State output boundary (SPEC §9.1). Output that does not satisfy its
- * declared schema is rejected here, before it can be stored as an Artifact or reach a downstream
- * Context.
- */
+/** State output must satisfy its declared schema before Artifact storage or downstream use. */
 export class TypedOutputValidator {
   private readonly ajv = new Ajv2020({ allErrors: true, strict: false });
   private readonly validators = new Map<string, ValidateFunction>();
@@ -63,7 +58,6 @@ export class TypedOutputValidator {
     }
   }
 
-  /** Validates a value against a registered schema and returns it with its canonical hash. */
   validate(schemaRef: string, value: unknown): ValidatedOutput {
     const validator = this.validators.get(schemaRef);
     if (!validator) throw new TypedOutputError("unknown_output_schema", schemaRef);

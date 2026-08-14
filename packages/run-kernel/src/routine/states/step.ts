@@ -1,13 +1,8 @@
 import type { CompiledState } from "../compiler";
 
 /**
- * Shared vocabulary for the typed State processors in this directory.
- *
- * Every processor is a pure function of `(compiled State, persisted progress, Context scope)`.
- * It decides *what should happen next* and never performs it: the caller persists the decision
- * and the resulting progress before dispatching, so a crash between decide and dispatch replays
- * to the same decision and confirmed logical work is never repeated. Errors are fail-closed and
- * carry only a code and the State (or branch) name — never an evaluated payload value.
+ * State processors are pure and side-effect-free; callers persist decisions before dispatch, and
+ * fail-closed errors contain no evaluated payload values.
  */
 
 export type RoutineStepErrorCode =
@@ -50,7 +45,6 @@ export class RoutineStepError extends Error {
   }
 }
 
-/** Where control goes once a State is done. */
 export type StepOutcome =
   | { readonly kind: "transition"; readonly target: string }
   | { readonly kind: "end" };
@@ -66,19 +60,16 @@ export type JoinDecision =
   | {
       readonly kind: "satisfied";
       readonly outcome: StepOutcome;
-      /** Still-unsettled units the caller must cancel; empty when the join waited for all. */
       readonly cancel: readonly string[];
     }
   | { readonly kind: "failed"; readonly failures: readonly string[] };
 
-/** The State's own authored continuation, used once its fan-out or loop has settled. */
 export function stateOutcome(state: CompiledState): StepOutcome {
   if (state.transition !== null) return { kind: "transition", target: state.transition };
   if (state.end) return { kind: "end" };
   throw new RoutineStepError("state_cannot_progress", state.name);
 }
 
-/** Ordered indices of the units to start now, honouring an explicit concurrency bound. */
 export function nextDispatchSlots(
   state: CompiledState,
   statuses: readonly WorkStatus[]
@@ -96,11 +87,7 @@ export function nextDispatchSlots(
   return { indices, settled: statuses.every(isSettled) };
 }
 
-/**
- * Resolve a fan-out join once `need` successes are required out of `keys`. A join fails as soon
- * as the outstanding units can no longer reach `need`, so a doomed fan-out never waits for
- * branches whose result cannot change the answer.
- */
+/** Fan-out joins fail as soon as outstanding units cannot reach `need`. */
 export function resolveJoin(
   state: CompiledState,
   keys: readonly string[],

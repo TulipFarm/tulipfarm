@@ -8,12 +8,8 @@ import {
 } from "./calendar";
 
 /**
- * Deterministic planner for `datetime`, `interval`, and `cron` Triggers.
- *
- * The planner is a pure function of the authored schedule, the durable schedule State, and the
- * caller's clock reading: the same three inputs always produce the same occurrences, the same
- * deduplication keys, and the same jitter. Nothing here reads the wall clock or dispatches — the
- * caller persists the returned occurrences and enqueues them.
+ * Schedule planning is pure over authored schedule, durable state, and caller clock; it does not
+ * read the wall clock or dispatch.
  */
 
 export type ScheduleType = "datetime" | "interval" | "cron";
@@ -43,11 +39,8 @@ export class ScheduleError extends Error {
 
 export interface ScheduleSpec {
   readonly type: ScheduleType;
-  /** `datetime` only: the single authored instant. */
   readonly at?: string;
-  /** `interval` only: the fixed UTC period. */
   readonly everyMs?: number;
-  /** `cron` only: a five-field expression evaluated in `timezone`. */
   readonly expression?: string;
   readonly timezone: string;
   readonly dstPolicy: DstPolicy;
@@ -58,45 +51,31 @@ export interface ScheduleSpec {
   readonly startAt?: string;
   readonly endAt?: string;
   readonly calendar?: BusinessCalendar;
-  /** The Trigger's deduplication key; every occurrence key is derived from it. */
   readonly deduplicationKey: string;
 }
 
-/** What the durable store knows about this Trigger when the planner runs. */
 export interface ScheduleState {
-  /** The newest occurrence already planned, or `null` if the Trigger has never fired. */
   readonly lastScheduledForMs: number | null;
   readonly activeRuns: number;
 }
 
 export interface ScheduledFire {
-  /** The occurrence's canonical instant — the identity the Run is deduplicated on. */
   readonly scheduledForMs: number;
-  /** When to actually start, after deterministic jitter. */
   readonly effectiveAtMs: number;
   readonly deduplicationKey: string;
-  /** True when the occurrence is older than the current one, i.e. a backfill. */
   readonly catchUp: boolean;
-  /** True when this occurrence displaces an in-flight Run under `supersede`. */
   readonly supersede: boolean;
 }
 
 export interface SchedulePlan {
   readonly fires: readonly ScheduledFire[];
-  /** Occurrences that were due but deliberately not fired, by policy or by calendar. */
   readonly skipped: number;
   readonly nextDueAtMs: number | null;
 }
 
-/** How far back a single planner pass will look for missed occurrences. */
 export const CATCH_UP_HORIZON_MS = 7 * 86_400_000;
-/** How far ahead the planner will search for the next occurrence before giving up. */
 export const LOOKAHEAD_HORIZON_MS = 400 * 86_400_000;
 const MAX_SCAN_STEPS = 200_000;
-
-// ---------------------------------------------------------------------------
-// cron
-// ---------------------------------------------------------------------------
 
 interface CronFields {
   readonly minute: ReadonlySet<number>;
@@ -178,7 +157,6 @@ function offsetAt(instantMs: number, timezone: string): number {
   );
 }
 
-/** The first instant after a spring-forward gap, i.e. the moment the skipped hour ends. */
 function gapEndInstant(parts: ZonedParts, timezone: string): number {
   const asUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute);
   let low = asUtc - 86_400_000;
@@ -204,7 +182,6 @@ function resolveDst(parts: ZonedParts, timezone: string, dstPolicy: DstPolicy): 
   return instants;
 }
 
-/** Next matching occurrence(s) strictly after `afterMs`; two only for a repeated hour. */
 function nextCronFires(fields: CronFields, spec: ScheduleSpec, afterMs: number): readonly number[] {
   const from = localPartsAt(afterMs, spec.timezone);
   let cursor = Date.UTC(from.year, from.month - 1, from.day, from.hour, from.minute) + 60_000;
@@ -248,10 +225,6 @@ function nextCronFires(fields: CronFields, spec: ScheduleSpec, afterMs: number):
   }
   return [];
 }
-
-// ---------------------------------------------------------------------------
-// occurrence enumeration
-// ---------------------------------------------------------------------------
 
 function requireInstant(value: string | undefined, code: ScheduleErrorCode, subject: string) {
   if (value === undefined) throw new ScheduleError(code, subject);
@@ -315,17 +288,8 @@ function jitterFor(spec: ScheduleSpec, scheduledForMs: number): number {
   return Number.parseInt(digest.slice(0, 8), 16) % spec.jitterMs;
 }
 
-// ---------------------------------------------------------------------------
-// planning
-// ---------------------------------------------------------------------------
-
 /**
- * Plan the occurrences a scheduled Trigger owes as of `nowMs`.
- *
- * Missed occurrences are resolved against the authored `missedRunPolicy`: `skip` runs only the
- * current occurrence, `run_once` runs it once and marks it a catch-up, and `catch_up_bounded`
- * backfills at most `catchUpCap` occurrences oldest-first. Everything not fired is counted in
- * `skipped` rather than silently dropped, so the caller can record why a Run never happened.
+ * Missed schedules obey `missedRunPolicy`; unfired occurrences are counted as `skipped`, not lost.
  */
 export function planSchedule(
   spec: ScheduleSpec,

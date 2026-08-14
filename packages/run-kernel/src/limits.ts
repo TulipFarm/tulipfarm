@@ -18,7 +18,6 @@ export const LIMIT_SCOPES = [
 
 export type LimitScope = (typeof LIMIT_SCOPES)[number];
 
-/** SPEC §9.1 limit keys. Every value is a non-negative integer in its own canonical unit. */
 export const LIMIT_KEYS = [
   "wallTimeMs",
   "activeTimeMs",
@@ -96,7 +95,6 @@ export function resolveLimits(scoped: readonly ScopedLimits[]): ResolvedLimits {
   return resolved as ResolvedLimits;
 }
 
-/** The effective ceiling for one key, or `null` when no scope bounds it. */
 export function narrowestWins(resolved: ResolvedLimits, key: LimitKey): number | null {
   return resolved[key]?.value ?? null;
 }
@@ -116,11 +114,7 @@ export function assertNonAmplifying(resolved: ResolvedLimits, requested: LimitSe
   }
 }
 
-/**
- * Deterministic target-concurrency key (SPEC §9.1). Parts are canonicalized by sorted name and
- * length-prefixed before hashing, so ordering cannot change the key and adjacent parts cannot
- * collide by concatenation.
- */
+/** Sorted, length-prefixed parts make target-concurrency keys order-safe and collision-safe. */
 export function deriveTargetKey(parts: Readonly<Record<string, string>>): string {
   const entries = Object.entries(parts).sort(([left], [right]) => (left < right ? -1 : 1));
   if (entries.length === 0) throw new LimitError("invalid_target_key");

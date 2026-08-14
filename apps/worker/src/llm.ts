@@ -16,29 +16,11 @@ import type { SecretsService } from "@tulipfarm/secrets";
 import type { LanguageModel } from "ai";
 import { modelBudgetEvidence } from "./model-budget";
 
-/**
- * The Soul's configured providers, kept current without a restart.
- *
- * The configuration lives in the Soul repository, which this app cannot read — it arrives over the
- * internal host. Reading it once at boot would mean an operator who edits `soul.yaml#llm` has to
- * restart every worker before the change takes effect, and would leave workers disagreeing about
- * which model a turn ran on in the meantime.
- *
- * So it is re-read before each model call and rebuilt only when it actually changed. The read is a
- * small local request next to a model round-trip, and the comparison is against the exact bytes
- * that were last applied, so an unchanged Soul costs nothing beyond that request.
- *
- * Credentials never travel: the configuration names `api_key_ref`s, and those are unwrapped here
- * against this process's own secret store.
- */
+/** Keeps published LLM config hot; credentials stay as `api_key_ref`s unwrapped in Worker. */
 export interface SoulLlmOptions {
   /** Reads the published LLM configuration, or `undefined` when the Soul publishes none. */
   source(): Promise<unknown>;
-  /**
-   * Opens the secret store. Built on first use rather than at boot: it unwraps the active DEK,
-   * which the API provisions, so a worker that starts first would otherwise refuse to boot over a
-   * key it will happily find a moment later — and a deployment running no chat never needs it.
-   */
+  /** Lazy because the API provisions the active DEK and some deployments never chat. */
   secrets(): Promise<SecretsService>;
 }
 
@@ -78,19 +60,7 @@ export class SoulLlm {
 
   constructor(private readonly options: SoulLlmOptions) {}
 
-  /**
-   * Resolve what a turn asked for into the model that will actually serve it.
-   *
-   * The selector is an effort preset, a ModelProfile id, or — for a Run minted before this existed,
-   * whose request Artifact is immutable — a raw provider model id. All three converge on the same
-   * router: a preset resolves to a profile, a profile is constraint-checked, and only a raw model id
-   * bypasses routing, because there is nothing to check it against.
-   *
-   * The returned model is the **whole** selected chain, not its head. That is the fix for the
-   * fallback that was configured but never reached: selection happened in the API and only the head
-   * model id survived the hop, so this process rebuilt a single model and no backup provider was
-   * ever tried.
-   */
+  /** Resolves selectors to the full selected chain; raw model ids bypass profile checks. */
   async model(selector: string, requirements: ModelRequirements): Promise<LanguageModel> {
     const resolution = await this.resolveModel(selector, requirements);
     if (resolution.kind === "denied") {
@@ -103,16 +73,7 @@ export class SoulLlm {
     return resolution.model;
   }
 
-  /**
-   * Build an executable model over a chain that has **already** been selected.
-   *
-   * A Routine routes against its Run's own pinned bundle, so by the time it invokes, the profile
-   * and its constraint-equivalent fallbacks are settled. Handing the profile id back to
-   * `resolveModel` would re-resolve it against the catalog *derived from current config* — where a
-   * bundle-authored profile id does not exist — and it would fall through to `raw_model`, quietly
-   * discarding both the pinned bundle and every fallback the router had just chosen. So the chain
-   * crosses this boundary as model ids, and only provider construction happens here.
-   */
+  /** Builds an already-routed Routine chain without re-resolving against current config. */
   async chainModel(modelIds: readonly string[]): Promise<LanguageModel> {
     await this.sync();
     return this.service.chainModel(modelIds);
@@ -139,9 +100,7 @@ export class SoulLlm {
       };
     }
 
-    // The evidence is attached only where it decided something. A turn that inferred a rung the
-    // deployment does not configure fell back to the declared default, and claiming otherwise
-    // would make the record name a route the Run did not take.
+    // Attach inference evidence only when it actually selected the profile.
     const evidence =
       resolved.resolution === "effort_inferred" && inference !== undefined
         ? { effortInference: inference }
@@ -201,14 +160,7 @@ export class SoulLlm {
     };
   }
 
-  /**
-   * Which ModelProfile serves this call, and how that was decided.
-   *
-   * An inferred rung is tried first and is allowed to lose: a deployment that configures no
-   * `thorough` preset must still answer the turn, so an unresolvable inference falls through to
-   * the selector the participant actually sent — `auto`, which resolves to the declared default.
-   * Failing the turn instead would let a routing *preference* deny a turn that has a model to run.
-   */
+  /** Inferred rungs may lose; unresolved inference falls back to the participant selector. */
   private resolveSelector(
     selector: string,
     inference: RunEventEffortInference | undefined
@@ -245,13 +197,7 @@ export class SoulLlm {
       : { kind: "raw_model", modelId: selector };
   }
 
-  /**
-   * Rebuilds the providers when the configuration changed.
-   *
-   * Concurrent turns share one in-flight rebuild rather than each starting their own: two
-   * simultaneous `init` calls on the same service would race to publish their provider maps, and
-   * the loser's turn would run against a half-replaced set.
-   */
+  /** Serializes provider rebuilds so concurrent turns never see a half-replaced service. */
   private async sync(): Promise<void> {
     if (this.pending) return this.pending;
     this.pending = this.rebuildIfChanged().finally(() => {
@@ -264,8 +210,7 @@ export class SoulLlm {
     const config = await this.options.source();
     const published = JSON.stringify(config ?? null);
     if (published === this.applied) return;
-    // Held as the promise, not the value, so concurrent first turns share one unwrap — but a
-    // failed unwrap is dropped, or one boot ordering would poison every later turn.
+    // Store the promise so first turns share one unwrap; drop failures so boot order cannot poison later turns.
     this.secrets ??= this.options.secrets().catch((error: unknown) => {
       this.secrets = null;
       throw error;
@@ -275,14 +220,7 @@ export class SoulLlm {
     this.applied = published;
   }
 
-  /**
-   * Build the routing catalog from the applied configuration.
-   *
-   * ModelProfiles are *derived* here rather than required to be authored, so that a deployment that
-   * has not published any still routes through the one router instead of falling back to a second,
-   * weaker selection mechanism — which is the split this convergence exists to close. An authored
-   * catalog replaces this source without changing anything downstream.
-   */
+  /** Derives profiles so deployments without authored ModelProfiles still use one router. */
   private rebuildCatalog(rawConfig: unknown): void {
     if (!rawConfig) {
       this.catalog = { get: () => undefined };
@@ -297,8 +235,7 @@ export class SoulLlm {
       profiles = deriveModelProfiles(config);
       presets = { presets: config.presets };
     } catch {
-      // `LlmService.init` already logged and disabled itself on an invalid config; routing simply
-      // has nothing to offer, which surfaces as an honest denial rather than a crash mid-turn.
+      // Invalid config leaves routing empty, producing denial instead of a mid-turn crash.
       this.catalog = { get: () => undefined };
       this.presets = {};
       return;
@@ -306,8 +243,7 @@ export class SoulLlm {
 
     const byId = new Map(
       profiles
-        // A profile whose model never built (missing credentials, unknown provider) must not be
-        // routable: selecting it would only fail later, past the point where fallback could help.
+        // Unbuilt models are not routable; fallback must happen before selection commits.
         .filter((profile) => this.service.hasModelId(profile.model))
         .map((profile) => [profile.profileId, profile])
     );

@@ -1,8 +1,4 @@
-/**
- * Session persistence scoped to business_id (SPEC §12). Storage owns the mechanics; expiry
- * itself is enforced here (`get` never returns an expired row) so every caller sees the same
- * durable truth regardless of adapter.
- */
+/** Session storage is business-scoped and never returns expired sessions. */
 
 export interface SessionRecord {
   readonly sid: string;

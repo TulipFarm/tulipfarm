@@ -3,14 +3,7 @@ import { CommandPalette } from "~/components/knowledge/command-palette";
 
 export const meta: MetaFunction = () => [{ title: "Knowledge · tulipfarm" }];
 
-/*
- * Knowledge wiki shell (Notion/Confluence-style). A persistent forest tree rail (all spaces + their
- * pages) on the left, the selected page in the content outlet on the right — the rail stays put while
- * pages swap. The main app sidebar auto-collapses to its icon rail whenever the path is under
- * /knowledge (wired in _app.tsx via `forceCollapsed`), giving the tree rail the freed space. On mobile
- * the tree stacks above the content. Children own their data; the tree self-fetches + refreshes on the
- * `okf:space-changed` event.
- */
+/* The app sidebar force-collapses under /knowledge; children own their data. */
 export default function KnowledgeLayout() {
   // `params.id` is the active space on space routes (home/new/graph); page-reader routes carry
   // `pageId` instead, so the scope toggle defaults to all-spaces there.

@@ -1,17 +1,6 @@
 /*
- * Maps a *role* ("the private key we sign App JWTs with") to the store key holding it, for
- * Integration adapters that mint their own per-tenant tokens. There is no TulipFarm-owned GitHub
- * App: each deployment registers its own via GitHub's App Manifest flow, so these values are
- * instance-wide but not vendor-supplied.
- *
- * The keys are the ones `integrationSecretKey()` seals a connection env var under, so an App
- * created by the declarative `auth` flow in `integrations/github/manifest.yml` is readable here
- * with no bridging step. This registry exists because the minting code composes at the application
- * layer and needs the name by role, not because the storage differs (packages/integrations may not
- * import @tulipfarm/secrets — see docs/architecture/dependency-rules.md).
- *
- * Distinct from `LLM_PROVIDERS` (registry.ts): these fields aren't picked per-provider by a
- * soul.yaml row.
+ * Maps integration credential roles to sealed connection env keys; app-layer minting needs role
+ * lookup because integrations cannot import @tulipfarm/secrets.
  */
 
 export type IntegrationAppFieldRole = "app_id" | "app_slug" | "private_key" | "webhook_secret";

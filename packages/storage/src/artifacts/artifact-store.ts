@@ -302,11 +302,7 @@ const JOINED_ARTIFACT_COLUMNS = `a.business_id, a.id, a.schema_ref, a.content_ki
   a.producer, a.created_at`;
 const BINDING_COLUMNS = "business_id, run_id, state_key, output_name, artifact_id, created_at";
 
-/**
- * PostgreSQL persistence for immutable Artifacts, their named State-output mappings, and their
- * lineage edges. Rows are append-only (triggers reject UPDATE/DELETE), so a stored Artifact keeps
- * the hash, classification, ACL, and retention it was published with.
- */
+/** Immutable Artifact persistence; triggers keep hash, classification, ACL, and retention fixed. */
 export class ArtifactStore {
   constructor(private readonly transactions: TransactionPort) {}
 

@@ -1,9 +1,4 @@
-/*
- * Extract inline `#tag` tokens from a markdown body so they can be unioned into the page's
- * frontmatter `tags` on save — keeping the stored `tags[]` (and its server-side filtering)
- * authoritative. Headings (`# Heading`, hash + space) never match; fenced/inline code is stripped
- * first so `#include`-style tokens in code blocks aren't harvested as tags.
- */
+/* Strip code before harvesting inline `#tag`s; headings (`# `) never match. */
 
 // `#` + a LETTER-led slug (the letter-first rule excludes numeric refs like `#123`).
 const TAG_RE = /(^|[\s(])#([a-z][a-z0-9_-]*)/gi;
@@ -26,11 +21,7 @@ export function extractInlineTags(body: string): string[] {
   return out;
 }
 
-/**
- * Union existing frontmatter tags with inline body tags, lowercased + deduped (existing first).
- * Lowercasing keeps stored tags consistent with the `#tag` chip/pill links and the case-sensitive
- * `tags @> …` server filter, so the tag-listing route always matches.
- */
+/** Lowercase tags so chips and the case-sensitive server filter agree. */
 export function mergeTags(frontmatter: string[], body: string): string[] {
   const out: string[] = [];
   const seen = new Set<string>();

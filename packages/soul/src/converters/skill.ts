@@ -22,11 +22,7 @@ const SKILL_FRONTMATTER_ALLOWLIST = [
 
 const SKILL_REQUIRED_FIELDS = ["trustTier"] as const;
 
-/**
- * Convert a legacy `SoulSkill` (SKILL.md frontmatter + body) into a proposed authored `Skill`
- * definition (`skills/<slug>/skill.yaml` + companion `SKILL.md`). Never publishes; the caller
- * decides whether/how to route the returned files through the changeset gateway.
- */
+/** Convert legacy Skill files into proposed canonical files; never writes or publishes. */
 export function convertLegacySkill(skill: SoulSkill): ConversionResult {
   const slug = slugify(skill.name);
   const { mapped, warnings } = mapAllowlistedFields(skill.frontmatter, SKILL_FRONTMATTER_ALLOWLIST);

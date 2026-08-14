@@ -1,8 +1,6 @@
 /**
- * Authority a Run may exercise. A child Run's authority is always the intersection of its parent's
- * authority with what the child asked for (SPEC §7.3): Tools and classifications the parent does
- * not hold, and limits above the parent's ceilings, are denied rather than clipped, so an
- * amplification attempt leaves evidence instead of quietly succeeding.
+ * Child authority is parent ∩ requested authority; unavailable Tools, classifications, and limits
+ * are denied with evidence rather than clipped.
  */
 export interface ChildAuthority {
   readonly tools: readonly string[];
@@ -20,7 +18,6 @@ export interface ChildLink {
   readonly parentRunId: string;
   readonly childRunId: string;
   readonly authority: ChildAuthority;
-  /** Set once the child was explicitly detached; a detached child stops taking propagation. */
   readonly detachedAt: string | null;
   readonly createdAt: string;
 }
@@ -39,7 +36,6 @@ export class ChildRunError extends Error {
   }
 }
 
-/** Narrow surface the manager needs; `@tulipfarm/storage`'s `ChildLinkStore` satisfies it. */
 export interface ChildLinkStore {
   link(input: {
     businessId: string;
@@ -101,7 +97,6 @@ function narrowLimits(
   return narrowed;
 }
 
-/** Intersects a requested child authority with its parent's. Never broadens. */
 export function narrowChildAuthority(
   parent: ChildAuthority,
   requested: RequestedChildAuthority
@@ -118,10 +113,7 @@ export function narrowChildAuthority(
 }
 
 /**
- * Persisted parent/child Run links (SPEC §7.3). The link records the *narrowed* authority the
- * child actually runs under, so cancellation propagation and audit read the same durable fact.
- * Linking is idempotent: a retried spawn after a crash re-reads the original link rather than
- * re-deriving — and possibly re-widening — authority.
+ * Parent/child links persist narrowed authority and are idempotent across retried spawns.
  */
 export class ChildRunManager {
   constructor(private readonly store: ChildLinkStore) {}
@@ -140,7 +132,6 @@ export class ChildRunManager {
     });
   }
 
-  /** Explicitly detaches a child so it outlives parent cancellation. Returns false if already detached. */
   async detach(input: DetachChildInput): Promise<boolean> {
     return this.store.detach(input.businessId, input.parentRunId, input.childRunId, input.now);
   }
@@ -149,7 +140,6 @@ export class ChildRunManager {
     return this.store.listChildren(businessId, parentRunId);
   }
 
-  /** Children still taking propagation from the parent. */
   async listAttached(businessId: string, parentRunId: string): Promise<readonly ChildLink[]> {
     const links = await this.store.listChildren(businessId, parentRunId);
     return links.filter((link) => link.detachedAt === null);

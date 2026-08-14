@@ -13,13 +13,11 @@ export interface ParallelEntry {
   readonly status: WorkStatus;
 }
 
-/** The durable fan-out record: one entry per authored branch, in authored order. */
 export interface ParallelProgress {
   readonly entries: readonly ParallelEntry[];
 }
 
 export interface ParallelPlan {
-  /** Branches to start now — never a branch already running or settled. */
   readonly dispatch: readonly string[];
   readonly settled: boolean;
 }
@@ -30,11 +28,7 @@ export function initParallelProgress(state: CompiledState): ParallelProgress {
   };
 }
 
-/**
- * Decide which branches to start. Only `pending` branches are ever dispatched, so a Run that
- * crashed after dispatching a branch but before recording its result resumes without starting
- * that branch a second time; the in-flight branch is settled by reconciliation instead.
- */
+/** Only `pending` branches dispatch; in-flight crash gaps settle by reconciliation. */
 export function planParallel(state: CompiledState, progress: ParallelProgress): ParallelPlan {
   const statuses = progress.entries.map((entry) => entry.status);
   const { indices, settled } = nextDispatchSlots(state, statuses);
@@ -44,11 +38,7 @@ export function planParallel(state: CompiledState, progress: ParallelProgress): 
   };
 }
 
-/**
- * Record a branch's status. Re-recording the same settled status is a no-op so an at-least-once
- * completion signal is safe to replay; moving a settled branch back to an unsettled status is a
- * denial, because a confirmed branch result is immutable.
- */
+/** Settled branch status is immutable; replaying the same settled status is a no-op. */
 export function settleParallelBranch(
   progress: ParallelProgress,
   branch: string,
@@ -66,7 +56,9 @@ export function settleParallelBranch(
   };
 }
 
-/** Successes a join needs: every branch for `all`, one for `any`, a strict majority for `quorum`. */
+/**
+ * Successes a join needs: every branch for `all`, one for `any`, a strict majority for `quorum`.
+ */
 function required(join: CompiledState["join"], total: number): number {
   if (join === "any") return 1;
   if (join === "quorum") return Math.floor(total / 2) + 1;

@@ -8,12 +8,7 @@ interface InjectionPattern {
   readonly re: RegExp;
 }
 
-/**
- * Tiered jailbreak/prompt-injection patterns. Tiers are additive: `medium`
- * includes every `low` pattern, `high` includes every `medium` pattern. Each
- * pattern carries a human-readable `category` used as the block `reason` so
- * logs/UI surface *what kind* of injection matched rather than a raw regex.
- */
+/** Additive jailbreak tiers; `category` becomes the block reason. */
 const PATTERNS: Readonly<Record<Sensitivity, readonly InjectionPattern[]>> = {
   // Blatant attempts to override the standing instructions.
   low: [

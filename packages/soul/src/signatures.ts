@@ -20,13 +20,7 @@ export const SOUL_BUNDLE_PUBLIC_KEY = "soul-bundle.ed25519.public-key";
 /** Stable public key identity recorded beside every signed execution bundle. */
 export const SOUL_BUNDLE_SIGNING_KEY_ID = "soul-bundle-v1";
 
-/**
- * Bundle signing and tamper verification (SPEC §8.2 step 9).
- *
- * The signature covers the bundle's content address plus its identity, so any edit to a definition
- * changes the digest and any edit to the identity or the signature fails verification. Key
- * material never enters this package: the caller injects a signer bound to an authorized key.
- */
+/** Bundle signing and verification; API signs, workers verify with public keys. */
 
 export interface BundleSigner {
   readonly keyId: string;
@@ -116,11 +110,7 @@ export function createEd25519BundleSigner(keyId: string, privateKeyPem: string):
   return signer;
 }
 
-/**
- * Ed25519 verifier over one or more trusted SPKI public key PEMs. Key selection is by the keyId
- * recorded beside the bundle, so old public keys can stay trusted after publication rotates to a
- * new private key.
- */
+/** Ed25519 verifier keyed by trusted SPKI public key PEMs; unknown key IDs fail closed. */
 export function createEd25519BundleVerifier(
   trustedKeys: readonly TrustedBundlePublicKey[]
 ): BundleVerifier {
@@ -161,11 +151,7 @@ export function createEd25519BundleVerifier(
   });
 }
 
-/**
- * Transitional adapter for tests and old call sites that already own a signer created here. It
- * never manufactures HMAC verification; callers that need runtime verification must provision
- * Ed25519 public keys.
- */
+/** Test/legacy adapter around a local signer. */
 export function verifierFromSigner(signer: BundleSigner): BundleVerifier {
   const verifier = verifierAdapters.get(signer);
   if (verifier === undefined) {
@@ -190,11 +176,7 @@ export function signExecutionBundle(
   return Object.freeze({ bundle, digest, signature: Object.freeze(signature) });
 }
 
-/**
- * Verify a stored bundle and open it for execution. Fails closed: the digest is recomputed from
- * the bundle's own data (tamper detection) before the public-key signature is checked, and only a
- * fully verified bundle yields a {@link RuntimeBundle}. No Git access is involved.
- */
+/** Verify digest, signature, and authored definition hashes before execution. */
 export function verifyExecutionBundle(
   record: SignedExecutionBundle,
   verifier: BundleVerifier

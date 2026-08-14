@@ -5,7 +5,7 @@ import type { ResolvedModelEntry } from "@tulipfarm/llm";
  * `PersistableStep` (turn-helpers.ts) deliberately omits `usage`/`response`; we read the real step
  * via this shape instead. NOTE: the consumer-facing `step.usage` (AI SDK `LanguageModelUsage`) is
  * FLAT — `inputTokens: number` with cache details nested under `inputTokenDetails` — NOT the nested
- * provider-level shape. Reading `inputTokens.total` (the provider shape) yields 0 for every call.
+ * provider-level shape.
  */
 export interface ObservableUsage {
   inputTokens?: number | null;
@@ -59,9 +59,8 @@ export function extractToolCalls(step: ObservableStep): ToolCallInfo[] {
 export interface StepUsage {
   tokensIn: number;
   tokensOut: number;
-  /** The model the provider actually served (flows through the fallback chain), or null if absent. */
+  /** Provider-served model after fallback, or null if absent. */
   servedModelId: string | null;
-  /** Prompt-cache + reasoning breakdown, stashed in attributes for later cache-aware pricing. */
   cacheRead?: number;
   cacheWrite?: number;
   reasoning?: number;
@@ -84,9 +83,9 @@ export function extractStepUsage(step: ObservableStep): StepUsage {
  * Attribute a finished step to a concrete model + provider, and detect fallback. Under a fallback
  * chain the served model id (from the step's response) can differ from the primary; we reconcile
  * against the resolved chain — exact match first, then a prefix-tolerant match (handles dated
- * provider ids), else fall back to the primary entry. This keeps `llm_call` rows from recording the
- * joined `"a|b|c"` FallbackModel id. `fellBack` is true when a served id positively matched a
- * NON-primary chain entry — i.e. an earlier provider failed and the chain advanced.
+ * provider ids), else fall back to the primary entry. `fellBack` is true when a served id
+ * positively matched a NON-primary chain entry — i.e. an earlier provider failed and the chain
+ * advanced.
  */
 export function attributeModel(
   servedModelId: string | null,
@@ -102,7 +101,6 @@ export function attributeModel(
   }
   const entry = idx >= 0 ? chain[idx] : chain[0];
   // Only a positively-matched non-primary entry counts as a fallback (a missing served id is
-  // ambiguous → assume primary). `entry` carries the pinned spec (pricing) for the served model.
   return {
     model,
     provider: entry?.provider ?? null,

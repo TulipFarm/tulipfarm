@@ -1,16 +1,6 @@
 /**
- * Provenance-authorized synthesis (SPEC §14.1: "a conclusion drawn from multiple sources requires
- * that every supporting source is authorized for the requester").
- *
- * Retrieval authorized each candidate when it was fetched. That is not enough to *state* a
- * conclusion: time has passed, a source may have been revoked, its content may have moved on, and
- * a synthesis blends sources so that no reader can tell which one a sentence came from. So every
- * citation is reauthorized at its cited revision, and a single failure denies the whole conclusion
- * rather than silently dropping one input — a conclusion missing one of its supports is not the
- * same conclusion.
- *
- * The denial carries a reason code and nothing else. Naming the source that failed would disclose
- * exactly the document the ACL withheld.
+ * Synthesis reauthorizes every cited revision; one failed citation denies the conclusion and
+ * reveals only a reason code, not the source name.
  */
 
 import type { SourceAccessDenialReason } from "./acl";

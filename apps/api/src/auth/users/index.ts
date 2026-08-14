@@ -4,15 +4,7 @@ import { hashPassword } from "../passwords";
 
 export type Role = "admin" | "member";
 
-/**
- * Lifecycle state of a local identity. A user that is not `active` fails authentication at every
- * credential path — cookie session, API token, and identity link — so deactivation takes effect on
- * the next request instead of waiting for a session to lapse (SPEC §12).
- *
- * `invited` is an account that exists but has chosen no password yet: the admin created it and
- * shared an invite link, and it becomes `active` the moment that link is redeemed. It is a distinct
- * state rather than a disabled account so the Users list can show who has not accepted yet.
- */
+/** Non-active users fail every credential path, including sessions and invites. */
 export type UserStatus = "active" | "invited" | "disabled";
 
 export interface UserDoc {
@@ -20,10 +12,7 @@ export interface UserDoc {
   email: string;
   /** Null until the user chooses a password — an invited account has none, and should say so. */
   passwordHash: string | null;
-  /**
-   * Null until the user sets one. Never derived from the email address: a guess that looks
-   * authored is worse than an honest absence, so readers fall back to the address instead.
-   */
+  /** Null until set; never guess a name from email. */
   name: string | null;
   role: Role;
   status: UserStatus;
@@ -54,11 +43,7 @@ export function toPublicUser(user: UserDoc): PublicUser {
 /** The longest display name worth storing — past this it stops being a name. */
 export const MAX_NAME_CHARS = 80;
 
-/**
- * Normalizes a submitted display name. Collapses internal whitespace so a name cannot be padded
- * into looking like two columns, and treats an empty result as clearing the name rather than
- * storing a blank one.
- */
+/** Trims and collapses whitespace; returns null for an empty display name. */
 export function normalizeName(name: string): string | null {
   const collapsed = name.replace(/\s+/g, " ").trim();
   return collapsed.length > 0 ? collapsed : null;
@@ -75,30 +60,19 @@ export interface UserRepo {
   insert(user: UserDoc): Promise<void>;
 }
 
-/**
- * The narrow surface the admin Users page needs (list + enable/disable). Kept separate from
- * UserRepo so test fakes that don't exercise user administration don't have to implement it —
- * same rationale as {@link IngressUserLookup}. PgUserRepo satisfies it.
- */
+/** Minimal surface for the admin Users page. */
 export interface UserAdminRepo {
   listAll(): Promise<UserDoc[]>;
   setStatus(id: string, status: UserStatus): Promise<void>;
 }
 
-/**
- * The narrow surface the password-setting flows need — the Settings change-password form and
- * invite redemption, which also activates the account it belongs to. Kept separate from UserRepo
- * for the same reason as {@link UserAdminRepo}. PgUserRepo satisfies it.
- */
+/** Minimal surface for password setting and invite redemption. */
 export interface PasswordWriteRepo {
   /** Sets the password and marks the account active — redemption is what ends `invited`. */
   setPassword(id: string, passwordHash: string): Promise<void>;
 }
 
-/**
- * The narrow surface the self-service profile route needs. Kept separate from UserRepo for the
- * same reason as {@link UserAdminRepo}. PgUserRepo satisfies it.
- */
+/** Minimal surface for self-service profile routes. */
 export interface ProfileWriteRepo {
   /** Null clears the name, returning the account to being addressed by its email. */
   setName(id: string, name: string | null): Promise<void>;
@@ -112,11 +86,7 @@ export class EmailAlreadyExistsError extends Error {
   }
 }
 
-/**
- * Thrown when a second first-admin setup/bootstrap claim would violate
- * `users_setup_bootstrap_admin_idx` — the concurrency-safe replacement for the old
- * check-then-insert `count() === 0` race in setup/routes.ts (#172), without limiting later admins.
- */
+/** Raised on a concurrent first-admin claim. */
 export class AdminAlreadyExistsError extends Error {
   constructor() {
     super("a setup admin user already exists");
@@ -124,11 +94,7 @@ export class AdminAlreadyExistsError extends Error {
   }
 }
 
-/**
- * The narrow lookup surface integration ingress needs to resolve an inbound sender to a
- * TulipFarm user (email match → admin fallback). Kept separate from UserRepo so test fakes
- * that don't care about ingress don't have to implement findFirstAdmin. PgUserRepo satisfies it.
- */
+/** Narrow lookup used by ingress sender resolution. */
 export interface IngressUserLookup {
   findByEmail(email: string): Promise<UserDoc | null>;
   findById(id: string): Promise<UserDoc | null>;
@@ -259,11 +225,7 @@ export async function createUser(
   return user;
 }
 
-/**
- * Creates a member account that has no password at all. It cannot authenticate until its invite
- * link is redeemed — which is the point: an admin provisioning a colleague never handles, sees, or
- * relays a credential for them.
- */
+/** Creates a passwordless member account; invite redemption activates login. */
 export async function inviteUser(repo: UserRepo, email: string): Promise<UserDoc> {
   const user: UserDoc = {
     _id: randomUUID(),
@@ -278,16 +240,9 @@ export async function inviteUser(repo: UserRepo, email: string): Promise<UserDoc
   return user;
 }
 
-// Deterministic dev admin. In non-production, when ADMIN_EMAIL/ADMIN_PASSWORD are not set, the
-// first admin defaults to these known dev credentials so `pnpm dev` is sign-in-ready with zero
-// setup (and the login screen prefills them). Production has NO default — it requires the env vars,
-// so a known-password admin is never auto-seeded in prod.
 export const DEV_ADMIN_EMAIL = "admin@tulipfarm.dev";
 export const DEV_ADMIN_PASSWORD = "password123";
 
-// Seeds the first admin on boot when no users exist. Uses ADMIN_EMAIL/ADMIN_PASSWORD when set;
-// otherwise falls back to the dev defaults in non-production. Idempotent — a no-op once any user
-// exists, or when neither env vars nor (in prod) a default are available.
 export async function bootstrapAdmin(
   repo: UserRepo,
   log?: { info: (msg: string) => void }

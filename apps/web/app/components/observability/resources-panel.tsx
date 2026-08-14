@@ -24,9 +24,6 @@ const METRICS: { key: ResourceMetric; label: string }[] = [
 ];
 
 /**
- * Per-service CPU and memory over time, all services on one chart so a spike can be attributed to
- * the process that caused it rather than hunted across separate panels.
- *
  * The two metrics share a chart but not an axis — percent and bytes have no common scale, and
  * plotting them together would make one of them unreadable — so a toggle swaps which is shown.
  */
@@ -36,7 +33,6 @@ export function ResourcesPanel({ initial }: { initial: ResourceUsage }) {
   const [metric, setMetric] = useState<ResourceMetric>("cpu");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Generation guard: a slower earlier request must not overwrite the window the user just picked.
   const req = useRef(0);
 
   const load = useCallback(async (next: ResourceWindow): Promise<void> => {
@@ -55,9 +51,6 @@ export function ResourcesPanel({ initial }: { initial: ResourceUsage }) {
     }
   }, []);
 
-  // Auto-refresh on the sampling cadence. Skipped while the tab is hidden: a backgrounded dashboard
-  // polling an admin endpoint forever is load nobody is reading, and the first tick on return
-  // repaints it anyway.
   useEffect(() => {
     const timer = setInterval(() => {
       if (typeof document !== "undefined" && document.hidden) return;

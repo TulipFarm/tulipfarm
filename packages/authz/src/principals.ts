@@ -1,8 +1,4 @@
-/**
- * Distinct principal kinds SPEC §12 requires (user/Agent/Routine/integration adapter/API/service),
- * plus the checks that keep a disabled, expired, or business-mismatched principal from
- * authenticating or substituting for another (SPEC §12 non-amplification, §24 confused-deputy).
- */
+/** Principal checks deny disabled, expired, business-mismatched, or substituted identities. */
 
 import { PRINCIPAL_KINDS, type PrincipalKind as SchemaPrincipalKind } from "@tulipfarm/schema";
 
@@ -55,11 +51,7 @@ export function assertPrincipalAuthenticatable(principal: Principal, now: Date =
   }
 }
 
-/**
- * Throws unless `session` was issued for exactly `principal` — same principal id, same
- * business_id, not expired. A session never authenticates a different principal or crosses a
- * business boundary (SPEC §12 non-amplification).
- */
+/** Sessions authenticate only the same unexpired principal id in the same business. */
 export function assertSessionMatchesPrincipal(
   session: SessionBinding,
   principal: Principal,

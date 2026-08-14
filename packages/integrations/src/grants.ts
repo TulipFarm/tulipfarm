@@ -1,14 +1,6 @@
 import type { AccessGrantDefinition } from "@tulipfarm/schema";
 
-/**
- * AccessGrant evaluation for Integration access (SPEC §15).
- *
- * An Integration's authority is the *intersection* of the acting principal, the Integration the
- * grant was issued against, the action, and the concrete external target. Every dimension is
- * closed: there is no wildcard action and no implicit target, and an empty grant list denies.
- * This never widens the internal authorization decision the Tool Broker already made — it narrows
- * it further with the external-target scope only the Integration layer knows about.
- */
+/** Integration AccessGrants only narrow authority across principal, integration, action, target. */
 
 export interface IntegrationPrincipalRef {
   readonly kind: string;
@@ -64,11 +56,7 @@ function targetMatches(grant: AccessGrantDefinition, target: IntegrationExternal
   );
 }
 
-/**
- * Decide one Integration access request. The reason returned is the narrowest one that actually
- * blocked the request, so an operator can tell "wrong Integration" from "action not granted"
- * without the decision itself becoming more permissive.
- */
+/** Return the narrowest blocking reason without widening the decision. */
 export function decideIntegrationAccess(
   grants: readonly AccessGrantDefinition[],
   request: IntegrationAccessRequest,

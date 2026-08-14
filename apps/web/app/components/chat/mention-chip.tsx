@@ -3,13 +3,6 @@ import type { Components } from "react-markdown";
 import { AgentGlyph } from "~/components/agent-glyph";
 import type { MentionEntry } from "./use-mention-catalog";
 
-/*
- * Renders a highlighted mention as a ruby `.tf-mention` chip with a hover/focus card explaining what
- * the tag actually is (agent / skill / resource type). The card is an absolutely-positioned span (so
- * it stays valid phrasing content inside the markdown paragraph and never disturbs layout), shown via
- * a CSS group-hover — mirroring the transcript's existing tooltip pattern.
- */
-
 const KIND_LABEL: Record<MentionEntry["kind"], string> = {
   agent: "Agent",
   skill: "Skill",

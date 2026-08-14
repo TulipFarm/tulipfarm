@@ -12,13 +12,7 @@ export const SOUL_CHANGESET_SOURCES = [
 
 export type SoulChangesetSource = (typeof SOUL_CHANGESET_SOURCES)[number];
 
-/**
- * The base a changeset declares when the Soul branch is unborn — a freshly initialized repo with
- * no commit yet. Git's own zero-OID, which `update-ref` already requires to mean "no prior value".
- *
- * A sentinel is needed because a changeset's `expectedBaseCommit` must be a non-empty string
- * (an absent base is a missing field, not a valid one), so "no base" needs a value that says so.
- */
+/** Zero-OID sentinel for an unborn Soul branch; changeset bases must be non-empty. */
 export const SOUL_UNBORN_BASE = "0".repeat(40);
 
 /** True when `base` names the unborn branch rather than a real commit. */
@@ -115,13 +109,7 @@ function freezeValidatedFile(
   });
 }
 
-/**
- * Validate an entire expected-base proposal before any file can be written.
- *
- * The function is deliberately synchronous and side-effect free. Callers must compare against the
- * base they resolved at their durable boundary, then pass only a successful result to the atomic
- * writer. A stale base or any invalid file rejects the complete proposal.
- */
+/** Validate base and files before any atomic writer side effects. */
 export function validateSoulChangeset(
   changeset: SoulChangeset,
   currentBaseCommit: string

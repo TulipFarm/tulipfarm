@@ -39,11 +39,7 @@ interface BindOfferResponse {
   outcome: "sent" | "no_offer" | "unconfigured";
 }
 
-/**
- * Calls `POST /api/v1/internal/channels/identity/bind-offer` — the bind token that could link an
- * unmapped sender is a bearer credential and never crosses into this process; `apps/api` resolves
- * the offer and posts the Slack reply itself, this just tells it who and where to reply to.
- */
+/** Bind tokens are bearer credentials; only `apps/api` resolves and posts bind offers. */
 export function httpChannelIdentityBindOfferPort(
   client: InternalApiClient,
   log: { warn: (message: string, error?: unknown) => void }

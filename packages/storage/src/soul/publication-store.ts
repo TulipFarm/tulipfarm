@@ -1,24 +1,8 @@
 import type { Queryable, TransactionPort } from "../ports";
 
-/**
- * Soul publication persistence (SPEC §8.2 steps 13–15).
- *
- * Storage owns the mechanics; `@tulipfarm/soul` owns the publication behaviour and is the only
- * writer of these rows. Three record families back one invariant: a digest becomes active only
- * after every earlier stage committed.
- *
- * - the publication record: which changeset/commit/digest is in flight and how far it got;
- * - the authored projection: rebuildable-from-Git metadata for the definitions of one digest;
- * - the outbox: the durable handoff to the job that finishes the publication.
- *
- * Rows carry only authored identifiers, digests, and stage names — never definition content,
- * secret material, or user data.
- */
+/** Soul publication stages activation with identifiers/digests only, never definitions or secrets. */
 
-/**
- * Publication progress, in order. Each stage is committed before the next begins, so a crash
- * resumes at the recorded stage and the previously active digest is never disturbed.
- */
+/** Ordered publication stages; crash resumes from the committed stage without disturbing active digest. */
 export const SOUL_PUBLICATION_STAGES = ["committed", "projected", "stored", "active"] as const;
 
 const SOUL_PUBLICATION_STAGE_SQL = SOUL_PUBLICATION_STAGES.map((stage) => `'${stage}'`).join(", ");
@@ -110,11 +94,7 @@ export const SOUL_PUBLICATION_STORAGE_STATEMENTS: readonly string[] = [
 
 export type SoulPublicationStage = (typeof SOUL_PUBLICATION_STAGES)[number];
 
-/**
- * Raised when an activation is refused because a newer publication already holds the active slot.
- * Distinct from a genuine failure: being superseded is the monotonic guard working as designed, so
- * callers must retire the publication quietly rather than burn its retry budget and dead-letter it.
- */
+/** Stale activation means monotonic guard worked; retire quietly instead of retrying. */
 export class StaleActivationError extends Error {
   constructor(readonly digest: string) {
     super(`stale_activation: ${digest} is older than the active bundle`);
@@ -222,15 +202,9 @@ export interface SoulPublicationTx {
   ): Promise<SoulPublicationRecord | undefined>;
 
   enqueue(message: SoulPublicationOutboxMessage): Promise<void>;
-  /**
-   * Unconsumed messages, oldest first. Legacy read-only path: safe only inside the still-open
-   * transaction because row locks vanish at commit. New drainers should call `claimOutbox`.
-   */
+  /** Legacy unconsumed read path; row locks are safe only inside the open transaction. */
   pendingOutbox(max: number): Promise<readonly SoulPublicationOutboxMessage[]>;
-  /**
-   * Atomically claims due, unconsumed, unleased rows. Expired leases are reclaimable, and
-   * concurrent claimers skip each other's locked rows rather than double-processing them.
-   */
+  /** Atomically claims due rows; expired leases are reclaimable and concurrent claimers skip locks. */
   claimOutbox(input: SoulOutboxClaimInput): Promise<readonly SoulPublicationOutboxMessage[]>;
   /** Idempotent: a message already consumed keeps its original consumer. */
   markConsumed(id: string, consumer: string): Promise<void>;
@@ -241,16 +215,9 @@ export interface SoulPublicationTx {
   ): Promise<void>;
   listProjection(businessId: string): Promise<readonly SoulDefinitionProjection[]>;
 
-  /**
-   * Auto-activate a publication only if its publication sequence is not older than the current
-   * active publication. Throws when the bundle is missing or the activation is stale.
-   */
+  /** Auto-activates only when publication sequence is not older than the current active one. */
   setActiveDigest(input: SoulBundleActivationInput): Promise<void>;
-  /**
-   * Explicitly activate a published digest, bypassing publication-order stale protection. Rollback
-   * uses this path; it still refuses unpublished or unstored digests and appends activation
-   * history in the same transaction as the active alias update.
-   */
+  /** Rollback activation bypasses stale protection but still requires a published/stored digest. */
   forceActivateDigest(input: SoulBundleActivationInput): Promise<void>;
   getActiveDigest(businessId: string): Promise<string | undefined>;
   listActivationHistory(
@@ -307,25 +274,14 @@ function publicationSequence(record: SoulPublicationRecord): number {
   return sequence;
 }
 
-/**
- * Probe for the one PostgreSQL constraint this store cannot hold itself: both activation paths
- * join `soul_execution_bundles`, so a digest with no stored bundle can never become active.
- *
- * Bundle rows live in a different table owned by a different port, so the in-memory double has to
- * be told. Wire it wherever activation behaviour is under test; leaving it unset makes the double
- * strictly weaker than production, which is how a revert bug hid here before.
- */
+/** In-memory bundle-existence probe mirrors Postgres activation joins; wire it in activation tests. */
 export type BundleExistsProbe = (businessId: string, digest: string) => Promise<boolean>;
 
 export interface InMemorySoulPublicationStoreOptions {
   readonly bundleExists?: BundleExistsProbe;
 }
 
-/**
- * Process-local store with real rollback, for tests and single-process composition. The durable
- * PostgreSQL adapter implements the same {@link SoulPublicationStore} contract; authoritative
- * publication state never lives only in process memory in production.
- */
+/** Process-local store with rollback; production state must live in the durable adapter. */
 export class InMemorySoulPublicationStore implements SoulPublicationStore {
   private readonly bundleExists: BundleExistsProbe | undefined;
 
@@ -831,9 +787,7 @@ function pgTransaction(transaction: Queryable): SoulPublicationTx {
         candidates: string | number;
         activated: string | number;
       }>(
-        // MATERIALIZED is load-bearing: `candidate` calls the volatile nextval() and is referenced
-        // three times below. Without it a planner that inlined the CTE would allocate a different
-        // activation sequence per reference, desynchronising soul_active_bundles from its history.
+        // MATERIALIZED is required so volatile nextval() allocates one activation sequence.
         `WITH candidate AS MATERIALIZED (
            SELECT p.business_id, p.digest, p.changeset_id,
                   p.publication_sequence,
@@ -876,9 +830,7 @@ function pgTransaction(transaction: Queryable): SoulPublicationTx {
            (SELECT count(*) FROM upserted) AS activated`,
         [input.businessId, input.digest, input.activatedByPrincipalId]
       );
-      // Separating these two zero-row cases matters: no candidate means the publication or its
-      // signed bundle is genuinely absent (a real failure), while a candidate that did not activate
-      // means a newer publication won the monotonic guard (benign supersession).
+      // Distinguish absent candidates from benign stale-publication supersession.
       const row = result.rows[0];
       if (Number(row?.candidates ?? 0) === 0) throw new Error("missing_bundle_for_activation");
       if (Number(row?.activated ?? 0) === 0) throw new StaleActivationError(input.digest);
@@ -971,7 +923,7 @@ function pgTransaction(transaction: Queryable): SoulPublicationTx {
   };
 }
 
-/** PostgreSQL publication adapter with real transactional stage transitions and outbox writes. */
+/** PostgreSQL publication adapter with transactional stages and outbox writes. */
 export class PgSoulPublicationStore implements SoulPublicationStore {
   constructor(private readonly transactions: TransactionPort) {}
 

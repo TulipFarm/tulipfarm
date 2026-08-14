@@ -1,10 +1,4 @@
-/*
- * Turn inline `[n]` citation markers in assistant prose into links to the cited knowledge page. The
- * agent writes plain `[1]`/`[2]` markers (not markdown links) and declares the page per ref via the
- * `cite_sources` tool, which arrives as the message's `sources` part. This rehype plugin (operating on
- * the rendered hast tree via the shared `walkTextNodes`, so it never touches code spans or existing
- * links) wraps each `[n]` whose ref has a resolved url in an anchor; unknown refs stay literal text.
- */
+/* Wrap resolved `[n]` text only; code, links, and unknown refs stay literal. */
 
 import { type HastNode, walkTextNodes } from "./hast-text-walk";
 
@@ -31,11 +25,7 @@ function splitCitations(text: string, refs: Map<number, string>): HastNode[] {
   return out;
 }
 
-/**
- * rehype plugin (use as `[rehypeCitations, { refs }]`). `refs` maps a citation number to the wiki url
- * of the page it cites. A `[n]` whose number is in the map becomes a `.tf-citation` anchor; everything
- * else is untouched. No-op when `refs` is empty.
- */
+/** No-op when refs are empty; mapped citation numbers become `.tf-citation` anchors. */
 export function rehypeCitations(options: { refs: Map<number, string> }) {
   return (tree: HastNode): void => {
     if (options.refs.size === 0) return;

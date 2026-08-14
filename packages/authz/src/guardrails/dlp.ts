@@ -1,10 +1,6 @@
 /**
- * DLP boundary check (SPEC §13): before data crosses a model, Tool, integration, sandbox, UI,
- * notification, or export boundary, every crossing data classification must have a DLP rule
- * permitting the destination and audience. Default deny: unclassified data, a class with no
- * rule, or a detected secret denies. Denials carry only the reason code and the classification
- * name — never destination, audience, field values, or content — so a blocked response cannot
- * reveal the protected content through its evidence.
+ * DLP is default-deny for unclassified data, missing rules, and secrets; denial evidence must not
+ * reveal destination, audience, field values, or content.
  */
 
 import type { GuardrailDecision } from "./decision";
@@ -29,9 +25,8 @@ export interface DlpCrossing {
 }
 
 /**
- * Decides whether `crossing` may pass. Allowed only when no secret is detected, the data is
- * classified, and every class has a rule whose destination and audience scopes are satisfied —
- * a scoped rule never permits a crossing that omits the scoped dimension (fail closed).
+ * Allows only classified, non-secret crossings covered by destination and audience scopes; omitted
+ * scoped dimensions fail closed.
  */
 export function checkDlpBoundary(
   rules: readonly DlpRule[],

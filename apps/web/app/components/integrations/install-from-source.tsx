@@ -4,14 +4,7 @@ import { Input } from "~/components/ui/input";
 import { Modal } from "~/components/ui/modal";
 import { inspectIntegrationSource, installIntegration } from "~/lib/integrations";
 
-/*
- * Install an integration from any git repository.
- *
- * Two steps on purpose. Inspecting first is what makes the curated catalog curation rather than an
- * allowlist: a repo nobody vetted can still be installed, but the operator is shown what it
- * declares — and why the host refuses it, when it declares something executable — before anything
- * is written to the soul repo.
- */
+/* Inspect before install so unvetted repos reveal executable declarations before writes. */
 
 type Offer = { name: string; description?: string; installable: boolean; issues: string[] };
 
@@ -117,9 +110,7 @@ export function InstallFromSource({ onInstalled }: { onInstalled: () => void }) 
                 {offer.description && (
                   <p className="text-xs text-muted-foreground">{offer.description}</p>
                 )}
-                {/* Naming the refused construct is the point: "not installable" alone reads as a
-                    bug in the catalog rather than a deliberate limit on what a stranger's repo
-                    may declare. */}
+                {/* Name refused constructs so refusal reads as policy, not catalog failure. */}
                 {offer.issues.map((issue) => (
                   <p key={issue} className="text-xs text-destructive">
                     {issue}

@@ -20,20 +20,13 @@ import { dimLiteral, embeddingDistanceSql } from "../vector-search";
 import { embedOne, type MemoryEmbedder } from "./embedder";
 
 /**
- * Postgres `MemoryRecallIndex`: three retrieval arms over `memory_assertions`.
- *
- * - **lexical** — full-text search over the generated `tsv` column.
- * - **entity** — overlap against the assertion's extracted entities, which catches the case
- *   full-text misses: a query naming a person or project whose statement never repeats the name.
- * - **vector** — pgvector cosine distance, only when an embedding provider is configured.
- *
- * Each arm returns a *ranking*; fusion and reranking happen in `@tulipfarm/memory`. This is
- * deliberately not an authorization boundary — it may return any assertion it matches, and
- * `recallMemory` authorizes every candidate afterwards. Filtering by scope here would move half
- * the access decision away from the audit trail.
- *
- * Superseded, forgotten, and unconfirmed assertions are excluded, because they are not candidates
- * under any caller's authority. That is a relevance floor, not an access decision.
+ * Postgres `MemoryRecallIndex`: three retrieval arms over `memory_assertions`. - **lexical** —
+ * full-text search over the generated `tsv` column. - **entity** — overlap against the assertion's
+ * extracted entities, which catches the case full-text misses: a query naming a person or project
+ * whose statement never repeats the name. - **vector** — pgvector cosine distance, only when an
+ * embedding provider is configured. Filtering by scope here would move half the access decision
+ * away from the audit trail. Superseded, forgotten, and unconfirmed assertions are excluded,
+ * because they are not candidates under any caller's authority.
  */
 
 const candidateFloor = (alias: string): string =>
@@ -168,11 +161,6 @@ export class PgMemoryRecallIndex implements MemoryRecallIndex {
     }));
   }
 
-  /**
-   * Rank by how many of the query's terms appear among an assertion's entities. Terms are matched
-   * case-insensitively against the stored entity list rather than tokenized by Postgres, because
-   * entities are already normalized at extraction time.
-   */
   private async entityArm(request: MemoryRecallIndexRequest): Promise<RecallArmHit[]> {
     const terms = [...new Set(request.query.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [])];
     if (terms.length === 0) return [];

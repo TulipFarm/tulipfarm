@@ -1,19 +1,7 @@
 import { resolveAuthSteps } from "./integration-auth";
 import type { AuthStep, IntegrationManifest } from "./types";
 
-/*
- * Trust rules for integrations installed from a third-party git repo.
- *
- * Bundled integrations ship in our image and are reviewed like any other code, so they may declare
- * anything the runtime supports. A manifest cloned from an arbitrary repo may not: the whole point
- * of the declarative framework is that installing an integration never hands a stranger code
- * execution. `manifest.yml` is data — URLs, field labels, response mappings — and data is all a
- * third party gets to supply.
- *
- * These checks are enforced at install time, mirroring how Skills gate on their pre-scan. Once
- * written into the soul repo an artifact is operator-owned and trusted (single-trust V1), so this
- * is the gate that matters.
- */
+/* Third-party integration manifests are data only; bundled integrations are reviewed code. */
 
 /** Manifest constructs that execute third-party code in one of our processes. */
 function codeExecutionIssues(manifest: IntegrationManifest): string[] {
@@ -45,11 +33,7 @@ function codeExecutionIssues(manifest: IntegrationManifest): string[] {
   return issues;
 }
 
-/**
- * Every provider URL a manifest can point the browser or the auth broker at. The broker sends app
- * credentials, authorization codes, and refresh tokens to these, so they are the manifest's most
- * security-relevant data.
- */
+/** Provider URLs receive credentials/codes/tokens, so every such URL is validated. */
 function authUrls(step: AuthStep): { label: string; url: string }[] {
   switch (step.kind) {
     case "app_manifest":
@@ -76,14 +60,7 @@ function authUrls(step: AuthStep): { label: string; url: string }[] {
   }
 }
 
-/**
- * A manifest URL must be https, and the host must be written literally.
- *
- * Templated segments ({callback_url}, {state}, a connection env var) are substituted at runtime,
- * so a placeholder in the authority — `https://{code}.example.com/x` — would leave the actual
- * destination undetermined at review time and decided later by a value the manifest itself can
- * influence. Requiring a literal scheme *and* host is what makes checking the URL mean anything.
- */
+/** Require literal https scheme and host; placeholders may not choose the destination. */
 function urlIssue(url: string): string | undefined {
   if (!url.startsWith("https://")) return "must be an https:// URL";
 
@@ -125,12 +102,7 @@ function transportIssues(manifest: IntegrationManifest): string[] {
   return issues;
 }
 
-/**
- * A Simple Icons slug is lowercase alphanumeric with the occasional underscore (`hive_blockchain`),
- * never a path. Since the slug is used to resolve a file inside the icon package, anything else —
- * a separator, a dot, a traversal sequence — is refused here rather than sanitized at the read,
- * so a third-party manifest can never aim that read somewhere else.
- */
+/** Simple Icons slugs are allowlisted to prevent path traversal through icon lookup. */
 const ICON_SLUG_RE = /^[a-z0-9_]{1,32}$/;
 
 function iconIssues(manifest: IntegrationManifest): string[] {
@@ -141,13 +113,7 @@ function iconIssues(manifest: IntegrationManifest): string[] {
   ];
 }
 
-/**
- * Returns the reasons this manifest may not be installed from an untrusted source. Empty means it
- * is purely declarative and safe to accept.
- *
- * Callers must treat a non-empty result as fatal: partial installs are worse than none, since a
- * rejected construct that still landed on disk would be loaded and trusted on the next boot.
- */
+/** Fatal install gate for untrusted manifests; partial installs would become trusted on next boot. */
 export function validateThirdPartyManifest(manifest: IntegrationManifest): string[] {
   return [...codeExecutionIssues(manifest), ...transportIssues(manifest), ...iconIssues(manifest)];
 }

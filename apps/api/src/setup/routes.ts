@@ -17,7 +17,6 @@ import type { SetupAdminCreator } from "./first-admin";
 import { isHeadlessBoot } from "./service";
 import { patchSoulConfig, readSoulConfig } from "./soul-config";
 
-// Cheapest models per provider, used only to validate the API key on setup.
 const PROBE_MODEL: Record<string, string> = {
   anthropic: "claude-haiku-4-5-20251001",
   openai: "gpt-4o-mini",
@@ -27,8 +26,8 @@ const PROBE_MODEL: Record<string, string> = {
 
 /**
  * The probe runs inside the wizard's HTTP request. An API-keyed provider answers in seconds, but a
- * Subscription Provider spawns a CLI subprocess whose default per-call budget is ten minutes —
- * long enough that a bad token would look like a hung wizard rather than a rejected credential.
+ * Subscription Provider spawns a CLI subprocess whose default per-call budget is ten minutes — long
+ * enough that a bad token would look like a hung wizard rather than a rejected credential.
  */
 const PROBE_TIMEOUT_MS = 30_000;
 
@@ -55,7 +54,6 @@ function setSessionCookies(
   setCsrfCookie(reply, csrfToken, ttlSeconds);
 }
 
-// Always-registered: returns needsSetup regardless of boot mode.
 // In headless boot all wizard step routes are absent (404), but this endpoint is always available
 // so the web client can rely on an explicit 200 rather than treating 404 as "not needed".
 export function registerSetupStatusRoute(
@@ -63,12 +61,9 @@ export function registerSetupStatusRoute(
   deps: Pick<SetupDeps, "userRepo" | "soulPath"> & { rateLimiter?: RateLimiter }
 ): void {
   const { userRepo, soulPath, rateLimiter } = deps;
-  // 30 req/min per IP — generous for a status poll, protects DB/FS on cold path.
   const preHandler = rateLimiter
     ? makeRateLimitHook(rateLimiter, (req) => `rl:setup:${req.ip}`, 30, 60_000)
     : undefined;
-  // Closure-scoped cache: once setup is confirmed complete, skip all I/O for the
-  // lifetime of this process. Resets naturally on restart (one cold check per boot).
   let done = false;
 
   app.get(
@@ -100,10 +95,6 @@ export function registerSetupStatusRoute(
       }
       const hasUsers = (await userRepo.count()) > 0;
       if (hasUsers) {
-        // Users exist but setupComplete missing from soul.yaml — soul.yaml was likely lost
-        // (e.g. volume loss after wizard completed). Treat as done; cache for this process
-        // lifetime but do NOT write setupComplete here: only POST /setup/complete owns that flag.
-        // On next restart a single DB query runs again, which is acceptable.
         done = true;
         return { needsSetup: false };
       }
@@ -112,13 +103,6 @@ export function registerSetupStatusRoute(
   );
 }
 
-// First-run setup wizard. Routes are only registered when NOT in headless
-// boot mode (isHeadlessBoot() === false, checked by caller in app.ts).
-//
-// Guard hierarchy:
-//   POST /admin   → open only while no users exist (requireSetupOpen)
-//   POST /business, /llm, /git → auth + admin + setupComplete=false (wizardStep)
-//   POST /complete → auth + admin
 export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void {
   const {
     userRepo,
@@ -189,9 +173,7 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
       if (pwErr) {
         return reply.code(400).send({ error: pwErr.message });
       }
-      // requireSetupOpen's count() check is a fast-path only. The setup_bootstrap unique index
       // closes the race without limiting later admins: one first-admin claim wins; the loser gets
-      // AdminAlreadyExistsError and no session (#172).
       let user: Awaited<ReturnType<typeof createUser>>;
       try {
         user = await createUser(userRepo, email, password, "admin", {
@@ -210,7 +192,6 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
     }
   );
 
-  // Step 2: record business name + description + website in soul.yaml.
   app.post(
     "/api/v1/setup/business",
     {
@@ -258,11 +239,7 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
     }
   );
 
-  // Step 3: store + live-validate the LLM API key.
-  // Saves key first, then probes with a minimal generateText call.
   // On credential error: removes key and returns 400 with a clear message.
-  // On transient error (network, rate-limit, 5xx): keeps the key and returns 204 with a warning
-  // so a bad network at setup time doesn't block the user.
   app.post(
     "/api/v1/setup/llm",
     {
@@ -300,7 +277,6 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
       if (!apiKey) return reply.code(400).send({ error: "apiKey is required" });
 
       // Codex's credential is a JSON file, not a token, and only a subscription-mode one works.
-      // Reject a malformed or API-key-mode blob here rather than storing it and letting the probe
       // fail thirty seconds later with a less specific message.
       if (provider === "codex") {
         try {
@@ -318,7 +294,6 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
         : `${provider}-api-key`;
       await secretsService.set(secretKey, apiKey);
 
-      // Live probe: validate the key is accepted by the provider.
       const probeModelId = PROBE_MODEL[provider] ?? "claude-haiku-4-5-20251001";
       try {
         const model = await createModel(
@@ -329,7 +304,6 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
         await generateText({ model, prompt: "ping" });
       } catch (err) {
         if (err instanceof LlmCredentialError) {
-          // Key is wrong — clean up and report the problem
           await secretsService.delete(secretKey).catch(() => {});
           return reply.code(400).send({ error: `API key is invalid: ${err.message}` });
         }
@@ -340,7 +314,6 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
           await secretsService.delete(secretKey).catch(() => {});
           return reply.code(400).send({ error: `Credential is invalid: ${err.message}` });
         }
-        // Transient (network, 5xx, rate-limit) — keep the key, let first chat surface any real issue
         app.log.warn({ err }, "LLM probe returned a transient error during setup; key kept");
       }
 
@@ -348,9 +321,7 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
     }
   );
 
-  // Step 4 (optional): configure soul git backup. Stores remote URL in soul.yaml (Soul Config)
   // and credentials as an encrypted Secret ("soul-git-credential"), then syncs immediately —
-  // clones/pulls the remote into the live GitSyncService instance, no restart required.
   app.post(
     "/api/v1/setup/git",
     {
@@ -414,9 +385,6 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
       },
     },
     async (req, reply) => {
-      // The LLM step is deliberately skippable (`optional: true` in the wizard) — a model provider
-      // can be configured later from Settings. Do not require `llm:` here: that would strand the
-      // documented "Skip for now" flow the wizard and installer smoke both rely on.
       await patchSoulConfig(soulPath, { setupComplete: true });
       await gitSync
         .commit("chore: complete first-run setup", commitActorFromRequest(req))

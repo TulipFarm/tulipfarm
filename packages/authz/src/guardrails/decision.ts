@@ -1,10 +1,4 @@
-/**
- * Guardrail decision contract (SPEC §12, §20, §24). Decisions are deterministic and carry only
- * safe reason evidence: a reason code, the deciding rule id, the failing dimension name, or a
- * data classification name. Context values (record ids, destinations, field contents, payloads,
- * Secrets) never appear in a decision, so denial evidence cannot reveal protected content
- * (SPEC §13 DLP, §20 audit reason codes).
- */
+/** Guardrail decisions expose only safe reason evidence, never payloads or Secrets. */
 
 export type GuardrailEffect = "allow" | "deny" | "require_approval";
 

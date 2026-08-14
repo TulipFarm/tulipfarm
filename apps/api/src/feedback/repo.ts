@@ -1,6 +1,5 @@
 import type { Queryable } from "../db";
 
-/** Up/down maps to +1/-1 in the `rating` smallint; the API speaks "up"/"down". */
 export type FeedbackRating = "up" | "down";
 
 export interface FeedbackRow {
@@ -10,15 +9,11 @@ export interface FeedbackRow {
 }
 
 export const ratingToInt = (r: FeedbackRating): number => (r === "up" ? 1 : -1);
-// The column is constrained to ±1; treat anything else as down rather than silently calling 0 "up".
 const intToRating = (n: number): FeedbackRating => (n === 1 ? "up" : "down");
 
 /**
- * Per-message thumbs up/down feedback (FB-V1). One current vote per (message, user): re-voting
- * upserts, un-voting deletes. `conversation_id` is derived from the message row inside `upsert`
- * (the `INSERT ... SELECT FROM messages`) so a vote on a missing message inserts nothing — the
- * route maps that to 404. The capture layer for a future self-improvement loop; no reads feed any
- * agent yet.
+ * Per-message thumbs up/down feedback (FB-V1). SELECT FROM messages`) so a vote on a missing
+ * message inserts nothing — the route maps that to 404.
  */
 export class FeedbackRepo {
   constructor(private readonly db: Queryable) {}
@@ -55,7 +50,6 @@ export class FeedbackRepo {
     ]);
   }
 
-  /** The caller's votes across a conversation, for rehydrating the transcript's thumb state. */
   async listByConversation(conversationId: string, userId: string): Promise<FeedbackRow[]> {
     const { rows } = await this.db.query(
       `SELECT message_id, rating, note FROM message_feedback

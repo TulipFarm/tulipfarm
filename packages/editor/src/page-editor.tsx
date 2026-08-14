@@ -7,12 +7,7 @@ import { type ReactNode, useEffect, useRef } from "react";
 import { buildContentExtensions } from "./extensions/build-extensions";
 import { SlashCommands } from "./slash/slash-menu";
 
-/*
- * Controlled markdown page editor. The value in/out is ALWAYS markdown — TipTap works in ProseMirror
- * JSON internally but loads via `contentType: "markdown"` and emits `editor.getMarkdown()` on change.
- * StarterKit's input rules give Notion-style shortcuts (`# `, `- `, `1. `, `> `, ```` ``` ````); `/`
- * opens the slash menu; a selection BubbleMenu covers inline marks. No save/route logic lives here.
- */
+/* Controlled editor: markdown is the boundary; ProseMirror JSON stays internal. */
 
 export interface PageEditorProps {
   /** Markdown body (the single source of truth). */

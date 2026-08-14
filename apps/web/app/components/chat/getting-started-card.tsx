@@ -1,14 +1,6 @@
 import { ArrowRight, Check, Circle, Lock, X } from "lucide-react";
 import type { OnboardingChecklist } from "~/lib/onboarding";
 
-/*
- * "Getting started" checklist card on the chat welcome (ONB-V1). Steps are the core build blocks
- * with status auto-derived server-side; `todo` steps and the "recommended next" items seed a guided
- * prompt through the built-in assistant flow the suggestion chips use (via `onPick`).
- * Routine/integration render as non-actionable "coming soon". Flat/hairline aesthetic,
- * no shadows; ruby is reserved for hover affordances only.
- */
-
 const chip =
   "flex min-h-11 w-full items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-sm text-muted-foreground transition hover:border-primary/60 hover:bg-accent hover:text-foreground active:translate-y-px";
 

@@ -1,30 +1,4 @@
-/**
- * Compiles authored `Guardrail` definitions into the rules this package's engine decides with
- * (SPEC §12, §13). The engine is a permit list — with no fully matching allow the answer is a
- * denial — so compilation may only ever *narrow*: an authored rule this compiler cannot express
- * exactly is refused with its id rather than dropped, because a dropped `deny` silently widens
- * the policy and a dropped ceiling silently removes one.
- *
- * What each authored rule becomes:
- *
- * - A scoped `allow` / `deny` becomes one `GuardrailRule` per authored combination of action,
- *   Resource type, Record id, data class, destination, and audience. The expansion is what keeps
- *   selector semantics identical to `AccessGrant` matching: a rule scoped to a dimension never
- *   matches a Context that omits it.
- * - A scoped `allow` that names data classes *also* becomes a DLP permit for those classes, since
- *   the destinations and audiences it lists are exactly the crossings the author permitted.
- * - An `approval` rule becomes a `require_approval` rule. Its approver count and separation of
- *   duties are the Approval gate's concern, not the engine's; leaving them out here is safe
- *   because `require_approval` is already stricter than the allow it replaces.
- * - A `dlp` rule with `action: block` becomes a `deny` — on its data classes, or on its protected
- *   fields. A `secret` detector needs no rule: `checkDlpBoundary` denies a flagged crossing before
- *   any rule is consulted. `action: requireApproval` becomes `require_approval` the same way.
- *
- * Refused outright: `scope.conditions` and `scope.expiresAt` (the engine evaluates neither
- * attributes nor time), every constraint but `maxRecords` (bytes, cost, time windows, network, and
- * execution environments are enforced where the work runs, not where it is decided), and
- * `action: redact` (the engine decides, it does not transform).
- */
+/** Compile Guardrails only when exact: unsupported scope, constraints, or redact are refused. */
 
 import type { GuardrailDefinition } from "@tulipfarm/schema";
 import type { GuardrailEffect } from "./decision";
@@ -171,11 +145,7 @@ function compileDlp(rule: Extract<AuthoredRule, { type: "dlp" }>): GuardrailRule
   return rules;
 }
 
-/**
- * Compiles every authored Guardrail into one policy. Rule order is the authored order across
- * definitions in the order given, which the engine's precedence (explicit deny first) makes
- * order-independent for the decision itself.
- */
+/** Compiles authored Guardrails in order; engine precedence makes final decisions stable. */
 export function compileGuardrailPolicy(
   definitions: readonly GuardrailDefinition[]
 ): GuardrailPolicy {

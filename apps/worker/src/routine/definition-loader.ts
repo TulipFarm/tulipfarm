@@ -26,12 +26,7 @@ export interface LoadedRoutineDefinition extends PinnedDefinition {
   readonly document: Readonly<routine.RoutineDefinition>;
 }
 
-/**
- * Maps a claimed Routine Run onto its exact signed Soul definition.
- *
- * This adapter deliberately has no active-publication or Git port. A Run that waited through a
- * newer publication resumes against the same digest, id, and authored version it started with.
- */
+/** Loads only the Run's exact signed Routine digest/id/version; never live Soul. */
 export class WorkerRoutineDefinitionLoader {
   constructor(private readonly definitions: ExactDefinitionReader) {}
 

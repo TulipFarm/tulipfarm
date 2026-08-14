@@ -1,14 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { Queryable } from "../db";
 
-/**
- * OIDC sign-in (SPEC §12). The provider itself is a port: TulipFarm holds no provider-specific
- * types, so an adapter can be swapped without touching the session, mapping, or route logic.
- *
- * The authorization request is stored server-side and consumed exactly once. State, nonce, and
- * the PKCE verifier never leave the server, so a captured callback URL cannot be replayed and a
- * code obtained for one browser cannot be redeemed in another (SPEC §24 replay/substitution).
- */
+/** OIDC requests are server-side, one-use, and keep state, nonce, and PKCE verifier off-browser. */
 
 export interface OidcClaims {
   /** Stable provider-scoped subject identifier. Never an email — emails are re-assignable. */
@@ -149,11 +142,7 @@ export class OidcDeniedError extends Error {
   }
 }
 
-/**
- * Completes the callback: consumes the stored request (one use), then exchanges the code with
- * the stored PKCE verifier and nonce. Provider failures surface as a single opaque reason so the
- * response never echoes provider error text back to the browser.
- */
+/** Consume the one-use request, then exchange with stored PKCE/nonce; echo no provider errors. */
 export async function completeOidcAuthorization(
   repo: OidcAuthRequestRepo,
   provider: OidcProvider,

@@ -1,18 +1,10 @@
 import { hasConnect, type Queryable } from "./db";
 import { PG_MIGRATIONS } from "./pg-migrations/index";
 
-/**
- * Advisory-lock key for the boot-time migration run. Arbitrary but *stable*: every replica must
- * name the same number or the lock excludes nobody.
- */
+/** Stable advisory-lock key shared by every replica. */
 export const MIGRATION_LOCK_KEY = 772_071_044;
 
-/**
- * ~5 minutes. Sized for the slowest thing a migration does — an ANN index build over a full
- * knowledge corpus (v45) — not for the fast DDL that most migrations are. A peer that exceeds even
- * this is reported as a timeout and the replica exits; its restart simply queues again, which is a
- * better failure than an indefinite silent boot hang.
- */
+/** Five-minute lock timeout covers slow ANN index builds without hiding deadlocks. */
 const DEFAULT_LOCK_ATTEMPTS = 300;
 const DEFAULT_LOCK_DELAY_MS = 1_000;
 
@@ -42,17 +34,7 @@ class MigrationFailedError extends Error {
   }
 }
 
-/**
- * On-boot Postgres migration runner: serialized, transactional, version-tracked, fail-loud.
- *
- * Takes a `Queryable` so the same code runs against `pg.Pool` (prod) and the PGlite test client.
- * `exit` and `log` are injectable for tests (see `env.ts`).
- *
- * The whole run happens on **one** connection under **one** advisory lock. Both matter:
- * `Pool.query` would otherwise spread the lock and the migrations across different connections
- * (making the lock decorative), and without the lock two replicas booting together would race
- * `CREATE TABLE IF NOT EXISTS` and apply the same migration twice.
- */
+/** Serialized, transactional, version-tracked migration runner. */
 export async function runPgMigrations(
   q: Queryable,
   exit: (code: number) => void = process.exit,
@@ -65,8 +47,7 @@ export async function runPgMigrations(
   try {
     await withMigrationLock(db, options, async () => {
       await ensureVersionTables(db);
-      // Read the version *after* taking the lock, never before: a replica that queued behind a
-      // peer must see the work that peer just finished, or it replays every migration itself.
+      // Read version after the lock, so queued replicas see completed peer work.
       const currentVersion = await readSchemaVersion(db);
       const pending = PG_MIGRATIONS.filter((m) => m.version > currentVersion).sort(
         (a, b) => a.version - b.version
@@ -118,9 +99,7 @@ async function withMigrationLock(
 }
 
 async function ensureVersionTables(db: Queryable): Promise<void> {
-  // Single-row table: the sentinel PK + CHECK make a second row impossible, so the version is
-  // unambiguous (not enforced by convention alone). `apps/worker` and `apps/integration-worker`
-  // gate startup on this shape — extend it, never change it.
+  // Single sentinel row keeps version unambiguous; worker apps depend on this shape.
   await db.query(
     `CREATE TABLE IF NOT EXISTS schema_version (
       id      boolean PRIMARY KEY DEFAULT true,
@@ -131,9 +110,7 @@ async function ensureVersionTables(db: Queryable): Promise<void> {
   await db.query(
     "INSERT INTO schema_version (id, version) VALUES (true, 0) ON CONFLICT (id) DO NOTHING"
   );
-  // The ledger answers "what ran, when, and how long" — which a single integer cannot. It is
-  // deliberately not a checksum of the migration source: the API is esbuild-bundled, so the same
-  // migration hashes differently under `tsx` and in the image, and every boot would cry drift.
+  // Ledger records observed runs, not source checksums that differ after bundling.
   await db.query(
     `CREATE TABLE IF NOT EXISTS schema_migrations (
       version     integer PRIMARY KEY,
@@ -142,8 +119,7 @@ async function ensureVersionTables(db: Queryable): Promise<void> {
       duration_ms integer
     )`
   );
-  // A database migrated before the ledger existed has nothing to show. Record one baseline row
-  // rather than inventing timestamps for migrations nobody observed.
+  // For pre-ledger databases, record one honest baseline row.
   await db.query(
     `INSERT INTO schema_migrations (version, description, duration_ms)
      SELECT version, 'pre-ledger baseline', NULL
@@ -168,9 +144,7 @@ async function applyMigration(
   log(`🚀 Running Postgres migration v${migration.version}: ${migration.description}`);
   const startedAt = Date.now();
 
-  // `CREATE INDEX CONCURRENTLY` cannot run inside a transaction, so such a migration trades
-  // atomicity away by declaring `concurrent`. A failure can leave an invalid index behind for an
-  // operator to drop — which is why the flag is opt-in and rare, not the default.
+  // Concurrent indexes trade atomicity away and can leave invalid indexes on failure.
   if (migration.concurrent) {
     try {
       await migration.up(db);
@@ -182,9 +156,7 @@ async function applyMigration(
     return;
   }
 
-  // The version bump and the ledger row commit *with* the DDL they describe. Without this a
-  // half-applied migration leaves objects behind at an unchanged version, and the next boot
-  // replays it onto them.
+  // Version and ledger row commit with their DDL, so failed migrations replay cleanly.
   await db.query("BEGIN");
   try {
     await migration.up(db);

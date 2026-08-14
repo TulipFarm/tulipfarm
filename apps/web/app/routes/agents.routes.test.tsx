@@ -7,12 +7,6 @@ import { ApiError } from "~/lib/api";
 import AgentsIndex, { ErrorBoundary as IndexErrorBoundary } from "./_app.agents._index";
 import AgentDetail, { ErrorBoundary as DetailErrorBoundary } from "./_app.agents.$name";
 
-/*
- * Agents route smoke tests. Same approach as resources.routes.test.tsx: mock the loader/error hooks
- * and render Component / ErrorBoundary directly (Link + useNavigate need router context, supplied by
- * createRemixStub).
- */
-
 vi.mock("@remix-run/react", async () => {
   const actual = await vi.importActual<typeof import("@remix-run/react")>("@remix-run/react");
   return {

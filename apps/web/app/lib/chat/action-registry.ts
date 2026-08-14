@@ -1,8 +1,7 @@
 /**
- * Client-side action registry + form prefill for agent→client actions (Tulip Surface Protocol P3, `invoke_action` /
- * `prefill_form`). A page registers named handlers (in an effect); the chat hook dispatches a
- * `client-action` to them. Prefill is generic — it sets fields by `name` / `data-name` on whatever
- * form the user has open, no registration required.
+ * Client-side action registry + form prefill for agent→client actions (Tulip Surface Protocol
+ * P3, `invoke_action` / `prefill_form`). A page registers named handlers (in an effect); the
+ * chat hook dispatches a `client-action` to them.
  */
 
 type ClientActionHandler = (payload: unknown) => void;
@@ -17,7 +16,6 @@ export function registerClientAction(name: string, handler: ClientActionHandler)
   };
 }
 
-/** Invoke a registered action by name. Returns false (no-op) if nothing is registered for it. */
 export function invokeClientAction(name: string, payload: unknown): boolean {
   const handler = registry.get(name);
   if (!handler) return false;
@@ -30,8 +28,6 @@ function cssEscape(value: string): string {
   return esc ? esc(value) : value.replace(/["\\]/g, "\\$&");
 }
 
-// Set a value on a (possibly React-controlled) input via the native setter + an input/change event,
-// so controlled components pick up the change.
 function setFieldValue(
   el: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement,
   value: unknown
@@ -53,7 +49,6 @@ function setFieldValue(
   el.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
-/** Set form fields (matched by `name` / `data-name`) to proposed values on the current page. */
 export function prefillForm(values: Record<string, unknown>): void {
   if (typeof document === "undefined") return;
   for (const [name, value] of Object.entries(values)) {

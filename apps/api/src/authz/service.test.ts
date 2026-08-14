@@ -1,11 +1,4 @@
-/**
- * Service-level cover for principal registration.
- *
- * The route schema already refuses `kind: "user"` through its enum, so a route test cannot tell a
- * working service guard from a missing one — it gets a `400` either way. These call the service
- * directly, so each refusal is proved where it is actually written. Both layers are wanted: the
- * schema keeps the request out, the service keeps the invariant true for any other caller.
- */
+/** Service-level principal-registration guards that route schemas cannot prove. */
 
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { InMemoryGroupRepo, InMemoryPrincipalRepo, InMemoryRoleRepo } from "@tulipfarm/storage";
@@ -74,12 +67,7 @@ describe("AuthzAdminService.registerPrincipal", () => {
   });
 });
 
-/**
- * `authority-layers.ts` fails the *whole* group layer closed when one group-held Role does not
- * apply to the member resolving it — so a single mismatched pairing strips that member of
- * everything the group grants, not just that Role. Neither write reported an error before this,
- * which meant an owner could empty a team's access and be told it worked.
- */
+/** One mismatched group Role fails the whole group layer closed, not just that Role. */
 describe("AuthzAdminService group role assignability", () => {
   let principals: InMemoryPrincipalRepo;
   let groups: InMemoryGroupRepo;

@@ -1,9 +1,4 @@
-/**
- * Turn completion (SPEC §10, §18). The Run finished; this writes the durable result the reader
- * will see. Completion is keyed by `(turnId, attempt)` so a redelivered job cannot post a second
- * assistant Message, and an attempt the user already superseded by retrying is dropped as stale
- * instead of overwriting the newer one.
- */
+/** Complete by `(turnId, attempt)`; redelivery is idempotent and stale attempts cannot win. */
 
 import type { ParticipantToolCall } from "@tulipfarm/schema";
 
@@ -16,14 +11,7 @@ export interface TurnCompletionRecord {
   readonly messageId: string | null;
 }
 
-/**
- * Which attempt of which Turn a write concerns.
- *
- * Both identifiers travel because they answer different questions. `turnId` names *what* is being
- * completed — completion is keyed by `(turnId, attempt)`. `runId` names the authority *under
- * which* it is completed, which is what a store that has to prove it may write at all needs: the
- * internal turn host takes the subject from the Run and refuses a Run no executor owns.
- */
+/** `turnId` keys completion; `runId` proves the authority allowed to complete it. */
 export interface TurnCompletionRef {
   readonly businessId: string;
   readonly runId: string;
@@ -81,13 +69,7 @@ export interface ConversationTurnCompleterOptions {
 export class ConversationTurnCompleter {
   constructor(private readonly options: ConversationTurnCompleterOptions) {}
 
-  /**
-   * Whether a newer attempt has already superseded this one.
-   *
-   * Exposed so a caller can ask **before** spending a model call or landing a Tool effect, rather
-   * than discovering it at completion time and throwing the work away. `complete` applies the same
-   * rule, so a caller that skips the question still cannot overwrite a newer answer.
-   */
+  /** Check before spending model/tool work; `complete` enforces the same stale-attempt rule. */
   isStale(input: Pick<CompleteTurnInput, "attempt" | "latestAttempt">): boolean {
     return input.latestAttempt !== undefined && input.latestAttempt > input.attempt;
   }

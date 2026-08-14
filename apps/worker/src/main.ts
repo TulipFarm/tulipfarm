@@ -75,29 +75,16 @@ import { RunStoreStateTransitions } from "./turn/kernel-ports";
 /** Consumer identity recorded on every outbox receipt this process writes. */
 const OUTBOX_CONSUMER = "worker.run-dispatch";
 
-/**
- * The Run source the Chat executor owns, persisted independently from its pinned Routine identity.
- * Slack and Telegram requests reach the same executor because the ingress path derives a chat
- * request from the envelope — the executor never learns which channel asked.
- */
+/** Chat source; channel-specific ingress derives a normal chat request before this executor. */
 const CHAT_RUN_SOURCE: RunSource = "chat";
 
-/**
- * The Run source an Integration delivery is minted under.
- *
- * Its executor classifies the stored envelope and then hands the Run to the very same chat
- * executor, so a Slack message and a web message are answered by one code path — the difference
- * between them ends at the classifier.
- */
+/** Integration deliveries classify first, then use the same chat executor. */
 const INTEGRATION_RUN_SOURCE: RunSource = "integration";
 
 /** Routine Runs execute only from their exact immutable bundle in this process. */
 const ROUTINE_RUN_SOURCE: RunSource = "routine";
 
-/**
- * Attached once the pool is up, since the sink writes through it. Until then — and whenever a write
- * fails — records still reach stdout, so capture is strictly additive to the output that came before.
- */
+/** Attached after the pool exists; stdout remains the fallback. */
 let logSink: BatchingLogSink | null = null;
 
 function captureError(message: string, error?: unknown): void {
@@ -113,8 +100,7 @@ function captureError(message: string, error?: unknown): void {
 
 const logger = {
   info: (message: string) => console.log(message),
-  // A guard that timed out or threw is skipped rather than allowed to stall the turn, so this is
-  // the only place it is ever heard about.
+  // Timed-out or thrown guards are skipped; this is their only report.
   warn: (obj: unknown, message?: string) =>
     message === undefined ? console.warn(obj) : console.warn(message, obj),
   error: (message: string, error?: unknown) => {
@@ -127,24 +113,11 @@ const logger = {
   warn: (obj: unknown, message?: string) => void;
 };
 
-/**
- * Composition root for the durable worker.
- *
- * Run dispatch, wait sweeping, and outbox delivery run side by side. A maintenance replica also
- * owns the pg-boss consumer loop. Each is independent: a failing loop backs off on its own without
- * stopping the others, because a stuck delivery target must not stop Runs from progressing.
- */
+/** Composition root; each loop backs off independently so one failure does not stop the others. */
 export async function main(): Promise<void> {
   loadEnv({ path: ".env.local" });
-  // The API mints the credential and the KEK on its first boot and persists them to the shared
-  // data volume; without this, a compose deployment that was never handed an `.env` cannot claim a
-  // single Run. Env always wins, so a managed deployment never reads the volume at all.
-  // Retried rather than read once: Turbo starts the API and this worker concurrently in `pnpm
-  // dev`, and the API needs a database round trip before the file is (re)written — most visibly
-  // right after `reset-dev.sh`, where the old file's credential no longer matches the wiped DB.
-  // `verify` closes a narrower gap than presence: a stale file from *before* the reset can already
-  // be non-empty on this process's very first read, satisfying the missing-keys check moments
-  // before the API overwrites it with the real value — so presence alone is not proof of validity.
+  // Env wins; otherwise retry data-volume reads because API and Worker boot concurrently.
+  // `verify` rejects stale pre-reset credentials that are present but no longer authenticate.
   const fromVolume = await waitForDataDirEnv({
     attempts: 15,
     delayMs: 1_000,
@@ -172,8 +145,7 @@ export async function main(): Promise<void> {
   const config: WorkerConfig = loadConfig();
   const pool = await connectPg(config.databaseUrl);
 
-  // Fail closed before a single Run is claimed: the API owns migrations, and a worker running
-  // ahead of them would write columns that do not exist yet.
+  // Fail closed before claiming Runs; API owns migrations.
   const schemaVersion = await waitForSchemaFloor(pool, REQUIRED_SCHEMA_VERSION, {
     attempts: 31,
     delayMs: 1_000,
@@ -184,15 +156,11 @@ export async function main(): Promise<void> {
     },
   });
 
-  // Deliberately not gated on REQUIRED_SCHEMA_VERSION. `log_event` arrives in migration 43, but a
-  // missing table only makes a flush fail into stderr — the records still reach stdout either way.
-  // Raising the floor for it would trade that graceful degradation for a refusal to boot, making
-  // telemetry load-bearing for work that does not depend on it.
+  // Telemetry is not load-bearing: missing log tables degrade to stdout, not boot failure.
   logSink = new BatchingLogSink({ service: "worker", writer: new PgLogWriter(pool) });
   logSink.start();
 
-  // `config.owner` is already `${hostname()}:${pid}` — the identity this replica claims Run leases
-  // under, so its samples key to the same instance an operator would see in a lease dispute.
+  // Match resource samples to the same owner used for Run leases.
   const resourceSampler = new ResourceSampler({
     service: "worker",
     instance: config.owner,
@@ -223,23 +191,16 @@ export async function main(): Promise<void> {
   const leases = new RunLeaseManager(runStore);
   const resume = new RunResumeGateway(runStore);
   const sweeper = new WaitTimerSweeper(waitStore, resume);
-  // Routine `wait` States open their timers here rather than over the internal API: nothing on the
-  // far side decides a timer, and the same sweeper above is what resolves it.
+  // Routine timers open here; the same sweeper resolves them.
   const waits = new DurableWaitManager(waitStore, resume);
 
-  // The turn host answers every question a turn has that this process cannot answer itself: which
-  // Turn a Run answers, the assembled Context, Tool dispatch, and the durable completion.
   const internalApi = new InternalApiClient({
     baseUrl: config.internalApiUrl,
     credential: config.internalApiCredential,
   });
   const turnHost = new HttpTurnHost(internalApi);
 
-  // The Soul's LLM configuration names providers and `api_key_ref`s; the credentials themselves are
-  // unwrapped here, against this worker's own database, so no key material crosses the API hop.
-  // `loadActiveDek`, never `loadOrProvision*`: the API mints keys, exactly as it owns migrations.
-  // Memoized: every consumer below (LLM keys, the GitHub installation-token provider) shares one
-  // instance rather than each re-running the DEK unwrap on its own first call.
+  // API mints keys; Worker only loads the active DEK and memoizes the secret service.
   let secretsService: Promise<SecretsService> | undefined;
   const secrets = async () =>
     (secretsService ??= (async () =>
@@ -255,17 +216,14 @@ export async function main(): Promise<void> {
   const executors = new RunExecutorRegistry();
   const deliveryTargets = new DeliveryTargetRegistry();
 
-  // Installation-scope-only for this phase (see routine/github-context.ts): the real narrowing is
-  // `GitHubAdapter`'s own installation-scope check, not a Soul-authored AccessGrant yet.
+  // Installation scope only; GitHubAdapter narrows until Soul-authored AccessGrants exist.
   const githubTooling = buildGitHubTooling({
     businessId: config.businessId,
     integrations: new IntegrationStore(transactions),
     secrets,
     log: logger,
   });
-  // The local container backend is a development convenience, never a production isolation
-  // boundary. Production leaves this undefined and published sandbox Tools fail closed on the
-  // normal `adapter_not_found` path until an attested remote backend is composed.
+  // Local sandbox images are dev-only; production fails closed until a remote backend is wired.
   const sandboxRuntimeImage =
     process.env.NODE_ENV === "production" ? undefined : process.env.SANDBOX_RUNTIME_IMAGE;
 
@@ -308,9 +266,7 @@ export async function main(): Promise<void> {
     INTEGRATION_RUN_SOURCE,
     createIntegrationExecutor({
       deliveries: new HttpDeliveryHost(internalApi),
-      // Spawned once and shared: the isolate is stateless between calls and its circuit breaker is
-      // per-Integration, so a classifier that keeps failing is disabled for that Integration rather
-      // than rediscovered from scratch on every delivery.
+      // Shared isolate; circuit breakers stay per Integration.
       hooks: createHookExecutor(),
       events: runEventStore,
       turn: chatExecutor,
@@ -328,15 +284,8 @@ export async function main(): Promise<void> {
       scheduler: new RoutineStateScheduler(runStore),
       transitions: new RunStoreStateTransitions(runStore),
       waits,
-      // Every Tool a Routine dispatches goes through the Broker: it authorizes against the Run's
-      // own pinned Guardrails and its own pinned ToolContracts' declared actions/resources
-      // (`BrokerRoutineToolPort.authorityFor` — the Routine's authority can never widen past what
-      // it declares wanting to call), reserves the effect in the ledger, and only then calls an
-      // adapter. GitHub is the only installed-Integration context with an owner in this process
-      // today; any other adapter ref still parks for reconciliation on `adapter_not_found` — there
-      // is no second path to an external effect here. No `authority` callback is passed: the
-      // bundle-derived layer above is this Run's only authority, and each adapter's own
-      // AccessGrant check narrows further still.
+      // Routine Tools must pass the Broker: pinned authority, ledger reservation, then adapter.
+      // No `authority` callback: the bundle layer is the Run's only authority.
       tools: new BrokerRoutineToolPort({
         effects: new PgEffectStore(transactions),
         adapters: githubTooling.adapters,
@@ -347,18 +296,11 @@ export async function main(): Promise<void> {
           }),
         credentials: githubTooling.credentials,
       }),
-      // An `approval` State parks on a durable wait registered by the API, in the same transaction
-      // as the approval a human will see. The resume token stays there; this process learns the
-      // wait's id, and later the decision.
+      // Approval resume tokens stay API-side; Worker gets only wait id and later decision.
       approvals: new HttpRoutineApprovalPort(internalApi),
-      // An `agent` State runs the same bounded loop a chat turn runs, against the Agent and
-      // ModelProfile the Run's own bundle names. It exposes no Tools: a Routine's effects belong to
-      // its `tool` States, where the Broker authorizes and the ledger reserves them.
+      // Routine Agent States use the pinned Agent/ModelProfile and expose no Tools.
       agents: new BundleRoutineAgentPort({
-        // The chain is already selected — against the Run's pinned bundle, by the port itself — so
-        // this only builds the providers to run it. Routing events and budgets are deliberately
-        // unset: the Routine port emits `model.routed` and opens the ModelProfile's Run budget
-        // itself, and wiring them here would double both.
+        // Chain, routing event, and budget are already selected/opened by the Routine port.
         model: ({ modelIds, routing }) =>
           new LlmModelPort({
             model: async () => ({
@@ -472,13 +414,11 @@ export async function main(): Promise<void> {
   const shutdown = async (reason: string): Promise<void> => {
     if (shuttingDown) return;
     shuttingDown = true;
-    // Readiness fails first so the orchestrator stops routing to this instance while it drains.
     serving = false;
     consumersReady = false;
     logger.info(`worker draining (${reason})`);
 
-    // Release the port immediately so a restart right after Ctrl+C doesn't hit EADDRINUSE
-    // while the (up to drainTimeoutMs) drain below is still running.
+    // Release the port before the drain so immediate restarts avoid EADDRINUSE.
     await new Promise<void>((resolve) => probeServer.close(() => resolve()));
 
     const outcome = await drain({
@@ -498,9 +438,7 @@ export async function main(): Promise<void> {
       );
     }
 
-    // Emitted above rather than after the drain below, because a timed-out drain means Runs were
-    // abandoned — the single record an operator most needs, and the one the sink could not capture
-    // if it were already stopped. Both calls precede pool.end(): the sink writes through that pool.
+    // Stop samplers before pool.end(); a timed-out drain must still be recorded.
     await resourceSampler.stop();
     await logSink?.stop();
     await pool.end();
@@ -515,10 +453,8 @@ export async function main(): Promise<void> {
   for (const signalName of ["SIGTERM", "SIGINT"] as const) {
     process.on(signalName, () => {
       shutdown(signalName).catch(async (error: unknown) => {
-        // A drain that cannot even run is an unsafe shutdown, and must not look like a clean one.
         logger.error("worker shutdown failed", error);
-        // Best-effort: if the pool is already closed this degrades to stderr, which still beats
-        // dropping the record that explains why the process died.
+        // Best effort: if the pool is closed, this degrades to stderr.
         await resourceSampler.stop();
         await logSink?.stop();
         process.exit(1);

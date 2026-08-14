@@ -16,12 +16,7 @@ import { sealPrincipalCredential } from "./principal-connect";
 import type { PrincipalProviderTokenRepo } from "./principal-tokens";
 import { mergeIntegrations } from "./routes";
 
-/*
- * Routes for the generic auth broker. There are exactly two, and neither names an Integration:
- * `POST /api/v1/integrations/:name/auth/start/:step` prepares a step, and every provider on every
- * Integration comes back to the single `GET /api/v1/integrations/auth/callback`. Adding an
- * Integration adds no route.
- */
+/* Generic auth routes: per-Integration start, one shared provider callback; no bespoke routes. */
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -30,27 +25,12 @@ export interface AuthRoutesDeps {
   gitSync: GitSyncService;
   secrets: SecretsService;
   repo: IntegrationAuthRequestRepo;
-  /** Bundled manifests take precedence, matching `routes.ts`'s merge. */
   bundled: ReadonlyMap<string, BundledIntegration>;
   endpoints: AuthEndpoints;
   fetchImpl?: typeof globalThis.fetch;
-  /**
-   * Post-connect wiring, shared with the connect route. Credentials that arrive through a provider
-   * redirect must trigger exactly the same setup as credentials an operator pasted — otherwise an
-   * OAuth-connected Slack would silently have no routing.
-   */
+  /** Provider redirects must trigger the same post-connect setup as pasted credentials. */
   onConnected?: (slug: string) => Promise<void>;
-  /**
-   * Where a *personal* provider credential is sealed (D7). `undefined` means this deployment cannot
-   * hold them, and a user-scoped connect is refused rather than falling back to the shared
-   * connection — a silent fallback would write one human's token where everyone spends it.
-   *
-   * Required rather than optional, and deliberately so: it was optional, every registration site
-   * omitted it, and the connect flow was therefore dead in production while `CredentialResolver`
-   * went on denying human calls with "connect it from Settings › Integrations" — a prompt pointing
-   * at a route that always answered 409. An omission that disables half of a two-sided protocol
-   * must be a compile error, not a default.
-   */
+  /** Personal credentials require a store; absence is a compile-time error, not shared fallback. */
   tokens: PrincipalProviderTokenRepo | undefined;
 }
 
@@ -103,9 +83,7 @@ export function registerIntegrationAuthRoutes(
           required: ["name", "step"],
           properties: { name: { type: "string" }, step: { type: "integer", minimum: 0 } },
         },
-        // Nullable because every business-scoped caller posts no body at all, and this route
-        // predates having one. Requiring an object here would break the default path to document
-        // the exception.
+        // Nullable preserves the pre-body business-scoped default path.
         body: {
           type: ["object", "null"],
           properties: {
@@ -138,23 +116,12 @@ export function registerIntegrationAuthRoutes(
       if (!manifest) return reply.code(404).send({ error: `integration not found: ${name}` });
 
       const scope = (req.body as { scope?: string } | undefined)?.scope ?? "business";
-      // The principal is taken from the authenticated request, never from the body: a caller must
-      // not be able to name whose credential a flow will mint.
+      // Credential owner comes from authenticated request, never the body.
       const caller = req.principal;
       if (caller === undefined) {
         return reply.code(401).send({ error: "unauthorized" });
       }
-      // The two scopes are not the same act and cannot share one guard.
-      //
-      // `user` is self-service: it mints a credential for the caller alone, bounded by whatever the
-      // provider already grants them, so authentication is the whole requirement — demanding an
-      // operator role here would make personal credentials unusable and push every Tool back onto
-      // the shared bot, which is exactly the attribution collapse this layer exists to end.
-      //
-      // `business` configures the deployment-wide credential every unattended Run and every
-      // service-mode Tool then spends. Any member completing it would be re-pointing the whole
-      // business's provider identity, so it takes the same fail-closed operator gate as the
-      // authorization admin API.
+      // User connect is self-service; business connect re-points deployment credentials.
       if (scope === "business" && (caller.kind !== "user" || caller.role !== "admin")) {
         return reply.code(403).send({ error: "forbidden" });
       }
@@ -176,9 +143,7 @@ export function registerIntegrationAuthRoutes(
             : {}),
         });
 
-        // A server-side step produced credentials rather than a browser instruction. Seal them the
-        // same way a provider callback's are, and answer with the action alone — the connection env
-        // is never part of a response body.
+        // Server-side env is sealed and never returned in the response body.
         if (action.action === "completed") {
           if (Object.keys(action.env).length > 0) {
             const { connectedNow } = await mergeConnectionEnv(deps, {
@@ -205,10 +170,7 @@ export function registerIntegrationAuthRoutes(
   app.get(
     "/api/v1/integrations/auth/callback",
     {
-      // No requireAuth, for the same reason as the GitHub install callback: the provider redirects
-      // the browser here as a cross-site top-level navigation, which never carries our
-      // SameSite=Strict session cookie. The one-use `state` consumed below is the authenticity
-      // check, and unlike a stateless signed token it also makes a replayed callback fail.
+      // Provider callbacks are unauthenticated; one-use state proves authenticity and replay.
       schema: {
         description:
           "Single provider callback for every integration auth flow: consumes the one-use state and stores what the step produced.",
@@ -230,9 +192,7 @@ export function registerIntegrationAuthRoutes(
         });
 
         const manifest = resolveManifest(outcome.slug);
-        // Two destinations, never both. A personal credential must not reach `connection.yaml` —
-        // that file is committed to the customer's soul git repo and is what every unattended
-        // caller spends, so merging one human's token there would publish it and share it at once.
+        // Personal credentials must never be merged into shared `connection.yaml`.
         if (outcome.principal !== undefined) {
           if (deps.tokens === undefined) {
             throw new AuthBrokerError(
@@ -261,9 +221,7 @@ export function registerIntegrationAuthRoutes(
         );
       } catch (err) {
         if (err instanceof AuthBrokerError) {
-          // The operator is mid-flow in a browser, so a failure belongs on an integration page with
-          // a reason, not as a raw JSON body they cannot act on. A failed state consume means we
-          // never learned the slug, so those land on the list.
+          // Browser failures redirect to an Integration page; unknown slugs land on the list.
           const slug = err.slug ?? "";
           return reply.redirect(
             `${deps.endpoints.webUrl}/integrations/${slug}?status=error&reason=${err.reason}`,

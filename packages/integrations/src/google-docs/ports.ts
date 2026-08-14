@@ -1,10 +1,4 @@
-/**
- * Provider-neutral Google Docs Knowledge boundary.
- *
- * Google Docs permissions are Drive permissions. Concrete adapters must include inherited
- * permissions in `getDocumentPermissions`; link-sharing (`anyone`) names no Tulip principal and is
- * intentionally not a wildcard grant in the sync.
- */
+/** Drive-backed ACLs must include inherited permissions; `anyone` is not a grant. */
 
 export interface GoogleDocsChange {
   readonly documentId: string;

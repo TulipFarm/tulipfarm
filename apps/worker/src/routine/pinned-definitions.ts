@@ -12,14 +12,7 @@ export interface WorkerSecretReader {
   get(key: string): Promise<string>;
 }
 
-/**
- * Lazily opens the exact signed bundle a Run pinned.
- *
- * Worker boot must not provision signing material and a replica with no Routine work should not
- * need it. The first Routine load therefore reads the API-provisioned public key, builds one
- * verifying loader, and reuses it. There is deliberately no private key, `set`, or
- * active-publication port here.
- */
+/** Lazily verify the exact signed bundle a Run pinned; no private key or publisher exists here. */
 export class WorkerPinnedDefinitionReader {
   private loader: Promise<PinnedDefinitionLoader> | undefined;
 

@@ -16,12 +16,8 @@ import { DEFAULT_MAX_SIMULATION_STEPS, SimulationError, simulateRoutine } from "
 import { forEachCase, intBetween } from "./support";
 
 /**
- * Reference model for simulation, replay, and crash recovery (SPEC §9.2, §23).
- *
- * The properties here are the ones a live system depends on: a simulation is a pure function of
- * its fixture, it never dispatches an effect or leases a Secret, it is bounded by construction,
- * replay is a simulation unless a caller explicitly proves live authority with a fresh identity,
- * and a crash at a durable write boundary never produces a second commit.
+ * Reference model: simulation is pure, bounded, has no live effects or Secret leases, live replay
+ * needs fresh authority, and write-boundary crashes never double-commit.
  */
 
 const IDENTITY_CEILING: IdentityCeiling = {
@@ -35,7 +31,6 @@ const BUSINESS_ID = "business-1";
 const RUN_ID = "00000000-0000-4000-8000-000000000001";
 const NOW = Date.UTC(2026, 6, 25, 12, 0, 0);
 
-/** A linear Routine of `length` Tool States — every State previews exactly one effect. */
 function compileChain(length: number) {
   const states: routineSchema.RoutineState[] = Array.from({ length }, (_, index) => ({
     type: "tool",

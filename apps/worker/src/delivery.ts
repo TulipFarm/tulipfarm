@@ -14,14 +14,7 @@ export class UnregisteredDeliveryTargetError extends Error {
   }
 }
 
-/**
- * Maps a claimed outbox message to the target that owns its topic.
- *
- * Empty at composition today: nothing writes `outbox_messages` yet, and the Integration delivery
- * targets arrive with the adapters in PR 6. Running the loop anyway is deliberate — it proves the
- * claim/complete/fail path end to end now, and an unmatched message quarantines after
- * `maxAttempts` with a named reason instead of being marked dispatched to nowhere.
- */
+/** Unmatched topics throw so the outbox loop quarantines them, never marks them delivered. */
 export class DeliveryTargetRegistry {
   private readonly targets = new Map<string, DeliveryTarget>();
 

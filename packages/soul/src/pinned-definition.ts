@@ -71,15 +71,7 @@ export function assertLiveAuthorityKind(kind: string): asserts kind is LiveArtif
   if (temporalClass !== "live") throw new LiveAuthorityTemporalClassError(kind, temporalClass);
 }
 
-/**
- * Git-free exact-definition reader for durable execution.
- *
- * A Run pins all five identity fields above. This loader accepts only a stored bundle whose
- * signature is valid and whose definition matches every pin; it never consults the active alias,
- * so publishing a newer bundle cannot change a Run that is already queued or waiting. That
- * immutability is only safe for behaviour: authority kinds are refused here because revocation must
- * be read live, never from a Run-pinned bundle.
- */
+/** Git-free exact-definition reader for durable execution; live kinds and unknown kinds are refused. */
 export class PinnedDefinitionLoader {
   constructor(
     private readonly bundles: Pick<BundleStore, "get">,

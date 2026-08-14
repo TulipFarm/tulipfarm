@@ -9,19 +9,8 @@ import { ambientTransactionPort, type Queryable } from "../db";
 import type { HostedRunReader } from "./turn-host";
 
 /**
- * The internal Routine-approval host — what a Routine Run calls back into when a State needs a
- * human (SPEC §7.2, §9.2).
- *
- * The Worker plans the wait, because the deadline, the approver roles, and the schema reference
- * are authored on the State and the kernel is where authored semantics live. It does not register
- * it: a wait's resume token is the capability to resume that Run once, and it must never leave the
- * process that will redeem it. So the Worker sends the plan, this host persists the approval and
- * the wait **in one transaction**, and the Worker learns only the wait's id.
- *
- * The same rule as every other internal host governs it: the caller states which Run, never as
- * whom. The Run must exist, be `running`, and have been minted as a Routine — a worker credential
- * cannot open an approval against a chat turn, and the businessId and Run the wait is registered
- * for are the route's, not the caller's.
+ * Routine approval host: persists approval and wait in one transaction.
+ * Resume tokens never leave the process that will redeem them; route identity names the Run.
  */
 
 export type RoutineApprovalDenial = "run_not_found" | "run_not_running" | "not_a_routine";
@@ -40,12 +29,7 @@ const ROUTINE_SOURCE = "routine";
 /** A Run may only be operated on while an executor holds it. */
 const OPERABLE_RUN_STATUS = "running";
 
-/**
- * What a human decided, as the Worker must read it.
- *
- * `expired` is nobody's decision — the deadline passed with no answer — and is deliberately not
- * folded into `denied`: a State's authored paths treat a rejection and an expiry differently.
- */
+/** `expired` is distinct from `denied`; authored State paths can handle them differently. */
 export type RoutineApprovalDecision = "pending" | "approved" | "denied" | "expired";
 
 export interface RoutineApprovalRecord {
@@ -59,14 +43,11 @@ export interface OpenRoutineApprovalInput {
   readonly stateKey: string;
   /** Authored State name, for the reader deciding it. */
   readonly stateName: string;
-  /**
-   * The wait exactly as the kernel planned it, including its deterministic id. Which business and
-   * which Run it belongs to are the route's to state, never the caller's.
-   */
+  /** Kernel-planned wait, including deterministic id; route owns business and Run identity. */
   readonly wait: Omit<RegisterWaitInput, "businessId" | "runId">;
 }
 
-/** Payload stored on a `routine_state` approval row; read by the approvals list and the decision. */
+/** Payload stored on a `routine_state` approval row for list and decision reads. */
 export interface RoutineApprovalPayload {
   readonly runId: string;
   readonly stateKey: string;
@@ -116,13 +97,7 @@ export class InternalRoutineApprovalHost {
     this.approvals = new ApprovalsRepo(options.db);
   }
 
-  /**
-   * Opens the approval a Routine State parks on, or returns the one it is already parked on.
-   *
-   * Idempotent by State occurrence, which is what makes a replayed park safe: the Worker derives
-   * the wait id from `(runId, stateKey)`, so a worker that died between opening the approval and
-   * parking the State finds its own approval here instead of asking a second human.
-   */
+  /** Idempotent by State occurrence, so replayed parks find their existing approval. */
   async open(
     businessId: string,
     runId: string,

@@ -10,14 +10,11 @@ import { listResourceTypes } from "~/lib/api";
 import { listAllPages, listSpacePages } from "~/lib/knowledge-api";
 
 /*
- * Builds the `@` (pages/agents/resources) + `#` (tags) editor extensions for the wiki page editor,
- * wired to a host data source. Lists are fetched once on mount into refs (not state) so the editor's
- * extensions never need to rebuild — the suggestion plugins read the latest ref on every keystroke
- * (mirrors the chat composer's `use-mention-data`). Same-space pages encode as a space-root `.md`
- * link; cross-space pages as `tf:page/<name>/<path>`; agents/resources as `tf:agent|resource/<id>`.
+ * Lists are fetched once on mount into refs (not state) so the editor's extensions never need
+ * to rebuild — the suggestion plugins read the latest ref on every keystroke (mirrors the chat
+ * composer's `use-mention-data`).
  */
 
-// Platform/forge agents are internal infrastructure — never surface them in the author's @-menu.
 const INTERNAL_AGENTS = new Set<string>();
 
 export function useWikiMentionExtensions(spaceId: string): AnyExtension[] {
@@ -70,8 +67,6 @@ export function useWikiMentionExtensions(spaceId: string): AnyExtension[] {
     };
   }, [spaceId]);
 
-  // Built once: the data source closes over the refs, so the extensions are stable for the editor's
-  // lifetime (rebuilding them would recreate the editor and drop content).
   return useMemo<AnyExtension[]>(() => {
     const source: MentionDataSource = {
       getPages: () => pages.current,

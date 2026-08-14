@@ -1,22 +1,13 @@
 import type { SoulLoader } from "@tulipfarm/soul";
 import { listAgents } from "./agents/registry";
 
-/**
- * One soul artifact projected to its L1 surface — `name` + `description` — for the
- * `<soul-context>` repo catalogue. Full bodies / schemas stay L2,
- * pulled on demand via `agent_get` / `load_skill` / `resource_type_schema`.
- */
+/** L1 projection for one Soul artifact. */
 export interface SoulCatalogueEntry {
   name: string;
   description: string;
 }
 
-/**
- * The repo catalogue for `<soul-context>`: every soul artifact type the loader exposes, each
- * projected to its L1 surface. Gives an agent ambient awareness of what already exists without a
- * tool round-trip (e.g. the built-in assistant can reference an existing agent or resource
- * type by name). Sorted by name within each section for a byte-stable prompt prefix.
- */
+/** L1 Soul catalog used by `<soul-context>`. */
 export interface SoulCatalogue {
   agents: SoulCatalogueEntry[];
   skills: SoulCatalogueEntry[];
@@ -30,8 +21,7 @@ function asDesc(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-/** A map's values as an array, tolerating an absent map — a missing artifact section degrades to
- * an empty catalogue section rather than throwing (the soul-context block is ambient, not critical). */
+/** Missing artifact sections degrade to empty catalogue arrays. */
 function values<T>(map: Map<string, T> | undefined): T[] {
   return map ? Array.from(map.values()) : [];
 }
@@ -40,14 +30,7 @@ function byName(a: SoulCatalogueEntry, b: SoulCatalogueEntry): number {
   return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
 }
 
-/**
- * Project every soul artifact to the `<soul-context>` L1 catalogue. Agents come from `listAgents`
- * (the built-in platform assistant first, then Soul agents) so the catalogue surfaces agents an
- * agent may hand off to. Skills are the full set (eager + lazy) minus
- * pending-audit; descriptions are read from each type's own metadata (frontmatter / schema /
- * config), falling back through `title` and then "". An absent loader yields all
- * empty sections, so the block is omitted entirely.
- */
+/** Projects all Soul artifact types to the `<soul-context>` L1 catalog. */
 export function buildSoulCatalogue(soulLoader: SoulLoader | undefined): SoulCatalogue {
   const agents = listAgents(soulLoader)
     .map((a) => ({ name: a.name, description: asDesc(a.frontmatter.description) }))

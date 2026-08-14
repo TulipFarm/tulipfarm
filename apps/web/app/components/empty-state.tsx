@@ -1,11 +1,5 @@
 import type { ReactNode } from "react";
 
-/*
- * Shared empty state for shell section pages: a quiet section eyebrow on a hairline-bordered card,
- * then the title + hint that communicate emptiness, plus an optional action slot. Depth comes from
- * the border + card surface (no shadow). The public API (section/title/hint/children) is unchanged
- * so section routes need no edits.
- */
 export function EmptyState({
   section,
   title,

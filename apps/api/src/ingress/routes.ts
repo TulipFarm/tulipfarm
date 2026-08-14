@@ -6,11 +6,9 @@ import type { IngressDeliveriesRepo } from "./repo";
 import { verifyWebhookRequest } from "./signature";
 import { dotPath, matchesBody, renderBodyTemplate } from "./template";
 
-/** One verified delivery handed to the persist-first invocation gateway. */
 export interface IngressJobPayload {
   slug: string;
   body: Record<string, unknown>;
-  /** Manifest-declared context_headers, lowercased — forwarded into the classifier's ctx. */
   headers?: Record<string, string>;
 }
 
@@ -22,17 +20,17 @@ export interface IngressRoutesDeps {
   resolveSecret?: (value: string) => Promise<string | undefined>;
 }
 
-/** Constant 404 body: never reveal whether the integration exists / is connected / declares ingress. */
+/** Constant 404 body: never reveal integration existence, connection, or ingress support. */
 const NOT_FOUND = { error: "integration ingress not found" };
 
 /**
- * Generic integration ingress hook — NO session auth, NO CSRF (mirrors the routines webhook
- * seam), and NO provider-specific code: verification, handshake, accept filtering, and dedup
- * are all driven by the integration manifest's declarative `ingress.webhook` block. Registered
- * in its own Fastify plugin scope so the JSON content-type parser can capture the raw body
- * (`parseAs: "buffer"`) for HMAC verification without affecting any other route. Does only
- * cheap synchronous work (verify → handshake → dedup → persist) and acks inside the provider's
- * acknowledgement window; all real processing is claimed from the durable Run store.
+ * Generic integration ingress hook — NO session auth, NO CSRF (mirrors the routines webhook seam),
+ * and NO provider-specific code: verification, handshake, accept filtering, and dedup are all
+ * driven by the integration manifest's declarative `ingress.webhook` block. Registered in its own
+ * Fastify plugin scope so the JSON content-type parser can capture the raw body (`parseAs:
+ * "buffer"`) for HMAC verification without affecting any other route. Does only cheap synchronous
+ * work (verify → handshake → dedup → persist) and acks inside the provider's acknowledgement
+ * window; all real processing is claimed from the durable Run store.
  */
 export async function registerIngressRoutes(
   app: FastifyInstance,
@@ -59,7 +57,6 @@ export async function registerIngressRoutes(
             properties: { name: { type: "string", minLength: 1 } },
           },
           response: {
-            // Handshake responses are manifest-templated (arbitrary keys) — don't strip them.
             200: { type: "object", additionalProperties: true },
             401: ErrorSchema,
             404: ErrorSchema,
@@ -72,8 +69,6 @@ export async function registerIngressRoutes(
         if (!integration) return reply.code(404).send(NOT_FOUND);
 
         const ingress = integration.manifest.ingress;
-        // Ingress requires the full declarative surface: a webhook block AND a loaded handler
-        // module (a declared-but-missing handler file already warned at soul load).
         if (!ingress?.webhook || !ingress.handler || !integration.ingressHandler) {
           return reply.code(404).send(NOT_FOUND);
         }
@@ -83,7 +78,6 @@ export async function registerIngressRoutes(
         const security = ingress.webhook.security;
         if (security?.type !== "hmac_sha256" && security?.type !== "shared_secret") {
           // V1 posture matches the routines webhook: never open. An ingress block without a
-          // recognised security scheme is a manifest bug, not a reason to accept unsigned traffic.
           return reply.code(401).send({ error: "webhook security not configured" });
         }
         let secret = connection.env?.[security.secret_env];
@@ -106,8 +100,6 @@ export async function registerIngressRoutes(
           return reply.code(401).send({ error: "invalid payload" });
         }
 
-        // Provider URL-verification handshake (e.g. Slack's url_verification) — signed like
-        // any other request; the response body is templated from the payload.
         const handshake = ingress.webhook.handshake;
         if (handshake && matchesBody(body, handshake.match)) {
           const respond: Record<string, string> = {};
@@ -117,11 +109,9 @@ export async function registerIngressRoutes(
           return reply.code(200).send(respond);
         }
 
-        // Hot-path accept filter: non-matching deliveries are acked and dropped.
         if (!matchesBody(body, ingress.webhook.accept)) return reply.code(200).send({});
 
         // Provider-retry dedup: a declared header (e.g. X-GitHub-Delivery) wins over the body
-        // dot-path; first delivery wins.
         const dedupValue = ingress.webhook.dedup_header
           ? headerValue(req.headers, ingress.webhook.dedup_header)
           : ingress.webhook.dedup_key
@@ -132,8 +122,6 @@ export async function registerIngressRoutes(
           if (!first) return reply.code(200).send({});
         }
 
-        // Forward the manifest-declared context headers (lowercased) — some providers put the
-        // event name there (X-GitHub-Event) rather than in the body.
         let headers: Record<string, string> | undefined;
         if (ingress.webhook.context_headers?.length) {
           headers = {};

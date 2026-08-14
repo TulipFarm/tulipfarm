@@ -34,7 +34,6 @@ function accessControlFromRow(row: KnowledgeSourceRow): KnowledgeAccessControl {
   if (row.access_control_mode === "snapshot") {
     return {
       mode: "snapshot",
-      // Snapshot mode always carries an aclRevision (enforced on write); empty string only if the
       // column is unexpectedly null, which keeps the shape well-typed rather than throwing here.
       aclRevision: row.acl_revision ?? "",
       maximumAgeSeconds: row.access_control_max_age_seconds,
@@ -79,11 +78,6 @@ function rowToRecord(row: KnowledgeSourceRow): KnowledgeSourceRecord {
   };
 }
 
-/**
- * Postgres storage for `KnowledgeSourceRecord` (`knowledge_source_records`). `retrieve()` reads
- * through `list`/`get` to build its authorized set before any candidate is ranked — this store
- * has no filtering of its own, `acl.ts` owns that decision.
- */
 export class PgKnowledgeSourceStore implements MutableKnowledgeSourceStore {
   constructor(private readonly q: Queryable) {}
 

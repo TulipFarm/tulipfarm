@@ -30,16 +30,11 @@ export function resumeTokenHashEquals(left: string, right: string): boolean {
   return timingSafeEqual(leftBytes, rightBytes);
 }
 
-/** Narrow surface `RunResumeGateway` needs; `@tulipfarm/storage`'s `RunStore` satisfies it. */
 export interface RunResumeStore {
   requeueWaitingRun(businessId: string, runId: string): Promise<boolean>;
 }
 
-/**
- * Moves a Run out of `waiting` once its durable wait resolved. The transition is validated
- * against the canonical state machine and applied under a status guard, so duplicate delivery,
- * a concurrent worker, or a restart requeues the Run exactly once.
- */
+/** Resolved waits requeue under canonical transition and status guards, exactly once. */
 export class RunResumeGateway {
   constructor(private readonly store: RunResumeStore) {}
 

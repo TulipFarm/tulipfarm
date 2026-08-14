@@ -2,15 +2,7 @@
 
 import { useEffect, useRef } from "react";
 
-/**
- * A living ASCII tulip field, drawn on canvas in JetBrains Mono.
- *
- * Two planting rows (a dim back row on the horizon, a brighter front row) sway
- * on a travelling sine gust; tulips near the pointer bend away from it. Ruby is
- * rationed to a handful of front-row heads (DESIGN.md ruby discipline). Colors
- * are resolved from the fumadocs tokens so light/dark both read correctly, and
- * `prefers-reduced-motion` renders a single still frame instead of animating.
- */
+/** Canvas ASCII tulip field; ruby stays sparse and reduced motion renders one frame. */
 
 type Tulip = {
   x: number;

@@ -1,11 +1,7 @@
 import type { RoutineDefinition } from "@tulipfarm/schema";
 import { API_BASE, apiGet, apiWrite } from "./api";
 
-/*
- * Client for the routines API (v0.11). Mirrors lib/agents.ts conventions (cookie-first
- * auth, ApiError on non-2xx). Live run progress streams from the run SSE endpoint —
- * `runEventsUrl` builds the EventSource URL (cookies ride along via withCredentials).
- */
+/* Cookie-first routines client; EventSource uses cookies via `withCredentials`. */
 
 export type RoutineTrigger = {
   slug: string;

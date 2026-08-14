@@ -1,4 +1,3 @@
-/** SPEC §9.1 target-concurrency policies over a deterministic target key. */
 export const CONCURRENCY_POLICIES = [
   "parallel",
   "serialize",
@@ -15,7 +14,6 @@ export type ConcurrencySlotStatus = "held" | "queued" | "superseded";
 export interface ConcurrencySlot {
   readonly runId: string;
   readonly status: ConcurrencySlotStatus;
-  /** Monotonic arrival order for the target key; decides FIFO promotion and tie-breaks. */
   readonly sequence: number;
 }
 
@@ -48,12 +46,9 @@ export interface AdmissionDecision {
   readonly outcome: AdmissionOutcome;
   readonly targetKey: string;
   readonly runId: string;
-  /** Runs holding the key when this admission was decided. */
   readonly holders: readonly string[];
   readonly supersededRunIds: readonly string[];
-  /** 1-based place in the queue, or `null` when this admission did not queue. */
   readonly queuePosition: number | null;
-  /** Set only when the request coalesced onto existing work. */
   readonly coalescedWithRunId?: string;
   readonly rejectionReason?: AdmissionRejectionReason;
 }
@@ -67,7 +62,6 @@ export interface ReleaseSlotInput {
 
 export interface ReleaseSlotResult {
   readonly released: boolean;
-  /** The queued Run promoted into the freed slot, if any. */
   readonly promotedRunId: string | null;
 }
 
@@ -86,9 +80,7 @@ export class ConcurrencyError extends Error {
 }
 
 /**
- * Narrow surface `TargetConcurrencyManager` needs; `@tulipfarm/storage`'s `ConcurrencyStore`
- * satisfies it. `decide` runs inside the target key's row lock and sees only the live slots this
- * admission contends with — never the admitting Run's own slot.
+ * `decide` runs under the target row lock and excludes the admitting Run's own slot.
  */
 export interface RunConcurrencyStore {
   admit(
@@ -123,9 +115,7 @@ function effectiveConcurrency(request: AdmissionRequest): number {
 }
 
 /**
- * Pure admission decision for one target key (SPEC §9.1). Evaluated under the key's row lock, so
- * the slots it sees are the authoritative contenders. A Run that already holds or occupies its
- * slot keeps it, which makes a retried admission idempotent.
+ * Admission is decided under the target lock; a Run that already has its slot keeps it.
  */
 export function decideAdmission(
   request: AdmissionRequest,
@@ -185,11 +175,7 @@ function assertPolicy(request: AdmissionRequest): void {
 }
 
 /**
- * Target-concurrency Guardrail for durable Runs (SPEC §9.1). Every admission is decided and
- * persisted under the target key's lock, so `serialize`, `queue`, `coalesce`, `reject`, and
- * `supersede` hold across workers, restarts, and duplicate delivery. The policy bounds are
- * validated up front: a caller cannot widen `serialize` or attach a queue to a non-queueing
- * policy.
+ * Target concurrency decisions persist under the target lock; invalid policy widening is denied.
  */
 export class TargetConcurrencyManager {
   constructor(private readonly store: RunConcurrencyStore) {}
@@ -236,7 +222,6 @@ export class TargetConcurrencyManager {
     }
   }
 
-  /** Frees a held slot and promotes the earliest queued contender. */
   async release(input: ReleaseSlotInput): Promise<ReleaseSlotResult> {
     return this.store.release(input.businessId, input.targetKey, input.runId, input.now);
   }

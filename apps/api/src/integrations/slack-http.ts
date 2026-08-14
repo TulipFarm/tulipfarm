@@ -4,13 +4,7 @@ import type {
   IntegrationHttpResponse,
 } from "@tulipfarm/integrations";
 
-/**
- * Slack Web API transport for this app: the `send_slack_message` chat Tool's adapter dispatch
- * (`tools/slack/tools.ts`). A deliberate local copy of `apps/integration-worker/src/slack/http.ts`
- * — an application may not import another application (`apps/integration-worker/AGENTS.md`). Kept
- * intentionally tiny: no pagination, no retry, mirrors just enough of `SlackWebApiHttp` to satisfy
- * `IntegrationHttpPort`.
- */
+/** Local Slack Web API port copy; apps may not import each other. */
 
 export const SLACK_API_BASE_URL = "https://slack.com/api";
 

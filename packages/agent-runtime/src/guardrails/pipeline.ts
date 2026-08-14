@@ -16,14 +16,7 @@ export type FailMode = "open" | "closed";
 
 export interface Guard<T> {
   name: string;
-  /**
-   * How the pipeline treats a timeout or thrown error from this guard.
-   *
-   * - `"open"` (default): skip the guard (treat as `pass`) — availability wins.
-   * - `"closed"`: treat the failure as a `block` — safety wins. Use for
-   *   critical guards (prompt injection, PII filters) where a missed check
-   *   is worse than a stalled turn.
-   */
+  /** Guard failure mode: fail open for availability, fail closed for critical safety. */
   failMode?: FailMode;
   run(input: T, ctx: GuardContext): Promise<Verdict<T>> | Verdict<T>;
 }
@@ -38,14 +31,7 @@ interface StageLogger {
 
 const TIMEOUT = Symbol("guard-timeout");
 
-/**
- * Runs guards in array order over a single stage.
- *
- * Each guard runs under a {@link GUARD_TIMEOUT_MS} timeout. On timeout or a
- * thrown error the guard is skipped (treated as `pass`) and a warning is logged
- * so a slow or buggy guard can never crash or stall the turn. A `transform`
- * verdict feeds its value into the next guard; the first `block` short-circuits.
- */
+/** Runs guards in order with timeout; transform feeds the next guard, block short-circuits. */
 export async function runStage<T>(
   guards: Guard<T>[],
   input: T,

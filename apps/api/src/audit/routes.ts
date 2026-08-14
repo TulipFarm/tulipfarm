@@ -1,16 +1,4 @@
-/**
- * Admin-only read API for the audit ledger.
- *
- * Before this, `audit_events` had no reader at all — and the panel labelled "Audit" in the
- * operations console is fed by the *activity feed*, a separate, non-chained store. So the one
- * surface an operator would go to for "who changed this" showed data that had never been through
- * the ledger. These two endpoints are the ledger's actual reader.
- *
- * Admin-only because audit events name principals and carry `safeMetadata` evidence. The audit
- * package already refuses to store protected values, so this exposes nothing a member could not
- * infer — but "who did what, when" is an operator concern, and the gate matches every other
- * operational surface. Registered in `identity/roles.ts:ADMIN_ONLY_SURFACES`.
- */
+/** Admin-only audit ledger reader; events can name principals and safeMetadata evidence. */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";

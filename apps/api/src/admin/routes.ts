@@ -63,15 +63,7 @@ export interface OperationsReadModel {
   readonly incidents: readonly Record<string, unknown>[];
   readonly quarantine: readonly Record<string, unknown>[];
   readonly killSwitches: readonly Record<string, unknown>[];
-  /**
-   * Recent *activity-feed* entries — not audit-ledger events.
-   *
-   * Named `activity` deliberately: this field used to be called `audit` and rendered under an
-   * "Audit" heading, while being populated from `ActivityService`, a cosmetic UI feed with no
-   * hash chain, no reason codes and no append-only guarantee. An operator asking "who repointed
-   * the Soul git remote" would read it and get an answer that had never been through the ledger.
-   * The real ledger is `audit_events`, exposed at `GET /api/v1/audit/events`.
-   */
+  /** Activity feed entries, not audit-ledger events; the ledger is `/api/v1/audit/events`. */
   readonly activity: readonly Record<string, unknown>[];
   readonly recovery: {
     readonly supportBundleAvailable: boolean;
@@ -198,11 +190,7 @@ export interface OperationalApiDeps {
   ): Promise<{ commandId: string; status: "accepted" | "duplicate" }>;
 }
 
-/**
- * Raised by an `OperationalApiDeps` implementation for a command this deployment cannot carry out
- * yet, so the route answers `501 not_implemented` with the reason instead of a `500` that reads
- * like a bug. Authorization is unaffected — the caller has the authority, the capability is absent.
- */
+/** Missing deployment capability; route returns 501 instead of masking it as auth failure. */
 export class OperationalNotImplementedError extends Error {
   readonly name = "OperationalNotImplementedError";
 
@@ -221,12 +209,7 @@ const idParams = {
   required: ["id"],
   properties: { id: { type: "string", minLength: 1 } },
 } as const;
-/*
- * Two shapes reach the client under these status codes. The route's own failures use the versioned
- * envelope below. The shared auth and CSRF preHandlers reject before the handler runs and send a
- * plain `{ error: "reason" }`, which is the API-wide contract — the schema must accept it too, or
- * the response serializer turns an ordinary 403 into a 500.
- */
+/* Accepts both route error envelopes and shared auth/CSRF `{ error: string }` replies. */
 const errorSchema = {
   type: "object",
   additionalProperties: false,

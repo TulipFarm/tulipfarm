@@ -23,11 +23,7 @@ declare module "fastify" {
 
 export const SESSION_COOKIE = "tf_sid";
 
-/**
- * Why a credential was rejected. Recorded as audit evidence on the server; the client always
- * sees the same opaque 401, so probing cannot distinguish "unknown" from "disabled" from
- * "expired" (SPEC §24 non-amplification).
- */
+/** Clients always receive the same opaque 401; audit records the rejection reason. */
 export type AuthDenialReason =
   | "no_credential"
   | "unknown_session"
@@ -49,14 +45,7 @@ function denialFromPrincipalError(error: unknown): AuthDenialReason | null {
   return error.reason === "disabled" ? "principal_disabled" : "principal_expired";
 }
 
-/**
- * Resolves the credential on a request to a typed principal (`req.principal`), in this order:
- * session cookie, API client secret, user API token. Every path enforces principal status, so a
- * disabled identity fails on its next request rather than when its session happens to lapse.
- *
- * `req.user` remains set for user principals — existing routes read it — but new code should
- * read `req.principal`, which also covers service identities.
- */
+/** Resolves credentials cookie, API-client, then user-token; every path enforces status. */
 export function makeRequireAuth(deps: RequireAuthDeps) {
   const { store, userRepo, tokenRepo, apiClientRepo } = deps;
 

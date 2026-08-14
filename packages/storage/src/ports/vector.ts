@@ -1,11 +1,4 @@
-/**
- * Provider-neutral vector-search port.
- *
- * Capability id `vector` (optional accelerator — see `@tulipfarm/observability`
- * capability catalog). pgvector is one adapter; correctness and ACLs never depend
- * on it (invariant 16). Knowledge authorization happens before this port is
- * queried, so a vector result is never an authorization decision.
- */
+/** Optional vector-search accelerator; never an authorization or correctness boundary. */
 
 export type VectorMetadata = Readonly<Record<string, string | number | boolean>>;
 

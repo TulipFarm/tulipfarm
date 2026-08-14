@@ -5,19 +5,7 @@ import { AuthBrokerError } from "./auth-broker";
 import type { PrincipalProviderTokenRepo } from "./principal-tokens";
 import { principalSecretKey } from "./principal-tokens";
 
-/**
- * Landing a user-scoped connect (D7).
- *
- * The auth broker produces the same `env` map whether the flow was run for the deployment or for
- * one person; what differs is where it may be written. A personal credential must **never** reach
- * `connection.yaml`: that file is committed and pushed to the customer's own soul git repo, and it
- * is the credential every unattended caller spends. Writing one human's token there would both
- * publish it and hand it to everybody.
- *
- * So the split is enforced here rather than left to the caller's discipline: this module is the
- * only writer of `principal_provider_tokens`, and the callback route routes to exactly one of the
- * two destinations based on whether the consumed request named a principal.
- */
+/** User-scoped credentials must never reach committed `connection.yaml`. */
 
 /** The narrow slice of `SecretsService` sealing needs — no reads, so a leak has nowhere to go. */
 export interface PrincipalSecretStore {
@@ -37,13 +25,7 @@ function parseExpiry(value: string | undefined): Date | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-/**
- * Seals one principal's provider credential and records the row pointing at it.
- *
- * Refuses an outcome that names a principal but carries no OAuth2 step. `startAuthStep` already
- * refuses to issue such a state, so reaching here means the request row was tampered with or a new
- * step kind was added without revisiting this decision — neither is a case to guess through.
- */
+/** Refuse principal outcomes without an OAuth2 step. */
 export async function sealPrincipalCredential(
   input: SealPrincipalCredentialInput
 ): Promise<{ readonly provider: string; readonly scopes: readonly string[] }> {

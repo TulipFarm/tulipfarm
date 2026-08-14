@@ -12,17 +12,9 @@ export interface BundledIntegration {
   setupGuide?: string;
   /** Parsed OpenAPI document (present when manifest.egress.spec is declared and readable). */
   egressSpec?: unknown;
-  /**
-   * The same document verbatim, plus the filename the manifest names it by. Installing a bundled
-   * integration copies this into the operator's soul repo; without it the installed manifest would
-   * point at a spec that isn't there.
-   */
+  /** Bundled install copies the egress spec the manifest names. */
   egressSpecFile?: { file: string; raw: string };
-  /**
-   * The sandboxed ingress classifier named by `manifest.ingress.handler`, verbatim. Carried for
-   * the same reason as the egress spec: the Soul loader treats a declared-but-missing handler as
-   * fatal, so installing a bundled channel must copy it alongside the manifest.
-   */
+  /** Bundled install copies the ingress handler the manifest names. */
   ingressHandlerFile?: { file: string; raw: string };
 }
 
@@ -39,11 +31,7 @@ function isNotFound(error: unknown): boolean {
   );
 }
 
-/**
- * Reads the OpenAPI document an `egress: { type: "openapi" }` manifest names. Mirrors the soul
- * loader's `loadEgressSpec`, including the `basename()` confinement, so a bundled and a
- * soul-installed integration publish Tools from the same input.
- */
+/** Reads bundled OpenAPI specs with the same `basename()` confinement as the Soul loader. */
 async function loadEgressSpec(
   dir: string,
   manifest: IntegrationManifest
@@ -55,12 +43,7 @@ async function loadEgressSpec(
   return { parsed: parseYaml(raw), file: { file: specFile, raw } };
 }
 
-/**
- * Reads the sandboxed ingress classifier an `ingress.handler` manifest names. `basename()`
- * confinement mirrors the Soul loader's, so a bundled and a soul-installed channel run the same
- * source. A declared-but-missing handler throws: the Soul loader would reject it on install
- * anyway, and failing here names the integration instead of the install.
- */
+/** Reads bundled ingress handlers with Soul-loader confinement; missing declared handlers throw. */
 async function loadIngressHandler(
   dir: string,
   manifest: IntegrationManifest
@@ -71,11 +54,7 @@ async function loadIngressHandler(
   return { file, raw: await readFile(join(dir, file), "utf8") };
 }
 
-/**
- * Loads the bundled integration manifests shipped with the app (mirrors bundled Skills'
- * `loadBundledSkills`). Callers merge Soul-authored integrations over this by slug —
- * soul-authored wins, since it's the connected, git-tracked instance.
- */
+/** Loads bundled integrations; Soul-authored manifests win by slug. */
 export async function loadBundledIntegrations(
   logger: Logger,
   root = bundledIntegrationsDir()

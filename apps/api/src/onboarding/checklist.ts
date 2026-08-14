@@ -1,19 +1,7 @@
 import type { SoulLoader } from "@tulipfarm/soul";
 import { evaluateRules } from "./rules";
 
-/*
- * Pure derivation for the "Getting started" onboarding checklist (ONBOARDING ONB-V1). The checklist
- * surface shows the core build blocks a fresh instance should create, with each step's done-state
- * derived from REAL soul/knowledge state (never a stored checkmark) so it can never desync. Routines
- * have no build flow yet, so that step renders "coming-soon" (non-actionable); integration is
- * actionable (`done` once any Soul integration is connected). The
- * contextual "recommended next" items come from the deterministic rule set in ./rules.
- *
- * Typed against a minimal soul slice (resources/skills/agents maps) so it is trivially testable with
- * a stub — mirrors suggestions.ts. The built-in platform assistant
- * live in listAgents(), NOT in soulLoader.agents, so `agents.size > 0` correctly counts only
- * user-created soul agents.
- */
+/* Checklist status is derived from real Soul/Knowledge state; no stored checkmarks. */
 
 export type StepStatus = "done" | "todo" | "coming-soon";
 
@@ -69,11 +57,7 @@ export function deriveSignals(
   };
 }
 
-/**
- * Build the six core steps in fixed order. `todo` steps carry the prompt; done/coming-soon do not.
- * Prompt text is `${base}${forBiz}.` — the trailing period is added here so the base strings stay
- * suffix-free and the no-businessName output is byte-identical to the original generic prompts.
- */
+/** Build the six fixed steps; only `todo` steps carry prompts. */
 export function buildSteps(sig: ChecklistSignals): ChecklistStep[] {
   const forBiz = sig.businessName ? ` for ${sig.businessName}` : "";
   const actionable = (

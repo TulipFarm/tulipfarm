@@ -1,13 +1,6 @@
 import { cloneElement, isValidElement, type ReactElement, type ReactNode, useId } from "react";
 import { cn } from "~/lib/utils";
 
-/**
- * A labelled form control.
- *
- * The label sits above the control and help text is persistent rather than hidden behind a
- * tooltip, so a participant can read the constraint before committing to a value. The error
- * replaces nothing — it appears below and is announced.
- */
 export function Field({
   label,
   help,
@@ -68,13 +61,6 @@ export function Field({
   );
 }
 
-/**
- * The button that acts on a `Field`, on the same line as it.
- *
- * The spacer reuses the Field's own label markup, so the control and the button line up whatever
- * the type scale does. The hand-tuned `sm:mt-6` this replaces was 2px short of the real label
- * height and would have drifted again the moment that scale changed.
- */
 export function FieldAction({ children, className }: { children: ReactNode; className?: string }) {
   return (
     <div className={cn("sm:space-y-1.5", className)}>
@@ -87,10 +73,8 @@ export function FieldAction({ children, className }: { children: ReactNode; clas
 }
 
 /**
- * A read-only label/value pair for detail views.
- *
- * Render inside a `<dl>`. Labels stay sentence case — uppercase tracking on a normal label is not
- * part of the type scale.
+ * Labels stay sentence case — uppercase tracking on a normal label is not part of the type
+ * scale.
  */
 export function ReadonlyField({
   label,

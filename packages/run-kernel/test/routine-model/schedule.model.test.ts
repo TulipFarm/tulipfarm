@@ -10,12 +10,8 @@ import {
 import { forEachCase, intBetween, pick } from "./support";
 
 /**
- * Reference model for SPEC §9.2 scheduling.
- *
- * Interval occurrences are a closed form — `anchor + k * period` — so the model can enumerate them
- * independently and the planner's output is checked against that enumeration rather than against a
- * remembered fixture. Calendar schedules are checked on the property that actually matters across
- * a DST transition: the *local wall clock* the author wrote, not the elapsed UTC time.
+ * Reference model: interval occurrences are `anchor + k * period`; calendar checks preserve the
+ * authored local wall clock across DST.
  */
 
 const MISSED_POLICIES: readonly MissedRunPolicy[] = ["skip", "run_once", "catch_up_bounded"];
@@ -27,7 +23,6 @@ interface Case {
   readonly spec: ScheduleSpec;
   readonly state: ScheduleState;
   readonly nowMs: number;
-  /** Every occurrence the model says is due, oldest first. */
   readonly due: readonly number[];
 }
 

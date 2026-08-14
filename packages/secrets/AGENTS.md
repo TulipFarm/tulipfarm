@@ -1,73 +1,40 @@
-# Secrets — Agent Conventions
+# Secrets (`@tulipfarm/secrets`)
 
-`@tulipfarm/secrets` — encrypted secret storage with zero-downtime key rotation. See root
-`AGENTS.md` for commands/lint.
+Encrypted Secret storage, DEK/KEK rotation, recovery, redaction, KMS ports, and short-lived
+Credential leases for tool/runtime use.
 
-## Public API (`src/index.ts`)
+## Read on / Skip
+- **Read on if** you change Secret storage, encryption, keys, leases, KMS, or redaction.
+- **Skip if** you only reference a Secret from a schema; read `../schema/AGENTS.md` instead.
 
-- **`SecretsService`** — high-level `get` / `set` / `list` / `delete` with an in-memory cache.
-  Constructed with an `ActiveDek` (+ optional `legacyKeys` for pre-backfill rows).
-- **`PgSecretRepo`** (+ type `SecretRepo`) — secret persistence; V1 store is PostgreSQL.
-- **`PgDekRepo`** (+ type `DekRepo`) — wrapped-DEK persistence (`wrapped_deks` table).
-- **`encryptSecret` / `decryptSecret`** — AES-256-GCM envelope codec.
-- **Key manager** — `generateDek`, `wrapDek` / `unwrapDek`, `makeCanary` / `verifyCanary`,
-  `loadOrProvisionActiveDek`, `rotateEnvKek`, `provisionRecoveryKey`, `recoverWithKey`,
-  `KeyManagerError`, type `ActiveDek`.
-- **`backfillSecretsToDek`** — migrate legacy (pre-envelope) secrets onto the DEK.
-- **`loadEncryptionKeys`** (+ type `EncryptionKeys`) — reads the env KEK(s).
-- **`assertValidSecretKey`** + `InvalidSecretKeyError` — key-name guard.
-- **`SecretBroker`** (`src/broker.ts`) — scoped, short-lived, in-memory Credential leases. Requires a
-  `SecretAuthorizer` (default-deny: a refusal *or* an authorizer failure denies), clamps TTL/uses to
-  what was authorized, resolves the value fresh on every use (so rotation/revocation apply to the
-  next invocation), and emits `SecretBrokerEvent` lease metadata — reference and scope, never value.
-  `revokeSecret` / `revokeLease` / `revokeAll` invalidate outstanding leases.
-- **`SecretLease`** (`src/lease.ts`) — non-serializable handle. Plaintext exists only as the argument
-  to `lease.use(cb)`; `toJSON` throws `SecretNotSerializableError`, string/inspect coercion yields
-  `[SecretLease redacted]`, a callback error is re-thrown redacted, and a callback that returns the
-  plaintext raises `SecretLeakError`. Denials are `SecretLeaseDeniedError` + reason code.
-- **`SecretProvider`** (`src/providers.ts`) — where the broker reads the *current* value from;
-  `inMemorySecretProvider` (dev/test only) and `secretsServiceProvider` (see its cache caveat).
-- **Redaction** (`src/redaction.ts`) — `redactSecrets`, `containsSecret`, `redactError`, `REDACTED`.
-- **KMS port** (`src/ports/kms.ts`) — provider-neutral `KmsPort` (`wrap`/`unwrap`/`activeKey`)
-  with opaque `MasterKeyRef` / `WrappedKey`; the master key never crosses the boundary and no
-  provider SDK type leaks. Adapters: local managed keys, cloud KMS, or Vault-compatible services.
-- Types: `SecretDoc`, `SecretEnvelopeFields`, `SecretMeta`, `SecretType`, `WrappedDekRow`, `KekLabel`.
+## Map
+| Path | Owns |
+| --- | --- |
+| `src/index.ts` | Public exports; do not mirror the list here. |
+| `src/service.ts`, `src/repo.ts`, `src/dek-repo.ts` | Service cache and Postgres repos. |
+| `src/crypto.ts`, `src/keys.ts`, `src/key-manager.ts` | Envelope encryption, DEK/KEK lifecycle. |
+| `src/backfill.ts` | Legacy Secret migration to DEK-backed envelopes. |
+| `src/broker.ts`, `src/lease.ts`, `src/providers.ts` | Scoped leases and current-value providers. |
+| `src/redaction.ts`, `src/key-guard.ts` | Redaction and Secret key validation. |
+| `src/registry.ts`, `src/integration-registry.ts` | Provider/integration Secret metadata. |
+| `src/ports/` | Provider-neutral KMS port; no SDK types cross it. |
 
-## Model — envelope encryption (SEC-V1 key recovery)
-
-- Each secret is encrypted under a single 32-byte **DEK** (random IV + auth tag, base64 envelope),
-  and tagged with `secrets.dek_id`.
-- The DEK is **wrapped** (same GCM codec) under one or more **KEKs**, stored in `wrapped_deks`:
-  the `env` wrap (operational, = `ENCRYPTION_KEY`) carries a canary; the `recovery` wrap is the
-  offline break-glass path.
-- **Boot:** `loadOrProvisionActiveDek` unwraps the DEK under the env KEK and verifies the canary —
-  fail-fast on a wrong/missing key or corruption. On a fresh DB it auto-provisions the DEK (so
-  `npm run dev` just works); the recovery key and legacy backfill are explicit operator steps.
-- **KEK rotation (cheap):** `decryptSecret`'s current→previous fall-through now lives in
-  `unwrapDek` — set the new key as `ENCRYPTION_KEY`, the old as `ENCRYPTION_KEY_PREVIOUS`, run
-  `keys rotate-kek`; secrets are never re-encrypted.
-- **Recovery:** if `ENCRYPTION_KEY` is lost, set a fresh one and run `keys recover` with the offline
-  recovery key — it unwraps the DEK from the recovery wrap and rebuilds the env wrap.
-- **Legacy rows** (`dek_id IS NULL`, pre-upgrade) decrypt under `legacyKeys` until `keys backfill`
-  re-encrypts them onto the DEK.
-- **`SecretsService` cache:** TTL freshness plus a stale-grace window (logged when served stale).
-
-## Operator CLI
-
-`pnpm --filter @tulipfarm/api keys <cmd>`: `verify` (boot canary on demand), `show-recovery`
-(mint + reveal the offline recovery key once), `rotate-kek`, `recover` (`RECOVERY_KEY=…`),
-`backfill`. See `docs/runbooks/secrets-key-recovery.md`.
-
-## How to extend
-
-- **New secret backend:** implement `SecretRepo` (`list` / `findByKey` / `upsert` / `delete` /
-  `listLegacyKeys`); keep `PgSecretRepo` as the reference. New DEK backend: implement `DekRepo`.
-- **Always** call `assertValidSecretKey()` before any write — it blocks prototype-pollution names.
+## Rules
+- Each Secret is encrypted under one 32-byte DEK and tagged with `secrets.dek_id`.
+- DEKs are wrapped under KEKs in `wrapped_deks`: `env` (`ENCRYPTION_KEY`) has a canary;
+  `recovery` is the offline break-glass path.
+- Boot unwraps and canary-verifies the env DEK; wrong/missing keys or corruption fail fast.
+- Fresh DBs auto-provision the DEK; recovery key creation and legacy backfill are explicit steps.
+- KEK rotation never re-encrypts Secrets: set `ENCRYPTION_KEY_PREVIOUS`, run `keys rotate-kek`.
+- Recovery sets a fresh `ENCRYPTION_KEY`, then `keys recover` unwraps via `RECOVERY_KEY`.
+- Legacy rows (`dek_id IS NULL`) decrypt via `legacyKeys` until `keys backfill` moves them to DEK.
+- `SecretsService` cache uses TTL plus stale-grace; stale serves are logged.
+- Always call `assertValidSecretKey()` before writes; it blocks prototype-pollution names.
 - Never log a DEK, recovery KEK, or decrypted value; surface failures as typed errors.
+- `SecretBroker` is default-deny, clamps TTL/uses, resolves values fresh on use, emits metadata
+  only, and revokes by Secret, lease, or all.
+- `SecretLease` is not serializable; plaintext may exist only inside `lease.use(cb)`. Returning it
+  throws `SecretLeakError`; callback errors are re-thrown redacted.
 
-## Tests
-
-Vitest, colocated unit (`crypto` / `keys` / `key-guard` / `service` / `key-manager` / `backfill`)
-plus DB-level `apps/api/src/secrets/key-manager.pg.test.ts` (provision / rotate / recover /
-canary fail-fast / backfill). Cover the round trip, malformed envelopes, KEK fall-through, the
-legacy decrypt branch, backfill idempotency, and cache TTL / stale behavior.
+Operator CLI: `pnpm --filter @tulipfarm/api keys <cmd>` (`verify`, `show-recovery`, `rotate-kek`,
+`recover`, `backfill`). See [key recovery](../../docs/runbooks/secrets-key-recovery.md).

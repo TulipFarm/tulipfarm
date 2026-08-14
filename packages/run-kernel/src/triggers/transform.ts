@@ -2,14 +2,8 @@ import type { event as eventSchema } from "@tulipfarm/schema";
 import { dotPath, type RegisteredTrigger } from "./matcher";
 
 /**
- * Turn a matched Trigger plus its event into the command that starts a Run.
- *
- * Three invariants hold here. The Run's identity is the Trigger's declared background identity —
- * never the event's principal, so a webhook caller cannot borrow authority. The Run's input is
- * only what the Trigger mapped — an unmapped field never reaches the Routine, so a payload can
- * neither smuggle Context nor leak more than the author intended. And the idempotency key is a
- * pure function of the Trigger, its authored version, and the event's deduplication key, so a
- * redelivered event resolves to the same invocation instead of a second Run.
+ * Trigger transforms use declared background identity, mapped input only, and idempotency from
+ * Trigger id, version, and event deduplication key.
  */
 
 export type TriggerBindErrorCode =
@@ -40,9 +34,7 @@ export interface RunInvocation {
     readonly principalId: string;
   };
   readonly mode: "routine" | "semantic_intake";
-  /** Semantic intake only: the Agent that reads the event. */
   readonly agentRef?: { readonly name: string; readonly version: string };
-  /** Semantic intake only: the Run may not produce effects. */
   readonly readOnly?: true;
   readonly input: Readonly<Record<string, unknown>>;
   readonly classification: readonly string[];
@@ -50,7 +42,6 @@ export interface RunInvocation {
   readonly causationId: string;
 }
 
-/** Build the Run command for a matched Trigger, or fail closed. */
 export function buildInvocation(
   trigger: RegisteredTrigger,
   envelope: eventSchema.EventEnvelope<Record<string, unknown>>

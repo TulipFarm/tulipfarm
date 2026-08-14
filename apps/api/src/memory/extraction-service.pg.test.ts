@@ -6,14 +6,7 @@ import { runPgMigrations } from "../pg-migrate";
 import { makePglite } from "../test/pglite";
 import { MemoryExtractionService } from "./extraction-service";
 
-/**
- * The confirmation gate, end to end against real tables.
- *
- * The claim under test is narrow and absolute: **nothing extraction infers reaches
- * `memory_assertions` without a person confirming it**, and a person may only confirm their own.
- * Everything else here exists to prove that claim survives the paths that would break it — a
- * hostile extractor, a guessed pendingId, an expired window.
- */
+/** End-to-end guard: inferred Memory Assertions require owner confirmation before persistence. */
 
 const USER = "11111111-1111-1111-1111-111111111111";
 const OTHER_USER = "22222222-2222-2222-2222-222222222222";

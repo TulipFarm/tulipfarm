@@ -1,16 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createTriageHarness, type TriageHarness } from "./harness";
 
-/**
- * GitHub issue triage vertical slice.
- *
- * One flow end to end: a signed GitHub delivery becomes a persisted event, the Agent reasons over
- * the issue and its duplicate candidates, and the Routine performs every external mutation through
- * the Tool Broker — labels, a Jira ticket, an assignment behind an Approval, a reply, and a close
- * that only ever happens on the duplicate path with two approvers. The evidence a reviewer needs
- * (citations, effect states, provider state) is asserted here rather than described.
- */
-
 let harness: TriageHarness;
 
 beforeEach(async () => {
@@ -63,7 +53,7 @@ describe("new issue triage", () => {
     ]);
     expect(harness.github.issue(41).labels).toEqual(["bug", "area:uploads"]);
     expect(harness.jira.issues()).toHaveLength(1);
-    // The assignment has not happened, and nothing was closed on the way here.
+
     expect(harness.github.issue(41).assignees).toEqual([]);
     expect(harness.github.issue(41).state).toBe("open");
   });
@@ -207,7 +197,7 @@ describe("ingress and partial-failure recovery", () => {
 
     const reconciled = await harness.reconcile(ticketStep?.effectId as string);
     expect(reconciled.outcome).toBe("confirmed");
-    // Reconciliation resolved the write that already landed — it did not create a second ticket.
+    // Reconciliation must confirm the landed write, not create a second ticket.
     expect(harness.jira.issues()).toHaveLength(1);
 
     const resumed = await harness.resume(interrupted);

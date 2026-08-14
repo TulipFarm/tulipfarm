@@ -3,13 +3,6 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../../auth/schemas";
 import { getAgent, listAgents } from "./registry";
 
-/*
- * Read-only HTTP surface for user-created Agents (AGENT.md files loaded into the SoulLoader at
- * startup). The list view carries frontmatter only; the detail view adds the markdown `body`.
- * Normal chat is not an Agent resource. Creation/editing of Soul agents happens through the
- * agent_* tools / forges, not here.
- */
-
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
 const AUTONOMY_VALUES = ["full", "supervised", "approval-required", "manual"] as const;

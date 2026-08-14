@@ -14,12 +14,7 @@ function msg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/**
- * Idempotently create the per-type table (+ its history table) for every loaded
- * resource type. Postgres can't lazily materialise a table the way `db.collection(type)`
- * did, so this runs on boot, after `POST /resource-types`, and after each soul sync.
- * A single bad type is logged and skipped rather than failing the whole pass.
- */
+/** Idempotently materializes per-type tables; a bad type is logged and skipped. */
 export async function reconcileResourceTables(
   q: Queryable,
   soul: ResourceTypes,
@@ -35,12 +30,7 @@ export async function reconcileResourceTables(
   }
 }
 
-/**
- * Reconcile per-type tables on every `soul.synced` (mirrors `registerLlmReload`):
- * reload the soul from disk, then create any tables a freshly-pulled type introduced.
- * Its own reload is independent of the llm reloader — both are cheap idempotent dir
- * scans at the 5-minute sync cadence.
- */
+/** On `soul.synced`, reloads Soul and materializes any newly introduced type tables. */
 export function registerResourceReconcile(
   gitSync: EventEmitter,
   soul: ReloadableResourceTypes,

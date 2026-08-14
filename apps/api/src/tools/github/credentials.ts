@@ -11,32 +11,12 @@ import {
 import type { GitHubInstallationDirectory } from "./installation";
 
 /**
- * The `SecretProvider` a GitHub chat Tool's `credentialRef` resolves to. Mirrors
- * `apps/worker/src/routine/github-credentials.ts` (a deliberate local copy — an application may
- * not import another application).
- *
- * The ref is **installation-selective**, not installation-blind. A business may install the App on
- * more than one account, and the bare ref names no installation, so the only honest answer it can
- * give with several to choose from is `null`. A Tool call, however, always names something — the
- * repository it writes to, or the account it creates a repository under — and that selector picks
- * exactly one installation or none. Carrying that selector *in the ref* is what lets the credential
- * be resolved per call without the resolver holding any mutable "current installation" state, which
- * would be a race between an unattended Routine and a human turn in the same process.
- *
- * `selectGitHubInstallation` is the single matcher both this provider and
- * `InstallationScopeGitHubContextResolver` use. Two copies of the choice would eventually disagree,
- * and a call whose credential came from one installation while its scope check came from another is
- * exactly the confused-deputy this layer exists to prevent.
+ * GitHub credential refs are installation-selective and fail closed on ambiguity.
+ * `selectGitHubInstallation` is shared with scope resolution to prevent confused deputies.
  */
 export const GITHUB_INSTALLATION_SECRET_REF = "secret://integrations/github/installation-token";
 
-/**
- * Which installation a call needs the credential of.
- *
- * `any` is the bare ref: it resolves only when the business has exactly one active installation,
- * and fails closed otherwise. It is not a fallback for a failed selection — a call that named a
- * repository no installation covers must not then borrow the sole installation's token.
- */
+/** `any` resolves only when exactly one active installation exists; it never falls back. */
 export type GitHubInstallationSelector =
   | { readonly kind: "any" }
   | { readonly kind: "repository"; readonly repository: string }
@@ -56,11 +36,7 @@ export function githubInstallationSecretRef(selector: GitHubInstallationSelector
   return GITHUB_INSTALLATION_SECRET_REF;
 }
 
-/**
- * `undefined` for any ref this provider does not own, so the composite router and the default-deny
- * authorizer can both ask one question. A scoped ref with a malformed selector body is *not* read
- * as the bare ref — it must not silently widen to "the sole installation".
- */
+/** Malformed scoped refs are not treated as bare refs, avoiding silent widening. */
 export function parseGitHubInstallationSecretRef(
   secretRef: string
 ): GitHubInstallationSelector | undefined {
@@ -86,14 +62,7 @@ export function isGitHubInstallationSecretRef(secretRef: string): boolean {
   );
 }
 
-/**
- * The one active installation this selector names, or `undefined`.
- *
- * Refuses on ambiguity in every branch: two installations listing the same repository, or two
- * covering the same account, is a state we cannot resolve without guessing whose credential the
- * effect should be attributed to. The bare `any` selector refuses whenever there is more than one
- * installation at all, because it names nothing to disambiguate by.
- */
+/** Selector resolution refuses every ambiguous installation match. */
 export function selectGitHubInstallation<
   T extends { readonly accountLogin: string; readonly repositories: readonly string[] },
 >(
@@ -130,17 +99,7 @@ export interface GitHubInstallationTokenProviderDeps {
   readonly log?: { warn: (obj: unknown, message?: string) => void };
 }
 
-/**
- * Mints and caches a GitHub App installation access token via the shared caching sequence in
- * `@tulipfarm/integrations` (`createCachingInstallationTokenMinter`). Fails closed: any minting
- * failure — unconfigured App, unreadable private key, no matching installation, an ambiguous
- * selector, a non-2xx from GitHub — returns `null` rather than a stale or guessed token.
- *
- * One minter is kept per resolved ref rather than one per provider, because each installation has
- * its own token with its own expiry. A single shared cache would hand a call against account A the
- * token minted for account B, which the scope check would then have to catch after the credential
- * was already leased.
- */
+/** One minter per resolved ref prevents cached account A tokens reaching account B calls. */
 export class GitHubInstallationTokenProvider implements SecretProvider {
   private readonly minters = new Map<string, () => Promise<string | undefined>>();
 

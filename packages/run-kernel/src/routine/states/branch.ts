@@ -2,11 +2,7 @@ import type { CompiledState } from "../compiler";
 import { type CompiledExpression, ExpressionError, evaluateCondition } from "../expressions";
 import { RoutineStepError, type StepOutcome } from "./step";
 
-/**
- * Evaluate one arm. An expression that cannot be evaluated against this Context — comparing a
- * missing value, say — is a fail-closed State failure, not a silent non-match that would quietly
- * route the Run down its default path.
- */
+/** Arm evaluation errors fail closed; they are never treated as non-matches. */
 function matches(
   condition: CompiledExpression,
   scope: Readonly<Record<string, unknown>>,
@@ -28,12 +24,7 @@ export interface BranchDecision {
   readonly outcome: StepOutcome;
 }
 
-/**
- * Pick a `branch` State's successor. Arms are evaluated in authored order and the first match
- * wins, so the same Context always yields the same successor — a replayed or reconciled Run
- * cannot silently take a different path. A Context that no arm matches falls through to the
- * authored default; a graph with no match and no default is a denial.
- */
+/** Authored arm order is deterministic; no match uses default or denies if none exists. */
 export function decideBranch(
   state: CompiledState,
   scope: Readonly<Record<string, unknown>>

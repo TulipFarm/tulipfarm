@@ -14,48 +14,14 @@ interface ReloadableSoulRoles extends SoulRoles {
   reload(): Promise<void>;
 }
 
-/**
- * Role ids the bootstrap layer owns: migration 50 seeds `owner`, and `syncDeploymentRoles` seeds
- * `admin`/`member` on every boot. The Soul reconciler must never delete or overwrite these — an
- * authored Role that collides with one of them is skipped rather than silently replacing the
- * deployment's own authority, which could lock the owner out.
- *
- * Exported so the admin authorization surface can distinguish these built-in Roles from
- * Soul-authored ones without maintaining a second copy of the list that could drift.
- */
+/** Bootstrap-owned Role ids must never be deleted or overwritten by Soul-authored Roles. */
 export const RESERVED_ROLE_IDS: ReadonlySet<string> = new Set(["owner", "admin", "member"]);
 
 function msg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/**
- * Projects authored Soul Roles into the durable role rows the `LiveAuthorityLayerResolver` reads,
- * mirroring the `reconcileResourceTables` pattern: it runs on boot and again after every soul sync,
- * and is idempotent — re-running with the same Soul state is a no-op because `putRole` upserts.
- *
- * Unlike the resource reconciler it must also *reap*: a Role removed from Soul has to disappear
- * from the durable rows, or under Stage 4's default-deny it would keep granting after its author
- * deleted it. Reaping is bounded to non-reserved roles so it can never delete a bootstrap role.
- * Every durable non-reserved Role is authored in Soul today (Soul is the only writer of them), so
- * "delete non-reserved roles absent from Soul" reaps exactly the stale authored Roles.
- *
- * **Compilation is per role, and the reap only runs when the desired set is known-complete.**
- * Both halves of that sentence are load-bearing, and each replaces a real defect:
- *
- * - Compiling the whole catalog up front meant one schema-valid-but-uncompilable artifact threw
- *   before anything was written. On boot that exits the process; on a running instance the handler
- *   swallows it, so *nothing* is projected and *nothing* is reaped on every subsequent sync —
- *   revocation-by-Soul-deletion silently stops working, which is the exact failure the reap exists
- *   to prevent. Per-role compilation contains the blast radius to the bad artifact.
- *
- * - Skipping a failed role and then reaping is worse than not reaping: `deleteRole` cascades to
- *   `role_assignments` and `group_role_assignments`, so one transient database blip during a
- *   routine sync would delete a live Role *and every assignment of it*. Re-authoring the Role in
- *   Soul restores the definition but not who held it, and nothing records who did. A failure means
- *   the desired set is *unknown*, not *empty* — so the reap is skipped for that pass. A stale Role
- *   surviving one extra cycle is recoverable; a destroyed grant graph is not.
- */
+/** Idempotently project and reap Soul-authored Roles; never reap bootstrap Roles. */
 export async function reconcileSoulRoles(
   roles: RoleRepo,
   soul: SoulRoles,
@@ -108,9 +74,7 @@ export async function reconcileSoulRoles(
 }
 
 /**
- * Reconcile authored Soul Roles into durable rows on every `soul.synced`, mirroring
- * `registerResourceReconcile`: reload the Soul catalog from disk, then project + reap Roles. A
- * failure is logged, never thrown, so the sync loop stays up.
+ * On soul.synced, reload from disk and reconcile Roles; failures are logged so sync keeps running.
  */
 export function registerSoulRoleReconcile(
   gitSync: EventEmitter,

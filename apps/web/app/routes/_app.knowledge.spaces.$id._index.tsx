@@ -30,12 +30,6 @@ export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
   return { listing, pages };
 }
 
-/*
- * Space front page (the wiki home). Renders the root index.md — authored or synthesized — with its
- * space-relative links rewritten to SPA routes, under a page toolbar (new page / edit front page /
- * graph / settings / delete). Space metadata comes from the workspace outlet context; the listing is
- * this route's own loader.
- */
 export default function SpaceHome() {
   const { space } = useOutletContext<SpaceOutletContext>();
   const { listing, pages } = useLoaderData<typeof clientLoader>();

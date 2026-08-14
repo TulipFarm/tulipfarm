@@ -266,16 +266,7 @@ describe("embedding backfill", () => {
     expect(errors).toHaveLength(1);
   });
 
-  /**
-   * The text and model-string a backfill writes must be byte-identical to what the write path
-   * produces, or one column ends up holding two incomparable populations — vectors that are never
-   * wrong enough to error, only wrong enough to rank badly. `recall-index.ts` fuses assertion and
-   * chunk distances with `min(distance)`, so a systematic offset in one silently degrades recall.
-   *
-   * These assert against the *write path's* own construction, which is where the first version of
-   * this file got it wrong: `episode-store.ts` calls `embedChunk(chunk.text)`, and the
-   * `embeddableText("episode", ...)` wrapper is applied one call deeper, inside `embedChunk`.
-   */
+  /** Backfill text and model strings must match write-path construction byte-for-byte. */
   describe("agreement with the write path", () => {
     it("embeds memory chunks exactly as episode-store does", () => {
       const target = BACKFILL_TARGETS.find((t) => t.table === "memory_chunks");
@@ -290,11 +281,7 @@ describe("embedding backfill", () => {
       expect(target?.textSql).toBe("subject || ': ' || statement");
     });
 
-    /**
-     * Both memory stores write `${provider}:${model}`; the knowledge stores write the bare model
-     * and compare it for equality when deciding whether an embedding can be reused. Writing the
-     * wrong form makes backfilled rows look like foreign-model rows forever.
-     */
+    /** Memory writes `provider:model`; knowledge writes bare model and compares equality. */
     it("records the model in each table's own format", async () => {
       const pageId = await seedPage();
       await db.query(
@@ -331,12 +318,7 @@ describe("embedding backfill", () => {
     });
   });
 
-  /**
-   * A batch is one provider call, so one row the provider refuses fails all of them. Because the
-   * sweep re-selects the same unembedded rows every run, that would mean no progress on the table
-   * ever again, the same rejected (and billed) call every five minutes, and every row behind the
-   * poison one starved.
-   */
+  /** Poison rows must not starve the whole table; failed batches fall back to per-row attempts. */
   it("isolates a row the provider refuses instead of stalling the whole table", async () => {
     const pageId = await seedPage();
     for (const [index, content] of ["good-1", "POISON", "good-2"].entries()) {

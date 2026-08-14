@@ -1,14 +1,6 @@
 import type { DefinitionTrustTier } from "@tulipfarm/schema";
 
-/**
- * Skill resolution (SPEC §10). Multiple Skills may be selected for one Run, but exact versions,
- * selection reasons, dependency resolution, conflicts, and Context budget are recorded. Trust
- * tiers decide whether changed executable content must be scanned and approved first.
- *
- * A Skill declares the Tool abilities it needs; it never grants one. Preflight therefore only
- * intersects the declaration with the abilities the caller already holds — a Skill that asks for
- * more is denied, never elevated (SPEC invariant 3).
- */
+/** Skill resolution records exact versions; Skills can require abilities, never grant them. */
 
 export interface SkillRef {
   readonly skillId: string;

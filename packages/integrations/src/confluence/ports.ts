@@ -1,11 +1,4 @@
-/**
- * Provider-neutral Confluence Knowledge boundary.
- *
- * The API port must return the effective Confluence accounts that can read a page. If the adapter
- * cannot prove that effective ACL, it returns `undefined`; sync then emits an unverifiable source
- * and removes indexed text. Direct restrictions alone are not enough unless the adapter has already
- * resolved inherited space/ancestor permissions into this effective reader set.
- */
+/** Return only proven effective readers; `undefined` means unverifiable and removes text. */
 
 /** One entry from Confluence's change feed. `cursor` is the resume position after this change. */
 export interface ConfluenceChange {
@@ -22,14 +15,12 @@ export interface ConfluencePage {
   readonly version: string;
   readonly ownerAccountId: string;
   readonly updatedAt: string;
-  /** Plain text extracted from the page body. */
   readonly content: string;
   readonly classification?: readonly string[];
   readonly webUrl?: string;
 }
 
 export interface ConfluencePagePermission {
-  /** Atlassian account id for a Confluence user who can effectively read the page. */
   readonly accountId: string;
 }
 

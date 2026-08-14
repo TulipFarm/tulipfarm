@@ -1,11 +1,6 @@
 import type { Editor } from "@tiptap/core";
 
-/*
- * Shared vanilla-DOM popup for the `@` and `#` suggestion menus (same lightweight, React-free
- * approach as the slash menu). Entries are flat for keyboard navigation but rendered grouped by
- * `section`; each entry carries its own `apply` so the menus stay declarative. ↑/↓ move, Enter picks,
- * Esc closes; the active popup is torn down on editor destroy by the owning extension.
- */
+/* Shared vanilla-DOM grouped suggestion popup; owner tears it down on editor destroy. */
 
 export interface MenuRange {
   from: number;

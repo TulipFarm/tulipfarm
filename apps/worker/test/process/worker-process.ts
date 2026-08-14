@@ -8,18 +8,7 @@ const APP_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const BUNDLE = resolve(APP_ROOT, "dist/worker.cjs");
 const HOOK_BUNDLE = resolve(APP_ROOT, "dist/ingress-hook-worker.cjs");
 
-/**
- * Bundles the worker exactly as the Dockerfile does. The subject of these tests is the shipped
- * artifact — a `tsx` run of the sources would not catch a bundling failure, which is precisely the
- * class of break that makes a container refuse to boot.
- *
- * Both entrypoints are built, and into the same directory the image lays them out in, because the
- * hook sandbox is found by looking for a sibling file: a worker whose own bundle builds but whose
- * sandbox entrypoint is missing boots fine and then fails on the first delivery.
- *
- * Keep `external` in sync with the Dockerfile. A Subscription Provider SDK that gets bundled loses
- * the `import.meta.url` anchor it locates its native binary with, and the worker dies at load.
- */
+/** Bundles Dockerfile-equivalent worker and hook artifacts; keep `external` in sync. */
 export async function buildWorkerBundle(): Promise<string> {
   await Promise.all([
     build({
@@ -72,8 +61,7 @@ export async function startWorker(options: StartWorkerOptions): Promise<WorkerHa
       PATH: process.env.PATH,
       NODE_ENV: "test",
       DATABASE_URL: options.databaseUrl,
-      // The turn host is never reached in these tests — no Chat Run is enqueued — but the worker
-      // refuses to boot without knowing where it is, so the harness has to say.
+      // Required for boot; these tests enqueue no Chat Run, so it is never reached.
       INTERNAL_API_URL: "http://127.0.0.1:1",
       WORKER_API_CREDENTIAL: "tfc_test.secret",
       WORKER_OWNER: options.owner,
@@ -118,7 +106,7 @@ export async function startWorker(options: StartWorkerOptions): Promise<WorkerHa
           const result = await probe("/readyz");
           if (result.status === 200) return;
         } catch {
-          // Not listening yet — the probe server starts after the preflight check.
+          // Probe server starts after preflight.
         }
         await sleep(100);
       }

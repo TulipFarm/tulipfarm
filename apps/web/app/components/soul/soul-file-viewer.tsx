@@ -4,9 +4,8 @@ import { highlight } from "~/lib/shiki";
 import { getSoulFile, type SoulFile } from "~/lib/soul";
 
 /*
- * Read-only source viewer for a single soul file. Fetches raw content from the API, then renders it
- * with Shiki (client-side). Markdown is shown as highlighted source — like VS Code, not rendered.
- * Recolors live on dark-mode toggle via the shared "themechange" window event (theme-toggle.tsx).
+ * Read-only source viewer for a single soul file. Fetches raw content from the API, then
+ * renders it with Shiki (client-side).
  */
 
 function readTheme(): "light" | "dark" {
@@ -26,14 +25,12 @@ export function SoulFileViewer({ path }: { path: string | null }) {
   const [error, setError] = useState<string | null>(null);
   const [theme, setTheme] = useState<"light" | "dark">(readTheme);
 
-  // Track the app theme so the highlighted source recolors in lockstep with the rest of the UI.
   useEffect(() => {
     const read = () => setTheme(readTheme());
     window.addEventListener("themechange", read);
     return () => window.removeEventListener("themechange", read);
   }, []);
 
-  // Fetch raw content whenever the selected file changes.
   useEffect(() => {
     if (!path) {
       setFile(null);
@@ -63,7 +60,6 @@ export function SoulFileViewer({ path }: { path: string | null }) {
     };
   }, [path]);
 
-  // (Re)highlight when the content or theme changes; skip non-text files.
   useEffect(() => {
     if (!file || file.binary || file.tooLarge) {
       setHtml(null);
@@ -75,7 +71,6 @@ export function SoulFileViewer({ path }: { path: string | null }) {
         if (!cancelled) setHtml(out);
       })
       .catch(() => {
-        // Highlighting failed (e.g. WASM load error) — leave the body empty rather than crash.
         if (!cancelled) setHtml(null);
       });
     return () => {

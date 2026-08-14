@@ -4,11 +4,7 @@ import { MAX_ENTRIES, MAX_TOTAL_CHARS, MAX_VALUE_CHARS } from "./limits";
 
 export type UpdateOutcome = { kind: "ok" } | { kind: "rejected_oversize" };
 
-/**
- * Owns the Memory write policy (MEM-V1-003): oversize rejection, last-write LRU, and the
- * dual cap (≤ MAX_ENTRIES and ≤ MAX_TOTAL_CHARS). The repo stays a dumb CRUD store; all the
- * "should this be kept?" judgement lives here so it is testable against an in-memory fake.
- */
+/** Memory write policy: oversize rejection plus entry and total-character LRU caps. */
 export class MemoryService {
   constructor(private readonly repo: MemoryRepo) {}
 
@@ -47,15 +43,7 @@ export class MemoryService {
     return this.repo.listByUser(userId);
   }
 
-  /**
-   * Drop oldest-written entries until BOTH caps hold; never evict `keepKey`.
-   *
-   * Public because this service is not the only writer that lands in the `<memory>` projection:
-   * a procedural correction is written through `MemoryLifecycleService`, straight to the engine.
-   * Leaving that path uncapped would let the block grow past `MAX_TOTAL_CHARS`, and the prompt
-   * assembler drops the block *whole* on overflow — so an uncapped write does not degrade Memory,
-   * it silently removes all of it from the turn.
-   */
+  /** Drops oldest entries until both caps hold, never evicting `keepKey`. */
   async enforceCaps(userId: string, keepKey: string): Promise<void> {
     let entries = await this.repo.listByUser(userId); // oldest-first
     const totalChars = (es: MemoryAssertionView[]): number =>

@@ -1,33 +1,13 @@
-/**
- * Turns a Tool call into the words and identity a reader actually needs.
- *
- * Everything here is derived from data the wire already carries — the Tool's name and the redacted
- * argument preview — so a row never claims more than the stream said. Nothing invents a duration, a
- * record count, or an outcome. When there is nothing to derive, the fallbacks degrade to the Tool's
- * own name rather than to filler.
- *
- * Kept free of React so the wording rules can be tested directly.
- */
+/** Summaries derive only from the wire data; they never invent counts, duration, or outcome. */
 
 import type { TimelinePart, ToolTier } from "~/lib/chat/types";
 
 type ToolPart = Extract<TimelinePart, { kind: "tool" }>;
 
-/**
- * Tools whose own output is the thing the reader already sees, so their row would be noise.
- *
- * `cite_sources` is citation plumbing: its result renders as the source cards and the inline `[n]`
- * links. The presentation Tools render as a native Surface. A FAILED presentation call still shows
- * its row, because then there is no Surface and the error is the only evidence something happened.
- */
+/** Hide successful plumbing/presentation rows; failed presentation calls still show the error. */
 const PRESENTATION_TOOL_NAMES = new Set(["present", "update_presentation", "request_input"]);
 
-/**
- * Whether a Tool reported success.
- *
- * Reads the redacted preview first, because on a live stream `result` is only the status envelope.
- * A restored conversation carries the verbatim result instead, so both shapes are checked.
- */
+/** Live streams use redacted previews; restored conversations may carry verbatim results. */
 export function toolSucceeded(part: ToolPart): boolean {
   if (part.outcome === "error") return false;
   const candidates: unknown[] = [];
@@ -66,12 +46,7 @@ export type ToolFamily =
   | "delegation"
   | "generic";
 
-/**
- * Which family a Tool belongs to, matched on its registered name.
- *
- * Ordered longest-prefix first: `github_pull_request_read` must not be read as a bare `read`. A
- * name nobody anticipated falls to `generic`, which is a real state, not a gap.
- */
+/** Longest prefixes must match first so specific Tool names are not shortened too early. */
 export function toolFamily(toolName: string): ToolFamily {
   const name = toolName.toLowerCase();
   if (name.startsWith("github_")) return "github";
@@ -99,10 +74,6 @@ export function toolTierLabel(tier: ToolTier | undefined, family: ToolFamily): s
   return family === "github" || family === "slack" ? "integration" : "platform";
 }
 
-/**
- * The verb each Tool name leads with, so a row reads as something that happened rather than as an
- * identifier. Matched by suffix or exact name; anything unmatched is humanized from the name itself.
- */
 const VERB_BY_SUFFIX: readonly (readonly [RegExp, string])[] = [
   [/^search_docs$/, "Searched docs"],
   [/^read_page$/, "Read page"],
@@ -129,15 +100,7 @@ const VERB_BY_SUFFIX: readonly (readonly [RegExp, string])[] = [
   [/^load_skill$/, "Loaded skill"],
 ];
 
-/**
- * Tools whose name leads with the verb — `list_resource_types`, `create_space`. The suffix table
- * cannot match these, so they fell through to the humanized name and rendered as imperatives
- * ("List resource types") next to past-tense rows in the same run. The remainder of the name is
- * the object the verb acts on, so the phrase is rebuilt whole: `Listed resource types`.
- *
- * Checked after the suffix and exact-name table, which stays authoritative — `get_current_time`
- * reads better as "Checked the time" than as "Read current time".
- */
+/** Verb-leading Tool names are rebuilt after exact/suffix matches stay authoritative. */
 const VERB_BY_PREFIX: readonly (readonly [RegExp, string])[] = [
   [/^list_/, "Listed"],
   [/^search_/, "Searched"],
@@ -158,11 +121,7 @@ const VERB_BY_PREFIX: readonly (readonly [RegExp, string])[] = [
   [/^close_/, "Closed"],
 ];
 
-/**
- * Keys whose value is prose a person typed, not an identifier. These get quoted so a multi-word
- * value reads as the argument it is rather than running into the verb: `Searched docs "refund
- * policy"`, not `Searched docs refund policy`.
- */
+/** Quote prose arguments so multi-word input stays visually bound to the Tool call. */
 const QUOTED_KEYS: readonly string[] = ["query", "q", "search", "text", "message", "body", "title"];
 
 /** Keys naming the thing a repo-scoped call acts on, so `repo` can carry its number: `owner/x#412`. */
@@ -206,14 +165,7 @@ function humanizeToolName(toolName: string): string {
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
-/**
- * A matched verb, plus the object the Tool name implies.
- *
- * The object is held separately because a phrasal verb only wants one of the two: `Commented on`
- * reads correctly with the argument (`Commented on maddhruv/tulipfarm#412`) and badly with both
- * (`Commented on github issue maddhruv/tulipfarm#412`). So the name-derived object is a fallback
- * used only when the arguments name nothing — which is what turned rows into a bare "Listed".
- */
+/** Use the name-derived object only when arguments name nothing. */
 type ToolVerb = { verb: string; fallbackObject?: string };
 
 /** `Listed agent` is wrong where `Listed agents` is right; a list verb takes a plural object. */
@@ -248,10 +200,7 @@ function truncateSubject(value: string): string {
   return `${collapsed.slice(0, MAX_SUBJECT_CHARS)}…`;
 }
 
-/**
- * Picks the one argument worth naming. Scalars only: an object or array subject would put a
- * fragment of a payload in a headline, which is exactly what the expanded pane is for.
- */
+/** Only scalar arguments are safe to headline; payload fragments belong in detail. */
 export function toolSubject(args: unknown): string | undefined {
   if (typeof args !== "object" || args === null || Array.isArray(args)) return undefined;
   const record = args as Record<string, unknown>;
@@ -281,14 +230,7 @@ function repoNumber(record: Record<string, unknown>): number | undefined {
   return undefined;
 }
 
-/**
- * The one-line human summary shown on a collapsed row.
- *
- * A server-supplied summary always wins: it was written by the side that ran the call and knows
- * what it did. Otherwise the verb and the subject are composed from real arguments, and failing
- * that the Tool's own name is used. The result never asserts an outcome — a row says what was
- * attempted, and the status glyph beside it says how it went.
- */
+/** Summary text never asserts outcome; the status glyph owns success/failure. */
 export function describeToolCall(toolName: string, args: unknown, serverSummary?: string): string {
   const trimmed = serverSummary?.trim();
   if (trimmed !== undefined && trimmed.length > 0) return trimmed;
@@ -316,17 +258,7 @@ function plural(count: number, noun: string): string {
   return `${count} ${count === 1 ? singular : `${singular}s`}`;
 }
 
-/**
- * The one fact from a Tool's output worth putting on the collapsed row.
- *
- * The complaint this answers is real: a row that shows only a green check makes the reader open
- * every call to learn anything. So a row now carries the shape of what came back — how many
- * records, or a short scalar.
- *
- * Everything here is read off the redacted preview (or a restored verbatim result). Nothing is
- * inferred, counted client-side, or guessed: when the payload does not plainly say, this returns
- * `undefined` and the row simply stays quiet rather than asserting something it cannot support.
- */
+/** Output facts come only from explicit preview/result fields; otherwise stay silent. */
 export function describeToolResult(part: ToolPart): string | undefined {
   let parsed: unknown;
   if (part.resultPreview !== undefined) {
@@ -365,10 +297,7 @@ export function describeToolResult(part: ToolPart): string | undefined {
   return undefined;
 }
 
-/**
- * Human duration. Sub-second stays in whole milliseconds because rounding `412ms` to `0.4s` reads
- * as less precise than the measurement actually was.
- */
+/** Keep sub-second durations in milliseconds. */
 export function formatDuration(ms: number | undefined): string | undefined {
   if (ms === undefined || !Number.isFinite(ms) || ms < 0) return undefined;
   if (ms < 1_000) return `${Math.round(ms)}ms`;

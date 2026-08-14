@@ -34,11 +34,7 @@ import type {
   SoulSkill,
 } from "./types";
 
-/**
- * Re-exported from `@tulipfarm/schema`, which now owns frontmatter parsing so the write gate and
- * this reader cannot disagree about what a legacy `AGENT.md` means. Kept here as a named export
- * because it is part of this package's published surface.
- */
+/** Re-export kept for package API; schema owns legacy frontmatter parsing. */
 export { parseFrontmatter };
 
 const definitionRegistry = new SchemaRegistry(DEFINITION_REGISTRATIONS);
@@ -76,19 +72,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/**
- * Reads the canonical `resource.yaml` envelope. This **must** throw rather than fall back when the
- * document fails validation.
- *
- * The caller's fallback (`?? parseYaml(definition.content)`) exists for the pre-envelope legacy
- * `schema.yml`, where the whole file genuinely is the Record schema. Letting an *envelope-shaped*
- * file reach that fallback silently reinterpreted the entire envelope
- * (`apiVersion`/`kind`/`metadata`/`spec`) as the Record JSON Schema **and dropped `spec.domain`** —
- * so a Resource an owner had walled into `hr` loaded as domainless. Since the member allow-list
- * grants every member `record.*` on a domainless request, that silently reopened the HR/engineering
- * wall this stage exists to build. Fail loudly instead; the caller wraps this in `artifactLoadError`
- * exactly as it already does for a malformed schema mapping.
- */
+/** Canonical Resource envelopes must validate; otherwise legacy fallback would drop `spec.domain`. */
 function resourceDefinitionOf(content: string, path: string): ResourceDefinition {
   const validated = definitionRegistry.validateYaml(content);
   if (validated.kind !== "Resource") {
@@ -97,14 +81,7 @@ function resourceDefinitionOf(content: string, path: string): ResourceDefinition
   return validated.document as unknown as ResourceDefinition;
 }
 
-/**
- * Reads the OpenAPI document an `egress: { type: "openapi" }` manifest names, so the Tool compiler
- * never touches the filesystem itself. `basename()` confines the read to the integration's own
- * directory, exactly as `ingress.handler` is confined below.
- *
- * A declared-but-unreadable spec is fatal: the alternative is an integration that loads, appears
- * connectable, and silently publishes no Tools.
- */
+/** Load declared OpenAPI specs here; unreadable specs are fatal so Tools do not vanish silently. */
 async function loadEgressSpec(dir: string, manifest: IntegrationManifest): Promise<unknown> {
   if (manifest.egress?.type !== "openapi") return undefined;
   const specFile = basename(manifest.egress.spec);
@@ -132,11 +109,7 @@ export class SoulLoader {
   guardrailsConfig: Record<string, unknown> | null = null;
   observabilityConfig: Record<string, unknown> | null = null;
   manifest: Record<string, unknown> | null = null;
-  /**
-   * Artifacts skipped this load and why. A directory with no definition file is a real state —
-   * a half-finished authoring flow, or a legacy directory mid-migration — and it must not take the
-   * whole catalog down with it, which is what throwing inside `Promise.all` used to do.
-   */
+  /** Skipped artifacts and reasons; missing definitions quarantine instead of breaking the catalog. */
   quarantined: Array<{ kind: string; name: string; reason: string }> = [];
 
   constructor(

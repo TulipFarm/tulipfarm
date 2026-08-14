@@ -1,8 +1,4 @@
-/**
- * Legal hold blocks eligible deletion without itself granting read access (SPEC §20: "Legal hold
- * prevents eligible deletion without itself granting read access."). This module only decides
- * hold state; it exposes no event content and no way to read protected payloads.
- */
+/** Legal hold blocks eligible deletion but grants no read access or event-content path. */
 
 export type LegalHoldScope =
   | { readonly type: "business" }
@@ -67,7 +63,7 @@ function scopeCovers(scope: LegalHoldScope, category: string, target: string): b
   return scope.target === target;
 }
 
-/** Whether `hold` blocks deletion of an item in `category`/`target` at `now`. Never reads content. */
+/** Whether `hold` blocks deletion in `category`/`target` at `now`. Never reads content. */
 export function isHeld(
   hold: LegalHold,
   businessId: string,

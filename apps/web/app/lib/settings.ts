@@ -1,16 +1,5 @@
 import { apiDelete, apiGet, apiWrite } from "./api";
 
-/*
- * Client for the Settings section (UI-V1-003). Two independent areas:
- *  - LLM config: read/replace soul.yaml's `llm` tiers (structured, via the LLM config form).
- *  - Secrets: list keys (never values) + admin add/update/delete (existing SECRETS backend).
- * Dark mode is handled entirely client-side by ThemeToggle in the sidebar and is not part of this.
- */
-
-// --- LLM config (mirrors @tulipfarm/llm LlmConfig; embeddings is read/preserved but not UI-editable) ---
-
-// Pinned model spec (pricing/context/capabilities), resolved from LiteLLM at config time. Mirrors
-// @tulipfarm/llm ModelSpec. Costs are USD per token.
 export type ModelSpec = {
   litellm_key?: string;
   input_cost_per_token?: number;
@@ -143,8 +132,6 @@ export async function putLlmConfig(config: LlmConfig): Promise<LlmConfig> {
   return apiWrite<LlmConfig>("PUT", "/api/v1/llm-config", config);
 }
 
-// --- Secrets (existing backend; values are never returned) ---
-
 export type SecretMeta = {
   key: string;
   type: "user-provided" | "auto-generated";
@@ -165,12 +152,7 @@ export async function deleteSecret(key: string): Promise<void> {
   await apiDelete(`/api/v1/secrets/${encodeURIComponent(key)}`);
 }
 
-/* ---------------------------------------------------------------------------------------------
- * Personal access tokens
- *
- * The backend has carried these since the auth module landed; nothing in the product ever called
- * them. `token` comes back exactly once, on create.
- * ------------------------------------------------------------------------------------------- */
+/* Personal access tokens: `token` is returned exactly once, on create. */
 
 export type ApiToken = {
   id: string;
@@ -195,9 +177,7 @@ export async function revokeApiToken(id: string): Promise<void> {
   await apiDelete(`/api/v1/auth/tokens/${encodeURIComponent(id)}`);
 }
 
-/* ---------------------------------------------------------------------------------------------
- * Custom instructions — standing guidance prepended to every agent turn for this user.
- * ------------------------------------------------------------------------------------------- */
+/* Custom instructions are prepended to every agent turn for this user. */
 
 export const MAX_CUSTOM_INSTRUCTIONS_CHARS = 4_000;
 
@@ -214,9 +194,7 @@ export async function putCustomInstructions(instructions: string): Promise<strin
   ).instructions;
 }
 
-/* ---------------------------------------------------------------------------------------------
- * Business profile — the identity block in soul.yaml, previously writable only during setup.
- * ------------------------------------------------------------------------------------------- */
+/* Business profile writes the identity block in soul.yaml. */
 
 export type BusinessProfile = {
   name: string;

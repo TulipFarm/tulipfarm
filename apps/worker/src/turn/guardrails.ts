@@ -8,19 +8,7 @@ import {
 import type { RunEventGuardrailStage } from "@tulipfarm/schema";
 import type { TurnEventWriter } from "./run-events";
 
-/**
- * Guardrail enforcement for a Worker-executed turn (GR-V1-001/002/003; plan §2).
- *
- * The three stages used to run inside the API's chat turn, which meant a Slack or Telegram message
- * reached the model through a path nothing guarded. Enforcement belongs wherever the turn actually
- * executes, so it lives here: one policy, applied identically on every channel.
- *
- * The policy itself is not read here. It arrives with the Context, already validated, and is
- * rebuilt into the same guards the API compiled — then checked, by comparing revisions, against the
- * digest recorded as `context.assembled` evidence. A turn whose enforcement does not match its own
- * evidence is refused rather than run, because the alternative is a record that lies about what
- * guarded it.
- */
+/** Enforces the Context's guardrail policy and refuses digest mismatches before execution. */
 
 /** What a refused turn says when the guard named no message of its own. */
 const DEFAULT_BLOCK_MESSAGE = "I can't help with that request.";
@@ -55,14 +43,7 @@ export interface TurnGuardrailPolicy {
 
 type GuardLogger = { warn: (obj: unknown, msg?: string) => void };
 
-/**
- * The three stages, bound to one turn.
- *
- * Built before the Context is resolved — the Tool dispatch port has to be wrapped before the loop
- * exists — and configured once the Context says which policy to enforce. Until then every stage
- * refuses: an unconfigured guard means the turn resolved no policy, and running Tools under no
- * policy is precisely what this class exists to prevent.
- */
+/** Built before Context; unconfigured stages refuse so Tools never run without policy. */
 export class TurnGuardrails {
   private service: GuardrailsService | undefined;
   private settings: TurnGuardrailPolicy | undefined;
@@ -97,12 +78,7 @@ export class TurnGuardrails {
     return { blocked: true, message: result.message ?? DEFAULT_BLOCK_MESSAGE };
   }
 
-  /**
-   * Wraps the Tool dispatch port so no call reaches the broker unguarded.
-   *
-   * A blocked call comes back as a denial the model reads and may recover from, which is what
-   * makes this stage different from the other two: refusing one Tool is not refusing the turn.
-   */
+  /** Blocks Tool calls as model-visible denials, not whole-turn refusals. */
   guard(tools: ToolDispatchPort, events: TurnEventWriter): ToolDispatchPort {
     return {
       dispatch: async (request: ToolDispatchRequest): Promise<ToolDispatchResult> => {
@@ -122,8 +98,7 @@ export class TurnGuardrails {
             result.guard,
             result.reason,
             `tool:${request.callId}`,
-            // The model is told a Tool was refused; a participant watching the stream is not shown
-            // a block, because the turn is still going to answer them.
+            // Model sees the denial; participant does not see a block for a continuing turn.
             false
           );
           return {
@@ -132,8 +107,7 @@ export class TurnGuardrails {
             reason: `${result.guard}: ${result.reason}`,
           };
         }
-        // A transform rewrites the arguments, so the broker executes what the guard allowed rather
-        // than what the model asked for.
+        // Execute the guard-approved arguments, not the model's original arguments.
         return tools.dispatch({ ...request, arguments: result.value.args });
       },
     };
@@ -154,13 +128,7 @@ export class TurnGuardrails {
     };
   }
 
-  /**
-   * Records a block twice, deliberately.
-   *
-   * `guardrail.decision` is operator evidence naming the guard; `guardrail.blocked` is what a
-   * participant is shown, and carries the reason without the guard's identity, so a refusal never
-   * teaches a reader which pattern to write around next time.
-   */
+  /** Records operator evidence separately from participant-visible refusal text. */
   private async record(
     events: TurnEventWriter,
     stage: RunEventGuardrailStage,

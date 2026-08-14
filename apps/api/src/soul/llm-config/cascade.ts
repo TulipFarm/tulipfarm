@@ -7,18 +7,9 @@ import { pruneLlmConfig } from "./prune";
 import { deleteLlmConfigFromSoulYaml, writeLlmConfigToSoulYaml } from "./soul-yaml-io";
 
 /**
- * Returns an `onSecretDeleted` callback that keeps `soul.yaml#llm` in sync when a
- * provider api_key secret is removed.
- *
- * On delete the callback:
- * 1. Checks whether the deleted key is an api_key field for a known LLM provider.
- * 2. Prunes matching provider entries from the current config.
- * 3. If every tier still has providers → writes the pruned config and re-inits.
- *    If any tier is left empty  → removes the `llm:` key entirely (clean unconfigured state).
- * 4. Commits via gitSync and reloads the soul + LLM service.
- *
- * Errors are re-thrown so the caller can log and suppress them without crashing the
- * delete response.
+ * Returns an `onSecretDeleted` callback that keeps `soul.yaml#llm` in sync when a provider api_key
+ * secret is removed. Checks whether the deleted key is an api_key field for a known LLM provider.
+ * Prunes matching provider entries from the current config.
  */
 export function makeLlmCascadeOnSecretDelete(
   soulLoader: SoulLoader,
@@ -43,7 +34,6 @@ export function makeLlmCascadeOnSecretDelete(
     if (result.action === "update") {
       await writeLlmConfigToSoulYaml(gitSync.path, result.config);
     } else {
-      // "delete" — pruning left a tier empty; remove the `llm:` key for a clean unconfigured state
       await deleteLlmConfigFromSoulYaml(gitSync.path);
     }
 

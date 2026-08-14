@@ -10,14 +10,7 @@ type ServiceLogger = { warn: (obj: unknown, msg?: string) => void };
 
 const NOOP_LOGGER: ServiceLogger = { warn() {} };
 
-/**
- * Owns the three guard stages and runs them. {@link init} validates the
- * configured policy and rebuilds the guard arrays into locals before swapping
- * them in, so a bad reload can never corrupt running state (mirrors
- * `LlmService.init`). An invalid or absent config falls back to
- * {@link DEFAULT_GUARDRAILS} — fail-safe to the default policy, never unguarded,
- * never crashing the turn.
- */
+/** Owns the three guard stages; invalid or absent config falls back to defaults. */
 export class GuardrailsService {
   private log: ServiceLogger = NOOP_LOGGER;
   private input: Guard<string>[] = [];
@@ -30,14 +23,7 @@ export class GuardrailsService {
     return this.revisionValue;
   }
 
-  /**
-   * The policy these guards were built from — the same object {@link revision} hashes.
-   *
-   * Exposed because the Worker enforces this policy on turns it executes and cannot read the Soul
-   * itself. Shipping the config rather than a compiled pipeline keeps one authority: whoever
-   * receives it rebuilds the identical guards through {@link init} and can prove it by comparing
-   * revisions.
-   */
+  /** Policy the guards were built from; hashed by `revision` and reusable by Workers. */
   get config(): GuardrailsConfig {
     return this.configValue;
   }

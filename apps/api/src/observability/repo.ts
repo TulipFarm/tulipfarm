@@ -1,16 +1,10 @@
 import type { Queryable } from "../db";
 
 export type ObsEventType = "llm_call" | "tool_call" | "turn" | "job";
-/** Per-type outcome: llm_call ok|error|fallback|timeout; tool_call ok|error; turn ok|error|blocked; job ok|error. */
+/** Outcome values by event type. */
 export type ObsStatus = "ok" | "error" | "fallback" | "blocked" | "timeout";
 
-/**
- * One row in the AI observability event spine (`obs_event`). Append-only: written at event time by
- * `ObservabilityService.record()` and never updated. Hot aggregate/filter fields are typed columns;
- * the long tail (token cache breakdown, error codes, job names) rides in `attributes` jsonb.
- * `costUsd` is frozen at write (NULL ⇒ the served model was unpriced). Cost/token totals are summed
- * from `type='llm_call'` rows only — `turn` rows carry display rollups and must not be re-summed.
- */
+/** Append-only AI observability event row; payload must already be redacted. */
 export interface ObsEventRow {
   _id: string;
   ts: Date;
@@ -30,13 +24,13 @@ export interface ObsEventRow {
   createdAt: Date;
 }
 
-/** Pre-aggregated dashboard data. Cost/token totals come from `llm_call` rows only (counting rule). */
+/** Dashboard totals; cost/token numbers count `llm_call` rows only. */
 export interface ObsSummary {
   totals: { costUsd: number; tokens: number; turns: number; unpricedCalls: number };
   series: Array<{ bucket: string; costUsd: number; tokens: number }>;
   byAgent: Array<{ agentId: string; costUsd: number }>;
   byModel: Array<{ model: string; costUsd: number; calls: number; unpriced: boolean }>;
-  /** Reliability lens: turn/tool/llm error + fallback counts and p95 step latency over the window. */
+  /** Reliability counts and p95 step latency over the window. */
   reliability: {
     turns: number;
     turnErrors: number;
@@ -129,8 +123,7 @@ export class PgObsRepo implements ObsRepo {
   }
 
   async summarize({ since, bucket }: SummarizeOpts): Promise<ObsSummary> {
-    // Cost/token totals + unpriced count from llm_call rows; turns from turn rows. FILTER keeps it
-    // to one scan. `tokens` = input + output. cost_usd is numeric (returned as string) → coerced.
+    // Cost/token totals come only from llm_call rows; FILTER keeps it to one scan.
     const totalsQ = this.q.query(
       `SELECT
          COALESCE(SUM(cost_usd) FILTER (WHERE type = 'llm_call'), 0) AS cost,

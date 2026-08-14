@@ -38,7 +38,6 @@ function api(
   };
 }
 
-/** A member of the org who may create repositories there. */
 const CAN_CREATE: OrganizationStanding = { member: true, canCreateRepositories: true };
 
 const REPO_TARGET = [{ type: "integration.github", id: "repo:acme/api" }];
@@ -54,8 +53,6 @@ function query(overrides: Record<string, unknown> = {}) {
   };
 }
 
-/** Narrows away the two non-verdict answers so a test asserting a verdict cannot silently pass on
- * `not_applicable` or `undefined`. */
 function verdictOf(answer: Awaited<ReturnType<GitHubEntitlementPort["check"]>>) {
   if (answer === undefined || answer === NOT_APPLICABLE) {
     throw new Error(`expected a verdict, got ${String(answer)}`);
@@ -75,8 +72,7 @@ describe("repositoriesIn", () => {
   });
 
   it("ignores a target that is not a resolvable repository", () => {
-    // A wildcard or bare name cannot be checked against GitHub's permission endpoint, and treating
-    // it as a repository would ask a question about the wrong thing and believe the answer.
+    // Wildcards and bare names are not repositories GitHub can check.
     expect(
       repositoriesIn([
         { type: "integration.github", id: "installation:all" },
@@ -101,8 +97,7 @@ describe("GitHubEntitlementPort", () => {
   });
 
   it("denies a write to someone GitHub gives read-only access", async () => {
-    // The case the campaign exists for: the App installation can write, so without this the
-    // platform would let a read-only collaborator write through the bot.
+    // Without L5, a read-only collaborator could write through the installation bot.
     const p = new GitHubEntitlementPort(identity([{}]), api({ "acme/api": "read" }));
     const verdict = verdictOf(await p.check(query({ action: "create" })));
     expect(verdict.allowed).toBe(false);
@@ -152,8 +147,7 @@ describe("GitHubEntitlementPort", () => {
   });
 
   it("could-not-determine when the call names no repository at all", async () => {
-    // A repo-less GitHub call reaches whatever the installation reaches, so there is nothing
-    // narrower to check and no basis on which to allow it.
+    // Repo-less calls have no narrower target to allow.
     const p = new GitHubEntitlementPort(identity([{}]), api({ "acme/api": "write" }));
     expect(await p.check(query({ targetRefs: [] }))).toBeUndefined();
   });
@@ -169,13 +163,7 @@ describe("GitHubEntitlementPort", () => {
     expect(answer).toBeUndefined();
   });
 
-  /*
-   * L5 answers "does *this person* hold provider-side access". Where there is no person, there is
-   * no question — and answering `undefined` (deny) instead would take every GitHub Tool offline for
-   * every caller that is not a signed-in human: Routines, schedule fires, and every Slack or
-   * Telegram turn, which arrive as `integration` because no human has been resolved at ingress
-   * (`runtime/invocation-callers.ts`).
-   */
+  /** Non-human callers abstain; denying would disable Routines and unresolved channel turns. */
   it("abstains for principals that are not people, rather than denying them", async () => {
     const p = new GitHubEntitlementPort(identity([{}]), api({ "acme/api": "write" }));
     for (const kind of ["routine", "agent", "service", "integration_adapter", "api"]) {
@@ -183,12 +171,7 @@ describe("GitHubEntitlementPort", () => {
     }
   });
 
-  /*
-   * The discovery Tool makes no provider call and reads no repository contents — it projects the
-   * installation rows this deployment already holds. Every other GitHub Tool requires an
-   * `owner/repo` argument the model has no other way to learn, so denying this one denies the
-   * whole family by starving it of its input.
-   */
+  /** Repository discovery abstains because it only projects local installation rows. */
   it("abstains for the local repository-discovery projection", async () => {
     const p = new GitHubEntitlementPort(identity([{}]), api({ "acme/api": "write" }));
     const answer = await p.check(
@@ -200,13 +183,7 @@ describe("GitHubEntitlementPort", () => {
     expect(answer).toBe(NOT_APPLICABLE);
   });
 
-  /*
-   * Repository creation names an account under which the repository does not exist yet. That makes
-   * the *repository* unanswerable, not the question — GitHub can say whether this person is in the
-   * organization and whether members there may create repositories. Abstaining would have let
-   * anyone holding the Role's blanket `integration.github` grant have the bot create a repository
-   * under an organization they are not in.
-   */
+  /** Repository creation checks organization membership before the repository exists. */
   const createQuery = (owner = "acme") =>
     query({
       action: "github.repository.create",
@@ -240,14 +217,11 @@ describe("GitHubEntitlementPort", () => {
 
   it("cannot determine when GitHub does not answer about the organization", async () => {
     const p = new GitHubEntitlementPort(identity([{}]), api({}, {}));
-    // `undefined` is the fail-closed answer the broker turns into a denial. It must not be
-    // NOT_APPLICABLE, which would waive the layer entirely.
+    // `undefined` fails closed; NOT_APPLICABLE would waive L5.
     expect(await p.check(createQuery())).toBeUndefined();
   });
 
   it("needs no organization membership to create under the person's own account", async () => {
-    // GitHub has no organization named `dhruv` to ask about, and nobody needs permission to be
-    // themselves. The probe must not be called at all.
     let asked = 0;
     const p = new GitHubEntitlementPort(identity([{}]), {
       permissionFor: async () => undefined,
@@ -286,12 +260,7 @@ describe("GitHubEntitlementPort", () => {
   });
 });
 
-/*
- * Drift guard. `repositoriesIn` reads a target shape the GitHub Tools produce; nothing in the type
- * system ties the two together, and a rename on either side would leave this port quietly finding
- * no repositories in any call — an entitlement check that never finds anything to check never
- * denies anything, and would look exactly like one that passes.
- */
+/** Drift guard: target-shape renames must not make entitlement checks find nothing. */
 describe("organizationsIn", () => {
   it("reads accounts out of org targets and ignores everything else", () => {
     expect(
@@ -305,9 +274,7 @@ describe("organizationsIn", () => {
   });
 
   it("yields nothing for a malformed account, so the caller cannot determine access", () => {
-    // A body containing a slash is a repository, not an account, and an empty one names nothing.
-    // Either would make the probe ask GitHub about a name it could never match, and a 404 there
-    // reads as "not a member" — a verdict we have no right to draw from our own malformed input.
+    // Malformed org targets must not become GitHub membership probes.
     expect(
       organizationsIn([
         { type: "integration.github", id: "org:" },
@@ -333,8 +300,6 @@ describe("agreement with the GitHub Tools' own derivation", () => {
 
     for (const tool of withRepoArg) {
       const derived = tool.definition?.targetsFor({ repository: "acme/api" }, undefined) ?? [];
-      // Not every repository-taking Tool derives a repository target (a create names an org), but
-      // no Tool may derive one this port cannot read back.
       const repos = repositoriesIn(derived);
       const namesARepo = derived.some((ref) => String(ref.id ?? "").startsWith("repo:"));
       expect(repos.length > 0).toBe(namesARepo);
@@ -342,21 +307,14 @@ describe("agreement with the GitHub Tools' own derivation", () => {
   });
 
   it("declines to read an installation-wide target as a repository", () => {
-    // `searchRepositoryTargets` emits `installation:*` when the call searches everything. Treating
-    // that as a repository would ask GitHub about a repo named `*` and believe the answer.
+    // `installation:*` is not a repository target.
     expect(repositoriesIn([{ type: "integration.github", id: "installation:__all__" }])).toEqual(
       []
     );
   });
 });
 
-/*
- * The production probe. Its job is to turn GitHub's several shapes of "no" into exactly one of
- * three answers, and the distinction that matters most is between a 404 on a membership lookup
- * (GitHub telling us this person is not a member) and every other failure (GitHub telling us
- * nothing). Reading the second as the first would deny honestly; reading the first as the second
- * would deny too, but reading *anything* as membership would open the hole this port closes.
- */
+/** Production probe must distinguish membership 404s from unknown provider failures. */
 describe("HttpGitHubPermissionApi.organizationStanding", () => {
   type Route = { status: number; body?: unknown };
 
@@ -394,7 +352,6 @@ describe("HttpGitHubPermissionApi.organizationStanding", () => {
       member: true,
       canCreateRepositories: true,
     });
-    // An owner may always create, and the policy endpoint may be unreachable for the installation.
     expect(seen).toEqual([MEMBERSHIP]);
   });
 

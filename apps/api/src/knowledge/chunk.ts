@@ -13,12 +13,7 @@ export interface TextChunk {
 const DEFAULT_SIZE = 800;
 const DEFAULT_OVERLAP = 100;
 
-/**
- * Fixed-window chunker with overlap (KN-V1 chunking, V1 choice). Deterministic and
- * pure — splits plain text into ~`size`-char windows that overlap by `overlap` chars
- * so a match near a boundary is still recallable. Whitespace-only input yields no
- * chunks; text shorter than a window yields a single trimmed chunk.
- */
+/** Deterministic fixed-window chunking with overlap. */
 export function chunkText(text: string, opts: ChunkOptions = {}): TextChunk[] {
   const size = Math.max(1, opts.size ?? DEFAULT_SIZE);
   const overlap = Math.max(0, Math.min(opts.overlap ?? DEFAULT_OVERLAP, size - 1));

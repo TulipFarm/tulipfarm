@@ -7,20 +7,12 @@ import type {
 import { generateText, type LanguageModel } from "ai";
 
 /**
- * LLM-backed Memory extraction (SPEC §14.3).
- *
- * Runs *after* a turn has answered, never inside it: inline extraction would put an extra model
- * call on every response for a result the user does not see. Correspondingly it is best-effort —
- * a failed extraction costs a few candidates, not a turn.
- *
- * What comes back is untrusted. This module's only job is to turn model output into well-formed
- * candidates; deciding whether a candidate may be proposed belongs to `screenMemoryCandidate` in
- * `@tulipfarm/memory`, which cannot be bypassed by changing this prompt.
+ * LLM-backed Memory extraction (SPEC §14.3). Runs *after* a turn has answered, never inside it:
+ * inline extraction would put an extra model call on every response for a result the user does not
+ * see. Correspondingly it is best-effort — a failed extraction costs a few candidates, not a turn.
  */
 
-/** How many messages of tail context the extractor sees. Enough for a exchange, not a transcript. */
 export const EXTRACTION_WINDOW_MESSAGES = 12;
-/** Ceiling on candidates from one turn — a model that returns fifty has misunderstood the task. */
 export const MAX_CANDIDATES_PER_TURN = 5;
 const MAX_MESSAGE_CHARS = 2_000;
 
@@ -56,11 +48,8 @@ function renderMessages(messages: MemoryExtractionInput["messages"]): string {
 }
 
 /**
- * Pulls the JSON object out of a model response.
- *
- * Models wrap JSON in prose or fences despite being told not to, and re-prompting costs another
- * call for a best-effort background job. Taking the outermost braces recovers the common cases;
- * anything else yields no candidates, which is the correct failure for this pipeline.
+ * Pulls the JSON object out of a model response. Taking the outermost braces recovers the common
+ * cases; anything else yields no candidates, which is the correct failure for this pipeline.
  */
 function parseCandidates(raw: string): readonly unknown[] {
   const start = raw.indexOf("{");
@@ -82,12 +71,7 @@ function clamp01(value: unknown, fallback: number): number {
     : fallback;
 }
 
-/**
- * Normalizes one raw item into a candidate, or `undefined` if it is not shaped like one.
- *
- * Numbers are clamped rather than trusted: a model that returns `confidence: 5` would otherwise
- * sail past the confidence floor that exists precisely to keep guesses out of the review queue.
- */
+/** Normalizes one raw item into a candidate, or `undefined` if it is not shaped like one. */
 function toCandidate(raw: unknown): MemoryCandidate | undefined {
   if (typeof raw !== "object" || raw === null) return undefined;
   const item = raw as Record<string, unknown>;
@@ -114,7 +98,6 @@ function toCandidate(raw: unknown): MemoryCandidate | undefined {
   };
 }
 
-/** Turns a model response into candidates. Exported for tests — no model call, pure parsing. */
 export function candidatesFromResponse(raw: string): readonly MemoryCandidate[] {
   const parsed: MemoryCandidate[] = [];
   for (const item of parseCandidates(raw)) {
@@ -126,10 +109,9 @@ export function candidatesFromResponse(raw: string): readonly MemoryCandidate[] 
 }
 
 /**
- * `MemoryExtractionPort` over the quick LLM tier.
- *
- * `getModel` is a thunk because the model is resolved from Soul config that reloads at runtime, and
- * because a not-configured deployment must degrade to extracting nothing rather than failing.
+ * `MemoryExtractionPort` over the quick LLM tier. `getModel` is a thunk because the model is
+ * resolved from Soul config that reloads at runtime, and because a not-configured deployment must
+ * degrade to extracting nothing rather than failing.
  */
 export class LlmMemoryExtractor implements MemoryExtractionPort {
   constructor(private readonly getModel: () => LanguageModel) {}

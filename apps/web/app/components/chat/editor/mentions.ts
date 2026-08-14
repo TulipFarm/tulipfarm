@@ -1,13 +1,4 @@
-/**
- * Tiptap glue for the three composer mention triggers. Each `@`/`/`/`#` is a separately-named
- * `Mention` node (so the serializer can tell them apart) with its own suggestion `pluginKey` (so the
- * three suggestion plugins don't collide). The dropdown is rendered with `ReactRenderer` into
- * `document.body` and positioned above the caret — mirroring the hand-rolled portal in
- * `model-selector.tsx`, no `tippy`/floating-ui dependency.
- *
- * v3 Mention builds the node-insertion `command` + `allow` per trigger char internally and spreads our
- * overrides last, so supplying `{ char, pluginKey, items, render }` keeps insertion working.
- */
+/** Each trigger needs a distinct Mention node and pluginKey so plugins do not collide. */
 
 import Mention from "@tiptap/extension-mention";
 import { PluginKey } from "@tiptap/pm/state";
@@ -90,11 +81,7 @@ function suggestionRender(kind: MentionKind) {
   };
 }
 
-/**
- * Build the three configured Mention extensions for the editor. `getItems` reads the live menu data
- * (from `useMentionData`) on every keystroke, so the extensions can be created once and still reflect
- * lists that load after mount.
- */
+/** `getItems` reads live data, so once-created extensions reflect post-mount loads. */
 export function buildMentionExtensions(getItems: GetItems) {
   return MENTION_KINDS.map((cfg, i) =>
     Mention.extend({ name: cfg.nodeName }).configure({

@@ -1,10 +1,7 @@
 /*
  * Pure, immutable reducer that folds the wire `ChatEvent` stream into the renderable timeline.
- * Every event lands on the LAST assistant message (one is created when a stream starts / the first
- * non-user event arrives). Tool calls and results are paired strictly by `toolCallId`, and parts
- * preserve first-seen order. Nothing here touches the network — `use-chat-stream` wires it to the
- * SSE client. Approvals are tracked both on the tool part (`approval.status`) and in a flat
- * `pendingApprovals` index so a resolution can locate its part in O(1).
+ * Every event lands on the LAST assistant message (one is created when a stream starts / the
+ * first non-user event arrives).
  */
 
 import type {
@@ -47,7 +44,6 @@ function sourceTurn(text: string, options?: ChatTurnOptions): ChatTurnSource {
   return cloned === undefined ? { text } : { text, options: cloned };
 }
 
-// Push a user message and mark the turn submitted. Used by the hook before opening the stream.
 export function appendUserMessage(
   state: ChatState,
   text: string,
@@ -63,10 +59,6 @@ export function appendUserMessage(
   return { ...state, messages: [...state.messages, message], status: "submitted" };
 }
 
-// Stop / un-send: drop the trailing assistant turn(s) AND the last user message, returning the
-// timeline to a clean pre-send state. The composer restores the original prompt into its editor; this
-// only rewinds the transcript. Local-only — the server keeps its full history, the same V1 trade-off
-// as `regenerate`.
 export function rewindLastTurn(state: ChatState): ChatState {
   const messages = state.messages.slice();
   while (messages.length > 0 && messages[messages.length - 1].role === "assistant") messages.pop();
@@ -74,7 +66,6 @@ export function rewindLastTurn(state: ChatState): ChatState {
   return { ...state, messages, status: "idle", error: undefined };
 }
 
-// The assistant message events fold into: the last one if it is still open, else a fresh one.
 function ensureAssistant(messages: ChatMessage[]): {
   messages: ChatMessage[];
   target: ChatMessage;
@@ -94,7 +85,6 @@ function ensureAssistant(messages: ChatMessage[]): {
   return { messages: [...messages, target], target };
 }
 
-// Replace `target` in the message list with a new message carrying `parts` (immutable update).
 function withParts(
   messages: ChatMessage[],
   target: ChatMessage,
@@ -104,7 +94,6 @@ function withParts(
   return messages.map((m) => (m.id === target.id ? updated : m));
 }
 
-// Append text to a trailing part of `kind`, or start a new one if the last part is something else.
 function appendText(
   parts: TimelinePart[],
   kind: "text" | "reasoning",
@@ -141,7 +130,6 @@ function mapSurface(
   );
 }
 
-// Map over tool parts, applying `fn` to the one matching `toolCallId` (others pass through).
 function mapTool(
   parts: TimelinePart[],
   toolCallId: string,
@@ -185,8 +173,6 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
         result: event.data.result,
         status: "done",
         ...(event.data.preview === undefined ? {} : { resultPreview: event.data.preview }),
-        // The call's own identity (tier, agent, step) is merged with the result's timing and
-        // failure code, so one part carries the whole story of the call.
         ...(resultMeta === undefined ? {} : { meta: { ...p.meta, ...resultMeta } }),
         ...(resultMeta?.errorCode === undefined ? {} : { outcome: "error" as const }),
       }));
@@ -220,8 +206,6 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
           ? { ...p, approval: { ...p.approval, status: event.data.outcome } }
           : { ...p, approval: { approvalId: event.data.approvalId, status: event.data.outcome } };
       const { [event.data.approvalId]: _removed, ...pendingApprovals } = state.pendingApprovals;
-      // Update the exact message holding the tool-call — located via the pendingApprovals index in
-      // case a later `finish` already sealed it — rather than assuming it is the open assistant.
       const byId = pending && state.messages.find((m) => m.id === pending.messageId);
       const { messages, target } = byId
         ? { messages: state.messages, target: byId }
@@ -289,7 +273,6 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
       return {
         ...state,
         status: "streaming",
-        // Track the new agent so the header indicator follows the handoff, not just the transcript.
         currentAgent: event.data.to,
         messages: withParts(messages, target, [...target.parts, part]),
       };
@@ -345,9 +328,6 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
 
     case "finish": {
       const { messages, target } = ensureAssistant(state.messages);
-      // Stamp the server's reply id onto the sealed message so feedback can target it. The turn's own
-      // finish event names the Message it persisted, so the id belongs to this reply and no other.
-      // `id` (the React key) stays the client uuid — swapping it would remount.
       const sealed = withParts(messages, target, target.parts).map((m) =>
         m.id === target.id
           ? {
@@ -364,7 +344,6 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
     case "error":
       return { ...state, status: "error", error: event.data.message };
 
-    // Imperative agent→client action — executed by the chat hook (navigate, …), no timeline change.
     case "client-action":
       return state;
   }

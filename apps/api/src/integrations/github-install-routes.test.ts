@@ -318,12 +318,7 @@ describe("GitHub App install routes", () => {
       expect(status.json()).toEqual({ installations: [] });
     });
 
-    /*
-     * The same authority `integrations/routes.ts` refuses a member for, through a different door.
-     * Disconnecting revokes every Agent's reach through that installation, so authentication alone
-     * is not the bar. Asserting the installation survives — not merely the status code — is what
-     * makes this fail if the gate moves after the effect instead of before it.
-     */
+    /* Disconnect is admin-only; assert the row survives so the gate is before the effect. */
     it("refuses a member disconnecting an installation, and leaves it connected", async () => {
       await installGitHubApp();
 
@@ -452,13 +447,7 @@ describe("GitHub App install routes", () => {
       );
     });
 
-    /*
-     * The most consequential of the three. This row decides which repository this business's Soul
-     * — the source of truth every other layer is checked against — actually *is*. A member able to
-     * repoint it would own every Resource, Agent, Skill and Routine definition the platform then
-     * enforces. Both routes assert the row is still absent, because a 403 that arrives after the
-     * write would be no protection at all.
-     */
+    /* Soul repo selection is admin-only; assert no row exists after a member attempt. */
     it("refuses a member connecting a Soul repo, and writes no mapping", async () => {
       await installWithPermissions({ issues: "write", metadata: "read" });
       const res = await app.inject({

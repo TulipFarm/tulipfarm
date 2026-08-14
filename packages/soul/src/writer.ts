@@ -109,25 +109,7 @@ export interface SoulReloadPort {
   reload(): Promise<unknown>;
 }
 
-/**
- * The single write gateway for the authored Soul tree.
- *
- * Every authoring surface — REST route, LLM Tool, importer, migration — reaches the tree through
- * `apply`, and through nothing else. That is what makes the validation gate real: it is not a
- * function a caller may remember to call, it is the only door. In exchange the caller is freed
- * from the five concerns it used to open-code (path building, existence checks, commit, push,
- * catalog reload), and gains the three it could not implement itself:
- *
- * - **Atomicity** — a multi-file artifact lands as one commit or not at all, so the tree never
- *   holds a manifest whose spec file is missing.
- * - **Conflict detection** — the write is a compare-and-swap against the base it was computed
- *   from, so a concurrent write or a down-sync pull is rejected rather than silently overwritten.
- * - **Provenance** — who, on whose authority, under which schema versions, signed into the commit.
- *
- * Nothing here decides *whether* a principal may write; authorization is resolved before `apply`
- * and arrives as `actor` and `approval`. This gateway decides only whether the bytes are valid and
- * lands them atomically.
- */
+/** Single authored-Soul write gateway: validate, atomically commit, push, then reload. */
 export class SoulWriter {
   constructor(
     private readonly store: SoulGitStore,
@@ -185,13 +167,7 @@ export class SoulWriter {
     throw new SoulWriteError("CONFLICT", "Soul read: the tree changed during the read");
   }
 
-  /**
-   * Validate and atomically commit a proposed change to the Soul tree.
-   *
-   * Throws `SoulWriteError` on every rejection. A `CONFLICT` means the base moved under the write
-   * — the caller must re-read and recompute, because its content was derived from a tree that no
-   * longer exists. Retrying the same bytes would resurrect a stale read.
-   */
+  /** Validate and commit; `CONFLICT` requires re-read and recompute, not retrying stale bytes. */
   async apply(request: SoulWriteRequest): Promise<SoulWriteResult> {
     const files = this.resolveChanges(request.changes);
     if (files.length === 0) {
@@ -269,14 +245,7 @@ export class SoulWriter {
     return files;
   }
 
-  /**
-   * Refuse to write a canonical definition while a superseded one for the same artifact survives.
-   *
-   * Two definitions for one artifact is an ambiguity the loader can only resolve by guessing. The
-   * writer does not delete the old file on the caller's behalf: a legacy definition can carry
-   * content the canonical form splits out (an `AGENT.md` body becomes `instructions.md`), so
-   * removing it silently would discard authored prose. Migration must be stated, not inferred.
-   */
+  /** Refuse canonical writes while legacy definitions for the same artifact still exist. */
   private checkNoAmbiguousDefinition(
     changes: readonly SoulWrite[],
     paths: ReadonlySet<string>
@@ -371,11 +340,7 @@ export class SoulWriter {
     }
   }
 
-  /**
-   * Refresh the in-memory catalog. A failure here leaves a committed, durable write behind a stale
-   * read — degraded but recoverable on the next sync — so it is logged, not thrown. Throwing would
-   * report failure for a change that is already permanent.
-   */
+  /** Reload failures are logged because the write is already durable. */
   private async refresh(changesetId: string): Promise<void> {
     if (this.reload === undefined) return;
     try {

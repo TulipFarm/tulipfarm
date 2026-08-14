@@ -350,12 +350,7 @@ export class IntegrationStore {
     });
   }
 
-  /**
-   * Every active/revoked Integration a business has for one provider, regardless of external
-   * tenant id — for a caller that must resolve context from a Tool call's arguments alone (e.g.
-   * which installed GitHub App installation covers a given repository) rather than from a known
-   * webhook delivery's installation id.
-   */
+  /** Lists provider integrations when context must be resolved from Tool arguments alone. */
   async loadProviderSnapshot(
     businessId: string,
     provider: string
@@ -397,7 +392,7 @@ export class IntegrationStore {
     });
   }
 
-  /** Active + revoked routes for one Integration, highest priority first — drives route-management UI. */
+  /** Active + revoked routes for one Integration, highest priority first. */
   async listRoutes(businessId: string, integrationId: string): Promise<PersistedChannelRoute[]> {
     return this.transactions.withTransaction(async (transaction) => {
       const routes = await transaction.query<RouteRow>(
@@ -422,7 +417,7 @@ export class IntegrationStore {
     });
   }
 
-  /** Current status of one Integration/Route pair, for re-checking authorization at delivery time. */
+  /** Current status of one Integration/Route pair for delivery-time auth checks. */
   async loadDeliveryStatus(
     businessId: string,
     integrationId: string,

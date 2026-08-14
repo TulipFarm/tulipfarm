@@ -48,11 +48,7 @@ export function parsePaginationQuery(query: Record<string, unknown>): {
   return after ? { limit, after } : { limit };
 }
 
-/**
- * Build a keyset page from an over-fetched array. Callers `SELECT … LIMIT limit + 1`
- * and pass the result here: if more than `limit` came back there's a next page, and the
- * cursor is the last kept item. Pure — shared by the raw-SQL Pg repos.
- */
+/** Builds keyset pages from `limit + 1` over-fetch; cursor is the last kept item. */
 export function toPage<T extends { createdAt: Date; _id: string }>(
   rows: T[],
   limit: number

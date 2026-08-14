@@ -9,12 +9,8 @@ export type PruneResult =
   | { action: "delete" };
 
 /**
- * A provider entry resolves its api key from `api_key_ref` when set, or from the
- * registry's default key for its provider type when not. Either path becomes broken
- * when `deletedKey` is removed, so both cases must be pruned.
- *
- * Entries with `env://` refs are unaffected — they read from process.env, not the
- * secrets store.
+ * Prune entries using the deleted secret directly or by provider default; env:// refs are
+ * unaffected.
  */
 function entryUsesKey(entry: ProviderEntry, deletedKey: string, ownerProviderId: string): boolean {
   if (entry.api_key_ref === deletedKey) return true;
@@ -23,12 +19,7 @@ function entryUsesKey(entry: ProviderEntry, deletedKey: string, ownerProviderId:
 }
 
 /**
- * Computes the effect of deleting a provider api_key secret on the LlmConfig.
- *
- * - "unchanged" — no entries reference the deleted key; nothing to do.
- * - "update"    — affected entries removed; every tier still has ≥1 provider; write pruned config.
- * - "delete"    — at least one tier is left empty after pruning (can't produce a valid config);
- *                 delete the file entirely so the server boots in a clean unconfigured state.
+ * Deleting a key leaves config unchanged, prunes entries, or deletes config when a tier empties.
  */
 export function pruneLlmConfig(
   config: LlmConfig,

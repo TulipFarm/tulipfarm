@@ -4,14 +4,7 @@ import type {
   LanguageModelV4ToolResultOutput,
 } from "@ai-sdk/provider";
 
-/**
- * A CLI provider has no session resume in one-shot/print mode, and TulipFarm's "capture → abort →
- * replay" turn shape spawns one fresh process per AgentLoop iteration anyway (see
- * `docs/plans/cli-agent-providers.md`). So instead of streaming multi-turn input to the CLI, the
- * whole `LanguageModelV4Prompt` — every prior user/assistant/tool message the AI SDK sends on
- * every call — is flattened into one text block and handed to the CLI as a single turn. The model
- * reads it as conversation history and produces the next assistant turn.
- */
+/** One-shot CLI turns flatten the full AI SDK prompt because each AgentLoop iteration is fresh. */
 
 export interface RenderedImage {
   readonly mimeType: string;

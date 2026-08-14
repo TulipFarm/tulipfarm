@@ -1,12 +1,7 @@
 import type { SecretProvider, SecretsService } from "@tulipfarm/secrets";
 import { integrationSecretKey } from "../../integrations/connection-env";
 
-/**
- * The `SecretProvider` the `send_slack_message` chat Tool's `credentialRef` resolves to. Reuses
- * the same sealed bot token `/api/v1/internal/channels/*` already reads
- * (`integrationSecretKey("slack", "SLACK_BOT_TOKEN")`, `apps/api/src/internal/channel-routes.ts`)
- * rather than adding a second Slack credential path.
- */
+/** Slack Tool credential provider reuses the sealed bot token internal channel routes read. */
 export const SLACK_BOT_TOKEN_SECRET_REF = "secret://integrations/slack/bot-token";
 
 export interface SlackBotTokenProviderDeps {

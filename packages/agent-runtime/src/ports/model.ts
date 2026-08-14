@@ -59,14 +59,7 @@ export interface ModelInvocationResult {
   readonly providerRequestId?: string;
 }
 
-/**
- * One increment of a streamed model response.
- *
- * A stream always ends with exactly one `completed` chunk carrying the same
- * `ModelInvocationResult` a non-streaming `invoke` would have returned, so a consumer that only
- * wants the outcome reads the last chunk and a consumer that wants live text reads the deltas.
- * Adapters that cannot stream simply do not implement `stream`.
- */
+/** Stream ends with one `completed` chunk; adapters without streaming omit `stream`. */
 export type ModelStreamChunk =
   | { readonly kind: "text_delta"; readonly text: string }
   | { readonly kind: "completed"; readonly result: ModelInvocationResult };
@@ -74,11 +67,6 @@ export type ModelStreamChunk =
 /** Provider-neutral model invocation boundary selected through a governed ModelProfile. */
 export interface ModelPort {
   invoke(request: ModelInvocationRequest): Promise<ModelInvocationResult>;
-  /**
-   * Stream the same call `invoke` would make.
-   *
-   * Optional: the loop falls back to `invoke` when an adapter omits it, so a non-streaming
-   * provider stays usable and only loses the live text — never a result.
-   */
+  /** Optional streaming; non-streaming providers still return a final result. */
   stream?(request: ModelInvocationRequest): AsyncIterable<ModelStreamChunk>;
 }

@@ -1,10 +1,6 @@
 import type { ResourceDoc } from "./repo";
 
-// Per-type resources live in a dedicated `resources` schema (D9) so `resource:user`
-// can't collide with the system `users` table or the `user` reserved word. Type names
-// are already constrained to /^[a-z][a-z0-9-]*$/ at POST /resource-types; we re-check
-// before ever interpolating one into SQL (defense-in-depth) and double-quote it
-// (hyphens require quoting).
+// Re-check type names before SQL interpolation and quote them; resources live in their own schema.
 
 const TYPE_RE = /^[a-z][a-z0-9-]*$/;
 
@@ -46,11 +42,7 @@ export function createHistoryTableSql(type: string): string {
   )`;
 }
 
-/**
- * Reconstruct a `ResourceDoc` from a per-type row. System columns are authoritative
- * (spread `data` first so a stray field can never shadow `_id`/`version`/…). pg and
- * PGlite both return `jsonb` as a parsed object and `timestamptz` as a `Date`.
- */
+/** Spread data first so row system columns remain authoritative. */
 export function rowToResourceDoc(row: Record<string, unknown>): ResourceDoc {
   const data = (row.data ?? {}) as Record<string, unknown>;
   const deletedAt = row.deleted_at as Date | null;

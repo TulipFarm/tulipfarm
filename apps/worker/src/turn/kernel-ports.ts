@@ -2,15 +2,7 @@ import type { StateStatus } from "@tulipfarm/run-kernel";
 import type { RunStore } from "@tulipfarm/storage";
 import type { StateTransitionPort } from "../agent-state";
 
-/**
- * The turn's ports onto the Run kernel tables.
- *
- * `AgentStateRunner` states transitions in kernel terms — "move this State from `running` to
- * `succeeded`" — while `RunStore` will only move a State it can prove nobody else moved first.
- * This file is that translation, and it is where the proof is obtained: the expected version is
- * read immediately before the write, so a lost race fails loudly instead of overwriting whatever
- * the other worker just recorded.
- */
+/** RunStore State transitions use fresh versions, so CAS races fail instead of overwriting. */
 
 /** A CAS transition that lost. Never handled here — it means two workers held the same State. */
 export class StateTransitionConflictError extends Error {
@@ -40,13 +32,7 @@ export class MissingStateError extends Error {
   }
 }
 
-/**
- * `StateTransitionPort` over `RunStore`.
- *
- * `reason` is recorded as the State's error evidence only when the State is ending badly. On a
- * `succeeded` transition there is nothing to explain, and `RunStore` never clears the column, so
- * writing one would leave a healthy State permanently carrying an error nobody can retract.
- */
+/** Record `reason` only for non-success; RunStore never clears error evidence. */
 export class RunStoreStateTransitions implements StateTransitionPort {
   constructor(private readonly runs: Pick<RunStore, "findState" | "transitionState">) {}
 
@@ -86,15 +72,7 @@ const TERMINAL_STATUSES: ReadonlySet<string> = new Set([
   "needs_reconciliation",
 ]);
 
-/**
- * Re-claims a State its Run parked on, so the turn can run again.
- *
- * A Run resumed from a durable wait comes back with its `invoke` State still `waiting`, and the
- * kernel does not allow `waiting -> running` — a parked State has to be offered and claimed again,
- * exactly as it was the first time. Walking it back through `ready` and `claimed` is that claim,
- * and each hop is compare-and-swapped: if another worker got there first, the transition raises
- * rather than stealing a State somebody else is already running.
- */
+/** Reclaim parked States through CAS `ready` then `claimed`; never steal a running State. */
 export const RECLAIM_PATH: readonly StateStatus[] = ["ready", "claimed"];
 
 async function walkReclaimPath(
@@ -116,14 +94,7 @@ export async function reclaimWaitingState(
   await walkReclaimPath(transitions, request, "waiting");
 }
 
-/**
- * Claims a Run's `invoke` State on its first dispatch.
- *
- * The gateway persists a fresh State at `pending` (the same default a Routine's start State gets,
- * since one INSERT serves both), but nothing leases a State the way `RunLeaseManager` leases a Run
- * — a chat turn has exactly one State and dispatches it immediately, so this walks it through
- * `ready` and `claimed` itself rather than expecting it to arrive already claimed.
- */
+/** First chat dispatch claims `pending` invoke State through `ready` and `claimed`. */
 export async function reclaimPendingState(
   transitions: StateTransitionPort,
   request: { businessId: string; runId: string; stateKey: string }

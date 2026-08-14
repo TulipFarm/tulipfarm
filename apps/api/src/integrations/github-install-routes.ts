@@ -13,22 +13,7 @@ import { GitHubInstallHttp } from "./github-http";
 import { type InstalledRepository, listInstalledRepositories } from "./github-install";
 import { refuseNonOperator } from "./operator";
 
-/*
- * What a business can do with GitHub *after* it is connected: inspect its installations, pick a
- * Soul repository, and disconnect.
- *
- * Acquiring the credentials is not here. `integrations/github/manifest.yml` declares the App
- * creation and installation as ordinary `app_manifest` and `install` steps, executed by the
- * generic auth broker (`auth-broker.ts`) that every integration shares, and the installation is
- * recorded by `ensureGitHubInstallation` (`github-install.ts`) from the shared `onConnected` hook.
- * There is no TulipFarm-owned App: each deployment creates its own.
- *
- * The Soul-repo step is genuinely GitHub-specific and stays: once an installation exists, the
- * customer either connects one of its already-granted repos (`connected_existing`) or has the App
- * create a fresh one (`created_via_app`, which needs `administration: write` — requested only as
- * an incremental re-auth via GitHub's "update permissions" URL, never in the base install). Either
- * path writes one row to `soul_repositories` (`SoulRepositoryStore`, one business -> one Soul repo).
- */
+/* GitHub post-connect routes: inspect installs, pick/create the Soul repo, disconnect. */
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -457,17 +442,9 @@ export function registerGitHubInstallRoutes(app: FastifyInstance, deps: GitHubIn
   );
 }
 
-/**
- * GitHub's install callback returns permissions as `{ issues: "write", ... }` — the only durable
- * source for `GitHubInstallationScope.permissions`, since the App manifest only states the
- * *requested* ceiling, not what an org admin actually granted.
- */
+/** Callback permissions are durable; manifests only state requested ceilings. */
 
-/**
- * Throws on a non-2xx GitHub response rather than returning `[]` — there is no periodic resync of
- * an installation's repo grant, so silently treating an API error as "zero repos" would have
- * persisted that empty state permanently instead of surfacing the failure to the caller.
- */
+/** GitHub API errors throw; persisting an empty repo grant would be permanent data loss. */
 
 type MintResult =
   | { ok: true; token: string }
@@ -484,13 +461,7 @@ type InstallationTokenCache = Map<string, CachedInstallationToken>;
 /** Refresh ahead of GitHub's ~1hr expiry so a cached token is never handed out about to expire. */
 const TOKEN_REFRESH_MARGIN_MS = 5 * 60 * 1000;
 
-/**
- * Mints a fresh installation token for a repo-picker/create request, or returns the cached one if
- * still comfortably inside its ~1hr expiry. Distinct from the install-callback's minting (which
- * also needs the raw JWT to read installation details) — these routes only ever need the exchanged
- * installation token, so they can share this cache across a burst of repo-picker requests instead
- * of minting a new token from GitHub on every call.
- */
+/** Caches installation tokens for picker/create bursts, separate from install-callback JWT use. */
 async function mintTokenForInstallation(
   deps: GitHubInstallDeps,
   http: IntegrationHttpPort,

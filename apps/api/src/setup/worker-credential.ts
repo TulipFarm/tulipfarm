@@ -1,15 +1,5 @@
-// Zero-required-env boot, second half: a Worker-shaped process needs a credential for
-// `/api/v1/internal/*`, and a compose file pasted into Portainer has no way to invent one. So the
-// API mints it — the same shape as `bootstrap-secrets.ts`, and for the same reason: env always
-// wins, the data volume is the fallback, and nothing is invented when neither lane applies.
-//
-// The file is the whole handoff. The reading process mounts the data volume read-only and reads
-// this file when its credential env var is unset; there is no endpoint that hands a credential
-// out, because an endpoint that does that is an endpoint an attacker can ask.
-//
-// `apps/worker` and `apps/integration-worker` both need exactly this, under their own client name
-// and file — `provisionServiceCredential` is the shared shape; `provisionWorkerCredential` and
-// `provisionIntegrationWorkerCredential` are its two named callers.
+// API mints Worker-shaped `/api/v1/internal/*` credentials when env is absent.
+// No endpoint exposes them.
 
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -34,7 +24,7 @@ export interface ServiceCredentialResult {
   file?: string;
 }
 
-/** @deprecated identical to {@link ServiceCredentialResult}; kept as the name callers already use. */
+/** @deprecated Same as {@link ServiceCredentialResult}; kept for existing callers. */
 export type WorkerCredentialResult = ServiceCredentialResult;
 
 export class WorkerCredentialError extends Error {}
@@ -57,11 +47,7 @@ function parseCredentialFile(contents: string, credentialKey: string): string | 
   return undefined;
 }
 
-/**
- * Whether a credential on disk would still authenticate a request the reading process makes — the
- * same two questions the auth middleware asks, so a disabled or expired client is replaced here
- * rather than at that process's first call.
- */
+/** Re-check disk credentials against auth rules so disabled or expired clients are replaced. */
 async function usable(repo: ApiClientRepo, credential: string): Promise<boolean> {
   const client = await authenticateApiClient(repo, credential);
   if (!client) return false;
@@ -73,13 +59,7 @@ async function usable(repo: ApiClientRepo, credential: string): Promise<boolean>
   }
 }
 
-/**
- * Ensures a service credential exists on the data volume, minting one on first boot.
- *
- * Re-verifies a credential it finds rather than trusting the file: a restored `/data` next to a
- * fresh database names a client that no longer exists, and a process that discovers that only when
- * it makes its first internal call has already cost a participant a turn.
- */
+/** Ensure a data-volume service credential; verify restored files against the live database. */
 async function provisionServiceCredential(
   { clientName, credentialFilename, credentialKey }: ServiceCredentialConfig,
   repo: ApiClientRepo,
@@ -129,7 +109,7 @@ export async function provisionWorkerCredential(
   );
 }
 
-/** Ensures an Integration Worker credential exists on the data volume, minting one on first boot. */
+/** Ensures an Integration Worker credential exists on the data volume. */
 export async function provisionIntegrationWorkerCredential(
   repo: ApiClientRepo,
   env: NodeJS.ProcessEnv = process.env,

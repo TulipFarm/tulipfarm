@@ -1,11 +1,7 @@
 import type { Editor, Range } from "@tiptap/core";
 import { CALLOUT_KINDS } from "../extensions/callout";
 
-/*
- * Slash (`/`) command catalog. Each item runs a TipTap command after deleting the typed `/query`
- * range. The catalog + `filterSlashItems` are pure (unit-tested); the menu UI (slash-menu.ts) just
- * renders the filtered list and calls `run`.
- */
+/* Pure slash command catalog; UI only filters and invokes these TipTap commands. */
 
 export interface SlashItem {
   id: string;

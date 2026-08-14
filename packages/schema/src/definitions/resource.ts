@@ -11,14 +11,7 @@ const domainPattern = "^[a-z][a-z0-9_]*(?:[-_][a-z0-9_]+)*$";
 
 const MetadataSchema = Type.Unsafe<DefinitionMetadata>(definitionMetadataSchema);
 
-/**
- * The authored JSON Schema describing one business Record.
- *
- * Deliberately open (`additionalProperties: true`): it carries the `x-*` authoring vocabulary
- * (`x-id-strategy`, `x-normalize`, `x-computed`, `x-links`) whose keys are checked against closed
- * sets by `validateResourceSchema`. Pinning the *structure* here and the *vocabulary* there keeps
- * one owner per concern — widening the vocabulary must not require touching this envelope.
- */
+/** Open authored record schema; `validateResourceSchema` owns the closed `x-*` vocabulary. */
 const RecordSchemaSchema = Type.Object(
   {
     type: Type.Literal("object"),
@@ -28,11 +21,7 @@ const RecordSchemaSchema = Type.Object(
   { additionalProperties: true }
 );
 
-/**
- * Record-lifecycle hooks live in a companion `hooks.ts` beside this definition. The definition
- * only declares *whether* they run; the code itself is content-addressed by the write gateway and
- * reviewed as executable content, never validated as configuration.
- */
+/** Hooks code lives in companion `hooks.ts`; this only declares whether hooks run. */
 const HooksSchema = Type.Object({ enabled: Type.Boolean() }, { additionalProperties: false });
 
 export const ResourceSchema = Type.Object(

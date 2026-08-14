@@ -1,10 +1,4 @@
-/**
- * Exports audit evidence that stays verifiable without protected payload access (SPEC §20:
- * "Separate access is required to query, export, or administer audit."; SPEC §13: protected
- * content never enters audit payloads). An export bundle carries events (already payload-free —
- * `normalizeAuditEventInput` rejects payload fields) plus seal signatures; verifying it only
- * recomputes hashes and checks signatures, never fetches blob content.
- */
+/** Audit exports verify from payload-free events and seal signatures, never protected blobs. */
 
 import type { AuditEvent } from "./event";
 import type { SealedSegment, SealSigner } from "./seal";
@@ -65,11 +59,7 @@ export interface ExportVerifyResult {
   readonly invalidSeals: readonly string[];
 }
 
-/**
- * Verifies `bundle` using only hashes and signatures — never reads blob storage. A tombstoned
- * (crypto-erased) segment still verifies: its seal signature and segment hash are independent of
- * whether the underlying blob content can still be decrypted.
- */
+/** Verifies hashes/signatures only; crypto-erased segments still verify. */
 export async function verifyExport(
   bundle: AuditExportBundle,
   signer: SealSigner,

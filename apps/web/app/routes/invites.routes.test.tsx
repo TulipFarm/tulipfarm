@@ -8,12 +8,9 @@ import AuthSettings from "./_app.settings.auth";
 import AcceptInvite from "./accept-invite";
 
 /*
- * Invite redemption and password change, end to end at the UI seam: the acceptance page redeems a
- * token it reads from the URL *fragment* (never the query string), and the Settings form requires
- * the current password.
- *
- * Issuing a link is the admin half of the same story and lives with the page that does it, in
- * `business-access-people.test.tsx` — the People page merged into Access.
+ * Invite redemption and password change, end to end at the UI seam: the acceptance page redeems
+ * a token it reads from the URL *fragment* (never the query string), and the Settings form
+ * requires the current password.
  */
 
 vi.mock("~/lib/api", async () => {
@@ -25,7 +22,6 @@ vi.mock("~/lib/api", async () => {
     changePassword: vi.fn(),
   };
 });
-// The Auth page also lists API tokens; stub that fetch so it cannot colour the password assertions.
 vi.mock("~/lib/settings", async () => {
   const actual = await vi.importActual<typeof import("~/lib/settings")>("~/lib/settings");
   return { ...actual, listApiTokens: vi.fn().mockResolvedValue([]) };

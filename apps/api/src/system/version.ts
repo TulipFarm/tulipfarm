@@ -1,8 +1,4 @@
-/**
- * The running TulipFarm release version. Baked into the server bundle by the Docker build
- * (esbuild --define, from the root package.json version); native dev runs fall back to the
- * TULIPFARM_VERSION env var, then "dev".
- */
+/** Running release version: bundle define, then `TULIPFARM_VERSION`, then `dev`. */
 declare const __TULIPFARM_VERSION__: string | undefined;
 
 export function runningVersion(): string {
@@ -16,11 +12,7 @@ export function runningVersion(): string {
   return envVer ?? "dev";
 }
 
-/**
- * True when `latest` is a strictly newer stable semver than `current`. Non-semver versions
- * ("dev", "latest", prereleases) never report an update — the notice is best-effort, and a
- * false negative beats nagging dev instances.
- */
+/** True only for strictly newer stable semver; non-semver and prereleases never nag. */
 export function isNewerVersion(current: string, latest: string): boolean {
   const cur = parseSemver(current);
   const next = parseSemver(latest);

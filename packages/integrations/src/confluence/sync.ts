@@ -1,11 +1,5 @@
 /**
- * Confluence Knowledge sync.
- *
- * A Confluence page is the Knowledge source and its body is chunked into indexed snippets. The
- * captured ACL is the effective Confluence account allow-list mapped into Tulip principals. Every
- * insecure ambiguity fails closed: unreadable permissions emit `unverifiable` and remove content,
- * unmapped accounts grant nothing, stale ACLs are denied by `@tulipfarm/knowledge`, and deleted
- * pages emit a deletion marker plus immediate content removal.
+ * Preserves effective Confluence ACLs; unreadable permissions or deletes remove indexed text.
  */
 
 import { canonicalHash } from "@tulipfarm/schema";

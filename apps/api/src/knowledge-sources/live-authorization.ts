@@ -11,13 +11,7 @@ import { SlackHttpKnowledgeApi } from "./slack-http";
 const SLACK_PROVIDER = "slack";
 const DRIVE_PROVIDER = "google-drive";
 
-/**
- * Live authorization for `live`-mode Slack sources (private channels, DMs, group DMs — never
- * cached, per `sync.ts`). A querying principal is allowed only if a mapped Slack identity of
- * theirs is a current member of the channel. `listMembers` returning `undefined` (unreadable) or
- * throwing (provider error) both resolve to `undefined` here — "could not determine" — never to an
- * open decision (`acl.ts` denies on `undefined`).
- */
+/** Live Slack auth allows current members; unreadable/provider errors return denied `undefined`. */
 export class SlackLiveSourceAuthorization implements LiveSourceAuthorizationPort {
   constructor(
     private readonly api: SlackKnowledgeApiPort,
@@ -56,14 +50,7 @@ export class SlackLiveSourceAuthorization implements LiveSourceAuthorizationPort
   }
 }
 
-/**
- * Resolves the business's current active Slack integration (single-tenant deployment, so at most
- * one) and its bot token fresh on every check — deliberately not cached at the composition root,
- * since a live check's whole point is to never answer from a stale credential or membership list.
- * No active integration or unresolvable token both fall through to `undefined` ("could not
- * determine"), the same fail-closed outcome `SlackLiveSourceAuthorization` already returns for an
- * unreadable channel.
- */
+/** Resolves Slack bot token fresh per check; missing token returns fail-closed `undefined`. */
 export class SlackTenantLiveAuthorization implements LiveSourceAuthorizationPort {
   constructor(
     private readonly integrations: IntegrationStore,

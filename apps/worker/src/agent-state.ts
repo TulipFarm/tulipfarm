@@ -2,12 +2,7 @@ import type { AgentLoopInput, AgentLoopOutcome } from "@tulipfarm/agent-runtime"
 import { assertStateTransition, type StateStatus } from "@tulipfarm/run-kernel";
 import { StateTransitionConflictError } from "./turn/kernel-ports";
 
-/**
- * Agent State execution (SPEC §10). Composition only: the bounded loop lives in
- * `@tulipfarm/agent-runtime` and the state machine in `@tulipfarm/run-kernel`; this file maps one
- * to the other so an Agent State can only end in a status the kernel allows, and an Approval parks
- * the State on a durable wait instead of blocking a worker.
- */
+/** Maps Agent loop outcomes onto legal Run-kernel State transitions and durable waits. */
 
 export interface AgentStateRequest {
   readonly businessId: string;
@@ -63,13 +58,7 @@ export type AgentStateResult =
 export class AgentStateRunner {
   constructor(private readonly options: AgentStateRunnerOptions) {}
 
-  /**
-   * Runs one Agent State over an already-resolved loop input.
-   *
-   * The input arrives built rather than being fetched here: the caller resolved the Context to
-   * announce what the model was given, and resolving it a second time would risk running the loop
-   * over a bundle nobody published evidence for.
-   */
+  /** Runs one Agent State over the already-announced Context bundle. */
   async execute(request: AgentStateRequest, input: AgentLoopInput): Promise<AgentStateResult> {
     // Fail before any model or Tool work if the State cannot legally start.
     assertStateTransition(request.from, "running");
@@ -124,14 +113,7 @@ export class AgentStateRunner {
     }
   }
 
-  /**
-   * Ends a State that was decided before the model was ever asked.
-   *
-   * A guardrail refusal is still a State that ran and reached a conclusion, so it walks the same
-   * `claimed → running → succeeded` path rather than being left mid-flight for the lease to
-   * reclaim. The kernel therefore sees one shape of Agent State, whether a model produced the
-   * answer or a guard did.
-   */
+  /** Settles guardrail-decided States through the same `running → succeeded` path. */
   async settle(
     request: AgentStateRequest,
     output: unknown

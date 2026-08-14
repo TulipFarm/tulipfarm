@@ -7,13 +7,12 @@ import type { IndexQueueStats } from "./types";
 
 export const KNOWLEDGE_INDEX_QUEUE = "knowledge-index";
 
-// pg-boss internal table names are safe identifiers; still validated before interpolation.
 const SAFE_TABLE = /^[A-Za-z0-9_."]+$/;
 
 /**
- * Operational stats for the index queue, read from pg-boss (`getQueueStats` + the queue's job table).
- * Degrades to `{ pending: 0, lastError: null }` if the pg-boss schema isn't present or its shape
- * changes — index-status should never fail because the queue introspection did.
+ * Operational stats for the index queue, read from pg-boss (`getQueueStats` + the queue's job
+ * table). Degrades to `{ pending: 0, lastError: null }` if the pg-boss schema isn't present or its
+ * shape changes — index-status should never fail because the queue introspection did.
  */
 export function makeIndexQueueStats(boss: PgBoss, db: Queryable): () => Promise<IndexQueueStats> {
   return async (): Promise<IndexQueueStats> => {
@@ -37,20 +36,16 @@ export function makeIndexQueueStats(boss: PgBoss, db: Queryable): () => Promise<
           lastError = { message, failedAt: row.completed_on };
         }
       }
-    } catch {
-      // pg-boss schema absent (e.g. tests) or shape changed → degrade gracefully.
-    }
+    } catch {}
     return { pending, lastError };
   };
 }
 
-/** What an indexing job carries — one variant per source adapter (KN-V1-003). */
 export type IndexJob =
   | { kind: "page"; pageId: string }
   | { kind: "resource"; resourceType: string; resourceId: string; record: Record<string, unknown> }
   | { kind: "conversation"; conversationId: string };
 
-/** Deterministic key so repeated events for the same source collapse to one job. */
 export function jobKey(job: IndexJob): string {
   switch (job.kind) {
     case "page":
@@ -62,7 +57,6 @@ export function jobKey(job: IndexJob): string {
   }
 }
 
-/** Minimal enqueue surface (a structural subset of pg-boss, fakeable in tests). */
 export interface Enqueuer {
   send(
     name: string,
@@ -81,7 +75,6 @@ export function enqueueIndex(boss: Enqueuer, job: IndexJob): Promise<string | nu
 
 const SYSTEM_FIELDS = new Set(["id", "version", "createdAt", "updatedAt", "deletedAt"]);
 
-/** Flatten a resource record's human-readable string fields into indexable text. */
 export function resourceToText(
   resourceType: string,
   record: Record<string, unknown>
@@ -102,11 +95,9 @@ export function resourceToText(
 
 export interface KnowledgeIndexingDeps {
   service: KnowledgeService;
-  /** Resolves a completed conversation into indexable text (injected to avoid a messageRepo dep here). */
   loadConversationText?: (
     conversationId: string
   ) => Promise<{ title: string; content: string } | null>;
-  /** Optional: record each batch run in the activity feed (category 'job'). */
   activity?: ActivityService;
 }
 
@@ -141,7 +132,6 @@ export async function handleIndexJob(job: IndexJob, deps: KnowledgeIndexingDeps)
   }
 }
 
-/** Register the in-process `knowledge-index` queue + worker (MODE=all). */
 export async function registerKnowledgeIndexing(
   boss: PgBoss,
   deps: KnowledgeIndexingDeps

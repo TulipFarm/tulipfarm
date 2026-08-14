@@ -223,11 +223,7 @@ export interface BundleSandboxToolingOptions {
   readonly now?: () => Date;
 }
 
-/**
- * Builds adapters only for commands carried by this Run's verified bundle. With no configured
- * development image it returns an empty map, so production parks on `adapter_not_found` until an
- * attested remote backend is composed.
- */
+/** Build only verified-bundle command adapters; no dev image means park on `adapter_not_found`. */
 export function buildBundleSandboxAdapters(
   request: RoutineToolRequest,
   options: BundleSandboxToolingOptions

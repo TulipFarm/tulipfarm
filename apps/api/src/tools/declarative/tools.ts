@@ -30,20 +30,7 @@ import { principalSecretKey } from "../../integrations/principal-tokens";
 import { defineApiTool, toToolDef } from "../define";
 import { err, ok, type RequestContext, type ToolCallResult, type ToolDef } from "../types";
 
-/**
- * Turns a manifest's declared egress into live chat Tools.
- *
- * This is the piece that makes the declarative framework real. Before it, a manifest could be
- * listed, installed, and connected, but `egress` was only ever validated and projected — never
- * executed — so the only integrations that produced working Tools were the two whose Tools are
- * hand-written TypeScript (`../github`, `../slack`), which is exactly what a third-party manifest
- * is forbidden to ship (`@tulipfarm/soul`'s `integration-trust.ts`).
- *
- * Manifest Tools go through the **same** governed path as those two: `EffectStore.reserve` for
- * replay-safe idempotency, then `EffectDispatcher.dispatch` for the credential lease and the call.
- * Declarative authorship changes who writes an integration, not how far the platform trusts it — a
- * manifest-declared mutation has to be as replay-safe and as auditable as a hand-written one.
- */
+/** Compiles manifest egress into governed chat Tools with the ledgered dispatch path. */
 
 /** Tool names are namespaced by slug so two integrations may both publish `search`. */
 export function declarativeToolName(slug: string, toolName: string): string {
@@ -55,15 +42,7 @@ export function egressSecretRef(slug: string, tokenEnv: string): string {
   return `secret://integrations/${slug}/egress/${tokenEnv}`;
 }
 
-/**
- * The ref a call acting *as a person* leases through (D7).
- *
- * Deliberately derived from the business ref rather than invented separately, so the two can never
- * drift apart and the authorizer can recognise both with one comparison. Carrying the principal in
- * the ref rather than in dispatcher state is what makes it per-call: the same compiled Tool serves
- * an unattended Routine and a human turn in the same process, and a dispatcher-level "current user"
- * would be a race between them.
- */
+/** Principal refs derive from business refs to keep credentials per-call. */
 export function principalEgressSecretRef(
   slug: string,
   tokenEnv: string,
@@ -121,11 +100,7 @@ function mapDispatchError(error: ToolDispatchError, slug: string): ToolCallResul
   }
 }
 
-/**
- * A rediscovered effect from an earlier attempt at this exact call (same run + call id). The
- * ledger keeps only whether it landed, never the provider's response, so a replay cannot hand the
- * model the original output back — same limitation `../slack/tools.ts` documents.
- */
+/** Rediscovered ledger effects cannot replay provider output; only settled state is stored. */
 function replayed(state: string): ToolCallResult {
   if (state === "confirmed") {
     return ok({ replayed: true, note: "This call already completed; not repeated." });
@@ -158,13 +133,7 @@ function integrationResource(slug: string): string {
   return `integration.${declarationSlug(slug)}`;
 }
 
-/**
- * Reads `manifest.auth` through `resolveAuthSteps`, not directly. A legacy manifest declares its
- * flow in the deprecated `oauth` block and leaves `auth` undefined; reading the raw field would
- * call such a provider service-only, short-circuit the resolver before it ever looks for a personal
- * credential, and silently spend the deployment's shared credential for a call the caller believes
- * is their own. The connect route resolves the same way, so the two must.
- */
+/** Resolve auth steps before credential mode so legacy `oauth` keeps personal credentials. */
 function credentialModeFor(integration: SoulIntegration): ToolCredentialMode {
   const personal = resolveAuthSteps(integration.manifest).some(isPersonalCredentialStep);
   return personal ? "user_preferred" : "service";
@@ -271,12 +240,7 @@ function declarativeTargets(
   return targets;
 }
 
-/**
- * Resolves an egress credential from the connection env the operator supplied at connect time.
- *
- * Reuses the sealed value `sealConnectionEnv` already wrote rather than adding a second credential
- * path, exactly as `../slack/credentials.ts` reuses the sealed bot token.
- */
+/** Resolves egress credentials from sealed connection env. */
 class EgressSecretProvider implements SecretProvider {
   constructor(
     private readonly secretRef: string,
@@ -506,17 +470,7 @@ export interface DeclarativeTooling {
   readonly problems: readonly string[];
 }
 
-/**
- * Builds every chat Tool the given integrations declare.
- *
- * Callers pass only connected integrations: publishing a Tool whose credential does not exist yet
- * would hand the model a capability that fails on first use, which reads to the operator as a
- * broken product rather than an unconnected one.
- *
- * A malformed declaration is collected as a problem rather than thrown, because one bad manifest
- * must not stop every other integration's Tools from registering — but it is never silent, since
- * quietly publishing nothing is how an operator ends up with a Connect button that does nothing.
- */
+/** Builds Tools only for connected integrations; malformed declarations report problems. */
 export function buildDeclarativeTools(
   integrations: readonly SoulIntegration[],
   deps: DeclarativeToolingDeps,

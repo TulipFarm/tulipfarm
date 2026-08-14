@@ -27,16 +27,11 @@ export interface ChatBody {
   clientContext?: { route?: string; title?: string };
 }
 
-/**
- * The route's body schema is the same object the request Artifact is validated against, so what is
- * accepted here and what is persisted can never disagree.
- */
+/** Reuse one schema for route input and persisted request Artifacts. */
 export const ChatBodySchema = CHAT_REQUEST_SCHEMA;
 
 /**
- * Resolve the resume cursor: the `Last-Event-ID` header (set automatically by an
- * `EventSource` on reconnect) takes precedence over the `?lastEventId=` query. A
- * missing/invalid value means "from the start" (seq 0).
+ * Last-Event-ID takes precedence over ?lastEventId=; missing or invalid cursors replay from seq 0.
  */
 export function parseLastEventId(
   header: string | string[] | undefined,
@@ -50,9 +45,7 @@ export function parseLastEventId(
   return typeof query === "number" && query >= 0 ? query : 0;
 }
 
-// @fastify/cors adds CORS headers on the normal reply path, but `reply.hijack()` (used for the SSE
-// stream) bypasses it — so a cross-origin browser `fetch` is blocked and X-Conversation-Id is unreadable.
-// Copy the headers the cors hook already set onto the raw response.
+// reply.hijack() bypasses @fastify/cors, so copy its headers to the raw SSE response.
 export function corsPassthrough(reply: FastifyReply): Record<string, string> {
   const out: Record<string, string> = {};
   for (const name of [
@@ -69,10 +62,7 @@ export function corsPassthrough(reply: FastifyReply): Record<string, string> {
   return out;
 }
 
-// Per-agent tool scoping (shared by the chat turn's toolset build, its <available-tools> prompt
-// block, and the debug-context route): a platform allowlist is applied when supplied. The built-in
-// assistant receives an explicit snapshot of the registered set; it never relies on an undefined
-// allowlist, which the production adapter treats as deny-all.
+// Per-agent tool scoping: built-in assistant gets an explicit registry snapshot, never undefined.
 export function allowedToolNamesFor(
   toolRegistry: ToolRegistry | undefined,
   pa: PlatformAgent | undefined,
@@ -94,17 +84,7 @@ export function allowedToolNamesFor(
   );
 }
 
-/**
- * Whether a Tool's own `availableTo` lets it be offered to this turn.
- *
- * Read from the declaration rather than from a name list kept beside it. The two lists this
- * replaced named the same seven Tools their definitions already describe, so a Tool added to one
- * and not the other was offered on a surface that cannot run it — a failure that shows up as a
- * model calling `navigate_to` in Slack, far from the list that caused it.
- *
- * This is *visibility*, not authority: a Tool that passes here is offered, not permitted. The gate
- * still decides every call.
- */
+/** Visibility only: offered Tools still require authorization. */
 function offerable(
   availability: ToolAvailability | undefined,
   presentationContext?: PresentationContext
@@ -120,12 +100,7 @@ function offerable(
   return true;
 }
 
-/**
- * Whether to instruct knowledge grounding + citation (and surface pinned pages) for an agent this
- * turn: a knowledge service must be wired AND `cite_sources` must be in the agent's scoped toolset
- * (so a future restricted platform agent can be excluded). Centralizes the gate the chat turn and
- * the debug-context route otherwise duplicated.
- */
+/** Enable knowledge grounding only with a service and scoped cite_sources Tool. */
 export function canGroundKnowledge(
   knowledge: KnowledgeService | undefined,
   tools: { name: string }[]
@@ -133,7 +108,6 @@ export function canGroundKnowledge(
   return knowledge != null && tools.some((t) => t.name === CITE_SOURCES_TOOL);
 }
 
-// The same allowed set projected to the `<available-tools>` L1 index — name + description, sorted
 // for a byte-stable prompt prefix. `[]` when no registry → the block is omitted.
 export function availableToolsFor(
   toolRegistry: ToolRegistry | undefined,

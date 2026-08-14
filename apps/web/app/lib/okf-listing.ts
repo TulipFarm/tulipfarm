@@ -1,10 +1,4 @@
-/*
- * Pure helpers for the unified knowledge tree. `parseListing` turns the `navigate` endpoint's markdown
- * index into direct child entries; `mergeEntries` collapses a page (`a.md`) and a sibling directory
- * (`a/`) that share a basename into ONE node — a page that has both its own body AND child pages (the
- * Notion "page with sub-pages"). The link rewriters resolve OKF path references to a page's stable
- * UUID route via a `PageResolver` (built once from `listAllPages()`). No path mutation, no backend conversion.
- */
+/* `mergeEntries` makes page+directory basename pairs one Notion-style node. */
 import { type PageResolver, pageHref } from "./page-href";
 
 export type PageEntry = { kind: "page"; label: string; path: string };
@@ -80,12 +74,7 @@ export function listingToNodes(dirPath: string, listing: string): PageNode[] {
   return mergeEntries(parseListing(dirPath, listing));
 }
 
-/**
- * Heuristic: is this `navigate("")` output the SYNTHESIZED contents listing (auto-generated) rather
- * than an authored index.md override? The synthesizer emits an empty doc or one starting with the
- * reserved `# Subdirectories` / `# Pages` headings. Used so "Edit front page" doesn't freeze the
- * auto-contents as a static override.
- */
+/** Detect synthesized root listings so editing does not freeze auto-contents. */
 export function isSynthesizedIndex(listing: string): boolean {
   const t = listing.trim();
   return t === "" || /^#\s+(Subdirectories|Pages)\b/.test(t);
@@ -106,12 +95,7 @@ function sameSpaceHref(target: string, spaceId: string, resolver: PageResolver):
   return ref ? pageHref(ref.pageId, ref.path) : null;
 }
 
-/**
- * Rewrite a space's (root-relative) OKF markdown links into stable page UUID routes so a rendered
- * index page is navigable. `[x](orders.md)` / `[x](tables/)` resolve their same-space path to a
- * page id via `resolver`, then emit `/knowledge/pages/<id>/<slug>`. External (http/mailto/#),
- * already-absolute (`/…`), and unresolved (a pure directory with no page) links are left untouched.
- */
+/** Rewrite same-space OKF links to stable page UUID routes; unresolved links stay untouched. */
 export function rewriteOkfLinks(markdown: string, spaceId: string, resolver: PageResolver): string {
   return markdown.replace(/\]\(([^)]+)\)/g, (whole, raw: string) => {
     const target = raw.trim();
@@ -121,16 +105,7 @@ export function rewriteOkfLinks(markdown: string, spaceId: string, resolver: Pag
   });
 }
 
-/**
- * Rewrite a PAGE BODY's links into stable page UUID routes for the read view. Handles everything
- * the `@`/`#` editor inserts plus authored OKF links:
- * - `tf:agent/<name>` → `/agents/<name>`, `tf:resource/<type>` → `/resources/<type>`
- * - `tf:page/<Space>/<path>` → `/knowledge/pages/<id>/<slug>` (cross-space, resolved by
- *   `(spaceName, path)`; an unknown/renamed target is left as a `tf:` href so the view renders it muted)
- * - same-space `/<path>.md`, `<path>.md`, `<dir>/` → `/knowledge/pages/<id>/<slug>` (resolved by
- *   `(spaceId, path)`; unresolved is left untouched)
- * `spaceId` is the page's own space (for same-space resolution).
- */
+/** Rewrite page-body `tf:` and OKF links to page UUID routes; unknown targets stay muted. */
 export function rewriteWikiLinks(
   markdown: string,
   spaceId: string,

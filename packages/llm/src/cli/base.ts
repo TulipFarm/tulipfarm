@@ -8,12 +8,7 @@ import type {
   LanguageModelV4Usage,
 } from "@ai-sdk/provider";
 
-/**
- * Simplified event vocabulary a CLI adapter (`claude-code.ts`, later `codex.ts`) emits from its
- * `runTurn` generator. `CliLanguageModel` translates these into the AI SDK's `LanguageModelV4`
- * shapes for both `doGenerate` (aggregated) and `doStream` (incremental) — the adapter itself
- * never touches AI SDK stream-part framing.
- */
+/** CLI adapter events are translated to AI SDK stream parts only in `CliLanguageModel`. */
 export type CliTurnEvent =
   | { type: "text-delta"; delta: string }
   | { type: "tool-call"; toolCallId: string; toolName: string; input: unknown }
@@ -22,11 +17,7 @@ export type CliTurnEvent =
 /** Default per-call wall clock before a CLI subprocess is aborted as hung. */
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 
-/**
- * Shared `LanguageModelV4` base for coding-agent CLIs run as a subscription-backed model provider.
- * Owns the AI SDK translation only; subprocess lifecycle, credential jailing, transcript
- * rendering, and the "capture → abort → replay" tool-call extraction live in each subclass.
- */
+/** Shared AI SDK translation base; subprocess lifecycle and tool extraction stay in subclasses. */
 export abstract class CliLanguageModel implements LanguageModelV4 {
   readonly specificationVersion = "v4" as const;
   abstract readonly provider: string;
@@ -40,7 +31,7 @@ export abstract class CliLanguageModel implements LanguageModelV4 {
     this.timeoutMs = timeoutMs;
   }
 
-  /** Run one model call end-to-end, yielding events as they happen. Must always end with a `usage` event. */
+  /** Runs one model call and must always end with a `usage` event. */
   protected abstract runTurn(
     options: LanguageModelV4CallOptions,
     signal: AbortSignal
@@ -73,10 +64,7 @@ export abstract class CliLanguageModel implements LanguageModelV4 {
   }
 
   /**
-   * The deadline aborts the turn, and an aborted `runTurn` ends its stream normally — so without
-   * this the truncated turn is indistinguishable from a completed one, and the AgentLoop commits
-   * a half-written answer to the durable transcript as final. A caller-driven abort is different
-   * and stays silent: the caller already knows it cancelled.
+   * Deadline aborts must surface as timeout errors; caller-driven aborts stay silent.
    */
   private assertNotTimedOut(timedOut: boolean) {
     if (timedOut) throw new Error(`CLI provider turn timed out after ${this.timeoutMs}ms`);

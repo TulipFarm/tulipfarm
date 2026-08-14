@@ -5,14 +5,7 @@ import { Button } from "~/components/ui/button";
 import { ApiError } from "~/lib/api";
 import type { FieldDescriptor } from "~/lib/schema";
 
-/*
- * Generic schema-driven create/edit form (write subset). Renders one control per editable
- * field (from `formFields`) following the Tulip Surface Protocol type→input mapping: string→text, number→numeric,
- * boolean→checkbox, enum→select, date→date input, array/object→JSON textarea, x-links→combobox.
- * `x-immutable` fields are read-only on edit. Validation is server-authoritative: the parent passes
- * `formError` (banner) and `fieldErrors` (mapped from the API's 422 `path`). The only client-side
- * check is JSON parseability of array/object textareas, surfaced inline before submit.
- */
+/* Server validation is authoritative; client validation only checks JSON textareas parse. */
 
 const inputClass =
   "w-full rounded-sm border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-60";

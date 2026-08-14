@@ -18,13 +18,7 @@ export interface SignatureCheck {
   reason?: "missing_headers" | "stale_timestamp" | "mismatch";
 }
 
-/**
- * Verify an HMAC-SHA256 webhook signature entirely from the manifest's declarative security
- * block — no provider-specific code. The canonical string is the `signing` template
- * (vars: {timestamp}, {body}; default "{body}") and the expected header value is the `format`
- * template (var: {hex}; default "{hex}"). Header names are matched case-insensitively.
- * `nowSeconds` is injectable for tests.
- */
+/** Verify manifest-declared HMAC-SHA256 templates; headers are case-insensitive. */
 export function verifyHmacSignature(
   rawBody: Buffer | string,
   headers: Record<string, string | string[] | undefined>,
@@ -54,10 +48,7 @@ export function verifyHmacSignature(
   return { ok: true };
 }
 
-/**
- * Compute the signature header value the provider would send for this security config.
- * Exported for test fixtures (route tests sign synthetic payloads with it).
- */
+/** Compute provider signature headers for route test fixtures. */
 export function computeHmacSignature(
   rawBody: Buffer | string,
   security: Pick<HmacWebhookSecurity, "signing" | "format">,
@@ -85,12 +76,7 @@ function headerValue(
   return Array.isArray(value) ? value[0] : value;
 }
 
-/**
- * Authenticate one delivery against whichever scheme the manifest declared.
- *
- * The route calls only this, so adding a scheme is a change here and in the manifest type — never
- * a new branch on the hot path where a missed `else` means accepting unsigned traffic.
- */
+/** Add signature schemes here and in manifest types, not route hot paths. */
 export function verifyWebhookRequest(
   rawBody: Buffer | string,
   headers: Record<string, string | string[] | undefined>,

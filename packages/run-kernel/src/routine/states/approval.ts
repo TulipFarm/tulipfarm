@@ -11,11 +11,7 @@ import {
 
 export type ApprovalResult = "approved" | "rejected" | "expired";
 
-/**
- * Open the durable Approval wait for an `approval` State. The wait carries the authored approver
- * roles as canonical principals, so wrong-actor and wrong-schema deliveries are denied by the
- * durable wait itself rather than by anything reimplemented here.
- */
+/** Approval waits carry canonical approver roles and deny wrong actors or schemas. */
 export function planApprovalWait(state: CompiledState, ctx: StateWaitContext): RegisterWaitInput {
   const roles = requireRoles(state, "approverRoles");
   return planStateWait(state, ctx, {
@@ -24,11 +20,7 @@ export function planApprovalWait(state: CompiledState, ctx: StateWaitContext): R
   });
 }
 
-/**
- * Resolve the Approval. A rejection is a decided negative outcome and fails the State unless an
- * `approval_rejected` handler claims it; an expiry is nobody's decision, so it parks the Run for
- * attention instead of being read as either an approval or a rejection.
- */
+/** Rejection is decided failure unless handled; expiry parks for attention. */
 export function resolveApproval(state: CompiledState, result: ApprovalResult): StateResumeDecision {
   if (result === "approved") return continueState(state);
   if (result === "rejected") return resolveErrorPath(state, "approval_rejected", "failed");

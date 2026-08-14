@@ -7,12 +7,7 @@ import {
 } from "./integration-worker-process";
 import { type ScratchDatabase, startScratchDatabase } from "./scratch-database";
 
-/**
- * Process-level acceptance for the bootable integration worker: a real child process, a real
- * socket, a real database. Every claim this PR makes — boots, refuses an old schema, drains on
- * SIGTERM — is behavioral, so none of it can be proven by a unit test over the same code. No
- * consumer loop exists yet, so claim/release and recovery tests land with the first one.
- */
+/** Process-level tests use a real child, socket, and database. */
 const TIMEOUT = 60_000;
 
 let scratch: ScratchDatabase | undefined;

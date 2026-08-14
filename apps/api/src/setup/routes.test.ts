@@ -21,11 +21,7 @@ import { AdminAlreadyExistsError, type UserDoc, type UserRepo } from "../auth/us
 import type { PaginatedResult } from "../pagination";
 import type { SetupAdminCreator } from "./first-admin";
 
-/**
- * The setup probe is a live model call, which makes the branch that *rejects* a credential the one
- * hardest to test and the one that matters most — it is the whole reason the step exists. Stubbing
- * `createModel` lets the outcome be chosen deterministically, with no network and no real CLI.
- */
+/** Uses a fake client because real credential rejection would require a live model call. */
 const probeOutcome: { mode: "accepts" | "auth-failure" | "transient" } = { mode: "accepts" };
 
 vi.mock("@tulipfarm/llm", async (importOriginal) => {
@@ -191,11 +187,7 @@ async function createAdmin(): Promise<{ name: string; value: string }[]> {
   return res.cookies;
 }
 
-/**
- * Writes a minimal `llm:` key straight into the fixture soul.yaml. `POST /setup/complete` refuses
- * without one, and going through the real LLM config route would drag a live provider probe into
- * tests that are about setup completion, not model routing.
- */
+/** Fixture soul.yaml needs an `llm:` key because `/setup/complete` refuses without one. */
 async function seedLlmConfig(): Promise<void> {
   const file = path.join(dir, "soul", "soul.yaml");
   await fs.mkdir(path.dirname(file), { recursive: true });
@@ -311,11 +303,7 @@ describe("setup routes", () => {
       payload: { provider, apiKey },
     });
 
-  /**
-   * There is no `GET /api/v1/secrets/:key` — values are write-only — so presence is read from the
-   * status listing. An earlier version of these tests fetched the key directly, which always 404s,
-   * making every assertion about a *kept* credential vacuously true.
-   */
+  /** Secret values are write-only, so tests assert presence through the status listing. */
   const secretExists = async (cookies: { name: string; value: string }[], key: string) => {
     const res = await app.inject({
       method: "GET",
@@ -352,8 +340,7 @@ describe("setup routes", () => {
   });
 
   it("keeps a key when the probe failed for a transient reason", async () => {
-    // The opposite error: a network blip must not throw away a credential that may be perfectly
-    // good, or an offline install could never finish setup.
+    // Network errors must not discard credentials that may be valid.
     const cookies = await createAdmin();
     probeOutcome.mode = "transient";
 

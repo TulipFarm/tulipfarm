@@ -6,17 +6,7 @@ import { analyzeHook } from "@tulipfarm/sandbox";
 import { beforeAll, describe, expect, it } from "vitest";
 import { createHookExecutor } from "../hooks/executor";
 
-/*
- * Behaviour guard for the first FULLY DECLARATIVE channel: runs a vendored copy of the
- * integrations repo's telegram/ingress.ts (__fixtures__/telegram-ingress.hook.txt) through the
- * real isolated-vm sandbox. The fixture is TEST DATA, not shipped code — keep it byte-identical
- * to integrations/telegram/ingress.ts.
- *
- * Unlike Slack, this classifier is told its own identity through `ctx.env`, which only exists
- * because the manifest declares `ingress.context_env`. Every group case below depends on it, so a
- * regression that stopped forwarding it would fail here rather than in production as a bot that
- * silently ignores every mention.
- */
+/** Parity guard: the API fixture must match the declarative Telegram ingress bundle. */
 
 // isolated-vm has no abi141 prebuild (same caveat as hooks/routine-sandbox.test.ts).
 const nodeMajor = parseInt(process.version.slice(1).split(".")[0], 10);

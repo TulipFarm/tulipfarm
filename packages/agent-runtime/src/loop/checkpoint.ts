@@ -1,8 +1,4 @@
-/**
- * Durable loop counters (SPEC §10). Limits are only real if they survive a crash: a resumed Agent
- * State continues from the persisted counters instead of restarting its iteration, Tool-call, and
- * repair budgets from zero.
- */
+/** Durable counters make loop, Tool-call, and repair limits survive resume. */
 export interface AgentLoopCheckpoint {
   readonly businessId: string;
   readonly runId: string;

@@ -28,11 +28,6 @@ test("says so plainly when somebody has nothing", () => {
   expect(screen.getByText("Nothing yet.")).toBeInTheDocument();
 });
 
-/*
- * The `member` Role is an unrestricted allow minus a list of denies. Rendering each derived allow
- * gave "Add to everything", "Change everything", "Remove from everything", "View everything" —
- * four lines that teach nothing and bury the denies, which are the only real information.
- */
 test("an unrestricted allow is said once, not once per derived verb", () => {
   render(
     <CapabilityList
@@ -60,11 +55,6 @@ test("drops the caveat when an unrestricted allow really is unrestricted", () =>
   expect(screen.getByText("Everything in the business.")).toBeInTheDocument();
 });
 
-/*
- * Distinct resource types in the same family collapse to one area name, so an allow on `authz.role`
- * and a deny on `authz` produced the identical phrase in both lists. Shown twice it is a flat
- * contradiction; the reader has no way to tell which one wins.
- */
 test("a phrase that is both allowed and blocked is shown once, as partial", () => {
   render(
     <CapabilityList
@@ -96,10 +86,6 @@ test("keeps a clean allow and a clean deny in their own groups", () => {
   expect(screen.queryByText("Only some of these")).not.toBeInTheDocument();
 });
 
-/*
- * Two grants differing only in a dimension this view drops (a domain, a condition) render the same
- * sentence. Printing it twice reads as a rendering bug.
- */
 test("does not repeat a sentence two grants happen to share", () => {
   render(
     <CapabilityList
@@ -118,9 +104,8 @@ test("does not repeat a sentence two grants happen to share", () => {
 });
 
 /*
- * The card says the Role's own words and nothing derived on top of them. `member`'s allow-only
- * area list named "people and access" directly under a blurb saying it cannot manage them, and a
- * Role without copy got the same sentence printed twice. Both were the same extra line.
+ * `member`'s allow-only area list named "people and access" directly under a blurb saying it
+ * cannot manage them, and a Role without copy got the same sentence printed twice.
  */
 test("says a Role's own words once, with nothing derived under them", () => {
   render(

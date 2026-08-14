@@ -1,11 +1,4 @@
-/**
- * The application's single entry point for audit evidence (SPEC §20).
- *
- * Deliberately unlike {@link ActivityService}: activity is a UI feed and a lost row is cosmetic,
- * whereas audit is evidence and a lost row is the difference between an answerable and an
- * unanswerable question. So failures here are surfaced, never swallowed, and the caller chooses
- * whether to proceed — {@link record} throws, {@link recordOrWarn} does not.
- */
+/** Audit evidence entry point; failures surface via `record` or log via `recordOrWarn`. */
 
 import type { AuditDecision, AuditEvent, AuditEventInput, AuditEventRepo } from "@tulipfarm/audit";
 import { AuditWriter } from "@tulipfarm/audit";
@@ -14,10 +7,7 @@ import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 /** Attributed to changes made by the system itself rather than a signed-in user. */
 export const SYSTEM_PRINCIPAL_ID = "system";
 
-/**
- * What a call site actually knows. The chain fields (`chainIndex`, `previousHash`, `hash`) and the
- * business scope are supplied here, because a route that had to compute them could get them wrong.
- */
+/** Caller-supplied audit input before chain fields and business scope are attached. */
 export interface AuditRecordInput {
   /** The signed-in user, or omitted for system-initiated changes. */
   readonly actorId?: string | null;
@@ -71,26 +61,12 @@ export class AuditService {
     };
   }
 
-  /**
-   * Appends an event, throwing if it cannot be persisted.
-   *
-   * Whether this joins the transaction of the change being audited depends on the repository it
-   * was built with. The application-wide instance is bound to the pool, so it does *not* — the
-   * event and the change commit separately. To bind them, construct a
-   * `new AuditService(new PgAuditEventRepo(tx, true))` inside the transaction; the second argument
-   * is required, or a chain conflict would abort the caller's transaction outright.
-   */
+  /** Appends and throws; use `new PgAuditEventRepo(tx, true)` to join a transaction. */
   async record(input: AuditRecordInput): Promise<AuditEvent> {
     return this.writer.append(this.toInput(input));
   }
 
-  /**
-   * Appends an event, logging instead of throwing.
-   *
-   * For call sites where the audited change has already been committed and cannot be undone —
-   * failing the request there would report an error for work that actually succeeded, while still
-   * losing the event. The loss is made loud rather than silent.
-   */
+  /** Appends and logs on failure for already-committed audited changes. */
   async recordOrWarn(input: AuditRecordInput): Promise<void> {
     try {
       await this.record(input);

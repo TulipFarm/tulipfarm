@@ -34,20 +34,11 @@ export interface PgMigration {
   version: number;
   description: string;
   up: (q: Queryable) => Promise<void>;
-  /**
-   * Run outside a transaction. Required only for statements Postgres refuses to run inside one —
-   * `CREATE INDEX CONCURRENTLY` above all. Such a migration gives up atomicity: a failure can
-   * leave partial objects behind, so prefer the default whenever the statement allows it.
-   */
+  /** Run outside a transaction only for statements Postgres forbids inside one. */
   concurrent?: boolean;
 }
 
-/**
- * Diagnostic log spine. Separate from `obs_event` on purpose: that table's columns are AI-shaped
- * (model, tokens, cost) and its aggregates sum cost across every row, so log volume there would
- * degrade the dashboard it exists to serve. Only `error`/`fatal` records are captured, so the
- * trigram index on `message` stays cheap enough to make substring search interactive.
- */
+/** Failure-only log spine, separate from AI-shaped `obs_event` aggregates. */
 const LOG_EVENT_STATEMENTS: string[] = [
   `CREATE TABLE IF NOT EXISTS log_event (
     id              uuid PRIMARY KEY,
@@ -62,23 +53,14 @@ const LOG_EVENT_STATEMENTS: string[] = [
     attributes      jsonb NOT NULL DEFAULT '{}',
     created_at      timestamptz NOT NULL
   )`,
-  // (ts DESC, id DESC) matches the keyset pagination order exactly, so a cursor read is an
-  // index-only range scan rather than a sort of the whole window.
+  // Cursor order matches the index, avoiding a window sort.
   "CREATE INDEX IF NOT EXISTS log_event_ts_idx ON log_event (ts DESC, id DESC)",
   "CREATE INDEX IF NOT EXISTS log_event_level_ts_idx ON log_event (level, ts DESC, id DESC)",
   "CREATE INDEX IF NOT EXISTS log_event_service_ts_idx ON log_event (service, ts DESC, id DESC)",
-  // Message search is deliberately left to a scan. A GIN/trigram index would tax every insert on
-  // the error path — when the system is least healthy and writing most — to speed up an occasional
-  // admin search over a retention-pruned table that the time and level indexes already narrow.
+  // No trigram index: error-path writes stay cheap; time/level indexes narrow admin search.
 ];
 
-/**
- * Process resource samples: one fixed-cadence row per service instance per minute. Separate from
- * `obs_event` (AI-shaped, event-driven) and `log_event` (failure-driven) because this is a gauge —
- * rows arrive on a clock whether or not anything happened, and are aggregated by time bucket rather
- * than paginated. `instance` is retained so a replicated deployment can still be averaged honestly
- * instead of double-counting one service's samples as if they came from one process.
- */
+/** Fixed-cadence resource gauges; instance is retained so replicas aggregate honestly. */
 const RESOURCE_SAMPLE_STATEMENTS: string[] = [
   `CREATE TABLE IF NOT EXISTS resource_sample (
     id         uuid PRIMARY KEY,
@@ -88,19 +70,12 @@ const RESOURCE_SAMPLE_STATEMENTS: string[] = [
     cpu_pct    real NOT NULL,
     rss_bytes  bigint NOT NULL
   )`,
-  // Every read is "one window, grouped by service", so the service-leading index serves the query
-  // directly; the ts-only index covers the retention sweep.
+  // Service-leading index serves grouped reads; ts-only index serves retention.
   "CREATE INDEX IF NOT EXISTS resource_sample_ts_idx ON resource_sample (ts DESC)",
   "CREATE INDEX IF NOT EXISTS resource_sample_service_ts_idx ON resource_sample (service, ts DESC)",
 ];
 
-/**
- * Greenfield schema baseline. Development databases from before this baseline must be reset;
- * TulipFarm does not preserve compatibility with the pre-rebuild development schema.
- *
- * Statements run separately for compatibility with both pg.Pool and PGlite. Every statement is
- * idempotent so a baseline interrupted before schema_version advances can safely run again.
- */
+/** Greenfield baseline; idempotent statements allow safe replay after interruption. */
 const BASELINE_STATEMENTS: string[] = [
   "CREATE EXTENSION IF NOT EXISTS vector",
   "CREATE EXTENSION IF NOT EXISTS citext",
@@ -444,11 +419,7 @@ const BASELINE_STATEMENTS: string[] = [
   "CREATE INDEX IF NOT EXISTS ingress_deliveries_received_idx ON ingress_deliveries (received_at)",
 ];
 
-/**
- * Hardened authentication and identity: user lifecycle status, typed session
- * authentication evidence, API clients as first-class service identities, one-use OIDC
- * authorization requests, and verified external identity mappings with one-use link tokens.
- */
+/** Adds hardened auth/identity: statuses, evidence, API clients, OIDC, mappings, links. */
 const IDENTITY_STATEMENTS: string[] = [
   "ALTER TABLE users ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'active'",
   "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now()",
@@ -496,11 +467,7 @@ const IDENTITY_STATEMENTS: string[] = [
   )`,
 ];
 
-/**
- * Raw webhook delivery bytes, stored encrypted before the canonical event is derived. This
- * predates any Run — `ArtifactService` requires a `{runId, stateKey, attempt}` producer, which
- * does not exist yet at ingestion time — so it is its own table rather than an Artifact.
- */
+/** Raw encrypted webhook bytes predate any Run, so they cannot be Artifacts. */
 const WEBHOOK_VAULT_STATEMENTS: string[] = [
   `CREATE TABLE IF NOT EXISTS webhook_raw_payloads (
     id             uuid PRIMARY KEY,
@@ -515,12 +482,7 @@ const WEBHOOK_VAULT_STATEMENTS: string[] = [
   "CREATE INDEX IF NOT EXISTS webhook_raw_payloads_business_idx ON webhook_raw_payloads (business_id)",
 ];
 
-/**
- * Postgres storage for `@tulipfarm/knowledge`'s source/chunk ports (ACL-first Knowledge, e.g.
- * Slack conversation indexing) — distinct from `knowledge_pages`/`knowledge_chunks` above, which
- * back the wiki. `knowledge_source_chunks` cascades off its source so a deleted/revoked source's
- * text cannot outlive the record that authorizes it.
- */
+/** ACL-first source/chunk storage; chunks cascade so revoked text cannot outlive authority. */
 const KNOWLEDGE_SOURCES_STATEMENTS: string[] = [
   `CREATE TABLE IF NOT EXISTS knowledge_source_records (
     source_id                      text NOT NULL,
@@ -571,12 +533,7 @@ const KNOWLEDGE_SOURCES_STATEMENTS: string[] = [
   "CREATE INDEX IF NOT EXISTS knowledge_source_chunks_dim_idx ON knowledge_source_chunks (dim)",
 ];
 
-/**
- * Durable per-channel resume position for `syncSlackKnowledge`
- * (`SlackKnowledgeCheckpointStore`), keyed by `integrationId` alone — the port takes no
- * `businessId` argument, and `integrationId` (`slack:<appId>:<teamId>`) is already
- * business-unique per `slack-binding.ts`.
- */
+/** Slack sync checkpoint keyed by business-unique integrationId. */
 const SLACK_KNOWLEDGE_CHECKPOINT_STATEMENTS: string[] = [
   `CREATE TABLE IF NOT EXISTS slack_knowledge_checkpoints (
     integration_id text NOT NULL,
@@ -587,11 +544,7 @@ const SLACK_KNOWLEDGE_CHECKPOINT_STATEMENTS: string[] = [
   )`,
 ];
 
-/**
- * Durable fire-state for `cron`/`interval`/`datetime` Routine `x-triggers` (the schedule
- * dispatcher's due-scan). One row per `(businessId, routineSlug, triggerIndex)`, created lazily on
- * first tick and dropped once the schedule dispatcher sees the trigger no longer exists.
- */
+/** Durable fire-state for Routine `x-triggers`, created lazily and dropped when removed. */
 const ROUTINE_SCHEDULE_STATE_STATEMENTS: string[] = [
   `CREATE TABLE IF NOT EXISTS routine_schedule_state (
     business_id            text NOT NULL,
@@ -617,13 +570,7 @@ const CONFLUENCE_KNOWLEDGE_CHECKPOINT_STATEMENTS: string[] = [
 ];
 
 /** Durable resume positions for K3 Knowledge sync providers. */
-// The legacy `working_memory` table is deliberately NOT dropped here. Migration v33 carried every
-// row across as a confirmed `user_private` preference Assertion and nothing has read or written the
-// table since — `EngineMemoryRepo` serves the KV surface off `memory_assertions` — so it is dead
-// weight. But it is also the only cheap recovery path if the backfill turns out to be wrong in
-// production, which is why `memory/backfill.pg.test.ts` asserts "leaves the legacy table intact so
-// the cutover stays recoverable". Dropping it in the same release as the cutover would destroy that
-// path. It should retire one release later, once the cutover has been proven live.
+// Legacy `working_memory` stays one release as recovery for the Memory cutover.
 
 const KNOWLEDGE_SYNC_CHECKPOINT_STATEMENTS: string[] = [
   `CREATE TABLE IF NOT EXISTS knowledge_sync_checkpoints (
@@ -636,21 +583,8 @@ const KNOWLEDGE_SYNC_CHECKPOINT_STATEMENTS: string[] = [
 ];
 
 /**
- * Memory storage (MEM-V1). Replaces the flat `working_memory` key/value table with scoped,
- * versioned Assertions.
- *
- * Two properties the shape has to guarantee:
- * - **Nothing is overwritten.** An edit writes a new row and marks the prior one `superseded`, so
- *   what was believed and when stays reconstructable. `created_at`/`recorded_until` carry
- *   transaction time and `valid_from`/`valid_to` carry valid time — the bi-temporal pair.
- * - **Scope ownership is columnar, not inferred.** `subject_principal_id`, `agent_id`, `role_id`,
- *   and `run_id` are the owner identities `authorizeMemoryScope` matches against; a lookup can
- *   filter on them, but authorization still runs on every row a query returns.
- *
- * `memory_pending` deliberately holds the whole request as jsonb rather than sharing the assertion
- * table: an inferred statement that was never confirmed must not be reachable by any query that
- * reads Assertions, and keeping it in a different table makes that structural instead of a
- * `WHERE` clause someone can forget.
+ * Memory storage: scoped, versioned Assertions; edits supersede instead of overwriting.
+ * `memory_pending` is separate so unconfirmed inferences are unreachable by Assertion queries.
  */
 const MEMORY_STATEMENTS: string[] = [
   `CREATE TABLE IF NOT EXISTS memory_assertions (
@@ -687,11 +621,9 @@ const MEMORY_STATEMENTS: string[] = [
     last_accessed_at     timestamptz,
     PRIMARY KEY (business_id, assertion_id)
   )`,
-  // The scope-owner lookup every read starts from: "active memory owned by this scope".
   `CREATE INDEX IF NOT EXISTS memory_assertions_scope_idx
      ON memory_assertions (business_id, scope, subject_principal_id, agent_id, role_id, run_id)
      WHERE status = 'active'`,
-  // Upsert-by-subject: the adapter resolves a key to the assertion it supersedes.
   `CREATE INDEX IF NOT EXISTS memory_assertions_subject_idx
      ON memory_assertions (business_id, scope, subject_principal_id, subject)
      WHERE status = 'active'`,
@@ -720,27 +652,8 @@ const MEMORY_STATEMENTS: string[] = [
   "CREATE INDEX IF NOT EXISTS memory_pending_expiry_idx ON memory_pending (business_id, expires_at)",
 ];
 
-/**
- * Carry every `working_memory` row over as a confirmed `user_private` preference Assertion.
- *
- * The old table is left in place rather than dropped: it is the only copy of this data, and a
- * failed cutover has to be recoverable. A later migration retires it once the adapter has run in
- * production. `ON CONFLICT DO NOTHING` plus the `NOT EXISTS` guard make a re-run a no-op, so an
- * interrupted baseline can safely replay.
- */
-/**
- * Recall index columns on `memory_assertions` (M2).
- *
- * Assertions are indexed in place rather than in a chunk table: an assertion is one short
- * statement (the KV surface caps values at 256 chars), so chunking would add a join and a
- * consistency problem to split text that never needs splitting. Episodes are long-form and do get
- * their own chunk table when they land.
- *
- * `tsv` is a generated column so the lexical arm cannot drift from the statement it indexes —
- * there is no write path that could forget to refresh it. The embedding is nullable and carries
- * its own model/dim, matching `knowledge_chunks`: a deployment with no embedding provider runs the
- * lexical and entity arms alone rather than failing.
- */
+/** Backfills `working_memory` to confirmed preferences; old table stays for recovery. */
+/** Recall columns index short Assertions in place; nullable embeddings keep lexical fallback. */
 const MEMORY_RECALL_INDEX_STATEMENTS: string[] = [
   `ALTER TABLE memory_assertions
      ADD COLUMN IF NOT EXISTS tsv tsvector
@@ -752,16 +665,7 @@ const MEMORY_RECALL_INDEX_STATEMENTS: string[] = [
      ON memory_assertions USING gin (tsv)`,
 ];
 
-/**
- * Episodic Memory storage (M5).
- *
- * Episodes are longer than Assertions and may need several recall handles, so their searchable
- * text lives in `memory_chunks`. Each chunk points at an episodic Assertion projection; that lets
- * the existing M2 recall pipeline keep returning authorized `MemoryAssertion`s while the new table
- * supplies the retrieval arms. Scope owner columns are duplicated onto both tables so operational
- * queries can stay narrow, but authorization still runs through `authorizeMemoryScope` after every
- * recall candidate.
- */
+/** Episodes use chunks, but project back to authorized MemoryAssertions for recall. */
 const MEMORY_EPISODE_STATEMENTS: string[] = [
   `CREATE TABLE IF NOT EXISTS memory_episodes (
     business_id          text NOT NULL,
@@ -828,23 +732,14 @@ const MEMORY_EPISODE_STATEMENTS: string[] = [
   "CREATE INDEX IF NOT EXISTS memory_chunks_tsv_idx ON memory_chunks USING gin (tsv)",
 ];
 
-/**
- * M6 erasure helpers.
- *
- * Hard erasure deletes rows, so the schema already has the important part: `ON DELETE CASCADE`
- * from evidence, Episodes, and chunks. This migration adds the only missing lookup shape for
- * pending candidates that explicitly reference an Assertion through `supersedesId`; the erase
- * write path also does an exact-content scan so copied summaries cannot survive.
- */
+/** Erasure helpers add the missing pending-candidate lookup; cascades remove owned rows. */
 const MEMORY_ERASURE_STATEMENTS: string[] = [
   `CREATE INDEX IF NOT EXISTS memory_pending_supersedes_idx
      ON memory_pending (business_id, ((request ->> 'supersedesId')))`,
 ];
 
 async function backfillWorkingMemory(q: Queryable, businessId: string): Promise<void> {
-  // A database that never created the legacy table has nothing to carry across — and must still
-  // migrate. Skipping is not merely defensive: migrations run against databases reconstructed from
-  // an arbitrary recorded version, where earlier tables may legitimately be absent.
+  // Databases reconstructed from arbitrary versions may legitimately lack this table.
   const { rows } = await q.query("SELECT to_regclass('public.working_memory') AS table_name");
   if ((rows[0] as { table_name: string | null } | undefined)?.table_name == null) return;
 
@@ -873,12 +768,7 @@ async function backfillWorkingMemory(q: Queryable, businessId: string): Promise<
   );
 }
 
-/**
- * One-use authorization requests for the Integration auth broker
- * (`integrations/auth-broker.ts`). Mirrors `oidc_auth_requests`: the PKCE verifier is held here
- * rather than in the `state` the provider echoes back, so a captured callback URL cannot be
- * replayed and a code obtained in one browser cannot be redeemed in another.
- */
+/** One-use auth requests hold PKCE verifier server-side to prevent replay and browser swapping. */
 const INTEGRATION_AUTH_REQUEST_STATEMENTS: string[] = [
   `CREATE TABLE IF NOT EXISTS integration_auth_requests (
     state             text PRIMARY KEY,
@@ -894,17 +784,8 @@ const INTEGRATION_AUTH_REQUEST_STATEMENTS: string[] = [
 ];
 
 /**
- * Per-principal provider credentials (D7). A Tool declaring `credentialMode: "user"` or
- * `"user_preferred"` spends *the calling human's* token so the provider sees that human — and so
- * the provider's own ACLs, which we cannot reproduce, do the narrowing we would otherwise have to
- * guess at.
- *
- * The table holds **no credential material**. Values live in the encrypted secrets store under
- * `principal.<kind>.<id>.<provider>.<ENV>` and this row carries only the key, so a database dump
- * without the DEK is inert — the same posture `connection.yaml`'s `secret://` refs take.
- *
- * `revoked_at` rather than a delete: a token that was withdrawn is evidence. Resolution treats a
- * revoked row as absent, so revocation is immediate without losing the record that it happened.
+ * Per-principal provider credentials store no secrets, only encrypted secret keys.
+ * `revoked_at` preserves evidence while resolution treats revoked credentials as absent.
  */
 const PRINCIPAL_PROVIDER_TOKEN_STATEMENTS: string[] = [
   `CREATE TABLE IF NOT EXISTS principal_provider_tokens (
@@ -924,28 +805,13 @@ const PRINCIPAL_PROVIDER_TOKEN_STATEMENTS: string[] = [
   )`,
   `CREATE INDEX IF NOT EXISTS principal_provider_tokens_provider_idx
     ON principal_provider_tokens (business_id, provider)`,
-  // The auth broker's one-use request must remember whose connect this was. Null means the
-  // business-wide flow, which is what every row written before per-user connect existed was.
-  //
-  // The table is re-asserted rather than assumed: these ALTERs are the only cross-migration
-  // dependency in the file, and a migration that reads as "runs only if an earlier one did" fails
-  // loudly and late. Both creation statements are `IF NOT EXISTS`, so on any real deployment —
-  // where 39 always ran — this is a no-op.
+  // Re-asserts the one-use request table so cross-migration dependency failures are loud.
   ...INTEGRATION_AUTH_REQUEST_STATEMENTS,
   "ALTER TABLE integration_auth_requests ADD COLUMN IF NOT EXISTS principal_kind text",
   "ALTER TABLE integration_auth_requests ADD COLUMN IF NOT EXISTS principal_id text",
 ];
 
-/*
- * GitHub App credentials moved from bespoke flat keys to the same `integration.<slug>.<ENV>` space
- * every other integration's credentials live in, so the declarative auth flow writes exactly what
- * the token-minting code reads. Renaming the key is safe: the key is not authenticated data in the
- * AES-GCM envelope, so the ciphertext still decrypts unchanged.
- *
- * `WHERE NOT EXISTS` keeps this idempotent and non-destructive — if a deployment has already
- * connected GitHub through the new flow, the newer value wins and the stale row is dropped rather
- * than overwriting it.
- */
+/* Moves GitHub App credentials to the declarative integration secret namespace idempotently. */
 const GITHUB_APP_SECRET_KEY_RENAMES: ReadonlyArray<readonly [string, string]> = [
   ["github-app-id", "integration.github.GITHUB_APP_ID"],
   ["github-app-slug", "integration.github.GITHUB_APP_SLUG"],
@@ -954,8 +820,7 @@ const GITHUB_APP_SECRET_KEY_RENAMES: ReadonlyArray<readonly [string, string]> = 
 ];
 
 async function renameGitHubAppSecretKeys(q: Queryable): Promise<void> {
-  // A database restored without a `secrets` table has no App credentials to carry over; the
-  // pg-migrate suite exercises exactly that shape.
+  // Restores without `secrets` have no App credentials to carry over.
   const present = await q.query("SELECT to_regclass('public.secrets') IS NOT NULL AS exists");
   if (present.rows[0]?.exists !== true) return;
 
@@ -1360,9 +1225,7 @@ export const PG_MIGRATIONS: PgMigration[] = [
     version: 16,
     description: "durable Conversation Turns",
     up: async (q) => {
-      // Pre-existing messages keep a NULL `turn_id`: they predate Turns, and a backfill would have
-      // to invent which Turn each belonged to. No `business_id` column — these tables are
-      // deployment-scoped, and `DEPLOYMENT_BUSINESS_ID` already says so.
+      // Existing messages predate Turns; NULL `turn_id` avoids inventing ownership.
       await q.query("ALTER TABLE messages ADD COLUMN IF NOT EXISTS turn_id uuid");
       await q.query(`CREATE TABLE IF NOT EXISTS conversation_turns (
         id                  uuid PRIMARY KEY,
@@ -1385,10 +1248,7 @@ export const PG_MIGRATIONS: PgMigration[] = [
     version: 17,
     description: "worker-owned turn execution: attempt bookkeeping and channel identity binding",
     up: async (q) => {
-      // What a Worker attempt produced. Keyed by `(turn_id, attempt)` rather than by Turn, because
-      // a Worker killed mid-turn is retried under a *new* attempt: without the attempt in the key,
-      // the retry's completion would collide with the dead attempt's and the turn would either
-      // duplicate its assistant Message or refuse to finish at all.
+      // Attempt is part of the key so retries cannot collide with dead attempts.
       await q.query(`CREATE TABLE IF NOT EXISTS turn_completions (
         turn_id    uuid NOT NULL REFERENCES conversation_turns(id),
         attempt    integer NOT NULL CHECK (attempt >= 0),
@@ -1398,29 +1258,16 @@ export const PG_MIGRATIONS: PgMigration[] = [
         created_at timestamptz NOT NULL,
         PRIMARY KEY (turn_id, attempt)
       )`);
-      // Which attempt wrote a Message, so a reader can tell a superseded attempt's output from the
-      // one that completed the Turn. NULL on every pre-existing row: they predate Worker attempts.
+      // NULL attempt on existing messages marks output that predates Worker attempts.
       await q.query("ALTER TABLE messages ADD COLUMN IF NOT EXISTS attempt integer");
-      // The Worker asks for a Turn by the Run it claimed, never the other way round, so this is the
-      // lookup every executed turn makes before it does anything else.
       await q.query(`CREATE UNIQUE INDEX IF NOT EXISTS conversation_turns_run_idx
         ON conversation_turns (run_id) WHERE run_id IS NOT NULL`);
 
-      // A channel sender bound to a TulipFarm account is an external identity mapping like any
-      // other — `external_identity_mappings (provider, external_subject)` already keys on exactly
-      // that, and `assertExternalIdentityMapped` already fails closed over it. A second table would
-      // be a second authority for the same question, so channels reuse this one with the
-      // integration slug as the provider. What is new is `verified_via`: an auto-link from a
-      // provider-verified email and a human confirming a bind link are not equally strong evidence
-      // and an audit must be able to tell them apart. NULL on pre-existing rows, which predate the
-      // distinction.
+      // Channel bindings reuse external identity mappings; `verified_via` keeps evidence strength.
       await q.query(
         "ALTER TABLE external_identity_mappings ADD COLUMN IF NOT EXISTS verified_via text"
       );
-      // Outstanding bind offers. The row exists so a nonce can be *consumed*: the link is signed,
-      // but a signature alone cannot be revoked or spent, so replaying a redeemed link would
-      // otherwise re-bind the sender. No `user_id` — at issue time no account is known yet, which
-      // is the whole reason the link is being sent.
+      // Bind offers persist a consumable nonce; signatures alone cannot be spent or revoked.
       await q.query(`CREATE TABLE IF NOT EXISTS channel_bind_tokens (
         nonce_hash         text PRIMARY KEY,
         integration_slug   text NOT NULL,
@@ -1443,10 +1290,7 @@ export const PG_MIGRATIONS: PgMigration[] = [
     version: 18,
     description: "retire the in-process chat stream buffer",
     up: async (q) => {
-      // `stream_resume` buffered the SSE frames one API process produced, so that the client that
-      // lost the connection could ask that process for them again. A chat turn is now executed by
-      // the Worker and read back from `run_events` — durable, gapless, and readable from any
-      // instance — which leaves this table buffering a stream nothing writes.
+      // `stream_resume` is removed; Worker-backed `run_events` are durable and instance-agnostic.
       await q.query("DROP TABLE IF EXISTS stream_resume");
     },
   },
@@ -1454,16 +1298,7 @@ export const PG_MIGRATIONS: PgMigration[] = [
     version: 19,
     description: "allow a deployment-owned service client",
     up: async (q) => {
-      // Every API client so far was minted by a person, so `owner_user_id` recorded who is
-      // accountable for it. The client this API mints for its own Worker has no such person: it is
-      // created on first boot, before the setup wizard has made a single user, and a deployment
-      // that never opens the wizard still has to execute the Runs it accepts.
-      //
-      // NULL therefore means "owned by the deployment", and it is not an authorization change:
-      // `apiClientPrincipal` has always derived authority from the client itself, never from its
-      // owner, so nothing reads this column to decide anything. What it costs is that the client
-      // list can show an owner nobody can page — which is the truth about a process, and better
-      // than attributing it to whichever human happened to run setup first.
+      // NULL owner means deployment-owned API client; authority still derives from the client.
       await q.query("ALTER TABLE api_clients ALTER COLUMN owner_user_id DROP NOT NULL");
     },
   },
@@ -1484,9 +1319,7 @@ export const PG_MIGRATIONS: PgMigration[] = [
     description: "separate Run source from pinned Routine identity",
     up: async (q) => {
       await q.query("ALTER TABLE runs ADD COLUMN IF NOT EXISTS source text");
-      // Before this migration the dispatcher overloaded `bundle.routineId` as the Run source. Copy
-      // it once so queued and in-flight Runs keep the same executor after every reader cuts over to
-      // the dedicated column; new writers must supply the source explicitly.
+      // Copy overloaded `bundle.routineId` once so in-flight Runs keep their executor.
       await q.query("UPDATE runs SET source = bundle->>'routineId' WHERE source IS NULL");
       await q.query("ALTER TABLE runs ALTER COLUMN source SET NOT NULL");
       await q.query(
@@ -1538,9 +1371,7 @@ export const PG_MIGRATIONS: PgMigration[] = [
     version: 26,
     description: "retire the legacy Routine engine's run tables",
     up: async (q) => {
-      // `routine_runs` and `routine_run_events` were the in-API Routine engine's own store. A
-      // Routine is now compiled to a Run and executed by the Worker against `runs`/`run_events`,
-      // and the engine that wrote these has been deleted — so nothing reads or writes them.
+      // Drops deleted in-API Routine engine tables; Worker Runs replaced them.
       await q.query("DROP TABLE IF EXISTS routine_run_events");
       await q.query("DROP TABLE IF EXISTS routine_runs");
     },
@@ -1560,11 +1391,9 @@ export const PG_MIGRATIONS: PgMigration[] = [
       await q.query(
         "CREATE INDEX IF NOT EXISTS user_invites_user_idx ON user_invites (user_id, consumed_at)"
       );
-      // An invited account has no password until its link is redeemed, and the column should say
-      // so rather than holding a placeholder that only fails to verify by accident.
+      // Invited accounts have no password until redemption.
+      // Forced reset only served temporary passwords, which invites no longer mint.
       await q.query("ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL");
-      // The forced-reset gate existed only to make an admin-minted temporary password single-use.
-      // Nothing mints one now — the invited user chooses their own password on redemption.
       await q.query("ALTER TABLE users DROP COLUMN IF EXISTS must_reset_password");
     },
   },
@@ -1605,10 +1434,7 @@ export const PG_MIGRATIONS: PgMigration[] = [
     },
   },
   {
-    // 32 is deliberately left unused: this branch reserved a gap while main's numbering was still
-    // moving, and closing it now would be worse than leaving it. `pg-migrate` filters
-    // `version > currentVersion`, so renumbering 33+ downward would silently skip these on any
-    // deployment already past 33. A gap is harmless; a reused number is not.
+    // Leave version 32 unused; renumbering would make upgraded deployments skip migrations.
     version: 33,
     description:
       "memory_assertions / memory_evidence / memory_pending: scoped, versioned, bi-temporal Memory",
@@ -1665,9 +1491,7 @@ export const PG_MIGRATIONS: PgMigration[] = [
     },
   },
   {
-    // Renumbered from 31 on merge with main: main had already shipped 31-38, and
-    // `pg-migrate` filters `version > currentVersion`, so keeping 31 would make every
-    // deployment already past 38 skip this migration silently.
+    // Renumbered from 31; main had already shipped 31-38.
     version: 39,
     description: "integration_auth_requests: one-use state + PKCE verifier for the auth broker",
     up: async (q) => {
@@ -1677,7 +1501,7 @@ export const PG_MIGRATIONS: PgMigration[] = [
     },
   },
   {
-    // Renumbered from 32 on merge with main — same reason as 39 above.
+    // Renumbered from 32 for the same skip-avoidance reason as 39.
     version: 40,
     description: "secrets: move GitHub App credentials onto integration.github.* keys",
     up: renameGitHubAppSecretKeys,
@@ -1744,10 +1568,7 @@ export const PG_MIGRATIONS: PgMigration[] = [
     version: 42,
     description: "users carry a display name",
     up: async (q) => {
-      // Until now a person was only ever their email address, so every surface that had to name
-      // someone printed a login credential at them. NULL means "has not set one" rather than
-      // backfilling the local part of the address, because a derived name is a guess and a guess
-      // that looks authored is worse than an honest absence — readers fall back to the email.
+      // NULL display name means unset; do not guess from email.
       await q.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS name text");
     },
   },
@@ -1772,10 +1593,7 @@ export const PG_MIGRATIONS: PgMigration[] = [
   {
     version: 45,
     description: "embeddings: partial HNSW indexes so vector recall stops scanning",
-    // `CREATE INDEX CONCURRENTLY` cannot run inside a transaction. Worth the lost atomicity here:
-    // these tables carry the whole knowledge corpus, and a plain build would lock out writes for
-    // the length of it. The cost is that an interrupted build leaves an invalid index behind, and
-    // `IF NOT EXISTS` would then skip it forever — so sweep those first.
+    // Concurrent index avoids corpus write locks; sweep invalid interrupted builds first.
     concurrent: true,
     up: async (q) => {
       await dropInvalidEmbeddingIndexes(q);
@@ -1820,9 +1638,7 @@ export const PG_MIGRATIONS: PgMigration[] = [
           recorded_at timestamptz NOT NULL DEFAULT now()
         )
       `);
-      // The compare-and-append guard. Two concurrent writers can both read the same tail and both
-      // pass an application-level check; only this constraint makes one of them lose, which is
-      // what lets AuditWriter retry instead of silently forking the chain.
+      // Unique tail guard makes concurrent audit appends lose instead of forking the chain.
       await q.query(
         "CREATE UNIQUE INDEX IF NOT EXISTS audit_events_chain_idx ON audit_events (business_id, chain_index)"
       );
@@ -1833,10 +1649,7 @@ export const PG_MIGRATIONS: PgMigration[] = [
         "CREATE INDEX IF NOT EXISTS audit_events_occurred_idx ON audit_events (business_id, occurred_at DESC)"
       );
 
-      // Immutability is enforced by the database, not by convention. A trigger is the primary
-      // mechanism rather than `REVOKE` because it binds even a superuser: turning it off takes a
-      // deliberate, itself-auditable `ALTER TABLE ... DISABLE TRIGGER`, not merely a stray UPDATE
-      // in a future migration or a careless repository method.
+      // Trigger-enforced immutability binds even superusers unless deliberately disabled.
       await q.query(`
         CREATE OR REPLACE FUNCTION audit_events_append_only() RETURNS trigger
         LANGUAGE plpgsql AS $fn$
@@ -1865,13 +1678,7 @@ export const PG_MIGRATIONS: PgMigration[] = [
     version: 47,
     description: "ops: enable pg_stat_statements where the server allows it",
     up: async (q) => {
-      // Best-effort by design. `pg_stat_statements` needs `shared_preload_libraries`, which is set
-      // in docker-compose.yml but is not settable on many managed hosts. Query observability is
-      // worth having wherever it is available, and never worth refusing to boot over — so a
-      // failure here is logged by the caller's migration wrapper only if it is genuinely fatal.
-      // The savepoint is essential, not decoration: a failed statement aborts the whole
-      // surrounding transaction, so catching the error is not enough — every later statement,
-      // including the `schema_version` bump, would fail with "current transaction is aborted".
+      // Best-effort pg_stat_statements uses a savepoint so failure does not abort migration.
       await q.query("SAVEPOINT try_pg_stat_statements");
       try {
         await q.query("CREATE EXTENSION IF NOT EXISTS pg_stat_statements");
@@ -1987,8 +1794,7 @@ export const PG_MIGRATIONS: PgMigration[] = [
       await q.query(
         "ALTER TABLE soul_publications ADD COLUMN IF NOT EXISTS actor_principal_id text"
       );
-      // Production tables are empty before the publisher ships. This fallback only keeps old local
-      // development rows migratable; new writes are rejected unless a real actor is supplied.
+      // Fallback only migrates old local development rows; new writes require a real actor.
       await q.query(
         "UPDATE soul_publications SET actor_principal_id = 'legacy:unknown' WHERE actor_principal_id IS NULL"
       );

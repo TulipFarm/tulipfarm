@@ -5,17 +5,7 @@ import {
 } from "@tulipfarm/schema";
 import type { IntegrationHttpMethod } from "../http";
 
-/**
- * The `egress` block this compiler is given, declared here rather than imported from
- * `@tulipfarm/soul`.
- *
- * Soul owns the manifest format, but a manifest is a TulipFarm concept and this is a generic
- * OpenAPI-to-Tool compiler — it reads nothing else from a manifest, so depending on that type
- * would couple a provider-neutral adapter to the artifact layer above it (see
- * `docs/architecture/dependency-rules.md`). These are structurally compatible with soul's
- * `EgressConfig`, so a caller that has one passes `manifest.egress` unchanged and any drift
- * surfaces as a compile error where the two meet.
- */
+/** Structural copy of Soul `EgressConfig`; avoids coupling this provider-neutral compiler. */
 export interface OpenApiEgressAuth {
   /** Connection env var holding the credential. Sealed values resolve through the secrets store. */
   readonly token_env: string;
@@ -27,9 +17,7 @@ export interface OpenApiEgressAuth {
   readonly format?: string;
 }
 
-/** One OpenAPI operation published as an agent-callable Tool. */
 export interface OpenApiEgressOperation {
-  /** `operationId` in the referenced spec. */
   readonly operation: string;
   /** Tool name agents call. Namespaced by slug, so it need not be unique across integrations. */
   readonly name: string;
@@ -59,24 +47,8 @@ export interface UnsupportedEgress {
 export type EgressInput = OpenApiEgress | UnsupportedEgress;
 
 /**
- * Compiles a manifest's `egress: { type: "openapi" }` into executable Tool contracts.
- *
- * This is the runtime counterpart to `../import/openapi.ts`. That module turns a discovered spec
- * into a *governed proposal* an operator reviews before anything is published; this one compiles
- * an already-installed manifest's own declaration into contracts the Tool Broker dispatches. The
- * schema derivation is deliberately similar and deliberately separate: the authoring path should
- * refuse anything it cannot describe precisely, while the runtime path has to cope with the real
- * specs providers actually publish.
- *
- * The two places they diverge, and why:
- *
- *  - **`$ref` is resolved here.** `ToolRegistry.register` compiles every `inputSchema` with AJV, so
- *    a surviving `#/components/schemas/...` pointer would throw at registration time and take down
- *    an unrelated integration's tools with it. Authoring can hand a reviewer a `$ref`; execution
- *    cannot.
- *  - **A missing response schema is not fatal here.** Plenty of real operations document no JSON
- *    response body. Refusing to compile those would let a provider's documentation quality decide
- *    whether an operator may use it, so the output schema falls back to permissive.
+ * Compiles installed OpenAPI egress into Tool contracts; resolves all `$ref`s and permits missing
+ * response schemas so malformed provider docs cannot break unrelated Tool registration.
  */
 
 const HTTP_METHODS = {
@@ -97,12 +69,7 @@ const ACTION_SLUG_PREFIX = "i_";
 
 const PERMISSIVE_SCHEMA = { type: "object", additionalProperties: true } as const;
 
-/**
- * RFC 3986 `pchar` minus `%`: the characters a value may contain when it is placed in the URL
- * path. Excluding `/`, `?`, `#` and `%` is the point — those are what would let a credential or a
- * connection value add a path segment, start a query, or smuggle an encoded character past this
- * check.
- */
+/** Path placeholder values exclude `/`, `?`, `#`, and `%` to prevent URL escape. */
 export const PATH_SEGMENT_RE = /^[A-Za-z0-9\-._~!$&'()*+,;=:@]+$/;
 
 export type EgressCompileErrorCode =
@@ -138,11 +105,7 @@ export interface OpenApiOperationBinding {
   readonly baseUrl: string;
   /** Spec path with `{param}` placeholders intact. */
   readonly pathTemplate: string;
-  /**
-   * The contract's own declaration, carried here so failure classification never re-guesses it
-   * from the HTTP verb — a manifest may mark a POST search as non-mutating, and whether a failed
-   * call is ambiguous depends on that answer rather than on the method.
-   */
+  /** Failure classification uses this manifest value, not the HTTP verb. */
   readonly mutating: boolean;
   readonly params: readonly OpenApiParamBinding[];
   /** Whether a JSON request body is built from the `body` argument. */
@@ -159,7 +122,6 @@ export interface OpenApiOperationBinding {
 }
 
 export interface CompiledEgressTool {
-  /** Name agents call. */
   readonly name: string;
   readonly description: string;
   readonly toolId: string;
@@ -171,20 +133,11 @@ export interface CompiledEgressTool {
 }
 
 export interface CompileOpenApiEgressInput {
-  /** Integration slug — namespaces tool ids so two integrations may publish the same tool name. */
   readonly slug: string;
   /** The integration's `egress` block. A non-openapi kind compiles to no Tools. */
   readonly egress: EgressInput | undefined;
-  /** The parsed spec document named by `egress.spec`. */
   readonly document: unknown;
-  /**
-   * Non-secret connection env, used to fill `{VAR}` placeholders in `base_url`'s path.
-   *
-   * Some providers put a per-install identifier in the address rather than a header — Atlassian
-   * Cloud is `/ex/confluence/<cloud-id>/…`. Resolved at compile rather than dispatch so the
-   * compiled binding holds a finished URL, and so a manifest naming a var the operator never
-   * supplied fails once, loudly, instead of on every call.
-   */
+  /** Non-secret path env resolved at compile time; missing vars fail once, not per call. */
   readonly env?: Record<string, string>;
 }
 
@@ -198,17 +151,7 @@ function toArray(value: unknown): readonly unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
-/**
- * Inlines local `#/...` pointers.
- *
- * Remote pointers are replaced with a permissive schema rather than fetched: dereferencing one
- * would have the host request a URL a third-party spec chose, during tool registration, which is
- * exactly the authority the declarative framework exists to withhold.
- *
- * A pointer already open on the current path is likewise replaced — a self-referential type (a
- * Notion block containing blocks) is legitimate and common, and the alternative is refusing to
- * compile it at all.
- */
+/** Inline local `$ref`s; remote or recursive refs become permissive schemas, never fetches. */
 function resolveRefs(
   node: unknown,
   root: Record<string, unknown>,
@@ -283,13 +226,7 @@ function firstServerUrl(document: unknown): string | undefined {
   return typeof url === "string" ? url : undefined;
 }
 
-/**
- * The URL credentials are actually sent to.
- *
- * Checked here and not only in `integration-trust` because the spec file that usually supplies it
- * is never read by that validator: a manifest can pass an install-time review and still point its
- * `servers` entry anywhere.
- */
+/** Resolve and require the credential destination URL to be HTTPS with a literal host. */
 function resolveBaseUrl(document: unknown, override: string | undefined): string {
   const declared = override ?? firstServerUrl(document);
   if (declared === undefined) {
@@ -310,18 +247,7 @@ function resolveBaseUrl(document: unknown, override: string | undefined): string
   return declared.replace(/\/+$/, "");
 }
 
-/**
- * Fill `{VAR}` placeholders in a base URL from non-secret connection env.
- *
- * `{token}` is left alone — that one is the credential, substituted at dispatch so the compiled
- * binding never holds a secret. Everything else must resolve here: a placeholder that survived
- * would be sent literally, asking the provider for a site named `{CONFLUENCE_CLOUD_ID}`.
- *
- * Values are validated as path segments rather than percent-encoded, for the same reason the
- * credential is: excluding `/ ? # %` is precisely what stops a connection value from adding a path
- * segment, smuggling a query, or escaping into a different resource. The host was already required
- * to be literal, so the destination allow-list still pins one origin.
- */
+/** Resolve non-secret `{VAR}` path placeholders; leave `{token}` secret-only for dispatch. */
 function resolveEnvPlaceholders(
   baseUrl: string,
   env: Record<string, string>,
@@ -352,15 +278,7 @@ function resolveEnvPlaceholders(
   });
 }
 
-/**
- * Reconcile where the credential is declared to go with what the base URL actually contains.
- *
- * Both directions are errors, and both are silent failures if unchecked: a `base_url` placement
- * with no `{token}` sends every call unauthenticated, and a leftover `{token}` under header
- * placement puts the literal string `%7Btoken%7D` in the path — a 404 that looks like a provider
- * problem. The host is already required to be literal by `resolveBaseUrl`, so `{token}` can only
- * ever land in the path and can never move the destination.
- */
+/** `base_url` auth must contain `{token}`; header auth must not leave `{token}` in the URL. */
 function assertAuthPlacement(baseUrl: string, auth: OpenApiEgressAuth | undefined): void {
   const hasPlaceholder = baseUrl.includes("{token}");
   if (auth?.in === "base_url") {

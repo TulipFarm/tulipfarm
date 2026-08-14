@@ -14,19 +14,7 @@ import type {
 import type { ResolvedTurnContext, TurnContextPort, TurnRequest } from "../turn/driver";
 import type { InternalApiClient } from "./client";
 
-/**
- * The API-backed implementation of every port a turn needs from outside the Worker.
- *
- * One class rather than three because there is one remote host: the Context, the Tool catalog, and
- * the conversation tables all live behind the same boundary and the same credential, and splitting
- * them would only invent a seam that does not exist. What matters is the direction — each port is
- * declared by the Worker (`turn/driver.ts`, `@tulipfarm/agent-runtime`), and this file satisfies
- * them. PR 4 swaps the implementation for in-process resolution and no caller changes.
- *
- * Every path names a Run and nothing else. Authority comes from the Run's recorded subject on the
- * far side, so this client cannot ask to act as anyone — the worst a leaked credential buys is
- * doing to a live Run exactly what that Run was already entitled to do.
- */
+/** API-backed turn ports; every path names only a Run and API re-derives authority. */
 
 /** Which Turn a Run is answering. `undefined` when the Run no longer names one. */
 export interface RemoteTurnIdentity {
@@ -64,13 +52,7 @@ export class HttpTurnHost
 {
   constructor(private readonly client: InternalApiClient) {}
 
-  /**
-   * The Turn this Run answers, or `undefined` when it answers none.
-   *
-   * A Run superseded by a retry no longer names its Turn, and so does a Run whose lease another
-   * worker has already reclaimed. Either way there is nothing for this executor to do, and asking
-   * first is what stops it from spending a model call to find out.
-   */
+  /** `undefined` means a retry or reclaim left this Run with no Turn to answer. */
   async findTurn(runId: string): Promise<RemoteTurnIdentity | undefined> {
     // `409` is a Run no executor may write for; `404` is a Run or Turn that is gone. Both mean
     // this worker holds nothing, and neither is a fault worth reconciling.
@@ -97,13 +79,7 @@ export class HttpTurnHost
     return withCallId(request.callId, result);
   }
 
-  /**
-   * `ApprovalWaitPort`. Parks this Run on the durable wait for an approval already requested.
-   *
-   * The wait lives beside the approval, on the far side, because that is where the decision is
-   * made and where the one-use resume token must be redeemed. What comes back is only the wait's
-   * id — enough to tell a reader what the Run is stopped on, and nothing that could resume it.
-   */
+  /** Parks on the API-side approval wait; resume tokens never cross to the Worker. */
   async register(input: {
     runId: string;
     stateKey: string;
@@ -116,11 +92,7 @@ export class HttpTurnHost
     );
   }
 
-  /**
-   * `TurnCompletionStore`. `204` — and only `204` — means this attempt has recorded no outcome
-   * yet; a missing Run still throws, because reading that as "not finished" is how a redelivered
-   * job posts a second answer.
-   */
+  /** Only `204` means unfinished; missing Runs still throw to prevent duplicate answers. */
   async findCompletion(ref: TurnCompletionRef): Promise<TurnCompletionRecord | undefined> {
     return this.client.find<TurnCompletionRecord>(
       "GET",

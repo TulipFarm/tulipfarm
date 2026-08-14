@@ -80,8 +80,6 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-// --- Secrets ---
-
 const meta = { type: "user-provided" as const, createdAt: "x", updatedAt: "y" };
 
 test("groups a provider's stored fields into one collapsible row and shows config values", async () => {
@@ -195,8 +193,6 @@ test("a custom (non-provider) secret lists individually and deletes by its key",
   await userEvent.click(within(dialog).getByRole("button", { name: /delete/i }));
   expect(settings.deleteSecret).toHaveBeenCalledWith("stale-key");
 });
-
-// --- Models ---
 
 test("llm pane saves the structured config via putLlmConfig", async () => {
   vi.mocked(settings.putLlmConfig).mockResolvedValueOnce(llmConfig);

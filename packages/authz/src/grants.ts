@@ -1,10 +1,4 @@
-/**
- * AccessGrant shape and matching per SPEC §12: a grant scopes an action to Resource
- * type/domain/Record selector, field selector, data class, destination, conditions, and expiry,
- * with an explicit allow/deny effect. Matching fails closed: a scoped grant never matches a request
- * that omits the scoped dimension, for allow and deny alike, so scoping is deterministic and a
- * grant cannot silently widen (SPEC §12 non-amplification, §24 fail-closed defaults).
- */
+/** Grant matching is fail-closed: scoped dimensions must be present and equal. */
 
 export type GrantEffect = "allow" | "deny";
 
@@ -13,10 +7,7 @@ export interface AccessGrant {
   readonly action: string;
   /** Resource type name or "*" for any type. */
   readonly resourceType: string;
-  /**
-   * Business-authored domain. Absent is conservative: it covers only domainless requests, not every
-   * domain. Use "*" deliberately to cover every named domain.
-   */
+  /** Absent domain covers only domainless requests; use "*" for all domains. */
   readonly domain?: string;
   /** Specific Record id; absent or "*" covers every Record of the type. */
   readonly recordSelector?: string;
@@ -45,11 +36,7 @@ export interface AccessRequest {
   readonly conditions?: Readonly<Record<string, string>>;
 }
 
-/**
- * True when `grant` covers `request` at `now`. Expired grants never match. Each scoped
- * dimension on the grant requires an equal value on the request — a request that omits a
- * scoped dimension does not match (fail closed).
- */
+/** Expired grants never match; every scoped grant dimension must equal the request. */
 export function grantMatches(grant: AccessGrant, request: AccessRequest, now: Date): boolean {
   if (grant.expiresAt && grant.expiresAt <= now) return false;
   if (request.action === "*" || request.resourceType === "*" || request.domain === "*") {

@@ -7,12 +7,7 @@ function everyNavItem(): NavItem[] {
   );
 }
 
-/*
- * `PAGE_META` is a hand-ordered list that has to be extended whenever a page is added, and its
- * fallback is `/chat`. So a new nav item with no entry does not fail loudly — the top bar just
- * quietly calls the page "Chat". That is exactly how `/business/access` shipped mislabelled.
- * Asserting the two lists agree turns a silent wrong label into a failing test.
- */
+/* New nav items must update `PAGE_META`; otherwise the fallback silently labels them Chat. */
 test("every page reachable from the sidebar has its own title in the top bar", () => {
   const mislabelled = everyNavItem()
     .filter((item) => item.to !== "/chat" && titleForPath(item.to) === "Chat")
@@ -34,11 +29,7 @@ test("a child route keeps its parent page's identity", () => {
   expect(titleForPath("/business/access/check")).toBe("People & access");
 });
 
-/*
- * `/business/people` merged into `/business/access` and now redirects. The redirect renders inside
- * the app shell for a frame, so an entry missing here would flash "Chat" at exactly the moment the
- * reader is looking for where their bookmark went.
- */
+/* `/business/people` redirects in-shell, so its transient label must stay explicit. */
 test("a retired page still names its destination while it redirects", () => {
   expect(titleForPath("/business/people")).toBe(titleForPath("/business/access"));
 });

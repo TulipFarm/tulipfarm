@@ -7,20 +7,7 @@ import {
   secretReferenceSchema,
 } from "./common";
 
-/**
- * Trigger definition meta-schema (SPEC §7.1, §9.2). A Trigger maps a normalized event to a
- * published Routine version. Triggers are separate from Routines so routing stays
- * deterministic and independently versioned.
- *
- * Security invariants enforced structurally:
- * - A webhook trigger cannot masquerade as a trusted provider without declaring signature
- *   verification (a `secret://` `secretRef`) — Hermes's `INSECURE_NO_AUTH` escape hatch is
- *   not representable (SPEC §9.2, §24).
- * - A scheduled/event Run uses an explicit `backgroundIdentity`; it never inherits an
- *   interactive user (SPEC §12).
- * - A `deduplication` key is mandatory so replay handling is deterministic (SPEC §9.2).
- * - Catch-up schedules are bounded: `catch_up_bounded` requires a `catchUpCap`.
- */
+/** Trigger schema: verified webhooks, background identity, deduplication, and bounded catch-up. */
 
 const apiVersion = DEFINITION_API_VERSION;
 const kind = "Trigger";
@@ -87,7 +74,7 @@ const schedulePolicy = Type.Object(
   },
   {
     additionalProperties: false,
-    // Bounded catch-up: catching up on missed fires requires an explicit cap.
+    // Catch-up on missed fires requires an explicit cap.
     if: {
       additionalProperties: true,
       properties: { missedRunPolicy: { const: "catch_up_bounded" } },
@@ -101,7 +88,6 @@ const schedulePolicy = Type.Object(
   }
 );
 
-// Fields every trigger variant shares.
 const sharedSpecProps = {
   routineRef: definitionRef,
   eventType: nonEmptyString,

@@ -16,14 +16,6 @@ import { buildGitHubTooling } from "./adapters";
 import { GITHUB_INSTALLATION_SECRET_REF } from "./github-credentials";
 import type { GitHubRestHttp } from "./github-http";
 
-/**
- * Composition test for `buildGitHubTooling()`: fakes only the two edges outside this app's
- * control — the storage snapshot and the GitHub REST transport — and exercises everything this
- * phase built in between (installation projection, context resolution, credential minting +
- * caching, `CredentialDispatcher`'s lease, and `GitHubAdapter`'s own scope + grant checks) as one
- * real object graph, the same shape `main.ts` wires.
- */
-
 const BUSINESS_ID = "biz-triage";
 const APP_PRIVATE_KEY_PEM = generateKeyPairSync("rsa", { modulusLength: 2048 })
   .privateKey.export({ type: "pkcs1", format: "pem" })

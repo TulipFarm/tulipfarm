@@ -1,10 +1,8 @@
 /*
- * Rehype plugin: turn inline `#tag` tokens in a rendered page body into chip links to the
- * tag-filtered listing. Mirrors `chat/mention-highlight.ts` — it walks the hast tree (so it never
- * fires inside code spans or existing links) and splits matching text nodes into `<a class="tf-tag-chip">`
- * anchors with an internal `/knowledge/tags/<tag>` href (the markdown view renders internal hrefs as
- * client-side links). Headings keep their `#` markers stripped by markdown already, so only genuine
- * inline `#word` tokens match.
+ * Mirrors `chat/mention-highlight.ts` — it walks the hast tree (so it never fires inside code
+ * spans or existing links) and splits matching text nodes into `<a class="tf-tag-chip">`
+ * anchors with an internal `/knowledge/tags/<tag>` href (the markdown view renders internal
+ * hrefs as client-side links).
  */
 
 interface HastNode {
@@ -18,9 +16,6 @@ interface HastNode {
 const SKIP_TAGS = new Set(["code", "pre", "a"]);
 
 function splitTags(text: string, tagBase: string): HastNode[] {
-  // A tag is `#` + a LETTER-led slug, anchored to a word boundary (start / whitespace / "("). The
-  // letter-first rule excludes numeric refs like `#123`. Local (not module-scoped) so the stateful
-  // `/g` `lastIndex` can't be corrupted by an interleaved render. Mirrors `inline-tags.ts`.
   const re = /(^|[\s(])#([a-z][a-z0-9_-]*)/gi;
   const out: HastNode[] = [];
   let last = 0;

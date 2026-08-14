@@ -32,14 +32,7 @@ const INVOKABLE = new Set(["manual", "internal_api"]);
 const INVOKE_LIMIT = 60;
 const INVOKE_WINDOW_MS = 60_000;
 
-/**
- * Caller-initiated Trigger invocation for `manual` and `internal_api` Triggers.
- *
- * The caller supplies data and an idempotency key; it does not supply identity. The Run always
- * starts under the Trigger's authored background identity, its input is only what the Trigger
- * mapped, and the canonical event is persisted before the Run is started so a crash between the
- * two replays rather than losing the invocation.
- */
+/** Caller supplies data/idempotency; Run uses Trigger identity and persisted event. */
 export function registerTriggerRoutes(
   app: FastifyInstance,
   deps: TriggerInvokeDeps,

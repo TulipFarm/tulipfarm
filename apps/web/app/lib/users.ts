@@ -46,11 +46,7 @@ export async function reissueInvite(id: string): Promise<Invite> {
   return body.invite;
 }
 
-/**
- * The two statuses an admin can set. `invited` is not among them: it describes an account that has
- * never been given a password, which is a fact about the account rather than a switch to flip. The
- * API resolves a re-enabled passwordless account to `invited` on its own.
- */
+/** Admins set only active/suspended; passwordless re-enabled accounts resolve to invited. */
 export type SettableUserStatus = "active" | "disabled";
 
 export async function setUserStatus(id: string, status: SettableUserStatus): Promise<UserSummary> {

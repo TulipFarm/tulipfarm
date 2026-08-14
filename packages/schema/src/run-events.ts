@@ -1,26 +1,9 @@
-/**
- * The Run event vocabulary — what a Run tells the world while it executes.
- *
- * Every observer reads this one stream: the web client, a Slack or Telegram renderer, an operator
- * console, and any channel added later. It is therefore deliberately channel-neutral — no vendor
- * wire format, no assumption that the reader can render partial tokens — because these rows are
- * also the permanent record of what the Run did, and a transport protocol baked into an audit log
- * outlives the transport.
- *
- * The schemas live here rather than in an app because the writer (the worker) and the readers
- * (the API's stream adapter, channel renderers) sit on opposite sides of an application boundary
- * and cannot import each other.
- */
+/** Channel-neutral Run event vocabulary shared by the worker and all readers. */
 
 import { MODEL_PROFILE_DENIAL_REASONS } from "./definitions/model";
 import { EFFORT_PRESETS, EFFORT_RUNGS, type EffortPreset, type EffortRung } from "./model-catalog";
 
-/**
- * Who an event may be shown to. `participant` is what the person in the conversation sees;
- * `operator` is evidence — digests, dispatch records, guardrail decisions — that belongs to
- * whoever operates the deployment. Listing requires audiences explicitly, so an event is withheld
- * unless the reader was granted its audience.
- */
+/** Event visibility; readers only see events for explicitly granted audiences. */
 export type RunEventAudience = "participant" | "operator";
 
 /** One event type, its audience, and the schema its payload must satisfy. */
@@ -71,12 +54,7 @@ const TURN_STARTED_SCHEMA = {
   },
 } as const;
 
-/**
- * A span of assistant text. Deltas are chunked rather than per-token: a channel that cannot render
- * partial words gains nothing from token granularity, and one durable row per token would make the
- * audit log mostly noise. `index` orders spans within an attempt independently of the Run-wide
- * sequence, so a reader can reassemble the text without assuming it saw every other event type.
- */
+/** Text spans are chunked; `index` orders spans without relying on Run-wide event position. */
 const TEXT_DELTA_SCHEMA = {
   type: "object",
   required: ["text", "index"],
@@ -87,20 +65,7 @@ const TEXT_DELTA_SCHEMA = {
   },
 } as const;
 
-/**
- * A bounded, redaction-aware view of a Tool's arguments or output.
- *
- * The digest alone told a participant that a call happened and nothing about what it did, which
- * made a Tool row unreadable to the person the Tool acted for. A preview closes that gap without
- * reopening the one the digest was protecting: it is built where the values already live (the
- * dispatch boundary), every withheld leaf is replaced rather than dropped, and `redactedPaths`
- * names each one so a reader can show that something was withheld instead of silently rendering a
- * hole. `truncated` reports that the preview is not the whole value, so a reader never presents a
- * partial result as complete.
- *
- * `json` is JSON text rather than a nested schema because Tool arguments have no common shape and
- * a schema permissive enough to hold all of them would constrain nothing.
- */
+/** Tool preview JSON is redacted/truncated at dispatch; paths name withheld leaves. */
 export const TOOL_PREVIEW_SCHEMA = {
   type: "object",
   required: ["json"],
@@ -137,18 +102,7 @@ export const MESSAGE_METADATA_SCHEMA = {
   },
 } as const;
 
-/**
- * A Tool call the participant is allowed to know happened.
- *
- * `argsDigest` stays required and stays the record of what was actually called: it hashes the
- * verbatim arguments, so it still identifies them exactly after a preview has redacted or
- * truncated them. `argsPreview` is the readable companion, never the authority. The full verbatim
- * arguments remain operator-audience only, in `tool.dispatched`.
- *
- * `tier`, `mutating`, `agentId` and `stepId` are identity rather than content — they say which
- * kind of Tool ran, whether it could write, and which Agent and State it belonged to — so a reader
- * can group and rank calls without being told what the call operated on.
- */
+/** Participant Tool call: digest is authoritative; verbatim arguments stay operator-only. */
 const TOOL_CALL_SCHEMA = {
   type: "object",
   required: ["callId", "name", "argsDigest"],
@@ -190,13 +144,7 @@ const SURFACE_EMITTED_SCHEMA = {
   },
 } as const;
 
-/**
- * The turn is parked on a durable wait. The same Run resumes when the wait is signalled.
- *
- * `callId` names the Tool call being held, so a reader can show the decision against the call it
- * belongs to instead of as a free-floating prompt. It is the id from the participant's own
- * `tool.call` event — never the Tool's arguments, which stay behind the digest.
- */
+/** Durable wait; `callId` pairs approval to the participant `tool.call`, never by position. */
 const APPROVAL_REQUESTED_SCHEMA = {
   type: "object",
   required: ["waitId", "intentId"],
@@ -220,10 +168,7 @@ const GUARDRAIL_BLOCKED_SCHEMA = {
   },
 } as const;
 
-/**
- * The terminal event. `messageId` is null when the turn produced no assistant Message — a block, a
- * failure, or a cancellation — so a reader never has to infer absence from a missing field.
- */
+/** Terminal event; `messageId: null` records that no assistant Message was produced. */
 const TURN_FINISHED_SCHEMA = {
   type: "object",
   required: ["status"],
@@ -314,29 +259,14 @@ const MODEL_ROUTED_BUDGET_LIMITS_SCHEMA = {
   },
 } as const;
 
-/**
- * How a selector became a ModelProfile.
- *
- * `effort_inferred` is `auto` resolved *from the prompt* by the effort router rather than from the
- * deployment's declared default. It is a separate value rather than a flag on `effort_preset`
- * because the two answer different questions on replay: a preset resolves the same way forever,
- * while an inferred rung is only reproducible because this event recorded it.
- */
+/** Profile resolution mode; `effort_inferred` records prompt-based `auto` for replay. */
 const MODEL_ROUTED_PROFILE_RESOLUTIONS = [
   "effort_preset",
   "effort_inferred",
   "profile_ref",
 ] as const;
 
-/**
- * Why the effort router chose the rung it chose.
- *
- * This is the calibration record: without the score and the signals behind it, a badly routed turn
- * can be noticed but never explained. `promptHash` stands in for the prompt deliberately — this
- * event is durable, operator-visible evidence, and a routing record carries reasons, never
- * payloads. The hash still groups repeat prompts and ties a complaint about one answer back to the
- * decision that produced it.
- */
+/** Effort-router evidence; `promptHash` records prompt identity without storing prompt text. */
 const MODEL_ROUTED_EFFORT_INFERENCE_SCHEMA = {
   type: "object",
   required: ["rung", "score", "band", "firedSignals", "usedClassifier", "promptHash"],
@@ -344,7 +274,7 @@ const MODEL_ROUTED_EFFORT_INFERENCE_SCHEMA = {
   properties: {
     rung: { type: "string", enum: [...EFFORT_RUNGS] },
     score: { type: "number" },
-    /** `unsure` records that the heuristic did not separate the prompt, so stage 2 was consulted. */
+    /** `unsure` means the heuristic did not separate the prompt, so stage 2 ran. */
     band: { type: "string", enum: [...EFFORT_RUNGS, "unsure"] },
     firedSignals: { type: "array", items: { type: "string", minLength: 1 } },
     usedClassifier: { type: "boolean" },
@@ -353,11 +283,7 @@ const MODEL_ROUTED_EFFORT_INFERENCE_SCHEMA = {
   },
 } as const;
 
-/**
- * Operator evidence for the model routing decision. Selection and denial share one event type so
- * a replay checks one deterministic key for "the model decision for this invocation" regardless of
- * which side of the router it landed on.
- */
+/** Operator evidence for model routing; selection and denial share one replay key. */
 const MODEL_ROUTED_SCHEMA = {
   oneOf: [
     {
@@ -427,10 +353,7 @@ const TOOL_DISPATCHED_SCHEMA = {
   },
 } as const;
 
-/**
- * Operator evidence for every guardrail stage, including the ones that passed. A record of blocks
- * alone cannot show that a guard ran at all, which is exactly what an audit needs to establish.
- */
+/** Operator evidence for every guardrail stage, including passes. */
 const GUARDRAIL_DECISION_SCHEMA = {
   type: "object",
   required: ["stage", "guard", "decision"],
@@ -443,14 +366,7 @@ const GUARDRAIL_DECISION_SCHEMA = {
   },
 } as const;
 
-/**
- * Operator evidence: what an Integration's classifier decided about one delivery.
- *
- * Most deliveries a channel sends are not questions — a reaction, a bot's own message, an event
- * type nobody subscribed to — and a Run that answers none of them still has to say why it did
- * nothing. Without this row, an operator asking "why did Slack not reply?" can only see a Run that
- * succeeded silently, which is indistinguishable from one that was never delivered.
- */
+/** Operator evidence for why an Integration delivery was ignored, routed, or rejected. */
 const DELIVERY_CLASSIFIED_SCHEMA = {
   type: "object",
   required: ["decision"],
@@ -462,10 +378,7 @@ const DELIVERY_CLASSIFIED_SCHEMA = {
   },
 } as const;
 
-/**
- * Every event a Run may emit. A type outside this set is refused before it can be appended, so the
- * durable stream cannot grow a shape no reader was built to understand.
- */
+/** Closed event set; unknown types are refused before append. */
 export const RUN_EVENT_DEFINITIONS: readonly RunEventDefinition[] = [
   { type: "turn.started", audience: "participant", schema: TURN_STARTED_SCHEMA },
   { type: "text.delta", audience: "participant", schema: TEXT_DELTA_SCHEMA },
@@ -491,13 +404,7 @@ export type RunEventToolTier = "system" | "platform" | "integration";
 /** How a selector became a ModelProfile. See {@link MODEL_ROUTED_PROFILE_RESOLUTIONS}. */
 export type RunEventModelResolution = (typeof MODEL_ROUTED_PROFILE_RESOLUTIONS)[number];
 
-/**
- * Why the effort router chose the rung it chose, recorded on the `model.routed` event.
- *
- * Present only when `resolution` is `effort_inferred`. It is what makes an inferred rung
- * reproducible: a replayed attempt reads `rung` back from here instead of asking a model again,
- * so a Run routes the same way on its second execution as on its first.
- */
+/** Effort inference recorded on `model.routed`; replay reads `rung` instead of asking again. */
 export interface RunEventEffortInference {
   readonly rung: EffortRung;
   readonly score: number;
@@ -510,13 +417,7 @@ export interface RunEventEffortInference {
   readonly classifierLatencyMs?: number;
 }
 
-/**
- * A bounded, redaction-aware view of a Tool's arguments or output.
- *
- * `json` is JSON text, already redacted and already truncated. `redactedPaths` names every leaf
- * that was withheld so a reader shows an explicit gap rather than an absence it cannot explain,
- * and `bytes` is the size of the original value, so "truncated" can say how much is missing.
- */
+/** Redacted/truncated Tool JSON preview; paths name withheld leaves and bytes size the original. */
 export interface RunEventToolPreview {
   readonly json: string;
   readonly redactedPaths?: readonly string[];
@@ -535,14 +436,7 @@ export interface ParticipantToolCall {
   readonly errorCode?: string;
 }
 
-/**
- * The payload each event type carries, matching its schema field for field.
- *
- * A writer still validates against the schema — these types bind the two sides at compile time but
- * cannot police a payload assembled from runtime data. Optional fields must be **omitted**, never
- * set to `undefined`: the schemas are `additionalProperties: false`, and a present-but-undefined
- * property is a property.
- */
+/** Payloads mirror schemas; optional fields must be omitted, never set to `undefined`. */
 export interface RunEventPayloads {
   readonly "turn.started": {
     readonly turnId: string;

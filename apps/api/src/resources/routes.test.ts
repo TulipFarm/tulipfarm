@@ -899,11 +899,7 @@ describe("resource domain events", () => {
   });
 });
 
-/**
- * The REST door under the same authority the Tool door uses. These drive the real
- * `LiveRecordAuthorizer` over the real shipped `member` grants — a fake authorizer would prove the
- * routes call *something*, not that they reach the verdict the gate reaches.
- */
+/** Exercise REST through the real `LiveRecordAuthorizer` and shipped `member` grants. */
 describe("record authority on the REST routes", () => {
   async function buildGuardedApp() {
     const store = new MemorySessionStore();

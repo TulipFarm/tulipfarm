@@ -63,12 +63,6 @@ function runStateOf(part: ToolPart, streaming: boolean | undefined): RunState {
   return streaming === true ? "running" : "blocked";
 }
 
-/**
- * The status marker, sized to sit on the trace rail.
- *
- * Status leads the row rather than trailing it: "did this work" is what the eye scans a run for,
- * and putting it last meant scanning a ragged right edge past variable-width text.
- */
 function StatusNode({ state }: { state: RunState }) {
   const base = "relative z-10 flex size-4 shrink-0 items-center justify-center rounded-full";
 
@@ -131,12 +125,6 @@ function CopyButton({ value, label }: { value: string; label: string }) {
   );
 }
 
-/**
- * One labelled half of the inspect view.
- *
- * Input and output get distinct headers because the previous design stacked two identical JSON
- * blocks and left the reader to guess which was which.
- */
 function InspectPane({
   label,
   preview,
@@ -166,16 +154,6 @@ function InspectPane({
   );
 }
 
-/**
- * One Tool call, as a single line on the trace.
- *
- * Everything the reader needs sits on that one line: how it ended, what it did in words, what came
- * back, and how long it took. The tool's registered name rides along in mono because that is the
- * fact a developer verifies against — but dimmed, because it is not what a reader is scanning for.
- *
- * The previous row spent two lines and a bordered card to say less than this: it repeated the tool
- * name it had already summarised, and showed nothing at all about the result until you clicked.
- */
 export function ToolCallRow({
   part,
   streaming,
@@ -312,14 +290,7 @@ export function ToolCallRow({
   );
 }
 
-/**
- * A consecutive run of Tool calls, drawn as one block.
- *
- * Consecutive calls are one event to the reader, so they get one container and hairline dividers
- * rather than a stack of separate cards with gaps between them. When the run is long enough and
- * asks nothing of anyone, it collapses to a single line — the reader gets their prose back and can
- * open the detail on demand.
- */
+/** Long, non-interactive Tool runs collapse to one line until opened. */
 export function ToolRun({
   parts,
   streaming,
@@ -421,13 +392,7 @@ function Meta({ label, value, mono }: { label: string; value: string; mono?: boo
   );
 }
 
-/**
- * The arguments to show and summarise.
- *
- * Prefers the redacted preview, which is structured data. Falls back to `args`, which a restored
- * conversation carries verbatim. On a live stream `args` holds only `{ argsDigest }` — that is a
- * receipt, not an argument, so it is withheld here and shown in the metadata strip instead.
- */
+/** Live `args` may be only `{ argsDigest }`; show it as metadata, not arguments. */
 function parsedArgs(part: ToolPart): unknown {
   if (part.argsPreview !== undefined) {
     try {
@@ -446,12 +411,7 @@ function isDigestOnly(args: unknown): boolean {
   return keys.length === 0 || (keys.length === 1 && keys[0] === "argsDigest");
 }
 
-/**
- * The digest that identifies what was really called.
- *
- * Read from either carrier: `meta` on a mapped stream, or the `args` envelope when a caller built
- * the part by hand. Losing it would leave a redacted call with nothing to verify it against.
- */
+/** Keep the digest so a redacted call remains verifiable. */
 function digestOf(part: ToolPart): string | undefined {
   if (part.meta?.argsDigest !== undefined) return part.meta.argsDigest;
   if (typeof part.args !== "object" || part.args === null) return undefined;

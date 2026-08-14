@@ -1,25 +1,4 @@
-/**
- * Provider-neutral infrastructure capability discovery.
- *
- * SPEC §22 requires ten operational backends to be provider-neutral ports "with
- * documented capability checks": PostgreSQL, blob, KMS, identity, model,
- * telemetry, vector search, cache, queue optimization, and sandbox. This module
- * makes that discovery explicit and typed and classifies each capability's
- * criticality so composition can fail closed on a missing required backend while
- * degrading gracefully without an optional one.
- *
- * Architectural invariant 16 (SPEC §5): no optional cache, queue, vector store,
- * or model provider is required for correctness. PostgreSQL is therefore the sole
- * correctness-critical capability; every other backend either fails closed
- * (required-to-serve) or degrades a feature (optional) without corrupting or
- * losing committed state.
- *
- * This catalog enumerates capability *ids* only. The port interfaces live with
- * their owning packages: transactions/blob/vector/cache/queue in
- * `@tulipfarm/storage`, KMS in `@tulipfarm/secrets`, sandbox in
- * `@tulipfarm/sandbox`, identity in `@tulipfarm/authz`, model in
- * `@tulipfarm/agent-runtime`, and telemetry here.
- */
+/** Capability catalog: PostgreSQL is correctness-critical; optional accelerators only degrade. */
 
 export const CAPABILITY_IDS = [
   "postgres",
@@ -36,21 +15,13 @@ export const CAPABILITY_IDS = [
 
 export type CapabilityId = (typeof CAPABILITY_IDS)[number];
 
-/**
- * - `required`: the deployment must provide a backend for this port before it can
- *   serve protected work; a missing required capability fails closed.
- * - `optional`: omitting or losing the backend degrades a feature but never loses
- *   authoritative state or grants access.
- */
+/** Required capabilities fail closed; optional ones degrade without losing authoritative state. */
 export type CapabilityRequirement = "required" | "optional";
 
 export interface CapabilityClassification {
   readonly id: CapabilityId;
   readonly requirement: CapabilityRequirement;
-  /**
-   * True only for capabilities whose loss can corrupt or lose committed state.
-   * Invariant 16 fixes this to PostgreSQL alone.
-   */
+  /** True only when capability loss can corrupt or lose committed state; PostgreSQL alone. */
   readonly correctnessCritical: boolean;
   readonly summary: string;
 }
@@ -154,11 +125,7 @@ export class MissingCapabilityError extends Error {
   }
 }
 
-/**
- * Fail closed when any `required` capability is unavailable. Absent optional
- * accelerators (cache, vector, queue, telemetry, model, sandbox) never throw, so
- * a deployment stays correct after losing them.
- */
+/** Missing required capabilities throw; missing optional accelerators do not. */
 export function assertRequiredCapabilities(report: CapabilityReport): void {
   const missing = requiredCapabilityIds().filter((id) => !report.probes[id]?.available);
   if (missing.length > 0) {

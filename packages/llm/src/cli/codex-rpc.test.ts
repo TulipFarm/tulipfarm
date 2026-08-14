@@ -4,11 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CodexRpc, CodexRpcError } from "./codex-rpc";
 
-/**
- * Driven against a purpose-built child rather than the fake app-server: these are the transport's
- * own failure modes — a split line, invalid JSON, a child that ignores SIGTERM, a close mid-request
- * — which the protocol-level tests in `codex.test.ts` cannot reach.
- */
+/** Tests transport-only child failures that `codex.test.ts` cannot reach. */
 
 let workDir: string;
 const open: CodexRpc[] = [];

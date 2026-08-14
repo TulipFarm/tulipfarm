@@ -20,11 +20,7 @@ import {
   verifySandboxExecutionResult,
 } from "./request";
 
-/**
- * Production implementations must allocate a fresh workspace inside `execute`, enforce the signed
- * limits, destroy the workspace before returning, and expose only the request's scoped one-use
- * credential bindings. Host mounts and ambient worker credentials are never available.
- */
+/** Production backends use fresh workspaces, signed limits, one-use credentials, and no mounts. */
 export interface SandboxBackend {
   readonly backendId: string;
   attest(challenge: string): Promise<SignedSandboxBackendAttestation>;

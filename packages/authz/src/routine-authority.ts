@@ -2,12 +2,8 @@ import type { ToolContractDefinition } from "@tulipfarm/schema";
 import type { AccessGrant } from "./grants";
 
 /**
- * Compiles a Routine's own pinned ToolContract definitions into the one `AuthorityLayer` its Runs
- * dispatch under (SPEC §12). A contract that declares `requiredActions`/`requiredResources` grants
- * exactly those; one that declares neither is scoped to itself alone, via the same `{ type: "Tool",
- * id: toolId }` fallback target `protectedRequests` (tool-broker) resolves to when a contract and
- * its intent both omit a resource. Nothing here can grant a Tool the bundle never published — a
- * Routine's authority can only ever be as wide as what it declares wanting to call.
+ * Routine authority is limited to pinned ToolContracts; contracts without required targets scope
+ * only to their own Tool id.
  */
 export function compileRoutineAuthority(
   contracts: readonly ToolContractDefinition[]

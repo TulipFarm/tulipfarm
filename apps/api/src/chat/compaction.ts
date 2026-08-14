@@ -7,15 +7,7 @@ import {
   type MessageRepo,
 } from "./messages";
 
-/**
- * Conversation compaction (CTX-V1-001/002). Statelessness is preserved — the prompt is
- * rebuilt every turn from durable rows; compaction only changes *which* history rows are
- * included. When a turn's estimated tokens exceed `MAX_HISTORY_TOKENS`, the oldest turns
- * are summarized once into a durable `summary` row and the recent turns stay verbatim.
- *
- * Token counts are a coarse char heuristic (no tokenizer dependency); a generous budget
- * with headroom under the model's context window makes the imprecision harmless.
- */
+/** CTX-V1-001/002: compact only by durable summary rows; token counts are coarse. */
 
 /** Flatten a message's content to the text used for the char-based token estimate. */
 function contentText(content: string | MessagePart[]): string {
@@ -40,12 +32,7 @@ function isAfter(d: MessageDoc, cutoff: CompactionCutoff): boolean {
   return d._id > cutoff._id;
 }
 
-/**
- * Read-path filter applied EVERY turn (statelessness). Given the rows ordered oldest→newest,
- * resolve the effective history: keep only the latest `summary` row plus the non-summary rows
- * newer than its cutoff. With no summary present, the rows pass through unchanged. A newer
- * summary therefore supersedes (and drops) any older summary — there is only ever one.
- */
+/** Every turn keeps only the latest summary plus rows newer than its cutoff. */
 export function applySummaryFilter(docs: MessageDoc[]): MessageDoc[] {
   let latest: MessageDoc | undefined;
   for (const d of docs) {
@@ -60,12 +47,7 @@ export function applySummaryFilter(docs: MessageDoc[]): MessageDoc[] {
   return [latest, ...verbatim];
 }
 
-/**
- * Choose the cut between summarized-oldest and kept-verbatim. Walks newest→oldest accumulating
- * the estimate until it exceeds `RECENT_RETENTION_TOKENS`, then snaps the boundary to a `user`
- * row so the verbatim region always begins with a user turn (valid message sequence; whole
- * user→assistant→tool turns stay intact). Returns the index of the first kept (verbatim) row.
- */
+/** Cut at a user row so the verbatim region starts with a valid whole turn. */
 export function computeCut(docs: MessageDoc[]): number {
   let acc = 0;
   let cut = 0;
@@ -96,10 +78,7 @@ export interface CompactHistoryArgs {
   messageRepo: MessageRepo;
   /** Summarize a transcript via the LLM quick tier. */
   summarize: (transcript: string) => Promise<string>;
-  /**
-   * Optional M5 Episode sink. The summary was already created for compaction; recording it here
-   * must never trigger a second summarization call and must never decide whether the turn runs.
-   */
+  /** Optional Episode sink; must not trigger another summary or decide turn execution. */
   episodeRecorder?: {
     recordConversationEpisode(input: {
       readonly conversationId: string;
@@ -111,12 +90,7 @@ export interface CompactHistoryArgs {
   log: { error: (obj: unknown, msg?: string) => void };
 }
 
-/**
- * Resolve the history rows to render for this turn. Always applies the summary filter; only when
- * the estimate is over budget does it run exactly one summarization pass: summarize the oldest
- * turns, persist a durable `summary` row, and return `[summary, ...verbatim]`. A summarize failure
- * degrades gracefully to the un-summarized (filtered) history so the turn still runs.
- */
+/** Apply summaries every turn; on over-budget, run one best-effort summarization pass. */
 export async function compactHistory(args: CompactHistoryArgs): Promise<MessageDoc[]> {
   const { docs, conversationId, extraTokens, messageRepo, summarize, log } = args;
   const filtered = applySummaryFilter(docs);
@@ -129,8 +103,7 @@ export async function compactHistory(args: CompactHistoryArgs): Promise<MessageD
   if (toSummarize.length === 0 || verbatim.length === 0) return filtered; // nothing safe to compact
 
   const last = toSummarize[toSummarize.length - 1];
-  // Summarize + persist are both best-effort: any failure (LLM throw, quick tier unconfigured,
-  // or a persistence error) degrades to the un-summarized history so the turn still runs.
+  // Summarize + persist are best-effort; failures leave the turn running with filtered history.
   try {
     const text = await summarize(renderTranscript(toSummarize));
     const summary = fromSummary(conversationId, text, {

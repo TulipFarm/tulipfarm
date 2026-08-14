@@ -1,37 +1,6 @@
 import type { ToolTargetRef } from "./intent";
 
-/**
- * Authority layer L5 — what the *provider* would let this person do (D7).
- *
- * Layers L1–L4 all describe authority this platform granted. None of them can know that a
- * particular engineer was never added to a particular repository, or that a document was shared
- * with one team and not another. That knowledge lives in the provider, and we neither replicate it
- * nor keep it fresh.
- *
- * When a call spends the caller's own credential the provider applies that knowledge itself and
- * this layer is unnecessary. It exists for the other case: a call that spends the deployment's
- * shared credential still reaches the provider *as the bot*, so the bot's access — usually far
- * wider than any individual's — becomes the effective access unless something checks the human
- * first. This is that check, and it is the only thing standing between "HR cannot see the
- * engineering repo" as a policy and as a fact.
- *
- * There are three answers, and conflating any two of them is how this layer breaks:
- *
- * - a **verdict** (`allowed` true or false) — the provider was asked and answered;
- * - **`undefined`** — *could not determine*. A provider that is unreachable, a response we cannot
- *   parse, an unmapped identity. The caller must deny: a layer that answered "yes" in this state
- *   would be at its most permissive exactly when it is least informed;
- * - **`not_applicable`** — there is no provider-side question to ask. Not a determination that
- *   failed, and not permission: it means L5 contributes nothing here and layers L1–L4 are the whole
- *   answer. Returning `undefined` for these instead would deny every call this layer was never
- *   meant to decide, and returning `{allowed:true}` would state an entitlement nobody verified.
- *
- * The third answer is load-bearing. Its cases are structural — a subject that is not a person has
- * no provider identity to check, and a target that names something other than a resource the
- * provider can report access on (an account under which a repository does not yet exist) offers
- * nothing to ask about. Without it, correctness at this layer would require every Tool of a covered
- * provider to name a checkable resource, which is not a property any Tool author can guarantee.
- */
+/** L5 checks provider-side human entitlement for shared bot credentials. */
 
 export interface EntitlementQuery {
   readonly businessId: string;
@@ -49,11 +18,7 @@ export interface EntitlementVerdict {
   readonly reason?: string;
 }
 
-/**
- * L5 has no question to ask about this call. Distinct from `{allowed:true}`, which asserts a
- * provider-side entitlement that was actually confirmed, and from `undefined`, which is a
- * determination that failed and must deny.
- */
+/** No provider-side question applies; distinct from confirmed allow or failed determination. */
 export const NOT_APPLICABLE = "not_applicable" as const;
 export type EntitlementNotApplicable = typeof NOT_APPLICABLE;
 
@@ -65,16 +30,7 @@ export interface ToolEntitlementPort {
   check(query: EntitlementQuery): Promise<EntitlementAnswer>;
 }
 
-/**
- * Routes a query to the port owning its provider.
- *
- * A provider with no port returns `undefined` from `check` *and* `false` from `covers`, and callers
- * must distinguish the two: an uncovered provider has no per-principal entitlement model wired yet,
- * which is a known gap rather than a determination that failed. Denying every uncovered provider
- * would make writing a port a precondition for shipping any provider Tool at all — a rule that
- * would be suspended the first time it bit, and a rule that gets suspended is worse than one that
- * is stated honestly. `covers` exists so the gap can be listed rather than discovered.
- */
+/** `covers` reports missing provider ports as known gaps, not failed entitlement checks. */
 export class CompositeToolEntitlement {
   private readonly ports: Map<string, ToolEntitlementPort>;
 

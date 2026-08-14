@@ -257,13 +257,7 @@ describe("integration auth routes", () => {
       expect(res.statusCode).toBe(404);
     });
 
-    /**
-     * The two halves of the personal-credential protocol are one feature, not two. The resolver
-     * refuses a human's user-mode call with "connect it from Settings, Integrations"; if this route
-     * cannot store what that connect produces, the person following that instruction walks into a
-     * 409 and the Tool is permanently unreachable — a prompt pointing at a dead end. This pins the
-     * halves together so neither can ship without the other.
-     */
+    /** Pins user-mode connect storage to the resolver prompt that sends people to Settings. */
     it("completes a user-scoped connect rather than refusing for want of a token store", async () => {
       await connectFields();
       const res = await app.inject({
@@ -277,14 +271,7 @@ describe("integration auth routes", () => {
       expect(new URL(res.json().url).searchParams.get("state")).toBeTruthy();
     });
 
-    /**
-     * `business` scope re-points the credential every unattended Run and every service-mode Tool
-     * then spends, so any member completing it would redirect the whole deployment's provider
-     * identity. It takes the same fail-closed operator gate as the authorization admin API. `user`
-     * scope stays self-service: it mints a credential bounded by what the provider already grants
-     * that person, and requiring an operator there would make personal credentials unusable and
-     * push every Tool back onto the shared bot.
-     */
+    /** Business-scoped connects require an operator; user-scoped connects stay self-service. */
     it("refuses a business-scoped connect from a non-operator", async () => {
       const res = await app.inject({
         method: "POST",

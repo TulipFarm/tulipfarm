@@ -1,21 +1,6 @@
 /**
- * Slack Knowledge sync (SPEC §14.1, §15).
- *
- * A Slack channel is the Knowledge source and each message is a chunk, because channel membership
- * is the ACL Slack actually enforces. Threads ride along as messages carrying `threadTs`; they are
- * not a separate source, so a thread can never outlive its channel's authorization.
- *
- * Fail-closed decisions this module makes:
- * - membership unreadable -> `unverifiable` source with its content removed, never an open one;
- * - a member with no Tulip identity mapping -> dropped, never an implicit grant;
- * - private channel, DM, or group DM -> `restricted` and `live` access control, so no cached ACL
- *   can outlive someone leaving the channel;
- * - archived channel -> `revoked` with content removed, still citable for past answers;
- * - deleted message -> its chunk removed, never re-indexed.
- *
- * Results are workspace-level counts plus stable failure codes. Channel ids, channel names, member
- * ids, message text, and provider errors never appear in a result — a sync report of a workspace
- * containing private channels must not disclose that those channels exist.
+ * Slack channel membership is the ACL; unreadable members, unmapped users, private channels,
+ * archives, and deleted messages fail closed without leaking ids or text in results.
  */
 
 import { canonicalHash } from "@tulipfarm/schema";

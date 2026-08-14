@@ -1,7 +1,6 @@
 import type { DueWaitDecision, PersistedWait, ResolvedDueWait } from "@tulipfarm/storage";
 import type { RunResumeGateway } from "./resume";
 
-/** Narrow surface `WaitTimerSweeper` needs; `@tulipfarm/storage`'s `WaitStore` satisfies it. */
 export interface WaitTimerStore {
   resolveDue(
     businessId: string,
@@ -14,7 +13,6 @@ export interface WaitTimerStore {
 export interface SweptWait {
   readonly wait: PersistedWait;
   readonly signalCount: number;
-  /** False when the wait resolved but its Run had already left `waiting` — needs reconciliation. */
   readonly resumed: boolean;
 }
 
@@ -24,11 +22,7 @@ export interface SweepInput {
   readonly limit: number;
 }
 
-/**
- * Deadline resolution for a due wait. A timer fires; a bounded window closes with whatever it
- * collected; every other unsatisfied wait times out. Aggregation that could still be satisfied by
- * a signal has already been resolved by the delivery path, so a due wait here never over-counts.
- */
+/** Due waits fire timers, close bounded windows, or time out without over-counting aggregation. */
 export function resolveDueWait(
   wait: PersistedWait,
   signalCount: number
@@ -39,10 +33,8 @@ export function resolveDueWait(
 }
 
 /**
- * Durable timer sweep. Resolves every wait past its deadline, consuming its one-use resume token
- * in the same transaction, then requeues the waiting Run. Resolution is guarded on `pending`, so
- * a concurrent sweeper, a duplicate delivery, or a restarted worker resumes each Run exactly once
- * — the resolved status tells the Run whether it fired or timed out.
+ * Timer sweeps atomically resolve pending waits, consume one-use tokens, and requeue Runs exactly
+ * once with fired-or-timed-out status.
  */
 export class WaitTimerSweeper {
   constructor(

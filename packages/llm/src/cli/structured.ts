@@ -1,13 +1,6 @@
 import type { JSONSchema7 } from "@ai-sdk/provider";
 
-/**
- * No CLI provider has a native `response_format`/structured-output mode. The emulation is:
- * append the schema to the prompt as an instruction, let the model reply in prose-plus-JSON, then
- * extract the first balanced JSON object out of that reply so the AI SDK's own `generateObject`
- * repair loop (`experimental_repairText`, already used at `apps/api/src/onboarding/personalize.ts`)
- * has a clean string to parse. Brace-scanning extractor ported from
- * `qm/src/security/security-posture.ts`.
- */
+/** CLI structured output is emulated by prompt schema text plus first-balanced-object extraction. */
 export function firstJsonObject(text: string): string | undefined {
   let depth = 0;
   let start = -1;

@@ -13,30 +13,15 @@ import type { SurfaceActionStore } from "../surfaces/action-store";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
-/**
- * `/api/v1/internal/surfaces/*` — the generic Surface interaction contract for a provider-originated
- * click (a Slack button/select). Resolves the clicking sender to its own Tulip principal in this
- * process, then delegates straight to `SurfaceActionStore.resolve()` — the same resolution
- * `/api/v1/surfaces/interactions` (web) already performs. No new resolution logic here.
- *
- * Unlike the web route, nothing here streams a reply back to the caller — a Slack click gets no
- * open connection to answer on. So after a successful resolution, this route itself submits a
- * follow-up chat turn (the web client does this client-side via `send(surfaceInteractionAnswer(...))`
- * after `postSurfaceInteraction` resolves) and re-registers a Channel run delivery so the
- * integration-worker's delivery poll loop picks up the agent's reply and posts it back into the same
- * Slack channel/thread the Artifact was presented in.
- */
 export interface SurfaceInternalRouteDeps {
   readonly identity: IngressIdentityResolver;
   readonly actions: SurfaceActionStore;
-  /** Same revision the handle was minted against (`present`/`request_input`'s `ctx.guardrailRevision`). */
   readonly guardrails?: GuardrailsService;
   readonly store: ConversationStore;
   readonly invocations: DurableInvocationGateway;
   readonly runDeliveries: ChannelRunDeliveryStore;
 }
 
-/** Mirrors the web client's `surfaceInteractionAnswer` (`use-chat-stream.ts`) for the channel path. */
 function surfaceInteractionAnswer(input: Readonly<Record<string, unknown>>): string {
   if (typeof input.value === "string" && input.value.trim().length > 0) return input.value;
   const entries = Object.entries(input);
@@ -116,7 +101,6 @@ export function registerSurfaceInternalRoutes(
         handle: body.handle,
         principal: resolution.user._id,
         value: body.input,
-        // Step-up verification has no channel-side equivalent yet — a handle minted with `stepUp`
         // is refused here rather than silently treated as satisfied.
         stepUpSatisfied: false,
         currentGuardrailRevision: deps.guardrails?.revision ?? "none",

@@ -1,9 +1,4 @@
-/**
- * Persistence for custom composable roles and role assignments (SPEC §12), scoped to a
- * business_id. Storage owns the mechanics; `@tulipfarm/authz` owns cycle checks, assignability,
- * and the effective-permission decision. Assignment expiry is enforced here (`listAssignments`
- * never returns an expired row) so every caller sees the same durable truth.
- */
+/** Role persistence is business-scoped; storage enforces assignment expiry for all callers. */
 
 import type { PrincipalKind } from "@tulipfarm/schema";
 import type { TransactionPort } from "../ports";
@@ -55,11 +50,8 @@ export interface GroupMembershipRecord {
 }
 
 /**
- * A Role a group holds. Members of the group inherit these roles, subject to the same assignability
- * and expiry rules a direct assignment obeys. A group cannot be assigned a role through
- * {@link RoleAssignmentRecord} because `role_assignments.principal_id` has a foreign key into
- * `principals`, and a group is not a principal (`principals.kind` has no `group` value) — so
- * group-held roles need their own relation.
+ * Group-held Roles use their own relation because groups are not principals; expiry and
+ * assignability still apply.
  */
 export interface GroupRoleAssignmentRecord {
   readonly groupId: string;
@@ -95,9 +87,7 @@ export interface GroupRepo {
   listGroups(businessId: string): Promise<GroupRecord[]>;
   putGroup(record: GroupRecord): Promise<void>;
   /**
-   * Removes a group and, via ON DELETE CASCADE, its memberships and group-held Roles. A no-op when
-   * the group does not exist. Deleting a group only detaches its members from the Roles it held;
-   * the principals and Roles themselves are untouched.
+   * Deletes only group membership and held-role links via cascade; principals and Roles stay.
    */
   deleteGroup(businessId: string, id: string): Promise<void>;
   addMember(record: GroupMembershipRecord): Promise<void>;
@@ -538,11 +528,7 @@ function groupRoleFromRow(row: GroupRoleRow): GroupRoleAssignmentRecord {
   };
 }
 
-/**
- * PostgreSQL adapter for durable Role definitions and principal→Role assignments. It preserves the
- * exact `RoleRecord` grant shape column-by-column so grants remain queryable and auditable after a
- * restart instead of being hidden in one opaque JSON blob.
- */
+/** PostgreSQL Role adapter stores grant fields queryably, not as one opaque JSON blob. */
 export class PgRoleRepo implements RoleRepo {
   constructor(private readonly transactions: TransactionPort) {}
 

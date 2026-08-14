@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { compileOpenApiEgress, EgressCompileError } from "./openapi-compile";
 
-/**
- * The spec is written the way real provider specs are — `$ref`d components, a path-level
- * parameter, a path parameter with no `required` flag — because those are precisely the shapes a
- * hand-written fixture would omit and the runtime would then fail on.
- */
+/** Fixture keeps real provider shapes: `$ref`, path-level params, and implicit path required. */
 const SPEC = {
   openapi: "3.0.3",
   servers: [{ url: "https://api.example.com/v1" }],

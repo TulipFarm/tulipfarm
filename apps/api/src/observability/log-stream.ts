@@ -31,11 +31,7 @@ function str(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
-/**
- * Pull the message and stack out of a pino record. Fastify serializes a thrown error under `err`,
- * but a hand-rolled `log.error({ error }, ...)` puts it under `error` — accept both, because the
- * moment this table matters is the moment someone logged an error the non-standard way.
- */
+/** Accept both pino `err` and hand-rolled `error` records. */
 function describe(record: Record<string, unknown>): { message: string; stack: string | null } {
   const err = (record.err ?? record.error) as Record<string, unknown> | undefined;
   const msg = str(record.msg);
@@ -73,14 +69,7 @@ export function capturePinoRecord(sink: BatchingLogSink, record: Record<string, 
   });
 }
 
-/**
- * A pino destination that tees: every line still reaches stdout byte-for-byte, and `error`/`fatal`
- * records are additionally buffered for Postgres.
- *
- * stdout is written first and unconditionally. Capture is strictly additive — if parsing fails, or
- * the sink is saturated, the operator has lost nothing they had before this stream existed. Records
- * are reassembled across chunk boundaries because a destination is not promised whole lines.
- */
+/** Tee stdout byte-for-byte; capture is additive and reassembles partial log lines. */
 export function createLogTeeStream(
   sink: BatchingLogSink,
   out: NodeJS.WritableStream = process.stdout

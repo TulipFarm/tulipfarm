@@ -10,20 +10,7 @@ import {
 } from "react";
 import { type ConversationSummary, listConversations } from "~/lib/conversations";
 
-/*
- * App-wide source of truth for the "Recent chats" sidebar list. Mounted once in the `_app` shell. It
- * fetches GET /api/v1/chats on mount and on every route change (so opening a new chat or
- * navigating refreshes the list). The chat surface additionally calls `refresh()` when a brand-new
- * conversation id arrives and again on each turn's finish, so a freshly created chat appears
- * immediately and its async-generated title fills in. No polling — chats change on user action, not
- * out of band. Mirrors ApprovalsProvider's inert-fallback shape so the sidebar renders in isolation.
- *
- * It also tracks `activeChatId` — the conversation currently on screen — so the sidebar highlights the
- * right entry. This is derived from the router location for real navigations, plus a shallow override
- * (`setActiveChatId`) that survives the `history.replaceState` the index route uses to put a freshly
- * created chat's id in the URL without remounting the live stream. Any real navigation clears the
- * override, so it never goes stale.
- */
+/* Route changes refetch; shallow chat id overrides survive index `history.replaceState`. */
 
 type ConversationsContextValue = {
   conversations: ConversationSummary[];

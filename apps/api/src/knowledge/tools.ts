@@ -14,12 +14,7 @@ export interface KnowledgeToolContext {
   conversationId?: string;
 }
 
-/**
- * The gate matches `resourceType` exactly against the two-level grant grammar, and derived targets
- * replace the Tool's static `resources`. A target typed `knowledge_space` is therefore unmatchable
- * by any authorable grant *and* suppresses the `platform.knowledge` check. The kind moves into the
- * id, where `recordSelector` still separates a space from a page from a path.
- */
+/** `resourceType` must match the grant grammar exactly; kind belongs in the target id. */
 const KNOWLEDGE_RESOURCE = "platform.knowledge";
 
 function firstError(validate: ReturnType<typeof ajv.compile>): string {
@@ -62,12 +57,15 @@ function knowledgePageTarget(args: unknown): TargetRef[] {
   return pageId === undefined ? [] : [{ type: KNOWLEDGE_RESOURCE, id: `page:${pageId}` }];
 }
 
-/** Tool name shared with the producer (it maps this tool's result to the `sources` SSE event) and the
- *  chat turn (grounding/citation is only instructed when this tool is in the agent's scoped toolset). */
+/**
+ * Tool name shared with the producer (`sources` SSE event) and chat turn (grounding/citation
+ * only when this tool is scoped to the agent).
+ */
 export const CITE_SOURCES_TOOL = "cite_sources";
 
 /** Wiki page url for a page — only OKF pages (which carry a spaceId) have one; a flat page
- *  returns undefined and renders unlinked. Single source of truth for the `/knowledge/pages/:id` form. */
+ *  returns undefined and renders unlinked. Source of truth for `/knowledge/pages/:id`.
+ */
 function pageUrl(page: { _id: string; spaceId?: string | null }): string | undefined {
   return page.spaceId ? `/knowledge/pages/${page._id}` : undefined;
 }
@@ -214,7 +212,7 @@ const citeSources = defineApiTool<KnowledgeToolContext>({
       const seen = new Set<string>();
       for (const c of a.citations) {
         // Dedup by pageId — a page cited under several [n] refs lists once in the footer (keep the
-        // first/lowest ref, matching "numbered in order of first use"); also spares a redundant fetch.
+        // first/lowest ref, matching "numbered in order of first use"; skips a redundant fetch.
         if (seen.has(c.pageId)) continue;
         seen.add(c.pageId);
         // Drop unknown OR soft-deleted pages — the agent can't cite a page the user can't open.
@@ -491,7 +489,7 @@ const getPage = defineApiTool<KnowledgeToolContext>({
     if (!validateGetPage(args)) return err("validation_error", firstError(validateGetPage));
     const a = args as { pageId: string };
     try {
-      // Mirror cite_sources: never hand the agent a soft-deleted (or missing) page — its wiki url would 404.
+      // Mirror cite_sources: never hand the agent a soft-deleted/missing page; its URL would 404.
       const page = await ctx.service.getActivePage(a.pageId);
       if (!page) return err("not_found", "page not found");
       const url = pageUrl(page);

@@ -10,16 +10,7 @@ import {
 } from "../http";
 import { type OpenApiOperationBinding, PATH_SEGMENT_RE } from "./openapi-compile";
 
-/**
- * Executes one compiled OpenAPI operation. Generic by construction: everything provider-specific
- * arrived as data on the `binding`, so this file contains no knowledge of any provider and never
- * needs editing to support a new one.
- *
- * One adapter instance per operation. `EffectDispatcher` looks adapters up by
- * `ToolContractSpec.adapter.ref`, and the compiler mints a unique ref per operation, so binding an
- * instance to its own operation is both the simplest fit and the reason this cannot dispatch to an
- * operation other than the one it was compiled for.
- */
+/** Executes exactly one compiled OpenAPI operation selected by its unique adapter ref. */
 
 /** Sends one already-resolved request. Kept separate so tests never touch the network. */
 export interface EgressHttpRequest {
@@ -101,7 +92,7 @@ export class OpenApiToolAdapter implements ToolAdapter {
     const search = query.toString();
     // The credential is part of the address for providers like Telegram. Substituted here rather
     // than at compile time so the compiled binding — which is logged and inspected — never holds
-    // the secret; `assertAuthPlacement` already proved the placeholder is in the path, not the host.
+    // the secret; `assertAuthPlacement` proved it is in the path, not the host.
     let base = binding.baseUrl;
     if (binding.auth?.in === "base_url" && credential !== undefined) {
       // Validate rather than percent-encode. Telegram's token contains a literal `:` that its

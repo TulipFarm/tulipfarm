@@ -1,14 +1,8 @@
 /*
  * SSE transport for the chat endpoint. `parseSseFrames` is a pure, incremental frame splitter
- * (unit-tested without a network); `postChat` drives the hijacked SSE stream and projects each Run
- * event onto the typed `ChatEvent`s this app renders; `sendApprovalDecision` posts an approval
- * verdict via the shared write client. Auth mirrors the rest of the app: cookie-first + optional
- * Bearer + CSRF echo, supplied by `mutationHeaders()`.
- *
- * The wire is the durable Run event vocabulary — the same frames `GET /api/v1/runs/:id/events`
- * replays and a Slack or Telegram reader consumes — so this file is the one place the web's own
- * vocabulary is derived from it. Nothing here is the source of truth for a turn: the Run is, which
- * is why a lost connection reconnects by cursor instead of resending the question.
+ * (unit-tested without a network); `postChat` drives the hijacked SSE stream and projects each
+ * Run event onto the typed `ChatEvent`s this app renders; `sendApprovalDecision` posts an
+ * approval verdict via the shared write client.
  */
 
 import type { EffortRung } from "@tulipfarm/schema";
@@ -23,11 +17,8 @@ import type {
   ToolTier,
 } from "~/lib/chat/types";
 
-// Terminal events end the stream — the reader stops once one is seen.
 const TERMINAL_EVENT_TYPES = new Set<ChatEventType>(["finish", "error"]);
 
-// Strip a field's `name:` prefix, tolerating an optional single leading space after the colon
-// (the spec emits "id: 1" but we also accept "id:1"). Returns null if the prefix is absent.
 function fieldValue(line: string, name: string): string | null {
   const prefix = `${name}:`;
   if (!line.startsWith(prefix)) return null;
@@ -35,9 +26,6 @@ function fieldValue(line: string, name: string): string | null {
   return raw.startsWith(" ") ? raw.slice(1) : raw;
 }
 
-// Split an SSE buffer on the `\n\n` frame boundary and parse each complete frame's id/event/data
-// lines. Frames lacking an event or a data line, or whose data is not valid JSON, are dropped.
-// The trailing partial (text after the last boundary) is returned in `rest` for the next chunk.
 export function parseSseFrames(buffer: string): { frames: ParsedFrame[]; rest: string } {
   const segments = buffer.split("\n\n");
   const rest = segments.pop() ?? "";
@@ -67,17 +55,12 @@ export function parseSseFrames(buffer: string): { frames: ParsedFrame[]; rest: s
     if (type === null || dataLine === null) continue;
     try {
       frames.push({ seq, type, data: JSON.parse(dataLine) });
-    } catch {
-      // unparseable data — drop the frame
-    }
+    } catch {}
   }
 
   return { frames, rest };
 }
 
-// The Run event payloads this client reads. Trusted as the matching shape: the wire is
-// server-controlled, the payload was validated against its published schema before it was
-// persisted, and the parser already checked it is JSON.
 type RunEventData = {
   text?: string;
   callId?: string;
@@ -124,24 +107,16 @@ export function modelFailureMessage(reason: string | undefined): string {
   }
 }
 
-/** Drops keys whose value is absent, so an optional field is omitted rather than set to undefined. */
 function compact<T extends object>(value: T): T {
   return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as T;
 }
 
 /**
- * Projects the Run event stream onto the timeline's own vocabulary.
- *
- * Stateful by necessity, and only across one turn: a Tool's name arrives with `tool.call` and its
- * result arrives later carrying just the call id, and an approval is settled by whoever decides it
- * rather than announced back on this stream — so the mapper remembers which call is held and
- * releases it when that call finally reports. One run event can therefore produce zero, one, or two
- * timeline events.
- *
- * Two things the durable stream deliberately withholds are withheld here too: the verbatim Tool
- * arguments (a digest stands in, alongside a redacted preview built server-side) and the identity
- * of a guard that refused. Neither is a rendering gap to be filled in later — they are the reason a
- * participant's stream is safe to show.
+ * Projects the Run event stream onto the timeline's own vocabulary. Stateful by necessity, and
+ * only across one turn: a Tool's name arrives with `tool.call` and its result arrives later
+ * carrying just the call id, and an approval is settled by whoever decides it rather than
+ * announced back on this stream — so the mapper remembers which call is held and releases it
+ * when that call finally reports.
  */
 export function createRunEventMapper(): (frame: ParsedFrame) => ChatEvent[] {
   const heldByCall = new Map<string, string>();
@@ -161,10 +136,6 @@ export function createRunEventMapper(): (frame: ParsedFrame) => ChatEvent[] {
             data: compact({
               toolCallId: data.callId ?? "",
               toolName: data.name ?? "tool",
-              // The verbatim arguments never reach a participant. `args` keeps the digest, which is
-              // what actually crossed the boundary; `preview` is the separate redacted, bounded
-              // view the server built for a reader. Conflating the two would let a preview be
-              // mistaken for the real call.
               args: { argsDigest: data.argsDigest },
               preview: data.argsPreview,
               meta: compact({
@@ -204,8 +175,6 @@ export function createRunEventMapper(): (frame: ParsedFrame) => ChatEvent[] {
         const approvalId = heldByCall.get(callId);
         if (approvalId !== undefined) {
           heldByCall.delete(callId);
-          // A held call that reports at all has been decided; a call refused at the approval is the
-          // one that comes back denied. Nothing else can move a call out of `awaiting_approval`.
           events.push({
             type: "approval-resolved",
             data: {
@@ -219,8 +188,6 @@ export function createRunEventMapper(): (frame: ParsedFrame) => ChatEvent[] {
       }
 
       case "approval.requested": {
-        // Without the call it holds, an approval has nothing to render against; the operational
-        // inbox is where such a decision is made instead.
         if (!data.callId || !data.intentId) return [];
         heldByCall.set(data.callId, data.intentId);
         return [
@@ -232,7 +199,6 @@ export function createRunEventMapper(): (frame: ParsedFrame) => ChatEvent[] {
       }
 
       case "guardrail.blocked": {
-        // The tool-call stage is not shown: that block refuses one Tool, and the turn still answers.
         if (data.stage !== "input" && data.stage !== "output") return [];
         return [
           {
@@ -269,23 +235,17 @@ export function createRunEventMapper(): (frame: ParsedFrame) => ChatEvent[] {
         return [{ type: "error", data: { message: modelFailureMessage(data.reason) } }];
       }
 
-      // The Run reached a terminal status. Normally `turn.finished` already said so; when it did
-      // not, the turn ended without announcing itself and the timeline still has to be released.
       case "stream.closed":
         return finished ? [] : [{ type: "finish", data: { reason: "closed" } }];
 
       case "stream.revoked":
         return [{ type: "error", data: { message: "access to this run was revoked" } }];
 
-      // The event names an Artifact id, not the Artifact itself (revision isn't on the wire) — the
-      // surface part renders with just the id, and `SurfaceArtifact` fetches the rest by id (latest
-      // revision when none is known), the same fetch it already does on a restored conversation.
       case "surface.emitted": {
         if (!data.artifactId) return [];
         return [{ type: "surface", data: { artifactId: data.artifactId } }];
       }
 
-      // `turn.started` and every operator-audience event have no timeline counterpart.
       default:
         return [];
     }
@@ -298,21 +258,15 @@ export type ChatRequestBody = {
   model?: ChatModelSelector;
   agentId?: string;
   autonomy?: Autonomy;
-  // Per-turn `/skill` + `#resource` tags from the composer, eagerly injected into the agent's
-  // context for this turn only (ephemeral, like `model`). Names resolve server-side.
   skills?: string[];
   resources?: string[];
-  // Per-turn `~knowledge` page pins (pageIds) — their content is injected server-side this turn.
   knowledgePages?: string[];
-  // What the user is viewing this turn — the agent reads it via the `get_client_context` tool (P3).
   clientContext?: { route?: string; title?: string };
 };
 
 export type ChatStreamMeta = {
   conversationId?: string;
-  // The Run answering this turn (X-Run-Id): what a reconnect resumes and what a stop cancels.
   runId?: string;
-  // The agent handling this turn (X-Agent-Id) so the header reflects the routed/@mentioned agent.
   agentId?: string;
 };
 
@@ -323,22 +277,15 @@ export type PostChatHandlers = {
   onConnectionState?: (state: "online" | "reconnecting") => void;
 };
 
-// Best-effort `{ error }` extraction so a failed POST throws the same ApiError shape as the rest of
-// the client (status-carrying), without re-exporting api.ts's private readError.
 async function readChatError(res: Response): Promise<ApiError> {
   let message = res.statusText || `request failed (${res.status})`;
   try {
     const body = (await res.json()) as { error?: unknown };
     if (typeof body.error === "string") message = body.error;
-  } catch {
-    // non-JSON body — keep the status-text fallback
-  }
+  } catch {}
   return new ApiError(res.status, message);
 }
 
-// POST to the chat endpoint and consume the hijacked SSE response. Reports the one-shot
-// `X-Conversation-Id`/`X-Run-Id` headers via `onMeta`, then streams typed events to `onEvent`,
-// stopping at the first terminal event (finish/error) or when the reader is exhausted.
 export async function postChat(
   body: ChatRequestBody,
   handlers: PostChatHandlers,
@@ -362,9 +309,6 @@ async function postTurnStream(
 ): Promise<void> {
   const { signal, onMeta } = handlers;
   const headers = mutationHeaders();
-  // One key per turn, so re-sending this POST resolves to the Turn and Run the first attempt already
-  // created instead of asking the agent the same question twice. Without it the server falls back to
-  // the request id, which makes every delivery a separate Turn.
   if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
   const res = await fetch(`${API_BASE}${path}`, {
     method: "POST",
@@ -383,8 +327,6 @@ async function postTurnStream(
     agentId: res.headers.get("X-Agent-Id") ?? undefined,
   });
 
-  // One mapper for the whole turn, reconnects included: it carries which Tool call is held on an
-  // approval, and a reconnect that started a fresh one would forget it mid-turn.
   const map = createRunEventMapper();
   let outcome = await consumeSse(res, handlers, 0, map);
   if (outcome.terminal || !runId) return;
@@ -395,8 +337,6 @@ async function postTurnStream(
     delete headers["Content-Type"];
     headers.Accept = "text/event-stream";
     headers["Last-Event-ID"] = String(outcome.lastSequence);
-    // The Run's own stream, resumed strictly after the last event this client saw — the turn kept
-    // running while the connection was gone, so nothing is replayed and nothing is missed.
     const resumed = await fetch(
       `${API_BASE}/api/v1/runs/${encodeURIComponent(runId)}/events?after=${outcome.lastSequence}`,
       {
@@ -451,10 +391,6 @@ async function consumeSse(
   return { terminal: false, lastSequence };
 }
 
-// Stop the turn by cancelling its Run: whichever process is executing it observes the cancellation
-// and halts, so a turn no longer has to be stopped by the connection that started it. Reuses the
-// shared write client (cookie/Bearer auth + CSRF echo). 404s once the Run has finished — callers
-// fire-and-forget, since the client also abandons its own stream.
 export function stopChatRun(runId: string): Promise<{ status: string }> {
   return apiWrite<{ status: string }>(
     "POST",
@@ -463,8 +399,6 @@ export function stopChatRun(runId: string): Promise<{ status: string }> {
   );
 }
 
-// Post an approval verdict for a pending tool call. Reuses the shared write client so it inherits
-// cookie/Bearer auth, the CSRF echo header, and ApiError-on-failure.
 export function sendApprovalDecision(
   approvalId: string,
   decision: "approve" | "deny"

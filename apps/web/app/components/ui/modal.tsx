@@ -4,13 +4,7 @@ import { useEffect, useId, useRef } from "react";
 import { Button } from "~/components/ui/button";
 import { cn } from "~/lib/utils";
 
-/*
- * Modal — built on the native <dialog> element.
- *
- * Using the browser's showModal() gives us focus-trap, Escape-to-close, and
- * the ::backdrop pseudo-element for free — no Radix or third-party dependency.
- * Flat/hairline aesthetic: no shadows, rounded-sm panel, border-border.
- */
+/* Native <dialog> supplies focus trap, Escape close, and ::backdrop without a dependency. */
 
 export function Modal({
   open,

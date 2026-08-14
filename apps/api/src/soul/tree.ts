@@ -55,11 +55,7 @@ export async function walkTree(soulRoot: string, dirAbs: string): Promise<TreeNo
   return nodes;
 }
 
-/**
- * Resolve a client-supplied relative path to an absolute path that is provably
- * inside the soul root. Layered defenses against traversal/symlink escape.
- * Throws UnsafePathError for rejected paths; lets ENOENT bubble (→ 404 in the route).
- */
+/** Resolves relative paths inside the soul root; escapes throw UnsafePathError. */
 export async function resolveSafe(soulRoot: string, rel: string): Promise<string> {
   let decoded: string;
   try {
@@ -88,7 +84,7 @@ export async function resolveSafe(soulRoot: string, rel: string): Promise<string
   return candReal;
 }
 
-/** Read a single soul file with size + binary guards. `abs` must be pre-resolved via resolveSafe. */
+/** Read one soul file with size/binary guards; `abs` must be pre-resolved. */
 export async function readSoulFile(abs: string, relPath: string): Promise<SoulFileContent> {
   const info = await stat(abs);
   if (!info.isFile()) throw new UnsafePathError("not a file");

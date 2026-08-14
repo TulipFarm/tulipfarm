@@ -1,19 +1,7 @@
 import Ajv2020, { type ErrorObject, type ValidateFunction } from "ajv/dist/2020";
 import { SchemaValidationError, type SchemaValidationIssue } from "../errors";
 
-/**
- * Canonical normalized event contract (SPEC §9.2). Every trigger class — manual, cron,
- * webhook, integration, form, internal domain event — is normalized into one
- * `EventEnvelope` before matching and Run creation.
- *
- * Unlike authored Soul definitions, the envelope is a runtime record keyed by `type` and a
- * numeric `version`, not by `apiVersion`/`kind`, so it is validated by a standalone strict
- * validator rather than the `SchemaRegistry`.
- *
- * Security invariant (SPEC §11 invariant 12, §24): an envelope cannot masquerade as a
- * verified provider event. A `verified` status must carry a non-empty verification
- * `method`; a raw or unverified payload can never claim verification it did not undergo.
- */
+/** Normalized event envelope; `verified` events must include a verification method. */
 
 const APversion = "tulipfarm.ai/v1";
 const KIND = "EventEnvelope";
@@ -21,8 +9,7 @@ const KIND = "EventEnvelope";
 export const EVENT_VERIFICATION_STATUSES = ["verified", "unverified", "failed"] as const;
 export type EventVerificationStatus = (typeof EVENT_VERIFICATION_STATUSES)[number];
 
-// ISO-8601 date-time (`format` keywords are avoided so the schema stays valid under Ajv's
-// strict mode without pulling in ajv-formats).
+// Pattern-based ISO date-time keeps Ajv strict mode free of ajv-formats.
 const ISO_DATE_TIME = "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$";
 
 const nonEmptyString = { type: "string", minLength: 1 } as const;
@@ -151,10 +138,7 @@ function toIssues(errors: ErrorObject[] | null | undefined): SchemaValidationIss
 const ajv = new Ajv2020({ allErrors: true, strict: true });
 const validator: ValidateFunction = ajv.compile(EventEnvelopeSchema);
 
-/**
- * Validate a normalized event envelope. Returns the typed envelope on success; throws
- * `SchemaValidationError` (with safe, value-free issues) on failure.
- */
+/** Validate a normalized event envelope; errors contain safe, value-free issues. */
 export function validateEventEnvelope<T = unknown>(envelope: unknown): EventEnvelope<T> {
   if (!validator(envelope)) {
     throw new SchemaValidationError(APversion, KIND, toIssues(validator.errors));

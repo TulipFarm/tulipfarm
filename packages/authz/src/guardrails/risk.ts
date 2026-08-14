@@ -1,9 +1,4 @@
-/**
- * Risk dimension orderings for Guardrail ceilings (SPEC §13). Taint tracks whether untrusted
- * input influenced the action; autonomy uses the canonical Agent autonomy ceilings from the
- * authored schema. Both are totally ordered so a ceiling check is deterministic: an actual level
- * is within a ceiling only when its rank does not exceed the ceiling's rank.
- */
+/** Ordered Guardrail risk levels; actual is allowed only at or below the ceiling. */
 
 import type { AgentAutonomyCeiling } from "@tulipfarm/schema";
 

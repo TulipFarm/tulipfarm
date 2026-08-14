@@ -1,16 +1,6 @@
 /**
- * Source lifecycle propagation (SPEC §14.1).
- *
- * Deletion and revocation take effect in two independent places, and both are required:
- *
- * 1. **Immediately, at read time.** The status is written to the source record, and `acl.ts` denies
- *    a `deleted` or `revoked` source on the very next retrieval. Nothing waits for a job.
- * 2. **Eventually, in the derived stores.** An invalidation job removes the indexed text, vectors,
- *    cached answers, summaries, Contexts, and citations, and `invalidationStatus` makes that
- *    convergence observable.
- *
- * Doing only the second would leave a window where revoked content is still answerable; doing only
- * the first would leave protected text sitting in indexes and caches indefinitely.
+ * Revocation/deletion deny reads immediately and enqueue durable invalidation so derived stores
+ * converge without leaving protected residue indefinitely.
  */
 
 import type { InvalidationDeps, InvalidationJob } from "./invalidate";
@@ -74,11 +64,7 @@ export interface SourceSyncRequest extends SourceLifecycleRequest {
   readonly lastSyncedAt?: string;
 }
 
-/**
- * Record what a sync observed. A new revision or a new ACL revision obsoletes derived artifacts, so
- * each enqueues invalidation; an unchanged sync enqueues nothing, which keeps a frequent poll from
- * flooding the queue with no-ops.
- */
+/** New content or ACL revisions enqueue invalidation; unchanged syncs enqueue nothing. */
 export async function syncSourceRevision(
   deps: SourceLifecycleDeps,
   request: SourceSyncRequest

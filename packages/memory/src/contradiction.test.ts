@@ -15,11 +15,7 @@ import {
 } from "./memory";
 import { recallMemory } from "./retrieve";
 
-/**
- * Contradiction handling is the one operation here that *removes* something from recall, so the
- * tests are mostly about what it must refuse to touch: another scope's memory, a more-trusted
- * statement, and any row the judge was never shown.
- */
+/** Tests ensure contradiction handling cannot close other scopes, stronger priors, or unseen rows. */
 
 const BIZ = "biz-1";
 const USER = "user-1";

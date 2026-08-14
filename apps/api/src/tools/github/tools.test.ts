@@ -8,13 +8,6 @@ import type { RequestContext } from "../types";
 import { buildGitHubTooling } from "./compose";
 import { buildGitHubTools, GITHUB_REPOSITORY_LIST_TOOL_NAME } from "./tools";
 
-/**
- * Exercises `buildGitHubTools()`'s `ToolDef.execute()` against a real `buildGitHubTooling()`
- * object graph (installation projection, context resolution, token minting, `GitHubAdapter`
- * dispatch), faking only the two edges outside this app's control — same shape as
- * `apps/worker/src/routine/adapters.test.ts`.
- */
-
 const BUSINESS_ID = "biz-triage";
 const APP_PRIVATE_KEY_PEM = generateKeyPairSync("rsa", { modulusLength: 2048 })
   .privateKey.export({ type: "pkcs1", format: "pem" })
@@ -583,13 +576,7 @@ describe("buildGitHubTools", () => {
   });
 });
 
-/**
- * Two active installations on two accounts, each covering its own repository — the state that made
- * every GitHub Tool unusable before the credential ref carried a selector. `install-1` mints one
- * token, `install-2` another, and the assertions turn on *which* token reached the API, because a
- * credential minted for the wrong installation is the failure that would otherwise look like
- * success.
- */
+/** Assert multi-install GitHub Tools mint the selected repository installation token. */
 function twoInstallationSnapshot(): PersistedRoutingSnapshot {
   return {
     apps: [

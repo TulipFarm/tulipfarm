@@ -1,21 +1,8 @@
 import type { RunEventToolPreview } from "@tulipfarm/schema";
 
-/**
- * Builds the readable companion to a Tool call's `argsDigest`.
- *
- * The digest was protecting something real: Tool arguments and Tool output routinely carry the
- * protected data the call operates on, and the participant stream is read by whoever is in the
- * conversation. So a preview is built by subtraction, not by selection — the whole value is walked
- * and anything that looks like credential material is replaced, rather than a short allowlist of
- * "safe" fields being copied out. A field nobody anticipated is therefore included by default and
- * a secret nobody anticipated is still caught by the value scan.
- *
- * Nothing here is a substitute for the operator-audience record. `tool.dispatched` still holds the
- * verbatim arguments, and `argsDigest` still hashes them, so redaction cannot quietly rewrite what
- * the audit says was called.
- */
+/** Build redacted participant previews; operator records and digests remain authoritative. */
 
-/** Depth, breadth and size ceilings. A preview is a summary; the full value is fetched, not streamed. */
+/** Preview ceilings; the full value is fetched, not streamed. */
 const MAX_DEPTH = 6;
 const MAX_ARRAY_ITEMS = 20;
 const MAX_OBJECT_KEYS = 40;
@@ -24,13 +11,9 @@ const MAX_PREVIEW_CHARS = 8_000;
 
 const REDACTED = "[redacted]";
 
-/**
- * Key names whose values are credential material regardless of what they contain. Matched on a
- * normalized key (non-alphanumerics stripped) so `api_key`, `apiKey` and `API-KEY` are one rule.
- */
+/** Credential key names, matched after stripping non-alphanumerics. */
 const SECRET_KEY_PATTERNS: readonly RegExp[] = [
-  // Substring matches, not suffix matches: `password_hash`, `passwordConfirmation` and `passwd`
-  // are all credential material, and a rule anchored to the end of the key misses every one.
+  // Substring match catches `password_hash`, `passwordConfirmation`, and `passwd`.
   /pass(word|phrase|wd)/,
   /^pwd$/,
   /secret/,
@@ -39,8 +22,7 @@ const SECRET_KEY_PATTERNS: readonly RegExp[] = [
   /accesskey/,
   /privatekey/,
   /credential/,
-  // `auth` anywhere, except the `author` family, which is ordinary metadata on GitHub and Slack
-  // payloads. `authorization` is still matched because its `or` is followed by `ization`.
+  // Match `auth`, but not ordinary `author` metadata; `authorization` still matches.
   /auth(?!or(?!ization))/,
   /session/,
   /cookie/,
@@ -53,11 +35,7 @@ const SECRET_KEY_PATTERNS: readonly RegExp[] = [
   /bearer/,
 ];
 
-/**
- * Value shapes that are credential material wherever they appear, so a secret passed under an
- * innocuous key is still caught. Deliberately narrow: these match structured credentials, not
- * ordinary prose, because over-matching would redact the very content that makes a preview useful.
- */
+/** Narrow credential value shapes, so innocuous prose is not over-redacted. */
 const SECRET_VALUE_PATTERNS: readonly RegExp[] = [
   // JWTs.
   /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+/,
@@ -105,8 +83,7 @@ function walk(value: unknown, path: string, depth: number, state: WalkState): un
   if (typeof value === "number" || typeof value === "boolean") return value;
   if (typeof value === "bigint") return value.toString();
 
-  // A function or symbol in a Tool argument is not data a reader can act on, and JSON would drop
-  // it silently. Naming it is more honest than an absent key.
+  // Name function/symbol values instead of letting JSON drop them silently.
   if (typeof value === "function" || typeof value === "symbol") return "[unserializable]";
 
   if (depth >= MAX_DEPTH) {
@@ -143,13 +120,7 @@ function walk(value: unknown, path: string, depth: number, state: WalkState): un
   return "[unserializable]";
 }
 
-/**
- * Produces a bounded, redacted preview of one Tool value.
- *
- * Returns `undefined` for a value that carries nothing to show (`null`/`undefined`), so a caller
- * omits the field rather than emitting an empty preview — the run-event schemas are
- * `additionalProperties: false` and an optional field must be absent, not present and empty.
- */
+/** Return bounded redacted preview; omit optional field for nullish values. */
 export function buildToolPreview(value: unknown): RunEventToolPreview | undefined {
   if (value === null || value === undefined) return undefined;
 
@@ -160,8 +131,7 @@ export function buildToolPreview(value: unknown): RunEventToolPreview | undefine
   try {
     json = JSON.stringify(safe) ?? "null";
   } catch {
-    // A cycle or a throwing getter survived the walk. Failing closed keeps a malformed value from
-    // becoming an unbounded string on a durable stream.
+    // Fail closed if a cycle/getter survived the walk.
     return { json: '"[unserializable]"', truncated: true };
   }
 
@@ -174,12 +144,9 @@ export function buildToolPreview(value: unknown): RunEventToolPreview | undefine
 
   let truncated = state.truncated;
   if (json.length > MAX_PREVIEW_CHARS) {
-    // Slicing serialized JSON cuts mid-token and leaves a blob nothing can parse, which made the
-    // whole row unreadable. Re-wrap the kept prefix as a JSON string so the payload stays valid
-    // and the reader still sees the beginning of the value alongside the truncation notice.
+    // Re-wrap truncated JSON as a string so the payload remains parseable.
     const marker = "…[truncated]";
-    // The re-wrap adds quotes, the marker, and escapes for any quote or backslash in the prefix.
-    // Shrink until the encoded result fits, so the ceiling holds on the wire, not just the input.
+    // Shrink after wrapping so the encoded payload still fits the wire ceiling.
     let keep = MAX_PREVIEW_CHARS - marker.length - 2;
     let wrapped = JSON.stringify(`${json.slice(0, keep)}${marker}`);
     while (wrapped.length > MAX_PREVIEW_CHARS && keep > 0) {
@@ -190,7 +157,7 @@ export function buildToolPreview(value: unknown): RunEventToolPreview | undefine
     truncated = true;
   }
 
-  // Duplicate paths add nothing and grow the row; a reader only needs to know a path was withheld.
+  // Deduplicate redaction paths; presence is all a reader needs.
   const redactedPaths = [...new Set(state.redacted)].filter((path) => path.length > 0);
 
   return {

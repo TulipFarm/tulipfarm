@@ -30,7 +30,6 @@ export interface ChildRunCommand {
 
 export interface ChildRunPlan {
   readonly command: ChildRunCommand;
-  /** The durable child-Run wait, or `null` for a detached child the parent does not join. */
   readonly wait: RegisterWaitInput | null;
 }
 
@@ -47,10 +46,7 @@ function routineRefOf(state: CompiledState): { name: string; version: string } {
 }
 
 /**
- * Plan a `child_routine` State. The command carries the *narrowed* authority the child will run
- * under, so an amplification attempt is denied here rather than clipped silently. In `wait` mode
- * the parent joins through a bounded durable wait signalled by the child Run itself; in `detach`
- * mode there is no wait and the parent continues immediately.
+ * Child commands carry narrowed authority; `wait` joins by bounded durable wait, `detach` does not.
  */
 export function planChildRun(
   state: CompiledState,
@@ -83,11 +79,7 @@ export function planChildRun(
   };
 }
 
-/**
- * Resolve the parent State once the child settled. A failed child is a decided outcome the parent
- * may handle; a cancelled or expired child is not — the parent parks for attention rather than
- * treating an unfinished child as either success or failure.
- */
+/** Failed child Runs are handleable outcomes; cancelled or expired children park attention. */
 export function resolveChildRun(state: CompiledState, result: ChildRunResult): StateResumeDecision {
   if (result === "succeeded") return continueState(state);
   if (result === "failed") return resolveErrorPath(state, "child_failed", "failed");

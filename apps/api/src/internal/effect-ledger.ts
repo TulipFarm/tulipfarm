@@ -8,26 +8,9 @@ import {
 } from "@tulipfarm/tool-broker";
 import type { ApiToolDefinition } from "../tools/define";
 
-/**
- * The effect ledger for the ~71 platform Tools, which until now had none.
- *
- * `github`, `slack` and the declarative family each reserve their own effect before dispatching,
- * so a crash between "the write landed" and "we recorded that it landed" is recoverable there.
- * Every other mutating Tool — Record CRUD, Soul Forge, memory, key-value — ran naked: a duplicate
- * delivery of the same tool call created a second Record, and a Tool that threw left nothing behind
- * for anyone to reconcile against.
- *
- * This module closes that gap without moving any executor. A mutating platform Tool now reserves
- * an effect keyed to its call, records one attempt per try, and lands in a terminal state that says
- * what is known: `confirmed` when the executor returned success, `failed` when it returned a
- * structured error (which proves it ran to completion and decided), and `ambiguous` when it
- * **threw** — because a throw carries no phase, so a write that landed and then failed on the way
- * back is indistinguishable from one that never landed. Parking that as `ambiguous` is the whole
- * point of having a ledger; reporting it as `failed` would licence a reconciler to assume nothing
- * happened.
- */
+/** Platform Tool effect ledger; thrown attempts are `ambiguous`, never `failed`. */
 
-/** Dresses a digest as an RFC 4122 v4 uuid; `effect_records.run_id`/`effect_id` are `uuid` columns. */
+/** Dresses a digest as an RFC 4122 v4 uuid for `uuid` columns. */
 export function derivedEffectId(...parts: readonly string[]): string {
   const digest = createHash("sha256").update(parts.join(":")).digest("hex");
   const version = `4${digest.slice(13, 16)}`;
@@ -41,20 +24,7 @@ export function derivedEffectId(...parts: readonly string[]): string {
   ].join("-");
 }
 
-/**
- * Whether this Tool's call is the ledger's to own on the chat path.
- *
- * Two exclusions, both load-bearing:
- *
- * - **Read-only Tools are not ledgered.** There is no effect to be idempotent about, and a row per
- *   read would make every listing a write. Idempotency protects against re-applying a change; a
- *   repeated read re-applies nothing.
- * - **A provider-backed Tool is not ledgered here**, because it already reserved its own effect
- *   inside its executor with the one thing this layer lacks: the dispatch *phase*. Reserving again
- *   would open a second effect for the same logical write and, worse, the outer reservation would
- *   report `confirmed` while the inner one sat `ambiguous`. Ownership must be singular, and the
- *   layer that can see the phase is the one that should hold it.
- */
+/** Ledger only mutating non-provider Tools; effect ownership must be singular. */
 export function ledgerOwnsCall(definition: ApiToolDefinition<unknown> | undefined): boolean {
   if (definition === undefined) return false;
   if (!definition.mutating) return false;
@@ -78,23 +48,10 @@ export type ReserveOutcome =
   | { readonly outcome: "reserved"; readonly effectId: string }
   /** This exact call already ran. `state` is what the earlier attempt settled on. */
   | { readonly outcome: "duplicate"; readonly state: string }
-  /**
-   * The same call id came back carrying different arguments. The ledger cannot treat that as a
-   * replay (the arguments are part of what was authorized) and must not treat it as new (the call
-   * id is the client's own promise of uniqueness), so it is refused.
-   */
+  /** Same call id with different authorized arguments: refuse as an idempotency conflict. */
   | { readonly outcome: "conflict" };
 
-/**
- * The call's idempotency key deliberately does **not** include an argument digest.
- *
- * `effect_records` carries two unique constraints — one on `idempotency_key` and one on
- * `(run_id, state_id, logical_effect_ordinal)`. If the key varied with the arguments while
- * `state_id` did not, the same call id resubmitted with changed arguments would miss the first
- * constraint and violate the second, surfacing as a raw database error instead of a decision.
- * Keying both on the call alone keeps them in agreement, and lets `intentDigest` detect the changed
- * arguments as what it is: an idempotency conflict with a name.
- */
+/** Idempotency excludes the argument digest so both unique constraints agree on conflicts. */
 function idempotencyKeyFor(input: LedgerCallInput): string {
   return derivedEffectId("chat-tool-idempotency", input.runId, input.callId, input.toolId);
 }
@@ -144,17 +101,7 @@ export class ChatEffectLedger {
     }
   }
 
-  /**
-   * Opens the attempt row and moves the effect to `dispatched`. Returns its number so the matching
-   * finish can address it.
-   *
-   * Exactly one attempt is opened per settled effect, and the dispatcher's own transient retries
-   * happen *inside* it rather than each opening another. That is not a simplification: the ledger's
-   * `attempt` models a dispatch whose phase is in question, and `beginAttempt` refuses any effect
-   * not still `authorized` precisely to stop a settled effect being re-dispatched. The transient
-   * retry loop runs entirely before any terminal decision is recorded, so it is one logical
-   * dispatch that took a few tries to get an answer, not several dispatches.
-   */
+  /** Open one attempt per authorized effect; transient retries stay inside that attempt. */
   async beginAttempt(businessId: string, effectId: string): Promise<number> {
     const attempt = await this.store.beginAttempt(businessId, effectId, new Date().toISOString());
     return attempt.attempt;

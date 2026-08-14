@@ -10,17 +10,7 @@ import type {
 import { ModelInvocationError } from "../ports";
 import type { AgentLoopCheckpoint, LoopCheckpointStore } from "./checkpoint";
 
-/**
- * Bounded, durable Agent Tool loop (SPEC §10).
- *
- * Invariants this file exists to hold:
- * - The Tool broker is the only effect path. The loop never executes a Tool, and a Tool the caller
- *   did not expose is refused here rather than handed to the broker.
- * - Model output is untrusted data. Denials, malformed calls, and schema-invalid structured output
- *   come back as transcript content, never as control flow the model can widen.
- * - Every loop, Tool-call, repair, and budget limit is checked against durable counters, so a
- *   resumed State cannot buy itself a fresh budget by crashing.
- */
+/** Bounded Tool loop: broker-only effects, untrusted model output, durable budgets. */
 
 export interface AgentLoopLimits {
   readonly maxIterations: number;
@@ -32,12 +22,7 @@ export interface ExposedTool {
   readonly name: string;
   readonly description?: string;
   readonly inputSchema: Readonly<Record<string, unknown>>;
-  /**
-   * Whether this Tool writes. Only `false` unlocks concurrent dispatch (TOOL-V1-008's "concurrent
-   * reads, sequential writes" rule, applied here too) — absent or `true` keeps a Tool sequential,
-   * so a caller that has not threaded this field through yet keeps today's safe behavior rather
-   * than being silently parallelized.
-   */
+  /** Only non-mutating Tools may dispatch concurrently; absent means sequential. */
   readonly mutating?: boolean;
 }
 
@@ -53,19 +38,11 @@ export interface AgentLoopInput {
   readonly tools: readonly ExposedTool[];
   readonly limits: AgentLoopLimits;
   readonly outputSchema?: Readonly<Record<string, unknown>>;
-  /**
-   * Per-Skill tool narrowing (context-size optimization only, not a security boundary — `exposed`
-   * below still authorizes every `tools` entry regardless of what a given iteration offers the
-   * model). Keyed by Skill name, from that Skill's `SKILL.md` `tools:` frontmatter. A Skill absent
-   * from this map, or no active Skill at all, offers the full `tools` list unchanged.
-   */
+  /** Skill narrowing affects model-visible Tools only; `exposed` remains the auth boundary. */
   readonly skillToolScopes?: ReadonlyMap<string, readonly string[]>;
 }
 
-/**
- * Structural/escape-hatch Tools a narrowed iteration must never drop, or a turn scoped into a Skill
- * could not switch Skills, hand off, or finish.
- */
+/** Structural Tools cannot be hidden by Skill narrowing. */
 const ALWAYS_EXPOSED_TOOL_NAMES: ReadonlySet<string> = new Set([
   "load_skill",
   "complete_task",
@@ -96,7 +73,6 @@ export type ToolDispatchResult =
       readonly approvalId: string;
     };
 
-/** The broker-backed effect boundary. Authorization, validation, and effects all live behind it. */
 export interface ToolDispatchPort {
   dispatch(request: ToolDispatchRequest): Promise<ToolDispatchResult>;
 }
@@ -111,17 +87,7 @@ export type AgentLoopEventType =
   | "failed"
   | "cancelled";
 
-/**
- * Persisted loop event. Consumers stream by `sequence`, so a reconnecting client resumes from its
- * cursor instead of replaying the model.
- *
- * The only content this carries is model text (`text_delta`) — the one thing that exists nowhere
- * else, since the loop consumes the model stream itself. Tool arguments and Tool output are
- * deliberately absent: the caller's `ToolDispatchPort` already holds both, so it emits whatever
- * call/result/Surface record a channel should see, and decides there what is safe to reproduce.
- * Keeping that decision at the dispatch boundary is why a secret passed as a Tool argument cannot
- * reach a reader through this stream.
- */
+/** Loop events carry model text only; Tool args/output stay with `ToolDispatchPort`. */
 export interface AgentLoopEvent {
   readonly sequence: number;
   readonly businessId: string;
@@ -134,7 +100,6 @@ export interface AgentLoopEvent {
   readonly outcome?: string;
   /** Model text released this chunk. Present only on `text_delta`. */
   readonly text?: string;
-  /** 1-based ordinal of this delta within the State, so a reader can order and de-duplicate. */
   readonly textIndex?: number;
   readonly occurredAt: string;
 }
@@ -143,7 +108,7 @@ export interface AgentLoopEventSink {
   append(event: AgentLoopEvent): Promise<void>;
 }
 
-/** Structural view of the Run kernel budget manager: charge before use, fail closed. */
+/** Budget manager must charge before use and fail closed. */
 export interface AgentLoopBudgetPort {
   consume(input: { key: string; amount: number }): Promise<{ outcome: string }>;
 }
@@ -202,11 +167,7 @@ const ITERATION_BUDGET_KEY = "iterations";
 const TOKEN_BUDGET_KEY = "tokens";
 const COST_BUDGET_KEY = "costMicros";
 
-/**
- * Marks a failure that came from the event sink rather than the model, so the model's own error
- * handling cannot swallow it. Never escapes this module: the original error is rethrown in its
- * place, leaving the caller the same failure it would have seen from any other sink write.
- */
+/** Event-sink failures rethrow as sink failures, not model failures. */
 class EventSinkFailure extends Error {
   constructor(readonly cause: unknown) {
     super("event sink failed");
@@ -215,8 +176,7 @@ class EventSinkFailure extends Error {
 
 type CompiledValidator = ReturnType<typeof ajv.compile>;
 
-/** Walks a wrapped error's `.cause` chain to the innermost message, e.g. the actual subprocess
- *  output a `LlmProviderError` wraps its participant-safe reason string around. */
+/** Walks `.cause` to the innermost diagnostic message. */
 function deepestErrorMessage(diagnostic: unknown): string {
   let current = diagnostic;
   while (current instanceof Error && current.cause !== undefined) current = current.cause;
@@ -243,7 +203,6 @@ export class AgentLoop {
     // the catalog this exists to shrink.
     let activeSkillName: string | undefined;
 
-    /** What `request.tools` offers this iteration — never what `exposed` authorizes for dispatch. */
     const toolsForIteration = (): readonly ExposedTool[] => {
       const scope =
         activeSkillName === undefined ? undefined : input.skillToolScopes?.get(activeSkillName);
@@ -293,15 +252,7 @@ export class AgentLoop {
 
     let textIndex = 0;
 
-    /**
-     * One model call, releasing text as it arrives when the adapter can stream.
-     *
-     * Deltas are emitted during the call rather than after it returns, which is what lets a
-     * participant on any channel watch the answer form. Both paths yield the same
-     * `ModelInvocationResult`, so nothing below this line forks on which one ran. A stream that
-     * ends without a `completed` chunk is a broken adapter contract, and is failed as a model
-     * error rather than silently treated as an empty answer.
-     */
+    /** Streams text deltas; missing `completed` is a model-adapter contract failure. */
     const callModel = async (request: ModelInvocationRequest): Promise<ModelInvocationResult> => {
       const stream = this.deps.model.stream?.(request);
       if (stream === undefined) return this.deps.model.invoke(request);

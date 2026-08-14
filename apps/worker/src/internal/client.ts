@@ -1,16 +1,4 @@
-/**
- * Transport for `/api/v1/internal/*` (plan §3).
- *
- * The Worker executes turns while the conversation history, the Soul artifacts, and the Tool
- * catalog still live in `apps/api`, and an application may not import another application. This is
- * the only place that knows the boundary is HTTP: everything above it speaks the ports in
- * `turn/driver.ts` and `@tulipfarm/agent-runtime`, so PR 4 replaces the implementations without
- * touching a caller.
- *
- * The credential is a service API-client secret. It is a key to *act on a Run*, never a principal:
- * the host derives authority from each Run's recorded subject, so this client states which Run and
- * never claims whom it is acting as.
- */
+/** HTTP boundary to the API; the credential acts on Runs and never names a principal. */
 
 /** A response the host refused or could not serve. Carries the status so callers can branch. */
 export class InternalApiError extends Error {
@@ -46,10 +34,7 @@ export class InternalApiClient {
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   }
 
-  /**
-   * One call whose answer must exist. Anything other than a body is a fault, including `204` — a
-   * caller that asked for a Context or dispatched a Tool has nothing to fall back on.
-   */
+  /** Require a body; `204` is a fault when the caller has no fallback. */
   async require<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
     const response = await this.send(method, path, body);
     if (!response.ok || response.status === 204) {
@@ -58,14 +43,7 @@ export class InternalApiClient {
     return (await response.json()) as T;
   }
 
-  /**
-   * One call whose answer may legitimately be "nothing".
-   *
-   * `absentOn` names exactly which statuses mean that, and every other failure still throws. It is
-   * a parameter rather than a blanket rule because the difference matters: `204` on a completion
-   * lookup means this attempt has not finished yet, while `404` on the same path means the Run is
-   * gone — reading the second as the first would let a redelivered job answer twice.
-   */
+  /** Only `absentOn` statuses mean missing; other failures still throw to prevent replay lies. */
   async find<T>(
     method: "GET" | "POST",
     path: string,

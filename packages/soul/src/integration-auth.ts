@@ -1,15 +1,6 @@
 import type { AuthOAuth2Step, AuthStep, IntegrationGrant, IntegrationManifest } from "./types";
 
-/*
- * One reading of an integration's connect flow. Manifests may declare the ordered `auth` step
- * list, or only the legacy `required_env` / `oauth` fields that predate it — every consumer (the
- * connect route, the auth broker, the connect UI, integration-forge) resolves through here so a
- * legacy manifest never needs a second code path.
- *
- * `install_manifest` is deliberately NOT derived into an `app_manifest` step: the legacy field
- * carries only the app definition, not the provider URL to submit it to, and inventing one would
- * be guessing. Those manifests keep their paste-the-JSON rendering until they declare `auth`.
- */
+/* Resolve both modern `auth` flows and legacy auth fields through one path. */
 
 /**
  * Where a rotated refresh token is stored. Derived from `token_env` unless the manifest overrides
@@ -24,23 +15,7 @@ export function oauth2ExpiresAtEnv(step: AuthOAuth2Step): string {
   return step.expires_at_env ?? `${step.token_env}_EXPIRES_AT`;
 }
 
-/**
- * Whether this step can mint a credential representing **the authorizing person** rather than the
- * installation.
- *
- * The discriminator is the explicit `personal: true`, **not** the grant type. OAuth2 says how a
- * token was obtained and nothing about whose access it carries: Slack's "Install to your
- * workspace" step is `authorization_code` and returns a workspace *bot* token with bot scopes.
- * Inferring "personal" from the grant would seal that shared token under one person's name — the
- * whole bot's reach attributed to them in the audit trail, and every Tool acting "as the human" in
- * fact acting as the bot. Undeclared means not personal, so a manifest that never considered the
- * question cannot answer it by accident.
- *
- * Lives here, beside `resolveAuthSteps`, because every consumer must read the identical test: the
- * connect route that refuses to issue a user-scoped state, and the Tool compiler that decides a
- * Tool may demand a personal credential. A Tool that refuses a call for want of a credential the
- * connect route would not issue is a dead end for whoever reads the refusal.
- */
+/** Personal credentials require explicit `personal: true`; OAuth grant type does not identify the actor. */
 export function isPersonalCredentialStep(step: AuthStep): boolean {
   return (
     step.kind === "oauth2" &&
@@ -77,12 +52,7 @@ export function resolveAuthSteps(manifest: IntegrationManifest): AuthStep[] {
   return steps;
 }
 
-/**
- * Connection env vars holding secret material. These are sealed into the secrets store and the
- * `connection.yaml` committed to the user's soul repo carries only a `secret://` reference.
- * OAuth2 tokens and client secrets are secret by definition; a `fields` step marks its own; an
- * `app_manifest` exchange names which of its mapped values are credentials rather than config.
- */
+/** Env vars that must be sealed; committed connection.yaml stores only secret references. */
 export function authSecretEnvNames(manifest: IntegrationManifest): Set<string> {
   const names = new Set<string>();
   for (const step of resolveAuthSteps(manifest)) {
@@ -159,11 +129,7 @@ export function authEnvNames(manifest: IntegrationManifest): string[] {
   return names;
 }
 
-/**
- * Every `{name}` placeholder in a step's URL and body, so the validator can prove each one is
- * supplied. Matches the broker's substitution pattern exactly — a validator that recognised a
- * different placeholder syntax would approve a manifest the broker then fails to render.
- */
+/** Template vars using the exact broker substitution syntax, so validation matches rendering. */
 function templateVars(url: string, body: unknown): Set<string> {
   const names = new Set<string>();
   const scan = (value: unknown): void => {
@@ -184,11 +150,7 @@ function templateVars(url: string, body: unknown): Set<string> {
   return names;
 }
 
-/**
- * Structural problems that would only surface mid-connect — an OAuth2 step with no authorize URL,
- * a step reading an env var nothing ever writes. Returned as messages rather than thrown so the
- * loader can reject one bad integration without taking the whole Soul down.
- */
+/** Return auth-flow issues so one bad integration can be rejected without stopping Soul load. */
 export function validateAuthSteps(manifest: IntegrationManifest): string[] {
   const issues: string[] = [];
   const steps = manifest.auth;
@@ -262,11 +224,7 @@ export function validateAuthSteps(manifest: IntegrationManifest): string[] {
   return issues;
 }
 
-/**
- * Whether a step has already produced everything it exists to produce. Optional outputs — a
- * refresh token, an expiry, a value the provider may or may not return — are deliberately not
- * counted: a step must not look unfinished because a provider chose not to send something.
- */
+/** Optional provider outputs do not make a completed step look unfinished. */
 export function authStepSatisfied(step: AuthStep, env: Record<string, string>): boolean {
   const has = (name: string) => Boolean(env[name]);
   switch (step.kind) {
@@ -287,13 +245,7 @@ export function authStepSatisfied(step: AuthStep, env: Record<string, string>): 
   }
 }
 
-/**
- * Whether completing this step writes connection env, i.e. whether we can observe that it
- * happened. A step that produces nothing — Slack's "create the app", which has no exchange
- * because Slack has no manifest-to-credentials API — is indistinguishable from one never started,
- * so it is `satisfied` from the moment it is declared and callers that walk an operator through
- * the flow must not treat that as done.
- */
+/** Steps that write no env cannot prove completion; walkthroughs must still show them. */
 export function authStepProducesEnv(step: AuthStep): boolean {
   switch (step.kind) {
     case "fields":
@@ -319,11 +271,7 @@ export function nextAuthStep(
   return index === -1 ? null : { index, step: steps[index] };
 }
 
-/**
- * Whether every declared step is satisfied — the one definition of "connected". A manifest that
- * declares no credentials at all is satisfied trivially, which is what makes a no-auth integration
- * connect in a single call.
- */
+/** A no-auth flow is satisfied immediately; this is the single connected check. */
 export function authFlowSatisfied(
   manifest: IntegrationManifest,
   env: Record<string, string>
@@ -331,13 +279,7 @@ export function authFlowSatisfied(
   return nextAuthStep(manifest, env) === null;
 }
 
-/**
- * Vars a classifier may be told, checked against what the flow treats as credential material.
- *
- * Rejected rather than filtered at forward time: a manifest that asks for a secret is stating an
- * intent this framework does not grant, and silently handing it an empty value would leave the
- * author debugging a classifier that never sees what they declared.
- */
+/** Reject classifier context env that names secrets; do not silently filter declared intent. */
 export function validateIngressContextEnv(manifest: IntegrationManifest): string[] {
   const declared = manifest.ingress?.context_env ?? [];
   if (declared.length === 0) return [];
@@ -350,20 +292,7 @@ export function validateIngressContextEnv(manifest: IntegrationManifest): string
     );
 }
 
-/**
- * The authority an integration asks for, as shown to an operator deciding whether to connect.
- *
- * An explicit `grants` list wins; otherwise this is the union of every `oauth2` step's `scopes`,
- * which is real declared data rather than authored copy. Deriving covers the common case for free
- * and cannot drift, but it cannot cover every provider: a GitHub App's permissions live inside the
- * opaque `app_manifest` blob, which is provider-defined and deliberately not interpreted here —
- * parsing `default_permissions` would put a provider's vocabulary in a generic resolver, which is
- * exactly what declaring `auth` steps was meant to stop. Those manifests declare `grants` by hand
- * and a test pins the two together.
- *
- * An empty result means "no authority to review" — a bot-token integration like Telegram — not
- * "unknown". Callers should render nothing rather than an empty section.
- */
+/** Resolve operator-visible grants from explicit grants or OAuth scopes; empty means no authority. */
 export function resolveGrants(manifest: IntegrationManifest): IntegrationGrant[] {
   if (manifest.grants?.length) return manifest.grants;
   const seen = new Set<string>();

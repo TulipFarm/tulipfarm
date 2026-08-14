@@ -44,15 +44,7 @@ export interface ChannelDeliveryReader {
   ): Promise<{ readonly provider: string; readonly destination: string } | null>;
 }
 
-/**
- * Where a Turn's answer is rendered, so `present`/`request_input` have somewhere to draw.
- *
- * A Run started from a Channel (Slack, Telegram, …) carries its destination in the correlation row
- * `ChannelInternalRouteDeps.runDeliveries` recorded at mint time; a plain web Turn carries none, and
- * falls back to the web chat surface keyed by conversation — the same target the (dead) debug route
- * built by hand. Channels the Surface registry has no renderer for yet (e.g. GitHub, which has no
- * `message` surface) fall back the same way rather than mint a target nothing can render.
- */
+/** Resolves the presentation target from channel delivery correlation, falling back to web chat. */
 export async function presentationContextForAuthority(
   authority: TurnAuthority,
   channelDeliveries?: ChannelDeliveryReader
@@ -73,19 +65,7 @@ export async function presentationContextForAuthority(
   );
 }
 
-/**
- * Resolves one turn's Context for the Worker (plan §3).
- *
- * The prompt itself is still assembled by `assembleAgentSystemPrompt`, the same function the web
- * turn uses, so a Slack turn and a web turn are given byte-identical instructions for the same
- * Agent. What differs is where history comes from: this reads the **durable** Turn transcript, in
- * which an assistant Message only appears once an attempt's completion named it. That is what stops
- * a Worker that died after writing its reply from teaching the retry that it already answered.
- *
- * The request Artifact is the only source of per-turn parameters. Reading it rather than trusting
- * the caller is the point — it is immutable, it was validated when the Run was minted, and it is
- * what makes the turn reconstructable after any crash.
- */
+/** Resolves Worker Context from durable transcript and immutable request Artifacts. */
 
 /** The per-turn parameters a chat request carries (`CHAT_REQUEST_SCHEMA`). */
 export interface ChatRequestPayload {
@@ -96,18 +76,10 @@ export interface ChatRequestPayload {
   readonly llmDecision?: boolean;
 }
 
-/**
- * How many durable memories the retrieved tier may add to a prompt. Deliberately small: this tier
- * is speculative — nothing asked for it — so it earns only a handful of lines. The agent reaches
- * for `recall_memory` when it needs more.
- */
+/** Retrieved memory is deliberately small; the Agent can call `recall_memory` for more. */
 const RECALLED_MEMORY_LIMIT = 5;
 
-/**
- * The text the retrieved tier is scored against: the newest user message in the conversation.
- * Assistant turns are excluded — scoring against the agent's own words would let it recall in
- * circles, reinforcing whatever it last said rather than what the user actually asked.
- */
+/** Recall scores against the newest user message, never the assistant's own words. */
 function latestUserMessage(history: readonly { role: string; content: string }[]): string {
   for (let i = history.length - 1; i >= 0; i--) {
     const message = history[i];
@@ -119,18 +91,7 @@ function latestUserMessage(history: readonly { role: string; content: string }[]
 /** Which Run source states its turn parameters directly, rather than through a derived Artifact. */
 const CHAT_SOURCE = "chat";
 
-/**
- * The Chat request behind a Run, read as the Run executor.
- *
- * Shared with the Tool dispatcher so both answer "which Agent is this turn?" from the same
- * immutable record. Anything else would let a Tool run under an Agent whose instructions the model
- * was never given.
- *
- * Which Artifact that is follows from the Run's source, not from anything the caller says. A Chat
- * Run's request *is* a Chat request; every other source arrives as something else — a provider
- * envelope, a Trigger payload — and is answered only after a derived Chat request has been
- * published for it, with lineage back to what it came from.
- */
+/** Reads Chat Run parameters from the immutable request or derived chat-request Artifact. */
 export async function readChatRequest(
   artifacts: ArtifactService,
   authority: TurnAuthority,
@@ -376,12 +337,7 @@ export class ChatTurnContextResolver implements TurnContextResolver {
   }
 }
 
-/**
- * The user's preferred zone, read off the Memory already loaded for the prompt. `timezone`
- * is the well-known key `MEMORY_GUIDANCE` tells the model to store and the Settings → Memory UI
- * offers as a preset, so this is the one place it is written. The value is whatever the user typed;
- * validating it is the renderer's job, which falls back to UTC rather than failing the turn.
- */
+/** Uses the stored `timezone` Memory value as-is; renderers validate and fall back to UTC. */
 function timezoneFrom(memory: readonly { key: string; value: string }[]): string | undefined {
   return memory.find((entry) => entry.key === "timezone")?.value;
 }
@@ -391,24 +347,7 @@ const MAX_REPAIR_ATTEMPTS = 2;
 
 const SYSTEM_SOURCE_ID = "system";
 
-/**
- * The Context manifest's candidates.
- *
- * History is offered **newest first** because the budget keeps candidates in the order they arrive:
- * feeding it oldest-first would keep the start of a long conversation and drop the message the user
- * just sent. The transcript sits at `user_request`, below the Agent's own instructions, so an
- * earlier message can never outrank the Agent, and the Agent's instructions are weighed against the
- * budget before any of it.
- */
-/**
- * The Skill → Tools map the loop uses to narrow what it offers the model once a Skill is active
- * (see `docs/plans/2026-08-08-skill-scoped-tool-narrowing.md`). Reads each Soul-loaded and bundled
- * Skill's optional `tools:` frontmatter — an array of Tool names — and skips any Skill that
- * declares none, which is what keeps the mechanism backward compatible: an undeclared Skill is
- * simply absent from the map, so the loop falls back to the full catalog for it exactly as before
- * this map existed. Returns `undefined` when nothing declares a scope, so the field is omitted
- * from the wire payload rather than shipped as an empty object.
- */
+/** Skill Tool scopes come from optional `tools:` frontmatter; absent scopes omit the wire field. */
 function buildSkillToolScopes(
   soulLoader: SoulLoader | undefined,
   bundledSkills: ReadonlyMap<string, BundledSkill> | undefined

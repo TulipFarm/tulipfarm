@@ -17,13 +17,7 @@ function isAbortError(err: unknown): boolean {
   return err instanceof Error && err.name === "AbortError";
 }
 
-/**
- * A hard failure aborts the chain immediately — retrying another provider cannot
- * help. Covers request cancellation, missing/invalid credentials, and any
- * APICallError the SDK marks non-retryable (401/403 auth, 404 model-not-found,
- * 400 bad-request). Everything else (429/5xx/timeout/network/unknown) is
- * transient and falls back to the next provider.
- */
+/** Hard failures abort fallback; 429/5xx/timeouts/network/unknown try the next provider. */
 export function isHardFailure(err: unknown): boolean {
   if (isAbortError(err)) return true;
   if (err instanceof LlmProviderError) return true;

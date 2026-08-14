@@ -12,15 +12,7 @@ import {
   refListSchema,
 } from "./common";
 
-/**
- * Agent authored definition (SPEC §7.1). Captures identity, owner/maintainers, assigned roles and
- * permission ceiling, personality, ModelProfile, Skill/Tool references, autonomy ceiling, limits,
- * data/delegation Guardrails, Memory/Knowledge scopes, trust tier, and evaluation suite.
- *
- * An Agent may reference Tools it is *allowed* to use, but the reference never grants authority:
- * effective authority is the intersection computed at runtime (SPEC §12). Permission never
- * broadens through an Agent, Skill, delegation, or team (invariant 3).
- */
+/** Agent definition; Tool refs are allowlists, never authority grants. */
 
 const KIND = "Agent";
 

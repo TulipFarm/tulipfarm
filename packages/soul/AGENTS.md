@@ -1,113 +1,40 @@
-# Soul — Agent Conventions
+# Soul (`@tulipfarm/soul`)
+Loader, compiler, publisher, and git-sync engine for Soul artifacts. Root `soul/` is runtime data.
 
-`@tulipfarm/soul` — loads "soul" artifacts from a local directory and keeps them synced with a
-git remote. See root `AGENTS.md` for commands/lint.
+## Read on / Skip
+- **Read on if** you change Soul loading, git sync, bundles, publication, or migrations.
+- **Skip if** you change artifact schemas or layouts; start in `../schema/AGENTS.md` first.
 
-> The runtime `soul/` directory at the repo root is a **separate git repo** (created by
-> `scripts/setup-dev.sh`). This package is the loader/sync *engine* — don't write package code
-> into that data repo.
+## Map
+| Path | Owns |
+| --- | --- |
+| `src/index.ts` | Public exports; do not mirror the list here. |
+| `src/soul-loader.ts`, `src/tree-reader.ts`, `src/soul-path.ts` | Disk and tree reads. |
+| `src/compiler.ts`, `src/bundle.ts`, `src/published-loader.ts` | Runtime bundles. |
+| `src/signatures.ts`, `src/publication.ts`, `src/publisher.ts` | Publish flow. |
+| `src/git-*`, `src/pinned-definition.ts`, `src/definition-reader.ts` | Git and pinned reads. |
+| `src/integration-*`, `src/types.ts` | Integration manifest trust/auth contracts. |
+| `src/migrations/`, `src/soul-migrations.ts`, `src/writer.ts` | Migrations and authoring. |
 
-## Public API (`src/index.ts`)
-
-- **`SoulLoader`** — reads artifacts from disk into in-memory maps; `load()` / reload. Root YAML
-  configs are exposed as fields: `llmConfig` (from `soul.yaml`'s nested `llm:` key),
-  `guardrailsConfig`, `manifest` (the full parsed `soul.yaml`).
-- **`GitSyncService`** — `bootSync`, `pull`, `commit`, `push`, `withSync(message)` (commit +
-  best-effort push around a write — used by the API's soul-backed tools), periodic sync.
-- **`compileExecutionBundle()`** / **`signExecutionBundle()`** / **`verifyExecutionBundle()`** —
-  immutable execution bundles: exact-version resolution, canonical digest, signature, and the
-  Git-free `RuntimeBundle` workers execute against. `InMemoryBundleStore` implements the
-  content-addressed `BundleStore` port.
-- **`PinnedDefinitionLoader`** — opens the exact bundle digest and definition identity a durable
-  Run recorded. It never consults Git or the active publication alias, so a waiting Run cannot
-  change behavior when a newer bundle becomes active.
-- **`SoulPublicationCoordinator`** — projects a signed bundle through the outbox and activates one
-  digest only after every stage (`committed → projected → stored → active`) committed. `publish()`
-  records + enqueues, `drain()` is the durable job (resumes at the recorded stage after a crash),
-  `activeDigest()`/`activeBundle()` are the runtime read side, `rebuildProjection()` recompiles the
-  authored projection from Git. Persistence is `@tulipfarm/storage`'s `SoulPublicationStore`.
-  `apps/api` composes the verified `activeBundle()` read side for Routine invocation; it does not
-  consult live Git when pinning a Run.
-- **`SoulPublisher`** — the only bridge from a successful Soul git commit to publication. Every
-  new commit helper must call the `GitSyncService` post-commit hook, or `soul_active_bundles` can
-  go empty again.
-- **`runSoulMigrations()`** + type `SoulMigration`.
-- Types: `SoulAgent`, `SoulSkill`, `SoulResource`, `SoulRoutine`, `SoulIntegration`.
-
-## On-disk layout (what `SoulLoader` reads)
-
-```
-agents/<name>/AGENT.md            # markdown + optional YAML frontmatter
-skills/<name>/SKILL.md
-resources/<name>/schema.yml       # + optional hooks.ts (SHA256-hashed for integrity)
-routines/<name>/routine.yaml      # + optional hooks.ts
-integrations/<name>/manifest.yml   # + connection.yaml once connected, + the egress spec if declared
-soul.yaml                         # repo-root manifest; `llm:` key holds LLM config
-guardrails.yaml                   # optional repo-root guardrail policy
-```
-
-Resource schemas are checked with `validateResourceSchema` (`@tulipfarm/schema`) on load.
-Parsing is fault-tolerant: a bad file is logged and skipped, and the loader stays up.
-
-That tolerance has a sharp edge for integrations: a manifest that declares `egress.spec` but whose
-spec file is missing is skipped, so the integration **silently disappears from the catalog** rather
-than failing loudly. Any code path that writes an integration into a soul repo must copy the spec
-alongside `manifest.yml` — see `apps/api/src/integrations/install.ts`.
-
-## File map
-
-- `soul-loader.ts` — the `load*` readers + frontmatter parsing + hook-hash tracking; `llmConfig` is
-  derived from `manifest.llm` after `soul.yaml` loads (not a separate file read).
-- `tree-reader.ts` — bundle membership is derived from `ARTIFACT_LAYOUTS` via
-  `classifySoulPath`. Do not add a "better" regex here; path contracts drift when described twice.
-- `pinned-definition.ts` — pinned reads refuse `live` kinds (`Role`, `AccessGrant`) and unknown
-  kinds. `temporalClass` means "which digest to read", not "whether the artifact is bundled".
-- `git-sync.ts` — sync engine. Divergence rule (SOUL-V1-004): upstream wins on genuine
-  divergence, but **un-pushed local commits are preserved** (retry push, don't blind-reset).
-  Commits use `BOT_GIT_NAME` / `BOT_GIT_EMAIL` from `@tulipfarm/constants`.
-- `publisher.ts` / `publication.ts` / `signatures.ts` — compile → Ed25519 sign → publish →
-  activate. The API signs with the private key; Workers verify with public keys only.
-- `migrations/index.ts` — the `SOUL_MIGRATIONS` array; `soul-migrations.ts` runs pending ones.
-- `types.ts` — the Integration manifest authoring contract (`EgressConfig`, `EgressAuth`,
-  `EgressOperation`). Widening these types widens what every third-party integration may declare,
-  so change them together with `integration-trust.ts`.
-- `integration-trust.ts` — what a *third-party* manifest may contain. `ts-code` and `stdio` egress
-  are rejected outright (they are code, and installing a repo must not mean executing its code);
-  `base_url` must be https with a literal host. Bundled integrations are exempt.
-- `integration-auth.ts` — validates the declared connect flow, so a manifest whose auth steps
-  cannot complete is rejected at load rather than halfway through an operator's setup.
-
-## How to extend
-
-- **New artifact type:** add it to `@tulipfarm/schema`'s `ARTIFACT_LAYOUTS` first. Derive paths,
-  companions, bundle membership, and temporal class from that registry; never duplicate the
-  contract with a regex or hand-built path table.
-- **New migration:** append to `SOUL_MIGRATIONS` with a monotonic `version`, a `description`, and
-  an async `up(soulPath)`.
-- **New integration:** nothing changes here — write a manifest. See
-  `../../docs/architecture/building-an-integration.md`.
-  Touch this package only when a provider needs a manifest capability that does not exist yet.
-
-## Tests
-
-Vitest, colocated. Mock `node:fs` / `simple-git`; cover loader degradation and the
-pull/commit/push divergence cases. In route tests that touch soul git config, spy on
-`GitSyncService.prototype.configureRemote`/`getStatus` (don't hit real git), and use
-`soulConfigFs.readFile`/`writeFile` (not raw `node:fs`).
-
-## Git-sync gotchas
-
-- Remote/credential env vars are `SOUL_GIT_REMOTE_URL` / `SOUL_GIT_CREDENTIAL` (soul-scoped,
-  matches `SOUL_PATH`) — not `GIT_REMOTE_URL`/`GIT_CREDENTIALS`. Watch for stale references when
-  touching `.env.local.example`, docs mdx, or secret keys.
-- `GitSyncService` reads its remote from env at boot; a remote set later via Business → Soul UI
-  persists to `soul.yaml` + a secret — boot must also read that persisted config, or the UI-set
-  remote is silently dropped on restart.
-- `bootSync()` must never throw (a bad/stale remote in `soul.yaml` previously crash-looped the
-  server on boot) — but `configureRemote()` (backs `PUT /soul/git-config`) must keep throwing so
-  the route can 400 on bad credentials. Fix boot-time resilience at the boot call site, not by
-  swallowing errors inside the shared methods.
-- Auth is HTTPS-only: `authUrl()` in `git-sync.ts` injects `SOUL_GIT_CREDENTIAL` (a PAT) as
-  `https://<token>@host/...`. No SSH keygen/agent support — an SSH remote URL will fail.
-- Soul-repo commits are always authored as `BOT_GIT_NAME`/`BOT_GIT_EMAIL` (`tulipfarm-bot`),
-  regardless of whose PAT authenticates the push.
+## Rules
+- Do not put package code in root `soul/`; it is a separate runtime git repo.
+- `SoulLoader` reads `agents/*/AGENT.md`, `skills/*/SKILL.md`, `resources/*/schema.yml`,
+  `routines/*/routine.yaml`, `integrations/*/manifest.yml`, root `soul.yaml`, `guardrails.yaml`.
+- Resource schemas must pass `validateResourceSchema()` on load.
+- Bad files are logged and skipped; if `egress.spec` is declared but missing, that integration
+  silently disappears. Writers must copy the spec beside `manifest.yml`.
+- Add artifact kinds to `@tulipfarm/schema` `ARTIFACT_LAYOUTS` first; derive paths, companions,
+  bundle membership, and temporal class from it. No custom regex/table.
+- Pinned reads refuse `live` kinds (`Role`, `AccessGrant`) and unknown kinds; `temporalClass`
+  means which digest to read, not whether the artifact is bundled.
+- SOUL-V1-004: upstream wins on real divergence; preserve unpushed local commits by retrying push.
+- Every successful Soul git commit helper must call the post-commit publication hook.
+- Publication activates one signed digest only after committed -> projected -> stored -> active.
+- API signs bundles with the private key; Workers verify with public keys only.
+- Widening integration types widens third-party trust; update `integration-trust.ts` too.
+- Third-party manifests reject `ts-code`, `stdio`, and non-HTTPS/non-literal `base_url`; bundled
+  integrations are exempt.
+- Env names: `SOUL_GIT_REMOTE_URL`, `SOUL_GIT_CREDENTIAL`; commits use bot name/email constants.
+- `bootSync()` must not throw; `configureRemote()` must throw so `PUT /soul/git-config` can 400.
+- Git auth is HTTPS PAT injection only; SSH remotes are unsupported.
+See [building an integration](../../docs/architecture/building-an-integration.md).

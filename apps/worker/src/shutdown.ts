@@ -22,16 +22,7 @@ function delay(ms: number): Promise<void> {
   });
 }
 
-/**
- * Stops accepting new work and waits for what is already claimed to finish.
- *
- * Each loop releases its Run leases as part of finishing its tick, so a loop that settles has left
- * nothing held. A loop that does not settle inside the budget still holds leases; those expire and
- * are recovered by `reclaimExpired` on the next worker. That recovery is correct but not free —
- * the Run sits idle for the remainder of its lease — so a timed-out drain is reported as
- * `timed_out` and the process exits non-zero, making an unsafe shutdown visible to the
- * orchestrator instead of indistinguishable from a clean one.
- */
+/** Waits for claimed work to finish; timed-out drains exit non-zero and leases expire later. */
 export async function drain(options: DrainOptions): Promise<DrainOutcome> {
   const sleep = options.sleep ?? delay;
   const pending = new Set(options.loops.map((loop) => loop.name));

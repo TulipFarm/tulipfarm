@@ -98,12 +98,7 @@ function cleanDecisions(decisions: readonly string[]): string[] {
   return cleaned;
 }
 
-/**
- * Pull decision bullets out of a summary we already paid to create.
- *
- * This is intentionally conservative: an unlabelled sentence can stay in the summary chunk and be
- * recalled there. Promoting every sentence to a decision would overstate what the user chose.
- */
+/** Conservatively promotes only labelled decision bullets from an existing summary. */
 export function decisionsFromEpisodeText(text: string): readonly string[] {
   const decisions: string[] = [];
   for (const line of text.split(/\r?\n|[•]/)) {
@@ -184,13 +179,7 @@ function chunkTexts(episode: MemoryEpisode): readonly {
   return chunks.filter((chunk) => chunk.text.length > 0);
 }
 
-/**
- * Postgres implementation for Episodes and their retrieval chunks.
- *
- * The Assertion projection is written first because recall still materializes
- * `MemoryAssertion`s. Chunks then point at that id, so a chunk hit enters the same authorization
- * and ranking path as every other M2 memory candidate.
- */
+/** Writes Assertion projection first so Episode chunks reuse normal Memory auth and ranking. */
 export class PgMemoryEpisodeStore implements MemoryEpisodeStore {
   private readonly assertions: PgMemoryAssertionStore;
 

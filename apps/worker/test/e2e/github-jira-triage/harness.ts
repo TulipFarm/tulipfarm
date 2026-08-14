@@ -57,25 +57,7 @@ import {
   verifyGitHubSignature,
 } from "./providers";
 
-/**
- * Composition harness for the GitHub → Jira triage vertical slice.
- *
- * This is deliberately *not* a mock of the flow. Every governed component is the real one — the
- * compiled Routine, the Tool Broker, the effect ledger, the Secret Broker, the Approval store, the
- * maintained GitHub and Jira adapters — wired together the way `apps/worker` wires them, with only
- * the model call and the two providers replaced. What the tests assert is therefore a property of
- * the system, not of this file.
- *
- * Two structural decisions carry most of the behaviour:
- *
- * - **Reads dispatch, mutations reserve.** A read Tool is authorized and dispatched under a Secret
- *   lease with no ledger entry; a mutating Tool reserves a durable effect first and dispatches
- *   through it. That is why the asserted effect list contains exactly the external mutations.
- * - **Resuming replays from the start.** There is no cached mid-flow state to trust after an
- *   Approval or a crash. The Routine re-executes, and convergence comes from the idempotency key —
- *   a reserved effect is recognized as a duplicate and its result is read back from the provider
- *   rather than written again.
- */
+/** Real governed triage wiring; reads skip the ledger, mutations reserve, resumes replay. */
 
 export const EXAMPLES_DIR = join(
   import.meta.dirname,
@@ -123,11 +105,7 @@ export function triageCatalog(): ToolCatalog {
   return ToolCatalog.load([...GITHUB_TOOL_CONTRACTS, ...JIRA_TOOL_CONTRACTS]);
 }
 
-/**
- * Jira account id → GitHub login. A real deployment resolves this through the identity map; the
- * point preserved here is that the Agent never names a GitHub login directly, so a prompt-injected
- * classification cannot assign an arbitrary account.
- */
+/** Agent outputs account ids, not GitHub logins, so prompt text cannot pick assignees. */
 const DIRECTORY: Readonly<Record<string, string>> = {
   "acct-maya": "maya-dev",
   "acct-lee": "lee-dev",
@@ -211,11 +189,7 @@ function record(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-/**
- * Authority for this Run: the Routine may act on the Tools the Routine declares, and nothing here
- * widens that. The narrowing that actually matters — which repository and which Jira project — is
- * enforced by the AccessGrants inside the adapters, one layer further out.
- */
+/** Routine-level authority is broad here; adapter AccessGrants do target narrowing. */
 const AUTHORITY_LAYERS: readonly AuthorityLayer[] = [
   { name: "routine", grants: [{ action: "*", resourceType: "*", effect: "allow" }] },
 ];
@@ -357,12 +331,7 @@ export async function createTriageHarness(): Promise<TriageHarness> {
     now: nowIso,
   });
 
-  /**
-   * Reconciliation runs long after the dispatch that leased the credential, so the ledger's
-   * reconciler passes none. Wrapping the adapter re-leases under the same authority: if that lease
-   * is refused the adapter is called without a credential and answers `ambiguous`, which is the
-   * honest result — never an assumed `not_applied`.
-   */
+  /** Reconciliation re-leases credentials; refused leases stay `ambiguous`, never `not_applied`. */
   function leasedReconciler(
     inner: GitHubAdapter | JiraAdapter,
     secretRef: string
@@ -403,8 +372,6 @@ export async function createTriageHarness(): Promise<TriageHarness> {
   const seenDeliveries = new Set<string>();
   const acceptedEvents: string[] = [];
 
-  // ── Trigger ingress ─────────────────────────────────────────────────────────
-
   function signedDelivery(input: DeliveryInput): SignedDelivery {
     const issue = github.issue(input.issueNumber);
     return signGitHubDelivery(WEBHOOK_SECRET, input.deliveryId, {
@@ -424,7 +391,7 @@ export async function createTriageHarness(): Promise<TriageHarness> {
   }
 
   async function ingest(delivery: SignedDelivery): Promise<IngressResult> {
-    // Signature first: an unverified payload is never parsed, stored, or deduplicated on.
+    // Verify before parse, store, or dedupe.
     if (!verifyGitHubSignature(WEBHOOK_SECRET, delivery)) {
       return { status: 401, code: "signature_invalid" };
     }
@@ -443,13 +410,7 @@ export async function createTriageHarness(): Promise<TriageHarness> {
     return { status: 202, outcome: "accepted" };
   }
 
-  // ── Agent State ─────────────────────────────────────────────────────────────
-
-  /**
-   * Stands in for the bounded Agent loop. It proposes only: it holds no write Tool, and the
-   * assignee it names is resolved through the directory rather than taken from issue text, so a
-   * prompt-injected classification cannot reach an arbitrary GitHub account.
-   */
+  /** Agent stub proposes only; directory resolution prevents arbitrary GitHub assignees. */
   function classifyIssue(state: CompiledState): Record<string, unknown> {
     if (classification === undefined) throw new Error("no classification stub configured");
     const assignees = classification.candidateAccountIds
@@ -469,16 +430,13 @@ export async function createTriageHarness(): Promise<TriageHarness> {
       output.duplicateOfIssue = classification.duplicateOfIssue;
     }
 
-    // The authored output schema is the boundary: an over-reaching proposal fails here, not at
-    // the provider.
+    // Authored output schema is the boundary, before any provider call.
     const schema = authored(state).output;
     if (schema !== undefined && !ajv.compile(record(schema))(output)) {
       throw new Error(`ClassifyIssue produced output outside its declared schema`);
     }
     return output;
   }
-
-  // ── Tool States ─────────────────────────────────────────────────────────────
 
   function targetRefFor(state: CompiledState, input: Record<string, unknown>) {
     const destination = authoredString(state, "destination");
@@ -505,8 +463,7 @@ export async function createTriageHarness(): Promise<TriageHarness> {
       arguments: input,
       destination: authoredString(state, "destination"),
       credentialRef: authoredString(state, "credentialRef"),
-      // Deterministic in the delivery and the State, so a redelivery, a retry, and a resumed Run
-      // all converge on the same effect.
+      // Deterministic per delivery and State so redelivery/retry/resume share one effect.
       idempotencyKey: `${BUSINESS_ID}:${deliveryId}:${state.name}`,
     };
   }
@@ -515,7 +472,7 @@ export async function createTriageHarness(): Promise<TriageHarness> {
     return intent.credentialRef ?? GITHUB_SECRET_REF;
   }
 
-  /** Reads never touch the ledger: nothing external changed, so there is nothing to reconcile. */
+  /** Reads skip the ledger because they create no external effect. */
   async function dispatchRead(intent: ToolIntent): Promise<unknown> {
     const adapter = intent.destination === "github" ? githubAdapter : jiraAdapter;
     const lease = await secrets.lease({
@@ -534,10 +491,7 @@ export async function createTriageHarness(): Promise<TriageHarness> {
     );
   }
 
-  /**
-   * What a confirmed effect produced, read back from the provider. Reached only on a duplicate
-   * reservation — a replayed Run must observe the write it already made instead of repeating it.
-   */
+  /** Duplicate reservations read provider state instead of repeating confirmed effects. */
   function providerOutputFor(effect: EffectRecord): Record<string, unknown> | undefined {
     const source = record(effect.intent.arguments);
     const key = effect.idempotencyKey;
@@ -594,8 +548,6 @@ export async function createTriageHarness(): Promise<TriageHarness> {
         return [];
     }
   }
-
-  // ── Run walk ────────────────────────────────────────────────────────────────
 
   interface WalkState {
     readonly deliveryId: string;
@@ -760,11 +712,7 @@ export async function createTriageHarness(): Promise<TriageHarness> {
     return outcome.intentDigest;
   }
 
-  /**
-   * An Approval State. Starting a Run raises the Approval and stops; resuming spends it and
-   * reserves the effect for the State it gates, so the authorization and the write are one atomic
-   * step rather than two hopeful ones.
-   */
+  /** Start raises approval; resume spends it and reserves the gated effect atomically. */
   async function runApprovalState(
     state: CompiledState,
     walk: WalkState
@@ -793,8 +741,7 @@ export async function createTriageHarness(): Promise<TriageHarness> {
       return blocked(walk, outcome.outcome === "denied" ? outcome.reason : "approval_not_required");
     }
 
-    // A resumed Run that reaches an Approval it never raised — because an earlier State was
-    // interrupted — raises it now. Only an existing Approval is spent.
+    // Resume may raise a missing approval; only existing approvals are spent.
     const existing = await approvals.get(BUSINESS_ID, approvalId);
     if (walk.mode === "start" || existing === undefined) {
       if (existing === undefined) {
@@ -927,8 +874,6 @@ export async function createTriageHarness(): Promise<TriageHarness> {
     }
     return state.end ? null : state.transition;
   }
-
-  // ── Public surface ──────────────────────────────────────────────────────────
 
   return {
     businessId: BUSINESS_ID,

@@ -1,14 +1,6 @@
 import { type JSONContent, mergeAttributes, Node } from "@tiptap/core";
 
-/*
- * Callout block — rendered to/from GitHub-alert markdown (`> [!NOTE] …`), which is valid markdown so
- * the body stays canonical. It hooks the `blockquote` markdown token (NOT a custom marked tokenizer —
- * registering one corrupts inline parsing in this @tiptap/markdown build): on parse, a blockquote
- * whose first line is `[!KIND]` becomes a `callout` node (marker stripped); every other blockquote is
- * returned untouched as a normal `blockquote` node. Higher priority than StarterKit's Blockquote so
- * this handler runs first. `CALLOUT_KINDS` + `CALLOUT_ALERT_RE` are shared with the web read-view
- * renderer so read and edit agree on the grammar.
- */
+/* Callouts round-trip GitHub-alert blockquotes while ordinary blockquotes stay untouched. */
 
 export const CALLOUT_KINDS = ["NOTE", "TIP", "IMPORTANT", "WARNING", "CAUTION"] as const;
 export type CalloutKind = (typeof CALLOUT_KINDS)[number];
@@ -26,12 +18,7 @@ function normalizeKind(raw: unknown): CalloutKind {
 
 type Tok = { type?: string; text?: string; raw?: string; tokens?: Tok[]; [k: string]: unknown };
 
-/**
- * Strip the leading `[!KIND]` marker from a blockquote's already-parsed child tokens, returning the
- * remaining child tokens (the callout body). Works on clones; the marker lives in the first inline
- * text token of the first paragraph (subsequent inline marks like **bold** are preserved). A
- * marker-only first paragraph is dropped entirely.
- */
+/** Strips the leading `[!KIND]` marker from cloned blockquote child tokens. */
 function stripMarkerTokens(tokens: Tok[]): Tok[] {
   const rest = tokens.slice();
   const first = rest[0];
@@ -82,10 +69,7 @@ export const Callout = Node.create({
     return ["div", mergeAttributes(HTMLAttributes, { class: "tf-callout" }), 0];
   },
 
-  // ── markdown bridge (intercepts the blockquote token) ────────────────────────
-  // NOTE: this build keys BOTH the parse handler and the render handler by `markdownTokenName`, so
-  // hooking "blockquote" means our renderer is invoked for ordinary blockquote nodes too. We therefore
-  // branch on `node.type` in renderMarkdown and emit a plain blockquote for non-callout nodes.
+  // Parse and render both key on `markdownTokenName`, so render must branch on node type.
   markdownTokenName: "blockquote",
 
   parseMarkdown(token, helpers) {

@@ -1,13 +1,6 @@
 import { assertExternalIdentityMapped, type ExternalIdentityMapping } from "@tulipfarm/authz";
 
-/**
- * GitHub App installation scope (SPEC §15).
- *
- * A GitHub App installation is the outer bound on everything this Integration can touch: the
- * account it was installed on, the repositories selected during install, and the permission set
- * granted at install time. Nothing downstream may widen it — AccessGrants only narrow it further.
- * Every check here is closed and reason-coded, and no denial repeats the target back to the caller.
- */
+/** GitHub installation scope is the outer bound; AccessGrants may only narrow it. */
 
 export interface GitHubRepositoryRef {
   readonly owner: string;
@@ -85,12 +78,7 @@ export function assertRepositoryInScope(
   }
 }
 
-/**
- * Throws unless `scope` covers `owner` at the required permission level. Unlike
- * `assertRepositoryInScope`, this does not check repository membership: it authorizes an
- * account-level action (e.g. creating a repo) whose target does not exist yet, so it cannot be
- * checked against the installation's already-selected repository list.
- */
+/** Authorize account-level actions whose target repo does not exist yet. */
 export function assertAccountInScope(
   scope: GitHubInstallationScope | undefined,
   owner: string,

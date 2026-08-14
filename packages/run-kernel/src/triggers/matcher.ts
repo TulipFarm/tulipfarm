@@ -1,14 +1,8 @@
 import type { event as eventSchema } from "@tulipfarm/schema";
 
 /**
- * Deterministic Trigger matching.
- *
- * Every intake class — integration event, form submission, manual invocation, internal API call,
- * internal domain event — arrives as one canonical `EventEnvelope` and is matched here against
- * the published Triggers. Matching never guesses: a Trigger matches only on exact type, exact
- * event version, and every predicate it declared. When two Triggers are equally specific the
- * result is `ambiguous` and no Run is created, and when nothing matches the result is `no_match`.
- * Both are safe outcomes the caller records; neither starts work.
+ * Trigger matching requires exact type, version, and predicates; equally specific matches are
+ * `ambiguous`, no matches are `no_match`, and neither starts a Run.
  */
 
 export type TriggerLifecycle = "draft" | "published" | "retired";
@@ -24,7 +18,6 @@ export type TriggerKind =
   | "manual"
   | "webhook";
 
-/** One equality predicate against a dot-path in the event's `data`. */
 export interface TriggerPredicate {
   readonly path: string;
   readonly equals: unknown;
@@ -38,7 +31,6 @@ export interface RegisteredTrigger {
   readonly eventType: string;
   readonly eventVersion: number;
   readonly provider?: string;
-  /** `form` Triggers only: the Form this Trigger owns submissions for. */
   readonly formRef?: string;
   readonly match?: readonly TriggerPredicate[];
   readonly routineRef: { readonly name: string; readonly version: string };
@@ -46,9 +38,7 @@ export interface RegisteredTrigger {
     readonly principalKind: string;
     readonly principalId: string;
   };
-  /** Authored event-path → Routine-input mappings. Nothing else reaches the Run. */
   readonly inputMappings?: Readonly<Record<string, string>>;
-  /** Reject an event that did not pass provider verification. */
   readonly requireVerified?: boolean;
   /** When set, intake runs as a constrained read-only Agent Run instead of the Routine. */
   readonly semanticIntakeAgent?: { readonly name: string; readonly version: string };
@@ -84,7 +74,6 @@ function satisfies(
   );
 }
 
-/** Specificity is the count of authored constraints; the strictly highest one wins. */
 function specificity(trigger: RegisteredTrigger): number {
   return (
     (trigger.match?.length ?? 0) +
@@ -93,7 +82,6 @@ function specificity(trigger: RegisteredTrigger): number {
   );
 }
 
-/** Resolve the single Trigger that owns this event, or say plainly that none does. */
 export function matchTrigger(
   triggers: readonly RegisteredTrigger[],
   envelope: eventSchema.EventEnvelope<Record<string, unknown>>

@@ -3,13 +3,7 @@ import { AgentGlyph } from "~/components/agent-glyph";
 import type { MentionKind } from "./mention-config";
 import type { MentionItem } from "./serialize";
 
-/**
- * The `@`/`/`/`#` suggestion dropdown. Rendered into `document.body` by the Tiptap suggestion glue
- * (`mentions.ts`) via `ReactRenderer`, positioned above the caret. Keyboard navigation is driven
- * imperatively through the exposed `onKeyDown` (the suggestion plugin forwards keystrokes to it),
- * so arrows/enter/tab move and pick without the editor losing focus. Styled to match the portalled
- * dropdown in `model-selector.tsx` (flat card surface, hairline border, ruby on the active row).
- */
+/** Imperative key handling keeps suggestion navigation from blurring the editor. */
 
 export interface MentionListRef {
   onKeyDown: (props: { event: KeyboardEvent }) => boolean;

@@ -14,26 +14,11 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { stripUrlCredentials } from "../audit/soul-write";
 import { cloneToTemp, sourceType } from "../soul/git-source";
 
-/*
- * Install an integration from a git repo.
- *
- * The whole framework rests on this staying boring: a repo contributes `manifest.yml` (data) and
- * an optional `setup-guide.md` (prose). Nothing else is copied, so "installing an integration"
- * cannot mean "running someone's code". Everything a provider needs — its create-app URL, OAuth
- * endpoints, response mappings, webhook shape — is already expressible in the manifest, which is
- * why the bundled Slack and GitHub integrations carry no bespoke connect code either.
- *
- * There is deliberately no scan/preview cache (Skills need one because an LLM audit runs between
- * scan and install). Validation here is mechanical, so preview and install can each just clone.
- */
+/** Installs only declarative Integration artifacts from git; no executable payloads. */
 
 const NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const MAX_FILE_BYTES = 512 * 1024;
-/**
- * Specs get their own, larger cap: a provider's OpenAPI document is generated, not hand-written,
- * and legitimately dwarfs a manifest. Still bounded — it is parsed and compiled to JSON Schema on
- * every boot, so an unbounded one is a startup cost an operator never agreed to.
- */
+/** OpenAPI specs get a larger cap because provider documents are generated. */
 const MAX_SPEC_BYTES = 2 * 1024 * 1024;
 
 export interface DiscoveredIntegration {
@@ -41,11 +26,7 @@ export interface DiscoveredIntegration {
   name: string;
   manifest: IntegrationManifest;
   setupGuide?: string;
-  /**
-   * The OpenAPI document an `egress: { type: "openapi" }` manifest names, carried verbatim so it
-   * can be written alongside the manifest. Without it the installed integration declares Tools
-   * whose spec is missing, which the loader treats as fatal.
-   */
+  /** OpenAPI spec carried verbatim beside its Integration manifest. */
   egressSpec?: { file: string; raw: string };
   /** Path of the manifest.yml relative to the repo root, recorded for provenance. */
   manifestPath: string;
@@ -70,21 +51,13 @@ function manifestIssues(manifest: IntegrationManifest): string[] {
   } else if (manifest.egress.type === "mcp" && !manifest.egress.entry?.transport) {
     issues.push("egress.entry.transport missing");
   }
-  // The same connect-flow validation the loader runs, applied before the files land rather than
-  // on the next boot: an integration that cannot complete its flow is rejected at install.
+  // Validate connect flows before files land, not on next boot.
   issues.push(...validateAuthSteps(manifest));
   issues.push(...validateThirdPartyManifest(manifest));
   return issues;
 }
 
-/**
- * Reads the OpenAPI document an `openapi` manifest names, and reports why it could not be read.
- *
- * A missing or unparseable spec is an install-blocking issue rather than a silent skip: the
- * manifest promises Tools, and letting it install anyway produces an integration an operator can
- * connect but never use. Resolved from the directory listing exactly like `setup-guide.md`, so a
- * `spec: ../../../etc/passwd` cannot be read into the operator's git repo.
- */
+/** Reads required OpenAPI specs strictly; install must fail before copying partial artifacts. */
 async function readEgressSpec(
   dir: string,
   entries: Dirent[],
@@ -116,11 +89,7 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/**
- * Walk a cloned repo for `manifest.yml` files and parse each into a DiscoveredIntegration. A
- * manifest whose directory name is not a safe slug is skipped — that name becomes a directory in
- * the soul repo, so it must not allow traversal.
- */
+/** Discovers manifest directories whose names match their declared slugs. */
 export async function discoverIntegrations(root: string): Promise<DiscoveredIntegration[]> {
   const found: DiscoveredIntegration[] = [];
 
@@ -134,9 +103,7 @@ export async function discoverIntegrations(root: string): Promise<DiscoveredInte
         await walk(full, depth + 1);
         continue;
       }
-      // Regular files only. Dirent uses lstat, so a symlink is neither isFile() nor
-      // isDirectory() — which is what keeps a link pointing outside the clone from being read or
-      // descended into.
+      // Dirent lstat skips symlinks, so links outside the clone are never read or descended into.
       if (!entry.isFile() || entry.name !== "manifest.yml") continue;
 
       const name = dir === root ? "" : (dir.split(/[\\/]/).pop() ?? "");
@@ -153,10 +120,7 @@ export async function discoverIntegrations(root: string): Promise<DiscoveredInte
       }
       if (typeof manifest !== "object" || manifest === null) continue;
 
-      // Same rule as the manifest, and for a sharper reason: the guide is committed and pushed to
-      // the operator's own soul remote, so `setup-guide.md -> /proc/self/environ` would publish
-      // host secrets to their git host. Resolved from the directory listing, never by path, so the
-      // check cannot be separated from the read.
+      // Never follow setup-guide symlinks; the guide is committed to the operator's Soul repo.
       let setupGuide: string | undefined;
       if (entries.some((sibling) => sibling.name === "setup-guide.md" && sibling.isFile())) {
         const guide = await readFile(join(dir, "setup-guide.md"), "utf8");
@@ -247,14 +211,7 @@ export async function inspectIntegrationSource(source: string): Promise<{
   }
 }
 
-/**
- * Install one integration from a git repo into the soul repo.
- *
- * Refuses to overwrite an existing slug. That is not just tidiness: `mergeIntegrations` prefers a
- * bundled manifest over the soul copy, so a third-party install under a bundled slug would be
- * silently ignored — and an install that appears to succeed while doing nothing is worse than a
- * clear rejection.
- */
+/** Installs one Integration and refuses overwrites to keep manifest ownership unambiguous. */
 export async function installIntegrationFromSource(
   options: {
     source: string;
@@ -301,34 +258,25 @@ export async function installIntegrationFromSource(
     throw new IntegrationInstallError(`integration already installed: ${chosen.name}`, 409);
   }
 
-  // Re-serialized from the parsed object rather than copied verbatim, so YAML comments, anchors,
-  // and any trailing document don't ride along into the operator's repo, and the bytes on disk are
-  // normalized. Note this does NOT strip unknown keys — it is a hygiene step, not a filter; the
-  // security boundary is manifestIssues() above.
+  // Normalize manifest bytes; filtering is enforced by manifestIssues() above.
   const manifestYaml = stringifyYaml(chosen.manifest);
   const dir = join(deps.gitSync.path, "integrations", chosen.name);
 
-  // Anything left behind by a failed install is loaded and trusted on the next boot — the loader
-  // reads the integrations directory and never consults the lock. So the directory is removed if
-  // any step after the first write fails, rather than leaving a half-installed integration.
+  // Remove failed partial installs because the loader trusts every directory on boot.
   try {
     await mkdir(dir, { recursive: true });
     await writeFile(join(dir, "manifest.yml"), manifestYaml, "utf8");
     if (chosen.setupGuide) {
       await writeFile(join(dir, "setup-guide.md"), chosen.setupGuide, "utf8");
     }
-    // Verbatim, unlike the manifest: the spec is a generated provider document that round-tripping
-    // would only churn, and it is read as data, never executed.
+    // Specs are generated data; copy verbatim to avoid churn.
     if (chosen.egressSpec) {
       await writeFile(join(dir, chosen.egressSpec.file), chosen.egressSpec.raw, "utf8");
     }
 
     const lock = await readIntegrationLock(deps.gitSync.path);
     lock.integrations[chosen.name] = {
-      // `integrations-lock.json` is committed and pushed by the `withSync` below, so an install
-      // from `https://user:token@host/repo` would publish that token to the Soul repo's remote.
-      // Only the credential is stripped: this is provenance, so `file://` and `owner/repo`
-      // sources must survive verbatim. Nothing re-clones from this field.
+      // Strip only credentials from lock provenance; file/shorthand sources must survive.
       sourceUrl: stripUrlCredentials(options.source),
       sourceType: sourceType(options.source),
       manifestPath: chosen.manifestPath,

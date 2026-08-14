@@ -1,10 +1,3 @@
-/*
- * Full-page states for the Resources pages: a centered card with a quiet section eyebrow (same plain
- * idiom as empty-state.tsx), then the error/not-found message. ErrorState handles 401 with explicit
- * "authentication required" copy and a hint to set VITE_API_TOKEN; NotFoundState covers a missing
- * record (404).
- */
-
 function Frame({ section, children }: { section: string; children: React.ReactNode }) {
   return (
     <section className="mx-auto flex h-full max-w-xl flex-col justify-center px-6 py-16">

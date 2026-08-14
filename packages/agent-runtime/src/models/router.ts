@@ -8,12 +8,7 @@ import {
 } from "./profile";
 import type { ModelUsageEvent, ModelUsageSink } from "./usage";
 
-/**
- * Provider-neutral model routing (SPEC §17). The router resolves a governed ModelProfile, invokes
- * the registered provider adapter behind {@link ModelPort}, and persists usage/cost/latency
- * evidence for every attempt. Fallback is a safe fallback only: the chain contains solely profiles
- * that met the *same* constraints, so an outage never degrades data handling or capability.
- */
+/** Governed router that records usage for each safe fallback attempt. */
 
 export type ModelRoutingErrorCode =
   | ModelProfileDenialReason

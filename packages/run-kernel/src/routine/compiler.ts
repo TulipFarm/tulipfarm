@@ -5,14 +5,8 @@ import type { JsonObject, OutputSchemaRegistration } from "../outputs";
 import { type CompiledExpression, compileExpression, ExpressionError } from "./expressions";
 
 /**
- * Deterministic Routine graph compiler (SPEC §9.1).
- *
- * Compilation turns an authored, schema-valid Routine into one immutable typed graph and proves
- * — before any Run exists — that it terminates, that every reference resolves to something that
- * can actually precede its reader, that no cycle escapes a bounded construct, and that no State
- * can widen the identity or permission ceiling the Run was started under. A simple one-Agent
- * automation, an explicit authored graph, and a bounded Agent-generated child plan all produce
- * the same {@link CompiledRoutine}, so downstream State processors have exactly one contract.
+ * Compiles valid Routine shapes into one graph after proving termination, reference order,
+ * bounded cycles, and no identity or permission widening.
  */
 
 export type RoutineCompileErrorCode =
@@ -35,11 +29,7 @@ export type RoutineCompileErrorCode =
   | "unreachable_reference"
   | "unreachable_state";
 
-/**
- * Compilation denial. The message carries the reason code and the JSON pointer of the offending
- * authored node only — never an authored value, which may embed a Secret reference or protected
- * data.
- */
+/** Denials include only reason code and JSON pointer, never authored values. */
 export class RoutineCompileError extends Error {
   readonly name = "RoutineCompileError";
 
@@ -72,9 +62,7 @@ export interface IdentityCeiling {
 
 export interface CompiledMapping {
   readonly name: string;
-  /** Set when the authored value was a `${ … }` expression. */
   readonly expression: CompiledExpression | null;
-  /** Set when the authored value was a literal carried through unchanged. */
   readonly literal: unknown;
 }
 
@@ -110,13 +98,11 @@ export interface CompiledState {
   readonly index: number;
   readonly transition: string | null;
   readonly end: boolean;
-  /** Every State this one can hand control to, including bodies, branches, and error paths. */
   readonly successors: readonly string[];
   readonly inputs: readonly CompiledMapping[];
   readonly conditions: readonly CompiledBranchArm[];
   readonly defaultTransition: string | null;
   readonly defaultEnd: boolean;
-  /** `foreach` collection or `repeat_until` termination condition. */
   readonly iterator: CompiledExpression | null;
   readonly body: string | null;
   readonly branches: readonly string[];
@@ -150,17 +136,11 @@ export interface CompileRoutineOptions {
   readonly identityCeiling: IdentityCeiling;
 }
 
-// ── Authored-node readers ─────────────────────────────────────────────────────
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/**
- * A dynamic-key view of an authored State. `RoutineState` is a discriminated union with
- * `additionalProperties: false`, so it deliberately has no index signature; these readers look up
- * keys chosen at runtime and so must opt out of the union explicitly rather than silently.
- */
+/** Runtime key reads intentionally opt out of the index-signature-free `RoutineState` union. */
 export function stateFields(state: routineSchema.RoutineState): Record<string, unknown> {
   return state as unknown as Record<string, unknown>;
 }
@@ -185,7 +165,6 @@ function readArray(source: Record<string, unknown>, key: string): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
-/** Drops `undefined`-valued keys so canonical hashing sees the same shape JSON would. */
 function stripUndefined<T>(value: T): T {
   if (Array.isArray(value)) return value.map(stripUndefined) as unknown as T;
   if (!isRecord(value)) return value;
@@ -208,8 +187,6 @@ function compileAt(source: string, path: string): CompiledExpression {
   }
 }
 
-// ── Graph helpers ─────────────────────────────────────────────────────────────
-
 function successorsOf(state: routineSchema.RoutineState): string[] {
   const targets: string[] = [];
   const push = (value: unknown) => {
@@ -229,7 +206,6 @@ function successorsOf(state: routineSchema.RoutineState): string[] {
   return targets;
 }
 
-/** Tarjan strongly-connected components over the successor graph, in source order. */
 function stronglyConnected(
   order: readonly string[],
   edges: ReadonlyMap<string, readonly string[]>
@@ -283,8 +259,6 @@ function reachableFrom(start: string, edges: ReadonlyMap<string, readonly string
   }
   return seen;
 }
-
-// ── Per-state validation ──────────────────────────────────────────────────────
 
 const BOUNDED_STATE_TYPES: ReadonlySet<routineSchema.RoutineStateType> = new Set([
   "foreach",
@@ -365,8 +339,6 @@ function canProgress(state: routineSchema.RoutineState): boolean {
   }
   return false;
 }
-
-// ── Compiler ──────────────────────────────────────────────────────────────────
 
 /**
  * Compile one authored Routine into an immutable typed graph under an explicit identity ceiling.

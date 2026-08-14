@@ -7,16 +7,7 @@ import type { MemoryAssertionView } from "./assertion-view";
 import { EngineMemoryRepo } from "./engine-repo";
 import { MemoryService } from "./service";
 
-/**
- * The M1 cutover test.
- *
- * The first block is the legacy `PgWorkingMemoryRepo` contract re-run verbatim against the
- * engine-backed repo — if the KV surface is to change engines with no user-visible difference,
- * the old contract has to hold unchanged, so it is asserted rather than assumed. (That legacy
- * repo and its `working_memory` table are now retired, so this file is the contract's only home.)
- * The second block asserts what the engine *adds* underneath: edits supersede instead of
- * overwriting, and deletes leave an auditable tombstone.
- */
+/** M1 cutover contract: legacy KV behavior unchanged; engine adds versions and tombstones. */
 
 const USER = "44444444-4444-4444-4444-444444444444";
 const OTHER = "55555555-5555-5555-5555-555555555555";

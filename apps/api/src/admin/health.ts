@@ -47,11 +47,7 @@ async function runProbe(probe: HealthProbe, now: () => string): Promise<Componen
   }
 }
 
-/**
- * Runs every probe concurrently and reports each outcome. A throwing or hanging probe becomes a
- * `down` component rather than failing the whole operations read model — an operator needs the
- * health page most when a dependency is unreachable.
- */
+/** Runs probes concurrently; probe failures become `down` components, not route failures. */
 export async function probeHealth(
   probes: readonly HealthProbe[],
   now: () => string = () => new Date().toISOString()

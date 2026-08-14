@@ -50,11 +50,7 @@ export interface CounterStore {
   makeCounterFn(): CounterFn;
 }
 
-/**
- * Postgres resource repo (D4/D9): one table per type in the `resources` schema. System
- * fields are typed columns; all schema-driven fields live in `data jsonb`. The table is
- * materialised by the reconciler (`reconcileResourceTables`), not here.
- */
+/** Resource repo: typed system columns plus schema-driven `data jsonb`; tables pre-exist. */
 export class PgResourceRepo implements ResourceRepo {
   private readonly table: string;
   private readonly historyTable: string;

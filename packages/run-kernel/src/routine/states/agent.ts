@@ -4,14 +4,8 @@ import { resolveRoutineStateInput } from "../input";
 import { RoutineStepError } from "./step";
 
 /**
- * Planning for an `agent` State. Like `tool`, this decides *what* would be asked and never asks it:
- * the Agent runtime owns the model call and the bounded Tool loop, and this file owns only the
- * deterministic part — which Agent, at which authored version, over which resolved input, against
- * which declared output schema.
- *
- * Keeping it here is what makes a replay reach the same question. The input is resolved from the
- * Context by the same rules every other State uses, so a resumed Run asks the Agent what the first
- * attempt asked it rather than what the Context happens to hold now.
+ * Agent planning is deterministic and side-effect-free: Agent version, resolved input, and output
+ * schema are fixed so replay asks the same question.
  */
 
 export interface AgentStateRef {
@@ -21,9 +15,7 @@ export interface AgentStateRef {
 
 export interface AgentInvocationPlan {
   readonly agentRef: AgentStateRef;
-  /** The State's authored input, resolved against the Context — the Agent's actual question. */
   readonly input: Record<string, unknown>;
-  /** Reference the answer is validated against when the State declares one. */
   readonly outputSchemaRef: string | null;
   /** How many malformed answers the loop may ask the Agent to repair; authored, never invented. */
   readonly maxRepairAttempts?: number;
@@ -33,11 +25,7 @@ function authored(state: CompiledState): Record<string, unknown> {
   return state.definition as unknown as Record<string, unknown>;
 }
 
-/**
- * The authored Agent reference. Required by the Routine schema; reading it defensively means a
- * State that reached here without one is refused by name rather than run against an Agent this
- * code chose.
- */
+/** Missing authored Agent reference is refused by State name, never invented. */
 function agentRefOf(state: CompiledState): AgentStateRef {
   const value = authored(state).agentRef;
   if (typeof value !== "object" || value === null) {
@@ -66,7 +54,6 @@ export function planAgentInvocation(
   };
 }
 
-/** The output schema the State declared, as the compiled Routine registered it. */
 export function agentOutputSchema(
   outputSchemas: readonly { readonly ref: string; readonly schema: JsonObject }[],
   outputSchemaRef: string | null

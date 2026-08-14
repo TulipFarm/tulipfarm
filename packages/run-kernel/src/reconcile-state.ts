@@ -1,8 +1,4 @@
-/**
- * What an observation proves about a side effect that was in flight when the Run was cancelled or
- * crashed (SPEC §23). `ambiguous` is a first-class outcome: an effect that *might* have landed is
- * never resolved by guessing.
- */
+/** `ambiguous` is first-class: an effect that might have landed is never guessed resolved. */
 export type EffectOutcome = "applied" | "not_applied" | "ambiguous";
 
 export interface ReconciliationEvidence {
@@ -38,7 +34,6 @@ export class ReconciliationError extends Error {
   }
 }
 
-/** Narrow surface the reconciler needs; `@tulipfarm/storage`'s `RunStore` satisfies it. */
 export interface ReconcilableStateStore {
   findState(
     businessId: string,
@@ -71,11 +66,7 @@ export type ReconcileStateResult = ReconciliationResolution & {
   readonly evidenceRef: string;
 };
 
-/**
- * Maps observed effect evidence onto a terminal State status. An effect proven applied is honoured
- * (`succeeded`) even though the Run was cancelling; only an effect proven *not* applied becomes
- * `cancelled`. Anything ambiguous stays in `needs_reconciliation` for an operator.
- */
+/** Applied effects become `succeeded`; only proven-not-applied becomes `cancelled`. */
 export function resolveReconciliation(evidence: ReconciliationEvidence): ReconciliationResolution {
   if (evidence.evidenceRef.length === 0) {
     throw new ReconciliationError("missing_reconciliation_evidence", "evidenceRef");
@@ -90,11 +81,7 @@ export function resolveReconciliation(evidence: ReconciliationEvidence): Reconci
   }
 }
 
-/**
- * Settles States parked in `needs_reconciliation` (SPEC §23). Only a State actually awaiting
- * reconciliation can be settled, the transition carries the evidence reference that justified it,
- * and a lost optimistic-concurrency race is reported rather than reported as success.
- */
+/** Reconciliation settlement requires a parked State and evidence; lost CAS races are reported. */
 export class StateReconciler {
   constructor(private readonly store: ReconcilableStateStore) {}
 

@@ -43,15 +43,7 @@ import { type BundledSkill, persistDisabledBundledSkills } from "./bundled";
 import { type SkillScanFile, scanSkill, skillTrustLevel } from "./guard";
 import { mergedSkills, resolveSkill } from "./registry";
 
-/*
- * Skills HTTP surface (SKILLS / SKL-V1-001..003). Read endpoints over the SoulLoader, plus the
- * install-from-git flow:
- *   scan  → clone a git repo to a temp dir and discover installable SKILL.md files,
- *   audit → run the advisory SkillAudit LLM review on one discovered skill,
- *   install → (operator confirm) write the chosen skills into the soul repo + skills-lock.json.
- * The audit is ADVISORY: the server never auto-installs on scan/audit — install is a separate,
- * explicit operator action.
- */
+/** Skills HTTP surface; scan/audit never installs, only explicit operator install does. */
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -63,27 +55,21 @@ export interface DiscoveredSkill {
   name: string;
   description?: string;
   category?: string;
-  // Path of the SKILL.md relative to the repo root (recorded in skills-lock.json).
   skillPath: string;
-  // Raw SKILL.md content (frontmatter + body), written verbatim on install.
   content: string;
-  // Exact Skill directory contents retained after the temporary clone is removed so the
-  // deterministic pre-scan covers references and structural metadata, not just SKILL.md.
+  // Retained after clone removal so pre-scan covers references, not just SKILL.md.
   files: SkillScanFile[];
 }
 
 interface ScanEntry {
   source: string;
-  // HEAD commit sha of the cloned repo at scan time — recorded as `ref` in skills-lock.json.
   ref: string;
   skills: DiscoveredSkill[];
-  // Names that have been through SkillAudit — install is gated on this.
+  // Install is gated on these audited names.
   audited: Set<string>;
   expires: number;
 }
 
-// In-memory scan cache so audit/install reuse the cloned content instead of re-cloning. Single-process
-// only (V1). Entries expire after SCAN_TTL_MS and are pruned lazily on each scan.
 const scans = new Map<string, ScanEntry>();
 const definitionRegistry = new SchemaRegistry(DEFINITION_REGISTRATIONS);
 
@@ -91,7 +77,6 @@ function pruneScans(now: number): void {
   for (const [id, entry] of scans) {
     if (entry.expires <= now) scans.delete(id);
   }
-  // Bound memory: drop the oldest entries beyond the cap (Map preserves insertion order).
   while (scans.size > MAX_SCANS) {
     const oldest = scans.keys().next().value;
     if (oldest === undefined) break;
@@ -229,9 +214,7 @@ async function skillPackageDetail(directory: string | undefined): Promise<SkillP
     try {
       definition = definitionRegistry.validateYaml(definitionFile.content)
         .document as unknown as SkillDefinition;
-    } catch {
-      // Invalid canonical definitions are publication blockers, not a reason to hide SKILL.md.
-    }
+    } catch {}
   }
   return {
     files: files.map((file) => ({ path: file.path, size: file.size ?? 0 })),
@@ -299,9 +282,7 @@ async function collectSkillFiles(skillDirectory: string): Promise<SkillScanFile[
           const resolved = await realpath(full);
           const fromRoot = relative(root, resolved);
           symlinkEscapes = fromRoot.startsWith("..") || isAbsolute(fromRoot);
-        } catch {
-          // Broken and circular symlinks are treated as escaping the Skill directory.
-        }
+        } catch {}
         files.push({
           path,
           content: symlinkTarget,
@@ -320,11 +301,7 @@ async function collectSkillFiles(skillDirectory: string): Promise<SkillScanFile[
   return files.sort((left, right) => left.path.localeCompare(right.path));
 }
 
-/**
- * Walk a directory tree for SKILL.md files and parse each into a DiscoveredSkill. Skips .git and
- * node_modules. Skills whose directory name is not a safe Skill identifier are dropped (that name
- * becomes a soul directory on install, so it must not allow path traversal). Exported for testing.
- */
+/** Walks for SKILL.md files; unsafe directory names are skipped before install. */
 export async function discoverSkills(root: string): Promise<DiscoveredSkill[]> {
   const out: DiscoveredSkill[] = [];
   async function walk(dir: string, depth: number): Promise<void> {
@@ -355,8 +332,6 @@ export async function discoverSkills(root: string): Promise<DiscoveredSkill[]> {
   return out;
 }
 
-// Per-skill lock entries follow spec SKL-V1-001: provenance is (sourceUrl, ref, hash), plus
-// sourceType and skillPath for the audit trail.
 interface LockEntry {
   sourceUrl?: string;
   sourceType?: string;
@@ -374,8 +349,6 @@ async function readLock(soulPath: string): Promise<{
       version?: number;
       skills?: Record<string, LockEntry>;
     };
-    // A freshly-initialized lock may be `{}` (no `skills` key) — normalize so callers can always
-    // index `lock.skills`.
     return { version: parsed.version ?? 1, skills: parsed.skills ?? {} };
   } catch {
     return { version: 1, skills: {} };
@@ -403,10 +376,7 @@ function toSkillSummary(
   };
 }
 
-// Cross-reference a discovered skill against what is installed: `installed` is true when the soul
-// repo already holds it, `updateAvailable` when its lock hash differs from the freshly-cloned
-// package. New installs hash the complete Skill directory; an existing V1 lock may contain the
-// legacy SKILL.md-only hash, which remains accepted until that Skill is updated.
+// V1 SKILL.md-only lock hashes stay accepted until that Skill is updated.
 function installStatus(
   skill: DiscoveredSkill,
   lock: Awaited<ReturnType<typeof readLock>>,
@@ -425,9 +395,7 @@ function installStatus(
   return { installed, updateAvailable };
 }
 
-// Curated-catalog manifest at the marketplace repo root (skills.sh shape). Discovery stays
-// authoritative — the manifest only enriches discovered skills; entries without a SKILL.md on
-// disk are ignored.
+// Marketplace manifest only enriches discovered SKILL.md files.
 interface MarketplaceManifestEntry {
   skillId?: string;
   name?: string;
@@ -436,7 +404,6 @@ interface MarketplaceManifestEntry {
   installs?: number;
 }
 
-// Read at request time (not module load) so the env override is honored per-request and in tests.
 function marketplaceSource(): string {
   return process.env.MARKETPLACE_SOURCE ?? "tulipfarm/skills";
 }
@@ -455,8 +422,6 @@ interface MarketplaceResponse {
   }[];
 }
 
-// Keyed by source so an env change never serves a stale catalog. Entries are only valid while the
-// matching scan entry is still alive (pruning/cap can evict it independently).
 const marketplaceCache = new Map<
   string,
   { scanId: string; expires: number; manifest: Map<string, MarketplaceManifestEntry> }
@@ -469,15 +434,11 @@ async function readManifest(dir: string): Promise<Map<string, MarketplaceManifes
       skills?: MarketplaceManifestEntry[];
     };
     for (const entry of Array.isArray(parsed.skills) ? parsed.skills : []) {
-      // Index under both skillId and name — the lookup key is the DISCOVERED skill's frontmatter
-      // name, which manifest authors may have recorded in either field.
       for (const key of [asString(entry.skillId), asString(entry.name)]) {
         if (key && !byName.has(key)) byName.set(key, entry);
       }
     }
-  } catch {
-    // Missing or invalid manifest is fine — the catalog is just the bare discovered list.
-  }
+  } catch {}
   return byName;
 }
 
@@ -562,12 +523,10 @@ export function registerSkillRoutes(
   gitSync: GitSyncService,
   llmService: LlmService,
   requireAuth: PreHandler,
-  // Optional: record skill installs in the activity feed.
   activity?: ActivityService,
   bundledSkills: ReadonlyMap<string, BundledSkill> = new Map(),
   disabledBundledSkills: Set<string> = new Set(),
-  // Optional: record installs/removals as audit evidence. Distinct from `activity` above —
-  // activity is a UI feed whose loss is cosmetic, audit answers who changed the Agents' capabilities.
+  // Audit answers who changed Agents' capabilities.
   audit?: AuditService
 ): void {
   const auditWrite = makeSoulAuditWriter(audit);
@@ -639,7 +598,6 @@ export function registerSkillRoutes(
       },
     },
     async (_req, reply) => {
-      // The catalog clone creates server-side scan state, so never let intermediaries cache it.
       reply.header("cache-control", "no-store");
       try {
         return await loadMarketplace(gitSync, soulLoader, bundledSkills, disabledBundledSkills);
@@ -788,7 +746,6 @@ export function registerSkillRoutes(
     },
     async (req, reply) => {
       const { name } = req.params as { name: string };
-      // NAME_RE also guards the rm path below against traversal, same as install.
       if (
         !NAME_RE.test(name) ||
         !resolveSkill(name, soulLoader, bundledSkills, disabledBundledSkills)
@@ -950,8 +907,7 @@ export function registerSkillRoutes(
           deterministicScan
         );
       } catch (e) {
-        // SkillAudit needs a working LLM. Surface an actionable message instead of a bare 500: a
-        // missing provider is a config problem (422), any other failure is an upstream error (502).
+        // Missing LLM config is 422; other audit failures are upstream 502s.
         if (e instanceof LlmNotConfiguredError) {
           return reply.code(422).send({
             error:
@@ -962,7 +918,6 @@ export function registerSkillRoutes(
           .code(502)
           .send({ error: `SkillAudit failed: ${e instanceof Error ? e.message : String(e)}` });
       }
-      // Record that the operator has seen an audit for this skill; install is gated on it.
       entry.audited.add(name);
       return { report };
     }
@@ -1009,8 +964,7 @@ export function registerSkillRoutes(
       if (missing.length > 0)
         return reply.code(400).send({ error: `not in scan: ${missing.join(", ")}` });
 
-      // Operator must have run SkillAudit on each skill before it can be installed. The
-      // rating itself never blocks — only the act of auditing is required.
+      // SkillAudit must run before install; rating itself never blocks.
       const unaudited = unique.filter((n) => !entry.audited.has(n));
       if (unaudited.length > 0)
         return reply
@@ -1054,15 +1008,10 @@ export function registerSkillRoutes(
         installed.push(skill.name);
       }
 
-      // Record provenance in skills-lock.json, then commit both SKILL.md files and the lock together.
       const lock = await readLock(gitSync.path);
       for (const skill of chosen as DiscoveredSkill[]) {
         lock.skills[skill.name] = {
-          // `skills-lock.json` is committed to the Soul repo and pushed to its remote, and
-          // `sourceUrl` is served back out of this module (`toSkillSummary`). An operator who
-          // installs from `https://user:token@host/repo` would otherwise publish that token to
-          // git history. Only the credential is stripped: this field is provenance, so `file://`
-          // and `owner/repo` sources must survive verbatim.
+          // Strip credentials before committing/serving provenance; keep file:// and owner/repo.
           sourceUrl: stripUrlCredentials(entry.source),
           sourceType: sourceType(entry.source),
           skillPath: skill.skillPath,
@@ -1096,7 +1045,7 @@ export function registerSkillRoutes(
       });
       await auditWrite(req, "skill.install", `skill:${installed.join(",")}`, {
         skills: installed,
-        // Operators paste credential-bearing clone URLs here; the ledger keeps this forever.
+        // The ledger is permanent; strip credentials from pasted clone URLs.
         source: redactRemoteUrl(entry.source),
         ...(entry.ref ? { ref: entry.ref } : {}),
       });

@@ -60,11 +60,7 @@ function renderPage() {
   render(<Stub initialEntries={["/"]} />);
 }
 
-/*
- * The sentence, not the raw strings. This is the whole point of the redesign: an admin picks a
- * real person and a real Resource type, and the exact `record.read` / `record.customer` pair is
- * derived. If this ever needs a UUID or a hand-typed action again, this helper stops compiling.
- */
+/* The helper must derive raw policy strings from a person and Resource type. */
 async function fillRequiredFields(user: ReturnType<typeof userEvent.setup>) {
   await user.selectOptions(screen.getByLabelText(/^Who/), "user_123");
   await user.selectOptions(screen.getByLabelText(/^Trying to/), "read");
@@ -103,16 +99,7 @@ test("renders partial allow as qualified and shows unevaluated layers", async ()
   expect(screen.getAllByText("credential").length).toBeGreaterThan(0);
 });
 
-/*
- * The layer disclosure has to survive on its own, not as a side effect of the partial-allow copy.
- * On a denial the outcome block says only that the denial is authoritative — it renders no layer
- * names — so this panel is the sole place an admin can see *what was actually checked*. Without
- * this test the whole "Scope of this answer" panel can be deleted with every other test still
- * green, which is exactly how a disclosure quietly disappears.
- *
- * `evaluatedLayers` matters as much as `unevaluatedLayers` here: a denial from a check that never
- * looked at the Agent layer is a different fact from one that did.
- */
+/* Denial copy omits layer names; this panel is the only checked-layer disclosure. */
 test("always discloses both evaluated and unevaluated layers, including on a denial", async () => {
   await submitCheck(
     makeResult({
@@ -304,11 +291,7 @@ test("stays quiet when every empty layer emptied for an ordinary reason", async 
   expect(screen.queryByText(/this is a data fault/i)).not.toBeInTheDocument();
 });
 
-/*
- * "Connected apps" has no `integration.update` — nothing in the system does. Offering "change"
- * there compiled an action no grant could match, so the page answered "Nobody has given them this
- * yet" and offered a remedy that an explicit deny would beat anyway.
- */
+/* Connected apps has no `integration.update`; offering change would create a false denial. */
 test("only offers verbs the chosen thing actually has an action for", async () => {
   const user = userEvent.setup();
   renderPage();

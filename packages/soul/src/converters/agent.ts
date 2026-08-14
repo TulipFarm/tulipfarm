@@ -27,11 +27,7 @@ const AGENT_FRONTMATTER_ALLOWLIST = [
 
 const AGENT_REQUIRED_FIELDS = ["owner", "modelProfile", "autonomy", "trustTier"] as const;
 
-/**
- * Convert a legacy `SoulAgent` (AGENT.md frontmatter + body) into a proposed authored `Agent`
- * definition (`agents/<slug>/agent.yaml` + companion `instructions.md`). Never publishes; the
- * caller decides whether/how to route the returned files through the changeset gateway.
- */
+/** Convert legacy Agent files into proposed canonical files; never writes or publishes. */
 export function convertLegacyAgent(agent: SoulAgent): ConversionResult {
   const slug = slugify(agent.name);
   const { mapped, warnings } = mapAllowlistedFields(agent.frontmatter, AGENT_FRONTMATTER_ALLOWLIST);

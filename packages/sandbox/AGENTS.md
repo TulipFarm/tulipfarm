@@ -1,36 +1,33 @@
-# Sandbox — Agent Conventions
+# Sandbox (`@tulipfarm/sandbox`)
+Isolated execution request contracts, backend ports, runtime profiles, workspace/assets, Hook
+execution, and egress/compute controls.
 
-`@tulipfarm/sandbox` — isolated execution request contract, backend ports, workspace/assets, and
-egress and compute controls. **Today:** `src/ports/` defines the provider-neutral `SandboxPort`,
-`SandboxIsolationAttestation`, and `assertProductionSandbox` gate (rejects local/SSH and any
-non-strong-isolation backend for production); `src/hooks/` holds the isolated-vm executor. tsconfig
-extends `@tulipfarm/tsconfig/base.json`. See root `AGENTS.md` for commands/lint.
+## Read on / Skip
+- **Read on if** you touch sandbox requests, backend attestation, production isolation gates,
+  runtime profiles, development containers, Skill execution, or isolated-vm Hook execution.
+- **Skip if** you touch Tool orchestration (`../tool-broker/AGENTS.md`), app-specific Hook grants
+  (`../../apps/api/AGENTS.md`, `../../apps/worker/AGENTS.md`), or integration adapters.
 
-## `src/hooks/` — the isolated-vm executor
-
-One implementation, shared by every host that runs untrusted source (API resource hooks, Worker
-ingress classification). Moved here from `apps/api/src/hooks/` — do not reintroduce a second copy.
-
-| File | What |
+## Map
+| Path | Owns |
 | --- | --- |
-| `protocol.ts` | `WorkerRequest`/`WorkerResponse` — a wire contract across threads and bundles; changing it is a breaking change. |
-| `analyzer.ts` | `analyzeHook` static pre-filter. A cheap first pass, **not** the isolation boundary. |
-| `isolate.ts` | `runExpression` / `runRoutineHook` / `runResourceHook` — the isolate itself, plus the `ResourceLookup` port. |
-| `worker-host.ts` | `serveHookRequests(options)` — serves requests on a worker thread with the capabilities the host grants. |
-| `worker.ts` | Default entrypoint granting **nothing**. Use it unless a capability is genuinely needed. |
-| `executor.ts` | `HookExecutor` (thread lifecycle, timeouts, circuit breaker) + `resolveHookWorkerPath`. |
+| `src/ports/`, `src/{backend,attestation}.ts` | SandboxPort and production checks. |
+| `src/{request,runtime-profile,development-container}.ts` | Requests and runtime models. |
+| `src/{skill-execution,guardrail}.ts` | Skill execution and sandbox guardrails. |
+| `src/hooks/` | Shared isolated-vm Hook executor. |
+| `test/security/` | Sandbox security checks. |
 
-**Capabilities are granted at the call site, never inside the package.** An application that needs
-the isolate to reach something ships its own entrypoint module calling `serveHookRequests` with
-that one port, and passes its path as `HookExecutorOptions.workerPath`. The API grants a read-only
-resource lookup (`apps/api/src/hooks/hook-worker.ts`); the Worker grants nothing. Adding a
-capability means adding a port here and a grant there — never a flag that silently widens reach.
-
-`resolveHookWorkerPath(dir, basename)` prefers a bundled `.cjs` sibling and falls back to `.ts`
-(run under `tsx`), so the same code path works in a built image and in tests.
-
-May import: `@tulipfarm/schema`, `@tulipfarm/authz`, `@tulipfarm/audit`, `@tulipfarm/storage`,
-`@tulipfarm/observability`. See
-[`docs/architecture/dependency-rules.md`](../../docs/architecture/dependency-rules.md). Production
-composition must inject an isolated microVM/service backend; local execution is never a
-production isolation boundary.
+## Rules
+- May import only `@tulipfarm/schema`, `authz`, `audit`, `storage`, and `observability`; see
+  [dependency rules](../../docs/architecture/dependency-rules.md).
+- Production composition must inject an isolated microVM/service backend. Local/SSH execution and
+  non-strong isolation are never production boundaries; `assertProductionSandbox` rejects them.
+- `src/hooks/` is the one implementation for untrusted source in API hooks and Worker ingress;
+  do not reintroduce an app-local copy.
+- Hook capabilities are granted at the app call site through a custom `serveHookRequests` entrypoint
+  and `HookExecutorOptions.workerPath`, never by a widening flag inside this package.
+- Default `src/hooks/worker.ts` grants nothing. Add a port here and an app grant there for any new
+  capability.
+- `src/hooks/protocol.ts` is a cross-thread/bundle wire contract; changing it is breaking.
+- `analyzeHook` is only a cheap pre-filter, not the isolation boundary.
+- `resolveHookWorkerPath(dir, basename)` prefers bundled `.cjs`, then `.ts` under `tsx`.

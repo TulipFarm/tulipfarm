@@ -5,12 +5,7 @@ export interface JobRunSummary {
   metadata?: Record<string, unknown>;
 }
 
-/**
- * Wrap a pg-boss job handler so each run is recorded in the activity feed (category 'job') with its
- * wall-clock duration and ok/error status. `summarize` derives a human summary + metadata from the
- * result on success. The activity write is best-effort (`ActivityService.record` never throws); a
- * job failure is recorded and then re-thrown so pg-boss still sees the failure and retries.
- */
+/** Records pg-boss job activity best-effort; failures are rethrown for retry. */
 export async function recordJobRun<T>(
   activity: ActivityService | undefined,
   queue: string,

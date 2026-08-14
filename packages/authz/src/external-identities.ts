@@ -1,12 +1,6 @@
 /**
- * External identity → principal mapping (SPEC §12): Slack/Telegram/GitHub/etc. subjects map to
- * one verified TulipFarm principal per business. "Thread/channel membership alone never
- * authorizes business data" — an unmapped sender, an expired mapping, or a sender mapped to a
- * different principal than the conversation owner must never inherit that owner's authority.
- * This closes the known Conversation-owner substitution fixture: today's ingress path lets any
- * external sender chime into a mapped thread and silently run the turn as the thread's owner
- * (see apps/api/src/ingress/service.ts `handleChat`); the assertion below is the fail-closed
- * check that decision must be routed through.
+ * External senders must map to their own verified principal; thread membership never inherits a
+ * conversation owner's authority.
  */
 
 export interface ExternalIdentityMapping {
@@ -58,11 +52,7 @@ export function assertExternalIdentityMapped(
   }
 }
 
-/**
- * Throws unless the sender's own verified mapping resolves to `conversationOwnerPrincipalId`.
- * An unmapped, expired, cross-business, or differently-mapped sender never inherits the
- * conversation owner's authority — denying the known Conversation-owner substitution fixture.
- */
+/** Denies unmapped, expired, cross-business, or differently mapped external senders. */
 export function assertConversationSenderAuthorized(
   mapping: ExternalIdentityMapping | undefined,
   conversationOwnerPrincipalId: string,

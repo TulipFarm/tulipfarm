@@ -2,14 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-/**
- * Boot-composition guard.
- *
- * `buildApp` gates whole feature areas on optional `AppOptions` entries. An option that `app.ts`
- * reads but `index.ts` never passes silently removes every route behind it: lint, typecheck, and
- * unit tests all stay green because the tests supply the option themselves. This test compares the
- * two files directly so a route area can only be absent from the running server on purpose.
- */
+/** Guards that `index.ts` wires every optional `AppOptions` dependency `buildApp` gates on. */
 
 const appSource = readFileSync(join(__dirname, "app.ts"), "utf8");
 const indexSource = readFileSync(join(__dirname, "index.ts"), "utf8");

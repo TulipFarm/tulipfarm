@@ -4,16 +4,9 @@ import type {
   IntegrationHttpResponse,
 } from "@tulipfarm/integrations";
 
-/**
- * Transport for manifest-declared OpenAPI egress. Unlike `SlackWebApiHttp` this applies no auth of
- * its own — the compiled binding declares its own header and format, so a provider that wants
- * `X-Api-Key` or `Authorization: token …` works without a code change here.
- *
- * A network fault answers 503 rather than throwing, so `classifyHttpFailure` decides retryability
- * once, in one place, for both provider-returned and transport-level failures.
- */
+/** Manifest OpenAPI transport; applies no auth and maps network faults to 503. */
 
-/** Third-party endpoints are not trusted to answer promptly; a stalled socket must not pin a Run. */
+/** Third-party endpoints may stall; never let a socket pin a Run. */
 const REQUEST_TIMEOUT_MS = 30_000;
 
 export interface EgressHttpOptions {

@@ -4,12 +4,7 @@ import { deriveModelProfiles, hoistProviderConnections, type LlmConfig } from "@
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type { SoulMigration } from "./index";
 
-/**
- * Normalize the legacy tier authoring shape entirely within `soul.yaml#llm`.
- *
- * ModelProfiles are runtime records synthesized from this config during publication. No authored
- * `models/` representation is created, so Settings and publication cannot diverge.
- */
+/** Normalize legacy LLM tier config inside `soul.yaml#llm`; no cross-file migration. */
 export async function normalizeLlmConfig(soulPath: string): Promise<void> {
   const soulYamlPath = join(soulPath, "soul.yaml");
 

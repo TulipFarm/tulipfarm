@@ -59,12 +59,7 @@ export class GitSoulTreeReader implements SoulTreeReader {
 
   constructor(private readonly soulPath: string) {}
 
-  /**
-   * simple-git throws from its own constructor when the directory does not yet exist, so the
-   * handle is bound on first read instead. The reader is constructed during wiring, before
-   * `GitSyncService.bootSync()` has created the Soul working copy on a fresh deployment; binding
-   * eagerly made that ordering a boot crash rather than a latent mistake.
-   */
+  /** `show` constructs simple-git after mkdir because simple-git throws if the cwd is absent. */
   private get git(): SimpleGit {
     if (!this.handle) this.handle = simpleGit(this.soulPath).env(hermeticGitEnv());
     return this.handle;

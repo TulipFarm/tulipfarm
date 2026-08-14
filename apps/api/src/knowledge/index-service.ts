@@ -10,7 +10,6 @@ export interface IndexResult {
   embedded: boolean;
 }
 
-/** Content address used to skip re-embedding unchanged chunks. md5 matches the SQL `md5()` backfill. */
 function contentHash(content: string): string {
   return createHash("md5").update(content).digest("hex");
 }
@@ -19,11 +18,9 @@ function contentHash(content: string): string {
  * (Re)index one page: chunk its plain text, then embed only the chunks whose content actually
  * changed since the last index. A chunk reuses its stored embedding when, at the same `chunkIndex`,
  * the prior chunk's `content_hash` matches AND it was embedded under the currently-active model —
- * so a one-line edit to a large page re-embeds one chunk instead of all of them. A model/dimension
- * swap invalidates every reuse (no prior model matches the active one) → full re-embed.
- *
- * Chunks with no available provider (or a provider that vanished mid-flight) store lexical-only with
- * NULL embeddings. Rows are replaced atomically (delete-then-insert — idempotent for retries).
+ * so a one-line edit to a large page re-embeds one chunk instead of all of them. Chunks with no
+ * available provider (or a provider that vanished mid-flight) store lexical-only with NULL
+ * embeddings.
  */
 export async function indexPage(
   page: KnowledgePage,
@@ -42,7 +39,6 @@ export async function indexPage(
   const activeModel = active?.model ?? null;
   const hashes = textChunks.map((c) => contentHash(c.content));
 
-  // Reuse pass: carry forward embeddings of chunks unchanged under the active model.
   const existing = await chunksRepo.listByPageForDiff(page._id);
   const priorByIndex = new Map(existing.map((c) => [c.chunkIndex, c]));
   const vectors: (number[] | null)[] = textChunks.map(() => null);
@@ -61,7 +57,6 @@ export async function indexPage(
     }
   });
 
-  // Embed only the chunks that couldn't be reused.
   const toEmbed = textChunks
     .map((c, i) => ({ content: c.content, i }))
     .filter(({ i }) => vectors[i] === null);
@@ -73,7 +68,6 @@ export async function indexPage(
         dims[toEmbed[j].i] = out.dimension;
       });
     } catch (err) {
-      // Provider vanished between isAvailable() and embedMany() → leave these chunks lexical-only.
       if (!(err instanceof EmbeddingUnavailableError)) throw err;
     }
   }
@@ -90,7 +84,6 @@ export async function indexPage(
   return { chunkCount: inputs.length, embedded: vectors.some((v) => v !== null) };
 }
 
-/** Full re-index of every active page (used after a dimension-change guard fires). */
 export async function reindexAll(
   pageRepo: KnowledgePageRepo,
   chunksRepo: KnowledgeChunkRepo,

@@ -3,12 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { SITE_URL } from "@/lib/shared";
 
-/**
- * A terminal window that types out the real one-line install from
- * `scripts/install.sh` when scrolled into view. Commands type character by
- * character; output lines land whole. Plays once; `prefers-reduced-motion`
- * (or a disconnected IntersectionObserver) shows the finished transcript.
- */
+/** Types the real install command once; reduced motion shows the finished transcript. */
 
 type Line =
   | { kind: "cmd"; text: string }

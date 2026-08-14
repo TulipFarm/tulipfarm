@@ -1,14 +1,9 @@
 /**
- * The audit ledger's reader.
- *
- * Distinct from the "Recent operational activity" table above it, and the distinction is the whole
- * point: that one renders `ActivityService` entries — a best-effort UI feed where a lost row is
- * cosmetic — while these rows are hash-chained, append-only evidence that the runtime database
- * role cannot rewrite. Until this panel existed the ledger had no reader at all, so the only way
- * to answer "who repointed the Soul git remote" was `psql`.
- *
- * The chain badge is not decoration. A list view cannot show that a row was altered or removed;
- * only re-deriving every hash can, which is what `/api/v1/audit/verify` does.
+ * Distinct from the "Recent operational activity" table above it, and the distinction is the
+ * whole point: that one renders `ActivityService` entries — a best-effort UI feed where a lost
+ * row is cosmetic — while these rows are hash-chained, append-only evidence that the runtime
+ * database role cannot rewrite. Until this panel existed the ledger had no reader at all, so
+ * the only way to answer "who repointed the Soul git remote" was `psql`.
  */
 
 import { FileClock, ShieldCheck, ShieldX } from "lucide-react";
@@ -65,8 +60,6 @@ export function AuditLedgerPanel() {
     setLoading(true);
     setError(null);
     try {
-      // Verification is requested alongside the first page rather than behind a button: a broken
-      // chain that nobody thought to check for is the same as no chain at all.
       const [page, verified] = await Promise.all([
         listAuditEvents(undefined, PAGE_SIZE),
         verifyAuditChain(),

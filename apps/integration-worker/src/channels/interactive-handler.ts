@@ -62,11 +62,7 @@ export interface InteractiveHandlerDeps {
   log: { warn: (message: string, error?: unknown) => void };
 }
 
-/**
- * Handles a Slack `block_actions` Approve/Deny click. The Socket Mode transport has already acked
- * within Slack's 3s window before this ever runs (`dispatch.ts`) — everything here is the
- * best-effort follow-up: decide, then update the message so a second click can't re-fire it.
- */
+/** Slack already got its 3s ack; follow-up records the decision and disables repeats. */
 export async function handleSlackInteractive(
   payload: unknown,
   deps: InteractiveHandlerDeps

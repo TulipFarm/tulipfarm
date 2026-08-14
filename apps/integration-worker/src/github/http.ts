@@ -4,15 +4,7 @@ import type {
   IntegrationHttpResponse,
 } from "@tulipfarm/integrations";
 
-/**
- * Concrete GitHub REST transport for the adapter's `IntegrationHttpPort`.
- *
- * Composition only: the durability decisions (what a status means, whether a write is ambiguous,
- * whether to retry) belong to `@tulipfarm/integrations`. This class does exactly one thing — turn
- * a provider-neutral request into an HTTP call and hand the raw status/headers/body back. A
- * non-2xx is a normal return value here, never a thrown error, so the adapter classifies every
- * outcome in one place. The credential is used to build one request and is never retained.
- */
+/** GitHub REST transport returns raw outcomes and never retains credentials. */
 
 export const GITHUB_API_BASE_URL = "https://api.github.com";
 const GITHUB_API_VERSION = "2022-11-28";

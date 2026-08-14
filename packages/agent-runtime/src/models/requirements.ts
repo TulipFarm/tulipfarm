@@ -1,23 +1,10 @@
 import type { ModelInvocationRequest } from "../ports/model";
 import type { ModelRequirements } from "./profile";
 
-/**
- * What a model must be able to do to serve one invocation.
- *
- * Kept pure and derived only from the request so that routing is reproducible: replaying a Run must
- * reach the same requirements, and therefore the same ModelProfile, as the original execution. Any
- * input that is not on the request (wall-clock, provider health, load) would make two identical
- * turns route differently with nothing in the record explaining why.
- *
- * Governance inputs the request cannot carry — residency, retention, training, sensitivity — are
- * supplied by the caller as `policy` and merged verbatim. They belong to the Run's Guardrails, not
- * to the transcript, and this function must not invent them.
- */
+/** Pure request-derived model requirements; policy fields are merged verbatim. */
 
-/** Rough characters-per-token for context estimation across the providers in use. */
 const CHARS_PER_TOKEN = 4;
 
-/** Headroom for the answer itself, so a prompt that only just fits does not pick a model it overruns. */
 const RESPONSE_HEADROOM_TOKENS = 1_024;
 
 export type ModelRequirementsPolicy = Omit<

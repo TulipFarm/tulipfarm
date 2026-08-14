@@ -16,12 +16,7 @@ import {
 import { GitHubRestHttp } from "./github-http";
 import { StoreGitHubInstallationDirectory } from "./github-installation";
 
-/**
- * Composes the Routine Tool port's adapter map and its `CredentialDispatcher` — the two pieces
- * `apps/worker/src/main.ts:217`'s empty `adapters: new Map()` and missing `credentials` option
- * left unowned (see `AGENTS.md`). Installation-scope-only for this phase: see
- * `github-context.ts`'s header for why AccessGrant compilation is deferred.
- */
+/** Compose installation-scoped GitHub adapters and credential dispatch. */
 
 export interface BuildGitHubToolingOptions {
   readonly businessId: string;
@@ -81,8 +76,7 @@ export function buildGitHubTooling(options: BuildGitHubToolingOptions): GitHubTo
   const secretBroker = new SecretBroker({ provider, authorizer: githubOnlyAuthorizer });
   const credentials = new CredentialDispatcher({
     secrets: secretBroker,
-    // Installation-scope-only for this phase: `GitHubAdapter.authorize` already re-checks scope +
-    // the synthesized grant on every dispatch, so there is no separate reauthorization decision.
+    // GitHubAdapter re-checks installation scope and its synthesized grant on every dispatch.
     reauthorize: () => true,
   });
 

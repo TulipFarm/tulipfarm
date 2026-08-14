@@ -8,12 +8,6 @@ import { formFields, parseSchema } from "~/lib/schema";
 import ResourceEdit from "./_app.resources.$type.$id_.edit";
 import ResourceCreate from "./_app.resources.$type.new";
 
-/*
- * Integration smoke for the create/edit routes: loader data is mocked (the real clientLoader would
- * trigger a jsdom-aborted fetch), the api write fns are mocked, and useNavigate is a spy. Covers the
- * success → navigate path, a 422 mapping to a field, and an edit 409 surfacing the conflict banner.
- */
-
 vi.mock("@remix-run/react", async () => {
   const actual = await vi.importActual<typeof import("@remix-run/react")>("@remix-run/react");
   return {

@@ -16,10 +16,7 @@ import type { Queryable } from "../db";
 import { embeddableText, embedOne, type MemoryEmbedder } from "./embedder";
 
 /**
- * Durable `MemoryStore` over `memory_assertions` + `memory_evidence`.
- *
- * `@tulipfarm/memory` owns the rules; this owns the rows. It is deliberately dumb: no filtering by
- * status beyond what a caller asked for, no authorization, no ranking. Every read path in the
+ * Durable `MemoryStore` over `memory_assertions` + `memory_evidence`. Every read path in the
  * package re-authorizes what this returns, so a store that quietly widened a result would defeat
  * that — hence `listActiveForScope` filters on the owner columns rather than trusting a caller to
  * narrow afterwards.
@@ -140,17 +137,12 @@ export class PgMemoryAssertionStore implements MemoryStore {
   ) {}
 
   /**
-   * Index the statement into the dense arm, after the row itself is committed.
-   *
-   * Best-effort by design: an embedding provider that is absent, slow, or failing must not stop a
-   * user from recording a preference. The lexical and entity arms keep the assertion recallable
-   * meanwhile, so the cost of a miss is a weaker ranking, not a lost memory.
+   * Index the statement into the dense arm, after the row itself is committed. Best-effort by
+   * design: an embedding provider that is absent, slow, or failing must not stop a user from
+   * recording a preference.
    */
   private async embedStatement(assertion: MemoryAssertion): Promise<void> {
     if (this.embedder === undefined || !this.embedder.isAvailable()) return;
-    // An inactive assertion is excluded from every recall arm, so embedding one buys nothing and
-    // costs a provider call. This matters on edits: superseding rewrites the old row unchanged,
-    // which would otherwise re-embed identical text on every single edit.
     if (assertion.status !== "active") return;
     try {
       const active = this.embedder.getActive();
@@ -171,17 +163,14 @@ export class PgMemoryAssertionStore implements MemoryStore {
           embedded.dimension,
         ]
       );
-    } catch {
-      // Swallowed deliberately — see the contract above.
-    }
+    } catch {}
   }
 
   /**
-   * Upsert the assertion and replace its evidence wholesale.
-   *
-   * Evidence is delete-then-insert rather than merged: an edit that dropped a citation must drop
-   * the row too, or a later recall would re-authorize a source the assertion no longer rests on
-   * and could keep serving a statement whose real basis is gone.
+   * Upsert the assertion and replace its evidence wholesale. Evidence is delete-then-insert rather
+   * than merged: an edit that dropped a citation must drop the row too, or a later recall would
+   * re-authorize a source the assertion no longer rests on and could keep serving a statement whose
+   * real basis is gone.
    */
   async put(assertion: MemoryAssertion): Promise<void> {
     const t = assertion.target;
@@ -278,10 +267,6 @@ export class PgMemoryAssertionStore implements MemoryStore {
     return assertionFromRow(row, evidence.get(assertionId) ?? []);
   }
 
-  /**
-   * Batched `get`. One round trip for the whole set, and — because recall hands us ids ranked by
-   * relevance — results come back in the caller's order, not the database's.
-   */
   async getMany(
     businessId: string,
     assertionIds: readonly string[]
@@ -316,7 +301,6 @@ export class PgMemoryAssertionStore implements MemoryStore {
     filter: MemoryScopeFilter
   ): Promise<readonly MemoryAssertion[]> {
     // `IS NOT DISTINCT FROM` so an absent owner id matches NULL — an unqualified filter must not
-    // silently widen to every row in the scope.
     return this.query(
       `WHERE business_id = $1
          AND status = 'active'
@@ -475,7 +459,6 @@ export class PgMemoryAssertionStore implements MemoryStore {
     return Number((countRows as { n: string }[])[0]?.n ?? "0");
   }
 
-  /** One round trip for the whole page's evidence, keyed by assertion. */
   private async evidenceFor(
     businessId: string,
     assertionIds: readonly string[]

@@ -2,12 +2,7 @@ import type { ModelSpec } from "@tulipfarm/schema";
 
 export type { ModelSpec };
 
-/**
- * Config-time model-spec resolution from LiteLLM's community-maintained
- * `model_prices_and_context_window.json` — the de-facto pricing/capability DB across the LLM tooling
- * ecosystem. Resolved once when a model is added/refreshed in Settings and pinned into the soul's
- * llm.config (deterministic + git-audited), rather than fetched per request.
- */
+/** Resolve LiteLLM specs at config time and pin them into git-audited LLM config. */
 
 // Canonical location is the repo ROOT (the `litellm/<file>` path 404s).
 const LITELLM_CATALOG_URL =
@@ -16,11 +11,7 @@ const LITELLM_CATALOG_URL =
 /** Raw LiteLLM catalog: model key → entry (we read a curated subset of fields). */
 export type LiteLlmCatalog = Record<string, Record<string, unknown>>;
 
-/**
- * TulipFarm provider → candidate LiteLLM key prefixes (LiteLLM keys look like `azure_ai/kimi-k2.5`,
- * `xai/grok-4`, `anthropic/claude-...`, or bare `gpt-4o`). `""` means "try the bare model id".
- * Order = match priority. `openai-compatible` can be anything, so we also fall back to a suffix search.
- */
+/** Provider → LiteLLM key prefixes in priority order; `""` tries the bare model id. */
 const PROVIDER_PREFIXES: Record<string, string[]> = {
   anthropic: ["", "anthropic/"],
   openai: ["", "openai/"],
@@ -28,7 +19,7 @@ const PROVIDER_PREFIXES: Record<string, string[]> = {
   "openai-compatible": [""],
 };
 
-/** Fetch the LiteLLM catalog. Best-effort: network/parse failure resolves to `null` (caller degrades). */
+/** Fetch the LiteLLM catalog; network/parse failure resolves to `null`. */
 export async function fetchLiteLlmCatalog(opts?: {
   url?: string;
   fetchImpl?: typeof fetch;
@@ -105,11 +96,7 @@ export function resolveModelSpecCandidate(
   return { spec, matchedKey: key, candidates: [] };
 }
 
-/**
- * Resolve a TulipFarm (provider, model[, base_url]) to a pinned ModelSpec from the LiteLLM catalog.
- * Tries provider-prefixed + bare keys (exact, then case-insensitive), then a suffix search across the
- * catalog. Returns the best match plus alternative candidates so the UI can confirm/override.
- */
+/** Resolve provider/model to a LiteLLM spec, returning alternatives for UI confirmation. */
 export function resolveModelSpec(
   provider: string,
   model: string,
@@ -148,16 +135,12 @@ export function resolveModelSpec(
     return { spec: null, matchedKey: null, candidates: suffixMatches.slice(0, 10) };
   }
 
-  // 3. Loose: keys that contain the model as a substring (helps near-misses); offered as candidates.
+  // 3. Loose: keys containing the model as a substring; offered as candidates.
   const loose = keys.filter((k) => k.toLowerCase().includes(m)).slice(0, 10);
   return { spec: null, matchedKey: null, candidates: loose };
 }
 
-/**
- * Bare, chat-capable model ids for a provider, derived from the catalog — used to populate the model
- * picker's suggestions in Settings. Strips the provider prefix (so `anthropic/claude-x` → `claude-x`),
- * keeps only entries that look like chat models (priced, `mode` chat/unset), dedupes and sorts.
- */
+/** Bare chat-model suggestions for Settings, derived from the LiteLLM catalog. */
 export function litellmModelsForProvider(provider: string, catalog: LiteLlmCatalog): string[] {
   const prefixes = PROVIDER_PREFIXES[provider] ?? [""];
   const out = new Set<string>();

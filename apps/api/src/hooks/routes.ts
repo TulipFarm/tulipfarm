@@ -4,10 +4,8 @@ import { ErrorSchema } from "../auth/schemas";
 import { makeRateLimitHook, type RateLimiter } from "../rate-limit";
 
 export interface HookIngressDeps {
-  /** Resolve the published webhook Trigger bound to this provider + slug, or `null`. */
   resolveTrigger(provider: string, triggerSlug: string): Promise<WebhookTrigger | null>;
   ingress: WebhookIngressDeps;
-  /** Receipt clock, injectable so ingress stays deterministic under test. */
   now?: () => string;
   rateLimiter?: RateLimiter;
 }
@@ -15,20 +13,12 @@ export interface HookIngressDeps {
 /** Constant 404 body: never reveal whether a Trigger exists, is published, or is signed. */
 const NOT_FOUND = { error: "hook not found" };
 
-/**
- * The receiver is public, so the limit is per sender and per Trigger rather than global, and it
- * is set well above a normal provider's delivery rate — a legitimate burst or redelivery storm
- * must not be dropped, while an unauthenticated flood still cannot run signature verification
- * without bound.
- */
+/** Public receiver limit is per sender and Trigger: permit redeliveries, bound floods. */
 const HOOK_LIMIT = 600;
 const HOOK_WINDOW_MS = 60_000;
 
 /**
- * Canonical signed-webhook receiver. No session auth and no CSRF — the route authenticates the
- * provider by the Trigger's declared signature scheme and nothing else. It registers in its own
- * plugin scope so the raw request bytes survive for verification, and it returns `202` only once
- * `ingestWebhook` has persisted the canonical event.
+ * Public webhook receiver: verify Trigger signatures on raw bytes and return 202 after persistence.
  */
 export async function registerHookIngressRoutes(
   app: FastifyInstance,

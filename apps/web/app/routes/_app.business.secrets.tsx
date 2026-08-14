@@ -129,11 +129,7 @@ export default function BusinessSecrets() {
     });
   }
 
-  /*
-   * `ownerId` namespaces the accessible name so two providers with a same-role field do not collide.
-   * Secret values are never returned by the API, so a stored secret renders blank with a "leave
-   * blank to keep" note; config values (resource name, base URL) prefill.
-   */
+  /* `ownerId` namespaces names; secret values never prefill and blank means keep. */
   const renderField = (field: ProviderField, ownerLabel: string) => {
     const stored = field.kind === "secret" && storedKeys.has(field.key);
     return (

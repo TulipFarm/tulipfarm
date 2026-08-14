@@ -1,26 +1,12 @@
 import { type Static, type TSchema, Type } from "@sinclair/typebox";
 import type { SchemaRegistration } from "../registry";
 
-/**
- * Shared building blocks for the canonical authored-definition schemas (Agent, Skill,
- * ToolContract, ModelProfile) registered in the {@link SchemaRegistry}. Each schema is built with
- * TypeBox and satisfies the registry's strict-object and discriminator contracts: every object
- * declares explicit unknown-property behaviour, and the root pins `apiVersion`/`kind` with `const`.
- *
- * TypeBox is used so a schema and the type describing its validated output cannot drift: the type
- * is *derived* from the schema with `Static<>`, never written a second time by hand. Where a schema
- * shape TypeBox does not emit natively is required — notably `enum`, which `Type.Union` would emit
- * as `anyOf` — use `Type.Unsafe<T>` over a literal, with both `T` and the literal derived from the
- * same `as const` array so the single source of truth survives.
- */
+/** Shared TypeBox definition blocks; derive types via `Static<>` and use enum, not `anyOf`. */
 
 /** Single canonical API version for authored Soul definitions. */
 export const DEFINITION_API_VERSION = "tulipfarm.ai/v1" as const;
 
-/**
- * Authored lifecycle (SPEC §7.1). Editing a published definition creates a new version;
- * rollback activates a prior immutable version rather than rewriting history.
- */
+/** Authored lifecycle; published edits version, while rollback activates prior versions. */
 export const DEFINITION_LIFECYCLE_STATES = [
   "draft",
   "validated",
@@ -32,18 +18,11 @@ export const DEFINITION_LIFECYCLE_STATES = [
 ] as const;
 export type DefinitionLifecycle = (typeof DEFINITION_LIFECYCLE_STATES)[number];
 
-/**
- * Trust tiers shared by Agents and Skills (SPEC §10): first-party reviewed, business-authored,
- * and third-party/Agent-generated. Changed executable content is scanned and approved per
- * Guardrail according to tier.
- */
+/** Trust tiers shared by Agents and Skills; executable changes are reviewed by tier. */
 export const DEFINITION_TRUST_TIERS = ["first_party", "business_authored", "third_party"] as const;
 export type DefinitionTrustTier = (typeof DEFINITION_TRUST_TIERS)[number];
 
-/**
- * Autonomy ceilings (SPEC §11.1). None bypasses the Tool Broker; they are Guardrail presets over
- * the same broker, not alternate execution paths.
- */
+/** Autonomy ceilings are Guardrail presets; none bypass the Tool Broker. */
 export const AGENT_AUTONOMY_CEILINGS = [
   "answer_only",
   "propose_actions",
@@ -91,12 +70,7 @@ export type ModelReasoningLevel = (typeof MODEL_REASONING_LEVELS)[number];
 export const MODEL_DATA_RETENTION = ["none", "zero_retention", "provider_default"] as const;
 export type ModelDataRetention = (typeof MODEL_DATA_RETENTION)[number];
 
-/**
- * Content kinds a model can accept or produce (SPEC §17). Modality is a *dimension*, not a rung on
- * the capability ladder: an image model is not "more" than a text model, it is a different one. A
- * turn that needs a modality no profile supports is a denial, never a silent send to a model that
- * would drop the content.
- */
+/** Model modalities are dimensions; unsupported modality is a denial, never silent dropping. */
 export const MODEL_MODALITIES = ["text", "image", "audio", "video"] as const;
 export type ModelModality = (typeof MODEL_MODALITIES)[number];
 
@@ -108,18 +82,7 @@ const SLUG_PATTERN = "^[a-z][a-z0-9]*(-[a-z0-9]+)*$";
 /** Lowercase hex sha-256 digest. */
 const DIGEST_PATTERN = "^[a-f0-9]{64}$";
 
-/**
- * Canonical secret *reference* shape, shared by every authored definition that names credential
- * material and by the execution-bundle compiler that refuses to store the material itself.
- *
- * `secret://` plus non-empty slash-separated segments; each segment starts and ends
- * alphanumerically and may contain `.`, `_`, `-` between. This deliberately excludes bare secret
- * keys (`webhook.github.secret`), env var names (`GITHUB_SECRET`), and traversal-shaped refs.
- *
- * Declared once here because the authoring boundary and the publication boundary must agree: a
- * value the schema accepts but the compiler rejects is authorable yet unpublishable, and under
- * auto-publish that wedges every later Soul change behind it.
- */
+/** Canonical `secret://` reference pattern; excludes bare keys, env vars, and traversal refs. */
 export const SECRET_REFERENCE_PATTERN =
   "^secret://[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?(?:/[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)*$";
 
@@ -136,10 +99,7 @@ export const secretReferenceSchema = Type.String({
   maxLength: 512,
 });
 
-/**
- * Common envelope every authored definition carries (SPEC §7.1): stable identifier, human slug,
- * schema version, authored version, lifecycle state, and immutable published digest.
- */
+/** Common authored-definition envelope. */
 export const definitionMetadataSchema = Type.Object(
   {
     id: Type.String({ pattern: ID_PATTERN }),
@@ -172,13 +132,7 @@ export const instructionsReferenceSchema = Type.Object(
   { additionalProperties: false }
 );
 
-/**
- * Wrap a `spec` schema in the strict discriminated root every authored definition shares.
- * The root pins `apiVersion`/`kind` and forbids unknown top-level keys.
- *
- * Generic over the `spec` schema so `Static<>` on the result yields the whole validated
- * definition — envelope and spec together — with no hand-written counterpart to fall out of date.
- */
+/** Wrap `spec` in the strict `apiVersion`/`kind` root so `Static<>` derives the full type. */
 export function definitionSchema<Kind extends string, Spec extends TSchema>(
   kind: Kind,
   spec: Spec

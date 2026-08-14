@@ -1,10 +1,6 @@
 import { MAX_KEY_CHARS, MAX_VALUE_CHARS } from "./limits";
 
-/**
- * One per-user Memory Assertion (MEM-V1-002). Keyed per user (tenant-wide) so personal facts
- * follow the user across agents. `lastWrittenAt` is the LRU key: it advances on every write
- * (memory is read in full each turn, so read-recency is meaningless — recency means last write).
- */
+/** Per-user Memory Assertion; `lastWrittenAt` is the LRU key because reads load all entries. */
 export interface MemoryAssertionView {
   _id: string;
   userId: string;
@@ -22,11 +18,7 @@ export class InvalidMemoryAssertionError extends Error {
   }
 }
 
-/**
- * Write-time guard, mirroring `assertValidMessage` — no document that breaks the per-entry
- * invariants ever reaches the collection. (Oversize *rejection toward knowledge* is a softer,
- * caller-facing policy handled in the service; this is the hard floor.)
- */
+/** Hard write-time invariant guard; oversize rejection is handled by caller-facing policy. */
 export function assertValidAssertion(doc: MemoryAssertionView): void {
   if (!doc.userId) {
     throw new InvalidMemoryAssertionError("Memory Assertion requires a userId");

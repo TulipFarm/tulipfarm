@@ -1,20 +1,4 @@
-/**
- * The Secret Broker (SPEC §13, §24). It is the only place a Credential turns from an opaque
- * reference into plaintext, and it does so inside one callback, after authorization, for a bounded
- * number of uses, within a bounded window.
- *
- * Invariants it enforces:
- *
- * - Default deny. No authorization, a refusal, or an authorizer failure all mean no lease.
- * - Non-amplification. A lease is clamped to the authorized TTL and use count, and can only be
- *   redeemed under the scope it was issued for.
- * - Freshness. Every use resolves the current value; no plaintext is cached between uses, so
- *   rotation and revocation apply to the next invocation.
- * - Containment. Plaintext never reaches the returned handle, the emitted evidence, an error
- *   message, a stack, or the callback's return value.
- *
- * Leases are in-memory only and intentionally not durable: a restarted process must re-authorize.
- */
+/** Secret Broker leases plaintext only inside an authorized, bounded, in-memory callback. */
 
 import {
   type ScopedSecretCallback,
@@ -38,11 +22,7 @@ export type SecretAuthorization =
       readonly maxUses?: number;
     };
 
-/**
- * The authority boundary in front of the broker. Implementations intersect user, Agent, Run
- * Context, Tool/target Guardrail, AccessGrant, and Credential scope; the broker itself never
- * decides authority, it only refuses to act without a positive decision.
- */
+/** Broker authority is external; without a positive decision it refuses to lease. */
 export interface SecretAuthorizer {
   authorize(scope: SecretScope): Promise<SecretAuthorization> | SecretAuthorization;
 }

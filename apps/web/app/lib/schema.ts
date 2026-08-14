@@ -1,10 +1,4 @@
-/*
- * The schema→UI mapping. Pure and React-free — this is the core: a valid `schema.yml`
- * yields a working list + detail with zero per-resource code. Parses the YAML JSON-Schema a resource
- * type ships, derives ordered field descriptors, then projects them into list columns / detail fields
- * and turns raw values into presentational primitives. Server-side transforms (x-id-strategy,
- * x-normalize, x-computed) already ran, so this only reads.
- */
+/* Schema transforms already ran server-side; this module only derives presentation fields. */
 
 import { parse as parseYaml } from "yaml";
 
@@ -49,7 +43,6 @@ export type FieldDescriptor = {
   enumValues?: string[];
   isSystem: boolean;
   isIdField: boolean;
-  // Write-side metadata (populated for declared properties; false/undefined for synthesized fields).
   required?: boolean;
   immutable?: boolean;
   readOnly?: boolean;

@@ -1,14 +1,4 @@
-// Zero-required-env boot, worker half: read what the API wrote to the shared data volume.
-//
-// A compose file pasted into Portainer has no `.env`, so nothing hands this process a credential
-// or a key. The API mints both on its first boot and persists them under the data volume; this
-// process mounts that volume read-only and reads them back. Two files, each with one owner:
-// `worker.env` (the service credential, written by `setup/worker-credential.ts`) and `secrets.env`
-// (the KEK, written by `setup/bootstrap-secrets.ts`) — the key is never copied into a second file.
-//
-// The environment always wins. A deployment that sets these itself never touches the volume, and
-// a development checkout has no `/data` at all, so it still fails with the familiar "X is required"
-// rather than a confusing error about a directory nobody asked for.
+// Env wins; otherwise containers may read API-minted worker.env/secrets.env from the data volume.
 
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -25,10 +15,7 @@ type Filled = keyof typeof SOURCES;
 
 type Env = Record<string, string | undefined>;
 
-/**
- * Where the API persists what it generated. `TF_DATA_DIR` wins; otherwise the container default,
- * and only when it already exists.
- */
+/** `TF_DATA_DIR` wins; otherwise use the existing container default. */
 export function resolveDataDir(env: Env = process.env): string | undefined {
   if (env.TF_DATA_DIR) return env.TF_DATA_DIR;
   try {
@@ -85,29 +72,11 @@ export interface WaitForDataDirOptions {
   delayMs: number;
   sleep?: (delayMs: number) => Promise<void>;
   onRetry?: (missing: Filled[], attempt: number) => void;
-  /**
-   * Optional extra check once every key is present. Presence alone isn't enough for
-   * `WORKER_API_CREDENTIAL`: `reset-dev.sh` can leave a stale file on disk from before a database
-   * wipe, and this process can read it before the API's fresh mint overwrites it — a value that
-   * satisfies the missing-keys check but does not actually authenticate. Return `false` to force a
-   * fresh read next attempt instead of trusting the cached value again.
-   */
+  /** Return `false` to reject stale data-volume values and retry a fresh read. */
   verify?: (env: Env) => Promise<boolean>;
 }
 
-/**
- * Retries `loadDataDirEnv` until every key it can source from the volume is filled (and, if
- * `verify` is given, passes it), or attempts are exhausted. This primarily handles local `pnpm
- * dev`, where Turbo starts the API and this worker concurrently: the API needs a database round
- * trip before it (re)writes the credential file — on a freshly reset database the old file is
- * stale until that happens — so a worker reading the directory in that window sees nothing yet,
- * not a permanent absence.
- *
- * A no-op single read when no data dir resolves at all: nothing here can turn a real
- * misconfiguration (no `TF_DATA_DIR`, no env var) into a value, so there is nothing to wait for —
- * and `verify` never runs, so an env-supplied credential in a managed deployment fails fast as
- * before rather than spending the retry budget on it.
- */
+/** Retries data-volume reads for local API/Worker boot races; never invents missing env. */
 export async function waitForDataDirEnv(
   options: WaitForDataDirOptions,
   env: Env = process.env

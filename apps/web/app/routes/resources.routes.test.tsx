@@ -9,11 +9,7 @@ import ResourcesIndex, { ErrorBoundary as IndexErrorBoundary } from "./_app.reso
 import ResourceList, { ErrorBoundary as ListErrorBoundary } from "./_app.resources.$type._index";
 import ResourceDetail, { ErrorBoundary as DetailErrorBoundary } from "./_app.resources.$type.$id";
 
-/*
- * Route smoke tests. A stub `loader` triggers a real data navigation whose AbortSignal jsdom's
- * undici rejects, so instead we mock `useLoaderData`/`useRouteError` and render each route's
- * Component / ErrorBoundary directly (Link still needs router context → createRemixStub at "/").
- */
+/* Render routes directly because real data navigation creates jsdom-undici AbortSignal issues. */
 
 vi.mock("@remix-run/react", async () => {
   const actual = await vi.importActual<typeof import("@remix-run/react")>("@remix-run/react");

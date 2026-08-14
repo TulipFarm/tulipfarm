@@ -4,11 +4,7 @@ import { KV_NAME_RE, MAX_KEY_CHARS, MAX_NAMESPACE_CHARS, MAX_VALUE_BYTES } from 
 import type { KvService } from "./service";
 import { err, ok } from "./tool-result";
 
-/**
- * Per-request context a KV tool handler runs against. `agentId` is the hard-wired owner for the
- * agent-scoped store — the LLM never supplies scope or owner, so an agent can only ever read/write
- * its own keyspace (`scope='agent'`, `owner_id=agentId`).
- */
+/** Tool context pins agent scope to `agentId`; the LLM never supplies scope or owner. */
 export interface KvToolContext {
   userId: string;
   agentId?: string;
@@ -48,7 +44,7 @@ const LIST_SCHEMA: Record<string, unknown> = {
   properties: { namespace: namespaceProp },
 };
 
-// `value` carries NO type constraint (any JSON). It also carries no maxLength — an oversize write must
+// `value` carries NO type constraint (any JSON) and no maxLength; oversize writes must
 // reach the service so the tool returns the byte-cap error rather than a generic schema rejection.
 const SET_SCHEMA: Record<string, unknown> = {
   type: "object",

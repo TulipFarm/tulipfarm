@@ -29,7 +29,7 @@ function summarize(args: unknown): string {
   return text.length > 500 ? `${text.slice(0, 500)}…` : text;
 }
 
-/** Approve/Deny Block Kit; a click carries `{approvalId, decision}` straight in the button value. */
+/** Approve/Deny Block Kit; clicks carry `{approvalId, decision}` in the button value. */
 function approvalBlocks(toolName: string, args: unknown, approvalId: string): unknown[] {
   return [
     {
@@ -70,12 +70,7 @@ export interface ApprovalDeliveryDeps {
   log: { warn: (message: string, error?: unknown) => void };
 }
 
-/**
- * Posts the Approve/Deny prompt for a Channel-originated Run parked on a tool-call approval —
- * once per approval. `approvalPostedId` on the correlation row is what makes this idempotent
- * across poll ticks; a *new* `approvalId` (a Run can ask for more than one approval in its
- * lifetime) posts again.
- */
+/** `approvalPostedId` makes one post idempotent per approval; a new approval id posts again. */
 export async function deliverPendingApproval(
   row: PersistedChannelRunDeliveryRecord,
   deps: ApprovalDeliveryDeps

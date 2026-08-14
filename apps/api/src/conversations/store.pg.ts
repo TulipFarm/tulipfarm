@@ -66,7 +66,6 @@ function toTurn(row: TurnRow): PersistedTurn {
     status: row.status as TurnStatus,
     attempt: row.attempt,
     runId: row.run_id,
-    // `bigint` arrives as a string from `pg` and as a number from PGlite.
     cursor: Number(row.cursor),
     supersededRunIds: row.superseded_run_ids,
     createdAt: row.created_at,
@@ -102,9 +101,9 @@ function toCompletion(row: CompletionRow): TurnCompletion {
 
 /**
  * `ConversationStore` over the existing `messages` table and the `conversation_turns` table added
- * in migration 16. Turn rows are the durable record of a submitted request: written before dispatch,
- * looked up by idempotency key so a retried request resolves to the same Turn instead of appending a
- * second Message.
+ * in migration 16. Turn rows are the durable record of a submitted request: written before
+ * dispatch, looked up by idempotency key so a retried request resolves to the same Turn instead of
+ * appending a second Message.
  */
 export class PgConversationStore implements ConversationStore {
   constructor(private readonly q: Queryable) {}
@@ -144,8 +143,6 @@ export class PgConversationStore implements ConversationStore {
 
   async appendMessage(message: PersistedMessage): Promise<void> {
     assertDeploymentBusiness(message.businessId);
-    // `content` is jsonb, and a Turn message is always text — `JSON.stringify` makes it a JSON
-    // string, matching what `PgMessageRepo` writes for a user message.
     await this.q.query(
       `INSERT INTO messages (id, conversation_id, turn_id, role, content, metadata, attempt, created_at)
        VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8)`,
@@ -198,11 +195,7 @@ export class PgConversationStore implements ConversationStore {
   ): Promise<readonly PersistedMessage[]> {
     assertDeploymentBusiness(businessId);
     // Only Turn messages, and only the text ones: rows predating migration 16 have a NULL
-    // `turn_id`, and tool/summary rows hold part arrays that are not a Turn's request or reply.
-    //
-    // An assistant Message additionally has to be the one an attempt *completed* its Turn with. A
     // Worker killed after writing its reply leaves that reply behind, and the retry writes its own
-    // under a new attempt — replaying both would show the conversation answering itself twice.
     const { rows } = await this.q.query(
       `SELECT m.id, m.conversation_id, m.turn_id, m.role,
               m.content #>> '{}' AS content, m.metadata, m.attempt, m.created_at
@@ -239,7 +232,6 @@ export class PgConversationStore implements ConversationStore {
 
   async saveCompletion(completion: TurnCompletion): Promise<void> {
     assertDeploymentBusiness(completion.businessId);
-    // `DO NOTHING`, not `DO UPDATE`: an attempt states its outcome once. A redelivered completion
     // must leave the recorded answer — and the Message it names — exactly as it stands.
     await this.q.query(
       `INSERT INTO turn_completions (turn_id, attempt, status, message_id, cursor, created_at)

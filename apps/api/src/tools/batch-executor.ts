@@ -1,13 +1,4 @@
-/**
- * TOOL-V1-008: Concurrent reads, sequential writes.
- *
- * Collects all schedule() calls made synchronously in the same event-loop tick,
- * then flushes: Promise.all if all read-only, sequential for-of if any mutating.
- *
- * The Vercel AI SDK invokes all tool execute() fns for a step via Promise.all —
- * synchronously before any await — so all schedule() calls for a step land here
- * before the microtask fires.
- */
+/** Schedules synchronous read Tools in parallel and mutating Tools sequentially. */
 export class BatchCoordinator {
   private queue: Array<{
     fn: () => Promise<unknown>;

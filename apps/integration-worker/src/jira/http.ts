@@ -5,12 +5,8 @@ import type {
 } from "@tulipfarm/integrations";
 
 /**
- * Concrete Jira Cloud transport for the adapter's `IntegrationHttpPort`.
- *
- * Composition only: durability decisions stay in `@tulipfarm/integrations`. Requests are addressed
- * through the Atlassian gateway for the installed site's `cloudId`, so the transport can never
- * reach a site the installation does not cover. A non-2xx is returned, not thrown, and the
- * credential builds one request and is never retained.
+ * Jira Cloud transport: gateway-scoped to the installation `cloudId`; non-2xx returns and the
+ * credential is retained for one request only.
  */
 
 export const JIRA_API_BASE_URL = "https://api.atlassian.com/ex/jira";
@@ -58,7 +54,7 @@ export class JiraRestHttp implements IntegrationHttpPort {
   }
 }
 
-/** Jira answers transitions and deletes with an empty body; that is a result, not a parse failure. */
+/** Jira transitions/deletes can return an empty body; that is a result, not a parse failure. */
 async function parseBody(response: Response): Promise<unknown> {
   const text = await response.text();
   if (text.length === 0) return undefined;

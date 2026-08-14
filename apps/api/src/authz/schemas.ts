@@ -5,11 +5,7 @@
 
 export const AUTHZ_SECURITY = [{ sessionCookie: [] }, { bearerToken: [] }] as const;
 
-/**
- * The principal kinds a non-human principal may be registered as. `user` is deliberately absent:
- * those rows are maintained by the `sync_user_authorization()` trigger, so the schema refuses the
- * request before the service has to.
- */
+/** Non-human principal kinds; `user` rows are maintained by the user store. */
 export const REGISTRABLE_PRINCIPAL_KINDS = [
   "agent",
   "routine",

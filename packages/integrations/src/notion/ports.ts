@@ -1,11 +1,4 @@
-/**
- * Provider-neutral Notion Knowledge boundary.
- *
- * Notion's public API does not expose a page's effective workspace sharing ACL. Concrete adapters
- * must therefore return an explicit effective reader set they can prove (for example, from an
- * admin-managed People property), or `undefined`. `undefined` is not "private"; it means
- * unverifiable and sync removes indexed content.
- */
+/** Notion readers must be proven explicitly; `undefined` means unverifiable, not private. */
 
 export interface NotionChange {
   readonly pageId: string;

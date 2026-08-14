@@ -1,26 +1,10 @@
-/**
- * Read side of the audit ledger.
- *
- * The ledger was write-only: `PgAuditEventRepo` persisted a hash-chained, tamper-evident record
- * that no REST endpoint and no UI could read, so the only way to answer "who repointed the Soul
- * git remote" was `psql`. A ledger nobody can read is not evidence.
- *
- * Two operations, deliberately separate:
- *
- *   list()   — a bounded, filtered page for a human reading the log.
- *   verify() — the whole chain re-derived from scratch, which is the *point* of chaining. A list
- *              view alone cannot tell you a row was deleted; only recomputing every hash and
- *              checking `previousHash` linkage can.
- */
+/** Audit ledger read side: list is paged; verify re-derives the full hash chain. */
 
 import { type AuditEvent, type VerifyIssue, verifyChain } from "@tulipfarm/audit";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { AuditPage, AuditPageQuery } from "./repo";
 
-/**
- * The read surface, narrowed from `PgAuditEventRepo` so tests and future adapters are not forced
- * to implement `append`.
- */
+/** Read-only audit repo surface. */
 export interface AuditChainReader {
   listPage(businessId: string, options?: AuditPageQuery): Promise<AuditPage>;
   listChain(businessId: string): Promise<AuditEvent[]>;
@@ -36,26 +20,13 @@ export interface AuditVerifyReport {
   readonly checkedAt: string;
 }
 
-/**
- * An externally-held anchor: a count and tail hash an operator recorded from an earlier `verify`
- * and kept *outside* the database.
- *
- * Without one, tail deletion is undetectable in principle. Removing the last `k` events leaves
- * every remaining hash and `previousHash` link perfectly consistent, and any count derived from
- * the same table shrinks with it — so the ledger cannot testify against itself about its own
- * length. Only a value stored elsewhere can. (Middle-row deletion, reordering and tampering are
- * caught without an anchor, by linkage and index gaps.)
- */
+/** Externally-held count and tail hash; required to detect tail deletion. */
 export interface AuditAnchor {
   readonly eventCount?: number;
   readonly tailHash?: string | null;
 }
 
-/**
- * Verification cost is linear in chain length and it reads every row, so it is not something to
- * expose without a ceiling. Above this the honest answer is "use the export/seal path", not a
- * request that quietly pins a connection for minutes.
- */
+/** Verify is linear and reads every row; above this limit, use export/seal. */
 export const VERIFY_MAX_EVENTS = 50_000;
 
 export class AuditTooLargeError extends Error {
@@ -77,14 +48,7 @@ export class AuditReadService {
     return this.repo.listPage(this.businessId, options);
   }
 
-  /**
-   * Re-derives the chain and reports any tamper, gap, fork or reorder.
-   *
-   * Pass `anchor` to also detect tail deletion — see {@link AuditAnchor} for why that case needs
-   * a value held outside the database. Without it this still catches everything that leaves a
-   * trace *inside* the chain, which is the common case: the table's UPDATE/DELETE/TRUNCATE
-   * trigger means reaching the rows at all requires deliberate superuser DDL.
-   */
+  /** Re-derive the chain; pass `anchor` to also detect tail deletion. */
   async verify(anchor: AuditAnchor = {}): Promise<AuditVerifyReport> {
     const eventCount = await this.repo.count(this.businessId);
     if (eventCount > VERIFY_MAX_EVENTS) throw new AuditTooLargeError(eventCount);

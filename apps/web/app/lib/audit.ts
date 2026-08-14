@@ -1,11 +1,4 @@
-/**
- * Client for the audit ledger's read API.
- *
- * Deliberately separate from `operations.ts`: the operations console's `activity` field is the
- * ActivityService feed — cosmetic, unchained, best-effort — while these are hash-chained evidence.
- * They used to be conflated under one name, which is how a panel labelled "Audit" ended up
- * rendering something that had never been through the ledger.
- */
+/** Audit reads are hash-chained evidence, not the cosmetic ActivityService feed. */
 
 import { apiGet } from "./api";
 

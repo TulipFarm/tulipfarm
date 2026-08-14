@@ -8,14 +8,7 @@ interface SchemaVersionRow {
   version: number | string;
 }
 
-/**
- * Fail-closed startup check.
- *
- * The worker never migrates — `apps/api` owns `schema_version` and applies migrations on boot.
- * That makes a worker started against an older database the dangerous case: it would claim Runs
- * and write columns that may not exist yet, failing them one by one instead of failing once.
- * Refusing to start is the honest outcome; an orchestrator restart loop is a visible signal.
- */
+/** Fails closed before claiming work; `apps/api` owns migrations and `schema_version`. */
 export async function assertSchemaFloor(
   database: Queryable,
   requiredVersion: number
@@ -54,10 +47,7 @@ interface WaitForSchemaOptions {
   onRetry?: (error: PreflightError, attempt: number) => void;
 }
 
-/**
- * Waits for the API's bounded migration window without ever claiming work against an old schema.
- * This primarily handles local `pnpm dev`, where Turbo starts API and Worker concurrently.
- */
+/** Waits for API's bounded migration window without claiming against an old schema. */
 export async function waitForSchemaFloor(
   database: Queryable,
   requiredVersion: number,

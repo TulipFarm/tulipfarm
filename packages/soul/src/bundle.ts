@@ -1,16 +1,6 @@
 import { canonicalHash, type VersionedSchemaDocument } from "@tulipfarm/schema";
 
-/**
- * Immutable execution bundle contract (SPEC §8.2 steps 9 and 14).
- *
- * A bundle is the content-addressed, exact-version snapshot a Run pins its behaviour to. It holds
- * only authored definitions that already passed strict AJV and semantic validation, every
- * reference resolved to a concrete `{id, slug, authoredVersion}`, and never any secret value —
- * Soul carries opaque secret references only, and the compiler enforces that.
- *
- * The bundle is deliberately free of Git: a worker loads it from the store by digest, verifies the
- * signature, and executes. No live repository, checkout, or network fetch is involved.
- */
+/** Immutable, content-addressed runtime bundle: validated definitions only, no Git or secrets. */
 
 export const EXECUTION_BUNDLE_VERSION = 2 as const;
 
@@ -82,12 +72,7 @@ export interface ExecutionBundle {
   readonly bundleVersion: typeof EXECUTION_BUNDLE_VERSION;
   readonly businessId: string;
   readonly changesetId: string;
-  /**
-   * The signed Soul commit this bundle was compiled from. Lineage (this and `changesetId`) stays
-   * out of the digest so the digest is a true content address: byte-identical definitions
-   * republished under a new commit dedupe to one stored bundle. Tampering is still caught because
-   * `buildBundleSigningPayload` binds `commit` and `changeset` into the signature.
-   */
+  /** Commit lineage is signed but excluded from the content digest so identical bundles dedupe. */
   readonly commitSha: string;
   /** Sorted by `kind` then `slug`, so the digest is order-independent. */
   readonly definitions: readonly BundleDefinition[];
@@ -175,12 +160,7 @@ export function createRuntimeBundle(bundle: ExecutionBundle, digest: string): Ru
   });
 }
 
-/**
- * Content-addressed, append-only bundle storage. `put` is idempotent: because the digest covers
- * content only, republishing identical content under a new commit yields the same digest with a
- * different signature. The first stored copy wins and is authoritative — its signature stays a
- * valid attestation of that content — so `put` never overwrites a stored digest.
- */
+/** Append-only bundle storage: the first stored copy for a digest is authoritative. */
 export interface BundleStore {
   put(record: SignedExecutionBundle): Promise<void>;
   get(digest: string): Promise<SignedExecutionBundle | undefined>;

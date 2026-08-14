@@ -1,19 +1,4 @@
-/**
- * Brand colour, made safe for both canvases.
- *
- * A brand hex is the one colour in the product that cannot be a design token: it belongs to an
- * external company, arrives as runtime data, and is not ours to redefine. It is also not
- * automatically legible — GitHub's `#181717` and Notion's `#000000` disappear on the dark canvas,
- * and a pale brand disappears on the white one.
- *
- * So the hex is never rendered as given. It is converted to OKLCH and its lightness clamped into
- * the band that reads on the canvas in question, holding hue and chroma steady so the result is
- * still recognisably the brand. OKLCH is used rather than mixing toward white or black because
- * mixing drains chroma: a tinted Slack aubergine turns into a pale lilac, while raising OKLCH
- * lightness keeps it purple. Out-of-gamut results are handed to the browser, which gamut-maps
- * `oklch()` itself — the same job done here would cost far more code and agree with the browser
- * anyway.
- */
+/** Clamp brand hexes in OKLCH per canvas so runtime colours stay legible and on-brand. */
 
 /** Above this the mark is too pale to read on the white canvas. */
 const LIGHT_CEILING = 0.62;
@@ -61,13 +46,7 @@ function css(l: number, c: number, h: number): string {
   return `oklch(${l.toFixed(3)} ${c.toFixed(4)} ${h.toFixed(1)})`;
 }
 
-/**
- * Both canvas-safe forms of a brand hex, or `null` if the hex is unusable.
- *
- * Returning both rather than the one for the current theme is deliberate: the pair is written to
- * two custom properties and switched by the `dark:` variant, so a theme change repaints with no
- * JavaScript and server-rendered markup is correct before hydration.
- */
+/** Return both theme-safe colours so CSS can switch themes without JavaScript. */
 export function brandInk(hex: string | null | undefined): BrandInk | null {
   if (!hex) return null;
   const oklch = toOklch(hex);

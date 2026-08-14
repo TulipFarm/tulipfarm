@@ -1,18 +1,6 @@
 import { readFile } from "node:fs/promises";
 
-/*
- * Resolves a manifest's `icon` slug to a Simple Icons mark: its path data and its brand colour.
- *
- * Resolution happens here rather than in the browser because the icon set is 25MB for ~3400 marks
- * and a deployment needs a handful. Shipping it to the client would cost every operator the whole
- * set to render two rows; resolving it here costs the payload ~700 bytes per integration that
- * actually has a mark, and keeps working for an integration installed from a git repo at runtime,
- * which a build-time bundle could not.
- *
- * The colour is the brand's official hex, unmodified. Making it *legible* is the renderer's job,
- * not this module's: whether GitHub's near-black #181717 needs lightening depends on the canvas it
- * lands on, and only the browser knows which theme is active.
- */
+/* Resolve manifest icon slugs server-side; return official Simple Icons path and hex only. */
 
 /** Matches `ICON_SLUG_RE` in packages/soul/src/integration-trust.ts. */
 const SLUG_RE = /^[a-z0-9_]{1,32}$/;
@@ -28,14 +16,7 @@ export interface BrandIcon {
 /** Resolved marks, and the misses, so an unknown slug is not re-resolved on every request. */
 const cache = new Map<string, BrandIcon | null>();
 
-/*
- * Slug → hex for the whole set, built once on the first lookup that needs a colour.
- *
- * The path comes from the per-brand SVG file, but those files carry no colour — the hex lives only
- * in the set's metadata, which is one 450KB document. Parsing it per request would be absurd, and
- * holding the parsed array would keep ~3400 objects alive to show a handful of brands, so the
- * array is reduced to a string map and dropped.
- */
+/* Build slug-to-hex once, then drop the 450KB metadata array. */
 let hexBySlug: Map<string, string> | undefined;
 
 function brandHex(slug: string): string | undefined {
@@ -53,12 +34,7 @@ function brandHex(slug: string): string | undefined {
   return hexBySlug.get(slug);
 }
 
-/**
- * The brand's mark, or `null` when the slug names no known brand.
- *
- * A miss is not an error: bundled manifests are reviewed, and the set omits brands that asked to
- * be removed, so "no mark for this name" is an ordinary outcome the caller renders a monogram for.
- */
+/** Returns null for reviewed-but-missing brand marks; callers render a monogram. */
 export async function brandIcon(slug: string | undefined): Promise<BrandIcon | null> {
   if (!slug || !SLUG_RE.test(slug)) return null;
 

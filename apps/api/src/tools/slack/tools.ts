@@ -18,21 +18,7 @@ import { err, ok, type RequestContext, type ToolCallResult, type ToolDef } from 
 import type { SlackTooling } from "./compose";
 import { SLACK_BOT_TOKEN_SECRET_REF } from "./credentials";
 
-/**
- * The chat-facing Slack Tool family — one `ToolDef` per `SLACK_TOOL_CONTRACTS` entry, tier
- * `"integration"`. Mirrors `../github/tools.ts`: every call goes through the effect-ledger
- * idempotency path (`EffectStore.reserve` -> `EffectDispatcher.dispatch`). Approval gating is the
- * existing chat-turn coarse gate keyed on `ToolDef.mutating` — no bespoke Slack approval UI.
- *
- * After a successful send, writes an `integration_conversations` mapping for the sent message's
- * channel + `ts` so a human reply in that Slack thread routes back to this same conversation,
- * exactly as the reactive ingress path would derive on first inbound message
- * (`internal/channel-routes.ts`'s `externalThreadKey`). It also marks the thread as mentioned
- * (`ChannelMentionedThreadStore.mark`) — `apps/integration-worker`'s mention-gate
- * (`channels/mention-gate.ts`) only lets a channel reply through when the thread was previously
- * marked via a human `@mention`; a thread the bot itself started has no such mark, so without this
- * every reply in it would be silently dropped as `unmentioned_thread`.
- */
+/** Slack Tools use the effect ledger; sent bot threads are mapped and mention-marked. */
 
 const SLACK_CATALOG = ToolCatalog.load(SLACK_TOOL_CONTRACTS);
 const SLACK_RESOURCE = "integration.slack";
@@ -57,7 +43,7 @@ const SLACK_TOOL_SPECS: Record<SlackToolId, SlackToolSpec> = {
   },
 };
 
-/** Dresses a digest as an RFC 4122 v4 uuid, same technique run-kernel uses for durable effect ids. */
+/** Dresses a digest as an RFC 4122 v4 uuid for durable effect ids. */
 function derivedId(...parts: readonly string[]): string {
   const digest = createHash("sha256").update(parts.join(":")).digest("hex");
   const version = `4${digest.slice(13, 16)}`;
@@ -77,20 +63,14 @@ function mapDispatchError(error: ToolDispatchError): ToolCallResult {
   if (error.detail === "channel_not_found") {
     return err("not_found", "No Slack channel by that name — check the bot has joined it.");
   }
-  // Infrastructure, not the request. Left as `internal_error` these read as `business` faults and
-  // are handed to the model as a repair signal, which spends its budget rewording arguments that
-  // were never wrong. Mirrors `../github/tools.ts` and `../declarative/tools.ts`.
+  // Treat missing credentials as infrastructure, not model-repairable bad arguments.
   if (error.detail === "provider_rate_limited" || error.detail === "provider_unavailable") {
     return err("unavailable", "Slack is temporarily unavailable; try again shortly.");
   }
   return err("internal_error", error.detail ? `${error.code}:${error.detail}` : error.message);
 }
 
-/**
- * A rediscovered effect from an earlier attempt at this exact call (same run + call id) — the
- * ledger keeps only whether it landed, not the Slack response body, so a replay can't hand the
- * model the original output back. Mirrors `../github/tools.ts`'s `replayed()`.
- */
+/** Replayed effect: settled state only, no retained Slack response body. */
 function replayed(state: string): ToolCallResult {
   switch (state) {
     case "confirmed":
@@ -127,10 +107,7 @@ function slackChannelTargets(args: unknown): readonly ToolTargetRef[] {
   if (/^[CGD][A-Z0-9]{8,}$/.test(normalized)) {
     return [{ type: SLACK_AUTHZ_RESOURCE, id: `channel:${normalized}` }];
   }
-  // Names cannot be resolved to Slack's stable channel id without an API call. Keep #name/name as
-  // one explicit ambiguous-name target instead of silently aliasing it to a channel id target; this
-  // prevents a grant or deny written for `slack.channel:C...` from being bypassed by switching to a
-  // name spelling unless policy also deliberately grants this unresolved-name namespace.
+  // Keep #name/name targets separate from stable channel ids; names need an API call to resolve.
   const name = normalized.startsWith("#") ? normalized.slice(1) : normalized;
   return name.length === 0 ? [] : [{ type: SLACK_AUTHZ_RESOURCE, id: `channel-name:${name}` }];
 }
@@ -188,9 +165,7 @@ function buildToolDef(
         toolId,
         toolVersion: contract.toolVersion,
         action: toolId,
-        // The Tool's own declared derivation, not a second one written here: `targetsFor` is what
-        // the gate reads, so building the intent from anything else would let the recorded effect
-        // and the authorization decision describe different targets.
+        // Build intent from `targetsFor`; the gate reads the same derivation.
         targetRefs: definition.targetsFor(args, ctx),
         arguments: args,
         credentialRef: SLACK_BOT_TOKEN_SECRET_REF,
@@ -224,8 +199,7 @@ function buildToolDef(
       try {
         const output = await dispatcher.dispatch(businessId, reserved.effect.effectId);
         if (toolId === SLACK_TOOL_IDS.sendMessage && isSendMessageOutput(output)) {
-          // Let a reply in this thread pass the ingress mention-gate even though no human ever
-          // @mentioned the bot here — the bot starting the thread should count the same way.
+          // Bot-started threads count as mentioned for the ingress mention-gate.
           await tooling.mentionedThreads.mark({
             businessId,
             provider: "slack",

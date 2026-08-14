@@ -1,13 +1,6 @@
 /**
- * Zero-unauthorized-disclosure proof for Memory (SPEC §14.2).
- *
- * The matrix here is scope × requester identity × lifecycle state (superseded, forgotten, expired,
- * unconfirmed) × evidence-provider behavior. Every case asserts the decision *and* that the planted
- * marker strings — statement text, subject, assertion id, evidence refs — appear nowhere in the
- * recall result, the exclusion list, or the audit payload.
- *
- * A memory the caller may not read must be indistinguishable from a memory that does not exist,
- * apart from an aggregate reason count.
+ * Unauthorized memory must look absent except for aggregate reason counts; planted marker strings
+ * must not appear in results, exclusions, or audit payloads.
  */
 
 import type { AuditEventInput } from "@tulipfarm/audit";

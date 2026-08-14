@@ -2,12 +2,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { freePort } from "./free-port";
 
-/**
- * The process under test is a real child process talking to a real socket, so the harness cannot
- * hand it an in-process PGlite the way the unit suites do. `PGLiteSocketServer` puts the same WASM
- * Postgres behind the wire protocol on an ephemeral port — a scratch database that never touches
- * the developer's, and needs no Docker in CI.
- */
+/** Wire-protocol PGlite DB for child-process tests, isolated and Docker-free. */
 export interface ScratchDatabase {
   /** `DATABASE_URL` for the integration worker process. */
   readonly url: string;
@@ -15,11 +10,7 @@ export interface ScratchDatabase {
   stop(): Promise<void>;
 }
 
-/**
- * Boots a scratch Postgres carrying only `schema_version`, at the given version — this skeleton
- * reads nothing else. The API owns migrations, so the harness writes `schema_version` itself
- * rather than importing another app's migration runner.
- */
+/** Boots scratch Postgres with only `schema_version`; the API owns migrations. */
 export async function startScratchDatabase(schemaVersion: number): Promise<ScratchDatabase> {
   const database = await PGlite.create();
 

@@ -1,16 +1,4 @@
-/**
- * Secret leases (SPEC §13, §24). A lease is an in-memory, short-lived, scope-bound right to use one
- * Credential — never the Credential itself. Plaintext exists only as an argument to the callback
- * passed to {@link SecretLease.use}, for the duration of that call.
- *
- * The handle is deliberately hostile to escape: it holds no plaintext field, refuses JSON
- * serialization, and renders as a fixed marker under string coercion and `util.inspect`. That keeps
- * a lease out of prompts, Run state, Artifacts, sandbox fixtures, and logs even when a caller
- * carelessly interpolates or dumps it.
- *
- * Issuing, authorizing, resolving, and revoking leases belongs to {@link SecretBroker} in
- * `./broker`; this module owns the handle, its scope shape, and its typed errors.
- */
+/** Secret leases expose plaintext only inside `use()` and stringify as a fixed marker. */
 
 export type SecretLeaseDenialReason =
   /** Authorization was refused, or could not be established at all. */
@@ -26,10 +14,7 @@ export type SecretLeaseDenialReason =
   /** The broker no longer knows this lease, as after a restart or `revokeAll`. */
   | "lease_unknown";
 
-/**
- * The exact authority a lease carries. Every field narrows use; none of them may be widened after
- * issue. `secretRef` is an opaque reference — the name of a Secret, never its value.
- */
+/** Exact lease authority; every field narrows use and `secretRef` is never the value. */
 export interface SecretScope {
   readonly secretRef: string;
   readonly toolId: string;
@@ -88,15 +73,7 @@ export class SecretLease {
     private readonly redeem: LeaseRedeemer
   ) {}
 
-  /**
-   * Runs `callback` with the *current* plaintext for this lease. The value is resolved at call
-   * time, so a rotation or revocation that happened since issue takes effect here; nothing is
-   * cached between calls. Denials, expiry, replay, and scope mismatches throw
-   * {@link SecretLeaseDeniedError} and never reveal the Credential.
-   *
-   * `presented` re-states the scope the caller believes it is acting under. Supplying a different
-   * scope is a denial, not a re-authorization: a lease cannot be pointed at another Tool or target.
-   */
+  /** Resolves current plaintext only inside the callback; scope mismatch/expiry/replay denies. */
   use<T>(callback: ScopedSecretCallback<T>, presented?: SecretScope): Promise<T> {
     return this.redeem(this.leaseId, presented, callback);
   }

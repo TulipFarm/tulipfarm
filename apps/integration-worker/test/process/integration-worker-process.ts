@@ -7,11 +7,7 @@ import { freePort } from "./free-port";
 const APP_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const BUNDLE = resolve(APP_ROOT, "dist/integration-worker.cjs");
 
-/**
- * Bundles the integration worker exactly as the Dockerfile does. The subject of these tests is the
- * shipped artifact — a `tsx` run of the sources would not catch a bundling failure, which is
- * precisely the class of break that makes a container refuse to boot.
- */
+/** Bundles like Docker so tests catch shipped-artifact boot failures. */
 export async function buildIntegrationWorkerBundle(): Promise<string> {
   await build({
     entryPoints: [resolve(APP_ROOT, "src/main.ts")],

@@ -3,20 +3,15 @@ import { type CompiledState, stateFields } from "../compiler";
 import { RoutineStepError, type StepOutcome, stateOutcome } from "./step";
 
 /**
- * Shared plumbing for the States that hand control to someone outside the Run — an approver, an
- * assignee, a form submitter, a child Run. Each one becomes a *durable* wait: bounded by an
- * authored deadline, addressed to explicit principals, and resolved through exactly one of the
- * paths below. Nothing here performs I/O; the caller registers the returned wait and persists the
- * decision, so a crash between planning and registering replays to the same plan.
+ * External-control States produce bounded durable waits for explicit principals; planning performs
+ * no I/O, so crashes before registration replay to the same plan.
  */
 
 export interface StateWaitContext {
   readonly businessId: string;
   readonly runId: string;
   readonly waitId: string;
-  /** Durable State occurrence key; it may differ from the authored name inside a fan-out. */
   readonly stateKey: string;
-  /** ISO-8601 instant the wait is opened at. */
   readonly now: string;
 }
 
@@ -79,9 +74,7 @@ export function continueState(state: CompiledState): StateResumeDecision {
 }
 
 /**
- * Route a named failure. An authored `onError` handler claims it; otherwise the State takes the
- * declared fallback — `failed` for a decided negative outcome, `attention` for one nobody
- * decided (an expiry, an unconfirmed compensation), which a human must resolve.
+ * `onError` may claim failures; otherwise decided outcomes fail and undecided ones need attention.
  */
 export function resolveErrorPath(
   state: CompiledState,
@@ -102,7 +95,6 @@ export function resolveErrorPath(
   return fallback === "failed" ? { kind: "failed", errorRef } : { kind: "attention", errorRef };
 }
 
-/** Read a required list of authored role names off a State. */
 export function requireRoles(state: CompiledState, key: string): readonly string[] {
   const value = stateFields(state.definition)[key];
   const roles = Array.isArray(value) ? value.filter((r): r is string => typeof r === "string") : [];

@@ -16,12 +16,7 @@ import {
 } from "../../src";
 import { FakeChildLinkStore, loopHarness, TOOL_NAME } from "./harness";
 
-/**
- * Adversarial corpus (SPEC §10, §17, invariants 1-3). Every case here is an attempt to widen
- * authority, launder untrusted content into instructions, or escape a durable limit through the
- * model. The assertions are on the runtime's decisions, not on prompt wording — a prompt fix
- * cannot make any of these pass.
- */
+/** Adversarial corpus for authority, instruction, and durable-limit invariants. */
 
 describe("prompt injection cannot outrank governed instructions", () => {
   function candidate(overrides: Partial<ContextCandidate> = {}): ContextCandidate {

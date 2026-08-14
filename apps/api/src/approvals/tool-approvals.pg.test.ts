@@ -17,15 +17,6 @@ import { makePglite } from "../test/pglite";
 import { ApprovalsRepo } from "./runtime-repo";
 import { ToolApprovalService } from "./tool-approvals";
 
-/**
- * Approvals as kernel waits, over real SQL (plan §5).
- *
- * The claim under test is that an approval is a *pause* rather than a restart: the Run that asked
- * stops holding a lease, a human decides at their own pace, and the very same Run is requeued. That
- * is only provable against the real `runs` / `run_waits` tables, because what makes it true is the
- * kernel's compare-and-swap and the wait's single-use token, not anything this service remembers.
- */
-
 const SUBJECT = { kind: "user", id: "user-1" } as const;
 const PRINCIPAL = `${SUBJECT.kind}:${SUBJECT.id}`;
 const STATE_KEY = "invoke";

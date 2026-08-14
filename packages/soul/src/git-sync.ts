@@ -43,12 +43,7 @@ export class GitSyncService extends EventEmitter {
   private lastSyncError: string | null = null;
   private lastSyncAt: Date | null = null;
 
-  /**
-   * Per-invocation `-c http.extraheader=...` config carrying the credential as a transient HTTP
-   * header — never persisted to `.git/config` (unlike the previous `https://<token>@host/...`
-   * embedded-URL scheme, which left the live credential sitting in plaintext on disk for as long
-   * as the remote stayed configured). Empty when no remote/credential is set.
-   */
+  /** Pass credentials as transient HTTP headers; never persist tokens in `.git/config`. */
   private async authConfig(): Promise<string[]> {
     if (!this.remoteUrl) return [];
     const credential = await this.credentialProvider();
@@ -77,12 +72,7 @@ export class GitSyncService extends EventEmitter {
     return this.remoteUrl !== undefined && this.remoteUrl !== "";
   }
 
-  /**
-   * Guarantee `soulPath` is its OWN git repo before any commit. If it has no `.git` yet but sits
-   * inside another repository, we REFUSE — committing there would silently pollute the enclosing
-   * repo (e.g. a misconfigured relative SOUL_PATH landing inside the project tree). Otherwise we
-   * initialize a dedicated repo. Idempotent.
-   */
+  /** Ensure `soulPath` is its own repo; refuse nested repos to avoid polluting the project repo. */
   private async ensureRepo(): Promise<void> {
     if (this.ensured) return;
     mkdirSync(this.soulPath, { recursive: true });
@@ -439,11 +429,7 @@ export class GitSyncService extends EventEmitter {
     return committed;
   }
 
-  /**
-   * Every successful local commit path must flow through this one hook. `commitPaths` is not a
-   * wrapper around `commit`, so a third commit helper added later must call this too or it can
-   * silently bypass bundle publication and leave `soul_active_bundles` empty again.
-   */
+  /** Every successful commit helper must call this hook so bundle publication cannot be bypassed. */
   private async afterSuccessfulCommit(
     result: { sha: string; filesChanged: number },
     actor: CommitActor | undefined

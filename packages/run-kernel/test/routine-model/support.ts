@@ -1,12 +1,5 @@
-/**
- * Shared scaffolding for the reference-model tests.
- *
- * These suites compare the kernel against an independently written model rather than against
- * remembered outputs, so a property is checked over many generated cases instead of one fixture.
- * Randomness is seeded and reproducible: a failure prints the seed and re-runs identically.
- */
+/** Reference-model tests use seeded random cases, and failures print reproducible seeds. */
 
-/** Deterministic 32-bit PRNG (mulberry32) — no dependency, same sequence on every machine. */
 export function seeded(seed: number): () => number {
   let state = seed >>> 0;
   return () => {

@@ -30,8 +30,6 @@ required:
   - title
 `;
 
-// ── Fake dependencies ─────────────────────────────────────────────────────────
-
 class FakeUserRepo implements UserRepo {
   private users: UserDoc[] = [];
   async findByEmail(email: string): Promise<UserDoc | null> {
@@ -92,8 +90,6 @@ function makeFakeSoulLoader(resources: SoulResource[] = []): SoulLoader {
   } as unknown as SoulLoader;
 }
 
-// ── Test setup ────────────────────────────────────────────────────────────────
-
 describe("resource-type routes", () => {
   let app: FastifyInstance;
   let store: MemorySessionStore;
@@ -125,8 +121,6 @@ describe("resource-type routes", () => {
   afterEach(async () => {
     await app.close();
   });
-
-  // ── POST /api/v1/resource-types ───────────────────────────────────────────
 
   describe("POST /api/v1/resource-types", () => {
     it("returns 401 without auth", async () => {
@@ -297,8 +291,6 @@ x-computed:
     });
   });
 
-  // ── GET /api/v1/resource-types ────────────────────────────────────────────
-
   describe("GET /api/v1/resource-types", () => {
     it("returns 401 without auth", async () => {
       const res = await app.inject({ method: "GET", url: "/api/v1/resource-types" });
@@ -343,8 +335,6 @@ x-computed:
       expect(customer?.schema).toContain("type: object");
     });
   });
-
-  // ── PUT /api/v1/resource-types/:name ──────────────────────────────────────
 
   describe("PUT /api/v1/resource-types/:name", () => {
     const put = (payload: { schema: string }) => ({
@@ -394,8 +384,6 @@ x-computed:
     });
   });
 
-  // ── DELETE /api/v1/resource-types/:name ───────────────────────────────────
-
   describe("DELETE /api/v1/resource-types/:name", () => {
     const del = () => ({
       method: "DELETE" as const,
@@ -431,13 +419,7 @@ x-computed:
     });
   });
 
-  // ── The domain wall ───────────────────────────────────────────────────────
-
-  /**
-   * A Resource's `domain` is what separates an HR Resource from an engineering one. Members may
-   * author record schemas; only an admin may decide the domain, because
-   * `MEMBER_UNDOMAINED_RECORD_ACTIONS` hands every member full CRUD on any *domainless* type.
-   */
+  /** Only admins may set Resource domains; members get full CRUD on domainless Resource types. */
   describe("domain is admin-only", () => {
     const auth = (session: string) => ({
       cookies: { [SESSION_COOKIE]: session, [CSRF_COOKIE]: TEST_CSRF },
@@ -518,7 +500,7 @@ x-computed:
         payload: { schema: VALID_SCHEMA_YAML },
       });
       expect(res.statusCode).toBe(200);
-      // The wall survives an ordinary schema edit.
+
       expect(writeFile).toHaveBeenCalledWith(
         expect.stringContaining("resource.yaml"),
         expect.stringContaining("domain: hr"),
@@ -526,7 +508,7 @@ x-computed:
       );
     });
 
-    // Without this the POST gate is walkable: delete the `hr` type, re-create it domainless.
+    // Prevent deleting and recreating a protected type as domainless.
     it("refuses a member deleting a domained type", async () => {
       vi.mocked(existsSync).mockReturnValue(true);
       soulLoader.resources.set("salary-review", {
@@ -556,11 +538,7 @@ x-computed:
       expect(res.statusCode).toBe(204);
     });
 
-    /**
-     * `checkSchemaYaml` is laxer than the envelope's `recordSchema`. Writing an envelope the
-     * loader would reject used to cost the Resource its domain silently; now the loader throws, so
-     * it would break Soul boot. The route must refuse it instead of committing it.
-     */
+    /** Refuse envelopes that checkSchemaYaml accepts but the loader would reject. */
     it("refuses a domained schema the Resource envelope would reject", async () => {
       const res = await app.inject({
         method: "POST",
@@ -572,8 +550,6 @@ x-computed:
       expect(writeFile).not.toHaveBeenCalled();
     });
   });
-
-  // ── GET /api/v1/resource-types/:name/hooks ─────────────────────────────────
 
   describe("GET /api/v1/resource-types/:name/hooks", () => {
     it("returns 401 without auth", async () => {
@@ -635,8 +611,6 @@ x-computed:
       expect(res.json()).toEqual({ name: "ticket", hasHooks: false, source: null });
     });
   });
-
-  // ── PUT /api/v1/resource-types/:name/hooks ─────────────────────────────────
 
   describe("PUT /api/v1/resource-types/:name/hooks", () => {
     const VALID_HOOK =
@@ -711,8 +685,6 @@ x-computed:
       });
     });
   });
-
-  // ── DELETE /api/v1/resource-types/:name/hooks ──────────────────────────────
 
   describe("DELETE /api/v1/resource-types/:name/hooks", () => {
     const delHooks = () => ({

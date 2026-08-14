@@ -1,13 +1,4 @@
-/**
- * Provider-neutral telemetry port.
- *
- * Capability id `telemetry` (optional; see ./capability). Adapters bind to
- * OpenTelemetry or any exporter without leaking provider types across the
- * boundary. Attribute values are restricted to primitives so callers cannot dump
- * payloads or secrets into spans/metrics/logs; errors are recorded by a stable
- * safe `code`, never a raw error carrying a stack or protected content (SPEC §22:
- * "redacting contents and Secrets").
- */
+/** Telemetry port restricts attributes to primitives and records safe error codes, never raw errors. */
 
 export type AttributeValue = string | number | boolean;
 export type Attributes = Readonly<Record<string, AttributeValue>>;

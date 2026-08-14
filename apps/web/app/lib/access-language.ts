@@ -1,44 +1,29 @@
 /*
- * Plain-language rendering of the authorization vocabulary.
- *
  * The authz API speaks in principals, grants, actions and resource types. A person running a
  * business does not, and an access screen that shows them `allow any action on platform.kv` is
- * asking them to learn our schema before they can let someone read the menu. This module is the
- * one place that translation happens, so every access surface says the same words.
- *
- * Two rules hold it honest:
- *
- * 1. **Never widen.** A phrase may be vaguer than the grant it renders, never broader. An unknown
- *    resource type falls back to its own name rather than being folded into a friendly area it
- *    might not belong to — guessing here would tell an owner they granted less than they did.
- * 2. **Plain words are a view, not the record.** The technical `label` the server builds carries
- *    domain and condition dimensions this rendering deliberately drops, so every surface that
- *    shows a phrase keeps the raw label reachable underneath it.
+ * asking them to learn our schema before they can let someone read the menu.
  */
 
 import type { AuthzGrant, AuthzRole } from "./authz";
 import type { UserStatus } from "./users";
 
-/** A part of the business an owner recognises, gathering the resource types that serve it. */
 export type AccessArea = {
   id: string;
-  /** Sentence-case name used in headings and chips. */
   label: string;
-  /** One line saying what lives here, in the owner's terms. */
   blurb: string;
 };
 
 type AreaRule = AccessArea & {
   /** Exact resource types this area owns. */
   types: readonly string[];
-  /** Extra dotted prefixes this area owns beyond its own types. */
   prefixes?: readonly string[];
 };
 
 /*
- * Ordered most-specific first: `record` must win before any prefix rule could claim it. The types
- * listed here are the live vocabulary from `apps/api/src/identity/roles.ts` — when a surface adds a
- * new resource type, it belongs in one of these areas or it will render as its raw name.
+ * Ordered most-specific first: `record` must win before any prefix rule could claim it. The
+ * types listed here are the live vocabulary from `apps/api/src/identity/roles.ts` — when a
+ * surface adds a new resource type, it belongs in one of these areas or it will render as its
+ * raw name.
  */
 const AREA_RULES: readonly AreaRule[] = [
   {
@@ -148,29 +133,15 @@ export function areaForResourceType(resourceType: string): AccessArea | null {
 
 function matchesArea(rule: AreaRule, resourceType: string): boolean {
   if (rule.types.includes(resourceType)) return true;
-  // A type owns its own namespace: whoever owns `authz` owns `authz.role` and `authz.assignment`.
-  // Without this, a Soul-authored Role naming a child type falls through to the raw-name fallback
-  // and the page says "Full access to authz assignment" — the database vocabulary this whole
-  // module exists to hide. Children are claimed by the first area that lists the parent, and
-  // `AREA_RULES` is ordered so an area that names a child exactly still wins over its parent's
-  // namespace (`soul.agent` is an automation, not business setup).
   return [...rule.types, ...(rule.prefixes ?? [])].some(
     (prefix) => prefix !== "*" && resourceType.startsWith(`${prefix}.`)
   );
 }
 
-/** Every area, in the order screens should offer them. */
 export function accessAreas(): readonly AccessArea[] {
   return AREA_RULES.map(({ id, label, blurb }) => ({ id, label, blurb }));
 }
 
-/**
- * The thing a grant acts on, named the way an owner would name it.
- *
- * `record.leave_request` becomes "Leave request records" rather than being flattened to "Records",
- * because the difference between an HR record and an engineering one is the entire point of
- * scoping a grant to a type.
- */
 export function describeResourceType(resourceType: string): string {
   if (resourceType === "*") return "everything";
   if (resourceType === "record") return "records";
@@ -189,7 +160,6 @@ export function describeResourceType(resourceType: string): string {
   return area ? area.label.toLowerCase() : humanize(resourceType).toLowerCase();
 }
 
-/** What a grant lets someone do, as a verb phrase that reads before its object. */
 export function describeAction(action: string): string {
   if (action === "*") return "Full access to";
 
@@ -227,14 +197,7 @@ export function describeAction(action: string): string {
   }
 }
 
-/**
- * One grant as a sentence fragment. The caller renders `effect` beside it — folding "blocked" into
- * the words would make an allow and a deny scan alike at list length.
- *
- * An unrestricted action reads as "Manage X" rather than "Full access to X". The literal composition
- * produced "Full access to people and access", which is both clumsy and, at a glance, ambiguous
- * about whether "access" is the object or part of the verb.
- */
+/** One grant as a sentence fragment. */
 export function describeGrant(grant: AuthzGrant): string {
   if (grant.action === "*") {
     if (grant.resourceType === "*") return "Do anything";
@@ -244,21 +207,18 @@ export function describeGrant(grant: AuthzGrant): string {
 }
 
 /*
- * A wildcard resource type does not mean "everything in the business" — it means the grant is not
- * narrowed to one resource, and the action already says what it reaches. `record.create` on `*` is
- * "create records anywhere", so rendering it as "Add to everything" both overstates the grant and
- * scares the reader. When the action carries a family, that family names the object; only an action
- * with no family of its own falls back to "everything".
+ * A wildcard resource type does not mean "everything in the business" — it means the grant is
+ * not narrowed to one resource, and the action already says what it reaches. When the action
+ * carries a family, that family names the object; only an action with no family of its own
+ * falls back to "everything".
  */
 function describeGrantObject(grant: AuthzGrant): string {
   return describeResourceType(grantScope(grant));
 }
 
 /**
- * The resource type a grant actually reaches. A wildcard is a scope rather than a scale, so the
- * action's own family stands in for it; only an action with no family falls back to the wildcard.
- * Shared with `summarizeRole`, because the two disagreeing is what produced "Add to everything"
- * on one screen and "…and everything" on the other.
+ * A wildcard is a scope rather than a scale, so the action's own family stands in for it; only
+ * an action with no family falls back to the wildcard.
  */
 function grantScope(grant: AuthzGrant): string {
   if (grant.resourceType !== "*") return grant.resourceType;
@@ -269,13 +229,9 @@ function grantScope(grant: AuthzGrant): string {
 }
 
 export type RoleSummary = {
-  /** The Role's own name, in title case. */
   title: string;
-  /** One line an owner can decide from. */
   blurb: string;
-  /** Areas this Role reaches, for chips. Empty when the Role grants nothing. */
   areas: AccessArea[];
-  /** True when the Role carries an unrestricted grant, which no chip list can convey. */
   unrestricted: boolean;
 };
 
@@ -289,9 +245,9 @@ const BUILTIN_ROLE_COPY: Readonly<Record<string, { title: string; blurb: string 
 };
 
 /**
- * The Role's display name. An authored level carries the name its author typed; when it carries
- * none — every built-in, and any Soul Role written by hand without a `displayName` — the id is
- * humanized instead, because a bare UUID tells the owner nothing.
+ * An authored level carries the name its author typed; when it carries none — every built-in,
+ * and any Soul Role written by hand without a `displayName` — the id is humanized instead,
+ * because a bare UUID tells the owner nothing.
  */
 export function roleTitle(roleId: string, displayName?: string | null): string {
   const builtin = BUILTIN_ROLE_COPY[roleId]?.title;
@@ -299,11 +255,6 @@ export function roleTitle(roleId: string, displayName?: string | null): string {
   return displayName?.trim() || humanize(roleId);
 }
 
-/**
- * Names Roles by id when the caller holds a Role list. Most screens know only an id at the point
- * they render — a group's held Role, a person's assignment — so without this they would humanize
- * the UUID and lose the name the owner chose two screens earlier.
- */
 export function roleNamer(roles: readonly AuthzRole[]): (roleId: string) => string {
   const names = new Map(roles.map((role) => [role.id, role.displayName]));
   return (roleId) => roleTitle(roleId, names.get(roleId));
@@ -314,17 +265,13 @@ export function summarizeRole(role: AuthzRole): RoleSummary {
   /*
    * A wildcard resource type alone does not make a Role unrestricted — it makes the grant
    * un-narrowed, and the action still says what it reaches. `member` allows `record.create` on
-   * `*`, which is "add records anywhere", not "do anything": badging it Unrestricted contradicted
-   * its own blurb one line above. Only a wildcard on both halves is genuinely unbounded, which is
-   * the same test `CapabilityList` applies, and the two must not disagree.
+   * `*`, which is "add records anywhere", not "do anything": badging it Unrestricted
+   * contradicted its own blurb one line above.
    */
   const unrestricted = allows.some((grant) => grant.action === "*" && grant.resourceType === "*");
 
   const areas: AccessArea[] = [];
   for (const grant of allows) {
-    // Same rule as `describeGrantObject`: a wildcard resource type is a scope, so the action's
-    // family names what the grant reaches. Reading it literally put the catch-all "everything"
-    // area at the end of every coverage line a `record.*` on `*` grant touched.
     const area = areaForResourceType(grantScope(grant));
     if (area && !areas.some((seen) => seen.id === area.id)) areas.push(area);
   }
@@ -345,16 +292,9 @@ function defaultBlurb(areas: readonly AccessArea[], unrestricted: boolean): stri
 }
 
 /*
- * What an account's status means, said the way an owner would say it.
- *
- * Three facts hang off the status and only one table should decide them, or the badge and the
- * button drift apart: what it is called, whether a sign-in link can be issued, and what the toggle
- * does next. A turned-off account offers no link — redeeming one would hand back an identity an
- * owner deliberately switched off, which is the one combination that must never be reachable.
- *
- * `invited` is deliberately absent from `nextStatus`: it describes an account that has never been
- * given a password, which is a fact about the account rather than a switch to flip. The API
- * resolves a re-enabled passwordless account back to `invited` on its own.
+ * What an account's status means, said the way an owner would say it. A turned-off account
+ * offers no link — redeeming one would hand back an identity an owner deliberately switched
+ * off, which is the one combination that must never be reachable.
  */
 export type AccountStatusCopy = {
   /** Badge text. `null` for the ordinary case, which needs no badge at all. */
@@ -390,7 +330,6 @@ export const ACCOUNT_STATUS: Readonly<Record<UserStatus, AccountStatusCopy>> = {
   },
 };
 
-/** "a, b and c" — the Oxford-less form people actually read. */
 export function joinWords(words: readonly string[]): string {
   if (words.length === 0) return "";
   if (words.length === 1) return words[0] ?? "";
@@ -398,8 +337,6 @@ export function joinWords(words: readonly string[]): string {
 }
 
 /*
- * The plain-language checks the Check screen offers.
- *
  * Kept short on purpose: an owner arrives asking "why couldn't they do this", not composing a
  * policy query. The exact action and resource strings stay visible beneath the sentence and
  * overridable in the advanced disclosure, so nothing an operator could ask before is lost.
@@ -413,14 +350,9 @@ export const CHECKABLE_VERBS: readonly { value: string; label: string }[] = [
 
 /**
  * Things whose action vocabulary is not CRUD, mapped verb by verb to the action the gate really
- * evaluates.
- *
- * `grantMatches` compares the action as an exact string, so a composed `integration.create` — an
- * action that exists nowhere — matches neither the allows nor the denies that describe the
- * surface. The screen would then report "Nobody has given them this yet" about somebody who
- * plainly can, or miss an explicit deny and offer a remedy that cannot work because a deny beats
- * any allow you add. A verb with no entry here is not offered for that thing at all: no answer is
- * better than a confident wrong one on a screen whose whole claim is that a denial is real.
+ * evaluates. `grantMatches` compares the action as an exact string, so a composed
+ * `integration.create` — an action that exists nowhere — matches neither the allows nor the
+ * denies that describe the surface.
  */
 const THING_ACTIONS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   integration: {
@@ -442,17 +374,17 @@ const THING_ACTIONS: Readonly<Record<string, Readonly<Record<string, string>>>> 
 };
 
 /**
- * Things worth checking that are not Records, named in the owner's words and paired with the exact
- * resource type the decision function evaluates. Record types are appended at runtime from the
- * business's own Resource catalog, so this list stays short and stable.
+ * Things worth checking that are not Records, named in the owner's words and paired with the
+ * exact resource type the decision function evaluates.
  */
 export const CHECKABLE_THINGS: readonly { value: string; label: string }[] = [
   { value: "platform.knowledge", label: "The knowledge base" },
   { value: "chat", label: "Chat" },
   /*
    * The Record family itself, not any one type. An access level built from the Records
-   * capabilities grants `record.create` on resource type `record`, so without this entry the one
-   * thing an owner is most likely to grant is the one thing this screen could not be asked about.
+   * capabilities grants `record.create` on resource type `record`, so without this entry the
+   * one thing an owner is most likely to grant is the one thing this screen could not be asked
+   * about.
    */
   { value: "record", label: "Records of every kind" },
   { value: "soul.agent", label: "Assistants" },
@@ -470,13 +402,11 @@ export const CHECKABLE_THINGS: readonly { value: string; label: string }[] = [
 ];
 
 /**
- * The action string the gate actually evaluates for a plain verb against a thing.
- *
  * Records are the one family whose actions are namespaced by the family rather than by the
  * individual type — a grant reads `record.read`, never `record.customer.read` — so scoping the
  * verb to the type would produce an action no grant can ever match and report a denial that the
- * real gate would not produce. Everything in {@link THING_ACTIONS} is named outright for the same
- * reason. Returns null when the verb has no counterpart, which the caller must not send.
+ * real gate would not produce. Returns null when the verb has no counterpart, which the caller
+ * must not send.
  */
 export function actionFor(resourceType: string, verb: string): string | null {
   const named = THING_ACTIONS[resourceType];
@@ -485,7 +415,6 @@ export function actionFor(resourceType: string, verb: string): string | null {
   return `${resourceType}.${verb}`;
 }
 
-/** The verbs that mean something for a thing. Empty selection means every verb is still open. */
 export function verbsFor(resourceType: string): readonly { value: string; label: string }[] {
   if (!resourceType) return CHECKABLE_VERBS;
   return CHECKABLE_VERBS.filter((verb) => actionFor(resourceType, verb.value) !== null);

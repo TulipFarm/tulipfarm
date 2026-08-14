@@ -1,8 +1,4 @@
-/**
- * Persistence for verified external identity mappings (SPEC §12): one provider/externalSubject
- * pair resolves to at most one principal per business. Storage owns the mechanics;
- * `@tulipfarm/authz` owns the mapped/expired/substitution decision.
- */
+/** Stores one verified provider/externalSubject mapping per principal/business pair. */
 
 export interface ExternalIdentityMappingRecord {
   readonly businessId: string;
@@ -22,10 +18,7 @@ export interface ExternalIdentityRepo {
   put(record: ExternalIdentityMappingRecord): Promise<void>;
 }
 
-/**
- * Process-local reference implementation for tests and single-process composition. A durable
- * PostgreSQL adapter implements the same {@link ExternalIdentityRepo} contract.
- */
+/** Process-local ExternalIdentityRepo double; durable adapters implement the same contract. */
 export class InMemoryExternalIdentityRepo implements ExternalIdentityRepo {
   private readonly records = new Map<string, ExternalIdentityMappingRecord>();
 

@@ -190,7 +190,7 @@ describe("embeddingIndexStatements", () => {
   });
 
   it("leaves a healthy index alone", async () => {
-    // The drop must be conditional: an unconditional one would rebuild the whole corpus on every boot.
+    // The drop must be conditional, or every boot would rebuild the whole corpus.
     const calls: string[] = [];
     const q = {
       query: async (text: string) => {
@@ -204,14 +204,7 @@ describe("embeddingIndexStatements", () => {
   });
 });
 
-/**
- * The backfill job asks "is there anything left to embed?" on every embedding table every five
- * minutes. Without a partial index that question is a sequential scan, and it is worst in the
- * healthy case: with nothing to do, Postgres must read every row to prove it.
- *
- * Measured on Postgres 17 with 200k embedded rows: `Seq Scan`, 1667 blocks, 5.24ms — versus
- * `Index Scan`, 1 block, 0.01ms with the index, which occupied 8192 bytes because it is empty.
- */
+/** Partial index keeps the empty backfill check from scanning every embedded row. */
 describe("backfillIndexStatements", () => {
   let db: PGlite;
 
@@ -249,11 +242,7 @@ describe("backfillIndexStatements", () => {
     }
   });
 
-  /**
-   * Built `CONCURRENTLY`, so an interrupted build leaves `indisvalid = false` — and
-   * `IF NOT EXISTS` then skips it forever. Proven on Postgres 17: after simulating the interrupt,
-   * an `IF NOT EXISTS` retry left `indisvalid=false`, while sweep-then-create restored it.
-   */
+  /** Interrupted `CONCURRENTLY` builds leave invalid indexes; sweep before retrying. */
   it("is swept when invalid, like the ANN indexes", () => {
     for (const { table, column } of EMBEDDING_COLUMNS) {
       expect(allEmbeddingIndexNames()).toContain(backfillIndexName(table, column));
