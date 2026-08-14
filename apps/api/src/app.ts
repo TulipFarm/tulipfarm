@@ -1,6 +1,7 @@
 import type { EventEmitter } from "node:events";
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
+import compress from "@fastify/compress";
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
@@ -339,6 +340,20 @@ export async function buildApp(opts: AppOptions = {}) {
   });
 
   await app.register(cookie);
+
+  /*
+   * Dynamic response compression. Static assets do NOT rely on this — the web build ships
+   * precompressed `.br`/`.gz` siblings that `@fastify/static` serves directly (see the SPA
+   * registration below) — so this only covers JSON payloads.
+   *
+   * gzip/deflate only, deliberately: brotli's encode cost is paid per request on hardware that may
+   * be a Raspberry Pi, and for JSON of this size it buys little over gzip. The responses where
+   * brotli genuinely pays are the immutable build assets, which are compressed at build time.
+   *
+   * Both SSE endpoints (chat and run events) call `reply.hijack()`, which detaches the reply from
+   * the framework's `onSend` chain, so this plugin can never buffer a live stream.
+   */
+  await app.register(compress, { global: true, encodings: ["gzip", "deflate"] });
 
   // Scoped to known CDN origins — never wildcard — so an XSS in Scalar cannot
   // load arbitrary external scripts (SEC-AUDIT H-1).
@@ -816,7 +831,23 @@ export async function buildApp(opts: AppOptions = {}) {
   // SPA last, so it never shadows an API/docs/health route. `wildcard: false` serves
   // routes and a JSON 404 for the API.
   if (serveSpa && webDist) {
-    await app.register(fastifyStatic, { root: webDist, wildcard: false });
+    await app.register(fastifyStatic, {
+      root: webDist,
+      wildcard: false,
+      // Serve the `.br`/`.gz` siblings written by the web build's precompress step. Compressing on
+      // the fly is too expensive on the small self-hosted boxes this ships to.
+      preCompressed: true,
+      setHeaders(reply, path) {
+        // Everything under /assets carries a content hash in its filename, so it can never change
+        // behind a cached copy. index.html has no hash and names those files — it must revalidate,
+        // otherwise a browser keeps loading the previous deploy's asset graph.
+        const immutable = path.includes(`${sep}assets${sep}`);
+        reply.header(
+          "cache-control",
+          immutable ? "public, max-age=31536000, immutable" : "no-cache"
+        );
+      },
+    });
     app.setNotFoundHandler((req, reply) => {
       if ((req.method === "GET" || req.method === "HEAD") && !isAppApiPath(req.url)) {
         return reply.sendFile("index.html");

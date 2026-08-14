@@ -5,7 +5,7 @@ import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
 import type { KvService } from "../kv/service";
 import { buildChecklist } from "./checklist";
-import { getPersonalizedOnboarding } from "./personalize";
+import { getPersonalizedOrRefresh } from "./personalize";
 import { deriveSuggestions } from "./suggestions";
 
 /* ONB-V1 read-only routes; checklist dismissal lives in user KV `onboarding/checklist`. */
@@ -62,7 +62,7 @@ export function registerOnboardingRoutes(
       },
     },
     async (req) => {
-      const personalized = await getPersonalizedOnboarding(soulLoader, {
+      const personalized = await getPersonalizedOrRefresh(soulLoader, {
         kvService: deps.kvService,
         llmService: deps.llmService,
         logger: req.log,
@@ -133,7 +133,7 @@ export function registerOnboardingRoutes(
           ? soulLoader.manifest.businessName
           : undefined;
       const { steps, recommendations } = buildChecklist(soulLoader, hasKnowledge, businessName);
-      const personalized = await getPersonalizedOnboarding(soulLoader, {
+      const personalized = await getPersonalizedOrRefresh(soulLoader, {
         kvService,
         llmService: deps.llmService,
         logger: req.log,

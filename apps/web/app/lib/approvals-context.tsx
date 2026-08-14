@@ -4,6 +4,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -23,6 +24,12 @@ type ApprovalsContextValue = {
 
 const ApprovalsContext = createContext<ApprovalsContextValue | null>(null);
 
+function sameApprovals(a: PendingApproval[], b: PendingApproval[]): boolean {
+  return (
+    a.length === b.length && a.every((item, i) => JSON.stringify(item) === JSON.stringify(b[i]))
+  );
+}
+
 export function ApprovalsProvider({ children }: { children: ReactNode }) {
   const [approvals, setApprovals] = useState<PendingApproval[]>([]);
   const [loading, setLoading] = useState(true);
@@ -39,7 +46,9 @@ export function ApprovalsProvider({ children }: { children: ReactNode }) {
     try {
       const items = await listPendingApprovals();
       if (mounted.current) {
-        setApprovals(items);
+        // The poll returns a fresh array every 4s. Writing it unconditionally would give every
+        // consumer a new reference and re-render the whole app on a tick that changed nothing.
+        setApprovals((prev) => (sameApprovals(prev, items) ? prev : items));
         setError(null);
       }
     } catch (err) {
@@ -63,13 +72,10 @@ export function ApprovalsProvider({ children }: { children: ReactNode }) {
     };
   }, [refresh]);
 
-  const value: ApprovalsContextValue = {
-    approvals,
-    count: approvals.length,
-    loading,
-    error,
-    refresh,
-  };
+  const value: ApprovalsContextValue = useMemo(
+    () => ({ approvals, count: approvals.length, loading, error, refresh }),
+    [approvals, loading, error, refresh]
+  );
   return <ApprovalsContext.Provider value={value}>{children}</ApprovalsContext.Provider>;
 }
 

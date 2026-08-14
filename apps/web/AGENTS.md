@@ -54,6 +54,10 @@ client data loading, schema-driven resource UI, and browser rendering of Surface
 - Known issue: broad web test failures can come from `~/` alias resolution; compare with a clean
   baseline before treating unrelated failures as regressions.
 - Production serves `build/client/` statically with a history-API fallback to `/index.html`.
+- `pnpm build` writes `.br`/`.gz` siblings next to every compressible asset; the API serves them via
+  `@fastify/static`'s `preCompressed`. Keep any new build step ordered after `remix vite:build`.
+- `HydrateFallback` is prerendered into `index.html`, so it paints before any JS. Keep it static —
+  no hooks, no data, no imports — and re-run the build so the CSP hashes stay in sync.
 
 See [`.agents/skills/tulipfarm-design-system`](../../.agents/skills/tulipfarm-design-system) for
 component and design conventions.

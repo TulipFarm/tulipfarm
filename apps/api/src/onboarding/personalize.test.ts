@@ -10,7 +10,13 @@ vi.mock("ai", async (orig) => {
   return { ...actual, generateObject: (...args: unknown[]) => generateObject(...args) };
 });
 
-import { buildStateKey, getPersonalizedOnboarding, type PersonalizeSoulSlice } from "./personalize";
+import {
+  buildStateKey,
+  getPersonalizedOrRefresh,
+  type PersonalizeSoulSlice,
+  readPersonalizedOnboarding,
+  refreshPersonalizedOnboarding,
+} from "./personalize";
 
 const VALID = {
   suggestions: [
@@ -86,12 +92,12 @@ describe("buildStateKey", () => {
   });
 });
 
-describe("getPersonalizedOnboarding", () => {
+describe("readPersonalizedOnboarding", () => {
   beforeEach(() => generateObject.mockReset());
 
-  it("returns null with no businessDescription (static fallback)", async () => {
+  it("never calls the LLM, even on a cache miss", async () => {
     const kvService = new KvService(new FakeKvRepo());
-    const result = await getPersonalizedOnboarding(soul({ resources: ["tickets"] }), {
+    const result = await readPersonalizedOnboarding(soul({ businessDescription: "a SaaS" }), {
       llmService,
       kvService,
     });
@@ -99,43 +105,76 @@ describe("getPersonalizedOnboarding", () => {
     expect(generateObject).not.toHaveBeenCalled();
   });
 
-  it("returns null with no llmService", async () => {
-    const kvService = new KvService(new FakeKvRepo());
-    const result = await getPersonalizedOnboarding(soul({ businessDescription: "a SaaS" }), {
-      kvService,
-    });
-    expect(result).toBeNull();
-  });
-
-  it("calls the LLM, returns + caches the result, and skips the LLM on the next call", async () => {
+  it("returns a previously cached personalization", async () => {
     generateObject.mockResolvedValue({ object: VALID });
     const kvService = new KvService(new FakeKvRepo());
     const s = soul({ businessDescription: "a SaaS for tickets", businessName: "Acme" });
 
-    const first = await getPersonalizedOnboarding(s, { llmService, kvService });
-    expect(first).toEqual(VALID);
+    await refreshPersonalizedOnboarding(s, { llmService, kvService });
+    expect(await readPersonalizedOnboarding(s, { llmService, kvService })).toEqual(VALID);
+  });
+});
+
+describe("refreshPersonalizedOnboarding", () => {
+  beforeEach(() => generateObject.mockReset());
+
+  it("calls the LLM with business context and caches the result", async () => {
+    generateObject.mockResolvedValue({ object: VALID });
+    const kvService = new KvService(new FakeKvRepo());
+    const s = soul({ businessDescription: "a SaaS for tickets", businessName: "Acme" });
+
+    await refreshPersonalizedOnboarding(s, { llmService, kvService });
+
     expect(generateObject).toHaveBeenCalledOnce();
     const call = generateObject.mock.calls[0][0];
     expect(call.prompt).toContain("Acme");
     expect(call.prompt).toContain("a SaaS for tickets");
+    expect(await readPersonalizedOnboarding(s, { llmService, kvService })).toEqual(VALID);
+  });
 
-    const second = await getPersonalizedOnboarding(s, { llmService, kvService });
-    expect(second).toEqual(VALID);
-    expect(generateObject).toHaveBeenCalledOnce(); // served from cache
+  it("coalesces concurrent refreshes for the same soul state into one LLM call", async () => {
+    generateObject.mockResolvedValue({ object: VALID });
+    const kvService = new KvService(new FakeKvRepo());
+    const s = soul({ businessDescription: "a SaaS" });
+
+    await Promise.all([
+      refreshPersonalizedOnboarding(s, { llmService, kvService }),
+      refreshPersonalizedOnboarding(s, { llmService, kvService }),
+      refreshPersonalizedOnboarding(s, { llmService, kvService }),
+    ]);
+
+    expect(generateObject).toHaveBeenCalledOnce();
+  });
+
+  it("does nothing without a businessDescription or llmService", async () => {
+    const kvService = new KvService(new FakeKvRepo());
+    await refreshPersonalizedOnboarding(soul({ resources: ["tickets"] }), {
+      llmService,
+      kvService,
+    });
+    await refreshPersonalizedOnboarding(soul({ businessDescription: "a SaaS" }), { kvService });
+    expect(generateObject).not.toHaveBeenCalled();
+  });
+
+  it("swallows a malformed LLM response and caches nothing", async () => {
+    generateObject.mockResolvedValue({ object: { suggestions: "nope" } });
+    const kvService = new KvService(new FakeKvRepo());
+    const s = soul({ businessDescription: "a SaaS" });
+
+    await expect(
+      refreshPersonalizedOnboarding(s, { llmService, kvService })
+    ).resolves.toBeUndefined();
+    expect(await readPersonalizedOnboarding(s, { llmService, kvService })).toBeNull();
   });
 
   it("repairs a complete fenced JSON response from providers without structured outputs", async () => {
     generateObject.mockResolvedValue({ object: VALID });
 
-    const result = await getPersonalizedOnboarding(
-      soul({ businessDescription: "an online store" }),
-      {
-        llmService,
-        kvService: new KvService(new FakeKvRepo()),
-      }
-    );
+    await refreshPersonalizedOnboarding(soul({ businessDescription: "an online store" }), {
+      llmService,
+      kvService: new KvService(new FakeKvRepo()),
+    });
 
-    expect(result).toEqual(VALID);
     const options = generateObject.mock.calls[0][0] as {
       experimental_repairText?: (input: { text: string; error: Error }) => Promise<string | null>;
     };
@@ -147,14 +186,40 @@ describe("getPersonalizedOnboarding", () => {
       })
     ).resolves.toBe(JSON.stringify(VALID));
   });
+});
 
-  it("returns null when the LLM output is malformed / the call fails (static fallback)", async () => {
-    generateObject.mockResolvedValue({ object: { suggestions: "nope" } });
+describe("getPersonalizedOrRefresh", () => {
+  beforeEach(() => generateObject.mockReset());
+
+  it("returns null on a cache miss without waiting for the LLM, then caches in the background", async () => {
+    // A model call the test controls: if the request path awaited it, `getPersonalizedOrRefresh`
+    // below could not resolve until we release it.
+    let release!: (value: unknown) => void;
+    generateObject.mockReturnValue(
+      new Promise((resolve) => {
+        release = resolve;
+      })
+    );
     const kvService = new KvService(new FakeKvRepo());
-    const result = await getPersonalizedOnboarding(soul({ businessDescription: "a SaaS" }), {
-      llmService,
-      kvService,
-    });
-    expect(result).toBeNull();
+    const s = soul({ businessDescription: "a deferred-LLM SaaS" });
+
+    expect(await getPersonalizedOrRefresh(s, { llmService, kvService })).toBeNull();
+    expect(generateObject).toHaveBeenCalledOnce(); // refresh started in the background
+
+    release({ object: VALID });
+    await refreshPersonalizedOnboarding(s, { llmService, kvService });
+    expect(await readPersonalizedOnboarding(s, { llmService, kvService })).toEqual(VALID);
+  });
+
+  it("serves the cache once a refresh has completed, without another LLM call", async () => {
+    generateObject.mockResolvedValue({ object: VALID });
+    const kvService = new KvService(new FakeKvRepo());
+    const s = soul({ businessDescription: "a warm-cache SaaS" });
+
+    await refreshPersonalizedOnboarding(s, { llmService, kvService });
+    generateObject.mockClear();
+
+    expect(await getPersonalizedOrRefresh(s, { llmService, kvService })).toEqual(VALID);
+    expect(generateObject).not.toHaveBeenCalled();
   });
 });

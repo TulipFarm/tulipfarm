@@ -134,31 +134,89 @@ function stringField(manifest: Record<string, unknown> | null, key: string): str
   return typeof v === "string" && v.length > 0 ? v : undefined;
 }
 
-/** Returns personalized onboarding, or null so callers fall back to static catalog/rules. */
-export async function getPersonalizedOnboarding(
+/** Everything a personalization lookup needs, or null when personalization is not configured. */
+function resolveRequest(
+  soul: PersonalizeSoulSlice,
+  deps: PersonalizeDeps
+): { key: string; businessDescription: string; state: SoulState } | null {
+  const businessDescription = stringField(soul.manifest, "businessDescription");
+  if (!businessDescription || !deps.llmService || !deps.kvService) return null;
+
+  const state = readSoulState(soul);
+  return { key: buildStateKey(businessDescription, state), businessDescription, state };
+}
+
+/*
+ * In-flight refreshes keyed by state hash. Both onboarding routes are on the chat landing path and
+ * the app polls, so without this a cold cache would fan a burst of identical LLM calls out of a
+ * single page load.
+ */
+const refreshesInFlight = new Map<string, Promise<void>>();
+
+/**
+ * Reads personalized onboarding from the KV cache. Never calls the LLM, so it is safe to await on a
+ * request that blocks first paint. Returns null on a miss — callers fall back to static
+ * catalog/rules and should kick off {@link refreshPersonalizedOnboarding}.
+ */
+export async function readPersonalizedOnboarding(
   soul: PersonalizeSoulSlice,
   deps: PersonalizeDeps
 ): Promise<Personalized | null> {
-  const businessDescription = stringField(soul.manifest, "businessDescription");
+  const req = resolveRequest(soul, deps);
+  if (!req || !deps.kvService) return null;
+
+  const cached = await deps.kvService.get("system", undefined, KV_NAMESPACE, req.key);
+  return cached ? (cached.value as Personalized) : null;
+}
+
+/**
+ * Generates personalization and writes it to the KV cache so a later request can read it. This makes
+ * an LLM call, so callers must NOT await it on a request path — fire and forget. Concurrent calls
+ * for the same soul state share one refresh. Never rejects; failures are logged and swallowed.
+ *
+ * The returned promise is for tests and shutdown coordination only.
+ */
+export function refreshPersonalizedOnboarding(
+  soul: PersonalizeSoulSlice,
+  deps: PersonalizeDeps
+): Promise<void> {
+  const req = resolveRequest(soul, deps);
   const { llmService, kvService, logger } = deps;
-  if (!businessDescription || !llmService || !kvService) return null;
+  if (!req || !llmService || !kvService) return Promise.resolve();
 
-  const state = readSoulState(soul);
-  const key = buildStateKey(businessDescription, state);
+  const existing = refreshesInFlight.get(req.key);
+  if (existing) return existing;
 
-  const cached = await kvService.get("system", undefined, KV_NAMESPACE, key);
-  if (cached) return cached.value as Personalized;
+  const run = (async () => {
+    try {
+      const result = await generatePersonalized(llmService.effortModel("fast"), {
+        businessName: stringField(soul.manifest, "businessName"),
+        businessDescription: req.businessDescription,
+        state: req.state,
+      });
+      await kvService.set("system", undefined, KV_NAMESPACE, req.key, result);
+    } catch (err) {
+      logger?.error({ err }, "onboarding personalization failed; falling back to static catalog");
+    } finally {
+      refreshesInFlight.delete(req.key);
+    }
+  })();
 
-  try {
-    const result = await generatePersonalized(llmService.effortModel("fast"), {
-      businessName: stringField(soul.manifest, "businessName"),
-      businessDescription,
-      state,
-    });
-    await kvService.set("system", undefined, KV_NAMESPACE, key, result);
-    return result;
-  } catch (err) {
-    logger?.error({ err }, "onboarding personalization failed; falling back to static catalog");
-    return null;
-  }
+  refreshesInFlight.set(req.key, run);
+  return run;
+}
+
+/**
+ * The request-path entry point both onboarding routes use: return the cached personalization if one
+ * exists, otherwise start a background refresh and return null so the caller falls back to the
+ * static catalog. Never waits on the LLM.
+ */
+export async function getPersonalizedOrRefresh(
+  soul: PersonalizeSoulSlice,
+  deps: PersonalizeDeps
+): Promise<Personalized | null> {
+  const cached = await readPersonalizedOnboarding(soul, deps);
+  if (cached) return cached;
+  void refreshPersonalizedOnboarding(soul, deps);
+  return null;
 }

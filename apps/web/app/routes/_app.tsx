@@ -10,18 +10,29 @@ import { getSetupStatus } from "~/lib/setup";
 // Checks setup status first: if the instance needs first-run setup, redirect to /setup.
 // Then checks auth: unauthenticated session (401) redirects to /login.
 export async function clientLoader() {
-  const { needsSetup } = await getSetupStatus();
-  if (needsSetup) throw redirect("/setup");
+  // Both requests go out together: this loader gates the first paint, so a second serial round trip
+  // is pure blank-screen time on a slow host. Precedence is unchanged — setup still wins over auth.
+  // On an un-set-up instance this does spend one wasted (401) session call, which is the cheaper
+  // trade: that path redirects to /setup once, while the authed path is every single page load.
+  const [setup, session] = await Promise.all([
+    getSetupStatus(),
+    getSession().then(
+      (user) => ({ ok: true as const, user }),
+      (err: unknown) => ({ ok: false as const, err })
+    ),
+  ]);
 
-  try {
-    return { user: await getSession() };
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 401) {
+  if (setup.needsSetup) throw redirect("/setup");
+
+  if (!session.ok) {
+    if (session.err instanceof ApiError && session.err.status === 401) {
       const here = typeof window !== "undefined" ? window.location.pathname : "/";
       throw redirect(`/login?redirectTo=${encodeURIComponent(here)}`);
     }
-    throw err;
+    throw session.err;
   }
+
+  return { user: session.user };
 }
 
 // Persistent shell: sidebar + main panel. Wraps every section route. ApprovalsProvider polls pending

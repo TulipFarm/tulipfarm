@@ -5,12 +5,16 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
 import { type ConversationSummary, listConversations } from "~/lib/conversations";
 
 /* Route changes refetch; shallow chat id overrides survive index `history.replaceState`. */
+
+/** Route-change refetches inside this window reuse the current list instead of re-hitting the API. */
+const REFETCH_TTL_MS = 5000;
 
 type ConversationsContextValue = {
   conversations: ConversationSummary[];
@@ -33,6 +37,12 @@ type ConversationsContextValue = {
 
 const ConversationsContext = createContext<ConversationsContextValue | null>(null);
 
+function sameConversations(a: ConversationSummary[], b: ConversationSummary[]): boolean {
+  return (
+    a.length === b.length && a.every((item, i) => JSON.stringify(item) === JSON.stringify(b[i]))
+  );
+}
+
 export function ConversationsProvider({ children }: { children: ReactNode }) {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,6 +59,8 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
   // refresh from `onMeta` is still running.
   const pending = useRef(false);
   const mounted = useRef(true);
+  // Timestamp of the last completed list fetch, used to collapse the route-change refetch storm.
+  const lastFetchedAt = useRef(0);
   // Bumped by startNewChat to remount the index chat surface (so "+ new chat" always clears, even on a
   // shallow-routed chat where the router location is still "/").
   const [newChatNonce, setNewChatNonce] = useState(0);
@@ -68,8 +80,11 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
         try {
           const items = await listConversations();
           if (mounted.current) {
-            setConversations(items);
+            // Keep the previous array when nothing changed, so every consumer of this context is
+            // spared a re-render on a refetch that produced an identical list.
+            setConversations((prev) => (sameConversations(prev, items) ? prev : items));
             setError(null);
+            lastFetchedAt.current = Date.now();
           }
         } catch (err) {
           // Keep the last-known list on a transient failure (don't flash empty).
@@ -93,8 +108,11 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
 
   // Refetch on mount and whenever the route changes. `pathname` is the intentional trigger (opening a
   // chat / navigating refreshes the list) even though the effect body does not read it directly.
+  // Sidebar navigation fires this constantly, so a short TTL collapses bursts; explicit `refresh()`
+  // callers (turn finished, chat renamed) are deliberately not throttled.
   // biome-ignore lint/correctness/useExhaustiveDependencies: pathname is a deliberate refetch trigger
   useEffect(() => {
+    if (Date.now() - lastFetchedAt.current < REFETCH_TTL_MS) return;
     void refresh();
   }, [refresh, pathname]);
 
@@ -125,18 +143,32 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
       (loadedTitle?.id === activeChatId ? loadedTitle.title : null))
     : null;
 
-  const value: ConversationsContextValue = {
-    conversations,
-    loading,
-    error,
-    refresh,
-    activeChatId,
-    setActiveChatId,
-    activeChatTitle,
-    setActiveChatTitle,
-    newChatNonce,
-    startNewChat,
-  };
+  const value: ConversationsContextValue = useMemo(
+    () => ({
+      conversations,
+      loading,
+      error,
+      refresh,
+      activeChatId,
+      setActiveChatId,
+      activeChatTitle,
+      setActiveChatTitle,
+      newChatNonce,
+      startNewChat,
+    }),
+    [
+      conversations,
+      loading,
+      error,
+      refresh,
+      activeChatId,
+      setActiveChatId,
+      activeChatTitle,
+      setActiveChatTitle,
+      newChatNonce,
+      startNewChat,
+    ]
+  );
   return <ConversationsContext.Provider value={value}>{children}</ConversationsContext.Provider>;
 }
 
