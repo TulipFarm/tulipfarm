@@ -5,6 +5,7 @@ import {
   type EgressHttpPort,
   OpenApiToolAdapter,
 } from "@tulipfarm/integrations";
+import type { MutationGuard } from "@tulipfarm/observability";
 import {
   type SecretAuthorizer,
   SecretBroker,
@@ -277,6 +278,7 @@ export interface DeclarativeToolingDeps {
   readonly secrets: () => Promise<SecretsService>;
   /** Injected so tests never reach the network. */
   readonly http: EgressHttpPort;
+  readonly mutationGuard?: MutationGuard;
 }
 
 interface CompiledIntegration {
@@ -461,6 +463,12 @@ function dispatcherFor(
     catalog,
     adapters,
     credentialDispatcher: credentials,
+    ...(deps.mutationGuard === undefined
+      ? {}
+      : {
+          mutationGuard: deps.mutationGuard,
+          mutationIdentity: { integrationId: integration.slug },
+        }),
   });
 }
 

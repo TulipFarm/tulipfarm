@@ -72,6 +72,8 @@ import {
 } from "./internal/channel-routes";
 import { type InternalTurnRouteDeps, registerInternalTurnRoutes } from "./internal/routes";
 import { registerSurfaceInternalRoutes } from "./internal/surfaces-routes";
+import { registerKillSwitchRoutes } from "./kill-switches/routes";
+import type { KillSwitchService } from "./kill-switches/service";
 import { registerKnowledgeRoutes } from "./knowledge/routes";
 import type { KnowledgeService } from "./knowledge/service";
 import { registerKvRoutes } from "./kv/routes";
@@ -227,6 +229,8 @@ export interface AppOptions {
   operationalApi?: OperationalApiDeps;
   /** Stage 3 admin authorization surface — read/assign/group/explain over durable authority. */
   authzAdmin?: AuthzAdminService;
+  /** Operator emergency stops over mutating Tool effects. */
+  killSwitches?: KillSwitchService;
   /** Persist-first authority shared by Chat and every Trigger ingress. */
   invocations?: DurableInvocationGateway;
   /**
@@ -524,6 +528,9 @@ export async function buildApp(opts: AppOptions = {}) {
     }
     if (opts.authzAdmin) {
       registerAuthzRoutes(app, opts.authzAdmin, requireAuth, opts.rateLimiter);
+    }
+    if (opts.killSwitches) {
+      registerKillSwitchRoutes(app, opts.killSwitches, requireAuth, opts.rateLimiter);
     }
     if (opts.memoryService) {
       registerMemoryRoutes(

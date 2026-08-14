@@ -36,5 +36,8 @@ Owns adapter contracts, event normalization, source ACLs, sync checkpoints, and 
 - Advance checkpoints only after full commit; one source failure must not stall others.
 - This package may not import `@tulipfarm/knowledge`; `src/knowledge/` mirrors store records.
 - `@tulipfarm/soul` is allowed only in `src/egress/` for manifest authoring types.
+- The barrel lists every export by name; `scripts/barrel-exports.test.ts` fails the build on a new
+  `export *`. Adapters reach the effect plane, so what this package publishes is a security surface,
+  not just an API.
 - [Building an integration](../../docs/architecture/building-an-integration.md)
 - [Dependency rules](../../docs/architecture/dependency-rules.md)

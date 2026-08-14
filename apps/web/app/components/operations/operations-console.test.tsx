@@ -74,7 +74,7 @@ describe("OperationsConsole", () => {
     });
     expect(screen.getByText("No active incidents")).toBeInTheDocument();
     expect(screen.getByText("No quarantined items")).toBeInTheDocument();
-    expect(screen.getByText("No kill switches enabled")).toBeInTheDocument();
+    expect(screen.getByText("No deployment flags set")).toBeInTheDocument();
     expect(screen.getByText("No operational activity recorded")).toBeInTheDocument();
     expect(screen.getByText("No backup reported")).toBeInTheDocument();
   });

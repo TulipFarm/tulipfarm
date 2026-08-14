@@ -1,3 +1,4 @@
+import { KillSwitchDeniedError } from "@tulipfarm/observability";
 import type { ToolContractDefinition } from "@tulipfarm/schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ToolCatalog } from "../catalog";
@@ -170,6 +171,42 @@ describe("EffectDispatcher", () => {
     });
     expect(adapter.dispatch).not.toHaveBeenCalled();
     expect(await store.listAttempts(BUSINESS_ID, EFFECT_ID)).toEqual([]);
+  });
+
+  it("offers the guard the identity the effect ledger does not record", async () => {
+    const assertAllowed = vi.fn(async () => {});
+    const guarded = new EffectDispatcher({
+      store,
+      catalog: ToolCatalog.load([definition]),
+      adapters: new Map([["github", { dispatch: async () => ({ providerId: "ok" }) }]]),
+      mutationGuard: { assertAllowed },
+      mutationIdentity: { integrationId: "github-app" },
+      now: () => "2026-07-25T00:00:01.000Z",
+    });
+
+    await guarded.dispatch(BUSINESS_ID, EFFECT_ID);
+    expect(assertAllowed).toHaveBeenCalledWith(
+      expect.objectContaining({ integrationId: "github-app" })
+    );
+  });
+
+  it("names the switch reason so the denial is actionable", async () => {
+    const guarded = new EffectDispatcher({
+      store,
+      catalog: ToolCatalog.load([definition]),
+      adapters: new Map([["github", { dispatch: async () => ({ providerId: "no" }) }]]),
+      mutationGuard: {
+        assertAllowed: async () => {
+          throw new KillSwitchDeniedError("ks-1", "all_mutations", "incident-42");
+        },
+      },
+      now: () => "2026-07-25T00:00:01.000Z",
+    });
+
+    await expect(guarded.dispatch(BUSINESS_ID, EFFECT_ID)).rejects.toMatchObject({
+      code: "kill_switch_denied",
+      detail: "incident-42",
+    });
   });
 
   function dispatcher(adapter: ToolAdapter, wait?: (delayMs: number) => Promise<void>) {

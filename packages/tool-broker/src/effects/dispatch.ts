@@ -1,4 +1,4 @@
-import type { MutationGuard } from "@tulipfarm/observability";
+import { KillSwitchDeniedError, type MutationGuard } from "@tulipfarm/observability";
 import { ajv, canonicalHash } from "@tulipfarm/schema";
 import type { ToolCatalog } from "../catalog";
 import type { CredentialDispatcher } from "../credential-dispatch";
@@ -54,12 +54,22 @@ export class ToolDispatchError extends Error {
   }
 }
 
+/** Identity a kill switch can scope on that the effect ledger itself does not record. */
+export interface MutationIdentity {
+  readonly agentId?: string;
+  readonly routineId?: string;
+  readonly integrationId?: string;
+  readonly model?: string;
+}
+
 export interface EffectDispatcherDeps {
   readonly store: EffectStore;
   readonly catalog: ToolCatalog;
   readonly adapters: ReadonlyMap<string, ToolAdapter>;
   readonly credentialDispatcher?: CredentialDispatcher;
   readonly mutationGuard?: MutationGuard;
+  /** Identity the effect ledger does not carry, supplied by whoever composed the dispatcher. */
+  readonly mutationIdentity?: MutationIdentity;
   readonly wait?: (delayMs: number) => Promise<void>;
   readonly now?: () => string;
 }
@@ -119,9 +129,15 @@ export class EffectDispatcher {
           provider: contract.adapter.ref,
           destination: effect.intent.destination,
           dataClasses: contract.dataClasses,
+          ...this.deps.mutationIdentity,
         });
-      } catch {
-        throw new ToolDispatchError("kill_switch_denied", effectId);
+      } catch (error) {
+        // Any guard failure denies, but the operator still needs to know which switch stopped them.
+        throw new ToolDispatchError(
+          "kill_switch_denied",
+          effectId,
+          error instanceof KillSwitchDeniedError ? error.reasonCode : undefined
+        );
       }
     }
 
