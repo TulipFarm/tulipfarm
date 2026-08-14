@@ -8,17 +8,11 @@ import { SESSION_COOKIE } from "../../auth/middleware";
 import { MemorySessionStore } from "../../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../../auth/users";
 import type { PaginatedResult } from "../../pagination";
+import { makeSoulWriterDouble, type SoulWriterDouble } from "../soul-writer-double";
 
 vi.mock("node:fs", () => ({ existsSync: vi.fn() }));
-vi.mock("node:fs/promises", () => ({
-  mkdir: vi.fn().mockResolvedValue(undefined),
-  writeFile: vi.fn().mockResolvedValue(undefined),
-  rm: vi.fn().mockResolvedValue(undefined),
-  unlink: vi.fn().mockResolvedValue(undefined),
-}));
 
 import { existsSync } from "node:fs";
-import { mkdir, rm, unlink, writeFile } from "node:fs/promises";
 
 const TEST_CSRF = "a".repeat(64);
 
@@ -97,6 +91,7 @@ describe("resource-type routes", () => {
   let tokenRepo: FakeTokenRepo;
   let gitSync: GitSyncService;
   let soulLoader: SoulLoader;
+  let soulWriterDouble: SoulWriterDouble;
   let sid: string;
   let adminSid: string;
 
@@ -109,13 +104,21 @@ describe("resource-type routes", () => {
     tokenRepo = new FakeTokenRepo();
     gitSync = makeFakeGitSync();
     soulLoader = makeFakeSoulLoader();
+    soulWriterDouble = makeSoulWriterDouble();
 
     const user = await createUser(userRepo, "user@example.com", "pass", "member");
     sid = await store.create(user._id);
     const admin = await createUser(userRepo, "admin@example.com", "pass", "admin");
     adminSid = await store.create(admin._id);
 
-    app = await buildApp({ sessionStore: store, userRepo, tokenRepo, gitSync, soulLoader });
+    app = await buildApp({
+      sessionStore: store,
+      userRepo,
+      tokenRepo,
+      gitSync,
+      soulLoader,
+      soulWriter: soulWriterDouble.writer,
+    });
   });
 
   afterEach(async () => {
@@ -142,18 +145,18 @@ describe("resource-type routes", () => {
       });
       expect(res.statusCode).toBe(201);
       expect(res.json()).toEqual({ name: "ticket", schema: VALID_SCHEMA_YAML, hasHooks: false });
-      expect(mkdir).toHaveBeenCalledWith(expect.stringContaining("resources/ticket"), {
-        recursive: true,
+      expect(soulWriterDouble.applied).toHaveLength(1);
+      expect(soulWriterDouble.applied[0]).toMatchObject({
+        subject: "soul: add resource type ticket",
+        actor: { email: "user@example.com" },
+        changes: [
+          {
+            op: "put",
+            target: { kind: "Resource", slug: "ticket", definitionMode: "legacy" },
+            content: VALID_SCHEMA_YAML,
+          },
+        ],
       });
-      expect(writeFile).toHaveBeenCalledWith(
-        expect.stringContaining("schema.yml"),
-        VALID_SCHEMA_YAML,
-        "utf8"
-      );
-      expect(gitSync.commit).toHaveBeenCalledWith(
-        "soul: add resource type ticket",
-        expect.objectContaining({ email: "user@example.com" })
-      );
       expect(soulLoader.reload).toHaveBeenCalledOnce();
     });
 
@@ -204,7 +207,7 @@ describe("resource-type routes", () => {
       });
       expect(res.statusCode).toBe(409);
       expect(res.json()).toMatchObject({ error: "resource type already exists" });
-      expect(mkdir).not.toHaveBeenCalled();
+      expect(soulWriterDouble.applied).toEqual([]);
     });
 
     it("returns 422 for invalid YAML", async () => {
@@ -217,7 +220,7 @@ describe("resource-type routes", () => {
       });
       expect(res.statusCode).toBe(422);
       expect(res.json()).toMatchObject({ error: expect.stringContaining("invalid YAML") });
-      expect(mkdir).not.toHaveBeenCalled();
+      expect(soulWriterDouble.applied).toEqual([]);
     });
 
     it("returns 422 for YAML that is not an object", async () => {
@@ -230,7 +233,7 @@ describe("resource-type routes", () => {
       });
       expect(res.statusCode).toBe(422);
       expect(res.json()).toMatchObject({ error: expect.stringContaining("YAML object") });
-      expect(mkdir).not.toHaveBeenCalled();
+      expect(soulWriterDouble.applied).toEqual([]);
     });
 
     it("returns 422 for invalid JSON Schema (type must be string)", async () => {
@@ -242,7 +245,7 @@ describe("resource-type routes", () => {
         payload: { name: "ticket", schema: "type: 123\n" },
       });
       expect(res.statusCode).toBe(422);
-      expect(mkdir).not.toHaveBeenCalled();
+      expect(soulWriterDouble.applied).toEqual([]);
     });
 
     it("returns 422 for unknown x-normalize value", async () => {
@@ -265,7 +268,7 @@ properties:
         error: expect.stringContaining("unknown normalizer"),
         boundary: "resource",
       });
-      expect(mkdir).not.toHaveBeenCalled();
+      expect(soulWriterDouble.applied).toEqual([]);
     });
 
     it("returns 422 for unknown x-computed fn", async () => {
@@ -314,7 +317,14 @@ x-computed:
         { name: "ticket", schema: { type: "object" }, hasHooks: false, hooksEnabled: true },
         { name: "customer", schema: { type: "object" }, hasHooks: true, hooksEnabled: true },
       ]);
-      app = await buildApp({ sessionStore: store, userRepo, tokenRepo, gitSync, soulLoader });
+      app = await buildApp({
+        sessionStore: store,
+        userRepo,
+        tokenRepo,
+        gitSync,
+        soulLoader,
+        soulWriter: soulWriterDouble.writer,
+      });
 
       const res = await app.inject({
         method: "GET",
@@ -365,15 +375,18 @@ x-computed:
       const res = await app.inject(put({ schema: VALID_SCHEMA_YAML }));
       expect(res.statusCode).toBe(200);
       expect(res.json()).toMatchObject({ name: "ticket", schema: VALID_SCHEMA_YAML });
-      expect(writeFile).toHaveBeenCalledWith(
-        expect.stringContaining("schema.yml"),
-        VALID_SCHEMA_YAML,
-        "utf8"
-      );
-      expect(gitSync.commit).toHaveBeenCalledWith(
-        "soul: update resource type ticket",
-        expect.objectContaining({ email: "user@example.com" })
-      );
+      expect(soulWriterDouble.applied).toHaveLength(1);
+      expect(soulWriterDouble.applied[0]).toMatchObject({
+        subject: "soul: update resource type ticket",
+        actor: { email: "user@example.com" },
+        changes: [
+          {
+            op: "put",
+            target: { kind: "Resource", slug: "ticket", definitionMode: "legacy" },
+            content: VALID_SCHEMA_YAML,
+          },
+        ],
+      });
       expect(soulLoader.reload).toHaveBeenCalledOnce();
     });
 
@@ -407,14 +420,12 @@ x-computed:
       vi.mocked(existsSync).mockReturnValue(true);
       const res = await app.inject(del());
       expect(res.statusCode).toBe(204);
-      expect(rm).toHaveBeenCalledWith(expect.stringContaining("resources/ticket"), {
-        recursive: true,
-        force: true,
+      expect(soulWriterDouble.applied).toHaveLength(1);
+      expect(soulWriterDouble.applied[0]).toMatchObject({
+        subject: "soul: remove resource type ticket",
+        actor: { email: "user@example.com" },
+        changes: [{ op: "deleteArtifact", kind: "Resource", slug: "ticket" }],
       });
-      expect(gitSync.commit).toHaveBeenCalledWith(
-        "soul: remove resource type ticket",
-        expect.objectContaining({ email: "user@example.com" })
-      );
       expect(soulLoader.reload).toHaveBeenCalledOnce();
     });
   });
@@ -434,7 +445,7 @@ x-computed:
         payload: { name: "salary-review", schema: VALID_SCHEMA_YAML, domain: "hr" },
       });
       expect(res.statusCode).toBe(403);
-      expect(writeFile).not.toHaveBeenCalled();
+      expect(soulWriterDouble.applied).toEqual([]);
     });
 
     it("lets an admin set a domain on create, writing the canonical envelope", async () => {
@@ -446,11 +457,14 @@ x-computed:
       });
       expect(res.statusCode).toBe(201);
       expect(res.json()).toMatchObject({ name: "salary-review", domain: "hr" });
-      expect(writeFile).toHaveBeenCalledWith(
-        expect.stringContaining("resource.yaml"),
-        expect.stringContaining("domain: hr"),
-        "utf8"
-      );
+      expect(soulWriterDouble.applied).toHaveLength(1);
+      expect(soulWriterDouble.applied[0].changes).toMatchObject([
+        {
+          op: "put",
+          target: { kind: "Resource", slug: "salary-review" },
+          content: expect.stringContaining("domain: hr"),
+        },
+      ]);
     });
 
     it("still lets a member create a domainless type", async () => {
@@ -480,7 +494,7 @@ x-computed:
         payload: { schema: VALID_SCHEMA_YAML, domain: "engineering" },
       });
       expect(res.statusCode).toBe(403);
-      expect(writeFile).not.toHaveBeenCalled();
+      expect(soulWriterDouble.applied).toEqual([]);
     });
 
     it("lets a member edit the schema of a domained type without changing its domain", async () => {
@@ -501,11 +515,18 @@ x-computed:
       });
       expect(res.statusCode).toBe(200);
 
-      expect(writeFile).toHaveBeenCalledWith(
-        expect.stringContaining("resource.yaml"),
-        expect.stringContaining("domain: hr"),
-        "utf8"
-      );
+      expect(soulWriterDouble.applied).toHaveLength(1);
+      expect(soulWriterDouble.applied[0].changes).toMatchObject([
+        {
+          op: "put",
+          target: { kind: "Resource", slug: "salary-review" },
+          content: expect.stringContaining("domain: hr"),
+        },
+        {
+          op: "delete",
+          target: { kind: "Resource", slug: "salary-review", definitionMode: "legacy" },
+        },
+      ]);
     });
 
     // Prevent deleting and recreating a protected type as domainless.
@@ -525,7 +546,7 @@ x-computed:
         ...auth(sid),
       });
       expect(res.statusCode).toBe(403);
-      expect(rm).not.toHaveBeenCalled();
+      expect(soulWriterDouble.applied).toEqual([]);
     });
 
     it("still lets a member delete a domainless type", async () => {
@@ -547,7 +568,7 @@ x-computed:
         payload: { name: "salary-review", schema: "type: object\n", domain: "hr" },
       });
       expect(res.statusCode).toBe(422);
-      expect(writeFile).not.toHaveBeenCalled();
+      expect(soulWriterDouble.applied).toEqual([]);
     });
   });
 
@@ -582,7 +603,14 @@ x-computed:
           hooksEnabled: true,
         },
       ]);
-      app = await buildApp({ sessionStore: store, userRepo, tokenRepo, gitSync, soulLoader });
+      app = await buildApp({
+        sessionStore: store,
+        userRepo,
+        tokenRepo,
+        gitSync,
+        soulLoader,
+        soulWriter: soulWriterDouble.writer,
+      });
 
       const res = await app.inject({
         method: "GET",
@@ -599,7 +627,14 @@ x-computed:
       soulLoader = makeFakeSoulLoader([
         { name: "ticket", schema: { type: "object" }, hasHooks: false, hooksEnabled: true },
       ]);
-      app = await buildApp({ sessionStore: store, userRepo, tokenRepo, gitSync, soulLoader });
+      app = await buildApp({
+        sessionStore: store,
+        userRepo,
+        tokenRepo,
+        gitSync,
+        soulLoader,
+        soulWriter: soulWriterDouble.writer,
+      });
 
       const res = await app.inject({
         method: "GET",
@@ -629,7 +664,14 @@ x-computed:
       soulLoader = makeFakeSoulLoader([
         { name: "ticket", schema: { type: "object" }, hasHooks: false, hooksEnabled: true },
       ]);
-      app = await buildApp({ sessionStore: store, userRepo, tokenRepo, gitSync, soulLoader });
+      app = await buildApp({
+        sessionStore: store,
+        userRepo,
+        tokenRepo,
+        gitSync,
+        soulLoader,
+        soulWriter: soulWriterDouble.writer,
+      });
     });
 
     it("returns 401 without auth", async () => {
@@ -645,15 +687,18 @@ x-computed:
       const res = await app.inject(putHook({ source: VALID_HOOK }));
       expect(res.statusCode).toBe(200);
       expect(res.json()).toMatchObject({ name: "ticket", hasHooks: true, source: VALID_HOOK });
-      expect(writeFile).toHaveBeenCalledWith(
-        expect.stringContaining("hooks.ts"),
-        VALID_HOOK,
-        "utf8"
-      );
-      expect(gitSync.commit).toHaveBeenCalledWith(
-        "soul: add hooks for resource type ticket",
-        expect.objectContaining({ email: "user@example.com" })
-      );
+      expect(soulWriterDouble.applied).toHaveLength(1);
+      expect(soulWriterDouble.applied[0]).toMatchObject({
+        subject: "soul: add hooks for resource type ticket",
+        actor: { email: "user@example.com" },
+        changes: [
+          {
+            op: "put",
+            target: { kind: "Resource", slug: "ticket", companion: "hooks.ts" },
+            content: VALID_HOOK,
+          },
+        ],
+      });
       expect(soulLoader.reload).toHaveBeenCalledOnce();
     });
 
@@ -674,7 +719,7 @@ x-computed:
       expect(res.json()).toMatchObject({
         error: expect.stringContaining("banned pattern"),
       });
-      expect(writeFile).not.toHaveBeenCalled();
+      expect(soulWriterDouble.applied).toEqual([]);
     });
 
     it("returns 422 when source is not parenthesized", async () => {
@@ -699,7 +744,14 @@ x-computed:
       soulLoader = makeFakeSoulLoader([
         { name: "ticket", schema: { type: "object" }, hasHooks: true, hooksEnabled: true },
       ]);
-      app = await buildApp({ sessionStore: store, userRepo, tokenRepo, gitSync, soulLoader });
+      app = await buildApp({
+        sessionStore: store,
+        userRepo,
+        tokenRepo,
+        gitSync,
+        soulLoader,
+        soulWriter: soulWriterDouble.writer,
+      });
     });
 
     it("returns 401 without auth", async () => {
@@ -711,31 +763,41 @@ x-computed:
     });
 
     it("deletes hooks.ts, commits, and reloads", async () => {
-      vi.mocked(existsSync).mockReturnValue(true);
+      // The route now gates on the gateway seeing a hooks companion, not on `existsSync`.
+      soulWriterDouble.putCompanion("Resource", "ticket", "hooks.ts", "({ before() {} })");
       const res = await app.inject(delHooks());
       expect(res.statusCode).toBe(204);
-      expect(unlink).toHaveBeenCalledWith(expect.stringContaining("hooks.ts"));
-      expect(gitSync.commit).toHaveBeenCalledWith(
-        "soul: remove hooks for resource type ticket",
-        expect.objectContaining({ email: "user@example.com" })
-      );
+      expect(soulWriterDouble.applied).toHaveLength(1);
+      expect(soulWriterDouble.applied[0]).toMatchObject({
+        subject: "soul: remove hooks for resource type ticket",
+        actor: { email: "user@example.com" },
+        changes: [
+          { op: "delete", target: { kind: "Resource", slug: "ticket", companion: "hooks.ts" } },
+        ],
+      });
       expect(soulLoader.reload).toHaveBeenCalledOnce();
     });
 
     it("returns 404 when hooks.ts does not exist", async () => {
-      vi.mocked(existsSync).mockReturnValue(false);
       const res = await app.inject(delHooks());
       expect(res.statusCode).toBe(404);
       expect(res.json()).toMatchObject({
         error: expect.stringContaining("no hooks found"),
       });
-      expect(unlink).not.toHaveBeenCalled();
+      expect(soulWriterDouble.applied).toEqual([]);
     });
 
     it("returns 404 when resource type does not exist", async () => {
       await app.close();
       soulLoader = makeFakeSoulLoader();
-      app = await buildApp({ sessionStore: store, userRepo, tokenRepo, gitSync, soulLoader });
+      app = await buildApp({
+        sessionStore: store,
+        userRepo,
+        tokenRepo,
+        gitSync,
+        soulLoader,
+        soulWriter: soulWriterDouble.writer,
+      });
 
       const res = await app.inject({
         method: "DELETE",

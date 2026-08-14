@@ -25,6 +25,8 @@ export async function scaffoldSoul(soulPath: string): Promise<void> {
   const git = simpleGit(soulPath).env(hermeticGitEnv());
   await git.addConfig("user.name", BOT_GIT_NAME);
   await git.addConfig("user.email", BOT_GIT_EMAIL);
+  // soul-write-exception: this creates the empty Soul repository itself. There is no artifact, no
+  // catalog and no gateway yet, and nothing else can be in the worktree for `-A` to sweep up.
   await git.add("-A");
   await git.commit("Initial soul structure");
 }

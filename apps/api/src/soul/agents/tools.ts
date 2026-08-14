@@ -1,9 +1,13 @@
-import { existsSync } from "node:fs";
-import { mkdir, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { ajv, TulipFarmValidationError, validateAgentFrontmatter } from "@tulipfarm/schema";
-import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
+import {
+  type GitSyncService,
+  type SoulLoader,
+  SoulWriteError,
+  type SoulWriter,
+} from "@tulipfarm/soul";
 import { stringify } from "yaml";
+import { SYSTEM_SOUL_COMMIT_ACTOR } from "../../runtime/soul-writer";
 import { type ApiToolDefinition, defineApiTool } from "../../tools/define.js";
 import { soulCommitError } from "../../tools/soul-faults";
 import { err, ok, type RequestContext, type ToolCallResult } from "../../tools/types.js";
@@ -14,11 +18,39 @@ const SOUL_AGENT_TARGET = "soul.agent";
 export interface AgentToolContext {
   gitSync: GitSyncService;
   soulLoader: SoulLoader;
+  readonly soulWriter: SoulWriter;
   requestContext?: RequestContext;
 }
 
 function reason(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+/**
+ * Map a Soul write-gateway rejection onto this tool family's error vocabulary.
+ *
+ * `PRECONDITION_FAILED` is the one code whose meaning is site-specific — an "already exists" on
+ * create, a "not found" on update/delete — so each caller supplies that mapping. The rest are
+ * fixed: a rejected changeset (bad target or invalid frontmatter) is a `validation_error`, a moved
+ * base is transient (`unavailable`), and a failed commit is classified by `soulCommitError` so git
+ * contention is reported as `unavailable` rather than as a request the model should repair. The
+ * gateway's message carries only structured evidence, never file content, so it is safe to surface.
+ */
+function mapSoulWriteError(
+  e: SoulWriteError,
+  onPrecondition: () => ToolCallResult
+): ToolCallResult {
+  switch (e.code) {
+    case "PRECONDITION_FAILED":
+      return onPrecondition();
+    case "VALIDATION_FAILED":
+    case "INVALID_TARGET":
+      return err("validation_error", e.message);
+    case "CONFLICT":
+      return err("unavailable", e.message);
+    default:
+      return soulCommitError(e, e.message);
+  }
 }
 
 function stringArg(args: unknown, key: string): string | undefined {
@@ -84,7 +116,7 @@ const validateCreate = ajv.compile(CREATE_SCHEMA);
 const agentCreate = defineApiTool<AgentToolContext>({
   name: "agent_create",
   description:
-    "Create a new agent in the soul repo by writing its AGENT.md. Commits and pushes via withSync. No approval gate.",
+    "Create a new agent in the soul repo by writing its AGENT.md. The change is committed atomically to the soul repo. No approval gate.",
   tier: "system",
   mutating: true,
   inputSchema: CREATE_SCHEMA,
@@ -112,25 +144,25 @@ const agentCreate = defineApiTool<AgentToolContext>({
     const fmError = frontmatterError(frontmatter);
     if (fmError) return fmError;
 
-    const agentDir = join(ctx.gitSync.path, "agents", name);
-    if (existsSync(agentDir)) return err("validation_error", "agent already exists");
-
     try {
-      await mkdir(agentDir, { recursive: true });
-      await writeFile(join(agentDir, "AGENT.md"), serializeAgent(frontmatter, body), "utf8");
+      await ctx.soulWriter.apply({
+        subject: `soul: add agent ${name}`,
+        source: "agent",
+        actor: ctx.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        changes: [
+          {
+            op: "put",
+            target: { kind: "Agent", slug: name, definitionMode: "legacy" },
+            content: serializeAgent(frontmatter, body),
+          },
+        ],
+        preconditions: [{ kind: "Agent", slug: name, state: "absent" }],
+      });
     } catch (e) {
-      return err("internal_error", reason(e));
-    }
-
-    try {
-      await ctx.gitSync.withSync(`soul: add agent ${name}`, ctx.requestContext?.actor);
-    } catch (e) {
-      return soulCommitError(e, reason(e));
-    }
-
-    try {
-      await ctx.soulLoader.reload();
-    } catch (e) {
+      if (e instanceof SoulWriteError) {
+        return mapSoulWriteError(e, () => err("validation_error", "agent already exists"));
+      }
       return err("internal_error", reason(e));
     }
 
@@ -162,7 +194,7 @@ const validateUpdate = ajv.compile(UPDATE_SCHEMA);
 const agentUpdate = defineApiTool<AgentToolContext>({
   name: "agent_update",
   description:
-    "Update an existing agent's body and/or frontmatter. At least one must be provided. Commits and pushes via withSync.",
+    "Update an existing agent's body and/or frontmatter. At least one must be provided. The change is committed atomically to the soul repo.",
   tier: "system",
   mutating: true,
   inputSchema: UPDATE_SCHEMA,
@@ -194,22 +226,24 @@ const agentUpdate = defineApiTool<AgentToolContext>({
     const newBody = body ?? existing.body;
     const newFm = frontmatter ?? existing.frontmatter;
 
-    const agentFile = join(ctx.gitSync.path, "agents", name, "AGENT.md");
     try {
-      await writeFile(agentFile, serializeAgent(newFm, newBody), "utf8");
+      await ctx.soulWriter.apply({
+        subject: `soul: update agent ${name}`,
+        source: "agent",
+        actor: ctx.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        changes: [
+          {
+            op: "put",
+            target: { kind: "Agent", slug: name, definitionMode: "legacy" },
+            content: serializeAgent(newFm, newBody),
+          },
+        ],
+      });
     } catch (e) {
-      return err("internal_error", reason(e));
-    }
-
-    try {
-      await ctx.gitSync.withSync(`soul: update agent ${name}`, ctx.requestContext?.actor);
-    } catch (e) {
-      return soulCommitError(e, reason(e));
-    }
-
-    try {
-      await ctx.soulLoader.reload();
-    } catch (e) {
+      if (e instanceof SoulWriteError) {
+        return mapSoulWriteError(e, () => err("not_found", `agent not found: ${name}`));
+      }
       return err("internal_error", reason(e));
     }
 
@@ -300,7 +334,7 @@ const validateDelete = ajv.compile(DELETE_SCHEMA);
 const agentDelete = defineApiTool<AgentToolContext>({
   name: "agent_delete",
   description:
-    "Delete an agent from the soul repo. Removes its directory, commits and pushes via withSync.",
+    "Delete an agent from the soul repo. Removes its definition and companions, committed atomically to the soul repo.",
   tier: "system",
   mutating: true,
   inputSchema: DELETE_SCHEMA,
@@ -317,22 +351,18 @@ const agentDelete = defineApiTool<AgentToolContext>({
 
     if (!ctx.soulLoader.agents.has(name)) return err("not_found", `agent not found: ${name}`);
 
-    const agentDir = join(ctx.gitSync.path, "agents", name);
     try {
-      await rm(agentDir, { recursive: true, force: true });
+      await ctx.soulWriter.apply({
+        subject: `soul: remove agent ${name}`,
+        source: "agent",
+        actor: ctx.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        changes: [{ op: "deleteArtifact", kind: "Agent", slug: name }],
+      });
     } catch (e) {
-      return err("internal_error", reason(e));
-    }
-
-    try {
-      await ctx.gitSync.withSync(`soul: remove agent ${name}`, ctx.requestContext?.actor);
-    } catch (e) {
-      return soulCommitError(e, reason(e));
-    }
-
-    try {
-      await ctx.soulLoader.reload();
-    } catch (e) {
+      if (e instanceof SoulWriteError) {
+        return mapSoulWriteError(e, () => err("not_found", `agent not found: ${name}`));
+      }
       return err("internal_error", reason(e));
     }
 

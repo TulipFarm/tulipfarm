@@ -5,11 +5,17 @@ import {
   useRouteError,
 } from "@remix-run/react";
 import { useEffect, useState } from "react";
+import { RunBudgets, type RunBudgetsState } from "~/components/runs/run-budgets";
 import { RunInspector } from "~/components/runs/run-inspector";
 import { ConnectionStatus } from "~/components/shell/states";
 import { ErrorState } from "~/components/states";
 import { API_BASE, ApiError } from "~/lib/api";
-import { commandRun, getOperationalRun, type RunCommandAction } from "~/lib/operations";
+import {
+  commandRun,
+  getOperationalRun,
+  getRunBudgets,
+  type RunCommandAction,
+} from "~/lib/operations";
 
 export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
   if (!params.id) throw new ApiError(404, "Run not found");
@@ -22,6 +28,27 @@ export default function OperationalRunRoute() {
   const [busy, setBusy] = useState(false);
   const [unavailable, setUnavailable] = useState<string>();
   const [connection, setConnection] = useState<"online" | "reconnecting">("online");
+  const [budgets, setBudgets] = useState<RunBudgetsState>({ status: "loading" });
+
+  useEffect(() => {
+    let active = true;
+    setBudgets({ status: "loading" });
+    getRunBudgets(run.id)
+      .then((result) => {
+        if (active) setBudgets({ status: "loaded", budgets: result.budgets });
+      })
+      .catch((error) => {
+        if (active) {
+          setBudgets({
+            status: "error",
+            message: error instanceof Error ? error.message : "Unknown error",
+          });
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [run.id]);
 
   useEffect(() => {
     if (["succeeded", "failed", "cancelled"].includes(run.status)) return;
@@ -68,6 +95,7 @@ export default function OperationalRunRoute() {
     <div className="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-6 sm:px-6">
       {connection === "reconnecting" ? <ConnectionStatus state="reconnecting" /> : null}
       <RunInspector run={run} busy={busy} unavailable={unavailable} onCommand={submit} />
+      <RunBudgets state={budgets} />
     </div>
   );
 }

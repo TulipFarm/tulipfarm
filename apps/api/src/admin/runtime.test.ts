@@ -85,6 +85,18 @@ function runtime() {
   const runs: RunReader = {
     list: vi.fn(async () => ({ items: [run], nextCursor: null })),
     get: vi.fn(async (_businessId: string, runId: string) => (runId === "run-1" ? run : null)),
+    budgets: vi.fn(async (_businessId: string, runId: string) =>
+      runId === "run-1"
+        ? [
+            {
+              key: "usd_micros",
+              limit: 1_000_000,
+              consumed: 250_000,
+              exhaustionPolicy: "failure_path" as const,
+            },
+          ]
+        : null
+    ),
   };
   const api = createRuntimeOperationalApi({
     activity,

@@ -1,12 +1,17 @@
 import type { LlmService } from "@tulipfarm/llm";
 import { LlmNotConfiguredError } from "@tulipfarm/schema";
-import type { GitSyncService, SoulLoader, SoulSkill } from "@tulipfarm/soul";
+import type {
+  GitSyncService,
+  SoulLoader,
+  SoulSkill,
+  SoulWriteRequest,
+  SoulWriter,
+} from "@tulipfarm/soul";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SKILL_TOOLS, type SkillToolContext } from "./tools";
 
 type SkillTool = (typeof SKILL_TOOLS)[number];
 
-vi.mock("node:fs", () => ({ existsSync: vi.fn() }));
 vi.mock("node:fs/promises", () => ({
   cp: vi.fn().mockResolvedValue(undefined),
   mkdir: vi.fn().mockResolvedValue(undefined),
@@ -21,8 +26,7 @@ vi.mock("./audit", async (orig) => {
   return { ...actual, buildAudit: (...args: unknown[]) => mockBuildAudit(...args) };
 });
 
-import { existsSync } from "node:fs";
-import { cp, mkdir, rm, writeFile } from "node:fs/promises";
+import { cp, rm, writeFile } from "node:fs/promises";
 import type { BundledSkill } from "./bundled";
 
 const FAKE_REPORT = {
@@ -44,8 +48,35 @@ function frontmatter(name: string, fields: Record<string, unknown> = {}): Record
 function makeGitSync(soulPath = "/fake/soul"): GitSyncService {
   return {
     path: soulPath,
-    withSync: vi.fn().mockResolvedValue({ sha: "abc1234", filesChanged: 1 }),
+    withSyncPaths: vi.fn().mockResolvedValue({ sha: "abc1234", filesChanged: 1 }),
   } as unknown as GitSyncService;
+}
+
+function makeSoulWriter(existingCompanions: ReadonlySet<string> = new Set()): SoulWriter {
+  return {
+    apply: vi.fn().mockResolvedValue({
+      commitSha: "abc1234",
+      filesChanged: 1,
+      paths: [],
+      pushed: false,
+    }),
+    readCompanion: vi.fn((_kind: string, slug: string, name: string) =>
+      existingCompanions.has(`${slug}/${name}`) ? "existing content" : null
+    ),
+  } as unknown as SoulWriter;
+}
+
+/** The single write gateway request the last `apply()` call received. */
+function lastApply(soulWriter: SoulWriter): SoulWriteRequest {
+  const calls = vi.mocked(soulWriter.apply).mock.calls;
+  expect(calls.length).toBeGreaterThan(0);
+  return calls[calls.length - 1][0];
+}
+
+/** The SKILL.md content of a gateway request's first `put` change, or "" when it is not a put. */
+function appliedContent(soulWriter: SoulWriter): string {
+  const change = lastApply(soulWriter).changes[0];
+  return change.op === "put" ? change.content : "";
 }
 
 function makeSoulLoader(skills: SoulSkill[] = []): SoulLoader {
@@ -69,10 +100,12 @@ function makeCtx(
   skills: SoulSkill[] = [],
   llmService?: LlmService,
   bundledSkills: BundledSkill[] = [],
-  disabledBundledSkills = new Set<string>()
+  disabledBundledSkills = new Set<string>(),
+  existingCompanions: ReadonlySet<string> = new Set()
 ): SkillToolContext & {
   gitSync: ReturnType<typeof makeGitSync>;
   soulLoader: ReturnType<typeof makeSoulLoader>;
+  soulWriter: SoulWriter;
 } {
   return {
     gitSync: makeGitSync(),
@@ -80,6 +113,7 @@ function makeCtx(
     llmService,
     bundledSkills: new Map(bundledSkills.map((skill) => [skill.name, skill])),
     disabledBundledSkills,
+    soulWriter: makeSoulWriter(existingCompanions),
   };
 }
 
@@ -132,11 +166,10 @@ describe("SKILL_TOOLS authorization declarations", () => {
 describe("skill_create", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(existsSync).mockReturnValue(false);
     mockBuildAudit.mockResolvedValue(FAKE_REPORT);
   });
 
-  it("writes SKILL.md with _pendingAudit marker, commits, reloads, returns auditReport", async () => {
+  it("writes SKILL.md with _pendingAudit marker, commits, returns auditReport", async () => {
     const ctx = makeCtx([], makeLlmService());
     const res = await createTool.handler(
       {
@@ -156,15 +189,18 @@ describe("skill_create", () => {
         auditReport: FAKE_REPORT,
       },
     });
-    expect(mkdir).toHaveBeenCalledWith(expect.stringContaining("skills/code-review"), {
-      recursive: true,
+    // A single SKILL.md companion put lands atomically through the write gateway.
+    expect(lastApply(ctx.soulWriter)).toMatchObject({
+      subject: "soul: add skill code-review",
+      source: "agent",
+      changes: [
+        { op: "put", target: { kind: "Skill", slug: "code-review", companion: "SKILL.md" } },
+      ],
     });
-    // Written content must include _pendingAudit marker.
-    const content = vi.mocked(writeFile).mock.calls[0][1] as string;
+    const content = appliedContent(ctx.soulWriter);
     expect(content).toContain("_pendingAudit: true");
     expect(content).toContain("Review code carefully.");
-    expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: add skill code-review", undefined);
-    expect(ctx.soulLoader.reload).toHaveBeenCalledOnce();
+    expect(ctx.gitSync.withSyncPaths).not.toHaveBeenCalled();
     expect(mockBuildAudit).toHaveBeenCalledOnce();
     expect(mockBuildAudit.mock.calls[0][2]).toEqual({
       verdict: "safe",
@@ -185,7 +221,7 @@ describe("skill_create", () => {
     );
 
     expect(res.success).toBe(true);
-    const content = vi.mocked(writeFile).mock.calls[0][1] as string;
+    const content = appliedContent(ctx.soulWriter);
     expect(content).toMatch(/^---\n/);
     expect(content).toContain("planning");
     expect(content).toContain("_pendingAudit: true");
@@ -231,7 +267,7 @@ describe("skill_create", () => {
       ctx
     );
     expect(res).toMatchObject({ success: false, error: { code: "audit_required" } });
-    expect(mkdir).not.toHaveBeenCalled();
+    expect(ctx.soulWriter.apply).not.toHaveBeenCalled();
   });
 
   it("returns audit_required if LlmNotConfiguredError thrown by llmService.effortModel", async () => {
@@ -241,7 +277,7 @@ describe("skill_create", () => {
       ctx
     );
     expect(res).toMatchObject({ success: false, error: { code: "audit_required" } });
-    expect(mkdir).not.toHaveBeenCalled();
+    expect(ctx.soulWriter.apply).not.toHaveBeenCalled();
   });
 
   it("returns validation_error for invalid name (uppercase)", async () => {
@@ -251,7 +287,7 @@ describe("skill_create", () => {
       ctx
     );
     expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
-    expect(ctx.gitSync.withSync).not.toHaveBeenCalled();
+    expect(ctx.gitSync.withSyncPaths).not.toHaveBeenCalled();
   });
 
   it("accepts a schema-valid name starting with a digit", async () => {
@@ -263,9 +299,8 @@ describe("skill_create", () => {
     expect(res).toMatchObject({ success: true, data: { name: "1skill" } });
   });
 
-  it("returns validation_error if skill dir already exists", async () => {
-    vi.mocked(existsSync).mockReturnValue(true);
-    const ctx = makeCtx([], makeLlmService());
+  it("returns validation_error if a Soul Skill already exists", async () => {
+    const ctx = makeCtx([], makeLlmService(), [], new Set(), new Set(["code-review/SKILL.md"]));
     const res = await createTool.handler(
       { name: "code-review", body: "body", frontmatter: frontmatter("code-review") },
       ctx
@@ -274,7 +309,7 @@ describe("skill_create", () => {
       success: false,
       error: { code: "validation_error", message: expect.stringContaining("already exists") },
     });
-    expect(mkdir).not.toHaveBeenCalled();
+    expect(ctx.soulWriter.apply).not.toHaveBeenCalled();
   });
 
   it("returns validation_error for missing required args", async () => {
@@ -343,19 +378,22 @@ describe("skill_activate", () => {
     body: "Review code.",
   };
 
-  it("removes _pendingAudit, rewrites SKILL.md, commits, reloads", async () => {
+  it("removes _pendingAudit, rewrites SKILL.md, commits through the gateway", async () => {
     const ctx = makeCtx([pendingSkill]);
     const res = await activateTool.handler({ name: "code-review" }, ctx);
 
     expect(res).toEqual({ success: true, data: { name: "code-review", activated: true } });
-    const content = vi.mocked(writeFile).mock.calls[0][1] as string;
+    expect(lastApply(ctx.soulWriter)).toMatchObject({
+      subject: "soul: activate skill code-review",
+      source: "agent",
+      changes: [
+        { op: "put", target: { kind: "Skill", slug: "code-review", companion: "SKILL.md" } },
+      ],
+    });
+    const content = appliedContent(ctx.soulWriter);
     expect(content).not.toContain("_pendingAudit");
     expect(content).toContain("review"); // user frontmatter preserved
-    expect(ctx.gitSync.withSync).toHaveBeenCalledWith(
-      "soul: activate skill code-review",
-      undefined
-    );
-    expect(ctx.soulLoader.reload).toHaveBeenCalledOnce();
+    expect(ctx.gitSync.withSyncPaths).not.toHaveBeenCalled();
   });
 
   it("returns validation_error if skill is already active (no _pendingAudit)", async () => {
@@ -367,7 +405,7 @@ describe("skill_activate", () => {
       success: false,
       error: { code: "validation_error", message: expect.stringContaining("already active") },
     });
-    expect(ctx.gitSync.withSync).not.toHaveBeenCalled();
+    expect(ctx.gitSync.withSyncPaths).not.toHaveBeenCalled();
   });
 
   it("returns not_found for unknown skill", async () => {
@@ -421,16 +459,17 @@ describe("skill_update", () => {
         body: "New body.",
       },
     });
-    expect(writeFile).toHaveBeenCalledWith(
-      expect.stringContaining("SKILL.md"),
-      expect.stringContaining("New body."),
-      "utf8"
-    );
-    expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: update skill code-review", undefined);
-    expect(ctx.soulLoader.reload).toHaveBeenCalledOnce();
+    expect(appliedContent(ctx.soulWriter)).toContain("New body.");
+    expect(lastApply(ctx.soulWriter)).toMatchObject({
+      subject: "soul: update skill code-review",
+      source: "agent",
+      changes: [
+        { op: "put", target: { kind: "Skill", slug: "code-review", companion: "SKILL.md" } },
+      ],
+    });
+    expect(ctx.gitSync.withSyncPaths).not.toHaveBeenCalled();
     expect(mockBuildAudit).not.toHaveBeenCalled();
-    const content = vi.mocked(writeFile).mock.calls[0][1] as string;
-    expect(content).not.toContain("_pendingAudit");
+    expect(appliedContent(ctx.soulWriter)).not.toContain("_pendingAudit");
   });
 
   it("surgically patches a unique body match without re-running SkillAudit", async () => {
@@ -452,11 +491,8 @@ describe("skill_update", () => {
         body: "Sharpened body.",
       },
     });
-    expect(writeFile).toHaveBeenCalledWith(
-      expect.stringContaining("SKILL.md"),
-      expect.stringContaining("Sharpened body."),
-      "utf8"
-    );
+    expect(appliedContent(ctx.soulWriter)).toContain("Sharpened body.");
+    expect(ctx.gitSync.withSyncPaths).not.toHaveBeenCalled();
     expect(mockBuildAudit).not.toHaveBeenCalled();
   });
 
@@ -640,7 +676,7 @@ describe("skill_update", () => {
         frontmatter: frontmatter("code-review", { version: "2" }),
       },
     });
-    const content = vi.mocked(writeFile).mock.calls[0][1] as string;
+    const content = appliedContent(ctx.soulWriter);
     expect(content).toContain("_pendingAudit: true");
     expect(mockBuildAudit).not.toHaveBeenCalled();
   });
@@ -665,7 +701,7 @@ describe("skill_update", () => {
     const ctx = makeCtx();
     const res = await updateTool.handler({ name: "ghost", body: "body" }, ctx);
     expect(res).toMatchObject({ success: false, error: { code: "not_found" } });
-    expect(ctx.gitSync.withSync).not.toHaveBeenCalled();
+    expect(ctx.gitSync.withSyncPaths).not.toHaveBeenCalled();
   });
 
   it("returns validation_error when neither body nor frontmatter provided", async () => {
@@ -696,8 +732,9 @@ describe("skill_update", () => {
       "utf8"
     );
     expect(disabled.has("resource-forge")).toBe(false);
-    expect(ctx.gitSync.withSync).toHaveBeenCalledWith(
+    expect(ctx.gitSync.withSyncPaths).toHaveBeenCalledWith(
       "soul: update skill resource-forge",
+      ["skills/resource-forge", "skills/.bundled-disabled.json"],
       undefined
     );
   });
@@ -807,17 +844,18 @@ describe("skill_delete", () => {
     vi.clearAllMocks();
   });
 
-  it("removes skill dir, commits via withSync, reloads", async () => {
+  it("removes a Soul Skill through the gateway as a whole-artifact delete", async () => {
     const ctx = makeCtx([{ name: "code-review", frontmatter: {}, body: "body" }]);
     const res = await deleteTool.handler({ name: "code-review" }, ctx);
 
     expect(res).toEqual({ success: true, data: { name: "code-review", deleted: true } });
-    expect(rm).toHaveBeenCalledWith(expect.stringContaining("skills/code-review"), {
-      recursive: true,
-      force: true,
+    expect(lastApply(ctx.soulWriter)).toMatchObject({
+      subject: "soul: remove skill code-review",
+      source: "agent",
+      changes: [{ op: "deleteArtifact", kind: "Skill", slug: "code-review" }],
     });
-    expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: remove skill code-review", undefined);
-    expect(ctx.soulLoader.reload).toHaveBeenCalledOnce();
+    expect(rm).not.toHaveBeenCalled();
+    expect(ctx.gitSync.withSyncPaths).not.toHaveBeenCalled();
   });
 
   it("returns not_found for unknown skill", async () => {
@@ -825,6 +863,7 @@ describe("skill_delete", () => {
     const res = await deleteTool.handler({ name: "ghost" }, ctx);
     expect(res).toMatchObject({ success: false, error: { code: "not_found" } });
     expect(rm).not.toHaveBeenCalled();
+    expect(ctx.soulWriter.apply).not.toHaveBeenCalled();
   });
 
   it("returns validation_error for missing name", async () => {

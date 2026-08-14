@@ -1,9 +1,9 @@
 import { existsSync } from "node:fs";
-import { mkdir, rm, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { analyzeHook, HookAnalysisError } from "@tulipfarm/sandbox";
 import { ajv, TulipFarmValidationError, validateResourceSchema } from "@tulipfarm/schema";
-import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
+import type { SoulLoader, SoulWrite, SoulWriter } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { parse as parseYaml } from "yaml";
 import type { AuditService } from "../../audit/service";
@@ -12,6 +12,7 @@ import { ErrorSchema } from "../../auth/schemas";
 import type { RateLimiter } from "../../rate-limit";
 import { makeRateLimitHook } from "../../rate-limit";
 import { commitActorFromRequest } from "../commit-actor";
+import { isSoulWriteError, soulWriteHttpError } from "../write-errors";
 import {
   RESOURCE_DOMAIN_RE,
   resourceDefinitionYaml,
@@ -101,7 +102,8 @@ function isDeploymentAdmin(req: FastifyRequest): boolean {
 
 export function registerResourceTypeRoutes(
   app: FastifyInstance,
-  gitSync: GitSyncService,
+  soulWriter: SoulWriter,
+  soulPath: string,
   soulLoader: SoulLoader,
   requireAuth: PreHandler,
   reconcile?: () => Promise<void>,
@@ -142,8 +144,10 @@ export function registerResourceTypeRoutes(
           400: ErrorSchema,
           401: ErrorSchema,
           403: ErrorSchema,
+          404: ErrorSchema,
           409: ErrorSchema,
           422: ValidationErrorSchema,
+          500: ErrorSchema,
         },
       },
     },
@@ -164,7 +168,7 @@ export function registerResourceTypeRoutes(
         return reply.code(403).send({ error: "only an admin can set a resource type's domain" });
       }
 
-      const typeDir = join(gitSync.path, "resources", name);
+      const typeDir = join(soulPath, "resources", name);
       if (existsSync(typeDir)) {
         return reply.code(409).send({ error: "resource type already exists" });
       }
@@ -172,7 +176,6 @@ export function registerResourceTypeRoutes(
       const check = checkSchemaYaml(schemaYaml);
       if (!check.ok) return reply.code(check.status).send(check.body);
 
-      await mkdir(typeDir, { recursive: true });
       const body =
         domain === undefined
           ? schemaYaml
@@ -180,17 +183,36 @@ export function registerResourceTypeRoutes(
       if (domain !== undefined) {
         const envelopeError = resourceEnvelopeError(body);
         if (envelopeError !== undefined) {
-          await rm(typeDir, { recursive: true, force: true });
           return reply.code(422).send({ error: envelopeError });
         }
       }
-      await writeFile(
-        join(typeDir, domain === undefined ? "schema.yml" : "resource.yaml"),
-        body,
-        "utf8"
-      );
 
-      await gitSync.commit(`soul: add resource type ${name}`, commitActorFromRequest(req));
+      try {
+        await soulWriter.apply({
+          subject: `soul: add resource type ${name}`,
+          source: "api",
+          actor: commitActorFromRequest(req),
+          businessId: DEPLOYMENT_BUSINESS_ID,
+          changes: [
+            {
+              op: "put",
+              // A domainless type keeps the superseded `schema.yml` spelling; only a domained one
+              // needs the canonical envelope that carries the wall.
+              target:
+                domain === undefined
+                  ? { kind: "Resource", slug: name, definitionMode: "legacy" }
+                  : { kind: "Resource", slug: name },
+              content: body,
+            },
+          ],
+        });
+      } catch (e) {
+        if (isSoulWriteError(e)) {
+          const mapped = soulWriteHttpError(e);
+          return reply.code(mapped.status).send(mapped.body);
+        }
+        throw e;
+      }
       await soulLoader.reload();
       // Materialise the new type's Postgres table before the client can POST records to it.
       await reconcile?.();
@@ -252,7 +274,9 @@ export function registerResourceTypeRoutes(
           401: ErrorSchema,
           403: ErrorSchema,
           404: ErrorSchema,
+          409: ErrorSchema,
           422: ValidationErrorSchema,
+          500: ErrorSchema,
         },
       },
     },
@@ -266,7 +290,7 @@ export function registerResourceTypeRoutes(
       if (domain !== undefined && !RESOURCE_DOMAIN_RE.test(domain)) {
         return reply.code(400).send({ error: "invalid resource type domain" });
       }
-      const typeDir = join(gitSync.path, "resources", name);
+      const typeDir = join(soulPath, "resources", name);
       if (!existsSync(typeDir)) {
         return reply.code(404).send({ error: "resource type not found" });
       }
@@ -280,8 +304,15 @@ export function registerResourceTypeRoutes(
       if (!check.ok) return reply.code(check.status).send(check.body);
 
       const nextDomain = domain ?? existingDomain;
+      let changes: SoulWrite[];
       if (nextDomain === undefined) {
-        await writeFile(join(typeDir, "schema.yml"), schemaYaml, "utf8");
+        changes = [
+          {
+            op: "put",
+            target: { kind: "Resource", slug: name, definitionMode: "legacy" },
+            content: schemaYaml,
+          },
+        ];
       } else {
         const body = resourceDefinitionYaml({
           name,
@@ -292,10 +323,29 @@ export function registerResourceTypeRoutes(
         if (envelopeError !== undefined) {
           return reply.code(422).send({ error: envelopeError });
         }
-        await writeFile(join(typeDir, "resource.yaml"), body, "utf8");
-        await rm(join(typeDir, "schema.yml"), { force: true });
+        // The canonical put and the legacy retirement must ride the same changeset: the gateway
+        // refuses a tree that carries both spellings of one definition.
+        changes = [
+          { op: "put", target: { kind: "Resource", slug: name }, content: body },
+          { op: "delete", target: { kind: "Resource", slug: name, definitionMode: "legacy" } },
+        ];
       }
-      await gitSync.commit(`soul: update resource type ${name}`, commitActorFromRequest(req));
+
+      try {
+        await soulWriter.apply({
+          subject: `soul: update resource type ${name}`,
+          source: "api",
+          actor: commitActorFromRequest(req),
+          businessId: DEPLOYMENT_BUSINESS_ID,
+          changes,
+        });
+      } catch (e) {
+        if (isSoulWriteError(e)) {
+          const mapped = soulWriteHttpError(e);
+          return reply.code(mapped.status).send(mapped.body);
+        }
+        throw e;
+      }
       await soulLoader.reload();
       // New columns may have been added — materialise them before records reference them.
       await reconcile?.();
@@ -328,6 +378,9 @@ export function registerResourceTypeRoutes(
           401: ErrorSchema,
           403: ErrorSchema,
           404: ErrorSchema,
+          409: ErrorSchema,
+          422: ErrorSchema,
+          500: ErrorSchema,
         },
       },
     },
@@ -336,7 +389,7 @@ export function registerResourceTypeRoutes(
       if (!name || !NAME_RE.test(name)) {
         return reply.code(400).send({ error: "invalid resource type name" });
       }
-      const typeDir = join(gitSync.path, "resources", name);
+      const typeDir = join(soulPath, "resources", name);
       if (!existsSync(typeDir)) {
         return reply.code(404).send({ error: "resource type not found" });
       }
@@ -345,8 +398,23 @@ export function registerResourceTypeRoutes(
       if (soulLoader.resources.get(name)?.domain !== undefined && !isDeploymentAdmin(req)) {
         return reply.code(403).send({ error: "only an admin can delete a domained resource type" });
       }
-      await rm(typeDir, { recursive: true, force: true });
-      await gitSync.commit(`soul: remove resource type ${name}`, commitActorFromRequest(req));
+      try {
+        await soulWriter.apply({
+          subject: `soul: remove resource type ${name}`,
+          source: "api",
+          actor: commitActorFromRequest(req),
+          businessId: DEPLOYMENT_BUSINESS_ID,
+          // Takes the definition *and* every companion beside it (`hooks.ts`), matching the
+          // recursive directory removal this replaced.
+          changes: [{ op: "deleteArtifact", kind: "Resource", slug: name }],
+        });
+      } catch (e) {
+        if (isSoulWriteError(e)) {
+          const mapped = soulWriteHttpError(e);
+          return reply.code(mapped.status).send(mapped.body);
+        }
+        throw e;
+      }
       await soulLoader.reload();
       await auditWrite(req, "resource-type.delete", `resource-type:${name}`);
       return reply.code(204).send();
@@ -404,7 +472,9 @@ export function registerResourceTypeRoutes(
           400: ErrorSchema,
           401: ErrorSchema,
           404: ErrorSchema,
+          409: ErrorSchema,
           422: ValidationErrorSchema,
+          500: ErrorSchema,
         },
       },
     },
@@ -435,12 +505,27 @@ export function registerResourceTypeRoutes(
         });
       }
 
-      const hooksFile = join(gitSync.path, "resources", name, "hooks.ts");
-      await writeFile(hooksFile, source, "utf8");
-      await gitSync.commit(
-        `soul: add hooks for resource type ${name}`,
-        commitActorFromRequest(req)
-      );
+      try {
+        await soulWriter.apply({
+          subject: `soul: add hooks for resource type ${name}`,
+          source: "api",
+          actor: commitActorFromRequest(req),
+          businessId: DEPLOYMENT_BUSINESS_ID,
+          changes: [
+            {
+              op: "put",
+              target: { kind: "Resource", slug: name, companion: "hooks.ts" },
+              content: source,
+            },
+          ],
+        });
+      } catch (e) {
+        if (isSoulWriteError(e)) {
+          const mapped = soulWriteHttpError(e);
+          return reply.code(mapped.status).send(mapped.body);
+        }
+        throw e;
+      }
       await soulLoader.reload();
       // Hooks are executable code running against business data — the highest-value write here.
       await auditWrite(req, "resource-type.hooks.write", `resource-type:${name}`);
@@ -463,6 +548,9 @@ export function registerResourceTypeRoutes(
           400: ErrorSchema,
           401: ErrorSchema,
           404: ErrorSchema,
+          409: ErrorSchema,
+          422: ErrorSchema,
+          500: ErrorSchema,
         },
       },
     },
@@ -475,16 +563,27 @@ export function registerResourceTypeRoutes(
         return reply.code(404).send({ error: `resource type not found: ${name}` });
       }
 
-      const hooksFile = join(gitSync.path, "resources", name, "hooks.ts");
-      if (!existsSync(hooksFile)) {
+      if (soulWriter.readCompanion("Resource", name, "hooks.ts") === null) {
         return reply.code(404).send({ error: `no hooks found for resource type: ${name}` });
       }
 
-      await unlink(hooksFile);
-      await gitSync.commit(
-        `soul: remove hooks for resource type ${name}`,
-        commitActorFromRequest(req)
-      );
+      try {
+        await soulWriter.apply({
+          subject: `soul: remove hooks for resource type ${name}`,
+          source: "api",
+          actor: commitActorFromRequest(req),
+          businessId: DEPLOYMENT_BUSINESS_ID,
+          changes: [
+            { op: "delete", target: { kind: "Resource", slug: name, companion: "hooks.ts" } },
+          ],
+        });
+      } catch (e) {
+        if (isSoulWriteError(e)) {
+          const mapped = soulWriteHttpError(e);
+          return reply.code(mapped.status).send(mapped.body);
+        }
+        throw e;
+      }
       await soulLoader.reload();
       await auditWrite(req, "resource-type.hooks.delete", `resource-type:${name}`);
       return reply.code(204).send();

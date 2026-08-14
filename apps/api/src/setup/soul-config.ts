@@ -31,6 +31,21 @@ async function readSoulConfigStrict(soulPath: string): Promise<SoulConfig> {
 }
 
 /**
+ * Pure read-merge-serialize for `soul.yaml`. `current` is the file's raw contents (or `null`/empty
+ * for genuine absence), `patch` overrides its keys, and the merged config is validated and
+ * re-serialized to YAML.
+ *
+ * Strict on purpose: a non-empty `current` that fails to parse or validate raises rather than
+ * resolving to `{}`. Merging a patch onto a silently-empty config would rewrite the file with the
+ * patch alone, discarding every key an unreadable soul.yaml still holds.
+ */
+export function mergeSoulConfig(current: string | null, patch: SoulConfig): string {
+  const base: SoulConfig =
+    current === null || current === "" ? {} : validateSoulConfig(parse(current) ?? {});
+  return stringify(validateSoulConfig({ ...base, ...patch }));
+}
+
+/**
  * Tolerant read for boot and display paths, which must degrade rather than crash (decision S3).
  * Never use this to build a value that is written back — see `patchSoulConfig`.
  */
@@ -43,9 +58,18 @@ export async function readSoulConfig(soulPath: string): Promise<SoulConfig> {
 }
 
 export async function patchSoulConfig(soulPath: string, patch: SoulConfig): Promise<void> {
-  // Deliberately the strict read: merging a patch onto a silently-empty config would rewrite the
-  // file with the patch alone, discarding every key an unreadable soul.yaml still holds.
-  const next = validateSoulConfig({ ...(await readSoulConfigStrict(soulPath)), ...patch });
+  // Read the raw file so the strict merge below sees exactly what is on disk: an unreadable but
+  // present soul.yaml must raise, not resolve to `{}` and clobber every key it still holds.
+  let current: string | null;
+  try {
+    current = await fs.readFile(soulYamlPath(soulPath), "utf8");
+  } catch (error) {
+    if (isMissingFile(error)) current = null;
+    else throw error;
+  }
+  const next = mergeSoulConfig(current, patch);
+  // soul-write-exception: the raw writer behind first-run setup and headless bootstrap, both of
+  // which seed soul.yaml before the artifact catalog and the SoulWriter gateway are constructed.
   await fs.mkdir(soulPath, { recursive: true });
-  await fs.writeFile(soulYamlPath(soulPath), stringify(next), "utf8");
+  await fs.writeFile(soulYamlPath(soulPath), next, "utf8");
 }

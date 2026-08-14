@@ -1,10 +1,12 @@
 import { existsSync } from "node:fs";
-import { mkdir, rm, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { analyzeHook, HookAnalysisError } from "@tulipfarm/sandbox";
 import { ajv, TulipFarmValidationError, validateResourceSchema } from "@tulipfarm/schema";
-import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
+import type { GitSyncService, SoulLoader, SoulWriter } from "@tulipfarm/soul";
+import { SoulWriteError } from "@tulipfarm/soul";
 import { parse as parseYaml } from "yaml";
+import { SYSTEM_SOUL_COMMIT_ACTOR } from "../../runtime/soul-writer";
 import { type ApiToolDefinition, defineApiTool } from "../../tools/define.js";
 import { soulCommitError } from "../../tools/soul-faults";
 import { err, ok, type RequestContext, type ToolCallResult } from "../../tools/types.js";
@@ -20,8 +22,30 @@ const SOUL_RESOURCE_TYPE_TARGET = "soul.resource_type";
 export interface ResourceTypeToolContext {
   gitSync: GitSyncService;
   soulLoader: SoulLoader;
+  readonly soulWriter: SoulWriter;
   reconcile?: () => Promise<void>;
   requestContext?: RequestContext;
+}
+
+/**
+ * Map a `SoulWriter.apply` rejection onto this file's Tool error vocabulary. `SoulWriteError`
+ * carries only structured evidence, never file content, so its message is safe to return. Codes
+ * preserve today's conditions: a schema/existence rejection is a `validation_error` the model can
+ * repair, a base-moved `CONFLICT` is transient infrastructure, and a git commit failure is routed
+ * through the same contention classifier the `withSync` path used.
+ */
+function soulWriteFault(error: SoulWriteError): ToolCallResult {
+  switch (error.code) {
+    case "VALIDATION_FAILED":
+    case "PRECONDITION_FAILED":
+      return err("validation_error", error.message);
+    case "CONFLICT":
+      return err("unavailable", error.message);
+    case "COMMIT_FAILED":
+      return soulCommitError(error, error.message);
+    default:
+      return err("internal_error", error.message);
+  }
 }
 
 function reason(e: unknown): string {
@@ -137,7 +161,7 @@ function firstError(validate: ReturnType<typeof ajv.compile>): string {
 const createResourceType = defineApiTool<ResourceTypeToolContext>({
   name: "create_resource_type",
   description:
-    "Create a new resource type by writing its JSON Schema (as YAML) to the soul repo. Commits and pushes via withSync.",
+    "Create a new resource type by writing its JSON Schema (as YAML) to the soul repo. The write is validated and committed atomically through the Soul write gateway.",
   mutating: true,
   tier: "system",
   inputSchema: CREATE_SCHEMA,
@@ -161,16 +185,22 @@ const createResourceType = defineApiTool<ResourceTypeToolContext>({
     if (!validated.ok) return validated.result;
 
     try {
-      await mkdir(typeDir, { recursive: true });
-      await writeFile(join(typeDir, "schema.yml"), schemaYaml, "utf8");
+      await ctx.soulWriter.apply({
+        subject: `soul: add resource type ${name}`,
+        source: "agent",
+        actor: ctx.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        changes: [
+          {
+            op: "put",
+            target: { kind: "Resource", slug: name, definitionMode: "legacy" },
+            content: schemaYaml,
+          },
+        ],
+      });
     } catch (e) {
+      if (e instanceof SoulWriteError) return soulWriteFault(e);
       return err("internal_error", reason(e));
-    }
-
-    try {
-      await ctx.gitSync.withSync(`soul: add resource type ${name}`, ctx.requestContext?.actor);
-    } catch (e) {
-      return soulCommitError(e, reason(e));
     }
 
     try {
@@ -231,7 +261,8 @@ const resourceTypeSchema = defineApiTool<ResourceTypeToolContext>({
 
 const resourceTypeUpdate = defineApiTool<ResourceTypeToolContext>({
   name: "resource_type_update",
-  description: "Replace the schema of an existing resource type. Commits and pushes via withSync.",
+  description:
+    "Replace the schema of an existing resource type. The write is validated and committed atomically through the Soul write gateway.",
   mutating: true,
   tier: "system",
   inputSchema: UPDATE_SCHEMA,
@@ -252,31 +283,48 @@ const resourceTypeUpdate = defineApiTool<ResourceTypeToolContext>({
     const validated = validateSchemaYaml(schemaYaml);
     if (!validated.ok) return validated.result;
 
-    const typeDir = join(ctx.gitSync.path, "resources", name);
     // The existing domain is carried through untouched: this Tool cannot set, change or clear it.
+    // A domained Resource lives in the canonical `resource.yaml` envelope (the only form that can
+    // carry `spec.domain`), so an update there rewrites the envelope and retires any superseded
+    // `schema.yml` in the same atomic changeset; a domainless one stays in the legacy `schema.yml`.
     const existingDomain = ctx.soulLoader.resources.get(name)?.domain;
-    try {
-      if (existingDomain === undefined) {
-        await writeFile(join(typeDir, "schema.yml"), schemaYaml, "utf8");
-      } else {
-        const body = resourceDefinitionYaml({
-          name,
-          schema: validated.parsed,
-          domain: existingDomain,
-        });
-        const envelopeError = resourceEnvelopeError(body);
-        if (envelopeError !== undefined) return err("validation_error", envelopeError);
-        await writeFile(join(typeDir, "resource.yaml"), body, "utf8");
-        await rm(join(typeDir, "schema.yml"), { force: true });
-      }
-    } catch (e) {
-      return err("internal_error", reason(e));
+    let envelopeBody: string | undefined;
+    if (existingDomain !== undefined) {
+      envelopeBody = resourceDefinitionYaml({
+        name,
+        schema: validated.parsed,
+        domain: existingDomain,
+      });
+      const envelopeError = resourceEnvelopeError(envelopeBody);
+      if (envelopeError !== undefined) return err("validation_error", envelopeError);
     }
 
     try {
-      await ctx.gitSync.withSync(`soul: update resource type ${name}`, ctx.requestContext?.actor);
+      await ctx.soulWriter.apply({
+        subject: `soul: update resource type ${name}`,
+        source: "agent",
+        actor: ctx.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        changes:
+          envelopeBody === undefined
+            ? [
+                {
+                  op: "put",
+                  target: { kind: "Resource", slug: name, definitionMode: "legacy" },
+                  content: schemaYaml,
+                },
+              ]
+            : [
+                { op: "put", target: { kind: "Resource", slug: name }, content: envelopeBody },
+                {
+                  op: "delete",
+                  target: { kind: "Resource", slug: name, definitionMode: "legacy" },
+                },
+              ],
+      });
     } catch (e) {
-      return soulCommitError(e, reason(e));
+      if (e instanceof SoulWriteError) return soulWriteFault(e);
+      return err("internal_error", reason(e));
     }
 
     try {
@@ -362,7 +410,8 @@ const createResourceHooks = defineApiTool<ResourceTypeToolContext>({
   description:
     "Create or replace a hooks.ts file for a resource type. The source must be a parenthesized " +
     "object literal with optional `before` and/or `after` async functions. Runs static analysis " +
-    "to block banned patterns (require, import, eval, fetch, setTimeout, etc.). Commits via withSync.",
+    "to block banned patterns (require, import, eval, fetch, setTimeout, etc.). Commits atomically " +
+    "through the Soul write gateway.",
   mutating: true,
   tier: "system",
   inputSchema: HOOKS_WRITE_SCHEMA,
@@ -384,20 +433,23 @@ const createResourceHooks = defineApiTool<ResourceTypeToolContext>({
     const validationErr = validateHookSource(source);
     if (validationErr) return validationErr;
 
-    const hooksFile = join(ctx.gitSync.path, "resources", name, "hooks.ts");
     try {
-      await writeFile(hooksFile, source, "utf8");
+      await ctx.soulWriter.apply({
+        subject: `soul: add hooks for resource type ${name}`,
+        source: "agent",
+        actor: ctx.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        changes: [
+          {
+            op: "put",
+            target: { kind: "Resource", slug: name, companion: "hooks.ts" },
+            content: source,
+          },
+        ],
+      });
     } catch (e) {
+      if (e instanceof SoulWriteError) return soulWriteFault(e);
       return err("internal_error", reason(e));
-    }
-
-    try {
-      await ctx.gitSync.withSync(
-        `soul: add hooks for resource type ${name}`,
-        ctx.requestContext?.actor
-      );
-    } catch (e) {
-      return soulCommitError(e, reason(e));
     }
 
     try {
@@ -456,24 +508,23 @@ const deleteResourceHooks = defineApiTool<ResourceTypeToolContext>({
       return err("not_found", `resource type not found: ${name}`);
     }
 
-    const hooksFile = join(ctx.gitSync.path, "resources", name, "hooks.ts");
-    if (!existsSync(hooksFile)) {
+    if (ctx.soulWriter.readCompanion("Resource", name, "hooks.ts") === null) {
       return err("not_found", `no hooks.ts found for resource type: ${name}`);
     }
 
     try {
-      await unlink(hooksFile);
+      await ctx.soulWriter.apply({
+        subject: `soul: remove hooks for resource type ${name}`,
+        source: "agent",
+        actor: ctx.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        changes: [
+          { op: "delete", target: { kind: "Resource", slug: name, companion: "hooks.ts" } },
+        ],
+      });
     } catch (e) {
+      if (e instanceof SoulWriteError) return soulWriteFault(e);
       return err("internal_error", reason(e));
-    }
-
-    try {
-      await ctx.gitSync.withSync(
-        `soul: remove hooks for resource type ${name}`,
-        ctx.requestContext?.actor
-      );
-    } catch (e) {
-      return soulCommitError(e, reason(e));
     }
 
     try {

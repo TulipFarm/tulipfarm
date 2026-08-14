@@ -1,17 +1,20 @@
 import { createHash } from "node:crypto";
 import type { Dirent } from "node:fs";
-import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { readdir, readFile, rm } from "node:fs/promises";
 import { basename, join, relative } from "node:path";
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import {
   type CommitActor,
-  type GitSyncService,
   type IntegrationManifest,
   type SoulLoader,
+  type SoulWrite,
+  type SoulWriter,
   validateAuthSteps,
   validateThirdPartyManifest,
 } from "@tulipfarm/soul";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { stripUrlCredentials } from "../audit/soul-write";
+import { SYSTEM_SOUL_COMMIT_ACTOR } from "../runtime/soul-writer";
 import { cloneToTemp, sourceType } from "../soul/git-source";
 
 /** Installs only declarative Integration artifacts from git; no executable payloads. */
@@ -152,11 +155,14 @@ export interface IntegrationLockEntry {
   hash?: string;
 }
 
-export async function readIntegrationLock(
-  soulPath: string
-): Promise<{ version: number; integrations: Record<string, IntegrationLockEntry> }> {
+export function readIntegrationLock(soulWriter: Pick<SoulWriter, "read">): {
+  version: number;
+  integrations: Record<string, IntegrationLockEntry>;
+} {
+  const raw = soulWriter.read("IntegrationsLock");
+  if (raw === null) return { version: 1, integrations: {} };
   try {
-    const parsed = JSON.parse(await readFile(join(soulPath, "integrations-lock.json"), "utf8")) as {
+    const parsed = JSON.parse(raw) as {
       version?: number;
       integrations?: Record<string, IntegrationLockEntry>;
     };
@@ -166,15 +172,12 @@ export async function readIntegrationLock(
   }
 }
 
-export async function writeIntegrationLock(
-  soulPath: string,
-  lock: { version: number; integrations: Record<string, IntegrationLockEntry> }
-): Promise<void> {
-  await writeFile(
-    join(soulPath, "integrations-lock.json"),
-    `${JSON.stringify(lock, null, 2)}\n`,
-    "utf8"
-  );
+/** Serialize the lock for a `IntegrationsLock` changeset entry — the writer never touches disk itself. */
+export function serializeIntegrationLock(lock: {
+  version: number;
+  integrations: Record<string, IntegrationLockEntry>;
+}): string {
+  return `${JSON.stringify(lock, null, 2)}\n`;
 }
 
 export interface InstallResult {
@@ -220,7 +223,8 @@ export async function installIntegrationFromSource(
   },
   deps: {
     soulLoader: SoulLoader;
-    gitSync: GitSyncService;
+    /** ADR-007 write gateway: the lock read, validation, and the atomic commit all go through it. */
+    soulWriter: SoulWriter;
     bundledSlugs: ReadonlySet<string>;
     actor?: CommitActor;
   }
@@ -260,37 +264,57 @@ export async function installIntegrationFromSource(
 
   // Normalize manifest bytes; filtering is enforced by manifestIssues() above.
   const manifestYaml = stringifyYaml(chosen.manifest);
-  const dir = join(deps.gitSync.path, "integrations", chosen.name);
 
-  // Remove failed partial installs because the loader trusts every directory on boot.
-  try {
-    await mkdir(dir, { recursive: true });
-    await writeFile(join(dir, "manifest.yml"), manifestYaml, "utf8");
-    if (chosen.setupGuide) {
-      await writeFile(join(dir, "setup-guide.md"), chosen.setupGuide, "utf8");
-    }
-    // Specs are generated data; copy verbatim to avoid churn.
-    if (chosen.egressSpec) {
-      await writeFile(join(dir, chosen.egressSpec.file), chosen.egressSpec.raw, "utf8");
-    }
-
-    const lock = await readIntegrationLock(deps.gitSync.path);
-    lock.integrations[chosen.name] = {
-      // Strip only credentials from lock provenance; file/shorthand sources must survive.
-      sourceUrl: stripUrlCredentials(options.source),
-      sourceType: sourceType(options.source),
-      manifestPath: chosen.manifestPath,
-      ref,
-      hash: createHash("sha256").update(manifestYaml).digest("hex"),
-    };
-    await writeIntegrationLock(deps.gitSync.path, lock);
-
-    await deps.gitSync.withSync(`soul: install integration ${chosen.name}`, deps.actor);
-  } catch (error) {
-    await rm(dir, { recursive: true, force: true });
-    await deps.soulLoader.reload();
-    throw error;
+  // `definitionMode: "legacy"` keeps the on-disk `manifest.yml` the loader reads, rather than the
+  // gateway's canonical `integration.yaml`. Manifest, companions and lock land as one changeset, so
+  // a rejected write leaves no half-installed directory for the loader to trust on boot.
+  const changes: SoulWrite[] = [
+    {
+      op: "put",
+      target: { kind: "Integration", slug: chosen.name, definitionMode: "legacy" },
+      content: manifestYaml,
+    },
+  ];
+  if (chosen.setupGuide) {
+    changes.push({
+      op: "put",
+      target: { kind: "Integration", slug: chosen.name, companion: "setup-guide.md" },
+      content: chosen.setupGuide,
+    });
   }
+  // Verbatim, unlike the manifest: round-tripping a generated spec only churns it. A declared-but-
+  // missing spec is fatal to the loader, so it must land in the same changeset.
+  if (chosen.egressSpec) {
+    changes.push({
+      op: "put",
+      target: { kind: "Integration", slug: chosen.name, companion: chosen.egressSpec.file },
+      content: chosen.egressSpec.raw,
+    });
+  }
+
+  const lock = readIntegrationLock(deps.soulWriter);
+  lock.integrations[chosen.name] = {
+    // The lock is committed and pushed, so a credentialed https source would leak its token to the
+    // remote. Strip only the credential; file/shorthand sources must survive as provenance.
+    sourceUrl: stripUrlCredentials(options.source),
+    sourceType: sourceType(options.source),
+    manifestPath: chosen.manifestPath,
+    ref,
+    hash: createHash("sha256").update(manifestYaml).digest("hex"),
+  };
+  changes.push({
+    op: "put",
+    target: { kind: "IntegrationsLock" },
+    content: serializeIntegrationLock(lock),
+  });
+
+  await deps.soulWriter.apply({
+    subject: `soul: install integration ${chosen.name}`,
+    source: "api",
+    actor: deps.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
+    businessId: DEPLOYMENT_BUSINESS_ID,
+    changes,
+  });
   await deps.soulLoader.reload();
 
   return { name: chosen.name, source: stripUrlCredentials(options.source), ref };

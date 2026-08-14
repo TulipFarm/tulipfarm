@@ -7,7 +7,8 @@ import { expandForgeExecutionContract } from "./forge-execution-contract";
 
 const IMAGE_SKILLS_DIR = "/app/skills";
 const REPO_SKILLS_DIR = resolve(__dirname, "../../../../../skills");
-const DISABLED_BUNDLED_SKILLS_FILE = ".bundled-disabled.json";
+/** Records which *shipped* Skills an operator switched off. Not an authored artifact. */
+export const DISABLED_BUNDLED_SKILLS_FILE = ".bundled-disabled.json";
 
 export interface BundledSkill extends SoulSkill {
   category: string;
@@ -184,6 +185,9 @@ export async function persistDisabledBundledSkills(
   disabled: ReadonlySet<string>
 ): Promise<void> {
   const skillsDirectory = join(soulPath, "skills");
+  // soul-write-exception: `skills/.bundled-disabled.json` is a nested singleton, and
+  // `classifySoulPath` only resolves singletons at the Soul repo root — so this tombstone has no
+  // artifact address to write to. Callers stage it explicitly with `withSyncPaths`, never `-A`.
   await mkdir(skillsDirectory, { recursive: true });
   const names = [...disabled].sort((left, right) => left.localeCompare(right));
   await writeFile(disabledSkillsPath(soulPath), `${JSON.stringify(names, null, 2)}\n`, "utf8");

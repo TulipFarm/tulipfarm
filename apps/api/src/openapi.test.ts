@@ -8,6 +8,7 @@ import type { TokenDoc, TokenRepo } from "./auth/api-tokens";
 import { MemorySessionStore } from "./auth/session-store";
 import type { UserDoc, UserRepo } from "./auth/users";
 import type { PaginatedResult } from "./pagination";
+import { makeSoulWriterDouble } from "./soul/soul-writer-double";
 
 class FakeUserRepo implements UserRepo {
   async findByEmail(): Promise<UserDoc | null> {
@@ -77,6 +78,7 @@ function buildTestApp() {
     tokenRepo: new FakeTokenRepo(),
     secretsService,
     gitSync: makeFakeGitSync(),
+    soulWriter: makeSoulWriterDouble().writer,
   });
 }
 
@@ -113,7 +115,6 @@ describe("OpenAPI spec", () => {
     expect(paths).toContain("/api/v1/auth/tokens/{id}");
     expect(paths).toContain("/api/v1/secrets/status");
     expect(paths).toContain("/api/v1/secrets/{key}");
-    expect(paths).toContain("/api/v1/soul/commit");
     expect(paths).toContain("/api/v1/soul/push");
   });
 

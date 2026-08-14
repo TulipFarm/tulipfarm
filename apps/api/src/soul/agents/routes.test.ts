@@ -8,6 +8,7 @@ import { SESSION_COOKIE } from "../../auth/middleware";
 import { MemorySessionStore } from "../../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../../auth/users";
 import type { PaginatedResult } from "../../pagination";
+import { makeSoulWriterDouble } from "../soul-writer-double";
 
 const TEST_CSRF = "a".repeat(64);
 
@@ -101,6 +102,7 @@ describe("agents routes", () => {
       tokenRepo,
       gitSync: makeFakeGitSync(),
       soulLoader: makeSoulLoader([PLANNER]),
+      soulWriter: makeSoulWriterDouble().writer,
     });
   });
 

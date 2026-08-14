@@ -1,18 +1,9 @@
-import type { GitSyncService, SoulAgent, SoulLoader } from "@tulipfarm/soul";
+import type { GitSyncService, SoulAgent, SoulLoader, SoulWriter } from "@tulipfarm/soul";
+import { SoulWriteError, type SoulWriteErrorCode } from "@tulipfarm/soul";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AGENT_TOOLS, type AgentToolContext } from "./tools";
 
 type AgentTool = (typeof AGENT_TOOLS)[number];
-
-vi.mock("node:fs", () => ({ existsSync: vi.fn() }));
-vi.mock("node:fs/promises", () => ({
-  mkdir: vi.fn().mockResolvedValue(undefined),
-  writeFile: vi.fn().mockResolvedValue(undefined),
-  rm: vi.fn().mockResolvedValue(undefined),
-}));
-
-import { existsSync } from "node:fs";
-import { mkdir, rm, writeFile } from "node:fs/promises";
 
 function makeGitSync(soulPath = "/fake/soul"): GitSyncService {
   return {
@@ -28,11 +19,36 @@ function makeSoulLoader(agents: SoulAgent[] = []): SoulLoader {
   } as unknown as SoulLoader;
 }
 
+function makeSoulWriter(): SoulWriter & { apply: ReturnType<typeof vi.fn> } {
+  return {
+    apply: vi.fn().mockResolvedValue({
+      commitSha: "abc1234",
+      filesChanged: 1,
+      paths: [],
+      pushed: false,
+    }),
+  } as unknown as SoulWriter & { apply: ReturnType<typeof vi.fn> };
+}
+
+/** Make the writer double reject the next `apply` with a specific gateway error. */
+function rejectApplyWith(
+  writer: ReturnType<typeof makeSoulWriter>,
+  code: SoulWriteErrorCode,
+  message: string
+): void {
+  writer.apply.mockRejectedValueOnce(new SoulWriteError(code, message));
+}
+
 function makeCtx(agents: SoulAgent[] = []): AgentToolContext & {
   gitSync: ReturnType<typeof makeGitSync>;
   soulLoader: ReturnType<typeof makeSoulLoader>;
+  soulWriter: ReturnType<typeof makeSoulWriter>;
 } {
-  return { gitSync: makeGitSync(), soulLoader: makeSoulLoader(agents) };
+  return {
+    gitSync: makeGitSync(),
+    soulLoader: makeSoulLoader(agents),
+    soulWriter: makeSoulWriter(),
+  };
 }
 
 const createTool = AGENT_TOOLS.find((t) => t.name === "agent_create") as AgentTool;
@@ -71,10 +87,9 @@ describe("AGENT_TOOLS authorization declarations", () => {
 describe("agent_create", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(existsSync).mockReturnValue(false);
   });
 
-  it("creates AGENT.md, commits via withSync, reloads", async () => {
+  it("puts the legacy AGENT.md through the write gateway with an absent precondition", async () => {
     const ctx = makeCtx();
     const res = await createTool.handler({ name: "task-planner", body: "You plan tasks." }, ctx);
 
@@ -82,16 +97,20 @@ describe("agent_create", () => {
       success: true,
       data: { name: "task-planner", frontmatter: {}, body: "You plan tasks." },
     });
-    expect(mkdir).toHaveBeenCalledWith(expect.stringContaining("agents/task-planner"), {
-      recursive: true,
-    });
-    expect(writeFile).toHaveBeenCalledWith(
-      expect.stringContaining("AGENT.md"),
-      "You plan tasks.",
-      "utf8"
+    expect(ctx.soulWriter.apply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subject: "soul: add agent task-planner",
+        source: "agent",
+        changes: [
+          {
+            op: "put",
+            target: { kind: "Agent", slug: "task-planner", definitionMode: "legacy" },
+            content: "You plan tasks.",
+          },
+        ],
+        preconditions: [{ kind: "Agent", slug: "task-planner", state: "absent" }],
+      })
     );
-    expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: add agent task-planner", undefined);
-    expect(ctx.soulLoader.reload).toHaveBeenCalledOnce();
   });
 
   it("includes frontmatter block when provided", async () => {
@@ -102,7 +121,10 @@ describe("agent_create", () => {
     );
 
     expect(res.success).toBe(true);
-    const content = vi.mocked(writeFile).mock.calls[0][1] as string;
+    const request = ctx.soulWriter.apply.mock.calls[0][0] as {
+      changes: { content: string }[];
+    };
+    const content = request.changes[0].content;
     expect(content).toMatch(/^---\n/);
     expect(content).toContain("domain: engineering");
     expect(content).toContain("You review.");
@@ -112,7 +134,7 @@ describe("agent_create", () => {
     const ctx = makeCtx();
     const res = await createTool.handler({ name: "MyAgent", body: "body" }, ctx);
     expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
-    expect(ctx.gitSync.withSync).not.toHaveBeenCalled();
+    expect(ctx.soulWriter.apply).not.toHaveBeenCalled();
   });
 
   it("returns validation_error for name starting with digit", async () => {
@@ -121,15 +143,14 @@ describe("agent_create", () => {
     expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
   });
 
-  it("returns validation_error if agent dir already exists", async () => {
-    vi.mocked(existsSync).mockReturnValue(true);
+  it("maps a PRECONDITION_FAILED from the gateway to 'agent already exists'", async () => {
     const ctx = makeCtx();
+    rejectApplyWith(ctx.soulWriter, "PRECONDITION_FAILED", 'Agent "task-planner" already exists');
     const res = await createTool.handler({ name: "task-planner", body: "body" }, ctx);
     expect(res).toMatchObject({
       success: false,
       error: { code: "validation_error", message: expect.stringContaining("already exists") },
     });
-    expect(mkdir).not.toHaveBeenCalled();
   });
 
   it("returns validation_error for missing required args", async () => {
@@ -138,15 +159,14 @@ describe("agent_create", () => {
     expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
   });
 
-  it("rejects invalid frontmatter (bad autonomy) without writing or committing", async () => {
+  it("rejects invalid frontmatter (bad autonomy) without writing", async () => {
     const ctx = makeCtx();
     const res = await createTool.handler(
       { name: "reviewer", body: "You review.", frontmatter: { autonomy: "banana" } },
       ctx
     );
     expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
-    expect(writeFile).not.toHaveBeenCalled();
-    expect(ctx.gitSync.withSync).not.toHaveBeenCalled();
+    expect(ctx.soulWriter.apply).not.toHaveBeenCalled();
   });
 
   it("rejects unknown frontmatter keys (strict)", async () => {
@@ -156,7 +176,7 @@ describe("agent_create", () => {
       ctx
     );
     expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
-    expect(ctx.gitSync.withSync).not.toHaveBeenCalled();
+    expect(ctx.soulWriter.apply).not.toHaveBeenCalled();
   });
 
   it("accepts valid frontmatter and writes", async () => {
@@ -170,8 +190,9 @@ describe("agent_create", () => {
       ctx
     );
     expect(res.success).toBe(true);
-    expect(writeFile).toHaveBeenCalled();
-    expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: add agent reviewer", undefined);
+    expect(ctx.soulWriter.apply).toHaveBeenCalledWith(
+      expect.objectContaining({ subject: "soul: add agent reviewer" })
+    );
   });
 });
 
@@ -196,13 +217,19 @@ describe("agent_update", () => {
       success: true,
       data: { name: "task-planner", frontmatter: { domain: "engineering" }, body: "New body." },
     });
-    expect(writeFile).toHaveBeenCalledWith(
-      expect.stringContaining("AGENT.md"),
-      expect.stringContaining("New body."),
-      "utf8"
+    expect(ctx.soulWriter.apply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subject: "soul: update agent task-planner",
+        source: "agent",
+        changes: [
+          {
+            op: "put",
+            target: { kind: "Agent", slug: "task-planner", definitionMode: "legacy" },
+            content: expect.stringContaining("New body."),
+          },
+        ],
+      })
     );
-    expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: update agent task-planner", undefined);
-    expect(ctx.soulLoader.reload).toHaveBeenCalledOnce();
   });
 
   it("updates frontmatter only, preserves existing body", async () => {
@@ -235,7 +262,7 @@ describe("agent_update", () => {
     const ctx = makeCtx();
     const res = await updateTool.handler({ name: "ghost", body: "body" }, ctx);
     expect(res).toMatchObject({ success: false, error: { code: "not_found" } });
-    expect(ctx.gitSync.withSync).not.toHaveBeenCalled();
+    expect(ctx.soulWriter.apply).not.toHaveBeenCalled();
   });
 
   it("returns validation_error when neither body nor frontmatter provided", async () => {
@@ -244,29 +271,39 @@ describe("agent_update", () => {
     expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
   });
 
-  it("rejects invalid frontmatter on update without committing", async () => {
+  it("rejects invalid frontmatter on update without writing", async () => {
     const ctx = makeCtx([existingAgent]);
     const res = await updateTool.handler(
       { name: "task-planner", frontmatter: { autonomy: "nope" } },
       ctx
     );
     expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
-    expect(ctx.gitSync.withSync).not.toHaveBeenCalled();
+    expect(ctx.soulWriter.apply).not.toHaveBeenCalled();
   });
 
-  it("allows a body-only update over arbitrary existing frontmatter (no retro-validation)", async () => {
+  it("sends a body-only update straight through the gateway, which validates the write", async () => {
+    // Previously this path skipped validation of the existing frontmatter. The write gateway now
+    // validates every write (legacy AGENT.md included), so a body-only update no longer bypasses
+    // it: the tool forwards the merged content and lets a VALIDATION_FAILED surface as one.
     const legacy: SoulAgent = {
       name: "task-planner",
       frontmatter: { custom: "kept-as-is", autonomy: "legacy-bad" },
       body: "Old body.",
     };
     const ctx = makeCtx([legacy]);
+    rejectApplyWith(ctx.soulWriter, "VALIDATION_FAILED", "frontmatter /autonomy is invalid");
     const res = await updateTool.handler({ name: "task-planner", body: "New body." }, ctx);
-    expect(res).toMatchObject({
-      success: true,
-      data: { name: "task-planner", frontmatter: { custom: "kept-as-is" }, body: "New body." },
-    });
-    expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: update agent task-planner", undefined);
+    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
+    expect(ctx.soulWriter.apply).toHaveBeenCalledWith(
+      expect.objectContaining({ subject: "soul: update agent task-planner" })
+    );
+  });
+
+  it("maps a gateway CONFLICT to a retriable 'unavailable' fault", async () => {
+    const ctx = makeCtx([existingAgent]);
+    rejectApplyWith(ctx.soulWriter, "CONFLICT", "the tree changed under this write");
+    const res = await updateTool.handler({ name: "task-planner", body: "New body." }, ctx);
+    expect(res).toMatchObject({ success: false, error: { code: "unavailable" } });
   });
 });
 
@@ -325,24 +362,32 @@ describe("agent_delete", () => {
     vi.clearAllMocks();
   });
 
-  it("removes agent dir, commits via withSync, reloads", async () => {
+  it("deletes the agent artifact through the write gateway", async () => {
     const ctx = makeCtx([{ name: "task-planner", frontmatter: {}, body: "body" }]);
     const res = await deleteTool.handler({ name: "task-planner" }, ctx);
 
     expect(res).toEqual({ success: true, data: { name: "task-planner", deleted: true } });
-    expect(rm).toHaveBeenCalledWith(expect.stringContaining("agents/task-planner"), {
-      recursive: true,
-      force: true,
-    });
-    expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: remove agent task-planner", undefined);
-    expect(ctx.soulLoader.reload).toHaveBeenCalledOnce();
+    expect(ctx.soulWriter.apply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subject: "soul: remove agent task-planner",
+        source: "agent",
+        changes: [{ op: "deleteArtifact", kind: "Agent", slug: "task-planner" }],
+      })
+    );
   });
 
   it("returns not_found for unknown agent", async () => {
     const ctx = makeCtx();
     const res = await deleteTool.handler({ name: "ghost" }, ctx);
     expect(res).toMatchObject({ success: false, error: { code: "not_found" } });
-    expect(rm).not.toHaveBeenCalled();
+    expect(ctx.soulWriter.apply).not.toHaveBeenCalled();
+  });
+
+  it("maps a gateway PRECONDITION_FAILED to not_found", async () => {
+    const ctx = makeCtx([{ name: "task-planner", frontmatter: {}, body: "body" }]);
+    rejectApplyWith(ctx.soulWriter, "PRECONDITION_FAILED", 'Agent "task-planner" does not exist');
+    const res = await deleteTool.handler({ name: "task-planner" }, ctx);
+    expect(res).toMatchObject({ success: false, error: { code: "not_found" } });
   });
 
   it("returns validation_error for missing name", async () => {

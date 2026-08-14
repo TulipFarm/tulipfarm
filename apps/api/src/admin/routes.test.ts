@@ -47,6 +47,14 @@ function deps(overrides: Partial<OperationalApiDeps> = {}): OperationalApiDeps {
     }),
     listRuns: async () => ({ items: [run], nextCursor: null }),
     getRun: async () => run,
+    getRunBudgets: async () => [
+      {
+        key: "usd_micros",
+        limit: 1_000_000,
+        consumed: 250_000,
+        exhaustionPolicy: "failure_path" as const,
+      },
+    ],
     commandRun: async (_grant, input) => ({
       commandId: `command-${input.action}`,
       runId: input.runId,
@@ -104,6 +112,74 @@ describe("operational API", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ run });
+    await app.close();
+  });
+
+  it("returns the Run budget ledger from the enforced run_budgets store", async () => {
+    const app = await harness();
+    const response = await app.inject({ method: "GET", url: "/api/v1/runs/run-1/budgets" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      runId: "run-1",
+      budgets: [
+        {
+          key: "usd_micros",
+          limit: 1_000_000,
+          consumed: 250_000,
+          exhaustionPolicy: "failure_path",
+        },
+      ],
+    });
+    await app.close();
+  });
+
+  it("returns an empty ledger for a Run that recorded no budgets (unbounded)", async () => {
+    const app = await harness({ getRunBudgets: async () => [] });
+    const response = await app.inject({ method: "GET", url: "/api/v1/runs/run-1/budgets" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ runId: "run-1", budgets: [] });
+    await app.close();
+  });
+
+  it("hides another business's Run behind the same 404 as an unknown one", async () => {
+    // `getRunBudgets` returns `null` when the Run does not exist for the caller's business, so a
+    // guessed `runId` from another tenant is indistinguishable from one that never existed.
+    const app = await harness({ getRunBudgets: async () => null });
+    const response = await app.inject({ method: "GET", url: "/api/v1/runs/run-other/budgets" });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toMatchObject({ error: { code: "run_not_found" } });
+    await app.close();
+  });
+
+  it("rejects an unauthenticated budget read at the auth preHandler", async () => {
+    const app = Fastify();
+    registerOperationalRoutes(app, deps(), async (_request, reply) => {
+      await reply.code(401).send({ error: "authentication required" });
+    });
+    await app.ready();
+
+    const response = await app.inject({ method: "GET", url: "/api/v1/runs/run-1/budgets" });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toEqual({ error: "authentication required" });
+    await app.close();
+  });
+
+  it("denies a budget read to a caller without runs:read", async () => {
+    const app = await harness({
+      authorize: async () => ({
+        businessId: "business-1",
+        principalId: "user-1",
+        permissions: ["operations:read"],
+      }),
+    });
+    const response = await app.inject({ method: "GET", url: "/api/v1/runs/run-1/budgets" });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toMatchObject({ error: { code: "forbidden" } });
     await app.close();
   });
 

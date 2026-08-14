@@ -1,22 +1,26 @@
 import type { EventEmitter } from "node:events";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { readFile } from "node:fs/promises";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { formatTemporalContext } from "@tulipfarm/agent-runtime";
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { ajv, TulipFarmValidationError, validateRoutineDefinition } from "@tulipfarm/schema";
-import type {
-  GitSyncService,
-  SoulAgent,
-  SoulLoader,
-  SoulRoutine,
-  SoulSkill,
+import {
+  type GitSyncService,
+  type SoulAgent,
+  type SoulLoader,
+  type SoulRoutine,
+  type SoulSkill,
+  SoulWriteError,
+  type SoulWriter,
 } from "@tulipfarm/soul";
 import { stringify as stringifyYaml } from "yaml";
+import { SYSTEM_SOUL_COMMIT_ACTOR } from "../runtime/soul-writer";
 import type { BundledSkill } from "../soul/skills/bundled";
 import { resolveSkill } from "../soul/skills/registry";
 import { type ApiToolDefinition, defineApiTool } from "../tools/define";
 import { soulCommitError } from "../tools/soul-faults";
 import type { RequestContext } from "../tools/types";
-import { err, ok } from "./tool-result";
+import { err, ok, type ToolCallResult } from "./tool-result";
 
 export interface PlatformToolContext {
   soulLoader?: {
@@ -26,6 +30,8 @@ export interface PlatformToolContext {
   };
   soulPath?: string;
   gitSync?: GitSyncService;
+  /** The single write gateway for the authored Soul tree (ADR-007). */
+  readonly soulWriter: SoulWriter;
   routineContext?: { routineId: string; runId: string };
   triggerRoutine?: (slug: string, inputs?: Record<string, unknown>) => Promise<{ runId: string }>;
   onRoutinesChanged?: () => Promise<void>;
@@ -37,6 +43,20 @@ export interface PlatformToolContext {
 }
 
 type AjvErrors = ReturnType<typeof ajv.compile>["errors"];
+
+/** Map a Soul write-gateway rejection onto `routine_forge`'s error vocabulary. */
+function mapRoutineWriteError(e: SoulWriteError): ToolCallResult {
+  switch (e.code) {
+    case "VALIDATION_FAILED":
+    case "INVALID_TARGET":
+    case "PRECONDITION_FAILED":
+      return err("validation_error", e.message);
+    case "CONFLICT":
+      return err("unavailable", e.message);
+    default:
+      return soulCommitError(e, e.message);
+  }
+}
 
 /** Delegation authorizes `platform.agent`, not Soul edits to `soul.agent`. */
 const SOUL_AGENT_TARGET = "platform.agent";
@@ -439,8 +459,8 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
     'states: [{ name: "Report", type: "operation", actions: [{ functionRef: { refName: "send" } }], ' +
     "end: true }] }. Load the routine-forge skill for the full authoring workflow before calling " +
     "this. Validates the definition against the V1 meta-schema (deferred constructs rejected), " +
-    "writes soul/routines/{name}/routine.yaml (+ optional hooks.ts), and commits via withSync. " +
-    "No approval step (ROUT-V1-002).",
+    "writes soul/routines/{name}/routine.yaml (+ optional hooks.ts), and commits it atomically to " +
+    "the soul repo. No approval step (ROUT-V1-002).",
   mutating: true,
   tier: "platform",
   inputSchema: ROUTINE_FORGE_SCHEMA,
@@ -459,7 +479,6 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
       hooks?: string;
     };
     if (!ROUTINE_NAME_RE.test(name)) return err("validation_error", "invalid routine name");
-    if (!ctx.gitSync) return err("internal_error", "Soul git sync is not available.");
 
     try {
       validateRoutineDefinition(definition);
@@ -476,15 +495,34 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
     }
 
     try {
-      const dir = join(ctx.gitSync.path, "routines", name);
-      await mkdir(dir, { recursive: true });
-      await writeFile(join(dir, "routine.yaml"), stringifyYaml(definition), "utf8");
-      if (hooks) await writeFile(join(dir, "hooks.ts"), hooks, "utf8");
-      await ctx.gitSync.withSync(`soul: forge routine ${name}`, ctx.requestContext?.actor);
+      await ctx.soulWriter.apply({
+        subject: `soul: forge routine ${name}`,
+        source: "agent",
+        actor: ctx.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        changes: [
+          {
+            op: "put",
+            target: { kind: "Routine", slug: name },
+            content: stringifyYaml(definition),
+          },
+          ...(hooks
+            ? [
+                {
+                  op: "put" as const,
+                  target: { kind: "Routine" as const, slug: name, companion: "hooks.ts" },
+                  content: hooks,
+                },
+              ]
+            : []),
+        ],
+      });
     } catch (e) {
+      if (e instanceof SoulWriteError) return mapRoutineWriteError(e);
       return soulCommitError(e, e instanceof Error ? e.message : String(e));
     }
 
+    // The gateway reloads the catalog but does not reschedule cron triggers.
     try {
       await ctx.onRoutinesChanged?.();
     } catch (e) {
@@ -524,113 +562,6 @@ export const routinePickerTool = defineApiTool<PlatformToolContext>({
       description: typeof r.config.description === "string" ? r.config.description : null,
     }));
     return ok({ routines: items });
-  },
-});
-
-const BEGIN_SOUL_BATCH_SCHEMA: Record<string, unknown> = {
-  type: "object",
-  additionalProperties: false,
-  properties: {},
-};
-const validateBeginSoulBatch = ajv.compile(BEGIN_SOUL_BATCH_SCHEMA);
-
-export const beginSoulBatchTool = defineApiTool<PlatformToolContext>({
-  name: "begin_soul_batch",
-  description:
-    "Open a soul-batch window. Multiple soul file writes performed after this call will be committed together by end_soul_batch. Call end_soul_batch to close the batch and commit.",
-  mutating: false,
-  tier: "platform",
-  inputSchema: BEGIN_SOUL_BATCH_SCHEMA,
-  authorization: {
-    action: "platform.soul_batch.begin",
-    resources: ["soul.repo"],
-    dataClasses: ["soul_definition"],
-  },
-  handler: async (args, _ctx) => {
-    if (!validateBeginSoulBatch(args))
-      return err("validation_error", firstError(validateBeginSoulBatch.errors));
-    return ok({ status: "open" });
-  },
-});
-
-const END_SOUL_BATCH_SCHEMA: Record<string, unknown> = {
-  type: "object",
-  additionalProperties: false,
-  required: ["message"],
-  properties: {
-    message: {
-      type: "string",
-      minLength: 1,
-      description: "Commit message for the batch of soul writes.",
-    },
-  },
-};
-const validateEndSoulBatch = ajv.compile(END_SOUL_BATCH_SCHEMA);
-
-export const endSoulBatchTool = defineApiTool<PlatformToolContext>({
-  name: "end_soul_batch",
-  description:
-    "Close the soul-batch window and commit all pending soul writes as a single commit via withSync (commit + best-effort push).",
-  mutating: true,
-  tier: "platform",
-  inputSchema: END_SOUL_BATCH_SCHEMA,
-  authorization: {
-    action: "platform.soul_batch.end",
-    resources: ["soul.repo"],
-    targets: wholeSoulRepoTarget,
-    dataClasses: ["soul_definition"],
-  },
-  handler: async (args, ctx) => {
-    if (!validateEndSoulBatch(args))
-      return err("validation_error", firstError(validateEndSoulBatch.errors));
-    if (!ctx.gitSync) return err("internal_error", "Soul git sync is not available.");
-    const { message } = args as { message: string };
-    try {
-      const result = await ctx.gitSync.withSync(message, ctx.requestContext?.actor);
-      return ok({ sha: result.sha, filesChanged: result.filesChanged });
-    } catch (e) {
-      return err("internal_error", e instanceof Error ? e.message : String(e));
-    }
-  },
-});
-
-const SOUL_REPO_COMMIT_SCHEMA: Record<string, unknown> = {
-  type: "object",
-  additionalProperties: false,
-  required: ["message"],
-  properties: {
-    message: {
-      type: "string",
-      minLength: 1,
-      description: "Commit message attributed to tulipfarm-bot.",
-    },
-  },
-};
-const validateSoulRepoCommit = ajv.compile(SOUL_REPO_COMMIT_SCHEMA);
-
-export const soulRepoCommitTool = defineApiTool<PlatformToolContext>({
-  name: "soul_repo_commit",
-  description:
-    "Stage and commit all current soul changes locally (attributed to tulipfarm-bot). Does not push — use soul_repo_push or end_soul_batch to reach the remote.",
-  mutating: true,
-  tier: "platform",
-  inputSchema: SOUL_REPO_COMMIT_SCHEMA,
-  authorization: {
-    action: "platform.soul_repo.commit",
-    resources: ["soul.repo"],
-    dataClasses: ["soul_definition"],
-  },
-  handler: async (args, ctx) => {
-    if (!validateSoulRepoCommit(args))
-      return err("validation_error", firstError(validateSoulRepoCommit.errors));
-    if (!ctx.gitSync) return err("internal_error", "Soul git sync is not available.");
-    const { message } = args as { message: string };
-    try {
-      const result = await ctx.gitSync.commit(message, ctx.requestContext?.actor);
-      return ok({ sha: result.sha, filesChanged: result.filesChanged });
-    } catch (e) {
-      return err("internal_error", e instanceof Error ? e.message : String(e));
-    }
   },
 });
 
@@ -852,9 +783,6 @@ export const PLATFORM_TOOLS: ApiToolDefinition<PlatformToolContext>[] = [
   triggerRoutineTool,
   routineForgeTool,
   routinePickerTool,
-  beginSoulBatchTool,
-  endSoulBatchTool,
-  soulRepoCommitTool,
   soulRepoPushTool,
   callSkillTool,
   completeStateTool,

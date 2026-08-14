@@ -1,3 +1,4 @@
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import {
   cliModelIds,
   cliModelSpec,
@@ -16,14 +17,15 @@ import {
   validateLlmConfig,
 } from "@tulipfarm/schema";
 import { LLM_PROVIDERS, type SecretsService } from "@tulipfarm/secrets";
-import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
+import type { SoulLoader, SoulWriter } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AuditService } from "../../audit/service";
 import { makeSoulAuditWriter } from "../../audit/soul-write";
 import { ErrorSchema } from "../../auth/schemas";
 import type { UserDoc } from "../../auth/users";
 import { commitActorFromRequest } from "../commit-actor";
-import { writeLlmConfigToSoulYaml } from "./soul-yaml-io";
+import { isSoulWriteError, soulWriteHttpError } from "../write-errors";
+import { mergeLlmConfigIntoSoulYaml } from "./soul-yaml-io";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -251,11 +253,12 @@ function validateRoutingCapacity(config: LlmConfig): string | null {
   return null;
 }
 
-/* Validate before writing LLM config; inline reload because `withSync` emits no sync event. */
+/* Validate before writing LLM config; inline re-init because the gateway reloads the Soul catalog
+ * but knows nothing about `LlmService`. */
 export function registerLlmConfigRoutes(
   app: FastifyInstance,
   soulLoader: SoulLoader,
-  gitSync: GitSyncService,
+  soulWriter: SoulWriter,
   llmService: LlmService,
   secrets: SecretsService,
   requireAuth: PreHandler,
@@ -477,9 +480,13 @@ export function registerLlmConfigRoutes(
         body: LlmConfigRouteSchema,
         response: {
           200: LlmConfigRouteSchema,
+          400: ErrorSchema,
           401: ErrorSchema,
           403: ErrorSchema,
+          404: ErrorSchema,
+          409: ErrorSchema,
           422: ErrorSchema,
+          500: ErrorSchema,
         },
       },
     },
@@ -512,8 +519,29 @@ export function registerLlmConfigRoutes(
         return reply.code(422).send({ error: capacityProblem });
       }
 
-      await writeLlmConfigToSoulYaml(gitSync.path, config);
-      await gitSync.withSync("soul: update llm config", commitActorFromRequest(req));
+      const { content: currentManifest, baseCommit } = await soulWriter.readWithBase("Settings");
+      try {
+        await soulWriter.apply({
+          subject: "soul: update llm config",
+          source: "api",
+          actor: commitActorFromRequest(req),
+          businessId: DEPLOYMENT_BUSINESS_ID,
+          expectedBaseCommit: baseCommit,
+          changes: [
+            {
+              op: "put",
+              target: { kind: "Settings" },
+              content: mergeLlmConfigIntoSoulYaml(currentManifest, config),
+            },
+          ],
+        });
+      } catch (e) {
+        if (isSoulWriteError(e)) {
+          const mapped = soulWriteHttpError(e);
+          return reply.code(mapped.status).send(mapped.body);
+        }
+        throw e;
+      }
       await soulLoader.reload();
       await llmService.init(soulLoader.llmConfig, secrets, app.log);
 

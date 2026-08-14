@@ -1,15 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import {
-  mkdir,
-  readdir,
-  readFile,
-  readlink,
-  realpath,
-  rename,
-  rm,
-  writeFile,
-} from "node:fs/promises";
+import { readdir, readFile, readlink, realpath, rm } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative } from "node:path";
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { LlmService } from "@tulipfarm/llm";
 import { SandboxRuntimeProfileRegistry, shellTsPythonV1 } from "@tulipfarm/sandbox";
 import {
@@ -25,6 +17,8 @@ import {
   parseFrontmatter,
   type SoulLoader,
   type SoulSkill,
+  type SoulWrite,
+  type SoulWriter,
 } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ActivityService } from "../../activity/service";
@@ -38,8 +32,13 @@ import {
   isAllowedSource,
   sourceType,
 } from "../git-source";
+import { isSoulWriteError, soulWriteHttpError } from "../write-errors";
 import { buildAudit, SKILL_AUDIT_REPORT_SCHEMA } from "./audit";
-import { type BundledSkill, persistDisabledBundledSkills } from "./bundled";
+import {
+  type BundledSkill,
+  DISABLED_BUNDLED_SKILLS_FILE,
+  persistDisabledBundledSkills,
+} from "./bundled";
 import { type SkillScanFile, scanSkill, skillTrustLevel } from "./guard";
 import { mergedSkills, resolveSkill } from "./registry";
 
@@ -129,28 +128,58 @@ function generatedSkillDefinition(skill: DiscoveredSkill): string | undefined {
   return definition?.operation === "upsert" ? definition.content : undefined;
 }
 
-async function installSkillDirectory(root: string, skill: DiscoveredSkill): Promise<void> {
-  const skillsRoot = join(root, "skills");
-  const destination = join(skillsRoot, skill.name);
-  const staging = join(skillsRoot, `.install-${skill.name}-${randomUUID()}`);
-  await mkdir(staging, { recursive: true });
-  try {
-    for (const file of skill.files) {
-      if (file.symlinkTarget !== undefined) continue;
-      const target = join(staging, file.path);
-      await mkdir(dirname(target), { recursive: true });
-      await writeFile(target, file.content, "utf8");
-    }
-    const generated = generatedSkillDefinition(skill);
-    if (generated !== undefined) {
-      await writeFile(join(staging, "skill.yaml"), generated, "utf8");
-    }
-    await rm(destination, { recursive: true, force: true });
-    await rename(staging, destination);
-  } catch (error) {
-    await rm(staging, { recursive: true, force: true });
-    throw error;
+/**
+ * The file changes that install `skill` over whatever is already at `skills/<name>`.
+ *
+ * Install is replace, not merge: a re-install from a source that dropped a reference must not
+ * leave the old one behind. The staging-directory-then-rename dance this replaced achieved that
+ * by removing the destination first; here the stale files are named explicitly so the whole
+ * install is one changeset the gateway can commit or refuse as a unit.
+ */
+async function skillInstallChanges(root: string, skill: DiscoveredSkill): Promise<SoulWrite[]> {
+  const changes: SoulWrite[] = [];
+  const written = new Set<string>();
+  const put = (path: string, content: string): void => {
+    changes.push({
+      op: "put",
+      target: { kind: "Skill", slug: skill.name, companion: path },
+      content,
+    });
+    written.add(path);
+  };
+
+  for (const file of skill.files) {
+    if (file.symlinkTarget !== undefined) continue;
+    put(file.path, file.content);
   }
+  const generated = generatedSkillDefinition(skill);
+  if (generated !== undefined) {
+    changes.push({
+      op: "put",
+      target: { kind: "Skill", slug: skill.name },
+      content: generated,
+    });
+    written.add("skill.yaml");
+  }
+
+  let existing: SkillScanFile[];
+  try {
+    existing = await collectSkillFiles(join(root, "skills", skill.name));
+  } catch {
+    // No prior install to supersede.
+    return changes;
+  }
+  for (const file of existing) {
+    if (written.has(file.path)) continue;
+    changes.push({
+      op: "delete",
+      target:
+        file.path === "skill.yaml"
+          ? { kind: "Skill", slug: skill.name }
+          : { kind: "Skill", slug: skill.name, companion: file.path },
+    });
+  }
+  return changes;
 }
 
 interface SkillPackageDetail {
@@ -521,6 +550,7 @@ export function registerSkillRoutes(
   app: FastifyInstance,
   soulLoader: SoulLoader,
   gitSync: GitSyncService,
+  soulWriter: SoulWriter,
   llmService: LlmService,
   requireAuth: PreHandler,
   activity?: ActivityService,
@@ -741,7 +771,15 @@ export function registerSkillRoutes(
         tags: ["skills"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         params: { type: "object", required: ["name"], properties: { name: { type: "string" } } },
-        response: { 204: { type: "null" }, 401: ErrorSchema, 404: ErrorSchema },
+        response: {
+          204: { type: "null" },
+          400: ErrorSchema,
+          401: ErrorSchema,
+          404: ErrorSchema,
+          409: ErrorSchema,
+          422: ErrorSchema,
+          500: ErrorSchema,
+        },
       },
     },
     async (req, reply) => {
@@ -752,21 +790,44 @@ export function registerSkillRoutes(
       ) {
         return reply.code(404).send({ error: `skill not found: ${name}` });
       }
+      const lock = await readLock(gitSync.path);
+      delete lock.skills[name];
+      const changes: SoulWrite[] = [];
       if (soulLoader.skills.has(name)) {
-        await rm(join(gitSync.path, "skills", name), { recursive: true, force: true });
+        changes.push({ op: "deleteArtifact", kind: "Skill", slug: name });
       }
+      changes.push({
+        op: "put",
+        target: { kind: "SkillsLock" },
+        content: `${JSON.stringify(lock, null, 2)}\n`,
+      });
+      try {
+        await soulWriter.apply({
+          subject: `soul: remove skill ${name}`,
+          source: "api",
+          actor: commitActorFromRequest(req),
+          businessId: DEPLOYMENT_BUSINESS_ID,
+          changes,
+        });
+      } catch (e) {
+        if (isSoulWriteError(e)) {
+          const mapped = soulWriteHttpError(e);
+          return reply.code(mapped.status).send(mapped.body);
+        }
+        throw e;
+      }
+      // The bundled-overlay tombstone is not an addressable Soul artifact — it records which
+      // *shipped* Skills are switched off, not authored content — so it cannot ride the changeset
+      // above. `commitPaths` still stages it explicitly rather than with `git add -A`.
       if (bundledSkills.has(name)) {
         disabledBundledSkills.add(name);
         await persistDisabledBundledSkills(gitSync.path, disabledBundledSkills);
+        await gitSync.commitPaths(
+          `soul: disable bundled skill ${name}`,
+          [join("skills", DISABLED_BUNDLED_SKILLS_FILE)],
+          commitActorFromRequest(req)
+        );
       }
-      const lock = await readLock(gitSync.path);
-      delete lock.skills[name];
-      await writeFile(
-        join(gitSync.path, "skills-lock.json"),
-        `${JSON.stringify(lock, null, 2)}\n`,
-        "utf8"
-      );
-      await gitSync.withSync(`soul: remove skill ${name}`, commitActorFromRequest(req));
       await soulLoader.reload();
       await auditWrite(req, "skill.remove", `skill:${name}`, {
         bundled: bundledSkills.has(name),
@@ -950,6 +1011,8 @@ export function registerSkillRoutes(
           401: ErrorSchema,
           404: ErrorSchema,
           409: ErrorSchema,
+          422: ErrorSchema,
+          500: ErrorSchema,
         },
       },
     },
@@ -1003,8 +1066,9 @@ export function registerSkillRoutes(
       }
 
       const installed: string[] = [];
+      const changes: SoulWrite[] = [];
       for (const skill of chosen as DiscoveredSkill[]) {
-        await installSkillDirectory(gitSync.path, skill);
+        changes.push(...(await skillInstallChanges(gitSync.path, skill)));
         installed.push(skill.name);
       }
 
@@ -1019,16 +1083,27 @@ export function registerSkillRoutes(
           hash: skillDirectoryHash(skill.files),
         };
       }
-      await writeFile(
-        join(gitSync.path, "skills-lock.json"),
-        `${JSON.stringify(lock, null, 2)}\n`,
-        "utf8"
-      );
+      changes.push({
+        op: "put",
+        target: { kind: "SkillsLock" },
+        content: `${JSON.stringify(lock, null, 2)}\n`,
+      });
 
-      await gitSync.withSync(
-        `soul: install skill(s) ${installed.join(", ")}`,
-        commitActorFromRequest(req)
-      );
+      try {
+        await soulWriter.apply({
+          subject: `soul: install skill(s) ${installed.join(", ")}`,
+          source: "api",
+          actor: commitActorFromRequest(req),
+          businessId: DEPLOYMENT_BUSINESS_ID,
+          changes,
+        });
+      } catch (e) {
+        if (isSoulWriteError(e)) {
+          const mapped = soulWriteHttpError(e);
+          return reply.code(mapped.status).send(mapped.body);
+        }
+        throw e;
+      }
       await soulLoader.reload();
       await activity?.record({
         category: "skill",

@@ -1,11 +1,19 @@
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { LlmNotConfiguredError } from "@tulipfarm/schema";
-import type { GitSyncService, SoulLoader, SoulSkill } from "@tulipfarm/soul";
+import {
+  type CommitSigner,
+  type GitSyncService,
+  type Logger,
+  SoulGitStore,
+  type SoulLoader,
+  type SoulSkill,
+  SoulWriter,
+} from "@tulipfarm/soul";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../../app";
@@ -15,6 +23,7 @@ import { SESSION_COOKIE } from "../../auth/middleware";
 import { MemorySessionStore } from "../../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../../auth/users";
 import type { PaginatedResult } from "../../pagination";
+
 import type { BundledSkill } from "./bundled";
 
 // Keep the report schema real (used in the route's response schema); mock only the LLM call.
@@ -116,7 +125,10 @@ describe("skills routes", () => {
   let store: MemorySessionStore;
   let sid: string;
   let soulPath: string;
-  let withSync: ReturnType<typeof vi.fn>;
+  let soulWriter: SoulWriter;
+  let commitPaths: ReturnType<typeof vi.fn>;
+  /** Commit subjects the gateway accepted, in order. */
+  let commits: string[];
   let reload: ReturnType<typeof vi.fn>;
   let soulLoader: SoulLoader;
   let bundledSkills: Map<string, BundledSkill>;
@@ -132,7 +144,15 @@ describe("skills routes", () => {
 
     soulPath = await mkdtemp(join(tmpdir(), "skill-soul-"));
     temps.push(soulPath);
-    withSync = vi.fn().mockResolvedValue({ sha: "abc1234", filesChanged: 2 });
+    // A real repository, not a double: these tests assert what landed on disk, and the whole
+    // point of routing installs through the gateway is that the tree it produces is the contract.
+    for (const args of [
+      ["init", "--quiet", "--initial-branch=main"],
+      ["config", "user.email", "bot@example.com"],
+      ["config", "user.name", "bot"],
+    ]) {
+      execFileSync("git", args, { cwd: soulPath });
+    }
     reload = vi.fn().mockResolvedValue(undefined);
 
     soulLoader = {
@@ -157,9 +177,10 @@ describe("skills routes", () => {
     ]);
     disabledBundledSkills = new Set();
 
+    commitPaths = vi.fn().mockResolvedValue({ sha: "abc1234", filesChanged: 1 });
     const gitSync = {
       path: soulPath,
-      withSync,
+      commitPaths,
       commit: vi.fn(),
       push: vi.fn(),
     } as unknown as GitSyncService;
@@ -174,6 +195,22 @@ describe("skills routes", () => {
       "utf8"
     );
 
+    const noop = () => undefined;
+    const logger = { info: noop, warn: noop, error: noop, debug: noop } as unknown as Logger;
+    const signer: CommitSigner = { keyId: "test-key", sign: () => "signature" };
+    const writer = new SoulWriter(new SoulGitStore(soulPath, signer, logger), logger);
+    commits = [];
+    soulWriter = {
+      exists: (kind, slug) => writer.exists(kind, slug),
+      read: (kind, slug) => writer.read(kind, slug),
+      readCompanion: (kind, slug, name) => writer.readCompanion(kind, slug, name),
+      apply: async (request) => {
+        const result = await writer.apply(request);
+        commits.push(request.subject);
+        return result;
+      },
+    } as SoulWriter;
+
     const llmService = { effortModel: vi.fn().mockReturnValue({}) } as never;
     app = await buildApp({
       sessionStore: store,
@@ -184,6 +221,7 @@ describe("skills routes", () => {
       llmService,
       bundledSkills,
       disabledBundledSkills,
+      soulWriter,
     });
     buildAudit.mockReset();
   });
@@ -548,7 +586,7 @@ spec:
       expect(auditRes.json().report.riskRating).toBe("medium");
       expect(buildAudit).toHaveBeenCalledOnce();
       // Audit alone installs nothing.
-      expect(withSync).not.toHaveBeenCalled();
+      expect(commits).toEqual([]);
       await expect(access(join(soulPath, "skills", "demo-skill", "SKILL.md"))).rejects.toThrow();
 
       // 3. INSTALL — operator confirm. Writes the file, updates the lock, commits, reloads.
@@ -583,7 +621,7 @@ spec:
       });
       expect(lock.skills["demo-skill"].hash).toMatch(/^[0-9a-f]{64}$/);
       expect(lock.skills["demo-skill"].ref).toBe(await headOf(remote));
-      expect(withSync).toHaveBeenCalledOnce();
+      expect(commits).toEqual(["soul: install skill(s) demo-skill"]);
       expect(reload).toHaveBeenCalledOnce();
     });
 
@@ -726,7 +764,7 @@ spec:
         payload: { scanId, names: ["demo-skill"] },
       });
       expect(installRes.statusCode).toBe(409);
-      expect(withSync).not.toHaveBeenCalled();
+      expect(commits).toEqual([]);
       await expect(access(join(soulPath, "skills", "demo-skill", "SKILL.md"))).rejects.toThrow();
     });
 
@@ -769,7 +807,7 @@ spec:
 
       expect(installRes.statusCode).toBe(400);
       expect(installRes.json().error).toMatch(/invalid Skill.*description/);
-      expect(withSync).not.toHaveBeenCalled();
+      expect(commits).toEqual([]);
       expect(reload).not.toHaveBeenCalled();
       await expect(access(join(soulPath, "skills", "demo-skill", "SKILL.md"))).rejects.toThrow();
     });
@@ -822,7 +860,7 @@ spec:
       });
 
       expect(installRes.statusCode).toBe(400);
-      expect(withSync).not.toHaveBeenCalled();
+      expect(commits).toEqual([]);
       expect(reload).not.toHaveBeenCalled();
       await expect(access(join(soulPath, "skills", "demo-skill", "SKILL.md"))).rejects.toThrow();
       await expect(access(join(soulPath, "skills", "invalid-skill", "SKILL.md"))).rejects.toThrow();
@@ -867,7 +905,7 @@ spec:
 
       expect(installRes.statusCode).toBe(400);
       expect(installRes.json().error).toMatch(/100,000 characters/);
-      expect(withSync).not.toHaveBeenCalled();
+      expect(commits).toEqual([]);
     });
   });
 
@@ -897,10 +935,7 @@ spec:
       await expect(access(dir)).rejects.toThrow();
       const lock = JSON.parse(await readFile(join(soulPath, "skills-lock.json"), "utf8"));
       expect(lock.skills["installed-skill"]).toBeUndefined();
-      expect(withSync).toHaveBeenCalledWith(
-        "soul: remove skill installed-skill",
-        expect.any(Object)
-      );
+      expect(commits).toEqual(["soul: remove skill installed-skill"]);
       expect(reload).toHaveBeenCalledOnce();
     });
 
@@ -947,7 +982,7 @@ spec:
         headers,
       });
       expect(res.statusCode).toBe(404);
-      expect(withSync).not.toHaveBeenCalled();
+      expect(commits).toEqual([]);
     });
   });
 

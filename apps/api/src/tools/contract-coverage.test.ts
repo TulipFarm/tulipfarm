@@ -118,18 +118,15 @@ const EXPECTED_FAMILY_TOOL_NAMES = [
   {
     family: "platform",
     names: [
-      "begin_soul_batch",
       "call_skill",
       "complete_state",
       "complete_task",
       "delegate_to_agent",
-      "end_soul_batch",
       "get_current_time",
       "load_skill",
       "load_skill_reference",
       "routine_forge",
       "routine_picker",
-      "soul_repo_commit",
       "soul_repo_push",
       "transfer_to_agent",
       "trigger_routine",

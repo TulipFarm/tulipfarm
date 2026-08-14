@@ -1,7 +1,4 @@
 import { generateKeyPairSync } from "node:crypto";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { IntegrationHttpRequest } from "@tulipfarm/integrations";
 import type { GitSyncService, SoulIntegration, SoulLoader } from "@tulipfarm/soul";
 import type { FastifyInstance } from "fastify";
@@ -15,6 +12,7 @@ import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
 import type { PaginatedResult } from "../pagination";
 import { loadBundledIntegrations } from "../soul/integrations/bundled";
+import { makeSoulWriterDouble } from "../soul/soul-writer-double";
 import type { IntegrationAuthRequestDoc, IntegrationAuthRequestRepo } from "./auth-broker";
 import { InMemoryPrincipalProviderTokenRepo } from "./principal-tokens";
 
@@ -123,7 +121,7 @@ class FakeSoulRepositoryStore {
 describe("github declarative auth flow", () => {
   let app: FastifyInstance;
   let sid: string;
-  let soulPath: string;
+  let soul: ReturnType<typeof makeSoulWriterDouble>;
   let soulLoader: SoulLoader;
   let secretsService: FakeSecretsService;
   let repo: MemoryAuthRequestRepo;
@@ -131,7 +129,6 @@ describe("github declarative auth flow", () => {
   let fetchImpl: ReturnType<typeof vi.fn>;
   let store: FakeIntegrationStore;
   let privateKeyPem: string;
-  const temps: string[] = [];
 
   beforeEach(async () => {
     const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
@@ -145,27 +142,25 @@ describe("github declarative auth flow", () => {
     const user = await createUser(userRepo, "user@example.com", "pass", "admin");
     sid = await sessions.create(user._id);
 
-    soulPath = await mkdtemp(join(tmpdir(), "github-auth-soul-"));
-    temps.push(soulPath);
+    soul = makeSoulWriterDouble();
 
     const bundled = await loadBundledIntegrations(logger);
     const github = bundled.get("github");
     if (!github) throw new Error("github is not a bundled integration");
+    const githubManifest = github.manifest;
 
-    async function reloadFromDisk(): Promise<Map<string, SoulIntegration>> {
+    function reloadFromTree(): Map<string, SoulIntegration> {
       const map = new Map<string, SoulIntegration>();
-      try {
-        const connection = parseYaml(
-          await readFile(join(soulPath, "integrations", "github", "connection.yaml"), "utf8")
-        );
+      const manifestRaw = soul.writer.read("Integration", "github");
+      const connectionRaw = soul.writer.readCompanion("Integration", "github", "connection.yaml");
+      if (manifestRaw !== null || connectionRaw !== null) {
+        const connection = connectionRaw === null ? undefined : parseYaml(connectionRaw);
         map.set("github", {
           slug: "github",
           sourceIntegration: "github",
-          manifest: github?.manifest,
+          manifest: githubManifest,
           connection,
         } as SoulIntegration);
-      } catch {
-        // not materialized yet
       }
       return map;
     }
@@ -174,16 +169,13 @@ describe("github declarative auth flow", () => {
       integrations: new Map<string, SoulIntegration>(),
       agents: new Map(),
       reload: vi.fn().mockImplementation(async () => {
-        soulLoader.integrations = await reloadFromDisk();
+        soulLoader.integrations = reloadFromTree();
       }),
     } as unknown as SoulLoader;
 
     const gitSync = {
-      path: soulPath,
-      withSync: vi.fn().mockImplementation(async () => {
-        soulLoader.integrations = await reloadFromDisk();
-        return { sha: "abc1234", filesChanged: 1 };
-      }),
+      path: "/soul",
+      withSync: vi.fn(),
       commit: vi.fn(),
       push: vi.fn(),
     } as unknown as GitSyncService;
@@ -199,6 +191,7 @@ describe("github declarative auth flow", () => {
       userRepo,
       tokenRepo: new FakeTokenRepo(),
       gitSync,
+      soulWriter: soul.writer,
       soulLoader,
       secretsService: secretsService as never,
       bundledIntegrations: bundled,
@@ -235,7 +228,6 @@ describe("github declarative auth flow", () => {
 
   afterEach(async () => {
     await app.close();
-    for (const dir of temps.splice(0)) await rm(dir, { recursive: true, force: true });
   });
 
   const auth = () => ({ [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF });
@@ -342,7 +334,7 @@ describe("github declarative auth flow", () => {
     await createApp();
     await installOnRepos();
 
-    const raw = await readFile(join(soulPath, "integrations", "github", "connection.yaml"), "utf8");
+    const raw = soul.writer.readCompanion("Integration", "github", "connection.yaml") ?? "";
     for (const secret of [privateKeyPem, "whsec", "cs_shh"]) {
       expect(raw).not.toContain(secret);
     }

@@ -1,5 +1,5 @@
 import type { SecretsService } from "@tulipfarm/secrets";
-import type { GitSyncService, IntegrationManifest, SoulLoader } from "@tulipfarm/soul";
+import type { IntegrationManifest, SoulLoader, SoulWriter } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import { commitActorFromRequest } from "../soul/commit-actor";
@@ -22,7 +22,7 @@ type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
 export interface AuthRoutesDeps {
   soulLoader: SoulLoader;
-  gitSync: GitSyncService;
+  soulWriter: SoulWriter;
   secrets: SecretsService;
   repo: IntegrationAuthRequestRepo;
   bundled: ReadonlyMap<string, BundledIntegration>;

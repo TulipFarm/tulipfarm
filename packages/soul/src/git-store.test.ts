@@ -278,7 +278,13 @@ describe("SoulGitStore.commitChangeset", () => {
     expect(mock.git.revparse).not.toHaveBeenCalled();
   });
 
-  it("writes definitions in deterministic canonical form", async () => {
+  /*
+   * Soul is a human-authored, human-reviewed git repository. Rewriting each definition to the
+   * canonical single-line JSON used for hashing would make every file unreadable and every diff a
+   * one-line churn — the exact friction that drives people to edit around the gateway. Determinism
+   * is unaffected: the changeset hash covers the parsed document, not the bytes.
+   */
+  it("commits the author's own bytes rather than the canonical form", async () => {
     const store = new SoulGitStore(SOUL, makeSigner(), logger);
     await store.commitChangeset({
       changeset: makeValidated(),
@@ -287,6 +293,10 @@ describe("SoulGitStore.commitChangeset", () => {
     });
 
     expect(mockWriteFileSync).toHaveBeenCalledWith(
+      "/soul/.git/tulipfarm-changesets/changeset-xyz/blob",
+      UPSERT.content
+    );
+    expect(mockWriteFileSync).not.toHaveBeenCalledWith(
       "/soul/.git/tulipfarm-changesets/changeset-xyz/blob",
       `${canonicalize(AGENT_DOCUMENT)}\n`
     );

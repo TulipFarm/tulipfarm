@@ -1,6 +1,3 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { GitSyncService, SoulIntegration, SoulLoader } from "@tulipfarm/soul";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -13,6 +10,7 @@ import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
 import type { PaginatedResult } from "../pagination";
 import { loadBundledIntegrations } from "../soul/integrations/bundled";
+import { makeSoulWriterDouble } from "../soul/soul-writer-double";
 import type { IntegrationAuthRequestDoc, IntegrationAuthRequestRepo } from "./auth-broker";
 import { InMemoryPrincipalProviderTokenRepo } from "./principal-tokens";
 
@@ -112,14 +110,13 @@ class FakeIntegrationStore {
 describe("slack declarative auth flow", () => {
   let app: FastifyInstance;
   let sid: string;
-  let soulPath: string;
+  let soul: ReturnType<typeof makeSoulWriterDouble>;
   let soulLoader: SoulLoader;
   let secretsService: FakeSecretsService;
   let repo: MemoryAuthRequestRepo;
   let principalTokens: InMemoryPrincipalProviderTokenRepo;
   let fetchImpl: ReturnType<typeof vi.fn>;
   let store: FakeIntegrationStore;
-  const temps: string[] = [];
 
   beforeEach(async () => {
     const sessions = new MemorySessionStore();
@@ -128,27 +125,25 @@ describe("slack declarative auth flow", () => {
     const user = await createUser(userRepo, "user@example.com", "pass", "admin");
     sid = await sessions.create(user._id);
 
-    soulPath = await mkdtemp(join(tmpdir(), "slack-auth-soul-"));
-    temps.push(soulPath);
+    soul = makeSoulWriterDouble();
 
     const bundled = await loadBundledIntegrations(logger);
     const slack = bundled.get("slack");
     if (!slack) throw new Error("slack is not a bundled integration");
+    const slackManifest = slack.manifest;
 
-    async function reloadFromDisk(): Promise<Map<string, SoulIntegration>> {
+    function reloadFromTree(): Map<string, SoulIntegration> {
       const map = new Map<string, SoulIntegration>();
-      try {
-        const connection = parseYaml(
-          await readFile(join(soulPath, "integrations", "slack", "connection.yaml"), "utf8")
-        );
+      const manifestRaw = soul.writer.read("Integration", "slack");
+      const connectionRaw = soul.writer.readCompanion("Integration", "slack", "connection.yaml");
+      if (manifestRaw !== null || connectionRaw !== null) {
+        const connection = connectionRaw === null ? undefined : parseYaml(connectionRaw);
         map.set("slack", {
           slug: "slack",
           sourceIntegration: "slack",
-          manifest: slack?.manifest,
+          manifest: slackManifest,
           connection,
         } as SoulIntegration);
-      } catch {
-        // not materialized yet
       }
       return map;
     }
@@ -157,16 +152,13 @@ describe("slack declarative auth flow", () => {
       integrations: new Map<string, SoulIntegration>(),
       agents: new Map(),
       reload: vi.fn().mockImplementation(async () => {
-        soulLoader.integrations = await reloadFromDisk();
+        soulLoader.integrations = reloadFromTree();
       }),
     } as unknown as SoulLoader;
 
     const gitSync = {
-      path: soulPath,
-      withSync: vi.fn().mockImplementation(async () => {
-        soulLoader.integrations = await reloadFromDisk();
-        return { sha: "abc1234", filesChanged: 1 };
-      }),
+      path: "/soul",
+      withSync: vi.fn(),
       commit: vi.fn(),
       push: vi.fn(),
     } as unknown as GitSyncService;
@@ -182,6 +174,7 @@ describe("slack declarative auth flow", () => {
       userRepo,
       tokenRepo: new FakeTokenRepo(),
       gitSync,
+      soulWriter: soul.writer,
       soulLoader,
       secretsService: secretsService as never,
       bundledIntegrations: bundled,
@@ -201,7 +194,6 @@ describe("slack declarative auth flow", () => {
 
   afterEach(async () => {
     await app.close();
-    for (const dir of temps.splice(0)) await rm(dir, { recursive: true, force: true });
   });
 
   const auth = () => ({ [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF });
@@ -292,7 +284,7 @@ describe("slack declarative auth flow", () => {
     expect(secretsService.store.get("integration.slack.SLACK_BOT_TOKEN")).toBe("xoxb-real");
     expect(secretsService.store.get("integration.slack.SLACK_APP_TOKEN")).toBe("xapp-1-abc");
     const connection = parseYaml(
-      await readFile(join(soulPath, "integrations", "slack", "connection.yaml"), "utf8")
+      soul.writer.readCompanion("Integration", "slack", "connection.yaml") ?? ""
     );
     // `map: {team.id: SLACK_TEAM_ID}` is the only reason the workspace id is captured at all.
     expect(connection.env.SLACK_TEAM_ID).toBe("T999");
@@ -324,7 +316,7 @@ describe("slack declarative auth flow", () => {
     await submitFields();
     await installToWorkspace();
 
-    const raw = await readFile(join(soulPath, "integrations", "slack", "connection.yaml"), "utf8");
+    const raw = soul.writer.readCompanion("Integration", "slack", "connection.yaml") ?? "";
     for (const secret of ["client-shh", "xapp-1-abc", "xoxb-real"]) {
       expect(raw).not.toContain(secret);
     }

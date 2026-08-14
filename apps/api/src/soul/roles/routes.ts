@@ -1,6 +1,6 @@
 /** Admin-gated REST surface over Soul-authored Roles. */
 
-import type { GitSyncService } from "@tulipfarm/soul";
+import type { SoulWriter } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { SoulAuditWriter } from "../../audit/soul-write";
 import { ErrorSchema } from "../../auth/schemas";
@@ -112,7 +112,8 @@ const LevelErrorSchema = {
 } as const;
 
 export interface LevelRouteDeps {
-  readonly gitSync: GitSyncService;
+  /** The ADR-007 write gateway; access-level writes commit through it. */
+  readonly soulWriter: SoulWriter;
   readonly catalog: () => CapabilityCatalog;
   readonly reconcile: () => Promise<void>;
   /** Resolves `req.principal` before the admin gate reads it. */
@@ -201,7 +202,7 @@ export function registerAccessLevelRoutes(app: FastifyInstance, deps: LevelRoute
       try {
         const level = await createLevel(
           { name: body.name, capabilities: body.capabilities },
-          { gitSync: deps.gitSync, catalog: deps.catalog, reconcile: deps.reconcile },
+          { soulWriter: deps.soulWriter, catalog: deps.catalog, reconcile: deps.reconcile },
           commitActorFromRequest(req)
         );
         await deps.auditWrite?.(req, "authz.level.create", `authz-level:${level.slug}`, {
@@ -262,7 +263,7 @@ export function registerAccessLevelRoutes(app: FastifyInstance, deps: LevelRoute
         const level = await updateLevel(
           slug,
           { name: body.name, capabilities: body.capabilities },
-          { gitSync: deps.gitSync, catalog: deps.catalog, reconcile: deps.reconcile },
+          { soulWriter: deps.soulWriter, catalog: deps.catalog, reconcile: deps.reconcile },
           commitActorFromRequest(req)
         );
         await deps.auditWrite?.(req, "authz.level.update", `authz-level:${slug}`, {
@@ -307,7 +308,7 @@ export function registerAccessLevelRoutes(app: FastifyInstance, deps: LevelRoute
       try {
         await deleteLevel(
           slug,
-          { gitSync: deps.gitSync, catalog: deps.catalog, reconcile: deps.reconcile },
+          { soulWriter: deps.soulWriter, catalog: deps.catalog, reconcile: deps.reconcile },
           commitActorFromRequest(req)
         );
         await deps.auditWrite?.(req, "authz.level.delete", `authz-level:${slug}`);

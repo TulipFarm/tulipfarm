@@ -1,6 +1,6 @@
-import { existsSync } from "node:fs";
 import { cp, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { LlmService } from "@tulipfarm/llm";
 import {
   ajv,
@@ -9,12 +9,22 @@ import {
   serializeSkill,
   validateSkill,
 } from "@tulipfarm/schema";
-import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
+import {
+  type GitSyncService,
+  type SoulLoader,
+  SoulWriteError,
+  type SoulWriter,
+} from "@tulipfarm/soul";
+import { SYSTEM_SOUL_COMMIT_ACTOR } from "../../runtime/soul-writer";
 import { type ApiToolDefinition, defineApiTool } from "../../tools/define.js";
 import { soulCommitError } from "../../tools/soul-faults";
-import { err, ok, type RequestContext } from "../../tools/types.js";
+import { err, ok, type RequestContext, type ToolCallResult } from "../../tools/types.js";
 import { buildAudit } from "./audit.js";
-import { type BundledSkill, persistDisabledBundledSkills } from "./bundled.js";
+import {
+  type BundledSkill,
+  DISABLED_BUNDLED_SKILLS_FILE,
+  persistDisabledBundledSkills,
+} from "./bundled.js";
 import { scanSkill, skillTrustLevel } from "./guard.js";
 import { mergedSkills, resolveSkill } from "./registry.js";
 
@@ -24,6 +34,7 @@ export interface SkillToolContext {
   llmService?: LlmService;
   bundledSkills: ReadonlyMap<string, BundledSkill>;
   disabledBundledSkills: Set<string>;
+  readonly soulWriter: SoulWriter;
   requestContext?: RequestContext;
 }
 
@@ -31,6 +42,33 @@ const SOUL_SKILL_TARGET = "soul.skill";
 
 function reason(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+/**
+ * Map a Soul write-gateway rejection onto this tool family's error vocabulary.
+ *
+ * `PRECONDITION_FAILED` is the one code whose meaning is site-specific — an "already exists" on
+ * create, a "not found" on update/delete — so each caller supplies that mapping. The rest are
+ * fixed: a rejected changeset (bad target or invalid content) is a `validation_error`, a moved base
+ * is transient (`unavailable`), and a failed commit is classified by `soulCommitError` so git
+ * contention is reported as `unavailable` rather than as a request the model should repair. The
+ * gateway's message carries only structured evidence, never file content, so it is safe to surface.
+ */
+function mapSoulWriteError(
+  e: SoulWriteError,
+  onPrecondition: () => ToolCallResult
+): ToolCallResult {
+  switch (e.code) {
+    case "PRECONDITION_FAILED":
+      return onPrecondition();
+    case "VALIDATION_FAILED":
+    case "INVALID_TARGET":
+      return err("validation_error", e.message);
+    case "CONFLICT":
+      return err("unavailable", e.message);
+    default:
+      return soulCommitError(e, e.message);
+  }
 }
 
 function stringArg(args: unknown, key: string): string | undefined {
@@ -99,7 +137,7 @@ const validateCreate = ajv.compile(CREATE_SCHEMA);
 const skillCreate = defineApiTool<SkillToolContext>({
   name: "skill_create",
   description:
-    "Create a new skill in the soul repo. Writes SKILL.md (pending audit), commits via withSync, runs SkillAudit synchronously, and returns the audit report. The skill is not active in prompt assembly until confirmed via skill_activate.",
+    "Create a new skill in the soul repo. Writes SKILL.md (pending audit), commits it to the soul repo, runs SkillAudit synchronously, and returns the audit report. The skill is not active in prompt assembly until confirmed via skill_activate.",
   tier: "system",
   mutating: true,
   inputSchema: CREATE_SCHEMA,
@@ -123,8 +161,10 @@ const skillCreate = defineApiTool<SkillToolContext>({
     const validation = validateSkill({ name, frontmatter, body, content });
     if (!validation.valid) return err("validation_error", validation.error);
 
-    const skillDir = join(ctx.gitSync.path, "skills", name);
-    if (existsSync(skillDir) || ctx.bundledSkills.has(name)) {
+    if (
+      ctx.soulWriter.readCompanion("Skill", name, "SKILL.md") !== null ||
+      ctx.bundledSkills.has(name)
+    ) {
       return err("validation_error", "skill already exists");
     }
 
@@ -148,23 +188,22 @@ const skillCreate = defineApiTool<SkillToolContext>({
       return err("internal_error", reason(e));
     }
 
-    // Write with _pendingAudit marker so the skill is committed but inactive until operator confirms.
+    // Commit with the _pendingAudit marker so the skill lands committed but inactive until an
+    // operator confirms it. One companion put is the whole changeset — atomic through the gateway.
     try {
-      await mkdir(skillDir, { recursive: true });
-      await writeFile(join(skillDir, "SKILL.md"), content, "utf8");
+      await ctx.soulWriter.apply({
+        subject: `soul: add skill ${name}`,
+        source: "agent",
+        actor: ctx.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        changes: [
+          { op: "put", target: { kind: "Skill", slug: name, companion: "SKILL.md" }, content },
+        ],
+      });
     } catch (e) {
-      return err("internal_error", reason(e));
-    }
-
-    try {
-      await ctx.gitSync.withSync(`soul: add skill ${name}`, ctx.requestContext?.actor);
-    } catch (e) {
-      return soulCommitError(e, reason(e));
-    }
-
-    try {
-      await ctx.soulLoader.reload();
-    } catch (e) {
+      if (e instanceof SoulWriteError) {
+        return mapSoulWriteError(e, () => err("validation_error", "skill already exists"));
+      }
       return err("internal_error", reason(e));
     }
 
@@ -232,7 +271,7 @@ const validateUpdate = ajv.compile(UPDATE_SCHEMA);
 const skillUpdate = defineApiTool<SkillToolContext>({
   name: "skill_update",
   description:
-    "Update an existing Skill. Prefer old_string/new_string for surgical body fixes; use body and/or frontmatter only for full replacements. Patch text must be unique unless replace_all is true. Updates preserve audit state and do not re-run SkillAudit. Commits and pushes via withSync.",
+    "Update an existing Skill. Prefer old_string/new_string for surgical body fixes; use body and/or frontmatter only for full replacements. Patch text must be unique unless replace_all is true. Updates preserve audit state and do not re-run SkillAudit. The change is committed to the soul repo.",
   tier: "system",
   mutating: true,
   inputSchema: UPDATE_SCHEMA,
@@ -303,9 +342,36 @@ const skillUpdate = defineApiTool<SkillToolContext>({
     const validation = validateSkill({ name, frontmatter: newFm, body: newBody, content });
     if (!validation.valid) return err("validation_error", validation.error);
 
+    // A pure Soul-skill edit is a single SKILL.md companion write — route it through the gateway.
+    // Materializing a bundled Skill (copying its companion tree) or clearing a bundled tombstone
+    // (`skills/.bundled-disabled.json`, which is not an addressable Soul artifact) cannot be
+    // expressed as an artifact-addressed changeset, so those keep the git-sync commit below.
+    if (soulSkill && !ctx.disabledBundledSkills.has(name)) {
+      try {
+        await ctx.soulWriter.apply({
+          subject: `soul: update skill ${name}`,
+          source: "agent",
+          actor: ctx.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
+          businessId: DEPLOYMENT_BUSINESS_ID,
+          changes: [
+            { op: "put", target: { kind: "Skill", slug: name, companion: "SKILL.md" }, content },
+          ],
+        });
+      } catch (e) {
+        if (e instanceof SoulWriteError) {
+          return mapSoulWriteError(e, () => err("not_found", `skill not found: ${name}`));
+        }
+        return err("internal_error", reason(e));
+      }
+      return ok({ name, frontmatter: validation.frontmatter, body: newBody });
+    }
+
     const skillFile = join(ctx.gitSync.path, "skills", name, "SKILL.md");
     try {
       if (!soulSkill && bundledSkill) {
+        // soul-write-exception: materialising a bundled Skill copies an arbitrary companion tree
+        // out of the bundle, which is not an artifact-addressed write. The commit below stages
+        // only these paths via `withSyncPaths`, so no unrelated worktree state is swept in.
         await mkdir(join(ctx.gitSync.path, "skills"), { recursive: true });
         await cp(bundledSkill.directory, join(ctx.gitSync.path, "skills", name), {
           recursive: true,
@@ -322,7 +388,14 @@ const skillUpdate = defineApiTool<SkillToolContext>({
     }
 
     try {
-      await ctx.gitSync.withSync(`soul: update skill ${name}`, ctx.requestContext?.actor);
+      // Materialising a bundled Skill copies a whole companion tree and clears the bundled
+      // tombstone — neither is an artifact-addressed write, so this path cannot use the gateway.
+      // `withSyncPaths` still names what it stages, so unrelated worktree state is never swept in.
+      await ctx.gitSync.withSyncPaths(
+        `soul: update skill ${name}`,
+        [join("skills", name), join("skills", DISABLED_BUNDLED_SKILLS_FILE)],
+        ctx.requestContext?.actor
+      );
     } catch (e) {
       return soulCommitError(e, reason(e));
     }
@@ -430,7 +503,7 @@ const validateDelete = ajv.compile(DELETE_SCHEMA);
 const skillDelete = defineApiTool<SkillToolContext>({
   name: "skill_delete",
   description:
-    "Delete a Skill from the merged view. Soul Skills are removed; bundled Skills are hidden with a persistent tombstone. Commits and pushes via withSync.",
+    "Delete a Skill from the merged view. Soul Skills are removed; bundled Skills are hidden with a persistent tombstone. The change is committed to the soul repo.",
   tier: "system",
   mutating: true,
   inputSchema: DELETE_SCHEMA,
@@ -451,6 +524,27 @@ const skillDelete = defineApiTool<SkillToolContext>({
       return err("not_found", `skill not found: ${name}`);
     }
 
+    // Removing a Soul-authored Skill is a whole-artifact delete through the gateway. Disabling a
+    // bundled Skill instead writes a tombstone to `skills/.bundled-disabled.json`, which is not an
+    // addressable Soul artifact, so any path that touches it keeps the git-sync commit below.
+    if (soulSkill && !bundledSkill) {
+      try {
+        await ctx.soulWriter.apply({
+          subject: `soul: remove skill ${name}`,
+          source: "agent",
+          actor: ctx.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
+          businessId: DEPLOYMENT_BUSINESS_ID,
+          changes: [{ op: "deleteArtifact", kind: "Skill", slug: name }],
+        });
+      } catch (e) {
+        if (e instanceof SoulWriteError) {
+          return mapSoulWriteError(e, () => err("not_found", `skill not found: ${name}`));
+        }
+        return err("internal_error", reason(e));
+      }
+      return ok({ name, deleted: true });
+    }
+
     const skillDir = join(ctx.gitSync.path, "skills", name);
     try {
       if (soulSkill) await rm(skillDir, { recursive: true, force: true });
@@ -463,7 +557,13 @@ const skillDelete = defineApiTool<SkillToolContext>({
     }
 
     try {
-      await ctx.gitSync.withSync(`soul: remove skill ${name}`, ctx.requestContext?.actor);
+      // Same reason as the bundled materialisation above: the tombstone is not an addressable
+      // artifact, so this residual path stages explicit paths instead of the whole worktree.
+      await ctx.gitSync.withSyncPaths(
+        `soul: remove skill ${name}`,
+        [join("skills", name), join("skills", DISABLED_BUNDLED_SKILLS_FILE)],
+        ctx.requestContext?.actor
+      );
     } catch (e) {
       return soulCommitError(e, reason(e));
     }
@@ -525,22 +625,20 @@ const skillActivate = defineApiTool<SkillToolContext>({
     });
     if (!validation.valid) return err("validation_error", validation.error);
 
-    const skillFile = join(ctx.gitSync.path, "skills", name, "SKILL.md");
     try {
-      await writeFile(skillFile, content, "utf8");
+      await ctx.soulWriter.apply({
+        subject: `soul: activate skill ${name}`,
+        source: "agent",
+        actor: ctx.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        changes: [
+          { op: "put", target: { kind: "Skill", slug: name, companion: "SKILL.md" }, content },
+        ],
+      });
     } catch (e) {
-      return err("internal_error", reason(e));
-    }
-
-    try {
-      await ctx.gitSync.withSync(`soul: activate skill ${name}`, ctx.requestContext?.actor);
-    } catch (e) {
-      return soulCommitError(e, reason(e));
-    }
-
-    try {
-      await ctx.soulLoader.reload();
-    } catch (e) {
+      if (e instanceof SoulWriteError) {
+        return mapSoulWriteError(e, () => err("not_found", `skill not found: ${name}`));
+      }
       return err("internal_error", reason(e));
     }
 

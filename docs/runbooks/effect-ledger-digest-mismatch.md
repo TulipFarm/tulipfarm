@@ -46,7 +46,7 @@ The **effect-plane hardening release** does both. Known changes:
 | `remember_correction` | action / target | `memory.remember` / `memory:<subject>` | `memory.lifecycle.remember` / `memory.lifecycle:<subject>` |
 | `resource_hooks_get` | action | `soul.resource_type.read` | `soul.resource_type.hooks.read` |
 | GitHub searches, `github_repository_list` | targets | `[]` | `github.installation:all-repositories` |
-| `end_soul_batch`, `soul_repo_push` | targets | `[]` | `soul.repo:entire-repository` |
+| `soul_repo_push` | targets | `[]` | `soul.repo:entire-repository` |
 | Slack send | targets | `slack.channel:<name-or-id>` | `slack.channel:<id>` or `slack.channel_name:<name>` |
 | Declarative (OpenAPI-imported) | action | bare operation name | `<slug>.<operation>` |
 

@@ -233,7 +233,10 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
         businessWebsite: website,
       });
       await gitSync
-        .commit("chore: set business profile", commitActorFromRequest(req))
+        // First-run setup writes soul.yaml before the artifact catalog — and therefore the
+        // SoulWriter gateway — exists, so it cannot route through it. It stages that one file by
+        // name rather than `git add -A`, so it can never sweep in unrelated worktree state.
+        .commitPaths("chore: set business profile", ["soul.yaml"], commitActorFromRequest(req))
         .catch(() => {});
       return reply.code(204).send();
     }
@@ -387,7 +390,9 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
     async (req, reply) => {
       await patchSoulConfig(soulPath, { setupComplete: true });
       await gitSync
-        .commit("chore: complete first-run setup", commitActorFromRequest(req))
+        // Same as the business-profile write above: pre-gateway, and staged by name so the
+        // `gitRemoteUrl` patch written earlier in the wizard is the only other file it can carry.
+        .commitPaths("chore: complete first-run setup", ["soul.yaml"], commitActorFromRequest(req))
         .catch(() => {});
       return reply.code(204).send();
     }

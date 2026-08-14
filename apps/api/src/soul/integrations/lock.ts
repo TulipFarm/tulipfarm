@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 export interface IntegrationLockEntry {
@@ -25,17 +25,6 @@ export async function readIntegrationsLock(soulPath: string): Promise<Integratio
   } catch {
     return { version: 1, integrations: {} };
   }
-}
-
-export async function writeIntegrationsLock(
-  soulPath: string,
-  lock: IntegrationsLock
-): Promise<void> {
-  await writeFile(
-    join(soulPath, "integrations-lock.json"),
-    `${JSON.stringify(lock, null, 2)}\n`,
-    "utf8"
-  );
 }
 
 export function hashContent(content: string): string {

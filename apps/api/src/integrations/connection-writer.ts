@@ -1,20 +1,21 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { SecretsService } from "@tulipfarm/secrets";
 import {
   authFlowSatisfied,
   type CommitActor,
-  type GitSyncService,
   type IntegrationManifest,
   type SoulLoader,
+  type SoulWriter,
 } from "@tulipfarm/soul";
 import { stringify as stringifyYaml } from "yaml";
+import { SYSTEM_SOUL_COMMIT_ACTOR } from "../runtime/soul-writer";
 import { resolveConnectionEnv, sealConnectionEnv } from "./connection-env";
 
 /** Sole `connection.yaml` writer; connect routes and auth callbacks share sealing and reload. */
 
 export interface ConnectionWriterDeps {
-  gitSync: GitSyncService;
+  /** ADR-007 write gateway: the sole door for committing `connection.yaml`. */
+  soulWriter: SoulWriter;
   soulLoader: SoulLoader;
   secrets: SecretsService;
 }
@@ -56,10 +57,22 @@ export async function mergeConnectionEnv(
   // Check satisfaction against sealed refs so this path does not decrypt credentials unnecessarily.
   const enabled = authFlowSatisfied(input.manifest, sealed);
 
-  const dir = join(deps.gitSync.path, "integrations", input.slug);
-  await mkdir(dir, { recursive: true });
-  await writeFile(join(dir, "connection.yaml"), stringifyYaml({ enabled, env: sealed }), "utf8");
-  await deps.gitSync.withSync(input.commitMessage, input.actor);
+  // `connection.yaml` is a registered companion of an Integration (content mode `managed`), so it
+  // is addressed as one — one atomic changeset through the gateway, which commits, pushes, and
+  // reloads. The old `mkdir` + `writeFile` + `withSync` sequence is gone; the gateway owns the path.
+  await deps.soulWriter.apply({
+    subject: input.commitMessage,
+    source: "api",
+    actor: input.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
+    businessId: DEPLOYMENT_BUSINESS_ID,
+    changes: [
+      {
+        op: "put",
+        target: { kind: "Integration", slug: input.slug, companion: "connection.yaml" },
+        content: stringifyYaml({ enabled, env: sealed }),
+      },
+    ],
+  });
   await deps.soulLoader.reload();
 
   return { enabled, connectedNow: enabled && existing?.enabled !== true };

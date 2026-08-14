@@ -360,24 +360,39 @@ describe("GitSyncService", () => {
     });
   });
 
-  describe("commit", () => {
+  describe("commitPaths", () => {
     beforeEach(() => {
       mockExistsSync.mockReturnValue(true); // soul is its own repo — ensureRepo skips init
     });
 
-    it("sets bot identity, stages all, returns sha and filesChanged", async () => {
+    it("sets bot identity and returns sha and filesChanged", async () => {
+      mockGit.raw.mockResolvedValue(" M soul.yaml\n");
       const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
-      const result = await svc.commit("chore: update soul");
+      const result = await svc.commitPaths("chore: update soul", ["soul.yaml"]);
       expect(mockGit.addConfig).toHaveBeenCalledWith("user.name", "tulipfarm-bot");
       expect(mockGit.addConfig).toHaveBeenCalledWith("user.email", "tulipfarmhq@gmail.com");
-      expect(mockGit.add).toHaveBeenCalledWith("-A");
       expect(result).toEqual({ sha: "abc1234", filesChanged: 2 });
     });
 
+    it("never stages the whole worktree — every add names a pathspec", async () => {
+      mockGit.raw.mockResolvedValue(" M soul.yaml\n");
+      const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
+
+      await svc.commitPaths("chore: update soul", ["soul.yaml"]);
+
+      // ADR-007: `git add -A` with no pathspec would sweep in unrelated local edits and commit
+      // them under this message. The primitives that did that were removed; this pins their absence.
+      expect(mockGit.add).not.toHaveBeenCalledWith("-A");
+      for (const [arg] of mockGit.add.mock.calls) {
+        expect(arg).toEqual(expect.arrayContaining(["--"]));
+      }
+    });
+
     it("publishes and activates the committed Soul tree", async () => {
+      mockGit.raw.mockResolvedValue(" M soul.yaml\n");
       const { publications, svc, verifier } = publishingService(logger);
 
-      await svc.commit("soul: update routine", ACTOR);
+      await svc.commitPaths("soul: update routine", ["soul.yaml"], ACTOR);
       await publications.drain("test");
 
       const active = await publications.activeBundle(BUSINESS, verifier);
@@ -386,6 +401,7 @@ describe("GitSyncService", () => {
     });
 
     it("does not roll back a durable commit when bundle publication fails", async () => {
+      mockGit.raw.mockResolvedValue(" M soul.yaml\n");
       const svc = new GitSyncService(SOUL, undefined, async () => undefined, logger, {
         committedTreePublisher: {
           publishCommittedTree: vi.fn(async () => {
@@ -394,24 +410,39 @@ describe("GitSyncService", () => {
         },
       });
 
-      await expect(svc.commit("soul: update routine", ACTOR)).resolves.toEqual({
+      await expect(svc.commitPaths("soul: update routine", ["soul.yaml"], ACTOR)).resolves.toEqual({
         sha: "abc1234",
         filesChanged: 2,
       });
       expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("compiler unavailable"));
     });
 
-    it("returns empty sha and zero changes when nothing to commit", async () => {
-      mockGit.commit.mockResolvedValue({ commit: "", summary: { changes: 0 } });
+    it("refuses to commit when none of the named paths changed", async () => {
+      mockGit.raw.mockResolvedValue("");
       const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
-      const result = await svc.commit("chore: update soul");
-      expect(result).toEqual({ sha: "", filesChanged: 0 });
+      await expect(svc.commitPaths("chore: update soul", ["soul.yaml"])).rejects.toThrow(
+        "no migration-owned changes to commit"
+      );
+      expect(mockGit.commit).not.toHaveBeenCalled();
+    });
+
+    it("rejects a path that escapes the Soul repository", async () => {
+      const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
+      await expect(svc.commitPaths("chore", ["../etc/passwd"])).rejects.toThrow(
+        "non-empty relative paths"
+      );
+      await expect(svc.commitPaths("chore", ["/etc/passwd"])).rejects.toThrow(
+        "non-empty relative paths"
+      );
     });
 
     it("propagates commit failure", async () => {
+      mockGit.raw.mockResolvedValue(" M soul.yaml\n");
       mockGit.commit.mockRejectedValue(new Error("cannot commit"));
       const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
-      await expect(svc.commit("chore: update soul")).rejects.toThrow("cannot commit");
+      await expect(svc.commitPaths("chore: update soul", ["soul.yaml"])).rejects.toThrow(
+        "cannot commit"
+      );
     });
 
     it("commits only changed migration-owned paths", async () => {
