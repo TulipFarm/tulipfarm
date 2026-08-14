@@ -185,8 +185,15 @@ export function deriveModelProfiles(config: LlmConfig): DerivedModelProfile[] {
  *
  * Deterministic and configuration-only: the same request against the same Soul always resolves the
  * same way, which is what keeps a Run replayable and its audit chain meaningful. `auto` is anchored
- * on a declared default rather than inferred from the request — an adaptive router would make two
- * identical turns diverge with nothing in the record explaining why.
+ * here on a declared default rather than inferred, and this function stays that way — it is reached
+ * with a preset and a catalogue, never with the participant's words.
+ *
+ * Inferring `auto` from the prompt is a layer above, in `@tulipfarm/agent-runtime`'s effort router,
+ * and it earns its determinism differently: the heuristic stage is pure, and the model-backed stage
+ * runs at most once per Run and is then pinned to the `model.routed` event, so a replay reads back
+ * the rung the turn already committed to instead of asking again. Two identical turns can still
+ * diverge, but never silently — the score, the signals, and the band that produced each are on the
+ * record. Where no prompt exists to score (a Routine's `agent` State), this remains the answer.
  */
 export function resolveEffortPreset(
   preset: EffortPreset,

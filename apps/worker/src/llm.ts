@@ -7,6 +7,7 @@ import {
   asEffortPreset,
   deriveModelProfiles,
   isDeprecatedTierAlias,
+  type RunEventEffortInference,
   type RunEventPayloads,
   resolveEffortPreset,
   validateLlmConfig,
@@ -55,7 +56,7 @@ export type LlmModelResolution =
       readonly routing: Extract<ModelRoutingPayload, { readonly outcome: "denied" }>;
     };
 
-type ProfileSelectorResolution = "effort_preset" | "profile_ref";
+type ProfileSelectorResolution = "effort_preset" | "effort_inferred" | "profile_ref";
 
 type ResolvedProfileSelector =
   | {
@@ -119,11 +120,12 @@ export class SoulLlm {
 
   async resolveModel(
     selector: string,
-    requirements: ModelRequirements
+    requirements: ModelRequirements,
+    inference?: RunEventEffortInference
   ): Promise<LlmModelResolution> {
     await this.sync();
 
-    const resolved = this.resolveProfileSelector(selector);
+    const resolved = this.resolveSelector(selector, inference);
     if (resolved.kind === "raw_model") {
       return {
         kind: "available",
@@ -137,6 +139,14 @@ export class SoulLlm {
       };
     }
 
+    // The evidence is attached only where it decided something. A turn that inferred a rung the
+    // deployment does not configure fell back to the declared default, and claiming otherwise
+    // would make the record name a route the Run did not take.
+    const evidence =
+      resolved.resolution === "effort_inferred" && inference !== undefined
+        ? { effortInference: inference }
+        : {};
+
     const selection = selectModelProfile(resolved.profileId, requirements, this.catalog);
     if (selection.outcome === "denied") {
       return {
@@ -148,6 +158,7 @@ export class SoulLlm {
           profileId: selection.profileId,
           reason: selection.reason,
           attempts: selection.attempts,
+          ...evidence,
         },
       };
     }
@@ -162,6 +173,7 @@ export class SoulLlm {
           profileId: selection.profileId,
           reason: "unknown_profile",
           attempts: [{ profileId: selection.profileId, reason: "unknown_profile" }],
+          ...evidence,
         },
       };
     }
@@ -184,8 +196,31 @@ export class SoulLlm {
         cacheAllowed: selection.cacheAllowed,
         rejectedFallbacks: selection.rejectedFallbacks,
         ...(budgetEvidence === undefined ? {} : { budgetLimits: budgetEvidence }),
+        ...evidence,
       },
     };
+  }
+
+  /**
+   * Which ModelProfile serves this call, and how that was decided.
+   *
+   * An inferred rung is tried first and is allowed to lose: a deployment that configures no
+   * `thorough` preset must still answer the turn, so an unresolvable inference falls through to
+   * the selector the participant actually sent — `auto`, which resolves to the declared default.
+   * Failing the turn instead would let a routing *preference* deny a turn that has a model to run.
+   */
+  private resolveSelector(
+    selector: string,
+    inference: RunEventEffortInference | undefined
+  ): ResolvedProfileSelector {
+    if (inference !== undefined) {
+      const available = (id: string) => this.catalog.get(id) !== undefined;
+      const profileId = resolveEffortPreset(inference.rung, this.presets, available);
+      if (profileId !== undefined) {
+        return { kind: "profile", profileId, resolution: "effort_inferred" };
+      }
+    }
+    return this.resolveProfileSelector(selector);
   }
 
   /** Which ModelProfile a selector names, or that it is a raw provider Model ID. */
