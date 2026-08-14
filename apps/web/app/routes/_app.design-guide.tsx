@@ -7,6 +7,8 @@ import { ToolRun } from "~/components/chat/tool-call";
 import { Transcript } from "~/components/chat/transcript";
 import { FormStatus } from "~/components/form-status";
 import { IntegrationIcon } from "~/components/integrations/integration-icon";
+import { CompanionPanel } from "~/components/onboarding/companion-panel";
+import { TulipGrowth, type TulipStage } from "~/components/onboarding/tulip-growth";
 import { PriorityBadge, StatusBadge } from "~/components/status-badge";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
@@ -94,6 +96,34 @@ const TIER_TOKENS = [
   ["integration", "bg-tool-tier-integration"],
   ["mutating", "bg-tool-mutating"],
 ] as const;
+
+const TULIP_STAGES: readonly TulipStage[] = [0, 1, 2, 3];
+
+/** Static specimen quests — one per tier — for the Companion panel showcase. Never wired live. */
+const GUIDE_QUESTS = [
+  {
+    id: "provider-key",
+    tier: 1 as const,
+    label: "Plant your model key",
+    hint: "Agents need one provider connected before they can do anything.",
+    action: { kind: "link" as const, href: "/settings/secrets" },
+  },
+  {
+    id: "checklist-resource",
+    tier: 2 as const,
+    label: "Create your first resource type",
+    action: { kind: "chat" as const, prompt: "Help me create a resource type." },
+  },
+  {
+    id: "profile-employee-count",
+    tier: 3 as const,
+    label: "How many people work here?",
+    action: {
+      kind: "chat" as const,
+      prompt: "Help me record how many employees the business has.",
+    },
+  },
+];
 
 const TOOL_SPECIMENS: { caption: string; part: Extract<TimelinePart, { kind: "tool" }> }[] = [
   {
@@ -201,6 +231,7 @@ const GUIDE_LINKS = [
   ["status-priority", "Status & priority systems"],
   ["agent-run", "Agent run vocabulary"],
   ["brand-marks", "Brand marks"],
+  ["onboarding", "Onboarding: tulip & Companion"],
   ["copy-field", "Copyable values"],
   ["hierarchy", "Component hierarchy"],
   ["composition", "Composition patterns"],
@@ -510,6 +541,36 @@ export default function DesignGuideRoute() {
           on the dark canvas and a pale brand is invisible on the light one. Both corrections ship
           as custom properties so the <code>dark:</code> variant switches them without JavaScript.
         </p>
+      </GuideSection>
+
+      <GuideSection
+        id="onboarding"
+        title="Onboarding: tulip & Companion"
+        description="Growth reports real answered-input count, not decoration — stage is state, motion is only the transition between stages. The same bloom face, eyes open, is the persistent in-app Companion."
+      >
+        <div className="flex flex-wrap items-end gap-6">
+          {TULIP_STAGES.map((stage) => (
+            <div key={stage} className="flex flex-col items-center gap-2">
+              <TulipGrowth stage={stage} width={60} height={80} />
+              <span className="font-mono text-xs text-muted-foreground">stage {stage}</span>
+            </div>
+          ))}
+        </div>
+        <p className="mt-4 max-w-2xl text-sm text-muted-foreground">
+          Pre-login (<code>/setup</code>) drives this with answered-question count, no step number
+          shown. In-app, stage 3 is fixed — it is the Companion's collapsed glyph, bottom right on{" "}
+          <code>sm</code>+ and a top-bar icon below it, with a pulsing dot badge (never a popup)
+          when a quest is pending.
+        </p>
+        <div className="mt-5 max-w-sm rounded-md border border-border bg-card">
+          <CompanionPanel
+            quests={GUIDE_QUESTS}
+            loading={false}
+            onDismiss={() => {}}
+            onAnswered={() => {}}
+            onClose={() => {}}
+          />
+        </div>
       </GuideSection>
 
       <GuideSection

@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { KnowledgeTree } from "~/components/knowledge/space-tree";
+import { CompanionMobileTrigger } from "~/components/onboarding/companion";
 import { ThemeToggle } from "~/components/theme-toggle";
 import { Badge } from "~/components/ui/badge";
 import { Separator } from "~/components/ui/separator";
@@ -498,6 +499,9 @@ export function AppShell({
           <Separator orientation="vertical" className="mx-1 hidden h-5 lg:block" />
           <Breadcrumb pathname={pathname} pageTitle={pageTitle} />
           <div className="ml-auto flex shrink-0 items-center gap-1 pl-2">
+            <span className="sm:hidden">
+              <CompanionMobileTrigger />
+            </span>
             <AccountChip user={user} />
             <span className="flex items-center lg:hidden">
               <ThemeToggle iconOnly />

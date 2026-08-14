@@ -56,6 +56,7 @@ export function Composer({
   presetById,
   activeAgent,
   suggestions = [],
+  initialDraft,
 }: {
   onSend: (text: string, opts: ComposerSendOptions) => void;
   onStop?: () => void;
@@ -65,6 +66,8 @@ export function Composer({
   presetById?: (id: string) => ChatModelSelector | undefined;
   activeAgent?: ComposerAgent;
   suggestions?: Suggestion[];
+  /** A prompt to draft into the box once, e.g. seeded by the onboarding Companion. Never sent. */
+  initialDraft?: string;
 }) {
   const [model, setModel] = useState<ChatModelSelector>(defaultModel);
   const getItems = useMentionData();
@@ -176,6 +179,16 @@ export function Composer({
     editor.commands.selectTextblockEnd();
     editor.view.focus();
   }
+
+  // Applies `initialDraft` once the editor exists, and only once per distinct value — a route-level
+  // seed (Companion "chat" quest), not a live-typing sync back to the box.
+  const draftedRef = useRef<string | undefined>(undefined);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: draftSuggestion closes over editor/busy already in deps.
+  useEffect(() => {
+    if (!editor || !initialDraft || draftedRef.current === initialDraft) return;
+    draftedRef.current = initialDraft;
+    draftSuggestion(initialDraft);
+  }, [editor, initialDraft]);
 
   return (
     <div className="shrink-0 border-t border-border/70 bg-background">

@@ -85,6 +85,7 @@ export function ChatPanel({
   initialConversationId,
   initialMessages,
   onConversationChange,
+  initialDraft,
 }: {
   agentId?: string;
   defaultModel?: ChatModelSelector;
@@ -95,6 +96,8 @@ export function ChatPanel({
   initialConversationId?: string;
   initialMessages?: ChatMessage[];
   onConversationChange?: (conversationId: string | undefined) => void;
+  /** A prompt to draft into the composer once, seeded by the onboarding Companion. */
+  initialDraft?: string;
 }) {
   const {
     messages,
@@ -219,6 +222,7 @@ export function ChatPanel({
             : undefined
         }
         suggestions={hasMessages ? [] : suggestions}
+        initialDraft={initialDraft}
         // A `@agent` mention in the composer overrides the panel's active agent for that turn.
         onSend={(text, opts) => send(text, { ...opts, agentId: opts.agentId ?? agentId })}
       />
