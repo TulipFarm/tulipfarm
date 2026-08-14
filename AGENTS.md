@@ -9,10 +9,49 @@ not the whole repo.
 
 ## What this is
 
-TulipFarm — AI-native business operating system. pnpm + Turborepo monorepo.
+TulipFarm is a **self-hosted control panel where autonomous agents run a business's
+operations**. The user describes what they want in chat — "track our customers", "create a
+support agent", "review this pull request" — and agents build and run it. Users never edit
+files or write code to configure it. It runs on the operator's own infrastructure and model
+provider keys; business data leaves the instance only when an agent was authorized to send it.
+
+**That product promise is a constraint on you**: if a capability cannot be reached from chat or
+the UI, it does not exist for users. Never close a gap by hand-editing the runtime `soul/` repo.
+
+An instance has two halves:
+
+- **The soul** — a git-backed config store (`soul/`, a separate repo, not a workspace). Resource
+  schemas, agents, skills, routines and integrations live there as files. Agents write to it when
+  asked to build something, so its git history is the audit trail.
+- **The runtime** — the API and workers that load the soul, store records, index knowledge, and
+  execute agent turns against configured LLM providers.
+
+### The nouns you will meet in code
+
+Full glossary with banned synonyms: [`metadata/terminologies.md`](metadata/terminologies.md).
+
+- **Chat** is the external word (routes, URLs, UI); **Conversation** is the internal entity
+  (table, repo, domain). Never let them bleed. A Conversation holds **Turns**, which hold
+  **Messages**.
+- **Agent** — a configured persona with its own instructions, tools and bounded authority.
+- **Resource type** — a user-defined schema (Ticket, Customer); one instance is a **Record**.
+  Never call an instance a "resource".
+- **Routine** — a scheduled or triggered automation, built from **States**. One execution is a
+  **Run**, which emits ordered **Run events**, each with an **Audience** (participant vs operator).
+- **Integration** — a connected third party, fully defined by a declarative **manifest**:
+  **egress** (what agents may do to the provider) and **ingress** (what the provider may send).
+- **Skill** — an installable capability package. **Knowledge** — cited, ACL-preserving
+  retrieval. **Memory** — scoped, versioned assertions. **Tool** — a callable an agent
+  invokes, brokered with approvals. **Surface** — the channel-neutral protocol for
+  rendering agent output.
+
+### Stack
+
+pnpm + Turborepo monorepo, TypeScript throughout.
 
 - **Node** `26.5.0` (`.node-version`) · **pnpm** `11.5.3` — never npm/yarn
 - **Workspaces**: `apps/*`, `packages/*`
+- PostgreSQL (pgvector + pg-boss), Fastify API, Remix web UI
 
 ## Navigating this repo
 
