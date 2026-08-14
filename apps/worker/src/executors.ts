@@ -2,7 +2,7 @@ import type { PersistedRun } from "@tulipfarm/storage";
 import type { RunOutcome } from "./run-dispatcher";
 
 /** Executes one claimed Run to a terminal outcome. Registered per Run source at composition. */
-export type RunExecutor = (run: PersistedRun) => Promise<RunOutcome>;
+export type RunExecutor = (run: PersistedRun, signal?: AbortSignal) => Promise<RunOutcome>;
 
 export class UnregisteredRunSourceError extends Error {
   readonly name = "UnregisteredRunSourceError";
@@ -41,10 +41,10 @@ export class RunExecutorRegistry {
     return run.source;
   }
 
-  async execute(run: PersistedRun): Promise<RunOutcome> {
+  async execute(run: PersistedRun, signal?: AbortSignal): Promise<RunOutcome> {
     const source = RunExecutorRegistry.sourceOf(run);
     const executor = this.executors.get(source);
     if (!executor) throw new UnregisteredRunSourceError(source, run.id);
-    return executor(run);
+    return executor(run, signal);
   }
 }

@@ -16,6 +16,9 @@ const HOOK_BUNDLE = resolve(APP_ROOT, "dist/ingress-hook-worker.cjs");
  * Both entrypoints are built, and into the same directory the image lays them out in, because the
  * hook sandbox is found by looking for a sibling file: a worker whose own bundle builds but whose
  * sandbox entrypoint is missing boots fine and then fails on the first delivery.
+ *
+ * Keep `external` in sync with the Dockerfile. A Subscription Provider SDK that gets bundled loses
+ * the `import.meta.url` anchor it locates its native binary with, and the worker dies at load.
  */
 export async function buildWorkerBundle(): Promise<string> {
   await Promise.all([
@@ -26,7 +29,7 @@ export async function buildWorkerBundle(): Promise<string> {
       target: "node26",
       format: "cjs",
       outfile: BUNDLE,
-      external: ["pg", "pg-boss", "isolated-vm"],
+      external: ["pg", "pg-boss", "isolated-vm", "@anthropic-ai/claude-agent-sdk", "@openai/codex"],
       logLevel: "silent",
     }),
     build({

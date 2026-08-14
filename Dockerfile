@@ -37,20 +37,25 @@ RUN test -s /app/apps/web/build/client/.csp-header.txt \
 # that read their own files at runtime (scalar UI assets) stay external and are
 # supplied by the prod deploy closure below. The datastore driver (pg) and queue
 # (pg-boss) are externalized too — they live in the prod node_modules closure.
+# The Subscription Providers' packages must stay external as well: each locates a native binary by
+# resolving its own package from disk, which bundling into a single .cjs destroys.
 RUN TF_VERSION=$(node -p "require('./package.json').version") \
   && pnpm --filter @tulipfarm/api exec esbuild src/index.ts \
   --bundle --platform=node --target=node26 --format=cjs --outfile=dist/server.cjs \
   --define:__TULIPFARM_VERSION__="\"$TF_VERSION\"" \
   --external:isolated-vm --external:@node-rs/argon2 --external:pg --external:pg-boss \
-  --external:@scalar/fastify-api-reference \
+  --external:@scalar/fastify-api-reference --external:@anthropic-ai/claude-agent-sdk \
+  --external:@openai/codex \
   && pnpm --filter @tulipfarm/api exec esbuild src/hooks/hook-worker.ts \
   --bundle --platform=node --target=node26 --format=cjs --outfile=dist/hook-worker.cjs \
   --external:isolated-vm --external:pg
 # The durable worker: a second long-running entrypoint off the same image, so one image tag
-# always pairs an API with a worker that speaks the same schema.
+# always pairs an API with a worker that speaks the same schema. This is the process that runs
+# the AgentLoop, so the Subscription Provider externalizations matter most here.
 RUN pnpm --filter @tulipfarm/worker exec esbuild src/main.ts \
   --bundle --platform=node --target=node26 --format=cjs --outfile=dist/worker.cjs \
   --external:pg --external:pg-boss --external:isolated-vm \
+  --external:@anthropic-ai/claude-agent-sdk --external:@openai/codex \
   && pnpm --filter @tulipfarm/worker exec esbuild src/hooks/ingress-hook-worker.ts \
   --bundle --platform=node --target=node26 --format=cjs --outfile=dist/ingress-hook-worker.cjs \
   --external:isolated-vm
@@ -62,6 +67,27 @@ RUN pnpm --filter @tulipfarm/integration-worker exec esbuild src/main.ts \
   --external:pg
 # Prod-only dependency closure (drops dev deps, resolves transitive deps flat).
 RUN pnpm --filter @tulipfarm/api deploy --prod --legacy /deploy
+# The claude-code Subscription Provider spawns a native `claude` binary that ships in an optional,
+# per-platform package (@anthropic-ai/claude-agent-sdk-linux-{x64,arm64}) — there is no
+# node_modules/.bin/claude, and pnpm keeps it under .pnpm rather than hoisting it. `--prod` prunes
+# aggressively and optional deps are exactly the kind of thing it can drop, so assert both that the
+# SDK resolves from the deploy root (the esbuild bundles `require` it as an external) and that the
+# binary survived for this image's arch — rather than discovering either at the first chat turn.
+# Same fail-closed discipline as the CSP artifact check above.
+RUN cd /deploy && node -e "require.resolve('@anthropic-ai/claude-agent-sdk')"
+RUN set -eu; \
+  bin=$(ls /deploy/node_modules/.pnpm/@anthropic-ai+claude-agent-sdk-linux-*/node_modules/@anthropic-ai/*/claude 2>/dev/null | head -n1); \
+  test -n "$bin"; \
+  test -x "$bin"
+# Same two checks for the codex Subscription Provider. Its launcher (bin/codex.js) is resolved at
+# runtime from the running entrypoint, so it must resolve from /deploy; the launcher then execs a
+# statically linked musl binary out of an optional per-platform package, which --prod can likewise
+# drop. The vendor triple is globbed rather than named so an arch rename fails loudly here.
+RUN cd /deploy && node -e "require.resolve('@openai/codex/package.json')"
+RUN set -eu; \
+  bin=$(ls /deploy/node_modules/.pnpm/@openai+codex@*/node_modules/@openai/codex/vendor/*-unknown-linux-musl/bin/codex 2>/dev/null | head -n1); \
+  test -n "$bin"; \
+  test -x "$bin"
 
 FROM node:26.5.0-slim AS runtime
 # git: soul backup/sync shells out to it. ca-certificates: git clones soul

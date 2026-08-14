@@ -230,6 +230,30 @@ describe("secrets routes", () => {
       expect(res.statusCode).toBe(400);
     });
 
+    it("rejects a Codex credential that is not a subscription auth.json", async () => {
+      // The only secret whose contents the product depends on. Validating on write means a paste
+      // of the wrong file is refused here, with a useful message, rather than inside a chat turn.
+      const bad = await app.inject({
+        method: "PUT",
+        url: "/api/v1/secrets/codex-auth-json",
+        cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+        payload: { value: JSON.stringify({ auth_mode: "apikey", OPENAI_API_KEY: "sk-live" }) },
+      });
+      expect(bad.statusCode).toBe(400);
+      expect(bad.json().error).toMatch(/subscription-only/);
+      expect(bad.body).not.toContain("sk-live");
+
+      const good = await app.inject({
+        method: "PUT",
+        url: "/api/v1/secrets/codex-auth-json",
+        cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+        payload: { value: JSON.stringify({ tokens: { refresh_token: "rt", access_token: "at" } }) },
+      });
+      expect(good.statusCode).toBe(200);
+    });
+
     it("returns 200 for admin and secret appears in GET /status", async () => {
       const put = await app.inject({
         method: "PUT",

@@ -1,6 +1,6 @@
 ---
 title: Model routing
-description: The four providers, effort presets, ModelProfile routing, model specs, and ordered fallback behavior.
+description: API-key and subscription providers, effort presets, ModelProfile routing, model specs, and ordered fallback behavior.
 ---
 
 TulipFarm routes every model call through a **ModelProfile** — a named set of capability, modality,
@@ -14,7 +14,11 @@ terms than were asked for. The router denies instead, naming the constraint it c
 
 ## Providers
 
-The shipped provider ids are:
+Providers come in two kinds. **API-key providers** call a hosted HTTP endpoint and bill per token.
+**Subscription providers** run a coding-agent CLI on the operator's own paid plan and bill nothing
+per turn.
+
+### API-key providers
 
 | Provider id | Label | Notes |
 | --- | --- | --- |
@@ -27,6 +31,41 @@ Provider credentials are stored as secrets or resolved from environment referenc
 secret keys are `anthropic-api-key`, `openai-api-key`, `azure-openai-api-key`,
 `azure-openai-resource-name`, `azure-foundry-endpoint`, `openai-compatible-api-key`, and
 `openai-compatible-base-url`.
+
+### Subscription providers
+
+| Provider id | Label | Models | Credential |
+| --- | --- | --- | --- |
+| `claude-code` | Claude Code (subscription) | `opus`, `sonnet`, `haiku` | `claude-code-oauth-token` |
+| `codex` | Codex (subscription) | `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna` | `codex-auth-json` |
+
+These exist so an operator holding a **Claude Pro/Max or ChatGPT Plus/Pro/Business plan but no API
+key** can run TulipFarm at all. Instead of an HTTP call, TulipFarm spawns the vendor's coding-agent
+binary and uses it as a model.
+
+They are ordinary providers everywhere else: they appear in the setup wizard and in **Operate →
+Business → Models**, they can be mixed into a chain with API-key providers, and deleting their
+credential prunes them from the config like any other. See
+[Run on a subscription plan](/docs/guides/run-on-a-subscription) for the setup steps.
+
+Three properties are specific to them and worth understanding:
+
+**The CLI never executes a tool.** TulipFarm's seam is a *model*, not an agent loop: messages go in,
+one completion comes out, and any tool calls come back **unexecuted**. The adapter captures them and
+stops the CLI turn. Every effect still runs through the Tool Broker, so [approvals](/docs/concepts/approvals),
+authority checks, and audit apply exactly as they do to an API-key provider. A subscription
+provider is a cheaper way to buy tokens, not a way around governance.
+
+**Each turn runs in a jail.** The CLI is spawned with `HOME` pointed at a fresh temporary directory
+and an explicit environment allowlist. The operator's own CLI session is never reused, and
+`DATABASE_URL`, `ENCRYPTION_KEY`, and every other provider's secret are absent from the child
+process by construction.
+
+**Turns are unpriced.** A subscription turn has no per-token price, so TulipFarm reports **no cost**
+for it rather than a misleading zero or the API-equivalent figure — either of which would corrupt
+cost budgets and the `llm_cost_usd_total` metric. Token counts are still reported in full, so token
+budgets and context-window constraints work normally. A cost *ceiling* on a chain that contains only
+subscription providers therefore never binds.
 
 ## Effort presets
 
@@ -91,12 +130,23 @@ retryable failures.
 If every provider in a chain fails transiently, the final error is returned after logging that all
 providers were exhausted.
 
+A subscription provider whose plan credential has expired is a **hard failure** for the same reason
+a rejected API key is: no other provider can fix it, and retrying only burns time. The error names
+the re-authentication step, so an operator sees *what to run* rather than a generic auth message.
+
 ## Model specs
 
 When a model is added or refreshed, TulipFarm resolves its pricing and capability metadata from the
 LiteLLM catalog on a best-effort basis and pins the result into the Soul. Only priced, chat-capable
 models count as valid models. The model picker can also list live models for an
 OpenAI-compatible endpoint when a `base_url` is configured.
+
+Subscription providers are the exception: there is no catalog entry to fetch, because there is no
+API price for a `sonnet` or `gpt-5.6-terra` turn bought through a plan. Their capability metadata —
+context window, tool support, vision, reasoning — comes from a static table shipped with TulipFarm
+instead, and their cost fields stay deliberately empty. Routing still hard-rejects any provider row
+whose context window it cannot verify, so a subscription model is never routed to on guessed
+capacity.
 
 ## Auto selection
 
@@ -118,7 +168,8 @@ resolved to as well, reading `Auto → Balanced` rather than just `Auto`.
 
 Cost is not shown to participants. Operators can read the full routing decision — the resolved
 ModelProfile, the whole fallback chain, any rejected fallbacks, and the budget ceilings in force —
-from the `model.routed` Run event.
+from the `model.routed` Run event. When a subscription provider answered, that decision reports no
+cost at all, because the turn had no per-token price.
 
 ## Try harder
 
