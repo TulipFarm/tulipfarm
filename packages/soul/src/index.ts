@@ -7,6 +7,14 @@ export type {
   PublishedAgentVersion,
 } from "./agent-publication";
 export { AgentPublicationError, publishAgentVersion } from "./agent-publication";
+export type { PlatformAgent } from "./agents/platform-agents";
+export {
+  DEFAULT_ASSISTANT,
+  DEFAULT_ASSISTANT_NAME,
+  FORGE_SKILL_NAMES,
+  getDefaultAssistant,
+} from "./agents/platform-agents";
+export { getAgent, listAgents, resolveAgent } from "./agents/registry";
 export type {
   BundleAsset,
   BundleDefinition,
@@ -25,6 +33,8 @@ export {
   InMemoryBundleStore,
 } from "./bundle";
 export { PgBundleStore, SOUL_BUNDLE_STORAGE_STATEMENTS } from "./bundle-store.pg";
+export type { SoulCatalogue, SoulCatalogueEntry } from "./catalogue";
+export { buildSoulCatalogue } from "./catalogue";
 export type {
   SoulChangeset,
   SoulChangesetErrorCode,
@@ -70,6 +80,14 @@ export {
   convertLegacyDefinitions,
   convertLegacySkill,
 } from "./converters/legacy-definitions";
+export {
+  ALLOWED_SOURCE_HINT,
+  cloneToTemp,
+  isAllowedSource,
+  normalizeGitUrl,
+  sourceType,
+  splitSourceRef,
+} from "./git-source";
 export type { SoulCommitRequest, SoulCommitResult, SoulGitStoreErrorCode } from "./git-store";
 export { SoulGitStore, SoulGitStoreError } from "./git-store";
 export type {
@@ -94,6 +112,20 @@ export {
   validateIngressContextEnv,
 } from "./integration-auth";
 export { validateThirdPartyManifest } from "./integration-trust";
+export type { BundledIntegration } from "./integrations/bundled";
+export { bundledIntegrationsDir, loadBundledIntegrations } from "./integrations/bundled";
+// `lock.ts` also declares a `sourceType`; it duplicates the `git-source` one and has no caller, so
+// it is deliberately not re-exported here rather than aliased into the public surface.
+export type { IntegrationLockEntry, IntegrationsLock } from "./integrations/lock";
+export { hashContent, readIntegrationsLock } from "./integrations/lock";
+export type { RegistryEntry } from "./integrations/registry";
+export { loadIntegrationRegistry } from "./integrations/registry";
+export {
+  deleteLlmConfigFromSoulYaml,
+  mergeLlmConfigIntoSoulYaml,
+  removeLlmConfigFromSoulYaml,
+  writeLlmConfigToSoulYaml,
+} from "./llm-config/soul-yaml-io";
 export type { SoulMigration } from "./migrations/index";
 export type {
   LiveAuthorityDefinitionReader,
@@ -137,6 +169,13 @@ export type {
 export { SoulPublisher } from "./publisher";
 export type { SoulSemanticIssue, SoulSemanticIssueCode } from "./refs";
 export { SoulSemanticValidationError } from "./refs";
+export type { ResourceTypePayload } from "./resource-types/definition";
+export {
+  RESOURCE_DOMAIN_RE,
+  resourceDefinitionYaml,
+  resourceEnvelopeError,
+  resourceTypePayload,
+} from "./resource-types/definition";
 export type {
   CompiledSoulGrant,
   CompiledSoulRole,
@@ -170,8 +209,42 @@ export {
   RuntimeSkillCommandError,
   resolveRuntimeSkillCommands,
 } from "./skill-commands";
+export type { BundledSkill } from "./skills/bundled";
+export {
+  bundledSkillsDir,
+  DISABLED_BUNDLED_SKILLS_FILE,
+  loadBundledSkills,
+  loadDisabledBundledSkills,
+  persistDisabledBundledSkills,
+} from "./skills/bundled";
+export {
+  expandForgeExecutionContract,
+  FORGE_EXECUTION_CONTRACT,
+  FORGE_EXECUTION_CONTRACT_TOKEN,
+} from "./skills/forge-execution-contract";
+export type {
+  Finding,
+  FindingCategory,
+  FindingSeverity,
+  GuardResult,
+  GuardVerdict,
+  SkillScanFile,
+  SkillTrustLevel,
+} from "./skills/guard";
+export { GUARD_VERSION, scanSkill, skillTrustLevel, THREAT_PATTERNS } from "./skills/guard";
+export type { AvailableSkill, EagerSkill } from "./skills/registry";
+export {
+  listAvailableSkills,
+  listEagerSkills,
+  mergedSkills,
+  resolveSkill,
+} from "./skills/registry";
 export { runSoulMigrations } from "./soul-migrations";
 export { resolveSoulPath } from "./soul-path";
+export type { SoulWriterDouble } from "./soul-writer-double";
+export { makeSoulWriterDouble } from "./soul-writer-double";
+export type { SoulFileContent, TreeNode } from "./tree";
+export { inferLanguage, readSoulFile, resolveSafe, UnsafePathError, walkTree } from "./tree";
 export { GitSoulTreeReader } from "./tree-reader";
 export type {
   AuthAppManifestStep,
@@ -208,6 +281,8 @@ export type {
   WebhookHandshake,
   WebhookSecurity,
 } from "./types";
+export type { SoulWriteHttpError } from "./write-errors";
+export { isSoulWriteError, soulWriteHttpError } from "./write-errors";
 export type {
   SoulBundlePublishPort,
   SoulPrecondition,

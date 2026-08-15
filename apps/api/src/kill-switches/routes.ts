@@ -1,6 +1,7 @@
 import type { KillSwitchRecord } from "@tulipfarm/storage";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
+import type { RequireAuthorization, RouteAuthorization } from "../authz/route-gate";
 import { AUTHZ_SECURITY } from "../authz/schemas";
 import { makeRateLimitHook, type RateLimiter } from "../rate-limit";
 import {
@@ -33,16 +34,24 @@ const KillSwitchSchema = {
   },
 } as const;
 
-/** Fail closed: API clients have no role, and only signed-in admin users pass. */
-const requireDeploymentAdmin: PreHandler = async (req, reply) => {
-  if (!req.principal) {
-    await reply.code(401).send({ error: "unauthorized" });
-    return;
-  }
-  if (req.principal.kind !== "user" || req.principal.role !== "admin") {
-    await reply.code(403).send({ error: "forbidden" });
-  }
-};
+/** Arming the effect-plane emergency stop halts other people's work, so it is never self-service. */
+const KILL_SWITCH_READ = {
+  action: "kill_switch.read",
+  resourceType: "kill_switch",
+  fallback: "admin",
+} as const;
+
+const KILL_SWITCH_ENABLE = {
+  action: "kill_switch.enable",
+  resourceType: "kill_switch",
+  fallback: "admin",
+} as const;
+
+const KILL_SWITCH_DISABLE = {
+  action: "kill_switch.disable",
+  resourceType: "kill_switch",
+  fallback: "admin",
+} as const;
 
 const ERROR_STATUS: Readonly<Record<KillSwitchErrorCode, 404 | 409 | 422>> = {
   not_found: 404,
@@ -90,6 +99,7 @@ export function registerKillSwitchRoutes(
   app: FastifyInstance,
   service: KillSwitchService,
   requireAuth: PreHandler,
+  requireAuthorization: RequireAuthorization,
   rateLimiter?: RateLimiter
 ): void {
   const rateLimitHook = rateLimiter
@@ -100,14 +110,15 @@ export function registerKillSwitchRoutes(
         KILL_SWITCH_WRITE_WINDOW_MS
       )
     : undefined;
-  const gate: PreHandler[] = rateLimitHook
-    ? [rateLimitHook, requireAuth, requireDeploymentAdmin]
-    : [requireAuth, requireDeploymentAdmin];
+  const gate = (authorization: RouteAuthorization): PreHandler[] =>
+    rateLimitHook
+      ? [rateLimitHook, requireAuth, requireAuthorization(authorization)]
+      : [requireAuth, requireAuthorization(authorization)];
 
   app.get(
     "/api/v1/kill-switches",
     {
-      preHandler: gate,
+      preHandler: gate(KILL_SWITCH_READ),
       schema: {
         description:
           "List every mutation kill switch, live and stood down, newest first, plus the scope " +
@@ -139,7 +150,7 @@ export function registerKillSwitchRoutes(
   app.post(
     "/api/v1/kill-switches",
     {
-      preHandler: gate,
+      preHandler: gate(KILL_SWITCH_ENABLE),
       schema: {
         description:
           "Arm a kill switch. Mutating Tool effects matching the scope are denied from the next " +
@@ -187,7 +198,7 @@ export function registerKillSwitchRoutes(
   app.delete(
     "/api/v1/kill-switches/:id",
     {
-      preHandler: gate,
+      preHandler: gate(KILL_SWITCH_DISABLE),
       schema: {
         description:
           "Stand a kill switch down. The row is kept with who stood it down and when, because " +

@@ -1,4 +1,6 @@
 import type { FastifyInstance } from "fastify";
+import type { AuthorizationCheck, RequireAuthorization } from "../../authz/route-gate";
+import { makeAuthorizationCheck, makeRequireAuthorization } from "../../authz/route-gate";
 import type { IdentityRouteDeps } from "../../identity/routes";
 import { registerIdentityRoutes } from "../../identity/routes";
 import type { RateLimiter } from "../../rate-limit";
@@ -22,6 +24,10 @@ interface AuthRouteOptions {
   passwordWriteRepo?: PasswordWriteRepo;
   profileWriteRepo?: ProfileWriteRepo;
   inviteRepo?: UserInviteRepo;
+  /** Defaults to the no-authorizer gate, which still refuses non-admins on admin declarations. */
+  requireAuthorization?: RequireAuthorization;
+  /** The value form of the same decision, for owner-scoped surfaces. */
+  authorizationCheck?: AuthorizationCheck;
 }
 
 const AUTH_LIMIT = 100;
@@ -67,7 +73,14 @@ export function registerAuthRoutes(
     profileWriteRepo: options.profileWriteRepo,
     inviteRepo: options.inviteRepo,
   });
-  registerTokenRoutes(app, repo, tokenRepo, requireAuth, preHandler);
+  registerTokenRoutes(
+    app,
+    repo,
+    tokenRepo,
+    requireAuth,
+    options.authorizationCheck ?? makeAuthorizationCheck(),
+    preHandler
+  );
   if (options.userAdminRepo && options.inviteRepo) {
     registerAdminUserRoutes(
       app,
@@ -75,6 +88,7 @@ export function registerAuthRoutes(
       options.userAdminRepo,
       options.inviteRepo,
       requireAuth,
+      options.requireAuthorization ?? makeRequireAuthorization(),
       preHandler
     );
   }
@@ -88,6 +102,7 @@ export function registerAuthRoutes(
       ...(preHandler && { rateLimitHook: preHandler }),
       ...(loginPreHandler && { credentialRateLimitHook: loginPreHandler }),
     },
-    requireAuth
+    requireAuth,
+    options.requireAuthorization ?? makeRequireAuthorization()
   );
 }

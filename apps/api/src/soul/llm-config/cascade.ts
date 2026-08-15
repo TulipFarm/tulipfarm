@@ -4,8 +4,8 @@ import type { LlmConfig } from "@tulipfarm/schema";
 import type { SecretsService } from "@tulipfarm/secrets";
 import { llmProviderForFieldKey } from "@tulipfarm/secrets";
 import type { CommitActor, Logger, SoulLoader, SoulWriter } from "@tulipfarm/soul";
+import { mergeLlmConfigIntoSoulYaml, removeLlmConfigFromSoulYaml } from "@tulipfarm/soul";
 import { pruneLlmConfig } from "./prune";
-import { mergeLlmConfigIntoSoulYaml, removeLlmConfigFromSoulYaml } from "./soul-yaml-io";
 
 /**
  * Returns an `onSecretDeleted` callback that keeps `soul.yaml#llm` in sync when a provider api_key

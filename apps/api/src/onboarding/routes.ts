@@ -2,14 +2,15 @@ import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { KvService } from "@tulipfarm/kv";
 import type { LlmService } from "@tulipfarm/llm";
 import type { GitSyncService, SoulLoader, SoulWriter } from "@tulipfarm/soul";
+import { isSoulWriteError, soulWriteHttpError } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AuditService } from "../audit/service";
 import { makeSoulAuditWriter } from "../audit/soul-write";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
+import type { RequireAuthorization } from "../authz/route-gate";
 import { mergeSoulConfig } from "../setup/soul-config";
 import { commitActorFromRequest } from "../soul/commit-actor";
-import { isSoulWriteError, soulWriteHttpError } from "../soul/write-errors";
 import { buildChecklist } from "./checklist";
 import { getPersonalizedOrRefresh, getProfileGaps } from "./personalize";
 import { buildQuests, type Quest, TIER1_BUSINESS_DESCRIPTION, TIER1_BUSINESS_NAME } from "./quests";
@@ -66,6 +67,7 @@ export function registerOnboardingRoutes(
   app: FastifyInstance,
   soulLoader: SoulLoader,
   requireAuth: PreHandler,
+  requireAuthorization: RequireAuthorization,
   deps: OnboardingDeps = {}
 ): void {
   app.get(
@@ -259,7 +261,14 @@ export function registerOnboardingRoutes(
   app.post(
     "/api/v1/onboarding/quests/:id/answer",
     {
-      preHandler: requireAuth,
+      preHandler: [
+        requireAuth,
+        requireAuthorization({
+          action: "onboarding.quest.answer",
+          resourceType: "onboarding",
+          fallback: "admin",
+        }),
+      ],
       schema: {
         description:
           "Answers a tier-1 quest inline (business name or description; admin only). Writes " +
@@ -295,9 +304,6 @@ export function registerOnboardingRoutes(
       },
     },
     async (req, reply) => {
-      if (req.user?.role !== "admin") {
-        return reply.code(403).send({ error: "forbidden" });
-      }
       if (!questsGitSync || !questsSoulWriter) {
         return reply.code(400).send({ error: "soul git sync unavailable" });
       }

@@ -12,7 +12,7 @@ publication, approvals, integrations, events, and blob/vector/cache/queue ports.
 | Path | Owns |
 | --- | --- |
 | `src/index.ts` | Public exports; do not mirror the list here. |
-| `src/ports/` | Transaction/query, blob, vector, cache, queue accelerator ports. |
+| `src/ports/` | Transaction/query (incl. `withTransaction`), blob, vector, cache, queue ports. |
 | `src/soul/` | Soul publication records, projection, outbox, activation history. |
 | `src/artifacts/` | Append-only Artifacts, State Output Bindings, lineage. |
 | `src/runs/` | Runs, States, Attempts, waits/signals, budgets, concurrency, children, events. |
@@ -20,6 +20,7 @@ publication, approvals, integrations, events, and blob/vector/cache/queue ports.
 | `src/integrations/` | Integration install/state and channel inbound/delivery stores. |
 | `src/approvals/`, `src/events/` | Approval persistence and generic event store. |
 | `src/kill-switches/` | Durable mutation kill switches backing the effect-plane emergency stop. |
+| `src/pagination.ts`, `src/vector-search.ts` | Cursor paging and pgvector index/distance SQL shared by every repository. |
 
 ## Rules
 

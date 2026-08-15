@@ -3,6 +3,7 @@ import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { InMemoryAuditEventRepo } from "@tulipfarm/audit";
 import type { SecretMeta, SecretsService } from "@tulipfarm/secrets";
 import type { GitSyncService } from "@tulipfarm/soul";
+import { inferLanguage, makeSoulWriterDouble, type SoulWriterDouble } from "@tulipfarm/soul";
 import type { PaginatedResult } from "@tulipfarm/storage";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -13,8 +14,6 @@ import { CSRF_COOKIE, CSRF_HEADER } from "../auth/csrf";
 import { SESSION_COOKIE } from "../auth/middleware";
 import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
-import { makeSoulWriterDouble, type SoulWriterDouble } from "./soul-writer-double";
-import { inferLanguage } from "./tree";
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
@@ -149,6 +148,7 @@ describe("soul routes", () => {
   let gitSync: GitSyncService;
   let soul: SoulWriterDouble;
   let sid: string;
+  let adminSid: string;
 
   beforeEach(async () => {
     store = new MemorySessionStore();
@@ -159,6 +159,8 @@ describe("soul routes", () => {
 
     const user = await createUser(userRepo, "user@example.com", "pass", "member");
     sid = await store.create(user._id);
+    const admin = await createUser(userRepo, "admin@example.com", "pass", "admin");
+    adminSid = await store.create(admin._id);
 
     app = await buildApp({
       sessionStore: store,
@@ -183,7 +185,7 @@ describe("soul routes", () => {
       const res = await app.inject({
         method: "POST",
         url: "/api/v1/soul/push",
-        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: TEST_CSRF },
         headers: { [CSRF_HEADER]: TEST_CSRF },
       });
       expect(res.statusCode).toBe(200);
@@ -204,7 +206,7 @@ describe("soul routes", () => {
       const res = await app.inject({
         method: "POST",
         url: "/api/v1/soul/push",
-        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: TEST_CSRF },
         headers: { [CSRF_HEADER]: TEST_CSRF },
       });
       expect(res.statusCode).toBe(200);
@@ -222,7 +224,7 @@ describe("soul routes", () => {
       const res = await app.inject({
         method: "POST",
         url: "/api/v1/soul/reload",
-        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: TEST_CSRF },
         headers: { [CSRF_HEADER]: TEST_CSRF },
       });
       expect(res.statusCode).toBe(204);
@@ -391,7 +393,7 @@ describe("soul routes", () => {
         const res = await app.inject({
           method: "GET",
           url: "/api/v1/soul/git-config",
-          cookies: { [SESSION_COOKIE]: sid },
+          cookies: { [SESSION_COOKIE]: adminSid },
         });
         expect(res.statusCode).toBe(200);
         expect(res.json()).toEqual({
@@ -428,7 +430,7 @@ describe("soul routes", () => {
         const res = await app.inject({
           method: "GET",
           url: "/api/v1/soul/git-config",
-          cookies: { [SESSION_COOKIE]: sid },
+          cookies: { [SESSION_COOKIE]: adminSid },
         });
         expect(res.statusCode).toBe(200);
         expect(res.json()).toEqual({
@@ -460,7 +462,7 @@ describe("soul routes", () => {
         const res = await app.inject({
           method: "GET",
           url: "/api/v1/soul/git-config",
-          cookies: { [SESSION_COOKIE]: sid },
+          cookies: { [SESSION_COOKIE]: adminSid },
         });
         expect(res.json().status.lastSyncError).toBe(
           "could not read Username for 'https://github.com'"
@@ -480,7 +482,7 @@ describe("soul routes", () => {
         const res = await app.inject({
           method: "POST",
           url: "/api/v1/soul/sync",
-          cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+          cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: TEST_CSRF },
           headers: { [CSRF_HEADER]: TEST_CSRF },
         });
         expect(res.statusCode).toBe(204);
@@ -494,7 +496,7 @@ describe("soul routes", () => {
         const res = await app.inject({
           method: "POST",
           url: "/api/v1/soul/sync",
-          cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+          cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: TEST_CSRF },
           headers: { [CSRF_HEADER]: TEST_CSRF },
         });
         expect(res.statusCode).toBe(400);
@@ -503,6 +505,19 @@ describe("soul routes", () => {
     });
 
     describe("PUT /api/v1/soul/git-config", () => {
+      it("refuses a member re-pointing the Soul git remote, which would exfiltrate the config", async () => {
+        await rebuild({});
+        const res = await app.inject({
+          method: "PUT",
+          url: "/api/v1/soul/git-config",
+          cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+          headers: { [CSRF_HEADER]: TEST_CSRF },
+          payload: { remoteUrl: "https://attacker.example/soul.git" },
+        });
+        expect(res.statusCode).toBe(403);
+        expect(gitSync.configureRemote).not.toHaveBeenCalled();
+      });
+
       it("returns 401 without auth", async () => {
         await rebuild({});
         const res = await app.inject({
@@ -518,7 +533,7 @@ describe("soul routes", () => {
         const res = await app.inject({
           method: "PUT",
           url: "/api/v1/soul/git-config",
-          cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+          cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: TEST_CSRF },
           headers: { [CSRF_HEADER]: TEST_CSRF },
           payload: {},
         });
@@ -532,7 +547,7 @@ describe("soul routes", () => {
         const res = await app.inject({
           method: "PUT",
           url: "/api/v1/soul/git-config",
-          cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+          cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: TEST_CSRF },
           headers: { [CSRF_HEADER]: TEST_CSRF },
           payload: { remoteUrl: "https://github.com/acme/soul.git", credential: "ghp_test" },
         });
@@ -549,7 +564,7 @@ describe("soul routes", () => {
         await app.inject({
           method: "PUT",
           url: "/api/v1/soul/git-config",
-          cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+          cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: TEST_CSRF },
           headers: { [CSRF_HEADER]: TEST_CSRF },
           payload: { remoteUrl: "https://gituser:ghp_supersecret@github.com/acme/soul.git" },
         });
@@ -566,7 +581,7 @@ describe("soul routes", () => {
         const res = await app.inject({
           method: "PUT",
           url: "/api/v1/soul/git-config",
-          cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+          cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: TEST_CSRF },
           headers: { [CSRF_HEADER]: TEST_CSRF },
           payload: { remoteUrl: "https://github.com/acme/soul.git", credential: "ghp_test" },
         });
@@ -592,7 +607,7 @@ describe("soul routes", () => {
         const res = await app.inject({
           method: "PUT",
           url: "/api/v1/soul/git-config",
-          cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+          cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: TEST_CSRF },
           headers: { [CSRF_HEADER]: TEST_CSRF },
           payload: { remoteUrl: "https://github.com/acme/soul.git", credential: "bad_token" },
         });

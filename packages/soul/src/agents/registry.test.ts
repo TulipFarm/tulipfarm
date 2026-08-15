@@ -1,5 +1,6 @@
-import type { SoulAgent, SoulLoader } from "@tulipfarm/soul";
 import { describe, expect, it } from "vitest";
+import type { SoulLoader } from "../published-loader";
+import type { SoulAgent } from "../types";
 import { DEFAULT_ASSISTANT, getAgent, listAgents, resolveAgent } from "./registry";
 
 function makeSoulLoader(agents: SoulAgent[] = []): SoulLoader {

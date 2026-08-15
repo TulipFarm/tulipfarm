@@ -2,11 +2,12 @@ import { type Dirent, existsSync } from "node:fs";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { validateSkill } from "@tulipfarm/schema";
-import { type Logger, parseFrontmatter, type SoulSkill } from "@tulipfarm/soul";
+import { parseFrontmatter } from "../published-loader";
+import type { Logger, SoulSkill } from "../types";
 import { expandForgeExecutionContract } from "./forge-execution-contract";
 
 const IMAGE_SKILLS_DIR = "/app/skills";
-const REPO_SKILLS_DIR = resolve(__dirname, "../../../../../skills");
+const REPO_SKILLS_DIR = resolve(__dirname, "../../../../skills");
 /** Records which *shipped* Skills an operator switched off. Not an authored artifact. */
 export const DISABLED_BUNDLED_SKILLS_FILE = ".bundled-disabled.json";
 

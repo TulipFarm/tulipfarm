@@ -2,6 +2,7 @@ import type { AccessGrant, AuthorityLayer } from "@tulipfarm/authz";
 import type { ArtifactService } from "@tulipfarm/run-kernel";
 import { RUN_EXECUTOR_PRINCIPAL_REF, requestArtifactId } from "@tulipfarm/run-kernel";
 import { AUTONOMY_VALUES } from "@tulipfarm/schema";
+import { DEFAULT_ASSISTANT_NAME } from "@tulipfarm/soul";
 import {
   CompositeToolEntitlement,
   MemoryEffectStore,

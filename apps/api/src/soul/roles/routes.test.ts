@@ -21,6 +21,7 @@ import { makeRequireAuth, SESSION_COOKIE } from "../../auth/middleware";
 import { MemorySessionStore } from "../../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../../auth/users";
 import type { CapabilityCatalog } from "../../authz/capabilities";
+import { makeRequireAuthorization } from "../../authz/route-gate";
 import { registerAccessLevelRoutes } from "./routes";
 
 const TEST_CSRF = "a".repeat(64);
@@ -148,6 +149,7 @@ describe("access level routes", () => {
     registerAccessLevelRoutes(app, {
       soulWriter,
       requireAuth: makeRequireAuth({ store, userRepo, tokenRepo }),
+      requireAuthorization: makeRequireAuthorization(),
       catalog: () => CATALOG,
       reconcile: reconcile as unknown as () => Promise<void>,
       auditWrite: auditWrite as unknown as SoulAuditWriter,

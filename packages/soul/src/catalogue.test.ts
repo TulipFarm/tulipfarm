@@ -1,13 +1,7 @@
-import type {
-  SoulAgent,
-  SoulIntegration,
-  SoulLoader,
-  SoulResource,
-  SoulRoutine,
-  SoulSkill,
-} from "@tulipfarm/soul";
 import { describe, expect, it } from "vitest";
 import { buildSoulCatalogue } from "./catalogue";
+import type { SoulLoader } from "./published-loader";
+import type { SoulAgent, SoulIntegration, SoulResource, SoulRoutine, SoulSkill } from "./types";
 
 const skill = (name: string, frontmatter: Record<string, unknown> = {}): SoulSkill => ({
   name,

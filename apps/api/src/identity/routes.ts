@@ -10,6 +10,7 @@ import {
   type SessionStore,
 } from "../auth/session-store";
 import { toPublicUser, type UserRepo } from "../auth/users";
+import type { RequireAuthorization, RouteAuthorization } from "../authz/route-gate";
 import { MemoryRateLimiter, makeRateLimitHook } from "../rate-limit";
 import {
   type ApiClientRepo,
@@ -91,7 +92,8 @@ function isAuthMethod(value: unknown): value is AuthMethod {
 export function registerIdentityRoutes(
   app: FastifyInstance,
   deps: IdentityRouteDeps,
-  requireAuth: PreHandler
+  requireAuth: PreHandler,
+  requireAuthorization: RequireAuthorization
 ): void {
   const ttlSeconds = deps.ttlSeconds ?? DEFAULT_SESSION_TTL_SECONDS;
   const fallbackLimiter = new MemoryRateLimiter();
@@ -117,7 +119,7 @@ export function registerIdentityRoutes(
 
   registerOidcRoutes(app, limited, ttlSeconds);
   registerStepUpRoute(app, limited, requireAuth, ttlSeconds);
-  registerApiClientRoutes(app, limited, requireAuth);
+  registerApiClientRoutes(app, limited, requireAuth, requireAuthorization);
   registerExternalLinkRoutes(app, limited, requireAuth);
   registerChannelBindRoutes(app, limited, requireAuth);
 }
@@ -317,18 +319,32 @@ function registerStepUpRoute(
   );
 }
 
-function requireAdmin(req: FastifyRequest, reply: FastifyReply): boolean {
-  if (req.principal?.kind !== "user" || req.principal.role !== "admin") {
-    reply.code(403).send({ error: "forbidden" });
-    return false;
-  }
-  return true;
-}
+const API_CLIENT_READ: RouteAuthorization = {
+  action: "identity.api_client.read",
+  resourceType: "identity",
+  fallback: "admin",
+};
+const API_CLIENT_CREATE: RouteAuthorization = {
+  action: "identity.api_client.create",
+  resourceType: "identity",
+  fallback: "admin",
+};
+const API_CLIENT_ROTATE: RouteAuthorization = {
+  action: "identity.api_client.rotate",
+  resourceType: "identity",
+  fallback: "admin",
+};
+const API_CLIENT_DISABLE: RouteAuthorization = {
+  action: "identity.api_client.disable",
+  resourceType: "identity",
+  fallback: "admin",
+};
 
 function registerApiClientRoutes(
   app: FastifyInstance,
   deps: IdentityRouteDeps,
-  requireAuth: PreHandler
+  requireAuth: PreHandler,
+  requireAuthorization: RequireAuthorization
 ): void {
   const repo = deps.apiClientRepo;
   if (!repo) return;
@@ -336,9 +352,9 @@ function registerApiClientRoutes(
   app.get(
     "/api/v1/identity/api-clients",
     {
-      preHandler: chain(deps.rateLimitHook, requireAuth),
+      preHandler: chain(deps.rateLimitHook, requireAuth, requireAuthorization(API_CLIENT_READ)),
       schema: {
-        description: "List API clients (service identities).",
+        description: "List API clients (service identities). Admin only.",
         tags: ["identity"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         response: {
@@ -352,8 +368,7 @@ function registerApiClientRoutes(
         },
       },
     },
-    async (req, reply) => {
-      if (!requireAdmin(req, reply)) return;
+    async (_req, reply) => {
       const clients = await repo.findAll();
       return reply.send({ clients: clients.map(toPublicApiClient) });
     }
@@ -362,9 +377,9 @@ function registerApiClientRoutes(
   app.post(
     "/api/v1/identity/api-clients",
     {
-      preHandler: chain(deps.rateLimitHook, requireAuth),
+      preHandler: chain(deps.rateLimitHook, requireAuth, requireAuthorization(API_CLIENT_CREATE)),
       schema: {
-        description: "Create an API client. The secret is returned exactly once.",
+        description: "Create an API client. The secret is returned exactly once. Admin only.",
         tags: ["identity"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         body: {
@@ -388,7 +403,6 @@ function registerApiClientRoutes(
       },
     },
     async (req, reply) => {
-      if (!requireAdmin(req, reply)) return;
       const body = (req.body ?? {}) as { name?: unknown; expiresAt?: unknown };
       if (typeof body.name !== "string" || body.name.trim() === "") {
         return reply.code(400).send({ error: "name is required" });
@@ -417,9 +431,10 @@ function registerApiClientRoutes(
   app.post(
     "/api/v1/identity/api-clients/:id/rotate",
     {
-      preHandler: chain(deps.rateLimitHook, requireAuth),
+      preHandler: chain(deps.rateLimitHook, requireAuth, requireAuthorization(API_CLIENT_ROTATE)),
       schema: {
-        description: "Rotate an API client secret. The previous secret stops working at once.",
+        description:
+          "Rotate an API client secret. The previous secret stops working at once. Admin only.",
         tags: ["identity"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
@@ -436,7 +451,6 @@ function registerApiClientRoutes(
       },
     },
     async (req, reply) => {
-      if (!requireAdmin(req, reply)) return;
       const { id } = req.params as { id: string };
       const rotated = await rotateApiClientSecret(repo, id);
       if (!rotated) return reply.code(404).send({ error: "not found" });
@@ -447,9 +461,10 @@ function registerApiClientRoutes(
   app.post(
     "/api/v1/identity/api-clients/:id/disable",
     {
-      preHandler: chain(deps.rateLimitHook, requireAuth),
+      preHandler: chain(deps.rateLimitHook, requireAuth, requireAuthorization(API_CLIENT_DISABLE)),
       schema: {
-        description: "Disable an API client. Its credential is refused on the next request.",
+        description:
+          "Disable an API client. Its credential is refused on the next request. Admin only.",
         tags: ["identity"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
@@ -466,7 +481,6 @@ function registerApiClientRoutes(
       },
     },
     async (req, reply) => {
-      if (!requireAdmin(req, reply)) return;
       const { id } = req.params as { id: string };
       const client = await repo.findById(id);
       if (!client) return reply.code(404).send({ error: "not found" });

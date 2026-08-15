@@ -2,8 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import type { ChunkInput, EmbeddingPort, KnowledgePage } from "@tulipfarm/knowledge";
 import { indexPage, PgKnowledgeChunkRepo, PgKnowledgePageRepo } from "@tulipfarm/knowledge";
+import type { Queryable } from "@tulipfarm/storage";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { Queryable } from "../db";
 import { makeMigratedPglite } from "../test/pglite";
 
 function page(over: Partial<KnowledgePage> = {}): KnowledgePage {

@@ -1,5 +1,6 @@
 import { parsePaginationQuery } from "@tulipfarm/storage";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { AuthorizationCheck } from "../../authz/route-gate";
 import { createApiToken, type TokenRepo, toPublicToken } from "../api-tokens";
 import { ErrorSchema, PublicTokenSchema } from "../schemas";
 import type { UserDoc, UserRepo } from "../users";
@@ -11,8 +12,22 @@ export function registerTokenRoutes(
   repo: UserRepo,
   tokenRepo: TokenRepo,
   requireAuth: PreHandler,
+  authorizationCheck: AuthorizationCheck,
   rateLimitHook?: PreHandler
 ): void {
+  /**
+   * API tokens are owner-scoped: anyone manages their own. Reaching another user's token is the
+   * separate authority the catalog denies members via `{ subject: "other_user" }`.
+   */
+  const mayReachOtherUsers = async (req: FastifyRequest): Promise<boolean> =>
+    req.principal !== undefined &&
+    (await authorizationCheck(req.principal, {
+      action: "api_token.manage",
+      resourceType: "api_token",
+      conditions: { subject: "other_user" },
+      fallback: "admin",
+    }));
+
   app.post(
     "/api/v1/auth/tokens",
     {
@@ -55,7 +70,7 @@ export function registerTokenRoutes(
 
       let targetUserId = actor._id;
       if (body.userId !== undefined) {
-        if (actor.role !== "admin") {
+        if (!(await mayReachOtherUsers(req))) {
           return reply.code(403).send({ error: "forbidden" });
         }
         if (typeof body.userId !== "string") {
@@ -111,10 +126,9 @@ export function registerTokenRoutes(
         return reply.code(400).send({ error: "invalid cursor" });
       }
 
-      const result =
-        actor.role === "admin"
-          ? await tokenRepo.findAllPaginated(limit, after)
-          : await tokenRepo.findByUserIdPaginated(actor._id, limit, after);
+      const result = (await mayReachOtherUsers(req))
+        ? await tokenRepo.findAllPaginated(limit, after)
+        : await tokenRepo.findByUserIdPaginated(actor._id, limit, after);
 
       return reply.send({ tokens: result.items.map(toPublicToken), nextCursor: result.nextCursor });
     }
@@ -149,7 +163,7 @@ export function registerTokenRoutes(
       if (!token) {
         return reply.code(404).send({ error: "token not found" });
       }
-      if (actor.role !== "admin" && token.userId !== actor._id) {
+      if (token.userId !== actor._id && !(await mayReachOtherUsers(req))) {
         return reply.code(403).send({ error: "forbidden" });
       }
       await tokenRepo.deleteById(id);

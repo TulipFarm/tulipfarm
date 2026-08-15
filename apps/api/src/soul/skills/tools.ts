@@ -10,10 +10,17 @@ import {
   validateSkill,
 } from "@tulipfarm/schema";
 import {
+  type BundledSkill,
+  DISABLED_BUNDLED_SKILLS_FILE,
   type GitSyncService,
+  mergedSkills,
+  persistDisabledBundledSkills,
+  resolveSkill,
   type SoulLoader,
   SoulWriteError,
   type SoulWriter,
+  scanSkill,
+  skillTrustLevel,
 } from "@tulipfarm/soul";
 import {
   type ApiToolDefinition,
@@ -26,13 +33,6 @@ import {
 import { SYSTEM_SOUL_COMMIT_ACTOR } from "../../runtime/soul-writer";
 import { soulCommitError } from "../../tools/soul-faults";
 import { buildAudit } from "./audit.js";
-import {
-  type BundledSkill,
-  DISABLED_BUNDLED_SKILLS_FILE,
-  persistDisabledBundledSkills,
-} from "./bundled.js";
-import { scanSkill, skillTrustLevel } from "./guard.js";
-import { mergedSkills, resolveSkill } from "./registry.js";
 
 export interface SkillToolContext {
   gitSync: GitSyncService;

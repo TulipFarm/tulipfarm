@@ -1,5 +1,6 @@
 import {
   authSecretEnvNames,
+  loadBundledIntegrations,
   nextAuthStep,
   resolveAuthSteps,
   resolveGrants,
@@ -11,7 +12,6 @@ import type {
   IntegrationAuthRequestRepo,
 } from "../../integrations/auth-broker";
 import { buildAuthorizeUrl, renderDeep, startAuthStep } from "../../integrations/auth-broker";
-import { loadBundledIntegrations } from "./bundled";
 
 /* Contract tests for shipped integration manifests, not fixtures. */
 

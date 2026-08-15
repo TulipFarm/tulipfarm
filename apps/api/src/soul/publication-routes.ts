@@ -15,6 +15,7 @@ import type {
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AuditRecordInput, AuditService } from "../audit/service";
 import { ErrorSchema } from "../auth/schemas";
+import type { RequireAuthorization, RouteAuthorization } from "../authz/route-gate";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -324,19 +325,25 @@ function filterPublications(
   });
 }
 
+/**
+ * The signed-in user a rollback is attributed to. Authorization is already settled by the route
+ * gate; this only refuses a service principal, which has no person to record in the audit trail.
+ */
 function principalId(req: FastifyRequest): string | undefined {
   const principal = req.principal;
-  if (principal?.kind !== "user" || principal.role !== "admin") return undefined;
+  if (principal?.kind !== "user") return undefined;
   return principal.id;
 }
 
-const requireOperator: PreHandler = async (req, reply) => {
-  if (!req.principal) {
-    return reply.code(401).send({ error: "unauthorized" });
-  }
-  if (req.principal.kind !== "user" || req.principal.role !== "admin") {
-    return reply.code(403).send({ error: "forbidden" });
-  }
+const PUBLICATION_READ: RouteAuthorization = {
+  action: "soul.publication.read",
+  resourceType: "soul.publication",
+  fallback: "admin",
+};
+const PUBLICATION_ROLLBACK: RouteAuthorization = {
+  action: "soul.publication.rollback",
+  resourceType: "soul.publication",
+  fallback: "admin",
 };
 
 /** Distinguishes in-flight publications from ones that lost the activation race. */
@@ -417,9 +424,11 @@ async function verifiedRollbackTarget(
 export function registerSoulPublicationRoutes(
   app: FastifyInstance,
   deps: SoulPublicationRouteDeps,
-  requireAuth: PreHandler
+  requireAuth: PreHandler,
+  requireAuthorization: RequireAuthorization
 ): void {
-  const protectedHandlers: PreHandler[] = [requireAuth, requireOperator];
+  const protectedHandlers: PreHandler[] = [requireAuth, requireAuthorization(PUBLICATION_READ)];
+  const rollbackHandlers: PreHandler[] = [requireAuth, requireAuthorization(PUBLICATION_ROLLBACK)];
 
   app.get(
     "/api/v1/soul/publications",
@@ -584,7 +593,7 @@ export function registerSoulPublicationRoutes(
   app.post(
     "/api/v1/soul/active-bundle/rollback",
     {
-      preHandler: protectedHandlers,
+      preHandler: rollbackHandlers,
       schema: {
         description:
           "Activate a previously published and signature-verified Soul execution bundle digest.",

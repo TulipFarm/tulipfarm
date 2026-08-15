@@ -5,17 +5,18 @@ import { basename, join, relative } from "node:path";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import {
   type CommitActor,
+  cloneToTemp,
   type IntegrationManifest,
   type SoulLoader,
   type SoulWrite,
   type SoulWriter,
+  sourceType,
   validateAuthSteps,
   validateThirdPartyManifest,
 } from "@tulipfarm/soul";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { stripUrlCredentials } from "../audit/soul-write";
 import { SYSTEM_SOUL_COMMIT_ACTOR } from "../runtime/soul-writer";
-import { cloneToTemp, sourceType } from "../soul/git-source";
 
 /** Installs only declarative Integration artifacts from git; no executable payloads. */
 

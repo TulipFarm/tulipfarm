@@ -18,7 +18,7 @@ export const ADMIN_ONLY_SURFACES: readonly {
   {
     type: "integration",
     actions: ["integration.connect", "integration.disconnect", "integration.remove"],
-    enforcedIn: "integrations/operator.ts",
+    enforcedIn: "integrations/routes.ts",
   },
   /** GitHub install disconnect and Soul repo selection are admin-only shared credentials. */
   {
@@ -44,7 +44,7 @@ export const ADMIN_ONLY_SURFACES: readonly {
   { type: "observability", actions: ["*"], enforcedIn: "observability/routes.ts" },
   {
     type: "llm_config",
-    actions: ["llm_config.resolve", "llm_config.write"],
+    actions: ["llm_config.read", "llm_config.resolve", "llm_config.write"],
     enforcedIn: "soul/llm-config/routes.ts",
   },
   { type: "knowledge_source", actions: ["*"], enforcedIn: "knowledge/routes.ts" },
@@ -64,6 +64,11 @@ export const ADMIN_ONLY_SURFACES: readonly {
   },
   { type: "audit", actions: ["*"], enforcedIn: "audit/routes.ts" },
   { type: "soul.business_profile", actions: ["*"], enforcedIn: "soul/routes.ts" },
+  /**
+   * The Soul git remote decides where the whole business's configuration is pushed, so re-pointing
+   * it is an exfiltration path. Read is admin too: it discloses the remote and credential state.
+   */
+  { type: "soul.git_config", actions: ["*"], enforcedIn: "soul/routes.ts" },
   { type: "soul.publication", actions: ["*"], enforcedIn: "soul/publication-routes.ts" },
   /** Resource domains are admin-only; domained deletes are gated to prevent re-create bypass. */
   {
@@ -75,8 +80,10 @@ export const ADMIN_ONLY_SURFACES: readonly {
     type: "authz",
     actions: [
       "authz.role.read",
+      "authz.role.author",
       "authz.role.assign",
       "authz.role.revoke",
+      "authz.principal.register",
       "authz.group.read",
       "authz.group.write",
       "authz.group.member.write",

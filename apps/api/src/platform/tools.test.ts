@@ -1,9 +1,9 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { SoulAgent, SoulRoutine, SoulSkill, SoulWriter } from "@tulipfarm/soul";
+import { assembleSystemPrompt } from "@tulipfarm/agent-runtime";
+import type { BundledSkill, SoulAgent, SoulRoutine, SoulSkill, SoulWriter } from "@tulipfarm/soul";
 import { describe, expect, it, vi } from "vitest";
-import type { BundledSkill } from "../soul/skills/bundled";
 import {
   callSkillTool,
   delegateToAgentTool,

@@ -18,7 +18,14 @@ import {
   requestArtifactId,
 } from "@tulipfarm/run-kernel";
 import { canonicalHash } from "@tulipfarm/schema";
-import type { SoulAgent, SoulLoader } from "@tulipfarm/soul";
+import type { BundledSkill, SoulAgent, SoulLoader } from "@tulipfarm/soul";
+import {
+  buildSoulCatalogue,
+  getDefaultAssistant,
+  listAvailableSkills,
+  listEagerSkills,
+  resolveAgent,
+} from "@tulipfarm/soul";
 import type { IntegrationStore } from "@tulipfarm/storage";
 import type { PresentationContext } from "@tulipfarm/surface";
 import type { ToolRegistry } from "../broker/tool-adapter";
@@ -27,10 +34,6 @@ import { assembleAgentSystemPrompt } from "../chat/system-prompt";
 import { availableToolsFor } from "../chat/turn-helpers";
 import type { ConversationStore, PersistedMessage } from "../conversations/service";
 import { readCustomInstructions } from "../preferences/custom-instructions";
-import { getDefaultAssistant, resolveAgent } from "../soul/agents/registry";
-import { buildSoulCatalogue } from "../soul/catalogue";
-import type { BundledSkill } from "../soul/skills/bundled";
-import { listAvailableSkills, listEagerSkills } from "../soul/skills/registry";
 import { presentationContextFor, surfaceCatalogPromptFor } from "../surfaces/renderer-registry";
 import { githubDisabledSkillNames, githubExcludedToolNames } from "../tools/github/visibility";
 import { ModelSelectorDeniedError, type ModelSelectorGate } from "./model-authz";

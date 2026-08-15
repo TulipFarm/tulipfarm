@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import type { SecretEnvelopeFields, SecretMeta, SecretRepo } from "@tulipfarm/secrets";
 import { SecretsService } from "@tulipfarm/secrets";
+import { makeSoulWriterDouble } from "@tulipfarm/soul";
 import type { PaginatedResult } from "@tulipfarm/storage";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -8,7 +9,6 @@ import { buildApp } from "./app";
 import type { TokenDoc, TokenRepo } from "./auth/api-tokens";
 import { MemorySessionStore } from "./auth/session-store";
 import type { UserDoc, UserRepo } from "./auth/users";
-import { makeSoulWriterDouble } from "./soul/soul-writer-double";
 
 class FakeUserRepo implements UserRepo {
   async findByEmail(): Promise<UserDoc | null> {

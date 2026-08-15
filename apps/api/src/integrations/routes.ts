@@ -1,15 +1,20 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { SecretsService } from "@tulipfarm/secrets";
+import type { BundledIntegration } from "@tulipfarm/soul";
 import {
   authStepProducesEnv,
   authStepSatisfied,
   type IntegrationManifest,
+  isSoulWriteError,
+  loadIntegrationRegistry,
+  type RegistryEntry,
   resolveAuthSteps,
   resolveGrants,
   type SoulIntegration,
   type SoulLoader,
   type SoulWrite,
   type SoulWriter,
+  soulWriteHttpError,
 } from "@tulipfarm/soul";
 import type { IntegrationStore } from "@tulipfarm/storage";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -17,16 +22,13 @@ import { stringify as stringifyYaml } from "yaml";
 import type { AuditService } from "../audit/service";
 import { makeSoulAuditWriter } from "../audit/soul-write";
 import { ErrorSchema } from "../auth/schemas";
+import type { RequireAuthorization } from "../authz/route-gate";
 import { commitActorFromRequest } from "../soul/commit-actor";
-import type { BundledIntegration } from "../soul/integrations/bundled";
-import { loadIntegrationRegistry, type RegistryEntry } from "../soul/integrations/registry";
-import { isSoulWriteError, soulWriteHttpError } from "../soul/write-errors";
 import { brandIcon } from "./brand-icon";
 import { deleteConnectionSecrets, ForeignSecretRefError } from "./connection-env";
 import { mergeConnectionEnv } from "./connection-writer";
 import { isGitHubInstalled } from "./github-status";
 import { readIntegrationLock, serializeIntegrationLock } from "./install";
-import { refuseNonOperator } from "./operator";
 
 /**
  * Generic Soul integration connect/disconnect backend; no scan, marketplace, or bespoke OAuth
@@ -193,6 +195,7 @@ export function registerIntegrationRoutes(
   secretsService: SecretsService,
   bundled: ReadonlyMap<string, BundledIntegration>,
   requireAuth: PreHandler,
+  requireAuthorization: RequireAuthorization,
   onConnected?: (name: string) => Promise<void>,
   githubStatus?: { integrations: IntegrationStore; businessId: string },
   /** Disconnect and uninstall sync here so revoked integrations revoke their Tools. */
@@ -318,7 +321,14 @@ export function registerIntegrationRoutes(
   app.post(
     "/api/v1/integrations/:name/connect",
     {
-      preHandler: requireAuth,
+      preHandler: [
+        requireAuth,
+        requireAuthorization({
+          action: "integration.connect",
+          resourceType: "integration",
+          fallback: "admin",
+        }),
+      ],
       schema: {
         description: "Connect an integration: seal required env and mark it enabled.",
         tags: ["integrations"],
@@ -346,7 +356,6 @@ export function registerIntegrationRoutes(
       },
     },
     async (req, reply) => {
-      if (refuseNonOperator(req, reply)) return reply;
       const { name } = req.params as { name: string };
       if (!NAME_RE.test(name)) {
         return reply.code(404).send({ error: `integration not found: ${name}` });
@@ -414,7 +423,14 @@ export function registerIntegrationRoutes(
   app.post(
     "/api/v1/integrations/:name/disconnect",
     {
-      preHandler: requireAuth,
+      preHandler: [
+        requireAuth,
+        requireAuthorization({
+          action: "integration.disconnect",
+          resourceType: "integration",
+          fallback: "admin",
+        }),
+      ],
       schema: {
         description: "Disconnect an integration, keeping its sealed env for reconnect.",
         tags: ["integrations"],
@@ -437,7 +453,6 @@ export function registerIntegrationRoutes(
       },
     },
     async (req, reply) => {
-      if (refuseNonOperator(req, reply)) return reply;
       const { name } = req.params as { name: string };
       if (!NAME_RE.test(name)) {
         return reply.code(404).send({ error: `integration not connected: ${name}` });
@@ -479,7 +494,14 @@ export function registerIntegrationRoutes(
   app.delete(
     "/api/v1/integrations/:name",
     {
-      preHandler: requireAuth,
+      preHandler: [
+        requireAuth,
+        requireAuthorization({
+          action: "integration.remove",
+          resourceType: "integration",
+          fallback: "admin",
+        }),
+      ],
       schema: {
         description: "Remove an installed integration from the soul repo and delete its secrets.",
         tags: ["integrations"],
@@ -498,7 +520,6 @@ export function registerIntegrationRoutes(
       },
     },
     async (req, reply) => {
-      if (refuseNonOperator(req, reply)) return reply;
       const { name } = req.params as { name: string };
       if (!NAME_RE.test(name) || !soulLoader.integrations.has(name)) {
         return reply.code(404).send({ error: `integration not found: ${name}` });

@@ -3,6 +3,7 @@ import { MAX_VALUE_BYTES } from "@tulipfarm/kv";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
+import type { RequireAuthorization, RouteAuthorization } from "../authz/route-gate";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -11,7 +12,8 @@ interface ScopeConfig {
   prefix: string;
   /** Owner derived from the authenticated caller — never from the request body/path. */
   resolveOwner: (req: FastifyRequest) => string | undefined;
-  requireAdmin: boolean;
+  /** Declared authority for the whole scope; absent means authentication is enough. */
+  authorization?: RouteAuthorization;
   tag: string;
 }
 
@@ -52,31 +54,26 @@ function registerScopedKvRoutes(
   app: FastifyInstance,
   kvService: KvService,
   requireAuth: PreHandler,
+  requireAuthorization: RequireAuthorization,
   cfg: ScopeConfig
 ): void {
-  const { scope, prefix, resolveOwner, requireAdmin, tag } = cfg;
+  const { scope, prefix, resolveOwner, authorization, tag } = cfg;
+  const handlers: PreHandler[] =
+    authorization === undefined
+      ? [requireAuth]
+      : [requireAuth, requireAuthorization(authorization)];
   const security: { [k: string]: readonly string[] }[] = [
     { sessionCookie: [] },
     { bearerToken: [] },
   ];
 
-  /** Returns true if the caller may proceed; otherwise sends 403 and returns false. */
-  const allowed = (req: FastifyRequest, reply: FastifyReply): boolean => {
-    if (requireAdmin && (req.user as UserDoc).role !== "admin") {
-      reply.code(403).send({ error: "forbidden" });
-      return false;
-    }
-    return true;
-  };
-
   app.get(
     `${prefix}/:namespace/:key`,
     {
-      preHandler: requireAuth,
+      preHandler: handlers,
       schema: { description: "Read a KV entry.", tags: [tag], security, params: PARAMS_NS_KEY },
     },
     async (req, reply) => {
-      if (!allowed(req, reply)) return;
       const { namespace, key } = req.params as { namespace: string; key: string };
       const entry = await kvService.get(scope, resolveOwner(req), namespace, key);
       if (!entry) return reply.code(404).send({ error: "not found" });
@@ -87,7 +84,7 @@ function registerScopedKvRoutes(
   app.put(
     `${prefix}/:namespace/:key`,
     {
-      preHandler: requireAuth,
+      preHandler: handlers,
       schema: {
         description: "Create or update a KV entry (last-write-wins).",
         tags: [tag],
@@ -98,7 +95,6 @@ function registerScopedKvRoutes(
       },
     },
     async (req, reply) => {
-      if (!allowed(req, reply)) return;
       const { namespace, key } = req.params as { namespace: string; key: string };
       const body = (req.body ?? {}) as { value?: unknown; ttlSeconds?: number };
       if (body.value === undefined) return reply.code(400).send({ error: "value is required" });
@@ -127,7 +123,7 @@ function registerScopedKvRoutes(
   app.delete(
     `${prefix}/:namespace/:key`,
     {
-      preHandler: requireAuth,
+      preHandler: handlers,
       schema: {
         description: "Delete a KV entry (idempotent).",
         tags: [tag],
@@ -137,7 +133,6 @@ function registerScopedKvRoutes(
       },
     },
     async (req, reply) => {
-      if (!allowed(req, reply)) return;
       const { namespace, key } = req.params as { namespace: string; key: string };
       await kvService.delete(scope, resolveOwner(req), namespace, key);
       return reply.code(204).send();
@@ -147,7 +142,7 @@ function registerScopedKvRoutes(
   app.get(
     `${prefix}/:namespace`,
     {
-      preHandler: requireAuth,
+      preHandler: handlers,
       schema: {
         description: "List all live entries in a namespace.",
         tags: [tag],
@@ -156,7 +151,6 @@ function registerScopedKvRoutes(
       },
     },
     async (req, reply) => {
-      if (!allowed(req, reply)) return;
       const { namespace } = req.params as { namespace: string };
       const entries = await kvService.list(scope, resolveOwner(req), namespace);
       return reply.send({ entries: entries.map(toApi) });
@@ -168,20 +162,24 @@ function registerScopedKvRoutes(
 export function registerKvRoutes(
   app: FastifyInstance,
   kvService: KvService,
-  requireAuth: PreHandler
+  requireAuth: PreHandler,
+  requireAuthorization: RequireAuthorization
 ): void {
-  registerScopedKvRoutes(app, kvService, requireAuth, {
+  registerScopedKvRoutes(app, kvService, requireAuth, requireAuthorization, {
     scope: "user",
     prefix: "/api/v1/kv",
     resolveOwner: (req) => (req.user as UserDoc)._id,
-    requireAdmin: false,
     tag: "kv",
   });
-  registerScopedKvRoutes(app, kvService, requireAuth, {
+  registerScopedKvRoutes(app, kvService, requireAuth, requireAuthorization, {
     scope: "system",
     prefix: "/api/v1/admin/kv",
     resolveOwner: () => undefined,
-    requireAdmin: true,
+    authorization: {
+      action: "kv_system.access",
+      resourceType: "kv_system",
+      fallback: "admin",
+    },
     tag: "kv-admin",
   });
 }

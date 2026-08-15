@@ -13,6 +13,7 @@ import {
 } from "@tulipfarm/knowledge";
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { makeRequireAuthorization } from "../authz/route-gate";
 import { makeMigratedPglite } from "../test/pglite";
 import { registerKnowledgeRoutes } from "./routes";
 
@@ -39,7 +40,13 @@ async function buildApp(db: PGlite): Promise<FastifyInstance> {
     retrieval: new PageRetrievalService(db),
   });
   const app = Fastify();
-  registerKnowledgeRoutes(app, service, async () => {}, new PageRetrievalService(db));
+  registerKnowledgeRoutes(
+    app,
+    service,
+    async () => {},
+    makeRequireAuthorization(),
+    new PageRetrievalService(db)
+  );
   await app.ready();
   return app;
 }

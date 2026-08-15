@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
+import { makeSoulWriterDouble, type SoulWriterDouble } from "@tulipfarm/soul";
 import type { PaginatedResult } from "@tulipfarm/storage";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -12,7 +13,6 @@ import { CSRF_COOKIE, CSRF_HEADER } from "../../auth/csrf";
 import { SESSION_COOKIE } from "../../auth/middleware";
 import { MemorySessionStore } from "../../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../../auth/users";
-import { makeSoulWriterDouble, type SoulWriterDouble } from "../soul-writer-double";
 import { __resetLlmCatalogCache } from "./routes";
 
 const TEST_CSRF = "a".repeat(64);
@@ -164,11 +164,21 @@ describe("llm-config routes", () => {
       expect(res.statusCode).toBe(401);
     });
 
-    it("returns the provider registry to any authed user", async () => {
+    it("refuses a member: provider and model ids describe where prompts are sent", async () => {
       const res = await app.inject({
         method: "GET",
         url: "/api/v1/llm-providers",
         cookies: cookies(memberSid),
+        headers,
+      });
+      expect(res.statusCode).toBe(403);
+    });
+
+    it("returns the provider registry to an admin", async () => {
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/llm-providers",
+        cookies: cookies(adminSid),
         headers,
       });
       expect(res.statusCode).toBe(200);
@@ -196,11 +206,21 @@ describe("llm-config routes", () => {
   });
 
   describe("GET /api/v1/provider-config", () => {
-    it("returns stored config-field values but never secret (api key) values", async () => {
+    it("refuses a member", async () => {
       const res = await app.inject({
         method: "GET",
         url: "/api/v1/provider-config",
         cookies: cookies(memberSid),
+        headers,
+      });
+      expect(res.statusCode).toBe(403);
+    });
+
+    it("returns stored config-field values but never secret (api key) values", async () => {
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/provider-config",
+        cookies: cookies(adminSid),
         headers,
       });
       expect(res.statusCode).toBe(200);
@@ -216,11 +236,21 @@ describe("llm-config routes", () => {
       expect(res.statusCode).toBe(401);
     });
 
-    it("returns the current config to any authed user", async () => {
+    it("refuses a member: the config names every provider, model and api_key_ref", async () => {
       const res = await app.inject({
         method: "GET",
         url: "/api/v1/llm-config",
         cookies: cookies(memberSid),
+        headers,
+      });
+      expect(res.statusCode).toBe(403);
+    });
+
+    it("returns the current config to an admin", async () => {
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/llm-config",
+        cookies: cookies(adminSid),
         headers,
       });
       expect(res.statusCode).toBe(200);

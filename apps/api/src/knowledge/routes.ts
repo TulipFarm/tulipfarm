@@ -15,6 +15,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ActivityService } from "../activity/service";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
+import type { RequireAuthorization } from "../authz/route-gate";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -114,6 +115,7 @@ export function registerKnowledgeRoutes(
   app: FastifyInstance,
   service: KnowledgeService,
   requireAuth: PreHandler,
+  requireAuthorization: RequireAuthorization,
   // Optional: only the page-search branch needs it. When absent, page-mode requests fall back to
   // chunk search so the knowledge routes never disappear just because the spine wasn't wired.
   retrieval?: PageRetrievalService,
@@ -769,20 +771,19 @@ export function registerKnowledgeRoutes(
   );
 
   // ── admin: reindex / backfill / index-status ─────────────────────────────────────
-  // Operational endpoints. Authenticated AND admin-only (mirrors secrets routes): a non-admin gets
-  // 403 even though requireAuth passed.
-  const isAdmin = (req: FastifyRequest, reply: FastifyReply): boolean => {
-    if ((req.user as UserDoc).role !== "admin") {
-      reply.code(403).send({ error: "forbidden" });
-      return false;
-    }
-    return true;
-  };
+  const indexAdmin = [
+    requireAuth,
+    requireAuthorization({
+      action: "knowledge_source.index",
+      resourceType: "knowledge_source",
+      fallback: "admin",
+    }),
+  ];
 
   app.post(
     "/api/v1/knowledge/reindex",
     {
-      preHandler: requireAuth,
+      preHandler: indexAdmin,
       schema: {
         description:
           "Re-index knowledge (admin). Body { pageId } re-indexes one page, { spaceId } a whole space, neither a full re-index.",
@@ -804,7 +805,6 @@ export function registerKnowledgeRoutes(
       },
     },
     async (req, reply) => {
-      if (!isAdmin(req, reply)) return;
       const b = (req.body ?? {}) as { pageId?: string; spaceId?: string };
       const reindexed = await service.reindexTargeted({ pageId: b.pageId, spaceId: b.spaceId });
       return reply.send({ reindexed });
@@ -814,7 +814,7 @@ export function registerKnowledgeRoutes(
   app.post(
     "/api/v1/knowledge/backfill",
     {
-      preHandler: requireAuth,
+      preHandler: indexAdmin,
       schema: {
         description:
           "Backfill embeddings (admin): re-index every active page with an unembedded or stale-model chunk. No-op without a provider.",
@@ -831,8 +831,7 @@ export function registerKnowledgeRoutes(
         },
       },
     },
-    async (req, reply) => {
-      if (!isAdmin(req, reply)) return;
+    async (_req, reply) => {
       const reindexed = await service.backfillMissing();
       return reply.send({ reindexed });
     }
@@ -841,7 +840,7 @@ export function registerKnowledgeRoutes(
   app.get(
     "/api/v1/knowledge/index-status",
     {
-      preHandler: requireAuth,
+      preHandler: indexAdmin,
       schema: {
         description:
           "Index health (admin): active pages, chunk embed/lexical counts, max index lag, and pg-boss queue stats.",
@@ -854,8 +853,7 @@ export function registerKnowledgeRoutes(
         },
       },
     },
-    async (req, reply) => {
-      if (!isAdmin(req, reply)) return;
+    async (_req, reply) => {
       const status = await service.indexStatus();
       return reply.send({
         activePages: status.activePages,

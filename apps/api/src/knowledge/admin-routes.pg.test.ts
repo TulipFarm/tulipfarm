@@ -1,4 +1,5 @@
 import type { PGlite } from "@electric-sql/pglite";
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { EmbeddingPort } from "@tulipfarm/knowledge";
 import {
   KnowledgeService,
@@ -9,6 +10,7 @@ import {
 } from "@tulipfarm/knowledge";
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { makeRequireAuthorization } from "../authz/route-gate";
 import { makeMigratedPglite } from "../test/pglite";
 import { registerKnowledgeRoutes } from "./routes";
 
@@ -39,18 +41,33 @@ describe("knowledge admin routes (reindex / backfill / index-status)", () => {
       retrieval: new PageRetrievalService(db),
     });
     app = Fastify();
-    // Stub auth: set req.user from the x-role header so the admin guard can be exercised.
-    registerKnowledgeRoutes(app, service, async (req) => {
-      req.user = {
-        _id: "u1",
-        email: "u@example.com",
-        passwordHash: "x",
-        name: null,
-        role: req.headers["x-role"] === "admin" ? "admin" : "member",
-        status: "active" as const,
-        createdAt: new Date(),
-      };
-    });
+    // Stub auth: set the principal from the x-role header so the admin gate can be exercised.
+    registerKnowledgeRoutes(
+      app,
+      service,
+      async (req) => {
+        const role = req.headers["x-role"] === "admin" ? "admin" : "member";
+        req.user = {
+          _id: "u1",
+          email: "u@example.com",
+          passwordHash: "x",
+          name: null,
+          role,
+          status: "active" as const,
+          createdAt: new Date(),
+        };
+        req.principal = {
+          id: "u1",
+          kind: "user",
+          businessId: DEPLOYMENT_BUSINESS_ID,
+          credential: "session",
+          authMethods: ["password"],
+          authenticatedAt: new Date(),
+          role,
+        };
+      },
+      makeRequireAuthorization()
+    );
     await app.ready();
   });
   afterEach(async () => {

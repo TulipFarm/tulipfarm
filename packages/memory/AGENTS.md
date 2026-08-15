@@ -15,11 +15,18 @@ supersession, and expiry.
 | `src/{retrieve,rank,contradiction}.ts` | Recall, ranking, contradiction handling. |
 | `src/{extract,episode}.ts` | Extraction and episode modeling. |
 | `src/telemetry.ts` | Redaction-safe metric/span names and helpers. |
+| `src/{assertion-view,service,limits}.ts` | Keyed KV view of an Assertion, its write policy, and the caps. |
+| `src/embedder.ts` | `MemoryEmbedder` port and the text an assertion is indexed by. |
+| `src/pg/` | Postgres `MemoryStore` / `PendingMemoryStore` over `@tulipfarm/storage`'s `Queryable`. |
 | `test/security/` | Scope/requester/lifecycle/evidence-provider side-channel matrices. |
 
 ## Rules
 - May import only `@tulipfarm/schema`, `authz`, `audit`, `storage`, and `observability`; see
   [dependency rules](../../docs/architecture/dependency-rules.md).
+- `src/pg/` is the only place that may hold SQL. It takes `Queryable` from `@tulipfarm/storage`
+  rather than declaring its own, so the control plane can hand it the pool it already has.
+- Anything needing `@tulipfarm/constants` or `agent-runtime` stays in `apps/api/src/memory` — those
+  edges are not in this package's allowlist and adding one would be an architecture decision.
 - Scope auth matches the scope owner, not a caller capability; unknown or disabled scopes deny.
 - Durable writes require explicit confirmation; this package never infers or persists unscoped
   memory.

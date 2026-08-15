@@ -5,6 +5,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { SoulAuditWriter } from "../../audit/soul-write";
 import { ErrorSchema } from "../../auth/schemas";
 import type { CapabilityCatalog } from "../../authz/capabilities";
+import type { RequireAuthorization, RouteAuthorization } from "../../authz/route-gate";
 import { makeRateLimitHook, type RateLimiter } from "../../rate-limit";
 import { commitActorFromRequest } from "../commit-actor";
 import {
@@ -20,14 +21,15 @@ type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 const LEVEL_WRITE_LIMIT = 30;
 const LEVEL_WRITE_WINDOW_MS = 60_000;
 
-const requireDeploymentAdmin: PreHandler = async (req, reply) => {
-  if (!req.principal) {
-    await reply.code(401).send({ error: "unauthorized" });
-    return;
-  }
-  if (req.principal.kind !== "user" || req.principal.role !== "admin") {
-    await reply.code(403).send({ error: "forbidden" });
-  }
+const CAPABILITY_READ: RouteAuthorization = {
+  action: "authz.capability.read",
+  resourceType: "authz",
+  fallback: "admin",
+};
+const LEVEL_WRITE: RouteAuthorization = {
+  action: "authz.level.write",
+  resourceType: "authz",
+  fallback: "admin",
 };
 
 const LEVEL_STATUS: Readonly<Record<LevelErrorCode, 400 | 404 | 409>> = {
@@ -118,6 +120,8 @@ export interface LevelRouteDeps {
   readonly reconcile: () => Promise<void>;
   /** Resolves `req.principal` before the admin gate reads it. */
   readonly requireAuth: PreHandler;
+  /** The one decision function, reached per declaration. */
+  readonly requireAuthorization: RequireAuthorization;
   /** Audits Role writes because Roles change authorization. */
   readonly auditWrite?: SoulAuditWriter;
   readonly rateLimiter?: RateLimiter;
@@ -132,10 +136,11 @@ export function registerAccessLevelRoutes(app: FastifyInstance, deps: LevelRoute
         LEVEL_WRITE_WINDOW_MS
       )
     : undefined;
-  const readHandlers: PreHandler[] = [deps.requireAuth, requireDeploymentAdmin];
+  const readHandlers: PreHandler[] = [deps.requireAuth, deps.requireAuthorization(CAPABILITY_READ)];
+  const writeGate = deps.requireAuthorization(LEVEL_WRITE);
   const writeHandlers: PreHandler[] = rateLimitHook
-    ? [rateLimitHook, deps.requireAuth, requireDeploymentAdmin]
-    : [deps.requireAuth, requireDeploymentAdmin];
+    ? [rateLimitHook, deps.requireAuth, writeGate]
+    : [deps.requireAuth, writeGate];
 
   function sendLevelError(reply: FastifyReply, error: LevelError) {
     return reply.code(LEVEL_STATUS[error.code]).send({

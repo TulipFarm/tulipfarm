@@ -1,6 +1,11 @@
 # Authorization design
 
-Status: **Proposed — nothing in this document is implemented.**
+Status: **Partially implemented — steps 1 and 4 of §5 have landed; steps 2, 3, 5 and 6 have not.**
+
+The decision engine, the persisted principal model, and both adapters D4 asks for are built and in
+the request path. What remains is the behavioural work: shadow mode, the enforcing flip, Soul-authored
+policy, and per-Record predicates. §2 below is the evidence that motivated this document and is
+retained as written; read [§2.1](#21-what-has-changed-since) first for what has since changed.
 
 Scope: the authorization model for human users, Agents, Routines, and service identities across
 Soul artifacts, Secrets, business settings, Integrations, and Resource Records.
@@ -34,7 +39,8 @@ engineer.
 
 ## 2. Why change — evidence
 
-Measured against the working tree, not documentation.
+Measured against the working tree, not documentation. **These measurements are historical — they are
+the case for writing this document, not a description of the repo today.** See §2.1.
 
 **The decision engine is effectively unreachable.** `decideEffectivePermission` — which
 `packages/authz/AGENTS.md` calls the sole accountable owner of authority-intersection decisions —
@@ -86,6 +92,33 @@ authorization checks. The Tools with the most authority have the least governanc
 **What is not wrong:** the grant algebra itself. Default-deny, deny-wins, intersection-only
 narrowing, fail-closed dimension scoping, cycle-safe role composition, separation-of-duties on
 approvals. It does not need replacing. It needs persistence, a chokepoint, names, and relations.
+
+### 2.1 What has changed since
+
+Re-measured against the working tree on 15 Aug 2026. Every row below was verified in code, not in
+documentation. The direction of drift is uniformly *good*, which means the §2 evidence above now
+overstates the problem.
+
+| §2 claim | Today |
+| --- | --- |
+| `decideEffectivePermission` has **one** call site | **Four.** `packages/tool-broker/src/authorize.ts:79`, `apps/api/src/authz/route-gate.ts:60`, `apps/api/src/authz/service.ts:403`, `apps/api/src/resources/authorize.ts:68` |
+| No human identity has ever entered an intersection decision | **False now.** Every gated route builds an `L1` principal layer from live assignments |
+| 16 `requireAdmin` + 8 `role === "admin"` checks | **0 `requireAdmin`; 2 role comparisons**, both non-decisions — the gate's own implementation, and a last-admin target-row invariant |
+| `member` is fail-open via `ANY_ACTION_ANY_RESOURCE` | **Removed.** The identifier does not appear anywhere in the repo; `member` is an allow-list (`MEMBER_ALLOWED_SURFACES`). **D3 is done for the shipped roles** |
+| No `principals`, `roles`, or grant tables among 54 | **Eight exist** — `principals`, `roles`, `role_parent_roles`, `role_grants`, `principal_groups`, `principal_group_members`, `role_assignments`, `group_role_assignments` (`packages/storage/src/auth/role-repo.ts`), kept in step with `users` by the `users_sync_authorization` trigger |
+| Exactly one administrator per deployment | **Lifted.** `users_single_admin_idx` is dropped in `seedAuthorizationBootstrap`; the `owner` role and `owners` group are seeded. **D7 has landed** |
+| Forge Tools write Soul with `fs.writeFile` + `git add -A`, no mutex, zero authorization | **Closed.** All artifact writes go through `SoulWriter`; commits stage only the paths they name; the ~30 platform Tools carry authorization declarations |
+
+What was genuinely missing, and is now built, was narrower than §2 implies: **the HTTP half of D4**.
+The engine, the algebra, the tables and the Tool adapter all existed. Routes were the one caller
+still deciding for themselves — 36 inline comparisons across 16 files, now 46 declared routes across
+22 files reaching the engine through `apps/api/src/authz/route-gate.ts`.
+
+One security defect was found by that migration and is worth recording, because it is the argument
+for step 1 in a single example: `PUT /api/v1/soul/git-config` re-points the Soul repository — the
+store holding every artifact in the deployment — and was gated by authentication alone. Any member
+could have pointed it at a remote they controlled. Requiring each route to state its authorization
+out loud is what surfaced it.
 
 ---
 
@@ -215,17 +248,25 @@ ordering rather than being a new decision.
 Ordering principle: **declare before enforce.** The allow-list flip (D3) is the one step that can
 lock users out of their own deployment, so it must be preceded by evidence.
 
-| # | Piece | Behaviour change | Acceptance |
-| --- | --- | --- | --- |
-| 1 | Name grammar + an authorization declaration on every route and Tool | none — inert metadata | `N of M` declared, ratcheting to 100% in CI |
-| 2 | The gate in **shadow mode** — evaluates and logs what it *would* deny, using today's admin/member | none | zero unexpected would-denies over real traffic |
-| 3 | Flip the gate to enforcing; retire `requireAdmin` | **yes — the first real one** | shadow-mode evidence from step 2 |
-| 4 | Persist principals, groups, assignments, relation tuples; retire `users.role` and `users_single_admin_idx` | multiple administrators become possible | existing users keep exactly their current reach |
-| 5 | Soul-authored domains, roles, relations, routing | the business can model itself | a leave-approval routing rule resolves end to end |
-| 6 | Attribute predicates compiled into SQL | per-Record access | list, count, and RAG results stay mutually consistent |
+| # | Piece | Behaviour change | Acceptance | Status |
+| --- | --- | --- | --- | --- |
+| 1 | Name grammar + an authorization declaration on every route and Tool | none — inert metadata | `N of M` declared, ratcheting to 100% in CI | **done** — Tools 74/74, routes 46 across 22 files; ratchet is `scripts/route-authorization.test.ts` with an empty debt list |
+| 2 | The gate in **shadow mode** — evaluates and logs what it *would* deny, using today's admin/member | none | zero unexpected would-denies over real traffic | **not started** |
+| 3 | Flip the gate to enforcing; retire `requireAdmin` | **yes — the first real one** | shadow-mode evidence from step 2 | **partial** — `requireAdmin` is gone and gated routes enforce today, but per the ordering principle this was reached without step 2's evidence. See the note below |
+| 4 | Persist principals, groups, assignments, relation tuples; retire `users.role` and `users_single_admin_idx` | multiple administrators become possible | existing users keep exactly their current reach | **mostly done** — eight tables persisted, `users_single_admin_idx` dropped, `users_sync_authorization` keeps them in step. `users.role` and `relation_tuples` outstanding |
+| 5 | Soul-authored domains, roles, relations, routing | the business can model itself | a leave-approval routing rule resolves end to end | **not started** — `identity/roles.ts` is still the compiled-in policy source |
+| 6 | Attribute predicates compiled into SQL | per-Record access | list, count, and RAG results stay mutually consistent | **not started** |
 
 Steps 1–3 close the Forge governance hole as a side effect: declaring what those ~30 platform Tools
 require *is* what puts them behind a gate for the first time.
+
+**On the step-2/3 inversion.** Enforcement arrived without shadow-mode evidence, which is not the
+order this section prescribes. What made that safe in practice — not by design — is that the route
+adapter's `fallback` field is **required**, so a declaration can only ever restate or narrow the
+check it replaced, never widen it, and the migration was one surface at a time behind a full test
+suite. That reasoning does **not** extend to step 3's remaining work or to the D3 flip for
+business-authored roles, where a wrong allow-list genuinely can lock a deployment out of itself.
+Shadow mode is still owed before either.
 
 ---
 
@@ -233,8 +274,11 @@ require *is* what puts them behind a gate for the first time.
 
 - **Authoring surface.** How the business architect writes domains, roles, and routing — agentic
   Chat, a dedicated UI, or both. Real product scope; undecided.
-- **What `member` becomes.** Flipping to allow-list locks out every existing user unless a default
-  role reproduces today's reach. Migration design needed before step 3.
+- **What `member` becomes.** ~~Flipping to allow-list locks out every existing user unless a default
+  role reproduces today's reach.~~ **Answered for the shipped roles:** `member` is already an
+  allow-list (`MEMBER_ALLOWED_SURFACES`) and `ANY_ACTION_ANY_RESOURCE` is gone. The question survives
+  for *business-authored* roles at step 5, where the same lockout risk returns without shadow-mode
+  evidence.
 - **Retiring `users.role`.** Becomes a seeded assignment, then the column is dropped.
 - **`integration_access_grants`.** Whether it folds into the unified model or stays a distinct
   credential-scope layer (L5).

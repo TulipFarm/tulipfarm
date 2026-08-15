@@ -1,10 +1,5 @@
 import type { ArtifactKind } from "@tulipfarm/schema";
-import type {
-  SoulReadResult,
-  SoulWriteRequest,
-  SoulWriteResult,
-  SoulWriter,
-} from "@tulipfarm/soul";
+import type { SoulReadResult, SoulWriteRequest, SoulWriteResult, SoulWriter } from "./writer";
 
 /**
  * An in-memory stand-in for the Soul write gateway.

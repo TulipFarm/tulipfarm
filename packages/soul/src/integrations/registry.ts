@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { Logger } from "@tulipfarm/soul";
 import { parse as parseYaml } from "yaml";
+import type { Logger } from "../types";
 import { bundledIntegrationsDir } from "./bundled";
 
 /* Curated registry only decorates bundled integrations or points at third-party repos. */

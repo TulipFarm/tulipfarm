@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { RequireAuthorization, RouteAuthorization } from "../../authz/route-gate";
 import { issueInvite, type UserInviteRepo } from "../invites";
 import { ErrorSchema, InviteSchema, PublicUserSchema } from "../schemas";
 import {
@@ -11,11 +12,11 @@ import {
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
-async function requireAdmin(req: FastifyRequest, reply: FastifyReply): Promise<void> {
-  if (req.user?.role !== "admin") {
-    return reply.code(403).send({ error: "admin role required" });
-  }
-}
+const USER_MANAGE: RouteAuthorization = {
+  action: "user.manage",
+  resourceType: "user",
+  fallback: "admin",
+};
 
 export function registerAdminUserRoutes(
   app: FastifyInstance,
@@ -23,11 +24,13 @@ export function registerAdminUserRoutes(
   userAdminRepo: UserAdminRepo,
   inviteRepo: UserInviteRepo,
   requireAuth: PreHandler,
+  requireAuthorization: RequireAuthorization,
   rateLimitHook?: PreHandler
 ): void {
+  const gate = requireAuthorization(USER_MANAGE);
   const adminOnly: PreHandler[] = rateLimitHook
-    ? [rateLimitHook, requireAuth, requireAdmin]
-    : [requireAuth, requireAdmin];
+    ? [rateLimitHook, requireAuth, gate]
+    : [requireAuth, gate];
 
   app.post(
     "/api/v1/users",
@@ -224,6 +227,8 @@ export function registerAdminUserRoutes(
       if (!target) {
         return reply.code(404).send({ error: "user not found" });
       }
+      // Domain invariant about the target row, not a decision about the caller: the deployment
+      // must not be able to lock out its own admin.
       if (target.role === "admin") {
         return reply.code(400).send({ error: "cannot change the admin's status" });
       }

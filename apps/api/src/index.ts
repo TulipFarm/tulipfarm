@@ -62,6 +62,9 @@ import {
   compileExecutionBundle,
   GitSoulTreeReader,
   GitSyncService,
+  loadBundledIntegrations,
+  loadBundledSkills,
+  loadDisabledBundledSkills,
   PgBundleStore,
   resolveSoulPath,
   runSoulMigrations,
@@ -117,6 +120,11 @@ import { PgUserInviteRepo } from "./auth/invites";
 import { makeRequireAuth } from "./auth/middleware";
 import { DEFAULT_SESSION_TTL_SECONDS, PgSessionStore } from "./auth/session-store";
 import { PgUserRepo } from "./auth/users";
+import {
+  LiveRouteAuthorizer,
+  makeAuthorizationCheck,
+  makeRequireAuthorization,
+} from "./authz/route-gate";
 import { AuthzAdminService } from "./authz/service";
 import { PgConversationRepo } from "./chat/conversations";
 import { PgMessageRepo } from "./chat/messages";
@@ -231,9 +239,7 @@ import {
 } from "./setup/worker-credential";
 import { hostedAgentResolver } from "./soul/agents/registry";
 import { createGitHubSoulCredentialProvider } from "./soul/github-repo-credential";
-import { loadBundledIntegrations } from "./soul/integrations/bundled";
 import { registerSoulPublicationRoutes } from "./soul/publication-routes";
-import { loadBundledSkills, loadDisabledBundledSkills } from "./soul/skills/bundled";
 import { registerSoulSync } from "./soul-sync";
 import { PgSurfaceActionStore } from "./surfaces/action-store";
 import { PgSurfaceArtifactStore } from "./surfaces/artifact-store";
@@ -652,6 +658,8 @@ async function boot() {
     // One resolver, shared. The admin surface's "why was this denied" and the gate's actual
     // decision must read the same grants through the same code, or the explanation describes a
     const authorityLayerResolver = buildApiAuthorityLayerResolver(pool);
+    const routeAuthorizer = new LiveRouteAuthorizer(authorityLayerResolver);
+    const operationalCheck = makeAuthorizationCheck(routeAuthorizer);
     const authzAdmin = new AuthzAdminService({
       roles: new PgRoleRepo(transactionPort(pool)),
       groups: new PgGroupRepo(transactionPort(pool)),
@@ -967,6 +975,7 @@ async function boot() {
       counterStore,
       // domain wall the gate enforces is only a wall if this door enforces it too.
       recordAuthorizer: new LiveRecordAuthorizer(soulLoader, authorityLayerResolver),
+      routeAuthorizer,
       reconcileResources,
       // so projecting without reloading would write the state from before the level was committed.
       reconcileSoulRoles: async () => {
@@ -1039,16 +1048,19 @@ async function boot() {
         authorize: async (req) => {
           const principal = req.principal;
           if (!principal) return null;
+          const operator = await operationalCheck(principal, {
+            action: "operations.read",
+            resourceType: "operations",
+            fallback: "admin",
+          });
           return {
             businessId: principal.businessId,
-            audiences:
-              principal.kind === "user" && principal.role === "admin"
-                ? ["participant", "operator"]
-                : ["participant"],
+            audiences: operator ? ["participant", "operator"] : ["participant"],
           };
         },
       },
       operationalApi: createRuntimeOperationalApi({
+        authorizationCheck: operationalCheck,
         activity: activityService,
         approvals: approvalsRepo,
         toolApprovals,
@@ -1111,7 +1123,8 @@ async function boot() {
         userRepo,
         tokenRepo,
         apiClientRepo,
-      })
+      }),
+      makeRequireAuthorization(routeAuthorizer)
     );
 
     // Init after buildApp so fallback events log through Fastify's Pino logger.

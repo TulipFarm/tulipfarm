@@ -1,11 +1,11 @@
 import type { KnowledgeService } from "@tulipfarm/knowledge";
 import { CITE_SOURCES_TOOL } from "@tulipfarm/knowledge";
 import { CHAT_REQUEST_SCHEMA } from "@tulipfarm/schema";
+import type { PlatformAgent } from "@tulipfarm/soul";
 import type { PresentationContext } from "@tulipfarm/surface";
 import type { ToolAvailability } from "@tulipfarm/tool-broker";
 import type { FastifyReply } from "fastify";
 import type { ToolRegistry } from "../broker/tool-adapter";
-import type { PlatformAgent } from "../soul/agents/registry";
 
 export interface ChatBody {
   conversationId?: string;

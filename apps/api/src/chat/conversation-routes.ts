@@ -1,16 +1,19 @@
 import type { KnowledgeService } from "@tulipfarm/knowledge";
 import type { MemoryService } from "@tulipfarm/memory";
-import type { SoulLoader } from "@tulipfarm/soul";
+import type { BundledSkill, SoulLoader } from "@tulipfarm/soul";
+import {
+  buildSoulCatalogue,
+  getDefaultAssistant,
+  listAvailableSkills,
+  listEagerSkills,
+  resolveAgent,
+} from "@tulipfarm/soul";
 import type { IntegrationStore } from "@tulipfarm/storage";
 import { parsePaginationQuery } from "@tulipfarm/storage";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
 import type { ToolRegistry } from "../broker/tool-adapter";
-import { getDefaultAssistant, resolveAgent } from "../soul/agents/registry";
-import { buildSoulCatalogue } from "../soul/catalogue";
-import type { BundledSkill } from "../soul/skills/bundled";
-import { listAvailableSkills, listEagerSkills } from "../soul/skills/registry";
 import { presentationContextFor, surfaceCatalogPromptFor } from "../surfaces/renderer-registry";
 import { githubDisabledSkillNames, githubExcludedToolNames } from "../tools/github/visibility";
 import type { ConversationDoc, ConversationRepo } from "./conversations";

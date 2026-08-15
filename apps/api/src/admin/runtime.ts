@@ -3,6 +3,8 @@ import type { ApprovalsRepo, ToolApprovalService } from "@tulipfarm/tool-host";
 import type { FastifyRequest } from "fastify";
 import type { ActivityService } from "../activity/service";
 import { listPendingToolApprovals, type PendingToolApproval } from "../approvals/pending";
+import type { AuthorizationCheck, RouteAuthorization } from "../authz/route-gate";
+import { makeAuthorizationCheck } from "../authz/route-gate";
 import { describeDeploymentRoles } from "../identity/roles";
 import { type HealthProbe, probeHealth } from "./health";
 import type {
@@ -29,6 +31,14 @@ type RuntimeOperationalDeps = {
     decision: "approved" | "denied";
   }): Promise<void>;
   guardrailsConfig(): unknown;
+  /** Decides operator authority; absent falls back to deployment admin. */
+  authorizationCheck?: AuthorizationCheck;
+};
+
+const OPERATIONS_READ: RouteAuthorization = {
+  action: "operations.read",
+  resourceType: "operations",
+  fallback: "admin",
 };
 
 /** Admins get every defined operational permission; missing capabilities still return 501. */
@@ -127,6 +137,7 @@ function routineApproval(
 }
 
 export function createRuntimeOperationalApi(deps: RuntimeOperationalDeps): OperationalApiDeps {
+  const check = deps.authorizationCheck ?? makeAuthorizationCheck();
   const decisions = new Map<
     string,
     {
@@ -140,7 +151,8 @@ export function createRuntimeOperationalApi(deps: RuntimeOperationalDeps): Opera
   return {
     async authorize(request: FastifyRequest): Promise<OperationalGrant | null> {
       const principal = request.principal;
-      if (principal?.kind !== "user" || principal.role !== "admin") return null;
+      if (principal === undefined) return null;
+      if (!(await check(principal, OPERATIONS_READ))) return null;
       return {
         businessId: principal.businessId,
         principalId: principal.id,

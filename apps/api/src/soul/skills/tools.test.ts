@@ -27,7 +27,7 @@ vi.mock("./audit", async (orig) => {
 });
 
 import { cp, rm, writeFile } from "node:fs/promises";
-import type { BundledSkill } from "./bundled";
+import type { BundledSkill } from "@tulipfarm/soul";
 
 const FAKE_REPORT = {
   riskRating: "low" as const,

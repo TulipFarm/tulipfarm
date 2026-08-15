@@ -15,11 +15,19 @@ propagation. This is the sole accountable owner for source ACL enforcement.
 | `src/indexing.ts`, `src/retrieve.ts` | Authorized indexing and authorize -> rank -> re-check. |
 | `src/{invalidate,delete,staleness}.ts` | Invalidation, deletion, stale-ACL sweeps. |
 | `src/provenance.ts` | `authorizeSynthesis` citation reauthorization. |
+| `src/types.ts`, `src/chunk.ts` | Shared page/chunk/space/search shapes and text chunking. |
+| `src/*-repo.ts`, `src/repo.ts` | PostgreSQL repositories for pages, revisions, chunks, links, spaces. |
+| `src/okf/` | OKF page parse, cross-page link extraction, index synthesis. |
+| `src/connectors/` | Connector seam, registry, sample/stub connectors, sync state. |
+| `src/{index-service,page-search-adapter,rerank,retrieval-config,embedding-backfill}.ts` | Indexing, page search, ranking config, embedding backfill. |
 | `test/security/` | Source/role/revoke/delete/cache/provider and side-channel matrices. |
 
 ## Rules
 - May import only `@tulipfarm/schema`, `authz`, `audit`, `storage`, and `observability`; see
   [dependency rules](../../docs/architecture/dependency-rules.md).
+- Repositories take a `Queryable` from `@tulipfarm/storage`; they never open their own pool. The
+  PGlite-backed repository tests stay in `apps/api`, which owns the migrations that build the
+  tables under test.
 - Authorize before ranking or candidate exposure, never after. Default-deny every ACL path; live
   checks never fall back to cached ACLs.
 - Retrieval cache keys bind principal plus Guardrail/Context epochs; reauthorize cache hits.
