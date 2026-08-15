@@ -41,6 +41,11 @@ export const ADMIN_ONLY_SURFACES: readonly {
     enforcedIn: "identity/routes.ts",
   },
   { type: "user", actions: ["*"], enforcedIn: "auth/routes/users.ts" },
+  {
+    type: "task",
+    actions: ["task.answer.business_profile"],
+    enforcedIn: "tasks/routes.ts",
+  },
   { type: "observability", actions: ["*"], enforcedIn: "observability/routes.ts" },
   {
     type: "llm_config",

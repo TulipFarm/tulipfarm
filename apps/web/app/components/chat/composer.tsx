@@ -181,7 +181,7 @@ export function Composer({
   }
 
   // Applies `initialDraft` once the editor exists, and only once per distinct value — a route-level
-  // seed (Companion "chat" quest), not a live-typing sync back to the box.
+  // seed (Companion "chat"-action Task), not a live-typing sync back to the box.
   const draftedRef = useRef<string | undefined>(undefined);
   // biome-ignore lint/correctness/useExhaustiveDependencies: draftSuggestion closes over editor/busy already in deps.
   useEffect(() => {

@@ -31,6 +31,7 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
 | `src/memory/`, `src/kv/`, `src/secrets/` | Memory Assertions, scoped KV, secret storage routes. |
 | `src/authz/` | `route-gate.ts` — the sole HTTP path to `decideEffectivePermission`; self-governed routes. |
 | `src/approvals/`, `src/broker/` | Approval routes and Tool effect dispatch composition. |
+| `src/tasks/` | Task routes, ranking. System-created human work items — no user-facing create route. |
 | `src/kill-switches/` | Operator-armed emergency stop over mutating effects; admin-gated routes. |
 | `src/surfaces/`, `src/forms/` | Tulip Surface Protocol and form APIs. |
 | `src/ingress/`, `src/triggers/`, `src/schedule/` | Ingress, triggers, schedules. |

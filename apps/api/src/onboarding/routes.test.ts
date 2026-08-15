@@ -205,98 +205,6 @@ describe("GET /api/v1/onboarding/suggestions", () => {
   });
 });
 
-interface ChecklistBody {
-  dismissed: boolean;
-  businessName?: string;
-  steps: { id: string; label: string; status: string; prompt?: string }[];
-  recommendations: { id: string; label: string; prompt: string }[];
-}
-
-describe("GET /api/v1/onboarding/checklist", () => {
-  let app: FastifyInstance;
-
-  afterEach(async () => {
-    await app?.close();
-  });
-
-  it("returns 401 without auth", async () => {
-    ({ app } = await appWith({ withKv: true }));
-    const res = await app.inject({ method: "GET", url: "/api/v1/onboarding/checklist" });
-    expect(res.statusCode).toBe(401);
-  });
-
-  it("is not registered when no KvService is wired (404)", async () => {
-    let authed: Awaited<ReturnType<typeof appWith>>["authed"];
-    ({ app, authed } = await appWith({})); // no withKv
-    const res = await app.inject(authed("/api/v1/onboarding/checklist"));
-    expect(res.statusCode).toBe(404);
-  });
-
-  it("returns all-todo core steps + coming-soon placeholders and no recs on a fresh instance", async () => {
-    let authed: Awaited<ReturnType<typeof appWith>>["authed"];
-    ({ app, authed } = await appWith({ withKv: true }));
-    const res = await app.inject(authed("/api/v1/onboarding/checklist"));
-    expect(res.statusCode).toBe(200);
-    const body = res.json() as ChecklistBody;
-    expect(body.dismissed).toBe(false);
-    expect(body.steps.map((s) => s.id)).toEqual([
-      "resource",
-      "skill",
-      "agent",
-      "knowledge",
-      "routine",
-      "integration",
-    ]);
-    expect(body.steps.filter((s) => s.status === "todo").map((s) => s.id)).toEqual([
-      "resource",
-      "skill",
-      "agent",
-      "knowledge",
-      "integration",
-    ]);
-    expect(body.steps.filter((s) => s.status === "coming-soon").map((s) => s.id)).toEqual([
-      "routine",
-    ]);
-    expect(body.recommendations).toEqual([]);
-  });
-
-  it("returns the configured business name as Chat context", async () => {
-    let authed: Awaited<ReturnType<typeof appWith>>["authed"];
-    ({ app, authed } = await appWith({ withKv: true, businessName: "Acme Tulips" }));
-    const body = (await app.inject(authed("/api/v1/onboarding/checklist"))).json() as ChecklistBody;
-    expect(body.businessName).toBe("Acme Tulips");
-  });
-
-  it("recommends an agent for an existing resource type, naming it", async () => {
-    let authed: Awaited<ReturnType<typeof appWith>>["authed"];
-    ({ app, authed } = await appWith({ withKv: true, resources: ["tickets"] }));
-    const body = (await app.inject(authed("/api/v1/onboarding/checklist"))).json() as ChecklistBody;
-    expect(body.steps.find((s) => s.id === "resource")?.status).toBe("done");
-    const rec = body.recommendations.find((r) => r.id === "agent-for-resource");
-    expect(rec?.label).toContain("tickets");
-  });
-
-  it("flips the knowledge step to done and drops the knowledge rec when a page exists", async () => {
-    let authed: Awaited<ReturnType<typeof appWith>>["authed"];
-    ({ app, authed } = await appWith({ withKv: true, agents: ["a"], hasKnowledge: true }));
-    const body = (await app.inject(authed("/api/v1/onboarding/checklist"))).json() as ChecklistBody;
-    expect(body.steps.find((s) => s.id === "knowledge")?.status).toBe("done");
-    expect(body.recommendations.map((r) => r.id)).not.toContain("knowledge-for-agent");
-  });
-
-  it("persists dismissal via the KV route (PUT then GET reflects dismissed:true)", async () => {
-    let req: Awaited<ReturnType<typeof appWith>>["req"];
-    let authed: Awaited<ReturnType<typeof appWith>>["authed"];
-    ({ app, req, authed } = await appWith({ withKv: true }));
-    const put = await app.inject(
-      req("PUT", "/api/v1/kv/onboarding/checklist", { value: { dismissed: true } })
-    );
-    expect(put.statusCode).toBeLessThan(300);
-    const body = (await app.inject(authed("/api/v1/onboarding/checklist"))).json() as ChecklistBody;
-    expect(body.dismissed).toBe(true);
-  });
-});
-
 describe("onboarding personalization (LLM)", () => {
   let app: FastifyInstance;
 
@@ -343,7 +251,7 @@ describe("onboarding personalization (LLM)", () => {
     });
   });
 
-  it("serves LLM recommendations in the checklist and reuses the cache across routes", async () => {
+  it("serves LLM suggestions and reuses the cache across repeated hits", async () => {
     generateObject.mockResolvedValue({ object: PERSONALIZED });
     let authed: Awaited<ReturnType<typeof appWith>>["authed"];
     ({ app, authed } = await appWith({
@@ -354,10 +262,10 @@ describe("onboarding personalization (LLM)", () => {
     await app.inject(authed("/api/v1/onboarding/suggestions"));
 
     await vi.waitFor(async () => {
-      const body = (
-        await app.inject(authed("/api/v1/onboarding/checklist"))
-      ).json() as ChecklistBody;
-      expect(body.recommendations.map((r) => r.id)).toEqual(["agent-for-matters"]);
+      const body = (await app.inject(authed("/api/v1/onboarding/suggestions"))).json() as {
+        suggestions: { id: string }[];
+      };
+      expect(body.suggestions.map((s) => s.id)).toEqual(["matters"]);
     });
     expect(generateObject).toHaveBeenCalledOnce(); // every later route hit reads the KV cache
   });

@@ -4,11 +4,12 @@ import { ConnectionStatus } from "~/components/shell/states";
 import type { ChatMessage, ChatModelSelector } from "~/lib/chat/types";
 import { useChatStream } from "~/lib/chat/use-chat-stream";
 import { errorAction } from "~/lib/error-actions";
-import type { OnboardingChecklist, Suggestion } from "~/lib/onboarding";
+import type { Suggestion } from "~/lib/onboarding";
+import type { Task } from "~/lib/tasks";
 import { ChatDebugDrawer } from "./chat-debug-drawer";
 import { Composer } from "./composer";
-import { GettingStartedCard } from "./getting-started-card";
 import { asPickerPreset, DEFAULT_CHAT_MODEL_SELECTOR } from "./model-selector";
+import { TasksPreviewCard } from "./tasks-preview-card";
 import { Transcript } from "./transcript";
 import { useMentionCatalog } from "./use-mention-catalog";
 
@@ -16,20 +17,18 @@ function EmptyState({
   businessName,
   agent,
   label,
-  checklist,
-  onDismissChecklist,
+  tasks,
   onPick,
 }: {
   businessName?: string;
   agent?: string;
   label?: string;
-  checklist?: OnboardingChecklist | null;
-  onDismissChecklist?: () => void;
+  tasks: Task[];
   onPick: (text: string) => void;
 }) {
   return (
     <div className="flex flex-1 overflow-y-auto">
-      <section className="mx-auto flex w-full max-w-4xl flex-col justify-start gap-8 px-4 py-8 sm:px-6 sm:py-14 md:justify-center">
+      <section className="mx-auto flex w-full max-w-4xl flex-col justify-start gap-7 px-4 py-8 sm:px-6 sm:py-14 md:justify-center">
         <div className="grid gap-7 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-500 md:grid-cols-[minmax(0,1fr)_12rem] md:items-end">
           <div>
             <p className="mb-3 text-sm font-medium text-primary">Chat</p>
@@ -62,13 +61,7 @@ function EmptyState({
             </p>
           </aside>
         </div>
-        {checklist && !checklist.dismissed ? (
-          <GettingStartedCard
-            checklist={checklist}
-            onPick={onPick}
-            onDismiss={() => onDismissChecklist?.()}
-          />
-        ) : null}
+        {!agent && tasks.length > 0 ? <TasksPreviewCard tasks={tasks} onPick={onPick} /> : null}
       </section>
     </div>
   );
@@ -79,9 +72,8 @@ export function ChatPanel({
   agentId,
   defaultModel = DEFAULT_CHAT_MODEL_SELECTOR,
   suggestions = [],
-  checklist,
+  tasks = [],
   businessName,
-  onDismissChecklist,
   initialConversationId,
   initialMessages,
   onConversationChange,
@@ -90,9 +82,8 @@ export function ChatPanel({
   agentId?: string;
   defaultModel?: ChatModelSelector;
   suggestions?: Suggestion[];
-  checklist?: OnboardingChecklist | null;
+  tasks?: Task[];
   businessName?: string;
-  onDismissChecklist?: () => void;
   initialConversationId?: string;
   initialMessages?: ChatMessage[];
   onConversationChange?: (conversationId: string | undefined) => void;
@@ -175,8 +166,7 @@ export function ChatPanel({
           businessName={businessName}
           agent={activeAgentName}
           label={agentInfo?.label}
-          checklist={checklist}
-          onDismissChecklist={onDismissChecklist}
+          tasks={tasks}
           onPick={(text) => send(text, { model: activeAgentPreset ?? defaultModel, agentId })}
         />
       )}

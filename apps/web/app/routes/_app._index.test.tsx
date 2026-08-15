@@ -1,7 +1,8 @@
 import * as remix from "@remix-run/react";
 import { createRemixStub } from "@remix-run/testing";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
+import { CompanionProvider } from "~/lib/companion-context";
 import ChatRoute, { clientLoader } from "~/routes/_app._index";
 
 // Mock the loader hook and render the Component directly (the convention used by the other route
@@ -19,21 +20,27 @@ vi.mock("~/lib/agents", () => ({
 }));
 vi.mock("~/lib/onboarding", () => ({
   listOnboardingSuggestions: vi.fn(),
-  getOnboardingChecklist: vi.fn(),
-  dismissOnboardingChecklist: vi.fn(),
+}));
+vi.mock("~/lib/tasks", () => ({
+  listTasks: vi.fn(),
 }));
 
 import { getAgent } from "~/lib/agents";
-import {
-  dismissOnboardingChecklist,
-  getOnboardingChecklist,
-  listOnboardingSuggestions,
-} from "~/lib/onboarding";
+import { listOnboardingSuggestions } from "~/lib/onboarding";
+import { listTasks } from "~/lib/tasks";
 
 // jsdom has no layout engine; the transcript's auto-scroll calls scrollIntoView.
 Element.prototype.scrollIntoView = vi.fn();
 
-const Stub = createRemixStub([{ path: "/", Component: ChatRoute }]);
+function ChatRouteWithCompanion() {
+  return (
+    <CompanionProvider>
+      <ChatRoute />
+    </CompanionProvider>
+  );
+}
+
+const Stub = createRemixStub([{ path: "/", Component: ChatRouteWithCompanion }]);
 
 const SUGGESTION = {
   id: "tickets",
@@ -46,7 +53,7 @@ const SUGGESTION = {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(listOnboardingSuggestions).mockResolvedValue([]);
-  vi.mocked(getOnboardingChecklist).mockResolvedValue(null as never);
+  vi.mocked(listTasks).mockResolvedValue([]);
   vi.mocked(remix.useLoaderData).mockReturnValue({ agentId: undefined, defaultModel: "auto" });
 });
 
@@ -79,41 +86,31 @@ test("clientLoader does no fetching, so nothing can delay the first paint", asyn
 
   expect(data).toEqual({ agentId: "support", defaultModel: "auto" });
   expect(listOnboardingSuggestions).not.toHaveBeenCalled();
-  expect(getOnboardingChecklist).not.toHaveBeenCalled();
 });
 
-test("a failed onboarding fetch leaves chat usable with no chips", async () => {
+test("a failed onboarding fetch leaves chat usable", async () => {
   vi.mocked(getAgent).mockRejectedValue(new Error("api down"));
   vi.mocked(listOnboardingSuggestions).mockRejectedValue(new Error("api down"));
-  vi.mocked(getOnboardingChecklist).mockRejectedValue(new Error("api down"));
+  vi.mocked(listTasks).mockRejectedValue(new Error("api down"));
 
   render(<Stub initialEntries={["/"]} />);
 
   expect(screen.getByRole("heading", { name: "What can I help with?" })).toBeInTheDocument();
   expect(await screen.findByLabelText("Message")).toBeInTheDocument();
-  expect(screen.queryByText(/Getting started/)).toBeNull();
 });
 
-test("the Getting-started card renders and route-level dismissal hides it (persists API call)", async () => {
-  vi.mocked(getOnboardingChecklist).mockResolvedValue({
-    dismissed: false,
-    businessName: "Acme Tulips",
-    steps: [
-      { id: "resource", label: "Create a resource type", status: "todo", prompt: "Help me." },
-    ],
-    recommendations: [],
-  });
-  vi.mocked(dismissOnboardingChecklist).mockResolvedValue();
+test("open Tasks render in the My Tasks preview card", async () => {
+  vi.mocked(listTasks).mockResolvedValue([
+    {
+      id: "t1",
+      title: "Add your business description",
+      action: { kind: "chat", prompt: "Help me describe my business." },
+      blocking: false,
+      status: "open",
+      createdAt: "2026-01-01T00:00:00Z",
+    },
+  ]);
   render(<Stub initialEntries={["/"]} />);
 
-  // Card visible (dismissal state lives in the route, above the newChatNonce-keyed ChatPanel).
-  expect(await screen.findByText(/Getting started/)).toBeInTheDocument();
-  expect(
-    screen.getByRole("heading", { name: "What can I help Acme Tulips with?" })
-  ).toBeInTheDocument();
-  fireEvent.click(screen.getByLabelText("Dismiss getting started"));
-
-  // Optimistically hidden + the persistence call fired.
-  expect(screen.queryByText(/Getting started/)).toBeNull();
-  expect(dismissOnboardingChecklist).toHaveBeenCalledOnce();
+  expect(await screen.findByText("Add your business description")).toBeInTheDocument();
 });

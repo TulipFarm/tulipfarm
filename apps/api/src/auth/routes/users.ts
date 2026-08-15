@@ -25,7 +25,8 @@ export function registerAdminUserRoutes(
   inviteRepo: UserInviteRepo,
   requireAuth: PreHandler,
   requireAuthorization: RequireAuthorization,
-  rateLimitHook?: PreHandler
+  rateLimitHook?: PreHandler,
+  triggerTaskReconcile?: () => Promise<void>
 ): void {
   const gate = requireAuthorization(USER_MANAGE);
   const adminOnly: PreHandler[] = rateLimitHook
@@ -82,6 +83,15 @@ export function registerAdminUserRoutes(
           userId: user._id,
           createdBy: req.user._id,
         });
+        if (triggerTaskReconcile) {
+          try {
+            await triggerTaskReconcile();
+          } catch (err) {
+            app.log.error(
+              `[tasks] reconcile kick after inviting ${user._id} failed — ${err instanceof Error ? err.message : String(err)}`
+            );
+          }
+        }
         return reply.code(201).send({
           user: toPublicUser(user),
           invite: { token: invite.token, expiresAt: invite.expiresAt.toISOString() },

@@ -24,6 +24,7 @@ import {
   RUN_STORAGE_STATEMENTS,
   SOUL_PUBLICATION_STORAGE_STATEMENTS,
   SOUL_REPOSITORY_STORAGE_STATEMENTS,
+  TASK_STORAGE_STATEMENTS,
   WAIT_STORAGE_STATEMENTS,
 } from "@tulipfarm/storage";
 import { EFFECT_STORAGE_STATEMENTS } from "@tulipfarm/tool-broker";
@@ -1980,6 +1981,15 @@ export const PG_MIGRATIONS: PgMigration[] = [
     description: "durable mutation kill switches for the effect plane",
     up: async (q) => {
       for (const sql of KILL_SWITCH_STORAGE_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 53,
+    description: "tasks: system-created human work items behind Companion/Tasks/home checklist",
+    up: async (q) => {
+      for (const sql of TASK_STORAGE_STATEMENTS) {
         await q.query(sql);
       }
     },

@@ -154,7 +154,30 @@ export interface InternalTurnRouteDeps {
    * process corrects reporting and leaves spend enforcement on the uncorrected price.
    */
   pricingOverrides(): Record<string, { in: number; out: number }>;
+  /**
+   * Soul manifest and knowledge/memory signals the task reconciler cannot reach directly, since
+   * those stores belong to this app, not the Worker (`apps/worker/AGENTS.md`: Soul access is
+   * signed-bundle reads only). Optional and read fresh per call, mirroring `llmConfig()` — a
+   * deployment that has not wired a supplier yet gets `204`, the same "not published" shape.
+   */
+  taskReconcileSignals?():
+    | Promise<TaskReconcileSignals | undefined>
+    | TaskReconcileSignals
+    | undefined;
   readonly routineApprovals?: InternalRoutineApprovalHost;
+}
+
+/** Payload for `GET /api/v1/internal/task-reconcile-signals`; see {@link InternalTurnRouteDeps}. */
+export interface TaskReconcileSignals {
+  readonly businessName?: string;
+  readonly businessDescription?: string;
+  readonly employeeCount?: string;
+  /**
+   * Non-disabled users (`active` or `invited`), admin included. Counts a sent-but-unredeemed
+   * invite as team growth — unlike the Worker's own `principals` table, which maps `invited` to
+   * `disabled` and so cannot tell an invite in flight from a deliberately deactivated account.
+   */
+  readonly memberCount?: number;
 }
 
 export function registerInternalTurnRoutes(
@@ -247,6 +270,32 @@ export function registerInternalTurnRoutes(
       },
     },
     async (_req, reply) => reply.send({ overrides: deps.pricingOverrides() })
+  );
+
+  app.get(
+    "/api/v1/internal/task-reconcile-signals",
+    {
+      preHandler,
+      schema: {
+        description:
+          "Soul manifest and memory signals the task reconciler cannot reach directly: business " +
+          "name/description and the employeeCount memory field. Empty (204) until a deployment " +
+          "wires a supplier.",
+        tags: ["internal"],
+        security: [{ bearerToken: [] }],
+        response: {
+          200: { type: "object", additionalProperties: true },
+          204: { type: "null", description: "No supplier wired yet." },
+          401: ErrorSchema,
+          403: ErrorSchema,
+        },
+      },
+    },
+    async (_req, reply) => {
+      const signals = await deps.taskReconcileSignals?.();
+      if (signals === undefined) return reply.code(204).send();
+      return reply.send(signals);
+    }
   );
 
   app.get(

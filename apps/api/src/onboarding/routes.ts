@@ -16,15 +16,16 @@ import { getPersonalizedOrRefresh, getProfileGaps } from "./personalize";
 import { buildQuests, type Quest, TIER1_BUSINESS_DESCRIPTION, TIER1_BUSINESS_NAME } from "./quests";
 import { deriveSuggestions } from "./suggestions";
 
-/* ONB-V1 read-only routes; checklist dismissal lives in user KV `onboarding/checklist`.
-   ONB-V2 adds the quest ladder (tier 1 gate / tier 2 checklist / tier 3 AI profile gaps),
-   dismissal in user KV `onboarding/quests-dismissed`, and a tier-1-only answer sink that
-   reuses the `PUT /api/v1/business` soul-write pattern directly. */
+/* ONB-V1 read-only suggestions route. ONB-V2 adds the quest ladder (tier 1 gate / tier 2
+   checklist / tier 3 AI profile gaps), dismissal in user KV `onboarding/quests-dismissed`, and a
+   tier-1-only answer sink that reuses the `PUT /api/v1/business` soul-write pattern directly.
+   The "Getting started" system-suggestion cards on the web home screen are static and seed a
+   chat prompt directly — no backend checklist route backs them; dismissal lives in user KV
+   `onboarding/getting-started`. */
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
 const KV_NAMESPACE = "onboarding";
-const KV_KEY = "checklist";
 const QUESTS_DISMISSED_KEY = "quests-dismissed";
 
 const QuestSchema = {
@@ -113,79 +114,6 @@ export function registerOnboardingRoutes(
 
   const { kvService } = deps;
   if (!kvService) return;
-
-  app.get(
-    "/api/v1/onboarding/checklist",
-    {
-      preHandler: requireAuth,
-      schema: {
-        description:
-          "Getting-started checklist: core build-block steps (status auto-derived from real state), " +
-          "deterministic next-step recommendations, and the user's dismissed flag.",
-        tags: ["onboarding"],
-        security: [{ sessionCookie: [] }, { bearerToken: [] }],
-        response: {
-          200: {
-            type: "object",
-            required: ["dismissed", "steps", "recommendations"],
-            properties: {
-              dismissed: { type: "boolean" },
-              businessName: { type: "string" },
-              steps: {
-                type: "array",
-                items: {
-                  type: "object",
-                  required: ["id", "label", "status"],
-                  properties: {
-                    id: { type: "string" },
-                    label: { type: "string" },
-                    status: { type: "string", enum: ["done", "todo", "coming-soon"] },
-                    prompt: { type: "string" },
-                  },
-                },
-              },
-              recommendations: {
-                type: "array",
-                items: {
-                  type: "object",
-                  required: ["id", "label", "prompt"],
-                  properties: {
-                    id: { type: "string" },
-                    label: { type: "string" },
-                    prompt: { type: "string" },
-                  },
-                },
-              },
-            },
-          },
-          401: ErrorSchema,
-        },
-      },
-    },
-    async (req) => {
-      const ownerId = (req.user as UserDoc)._id;
-      const entry = await kvService.get("user", ownerId, KV_NAMESPACE, KV_KEY);
-      const value = entry?.value as { dismissed?: unknown } | undefined;
-      const dismissed = value?.dismissed === true;
-      const hasKnowledge = (await deps.hasAnyKnowledgePage?.()) ?? false;
-      const businessName =
-        typeof soulLoader.manifest?.businessName === "string"
-          ? soulLoader.manifest.businessName
-          : undefined;
-      const { steps, recommendations } = buildChecklist(soulLoader, hasKnowledge, businessName);
-      const personalized = await getPersonalizedOrRefresh(soulLoader, {
-        kvService,
-        llmService: deps.llmService,
-        logger: req.log,
-      });
-      return {
-        dismissed,
-        businessName,
-        steps,
-        recommendations: personalized?.recommendations ?? recommendations,
-      };
-    }
-  );
 
   const questsGitSync = deps.gitSync;
   const questsSoulWriter = deps.soulWriter;

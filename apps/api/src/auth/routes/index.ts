@@ -28,6 +28,9 @@ interface AuthRouteOptions {
   requireAuthorization?: RequireAuthorization;
   /** The value form of the same decision, for owner-scoped surfaces. */
   authorizationCheck?: AuthorizationCheck;
+  /** Kicks the Task reconciler outside its 15-minute cron after an invite is issued, so
+   * "Invite your team" clears within seconds instead of waiting for the next scheduled tick. */
+  triggerTaskReconcile?: () => Promise<void>;
 }
 
 const AUTH_LIMIT = 100;
@@ -89,7 +92,8 @@ export function registerAuthRoutes(
       options.inviteRepo,
       requireAuth,
       options.requireAuthorization ?? makeRequireAuthorization(),
-      preHandler
+      preHandler,
+      options.triggerTaskReconcile
     );
   }
   registerIdentityRoutes(

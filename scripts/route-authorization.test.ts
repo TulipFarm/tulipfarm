@@ -80,6 +80,7 @@ const MIGRATED: readonly string[] = [
   "soul/resource-types/routes.ts",
   "soul/roles/routes.ts",
   "soul/routes.ts",
+  "tasks/routes.ts",
 ];
 
 function withoutComments(source: string): string {

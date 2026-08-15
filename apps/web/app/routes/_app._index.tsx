@@ -3,14 +3,9 @@ import { useCallback, useEffect, useState } from "react";
 import { ChatPanel } from "~/components/chat/chat-panel";
 import { DEFAULT_CHAT_MODEL_SELECTOR } from "~/components/chat/model-selector";
 import type { ChatModelSelector } from "~/lib/chat/types";
+import { useCompanion } from "~/lib/companion-context";
 import { useConversations } from "~/lib/conversations-context";
-import {
-  dismissOnboardingChecklist,
-  getOnboardingChecklist,
-  listOnboardingSuggestions,
-  type OnboardingChecklist,
-  type Suggestion,
-} from "~/lib/onboarding";
+import { listOnboardingSuggestions, type Suggestion } from "~/lib/onboarding";
 
 export const meta: MetaFunction = () => [{ title: "Chat · tulipfarm" }];
 
@@ -22,7 +17,7 @@ export const meta: MetaFunction = () => [{ title: "Chat · tulipfarm" }];
 export async function clientLoader({ request }: ClientLoaderFunctionArgs) {
   const url = new URL(request.url);
   const agentId = url.searchParams.get("agent") || undefined;
-  // Seeded by the onboarding Companion (a tier-2/3 quest's "chat" action) — drafted into the
+  // Seeded by the onboarding Companion (a Task's "chat" action) — drafted into the
   // composer, never auto-sent.
   const draft = url.searchParams.get("draft") || undefined;
   const defaultModel: ChatModelSelector = DEFAULT_CHAT_MODEL_SELECTOR;
@@ -30,15 +25,14 @@ export async function clientLoader({ request }: ClientLoaderFunctionArgs) {
 }
 
 /*
- * Adaptive onboarding suggestions (ONB-V1-002/003) + the Getting-started checklist (ONB-V1), loaded
- * after the chat surface is already on screen. Both are decorative: a failed or slow fetch just
- * leaves the chips absent, and chat is usable throughout. Re-runs on "+ new chat" so a soul the
- * agent just changed is reflected, matching the route-loader refetch this replaced.
+ * Adaptive onboarding suggestions (ONB-V1-002/003), loaded after the chat surface is already on
+ * screen. Decorative: a failed or slow fetch just leaves the chips absent, and chat is usable
+ * throughout. Re-runs on "+ new chat" so a soul the agent just changed is reflected, matching the
+ * route-loader refetch this replaced. Tasks come from `useCompanion()` instead of a separate
+ * fetch here, so the "My Tasks" preview card and the Companion panel never drift out of sync.
  */
-function useOnboarding(newChatNonce: number) {
+function useOnboardingSuggestions(newChatNonce: number) {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
-  const [checklist, setChecklist] = useState<OnboardingChecklist | null>(null);
-  const [dismissed, setDismissed] = useState(false);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: newChatNonce is a deliberate refetch trigger
   useEffect(() => {
@@ -47,22 +41,12 @@ function useOnboarding(newChatNonce: number) {
       (items) => !cancelled && setSuggestions(items),
       () => {}
     );
-    void getOnboardingChecklist().then(
-      (value) => {
-        if (cancelled) return;
-        setChecklist(value);
-        // Latches on only. A slower fetch must never resurrect a card the user just dismissed, and an
-        // optimistic dismiss whose PUT failed should still stay dismissed for this session.
-        if (value?.dismissed) setDismissed(true);
-      },
-      () => {}
-    );
     return () => {
       cancelled = true;
     };
   }, [newChatNonce]);
 
-  return { suggestions, checklist, dismissed, setDismissed };
+  return suggestions;
 }
 
 export default function ChatRoute() {
@@ -75,9 +59,8 @@ export default function ChatRoute() {
     window.history.replaceState(null, "", `${url.pathname}${url.search}`);
   }, [draft]);
   const { refresh, setActiveChatId, newChatNonce } = useConversations();
-  // Dismissal lives here, ABOVE the `newChatNonce`-keyed ChatPanel, so "+ new chat" (which remounts
-  // ChatPanel) doesn't resurrect a card the user already dismissed.
-  const { suggestions, checklist, dismissed, setDismissed } = useOnboarding(newChatNonce);
+  const suggestions = useOnboardingSuggestions(newChatNonce);
+  const { tasks } = useCompanion();
   // First turn of a fresh chat: refresh the Recent chats sidebar AND reflect the new conversation in
   // the URL so a reload restores it. We use `history.replaceState` rather than a router navigate so the
   // in-flight stream keeps streaming on this mounted route — no remount, no message re-fetch race.
@@ -102,12 +85,7 @@ export default function ChatRoute() {
       agentId={agentId}
       defaultModel={defaultModel}
       suggestions={suggestions}
-      businessName={checklist?.businessName}
-      checklist={dismissed ? null : checklist}
-      onDismissChecklist={() => {
-        setDismissed(true); // optimistic — survives ChatPanel remount
-        void dismissOnboardingChecklist().catch(() => {});
-      }}
+      tasks={tasks}
       onConversationChange={onConversationChange}
       initialDraft={draft}
     />
