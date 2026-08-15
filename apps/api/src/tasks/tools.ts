@@ -6,8 +6,7 @@ import {
   TaskStoreError,
   type TaskSubjectRef,
 } from "@tulipfarm/storage";
-import { type ApiToolDefinition, defineApiTool } from "../tools/define";
-import { err, ok } from "../tools/types";
+import { type ApiToolDefinition, defineApiTool, err, ok } from "@tulipfarm/tool-host";
 
 /** Per-request context a task tool handler runs against — closes over the calling Agent. */
 export interface TaskToolContext {

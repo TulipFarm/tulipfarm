@@ -4,7 +4,7 @@ import type { LlmConfig } from "@tulipfarm/schema";
 import type { SecretsService } from "@tulipfarm/secrets";
 import { llmProviderForFieldKey } from "@tulipfarm/secrets";
 import type { CommitActor, Logger, SoulLoader, SoulWriter } from "@tulipfarm/soul";
-import { mergeLlmConfigIntoSoulYaml } from "./soul-yaml-io";
+import { mergeLlmConfigIntoSoulYaml } from "@tulipfarm/soul";
 
 /**
  * Subscription CLI providers ship a fixed, known model per tier (`packages/llm/src/cli/specs.ts`),

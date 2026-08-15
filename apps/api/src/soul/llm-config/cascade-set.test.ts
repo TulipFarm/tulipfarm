@@ -1,9 +1,13 @@
 import type { LlmService } from "@tulipfarm/llm";
 import type { LlmConfig } from "@tulipfarm/schema";
 import type { SecretsService } from "@tulipfarm/secrets";
-import type { CommitActor, Logger, SoulLoader } from "@tulipfarm/soul";
+import {
+  type CommitActor,
+  type Logger,
+  makeSoulWriterDouble,
+  type SoulLoader,
+} from "@tulipfarm/soul";
 import { describe, expect, it, vi } from "vitest";
-import { makeSoulWriterDouble } from "../soul-writer-double";
 import { makeLlmCascadeOnSecretSet } from "./cascade-set";
 
 const ACTOR: CommitActor = { principalId: "user:u1", name: "Ada", email: "ada@example.com" };

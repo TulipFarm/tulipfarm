@@ -4,7 +4,9 @@ import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
 import { vector } from "@electric-sql/pglite-pgvector";
 import { InMemoryAuditEventRepo } from "@tulipfarm/audit";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
-import type { GitSyncService } from "@tulipfarm/soul";
+import type { MemoryAssertionView, MemoryRepo } from "@tulipfarm/memory";
+import { MemoryService } from "@tulipfarm/memory";
+import { type GitSyncService, makeSoulWriterDouble } from "@tulipfarm/soul";
 import { TASK_STORAGE_STATEMENTS, type TaskAction, TaskRepo } from "@tulipfarm/storage";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -15,9 +17,6 @@ import { CSRF_COOKIE, CSRF_HEADER } from "../auth/csrf";
 import { SESSION_COOKIE } from "../auth/middleware";
 import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
-import type { MemoryAssertionView, MemoryRepo } from "../memory/assertion-view";
-import { MemoryService } from "../memory/service";
-import { makeSoulWriterDouble } from "../soul/soul-writer-double";
 
 const TEST_CSRF = "a".repeat(64);
 
