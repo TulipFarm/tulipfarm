@@ -62,6 +62,8 @@ reconciliation, turn execution, delivery classification, projections, and outbox
 - Delivery classifier isolate gets no grants; keep API and worker hook bundle basenames distinct.
 - Bind links and reply text never cross from API to worker; replies are at-least-once.
 - Effort inference happens once per Run for `auto`; classifier tokens are unmetered.
+- Gate rejections throw `ProviderUnavailableError` from `@tulipfarm/llm`; a worker-local error
+  class classifies as a generic `model_error` and the participant is told nothing useful.
 - `test/process/` boots the bundled worker; run these tests with `--maxWorkers=1`.
 - Worker process tests can leak dev env through `apps/worker/.env.local`; check before blaming code.
 - May import listed `@tulipfarm/*` packages, never another app; see dependency rules below.

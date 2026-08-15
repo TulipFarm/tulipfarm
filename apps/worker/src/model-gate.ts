@@ -1,3 +1,4 @@
+import { ProviderUnavailableError } from "@tulipfarm/llm";
 import { CircuitBreaker } from "@tulipfarm/observability";
 
 /** Parallel in-flight calls allowed against one provider before further turns queue. */
@@ -18,16 +19,6 @@ const INFRASTRUCTURE_FAILURES = new Set([
   "model_rate_limited",
   "model_error",
 ]);
-
-export class ProviderUnavailableError extends Error {
-  constructor(
-    readonly provider: string,
-    reason: string
-  ) {
-    super(`provider ${provider} is not accepting calls: ${reason}`);
-    this.name = "ProviderUnavailableError";
-  }
-}
 
 /** A held slot. `release` must run exactly once, or the provider leaks capacity. */
 export interface ModelCallLease {

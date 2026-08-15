@@ -56,4 +56,5 @@ export {
   classifyProviderError,
   LlmProviderError,
   type LlmProviderFailureReason,
+  ProviderUnavailableError,
 } from "./provider-error";

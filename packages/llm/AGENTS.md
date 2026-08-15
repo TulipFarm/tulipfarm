@@ -28,6 +28,8 @@ subscription-CLI model adapters.
 - `chainModel(ids)` must execute the whole selected chain; do not collapse fallback to the head.
 - API-keyed providers read `entry.api_key_ref`: `env://VAR` from env, else `secrets.get(ref)`.
 - Fallback hard failures propagate: auth, `404`, abort. `429`, `5xx`, timeout fall through.
+- A call shed by admission control throws `ProviderUnavailableError`, never `LlmProviderError`:
+  that type means permanent, and a shed provider must stay retryable.
 - Bad Subscription Provider credentials throw `LlmProviderError("model_authentication_failed")`.
 - CLI usage reports are running totals, not deltas; never sum them.
 - Embedding failover is width-scoped: a standby may answer only if it declares the *same*
