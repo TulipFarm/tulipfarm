@@ -1,5 +1,5 @@
 import { KillSwitchDeniedError, type MutationGuard } from "@tulipfarm/observability";
-import { ajv, canonicalHash } from "@tulipfarm/schema";
+import { ajv, canonicalHash, type ToolAdapterKind } from "@tulipfarm/schema";
 import type { ToolCatalog } from "../catalog";
 import type { CredentialDispatcher } from "../credential-dispatch";
 import type { ToolIntent } from "../intent";
@@ -28,6 +28,13 @@ export interface ToolAdapterRequest {
 }
 
 export interface ToolAdapter {
+  /**
+   * The backend this adapter actually is. Resolution is by `ToolContractSpec.adapter.ref`, which a
+   * contract chooses freely, so without this the declared `adapter.kind` is decoration: a contract
+   * could name a ref registered to another backend and be handed that backend's authority. The
+   * dispatcher refuses when the two disagree.
+   */
+  readonly kind: ToolAdapterKind;
   dispatch(request: ToolAdapterRequest, credential?: string): Promise<unknown>;
 }
 
@@ -35,6 +42,7 @@ export type ToolDispatchErrorCode =
   | "effect_not_found"
   | "contract_not_found"
   | "adapter_not_found"
+  | "adapter_kind_mismatch"
   | "dispatch_failed"
   | "ambiguous"
   | "invalid_output"
@@ -115,6 +123,16 @@ export class EffectDispatcher {
     if (contract === undefined) throw new ToolDispatchError("contract_not_found", effectId);
     const adapter = this.deps.adapters.get(contract.adapter.ref);
     if (adapter === undefined) throw new ToolDispatchError("adapter_not_found", effectId);
+    // Checked before the attempt is recorded, like the kill switch: a contract that reaches the
+    // wrong backend is a mis-registration, and recording an attempt would claim the call was
+    // routable. The detail names both sides so an operator can see which one is wrong.
+    if (adapter.kind !== contract.adapter.kind) {
+      throw new ToolDispatchError(
+        "adapter_kind_mismatch",
+        effectId,
+        `${contract.adapter.kind}!=${adapter.kind}`
+      );
+    }
     const validateOutput = ajv.compile(contract.outputSchema);
 
     if (this.deps.mutationGuard !== undefined) {

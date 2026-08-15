@@ -14,7 +14,7 @@ Owns adapter contracts, event normalization, source ACLs, sync checkpoints, and 
 | --- | --- |
 | `src/http.ts` | Provider-neutral HTTP port, failure classification, bounded pagination. |
 | `src/grants.ts` | Default-deny grants for concrete external targets. |
-| `src/egress/` | Declarative egress manifest to ToolContract compiler and adapter. |
+| `src/egress/` | Manifest-to-ToolContract compiler, adapter, fetch transport, destination cage. |
 | `src/import/`, `src/ingress/`, `src/external-protocol/` | Import and ingress protocols. |
 | `src/github/`, `src/jira/` | Tool adapters and provider contracts. |
 | `src/slack/`, `src/telegram/` | Messaging Tool adapters and provider contracts. |
@@ -27,6 +27,8 @@ Owns adapter contracts, event normalization, source ACLs, sync checkpoints, and 
 
 - Concrete transports live in `apps/integration-worker`; the broker must not import impls.
 - Prefer `src/egress/` over `src/<provider>/` when a manifest can express the provider.
+- Manifest hosts are chat-authored: compile through `assertPublicEgressUrl`, send through
+  `GuardedEgressHttp`. Neither subsumes the other — a public name can hold an inward A record.
 - `openapi-compile.ts` must resolve every `$ref`; survivors can break unrelated Tool registration.
 - `collectPages` must throw `PaginationBoundError` rather than silently truncate a paged read.
 - Jira creates use `tulipfarm-effect-<hash>` labels and must read provider state before writing.

@@ -79,6 +79,7 @@ function preflight(code: string): AdapterDispatchError {
 
 /** Authorized Skill Tool adapter; sends immutable input Artifacts, never credential plaintext. */
 export class SandboxToolAdapter implements ToolAdapter {
+  readonly kind = "sandbox" as const;
   private readonly now: () => number;
   private readonly nonce: () => string;
   private readonly requestLifetimeMs: number;

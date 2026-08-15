@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { hostname } from "node:os";
 import { GuardrailsService } from "@tulipfarm/agent-runtime";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import { FetchEgressHttp, GuardedEgressHttp } from "@tulipfarm/integrations";
 import {
   buildDefaultRegistry,
   enqueueIndex,
@@ -246,7 +247,6 @@ import { PgSurfaceActionStore } from "./surfaces/action-store";
 import { PgSurfaceArtifactStore } from "./surfaces/artifact-store";
 import { apiSurfacePresentation, surfaceRendererRegistry } from "./surfaces/renderer-registry";
 import { registerTaskReconcileSchedule, TASK_RECONCILE_QUEUE } from "./tasks/reconcile-schedule";
-import { FetchEgressHttp } from "./tools/declarative/http";
 import { DeclarativeToolSync } from "./tools/declarative/sync";
 import { buildGitHubTooling } from "./tools/github/compose";
 import { buildGitHubTools } from "./tools/github/tools";
@@ -822,7 +822,8 @@ async function boot() {
       businessId: DEPLOYMENT_BUSINESS_ID,
       effects: slackEffects,
       secrets: async () => secretsService,
-      http: new FetchEgressHttp(),
+      // Manifests are authored from chat, so the destination is untrusted right up to the socket.
+      http: new GuardedEgressHttp(new FetchEgressHttp()),
       mutationGuard,
       logger: () => app.log,
     });

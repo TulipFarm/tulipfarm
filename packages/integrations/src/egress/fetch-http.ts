@@ -1,8 +1,5 @@
-import type {
-  EgressHttpPort,
-  EgressHttpRequest,
-  IntegrationHttpResponse,
-} from "@tulipfarm/integrations";
+import type { IntegrationHttpResponse } from "../http";
+import type { EgressHttpPort, EgressHttpRequest } from "./openapi-adapter";
 
 /** Manifest OpenAPI transport; applies no auth and maps network faults to 503. */
 

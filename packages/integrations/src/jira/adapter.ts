@@ -126,6 +126,8 @@ function jqlString(value: string): string {
 }
 
 export class JiraAdapter implements ToolAdapter, ToolReconciliationAdapter {
+  readonly kind = "integration" as const;
+
   constructor(private readonly deps: JiraAdapterDeps) {}
 
   async dispatch(request: ToolAdapterRequest, credential?: string): Promise<unknown> {

@@ -23,6 +23,12 @@ import { describe, expect, it } from "vitest";
  *
  * `apps/api` no longer holds the majority: the packages now carry 73,822 lines to its 49,214.
  *
+ * The mark came down to 50,033 when the manifest egress transport moved to
+ * `packages/integrations/src/egress`, where the `EgressHttpPort` it implements already lived. It
+ * had been in the app for no reason other than that the app was where it was first needed. The
+ * effect-plane wave that moved it also added `adapterFor()` to the declarative composition root,
+ * which is Fastify-adjacent wiring and stays — so the net is 41 lines out, not 62.
+ *
  * This is that. The ceiling is a high-water mark, not a target — lowering it as code moves out is
  * the point, and the only edit this file should ever receive. Raising it needs a reviewed reason,
  * because "the number went up again" is exactly the event three editions failed to catch.
@@ -32,7 +38,7 @@ import { describe, expect, it } from "vitest";
  * measure that cannot be gamed without noticing is worth more here than a subtle one.
  */
 
-const CEILING = 50_074;
+const CEILING = 50_033;
 
 /**
  * Domains inside `apps/api/src` that already have a package of the same name. Everything here that

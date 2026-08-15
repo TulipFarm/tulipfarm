@@ -52,17 +52,15 @@ export type ToolIdempotencyStrategy = (typeof TOOL_IDEMPOTENCY_STRATEGIES)[numbe
 
 /**
  * Implementation backends a Tool contract can bind to (SPEC §11.1, §15). A kind belongs here only
- * while a registered adapter can serve it: the declarative path picks an adapter per contract, so
- * a kind with no implementation validates and then silently binds to the wrong backend.
+ * while a registered adapter can serve it: `EffectDispatcher` refuses a contract whose declared
+ * kind is not the kind of the adapter its ref resolves to, so an unserved kind is a Tool that
+ * validates at install and can never dispatch.
+ *
+ * `native` is served by the Tool host rather than the effect plane; `mcp` is emitted by the import
+ * proposal path and has no adapter yet. Both are pinned as declaration-only by
+ * `scripts/adapter-kind-dispatch.test.ts`, which fails the build on a new unserved kind.
  */
-export const TOOL_ADAPTER_KINDS = [
-  "native",
-  "integration",
-  "mcp",
-  "openapi",
-  "http",
-  "sandbox",
-] as const;
+export const TOOL_ADAPTER_KINDS = ["native", "integration", "mcp", "openapi", "sandbox"] as const;
 export type ToolAdapterKind = (typeof TOOL_ADAPTER_KINDS)[number];
 
 /** Reasoning/effort level requested from a model (SPEC §17). */

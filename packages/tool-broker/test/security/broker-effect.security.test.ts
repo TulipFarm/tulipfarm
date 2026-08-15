@@ -220,6 +220,7 @@ describe("Tool Broker and effect threat boundary", () => {
       authorizer: { authorize: async () => ({ allowed: true, maxUses: 1 }) },
     });
     const adapter: ToolAdapter = {
+      kind: "integration",
       dispatch: vi.fn(async (_request, credential) => {
         throw new Error(`provider rejected ${credential}`);
       }),
@@ -250,6 +251,7 @@ describe("Tool Broker and effect threat boundary", () => {
     const store = new MemoryEffectStore();
     await reserveAuthorized(store, authorized(broker));
     const adapter: ToolAdapter = {
+      kind: "integration",
       dispatch: vi.fn(async () => {
         throw new AdapterDispatchError("after_dispatch", "cancelled", true, "provider-request-1");
       }),

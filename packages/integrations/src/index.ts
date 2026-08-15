@@ -33,9 +33,13 @@ export type {
   CompiledEgressTool,
   CompileOpenApiEgressInput,
   EgressCompileErrorCode,
+  EgressDestinationDenial,
+  EgressHttpOptions,
   EgressHttpPort,
   EgressHttpRequest,
   EgressInput,
+  GuardedEgressHttpOptions,
+  HostResolver,
   OpenApiEgress,
   OpenApiEgressAuth,
   OpenApiEgressOperation,
@@ -44,7 +48,17 @@ export type {
   OpenApiToolAdapterDeps,
   UnsupportedEgress,
 } from "./egress";
-export { compileOpenApiEgress, EgressCompileError, OpenApiToolAdapter } from "./egress";
+export {
+  assertPublicAddresses,
+  assertPublicEgressUrl,
+  compileOpenApiEgress,
+  EgressCompileError,
+  EgressDestinationError,
+  FetchEgressHttp,
+  GuardedEgressHttp,
+  isPrivateNetworkAddress,
+  OpenApiToolAdapter,
+} from "./egress";
 export type {
   ExternalIntegrationAccessPort,
   ExternalIntegrationAuditEvent,
@@ -82,23 +96,10 @@ export type {
   GenericWebhookErrorCode,
   GenericWebhookEvent,
   GenericWebhookRequest,
-  OutboundHttpConfig,
-  OutboundHttpDependencies,
-  OutboundHttpErrorCode,
-  OutboundHttpFailurePhase,
-  OutboundHttpRequest,
-  OutboundHttpResult,
-  OutboundHttpTransport,
-  OutboundHttpTransportRequest,
-  OutboundHttpTransportResponse,
 } from "./generic";
 export {
   acceptGenericWebhook,
   GenericWebhookError,
-  isPrivateNetworkAddress,
-  OutboundHttpAdapter,
-  OutboundHttpError,
-  renderOutboundHttpTemplate,
 } from "./generic";
 export type {
   CachingInstallationTokenMinterDeps,

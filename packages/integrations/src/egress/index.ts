@@ -1,4 +1,15 @@
 export {
+  assertPublicAddresses,
+  assertPublicEgressUrl,
+  type EgressDestinationDenial,
+  EgressDestinationError,
+  GuardedEgressHttp,
+  type GuardedEgressHttpOptions,
+  type HostResolver,
+  isPrivateNetworkAddress,
+} from "./destination";
+export { type EgressHttpOptions, FetchEgressHttp } from "./fetch-http";
+export {
   type EgressHttpPort,
   type EgressHttpRequest,
   OpenApiToolAdapter,

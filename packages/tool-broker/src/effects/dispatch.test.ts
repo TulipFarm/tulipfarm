@@ -85,6 +85,7 @@ describe("EffectDispatcher", () => {
 
   it("dispatches only after the effect and attempt are durable", async () => {
     const adapter: ToolAdapter = {
+      kind: "integration",
       dispatch: vi.fn(async (request) => {
         expect(await store.get(BUSINESS_ID, EFFECT_ID)).toMatchObject({ state: "dispatched" });
         expect(await store.listAttempts(BUSINESS_ID, EFFECT_ID)).toHaveLength(1);
@@ -102,6 +103,7 @@ describe("EffectDispatcher", () => {
   it("retries a classified pre-dispatch failure with the same stable key and backoff", async () => {
     const keys: string[] = [];
     const adapter: ToolAdapter = {
+      kind: "integration",
       dispatch: vi.fn(async (request) => {
         keys.push(request.idempotencyKey);
         if (keys.length === 1) {
@@ -121,6 +123,7 @@ describe("EffectDispatcher", () => {
 
   it("marks an uncertain mutation ambiguous and never blindly retries", async () => {
     const adapter: ToolAdapter = {
+      kind: "integration",
       dispatch: vi.fn(async () => {
         throw new AdapterDispatchError("after_dispatch", "provider_timeout", true, "request-42");
       }),
@@ -134,7 +137,10 @@ describe("EffectDispatcher", () => {
   });
 
   it("validates provider output before confirming the effect", async () => {
-    const adapter: ToolAdapter = { dispatch: vi.fn(async () => ({ providerId: 42 })) };
+    const adapter: ToolAdapter = {
+      kind: "integration",
+      dispatch: vi.fn(async () => ({ providerId: 42 })),
+    };
 
     await expect(dispatcher(adapter).dispatch(BUSINESS_ID, EFFECT_ID)).rejects.toThrow(
       new ToolDispatchError("invalid_output", EFFECT_ID)
@@ -143,7 +149,10 @@ describe("EffectDispatcher", () => {
   });
 
   it("enforces a kill switch before creating an attempt or calling the adapter", async () => {
-    const adapter: ToolAdapter = { dispatch: vi.fn(async () => ({ providerId: "must-not-run" })) };
+    const adapter: ToolAdapter = {
+      kind: "integration",
+      dispatch: vi.fn(async () => ({ providerId: "must-not-run" })),
+    };
     const assertAllowed = vi.fn(async () => {
       throw new Error("kill_switch_denied");
     });
@@ -178,7 +187,9 @@ describe("EffectDispatcher", () => {
     const guarded = new EffectDispatcher({
       store,
       catalog: ToolCatalog.load([definition]),
-      adapters: new Map([["github", { dispatch: async () => ({ providerId: "ok" }) }]]),
+      adapters: new Map([
+        ["github", { kind: "integration" as const, dispatch: async () => ({ providerId: "ok" }) }],
+      ]),
       mutationGuard: { assertAllowed },
       mutationIdentity: { integrationId: "github-app" },
       now: () => "2026-07-25T00:00:01.000Z",
@@ -194,7 +205,9 @@ describe("EffectDispatcher", () => {
     const guarded = new EffectDispatcher({
       store,
       catalog: ToolCatalog.load([definition]),
-      adapters: new Map([["github", { dispatch: async () => ({ providerId: "no" }) }]]),
+      adapters: new Map([
+        ["github", { kind: "integration" as const, dispatch: async () => ({ providerId: "no" }) }],
+      ]),
       mutationGuard: {
         assertAllowed: async () => {
           throw new KillSwitchDeniedError("ks-1", "all_mutations", "incident-42");
@@ -207,6 +220,37 @@ describe("EffectDispatcher", () => {
       code: "kill_switch_denied",
       detail: "incident-42",
     });
+  });
+
+  it("refuses an adapter whose kind is not the one the contract declared", async () => {
+    // The contract declares `integration` and names ref `github`; a `sandbox` adapter registered
+    // under that ref would otherwise be handed the contract's authority, because resolution is by
+    // ref alone. Nothing is dispatched and no attempt is recorded: the call was never routable.
+    const impostor: ToolAdapter = { kind: "sandbox", dispatch: vi.fn(async () => ({})) };
+
+    await expect(dispatcher(impostor).dispatch(BUSINESS_ID, EFFECT_ID)).rejects.toMatchObject({
+      code: "adapter_kind_mismatch",
+      detail: "integration!=sandbox",
+    });
+    expect(impostor.dispatch).not.toHaveBeenCalled();
+    expect(await store.listAttempts(BUSINESS_ID, EFFECT_ID)).toEqual([]);
+    expect(await store.get(BUSINESS_ID, EFFECT_ID)).toMatchObject({ state: "authorized" });
+  });
+
+  it("refuses the mismatch before the kill switch, so a stopped deployment reports the real fault", async () => {
+    const assertAllowed = vi.fn(async () => {});
+    const guarded = new EffectDispatcher({
+      store,
+      catalog: ToolCatalog.load([definition]),
+      adapters: new Map([["github", { kind: "openapi" as const, dispatch: async () => ({}) }]]),
+      mutationGuard: { assertAllowed },
+      now: () => "2026-07-25T00:00:01.000Z",
+    });
+
+    await expect(guarded.dispatch(BUSINESS_ID, EFFECT_ID)).rejects.toMatchObject({
+      code: "adapter_kind_mismatch",
+    });
+    expect(assertAllowed).not.toHaveBeenCalled();
   });
 
   function dispatcher(adapter: ToolAdapter, wait?: (delayMs: number) => Promise<void>) {
