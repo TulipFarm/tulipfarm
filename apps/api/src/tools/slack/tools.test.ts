@@ -6,9 +6,9 @@ import {
   type ReserveEffectInput,
   type ToolIntent,
 } from "@tulipfarm/tool-broker";
+import type { RequestContext } from "@tulipfarm/tool-host";
 import { describe, expect, it } from "vitest";
 import type { IntegrationConversation, IntegrationConversationsRepo } from "../../ingress/repo";
-import type { RequestContext } from "../types";
 import { buildSlackTooling } from "./compose";
 import { buildSlackTools } from "./tools";
 

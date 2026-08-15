@@ -11,9 +11,8 @@ import {
   surfaceActionsForArtifact,
   targetKey,
 } from "@tulipfarm/surface";
-import { defineApiTool, toToolDef } from "../tools/define";
-import type { RequestContext, ToolDef } from "../tools/types";
-import { err, ok } from "../tools/types";
+import type { RequestContext, ToolDef } from "@tulipfarm/tool-host";
+import { defineApiTool, err, ok, toToolDef } from "@tulipfarm/tool-host";
 import { surfaceRendererRegistry } from "./renderer-registry";
 
 async function createActionHandles(

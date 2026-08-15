@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { PGlite } from "@electric-sql/pglite";
+import { DOMAIN_EVENTS } from "@tulipfarm/storage";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { DOMAIN_EVENTS } from "../domain-events";
 import { makeMigratedPglite } from "../test/pglite";
 import { subscribeObservability } from "./events";
 import { PgObsRepo } from "./repo";

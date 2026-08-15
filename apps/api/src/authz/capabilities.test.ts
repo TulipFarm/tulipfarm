@@ -1,8 +1,8 @@
 /** The capability catalog must only advertise gates the auth layer can evaluate. */
 
 import { RoleGrantSchema } from "@tulipfarm/schema";
+import type { ToolDef } from "@tulipfarm/tool-host";
 import { describe, expect, it } from "vitest";
-import type { ToolDef } from "../tools/types";
 import {
   AUTHORABLE_ACTION,
   AUTHORABLE_RESOURCE,

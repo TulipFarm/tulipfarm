@@ -1,6 +1,6 @@
+import { parsePaginationQuery } from "@tulipfarm/storage";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
-import { parsePaginationQuery } from "../pagination";
 import type { ActivityRow } from "./repo";
 import type { ActivityService } from "./service";
 

@@ -17,8 +17,15 @@ import {
   type ToolIntent,
   type ToolTargetRef,
 } from "@tulipfarm/tool-broker";
-import { defineApiTool, toToolDef } from "../define";
-import { err, ok, type RequestContext, type ToolCallResult, type ToolDef } from "../types";
+import {
+  defineApiTool,
+  err,
+  ok,
+  type RequestContext,
+  type ToolCallResult,
+  type ToolDef,
+  toToolDef,
+} from "@tulipfarm/tool-host";
 import type { GitHubTooling } from "./compose";
 import { type GitHubInstallationSelector, githubInstallationSecretRef } from "./credentials";
 

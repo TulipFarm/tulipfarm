@@ -1,7 +1,7 @@
 import { MAX_CUSTOM_INSTRUCTIONS_CHARS } from "@tulipfarm/agent-runtime";
+import type { KvService } from "@tulipfarm/kv";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
-import type { KvService } from "../kv/service";
 import {
   CUSTOM_INSTRUCTIONS_KEY,
   CUSTOM_INSTRUCTIONS_NAMESPACE,

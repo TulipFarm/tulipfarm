@@ -4,19 +4,21 @@ import type {
   MemoryAssertion,
   MemoryConfirmationState,
   MemoryDeps,
+  MemoryEmbedder,
   MemoryExclusionReason,
   MemoryOrigin,
   MemoryStatus,
   MemoryTrustTier,
   MemoryType,
 } from "@tulipfarm/memory";
-import { recallMemory } from "@tulipfarm/memory";
+import {
+  PgMemoryAssertionStore,
+  PgMemoryRecallIndex,
+  PgPendingMemoryStore,
+  recallMemory,
+} from "@tulipfarm/memory";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeMigratedPglite } from "../test/pglite";
-import { PgMemoryAssertionStore } from "./assertion-store";
-import type { MemoryEmbedder } from "./embedder";
-import { PgPendingMemoryStore } from "./pending-store";
-import { PgMemoryRecallIndex } from "./recall-index";
 
 interface GoldenRecallAssertion {
   readonly id: string;

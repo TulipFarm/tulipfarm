@@ -2,6 +2,15 @@ import type { PGlite } from "@electric-sql/pglite";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { ConfluenceApiPort, ConfluenceChange, ConfluencePage } from "@tulipfarm/integrations";
 import { syncConfluenceKnowledge } from "@tulipfarm/integrations";
+import type { EmbeddingPort } from "@tulipfarm/knowledge";
+import {
+  KNOWLEDGE_TOOLS,
+  KnowledgeService,
+  PageRetrievalService,
+  PgKnowledgeChunkRepo,
+  PgKnowledgePageRepo,
+  PgKnowledgeRevisionRepo,
+} from "@tulipfarm/knowledge";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { MemoryExternalIdentityRepo } from "../identity/fakes";
 import { ExternalLinkKnowledgeIdentityMap } from "../identity/knowledge-identity-map";
@@ -10,12 +19,6 @@ import { PgKnowledgeEmissionSink } from "../knowledge-sources/emission-sink";
 import { PgKnowledgeIndexStore } from "../knowledge-sources/index-store";
 import { PgKnowledgeSourceStore } from "../knowledge-sources/source-store";
 import { makeMigratedPglite } from "../test/pglite";
-import { PgKnowledgeChunkRepo } from "./chunks-repo";
-import { PageRetrievalService } from "./page-search-adapter";
-import { PgKnowledgePageRepo, PgKnowledgeRevisionRepo } from "./repo";
-import { KnowledgeService } from "./service";
-import { KNOWLEDGE_TOOLS } from "./tools";
-import type { EmbeddingPort } from "./types";
 
 const BUSINESS = DEPLOYMENT_BUSINESS_ID;
 const NOW = new Date("2026-08-08T12:00:00.000Z");

@@ -3,8 +3,8 @@ import { GITHUB_TOOL_CONTRACTS, type IntegrationHttpRequest } from "@tulipfarm/i
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { IntegrationStore, PersistedRoutingSnapshot } from "@tulipfarm/storage";
 import { MemoryEffectStore } from "@tulipfarm/tool-broker";
+import type { RequestContext } from "@tulipfarm/tool-host";
 import { describe, expect, it } from "vitest";
-import type { RequestContext } from "../types";
 import { buildGitHubTooling } from "./compose";
 import { buildGitHubTools, GITHUB_REPOSITORY_LIST_TOOL_NAME } from "./tools";
 

@@ -6,11 +6,17 @@ import {
   SoulWriteError,
   type SoulWriter,
 } from "@tulipfarm/soul";
+import {
+  type ApiToolDefinition,
+  defineApiTool,
+  err,
+  ok,
+  type RequestContext,
+  type ToolCallResult,
+} from "@tulipfarm/tool-host";
 import { stringify } from "yaml";
 import { SYSTEM_SOUL_COMMIT_ACTOR } from "../../runtime/soul-writer";
-import { type ApiToolDefinition, defineApiTool } from "../../tools/define.js";
 import { soulCommitError } from "../../tools/soul-faults";
-import { err, ok, type RequestContext, type ToolCallResult } from "../../tools/types.js";
 
 const NAME_RE = /^[a-z][a-z0-9-]*$/;
 const SOUL_AGENT_TARGET = "soul.agent";

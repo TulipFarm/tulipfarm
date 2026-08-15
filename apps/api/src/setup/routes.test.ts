@@ -10,6 +10,7 @@ import {
   SecretsService,
 } from "@tulipfarm/secrets";
 import { GitSyncService } from "@tulipfarm/soul";
+import type { PaginatedResult } from "@tulipfarm/storage";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parse, stringify } from "yaml";
@@ -18,7 +19,6 @@ import type { TokenDoc, TokenRepo } from "../auth/api-tokens";
 import { CSRF_COOKIE, CSRF_HEADER } from "../auth/csrf";
 import { MemorySessionStore } from "../auth/session-store";
 import { AdminAlreadyExistsError, type UserDoc, type UserRepo } from "../auth/users";
-import type { PaginatedResult } from "../pagination";
 import type { SetupAdminCreator } from "./first-admin";
 
 /** Uses a fake client because real credential rejection would require a live model call. */

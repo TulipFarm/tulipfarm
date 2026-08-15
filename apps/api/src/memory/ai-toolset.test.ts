@@ -1,11 +1,14 @@
+import type { MemoryLifecycleService, ToolCallResult } from "@tulipfarm/memory";
+import {
+  assertValidAssertion,
+  type MemoryAssertionView,
+  type MemoryRepo,
+  MemoryService,
+} from "@tulipfarm/memory";
 import type { ToolSet } from "ai";
 import { describe, expect, it } from "vitest";
 import { FRONTEND_TOOLS } from "../platform/frontend-tools";
 import { buildToolRegistry } from "../tools/setup";
-import { assertValidAssertion, type MemoryAssertionView, type MemoryRepo } from "./assertion-view";
-import type { MemoryLifecycleService } from "./lifecycle-service";
-import { MemoryService } from "./service";
-import type { ToolCallResult } from "./tool-result";
 
 class FakeMemoryRepo implements MemoryRepo {
   docs: MemoryAssertionView[] = [];

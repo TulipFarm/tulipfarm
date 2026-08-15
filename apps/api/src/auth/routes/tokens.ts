@@ -1,5 +1,5 @@
+import { parsePaginationQuery } from "@tulipfarm/storage";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { parsePaginationQuery } from "../../pagination";
 import { createApiToken, type TokenRepo, toPublicToken } from "../api-tokens";
 import { ErrorSchema, PublicTokenSchema } from "../schemas";
 import type { UserDoc, UserRepo } from "../users";

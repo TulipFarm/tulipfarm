@@ -30,7 +30,7 @@ An omitted edge is forbidden.
 | --- | --- |
 | `packages/schema` | No TulipFarm runtime package |
 | `packages/observability` | No TulipFarm runtime package |
-| `packages/storage` | `packages/schema`, `packages/observability` |
+| `packages/storage` | `packages/schema`, `packages/observability`, `packages/surface` |
 | `packages/authz` | `packages/schema`, `packages/observability` |
 | `packages/audit` | `packages/schema`, `packages/storage`, `packages/observability` |
 | `packages/soul` | `packages/schema`, `packages/authz`, `packages/audit`, `packages/storage`, `packages/observability`, `packages/surface` |
@@ -38,8 +38,11 @@ An omitted edge is forbidden.
 | `packages/run-kernel` | `packages/schema`, `packages/audit`, `packages/storage`, `packages/observability` |
 | `packages/sandbox` | `packages/schema`, `packages/authz`, `packages/audit`, `packages/storage`, `packages/observability` |
 | `packages/tool-broker` | `packages/schema`, `packages/authz`, `packages/audit`, `packages/secrets`, `packages/sandbox`, `packages/storage`, `packages/observability` |
-| `packages/knowledge` | `packages/schema`, `packages/authz`, `packages/audit`, `packages/storage`, `packages/observability` |
-| `packages/memory` | `packages/schema`, `packages/authz`, `packages/audit`, `packages/storage`, `packages/observability` |
+| `packages/knowledge` | `packages/schema`, `packages/authz`, `packages/audit`, `packages/storage`, `packages/observability`, `packages/constants`, `packages/llm`, `packages/tool-host` |
+| `packages/memory` | `packages/schema`, `packages/authz`, `packages/audit`, `packages/storage`, `packages/observability`, `packages/constants`, `packages/tool-host` |
+| `packages/tool-host` | `packages/schema`, `packages/authz`, `packages/soul`, `packages/run-kernel`, `packages/tool-broker`, `packages/surface`, `packages/storage`, `packages/observability` |
+| `packages/kv` | `packages/schema`, `packages/storage`, `packages/tool-host` |
+| `packages/platform-tools` | `packages/schema`, `packages/tool-host`, `packages/agent-runtime` |
 | `packages/surface` | `packages/schema` |
 | `packages/surface-web` | `packages/surface`, `packages/ui` |
 | `packages/surface-slack` | `packages/surface` |
@@ -57,8 +60,8 @@ the Agent runtime. Applications register implementations during composition.
 
 | Consumer | May import from |
 | --- | --- |
-| `apps/api` | `schema`, `soul`, `constants`, `authz`, `audit`, `secrets`, `run-kernel`, `tool-broker`, `agent-runtime`, `knowledge`, `memory`, `surface`, `surface-web`, `surface-slack`, `surface-telegram`, `surface-github`, `sandbox`, `integrations`, `storage`, `observability` |
-| `apps/worker` | `schema`, `constants`, `authz`, `audit`, `secrets`, `soul`, `run-kernel`, `tool-broker`, `agent-runtime`, `knowledge`, `memory`, `surface`, `integrations`, `sandbox`, `storage`, `observability` |
+| `apps/api` | `schema`, `soul`, `constants`, `authz`, `audit`, `secrets`, `run-kernel`, `tool-broker`, `agent-runtime`, `knowledge`, `memory`, `surface`, `surface-web`, `surface-slack`, `surface-telegram`, `surface-github`, `sandbox`, `integrations`, `storage`, `observability`, `tool-host`, `kv`, `platform-tools` |
+| `apps/worker` | `schema`, `constants`, `authz`, `audit`, `secrets`, `soul`, `run-kernel`, `tool-broker`, `agent-runtime`, `knowledge`, `memory`, `surface`, `integrations`, `sandbox`, `storage`, `observability`, `tool-host`, `kv`, `platform-tools` |
 | `apps/integration-worker` | `schema`, `authz`, `audit`, `run-kernel`, `tool-broker`, `integrations`, `storage`, `observability` |
 | `apps/web` | `schema`, `surface`, `surface-web`, and presentation-only packages such as `ui`/`editor` |
 

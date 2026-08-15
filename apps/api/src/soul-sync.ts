@@ -1,4 +1,4 @@
-import { recordJobRun } from "./activity/job-run";
+import { recordJobRun } from "@tulipfarm/observability";
 import type { ActivityService } from "./activity/service";
 
 interface SoulSyncer {

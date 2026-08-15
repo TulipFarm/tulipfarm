@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { type LogEventRecord, PgResourceWriter } from "@tulipfarm/observability";
+import type { PaginatedResult } from "@tulipfarm/storage";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../app";
@@ -8,7 +9,6 @@ import type { TokenDoc, TokenRepo } from "../auth/api-tokens";
 import { SESSION_COOKIE } from "../auth/routes";
 import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
-import type { PaginatedResult } from "../pagination";
 import { makeMigratedPglite } from "../test/pglite";
 import { type LogEventView, PgLogRepo } from "./log-repo";
 import { PgObsRepo } from "./repo";

@@ -1,10 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
+import type { MemoryAssertionView } from "@tulipfarm/memory";
+import { EngineMemoryRepo, MemoryService } from "@tulipfarm/memory";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeMigratedPglite } from "../test/pglite";
-import type { MemoryAssertionView } from "./assertion-view";
-import { EngineMemoryRepo } from "./engine-repo";
-import { MemoryService } from "./service";
 
 /** M1 cutover contract: legacy KV behavior unchanged; engine adds versions and tombstones. */
 

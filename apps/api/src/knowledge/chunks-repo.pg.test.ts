@@ -1,12 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
+import type { ChunkInput, EmbeddingPort, KnowledgePage } from "@tulipfarm/knowledge";
+import { indexPage, PgKnowledgeChunkRepo, PgKnowledgePageRepo } from "@tulipfarm/knowledge";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Queryable } from "../db";
 import { makeMigratedPglite } from "../test/pglite";
-import { PgKnowledgeChunkRepo } from "./chunks-repo";
-import { indexPage } from "./index-service";
-import { PgKnowledgePageRepo } from "./repo";
-import type { ChunkInput, EmbeddingPort, KnowledgePage } from "./types";
 
 function page(over: Partial<KnowledgePage> = {}): KnowledgePage {
   const now = new Date();
@@ -56,14 +54,18 @@ class FailSecondChunkInsert implements Queryable {
 
   constructor(private readonly db: PGlite) {}
 
-  query(text: string, params?: unknown[]): Promise<{ rows: Record<string, unknown>[] }> {
-    return this.queryWith(this.db, text, params);
+  query<Row = Record<string, unknown>>(
+    text: string,
+    params?: readonly unknown[]
+  ): Promise<{ rows: Row[] }> {
+    return this.queryWith(this.db, text, params) as Promise<{ rows: Row[] }>;
   }
 
   transaction<T>(callback: (tx: Queryable) => Promise<T>): Promise<T> {
     return this.db.transaction((tx) =>
       callback({
-        query: (text, params) => this.queryWith(tx, text, params),
+        query: <Row>(text: string, params?: readonly unknown[]) =>
+          this.queryWith(tx, text, params) as Promise<{ rows: Row[] }>,
       })
     );
   }
@@ -71,7 +73,7 @@ class FailSecondChunkInsert implements Queryable {
   private queryWith(
     q: Queryable,
     text: string,
-    params?: unknown[]
+    params?: readonly unknown[]
   ): Promise<{ rows: Record<string, unknown>[] }> {
     if (text.includes("INSERT INTO knowledge_chunks")) {
       this.insertCount += 1;

@@ -13,11 +13,17 @@ import {
   type SurfaceComponentSupport,
   validateSoulSurfaceComponent,
 } from "@tulipfarm/surface";
+import {
+  type ApiToolDefinition,
+  defineApiTool,
+  err,
+  ok,
+  type RequestContext,
+  type ToolCallResult,
+} from "@tulipfarm/tool-host";
 import { parse, stringify } from "yaml";
 import { SYSTEM_SOUL_COMMIT_ACTOR } from "../../runtime/soul-writer";
-import { type ApiToolDefinition, defineApiTool } from "../../tools/define";
 import { soulCommitError } from "../../tools/soul-faults";
-import { err, ok, type RequestContext, type ToolCallResult } from "../../tools/types";
 
 export interface SurfaceComponentToolContext {
   readonly gitSync: GitSyncService;

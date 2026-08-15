@@ -1,0 +1,23 @@
+{
+  "name": "@tulipfarm/kv",
+  "version": "0.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "scripts": {
+    "lint": "biome check --no-errors-on-unmatched .",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@tulipfarm/schema": "workspace:*",
+    "@tulipfarm/storage": "workspace:*",
+    "@tulipfarm/tool-host": "workspace:*"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.3",
+    "@tulipfarm/tsconfig": "workspace:*",
+    "@types/node": "^26.1.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
+  }
+}

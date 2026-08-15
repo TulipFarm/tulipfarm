@@ -3,7 +3,7 @@
  * broken ones.
  */
 
-import type { ToolDef } from "../tools/types";
+import type { ToolDef } from "@tulipfarm/tool-host";
 
 /** Copied from RoleSchema; tests guard drift without TypeBox runtime coupling. */
 export const AUTHORABLE_ACTION = /^[a-z][a-z0-9_-]*(?:\.[a-z][a-z0-9_-]*)+$/;

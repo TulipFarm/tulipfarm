@@ -1,8 +1,8 @@
 import type { EventEmitter } from "node:events";
 import { readFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { formatTemporalContext } from "@tulipfarm/agent-runtime";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import { PLATFORM_RUNTIME_TOOLS } from "@tulipfarm/platform-tools";
 import { ajv, TulipFarmValidationError, validateRoutineDefinition } from "@tulipfarm/schema";
 import {
   type GitSyncService,
@@ -13,13 +13,13 @@ import {
   SoulWriteError,
   type SoulWriter,
 } from "@tulipfarm/soul";
+import type { RequestContext } from "@tulipfarm/tool-host";
+import { type ApiToolDefinition, defineApiTool } from "@tulipfarm/tool-host";
 import { stringify as stringifyYaml } from "yaml";
 import { SYSTEM_SOUL_COMMIT_ACTOR } from "../runtime/soul-writer";
 import type { BundledSkill } from "../soul/skills/bundled";
 import { resolveSkill } from "../soul/skills/registry";
-import { type ApiToolDefinition, defineApiTool } from "../tools/define";
 import { soulCommitError } from "../tools/soul-faults";
-import type { RequestContext } from "../tools/types";
 import { err, ok, type ToolCallResult } from "./tool-result";
 
 export interface PlatformToolContext {
@@ -113,6 +113,7 @@ const validateLoadSkill = ajv.compile(LOAD_SKILL_SCHEMA);
 
 export const loadSkillTool = defineApiTool<PlatformToolContext>({
   name: "load_skill",
+  requiresAmbient: ["soul"],
   description:
     "Load a Skill's frontmatter and body by name so the agent can apply its instructions. Resolves Soul Skills before the read-only bundled overlay. Graceful not_found when the Skill is absent.",
   mutating: false,
@@ -163,6 +164,7 @@ const validateLoadSkillRef = ajv.compile(LOAD_SKILL_REFERENCE_SCHEMA);
 
 export const loadSkillReferenceTool = defineApiTool<PlatformToolContext>({
   name: "load_skill_reference",
+  requiresAmbient: ["soul"],
   description:
     "Load a reference file from a skill's references/ directory. Use this to pull in supporting material (playbooks, templates) that are too large to include in the skill body.",
   mutating: false,
@@ -206,54 +208,6 @@ export const loadSkillReferenceTool = defineApiTool<PlatformToolContext>({
   },
 });
 
-const VALIDATE_ARTIFACT_SCHEMA: Record<string, unknown> = {
-  type: "object",
-  additionalProperties: false,
-  required: ["artifact", "schema"],
-  properties: {
-    artifact: { description: "The data to validate." },
-    schema: {
-      type: "object",
-      description: "JSON Schema to validate the artifact against.",
-    },
-  },
-};
-const validateArtifactArgs = ajv.compile(VALIDATE_ARTIFACT_SCHEMA);
-
-export const validateArtifactTool = defineApiTool<PlatformToolContext>({
-  name: "validate_artifact",
-  description:
-    "Validate an arbitrary artifact against a JSON Schema. Returns { valid: true } on success or { valid: false, errors: [...] } with AJV error details. Use before writing structured data to resources.",
-  mutating: false,
-  tier: "platform",
-  inputSchema: VALIDATE_ARTIFACT_SCHEMA,
-  authorization: {
-    action: "platform.artifact.validate",
-    resources: ["platform.artifact"],
-    dataClasses: ["soul_definition"],
-  },
-  handler: async (args, _ctx) => {
-    if (!validateArtifactArgs(args))
-      return err("validation_error", firstError(validateArtifactArgs.errors));
-    const { artifact, schema } = args as { artifact: unknown; schema: Record<string, unknown> };
-    let validate: ReturnType<typeof ajv.compile>;
-    try {
-      validate = ajv.compile(schema);
-    } catch (e) {
-      return err("internal_error", `Invalid schema: ${e instanceof Error ? e.message : String(e)}`);
-    }
-    const valid = validate(artifact);
-    if (valid) return ok({ valid: true });
-    return ok({
-      valid: false,
-      errors: (validate.errors ?? []).map((e) => ({
-        path: e.instancePath || "(root)",
-        message: e.message ?? "is invalid",
-      })),
-    });
-  },
-});
-
 const TRANSFER_TO_AGENT_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
@@ -270,6 +224,7 @@ const validateTransfer = ajv.compile(TRANSFER_TO_AGENT_SCHEMA);
 
 export const transferToAgentTool = defineApiTool<PlatformToolContext>({
   name: "transfer_to_agent",
+  requiresAmbient: ["soul"],
   description:
     "Hand the conversation off to another configured agent. The conversation's active agent switches and future turns are handled by the target. Validates that the target is a known platform or Soul agent.",
   mutating: false,
@@ -316,6 +271,7 @@ const validateDelegate = ajv.compile(DELEGATE_TO_AGENT_SCHEMA);
 
 export const delegateToAgentTool = defineApiTool<PlatformToolContext>({
   name: "delegate_to_agent",
+  requiresAmbient: ["soul"],
   description:
     "Delegate a sub-task to another agent and record the delegation. The UI surfaces a delegation-event card. Full async execution is deferred (Agents v0.9) — V1 records intent and returns a delegation receipt.",
   mutating: false,
@@ -357,6 +313,7 @@ const validateTriggerRoutine = ajv.compile(TRIGGER_ROUTINE_SCHEMA);
 
 export const triggerRoutineTool = defineApiTool<PlatformToolContext>({
   name: "trigger_routine",
+  requiresAmbient: ["soul"],
   description:
     "Trigger a routine by name with optional inputs (validated against the routine's x-inputs schema). Returns the run id; watch progress via the routine run APIs.",
   mutating: true,
@@ -440,6 +397,7 @@ function findUnknownAgentRef(
 
 export const routineForgeTool = defineApiTool<PlatformToolContext>({
   name: "routine_forge",
+  requiresAmbient: ["soul"],
   description:
     "Create or update a ROUTINE (a scheduled/triggered automation) in the soul repo — use this, " +
     "not skill_create, whenever the user asks to 'create a routine' / 'automate X' / 'every " +
@@ -541,6 +499,7 @@ const validateRoutinePicker = ajv.compile(ROUTINE_PICKER_SCHEMA);
 
 export const routinePickerTool = defineApiTool<PlatformToolContext>({
   name: "routine_picker",
+  requiresAmbient: ["soul"],
   description:
     "List all available routines from the soul so the user can pick one to trigger. Returns name, title, and description for each routine.",
   mutating: false,
@@ -574,6 +533,7 @@ const validateSoulRepoPush = ajv.compile(SOUL_REPO_PUSH_SCHEMA);
 
 export const soulRepoPushTool = defineApiTool<PlatformToolContext>({
   name: "soul_repo_push",
+  requiresAmbient: ["soul"],
   description:
     "Push committed soul changes to the configured git remote. Returns { pushed: false } when no remote is configured (local-only mode).",
   mutating: true,
@@ -615,6 +575,7 @@ const validateCallSkill = ajv.compile(CALL_SKILL_SCHEMA);
 
 export const callSkillTool = defineApiTool<PlatformToolContext>({
   name: "call_skill",
+  requiresAmbient: ["soul"],
   description:
     "Load and invoke a skill within the current routine execution context. Only callable from a routine-spawned agent turn.",
   mutating: false,
@@ -648,136 +609,11 @@ export const callSkillTool = defineApiTool<PlatformToolContext>({
   },
 });
 
-const COMPLETE_STATE_SCHEMA: Record<string, unknown> = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    output: { description: "Output data from the completed state." },
-  },
-};
-const validateCompleteState = ajv.compile(COMPLETE_STATE_SCHEMA);
-
-export const completeStateTool = defineApiTool<PlatformToolContext>({
-  name: "complete_state",
-  description:
-    "Signal completion of the current routine state and emit its output. Only callable from a routine-spawned agent turn.",
-  mutating: true,
-  tier: "platform",
-  inputSchema: COMPLETE_STATE_SCHEMA,
-  authorization: {
-    action: "platform.state.complete",
-    resources: ["platform.state"],
-    dataClasses: ["operational"],
-  },
-  handler: async (args, ctx) => {
-    if (!validateCompleteState(args))
-      return err("validation_error", firstError(validateCompleteState.errors));
-    if (!ctx.routineContext)
-      return err("internal_error", "complete_state is only callable from a routine context.");
-    const { output } = args as { output?: unknown };
-    return ok({
-      routineId: ctx.routineContext.routineId,
-      runId: ctx.routineContext.runId,
-      completed: true,
-      output: output ?? null,
-    });
-  },
-});
-
-const COMPLETE_TASK_SCHEMA: Record<string, unknown> = {
-  type: "object",
-  additionalProperties: false,
-  required: ["status"],
-  properties: {
-    status: {
-      type: "string",
-      enum: ["success", "failed", "cancelled"],
-      description: "Outcome of the delegated work.",
-    },
-    summary: { type: "string", description: "One-line summary of what was built / what happened." },
-    result: {
-      type: "object",
-      description:
-        "Optional structured result, e.g. { resources, skills, agents } counts or names.",
-    },
-    error: { type: "string", description: "Specific reason when status is 'failed'." },
-  },
-};
-const validateCompleteTask = ajv.compile(COMPLETE_TASK_SCHEMA);
-
-export const completeTaskTool = defineApiTool<PlatformToolContext>({
-  name: "complete_task",
-  description:
-    "Signal that the delegated work is finished and hand control back to the front-desk agent. Call this when a creation/onboarding session is done (success), cannot proceed (failed), or was abandoned (cancelled).",
-  mutating: false,
-  tier: "platform",
-  inputSchema: COMPLETE_TASK_SCHEMA,
-  authorization: {
-    action: "platform.task.complete",
-    resources: ["platform.task"],
-    dataClasses: ["operational"],
-  },
-  handler: async (args) => {
-    if (!validateCompleteTask(args))
-      return err("validation_error", firstError(validateCompleteTask.errors));
-    const { status, summary, result, error } = args as {
-      status: "success" | "failed" | "cancelled";
-      summary?: string;
-      result?: Record<string, unknown>;
-      error?: string;
-    };
-    return ok({
-      status,
-      summary: summary ?? null,
-      result: result ?? null,
-      error: error ?? null,
-      completed: true,
-    });
-  },
-});
-
-const GET_CURRENT_TIME_SCHEMA: Record<string, unknown> = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    timezone: {
-      type: "string",
-      minLength: 1,
-      description:
-        "IANA zone to read the time in (e.g. 'Asia/Kolkata'). Defaults to UTC. Pass the zone shown " +
-        "in <current-context> to stay consistent with the rest of the turn.",
-    },
-  },
-};
-const validateGetCurrentTime = ajv.compile(GET_CURRENT_TIME_SCHEMA);
-
 /** Fresh stateless clock Tool shares the turn-context format to avoid conflicting time facts. */
-export const getCurrentTimeTool = defineApiTool<PlatformToolContext>({
-  name: "get_current_time",
-  description:
-    "Get the current date, day of week and time. The <current-context> block is read once at the " +
-    "start of the turn, so call this when a long-running turn may have outlived it, or to read the " +
-    "time in a different timezone.",
-  mutating: false,
-  tier: "platform",
-  inputSchema: GET_CURRENT_TIME_SCHEMA,
-  authorization: {
-    action: "platform.time.read",
-    resources: ["platform.time"],
-    dataClasses: ["operational"],
-  },
-  handler: async (args) => {
-    if (!validateGetCurrentTime(args))
-      return err("validation_error", firstError(validateGetCurrentTime.errors));
-    const { timezone } = args as { timezone?: string };
-    return ok({ current: formatTemporalContext({ now: new Date(), timezone }) });
-  },
-});
 
 export const PLATFORM_TOOLS: ApiToolDefinition<PlatformToolContext>[] = [
   loadSkillTool,
   loadSkillReferenceTool,
-  validateArtifactTool,
   transferToAgentTool,
   delegateToAgentTool,
   triggerRoutineTool,
@@ -785,7 +621,7 @@ export const PLATFORM_TOOLS: ApiToolDefinition<PlatformToolContext>[] = [
   routinePickerTool,
   soulRepoPushTool,
   callSkillTool,
-  completeStateTool,
-  completeTaskTool,
-  getCurrentTimeTool,
+  // Context-free Tools the durable runtime also hosts; `PlatformRuntimeContext` is a subset of
+  // `PlatformToolContext`, so the control plane registers the same definitions.
+  ...(PLATFORM_RUNTIME_TOOLS as ApiToolDefinition<PlatformToolContext>[]),
 ];

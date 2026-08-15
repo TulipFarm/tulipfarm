@@ -3,7 +3,35 @@ import { EventEmitter } from "node:events";
 import { hostname } from "node:os";
 import { GuardrailsService } from "@tulipfarm/agent-runtime";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import {
+  buildDefaultRegistry,
+  enqueueIndex,
+  KnowledgeService,
+  makeIndexQueueStats,
+  PgConnectorStateRepo,
+  PgKnowledgeChunkRepo,
+  PgKnowledgeLinksRepo,
+  PgKnowledgePageRepo,
+  PgKnowledgeRevisionRepo,
+  PgKnowledgeSpaceOverrideRepo,
+  PgKnowledgeSpaceRepo,
+  registerConnectorSync,
+  registerEmbeddingBackfill,
+  registerKnowledgeIndexing,
+  subscribeKnowledgeIndexing,
+} from "@tulipfarm/knowledge";
+import { KvService, PgKvRepo } from "@tulipfarm/kv";
 import { EmbeddingService, LlmService } from "@tulipfarm/llm";
+import {
+  EngineMemoryRepo,
+  LlmContradictionJudge,
+  LlmMemoryExtractor,
+  MemoryExtractionService,
+  MemoryLifecycleService,
+  MemoryRecallService,
+  MemoryService,
+  PgMemoryEpisodeStore,
+} from "@tulipfarm/memory";
 import {
   BatchingLogSink,
   MutationKillSwitchGuard,
@@ -48,6 +76,7 @@ import {
   ChannelRunDeliveryStore,
   ChildLinkStore,
   EventStore,
+  ensureEmbeddingIndexes,
   IntegrationStore,
   KillSwitchRepo,
   PgGroupRepo,
@@ -60,6 +89,13 @@ import {
   WaitStore,
 } from "@tulipfarm/storage";
 import { CompositeToolEntitlement, PgEffectStore } from "@tulipfarm/tool-broker";
+import {
+  ApprovalsRepo,
+  CredentialResolver,
+  LiveToolGate,
+  RegistryToolDispatcher,
+  ToolApprovalService,
+} from "@tulipfarm/tool-host";
 import { config } from "dotenv";
 import type { FastifyBaseLogger } from "fastify";
 import { PgBoss } from "pg-boss";
@@ -72,8 +108,6 @@ import { createRunReader } from "./admin/run-reader";
 import { createRuntimeOperationalApi } from "./admin/runtime";
 import { buildApp } from "./app";
 import { RoutineApprovalService } from "./approvals/routine-approvals";
-import { ApprovalsRepo } from "./approvals/runtime-repo";
-import { ToolApprovalService } from "./approvals/tool-approvals";
 import { AuditReadService } from "./audit/read-service";
 import { PgAuditEventRepo } from "./audit/repo";
 import { AuditService } from "./audit/service";
@@ -102,7 +136,7 @@ import { createHookExecutor } from "./hooks/executor";
 import { PgRawPayloadVault } from "./hooks/raw-payload-vault";
 import { webhookSecretPort } from "./hooks/secret-port";
 import { PgApiClientRepo } from "./identity/api-clients";
-import { buildLiveAuthorityLayerResolver } from "./identity/authority-layers";
+import { buildApiAuthorityLayerResolver } from "./identity/authority-layers";
 import { channelBindKeyResolver } from "./identity/channel-link";
 import { PgExternalIdentityRepo } from "./identity/external-links";
 import { ExternalLinkKnowledgeIdentityMap } from "./identity/knowledge-identity-map";
@@ -117,27 +151,12 @@ import {
 import { PgIntegrationAuthRequestRepo } from "./integrations/auth-broker";
 import { resolveSecretRef } from "./integrations/connection-env";
 import { PgPrincipalProviderTokenRepo } from "./integrations/principal-tokens";
-import { CredentialResolver } from "./internal/credential-mode";
 import { IngressDeliveryHost } from "./internal/delivery-host";
 import { GitHubEntitlementPort, HttpGitHubPermissionApi } from "./internal/github-entitlement";
 import { InternalRoutineApprovalHost } from "./internal/routine-approval-host";
-import { RegistryToolDispatcher } from "./internal/tool-dispatch";
-import { LiveToolGate } from "./internal/tool-gate";
 import { ChatTurnContextResolver } from "./internal/turn-context";
 import { InternalTurnHost } from "./internal/turn-host";
 import { KillSwitchService } from "./kill-switches/service";
-import { PgKnowledgeChunkRepo } from "./knowledge/chunks-repo";
-import { buildDefaultRegistry } from "./knowledge/connectors/registry";
-import { PgConnectorStateRepo } from "./knowledge/connectors/state-repo";
-import { registerConnectorSync } from "./knowledge/connectors/sync";
-import { registerEmbeddingBackfill } from "./knowledge/embedding-backfill";
-import { subscribeKnowledgeIndexing } from "./knowledge/events";
-import { enqueueIndex, makeIndexQueueStats, registerKnowledgeIndexing } from "./knowledge/indexing";
-import { PgKnowledgeLinksRepo } from "./knowledge/links-repo";
-import { PgKnowledgePageRepo, PgKnowledgeRevisionRepo } from "./knowledge/repo";
-import { KnowledgeService } from "./knowledge/service";
-import { PgKnowledgeSpaceOverrideRepo } from "./knowledge/space-overrides-repo";
-import { PgKnowledgeSpaceRepo } from "./knowledge/spaces-repo";
 import { PgSlackKnowledgeCheckpointStore } from "./knowledge-sources/checkpoint-store";
 import { PgConfluenceKnowledgeCheckpointStore } from "./knowledge-sources/confluence-checkpoint-store";
 import { registerConfluenceKnowledgeSync } from "./knowledge-sources/confluence-sync-schedule";
@@ -152,17 +171,7 @@ import {
 import { registerSlackKnowledgeSync } from "./knowledge-sources/slack-sync-schedule";
 import { PgKnowledgeSourceStore } from "./knowledge-sources/source-store";
 import { PgProviderKnowledgeCheckpointStore } from "./knowledge-sources/sync-checkpoint-store";
-import { PgKvRepo } from "./kv/repo";
-import { KvService } from "./kv/service";
 import { registerLlmReload } from "./llm-reload";
-import { LlmContradictionJudge } from "./memory/contradiction-judge";
-import { EngineMemoryRepo } from "./memory/engine-repo";
-import { PgMemoryEpisodeStore } from "./memory/episode-store";
-import { MemoryExtractionService } from "./memory/extraction-service";
-import { LlmMemoryExtractor } from "./memory/extractor";
-import { MemoryLifecycleService } from "./memory/lifecycle-service";
-import { MemoryRecallService } from "./memory/recall-service";
-import { MemoryService } from "./memory/service";
 import { parseObservabilityConfig } from "./observability/config";
 import { subscribeObservability } from "./observability/events";
 import { PgLogRepo } from "./observability/log-repo";
@@ -216,6 +225,7 @@ import {
   provisionIntegrationWorkerCredential,
   provisionWorkerCredential,
 } from "./setup/worker-credential";
+import { hostedAgentResolver } from "./soul/agents/registry";
 import { createGitHubSoulCredentialProvider } from "./soul/github-repo-credential";
 import { loadBundledIntegrations } from "./soul/integrations/bundled";
 import { registerSoulPublicationRoutes } from "./soul/publication-routes";
@@ -223,15 +233,15 @@ import { loadBundledSkills, loadDisabledBundledSkills } from "./soul/skills/bund
 import { registerSoulSync } from "./soul-sync";
 import { PgSurfaceActionStore } from "./surfaces/action-store";
 import { PgSurfaceArtifactStore } from "./surfaces/artifact-store";
-import { surfaceRendererRegistry } from "./surfaces/renderer-registry";
+import { apiSurfacePresentation, surfaceRendererRegistry } from "./surfaces/renderer-registry";
 import { FetchEgressHttp } from "./tools/declarative/http";
 import { DeclarativeToolSync } from "./tools/declarative/sync";
 import { buildGitHubTooling } from "./tools/github/compose";
 import { buildGitHubTools } from "./tools/github/tools";
+import { githubExcludedToolNames } from "./tools/github/visibility";
 import { buildToolRegistry } from "./tools/setup";
 import { buildSlackTooling } from "./tools/slack/compose";
 import { buildSlackTools } from "./tools/slack/tools";
-import { ensureEmbeddingIndexes } from "./vector-search";
 
 config({ path: ".env.local" });
 
@@ -634,7 +644,7 @@ async function boot() {
     // *definitions* stay Soul-authored — this service never writes durable Role rows.
     // One resolver, shared. The admin surface's "why was this denied" and the gate's actual
     // decision must read the same grants through the same code, or the explanation describes a
-    const authorityLayerResolver = buildLiveAuthorityLayerResolver(pool);
+    const authorityLayerResolver = buildApiAuthorityLayerResolver(pool);
     const authzAdmin = new AuthzAdminService({
       roles: new PgRoleRepo(transactionPort(pool)),
       groups: new PgGroupRepo(transactionPort(pool)),
@@ -830,10 +840,15 @@ async function boot() {
           soulLoader,
           approvals: toolApprovals,
           channelDeliveries: channelRunDeliveries,
+          surfaces: apiSurfacePresentation,
           surfaceStore: surfaceArtifactStore,
           surfaceActionStore,
           guardrails: guardrailsService,
-          githubStatus: { integrations: integrationStore, businessId: DEPLOYMENT_BUSINESS_ID },
+          agents: hostedAgentResolver(soulLoader),
+          visibility: {
+            excludedToolNames: (businessId) =>
+              githubExcludedToolNames({ integrations: integrationStore, businessId }),
+          },
           // the agent allowlist alone; with them, no chat Tool executes without a grant.
           gate: new LiveToolGate(),
           authorityLayers: authorityLayerResolver,

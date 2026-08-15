@@ -17,6 +17,13 @@ export type ToolPrincipalKind =
   | "service";
 
 /** Visibility only, not authorization; legacy name lists still apply until adapters use this. */
+/**
+ * Ambient capabilities a handler reads from its context, beyond what it declares for
+ * authorization. A process that cannot supply one must not execute the Tool: the handler would
+ * still run, but against missing state, and would report a wrong answer rather than an error.
+ */
+export type ToolAmbientCapability = "soul" | "renderer" | "provider-credentials";
+
 export interface ToolAvailability {
   readonly principalKinds?: readonly ToolPrincipalKind[];
   readonly requiresPresentation?: boolean;
@@ -74,6 +81,8 @@ export interface DefineToolInput<Ctx, Result> {
   readonly credentialMode?: ToolCredentialMode;
   readonly provider?: string;
   readonly availableTo?: ToolAvailability;
+  /** Ambient context the handler reads; a process lacking any of these must not execute it. */
+  readonly requiresAmbient?: readonly ToolAmbientCapability[];
   readonly idempotency?: ToolDefinitionIdempotency;
   readonly retry?: ToolRetryPolicy;
   readonly timeout?: ToolTimeoutPolicy;

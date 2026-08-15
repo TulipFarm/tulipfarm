@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { DurableWaitManager, RunResumeGateway } from "@tulipfarm/run-kernel";
+import type { PaginatedResult } from "@tulipfarm/storage";
 import { RunStore, WaitStore } from "@tulipfarm/storage";
+import { ApprovalsRepo, ToolApprovalService } from "@tulipfarm/tool-host";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app";
@@ -13,11 +15,8 @@ import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
 import { type Queryable, transactionPort, withTransaction } from "../db";
 import { InternalRoutineApprovalHost } from "../internal/routine-approval-host";
-import type { PaginatedResult } from "../pagination";
 import { makeMigratedPglite } from "../test/pglite";
 import { RoutineApprovalService } from "./routine-approvals";
-import { ApprovalsRepo } from "./runtime-repo";
-import { ToolApprovalService } from "./tool-approvals";
 
 const TEST_CSRF = "a".repeat(64);
 

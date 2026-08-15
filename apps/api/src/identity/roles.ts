@@ -132,15 +132,19 @@ export const MEMBER_ALLOWED_SURFACES: readonly {
     enforcedIn: "integrations/routes.ts",
   },
   /** Use exact Tool-declared resource types; kind distinctions live in target ids. */
-  { type: "platform.knowledge", actions: ["*"], enforcedIn: "knowledge/tools.ts" },
-  { type: "platform.kv", actions: ["*"], enforcedIn: "kv/tools.ts" },
+  { type: "platform.knowledge", actions: ["*"], enforcedIn: "packages/knowledge/src/tools.ts" },
+  { type: "platform.kv", actions: ["*"], enforcedIn: "packages/kv/src/tools.ts" },
   { type: "kv_user", actions: ["*"], enforcedIn: "kv/routes.ts" },
   {
     type: "llm_config",
     actions: ["llm_config.read"],
     enforcedIn: "soul/llm-config/routes.ts",
   },
-  { type: "platform.memory", actions: ["*"], enforcedIn: "memory/routes.ts; memory/tools.ts" },
+  {
+    type: "platform.memory",
+    actions: ["*"],
+    enforcedIn: "memory/routes.ts; packages/memory/src/tools.ts",
+  },
   { type: "onboarding", actions: ["*"], enforcedIn: "onboarding/routes.ts" },
   { type: "preference", actions: ["*"], enforcedIn: "preferences/routes.ts" },
   { type: "secret", actions: ["secret.read"], enforcedIn: "secrets/routes.ts" },

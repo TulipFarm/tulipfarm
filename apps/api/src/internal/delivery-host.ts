@@ -9,11 +9,11 @@ import {
 } from "@tulipfarm/run-kernel";
 import { CHAT_REQUEST_SCHEMA_REF } from "@tulipfarm/schema";
 import type { ChatIngressConfig, SoulLoader } from "@tulipfarm/soul";
+import { DOMAIN_EVENTS, type IntegrationEventPayload } from "@tulipfarm/storage";
 import type { FastifyBaseLogger } from "fastify";
 import type { ToolRegistry } from "../broker/tool-adapter";
 import type { ConversationRepo } from "../chat/conversations";
 import type { ConversationStore, PersistedTurn } from "../conversations/service";
-import { DOMAIN_EVENTS, type IntegrationEventPayload } from "../domain-events";
 import type { IngressIdentityResolver } from "../ingress/identity";
 import type { IntegrationConversationsRepo, IntegrationEventsRepo } from "../ingress/repo";
 import { postReply } from "../ingress/responder";

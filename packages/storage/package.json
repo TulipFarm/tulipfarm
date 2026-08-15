@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "@tulipfarm/observability": "workspace:*",
-    "@tulipfarm/schema": "workspace:*"
+    "@tulipfarm/schema": "workspace:*",
+    "@tulipfarm/surface": "workspace:*"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.3",

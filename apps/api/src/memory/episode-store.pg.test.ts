@@ -1,11 +1,13 @@
 import type { PGlite } from "@electric-sql/pglite";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import {
+  MemoryExtractionService,
+  MemoryRecallService,
+  PgMemoryEpisodeStore,
+} from "@tulipfarm/memory";
 import type { Attributes, Span, TelemetryPort } from "@tulipfarm/observability";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeMigratedPglite } from "../test/pglite";
-import { PgMemoryEpisodeStore } from "./episode-store";
-import { MemoryExtractionService } from "./extraction-service";
-import { MemoryRecallService } from "./recall-service";
 
 class EmptyExtractor {
   async extract(): Promise<[]> {

@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
+import type { PaginatedResult } from "@tulipfarm/storage";
 import { describe, expect, it } from "vitest";
-import type { PaginatedResult } from "../pagination";
 import {
   createApiToken,
   findTokenForRawToken,

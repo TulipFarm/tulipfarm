@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
+import type { KnowledgePage } from "@tulipfarm/knowledge";
+import { PgKnowledgePageRepo, PgKnowledgeRevisionRepo } from "@tulipfarm/knowledge";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeMigratedPglite } from "../test/pglite";
-import { PgKnowledgePageRepo, PgKnowledgeRevisionRepo } from "./repo";
-import type { KnowledgePage } from "./types";
 
 function page(over: Partial<KnowledgePage> = {}): KnowledgePage {
   const now = new Date();

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { CounterFn } from "@tulipfarm/schema";
+import { type PaginatedResult, toPage } from "@tulipfarm/storage";
 import type { Queryable } from "../db";
-import { type PaginatedResult, toPage } from "../pagination";
 import { historyTableName, rowToResourceDoc, tableName } from "./schema";
 
 export interface ResourceDoc {

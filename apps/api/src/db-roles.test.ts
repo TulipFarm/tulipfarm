@@ -158,10 +158,10 @@ describe("db-roles", () => {
     it("falls back to single-role when the connecting role cannot create roles", async () => {
       // Managed Postgres commonly withholds CREATEROLE. Booting must still succeed.
       const restricted: Queryable = {
-        query: async (text, params) =>
-          text.includes("rolcreaterole")
+        query: async <Row>(text: string, params?: readonly unknown[]) =>
+          (text.includes("rolcreaterole")
             ? { rows: [{ can_provision: false }] }
-            : ((await pg.query(text, params as never[])) as never),
+            : await pg.query(text, params as never[])) as { rows: Row[] },
       };
 
       const separation = await provisionRuntimeRole(restricted);

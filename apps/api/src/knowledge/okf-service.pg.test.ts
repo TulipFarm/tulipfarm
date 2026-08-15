@@ -1,15 +1,18 @@
 import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
+import type { EmbeddingPort } from "@tulipfarm/knowledge";
+import {
+  KnowledgeService,
+  PageRetrievalService,
+  PgKnowledgeChunkRepo,
+  PgKnowledgeLinksRepo,
+  PgKnowledgePageRepo,
+  PgKnowledgeRevisionRepo,
+  PgKnowledgeSpaceOverrideRepo,
+  PgKnowledgeSpaceRepo,
+} from "@tulipfarm/knowledge";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeMigratedPglite } from "../test/pglite";
-import { PgKnowledgeChunkRepo } from "./chunks-repo";
-import { PgKnowledgeLinksRepo } from "./links-repo";
-import { PageRetrievalService } from "./page-search-adapter";
-import { PgKnowledgePageRepo, PgKnowledgeRevisionRepo } from "./repo";
-import { KnowledgeService } from "./service";
-import { PgKnowledgeSpaceOverrideRepo } from "./space-overrides-repo";
-import { PgKnowledgeSpaceRepo } from "./spaces-repo";
-import type { EmbeddingPort } from "./types";
 
 // Lexical-only embeddings (no provider) → deterministic websearch_to_tsquery ranking.
 function lexicalOnly(): EmbeddingPort {

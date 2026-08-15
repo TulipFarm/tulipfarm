@@ -5,11 +5,17 @@ import { analyzeHook, HookAnalysisError } from "@tulipfarm/sandbox";
 import { ajv, TulipFarmValidationError, validateResourceSchema } from "@tulipfarm/schema";
 import type { GitSyncService, SoulLoader, SoulWriter } from "@tulipfarm/soul";
 import { SoulWriteError } from "@tulipfarm/soul";
+import {
+  type ApiToolDefinition,
+  defineApiTool,
+  err,
+  ok,
+  type RequestContext,
+  type ToolCallResult,
+} from "@tulipfarm/tool-host";
 import { parse as parseYaml } from "yaml";
 import { SYSTEM_SOUL_COMMIT_ACTOR } from "../../runtime/soul-writer";
-import { type ApiToolDefinition, defineApiTool } from "../../tools/define.js";
 import { soulCommitError } from "../../tools/soul-faults";
-import { err, ok, type RequestContext, type ToolCallResult } from "../../tools/types.js";
 import {
   resourceDefinitionYaml,
   resourceEnvelopeError,

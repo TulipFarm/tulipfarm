@@ -511,11 +511,11 @@ describe("runPgMigrations", () => {
 function watch(db: PGlite, intercept?: Intercept) {
   const statements: string[] = [];
   const queryable: Queryable = {
-    async query(text, params) {
+    async query<Row = Record<string, unknown>>(text: string, params?: readonly unknown[]) {
       statements.push(text);
-      const override = intercept?.(text, params);
-      if (override) return await override;
-      return (await db.query(text, params)) as { rows: Record<string, unknown>[] };
+      const override = intercept?.(text, params as unknown[]);
+      if (override) return (await override) as { rows: Row[] };
+      return (await db.query(text, params as unknown[])) as { rows: Row[] };
     },
   };
   return { queryable, statements };

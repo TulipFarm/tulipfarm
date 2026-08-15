@@ -1,7 +1,7 @@
 import type { ToolBinding } from "@tulipfarm/soul";
+import type { ToolCallResult } from "@tulipfarm/tool-host";
 import type { ToolRegistry } from "../broker/tool-adapter";
 import { declarativeToolName } from "../tools/declarative/tools";
-import type { ToolCallResult } from "../tools/types";
 import { dotPath, renderVarTemplate } from "./template";
 
 /** Actor id stamped on tool calls made by the ingress engine (no human session). */

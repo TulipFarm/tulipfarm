@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
+import { ApprovalsRepo } from "@tulipfarm/tool-host";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeMigratedPglite } from "../test/pglite";
-import { ApprovalsRepo } from "./runtime-repo";
 
 describe("ApprovalsRepo (PGlite)", () => {
   let db: PGlite;

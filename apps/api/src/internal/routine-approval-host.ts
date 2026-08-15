@@ -4,7 +4,7 @@ import {
   type RunResumeGateway,
 } from "@tulipfarm/run-kernel";
 import { WaitStore } from "@tulipfarm/storage";
-import { type ApprovalRow, ApprovalsRepo } from "../approvals/runtime-repo";
+import { type ApprovalRow, ApprovalsRepo } from "@tulipfarm/tool-host";
 import { ambientTransactionPort, type Queryable } from "../db";
 import type { HostedRunReader } from "./turn-host";
 

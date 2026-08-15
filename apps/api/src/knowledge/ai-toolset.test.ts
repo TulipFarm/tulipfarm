@@ -1,7 +1,7 @@
+import type { KnowledgeService } from "@tulipfarm/knowledge";
 import { describe, expect, it } from "vitest";
 import { FRONTEND_TOOLS } from "../platform/frontend-tools";
 import { buildToolRegistry } from "../tools/setup";
-import type { KnowledgeService } from "./service";
 
 // Frontend tools (get_client_context, navigate_to) are always-on (no service); they're covered by
 // frontend-tools.test.ts, so filter them out here to keep this focused on the knowledge family.

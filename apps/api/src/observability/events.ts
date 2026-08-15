@@ -5,7 +5,7 @@ import {
   type LlmStepFinishedPayload,
   type SurfaceRenderedPayload,
   type TurnFinishedPayload,
-} from "../domain-events";
+} from "@tulipfarm/storage";
 import type { MetricsSink } from "./metrics";
 import type { ObservabilityService } from "./service";
 import type { TracesSink } from "./traces";

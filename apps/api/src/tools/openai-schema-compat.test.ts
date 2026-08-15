@@ -1,6 +1,6 @@
+import { KNOWLEDGE_TOOLS } from "@tulipfarm/knowledge";
+import { MEMORY_TOOLS } from "@tulipfarm/memory";
 import { describe, expect, it } from "vitest";
-import { KNOWLEDGE_TOOLS } from "../knowledge/tools";
-import { MEMORY_TOOLS } from "../memory/tools";
 import { PLATFORM_TOOLS } from "../platform/tools";
 import { RESOURCE_TOOLS } from "../resources/tools";
 import { AGENT_TOOLS } from "../soul/agents/tools";

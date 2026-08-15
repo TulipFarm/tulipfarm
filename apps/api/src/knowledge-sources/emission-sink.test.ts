@@ -1,7 +1,7 @@
 import type { PGlite } from "@electric-sql/pglite";
 import type { KnowledgeChunkEmission, KnowledgeSourceEmission } from "@tulipfarm/integrations";
+import type { EmbeddingPort } from "@tulipfarm/knowledge";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { EmbeddingPort } from "../knowledge/types";
 import { makeMigratedPglite } from "../test/pglite";
 import { PgKnowledgeEmissionSink } from "./emission-sink";
 import { PgKnowledgeIndexStore } from "./index-store";

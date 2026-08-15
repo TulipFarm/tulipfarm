@@ -1,3 +1,4 @@
+import type { PaginatedResult } from "@tulipfarm/storage";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../app";
@@ -6,7 +7,6 @@ import { CSRF_COOKIE } from "../auth/csrf";
 import { SESSION_COOKIE } from "../auth/routes";
 import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
-import type { PaginatedResult } from "../pagination";
 import type { RunEventRecord, RunStreamGrant } from "./events";
 
 const TEST_CSRF = "a".repeat(64);

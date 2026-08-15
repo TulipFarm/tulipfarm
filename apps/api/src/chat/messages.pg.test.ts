@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
+import { decodeCursor } from "@tulipfarm/storage";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { decodeCursor } from "../pagination";
 import { makeMigratedPglite } from "../test/pglite";
 import { type MessageDoc, type MessagePart, PgMessageRepo } from "./messages";
 

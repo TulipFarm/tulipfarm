@@ -3,10 +3,9 @@
 
 import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
+import { DEFAULT_RANKING, PageRetrievalService } from "@tulipfarm/knowledge";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeMigratedPglite } from "../test/pglite";
-import { PageRetrievalService } from "./page-search-adapter";
-import { DEFAULT_RANKING } from "./retrieval-config";
 
 interface Page {
   path: string;

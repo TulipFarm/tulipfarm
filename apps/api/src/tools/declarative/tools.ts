@@ -26,10 +26,17 @@ import {
   ToolDispatchError,
   type ToolTargetRef,
 } from "@tulipfarm/tool-broker";
+import {
+  defineApiTool,
+  err,
+  ok,
+  type RequestContext,
+  type ToolCallResult,
+  type ToolDef,
+  toToolDef,
+} from "@tulipfarm/tool-host";
 import { integrationSecretKey, isSecretRef } from "../../integrations/connection-env";
 import { principalSecretKey } from "../../integrations/principal-tokens";
-import { defineApiTool, toToolDef } from "../define";
-import { err, ok, type RequestContext, type ToolCallResult, type ToolDef } from "../types";
 
 /** Compiles manifest egress into governed chat Tools with the ledgered dispatch path. */
 

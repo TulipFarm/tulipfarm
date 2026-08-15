@@ -1,4 +1,5 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import type { PaginatedResult } from "@tulipfarm/storage";
 import { InMemoryGroupRepo, InMemoryPrincipalRepo, InMemoryRoleRepo } from "@tulipfarm/storage";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -10,7 +11,6 @@ import { SESSION_COOKIE } from "../auth/routes";
 import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
 import { LiveAuthorityLayerResolver } from "../identity/authority-layers";
-import type { PaginatedResult } from "../pagination";
 import { AUTHZ_ADMIN_CHANGE, AuthzAdminService } from "./service";
 
 const TEST_CSRF = "a".repeat(64);

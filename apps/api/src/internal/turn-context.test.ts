@@ -1,14 +1,14 @@
 import { DEFAULT_GUARDRAILS, type GuardrailsService } from "@tulipfarm/agent-runtime";
+import type { MemoryRecallService, MemoryService } from "@tulipfarm/memory";
+import { MAX_HISTORY_TOKENS } from "@tulipfarm/memory";
 import type { ArtifactService } from "@tulipfarm/run-kernel";
 import { canonicalHash } from "@tulipfarm/schema";
 import type { SoulLoader, SoulSkill } from "@tulipfarm/soul";
 import type { ToolAvailability } from "@tulipfarm/tool-broker";
+import { ok, type ToolDef } from "@tulipfarm/tool-host";
 import { describe, expect, it, vi } from "vitest";
 import { ToolRegistry } from "../broker/tool-adapter";
 import type { PersistedMessage } from "../conversations/service";
-import { MAX_HISTORY_TOKENS } from "../memory/limits";
-import type { MemoryRecallService } from "../memory/recall-service";
-import type { MemoryService } from "../memory/service";
 import { DEFAULT_ASSISTANT_NAME } from "../soul/agents/platform-agents";
 import type { BundledSkill } from "../soul/skills/bundled";
 import {
@@ -20,7 +20,6 @@ import {
   TURN_ID,
   turn,
 } from "../test/turn-host-fixtures";
-import { ok, type ToolDef } from "../tools/types";
 import { type ChannelDeliveryReader, ChatTurnContextResolver } from "./turn-context";
 import type { TurnAuthority } from "./turn-host";
 

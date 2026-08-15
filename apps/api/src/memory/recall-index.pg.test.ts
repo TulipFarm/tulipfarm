@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
+import { PgMemoryRecallIndex } from "@tulipfarm/memory";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeMigratedPglite } from "../test/pglite";
-import { PgMemoryRecallIndex } from "./recall-index";
 
 const BIZ = "biz-1";
 const USER = "44444444-4444-4444-4444-444444444444";

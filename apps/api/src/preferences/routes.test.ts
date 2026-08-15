@@ -1,4 +1,6 @@
 import type { PGlite } from "@electric-sql/pglite";
+import { KvService, PgKvRepo } from "@tulipfarm/kv";
+import type { PaginatedResult } from "@tulipfarm/storage";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../app";
@@ -7,9 +9,6 @@ import { CSRF_COOKIE, CSRF_HEADER } from "../auth/csrf";
 import { SESSION_COOKIE } from "../auth/routes";
 import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
-import { PgKvRepo } from "../kv/repo";
-import { KvService } from "../kv/service";
-import type { PaginatedResult } from "../pagination";
 import { makeMigratedPglite } from "../test/pglite";
 import { readCustomInstructions } from "./custom-instructions";
 

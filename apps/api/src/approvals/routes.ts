@@ -1,10 +1,9 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import type { ApprovalsRepo, ToolApprovalService } from "@tulipfarm/tool-host";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import { listPendingToolApprovals } from "./pending";
 import type { RoutineApprovalService } from "./routine-approvals";
-import type { ApprovalsRepo } from "./runtime-repo";
-import type { ToolApprovalService } from "./tool-approvals";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 

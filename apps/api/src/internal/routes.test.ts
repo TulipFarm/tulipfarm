@@ -1,3 +1,4 @@
+import type { PaginatedResult } from "@tulipfarm/storage";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../app";
@@ -8,7 +9,6 @@ import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
 import { createApiClient, formatApiClientCredential } from "../identity/api-clients";
 import { MemoryApiClientRepo } from "../identity/fakes";
-import type { PaginatedResult } from "../pagination";
 import {
   BUSINESS_ID,
   CONVERSATION_ID,

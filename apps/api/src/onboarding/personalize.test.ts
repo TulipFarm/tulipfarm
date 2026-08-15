@@ -1,7 +1,7 @@
+import type { KvEntry, KvRepo, KvScope } from "@tulipfarm/kv";
+import { KvService } from "@tulipfarm/kv";
 import type { LlmService } from "@tulipfarm/llm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { KvEntry, KvRepo, KvScope } from "../kv/repo";
-import { KvService } from "../kv/service";
 
 // Mock the AI SDK so no real model is invoked. `jsonSchema` is kept real (pure wrapper).
 const generateObject = vi.fn();

@@ -21,6 +21,7 @@ reconciliation, turn execution, delivery classification, projections, and outbox
 | `src/turn/` | Chat/integration turn executors, Context, guardrails, events, completion. |
 | `src/routine/` | Routine executor plus Tool, Agent, and approval ports. |
 | `src/internal/` | HTTP ports back to `/api/v1/internal/*`; Run identity is re-derived by API. |
+| `src/tools/` | In-process Tool host for co-locatable families, and the routing dispatcher. |
 | `src/hooks/` | Sandbox worker bundle for Integration delivery classification. |
 | `src/recovery/` | Reconciliation helpers for abandoned or parked work. |
 | `test/process/` | Real bundled-worker process tests over PGlite socket. |
@@ -48,6 +49,8 @@ reconciliation, turn execution, delivery classification, projections, and outbox
 - Routine Agent States expose no Tools, use deployment default guardrails, and record null output.
 - Agent `instructions.md` is a Soul companion hash, not bundled prompt text; use personality.
 - Approval resume tokens never cross to the worker; replay by wait id and State occurrence.
+- Tools hosted in `src/tools/` must clear `localDispatchRefusal`; boot fails rather than weaken it.
+- Authority for a co-located Tool is still read from the API per Run, never derived here.
 - Approval role authority only knows recorded `admin`/`member`; other roles fail closed.
 - Unsupported effect States and live-timer join cancellations park, never pretend success.
 - Chat `invoke` may start `pending` or `waiting`; reclaim through ready/claimed before running.

@@ -1,17 +1,17 @@
-import { ToolRegistry } from "../broker/tool-adapter";
-import type { KnowledgeService } from "../knowledge/service";
-import { KNOWLEDGE_TOOLS } from "../knowledge/tools";
-import type { KvService } from "../kv/service";
-import { KV_TOOLS } from "../kv/tools";
-import type { MemoryLifecycleService } from "../memory/lifecycle-service";
-import type { MemoryRecallService } from "../memory/recall-service";
-import type { MemoryService } from "../memory/service";
+import type { KnowledgeService } from "@tulipfarm/knowledge";
+import { KNOWLEDGE_TOOLS } from "@tulipfarm/knowledge";
+import type { KvService } from "@tulipfarm/kv";
+import { KV_TOOLS } from "@tulipfarm/kv";
+import type { MemoryLifecycleService, MemoryRecallService, MemoryService } from "@tulipfarm/memory";
 import {
   MEMORY_TOOLS,
   recallMemoryTool,
   rememberCorrectionTool,
   type ToolContext,
-} from "../memory/tools";
+} from "@tulipfarm/memory";
+import type { RequestContext, ToolDef } from "@tulipfarm/tool-host";
+import { type ApiToolDefinition, toToolDef } from "@tulipfarm/tool-host";
+import { ToolRegistry } from "../broker/tool-adapter";
 import { FRONTEND_TOOLS } from "../platform/frontend-tools";
 import { PLATFORM_TOOLS, type PlatformToolContext } from "../platform/tools";
 import { RESOURCE_TOOLS, type ResourceServices } from "../resources/tools.js";
@@ -23,8 +23,6 @@ import {
   type SurfaceComponentToolContext,
 } from "../soul/surface-components/tools.js";
 import { SURFACE_TOOLS } from "../surfaces/tools";
-import { type ApiToolDefinition, toToolDef } from "./define";
-import type { RequestContext, ToolDef } from "./types";
 
 /** Build the startup ToolRegistry; handlers close over services and receive RequestContext. */
 export function buildToolRegistry(services: {

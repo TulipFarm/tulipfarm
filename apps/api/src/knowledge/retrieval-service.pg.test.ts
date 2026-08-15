@@ -1,9 +1,13 @@
 import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
+import {
+  DEFAULT_RANKING,
+  extractHighlights,
+  PageRetrievalService,
+  toPrefixTsQuery,
+} from "@tulipfarm/knowledge";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeMigratedPglite } from "../test/pglite";
-import { extractHighlights, PageRetrievalService, toPrefixTsQuery } from "./page-search-adapter";
-import { DEFAULT_RANKING } from "./retrieval-config";
 
 async function seedSpace(db: PGlite, name = `b-${randomUUID()}`): Promise<string> {
   const id = randomUUID();

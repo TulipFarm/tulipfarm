@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
+import type { KvService } from "@tulipfarm/kv";
 import type { LlmService } from "@tulipfarm/llm";
 import { ajv } from "@tulipfarm/schema";
 import type { SoulLoader } from "@tulipfarm/soul";
 import { generateObject, jsonSchema } from "ai";
 import type { FastifyBaseLogger } from "fastify";
-import type { KvService } from "../kv/service";
 import type { Suggestion } from "./suggestions";
 
 /* Caches one quick-tier LLM personalization per business-description plus soul-name hash. */

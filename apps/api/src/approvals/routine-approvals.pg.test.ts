@@ -11,12 +11,12 @@ import {
 } from "@tulipfarm/run-kernel";
 import { INVOCATION_REQUEST_SCHEMAS, MANUAL_REQUEST_SCHEMA_REF } from "@tulipfarm/schema";
 import { ArtifactStore, RunStore, WaitStore } from "@tulipfarm/storage";
+import { ApprovalsRepo } from "@tulipfarm/tool-host";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ambientTransactionPort, type Queryable, transactionPort, withTransaction } from "../db";
 import { InternalRoutineApprovalHost } from "../internal/routine-approval-host";
 import { makeMigratedPglite } from "../test/pglite";
 import { RoutineApprovalService } from "./routine-approvals";
-import { ApprovalsRepo } from "./runtime-repo";
 
 /** Proves SQL-backed Routine approval uses role authority and requeues the same Run. */
 

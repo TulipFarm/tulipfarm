@@ -37,6 +37,8 @@ export interface ChatExecutorHost {
 export interface ChatExecutorOptions {
   /** Resolves the Turn, the Context, the Tools, and the durable completion. */
   readonly host: ChatExecutorHost & TurnCompletionStore & ToolDispatchPort;
+  /** Where Tool calls go. Defaults to `host`; a process that hosts Tools passes its own router. */
+  readonly tools?: ToolDispatchPort;
   readonly context: TurnContextPort;
   readonly runs: Pick<RunStore, "find" | "findState">;
   readonly events: RunEventAppendPort;
@@ -119,7 +121,7 @@ export function createChatExecutor(options: ChatExecutorOptions): RunExecutor {
     const loop = new AgentLoop({
       model,
       // Guard before announcing; refused Tool calls never ran.
-      tools: guardrails.guard(announceToolCalls(options.host, writer), writer),
+      tools: guardrails.guard(announceToolCalls(options.tools ?? options.host, writer), writer),
       checkpoints: new InMemoryLoopCheckpointStore(),
       events: writer,
       budget: runBudget(options.budgets, run.businessId, run.id),

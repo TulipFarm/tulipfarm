@@ -1,9 +1,8 @@
 import { createHash } from "node:crypto";
+import type { ApprovalsRepo, ToolApprovalService } from "@tulipfarm/tool-host";
 import type { FastifyRequest } from "fastify";
 import type { ActivityService } from "../activity/service";
 import { listPendingToolApprovals, type PendingToolApproval } from "../approvals/pending";
-import type { ApprovalsRepo } from "../approvals/runtime-repo";
-import type { ToolApprovalService } from "../approvals/tool-approvals";
 import { describeDeploymentRoles } from "../identity/roles";
 import { type HealthProbe, probeHealth } from "./health";
 import type {

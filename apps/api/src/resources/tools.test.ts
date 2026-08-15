@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { HookError, type HookExecutor } from "@tulipfarm/sandbox";
 import type { SoulLoader, SoulResource } from "@tulipfarm/soul";
+import type { PaginatedResult } from "@tulipfarm/storage";
 import {
   authorizeToolIntent,
   type PublishedToolContract,
   toolContractSpecOf,
 } from "@tulipfarm/tool-broker";
 import { describe, expect, it, vi } from "vitest";
-import type { PaginatedResult } from "../pagination.js";
 import type {
   CounterStore,
   ListOpts,

@@ -1,8 +1,8 @@
 /** Pins Soul Tool fault taxonomy: git contention retries; remote decisions stay business faults. */
 
+import { isInfrastructureFault } from "@tulipfarm/tool-host";
 import { describe, expect, it } from "vitest";
 import { isTransientGitFailure, soulCommitError, soulCommitFaultCode } from "./soul-faults";
-import { isInfrastructureFault } from "./types";
 
 describe("soul commit fault classification", () => {
   /** The messages git actually emits when another commit holds the worktree. */

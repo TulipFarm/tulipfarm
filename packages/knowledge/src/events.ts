@@ -1,0 +1,35 @@
+import type { EventEmitter } from "node:events";
+import {
+  type ConversationCompletedPayload,
+  DOMAIN_EVENTS,
+  type ResourceEventPayload,
+} from "@tulipfarm/storage";
+import { type Enqueuer, enqueueIndex } from "./index-queue";
+
+function fireAndForget(p: Promise<unknown>): void {
+  p.catch((err) =>
+    console.error(`[knowledge] enqueue failed: ${err instanceof Error ? err.message : String(err)}`)
+  );
+}
+
+/**
+ * Wire the knowledge source adapters (KN-V1-003) to the domain-event bus: resource
+ * writes and completed conversations enqueue idempotent indexing jobs.
+ */
+export function subscribeKnowledgeIndexing(emitter: EventEmitter, boss: Enqueuer): void {
+  const onResource = (p: ResourceEventPayload): void => {
+    fireAndForget(
+      enqueueIndex(boss, {
+        kind: "resource",
+        resourceType: p.resourceType,
+        resourceId: p.resourceId,
+        record: p.record,
+      })
+    );
+  };
+  emitter.on(DOMAIN_EVENTS.RESOURCE_CREATED, onResource);
+  emitter.on(DOMAIN_EVENTS.RESOURCE_UPDATED, onResource);
+  emitter.on(DOMAIN_EVENTS.CONVERSATION_COMPLETED, (p: ConversationCompletedPayload): void => {
+    fireAndForget(enqueueIndex(boss, { kind: "conversation", conversationId: p.conversationId }));
+  });
+}

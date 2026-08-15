@@ -1,11 +1,14 @@
 import type { PGlite } from "@electric-sql/pglite";
+import type { EmbeddingPort } from "@tulipfarm/knowledge";
+import {
+  KnowledgeService,
+  PageRetrievalService,
+  PgKnowledgeChunkRepo,
+  PgKnowledgePageRepo,
+  PgKnowledgeRevisionRepo,
+} from "@tulipfarm/knowledge";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeMigratedPglite } from "../test/pglite";
-import { PgKnowledgeChunkRepo } from "./chunks-repo";
-import { PageRetrievalService } from "./page-search-adapter";
-import { PgKnowledgePageRepo, PgKnowledgeRevisionRepo } from "./repo";
-import { KnowledgeService } from "./service";
-import type { EmbeddingPort } from "./types";
 
 function fakeEmbeddings(available: boolean, pending = false): EmbeddingPort {
   let pendingReindex = pending;
