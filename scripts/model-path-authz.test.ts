@@ -19,9 +19,9 @@ describe("model path — authorization fitness", () => {
   it("keeps a principal's model governance on the API→Worker wire", () => {
     // Fastify strips undeclared response properties, so dropping either of these from the schema
     // silently discards the demand instead of failing anywhere.
-    const routes = read("apps/api/src/internal/routes.ts");
-    expect(routes).toContain("modelPolicy:");
-    expect(routes).toContain("principal:");
+    const schemas = read("apps/api/src/internal/schemas.ts");
+    expect(schemas).toContain("modelPolicy:");
+    expect(schemas).toContain("principal:");
   });
 
   it("derives the governance posture a profile declares, so denials can fire", () => {

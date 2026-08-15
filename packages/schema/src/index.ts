@@ -132,8 +132,6 @@ export {
   DEFERRED_TRIGGER_TYPES,
   ROUTINE_APPROVAL_CHANNELS,
   ROUTINE_EVENT_NAMES,
-  ROUTINE_STATE_TYPES,
-  ROUTINE_TRIGGER_TYPES,
   RoutineDefinitionSchema,
   validateRoutineDefinition,
 } from "./routine";

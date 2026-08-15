@@ -12,7 +12,7 @@ import type { SurfacePresentationPort } from "./ports";
 
 export const BUSINESS_ID = "tulipfarm-local";
 export const CONVERSATION_ID = "conversation-1";
-export const TURN_ID = "turn-1";
+const TURN_ID = "turn-1";
 export const RUN_ID = "run-1";
 
 export function turnRef(overrides: Partial<HostedTurnRef> = {}): HostedTurnRef {

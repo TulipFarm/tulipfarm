@@ -24,7 +24,6 @@ export {
   INTEGRATION_APPS,
   integrationAppById,
   integrationAppField,
-  isIntegrationAppConfigured,
 } from "./integration-registry";
 export { assertValidSecretKey, InvalidSecretKeyError } from "./key-guard";
 export type { ActiveDek } from "./key-manager";
@@ -63,7 +62,6 @@ export { inMemorySecretProvider, secretsServiceProvider } from "./providers";
 export { containsSecret, REDACTED, redactError, redactSecrets } from "./redaction";
 export type { LlmProviderId, LlmProviderInfo, ProviderField, ProviderFieldRole } from "./registry";
 export {
-  isProviderConfigured,
   LLM_PROVIDERS,
   llmProviderById,
   llmProviderForFieldKey,

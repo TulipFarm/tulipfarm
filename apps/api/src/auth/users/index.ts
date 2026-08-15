@@ -240,23 +240,3 @@ export async function inviteUser(repo: UserRepo, email: string): Promise<UserDoc
   await repo.insert(user);
   return user;
 }
-
-export const DEV_ADMIN_EMAIL = "admin@tulipfarm.dev";
-export const DEV_ADMIN_PASSWORD = "password123";
-
-export async function bootstrapAdmin(
-  repo: UserRepo,
-  log?: { info: (msg: string) => void }
-): Promise<void> {
-  const isProd = process.env.NODE_ENV === "production";
-  const email = process.env.ADMIN_EMAIL ?? (isProd ? undefined : DEV_ADMIN_EMAIL);
-  const password = process.env.ADMIN_PASSWORD ?? (isProd ? undefined : DEV_ADMIN_PASSWORD);
-  if (!email || !password) return;
-  if ((await repo.count()) > 0) return;
-
-  await createUser(repo, email, password, "admin");
-  log?.info(`Bootstrapped admin user ${normalizeEmail(email)}`);
-  if (!process.env.ADMIN_PASSWORD && !isProd) {
-    log?.info("Using dev default admin password (password123) — set ADMIN_PASSWORD to override.");
-  }
-}

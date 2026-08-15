@@ -45,14 +45,6 @@ export function GlobalConnectionStatus() {
   );
 }
 
-export function LoadingState({ label = "Loading" }: { label?: string }) {
-  return (
-    <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
-      {label}…
-    </p>
-  );
-}
-
 export function PermissionDeniedState({ correlationId }: { correlationId?: string }) {
   return (
     <section role="alert" className="border border-border bg-card px-4 py-3">

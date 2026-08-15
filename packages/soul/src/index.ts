@@ -114,10 +114,6 @@ export {
 export { validateThirdPartyManifest } from "./integration-trust";
 export type { BundledIntegration } from "./integrations/bundled";
 export { bundledIntegrationsDir, loadBundledIntegrations } from "./integrations/bundled";
-// `lock.ts` also declares a `sourceType`; it duplicates the `git-source` one and has no caller, so
-// it is deliberately not re-exported here rather than aliased into the public surface.
-export type { IntegrationLockEntry, IntegrationsLock } from "./integrations/lock";
-export { hashContent, readIntegrationsLock } from "./integrations/lock";
 export type { RegistryEntry } from "./integrations/registry";
 export { loadIntegrationRegistry } from "./integrations/registry";
 export {

@@ -82,14 +82,13 @@ sibling `AGENTS.md`.
 | [`packages/llm`](packages/llm/AGENTS.md) | Provider abstraction, tiered fallback chains |
 | [`packages/secrets`](packages/secrets/AGENTS.md) | Encrypted secret storage, key rotation |
 | [`packages/integrations`](packages/integrations/AGENTS.md) | Adapter contracts, event normalization, identity mapping |
-| [`packages/surface`](packages/surface/AGENTS.md) | Tulip Surface Protocol contracts, catalog, Artifacts, linting |
+| [`packages/surface`](packages/surface/AGENTS.md) | Tulip Surface Protocol contracts, catalog, Artifacts |
 | [`packages/surface-web`](packages/surface-web/AGENTS.md) · [`-slack`](packages/surface-slack/AGENTS.md) · [`-telegram`](packages/surface-telegram/AGENTS.md) · [`-github`](packages/surface-github/AGENTS.md) | Channel-native TSP renderers |
 | [`packages/sandbox`](packages/sandbox/AGENTS.md) | Isolated execution contract, backend ports |
 | [`packages/observability`](packages/observability/AGENTS.md) | OTel conventions, metrics, health/readiness, redaction |
-| [`packages/ui`](packages/ui/AGENTS.md) | Shared React components |
 | [`packages/editor`](packages/editor/AGENTS.md) | Shared rich-text editor |
 | [`packages/testkit`](packages/testkit/AGENTS.md) | Shared test fixtures and helpers |
-| [`packages/types`](packages/types/AGENTS.md) · [`utils`](packages/utils/AGENTS.md) · [`constants`](packages/constants/AGENTS.md) · [`tsconfig`](packages/tsconfig/AGENTS.md) | Shared types, utilities, env-aware constants, tsconfig bases |
+| [`packages/constants`](packages/constants/AGENTS.md) · [`tsconfig`](packages/tsconfig/AGENTS.md) | Env-aware constants, tsconfig bases |
 
 Not workspaces: `soul/` (separate git repo created by `scripts/setup-dev.sh` — Resources,
 Routines, Agents, Skills, Integrations), `docs/architecture/` (design decisions), `metadata/`

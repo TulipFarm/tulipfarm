@@ -44,7 +44,7 @@ An omitted edge is forbidden.
 | `packages/kv` | `packages/schema`, `packages/storage`, `packages/tool-host` |
 | `packages/platform-tools` | `packages/schema`, `packages/tool-host`, `packages/agent-runtime` |
 | `packages/surface` | `packages/schema` |
-| `packages/surface-web` | `packages/surface`, `packages/ui` |
+| `packages/surface-web` | `packages/surface` |
 | `packages/surface-slack` | `packages/surface` |
 | `packages/surface-telegram` | `packages/surface` |
 | `packages/surface-github` | `packages/surface` |

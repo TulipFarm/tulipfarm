@@ -1,9 +1,6 @@
 import { type JSONContent, resolveExtensions } from "@tiptap/core";
 import { MarkdownManager } from "@tiptap/markdown";
-import {
-  type BuildExtensionsOptions,
-  buildContentExtensions,
-} from "../extensions/build-extensions";
+import { buildContentExtensions } from "../extensions/build-extensions";
 
 /*
  * DOM-free markdown ⇄ ProseMirror bridge. Markdown is canonical; first serialization normalizes,
@@ -20,14 +17,6 @@ function manager(): MarkdownManager {
     });
   }
   return cached;
-}
-
-/** Build a one-off manager with host-injected extensions such as mentions. */
-export function createMarkdownManager(opts: BuildExtensionsOptions = {}): MarkdownManager {
-  return new MarkdownManager({
-    extensions: resolveExtensions(buildContentExtensions(opts)),
-    markedOptions: { gfm: true },
-  });
 }
 
 /** Markdown string → Tiptap/ProseMirror JSON document. */

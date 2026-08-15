@@ -249,8 +249,3 @@ export function buildSlackTools(businessId: string, tooling: SlackToolingContext
     buildToolDef(contract.spec.toolId as SlackToolId, businessId, tooling)
   );
 }
-
-/** Every chat tool name this family registers. */
-export const SLACK_TOOL_NAMES: ReadonlySet<string> = new Set(
-  Object.values(SLACK_TOOL_SPECS).map((spec) => spec.name)
-);

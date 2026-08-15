@@ -1,3 +1,5 @@
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+
 export type HealthStatus = "ok" | "degraded" | "down";
 
 export interface HealthResult {
@@ -175,6 +177,102 @@ export function llmProbe(llm: ModelProbeTarget, options: LlmProbeOptions = {}): 
       }
       cached = { at: now(), result };
       return result;
+    },
+  };
+}
+
+function numberFrom(value: unknown): number {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  if (typeof value === "bigint") return Number(value);
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+}
+
+function dateMs(value: unknown): number | undefined {
+  if (value instanceof Date) return value.getTime();
+  if (typeof value !== "string") return undefined;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+export interface SoulPublicationProbeTarget {
+  query<Row = Record<string, unknown>>(
+    text: string,
+    params?: readonly unknown[]
+  ): Promise<{ rows: Row[] }>;
+}
+
+export function soulPublicationProbe(database: SoulPublicationProbeTarget): HealthProbe {
+  return {
+    component: "soul-publication",
+    async check() {
+      const result = await database.query(
+        `
+          WITH stats AS (
+            SELECT
+              COUNT(*) FILTER (WHERE dead_lettered_at IS NOT NULL) AS dead_lettered_count,
+              MAX(publication_sequence) AS newest_sequence
+            FROM soul_publications
+            WHERE business_id = $1
+          ),
+          newest AS (
+            SELECT created_at, publication_sequence
+            FROM soul_publications
+            WHERE business_id = $1
+            ORDER BY publication_sequence DESC
+            LIMIT 1
+          ),
+          active_publication AS (
+            SELECT p.created_at, p.publication_sequence
+            FROM soul_active_bundles active
+            JOIN soul_publications p
+              ON p.business_id = active.business_id
+             AND p.digest = active.digest
+            WHERE active.business_id = $1
+            ORDER BY p.publication_sequence DESC
+            LIMIT 1
+          )
+          SELECT
+            stats.dead_lettered_count,
+            stats.newest_sequence,
+            newest.created_at AS newest_created_at,
+            newest.publication_sequence AS newest_publication_sequence,
+            active_publication.created_at AS active_created_at,
+            active_publication.publication_sequence AS active_publication_sequence
+          FROM stats
+          LEFT JOIN newest ON true
+          LEFT JOIN active_publication ON true
+        `,
+        [DEPLOYMENT_BUSINESS_ID]
+      );
+      const row = result.rows[0] as Record<string, unknown> | undefined;
+      const deadLetteredCount = numberFrom(row?.dead_lettered_count);
+      const newestSequence = numberFrom(row?.newest_publication_sequence);
+      const activeSequence = numberFrom(row?.active_publication_sequence);
+      const newestCreatedMs = dateMs(row?.newest_created_at);
+      const activeCreatedMs = dateMs(row?.active_created_at);
+      const activeLagMs =
+        newestCreatedMs !== undefined && activeCreatedMs !== undefined
+          ? Math.max(0, newestCreatedMs - activeCreatedMs)
+          : undefined;
+
+      if (newestSequence === 0) {
+        return { status: "degraded", detail: "no Soul publication has been recorded" };
+      }
+      if (activeSequence === 0) {
+        return {
+          status: "degraded",
+          detail: `dead-lettered ${deadLetteredCount}, no active Soul bundle`,
+        };
+      }
+      const detail = `dead-lettered ${deadLetteredCount}, active lag ${activeLagMs ?? 0}ms`;
+      if (deadLetteredCount > 0 || activeSequence < newestSequence) {
+        return { status: "degraded", detail };
+      }
+      return { status: "ok", detail };
     },
   };
 }

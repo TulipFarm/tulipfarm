@@ -9,7 +9,6 @@ export {
   assertRequiredCapabilities,
   CAPABILITY_CLASSIFICATIONS,
   CAPABILITY_IDS,
-  classifyCapability,
   correctnessCriticalCapabilityIds,
   MissingCapabilityError,
   requiredCapabilityIds,

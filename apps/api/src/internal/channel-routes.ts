@@ -18,6 +18,7 @@ import type { IntegrationConversationsRepo } from "../ingress/repo";
 import { integrationSecretKey } from "../integrations/connection-env";
 import type { SurfaceActionStore } from "../surfaces/action-store";
 import type { SurfaceArtifactStore } from "../surfaces/artifact-store";
+import * as InternalSchemas from "./schemas";
 
 /** The subset of `SecretsService` the credential route needs (narrow for testability). */
 export interface ChannelCredentialSecretStore {
@@ -127,33 +128,12 @@ export function registerChannelInternalRoutes(
       preHandler,
       schema: {
         description:
-          "Resolve a verified Channel sender to its own Tulip principal. Never substitutes " +
-          "another user — an unmapped sender resolves to `linked: false`, and the bind link that " +
-          "could fix that is never handed to a worker.",
+          "Resolve a verified Channel sender to its own Tulip principal. Never substitutes another user — an unmapped sender resolves to `linked: false`, and the bind link that could fix that is never handed to a worker.",
         tags: ["internal"],
         security: [{ bearerToken: [] }],
-        body: {
-          type: "object",
-          required: ["provider", "externalSubject"],
-          additionalProperties: false,
-          properties: {
-            provider: { type: "string", minLength: 1 },
-            externalSubject: { type: "string", minLength: 1 },
-          },
-        },
+        body: InternalSchemas.ChannelIdentityResolveBodySchema,
         response: {
-          200: {
-            type: "object",
-            required: ["linked"],
-            properties: {
-              linked: { type: "boolean" },
-              principal: {
-                type: "object",
-                required: ["kind", "id"],
-                properties: { kind: { type: "string" }, id: { type: "string" } },
-              },
-            },
-          },
+          200: InternalSchemas.ChannelIdentityResolveResponseSchema,
           401: ErrorSchema,
           403: ErrorSchema,
         },
@@ -176,31 +156,12 @@ export function registerChannelInternalRoutes(
       preHandler,
       schema: {
         description:
-          "Answers an unmapped Slack sender with a single-use bind link, posted to Slack from " +
-          "this process. The bind token is a bearer credential and must never cross into a " +
-          "Worker process (see `apps/api/src/internal/delivery-host.ts`'s module doc), so this " +
-          "route resolves the offer and posts the reply itself rather than handing the token back.",
+          "Answers an unmapped Slack sender with a single-use bind link, posted to Slack from this process. The bind token is a bearer credential and must never cross into a Worker process (see `apps/api/src/internal/delivery-host.ts`'s module doc), so this route resolves the offer and posts the reply itself rather than handing the token back.",
         tags: ["internal"],
         security: [{ bearerToken: [] }],
-        body: {
-          type: "object",
-          required: ["provider", "externalSubject", "channelId"],
-          additionalProperties: false,
-          properties: {
-            provider: { type: "string", minLength: 1 },
-            externalSubject: { type: "string", minLength: 1 },
-            channelId: { type: "string", minLength: 1 },
-            threadId: { type: "string" },
-          },
-        },
+        body: InternalSchemas.ChannelIdentityBindOfferBodySchema,
         response: {
-          200: {
-            type: "object",
-            required: ["outcome"],
-            properties: {
-              outcome: { type: "string", enum: ["sent", "no_offer", "unconfigured"] },
-            },
-          },
+          200: InternalSchemas.ChannelIdentityBindOfferResponseSchema,
           401: ErrorSchema,
           403: ErrorSchema,
         },
@@ -278,61 +239,12 @@ export function registerChannelInternalRoutes(
       preHandler,
       schema: {
         description:
-          "Mint (or replay-resolve) the durable Run that answers one Channel message. The " +
-          "external thread maps 1:1 onto a Conversation, created on first message and reused " +
-          "after; `eventId` is the Turn's idempotency key, so a redelivered event never answers " +
-          "twice.",
+          "Mint (or replay-resolve) the durable Run that answers one Channel message. The external thread maps 1:1 onto a Conversation, created on first message and reused after; `eventId` is the Turn's idempotency key, so a redelivered event never answers twice.",
         tags: ["internal"],
         security: [{ bearerToken: [] }],
-        body: {
-          type: "object",
-          required: [
-            "eventId",
-            "provider",
-            "integrationId",
-            "routeId",
-            "agentId",
-            "principal",
-            "message",
-          ],
-          additionalProperties: false,
-          properties: {
-            eventId: { type: "string", minLength: 1 },
-            provider: { type: "string", minLength: 1 },
-            integrationId: { type: "string", minLength: 1 },
-            routeId: { type: "string", minLength: 1 },
-            agentId: { type: "string", minLength: 1 },
-            principal: {
-              type: "object",
-              required: ["kind", "id"],
-              additionalProperties: false,
-              properties: {
-                kind: { type: "string", enum: ["user", "guest"] },
-                id: { type: "string" },
-              },
-            },
-            message: {
-              type: "object",
-              required: ["externalAppId", "channelId", "text"],
-              additionalProperties: false,
-              properties: {
-                externalAppId: { type: "string" },
-                channelId: { type: "string" },
-                threadId: { type: "string" },
-                text: { type: "string" },
-              },
-            },
-          },
-        },
+        body: InternalSchemas.ChannelRunCreateBodySchema,
         response: {
-          200: {
-            type: "object",
-            required: ["runId", "outcome"],
-            properties: {
-              runId: { type: "string" },
-              outcome: { type: "string", enum: ["started", "duplicate"] },
-            },
-          },
+          200: InternalSchemas.ChannelRunCreateResponseSchema,
           401: ErrorSchema,
           403: ErrorSchema,
           409: ErrorSchema,
@@ -435,30 +347,13 @@ export function registerChannelInternalRoutes(
       preHandler,
       schema: {
         description:
-          "The recorded answer for a finished Channel Run, read out of the durable conversation " +
-          "— never generated here. `pending` when the Turn has not completed the attempt yet.",
+          "The recorded answer for a finished Channel Run, read out of the durable conversation — never generated here. `pending` when the Turn has not completed the attempt yet.",
         tags: ["internal"],
         security: [{ bearerToken: [] }],
-        params: {
-          type: "object",
-          required: ["runId"],
-          properties: { runId: { type: "string", minLength: 1 } },
-        },
-        querystring: {
-          type: "object",
-          properties: { attempt: { type: "integer", minimum: 1 } },
-        },
+        params: InternalSchemas.InternalRunParamsSchema,
+        querystring: InternalSchemas.ChannelRunReplyQuerySchema,
         response: {
-          200: {
-            type: "object",
-            required: ["status"],
-            properties: {
-              status: { type: "string", enum: ["succeeded", "failed", "pending"] },
-              text: { type: "string" },
-              agentDisplayName: { type: "string" },
-              blocks: { type: "array", items: { type: "object", additionalProperties: true } },
-            },
-          },
+          200: InternalSchemas.ChannelRunReplyResponseSchema,
           401: ErrorSchema,
           403: ErrorSchema,
           404: ErrorSchema,
@@ -502,26 +397,12 @@ export function registerChannelInternalRoutes(
       preHandler,
       schema: {
         description:
-          "The tool-call approval a Channel-originated Run is currently parked on, if any — read " +
-          "here so a Channel host knows whether (and what) to post an Approve/Deny prompt for.",
+          "The tool-call approval a Channel-originated Run is currently parked on, if any — read here so a Channel host knows whether (and what) to post an Approve/Deny prompt for.",
         tags: ["internal"],
         security: [{ bearerToken: [] }],
-        params: {
-          type: "object",
-          required: ["runId"],
-          properties: { runId: { type: "string", minLength: 1 } },
-        },
+        params: InternalSchemas.InternalRunParamsSchema,
         response: {
-          200: {
-            type: "object",
-            required: ["pending"],
-            properties: {
-              pending: { type: "boolean" },
-              approvalId: { type: "string" },
-              toolName: { type: "string" },
-              args: {},
-            },
-          },
+          200: InternalSchemas.ChannelRunPendingApprovalResponseSchema,
           401: ErrorSchema,
           403: ErrorSchema,
         },
@@ -546,21 +427,11 @@ export function registerChannelInternalRoutes(
       preHandler,
       schema: {
         description:
-          "The Slack bot and app-level tokens sealed at connect time, resolved from the " +
-          "encrypted secrets store. `apps/integration-worker` may not read secrets directly, so " +
-          "it leases both tokens here rather than holding a long-lived plaintext copy of either.",
+          "The Slack bot and app-level tokens sealed at connect time, resolved from the encrypted secrets store. `apps/integration-worker` may not read secrets directly, so it leases both tokens here rather than holding a long-lived plaintext copy of either.",
         tags: ["internal"],
         security: [{ bearerToken: [] }],
         response: {
-          200: {
-            type: "object",
-            required: ["configured"],
-            properties: {
-              configured: { type: "boolean" },
-              botToken: { type: "string" },
-              appToken: { type: "string" },
-            },
-          },
+          200: InternalSchemas.ChannelSlackCredentialResponseSchema,
           401: ErrorSchema,
           403: ErrorSchema,
         },
@@ -585,37 +456,13 @@ export function registerChannelInternalRoutes(
       preHandler,
       schema: {
         description:
-          "Resolve a Slack Block Kit Approve/Deny click to a tool-call approval decision. The " +
-          "clicking sender is resolved to a principal here, in this process — a worker states " +
-          "only the click, never the identity it decides as.",
+          "Resolve a Slack Block Kit Approve/Deny click to a tool-call approval decision. The clicking sender is resolved to a principal here, in this process — a worker states only the click, never the identity it decides as.",
         tags: ["internal"],
         security: [{ bearerToken: [] }],
-        params: {
-          type: "object",
-          required: ["approvalId"],
-          properties: { approvalId: { type: "string", minLength: 1 } },
-        },
-        body: {
-          type: "object",
-          required: ["provider", "externalSubject", "decision"],
-          additionalProperties: false,
-          properties: {
-            provider: { type: "string", minLength: 1 },
-            externalSubject: { type: "string", minLength: 1 },
-            decision: { type: "string", enum: ["approved", "denied"] },
-          },
-        },
+        params: InternalSchemas.ChannelApprovalDecisionParamsSchema,
+        body: InternalSchemas.ChannelApprovalDecisionBodySchema,
         response: {
-          200: {
-            type: "object",
-            required: ["outcome"],
-            properties: {
-              outcome: {
-                type: "string",
-                enum: ["resumed", "already_settled", "forbidden", "not_found", "unlinked"],
-              },
-            },
-          },
+          200: InternalSchemas.ChannelApprovalDecisionResponseSchema,
           401: ErrorSchema,
           403: ErrorSchema,
         },

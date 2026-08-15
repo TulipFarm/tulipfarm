@@ -1,10 +1,10 @@
 # Authorization design
 
-Status: **Partially implemented — steps 1 and 4 of §5 have landed; steps 2, 3, 5 and 6 have not.**
+Status: **Partially implemented — steps 1, 2, 3 and most of 4 of §5 have landed; steps 5 and 6 have not.**
 
-The decision engine, the persisted principal model, and both adapters D4 asks for are built and in
-the request path. What remains is the behavioural work: shadow mode, the enforcing flip, Soul-authored
-policy, and per-Record predicates. §2 below is the evidence that motivated this document and is
+The decision engine, the persisted principal model, both adapters D4 asks for, and the shadow-mode
+rehearsal path are built and in the request path. What remains is product scope: Soul-authored
+policy and per-Record predicates. §2 below is the evidence that motivated this document and is
 retained as written; read [§2.1](#21-what-has-changed-since) first for what has since changed.
 
 Scope: the authorization model for human users, Agents, Routines, and service identities across
@@ -251,10 +251,10 @@ lock users out of their own deployment, so it must be preceded by evidence.
 | # | Piece | Behaviour change | Acceptance | Status |
 | --- | --- | --- | --- | --- |
 | 1 | Name grammar + an authorization declaration on every route and Tool | none — inert metadata | `N of M` declared, ratcheting to 100% in CI | **done** — Tools 74/74, routes 46 across 22 files; ratchet is `scripts/route-authorization.test.ts` with an empty debt list |
-| 2 | The gate in **shadow mode** — evaluates and logs what it *would* deny, using today's admin/member | none | zero unexpected would-denies over real traffic | **not started** |
-| 3 | Flip the gate to enforcing; retire `requireAdmin` | **yes — the first real one** | shadow-mode evidence from step 2 | **partial** — `requireAdmin` is gone and gated routes enforce today, but per the ordering principle this was reached without step 2's evidence. See the note below |
-| 4 | Persist principals, groups, assignments, relation tuples; retire `users.role` and `users_single_admin_idx` | multiple administrators become possible | existing users keep exactly their current reach | **mostly done** — eight tables persisted, `users_single_admin_idx` dropped, `users_sync_authorization` keeps them in step. `users.role` and `relation_tuples` outstanding |
-| 5 | Soul-authored domains, roles, relations, routing | the business can model itself | a leave-approval routing rule resolves end to end | **not started** — `identity/roles.ts` is still the compiled-in policy source |
+| 2 | The gate in **shadow mode** — evaluates and logs what it *would* deny, using today's admin/member | none | zero unexpected would-denies over real traffic | **done** — `AUTHZ_MODE=shadow` serves the declaration's `fallback` while still running the engine; every disagreement is logged as `authz.divergence`. Threaded through `buildApp`, so it covers every gated route, not only the two direct call sites |
+| 3 | Flip the gate to enforcing; retire `requireAdmin` | **yes — the first real one** | shadow-mode evidence from step 2 | **done** — `requireAdmin` is gone and gated routes enforce today. Reached before step 2 rather than after it; the ordering debt that created is discharged by shadow mode now existing. See the note below |
+| 4 | Persist principals, groups, assignments, relation tuples; retire `users.role` and `users_single_admin_idx` | multiple administrators become possible | existing users keep exactly their current reach | **done, less two pieces that this table mis-ordered** — eight tables persisted, `users_single_admin_idx` dropped, `users_sync_authorization` keeps them in step. `users.role` and `relation_tuples` are blocked on step 5, not on this step; see the note below |
+| 5 | Soul-authored domains, roles, relations, routing | the business can model itself | a leave-approval routing rule resolves end to end | **partial** — Roles *are* Soul-authored: `soul/roles/` loads into `SoulRole`, `reconcileSoulRoles` projects them into durable rows, and `authz/routes.ts` exposes 17 authoring routes behind the access UI. Domains, relations and routing remain, and `DEPLOYMENT_ROLES` in `identity/roles.ts` is still the compiled-in baseline the deployment boots with |
 | 6 | Attribute predicates compiled into SQL | per-Record access | list, count, and RAG results stay mutually consistent | **not started** |
 
 Steps 1–3 close the Forge governance hole as a side effect: declaring what those ~30 platform Tools
@@ -264,9 +264,42 @@ require *is* what puts them behind a gate for the first time.
 order this section prescribes. What made that safe in practice — not by design — is that the route
 adapter's `fallback` field is **required**, so a declaration can only ever restate or narrow the
 check it replaced, never widen it, and the migration was one surface at a time behind a full test
-suite. That reasoning does **not** extend to step 3's remaining work or to the D3 flip for
-business-authored roles, where a wrong allow-list genuinely can lock a deployment out of itself.
-Shadow mode is still owed before either.
+suite. That reasoning does **not** extend to the D3 flip for business-authored roles, where a wrong
+allow-list genuinely can lock a deployment out of itself.
+
+Shadow mode now exists, so that debt is discharged rather than merely acknowledged:
+
+- `AUTHZ_MODE=shadow` makes the gate serve each declaration's `fallback` while still evaluating
+  `decideEffectivePermission`, so an operator can rehearse a policy change against real traffic
+  before it can refuse anyone.
+- Divergences are recorded in **both** modes, not only in shadow. Under `enforcing`, a logged
+  `fallbackAllowed: false, engineAllowed: true` is a grant that is *wider* than the static check it
+  replaced — precisely what ADR-009 forbids — and there was previously no way to see one.
+- The default is `enforcing`. A deployment has to opt out; it can never fall into shadow mode by
+  leaving a variable unset.
+- An engine that *throws* is contained: under `shadow` the failure is recorded as
+  `engineAllowed: "threw"` and the request is served from its `fallback`, because a rehearsal that
+  can take the deployment down is not a rehearsal. Under `enforcing` it propagates, since there an
+  unanswerable check has to be a refusal.
+
+Before step 5 lands, run a deployment in shadow mode long enough to see zero unexpected
+`authz.divergence` would-denies, which is the acceptance criterion step 2 always asked for.
+
+**On the two pieces step 4 still lists.** Both were placed in step 4 by this table and neither
+belongs there:
+
+- **`users.role`** is the policy source for `isDeploymentAdmin`, which backs every declaration's
+  required `fallback`. That field is what guarantees a route with no authorizer wired still refuses
+  somebody — the safety property the whole gate rests on. `users.role` therefore cannot be retired
+  until `fallback` can be, and `fallback` cannot be until Soul-authored Roles are guaranteed present
+  in every deployment. It is ordered **after** step 5, not before it.
+- **`relation_tuples`** has no reader. Nothing in the decision path resolves a relation yet, because
+  relations are step 5's work and per-Record predicates are step 6's. Creating the table now would
+  ship a schema, a repository and a test suite that no production entrypoint reaches — the precise
+  defect class `pnpm reachability:check` exists to catch. Build it when step 5 gives it a caller.
+
+Recording this is the point: an "outstanding" item that is actually blocked reads as neglect, and
+the next person re-derives the ordering from scratch.
 
 ---
 

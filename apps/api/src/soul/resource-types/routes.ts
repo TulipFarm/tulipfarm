@@ -21,6 +21,18 @@ import type { AuthorizationCheck, RouteAuthorization } from "../../authz/route-g
 import type { RateLimiter } from "../../rate-limit";
 import { makeRateLimitHook } from "../../rate-limit";
 import { commitActorFromRequest } from "../commit-actor";
+import {
+  CreateResourceTypeBodySchema,
+  ListResourceTypesResponseSchema,
+  ResourceTypeDeleteResponseSchema,
+  ResourceTypeHooksDeleteResponseSchema,
+  ResourceTypeHooksResponseSchema,
+  ResourceTypeNameParamsSchema,
+  ResourceTypeResponseSchema,
+  ResourceTypeValidationErrorSchema,
+  UpdateResourceTypeBodySchema,
+  UpdateResourceTypeHooksBodySchema,
+} from "./schemas";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -73,27 +85,6 @@ function checkSchemaYaml(schemaYaml: string): SchemaCheck {
   return { ok: true, parsed: parsed as Record<string, unknown> };
 }
 
-const ValidationErrorSchema = {
-  type: "object",
-  properties: {
-    error: { type: "string" },
-    boundary: { type: "string" },
-    path: { type: "string" },
-  },
-  required: ["error"],
-} as const;
-
-const ResourceTypeSchema = {
-  type: "object",
-  properties: {
-    name: { type: "string" },
-    schema: { type: "string" },
-    hasHooks: { type: "boolean" },
-    domain: { type: "string" },
-  },
-  required: ["name", "schema", "hasHooks"],
-} as const;
-
 const SOUL_WRITE_LIMIT = 60;
 const SOUL_WRITE_WINDOW_MS = 60_000;
 
@@ -142,23 +133,15 @@ export function registerResourceTypeRoutes(
           "Create a new resource type. `schema` is a YAML string (JSON Schema). Written as-is to soul/resources/{name}/schema.yml.",
         tags: ["soul"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
-        body: {
-          type: "object",
-          required: ["name", "schema"],
-          properties: {
-            name: { type: "string" },
-            schema: { type: "string" },
-            domain: { type: "string" },
-          },
-        },
+        body: CreateResourceTypeBodySchema,
         response: {
-          201: ResourceTypeSchema,
+          201: ResourceTypeResponseSchema,
           400: ErrorSchema,
           401: ErrorSchema,
           403: ErrorSchema,
           404: ErrorSchema,
           409: ErrorSchema,
-          422: ValidationErrorSchema,
+          422: ResourceTypeValidationErrorSchema,
           500: ErrorSchema,
         },
       },
@@ -248,13 +231,7 @@ export function registerResourceTypeRoutes(
         tags: ["soul"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         response: {
-          200: {
-            type: "object",
-            properties: {
-              types: { type: "array", items: ResourceTypeSchema },
-            },
-            required: ["types"],
-          },
+          200: ListResourceTypesResponseSchema,
           401: ErrorSchema,
         },
       },
@@ -274,20 +251,16 @@ export function registerResourceTypeRoutes(
           "Replace an existing resource type's schema. `schema` is a YAML string (JSON Schema).",
         tags: ["soul"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
-        params: { type: "object", required: ["name"], properties: { name: { type: "string" } } },
-        body: {
-          type: "object",
-          required: ["schema"],
-          properties: { schema: { type: "string" }, domain: { type: "string" } },
-        },
+        params: ResourceTypeNameParamsSchema,
+        body: UpdateResourceTypeBodySchema,
         response: {
-          200: ResourceTypeSchema,
+          200: ResourceTypeResponseSchema,
           400: ErrorSchema,
           401: ErrorSchema,
           403: ErrorSchema,
           404: ErrorSchema,
           409: ErrorSchema,
-          422: ValidationErrorSchema,
+          422: ResourceTypeValidationErrorSchema,
           500: ErrorSchema,
         },
       },
@@ -387,9 +360,9 @@ export function registerResourceTypeRoutes(
           "(non-destructive) so existing records remain recoverable.",
         tags: ["soul"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
-        params: { type: "object", required: ["name"], properties: { name: { type: "string" } } },
+        params: ResourceTypeNameParamsSchema,
         response: {
-          204: { type: "null" },
+          204: ResourceTypeDeleteResponseSchema,
           400: ErrorSchema,
           401: ErrorSchema,
           403: ErrorSchema,
@@ -440,16 +413,6 @@ export function registerResourceTypeRoutes(
     }
   );
 
-  const HookResponseSchema = {
-    type: "object",
-    properties: {
-      name: { type: "string" },
-      hasHooks: { type: "boolean" },
-      source: { type: "string", nullable: true },
-    },
-    required: ["name", "hasHooks"],
-  } as const;
-
   app.get(
     "/api/v1/resource-types/:name/hooks",
     {
@@ -458,8 +421,8 @@ export function registerResourceTypeRoutes(
         description: "Get the hooks.ts source for a resource type, or null if none exists.",
         tags: ["soul"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
-        params: { type: "object", required: ["name"], properties: { name: { type: "string" } } },
-        response: { 200: HookResponseSchema, 401: ErrorSchema, 404: ErrorSchema },
+        params: ResourceTypeNameParamsSchema,
+        response: { 200: ResourceTypeHooksResponseSchema, 401: ErrorSchema, 404: ErrorSchema },
       },
     },
     async (req, reply) => {
@@ -480,19 +443,15 @@ export function registerResourceTypeRoutes(
           "Runs static analysis to block banned patterns.",
         tags: ["soul"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
-        params: { type: "object", required: ["name"], properties: { name: { type: "string" } } },
-        body: {
-          type: "object",
-          required: ["source"],
-          properties: { source: { type: "string" } },
-        },
+        params: ResourceTypeNameParamsSchema,
+        body: UpdateResourceTypeHooksBodySchema,
         response: {
-          200: HookResponseSchema,
+          200: ResourceTypeHooksResponseSchema,
           400: ErrorSchema,
           401: ErrorSchema,
           404: ErrorSchema,
           409: ErrorSchema,
-          422: ValidationErrorSchema,
+          422: ResourceTypeValidationErrorSchema,
           500: ErrorSchema,
         },
       },
@@ -561,9 +520,9 @@ export function registerResourceTypeRoutes(
         description: "Remove the hooks.ts file for a resource type.",
         tags: ["soul"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
-        params: { type: "object", required: ["name"], properties: { name: { type: "string" } } },
+        params: ResourceTypeNameParamsSchema,
         response: {
-          204: { type: "null" },
+          204: ResourceTypeHooksDeleteResponseSchema,
           400: ErrorSchema,
           401: ErrorSchema,
           404: ErrorSchema,

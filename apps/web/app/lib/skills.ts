@@ -116,10 +116,6 @@ export async function marketplaceSkills(): Promise<MarketplaceCatalog> {
   return apiGet<MarketplaceCatalog>("/api/v1/skills/marketplace");
 }
 
-export async function skillUpdates(): Promise<MarketplaceCatalog> {
-  return apiGet<MarketplaceCatalog>("/api/v1/skills/updates");
-}
-
 export async function removeSkill(name: string): Promise<void> {
   return apiDelete(`/api/v1/skills/${encodeURIComponent(name)}`);
 }

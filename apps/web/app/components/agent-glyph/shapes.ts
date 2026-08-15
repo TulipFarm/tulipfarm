@@ -9,8 +9,6 @@ export interface ShapeData {
 
 export const GLYPH_VIEWBOX = "0 0 24 24";
 
-export const MATURITY_RING_RADIUS = 11.5;
-
 export const SHAPES: Record<GlyphBase, ShapeData> = {
   burst: {
     paths: [

@@ -10,4 +10,4 @@ export type {
   SkillSelectionReason,
   SkillTrustPolicy,
 } from "./resolve";
-export { resolveSkills, skillRef } from "./resolve";
+export { resolveSkills } from "./resolve";

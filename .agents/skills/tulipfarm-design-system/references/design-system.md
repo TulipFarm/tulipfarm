@@ -354,7 +354,7 @@ Prefer the index and source search over guessing component names.
 - Use kebab-case files, named exports, type-only imports, `cn()` for class composition, and CVA for
   closed variants.
 - Colocate `*.test.tsx`. Use Remix `Link`/`NavLink`, the shared API client, and canonical terms.
-- Keep changes surgical and do not move components into `@tulipfarm/ui` without a second consumer.
+- Keep changes surgical; components stay app-local until a second app genuinely needs them.
 
 ## 13. Common Mistakes to Avoid
 

@@ -47,6 +47,65 @@ export function isDeploymentAdmin(principal: RequestPrincipal): boolean {
   return principal.kind === "user" && principal.role === "admin";
 }
 
+/**
+ * Whether the decision engine's answer is served, or merely observed.
+ *
+ * `authorization-design.md` §5 orders the programme "declare before enforce":
+ * step 2 runs the gate in shadow mode and collects evidence, step 3 flips it.
+ * Enforcement in fact arrived first, which was safe only because `fallback` is
+ * required and can therefore never widen a check. That reasoning does not
+ * extend to the step-5 flip for business-authored Roles, where a wrong
+ * allow-list can lock a deployment out of itself — so the evidence mechanism
+ * has to exist before then, and this is it.
+ */
+export type AuthorizationMode = "enforcing" | "shadow";
+
+/**
+ * One request where the decision engine and the static fallback disagreed.
+ *
+ * Recorded in both modes. A would-deny under `shadow` is the signal step 2
+ * asks for; a would-allow under `enforcing` says a Role grant is wider than
+ * the check it replaced, which ADR-009 forbids.
+ */
+export interface AuthorizationDivergence {
+  readonly mode: AuthorizationMode;
+  readonly action: string;
+  readonly resourceType: string;
+  readonly principalKind: RequestPrincipal["kind"];
+  readonly principalId: string;
+  readonly fallback: RouteAuthorization["fallback"];
+  /** What the static admin/authenticated check said. */
+  readonly fallbackAllowed: boolean;
+  /** What `decideEffectivePermission` said, or `"threw"` when it could not answer. */
+  readonly engineAllowed: boolean | "threw";
+  /** Present only when `engineAllowed` is `"threw"`. */
+  readonly error?: string;
+}
+
+export interface AuthorizationGateOptions {
+  readonly mode?: AuthorizationMode;
+  readonly observe?: (divergence: AuthorizationDivergence) => void;
+}
+
+/**
+ * Reads the deployment's gate mode and pairs it with a divergence log.
+ *
+ * Default `enforcing` — a deployment must opt *out* of enforcement, never into
+ * it by omission. `log` is deferred because the composition root builds the
+ * gate before Fastify exists.
+ */
+export function deploymentGateOptions(
+  log: () => { warn: (payload: object, message: string) => void },
+  env: NodeJS.ProcessEnv = process.env
+): AuthorizationGateOptions {
+  return {
+    mode: env.AUTHZ_MODE === "shadow" ? "shadow" : "enforcing",
+    observe: (divergence) => {
+      log().warn({ event: "authz.divergence", ...divergence }, "authorization divergence");
+    },
+  };
+}
+
 export class LiveRouteAuthorizer implements RouteAuthorizer {
   constructor(
     private readonly layers: {
@@ -75,8 +134,11 @@ export class LiveRouteAuthorizer implements RouteAuthorizer {
  * Builds the one preHandler every gated route uses. Routes declare what they need; they never
  * compare a role themselves.
  */
-export function makeRequireAuthorization(authorizer?: RouteAuthorizer): RequireAuthorization {
-  const check = makeAuthorizationCheck(authorizer);
+export function makeRequireAuthorization(
+  authorizer?: RouteAuthorizer,
+  options?: AuthorizationGateOptions
+): RequireAuthorization {
+  const check = makeAuthorizationCheck(authorizer, options);
   return (authorization) => async (req, reply) => {
     const principal = req.principal;
     if (principal === undefined) {
@@ -94,11 +156,50 @@ export function makeRequireAuthorization(authorizer?: RouteAuthorizer): RequireA
  * the operational API's grant resolver and the Run event audience split. They need the answer as a
  * value, and duplicating the comparison is exactly the drift this module exists to stop.
  */
-export function makeAuthorizationCheck(authorizer?: RouteAuthorizer): AuthorizationCheck {
+export function makeAuthorizationCheck(
+  authorizer?: RouteAuthorizer,
+  options?: AuthorizationGateOptions
+): AuthorizationCheck {
+  const mode = options?.mode ?? "enforcing";
+  const observe = options?.observe;
   return async (principal, authorization) => {
+    const fallbackAllowed =
+      authorization.fallback === "authenticated" || isDeploymentAdmin(principal);
     if (authorizer === undefined) {
-      return authorization.fallback === "authenticated" || isDeploymentAdmin(principal);
+      return fallbackAllowed;
     }
-    return authorizer.authorize(callerAuthorityPrincipal(principal), authorization);
+    const record = (engineAllowed: boolean | "threw", error?: string) => {
+      observe?.({
+        mode,
+        action: authorization.action,
+        resourceType: authorization.resourceType,
+        principalKind: principal.kind,
+        principalId: principal.id,
+        fallback: authorization.fallback,
+        fallbackAllowed,
+        engineAllowed,
+        ...(error === undefined ? {} : { error }),
+      });
+    };
+
+    let engineAllowed: boolean;
+    try {
+      engineAllowed = await authorizer.authorize(
+        callerAuthorityPrincipal(principal),
+        authorization
+      );
+    } catch (error) {
+      // Shadow mode exists to rehearse the engine at zero risk, so an engine that
+      // cannot answer must not fail the request it is only observing. Enforcing
+      // mode still rethrows: there, a missing answer has to be a denial.
+      if (mode === "enforcing") throw error;
+      record("threw", error instanceof Error ? error.message : String(error));
+      return fallbackAllowed;
+    }
+
+    if (engineAllowed !== fallbackAllowed) {
+      record(engineAllowed);
+    }
+    return mode === "shadow" ? fallbackAllowed : engineAllowed;
   };
 }

@@ -176,30 +176,9 @@ export type SlackRoute = {
   priority: number;
 };
 
-export async function bindSlackAgent(
-  agentId: string,
-  channelId?: string
-): Promise<{
-  status: string;
-  teamId: string;
-  appId: string;
-  routeId: string;
-  channelId: string | null;
-}> {
-  return apiWrite(
-    "POST",
-    "/api/v1/integrations/slack/bind",
-    channelId === undefined ? { agentId } : { agentId, channelId }
-  );
-}
-
 export async function listSlackRoutes(): Promise<SlackRoute[]> {
   const body = await apiGet<{ routes: SlackRoute[] }>("/api/v1/integrations/slack/routes");
   return body.routes;
-}
-
-export async function unbindSlackRoute(routeId: string): Promise<void> {
-  await apiDelete(`/api/v1/integrations/slack/routes/${encodeURIComponent(routeId)}`);
 }
 
 export type GitHubInstallation = {

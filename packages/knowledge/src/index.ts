@@ -177,7 +177,7 @@ export type {
   MutableKnowledgeSourceStore,
   SnapshotAccessControl,
 } from "./source";
-export { InMemoryKnowledgeSourceStore, knowledgeSourceFromDefinition } from "./source";
+export { InMemoryKnowledgeSourceStore } from "./source";
 export {
   type KnowledgeSpaceOverrideRepo,
   PgKnowledgeSpaceOverrideRepo,

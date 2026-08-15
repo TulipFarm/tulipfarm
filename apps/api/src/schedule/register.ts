@@ -1,8 +1,6 @@
 import type { PgBoss } from "pg-boss";
 import type { ScheduleDispatcher } from "./dispatcher";
 
-export const SCHEDULE_DISPATCH_INTERVAL_MS = 60 * 1000;
-
 export const SCHEDULE_DISPATCH_QUEUE = "routine-schedule-dispatch";
 
 export const SCHEDULE_DISPATCH_CRON = "* * * * *";

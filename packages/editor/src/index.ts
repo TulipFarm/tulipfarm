@@ -11,12 +11,7 @@ export {
   Callout,
   type CalloutKind,
 } from "./extensions/callout";
-export {
-  createMarkdownManager,
-  normalizeMarkdown,
-  parseMarkdownToDoc,
-  serializeDocToMarkdown,
-} from "./markdown/markdown";
+export { normalizeMarkdown, parseMarkdownToDoc, serializeDocToMarkdown } from "./markdown/markdown";
 export {
   filterMentionSections,
   filterTagSuggestions,
