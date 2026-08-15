@@ -148,11 +148,6 @@ export const MEMBER_ALLOWED_SURFACES: readonly {
   { type: "platform.kv", actions: ["*"], enforcedIn: "packages/kv/src/tools.ts" },
   { type: "kv_user", actions: ["*"], enforcedIn: "kv/routes.ts" },
   {
-    type: "llm_config",
-    actions: ["llm_config.read"],
-    enforcedIn: "soul/llm-config/routes.ts",
-  },
-  {
     type: "platform.memory",
     actions: ["*"],
     enforcedIn: "memory/routes.ts; packages/memory/src/tools.ts",
