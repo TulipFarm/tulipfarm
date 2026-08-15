@@ -1,0 +1,178 @@
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
+import type { IntegrationHttpResponse } from "../http";
+import type { EgressHttpPort, EgressHttpRequest } from "./openapi-adapter";
+
+/**
+ * Destination cage for manifest egress. A manifest is authored by an Agent from chat, so its
+ * `base_url` is untrusted input that the deployment's own credential is then spent against: an
+ * unguarded one reaches cloud metadata (`169.254.169.254`), a loopback admin port, or anything
+ * else inside the perimeter. Enforced twice, because neither check subsumes the other — the
+ * literal check fails an install outright, the resolved check catches a public name that points
+ * inward.
+ */
+
+export type EgressDestinationDenial =
+  | "not_https"
+  | "embedded_credentials"
+  | "no_host"
+  | "private_destination"
+  | "unresolved_destination";
+
+export class EgressDestinationError extends Error {
+  readonly name = "EgressDestinationError";
+
+  constructor(
+    readonly denial: EgressDestinationDenial,
+    readonly destination: string
+  ) {
+    super(`egress_destination:${denial}:${destination}`);
+  }
+}
+
+function isPrivateIpv4(address: string): boolean {
+  const octets = address.split(".").map(Number);
+  // An address that does not parse is treated as private: the caller is deciding whether to send
+  // a credential, and "cannot tell" must land on the deny side of that question.
+  if (octets.length !== 4 || octets.some((octet) => !Number.isInteger(octet))) return true;
+  const [first, second] = octets;
+  return (
+    first === 0 ||
+    first === 10 ||
+    first === 127 ||
+    (first === 100 && second >= 64 && second <= 127) ||
+    (first === 169 && second === 254) ||
+    (first === 172 && second >= 16 && second <= 31) ||
+    (first === 192 && second === 168) ||
+    first >= 224
+  );
+}
+
+function isPrivateIpv6(address: string): boolean {
+  const normalized = address.toLowerCase().split("%")[0];
+  if (normalized === "::" || normalized === "::1") return true;
+  if (normalized.startsWith("fc") || normalized.startsWith("fd")) return true;
+  if (/^fe[89ab]/.test(normalized)) return true;
+  const mappedIpv4 = normalized.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/)?.[1];
+  return mappedIpv4 !== undefined && isPrivateIpv4(mappedIpv4);
+}
+
+/** Loopback, link-local, RFC 1918, CGNAT, multicast and IPv4-mapped IPv6 all count as private. */
+export function isPrivateNetworkAddress(address: string): boolean {
+  const family = isIP(address);
+  if (family === 4) return isPrivateIpv4(address);
+  if (family === 6) return isPrivateIpv6(address);
+  // Not an address at all — the same "cannot tell" deny as an unparsable v4.
+  return true;
+}
+
+/**
+ * Install-time check on a manifest's declared `base_url`. Rejects a URL that is not HTTPS, carries
+ * embedded credentials, or names a private address literally. A hostname passes here and is caught
+ * at request time instead, because resolving during compilation would make an install depend on
+ * DNS that can differ by the time the Tool runs.
+ *
+ * @throws EgressDestinationError when the URL may not be an egress destination.
+ */
+export function assertPublicEgressUrl(url: URL, destination: string): void {
+  if (url.protocol !== "https:") throw new EgressDestinationError("not_https", destination);
+  if (url.username !== "" || url.password !== "") {
+    throw new EgressDestinationError("embedded_credentials", destination);
+  }
+  if (url.hostname === "") throw new EgressDestinationError("no_host", destination);
+  const literal = url.hostname.startsWith("[") ? url.hostname.slice(1, -1) : url.hostname;
+  if (isIP(literal) !== 0 && isPrivateNetworkAddress(literal)) {
+    throw new EgressDestinationError("private_destination", destination);
+  }
+}
+
+/**
+ * Request-time check on what a hostname actually resolves to. Denies unless every answer is
+ * public, so a single private address in a round-robin cannot be the one dialled.
+ *
+ * This narrows the window rather than closing it: the addresses are not pinned to the socket the
+ * transport then opens, so a DNS answer that changes between this call and the connection is not
+ * caught. Pinning needs a custom connector; until there is one, this stops the static cases —
+ * `metadata.google.internal`, a name whose A record is `10.x`, an attacker's always-private zone.
+ *
+ * @throws EgressDestinationError when nothing resolves or any answer is private.
+ */
+export function assertPublicAddresses(
+  addresses: readonly string[],
+  destination: string
+): readonly string[] {
+  if (addresses.length === 0) {
+    throw new EgressDestinationError("unresolved_destination", destination);
+  }
+  if (addresses.some(isPrivateNetworkAddress)) {
+    throw new EgressDestinationError("private_destination", destination);
+  }
+  return addresses;
+}
+
+/** Answers stay usable far longer than one Run, and re-resolving every call is a per-call stall. */
+const RESOLUTION_TTL_MS = 30_000;
+
+export type HostResolver = (hostname: string) => Promise<readonly string[]>;
+
+async function resolveHost(hostname: string): Promise<readonly string[]> {
+  const answers = await lookup(hostname, { all: true, verbatim: true });
+  return answers.map((answer) => answer.address);
+}
+
+export interface GuardedEgressHttpOptions {
+  /** Injected so tests never touch DNS. */
+  readonly resolve?: HostResolver;
+  readonly ttlMs?: number;
+}
+
+/**
+ * Wraps any egress transport so nothing leaves for a private address. Kept separate from the
+ * transport because it is policy, not plumbing: the install-time check on `base_url` cannot see a
+ * public-looking hostname whose record points inward, and only a resolution can.
+ *
+ * Denials surface as `403`, not as a transport failure — refusing to cross the perimeter is a
+ * decision the effect ledger should record as denied rather than retry as an outage.
+ */
+export class GuardedEgressHttp implements EgressHttpPort {
+  private readonly resolve: HostResolver;
+  private readonly ttlMs: number;
+  private readonly checked = new Map<string, number>();
+
+  constructor(
+    private readonly inner: EgressHttpPort,
+    options: GuardedEgressHttpOptions = {}
+  ) {
+    this.resolve = options.resolve ?? resolveHost;
+    this.ttlMs = options.ttlMs ?? RESOLUTION_TTL_MS;
+  }
+
+  async send(request: EgressHttpRequest): Promise<IntegrationHttpResponse> {
+    try {
+      await this.assertPublicDestination(request.url);
+    } catch (error) {
+      if (!(error instanceof EgressDestinationError)) throw error;
+      return { status: 403, headers: {}, body: { error: error.denial } };
+    }
+    return this.inner.send(request);
+  }
+
+  private async assertPublicDestination(rawUrl: string): Promise<void> {
+    let url: URL;
+    try {
+      url = new URL(rawUrl);
+    } catch {
+      throw new EgressDestinationError("no_host", rawUrl);
+    }
+    const hostname = url.hostname.startsWith("[") ? url.hostname.slice(1, -1) : url.hostname;
+    const checkedAt = this.checked.get(hostname);
+    if (checkedAt !== undefined && Date.now() - checkedAt < this.ttlMs) return;
+
+    // A literal address needs no lookup, and asking a resolver about one invites an answer that
+    // vouches for it. Check the literal itself.
+    const addresses =
+      isIP(hostname) === 0 ? await this.resolve(hostname).catch(() => []) : [hostname];
+    assertPublicAddresses(addresses, hostname);
+    this.checked.set(hostname, Date.now());
+  }
+}

@@ -4,6 +4,7 @@ import {
   type ToolContractSpec,
 } from "@tulipfarm/schema";
 import type { IntegrationHttpMethod } from "../http";
+import { assertPublicEgressUrl, EgressDestinationError } from "./destination";
 
 /** Structural copy of Soul `EgressConfig`; avoids coupling this provider-neutral compiler. */
 export interface OpenApiEgressAuth {
@@ -226,7 +227,7 @@ function firstServerUrl(document: unknown): string | undefined {
   return typeof url === "string" ? url : undefined;
 }
 
-/** Resolve and require the credential destination URL to be HTTPS with a literal host. */
+/** Resolve and require the credential destination URL to be HTTPS with a literal public host. */
 function resolveBaseUrl(document: unknown, override: string | undefined): string {
   const declared = override ?? firstServerUrl(document);
   if (declared === undefined) {
@@ -243,6 +244,15 @@ function resolveBaseUrl(document: unknown, override: string | undefined): string
   }
   if (/[{}]/.test(parsed.host)) {
     throw new EgressCompileError("base_url_invalid", `${declared} (host must be literal)`);
+  }
+  // A manifest is authored from chat, so its destination is untrusted and is about to be spent
+  // against with the deployment's credential. Refuse an install that points inward rather than
+  // discovering it on the first call.
+  try {
+    assertPublicEgressUrl(parsed, declared);
+  } catch (error) {
+    if (!(error instanceof EgressDestinationError)) throw error;
+    throw new EgressCompileError("base_url_invalid", `${declared} (${error.denial})`);
   }
   return declared.replace(/\/+$/, "");
 }

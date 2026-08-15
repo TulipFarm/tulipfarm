@@ -395,6 +395,47 @@ describe("compileOpenApiEgress", () => {
     ).toThrow(/base_url_invalid/);
   });
 
+  it("refuses a base_url aimed at the private network, from the manifest or from the spec", () => {
+    // A manifest is authored from chat. Without this, an installed Tool spends the deployment's
+    // own credential against cloud metadata or an internal admin port.
+    for (const baseUrl of ["https://169.254.169.254", "https://10.0.0.5", "https://127.0.0.1"]) {
+      expect(() =>
+        compileOpenApiEgress({
+          slug: "acme",
+          egress: {
+            type: "openapi",
+            spec: "spec.json",
+            operations: [SEARCH_OP],
+            base_url: baseUrl,
+          },
+          document: SPEC,
+        })
+      ).toThrow(/base_url_invalid.*private_destination/);
+    }
+    expect(() =>
+      compileOpenApiEgress({
+        slug: "acme",
+        egress: { type: "openapi", spec: "spec.json", operations: [SEARCH_OP] },
+        document: { ...SPEC, servers: [{ url: "https://192.168.0.1" }] },
+      })
+    ).toThrow(/base_url_invalid.*private_destination/);
+  });
+
+  it("refuses a base_url carrying embedded credentials", () => {
+    expect(() =>
+      compileOpenApiEgress({
+        slug: "acme",
+        egress: {
+          type: "openapi",
+          spec: "spec.json",
+          operations: [SEARCH_OP],
+          base_url: "https://user:pass@api.example.com",
+        },
+        document: SPEC,
+      })
+    ).toThrow(/base_url_invalid.*embedded_credentials/);
+  });
+
   it("refuses an operation the spec does not define", () => {
     expect(() =>
       compileOpenApiEgress({

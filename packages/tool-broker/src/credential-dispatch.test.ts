@@ -82,6 +82,7 @@ describe("CredentialDispatcher", () => {
   it("leases the current Credential only inside the adapter callback", async () => {
     provider.set(SECRET_REF, ROTATED_SECRET);
     const adapter: ToolAdapter = {
+      kind: "integration",
       dispatch: vi.fn(async (_request, credential) => {
         expect(credential).toBe(ROTATED_SECRET);
         return { providerId: "external-42" };
@@ -100,6 +101,7 @@ describe("CredentialDispatcher", () => {
   it("reauthorizes and leases fresh on every retry attempt", async () => {
     let calls = 0;
     const adapter: ToolAdapter = {
+      kind: "integration",
       dispatch: vi.fn(async (_request, credential) => {
         calls += 1;
         if (calls === 1) {
@@ -119,6 +121,7 @@ describe("CredentialDispatcher", () => {
   it("denies when final authorization is no longer current", async () => {
     reauthorize.mockResolvedValue(false);
     const adapter: ToolAdapter = {
+      kind: "integration",
       dispatch: vi.fn(async () => ({ providerId: "must-not-run" })),
     };
 
@@ -128,6 +131,7 @@ describe("CredentialDispatcher", () => {
 
   it("blocks plaintext in adapter results and persists no plaintext", async () => {
     const adapter: ToolAdapter = {
+      kind: "integration",
       dispatch: vi.fn(async (_request, credential) => ({ providerId: credential })),
     };
 

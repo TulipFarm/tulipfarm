@@ -61,6 +61,8 @@ function asRecord(body: unknown): Record<string, unknown> {
 }
 
 export class SlackToolAdapter implements ToolAdapter {
+  readonly kind = "integration" as const;
+
   constructor(private readonly deps: SlackToolAdapterDeps) {}
 
   async dispatch(request: ToolAdapterRequest, credential?: string): Promise<unknown> {

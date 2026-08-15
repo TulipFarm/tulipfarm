@@ -43,6 +43,8 @@ function scalar(value: unknown): string {
 }
 
 export class OpenApiToolAdapter implements ToolAdapter {
+  readonly kind = "openapi" as const;
+
   constructor(private readonly deps: OpenApiToolAdapterDeps) {}
 
   async dispatch(request: ToolAdapterRequest, credential?: string): Promise<unknown> {

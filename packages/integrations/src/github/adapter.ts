@@ -180,6 +180,8 @@ function permissionFor(action: string): "issues" | "pull_requests" | "checks" | 
 }
 
 export class GitHubAdapter implements ToolAdapter, ToolReconciliationAdapter {
+  readonly kind = "integration" as const;
+
   constructor(private readonly deps: GitHubAdapterDeps) {}
 
   async dispatch(request: ToolAdapterRequest, credential?: string): Promise<unknown> {

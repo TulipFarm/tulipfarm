@@ -421,17 +421,37 @@ function buildToolDef(
   return toToolDef(definition, (ctx) => ctx);
 }
 
+/**
+ * Picks the adapter a compiled Tool's contract asks for, or `undefined` when this composition root
+ * registers no implementation for that kind. Never falls back: the declared kind is the contract,
+ * and guessing one is how a Tool reaches a backend nobody authorized.
+ */
+function adapterFor(
+  tool: CompiledEgressTool,
+  deps: DeclarativeToolingDeps
+): ToolAdapter | undefined {
+  switch (tool.contract.spec.adapter.kind) {
+    case "openapi":
+      return new OpenApiToolAdapter({ binding: tool.binding, http: deps.http });
+    default:
+      return undefined;
+  }
+}
+
 function dispatcherFor(
   integration: CompiledIntegration,
   deps: DeclarativeToolingDeps
 ): EffectDispatcher {
   const catalog = ToolCatalog.load(integration.tools.map((tool) => tool.contract));
-  const adapters = new Map<string, ToolAdapter>(
-    integration.tools.map((tool) => [
-      tool.adapterRef,
-      new OpenApiToolAdapter({ binding: tool.binding, http: deps.http }),
-    ])
-  );
+  const adapters = new Map<string, ToolAdapter>();
+  for (const tool of integration.tools) {
+    const adapter = adapterFor(tool, deps);
+    // A kind with no implementation is left unregistered rather than handed the OpenAPI adapter:
+    // the compiler emits the kind, so binding it to a backend it did not declare would let the
+    // contract and the runtime disagree in silence. Dispatch then fails `adapter_not_found`,
+    // which parks that one Tool instead of failing the whole integration's registration.
+    if (adapter !== undefined) adapters.set(tool.adapterRef, adapter);
+  }
 
   const { credential } = integration;
   // Default-deny, scoped to this integration's own ref: a careless or hostile manifest can never

@@ -132,7 +132,7 @@ beforeEach(() => {
   dispatch = vi.fn<ToolAdapter["dispatch"]>(async (_request: ToolAdapterRequest) => ({
     commentId: 12,
   }));
-  adapters = new Map<string, ToolAdapter>([["github", { dispatch }]]);
+  adapters = new Map<string, ToolAdapter>([["github", { kind: "integration" as const, dispatch }]]);
 });
 
 function port(): BrokerRoutineToolPort {
@@ -153,7 +153,7 @@ describe("BrokerRoutineToolPort", () => {
   it("resolves bundle-scoped adapters from the exact Routine request", async () => {
     const adaptersFor = vi.fn(
       (_input: RoutineToolRequest): ReadonlyMap<string, ToolAdapter> =>
-        new Map([["github", { dispatch }]])
+        new Map([["github", { kind: "integration" as const, dispatch }]])
     );
     const dynamic = new BrokerRoutineToolPort({
       effects,

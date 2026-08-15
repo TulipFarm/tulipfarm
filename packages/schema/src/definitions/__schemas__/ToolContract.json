@@ -113,7 +113,6 @@
                 "integration",
                 "mcp",
                 "openapi",
-                "http",
                 "sandbox"
               ],
               "type": "string"

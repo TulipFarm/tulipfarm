@@ -33,7 +33,7 @@ export const THREAT_MODEL_CONTROLS: readonly ThreatModelControl[] = [
   },
   {
     category: "prompt_injection",
-    evidence: ["apps/api/src/guardrails/pipeline.test.ts"],
+    evidence: ["packages/agent-runtime/src/guardrails/guards/prompt-injection.test.ts"],
   },
   {
     category: "secret_exposure",
@@ -43,7 +43,8 @@ export const THREAT_MODEL_CONTROLS: readonly ThreatModelControl[] = [
     category: "replay_substitution",
     evidence: [
       "packages/integrations/src/generic/webhook.test.ts",
-      "packages/surface/src/action.test.ts",
+      "packages/tool-broker/src/effects/store.test.ts",
+      "packages/secrets/src/broker.test.ts",
     ],
   },
   {
@@ -52,11 +53,11 @@ export const THREAT_MODEL_CONTROLS: readonly ThreatModelControl[] = [
   },
   {
     category: "ssrf",
-    evidence: ["packages/integrations/src/generic/http.test.ts"],
+    evidence: ["packages/integrations/src/egress/destination.test.ts"],
   },
   {
     category: "sql_injection",
-    evidence: ["packages/integrations/src/postgres/adapter.test.ts"],
+    evidence: ["apps/api/src/resources/schema.test.ts", "scripts/sql-parameterization.test.ts"],
   },
   {
     category: "command_injection",
