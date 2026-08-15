@@ -103,6 +103,7 @@ import { subscribeActivityLogging } from "./activity/events";
 import { PgActivityRepo } from "./activity/repo";
 import { ActivityService } from "./activity/service";
 import { type HealthProbe, llmProbe, postgresProbe, queueProbe, soulProbe } from "./admin/health";
+import { modelReachability } from "./admin/model-reachability";
 import { OperationalNotImplementedError } from "./admin/routes";
 import { createRunReader } from "./admin/run-reader";
 import { createRuntimeOperationalApi } from "./admin/runtime";
@@ -153,6 +154,7 @@ import { resolveSecretRef } from "./integrations/connection-env";
 import { PgPrincipalProviderTokenRepo } from "./integrations/principal-tokens";
 import { IngressDeliveryHost } from "./internal/delivery-host";
 import { GitHubEntitlementPort, HttpGitHubPermissionApi } from "./internal/github-entitlement";
+import { ModelSelectorGate, modelGateModeFromEnv } from "./internal/model-authz";
 import { InternalRoutineApprovalHost } from "./internal/routine-approval-host";
 import { ChatTurnContextResolver } from "./internal/turn-context";
 import { InternalTurnHost } from "./internal/turn-host";
@@ -173,6 +175,7 @@ import { PgKnowledgeSourceStore } from "./knowledge-sources/source-store";
 import { PgProviderKnowledgeCheckpointStore } from "./knowledge-sources/sync-checkpoint-store";
 import { registerLlmReload } from "./llm-reload";
 import { parseObservabilityConfig } from "./observability/config";
+import { createEmbeddingUsageSink } from "./observability/embedding-usage";
 import { subscribeObservability } from "./observability/events";
 import { PgLogRepo } from "./observability/log-repo";
 import { OtlpMetricsExporter } from "./observability/metrics";
@@ -180,6 +183,7 @@ import { registerObsPruneSchedule } from "./observability/prune-schedule";
 import { PgObsRepo } from "./observability/repo";
 import { PgResourceRepo } from "./observability/resource-repo";
 import { ObservabilityService } from "./observability/service";
+import { registerSpendAlertSchedule } from "./observability/spend-alert";
 import { createObservabilityTelemetryPort } from "./observability/telemetry-port";
 import { OtlpTracesExporter } from "./observability/traces";
 import { runPgMigrations } from "./pg-migrate";
@@ -580,13 +584,16 @@ async function boot() {
 
     const llmService = new LlmService();
     const guardrailsService = new GuardrailsService();
-    const embeddingService = new EmbeddingService();
     const conversationRepo = new PgConversationRepo(pool);
     const messageRepo = new PgMessageRepo(pool);
     const feedbackRepo = new FeedbackRepo(pool);
     const surfaceArtifactStore = new PgSurfaceArtifactStore(pool);
     const surfaceActionStore = new PgSurfaceActionStore(pool);
     const observabilityService = new ObservabilityService(new PgObsRepo(pool));
+    // Built after observability so embedding spend lands in the same table as every other call.
+    const embeddingService = new EmbeddingService({
+      usage: createEmbeddingUsageSink(observabilityService, () => obsConfig.pricingOverrides),
+    });
     const logRepo = new PgLogRepo(pool);
     const logSink = new BatchingLogSink({ service: "api", writer: logRepo });
     logSink.start();
@@ -833,6 +840,15 @@ async function boot() {
           disabledBundledSkills,
           channelDeliveries: channelRunDeliveries,
           githubStatus: { integrations: integrationStore, businessId: DEPLOYMENT_BUSINESS_ID },
+          // Authority layers L1/L2 for the model path, off the same live resolver the Tool gate
+          // uses, so `platform.model` is decided by the one decision function rather than a copy.
+          // Shadow until there is evidence over real traffic: no role grants `platform.model`
+          // yet, so enforcing today would deny every turn a model.
+          modelGate: new ModelSelectorGate({
+            resolver: authorityLayerResolver,
+            mode: modelGateModeFromEnv(),
+            log: (event, message) => console.warn(JSON.stringify({ ...event, msg: message })),
+          }),
         }),
         tools: new RegistryToolDispatcher({
           registry: toolRegistry,
@@ -901,6 +917,7 @@ async function boot() {
         }),
       // without restarting it.
       llmConfig: () => soulLoader.llmConfig,
+      pricingOverrides: () => obsConfig.pricingOverrides,
       // reason: the resume token stays in the process that redeems it.
       routineApprovals: new InternalRoutineApprovalHost({
         runs: runStore,
@@ -1041,7 +1058,7 @@ async function boot() {
           queueProbe(boss),
           soulProbe(gitSync),
           soulPublicationProbe(pool),
-          llmProbe(llmService),
+          llmProbe(llmService, { reachability: modelReachability(llmService) }),
         ],
         // strand the Run, so the attempt fails loudly instead. Tool-call Approvals — the ones
         // this deployment actually produces — are resolved in-process and never reach here.
@@ -1099,9 +1116,20 @@ async function boot() {
 
     // Init after buildApp so fallback events log through Fastify's Pino logger.
     declarativeTools.sync();
-    await llmService.init(soulLoader.llmConfig, secretsService, app.log);
+    // A malformed `soul.yaml#llm` must not take down authentication, the UI and every unrelated
+    // feature. The reload path has always degraded to "LLM disabled" on exactly this error; cold
+    // boot used to fall through to the boot-wide `process.exit(1)` instead.
+    try {
+      await llmService.init(soulLoader.llmConfig, secretsService, app.log);
+      await embeddingService.init(soulLoader.llmConfig, secretsService, app.log);
+    } catch (err) {
+      app.log.error(
+        `[llm] invalid llm config at boot, continuing with LLM features disabled — ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
+    }
     guardrailsService.init(soulLoader.guardrailsConfig, app.log);
-    await embeddingService.init(soulLoader.llmConfig, secretsService, app.log);
     registerLlmReload(
       gitSync,
       soulLoader,
@@ -1111,6 +1139,16 @@ async function boot() {
       app.log,
       () => knowledgeService.runReindexIfPending().then(() => undefined)
     );
+    // A dimension change made while this process was down leaves every stored vector at a width
+    // exact-match vector search can never return, and the in-memory flag cannot see across a
+    // restart. Detached: a full re-index must not hold up serving traffic.
+    void knowledgeService.runReindexIfPending().catch((err: unknown) => {
+      app.log.error(
+        `[knowledge] boot re-index check failed — ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
+    });
     registerGuardrailsReload(gitSync, soulLoader, guardrailsService, app.log);
     registerResourceReconcile(gitSync, soulLoader, pool, app.log);
     registerSoulRoleReconcile(
@@ -1141,6 +1179,7 @@ async function boot() {
     });
     await registerScheduleDispatch(boss, scheduleDispatcher, { log: app.log });
     await registerObsPruneSchedule(boss, obsConfig.retentionDays * 24 * 60 * 60 * 1000);
+    await registerSpendAlertSchedule(boss, obsConfig.spendAlertUsd);
     await registerKnowledgeIndexing(boss, {
       service: knowledgeService,
       loadConversationText: async (conversationId) => {

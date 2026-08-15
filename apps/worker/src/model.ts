@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type {
   ModelInvocationRequest,
   ModelInvocationResult,
@@ -7,9 +8,11 @@ import type {
   ModelRequirements,
   ModelRequirementsPolicy,
   ModelStreamChunk,
+  ModelUsage,
 } from "@tulipfarm/agent-runtime";
 import { deriveModelRequirements, ModelInvocationError } from "@tulipfarm/agent-runtime";
-import { classifyProviderError, priceFor } from "@tulipfarm/llm";
+import type { CostBasis, PrincipalRef } from "@tulipfarm/llm";
+import { classifyProviderError } from "@tulipfarm/llm";
 import type { ResolvedLimits } from "@tulipfarm/run-kernel";
 import {
   asEffortPreset,
@@ -21,6 +24,7 @@ import {
 } from "@tulipfarm/schema";
 import {
   jsonSchema,
+  type LanguageModelUsage,
   type ModelMessage as SdkMessage,
   type SystemModelMessage,
   streamText,
@@ -31,6 +35,9 @@ import {
 } from "ai";
 import type { EffortInferencePort } from "./effort-inference";
 import type { LlmModelResolution } from "./llm";
+import type { ModelCallGate } from "./model-gate";
+import { ModelCallWatchdog, withAbort } from "./model-watchdog";
+import type { SpendSink } from "./observability";
 
 /** ModelPort over Soul providers; SDK Tools never execute, so Broker remains sole effect path. */
 
@@ -39,7 +46,8 @@ export interface LlmModelPortOptions {
   model(
     selector: string,
     requirements: ModelRequirements,
-    inference?: RunEventEffortInference
+    inference?: RunEventEffortInference,
+    principal?: PrincipalRef
   ): Promise<LlmModelResolution>;
   /** Optional `auto` effort inference; consulted once per Turn-attempt port instance. */
   readonly effort?: EffortInferencePort;
@@ -58,10 +66,28 @@ export interface LlmModelPortOptions {
   readonly budgets?: {
     open(limits: ResolvedLimits): Promise<void>;
   };
-  /** Governance the request cannot carry — residency, retention, training, sensitivity. */
+  /**
+   * Process-wide governance floor, used only when a request carries no policy of its own.
+   *
+   * Per-turn governance belongs on `ModelInvocationRequest.policy`: this port is constructed
+   * before the turn's Context resolves, so it cannot know which Agent is acting.
+   */
   readonly policy?: ModelRequirementsPolicy;
   /** Aborts an in-flight model call when the worker is draining. */
   readonly signal?: AbortSignal;
+  /** Overrides the default idle bound; a chunk of any kind restarts it. */
+  readonly stallTimeoutMs?: number;
+  /** Overrides the default absolute ceiling for one call. */
+  readonly callTimeoutMs?: number;
+  /**
+   * Per-provider concurrency cap and circuit breaker. Shared across turns, so it must be one
+   * instance per process rather than one per port.
+   */
+  readonly gate?: ModelCallGate;
+  /** Where each model call is reported as spend. Best-effort; never blocks the turn. */
+  readonly spend?: SpendSink;
+  /** The Conversation this port serves, for attributing spend. Absent for Routine Runs. */
+  readonly conversationId?: string;
   /** Test hook for deterministic latency measurement. Defaults to `Date.now`. */
   now?(): number;
 }
@@ -100,9 +126,14 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
   }
 
   async *stream(request: ModelInvocationRequest): AsyncIterable<ModelStreamChunk> {
-    const requirements = deriveModelRequirements(request, this.options.policy);
+    const requirements = deriveModelRequirements(request, request.policy ?? this.options.policy);
     const inference = await this.inferEffort(request, requirements);
-    const resolution = await this.options.model(request.modelProfileId, requirements, inference);
+    const resolution = await this.options.model(
+      request.modelProfileId,
+      requirements,
+      inference,
+      request.principal
+    );
     if (resolution.kind === "available" && resolution.budgetLimits !== undefined) {
       await this.options.budgets?.open(resolution.budgetLimits);
     }
@@ -120,6 +151,9 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
     try {
       yield* this.streamProvider(request, resolution);
     } catch (error) {
+      // Re-classifying an already-classified failure would read the wrapper rather than the
+      // provider's own error and flatten every reason to `model_error`.
+      if (error instanceof ModelInvocationError) throw error;
       throw new ModelInvocationError(classifyProviderError(error), error);
     }
   }
@@ -146,40 +180,103 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
   ): AsyncIterable<ModelStreamChunk> {
     const { instructions, messages } = splitPrompt(request.messages);
     const startedAt = this.now();
-    const result = streamText({
-      model: resolution.model,
-      messages,
-      ...(instructions.length === 0 ? {} : { instructions }),
-      ...(request.tools === undefined || request.tools.length === 0
+    // Held for the whole call: releasing early would let the next turn in while this one is
+    // still occupying a provider connection.
+    const lease = await this.options.gate?.acquire(resolution.provider ?? "unknown");
+    const watchdog = new ModelCallWatchdog({
+      ...(this.options.signal === undefined ? {} : { signal: this.options.signal }),
+      ...(this.options.stallTimeoutMs === undefined
         ? {}
-        : { tools: toToolSet(request.tools) }),
-      ...(request.maxOutputTokens === undefined
+        : { stallTimeoutMs: this.options.stallTimeoutMs }),
+      ...(this.options.callTimeoutMs === undefined
         ? {}
-        : { maxOutputTokens: request.maxOutputTokens }),
-      ...(this.options.signal === undefined ? {} : { abortSignal: this.options.signal }),
+        : { callTimeoutMs: this.options.callTimeoutMs }),
     });
 
     let finishReason: string | undefined;
     let rawFinishReason: string | undefined;
+    // Accumulated as the stream runs, not read from the terminal chunk: a call that dies
+    // mid-stream never produces that chunk, and the provider still bills for what it did.
+    const observed = new UsageAccumulator();
+    let streamError: Error | undefined;
+    let calls: Awaited<ReturnType<typeof streamText>["toolCalls"]>;
+    let text: string;
+    let usage: Awaited<ReturnType<typeof streamText>["usage"]>;
+    let result: ReturnType<typeof streamText>;
 
-    for await (const part of result.fullStream) {
-      if (part.type === "text-delta" && part.text.length > 0) {
-        yield { kind: "text_delta", text: part.text };
+    try {
+      result = streamText({
+        model: resolution.model,
+        messages,
+        ...(instructions.length === 0 ? {} : { instructions }),
+        ...(request.tools === undefined || request.tools.length === 0
+          ? {}
+          : { tools: toToolSet(request.tools) }),
+        ...(request.maxOutputTokens === undefined
+          ? {}
+          : { maxOutputTokens: request.maxOutputTokens }),
+        abortSignal: watchdog.signal,
+      });
+
+      for await (const part of withAbort(result.fullStream, watchdog.signal)) {
+        // Any part at all is proof of life, so the stall window restarts on tool calls and
+        // reasoning too, not only on visible text.
+        watchdog.progress();
+        if (part.type === "text-delta" && part.text.length > 0) {
+          yield { kind: "text_delta", text: part.text };
+        }
+        if (part.type === "error") {
+          // Deliberately not thrown here. The SDK reports the step's usage in the `finish-step`
+          // part that follows the `error` part, so bailing out on sight is precisely what made
+          // every mid-stream failure look free while the provider still billed for it.
+          streamError = part.error instanceof Error ? part.error : new Error(String(part.error));
+          continue;
+        }
+        // Every step reports its own usage; `finish` repeats the total, so counting only the
+        // steps keeps one source and cannot double-charge.
+        if (part.type === "finish-step") observed.add(part.usage);
+        if (part.type === "finish") {
+          finishReason = part.finishReason;
+          rawFinishReason = part.rawFinishReason;
+        }
       }
-      if (part.type === "error") {
-        throw part.error instanceof Error ? part.error : new Error(String(part.error));
+
+      if (streamError !== undefined) throw streamError;
+
+      [calls, text, usage] = await Promise.all([result.toolCalls, result.text, result.usage]);
+      lease?.succeeded();
+    } catch (error) {
+      // A watchdog abort must not be reported as a generic provider error: the operator needs to
+      // know the call was cut off here, and by which bound.
+      // Whatever the provider consumed before it stopped rides out on the error, so the Run is
+      // charged for a failed call instead of being handed it free.
+      const partial = observed.settle((tokensIn, tokensOut) =>
+        resolution.price(tokensIn, tokensOut)
+      );
+      this.reportSpend(request, resolution, "error", partial, this.now() - startedAt);
+      if (watchdog.expired !== undefined) {
+        lease?.failed("model_provider_unavailable");
+        throw new ModelInvocationError(
+          "model_provider_unavailable",
+          new Error(`${watchdog.message()} — model call aborted`, { cause: error }),
+          partial
+        );
       }
-      if (part.type === "finish") {
-        finishReason = part.finishReason;
-        rawFinishReason = part.rawFinishReason;
-      }
+      lease?.failed(classifyProviderError(error));
+      throw error instanceof ModelInvocationError
+        ? new ModelInvocationError(error.reason, error.cause, partial)
+        : new ModelInvocationError(classifyProviderError(error), error, partial);
+    } finally {
+      watchdog.close();
+      lease?.release();
     }
 
-    const [calls, text, usage] = await Promise.all([result.toolCalls, result.text, result.usage]);
     const finishedAt = this.now();
     const inputTokens = usage.inputTokens ?? 0;
     const outputTokens = usage.outputTokens ?? 0;
-    const cost = priceFor(pricingModelId(resolution.routing), inputTokens, outputTokens);
+    // Priced after the call, against the chain link that actually answered — never the head of
+    // the chain, which is a prediction rather than an outcome.
+    const cost = resolution.price(inputTokens, outputTokens);
     this.receipt =
       receiptFromRouting(resolution.routing, Math.max(0, Math.round(finishedAt - startedAt))) ??
       this.receipt;
@@ -198,11 +295,15 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
         Promise.resolve(result.request).catch((error: unknown) => ({ body: String(error) })),
         Promise.resolve(result.response).catch((error: unknown) => ({ body: String(error) })),
       ]);
+      // Shapes and fingerprints only. This message reaches the operator's process logs, and the
+      // request body is the assembled prompt while the response body is the model's answer — both
+      // are the participant's business content, which no amount of truncation makes safe to spill
+      // there. A digest still correlates repeat failures and still says how big the call was.
       const outgoing = {
         instructionCount: instructions.length,
         messageCount: messages.length,
         roles: messages.map((m) => m.role),
-        lastMessage: messages.at(-1),
+        lastMessage: describeMessage(messages.at(-1)),
         toolCount: request.tools?.length ?? 0,
         toolNames: request.tools?.map((t) => t.name) ?? [],
       };
@@ -210,24 +311,59 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
         `model call produced no output (finishReason=${finishReason ?? "unknown"}` +
           `${rawFinishReason ? `, rawFinishReason=${rawFinishReason}` : ""}, ` +
           `warnings=${JSON.stringify(warnings)}, ` +
-          `request=${JSON.stringify(sdkRequest).slice(0, 2000)}, ` +
-          `response=${JSON.stringify(sdkResponse).slice(0, 2000)}, ` +
-          `outgoing=${JSON.stringify(outgoing).slice(0, 4000)})`
+          `request=${fingerprint(sdkRequest)}, ` +
+          `response=${describeResponse(sdkResponse)}, ` +
+          `outgoing=${JSON.stringify(outgoing)})`
       );
     }
+
+    const finalUsage: ModelUsage = {
+      inputTokens,
+      outputTokens,
+      ...tokenDetail(usage),
+      ...(cost.kind === "priced" ? { costUsd: cost.costUsd } : {}),
+      costBasis: cost.kind,
+    };
+    this.reportSpend(request, resolution, "ok", finalUsage, finishedAt - startedAt);
 
     yield {
       kind: "completed",
       result: {
         requestId: request.requestId,
         output: toOutput(calls, text),
-        usage: {
-          inputTokens,
-          outputTokens,
-          ...(cost.costUsd === null ? {} : { costUsd: cost.costUsd }),
-        },
+        usage: finalUsage,
       },
     };
+  }
+
+  /**
+   * Reports one model call to the spend ledger.
+   *
+   * Failures are reported too, with whatever the provider had already consumed: a call that dies
+   * mid-stream is billed by the provider, so leaving it out of the ledger understates real spend
+   * by exactly the amount an operator most wants to see.
+   */
+  private reportSpend(
+    request: ModelInvocationRequest,
+    resolution: Extract<LlmModelResolution, { kind: "available" }>,
+    status: "ok" | "error",
+    usage: ModelUsage | undefined,
+    durationMs: number
+  ): void {
+    if (this.options.spend === undefined) return;
+    this.options.spend.recordLlmCall({
+      status,
+      durationMs: Math.max(0, Math.round(durationMs)),
+      ...(usage === undefined ? {} : { usage }),
+      ...(this.options.conversationId === undefined
+        ? {}
+        : { conversationId: this.options.conversationId }),
+      ...(request.agentId === undefined ? {} : { agentId: request.agentId }),
+      ...(routedModelId(resolution.routing) === undefined
+        ? {}
+        : { model: routedModelId(resolution.routing) }),
+      ...(resolution.provider === undefined ? {} : { provider: resolution.provider }),
+    });
   }
 
   private now(): number {
@@ -236,6 +372,52 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
 }
 
 /** Latest user text only; never let system text or model output escalate effort. */
+/**
+ * A non-reversible tag plus a size for a payload that must not be logged verbatim.
+ *
+ * Two failures with the same digest are the same call shape, which is what a diagnostic is
+ * actually for; the content itself is the participant's, not the operator's.
+ */
+function fingerprint(value: unknown): string {
+  let json: string;
+  try {
+    json = JSON.stringify(value) ?? "undefined";
+  } catch {
+    json = "unserializable";
+  }
+  return `sha256:${createHash("sha256").update(json).digest("hex").slice(0, 12)}/${json.length}b`;
+}
+
+/** Provider call metadata is operational; the body is content, so it is only fingerprinted. */
+function describeResponse(response: unknown): string {
+  const r = response as { id?: unknown; modelId?: unknown; timestamp?: unknown } | null | undefined;
+  const meta = {
+    id: typeof r?.id === "string" ? r.id : undefined,
+    modelId: typeof r?.modelId === "string" ? r.modelId : undefined,
+    timestamp: r?.timestamp instanceof Date ? r.timestamp.toISOString() : undefined,
+  };
+  return `${JSON.stringify(meta)}@${fingerprint(response)}`;
+}
+
+/** Role and part shape of a message, with sizes instead of text. */
+function describeMessage(message: SdkMessage | undefined): unknown {
+  if (!message) return undefined;
+  const { role, content } = message;
+  if (typeof content === "string")
+    return { role, parts: [{ type: "text", chars: content.length }] };
+  if (!Array.isArray(content)) return { role, parts: [] };
+  return {
+    role,
+    parts: content.map((part) => {
+      const p = part as { type?: unknown; text?: unknown };
+      return {
+        type: typeof p.type === "string" ? p.type : "unknown",
+        chars: typeof p.text === "string" ? p.text.length : undefined,
+      };
+    }),
+  };
+}
+
 function latestUserPrompt(messages: readonly ModelMessage[]): string | undefined {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
@@ -243,6 +425,18 @@ function latestUserPrompt(messages: readonly ModelMessage[]): string | undefined
     if (message.content.trim().length === 0) continue;
     return message.content;
   }
+  return undefined;
+}
+
+/**
+ * The model the ledger attributes this call to.
+ *
+ * Wider than `pricingModelId`, which reports only chain heads: a raw model id is still a real
+ * model and a spend row that cannot name it is a spend row nobody can act on.
+ */
+function routedModelId(routing: RunEventPayloads["model.routed"]): string | undefined {
+  if (routing.outcome === "selected") return routing.chain[0]?.modelId;
+  if (routing.outcome === "raw_model") return routing.modelId;
   return undefined;
 }
 
@@ -432,4 +626,67 @@ function toToolSet(
       }),
     ])
   );
+}
+
+/**
+ * Cache and reasoning splits.
+ *
+ * Zeros are dropped alongside absent values: providers that support none of this still report
+ * `0`, and carrying that into every record would bloat the stored attributes without saying
+ * anything a missing key does not already say.
+ */
+function tokenDetail(usage: LanguageModelUsage): Partial<ModelUsage> {
+  const cacheReadTokens = usage.inputTokenDetails?.cacheReadTokens ?? 0;
+  const cacheWriteTokens = usage.inputTokenDetails?.cacheWriteTokens ?? 0;
+  const reasoningTokens = usage.outputTokenDetails?.reasoningTokens ?? 0;
+  return {
+    ...(cacheReadTokens === 0 ? {} : { cacheReadTokens }),
+    ...(cacheWriteTokens === 0 ? {} : { cacheWriteTokens }),
+    ...(reasoningTokens === 0 ? {} : { reasoningTokens }),
+  };
+}
+
+/**
+ * Running total of what a streaming call has consumed so far.
+ *
+ * Exists for the failure path. Usage was only ever read from the terminal chunk, which a call
+ * that dies mid-stream never reaches — so every mid-stream failure was charged zero while the
+ * provider billed for the submitted prompt and the partial output that had already been
+ * streamed to, and durably stored for, the participant.
+ */
+class UsageAccumulator {
+  private inputTokens = 0;
+  private outputTokens = 0;
+  private cacheReadTokens = 0;
+  private cacheWriteTokens = 0;
+  private reasoningTokens = 0;
+
+  add(usage: LanguageModelUsage): void {
+    this.inputTokens += usage.inputTokens ?? 0;
+    this.outputTokens += usage.outputTokens ?? 0;
+    this.cacheReadTokens += usage.inputTokenDetails?.cacheReadTokens ?? 0;
+    this.cacheWriteTokens += usage.inputTokenDetails?.cacheWriteTokens ?? 0;
+    this.reasoningTokens += usage.outputTokenDetails?.reasoningTokens ?? 0;
+  }
+
+  /**
+   * Prices what was consumed, or reports nothing when no tokens were.
+   *
+   * The SDK synthesises a zero-usage step for a call that failed before the provider answered,
+   * so "reported something" is not a usable test. Zero tokens is nothing to charge on either
+   * reading, and reporting absence keeps a meaningless record out of the spend ledger.
+   */
+  settle(price: (tokensIn: number, tokensOut: number) => CostBasis): ModelUsage | undefined {
+    if (this.inputTokens === 0 && this.outputTokens === 0) return undefined;
+    const cost = price(this.inputTokens, this.outputTokens);
+    return {
+      inputTokens: this.inputTokens,
+      outputTokens: this.outputTokens,
+      ...(this.cacheReadTokens === 0 ? {} : { cacheReadTokens: this.cacheReadTokens }),
+      ...(this.cacheWriteTokens === 0 ? {} : { cacheWriteTokens: this.cacheWriteTokens }),
+      ...(this.reasoningTokens === 0 ? {} : { reasoningTokens: this.reasoningTokens }),
+      ...(cost.kind === "priced" ? { costUsd: cost.costUsd } : {}),
+      costBasis: cost.kind,
+    };
+  }
 }

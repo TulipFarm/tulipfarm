@@ -10,6 +10,11 @@ export interface IndexResult {
   embedded: boolean;
 }
 
+/** Minimal logger surface for degraded-indexing notices. */
+export interface IndexLogger {
+  warn(msg: string): void;
+}
+
 function contentHash(content: string): string {
   return createHash("md5").update(content).digest("hex");
 }
@@ -25,7 +30,8 @@ function contentHash(content: string): string {
 export async function indexPage(
   page: KnowledgePage,
   chunksRepo: KnowledgeChunkRepo,
-  embeddings: EmbeddingPort
+  embeddings: EmbeddingPort,
+  log?: IndexLogger
 ): Promise<IndexResult> {
   const textChunks = chunkText(page.plainText);
   if (textChunks.length === 0) {
@@ -37,6 +43,11 @@ export async function indexPage(
   // Snapshot the active model before embedding so a concurrent reload can't swap it under us.
   const active = available ? embeddings.getActive() : null;
   const activeModel = active?.model ?? null;
+  // A model name is not a width. `text-embedding-3-large` takes a configurable output dimension,
+  // and the `dimension` config field can be edited without touching `model` — so keying reuse on
+  // the name alone made the width-change re-index reuse the very vectors it was run to replace.
+  // Unknown width stays permissive: re-embedding the whole corpus on a guess is worse.
+  const activeDim = active?.dimension ?? null;
   const hashes = textChunks.map((c) => contentHash(c.content));
 
   const existing = await chunksRepo.listByPageForDiff(page._id);
@@ -50,7 +61,8 @@ export async function indexPage(
       prior &&
       prior.embedding !== null &&
       prior.contentHash === hashes[i] &&
-      prior.model === activeModel
+      prior.model === activeModel &&
+      (activeDim === null || prior.dim === activeDim)
     ) {
       vectors[i] = prior.embedding;
       dims[i] = prior.dim;
@@ -68,7 +80,18 @@ export async function indexPage(
         dims[toEmbed[j].i] = out.dimension;
       });
     } catch (err) {
-      if (!(err instanceof EmbeddingUnavailableError)) throw err;
+      // Any embedding failure degrades this page to lexical-only. Re-throwing anything but
+      // `EmbeddingUnavailableError` used to abort the whole indexing operation on a rate limit or
+      // a timeout, so one throttled provider could leave a page with no chunks at all — worse than
+      // the lexical-only row we already accept when no provider is configured. The backfill sweep
+      // (`listPageIdsNeedingEmbedding`) picks these up once the provider recovers.
+      if (!(err instanceof EmbeddingUnavailableError)) {
+        log?.warn(
+          `[knowledge] embedding failed for page=${page._id}, storing lexical-only — ${
+            err instanceof Error ? err.message : String(err)
+          }`
+        );
+      }
     }
   }
 
@@ -87,11 +110,12 @@ export async function indexPage(
 export async function reindexAll(
   pageRepo: KnowledgePageRepo,
   chunksRepo: KnowledgeChunkRepo,
-  embeddings: EmbeddingPort
+  embeddings: EmbeddingPort,
+  log?: IndexLogger
 ): Promise<number> {
   const pages = await pageRepo.listActive();
   for (const page of pages) {
-    await indexPage(page, chunksRepo, embeddings);
+    await indexPage(page, chunksRepo, embeddings, log);
   }
   return pages.length;
 }

@@ -65,6 +65,8 @@ function profileFrom(
   connection: string
 ): DerivedModelProfile {
   const spec = entry.spec;
+  const budgets = budgetsFrom(entry);
+  const constraints = constraintsFrom(entry);
   return {
     profileId,
     provider: entry.provider,
@@ -81,6 +83,38 @@ function profileFrom(
     },
     allowCaching: spec?.supports_prompt_caching === true,
     ...(spec === undefined ? {} : { spec }),
+    ...(budgets === undefined ? {} : { budgets }),
+    ...(constraints === undefined ? {} : { constraints }),
+  };
+}
+
+/**
+ * Authored governance posture, in the camelCase shape `selectModelProfile` reads.
+ *
+ * Nothing derived this before, so `constraints` was always absent and the residency, retention
+ * and training checks could never fire on any request — they read as governance and enforced
+ * nothing.
+ */
+function constraintsFrom(entry: ProviderEntry): ModelProfileSpec["constraints"] {
+  const authored = entry.constraints;
+  if (authored === undefined) return undefined;
+  const constraints = {
+    ...(authored.residency === undefined ? {} : { residency: authored.residency }),
+    ...(authored.data_retention === undefined ? {} : { dataRetention: authored.data_retention }),
+    ...(authored.allow_training === undefined ? {} : { allowTraining: authored.allow_training }),
+    ...(authored.max_latency_ms === undefined ? {} : { maxLatencyMs: authored.max_latency_ms }),
+  };
+  return Object.keys(constraints).length === 0 ? undefined : constraints;
+}
+
+/** Authored snake_case ceilings, in the camelCase shape the Run budget resolver reads. */
+function budgetsFrom(entry: ProviderEntry): ModelProfileSpec["budgets"] {
+  const maxCostUsd = entry.budgets?.max_cost_usd;
+  const maxTokens = entry.budgets?.max_tokens;
+  if (maxCostUsd === undefined && maxTokens === undefined) return undefined;
+  return {
+    ...(maxCostUsd === undefined ? {} : { maxCostUsd }),
+    ...(maxTokens === undefined ? {} : { maxTokens }),
   };
 }
 

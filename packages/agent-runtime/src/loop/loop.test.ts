@@ -358,6 +358,57 @@ describe("AgentLoop", () => {
     ]);
   });
 
+  it("charges what a failed model call already spent", async () => {
+    const charges: { key: string; amount: number }[] = [];
+    const outcome = await loop({
+      model: {
+        invoke: async () => {
+          throw new ModelInvocationError("model_error", new Error("connection reset"), {
+            inputTokens: 900,
+            outputTokens: 40,
+            costUsd: 0.000005,
+            costBasis: "priced",
+          });
+        },
+      },
+      budget: {
+        consume: async (charge) => {
+          charges.push(charge);
+          return { outcome: "allowed" };
+        },
+      },
+    }).run(input());
+
+    // A mid-stream failure is not a free call: the prompt was submitted and the partial answer
+    // was generated and durably stored. Charging nothing let a Run that fails every iteration
+    // spend without ever touching the ceiling that was supposed to stop it.
+    expect(outcome).toMatchObject({ status: "failed", reason: "model_error" });
+    expect(charges).toEqual([
+      { key: "iterations", amount: 1 },
+      { key: "tokens", amount: 940 },
+      { key: "costMicros", amount: 5 },
+    ]);
+  });
+
+  it("charges nothing for a failed call that reported no usage", async () => {
+    const charges: { key: string; amount: number }[] = [];
+    await loop({
+      model: {
+        invoke: async () => {
+          throw new ModelInvocationError("model_provider_unavailable", new Error("refused"));
+        },
+      },
+      budget: {
+        consume: async (charge) => {
+          charges.push(charge);
+          return { outcome: "allowed" };
+        },
+      },
+    }).run(input());
+
+    expect(charges).toEqual([{ key: "iterations", amount: 1 }]);
+  });
+
   it("yields cancellation before calling the model again", async () => {
     const model = scriptedModel(
       toolCallResult([{ callId: "c1", name: "github.issue.comment", arguments: { body: "1" } }])

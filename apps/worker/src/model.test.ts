@@ -1,5 +1,11 @@
-import type { ModelInvocationRequest, ModelStreamChunk } from "@tulipfarm/agent-runtime";
-import { LlmProviderError } from "@tulipfarm/llm";
+import type {
+  ModelInvocationRequest,
+  ModelRequirements,
+  ModelRequirementsPolicy,
+  ModelStreamChunk,
+} from "@tulipfarm/agent-runtime";
+import { ModelInvocationError } from "@tulipfarm/agent-runtime";
+import { type CostBasis, LlmProviderError } from "@tulipfarm/llm";
 import type { EffortRung, RunEventEffortInference } from "@tulipfarm/schema";
 import type { LanguageModel } from "ai";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
@@ -7,6 +13,14 @@ import { describe, expect, it, vi } from "vitest";
 import type { EffortInferencePort } from "./effort-inference";
 import type { LlmModelResolution } from "./llm";
 import { LlmModelPort } from "./model";
+import type { SpendSink } from "./observability";
+
+/**
+ * These tests exercise streaming, cancellation and receipts, not pricing. Pricing itself belongs
+ * to `SoulLlm`, which knows the provider and which chain link answered; the port only reports what
+ * the resolution hands it. `unpriced` is the honest default for a mock model no authority prices.
+ */
+const TEST_PRICE = (): CostBasis => ({ kind: "unpriced" });
 
 type DoStreamResult = Awaited<ReturnType<MockLanguageModelV4["doStream"]>>;
 type StreamPart = DoStreamResult["stream"] extends ReadableStream<infer Part> ? Part : never;
@@ -22,6 +36,7 @@ function model(parts: StreamPart[]): {
     port: new LlmModelPort({
       model: async (selector): Promise<LlmModelResolution> => ({
         kind: "available",
+        price: TEST_PRICE,
         model: mock as unknown as LanguageModel,
         routing: {
           outcome: "raw_model",
@@ -80,7 +95,8 @@ describe("LlmModelPort", () => {
       result: {
         requestId: "request-1",
         output: { kind: "text", text: "Hello" },
-        usage: { inputTokens: 11, outputTokens: 4 },
+        // Reported as unpriced, never as free: nobody could price this call.
+        usage: { inputTokens: 11, outputTokens: 4, costBasis: "unpriced" },
       },
     });
   });
@@ -106,6 +122,7 @@ describe("LlmModelPort", () => {
     const port = new LlmModelPort({
       model: async (selector): Promise<LlmModelResolution> => ({
         kind: "available",
+        price: TEST_PRICE,
         model: mock as unknown as LanguageModel,
         routing: {
           outcome: "raw_model",
@@ -138,6 +155,7 @@ describe("LlmModelPort", () => {
     const port = new LlmModelPort({
       model: async (): Promise<LlmModelResolution> => ({
         kind: "available",
+        price: TEST_PRICE,
         model: mock as unknown as LanguageModel,
         routing: {
           outcome: "selected",
@@ -196,6 +214,7 @@ describe("LlmModelPort", () => {
     const port = new LlmModelPort({
       model: async (): Promise<LlmModelResolution> => ({
         kind: "available",
+        price: TEST_PRICE,
         model: mock as unknown as LanguageModel,
         budgetLimits: { tokens: { value: 2_000, scope: "model" } },
         routing: {
@@ -226,7 +245,8 @@ describe("LlmModelPort", () => {
     expect(order).toEqual(["open:2000", "event", "model"]);
   });
 
-  it("adds priced cost usage when the selected model is known to the price table", async () => {
+  /** A selected chain with more than one link, so the head is not necessarily who answers. */
+  function selectedPort(price: (tokensIn: number, tokensOut: number) => CostBasis): LlmModelPort {
     const mock = new MockLanguageModelV4({
       doStream: async () => ({
         stream: simulateReadableStream<StreamPart>({
@@ -234,25 +254,58 @@ describe("LlmModelPort", () => {
         }),
       }),
     });
-    const port = new LlmModelPort({
+    return new LlmModelPort({
       model: async (): Promise<LlmModelResolution> => ({
         kind: "available",
+        price,
         model: mock as unknown as LanguageModel,
         routing: {
           outcome: "selected",
           selector: "balanced",
           resolution: "effort_preset",
           profileId: "primary",
-          chain: [{ profileId: "primary", modelId: "claude-sonnet-4-6" }],
+          chain: [
+            { profileId: "primary", modelId: "claude-sonnet-4-6" },
+            { profileId: "primary", modelId: "claude-haiku-4-5" },
+          ],
           cacheAllowed: true,
           rejectedFallbacks: [],
         },
       }),
     });
+  }
+
+  it("reports the cost the resolution priced, against the real token counts", async () => {
+    // The port does not price. It hands the served token counts to the authority that knows the
+    // provider and which chain link answered, and reports that answer unchanged.
+    const seen: Array<[number, number]> = [];
+    const port = selectedPort((tokensIn, tokensOut) => {
+      seen.push([tokensIn, tokensOut]);
+      return { kind: "priced", costUsd: 0.000093, source: "table" };
+    });
 
     await expect(port.invoke(request({ modelProfileId: "balanced" }))).resolves.toMatchObject({
-      usage: { inputTokens: 11, outputTokens: 4, costUsd: 0.000093 },
+      usage: { inputTokens: 11, outputTokens: 4, costUsd: 0.000093, costBasis: "priced" },
     });
+    expect(seen).toEqual([[11, 4]]);
+  });
+
+  it("reports an unpriceable call as unpriced rather than omitting cost silently", async () => {
+    // An absent `costUsd` alone reads as free downstream. The basis says the cost is unknown.
+    const result = await selectedPort(() => ({ kind: "unpriced" })).invoke(
+      request({ modelProfileId: "balanced" })
+    );
+    expect(result.usage).toMatchObject({ costBasis: "unpriced" });
+    expect(result.usage).not.toHaveProperty("costUsd");
+  });
+
+  it("reports a subscription seat as unmetered, not as an unpriced call", async () => {
+    // A seat's zero cost is known; an unpriced call's is unknown. Downstream must tell them apart.
+    const result = await selectedPort(() => ({ kind: "subscription" })).invoke(
+      request({ modelProfileId: "balanced" })
+    );
+    expect(result.usage).toMatchObject({ costBasis: "subscription" });
+    expect(result.usage).not.toHaveProperty("costUsd");
   });
 
   it("records a participant receipt for the selected model call after it completes", async () => {
@@ -267,6 +320,7 @@ describe("LlmModelPort", () => {
     const port = new LlmModelPort({
       model: async (): Promise<LlmModelResolution> => ({
         kind: "available",
+        price: TEST_PRICE,
         model: mock as unknown as LanguageModel,
         routing: {
           outcome: "selected",
@@ -304,6 +358,7 @@ describe("LlmModelPort", () => {
     const port = new LlmModelPort({
       model: async (): Promise<LlmModelResolution> => ({
         kind: "available",
+        price: TEST_PRICE,
         model: mock as unknown as LanguageModel,
         routing: {
           outcome: "selected",
@@ -339,6 +394,7 @@ describe("LlmModelPort", () => {
     const port = new LlmModelPort({
       model: async (): Promise<LlmModelResolution> => ({
         kind: "available",
+        price: TEST_PRICE,
         model: mock as unknown as LanguageModel,
         routing: {
           outcome: "selected",
@@ -567,6 +623,7 @@ describe("LlmModelPort effort inference", () => {
         const profileId = inference?.rung ?? selector;
         return {
           kind: "available",
+          price: TEST_PRICE,
           model: mock as unknown as LanguageModel,
           routing: {
             outcome: "selected",
@@ -692,5 +749,343 @@ describe("LlmModelPort effort inference", () => {
       effortPreset: "auto",
       effortApplied: "thorough",
     });
+  });
+});
+
+describe("LlmModelPort — governance", () => {
+  /** Captures the requirements the port derived, which is what profile selection is judged on. */
+  function capturing(policy?: ModelRequirementsPolicy) {
+    const seen: ModelRequirements[] = [];
+    const mock = new MockLanguageModelV4({
+      doStream: async () => ({ stream: simulateReadableStream<StreamPart>({ chunks: [FINISH] }) }),
+    });
+    const port = new LlmModelPort({
+      model: async (selector, requirements): Promise<LlmModelResolution> => {
+        seen.push(requirements);
+        return {
+          kind: "available",
+          price: TEST_PRICE,
+          model: mock as unknown as LanguageModel,
+          routing: {
+            outcome: "raw_model",
+            selector,
+            resolution: "raw_model_id",
+            modelId: selector,
+          },
+        };
+      },
+      ...(policy === undefined ? {} : { policy }),
+    });
+    return { port, seen };
+  }
+
+  async function drain(port: LlmModelPort, req: ModelInvocationRequest): Promise<void> {
+    for await (const _ of port.stream(req)) {
+      // consume
+    }
+  }
+
+  it("carries the turn's governance from the request into the requirements", async () => {
+    // The port is built before the turn's Context resolves, so it cannot know which Agent acts.
+    // If governance did not ride the request, it could never reach profile selection at all.
+    const { port, seen } = capturing();
+
+    await drain(port, request({ policy: { residency: "eu", dataRetention: "none" } }));
+
+    expect(seen[0]).toMatchObject({ residency: "eu", dataRetention: "none" });
+  });
+
+  it("lets the turn's governance override the process-wide floor", async () => {
+    const { port, seen } = capturing({ residency: "us" });
+
+    await drain(port, request({ policy: { residency: "eu" } }));
+
+    expect(seen[0]).toMatchObject({ residency: "eu" });
+  });
+
+  it("falls back to the process-wide floor when the request carries no governance", async () => {
+    const { port, seen } = capturing({ residency: "us" });
+
+    await drain(port, request());
+
+    expect(seen[0]).toMatchObject({ residency: "us" });
+  });
+});
+
+describe("LlmModelPort — wall clock", () => {
+  it("aborts a provider that accepts the connection and then never answers", async () => {
+    // The AI SDK sets no default fetch timeout and both production port constructions omitted the
+    // optional signal, so this call would previously have hung forever holding the Run's lease.
+    const hung = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: new ReadableStream<StreamPart>({
+          start() {
+            // never enqueues, never closes
+          },
+        }),
+      }),
+    });
+    const port = new LlmModelPort({
+      model: async (selector): Promise<LlmModelResolution> => ({
+        kind: "available",
+        price: TEST_PRICE,
+        model: hung as unknown as LanguageModel,
+        routing: {
+          outcome: "raw_model",
+          selector,
+          resolution: "raw_model_id",
+          modelId: selector,
+        },
+      }),
+      stallTimeoutMs: 50,
+    });
+
+    await expect(async () => {
+      for await (const _ of port.stream(request())) {
+        // consume
+      }
+    }).rejects.toThrow(ModelInvocationError);
+  });
+});
+
+describe("LlmModelPort — what a call actually consumed", () => {
+  it("reports the cache and reasoning splits the provider returned", async () => {
+    const { port } = model([
+      { type: "text-start", id: "1" },
+      { type: "text-delta", id: "1", delta: "hi" },
+      { type: "text-end", id: "1" },
+      {
+        type: "finish",
+        finishReason: { unified: "stop", raw: "end_turn" },
+        usage: {
+          inputTokens: { total: 100, noCache: 20, cacheRead: 70, cacheWrite: 10 },
+          outputTokens: { total: 50, text: 20, reasoning: 30 },
+        },
+      },
+    ]);
+
+    const chunks = await collect(port.stream(request()));
+    const completed = chunks.find((c) => c.kind === "completed");
+
+    // Folding these into the totals would make this call indistinguishable from one that read
+    // nothing from cache and reasoned not at all — at several times the price.
+    expect(completed?.result.usage).toMatchObject({
+      inputTokens: 100,
+      outputTokens: 50,
+      cacheReadTokens: 70,
+      cacheWriteTokens: 10,
+      reasoningTokens: 30,
+    });
+  });
+
+  it("omits the splits entirely when the provider reports none", async () => {
+    const { port } = model([
+      { type: "text-start", id: "1" },
+      { type: "text-delta", id: "1", delta: "hi" },
+      { type: "text-end", id: "1" },
+      FINISH,
+    ]);
+
+    const chunks = await collect(port.stream(request()));
+    const completed = chunks.find((c) => c.kind === "completed");
+
+    expect(completed?.result.usage).not.toHaveProperty("cacheReadTokens");
+    expect(completed?.result.usage).not.toHaveProperty("reasoningTokens");
+  });
+
+  it("carries what was already spent out on a mid-stream failure", async () => {
+    const { port } = model([
+      { type: "text-start", id: "1" },
+      { type: "text-delta", id: "1", delta: "partial answer" },
+      {
+        type: "finish",
+        finishReason: { unified: "stop", raw: "end_turn" },
+        usage: {
+          inputTokens: { total: 900, noCache: 900, cacheRead: 0, cacheWrite: 0 },
+          outputTokens: { total: 40, text: 40, reasoning: 0 },
+        },
+      },
+      { type: "error", error: new Error("connection reset") },
+    ]);
+
+    // The participant already has the partial answer and the provider already billed for it.
+    // Reporting no usage here is what let a failure loop spend without touching the budget.
+    const error = await collect(port.stream(request())).then(
+      () => undefined,
+      (err: unknown) => err
+    );
+
+    expect(error).toBeInstanceOf(ModelInvocationError);
+    expect((error as ModelInvocationError).usage).toMatchObject({
+      inputTokens: 900,
+      outputTokens: 40,
+    });
+  });
+
+  it("reports no usage when the call failed before the provider consumed anything", async () => {
+    const { port } = model([
+      { type: "text-start", id: "1" },
+      { type: "error", error: new Error("connection reset") },
+    ]);
+
+    // The SDK still synthesises a zero-usage step here, so a naive "did anything arrive" test
+    // would write an empty row into the spend ledger for every failed connection.
+    const error = await collect(port.stream(request())).then(
+      () => undefined,
+      (err: unknown) => err
+    );
+
+    expect((error as ModelInvocationError).usage).toBeUndefined();
+  });
+});
+
+describe("LlmModelPort — reporting spend", () => {
+  function spy() {
+    const calls: Parameters<SpendSink["recordLlmCall"]>[0][] = [];
+    return {
+      calls,
+      sink: {
+        recordLlmCall: (record: Parameters<SpendSink["recordLlmCall"]>[0]) => calls.push(record),
+        recordTurn: () => undefined,
+      } satisfies SpendSink,
+    };
+  }
+
+  function portWith(parts: StreamPart[], sink: SpendSink): LlmModelPort {
+    const mock = new MockLanguageModelV4({
+      doStream: async () => ({ stream: simulateReadableStream<StreamPart>({ chunks: parts }) }),
+    });
+    return new LlmModelPort({
+      model: async (selector): Promise<LlmModelResolution> => ({
+        kind: "available",
+        price: (tokensIn, tokensOut) => ({
+          kind: "priced",
+          costUsd: (tokensIn + tokensOut) / 1000,
+          source: "table",
+        }),
+        provider: "anthropic",
+        model: mock as unknown as LanguageModel,
+        routing: {
+          outcome: "raw_model",
+          selector,
+          resolution: "raw_model_id",
+          modelId: selector,
+        },
+      }),
+      spend: sink,
+      conversationId: "conv-1",
+    });
+  }
+
+  it("reports a completed call to the spend ledger", async () => {
+    const { calls, sink } = spy();
+    const port = portWith(
+      [
+        { type: "text-start", id: "1" },
+        { type: "text-delta", id: "1", delta: "hi" },
+        { type: "text-end", id: "1" },
+        FINISH,
+      ],
+      sink
+    );
+
+    await collect(port.stream(request({ agentId: "support" })));
+
+    // Nothing in production emitted this, so every cost view read zero — which is
+    // indistinguishable from a quiet week, and is why it was never noticed.
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      status: "ok",
+      conversationId: "conv-1",
+      agentId: "support",
+      provider: "anthropic",
+      model: "claude-opus-5",
+      usage: { inputTokens: 11, outputTokens: 4 },
+    });
+  });
+
+  it("reports a failed call, not only a successful one", async () => {
+    const { calls, sink } = spy();
+    const port = portWith(
+      [
+        { type: "text-start", id: "1" },
+        { type: "text-delta", id: "1", delta: "partial" },
+        {
+          type: "finish",
+          finishReason: { unified: "stop", raw: "end_turn" },
+          usage: {
+            inputTokens: { total: 900, noCache: 900, cacheRead: 0, cacheWrite: 0 },
+            outputTokens: { total: 40, text: 40, reasoning: 0 },
+          },
+        },
+        { type: "error", error: new Error("connection reset") },
+      ],
+      sink
+    );
+
+    await collect(port.stream(request())).catch(() => undefined);
+
+    expect(calls[0]).toMatchObject({
+      status: "error",
+      usage: { inputTokens: 900, outputTokens: 40 },
+    });
+  });
+});
+
+describe("LlmModelPort — the zero-output diagnostic is not a content leak", () => {
+  const EMPTY_FINISH: StreamPart = {
+    type: "finish",
+    finishReason: { unified: "stop", raw: "end_turn" },
+    usage: {
+      inputTokens: { total: 0, noCache: 0, cacheRead: 0, cacheWrite: 0 },
+      outputTokens: { total: 0, text: 0, reasoning: 0 },
+    },
+  };
+
+  const SECRET = "quarterly revenue was forty-one million dollars";
+
+  async function diagnose(): Promise<string> {
+    const { port } = model([EMPTY_FINISH]);
+    try {
+      for await (const _ of port.stream(
+        request({
+          messages: [
+            { role: "user", content: SECRET },
+            { role: "assistant", content: "acknowledged" },
+            { role: "user", content: `${SECRET} again` },
+          ],
+        })
+      )) {
+        // drained for the throw
+      }
+    } catch (err) {
+      // The loop logs the deepest cause, not the wrapper — that is the string that reaches ops.
+      let current: unknown = err;
+      while (current instanceof Error && current.cause !== undefined) current = current.cause;
+      return current instanceof Error ? current.message : String(current);
+    }
+    throw new Error("expected the empty call to be reported as a fault");
+  }
+
+  it("reports the fault without putting message content in the message", async () => {
+    const message = await diagnose();
+    expect(message).toContain("model call produced no output");
+    expect(message).not.toContain(SECRET);
+    expect(message).not.toContain("acknowledged");
+  });
+
+  it("still says enough to diagnose: shape, sizes and a correlatable digest", async () => {
+    const message = await diagnose();
+    expect(message).toMatch(/request=sha256:[0-9a-f]{12}\/\d+b/);
+    expect(message).toContain('"messageCount":3');
+    expect(message).toContain('"roles":["user","assistant","user"]');
+    expect(message).toContain(`"chars":${`${SECRET} again`.length}`);
+  });
+
+  it("is stable across calls, so repeat failures correlate", async () => {
+    const [a, b] = await Promise.all([diagnose(), diagnose()]);
+    const digest = (m: string) => /request=(sha256:[0-9a-f]{12})/.exec(m)?.[1];
+    expect(digest(a)).toBe(digest(b));
+    expect(digest(a)).toBeDefined();
   });
 });

@@ -183,13 +183,23 @@ Two levels, exact match — no prefix matching, so `grantMatches` needs no chang
 
 | Namespace | Membership | Examples |
 | --- | --- | --- |
-| `platform.*` | closed | `platform.secret`, `platform.setting`, `platform.user`, `platform.integration` |
+| `platform.*` | closed | `platform.secret`, `platform.setting`, `platform.user`, `platform.integration`, `platform.model` |
 | `soul.*` | closed | `soul.agent`, `soul.skill`, `soul.routine`, `soul.resource_type` |
 | `record.<resource_type_id>` | **open** — business-defined | `record.leave_request` |
 | `authz.*` | closed | `authz.role`, `authz.assignment`, `authz.relation` |
 
 The open `record.*` namespace is why the grammar must be a convention rather than an enum: Resource
 types are authored at runtime.
+
+The closed namespaces are enumerated in `packages/authz/src/resources.ts`, and
+`scripts/authz-resource-grammar.test.ts` fails the build when that table and this one disagree.
+
+**`platform.model`** covers which model a principal may cause a call to. A chat request names a
+model as a free string — an effort preset, a ModelProfile ref, or a raw provider model id — and it
+reached the provider having passed only a capability-fit check. Without a resource there was
+nothing to default-deny against, so invariant 3 had nothing to apply to on the layer that spends
+the money. The named model travels as the request's `recordId`, so a grant can be written for one
+model, for a set of them, or for all of them.
 
 ### Package placement
 

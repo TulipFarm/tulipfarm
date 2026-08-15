@@ -19,7 +19,8 @@ function fakeEmbeddings(available: boolean): EmbeddingPort {
     embedMany: async (values) => ({ embeddings: values.map(() => [0.5, 0.5, 0.5]), dimension: 3 }),
     getActive: () => (available ? { provider: "f", model: "m", dimension: 3 } : null),
     getDimension: () => (available ? 3 : null),
-    consumePendingReindex: () => false,
+    pendingReindex: () => false,
+    clearPendingReindex: () => {},
   };
 }
 

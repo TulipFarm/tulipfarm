@@ -57,6 +57,8 @@ import { SoulLlm } from "./llm";
 import { type LoopLogger, runLoop } from "./loop";
 import { LlmModelPort } from "./model";
 import { MODEL_BUDGET_EXHAUSTION_POLICY } from "./model-budget";
+import { ProviderGate } from "./model-gate";
+import { PgSpendSink } from "./observability";
 import { waitForSchemaFloor } from "./preflight";
 import { startProbeServer } from "./probe-server";
 import { buildGitHubTooling } from "./routine/adapters";
@@ -176,7 +178,7 @@ export async function main(): Promise<void> {
 
   let consumersReady = !config.maintenance;
   const jobBoss = config.maintenance
-    ? await startJobConsumers({ databaseUrl: config.databaseUrl, database: pool })
+    ? await startJobConsumers({ databaseUrl: config.databaseUrl, database: pool, log: logger })
     : undefined;
   consumersReady = true;
 
@@ -229,6 +231,7 @@ export async function main(): Promise<void> {
   const llm = new SoulLlm({
     source: () => turnHost.llmConfig(),
     secrets,
+    pricingOverrides: () => turnHost.pricingOverrides(),
   });
 
   // Built from the same published config the control plane embeds with, and rebuilt before each
@@ -236,6 +239,7 @@ export async function main(): Promise<void> {
   const localEmbeddings = new SoulEmbeddings({
     source: () => turnHost.llmConfig(),
     secrets,
+    log: logger,
   });
 
   // Tools that need no live Soul, no renderer and no provider credential run here, next to the
@@ -263,6 +267,18 @@ export async function main(): Promise<void> {
   const sandboxRuntimeImage =
     process.env.NODE_ENV === "production" ? undefined : process.env.SANDBOX_RUNTIME_IMAGE;
 
+  // Declared before the executors so every per-turn model port can be aborted on drain.
+  // Both port constructions previously omitted it, leaving production model calls unbounded.
+  const controller = new AbortController();
+  const { signal } = controller;
+
+  // One per process, shared by every turn: a per-turn gate would cap nothing.
+  const modelGate = new ProviderGate();
+
+  // The spend ledger the dashboard reads. Without this the Worker charges Run budgets correctly
+  // and reports nothing, so every cost view showed zero.
+  const spendSink = new PgSpendSink(pool, logger);
+
   const chatExecutor = createChatExecutor({
     host: turnHost,
     tools: toolDispatch,
@@ -272,10 +288,14 @@ export async function main(): Promise<void> {
     budgets: budgetStore,
     transitions: new RunStoreStateTransitions(runStore),
     waits: turnHost,
-    model: ({ events, budgets, businessId, runId }) =>
+    model: ({ events, budgets, businessId, runId, conversationId }) =>
       new LlmModelPort({
-        model: (selector, requirements, inference) =>
-          llm.resolveModel(selector, requirements, inference),
+        model: (selector, requirements, inference, principal) =>
+          llm.resolveModel(selector, requirements, inference, principal),
+        signal,
+        gate: modelGate,
+        spend: spendSink,
+        conversationId,
         effort: createEffortInference({
           models: llm,
           pinned: runEventEffortPin(runEventStore, businessId, runId),
@@ -295,6 +315,7 @@ export async function main(): Promise<void> {
             }),
         },
       }),
+    spend: spendSink,
     log: logger,
   });
   executors.register(CHAT_RUN_SOURCE, chatExecutor);
@@ -341,11 +362,13 @@ export async function main(): Promise<void> {
         // Chain, routing event, and budget are already selected/opened by the Routine port.
         model: ({ modelIds, routing }) =>
           new LlmModelPort({
-            model: async () => ({
-              kind: "available",
-              model: await llm.chainModel(modelIds),
-              routing,
-            }),
+            // Through `resolveChain`, so a Routine call is priced by the same authority as a Chat
+            // call. Building the resolution inline here is what left Routine spend reported free.
+            model: async (_selector, _requirements, _inference, principal) =>
+              llm.resolveChain(modelIds, routing, principal),
+            signal,
+            gate: modelGate,
+            spend: spendSink,
           }),
         events: runEventStore,
         budgets: budgetStore,
@@ -376,8 +399,6 @@ export async function main(): Promise<void> {
     batchSize: config.batchSize,
   });
 
-  const controller = new AbortController();
-  const { signal } = controller;
   let serving = true;
 
   const loops: DrainableLoop[] = [

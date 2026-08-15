@@ -184,8 +184,14 @@ export interface IndexStatusReport {
 
 export interface EmbeddingPort {
   isAvailable(): boolean;
-  embedMany(values: string[]): Promise<{ embeddings: number[][]; dimension: number }>;
+  embedMany(
+    values: string[],
+    signal?: AbortSignal
+  ): Promise<{ embeddings: number[][]; dimension: number }>;
   getActive(): { provider: string; model: string; dimension: number | null } | null;
   getDimension(): number | null;
-  consumePendingReindex(): boolean;
+  /** Whether stored vectors are known to predate the active model. Must not clear the flag. */
+  pendingReindex(): boolean;
+  /** Called only after a re-index succeeded, so a failed one does not lose the signal. */
+  clearPendingReindex(): void;
 }

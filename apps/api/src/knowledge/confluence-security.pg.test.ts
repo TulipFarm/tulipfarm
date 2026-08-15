@@ -29,7 +29,8 @@ const lexicalOnlyEmbeddings: EmbeddingPort = {
   embedMany: async () => ({ embeddings: [], dimension: 0 }),
   getActive: () => null,
   getDimension: () => null,
-  consumePendingReindex: () => false,
+  pendingReindex: () => false,
+  clearPendingReindex: () => {},
 };
 
 class FakeConfluenceApi implements ConfluenceApiPort {

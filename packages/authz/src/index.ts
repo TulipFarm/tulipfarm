@@ -81,6 +81,8 @@ export {
   assertRecertificationReviewer,
   RecertificationDeniedError,
 } from "./recertification";
+export type { PlatformResource } from "./resources";
+export { MODEL_INVOKE_ACTION, MODEL_RESOURCE, PLATFORM_RESOURCES } from "./resources";
 export type { Role, RoleAssignableTo, RoleAssignmentDenialReason } from "./roles";
 export {
   assertRoleAssignable,

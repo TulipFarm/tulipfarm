@@ -12,7 +12,7 @@ orchestration. It owns prompt assembly and runtime control, not model providers.
 | Path | Owns |
 | --- | --- |
 | `src/ports/model.ts` | Provider-neutral `ModelPort`; `stream` is optional. |
-| `src/models/` | ModelProfile selection, Effort routing, requirements, usage/cost evidence. |
+| `src/models/` | ModelProfile selection, Effort routing, model requirements. |
 | `src/context/` | Instruction precedence, Context manifests, prompt assembly. |
 | `src/guardrails/` | Input/tool/output guard stages and `DEFAULT_GUARDRAILS`. |
 | `src/skills/` | Exact-version Skill resolution, trust tiers, scanning, ability intersection. |

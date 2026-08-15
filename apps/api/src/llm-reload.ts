@@ -19,7 +19,7 @@ export function registerLlmReload(
         await soulLoader.reload();
         await llmService.init(soulLoader.llmConfig, secrets, logger);
         await embeddingService.init(soulLoader.llmConfig, secrets, logger);
-        // Runs after re-init so a dimension change (consumePendingReindex) triggers a re-index.
+        // Runs after re-init so a dimension change triggers a re-index.
         await afterReload?.();
         logger.info("[llm] config reloaded after soul.synced");
       } catch (err) {

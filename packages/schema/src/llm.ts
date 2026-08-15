@@ -1,5 +1,6 @@
 import { type Static, Type } from "@sinclair/typebox";
 import { ajv } from "./ajv";
+import { MODEL_DATA_RETENTION, type ModelDataRetention } from "./definitions/common";
 
 export class LlmConfigValidationError extends Error {
   constructor(message: string) {
@@ -65,6 +66,40 @@ const ProviderEntrySchema = Type.Object({
   base_url: Type.Optional(Type.String()),
   resource_name: Type.Optional(Type.String()),
   spec: Type.Optional(ModelSpecSchema),
+  /**
+   * What this entry's governance posture *is*, so a turn that requires one can be matched
+   * against it. Undeclared stays undeclared: `selectModelProfile` treats an absent posture as
+   * unverifiable rather than permissive, so declaring nothing denies a turn that demands one.
+   */
+  constraints: Type.Optional(
+    Type.Object(
+      {
+        data_retention: Type.Optional(
+          Type.Unsafe<ModelDataRetention>({ type: "string", enum: [...MODEL_DATA_RETENTION] })
+        ),
+        allow_training: Type.Optional(Type.Boolean()),
+        residency: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+        max_latency_ms: Type.Optional(Type.Integer({ minimum: 0 })),
+      },
+      { additionalProperties: false }
+    )
+  ),
+  /**
+   * Per-Run execution ceilings for calls this entry serves.
+   *
+   * `ModelProfileSpec.budgets` has always been consumed by the Run budget resolver, but nothing
+   * derived it from authored config, so no operator could declare a ceiling here at all. Without
+   * this the enforcement path is reachable only from tests.
+   */
+  budgets: Type.Optional(
+    Type.Object(
+      {
+        max_cost_usd: Type.Optional(Type.Number({ minimum: 0 })),
+        max_tokens: Type.Optional(Type.Integer({ minimum: 0 })),
+      },
+      { additionalProperties: false }
+    )
+  ),
 });
 
 const TierConfigSchema = Type.Object({
@@ -86,6 +121,12 @@ const EmbeddingProviderEntrySchema = Type.Object({
   base_url: Type.Optional(Type.String()),
   resource_name: Type.Optional(Type.String()),
   dimension: Type.Optional(Type.Integer({ minimum: 1 })),
+  /**
+   * Per-token costs, same pinned shape a chat entry carries. Embedding models are absent from the
+   * fallback price table, so without this an embedding call is unpriceable and its spend is
+   * invisible however carefully the rest of the spend spine is wired.
+   */
+  spec: Type.Optional(ModelSpecSchema),
 });
 
 const EmbeddingsConfigSchema = Type.Object({

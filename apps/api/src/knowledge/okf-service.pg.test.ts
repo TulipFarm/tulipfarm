@@ -21,7 +21,8 @@ function lexicalOnly(): EmbeddingPort {
     embedMany: async (values) => ({ embeddings: values.map(() => [0, 0, 0]), dimension: 3 }),
     getActive: () => null,
     getDimension: () => null,
-    consumePendingReindex: () => false,
+    pendingReindex: () => false,
+    clearPendingReindex: () => {},
   };
 }
 

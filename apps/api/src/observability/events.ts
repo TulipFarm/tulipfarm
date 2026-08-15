@@ -1,5 +1,5 @@
 import type { EventEmitter } from "node:events";
-import { type ModelPrice, priceFor } from "@tulipfarm/llm";
+import { type ModelPrice, priceCall } from "@tulipfarm/llm";
 import {
   DOMAIN_EVENTS,
   type LlmStepFinishedPayload,
@@ -60,14 +60,28 @@ export function subscribeObservability(
   const traces = opts.traces;
   const captureContent = opts.captureContent === true;
 
-  // Cost priority: the served model's pinned per-token soul spec (authoritative), else the built-in
-  // price map + config overrides, else null (unpriced). Rounded to 6 decimals like priceFor.
+  // One pricing authority, shared with the Worker branch that charges the Run budget. An operator
+  // override outranks the pinned soul spec: the override exists to correct a drifted price, and a
+  // spec that always won would make an override unreachable for every model that has one.
   function computeCost(p: LlmStepFinishedPayload): number | null {
-    if (typeof p.costInPerToken === "number" && typeof p.costOutPerToken === "number") {
-      const raw = p.tokensIn * p.costInPerToken + p.tokensOut * p.costOutPerToken;
-      return Math.round(raw * 1_000_000) / 1_000_000;
-    }
-    return priceFor(p.model, p.tokensIn, p.tokensOut, opts.pricingOverrides).costUsd;
+    const priced = priceCall({
+      // A step with no recorded provider cannot be recognised as a subscription seat, so it
+      // prices like any metered call rather than silently becoming free.
+      provider: p.provider ?? "",
+      modelId: p.model,
+      tokensIn: p.tokensIn,
+      tokensOut: p.tokensOut,
+      overrides: opts.pricingOverrides,
+      ...(typeof p.costInPerToken === "number" && typeof p.costOutPerToken === "number"
+        ? {
+            spec: {
+              input_cost_per_token: p.costInPerToken,
+              output_cost_per_token: p.costOutPerToken,
+            },
+          }
+        : {}),
+    });
+    return priced.kind === "priced" ? priced.costUsd : null;
   }
   emitter.on(DOMAIN_EVENTS.LLM_STEP_FINISHED, (p: LlmStepFinishedPayload): void =>
     guard(() => onLlmStep(p))

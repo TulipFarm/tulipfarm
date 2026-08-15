@@ -11,6 +11,17 @@ export interface FallbackLogger {
   warn(msg: string): void;
 }
 
+/**
+ * Which configured link actually served a call.
+ *
+ * A fallback chain that rate-limits through to a cheaper model must be billed at that model's
+ * price. `modelId` on the chain is every link pipe-joined and cannot answer this, so the responder
+ * is recorded here as the chain executes rather than inferred from the chain head.
+ */
+export interface ModelResponderRef {
+  modelId?: string;
+}
+
 const noopLogger: FallbackLogger = { warn() {} };
 
 function isAbortError(err: unknown): boolean {
@@ -40,18 +51,27 @@ export class FallbackModel implements LanguageModelV4 {
 
   constructor(
     private readonly models: LanguageModelV4[],
-    private readonly logger: FallbackLogger = noopLogger
+    private readonly logger: FallbackLogger = noopLogger,
+    /** Records which link served, so cost is attributed to the model that answered. */
+    private readonly responder?: ModelResponderRef
   ) {
     const primary = models[0];
     if (!primary) throw new Error("FallbackModel requires at least one model");
     this.modelId = models.map((m) => m.modelId).join("|");
   }
 
+  /** Marks a link as the responder the moment it commits, before any output is consumed. */
+  private commit(model: LanguageModelV4): void {
+    if (this.responder !== undefined) this.responder.modelId = model.modelId;
+  }
+
   async doGenerate(options: LanguageModelV4CallOptions) {
     let lastError: unknown;
     for (const model of this.models) {
       try {
-        return await model.doGenerate(options);
+        const generated = await model.doGenerate(options);
+        this.commit(model);
+        return generated;
       } catch (err) {
         if (isHardFailure(err)) throw err;
         lastError = err;
@@ -88,6 +108,7 @@ export class FallbackModel implements LanguageModelV4 {
       }
 
       // First chunk received — stream is committed, reconstruct with remaining
+      this.commit(model);
       const stream = new ReadableStream<LanguageModelV4StreamPart>({
         async start(controller) {
           if (!firstChunk.done) controller.enqueue(firstChunk.value);

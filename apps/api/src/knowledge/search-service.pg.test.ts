@@ -15,7 +15,8 @@ function fakeEmbeddings(available: boolean, dim = 3): EmbeddingPort {
     }),
     getActive: () => (available ? { provider: "fake", model: "m", dimension: dim } : null),
     getDimension: () => (available ? dim : null),
-    consumePendingReindex: () => false,
+    pendingReindex: () => false,
+    clearPendingReindex: () => {},
   };
 }
 
@@ -100,7 +101,8 @@ describe("knowledge search", () => {
       embedMany: async () => ({ embeddings: [], dimension: 3 }),
       getActive: () => ({ provider: "f", model: "m", dimension: 3 }),
       getDimension: () => 3,
-      consumePendingReindex: () => false,
+      pendingReindex: () => false,
+      clearPendingReindex: () => {},
     };
     const res = await search("france", {}, 10, { embeddings: emptyProvider, chunksRepo: chunks });
     expect(res.warnings).toEqual([]);

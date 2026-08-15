@@ -1,5 +1,6 @@
 import { type Static, Type } from "@sinclair/typebox";
 import { ajv } from "./ajv";
+import { modelPolicySchema } from "./definitions/common";
 import { TulipFarmValidationError } from "./error";
 
 /** AGENT.md frontmatter schema: write-time only, strict, and name comes from directory. */
@@ -16,6 +17,7 @@ export const AgentFrontmatterSchema = Type.Object(
     autonomy: Type.Optional(
       Type.Unsafe<(typeof AUTONOMY_VALUES)[number]>({ type: "string", enum: [...AUTONOMY_VALUES] })
     ),
+    modelPolicy: Type.Optional(modelPolicySchema),
     placeholder: Type.Optional(Type.Array(Type.String())),
     suggestions: Type.Optional(Type.Array(Type.String())),
   },

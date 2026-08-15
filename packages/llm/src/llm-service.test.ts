@@ -201,7 +201,7 @@ describe("LlmService", () => {
       },
     };
 
-    const logger = { warn: vi.fn() };
+    const logger = { warn: vi.fn(), info: vi.fn() };
     const svc = new LlmService();
     await svc.init(twoProviderConfig, fakeSecrets, logger);
     await expect(
@@ -302,5 +302,98 @@ describe("LlmService.effortModel", () => {
     await svc.init(validConfig, fakeSecrets);
     expect(svc.effortModel("claude-opus-4-8")).toMatchObject({ modelId: "claude-opus-4-8" });
     expect(() => svc.effortModel("no-such-model")).toThrow(UnknownModelError);
+  });
+});
+
+describe("LlmService — whose credential a chain spends", () => {
+  const ALICE = { kind: "user", id: "alice" };
+
+  async function service(resolve: () => Promise<string | undefined>) {
+    const svc = new LlmService();
+    await svc.init(validConfig, fakeSecrets, console, { resolve });
+    return svc;
+  }
+
+  it("builds a principal-scoped model when the principal holds a credential", async () => {
+    const svc = await service(async () => "sk-alice");
+    vi.mocked(createModel).mockClear();
+
+    await svc.chainModelFor(["claude-sonnet-4-6"], ALICE);
+
+    // A boot-time model is shared by everyone, so acting as a principal means building one.
+    expect(vi.mocked(createModel).mock.calls.at(-1)?.[2]).toMatchObject({ principal: ALICE });
+  });
+
+  it("reuses the shared model when the principal holds no credential", async () => {
+    const svc = await service(async () => undefined);
+    vi.mocked(createModel).mockClear();
+
+    const model = await svc.chainModelFor(["claude-sonnet-4-6"], ALICE);
+
+    expect(vi.mocked(createModel)).not.toHaveBeenCalled();
+    expect(model).toBe(svc.getModelById("claude-sonnet-4-6"));
+  });
+
+  it("builds a principal's model once and reuses it", async () => {
+    const svc = await service(async () => "sk-alice");
+    vi.mocked(createModel).mockClear();
+
+    await svc.chainModelFor(["claude-sonnet-4-6"], ALICE);
+    await svc.chainModelFor(["claude-sonnet-4-6"], ALICE);
+
+    expect(vi.mocked(createModel)).toHaveBeenCalledTimes(1);
+  });
+
+  it("acts as the deployment when no principal was named", async () => {
+    const svc = await service(async () => "sk-alice");
+    vi.mocked(createModel).mockClear();
+
+    const model = await svc.chainModelFor(["claude-sonnet-4-6"], undefined);
+
+    expect(vi.mocked(createModel)).not.toHaveBeenCalled();
+    expect(model).toBe(svc.getModelById("claude-sonnet-4-6"));
+  });
+});
+
+describe("LlmService — a reload takes effect whole or not at all", () => {
+  it("keeps the previous config intact when a provider fails unexpectedly", async () => {
+    // `presets` and `profiles` were assigned right after validation but the model maps only at
+    // the very end, so a mid-init throw left new presets pointing at the old models.
+    const svc = new LlmService();
+    await svc.init(validConfig, fakeSecrets);
+    const before = svc.effortModel("balanced");
+
+    vi.mocked(createModel).mockRejectedValueOnce(new Error("provider exploded"));
+    await expect(
+      svc.init(
+        {
+          tiers: {
+            quick: { providers: [{ provider: "openai", model: "gpt-4o", api_key_ref: "k" }] },
+            standard: { providers: [{ provider: "openai", model: "gpt-4o", api_key_ref: "k" }] },
+            complex: { providers: [{ provider: "openai", model: "gpt-4o", api_key_ref: "k" }] },
+          },
+        },
+        fakeSecrets
+      )
+    ).rejects.toThrow("provider exploded");
+
+    expect(svc.effortModel("balanced")).toBe(before);
+    expect(svc.hasModelId("claude-sonnet-4-6")).toBe(true);
+    expect(svc.hasModelId("gpt-4o")).toBe(false);
+  });
+
+  it("drops principal-scoped models built from the previous config", async () => {
+    // They were built from entries the operator has just changed; serving them would ignore
+    // the new config for exactly the principals who have their own credentials.
+    const resolve = async () => "sk-alice";
+    const svc = new LlmService();
+    await svc.init(validConfig, fakeSecrets, console, { resolve });
+    await svc.chainModelFor(["claude-sonnet-4-6"], { kind: "user", id: "alice" });
+
+    await svc.init(validConfig, fakeSecrets, console, { resolve });
+    vi.mocked(createModel).mockClear();
+    await svc.chainModelFor(["claude-sonnet-4-6"], { kind: "user", id: "alice" });
+
+    expect(vi.mocked(createModel)).toHaveBeenCalledTimes(1);
   });
 });

@@ -4,13 +4,7 @@ import type { Queryable } from "../db";
 /** Per-principal credential keys; sealed material stays in the secrets store. */
 
 /** Where a principal's sealed provider credential lives in the secrets store. */
-export function principalSecretKey(
-  principal: { readonly kind: string; readonly id: string },
-  provider: string,
-  envName: string
-): string {
-  return `principal.${principal.kind}.${principal.id}.${provider}.${envName}`;
-}
+export { principalSecretKey } from "@tulipfarm/secrets";
 
 export interface PrincipalProviderTokenDoc {
   readonly principalKind: string;

@@ -3,6 +3,7 @@ import type {
   AgentLoopLimits,
   ExposedTool,
   ModelMessage,
+  ModelRequirementsPolicy,
 } from "@tulipfarm/agent-runtime";
 import type { StateStatus } from "@tulipfarm/run-kernel";
 import type { AgentStateRequest, AgentStateResult, AgentStateRunner } from "../agent-state";
@@ -12,6 +13,7 @@ import type {
   TurnOutcome,
 } from "../conversation-turn";
 import type { ModelCallReceipt } from "../model";
+import type { SpendSink } from "../observability";
 import type { RunOutcome } from "../run-dispatcher";
 import type { TurnGuardrails } from "./guardrails";
 import type { TurnEventWriter } from "./run-events";
@@ -38,6 +40,10 @@ export interface ResolvedTurnContext {
   /** Whom the turn acts as, as the Run recorded it. Guards are told who they are guarding. */
   readonly subjectId: string;
   readonly modelProfileId: string;
+  /** Governance the Agent requires of the model serving this turn; absent means no demand. */
+  readonly modelPolicy?: ModelRequirementsPolicy;
+  /** Whom the turn acts as, kind included, so a model call can use that principal's credential. */
+  readonly principal?: { readonly kind: string; readonly id: string };
   readonly contextDigest: string;
   readonly guardrailDigest: string;
   /** The validated guardrail policy `guardrailDigest` names, rebuilt into guards here. */
@@ -66,6 +72,15 @@ export interface TurnDriverOptions {
   buildEvents(request: TurnRequest): TurnEventWriter;
   /** Optional model receipt; omit it rather than report a model the port cannot name. */
   modelReceipt?(): ModelCallReceipt | undefined;
+  /** Where finished turns are reported as spend. Best-effort; never blocks the turn. */
+  readonly spend?: SpendSink;
+}
+
+/** What a finished turn is attributed to, carried rather than held so no state outlives a run. */
+interface TurnSpendScope {
+  readonly startedAt: number;
+  readonly agentId: string;
+  readonly conversationId: string;
 }
 
 export class TurnDriver {
@@ -77,8 +92,14 @@ export class TurnDriver {
       return "succeeded";
     }
 
+    const startedAt = Date.now();
     const events = this.options.buildEvents(request);
     const context = await this.options.context.resolve(request);
+    const spend: TurnSpendScope = {
+      startedAt,
+      agentId: context.agentId,
+      conversationId: request.conversationId,
+    };
 
     // Verify guard policy digest before the first event; no misnamed guards may run.
     this.options.guardrails.configure({
@@ -127,7 +148,8 @@ export class TurnDriver {
       return this.complete(
         request,
         events,
-        await this.options.states.settle(stateRequest, guarded.message)
+        await this.options.states.settle(stateRequest, guarded.message),
+        spend
       );
     }
 
@@ -136,6 +158,9 @@ export class TurnDriver {
       runId: request.runId,
       stateId: request.stateKey,
       modelProfileId: context.modelProfileId,
+      ...(context.modelPolicy === undefined ? {} : { modelPolicy: context.modelPolicy }),
+      ...(context.principal === undefined ? {} : { principal: context.principal }),
+      agentId: context.agentId,
       contextDigest: context.contextDigest,
       guardrailDigest: context.guardrailDigest,
       messages: guarded.messages,
@@ -171,7 +196,7 @@ export class TurnDriver {
       return "waiting";
     }
 
-    return this.complete(request, events, result);
+    return this.complete(request, events, result, spend);
   }
 
   /** Guard only the latest user message; transforms affect the model, not persisted history. */
@@ -198,7 +223,8 @@ export class TurnDriver {
   private async complete(
     request: TurnRequest,
     events: TurnEventWriter,
-    result: Extract<AgentStateResult, { status: "succeeded" | "failed" }>
+    result: Extract<AgentStateResult, { status: "succeeded" | "failed" }>,
+    spend: TurnSpendScope
   ): Promise<RunOutcome> {
     const completion = await this.options.completer.complete({
       businessId: request.businessId,
@@ -212,7 +238,7 @@ export class TurnDriver {
       ...(request.latestAttempt === undefined ? {} : { latestAttempt: request.latestAttempt }),
     });
 
-    return this.finish(events, completion);
+    return this.finish(events, completion, spend);
   }
 
   /** Guard output before it is durable; blocked answers are replaced, not dropped. */
@@ -224,7 +250,8 @@ export class TurnDriver {
 
   private async finish(
     events: TurnEventWriter,
-    completion: CompleteTurnResult
+    completion: CompleteTurnResult,
+    spend: TurnSpendScope
   ): Promise<RunOutcome> {
     if (completion.status === "stale") {
       // A newer attempt already answered; do not announce this one.
@@ -238,6 +265,7 @@ export class TurnDriver {
         { status: "succeeded", messageId: completion.messageId, ...(receipt ?? {}) },
         "finished"
       );
+      this.reportTurn(spend, "ok");
       return "succeeded";
     }
 
@@ -247,11 +275,22 @@ export class TurnDriver {
         { status: "failed", messageId: null, reason: completion.reason },
         "finished"
       );
+      this.reportTurn(spend, "error");
       return "failed";
     }
 
     // `waiting` cannot appear after completion is attempted.
     throw new Error(`turn completion returned an unexpected status "${completion.status}"`);
+  }
+
+  /** Records the turn in the spend ledger; the reliability half of the dashboard reads this. */
+  private reportTurn(spend: TurnSpendScope, status: "ok" | "error"): void {
+    this.options.spend?.recordTurn({
+      status,
+      durationMs: Math.max(0, Date.now() - spend.startedAt),
+      agentId: spend.agentId,
+      conversationId: spend.conversationId,
+    });
   }
 }
 

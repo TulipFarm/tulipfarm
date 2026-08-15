@@ -121,16 +121,60 @@ export interface ModelProbeTarget {
   effortModel(preset: "balanced"): unknown;
 }
 
+/** Whether the configured credential is still accepted. Absent means "not checked". */
+export interface ModelReachability {
+  /** Rejects only when the provider refused the *credential*; transient faults resolve. */
+  verify(): Promise<void>;
+}
+
+export interface LlmProbeOptions {
+  /**
+   * Optional live credential check. Without it the probe reports configuration only, which
+   * cannot distinguish a working key from a revoked one.
+   */
+  readonly reachability?: ModelReachability;
+  /** Reachability is cached this long so scraping the health page cannot spend tokens per hit. */
+  readonly ttlMs?: number;
+  now?(): number;
+}
+
+const REACHABILITY_TTL_MS = 60_000;
+
 /**
- * Checks that a model is configured and resolvable. It deliberately does not call the provider —
- * a health page must not spend tokens or take a provider outage as its own failure.
+ * Checks that a model is configured and resolvable, and — when a reachability check is supplied —
+ * that the provider still accepts the credential.
+ *
+ * A provider outage is deliberately *not* our failure: only a refused credential downgrades the
+ * component, and only to `degraded`. Reporting `down` would hand a third party the power to fail
+ * this deployment's readiness. Without that distinction a revoked key reported `ok` and the first
+ * person to learn of it was a participant mid-chat.
  */
-export function llmProbe(llm: ModelProbeTarget): HealthProbe {
+export function llmProbe(llm: ModelProbeTarget, options: LlmProbeOptions = {}): HealthProbe {
+  const now = options.now ?? Date.now;
+  const ttlMs = options.ttlMs ?? REACHABILITY_TTL_MS;
+  let cached: { at: number; result: HealthResult } | undefined;
+
   return {
     component: "llm",
     async check() {
       llm.effortModel("balanced");
-      return { status: "ok" };
+      const reachability = options.reachability;
+      if (reachability === undefined) return { status: "ok" };
+
+      if (cached !== undefined && now() - cached.at < ttlMs) return cached.result;
+
+      let result: HealthResult;
+      try {
+        await reachability.verify();
+        result = { status: "ok" };
+      } catch (error) {
+        result = {
+          status: "degraded",
+          detail: `provider rejected the credential: ${message(error)}`,
+        };
+      }
+      cached = { at: now(), result };
+      return result;
     },
   };
 }

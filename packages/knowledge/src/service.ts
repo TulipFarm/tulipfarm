@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
-import { EMBEDDING_UNAVAILABLE_WARNING } from "@tulipfarm/llm";
-import { EmbeddingUnavailableError } from "@tulipfarm/schema";
+import { EMBEDDING_REINDEX_PENDING_WARNING, EMBEDDING_UNAVAILABLE_WARNING } from "@tulipfarm/llm";
 import type { PaginatedResult } from "@tulipfarm/storage";
 import type { KnowledgeChunkRepo } from "./chunks-repo";
 import { indexPage, reindexAll } from "./index-service";
@@ -350,8 +349,14 @@ export class KnowledgeService {
         }
         pagesV = [...best.entries()].sort((a, b) => b[1].score - a[1].score).map(([id]) => id);
         for (const [id, { content }] of best) vectorSnippet.set(id, content);
-      } catch (err) {
-        if (!(err instanceof EmbeddingUnavailableError)) throw err;
+        // Stored vectors at the previous width can never match an exact-width vector search, so
+        // the arm returns confidently empty rather than erroring. Say so.
+        if (this.deps.embeddings.pendingReindex()) {
+          warnings.push(EMBEDDING_REINDEX_PENDING_WARNING);
+        }
+      } catch {
+        // Any embedding failure degrades this arm to lexical-only, rate limits included: a partial
+        // hybrid result with a warning beats failing a search the lexical arm could have answered.
         warnings.push(EMBEDDING_UNAVAILABLE_WARNING);
       }
     } else {
@@ -821,7 +826,7 @@ export class KnowledgeService {
   async backfillMissing(): Promise<number> {
     const active = this.deps.embeddings.isAvailable() ? this.deps.embeddings.getActive() : null;
     if (!active?.model) return 0;
-    const ids = await this.deps.chunks.listPageIdsNeedingEmbedding(active.model);
+    const ids = await this.deps.chunks.listPageIdsNeedingEmbedding(active.model, active.dimension);
     for (const id of ids) {
       if (this.deps.enqueueIndex) await this.deps.enqueueIndex(id);
       else await this.reindexById(id);
@@ -846,11 +851,27 @@ export class KnowledgeService {
     };
   }
 
-  /** Full re-index when the embedding dimension changed (KN-V1-002 guard). */
+  /**
+   * Full re-index when the stored vectors no longer match the active embedding model (KN-V1-002).
+   *
+   * The in-memory flag only sees a change that happens inside one process lifetime. An operator who
+   * edits the embedding model and restarts loses it entirely, and every stored vector then sits at
+   * a width `searchVector` will never match — vector recall silently drops to zero. So the stored
+   * corpus, not process memory, is the authority; the flag is only a fast path.
+   */
   async runReindexIfPending(): Promise<boolean> {
-    if (!this.deps.embeddings.consumePendingReindex()) return false;
+    if (!(await this.reindexNeeded())) return false;
     await this.reindexAll();
+    // Cleared last: a re-index that throws must leave the signal set for the next attempt.
+    this.deps.embeddings.clearPendingReindex();
     return true;
+  }
+
+  private async reindexNeeded(): Promise<boolean> {
+    if (this.deps.embeddings.pendingReindex()) return true;
+    const dim = this.deps.embeddings.getDimension();
+    if (dim === null) return false;
+    return (await this.deps.chunks.countStaleDimension(dim)) > 0;
   }
 
   private async afterWrite(page: KnowledgePage): Promise<void> {

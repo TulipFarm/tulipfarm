@@ -8,7 +8,13 @@ export interface ObservabilityConfig {
   retentionDays: number;
   /** When true, prompt/completion/tool bodies may be captured (P3). Off by default. */
   captureContent: boolean;
-  /** Daily-spend threshold ($) used by the shipped Grafana alert rule; null ⇒ unset. */
+  /**
+   * Rolling-24h model spend ceiling in USD; null ⇒ no alert.
+   *
+   * Enforced by the instance: the API schedules an hourly check and the Worker reports a breach
+   * to the operator log. It needs no Grafana. The shipped Grafana rule carries its own threshold
+   * and is an optional second route for the same breach, not the thing that makes this work.
+   */
   spendAlertUsd: number | null;
   /** Grafana Cloud OTLP target; null ⇒ no exporter even if `enabled`. `token` is a ref string. */
   otlp: { endpoint: string; instanceId: string; token: string } | null;

@@ -181,6 +181,35 @@
           "type": "array",
           "uniqueItems": true
         },
+        "modelPolicy": {
+          "additionalProperties": false,
+          "properties": {
+            "allowTraining": {
+              "type": "boolean"
+            },
+            "dataRetention": {
+              "enum": [
+                "none",
+                "zero_retention",
+                "provider_default"
+              ],
+              "type": "string"
+            },
+            "maxLatencyMs": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "residency": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "sensitive": {
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
         "modelProfile": {
           "maxLength": 256,
           "minLength": 1,

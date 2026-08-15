@@ -20,10 +20,9 @@ function fakeEmbeddings(available: boolean, pending = false): EmbeddingPort {
     }),
     getActive: () => (available ? { provider: "fake", model: "m", dimension: 3 } : null),
     getDimension: () => (available ? 3 : null),
-    consumePendingReindex: () => {
-      const p = pendingReindex;
+    pendingReindex: () => pendingReindex,
+    clearPendingReindex: () => {
       pendingReindex = false;
-      return p;
     },
   };
 }
@@ -114,7 +113,7 @@ describe("KnowledgeService", () => {
     expect(await svc.governancePages()).toHaveLength(1);
 
     expect(await svc.runReindexIfPending()).toBe(true);
-    expect(await svc.runReindexIfPending()).toBe(false); // flag consumed
+    expect(await svc.runReindexIfPending()).toBe(false); // flag cleared after a successful re-index
   });
 
   async function embeddedCount(): Promise<number> {
@@ -162,6 +161,53 @@ describe("KnowledgeService", () => {
     expect(status.chunks.embedded).toBe(status.chunks.total);
     expect(status.chunks.lexicalOnly).toBe(0);
     expect(status.queue).toBeNull();
+  });
+
+  it("re-indexes on a dimension change no process ever saw, and keeps the signal on failure", async () => {
+    // The in-memory flag cannot see a change made while the process was down, yet that is exactly
+    // when a stored vector becomes permanently unreachable: `searchVector` matches width exactly.
+    const svc = makeService(db, fakeEmbeddings(true));
+    await svc.createPage({ title: "A", content: "alpha body" });
+    expect(await svc.runReindexIfPending()).toBe(false);
+
+    // A fresh process, a different embedding width, and no flag anywhere.
+    const widened: EmbeddingPort = {
+      ...fakeEmbeddings(true),
+      embedMany: async (values) => ({
+        embeddings: values.map(() => [0.5, 0.5, 0.5, 0.5]),
+        dimension: 4,
+      }),
+      getActive: () => ({ provider: "fake", model: "m", dimension: 4 }),
+      getDimension: () => 4,
+    };
+    const restarted = makeService(db, widened);
+    expect(await svc.search("alpha", {}, 10)).toBeDefined();
+    expect(await restarted.runReindexIfPending()).toBe(true);
+    // Re-embedded at the new width, so the next run has nothing left to do.
+    expect(await restarted.runReindexIfPending()).toBe(false);
+  });
+
+  it("leaves the re-index signal set when the re-index itself fails", async () => {
+    let pending = true;
+    let calls = 0;
+    const flaky: EmbeddingPort = {
+      ...fakeEmbeddings(true),
+      embedMany: async (values) => {
+        calls += 1;
+        if (calls === 1) throw new Error("provider throttled");
+        return { embeddings: values.map(() => [0.5, 0.5, 0.5]), dimension: 3 };
+      },
+      pendingReindex: () => pending,
+      clearPendingReindex: () => {
+        pending = false;
+      },
+    };
+    const svc = makeService(db, flaky);
+    await svc.createPage({ title: "A", content: "alpha body" });
+
+    // The page still indexes — lexical-only — rather than aborting the whole operation.
+    expect((await svc.indexStatus()).chunks.lexicalOnly).toBeGreaterThan(0);
+    expect(pending).toBe(true);
   });
 
   it("indexStatus surfaces pg-boss queue stats when wired", async () => {

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { ModelRequirementsPolicy } from "@tulipfarm/agent-runtime";
 import type { InvocationPrincipal } from "@tulipfarm/run-kernel";
 import type { ParticipantToolCall } from "@tulipfarm/schema";
 import type {
@@ -52,6 +53,10 @@ export interface HostedTurnContext {
   /** Whom the turn acts as. Taken from the Run, so a guard is told who it is guarding. */
   readonly subjectId: string;
   readonly modelProfileId: string;
+  /** Governance the Agent requires of the model serving this turn; absent means no demand. */
+  readonly modelPolicy?: ModelRequirementsPolicy;
+  /** Whom the turn acts as, kind included. `subjectId` alone cannot name a principal. */
+  readonly principal?: { readonly kind: string; readonly id: string };
   readonly contextDigest: string;
   readonly guardrailDigest: string;
   /** Validated guardrail policy named by digest; Worker enforces it without reading Soul. */
