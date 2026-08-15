@@ -2,8 +2,14 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { decideEffectivePermission } from "@tulipfarm/authz";
 import { describe, expect, it } from "vitest";
-import { ADMIN_ONLY_SURFACES, MEMBER_ALLOWED_SURFACES, OWNER_SCOPED_SURFACES } from "./roles";
+import {
+  ADMIN_ONLY_SURFACES,
+  DEPLOYMENT_ROLES,
+  MEMBER_ALLOWED_SURFACES,
+  OWNER_SCOPED_SURFACES,
+} from "./roles";
 
 const SRC_ROOT = resolve(process.cwd(), "src");
 /** A gate that moved into a shared package is cited from the repo root, not from `src`. */
@@ -179,6 +185,60 @@ describe("role catalog fitness", () => {
           "member-only citation."
       ),
       "A file with an admin gate cannot be represented only as member-allowed."
+    ).toEqual([]);
+  });
+
+  /**
+   * The checks above compare *files*, so they pass whenever a file is cited by both catalogs —
+   * which is exactly the shape a route family with an admin half and a member half has. That
+   * leaves the action-level contradiction below invisible to them.
+   */
+  it("never names one action as both member-allowed and admin-only", () => {
+    const adminActionsByType = new Map(
+      ADMIN_ONLY_SURFACES.map((surface) => [surface.type, surface.actions])
+    );
+
+    const dead = MEMBER_ALLOWED_SURFACES.flatMap((surface) => {
+      const admin = adminActionsByType.get(surface.type);
+      if (!admin) return [];
+      // A member wildcard narrowed by a specific admin deny is the intended pattern: the member
+      // keeps the rest of the type. Only an exact collision, or wildcard against wildcard, leaves
+      // an allow that can never fire.
+      if (surface.actions.includes("*")) {
+        return admin.includes("*") ? [`${surface.type}: * denied by an admin-only *`] : [];
+      }
+      return surface.actions
+        .filter((action) => admin.includes(action))
+        .map((action) => `${surface.type}: ${action}`);
+    });
+
+    expect(
+      dead,
+      "Deny beats allow, so an action on both catalogs is an allow that can never fire: the " +
+        "Roles view promises access the gate refuses. Remove it from MEMBER_ALLOWED_SURFACES if " +
+        "the surface is operator-only, or from ADMIN_ONLY_SURFACES if it is not."
+    ).toEqual([]);
+  });
+
+  it("grants a member every action the member catalog names", () => {
+    const member = DEPLOYMENT_ROLES.find((role) => role.id === "member");
+    if (!member) throw new Error("member role missing from the deployment catalog");
+    const layers = [{ name: "member", grants: member.grants }];
+
+    const refused = MEMBER_ALLOWED_SURFACES.flatMap((surface) =>
+      surface.actions
+        .filter((action) => action !== "*")
+        .filter(
+          (action) =>
+            !decideEffectivePermission(layers, { action, resourceType: surface.type }).allowed
+        )
+        .map((action) => `${surface.type}: ${action}`)
+    );
+
+    expect(
+      refused,
+      "Every explicitly named member action must survive the compiled role through the same " +
+        "decision function the gate uses."
     ).toEqual([]);
   });
 });
