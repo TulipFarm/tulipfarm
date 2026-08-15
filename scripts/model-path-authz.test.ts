@@ -184,4 +184,26 @@ describe("the embedding path is metered, bounded and structurally logged", () =>
     expect(model).toContain("lastMessage: describeMessage(messages.at(-1))");
     expect(model).not.toContain("lastMessage: messages.at(-1)");
   });
+
+  it("asks for the prompt caching it already meters, and only where routing allowed it", () => {
+    // Cache read and write tokens were captured, priced and charged long before anything requested
+    // caching, so the ledger reported a decision nobody had made. The annotation must reach the
+    // prompt actually sent — building it and passing `instructions` would look identical here.
+    const model = read("apps/worker/src/model.ts");
+    expect(model).toContain("decidePromptCache({");
+    expect(model).toContain("cacheAllowed: routedCacheAllowed(resolution.routing)");
+    expect(model).toContain("instructions: prompt");
+    expect(model).not.toMatch(/\binstructions: instructions\b|\binstructions,\s*\n\s*\.\.\.\(/);
+  });
+
+  it("refuses to cache a prompt no profile cleared, so sensitivity is never assumed", () => {
+    // `cacheAllowed` is `allowCaching && !sensitive`. A raw model id bypasses profile selection
+    // entirely, so `undefined` means nothing checked sensitivity — it must not read as yes.
+    const cache = read("packages/llm/src/prompt-cache.ts");
+    expect(cache).toContain('if (input.cacheAllowed === undefined) return { kind: "skip"');
+    const model = read("apps/worker/src/model.ts");
+    expect(model).toMatch(
+      /routedCacheAllowed[\s\S]{0,200}routing\.outcome === "selected" \? routing\.cacheAllowed : undefined/
+    );
+  });
 });
