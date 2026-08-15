@@ -16,7 +16,7 @@ Owns adapter contracts, event normalization, source ACLs, sync checkpoints, and 
 | `src/grants.ts` | Default-deny grants for concrete external targets. |
 | `src/egress/` | Declarative egress manifest to ToolContract compiler and adapter. |
 | `src/import/`, `src/ingress/`, `src/external-protocol/` | Import and ingress protocols. |
-| `src/github/`, `src/jira/`, `src/postgres/` | Tool adapters and provider contracts. |
+| `src/github/`, `src/jira/` | Tool adapters and provider contracts. |
 | `src/slack/`, `src/telegram/` | Messaging Tool adapters and provider contracts. |
 | `src/google-drive/`, `src/google-docs/` | Knowledge sync with provider ACLs. |
 | `src/notion/`, `src/confluence/`, `src/slack/knowledge/` | Knowledge sync adapters. |

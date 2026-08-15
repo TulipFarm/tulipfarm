@@ -50,7 +50,11 @@ export type ToolRiskClass = (typeof TOOL_RISK_CLASSES)[number];
 export const TOOL_IDEMPOTENCY_STRATEGIES = ["provider", "reconcile", "none"] as const;
 export type ToolIdempotencyStrategy = (typeof TOOL_IDEMPOTENCY_STRATEGIES)[number];
 
-/** Implementation backends a Tool contract can bind to (SPEC §11.1, §15). */
+/**
+ * Implementation backends a Tool contract can bind to (SPEC §11.1, §15). A kind belongs here only
+ * while a registered adapter can serve it: the declarative path picks an adapter per contract, so
+ * a kind with no implementation validates and then silently binds to the wrong backend.
+ */
 export const TOOL_ADAPTER_KINDS = [
   "native",
   "integration",
@@ -58,7 +62,6 @@ export const TOOL_ADAPTER_KINDS = [
   "openapi",
   "http",
   "sandbox",
-  "postgres",
 ] as const;
 export type ToolAdapterKind = (typeof TOOL_ADAPTER_KINDS)[number];
 
