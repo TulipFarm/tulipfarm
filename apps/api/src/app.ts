@@ -40,7 +40,6 @@ import type { RoutineApprovalService } from "./approvals/routine-approvals";
 import type { AuditReadService } from "./audit/read-service";
 import { registerAuditRoutes } from "./audit/routes";
 import type { AuditService } from "./audit/service";
-import { makeSoulAuditWriter } from "./audit/soul-write";
 import type { TokenRepo } from "./auth/api-tokens";
 import { csrfHook, makeCsrfHook } from "./auth/csrf";
 import type { UserInviteRepo } from "./auth/invites";
@@ -48,8 +47,8 @@ import { makeRequireAuth } from "./auth/middleware";
 import { registerAuthRoutes } from "./auth/routes";
 import type { SessionStore } from "./auth/session-store";
 import type { PasswordWriteRepo, ProfileWriteRepo, UserAdminRepo, UserRepo } from "./auth/users";
-import { buildCapabilityCatalog } from "./authz/capabilities";
 import {
+  type AuthorizationGateOptions,
   makeAuthorizationCheck,
   makeRequireAuthorization,
   type RouteAuthorizer,
@@ -68,21 +67,13 @@ import { type FormsRoutesDeps, registerFormRoutes } from "./forms/routes";
 import { type HookIngressDeps, registerHookIngressRoutes } from "./hooks/routes";
 import type { IdentityRouteDeps } from "./identity/routes";
 import { type IngressRoutesDeps, registerIngressRoutes } from "./ingress/routes";
-import { type IntegrationAuthRequestRepo, resolveAuthEndpoints } from "./integrations/auth-broker";
-import { registerIntegrationAuthRoutes } from "./integrations/auth-routes";
-import { ensureGitHubInstallation } from "./integrations/github-install";
+import type { IntegrationAuthRequestRepo } from "./integrations/auth-broker";
 import {
   type GitHubInstallDeps,
   registerGitHubInstallRoutes,
 } from "./integrations/github-install-routes";
-import { registerIntegrationMarketplaceRoutes } from "./integrations/marketplace-routes";
 import type { PrincipalProviderTokenRepo } from "./integrations/principal-tokens";
-import { registerIntegrationRoutes } from "./integrations/routes";
-import {
-  ensureDefaultSlackRoute,
-  registerSlackBindRoute,
-  type SlackBindDeps,
-} from "./integrations/slack-binding";
+import type { SlackBindDeps } from "./integrations/slack-binding";
 import {
   type ChannelInternalRouteDeps,
   registerChannelInternalRoutes,
@@ -100,7 +91,6 @@ import { createLogTeeStream } from "./observability/log-stream";
 import type { ResourceRepo } from "./observability/resource-repo";
 import { registerObservabilityRoutes } from "./observability/routes";
 import type { ObservabilityService } from "./observability/service";
-import { registerOnboardingRoutes } from "./onboarding/routes";
 import { registerPreferenceRoutes } from "./preferences/routes";
 import type { RateLimiter } from "./rate-limit";
 import type { RecordAuthorizer } from "./resources/authorize";
@@ -116,14 +106,9 @@ import { registerSecretsRoutes } from "./secrets/routes";
 import type { SetupAdminCreator } from "./setup/first-admin";
 import { registerSetupRoutes, registerSetupStatusRoute } from "./setup/routes";
 import { isHeadlessBoot } from "./setup/service";
-import { registerAgentRoutes } from "./soul/agents/routes";
 import { makeLlmCascadeOnSecretDelete } from "./soul/llm-config/cascade";
 import { makeLlmCascadeOnSecretSet } from "./soul/llm-config/cascade-set";
-import { registerLlmConfigRoutes } from "./soul/llm-config/routes";
-import { registerResourceTypeRoutes } from "./soul/resource-types/routes";
-import { registerAccessLevelRoutes } from "./soul/roles/routes";
-import { registerSoulRoutes } from "./soul/routes";
-import { registerSkillRoutes } from "./soul/skills/routes";
+import { registerSoulRouteFamily } from "./soul/route-family";
 import { MemorySurfaceActionStore, type SurfaceActionStore } from "./surfaces/action-store";
 import { MemorySurfaceArtifactStore, type SurfaceArtifactStore } from "./surfaces/artifact-store";
 import { registerSurfaceRoutes } from "./surfaces/routes";
@@ -193,6 +178,11 @@ export interface AppOptions {
    * each declaration's own `fallback`, so a deployment or test without it is never widened.
    */
   routeAuthorizer?: RouteAuthorizer;
+  /**
+   * Serve or merely observe {@link routeAuthorizer}'s answer. Omitted means enforce: a deployment
+   * has to opt out of enforcement, and can never fall into shadow mode by leaving a field unset.
+   */
+  authorizationGate?: AuthorizationGateOptions;
   reconcileResources?: () => Promise<void>;
   /**
    * Projects authored Soul Roles into durable rows. Wired alongside `gitSync` + `toolRegistry` to
@@ -478,6 +468,11 @@ export async function buildApp(opts: AppOptions = {}) {
   }
 
   if (opts.sessionStore && opts.userRepo && opts.tokenRepo) {
+    const requireAuthorization = makeRequireAuthorization(
+      opts.routeAuthorizer,
+      opts.authorizationGate
+    );
+    const authorizationCheck = makeAuthorizationCheck(opts.routeAuthorizer, opts.authorizationGate);
     registerAuthRoutes(app, opts.sessionStore, opts.userRepo, opts.tokenRepo, {
       rateLimiter: opts.rateLimiter,
       ...(opts.identity && { identity: opts.identity }),
@@ -485,8 +480,8 @@ export async function buildApp(opts: AppOptions = {}) {
       ...(opts.passwordWriteRepo && { passwordWriteRepo: opts.passwordWriteRepo }),
       ...(opts.profileWriteRepo && { profileWriteRepo: opts.profileWriteRepo }),
       ...(opts.userInviteRepo && { inviteRepo: opts.userInviteRepo }),
-      requireAuthorization: makeRequireAuthorization(opts.routeAuthorizer),
-      authorizationCheck: makeAuthorizationCheck(opts.routeAuthorizer),
+      requireAuthorization,
+      authorizationCheck,
       ...(opts.triggerTaskReconcile && { triggerTaskReconcile: opts.triggerTaskReconcile }),
     });
     const requireAuth = makeRequireAuth({
@@ -495,8 +490,6 @@ export async function buildApp(opts: AppOptions = {}) {
       tokenRepo: opts.tokenRepo,
       ...(opts.identity?.apiClientRepo && { apiClientRepo: opts.identity.apiClientRepo }),
     });
-    const requireAuthorization = makeRequireAuthorization(opts.routeAuthorizer);
-    const authorizationCheck = makeAuthorizationCheck(opts.routeAuthorizer);
     // Headless boot omits wizard routes (404), but status stays reachable.
     const soulPath = opts.gitSync?.path;
     if (soulPath) {
@@ -605,165 +598,7 @@ export async function buildApp(opts: AppOptions = {}) {
         opts.resourceRepo
       );
     }
-    if (opts.gitSync && opts.soulWriter) {
-      registerSoulRoutes(
-        app,
-        opts.gitSync,
-        opts.soulWriter,
-        requireAuth,
-        requireAuthorization,
-        opts.secretsService,
-        opts.auditService
-      );
-      if (opts.soulLoader && opts.soulWriter) {
-        registerResourceTypeRoutes(
-          app,
-          opts.soulWriter,
-          opts.gitSync.path,
-          opts.soulLoader,
-          requireAuth,
-          authorizationCheck,
-          opts.reconcileResources,
-          opts.rateLimiter,
-          opts.auditService
-        );
-        registerAgentRoutes(app, opts.soulLoader, requireAuth);
-        if (opts.toolRegistry && opts.reconcileSoulRoles && opts.soulWriter) {
-          const toolRegistry = opts.toolRegistry;
-          const reconcileRoles = opts.reconcileSoulRoles;
-          registerAccessLevelRoutes(app, {
-            soulWriter: opts.soulWriter,
-            requireAuth,
-            requireAuthorization,
-            auditWrite: makeSoulAuditWriter(opts.auditService),
-            catalog: () => buildCapabilityCatalog(toolRegistry.getAll()),
-            reconcile: reconcileRoles,
-            ...(opts.rateLimiter === undefined ? {} : { rateLimiter: opts.rateLimiter }),
-          });
-        }
-        if (opts.secretsService) {
-          const soulLoader = opts.soulLoader;
-          const slackBindDeps: SlackBindDeps | undefined = opts.slackBind
-            ? {
-                soulLoader: opts.soulLoader,
-                secretsService: opts.secretsService,
-                integrations: opts.slackBind.integrations,
-                businessId: opts.slackBind.businessId,
-                verifyBotToken: opts.slackBind.verifyBotToken,
-                requireAuth,
-              }
-            : undefined;
-          const onConnected = async (name: string) => {
-            // below cannot leave an integration connected but toolless.
-            opts.declarativeTools?.sync();
-            if (name === "slack" && slackBindDeps) {
-              await ensureDefaultSlackRoute(slackBindDeps);
-            }
-            if (name === "github" && opts.githubInstall) {
-              // Written by the manifest's `install` step; without it there is no installation to
-              // record, which is the pre-install state rather than a failure.
-              const installationId =
-                soulLoader.integrations.get("github")?.connection?.env?.GITHUB_INSTALLATION_ID;
-              if (installationId) {
-                await ensureGitHubInstallation(
-                  {
-                    integrations: opts.githubInstall.integrations,
-                    secretsService: opts.githubInstall.secretsService,
-                    businessId: opts.githubInstall.businessId,
-                    http: opts.githubInstall.http,
-                    log: app.log,
-                  },
-                  installationId
-                );
-              }
-            }
-          };
-          registerIntegrationRoutes(
-            app,
-            opts.soulLoader,
-            opts.soulWriter,
-            opts.secretsService,
-            opts.bundledIntegrations ?? new Map(),
-            requireAuth,
-            requireAuthorization,
-            onConnected,
-            opts.githubInstall
-              ? {
-                  integrations: opts.githubInstall.integrations,
-                  businessId: opts.githubInstall.businessId,
-                }
-              : undefined,
-            opts.declarativeTools,
-            opts.auditService
-          );
-          registerIntegrationMarketplaceRoutes(
-            app,
-            opts.soulLoader,
-            opts.soulWriter,
-            opts.bundledIntegrations ?? new Map(),
-            requireAuth
-          );
-          if (slackBindDeps) {
-            registerSlackBindRoute(app, slackBindDeps);
-          }
-          if (opts.integrationAuth && opts.secretsService) {
-            registerIntegrationAuthRoutes(
-              app,
-              {
-                soulLoader: opts.soulLoader,
-                soulWriter: opts.soulWriter,
-                secrets: opts.secretsService,
-                repo: opts.integrationAuth.repo,
-                bundled: opts.bundledIntegrations ?? new Map(),
-                endpoints: resolveAuthEndpoints(),
-                fetchImpl: opts.integrationAuth.fetchImpl,
-                onConnected,
-                tokens: opts.integrationAuth.tokens,
-              },
-              requireAuth,
-              authorizationCheck
-            );
-          }
-        }
-        const knowledgeService = opts.knowledgeService;
-        registerOnboardingRoutes(app, opts.soulLoader, requireAuth, requireAuthorization, {
-          kvService: opts.kvService,
-          llmService: opts.llmService,
-          hasAnyKnowledgePage: knowledgeService
-            ? () => knowledgeService.hasAnyKnowledgePage()
-            : undefined,
-          gitSync: opts.gitSync,
-          soulWriter: opts.soulWriter,
-          auditService: opts.auditService,
-        });
-        if (opts.llmService) {
-          registerSkillRoutes(
-            app,
-            opts.soulLoader,
-            opts.gitSync,
-            opts.soulWriter,
-            opts.llmService,
-            requireAuth,
-            opts.activityService,
-            opts.bundledSkills,
-            opts.disabledBundledSkills,
-            opts.auditService
-          );
-          if (opts.secretsService) {
-            registerLlmConfigRoutes(
-              app,
-              opts.soulLoader,
-              opts.soulWriter,
-              opts.llmService,
-              opts.secretsService,
-              requireAuth,
-              requireAuthorization,
-              opts.auditService
-            );
-          }
-        }
-      }
-    }
+    registerSoulRouteFamily(app, opts, requireAuth, requireAuthorization, authorizationCheck);
     if (opts.taskStore) {
       registerTaskRoutes(
         app,

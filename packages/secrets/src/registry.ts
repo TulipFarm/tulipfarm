@@ -137,8 +137,3 @@ export function providerField(
 ): ProviderField | undefined {
   return info.fields.find((f) => f.role === role);
 }
-
-/** A provider is usable once every non-optional field has a stored value. */
-export function isProviderConfigured(info: LlmProviderInfo, storedKeys: string[]): boolean {
-  return info.fields.filter((f) => !f.optional).every((f) => storedKeys.includes(f.key));
-}

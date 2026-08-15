@@ -8,8 +8,6 @@ import {
 
 export const SLACK_ADAPTER_REF = "integration:slack";
 
-export const SLACK_MESSAGE_TARGET = "slack.message";
-
 export const SLACK_TOOL_IDS = {
   sendMessage: "slack.message.send",
 } as const;

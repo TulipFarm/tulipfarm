@@ -72,9 +72,3 @@ export function localDispatchRefusal(
   }
   return undefined;
 }
-
-export function isLocallyDispatchable(
-  definition: ToolDefinition<unknown, unknown> | undefined
-): boolean {
-  return localDispatchRefusal(definition) === undefined;
-}

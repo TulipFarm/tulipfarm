@@ -24,11 +24,3 @@ const RANK: Readonly<Record<string, number>> = Object.fromEntries(
 export function precedenceRank(level: string): number | undefined {
   return RANK[level];
 }
-
-/** True when `candidate` sits at or below `ceiling` and therefore cannot override it. */
-export function precedenceWithin(
-  candidate: InstructionPrecedence,
-  ceiling: InstructionPrecedence
-): boolean {
-  return RANK[candidate] >= RANK[ceiling];
-}

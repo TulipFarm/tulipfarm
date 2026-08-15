@@ -1,9 +1,6 @@
 /**
- * Runtime Knowledge source record; `acl.ts` is the only place it becomes an access decision, and
- * `knowledgeSourceFromDefinition` keeps authored access-control modes in lockstep.
+ * Runtime Knowledge source record; `acl.ts` is the only place it becomes an access decision.
  */
-
-import type { KnowledgeSourceDefinition } from "@tulipfarm/schema";
 
 /** Lifecycle of the external record behind a source. Anything but `active` is unreachable. */
 export type KnowledgeSourceStatus = "active" | "revoked" | "deleted";
@@ -110,30 +107,4 @@ export interface KnowledgeSourceRuntimeInput {
   readonly provenance: KnowledgeProvenance;
   readonly lastSyncedAt: string;
   readonly acl?: KnowledgeAclSnapshot;
-}
-
-/** Missing snapshot ACLs project to `unverifiable`, not an empty allow list. */
-export function knowledgeSourceFromDefinition(
-  definition: KnowledgeSourceDefinition,
-  runtime: KnowledgeSourceRuntimeInput
-): KnowledgeSourceRecord {
-  const { accessControl } = definition.spec;
-  const aclMissing = accessControl.mode === "snapshot" && runtime.acl === undefined;
-  return {
-    sourceId: definition.metadata.id,
-    businessId: runtime.businessId,
-    integrationId: definition.spec.integrationId,
-    provider: definition.spec.source.provider,
-    externalId: definition.spec.source.externalId,
-    externalTenantId: definition.spec.source.externalTenantId,
-    ownerExternalId: definition.spec.source.ownerExternalId,
-    revision: runtime.revision,
-    classification: definition.spec.classification,
-    status: runtime.status,
-    verification: aclMissing ? "unverifiable" : runtime.verification,
-    accessControl,
-    ...(runtime.acl === undefined ? {} : { acl: runtime.acl }),
-    provenance: runtime.provenance,
-    lastSyncedAt: runtime.lastSyncedAt,
-  };
 }

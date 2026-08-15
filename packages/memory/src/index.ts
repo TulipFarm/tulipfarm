@@ -124,7 +124,6 @@ export {
   type MemoryTrustTier,
   type MemoryType,
   matchesScopeFilter,
-  memorySettingsView,
   type ProceduralCorrectionRequest,
   type RememberDenialReason,
   type RememberRequest,

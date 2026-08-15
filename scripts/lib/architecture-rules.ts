@@ -159,7 +159,7 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
     kv: ["schema", "storage", "tool-host"],
     "platform-tools": ["schema", "tool-host", "agent-runtime"],
     surface: ["schema"],
-    "surface-web": ["surface", "ui"],
+    "surface-web": ["surface"],
     "surface-slack": ["surface"],
     "surface-telegram": ["surface"],
     "surface-github": ["surface"],
@@ -245,7 +245,7 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
       "observability",
     ],
     // `apps/web` uses shared wire schemas and presentation-only packages.
-    web: ["schema", "surface", "surface-web", "ui", "editor"],
+    web: ["schema", "surface", "surface-web", "editor"],
   },
   // Legacy v1 edges that still exist during cutover. Each is a target package
   // importing a not-yet-replaced legacy package; removed when its owner passes

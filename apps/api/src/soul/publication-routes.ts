@@ -16,6 +16,17 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AuditRecordInput, AuditService } from "../audit/service";
 import { ErrorSchema } from "../auth/schemas";
 import type { RequireAuthorization, RouteAuthorization } from "../authz/route-gate";
+import {
+  SoulActiveBundleQuerystringSchema,
+  SoulActiveBundleResponseSchema,
+  SoulActiveBundleRollbackBodySchema,
+  SoulActiveBundleRollbackResponseSchema,
+  SoulPublicationChangesetParamsSchema,
+  SoulPublicationDeadLetterListQuerystringSchema,
+  SoulPublicationListQuerystringSchema,
+  SoulPublicationPageSchema,
+  SoulPublicationSchema,
+} from "./publication-schemas";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -44,84 +55,6 @@ const MAX_LIST_SCAN = 500;
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
 const ROLLBACK_AUDIT_REASON = "SOUL_PUBLICATION_ROLLBACK";
-const STAGES: readonly SoulPublicationStage[] = ["committed", "projected", "stored", "active"];
-
-const NullableString = { type: ["string", "null"] } as const;
-const NullableDateTime = { type: ["string", "null"], format: "date-time" } as const;
-
-const PublicationSchema = {
-  type: "object",
-  properties: {
-    changesetId: { type: "string" },
-    businessId: { type: "string" },
-    commitSha: { type: "string" },
-    digest: { type: "string" },
-    stage: { type: "string", enum: STAGES },
-    publicationSequence: { type: ["number", "null"] },
-    actorPrincipalId: { type: "string" },
-    createdAt: NullableDateTime,
-    attempts: { type: "number" },
-    nextAttemptAt: NullableDateTime,
-    failureCode: NullableString,
-    deadLetteredAt: NullableDateTime,
-    deadLetterReason: NullableString,
-  },
-  required: [
-    "changesetId",
-    "businessId",
-    "commitSha",
-    "digest",
-    "stage",
-    "publicationSequence",
-    "actorPrincipalId",
-    "createdAt",
-    "attempts",
-    "nextAttemptAt",
-    "failureCode",
-    "deadLetteredAt",
-    "deadLetterReason",
-  ],
-} as const;
-
-const ActivationSchema = {
-  type: "object",
-  properties: {
-    businessId: { type: "string" },
-    activationSequence: { type: "number" },
-    digest: { type: "string" },
-    changesetId: { type: "string" },
-    activatedAt: { type: "string", format: "date-time" },
-    activatedByPrincipalId: { type: "string" },
-  },
-  required: [
-    "businessId",
-    "activationSequence",
-    "digest",
-    "changesetId",
-    "activatedAt",
-    "activatedByPrincipalId",
-  ],
-} as const;
-
-const ActiveBundleSchema = {
-  type: "object",
-  properties: {
-    digest: { type: "string" },
-    activatedAt: NullableDateTime,
-    activatedByPrincipalId: NullableString,
-  },
-  required: ["digest", "activatedAt", "activatedByPrincipalId"],
-} as const;
-
-const PublicationPageSchema = {
-  type: "object",
-  properties: {
-    publications: { type: "array", items: PublicationSchema },
-    nextCursor: { type: ["string", "null"] },
-  },
-  required: ["publications", "nextCursor"],
-} as const;
-
 interface CursorState {
   readonly createdAt: string;
   readonly _id: string;
@@ -439,19 +372,9 @@ export function registerSoulPublicationRoutes(
           "List visible Soul publication records from activation history and the dead-letter queue.",
         tags: ["soul"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
-        querystring: {
-          type: "object",
-          properties: {
-            limit: { type: "integer", minimum: 1, maximum: 100 },
-            cursor: { type: "string" },
-            changesetId: { type: "string" },
-            stage: { type: "string", enum: STAGES },
-            digest: { type: "string" },
-            deadLettered: { type: "boolean" },
-          },
-        },
+        querystring: SoulPublicationListQuerystringSchema,
         response: {
-          200: PublicationPageSchema,
+          200: SoulPublicationPageSchema,
           400: ErrorSchema,
           401: ErrorSchema,
           403: ErrorSchema,
@@ -479,15 +402,9 @@ export function registerSoulPublicationRoutes(
         description: "List dead-lettered Soul publications that need operator attention.",
         tags: ["soul"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
-        querystring: {
-          type: "object",
-          properties: {
-            limit: { type: "integer", minimum: 1, maximum: 100 },
-            cursor: { type: "string" },
-          },
-        },
+        querystring: SoulPublicationDeadLetterListQuerystringSchema,
         response: {
-          200: PublicationPageSchema,
+          200: SoulPublicationPageSchema,
           400: ErrorSchema,
           401: ErrorSchema,
           403: ErrorSchema,
@@ -519,12 +436,13 @@ export function registerSoulPublicationRoutes(
         description: "Read publication status for one Soul changeset.",
         tags: ["soul"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
-        params: {
-          type: "object",
-          required: ["changesetId"],
-          properties: { changesetId: { type: "string", minLength: 1 } },
+        params: SoulPublicationChangesetParamsSchema,
+        response: {
+          200: SoulPublicationSchema,
+          401: ErrorSchema,
+          403: ErrorSchema,
+          404: ErrorSchema,
         },
-        response: { 200: PublicationSchema, 401: ErrorSchema, 403: ErrorSchema, 404: ErrorSchema },
       },
     },
     async (req, reply) => {
@@ -547,19 +465,9 @@ export function registerSoulPublicationRoutes(
         description: "Read the active Soul execution bundle digest and activation history.",
         tags: ["soul"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
-        querystring: {
-          type: "object",
-          properties: { historyLimit: { type: "integer", minimum: 1, maximum: 100 } },
-        },
+        querystring: SoulActiveBundleQuerystringSchema,
         response: {
-          200: {
-            type: "object",
-            properties: {
-              active: { anyOf: [ActiveBundleSchema, { type: "null" }] },
-              history: { type: "array", items: ActivationSchema },
-            },
-            required: ["active", "history"],
-          },
+          200: SoulActiveBundleResponseSchema,
           400: ErrorSchema,
           401: ErrorSchema,
           403: ErrorSchema,
@@ -599,26 +507,9 @@ export function registerSoulPublicationRoutes(
           "Activate a previously published and signature-verified Soul execution bundle digest.",
         tags: ["soul"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
-        body: {
-          type: "object",
-          required: ["digest", "reason"],
-          additionalProperties: false,
-          properties: {
-            digest: { type: "string", minLength: 1 },
-            reason: { type: "string", minLength: 1, maxLength: 1000 },
-          },
-        },
+        body: SoulActiveBundleRollbackBodySchema,
         response: {
-          200: {
-            type: "object",
-            properties: {
-              activated: { type: "boolean" },
-              previousDigest: NullableString,
-              digest: { type: "string" },
-              changesetId: { type: "string" },
-            },
-            required: ["activated", "previousDigest", "digest", "changesetId"],
-          },
+          200: SoulActiveBundleRollbackResponseSchema,
           400: ErrorSchema,
           401: ErrorSchema,
           403: ErrorSchema,

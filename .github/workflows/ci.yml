@@ -222,8 +222,9 @@ jobs:
           retention-days: 7
 
   # Static architecture guardrail (AW-004): enforce the package/app dependency
-  # allowlist and block forbidden imports and import cycles. Encodes
-  # docs/architecture/dependency-rules.md. Fast and deterministic — always runs.
+  # allowlist, block forbidden imports and import cycles, and refuse code that no
+  # production entrypoint reaches. Encodes docs/architecture/dependency-rules.md.
+  # Fast and deterministic — always runs.
   architecture:
     name: Architecture
     runs-on: ubuntu-latest
@@ -238,6 +239,13 @@ jobs:
           set -o pipefail
           pnpm architecture:test 2>&1 | tee architecture.log
           pnpm architecture:check 2>&1 | tee -a architecture.log
+      # The repo's most repeated defect is code that is built, tested and reachable from no
+      # production entrypoint. `architecture:test` runs the ratchet; this runs the reporter, so a
+      # failure log names the symbols rather than only the count.
+      - name: Enforce production reachability
+        run: |
+          set -o pipefail
+          pnpm reachability:check 2>&1 | tee -a architecture.log
       - name: Job summary
         if: always()
         env:
@@ -246,7 +254,7 @@ jobs:
           {
             echo "## Architecture"
             if [ "$STATUS" = "success" ]; then
-              echo "✅ **Dependency and import rules passed**"
+              echo "✅ **Dependency, import and reachability rules passed**"
             else
               echo "❌ **Architecture check failed** — last 100 lines:"
               echo ""

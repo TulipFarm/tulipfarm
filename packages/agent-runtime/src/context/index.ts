@@ -30,9 +30,4 @@ export type {
 } from "./manifest";
 export { assembleContext, ContextAssemblyError } from "./manifest";
 export type { InstructionPrecedence } from "./precedence";
-export {
-  INSTRUCTION_PRECEDENCE,
-  NON_COMPACTABLE_PRECEDENCE,
-  precedenceRank,
-  precedenceWithin,
-} from "./precedence";
+export { INSTRUCTION_PRECEDENCE, NON_COMPACTABLE_PRECEDENCE, precedenceRank } from "./precedence";

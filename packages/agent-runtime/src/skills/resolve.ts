@@ -72,7 +72,7 @@ export interface ResolveSkillsInput {
   readonly contextBudgetTokens: number;
 }
 
-export function skillRef(ref: SkillRef): string {
+function skillRef(ref: SkillRef): string {
   return `${ref.skillId}@${ref.version}`;
 }
 

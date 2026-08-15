@@ -36,16 +36,8 @@ export async function answerTask(id: string, value: string): Promise<void> {
   await apiWrite("POST", `/api/v1/tasks/${encodeURIComponent(id)}/answer`, { value });
 }
 
-export async function claimTask(id: string): Promise<void> {
-  await apiWrite("POST", `/api/v1/tasks/${encodeURIComponent(id)}/claim`, {});
-}
-
 export async function completeTask(id: string): Promise<void> {
   await apiWrite("POST", `/api/v1/tasks/${encodeURIComponent(id)}/done`, {});
-}
-
-export async function snoozeTask(id: string, until: string): Promise<void> {
-  await apiWrite("POST", `/api/v1/tasks/${encodeURIComponent(id)}/snooze`, { until });
 }
 
 export async function dismissTask(id: string): Promise<void> {

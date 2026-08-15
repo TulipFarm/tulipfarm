@@ -200,3 +200,130 @@ export const OkSchema = {
 } as const;
 
 export const IsoDateTime = { type: "string", format: "date-time" } as const;
+
+export const NonEmptyStringSchema = { type: "string", minLength: 1 } as const;
+
+export const RoleListResponseSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["roles"],
+  properties: { roles: { type: "array", items: RoleViewSchema } },
+} as const;
+
+export const RoleIdParamsSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["roleId"],
+  properties: { roleId: NonEmptyStringSchema },
+} as const;
+
+export const RoleAssigneesResponseSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["assignees"],
+  properties: { assignees: { type: "array", items: AssigneeSchema } },
+} as const;
+
+export const GroupListResponseSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["groups"],
+  properties: { groups: { type: "array", items: GroupViewSchema } },
+} as const;
+
+export const GroupIdParamsSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["groupId"],
+  properties: { groupId: NonEmptyStringSchema },
+} as const;
+
+export const PrincipalIdParamsSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["principalId"],
+  properties: { principalId: NonEmptyStringSchema },
+} as const;
+
+export const PrincipalListResponseSchema = {
+  type: "array",
+  items: PrincipalViewSchema,
+} as const;
+
+export const PrincipalRegistrationBodySchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "kind"],
+  properties: {
+    id: NonEmptyStringSchema,
+    kind: { type: "string", enum: [...REGISTRABLE_PRINCIPAL_KINDS] },
+    expiresAt: IsoDateTime,
+  },
+} as const;
+
+export const ExplainBodySchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["principalId", "action", "resourceType"],
+  properties: {
+    principalId: NonEmptyStringSchema,
+    action: NonEmptyStringSchema,
+    resourceType: NonEmptyStringSchema,
+    agentId: NonEmptyStringSchema,
+    domain: NonEmptyStringSchema,
+    recordId: NonEmptyStringSchema,
+    field: NonEmptyStringSchema,
+    dataClass: NonEmptyStringSchema,
+    destination: NonEmptyStringSchema,
+    conditions: { type: "object", additionalProperties: { type: "string" } },
+  },
+} as const;
+
+export const RoleAssignmentBodySchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["principalId"],
+  properties: { principalId: NonEmptyStringSchema, expiresAt: IsoDateTime },
+} as const;
+
+export const RoleIdAndPrincipalIdParamsSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["roleId", "principalId"],
+  properties: { roleId: NonEmptyStringSchema, principalId: NonEmptyStringSchema },
+} as const;
+
+export const GroupCreateBodySchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id"],
+  properties: { id: NonEmptyStringSchema, expiresAt: IsoDateTime },
+} as const;
+
+export const GroupMemberBodySchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["principalId"],
+  properties: { principalId: NonEmptyStringSchema, expiresAt: IsoDateTime },
+} as const;
+
+export const GroupIdAndPrincipalIdParamsSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["groupId", "principalId"],
+  properties: { groupId: NonEmptyStringSchema, principalId: NonEmptyStringSchema },
+} as const;
+
+export const GroupRoleBodySchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["roleId"],
+  properties: { roleId: NonEmptyStringSchema, expiresAt: IsoDateTime },
+} as const;
+
+export const GroupIdAndRoleIdParamsSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["groupId", "roleId"],
+  properties: { groupId: NonEmptyStringSchema, roleId: NonEmptyStringSchema },
+} as const;

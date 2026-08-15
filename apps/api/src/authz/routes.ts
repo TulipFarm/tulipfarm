@@ -5,17 +5,28 @@ import { ErrorSchema } from "../auth/schemas";
 import { makeRateLimitHook, type RateLimiter } from "../rate-limit";
 import type { RequireAuthorization, RouteAuthorization } from "./route-gate";
 import {
-  AssigneeSchema,
   AUTHZ_SECURITY,
   EffectiveGrantsSchema,
+  ExplainBodySchema,
   ExplainSchema,
+  GroupCreateBodySchema,
   GroupDetailSchema,
+  GroupIdAndPrincipalIdParamsSchema,
+  GroupIdAndRoleIdParamsSchema,
+  GroupIdParamsSchema,
+  GroupListResponseSchema,
+  GroupMemberBodySchema,
+  GroupRoleBodySchema,
   GroupViewSchema,
-  IsoDateTime,
   OkSchema,
-  PrincipalViewSchema,
-  REGISTRABLE_PRINCIPAL_KINDS,
-  RoleViewSchema,
+  PrincipalIdParamsSchema,
+  PrincipalListResponseSchema,
+  PrincipalRegistrationBodySchema,
+  RoleAssigneesResponseSchema,
+  RoleAssignmentBodySchema,
+  RoleIdAndPrincipalIdParamsSchema,
+  RoleIdParamsSchema,
+  RoleListResponseSchema,
 } from "./schemas";
 import {
   type AuthzActor,
@@ -30,8 +41,6 @@ type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
 const AUTHZ_WRITE_LIMIT = 60;
 const AUTHZ_WRITE_WINDOW_MS = 60_000;
-
-const idParam = { type: "string", minLength: 1 } as const;
 
 /**
  * Authorization governs itself (authorization-design D8): without this, "can write Soul" becomes
@@ -95,12 +104,7 @@ export function registerAuthzRoutes(
         tags: ["authz"],
         security: AUTHZ_SECURITY,
         response: {
-          200: {
-            type: "object",
-            additionalProperties: false,
-            required: ["roles"],
-            properties: { roles: { type: "array", items: RoleViewSchema } },
-          },
+          200: RoleListResponseSchema,
           401: ErrorSchema,
           403: ErrorSchema,
           429: ErrorSchema,
@@ -118,19 +122,9 @@ export function registerAuthzRoutes(
         description: "List the principals a Role is currently assigned to (unexpired only).",
         tags: ["authz"],
         security: AUTHZ_SECURITY,
-        params: {
-          type: "object",
-          additionalProperties: false,
-          required: ["roleId"],
-          properties: { roleId: idParam },
-        },
+        params: RoleIdParamsSchema,
         response: {
-          200: {
-            type: "object",
-            additionalProperties: false,
-            required: ["assignees"],
-            properties: { assignees: { type: "array", items: AssigneeSchema } },
-          },
+          200: RoleAssigneesResponseSchema,
           400: ErrorSchema,
           401: ErrorSchema,
           403: ErrorSchema,
@@ -158,12 +152,7 @@ export function registerAuthzRoutes(
         tags: ["authz"],
         security: AUTHZ_SECURITY,
         response: {
-          200: {
-            type: "object",
-            additionalProperties: false,
-            required: ["groups"],
-            properties: { groups: { type: "array", items: GroupViewSchema } },
-          },
+          200: GroupListResponseSchema,
           401: ErrorSchema,
           403: ErrorSchema,
           429: ErrorSchema,
@@ -181,12 +170,7 @@ export function registerAuthzRoutes(
         description: "Get a group with its unexpired members and the Roles it holds.",
         tags: ["authz"],
         security: AUTHZ_SECURITY,
-        params: {
-          type: "object",
-          additionalProperties: false,
-          required: ["groupId"],
-          properties: { groupId: idParam },
-        },
+        params: GroupIdParamsSchema,
         response: {
           200: GroupDetailSchema,
           400: ErrorSchema,
@@ -217,12 +201,7 @@ export function registerAuthzRoutes(
           "unexpired group-held Role it inherits — resolved through the live authority resolver.",
         tags: ["authz"],
         security: AUTHZ_SECURITY,
-        params: {
-          type: "object",
-          additionalProperties: false,
-          required: ["principalId"],
-          properties: { principalId: idParam },
-        },
+        params: PrincipalIdParamsSchema,
         response: {
           200: EffectiveGrantsSchema,
           400: ErrorSchema,
@@ -254,7 +233,7 @@ export function registerAuthzRoutes(
         tags: ["authz"],
         security: AUTHZ_SECURITY,
         response: {
-          200: { type: "array", items: PrincipalViewSchema },
+          200: PrincipalListResponseSchema,
           401: ErrorSchema,
           403: ErrorSchema,
           429: ErrorSchema,
@@ -274,16 +253,7 @@ export function registerAuthzRoutes(
           "existing id with the same kind is idempotent; changing its kind is a conflict.",
         tags: ["authz"],
         security: AUTHZ_SECURITY,
-        body: {
-          type: "object",
-          additionalProperties: false,
-          required: ["id", "kind"],
-          properties: {
-            id: idParam,
-            kind: { type: "string", enum: [...REGISTRABLE_PRINCIPAL_KINDS] },
-            expiresAt: IsoDateTime,
-          },
-        },
+        body: PrincipalRegistrationBodySchema,
         response: {
           200: OkSchema,
           400: ErrorSchema,
@@ -316,23 +286,7 @@ export function registerAuthzRoutes(
           "read `partial` and `unevaluatedLayers` before treating an allow as a gate guarantee.",
         tags: ["authz"],
         security: AUTHZ_SECURITY,
-        body: {
-          type: "object",
-          additionalProperties: false,
-          required: ["principalId", "action", "resourceType"],
-          properties: {
-            principalId: idParam,
-            action: idParam,
-            resourceType: idParam,
-            agentId: { type: "string", minLength: 1 },
-            domain: { type: "string", minLength: 1 },
-            recordId: { type: "string", minLength: 1 },
-            field: { type: "string", minLength: 1 },
-            dataClass: { type: "string", minLength: 1 },
-            destination: { type: "string", minLength: 1 },
-            conditions: { type: "object", additionalProperties: { type: "string" } },
-          },
-        },
+        body: ExplainBodySchema,
         response: {
           200: ExplainSchema,
           400: ErrorSchema,
@@ -404,18 +358,8 @@ export function registerAuthzRoutes(
         description: "Assign a Role to a principal, optionally with an expiry.",
         tags: ["authz"],
         security: AUTHZ_SECURITY,
-        params: {
-          type: "object",
-          additionalProperties: false,
-          required: ["roleId"],
-          properties: { roleId: idParam },
-        },
-        body: {
-          type: "object",
-          additionalProperties: false,
-          required: ["principalId"],
-          properties: { principalId: idParam, expiresAt: IsoDateTime },
-        },
+        params: RoleIdParamsSchema,
+        body: RoleAssignmentBodySchema,
         response: {
           200: OkSchema,
           400: ErrorSchema,
@@ -445,12 +389,7 @@ export function registerAuthzRoutes(
         description: "Revoke a Role from a principal. A no-op assignment still returns 200.",
         tags: ["authz"],
         security: AUTHZ_SECURITY,
-        params: {
-          type: "object",
-          additionalProperties: false,
-          required: ["roleId", "principalId"],
-          properties: { roleId: idParam, principalId: idParam },
-        },
+        params: RoleIdAndPrincipalIdParamsSchema,
         response: {
           200: OkSchema,
           400: ErrorSchema,
@@ -476,12 +415,7 @@ export function registerAuthzRoutes(
         description: "Create (or upsert) a principal group, optionally with an expiry.",
         tags: ["authz"],
         security: AUTHZ_SECURITY,
-        body: {
-          type: "object",
-          additionalProperties: false,
-          required: ["id"],
-          properties: { id: idParam, expiresAt: IsoDateTime },
-        },
+        body: GroupCreateBodySchema,
         response: {
           200: GroupViewSchema,
           201: GroupViewSchema,
@@ -511,12 +445,7 @@ export function registerAuthzRoutes(
           "themselves are untouched.",
         tags: ["authz"],
         security: AUTHZ_SECURITY,
-        params: {
-          type: "object",
-          additionalProperties: false,
-          required: ["groupId"],
-          properties: { groupId: idParam },
-        },
+        params: GroupIdParamsSchema,
         response: {
           200: OkSchema,
           400: ErrorSchema,
@@ -542,18 +471,8 @@ export function registerAuthzRoutes(
         description: "Add a principal to a group, optionally with an expiry.",
         tags: ["authz"],
         security: AUTHZ_SECURITY,
-        params: {
-          type: "object",
-          additionalProperties: false,
-          required: ["groupId"],
-          properties: { groupId: idParam },
-        },
-        body: {
-          type: "object",
-          additionalProperties: false,
-          required: ["principalId"],
-          properties: { principalId: idParam, expiresAt: IsoDateTime },
-        },
+        params: GroupIdParamsSchema,
+        body: GroupMemberBodySchema,
         response: {
           200: OkSchema,
           400: ErrorSchema,
@@ -583,12 +502,7 @@ export function registerAuthzRoutes(
         description: "Remove a principal from a group. A no-op membership still returns 200.",
         tags: ["authz"],
         security: AUTHZ_SECURITY,
-        params: {
-          type: "object",
-          additionalProperties: false,
-          required: ["groupId", "principalId"],
-          properties: { groupId: idParam, principalId: idParam },
-        },
+        params: GroupIdAndPrincipalIdParamsSchema,
         response: {
           200: OkSchema,
           400: ErrorSchema,
@@ -617,18 +531,8 @@ export function registerAuthzRoutes(
         description: "Grant a Role to a group; its members inherit it. Optional expiry.",
         tags: ["authz"],
         security: AUTHZ_SECURITY,
-        params: {
-          type: "object",
-          additionalProperties: false,
-          required: ["groupId"],
-          properties: { groupId: idParam },
-        },
-        body: {
-          type: "object",
-          additionalProperties: false,
-          required: ["roleId"],
-          properties: { roleId: idParam, expiresAt: IsoDateTime },
-        },
+        params: GroupIdParamsSchema,
+        body: GroupRoleBodySchema,
         response: {
           200: OkSchema,
           400: ErrorSchema,
@@ -658,12 +562,7 @@ export function registerAuthzRoutes(
         description: "Revoke a Role from a group. A no-op holding still returns 200.",
         tags: ["authz"],
         security: AUTHZ_SECURITY,
-        params: {
-          type: "object",
-          additionalProperties: false,
-          required: ["groupId", "roleId"],
-          properties: { groupId: idParam, roleId: idParam },
-        },
+        params: GroupIdAndRoleIdParamsSchema,
         response: {
           200: OkSchema,
           400: ErrorSchema,

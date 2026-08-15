@@ -82,7 +82,7 @@ const ISOLATIONS = new Set<SandboxIsolation>([
   "ssh",
 ]);
 
-export function parseSandboxBackendAttestation(input: unknown): SandboxBackendAttestation {
+function parseSandboxBackendAttestation(input: unknown): SandboxBackendAttestation {
   const body = record(input);
   exactKeys(body, [
     "attestationId",

@@ -1,4 +1,4 @@
-import { githubExternalSubject, parseRepositoryRef } from "./scope";
+import { parseRepositoryRef } from "./scope";
 
 /** Normalize only HMAC-verified, delivery-deduped GitHub webhooks; reject missing auth bounds. */
 
@@ -135,11 +135,6 @@ export function normalizeGitHubIssueEvent(payload: unknown): GitHubIssueEvent {
     },
     sender: { login: requiredString(sender.login), externalId: requiredId(sender.id) },
   };
-}
-
-/** Subject to look the sender up by in the external identity map. */
-export function githubSenderSubject(event: GitHubIssueEvent): string {
-  return githubExternalSubject(event.sender.externalId);
 }
 
 export const GITHUB_PULL_REQUEST_ACTIONS = [

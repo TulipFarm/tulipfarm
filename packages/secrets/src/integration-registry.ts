@@ -64,11 +64,3 @@ export function integrationAppField(
 ): IntegrationAppField | undefined {
   return info.fields.find((f) => f.role === role);
 }
-
-/** An App is usable once every field has a stored value — none are optional here. */
-export function isIntegrationAppConfigured(
-  info: IntegrationAppInfo,
-  storedKeys: string[]
-): boolean {
-  return info.fields.every((f) => storedKeys.includes(f.key));
-}

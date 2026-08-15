@@ -14,8 +14,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@tulipfarm/surface": "workspace:*",
-    "@tulipfarm/ui": "workspace:*"
+    "@tulipfarm/surface": "workspace:*"
   },
   "devDependencies": {
     "@tulipfarm/tsconfig": "workspace:*",

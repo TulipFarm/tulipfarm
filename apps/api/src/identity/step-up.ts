@@ -1,4 +1,3 @@
-import type { FastifyReply, FastifyRequest } from "fastify";
 import type { AuthMethod } from "../auth/session-store";
 
 /**
@@ -79,24 +78,4 @@ export function evaluateStepUp(
     return { satisfied: false, reason: "step_up_stale" };
   }
   return { satisfied: true };
-}
-
-/**
- * PreHandler enforcing `policy` on a route. Returns 401 when unauthenticated and 403 with the
- * accepted methods when a factor is missing or stale, so a client knows what to prove without
- * learning anything about the principal.
- */
-export function makeRequireStepUp(policy: StepUpPolicy) {
-  return async function requireStepUp(req: FastifyRequest, reply: FastifyReply): Promise<void> {
-    const evaluation = evaluateStepUp(req.principal, policy, new Date());
-    if (evaluation.satisfied) return;
-    if (evaluation.reason === "unauthenticated") {
-      return reply.code(401).send({ error: "unauthorized" });
-    }
-    return reply.code(403).send({
-      error: evaluation.reason,
-      acceptedMethods: [...policy.methods],
-      maxAgeSeconds: policy.maxAgeSeconds,
-    });
-  };
 }

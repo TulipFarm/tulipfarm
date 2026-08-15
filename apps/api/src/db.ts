@@ -76,10 +76,6 @@ export async function startRuntimePool(
   return pool;
 }
 
-export function getPool(): Pool {
-  return pool;
-}
-
 /** libpq options that pin the runtime role, for separately created workers. */
 export function runtimePoolOptions(): string | undefined {
   return runtimeOptions;

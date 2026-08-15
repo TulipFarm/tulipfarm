@@ -4,16 +4,6 @@ import { TulipFarmValidationError } from "./error";
 
 /** routine.yaml schema; deferred V1 constructs are pre-rejected before AJV union errors. */
 
-export const ROUTINE_STATE_TYPES = ["operation", "switch", "foreach", "sleep", "inject"] as const;
-export const ROUTINE_TRIGGER_TYPES = [
-  "event",
-  "manual",
-  "cron",
-  "interval",
-  "datetime",
-  "webhook",
-  "agent",
-] as const;
 export const ROUTINE_APPROVAL_CHANNELS = ["ui", "slack", "email", "sms"] as const;
 /** Deferred to post-V1 (ROUT-V1-004/005). */
 export const DEFERRED_STATE_TYPES = ["parallel", "event"] as const;

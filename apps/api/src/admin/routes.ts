@@ -1,260 +1,43 @@
-import type { BudgetExhaustionPolicy } from "@tulipfarm/storage";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { makeRateLimitHook, type RateLimiter } from "../rate-limit";
+import * as AdminSchemas from "./schemas";
+import type {
+  AgentChangesetInput,
+  GuardrailChangesetInput,
+  OperationalApiDeps,
+  OperationalGrant,
+  OperationalPermission,
+} from "./types";
+
+export type {
+  AgentChangesetInput,
+  ApprovalDecisionInput,
+  GuardrailChangesetInput,
+  GuardrailsReadModel,
+  InboxItemReadModel,
+  OperationalApiDeps,
+  OperationalGrant,
+  OperationalPermission,
+  OperationsReadModel,
+  RolesReadModel,
+  RunBudgetReadModel,
+  RunCommandAction,
+  RunCommandInput,
+  RunReadModel,
+  RunStateReadModel,
+} from "./types";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
-export type OperationalPermission =
-  | "runs:read"
-  | "runs:control"
-  | "operations:read"
-  | "guardrails:read"
-  | "guardrails:write"
-  | "agents:write"
-  | "approvals:read"
-  | "approvals:decide"
-  | "roles:read"
-  | "roles:write"
-  | "operations:control";
-
-export interface OperationalGrant {
-  readonly businessId: string;
-  readonly principalId: string;
-  readonly permissions: readonly OperationalPermission[];
-}
-
-export interface RunStateReadModel {
-  readonly key: string;
-  readonly status: string;
-  readonly attempts: number;
-  readonly input?: unknown;
-  readonly output?: unknown;
-  readonly errorEvidenceRef?: string;
-}
-
-export interface RunReadModel {
-  readonly id: string;
-  readonly routineId: string;
-  readonly routineVersion: string;
-  readonly status: string;
-  readonly version: number;
-  readonly createdAt: string;
-  readonly startedAt: string | null;
-  readonly finishedAt: string | null;
-  readonly states: readonly RunStateReadModel[];
-  readonly effects: readonly Record<string, unknown>[];
-  readonly waits: readonly Record<string, unknown>[];
-  readonly guardrailDecisions: readonly Record<string, unknown>[];
-  readonly lineage: readonly Record<string, unknown>[];
-  readonly costs: { readonly amountUsd: number; readonly modelTokens: number };
-}
-
-/**
- * One limit key of a Run's write-once budget ledger (`run_budgets`), projected for reading: the
- * committed ceiling, how much has been consumed against it, and the exhaustion policy that applies
- * once it is spent. This is the enforced ledger, not a recomputation.
- */
-export interface RunBudgetReadModel {
-  readonly key: string;
-  readonly limit: number;
-  readonly consumed: number;
-  readonly exhaustionPolicy: BudgetExhaustionPolicy;
-}
-
-export type RunCommandAction = "pause" | "resume" | "cancel" | "retry" | "reconcile";
-
-export interface RunCommandInput {
-  readonly action: RunCommandAction;
-  readonly runId: string;
-  readonly expectedVersion: number;
-  readonly reason: string;
-  readonly idempotencyKey: string;
-}
-
-export interface OperationsReadModel {
-  readonly health: readonly Record<string, unknown>[];
-  readonly incidents: readonly Record<string, unknown>[];
-  readonly quarantine: readonly Record<string, unknown>[];
-  readonly killSwitches: readonly Record<string, unknown>[];
-  /** Activity feed entries, not audit-ledger events; the ledger is `/api/v1/audit/events`. */
-  readonly activity: readonly Record<string, unknown>[];
-  readonly recovery: {
-    readonly supportBundleAvailable: boolean;
-    readonly lastBackupAt: string | null;
-  };
-}
-
-export interface GuardrailsReadModel {
-  readonly revision: string;
-  readonly items: readonly Record<string, unknown>[];
-}
-
-export interface GuardrailChangesetInput {
-  readonly baseRevision: string;
-  readonly changes: readonly {
-    readonly op: "add" | "remove" | "replace";
-    readonly path: string;
-    readonly value?: unknown;
-  }[];
-  readonly idempotencyKey: string;
-}
-
-export interface AgentChangesetInput {
-  readonly agentId: string;
-  readonly baseVersion: string;
-  readonly candidateVersion: string;
-  readonly patch: Record<string, unknown>;
-  readonly idempotencyKey: string;
-}
-
-export interface InboxItemReadModel {
-  readonly id: string;
-  readonly kind: "approval" | "human_task" | "form" | "access_request";
-  readonly title: string;
-  readonly status: string;
-  readonly risk: "low" | "medium" | "high";
-  readonly intentDigest?: string;
-  readonly guardrailRevision?: string;
-  readonly target?: string;
-  readonly destination?: string;
-  readonly fields?: readonly string[];
-  readonly expiresAt?: string;
-  readonly decisions: number;
-  readonly requiredDecisions: number;
-  readonly canDecide: boolean;
-  readonly denialReason?: string;
-}
-
-export interface ApprovalDecisionInput {
-  readonly approvalId: string;
-  readonly decision: "approved" | "denied";
-  readonly comment?: string;
-  readonly idempotencyKey: string;
-}
-
-export interface RolesReadModel {
-  readonly revision: string;
-  readonly items: readonly {
-    readonly id: string;
-    readonly name: string;
-    readonly principalKinds: readonly string[];
-    readonly grants: readonly string[];
-    readonly conditions: readonly string[];
-  }[];
-}
-
-export interface OperationalApiDeps {
-  authorize(req: FastifyRequest): Promise<OperationalGrant | null>;
-  listRuns(
-    grant: OperationalGrant,
-    options: { cursor?: string; limit: number }
-  ): Promise<{ items: readonly RunReadModel[]; nextCursor: string | null }>;
-  getRun(grant: OperationalGrant, runId: string): Promise<RunReadModel | null>;
-  /**
-   * The write-once budget ledger for one Run. `null` denies existence (unknown Run, or a Run owned
-   * by another business — the two are indistinguishable), which the route answers as `404`.
-   */
-  getRunBudgets(
-    grant: OperationalGrant,
-    runId: string
-  ): Promise<readonly RunBudgetReadModel[] | null>;
-  commandRun(
-    grant: OperationalGrant,
-    input: RunCommandInput
-  ): Promise<{ commandId: string; runId: string; status: "accepted" | "duplicate" }>;
-  getOperations(grant: OperationalGrant): Promise<OperationsReadModel>;
-  getGuardrails(grant: OperationalGrant): Promise<GuardrailsReadModel>;
-  proposeGuardrailChangeset(
-    grant: OperationalGrant,
-    input: GuardrailChangesetInput
-  ): Promise<{
-    changesetId: string;
-    status: "validated" | "awaiting_approval" | "published";
-  }>;
-  proposeAgentChangeset(
-    grant: OperationalGrant,
-    input: AgentChangesetInput
-  ): Promise<{
-    changesetId: string;
-    candidateVersion: string;
-    status: "validated" | "awaiting_approval" | "published";
-  }>;
-  getInbox(grant: OperationalGrant): Promise<{ items: readonly InboxItemReadModel[] }>;
-  decideApproval(
-    grant: OperationalGrant,
-    input: ApprovalDecisionInput
-  ): Promise<{
-    approvalId: string;
-    status: "pending" | "approved" | "denied";
-    decisions: number;
-    requiredDecisions: number;
-  }>;
-  getRoles(grant: OperationalGrant): Promise<RolesReadModel>;
-  proposeRoleChangeset(
-    grant: OperationalGrant,
-    input: {
-      baseRevision: string;
-      role: Record<string, unknown>;
-      idempotencyKey: string;
-    }
-  ): Promise<{
-    changesetId: string;
-    status: "validated" | "awaiting_approval" | "published";
-  }>;
-  commandOperation(
-    grant: OperationalGrant,
-    input: {
-      action: "support-bundle.create" | "kill-switch.set" | "quarantine.resolve" | "recovery.start";
-      parameters: Record<string, unknown>;
-      idempotencyKey: string;
-    }
-  ): Promise<{ commandId: string; status: "accepted" | "duplicate" }>;
-}
-
-/** Missing deployment capability; route returns 501 instead of masking it as auth failure. */
 export class OperationalNotImplementedError extends Error {
   readonly name = "OperationalNotImplementedError";
-
-  constructor(reason: string) {
-    super(reason);
-  }
 }
 
 const security: { [securityLabel: string]: readonly string[] }[] = [
   { sessionCookie: [] },
   { bearerToken: [] },
 ];
-const idParams = {
-  type: "object",
-  additionalProperties: false,
-  required: ["id"],
-  properties: { id: { type: "string", minLength: 1 } },
-} as const;
-/* Accepts both route error envelopes and shared auth/CSRF `{ error: string }` replies. */
-const errorSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["error"],
-  properties: {
-    error: {
-      anyOf: [
-        { type: "string" },
-        {
-          type: "object",
-          additionalProperties: false,
-          required: ["version", "code", "message", "correlationId", "retryable"],
-          properties: {
-            version: { type: "string", const: "1" },
-            code: { type: "string" },
-            message: { type: "string" },
-            correlationId: { type: "string" },
-            retryable: { type: "boolean" },
-          },
-        },
-      ],
-    },
-  },
-} as const;
+const missingKeyMessage = "An Idempotency-Key header is required.";
 
 function fail(
   reply: FastifyReply,
@@ -313,62 +96,6 @@ function idempotencyKey(request: FastifyRequest): string | null {
   return typeof raw === "string" && raw.length > 0 ? raw : null;
 }
 
-const runSchema = {
-  type: "object",
-  additionalProperties: true,
-  required: [
-    "id",
-    "routineId",
-    "routineVersion",
-    "status",
-    "version",
-    "createdAt",
-    "startedAt",
-    "finishedAt",
-    "states",
-    "effects",
-    "waits",
-    "guardrailDecisions",
-    "lineage",
-    "costs",
-  ],
-  properties: {
-    id: { type: "string" },
-    routineId: { type: "string" },
-    routineVersion: { type: "string" },
-    status: { type: "string" },
-    version: { type: "integer" },
-    createdAt: { type: "string" },
-    startedAt: { type: ["string", "null"] },
-    finishedAt: { type: ["string", "null"] },
-    states: { type: "array", items: { type: "object", additionalProperties: true } },
-    effects: { type: "array", items: { type: "object", additionalProperties: true } },
-    waits: { type: "array", items: { type: "object", additionalProperties: true } },
-    guardrailDecisions: {
-      type: "array",
-      items: { type: "object", additionalProperties: true },
-    },
-    lineage: { type: "array", items: { type: "object", additionalProperties: true } },
-    costs: {
-      type: "object",
-      required: ["amountUsd", "modelTokens"],
-      properties: { amountUsd: { type: "number" }, modelTokens: { type: "number" } },
-    },
-  },
-} as const;
-
-const budgetSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["key", "limit", "consumed", "exhaustionPolicy"],
-  properties: {
-    key: { type: "string" },
-    limit: { type: "integer" },
-    consumed: { type: "integer" },
-    exhaustionPolicy: { type: "string", enum: ["failure_path", "attention_required"] },
-  },
-} as const;
-
 export function registerOperationalRoutes(
   app: FastifyInstance,
   deps: OperationalApiDeps,
@@ -388,25 +115,8 @@ export function registerOperationalRoutes(
         description: "List authorized Run read models for the operational browser UI.",
         tags: ["runs"],
         security,
-        querystring: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            cursor: { type: "string" },
-            limit: { type: "integer", minimum: 1, maximum: 100, default: 50 },
-          },
-        },
-        response: {
-          200: {
-            type: "object",
-            required: ["items", "nextCursor"],
-            properties: {
-              items: { type: "array", items: runSchema },
-              nextCursor: { type: ["string", "null"] },
-            },
-          },
-          403: errorSchema,
-        },
+        querystring: AdminSchemas.AdminRunListQuerystringSchema,
+        response: AdminSchemas.AdminRunListResponsesSchema,
       },
     },
     async (request, reply) => {
@@ -427,16 +137,8 @@ export function registerOperationalRoutes(
           "Guardrail decisions, and lineage.",
         tags: ["runs"],
         security,
-        params: idParams,
-        response: {
-          200: {
-            type: "object",
-            required: ["run"],
-            properties: { run: runSchema },
-          },
-          403: errorSchema,
-          404: errorSchema,
-        },
+        params: AdminSchemas.AdminIdParamsSchema,
+        response: AdminSchemas.AdminRunResponsesSchema,
       },
     },
     async (request, reply) => {
@@ -463,21 +165,8 @@ export function registerOperationalRoutes(
           "oracle.",
         tags: ["runs"],
         security,
-        params: idParams,
-        response: {
-          200: {
-            type: "object",
-            additionalProperties: false,
-            required: ["runId", "budgets"],
-            properties: {
-              runId: { type: "string" },
-              budgets: { type: "array", items: budgetSchema },
-            },
-          },
-          401: errorSchema,
-          403: errorSchema,
-          404: errorSchema,
-        },
+        params: AdminSchemas.AdminIdParamsSchema,
+        response: AdminSchemas.AdminRunBudgetsResponsesSchema,
       },
     },
     async (request, reply) => {
@@ -501,51 +190,17 @@ export function registerOperationalRoutes(
             "The browser supplies presentation intent only; the Run authority validates it.",
           tags: ["runs"],
           security,
-          params: idParams,
-          headers: {
-            type: "object",
-            properties: { "idempotency-key": { type: "string", minLength: 1, maxLength: 200 } },
-          },
-          body: {
-            type: "object",
-            additionalProperties: false,
-            required: ["expectedVersion", "reason"],
-            properties: {
-              expectedVersion: { type: "integer", minimum: 0 },
-              reason: { type: "string", minLength: 1, maxLength: 500 },
-            },
-          },
-          response: {
-            202: {
-              type: "object",
-              required: ["commandId", "runId", "status"],
-              properties: {
-                commandId: { type: "string" },
-                runId: { type: "string" },
-                status: { type: "string", enum: ["accepted", "duplicate"] },
-              },
-            },
-            400: errorSchema,
-            403: errorSchema,
-            404: errorSchema,
-            409: errorSchema,
-            501: errorSchema,
-          },
+          params: AdminSchemas.AdminIdParamsSchema,
+          headers: AdminSchemas.AdminIdempotencyKeyHeadersSchema,
+          body: AdminSchemas.AdminRunCommandBodySchema,
+          response: AdminSchemas.AdminRunCommandResponsesSchema,
         },
       },
       async (request, reply) => {
         const grant = await requireGrant(request, reply, deps, "runs:control");
         if (!grant) return;
         const key = idempotencyKey(request);
-        if (!key) {
-          return fail(
-            reply,
-            request,
-            400,
-            "idempotency_key_required",
-            "An Idempotency-Key header is required."
-          );
-        }
+        if (!key) return fail(reply, request, 400, "idempotency_key_required", missingKeyMessage);
         const { id } = request.params as { id: string };
         const body = request.body as { expectedVersion: number; reason: string };
         const result = await attemptCommand(request, reply, () =>
@@ -573,10 +228,7 @@ export function registerOperationalRoutes(
           "switches, audit summaries, and recovery posture.",
         tags: ["admin"],
         security,
-        response: {
-          200: { type: "object", additionalProperties: true },
-          403: errorSchema,
-        },
+        response: AdminSchemas.AdminOperationsResponsesSchema,
       },
     },
     async (request, reply) => {
@@ -594,17 +246,7 @@ export function registerOperationalRoutes(
         description: "Get the authorized Guardrail administration read model.",
         tags: ["guardrails"],
         security,
-        response: {
-          200: {
-            type: "object",
-            required: ["revision", "items"],
-            properties: {
-              revision: { type: "string" },
-              items: { type: "array", items: { type: "object", additionalProperties: true } },
-            },
-          },
-          403: errorSchema,
-        },
+        response: AdminSchemas.AdminGuardrailsResponsesSchema,
       },
     },
     async (request, reply) => {
@@ -624,49 +266,9 @@ export function registerOperationalRoutes(
           "publication authority. This endpoint never writes Guardrails directly.",
         tags: ["guardrails", "soul"],
         security,
-        headers: {
-          type: "object",
-          properties: { "idempotency-key": { type: "string", minLength: 1, maxLength: 200 } },
-        },
-        body: {
-          type: "object",
-          additionalProperties: false,
-          required: ["baseRevision", "changes"],
-          properties: {
-            baseRevision: { type: "string", minLength: 1 },
-            changes: {
-              type: "array",
-              minItems: 1,
-              items: {
-                type: "object",
-                additionalProperties: false,
-                required: ["op", "path"],
-                properties: {
-                  op: { type: "string", enum: ["add", "remove", "replace"] },
-                  path: { type: "string", minLength: 1 },
-                  value: {},
-                },
-              },
-            },
-          },
-        },
-        response: {
-          202: {
-            type: "object",
-            required: ["changesetId", "status"],
-            properties: {
-              changesetId: { type: "string" },
-              status: {
-                type: "string",
-                enum: ["validated", "awaiting_approval", "published"],
-              },
-            },
-          },
-          400: errorSchema,
-          403: errorSchema,
-          409: errorSchema,
-          501: errorSchema,
-        },
+        headers: AdminSchemas.AdminIdempotencyKeyHeadersSchema,
+        body: AdminSchemas.AdminGuardrailChangesetBodySchema,
+        response: AdminSchemas.AdminGuardrailChangesetResponsesSchema,
       },
     },
     async (request, reply) => {
@@ -674,13 +276,7 @@ export function registerOperationalRoutes(
       if (!grant) return;
       const key = idempotencyKey(request);
       if (!key) {
-        return fail(
-          reply,
-          request,
-          400,
-          "idempotency_key_required",
-          "An Idempotency-Key header is required."
-        );
+        return fail(reply, request, 400, "idempotency_key_required", missingKeyMessage);
       }
       const body = request.body as Omit<GuardrailChangesetInput, "idempotencyKey">;
       const result = await attemptCommand(request, reply, () =>
@@ -701,39 +297,10 @@ export function registerOperationalRoutes(
           "and publication authority. The browser cannot publish or write Agent files directly.",
         tags: ["agents", "soul"],
         security,
-        params: idParams,
-        headers: {
-          type: "object",
-          properties: { "idempotency-key": { type: "string", minLength: 1, maxLength: 200 } },
-        },
-        body: {
-          type: "object",
-          additionalProperties: false,
-          required: ["baseVersion", "candidateVersion", "patch"],
-          properties: {
-            baseVersion: { type: "string", minLength: 1 },
-            candidateVersion: { type: "string", minLength: 1 },
-            patch: { type: "object", additionalProperties: true },
-          },
-        },
-        response: {
-          202: {
-            type: "object",
-            required: ["changesetId", "candidateVersion", "status"],
-            properties: {
-              changesetId: { type: "string" },
-              candidateVersion: { type: "string" },
-              status: {
-                type: "string",
-                enum: ["validated", "awaiting_approval", "published"],
-              },
-            },
-          },
-          400: errorSchema,
-          403: errorSchema,
-          409: errorSchema,
-          501: errorSchema,
-        },
+        params: AdminSchemas.AdminIdParamsSchema,
+        headers: AdminSchemas.AdminIdempotencyKeyHeadersSchema,
+        body: AdminSchemas.AdminAgentChangesetBodySchema,
+        response: AdminSchemas.AdminAgentChangesetResponsesSchema,
       },
     },
     async (request, reply) => {
@@ -741,13 +308,7 @@ export function registerOperationalRoutes(
       if (!grant) return;
       const key = idempotencyKey(request);
       if (!key) {
-        return fail(
-          reply,
-          request,
-          400,
-          "idempotency_key_required",
-          "An Idempotency-Key header is required."
-        );
+        return fail(reply, request, 400, "idempotency_key_required", missingKeyMessage);
       }
       const { id } = request.params as { id: string };
       const body = request.body as Omit<AgentChangesetInput, "agentId" | "idempotencyKey">;
@@ -769,19 +330,7 @@ export function registerOperationalRoutes(
           "Form content and protected intent payloads remain on their owning data planes.",
         tags: ["approvals"],
         security,
-        response: {
-          200: {
-            type: "object",
-            required: ["items"],
-            properties: {
-              items: {
-                type: "array",
-                items: { type: "object", additionalProperties: true },
-              },
-            },
-          },
-          403: errorSchema,
-        },
+        response: AdminSchemas.AdminInboxResponsesSchema,
       },
     },
     async (request, reply) => {
@@ -801,36 +350,10 @@ export function registerOperationalRoutes(
           "The request cannot replace the intent, target, destination, or Guardrail revision.",
         tags: ["approvals"],
         security,
-        params: idParams,
-        headers: {
-          type: "object",
-          properties: { "idempotency-key": { type: "string", minLength: 1, maxLength: 200 } },
-        },
-        body: {
-          type: "object",
-          additionalProperties: false,
-          required: ["decision"],
-          properties: {
-            decision: { type: "string", enum: ["approved", "denied"] },
-            comment: { type: "string", maxLength: 1000 },
-          },
-        },
-        response: {
-          200: {
-            type: "object",
-            required: ["approvalId", "status", "decisions", "requiredDecisions"],
-            properties: {
-              approvalId: { type: "string" },
-              status: { type: "string", enum: ["pending", "approved", "denied"] },
-              decisions: { type: "integer" },
-              requiredDecisions: { type: "integer" },
-            },
-          },
-          400: errorSchema,
-          403: errorSchema,
-          404: errorSchema,
-          409: errorSchema,
-        },
+        params: AdminSchemas.AdminIdParamsSchema,
+        headers: AdminSchemas.AdminIdempotencyKeyHeadersSchema,
+        body: AdminSchemas.AdminApprovalDecisionBodySchema,
+        response: AdminSchemas.AdminApprovalDecisionResponsesSchema,
       },
     },
     async (request, reply) => {
@@ -838,13 +361,7 @@ export function registerOperationalRoutes(
       if (!grant) return;
       const key = idempotencyKey(request);
       if (!key) {
-        return fail(
-          reply,
-          request,
-          400,
-          "idempotency_key_required",
-          "An Idempotency-Key header is required."
-        );
+        return fail(reply, request, 400, "idempotency_key_required", missingKeyMessage);
       }
       const { id } = request.params as { id: string };
       const body = request.body as {
@@ -868,17 +385,7 @@ export function registerOperationalRoutes(
         description: "Get authorized custom Role summaries and scoped grants.",
         tags: ["roles"],
         security,
-        response: {
-          200: {
-            type: "object",
-            required: ["revision", "items"],
-            properties: {
-              revision: { type: "string" },
-              items: { type: "array", items: { type: "object", additionalProperties: true } },
-            },
-          },
-          403: errorSchema,
-        },
+        response: AdminSchemas.AdminRolesResponsesSchema,
       },
     },
     async (request, reply) => {
@@ -898,36 +405,9 @@ export function registerOperationalRoutes(
           "or broaden authority directly.",
         tags: ["roles", "soul"],
         security,
-        headers: {
-          type: "object",
-          properties: { "idempotency-key": { type: "string", minLength: 1, maxLength: 200 } },
-        },
-        body: {
-          type: "object",
-          additionalProperties: false,
-          required: ["baseRevision", "role"],
-          properties: {
-            baseRevision: { type: "string", minLength: 1 },
-            role: { type: "object", additionalProperties: true },
-          },
-        },
-        response: {
-          202: {
-            type: "object",
-            required: ["changesetId", "status"],
-            properties: {
-              changesetId: { type: "string" },
-              status: {
-                type: "string",
-                enum: ["validated", "awaiting_approval", "published"],
-              },
-            },
-          },
-          400: errorSchema,
-          403: errorSchema,
-          409: errorSchema,
-          501: errorSchema,
-        },
+        headers: AdminSchemas.AdminIdempotencyKeyHeadersSchema,
+        body: AdminSchemas.AdminRoleChangesetBodySchema,
+        response: AdminSchemas.AdminRoleChangesetResponsesSchema,
       },
     },
     async (request, reply) => {
@@ -935,13 +415,7 @@ export function registerOperationalRoutes(
       if (!grant) return;
       const key = idempotencyKey(request);
       if (!key) {
-        return fail(
-          reply,
-          request,
-          400,
-          "idempotency_key_required",
-          "An Idempotency-Key header is required."
-        );
+        return fail(reply, request, 400, "idempotency_key_required", missingKeyMessage);
       }
       const body = request.body as {
         baseRevision: string;
@@ -965,46 +439,10 @@ export function registerOperationalRoutes(
           "target and never accepts protected payloads from the browser.",
         tags: ["admin"],
         security,
-        params: {
-          type: "object",
-          additionalProperties: false,
-          required: ["action"],
-          properties: {
-            action: {
-              type: "string",
-              enum: [
-                "support-bundle.create",
-                "kill-switch.set",
-                "quarantine.resolve",
-                "recovery.start",
-              ],
-            },
-          },
-        },
-        headers: {
-          type: "object",
-          properties: { "idempotency-key": { type: "string", minLength: 1, maxLength: 500 } },
-        },
-        body: {
-          type: "object",
-          additionalProperties: false,
-          required: ["input"],
-          properties: { input: { type: "object", additionalProperties: true } },
-        },
-        response: {
-          202: {
-            type: "object",
-            required: ["commandId", "status"],
-            properties: {
-              commandId: { type: "string" },
-              status: { type: "string", enum: ["accepted", "duplicate"] },
-            },
-          },
-          400: errorSchema,
-          403: errorSchema,
-          409: errorSchema,
-          501: errorSchema,
-        },
+        params: AdminSchemas.AdminOperationActionParamsSchema,
+        headers: AdminSchemas.AdminOperationCommandHeadersSchema,
+        body: AdminSchemas.AdminOperationCommandBodySchema,
+        response: AdminSchemas.AdminOperationCommandResponsesSchema,
       },
     },
     async (request, reply) => {
@@ -1012,13 +450,7 @@ export function registerOperationalRoutes(
       if (!grant) return;
       const key = idempotencyKey(request);
       if (!key) {
-        return fail(
-          reply,
-          request,
-          400,
-          "idempotency_key_required",
-          "An Idempotency-Key header is required."
-        );
+        return fail(reply, request, 400, "idempotency_key_required", missingKeyMessage);
       }
       const { action } = request.params as {
         action:

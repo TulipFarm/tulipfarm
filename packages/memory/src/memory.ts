@@ -1,7 +1,7 @@
 /** Scoped Memory assertions are versioned; inferred saves become Pending Memory. */
 
 import type { AuditEventInput } from "@tulipfarm/audit";
-import type { MemoryScope, MemorySettingsDefinition } from "@tulipfarm/schema";
+import type { MemoryScope } from "@tulipfarm/schema";
 import type { PendingMemoryStore } from "./confirm";
 import { DEFAULT_CONFIRMATION_TTL_MS } from "./confirm";
 import type { MemoryContradictionPort } from "./contradiction";
@@ -221,16 +221,6 @@ export interface MemorySettingsView {
     | { readonly enabled: true; readonly confirmationRequired: true }
     | { readonly enabled: false };
   readonly defaultExpiryDays?: number;
-}
-
-export function memorySettingsView(definition: MemorySettingsDefinition): MemorySettingsView {
-  return {
-    scopes: definition.spec.scopes,
-    inferredDurableMemory: definition.spec.inferredDurableMemory,
-    ...(definition.spec.defaultExpiryDays === undefined
-      ? {}
-      : { defaultExpiryDays: definition.spec.defaultExpiryDays }),
-  };
 }
 
 /** Knowledge-backed evidence is reauthorized through an app port; `undefined` denies. */

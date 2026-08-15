@@ -553,13 +553,6 @@ async function completeStep(ctx: {
   }
 }
 
-/** The OAuth2 steps in a manifest, paired with their index. */
-export function oauth2Steps(manifest: IntegrationManifest): AuthOAuth2Step[] {
-  return resolveAuthSteps(manifest).filter(
-    (step): step is AuthOAuth2Step => step.kind === "oauth2"
-  );
-}
-
 /** No `expires_at_env` or recorded expiry means non-expiring; never refresh on a guess. */
 export function credentialsExpireWithin(
   step: AuthOAuth2Step,

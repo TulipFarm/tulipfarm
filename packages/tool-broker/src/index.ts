@@ -55,7 +55,6 @@ export type {
   EffectStore,
   FinishEffectAttemptInput,
   MutationIdentity,
-  ReconciliationJobResult,
   ReconciliationResult,
   ReserveEffectInput,
   ReserveEffectResult,
@@ -81,7 +80,6 @@ export {
   mayRetry,
   PgEffectStore,
   retryDelayMs,
-  runReconciliationJobs,
   ToolDispatchError,
 } from "./effects";
 export type {

@@ -11,7 +11,6 @@ import type { UserDoc } from "../auth/users";
 import type { RequireAuthorization } from "../authz/route-gate";
 import { mergeSoulConfig } from "../setup/soul-config";
 import { commitActorFromRequest } from "../soul/commit-actor";
-import { buildChecklist } from "./checklist";
 import { getPersonalizedOrRefresh, getProfileGaps } from "./personalize";
 import { buildQuests, type Quest, TIER1_BUSINESS_DESCRIPTION, TIER1_BUSINESS_NAME } from "./quests";
 import { deriveSuggestions } from "./suggestions";

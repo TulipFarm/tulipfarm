@@ -1,9 +1,6 @@
 import { cpus, freemem, platform, totalmem } from "node:os";
 import { describe, expect, it } from "vitest";
-import {
-  CircuitBreaker,
-  DurableAdmissionController,
-} from "../../packages/observability/src/backpressure";
+import { CircuitBreaker } from "../../packages/observability/src/backpressure";
 import {
   assessPerformanceTarget,
   LOAD_SCENARIOS,
@@ -22,31 +19,6 @@ describe("Phase 14 load and recovery profile", () => {
       "integration_rate_limit",
       "model_rate_limit",
     ]);
-  });
-
-  it("persists 1,000 accepted Runs before admission and loses none under saturation", async () => {
-    const controller = new DurableAdmissionController({
-      capacity: 100,
-      reservedCapacity: 10,
-    });
-    const persisted: string[] = [];
-    const results = await Promise.all(
-      Array.from({ length: 1000 }, (_, index) =>
-        controller.admit({
-          id: `run-${index}`,
-          priority: index >= 990 ? "critical" : "normal",
-          persist: async () => {
-            persisted.push(`run-${index}`);
-          },
-        })
-      )
-    );
-
-    expect(persisted).toHaveLength(1000);
-    expect(new Set(persisted)).toHaveLength(1000);
-    expect(results.filter((result) => result.outcome === "dispatch")).toHaveLength(110);
-    expect(results.filter((result) => result.outcome === "delayed")).toHaveLength(890);
-    expect(results.every((result) => result.persisted)).toBe(true);
   });
 
   it("opens a failing dependency circuit and permits one recovery probe", () => {

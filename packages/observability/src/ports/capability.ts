@@ -90,10 +90,6 @@ export const CAPABILITY_CLASSIFICATIONS: Readonly<Record<CapabilityId, Capabilit
     },
   };
 
-export function classifyCapability(id: CapabilityId): CapabilityClassification {
-  return CAPABILITY_CLASSIFICATIONS[id];
-}
-
 export function requiredCapabilityIds(): CapabilityId[] {
   return CAPABILITY_IDS.filter((id) => CAPABILITY_CLASSIFICATIONS[id].requirement === "required");
 }

@@ -49,7 +49,6 @@ export { type ApiToolDefinition, defineApiTool, toToolDef } from "./define";
 export { RegistryToolDispatcher, type RegistryToolDispatcherOptions } from "./dispatcher";
 export { ChatEffectLedger, ledgerOwnsCall } from "./effect-ledger";
 export {
-  isLocallyDispatchable,
   type LocalDispatchRefusal,
   localDispatchRefusal,
 } from "./eligibility";

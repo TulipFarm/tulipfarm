@@ -4,7 +4,6 @@ export type {
   SignedSandboxBackendAttestation,
 } from "./attestation";
 export {
-  parseSandboxBackendAttestation,
   signSandboxBackendAttestation,
   verifyProductionSandboxAttestation,
 } from "./attestation";

@@ -7,9 +7,9 @@ client data loading, schema-driven resource UI, and browser rendering of Surface
 
 - **Read on if** you touch Remix routes, React screens, client loaders, browser API calls,
   schema-driven forms/tables, chat UI, navigation, theme, or Vite/Vitest web config.
-- **Skip if** the task is API behavior ([`../api/AGENTS.md`](../api/AGENTS.md)), shared React UI
-  ([`../../packages/ui/AGENTS.md`](../../packages/ui/AGENTS.md)), or Surface protocol contracts
-  ([`../../packages/surface/AGENTS.md`](../../packages/surface/AGENTS.md)).
+- **Skip if** the task is API behavior ([`../api/AGENTS.md`](../api/AGENTS.md)), the shared
+  rich-text editor ([`../../packages/editor/AGENTS.md`](../../packages/editor/AGENTS.md)), or
+  Surface protocol contracts ([`../../packages/surface/AGENTS.md`](../../packages/surface/AGENTS.md)).
 
 ## Map
 
@@ -19,6 +19,7 @@ client data loading, schema-driven resource UI, and browser rendering of Surface
 | `app/app.css`, `app/tokens.css` | Tailwind v4 import, OKLCH tokens, `[data-theme]` variables. |
 | `app/routes/` | Remix SPA routes under `_app`; Chat is `/`. |
 | `app/components/` | App-local layout, state, resource, markdown, chat, and Surface components. |
+| `app/components/design-guide/` | Section groups and shared wrappers for the development-only `/design-guide` route. |
 | `app/components/ui/` | Vendored shadcn primitives for this app only. |
 | `app/lib/api.ts` | API client with cookies, CSRF header, optional bearer token, `ApiError`. |
 | `app/lib/schema.ts` | JSON-Schema field detection, list/detail/form metadata, value rendering. |
@@ -48,7 +49,8 @@ client data loading, schema-driven resource UI, and browser rendering of Surface
 - Theme uses `[data-theme="dark"]` on `<html>`, not shadcn `.dark`; keep the no-flash init script.
 - Keep design neutral, flat, compact, and hairline. Use coral `--primary` only for brand/primary
   and `--destructive` only for danger; prefer restrained `rounded-sm/md` surfaces.
-- `app/components/ui` is app-local shadcn. Put cross-app shared components in `@tulipfarm/ui`.
+- `app/components/ui` is app-local shadcn. A component only becomes shared once a second app needs
+  it; there is no shared React package to reach for.
 - Badge counts in `app/lib/badges.ts` are mocked in the V1 shell.
 - Web Vitest must use `vitest.config.ts` with `@vitejs/plugin-react` and jsdom, not the Remix Vite
   plugin. Components with Remix routing primitives need `createRemixStub`.

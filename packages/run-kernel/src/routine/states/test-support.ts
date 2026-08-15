@@ -8,7 +8,7 @@ import {
 
 /** Shared fixtures for the State-processor tests. Not part of the package's public surface. */
 
-export const TEST_CEILING: IdentityCeiling = {
+const TEST_CEILING: IdentityCeiling = {
   principalKind: "service",
   principalId: "triage-bot",
   grants: ["github:issues:write"],
@@ -38,16 +38,6 @@ export function compileStates(
     } as routineSchema.RoutineDefinition,
     { identityCeiling: TEST_CEILING }
   );
-}
-
-/** Compile `states` and return the one named `start`. */
-export function compileState(
-  states: readonly routineSchema.RoutineState[],
-  start: string
-): CompiledState {
-  const state = compileStates(states, start).states.get(start);
-  if (state === undefined) throw new Error(`missing ${start}`);
-  return state;
 }
 
 function targetsOf(state: routineSchema.RoutineState): string[] {
