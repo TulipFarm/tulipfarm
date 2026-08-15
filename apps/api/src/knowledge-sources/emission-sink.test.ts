@@ -18,7 +18,8 @@ function fakeEmbeddings(): EmbeddingPort {
     }),
     getActive: () => ({ provider: "fake", model: "fake-model", dimension: 3 }),
     getDimension: () => 3,
-    consumePendingReindex: () => false,
+    pendingReindex: () => false,
+    clearPendingReindex: () => {},
   };
 }
 

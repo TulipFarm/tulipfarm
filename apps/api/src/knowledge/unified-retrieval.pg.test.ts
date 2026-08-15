@@ -22,7 +22,8 @@ const lexicalOnlyEmbeddings: EmbeddingPort = {
   embedMany: async () => ({ embeddings: [], dimension: 0 }),
   getActive: () => null,
   getDimension: () => null,
-  consumePendingReindex: () => false,
+  pendingReindex: () => false,
+  clearPendingReindex: () => {},
 };
 
 async function seedSpacePage(db: PGlite): Promise<string> {

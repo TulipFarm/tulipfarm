@@ -147,6 +147,13 @@ export interface InternalTurnRouteDeps {
    * refs against the encrypted secret store itself, so the key material never crosses this hop.
    */
   llmConfig(): unknown;
+  /**
+   * Operator price corrections, so the Worker prices a call the same way this app reports it.
+   *
+   * The Worker owns the branch that charges the Run budget. An override that reaches only this
+   * process corrects reporting and leaves spend enforcement on the uncorrected price.
+   */
+  pricingOverrides(): Record<string, { in: number; out: number }>;
   readonly routineApprovals?: InternalRoutineApprovalHost;
 }
 
@@ -207,6 +214,39 @@ export function registerInternalTurnRoutes(
       if (config === undefined || config === null) return reply.code(204).send();
       return reply.send(config);
     }
+  );
+
+  app.get(
+    "/api/v1/internal/observability/pricing",
+    {
+      preHandler,
+      schema: {
+        description:
+          "Operator per-model price corrections (USD per 1M tokens), so the Worker charges Run " +
+          "budgets at the same price this app reports. Empty when the operator has set none.",
+        tags: ["internal"],
+        security: [{ bearerToken: [] }],
+        response: {
+          200: {
+            type: "object",
+            required: ["overrides"],
+            properties: {
+              overrides: {
+                type: "object",
+                additionalProperties: {
+                  type: "object",
+                  required: ["in", "out"],
+                  properties: { in: { type: "number" }, out: { type: "number" } },
+                },
+              },
+            },
+          },
+          401: ErrorSchema,
+          403: ErrorSchema,
+        },
+      },
+    },
+    async (_req, reply) => reply.send({ overrides: deps.pricingOverrides() })
   );
 
   app.get(
@@ -280,6 +320,25 @@ export function registerInternalTurnRoutes(
               agentId: { type: "string" },
               subjectId: { type: "string" },
               modelProfileId: { type: "string" },
+              // Undeclared properties are stripped on serialization, so an omission here would
+              // silently drop the Agent's governance demand between API and Worker.
+              modelPolicy: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  residency: { type: "string" },
+                  dataRetention: { type: "string" },
+                  allowTraining: { type: "boolean" },
+                  maxLatencyMs: { type: "integer" },
+                  sensitive: { type: "boolean" },
+                },
+              },
+              principal: {
+                type: "object",
+                required: ["kind", "id"],
+                additionalProperties: false,
+                properties: { kind: { type: "string" }, id: { type: "string" } },
+              },
               contextDigest: { type: "string" },
               guardrailDigest: { type: "string" },
               guardrailPolicy: { type: "object", additionalProperties: true },

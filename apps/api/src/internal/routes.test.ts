@@ -81,6 +81,7 @@ describe("/api/v1/internal/turns", () => {
   let store: FakeConversationStore;
   let runs: HostedRunReader;
   let llmConfig: unknown;
+  let pricingOverrides: Record<string, { in: number; out: number }> = {};
   let dispatched: { authority: TurnAuthority; call: HostedToolCall }[];
   let parked: { authority: TurnAuthority; stateKey: string; approvalId: string }[];
 
@@ -121,6 +122,8 @@ describe("/api/v1/internal/turns", () => {
                 agentId: "assistant",
                 subjectId: authority.subject.id,
                 modelProfileId: "model-1",
+                modelPolicy: { residency: "eu", dataRetention: "none" as const },
+                principal: { kind: authority.subject.kind, id: authority.subject.id },
                 contextDigest: "context-digest",
                 guardrailDigest: "guardrail-digest",
                 guardrailPolicy: { input: [] },
@@ -147,6 +150,7 @@ describe("/api/v1/internal/turns", () => {
           now: () => CREATED_AT,
         }),
         llmConfig: () => llmConfig,
+        pricingOverrides: () => pricingOverrides,
       },
     });
   });
@@ -186,6 +190,34 @@ describe("/api/v1/internal/turns", () => {
     expect(published.json()).toEqual(llmConfig);
   });
 
+  it("serves operator price corrections, so the Worker charges what this app reports", async () => {
+    const none = await app.inject({
+      method: "GET",
+      url: "/api/v1/internal/observability/pricing",
+      headers: asWorker(),
+    });
+    expect(none.statusCode).toBe(200);
+    expect(none.json()).toEqual({ overrides: {} });
+
+    // The Worker owns the branch that charges the Run budget. An override that reached only the
+    // reporting side corrected the report and left enforcement on the uncorrected price.
+    pricingOverrides = { "claude-opus-4-8": { in: 1, out: 2 } };
+    const corrected = await app.inject({
+      method: "GET",
+      url: "/api/v1/internal/observability/pricing",
+      headers: asWorker(),
+    });
+    expect(corrected.json()).toEqual({ overrides: pricingOverrides });
+  });
+
+  it("refuses price corrections to anything but a service principal", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/internal/observability/pricing",
+    });
+    expect([401, 403]).toContain(res.statusCode);
+  });
+
   it("serves the turn's Context to a service principal", async () => {
     const res = await app.inject({
       method: "POST",
@@ -199,6 +231,31 @@ describe("/api/v1/internal/turns", () => {
       contextDigest: "context-digest",
       messages: [{ role: "user", content: "as slack" }],
     });
+  });
+
+  it("carries the Agent's model governance to the Worker", async () => {
+    // Fastify strips undeclared properties on serialization, so an omission in the response
+    // schema would drop the governance demand here with no error anywhere.
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/v1/internal/turns/${RUN_ID}/context`,
+      headers: asWorker(),
+    });
+
+    expect(res.json().modelPolicy).toEqual({ residency: "eu", dataRetention: "none" });
+  });
+
+  it("carries the acting principal to the Worker, kind included", async () => {
+    // `subjectId` alone cannot name a principal, and a stripped principal would silently send
+    // every model call back to acting as the deployment.
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/v1/internal/turns/${RUN_ID}/context`,
+      headers: asWorker(),
+    });
+
+    // The subject came from the Run, not from the caller — the worker never named one.
+    expect(res.json().principal).toEqual({ kind: "integration", id: "slack" });
   });
 
   it("refuses a signed-in person, so a browser cannot reach the turn machinery", async () => {
@@ -422,6 +479,7 @@ describe("/api/v1/internal/runs/:runId/routine-approvals", () => {
           },
         }),
         llmConfig: () => undefined,
+        pricingOverrides: () => ({}),
         routineApprovals,
       },
     });

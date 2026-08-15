@@ -18,7 +18,8 @@ function fakeEmbeddings(opts: { available: boolean; model?: string; dim?: number
     }),
     getActive: () => (opts.available ? { provider: "fake", model, dimension: dim } : null),
     getDimension: () => (opts.available ? dim : null),
-    consumePendingReindex: () => false,
+    pendingReindex: () => false,
+    clearPendingReindex: () => {},
   };
 }
 
@@ -33,7 +34,8 @@ function countingEmbeddings(model = "fake-model", dim = 3): { port: EmbeddingPor
     },
     getActive: () => ({ provider: "fake", model, dimension: dim }),
     getDimension: () => dim,
-    consumePendingReindex: () => false,
+    pendingReindex: () => false,
+    clearPendingReindex: () => {},
   };
   return {
     port,

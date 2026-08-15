@@ -1,5 +1,4 @@
-import { EMBEDDING_UNAVAILABLE_WARNING } from "@tulipfarm/llm";
-import { EmbeddingUnavailableError } from "@tulipfarm/schema";
+import { EMBEDDING_REINDEX_PENDING_WARNING, EMBEDDING_UNAVAILABLE_WARNING } from "@tulipfarm/llm";
 import type { KnowledgeChunkRepo } from "./chunks-repo";
 import type { EmbeddingPort, SearchFilters, SearchResults } from "./types";
 
@@ -24,9 +23,17 @@ export async function search(
       const results = vec
         ? await chunksRepo.searchVector(vec, out.dimension, limit, filters)
         : await chunksRepo.searchLexical(query, limit, filters);
-      return { results, warnings: [] };
-    } catch (err) {
-      if (!(err instanceof EmbeddingUnavailableError)) throw err;
+      // A pending re-index means stored vectors are at the *old* width, which `searchVector`
+      // matches exactly and therefore never returns. Recall is degraded, not merely stale, so the
+      // caller has to be told rather than handed a confident empty result.
+      return {
+        results,
+        warnings: embeddings.pendingReindex() ? [EMBEDDING_REINDEX_PENDING_WARNING] : [],
+      };
+    } catch {
+      // Any embedding failure degrades to lexical. Re-throwing a rate limit or a timeout turned a
+      // recall problem into a failed search, which is strictly worse than fewer results plus the
+      // warning the caller already knows how to render.
     }
   }
   const results = await chunksRepo.searchLexical(query, limit, filters);

@@ -7,8 +7,10 @@ import {
 } from "@tulipfarm/observability";
 import { type ConstructorOptions, PgBoss } from "pg-boss";
 import type { Queryable } from "./db";
+import { breached, readSpendWindow, spendAlertMessage } from "./spend-alert";
 
 export const OBS_PRUNE_QUEUE = "obs-event-prune";
+export const SPEND_ALERT_QUEUE = "obs-spend-alert";
 
 export interface JobConsumerOptions {
   readonly databaseUrl: string;
@@ -16,10 +18,16 @@ export interface JobConsumerOptions {
   readonly now?: () => Date;
   /** Test seam; production always constructs the non-migrating client below. */
   readonly boss?: PgBoss;
+  /** Where a breached spend ceiling is reported; the operator log spine in production. */
+  readonly log?: { error(message: string): void };
 }
 
 interface ObservabilityPruneJob {
   readonly retentionMs?: number;
+}
+
+interface SpendAlertJob {
+  readonly thresholdUsd?: number;
 }
 
 /**
@@ -48,6 +56,16 @@ export async function startJobConsumers(options: JobConsumerOptions): Promise<Pg
     // 90-day policy above would keep two orders of magnitude more rows than the 24h chart can show.
     // The job override deliberately does not apply — it configures the event window, not this one.
     await resourcePruner.deleteOlderThan(new Date(now().getTime() - RESOURCE_RETENTION_MS));
+  });
+
+  await boss.createQueue(SPEND_ALERT_QUEUE);
+  await boss.work<SpendAlertJob>(SPEND_ALERT_QUEUE, async (jobs) => {
+    const thresholdUsd = jobs[0]?.data.thresholdUsd;
+    // No threshold means the operator set none. There is no default budget to fall back to.
+    if (typeof thresholdUsd !== "number" || thresholdUsd <= 0) return;
+    const window = await readSpendWindow(options.database, thresholdUsd, now());
+    if (!breached(window)) return;
+    options.log?.error(spendAlertMessage(window));
   });
 
   return boss;

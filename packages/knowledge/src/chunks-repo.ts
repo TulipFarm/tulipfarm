@@ -88,8 +88,17 @@ export interface KnowledgeChunkRepo {
   getIndexingStatus(pageId: string): Promise<IndexingStatus>;
   /** Batch variant — one grouped query; ids absent from the result default to "pending". */
   getIndexingStatuses(pageIds: string[]): Promise<Map<string, IndexingStatus>>;
-  /** Active pages with a chunk that is unembedded or embedded under a stale model — backfill targets. */
-  listPageIdsNeedingEmbedding(activeModel: string): Promise<string[]>;
+  /**
+   * Active pages with a chunk that is unembedded, embedded under a stale model, or embedded at a
+   * width other than the active one — backfill targets.
+   */
+  listPageIdsNeedingEmbedding(activeModel: string, activeDim?: number | null): Promise<string[]>;
+  /**
+   * How many stored vectors are at a width other than `dim`. `searchVector` matches on exact
+   * width, so every such chunk is unreachable by vector search until it is re-embedded — and the
+   * in-memory dimension-change flag cannot see a change that happened across a restart.
+   */
+  countStaleDimension(dim: number): Promise<number>;
   /** Aggregate index health (counts + max lag), all from our own tables. */
   indexStats(): Promise<IndexStats>;
 }
@@ -222,15 +231,32 @@ export class PgKnowledgeChunkRepo implements KnowledgeChunkRepo {
     return statuses.get(pageId) ?? "pending";
   }
 
-  async listPageIdsNeedingEmbedding(activeModel: string): Promise<string[]> {
+  async listPageIdsNeedingEmbedding(
+    activeModel: string,
+    activeDim?: number | null
+  ): Promise<string[]> {
+    const dimCondition =
+      activeDim === undefined || activeDim === null ? "" : " OR c.dim IS DISTINCT FROM $2";
+    const params: unknown[] = [activeModel];
+    if (dimCondition) params.push(activeDim);
     const { rows } = await this.q.query(
       `SELECT DISTINCT p.id
        FROM knowledge_pages p
        JOIN knowledge_chunks c ON c.page_id = p.id
-       WHERE p.active = true AND (c.embedding IS NULL OR c.model IS DISTINCT FROM $1)`,
-      [activeModel]
+       WHERE p.active = true
+         AND (c.embedding IS NULL OR c.model IS DISTINCT FROM $1${dimCondition})`,
+      params
     );
     return (rows as Array<{ id: string }>).map((r) => r.id);
+  }
+
+  async countStaleDimension(dim: number): Promise<number> {
+    const { rows } = await this.q.query(
+      `SELECT count(*)::int AS n FROM knowledge_chunks
+       WHERE embedding IS NOT NULL AND dim IS DISTINCT FROM $1`,
+      [dim]
+    );
+    return (rows[0] as { n: number } | undefined)?.n ?? 0;
   }
 
   async indexStats(): Promise<IndexStats> {

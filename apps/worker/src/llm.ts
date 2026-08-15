@@ -1,6 +1,7 @@
 import type { ModelProfileCatalog, ModelRequirements } from "@tulipfarm/agent-runtime";
 import { selectModelProfile } from "@tulipfarm/agent-runtime";
-import { LlmService } from "@tulipfarm/llm";
+import type { CostBasis, ModelPrice, ModelResponderRef, PrincipalRef } from "@tulipfarm/llm";
+import { isPriceable, LlmService, priceCall, SecretsPrincipalCredentials } from "@tulipfarm/llm";
 import type { ResolvedLimits } from "@tulipfarm/run-kernel";
 import { resolveModelProfileBudgetLimits } from "@tulipfarm/run-kernel";
 import {
@@ -22,6 +23,13 @@ export interface SoulLlmOptions {
   source(): Promise<unknown>;
   /** Lazy because the API provisions the active DEK and some deployments never chat. */
   secrets(): Promise<SecretsService>;
+  /**
+   * Operator price corrections, read from the same published config the control plane parses.
+   *
+   * This is the branch that charges the Run budget, so an override that does not reach here
+   * corrects only reporting. Failure resolves to no overrides rather than failing the turn.
+   */
+  pricingOverrides?(): Promise<Record<string, ModelPrice>>;
 }
 
 export type ModelRoutingPayload = RunEventPayloads["model.routed"];
@@ -32,6 +40,19 @@ export type LlmModelResolution =
       readonly model: LanguageModel;
       readonly routing: ModelRoutingPayload;
       readonly budgetLimits?: ResolvedLimits;
+      /**
+       * The provider the head of the chain belongs to, so per-provider limits and the circuit
+       * breaker have something to key on. A chain can span providers; this names the one the
+       * call is about to be made against.
+       */
+      readonly provider?: string;
+      /**
+       * Prices this call against whichever chain link actually answered.
+       *
+       * Valid only once the call has committed; before that the responder is unknown and this
+       * reports `unpriced` rather than guessing at the head of the chain.
+       */
+      price(tokensIn: number, tokensOut: number): CostBasis;
     }
   | {
       readonly kind: "denied";
@@ -57,8 +78,47 @@ export class SoulLlm {
   /** ModelProfiles derived from the applied configuration, keyed by profile id. */
   private catalog: ModelProfileCatalog = { get: () => undefined };
   private presets: Parameters<typeof resolveEffortPreset>[1] = {};
+  /** Operator price corrections refreshed with the config they belong to. */
+  private overrides: Record<string, ModelPrice> = {};
 
   constructor(private readonly options: SoulLlmOptions) {}
+
+  /**
+   * Prices a completed call, given the model that actually answered.
+   *
+   * The provider comes from the configured entry rather than the model id, so a subscription seat
+   * is recognised as unmetered instead of being matched against the published API price table.
+   */
+  /** The provider behind a configured model id, for per-provider limits and the breaker. */
+  private providerOf(modelId: string | undefined): string | undefined {
+    return modelId === undefined ? undefined : this.service.entryFor(modelId)?.provider;
+  }
+
+  priceFor(modelId: string | undefined, tokensIn: number, tokensOut: number): CostBasis {
+    if (modelId === undefined) return { kind: "unpriced" };
+    const entry = this.service.entryFor(modelId);
+    return priceCall({
+      provider: entry?.provider ?? "",
+      modelId,
+      tokensIn,
+      tokensOut,
+      spec: entry?.spec,
+      overrides: this.overrides,
+    });
+  }
+
+  /** The first chain link whose calls could not be priced, or `undefined` when all can. */
+  private unpriceableLink(modelIds: readonly string[]): string | undefined {
+    return modelIds.find((modelId) => {
+      const entry = this.service.entryFor(modelId);
+      return !isPriceable({
+        provider: entry?.provider ?? "",
+        modelId,
+        spec: entry?.spec,
+        overrides: this.overrides,
+      });
+    });
+  }
 
   /** Resolves selectors to the full selected chain; raw model ids bypass profile checks. */
   async model(selector: string, requirements: ModelRequirements): Promise<LanguageModel> {
@@ -79,10 +139,33 @@ export class SoulLlm {
     return this.service.chainModel(modelIds);
   }
 
+  /**
+   * An already-routed Routine chain as a full resolution, so the Routine path prices its calls
+   * through the same authority the Chat path uses rather than reporting them as free.
+   */
+  async resolveChain(
+    modelIds: readonly string[],
+    routing: ModelRoutingPayload,
+    principal?: PrincipalRef
+  ): Promise<LlmModelResolution> {
+    await this.sync();
+    const responder: ModelResponderRef = {};
+    return {
+      kind: "available",
+      model: await this.service.chainModelFor(modelIds, principal, undefined, responder),
+      ...(this.providerOf(modelIds[0]) === undefined
+        ? {}
+        : { provider: this.providerOf(modelIds[0]) }),
+      routing,
+      price: (tokensIn, tokensOut) => this.priceFor(responder.modelId, tokensIn, tokensOut),
+    };
+  }
+
   async resolveModel(
     selector: string,
     requirements: ModelRequirements,
-    inference?: RunEventEffortInference
+    inference?: RunEventEffortInference,
+    principal?: PrincipalRef
   ): Promise<LlmModelResolution> {
     await this.sync();
 
@@ -90,13 +173,18 @@ export class SoulLlm {
     if (resolved.kind === "raw_model") {
       return {
         kind: "available",
-        model: this.service.getModelById(resolved.modelId),
+        model: await this.service.chainModelFor([resolved.modelId], principal, undefined),
+        ...(this.providerOf(resolved.modelId) === undefined
+          ? {}
+          : { provider: this.providerOf(resolved.modelId) }),
         routing: {
           outcome: "raw_model",
           selector,
           resolution: "raw_model_id",
           modelId: resolved.modelId,
         },
+        // A raw model id names exactly one model; nothing else could answer.
+        price: (tokensIn, tokensOut) => this.priceFor(resolved.modelId, tokensIn, tokensOut),
       };
     }
 
@@ -138,11 +226,40 @@ export class SoulLlm {
     }
     const budgetLimits = resolveModelProfileBudgetLimits(primary);
     const budgetEvidence = modelBudgetEvidence(budgetLimits);
+    const chain = selection.chain.map((profile) => profile.model);
+
+    // An unpriceable call cannot be charged against a cost ceiling, so a profile that declares one
+    // must not route to a chain we cannot price — otherwise the ceiling is strictest on the models
+    // we understand and absent on the ones we do not. Profiles with no cost ceiling are untouched:
+    // there is nothing to enforce, and denying them would fail Runs that never asked for a limit.
+    if (budgetLimits.costMicros !== undefined) {
+      const unpriceable = this.unpriceableLink(chain);
+      if (unpriceable !== undefined) {
+        return {
+          kind: "denied",
+          routing: {
+            outcome: "denied",
+            selector,
+            resolution: resolved.resolution,
+            profileId: selection.profileId,
+            reason: "cost_unpriceable",
+            attempts: [{ profileId: selection.profileId, reason: "cost_unpriceable" }],
+            ...evidence,
+          },
+        };
+      }
+    }
+
+    const responder: ModelResponderRef = {};
 
     return {
       kind: "available",
-      model: this.service.chainModel(selection.chain.map((profile) => profile.model)),
+      model: await this.service.chainModelFor(chain, principal, undefined, responder),
+      ...(this.providerOf(chain[0]) === undefined ? {} : { provider: this.providerOf(chain[0]) }),
       ...(budgetEvidence === undefined ? {} : { budgetLimits }),
+      // Attributed to the link that answered: a chain that rate-limits through to a cheaper model
+      // must not be billed at the head model's price.
+      price: (tokensIn, tokensOut) => this.priceFor(responder.modelId, tokensIn, tokensOut),
       routing: {
         outcome: "selected",
         selector,
@@ -215,8 +332,13 @@ export class SoulLlm {
       this.secrets = null;
       throw error;
     });
-    await this.service.init(config, await this.secrets);
+    const secrets = await this.secrets;
+    await this.service.init(config, secrets, undefined, new SecretsPrincipalCredentials(secrets));
     this.rebuildCatalog(config);
+    // Price corrections travel with the config they correct. A failure here must not fail the
+    // turn: pricing degrades to the pinned specs and the built-in table, which is what the
+    // deployment had before the operator wrote an override.
+    this.overrides = (await this.options.pricingOverrides?.().catch(() => ({}))) ?? {};
     this.applied = published;
   }
 

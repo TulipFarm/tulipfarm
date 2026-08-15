@@ -29,6 +29,13 @@ subscription-CLI model adapters.
 - Fallback hard failures propagate: auth, `404`, abort. `429`, `5xx`, timeout fall through.
 - Bad Subscription Provider credentials throw `LlmProviderError("model_authentication_failed")`.
 - CLI usage reports are running totals, not deltas; never sum them.
+- Embedding failover is width-scoped: a standby may answer only if it declares the *same*
+  `dimension` as the active provider. A different width writes vectors the next query can never
+  match, and nothing errors.
+- Do not price inside this package's embedding path. `EmbeddingUsageSink` reports usage; the
+  caller that holds the operator's overrides prices it, so there stays exactly one pricing site.
+- No direct `console.*`: every notice goes through the injected `LlmLogger`/`EmbeddingLogger`, or
+  it misses the log viewer and redaction.
 - Cached input token semantics differ by vendor; report cache read as a breakdown, never an addend.
 - Do not pass ambient vendor env credentials through the CLI jail; only saved credentials.
 - Timed-out CLI turns must throw, not finish as a normal `stop`.

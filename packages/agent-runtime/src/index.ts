@@ -12,6 +12,7 @@ export type {
   ModelOutput,
   ModelPort,
   ModelStreamChunk,
+  ModelUsage,
 } from "./ports";
 export { ModelInvocationError } from "./ports";
 export * from "./skills";

@@ -65,6 +65,14 @@ export class HttpTurnHost
     return this.client.find<Record<string, unknown>>("GET", "/api/v1/internal/llm/config", [204]);
   }
 
+  /** Operator price corrections, so this process charges at the price the operator set. */
+  async pricingOverrides(): Promise<Record<string, { in: number; out: number }>> {
+    const body = await this.client.require<{
+      overrides: Record<string, { in: number; out: number }>;
+    }>("GET", "/api/v1/internal/observability/pricing");
+    return body.overrides;
+  }
+
   /** `TurnContextPort`. */
   async resolve(request: TurnRequest): Promise<ResolvedTurnContext> {
     return this.client.require<ResolvedTurnContext>("POST", turnPath(request.runId, "/context"));

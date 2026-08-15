@@ -9,6 +9,7 @@ import {
   instructionsReferenceSchema,
   MEMORY_SCOPES,
   type MemoryScope,
+  modelPolicySchema,
   refListSchema,
 } from "./common";
 
@@ -52,6 +53,17 @@ const agentSpecSchema = Type.Object(
       )
     ),
     modelProfile: Type.String({ minLength: 1, maxLength: 256 }),
+    /**
+     * Governance this Agent's turns require of whatever model serves them.
+     *
+     * The request carries content; it cannot carry the posture that content demands. Without an
+     * authored source the residency, retention and training checks in `selectModelProfile` read
+     * every request as demanding nothing, so they never denied a model on any of those grounds.
+     *
+     * A demand here is matched against what a provider entry declares it satisfies. An entry that
+     * declares nothing is treated as unverifiable, not permissive, so a demand denies it.
+     */
+    modelPolicy: Type.Optional(modelPolicySchema),
     skills: Type.Optional(refListSchema),
     // Tools the Agent is *allowed* to request; never a grant of authority.
     allowedTools: Type.Optional(refListSchema),

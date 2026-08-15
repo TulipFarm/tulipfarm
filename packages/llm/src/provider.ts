@@ -64,10 +64,39 @@ async function resolveStored(
   }
 }
 
+/** Whom a model call acts as. Mirrors `InvocationPrincipal` without depending on the Run kernel. */
+export interface PrincipalRef {
+  readonly kind: string;
+  readonly id: string;
+}
+
+/**
+ * Looks up a principal's own provider credential, so a model call can act as the person rather
+ * than as the deployment.
+ *
+ * Returning `undefined` means "this principal has none", which falls back to the shared entry
+ * credential. That is deliberate: most deployments hold one key, and refusing the call would
+ * break every one of them.
+ */
+export interface PrincipalCredentialResolver {
+  resolve(principal: PrincipalRef, provider: string): Promise<string | undefined>;
+}
+
 /** Per-call knobs a caller can impose on the built model. */
 export interface CreateModelOptions {
   /** Wall clock for one model call; `/setup` passes a short probe timeout. */
   timeoutMs?: number;
+  /**
+   * Whom the call acts as. With `credentials`, the principal's own key is preferred over the
+   * shared one, so the provider's ACLs re-enter the decision the way they do on the effect plane.
+   */
+  principal?: PrincipalRef;
+  credentials?: PrincipalCredentialResolver;
+  /**
+   * Where a provider-side notice goes. Without it these land on `console` and so miss the log
+   * viewer and the redaction the structured pipeline applies.
+   */
+  log?: { warn(msg: string): void };
 }
 
 export async function createModel(
@@ -77,10 +106,19 @@ export async function createModel(
 ): Promise<LanguageModelV4> {
   const info = llmProviderById(entry.provider);
 
+  // The acting principal's own credential outranks the shared one: a call made on someone's
+  // behalf should carry their authority at the provider, not the deployment's.
+  const principalKey =
+    options.principal === undefined || options.credentials === undefined
+      ? undefined
+      : await options.credentials.resolve(options.principal, entry.provider);
+
   // API key: explicit api_key_ref wins; optional keys may be unset.
   const apiKeyField = info ? providerField(info, "api_key") : undefined;
   let apiKey: string | undefined;
-  if (entry.api_key_ref) {
+  if (principalKey !== undefined) {
+    apiKey = principalKey;
+  } else if (entry.api_key_ref) {
     apiKey = await resolveApiKey(entry.api_key_ref, secrets);
   } else if (apiKeyField) {
     apiKey = apiKeyField.optional
@@ -132,7 +170,7 @@ export async function createModel(
               await secrets.set(key, authJson);
             }
           : undefined;
-      return new CodexModel(entry.model, apiKey, options.timeoutMs, persist);
+      return new CodexModel(entry.model, apiKey, options.timeoutMs, persist, options.log);
     }
     default:
       throw new LlmConfigValidationError(`unknown provider: ${entry.provider}`);

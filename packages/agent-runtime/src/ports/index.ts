@@ -6,5 +6,6 @@ export type {
   ModelOutput,
   ModelPort,
   ModelStreamChunk,
+  ModelUsage,
 } from "./model";
 export { ModelInvocationError } from "./model";

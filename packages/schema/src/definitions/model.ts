@@ -25,6 +25,9 @@ export const MODEL_PROFILE_DENIAL_REASONS = [
   "data_retention_violation",
   "training_not_permitted",
   "cost_budget_exceeded",
+  // A declared cost ceiling that cannot be enforced, because a link in the selected chain has no
+  // price. Distinct from `cost_budget_exceeded`: nothing was overspent, the limit is unenforceable.
+  "cost_unpriceable",
   "token_budget_exceeded",
   "latency_budget_exceeded",
   "capability_class_mismatch",

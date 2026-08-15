@@ -1,10 +1,12 @@
-import { EmbeddingService } from "@tulipfarm/llm";
+import { type EmbeddingLogger, EmbeddingService } from "@tulipfarm/llm";
 import type { SecretsService } from "@tulipfarm/secrets";
 
 /** Reads the published LLM configuration, or `undefined` when the Soul publishes none. */
 export interface SoulEmbeddingsOptions {
   source(): Promise<unknown>;
   secrets(): Promise<SecretsService>;
+  /** Without it, provider-resolution notices land on `console` and miss the structured pipeline. */
+  log?: EmbeddingLogger;
 }
 
 /**
@@ -43,7 +45,7 @@ export class SoulEmbeddings {
       this.secrets = null;
       throw error;
     });
-    await this.service.init(config, await this.secrets);
+    await this.service.init(config, await this.secrets, this.options.log);
     this.applied = published;
   }
 
@@ -59,11 +61,18 @@ export class SoulEmbeddings {
     return this.service.getDimension();
   }
 
-  consumePendingReindex(): boolean {
-    return this.service.consumePendingReindex();
+  pendingReindex(): boolean {
+    return this.service.pendingReindex();
   }
 
-  embedMany(values: string[]): Promise<{ embeddings: number[][]; dimension: number }> {
-    return this.service.embedMany(values);
+  clearPendingReindex(): void {
+    this.service.clearPendingReindex();
+  }
+
+  embedMany(
+    values: string[],
+    signal?: AbortSignal
+  ): Promise<{ embeddings: number[][]; dimension: number }> {
+    return this.service.embedMany(values, signal);
   }
 }

@@ -18,7 +18,8 @@ function fakeEmbeddings(): EmbeddingPort {
     embedMany: async (values) => ({ embeddings: values.map(() => [0.1, 0.1, 0.1]), dimension: 3 }),
     getActive: () => ({ provider: "fake", model: "m", dimension: 3 }),
     getDimension: () => 3,
-    consumePendingReindex: () => false,
+    pendingReindex: () => false,
+    clearPendingReindex: () => {},
   };
 }
 

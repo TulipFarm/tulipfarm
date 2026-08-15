@@ -46,6 +46,76 @@ describe("asEffortPreset", () => {
   });
 });
 
+describe("deriveModelProfiles — authored budgets", () => {
+  it("derives a per-model cost ceiling an operator authored", () => {
+    // `ModelProfileSpec.budgets` was consumed by the Run budget resolver but derived from nothing,
+    // so no operator could declare a ceiling and the enforcement path was unreachable in production.
+    const profiles = deriveModelProfiles(
+      config({
+        standard: {
+          providers: [
+            {
+              provider: "anthropic",
+              model: "sonnet",
+              api_key_ref: "env://KEY",
+              budgets: { max_cost_usd: 2.5, max_tokens: 100_000 },
+            },
+          ],
+        },
+      })
+    );
+
+    // The `standard` tier derives to the `balanced` effort preset.
+    const balanced = profiles.find((profile) => profile.model === "sonnet");
+    expect(balanced?.budgets).toEqual({ maxCostUsd: 2.5, maxTokens: 100_000 });
+  });
+
+  it("leaves a profile with no authored ceiling unbounded rather than inventing one", () => {
+    const profiles = deriveModelProfiles(config({}));
+    for (const profile of profiles) expect(profile.budgets).toBeUndefined();
+  });
+});
+
+describe("deriveModelProfiles — authored governance", () => {
+  it("derives the governance posture an operator authored", () => {
+    // `ModelProfileSpec.constraints` gated residency, retention and training in
+    // `selectModelProfile`, but nothing derived it, so every profile read as undeclared and none
+    // of those denials could fire.
+    const profiles = deriveModelProfiles(
+      config({
+        standard: {
+          providers: [
+            {
+              provider: "anthropic",
+              model: "sonnet",
+              api_key_ref: "env://KEY",
+              constraints: {
+                residency: "eu",
+                data_retention: "zero_retention",
+                allow_training: false,
+                max_latency_ms: 2_000,
+              },
+            },
+          ],
+        },
+      })
+    );
+
+    const balanced = profiles.find((profile) => profile.model === "sonnet");
+    expect(balanced?.constraints).toEqual({
+      residency: "eu",
+      dataRetention: "zero_retention",
+      allowTraining: false,
+      maxLatencyMs: 2_000,
+    });
+  });
+
+  it("leaves an unauthored posture undeclared rather than inventing a permissive one", () => {
+    const profiles = deriveModelProfiles(config({}));
+    for (const profile of profiles) expect(profile.constraints).toBeUndefined();
+  });
+});
+
 describe("deriveModelProfiles", () => {
   it("derives one profile per tier, named for its effort preset", () => {
     const profiles = deriveModelProfiles(config({}));

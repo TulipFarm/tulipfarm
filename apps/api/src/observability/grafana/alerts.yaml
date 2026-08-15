@@ -7,7 +7,10 @@
 groups:
   - name: tulipfarm-observability
     rules:
-      # Daily LLM spend crossed the budget. Mirror of spend_alert_usd in observability.config.yaml.
+      # Daily LLM spend crossed the budget.
+      # The threshold below is independent of `spend_alert_usd` and must be edited here by hand.
+      # `spend_alert_usd` is enforced by the instance itself and needs none of this file; these
+      # rules exist only to route the same breach through Grafana Cloud alongside your others.
       - alert: TulipFarmHighDailySpend
         expr: sum(increase(llm_cost_usd_total[24h])) > 50
         for: 5m

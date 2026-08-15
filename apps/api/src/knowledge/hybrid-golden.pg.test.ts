@@ -40,7 +40,8 @@ function bagEmbeddings(available: boolean): EmbeddingPort {
     }),
     getActive: () => (available ? { provider: "fake", model: "m", dimension: DIM } : null),
     getDimension: () => (available ? DIM : null),
-    consumePendingReindex: () => false,
+    pendingReindex: () => false,
+    clearPendingReindex: () => {},
   };
 }
 

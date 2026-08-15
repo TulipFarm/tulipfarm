@@ -31,11 +31,3 @@ export type {
 export { checkModelProfile, selectModelProfile } from "./profile";
 export type { ModelRequirementsPolicy } from "./requirements";
 export { deriveModelRequirements, estimateContextTokens } from "./requirements";
-export type {
-  ModelInvocationScope,
-  ModelRouterOptions,
-  ModelRoutingErrorCode,
-} from "./router";
-export { ModelRouter, ModelRoutingError } from "./router";
-export type { ModelUsageEvent, ModelUsageOutcome, ModelUsageSink } from "./usage";
-export { InMemoryModelUsageSink, totalModelCostUsd, totalModelTokens } from "./usage";

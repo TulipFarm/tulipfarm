@@ -1,11 +1,13 @@
 import { usdToCostMicros } from "@tulipfarm/run-kernel";
 import { ajv } from "@tulipfarm/schema";
+import type { ModelRequirementsPolicy } from "../models/requirements";
 import type {
   ModelInvocationFailureReason,
   ModelInvocationRequest,
   ModelInvocationResult,
   ModelMessage,
   ModelPort,
+  ModelUsage,
 } from "../ports";
 import { ModelInvocationError } from "../ports";
 import type { AgentLoopCheckpoint, LoopCheckpointStore } from "./checkpoint";
@@ -31,6 +33,12 @@ export interface AgentLoopInput {
   readonly runId: string;
   readonly stateId: string;
   readonly modelProfileId: string;
+  /** Governance the acting Agent requires of the model; see `ModelInvocationRequest.policy`. */
+  readonly modelPolicy?: ModelRequirementsPolicy;
+  /** Whom the turn acts as; see `ModelInvocationRequest.principal`. */
+  readonly principal?: { readonly kind: string; readonly id: string };
+  /** Which Agent the turn runs as, so its spend is attributed rather than pooled. */
+  readonly agentId?: string;
   /** Digest of the Context manifest the messages were assembled from. */
   readonly contextDigest: string;
   readonly guardrailDigest: string;
@@ -276,6 +284,26 @@ export class AgentLoop {
       return completed;
     };
 
+    /** Charges tokens and cost against the Run budget; shared by the success and failure paths. */
+    const chargeUsage = async (usage: ModelUsage): Promise<"ok" | "exhausted"> => {
+      const tokens = usage.inputTokens + usage.outputTokens;
+      if (tokens > 0) {
+        const tokenBudget = await this.deps.budget.consume({
+          key: TOKEN_BUDGET_KEY,
+          amount: tokens,
+        });
+        if (tokenBudget.outcome === "exhausted") return "exhausted";
+      }
+      if (usage.costUsd !== undefined && usage.costUsd > 0) {
+        const costBudget = await this.deps.budget.consume({
+          key: COST_BUDGET_KEY,
+          amount: usdToCostMicros(usage.costUsd),
+        });
+        if (costBudget.outcome === "exhausted") return "exhausted";
+      }
+      return "ok";
+    };
+
     for (;;) {
       if (await this.deps.isCancelled()) {
         return finish({ status: "cancelled", ...counters }, "cancelled");
@@ -301,6 +329,9 @@ export class AgentLoop {
         modelProfileId: input.modelProfileId,
         messages,
         tools: toolsForIteration(),
+        ...(input.modelPolicy === undefined ? {} : { policy: input.modelPolicy }),
+        ...(input.principal === undefined ? {} : { principal: input.principal }),
+        ...(input.agentId === undefined ? {} : { agentId: input.agentId }),
         ...(input.outputSchema === undefined ? {} : { outputSchema: input.outputSchema }),
       };
 
@@ -326,29 +357,24 @@ export class AgentLoop {
           },
           "model call failed"
         );
+        // A failed call still spent whatever the provider consumed before it stopped. Charging it
+        // before finishing is what stops a Run that fails every iteration from spending without
+        // limit against a budget it never touches.
+        if (error instanceof ModelInvocationError && error.usage !== undefined) {
+          await chargeUsage(error.usage);
+        }
         return finish({ status: "failed", reason, ...counters }, "failed");
       }
 
-      const tokens = result.usage.inputTokens + result.usage.outputTokens;
-      if (tokens > 0) {
-        const tokenBudget = await this.deps.budget.consume({
-          key: TOKEN_BUDGET_KEY,
-          amount: tokens,
-        });
-        if (tokenBudget.outcome === "exhausted") {
-          return finish({ status: "failed", reason: "budget_exhausted", ...counters }, "failed");
-        }
+      const spend = await chargeUsage(result.usage);
+      if (spend === "exhausted") {
+        return finish({ status: "failed", reason: "budget_exhausted", ...counters }, "failed");
       }
 
-      if (result.usage.costUsd !== undefined && result.usage.costUsd > 0) {
-        const costBudget = await this.deps.budget.consume({
-          key: COST_BUDGET_KEY,
-          amount: usdToCostMicros(result.usage.costUsd),
-        });
-        if (costBudget.outcome === "exhausted") {
-          return finish({ status: "failed", reason: "budget_exhausted", ...counters }, "failed");
-        }
-      }
+      // An unpriceable call is not a free one. The port refuses one up front when the profile
+      // declared a cost ceiling, so reaching here with `unpriced` means no ceiling was declared
+      // and there is nothing to enforce — charging a guessed amount would invent a limit the
+      // operator never set.
 
       if (result.output.kind === "tool_calls") {
         const calls = normalizeCalls(result.output.calls, counters.iterations);

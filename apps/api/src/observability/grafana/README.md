@@ -30,6 +30,10 @@ Cloud Prometheus (Mimir) data source when prompted.
 (`mimirtool rules load`) or recreate the rules in Grafana Alerting against your Prometheus data
 source. Tune thresholds to your workload.
 
+These rules are optional. `spend_alert_usd` is enforced by the instance itself — the API schedules
+an hourly check and the Worker reports a breach to the operator log — so the spend ceiling works
+with none of this set up. The threshold in `alerts.yaml` is separate and must be edited there.
+
 ## Exported metrics (all cumulative counters)
 
 | Metric | Labels | Meaning |

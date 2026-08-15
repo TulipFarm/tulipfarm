@@ -280,7 +280,8 @@ export class CodexModel extends CliLanguageModel {
     private readonly authJson: string | undefined,
     timeoutMs?: number,
     /** Persists a credential Codex rotated mid-turn. Absent in tests and on read-only paths. */
-    private readonly persistAuth?: (authJson: string) => Promise<void>
+    private readonly persistAuth?: (authJson: string) => Promise<void>,
+    private readonly log?: { warn(msg: string): void }
   ) {
     super(modelId, timeoutMs);
   }
@@ -541,7 +542,7 @@ export class CodexModel extends CliLanguageModel {
       // A refresh that could not be stored is not a failed turn — the turn already succeeded, and
       // the old credential still works until its refresh token is rotated out. Never rethrow with
       // the blob in the message.
-      console.warn("[codex] could not persist rotated credential");
+      (this.log ?? console).warn("[codex] could not persist rotated credential");
     }
   }
 }

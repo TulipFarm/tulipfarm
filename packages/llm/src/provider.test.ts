@@ -1,7 +1,9 @@
+import { createAnthropic } from "@ai-sdk/anthropic";
 import { LlmConfigValidationError, LlmCredentialError } from "@tulipfarm/schema";
 import { DecryptError, SecretUnavailableError } from "@tulipfarm/secrets";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createModel } from "./provider";
+import { ClassifiedLanguageModel, classifyProviderError, LlmProviderError } from "./provider-error";
 
 vi.mock("@ai-sdk/anthropic", () => ({
   createAnthropic: vi.fn(() => (modelId: string) => ({ provider: "anthropic", modelId })),
@@ -232,5 +234,117 @@ describe("createModel", () => {
         secrets as never
       )
     ).rejects.toBeInstanceOf(LlmCredentialError);
+  });
+});
+
+describe("createModel — whose credential the call spends", () => {
+  const ENTRY = {
+    provider: "anthropic" as const,
+    model: "claude-haiku-4-5",
+    api_key_ref: "shared-key",
+  };
+  const ALICE = { kind: "user", id: "alice" };
+
+  /** The key handed to the provider SDK, which is what actually authenticates the call. */
+  function spentKey(): string | undefined {
+    const calls = vi.mocked(createAnthropic).mock.calls;
+    return (calls.at(-1)?.[0] as { apiKey?: string } | undefined)?.apiKey;
+  }
+
+  beforeEach(() => {
+    vi.mocked(createAnthropic).mockClear();
+  });
+
+  it("spends the principal's own credential when they hold one", async () => {
+    // Every model call used to act as the deployment, so one key served every principal and the
+    // provider's own ACLs never entered the decision.
+    const secrets = makeSecrets({ "shared-key": "sk-deployment" });
+    await createModel(ENTRY, secrets as never, {
+      principal: ALICE,
+      credentials: { resolve: async () => "sk-alice" },
+    });
+
+    expect(spentKey()).toBe("sk-alice");
+  });
+
+  it("falls back to the deployment credential when the principal holds none", async () => {
+    // Most principals have connected nothing; refusing here would break every such deployment.
+    const secrets = makeSecrets({ "shared-key": "sk-deployment" });
+    await createModel(ENTRY, secrets as never, {
+      principal: ALICE,
+      credentials: { resolve: async () => undefined },
+    });
+
+    expect(spentKey()).toBe("sk-deployment");
+  });
+
+  it("spends the deployment credential when no principal was named", async () => {
+    const secrets = makeSecrets({ "shared-key": "sk-deployment" });
+    await createModel(ENTRY, secrets as never, {});
+
+    expect(spentKey()).toBe("sk-deployment");
+  });
+});
+
+/**
+ * L5-U. The API branches wrap in `ClassifiedLanguageModel`; the two CLI branches deliberately do
+ * not, because a CLI turn already fails as `Error`/`LlmProviderError` rather than `APICallError`
+ * and `classifyProviderError` reads those directly. That is correct today and invisible tomorrow:
+ * dropping a wrap from an API branch would silently collapse every retryable provider failure to
+ * `model_error`, and the suite would stay green. These pin the shape, not new behaviour.
+ */
+describe("createModel — provider error classification is wrapped for API providers only", () => {
+  const secrets = () =>
+    makeSecrets({
+      "anthropic-api-key": "k",
+      "openai-api-key": "k",
+      "azure-api-key": "k",
+      "compat-api-key": "k",
+      "claude-code-key": "k",
+      "codex-key": "{}",
+    }) as never;
+
+  const API_ENTRIES = [
+    { provider: "anthropic", model: "claude-haiku-4-5", api_key_ref: "anthropic-api-key" },
+    { provider: "openai", model: "gpt-4o-mini", api_key_ref: "openai-api-key" },
+    {
+      provider: "openai-compatible",
+      model: "m",
+      api_key_ref: "compat-api-key",
+      base_url: "http://localhost:1234/v1",
+    },
+    {
+      provider: "azure",
+      model: "m",
+      api_key_ref: "azure-api-key",
+      resource_name: "res",
+    },
+  ];
+
+  it.each(API_ENTRIES)("wraps $provider so APICallError is classified", async (entry) => {
+    const model = await createModel(entry, secrets());
+    expect(model).toBeInstanceOf(ClassifiedLanguageModel);
+  });
+
+  it("leaves claude-code unwrapped, and classification still recognises its errors", async () => {
+    const model = await createModel(
+      { provider: "claude-code", model: "sonnet", api_key_ref: "claude-code-key" },
+      secrets()
+    );
+    expect(model).not.toBeInstanceOf(ClassifiedLanguageModel);
+    expect(classifyProviderError(new LlmProviderError("model_not_found", "no model"))).toBe(
+      "model_not_found"
+    );
+  });
+
+  it("leaves codex unwrapped, and classification still recognises its errors", async () => {
+    const model = await createModel(
+      { provider: "codex", model: "gpt-5", api_key_ref: "codex-key" },
+      secrets()
+    );
+    expect(model).not.toBeInstanceOf(ClassifiedLanguageModel);
+    expect(classifyProviderError(new LlmProviderError("model_authentication_failed", "401"))).toBe(
+      "model_authentication_failed"
+    );
   });
 });

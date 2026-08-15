@@ -39,6 +39,9 @@ export class PgKnowledgeIndexStore implements MutableKnowledgeIndexPort {
   async upsert(entry: KnowledgeIndexEntry): Promise<void> {
     const active = this.embeddings.isAvailable() ? this.embeddings.getActive() : null;
     const activeModel = active?.model ?? null;
+    // Width, not just name: search filters `dim` on exact match, so a vector kept at the previous
+    // width is one this store can never return again. Unknown width stays permissive.
+    const activeDim = active?.dimension ?? null;
 
     let vector: number[] | null = null;
     let dim: number | null = null;
@@ -55,6 +58,7 @@ export class PgKnowledgeIndexStore implements MutableKnowledgeIndexPort {
       activeModel !== null &&
       existing.digest === entry.digest &&
       existing.model === activeModel &&
+      (activeDim === null || existing.dim === activeDim) &&
       existing.embedding !== null
     ) {
       vector = parseVector(existing.embedding);
@@ -128,10 +132,15 @@ export class PgKnowledgeIndexStore implements MutableKnowledgeIndexPort {
     if (this.embeddings.isAvailable()) {
       const active = this.embeddings.getActive();
       if (active?.dimension) {
-        const out = await this.embeddings.embedMany([query.query]);
-        const vec = out.embeddings[0];
-        if (vec) {
-          return this.searchVector(query.businessId, sourceIds, vec, out.dimension, query.limit);
+        try {
+          const out = await this.embeddings.embedMany([query.query]);
+          const vec = out.embeddings[0];
+          if (vec) {
+            return this.searchVector(query.businessId, sourceIds, vec, out.dimension, query.limit);
+          }
+        } catch {
+          // Degrade to lexical rather than failing retrieval outright — same posture the write
+          // path already takes when a provider is throttled or unreachable.
         }
       }
     }

@@ -10,14 +10,23 @@ import {
   LlmCredentialError,
   LlmNotConfiguredError,
   type ModelSpec,
+  type ProviderEntry,
   resolveEffortPreset,
   UnknownModelError,
   validateLlmConfig,
 } from "@tulipfarm/schema";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { LanguageModel } from "ai";
-import { type FallbackLogger, FallbackModel } from "./fallback";
-import { createModel } from "./provider";
+import { type FallbackLogger, FallbackModel, type ModelResponderRef } from "./fallback";
+import { createModel, type PrincipalCredentialResolver, type PrincipalRef } from "./provider";
+
+/**
+ * Init-time logger. Wider than {@link FallbackLogger} because provider resolution reports what it
+ * skipped and what it built, and those lines belong in the structured pipeline like any other.
+ */
+export interface LlmLogger extends FallbackLogger {
+  info(msg: string): void;
+}
 
 /** Retired authored config shape; product routing now uses effort presets and ModelProfiles. */
 type Tier = "quick" | "standard" | "complex";
@@ -30,6 +39,8 @@ export interface ResolvedModelEntry {
   modelId: string;
   /** Pinned spec from llm.config (pricing/context/capabilities), when resolved for this model. */
   spec?: ModelSpec;
+  /** The authored entry, retained so a principal-scoped model can be rebuilt on demand. */
+  entry?: ProviderEntry;
 }
 
 export class LlmService {
@@ -42,22 +53,31 @@ export class LlmService {
   private entryByModelId: Map<string, ResolvedModelEntry> = new Map();
   private presets: Pick<LlmConfig, "presets"> = {};
   private profiles: Map<string, DerivedModelProfile> = new Map();
+  /** Retained from init so a principal-scoped model can be built after boot. */
+  private secrets: SecretsService | undefined;
+  private credentials: PrincipalCredentialResolver | undefined;
+  /** Principal-scoped models, keyed `kind:id:modelId`. Built once, then reused like the shared set. */
+  private readonly byPrincipal: Map<string, LanguageModelV4> = new Map();
 
   async init(
     rawConfig: unknown,
     secrets: SecretsService,
-    logger: FallbackLogger = console
+    logger: LlmLogger = console,
+    credentials?: PrincipalCredentialResolver
   ): Promise<void> {
     if (!rawConfig) {
-      console.warn("[llm] no soul.yaml#llm config found — LLM features disabled");
+      logger.warn("[llm] no soul.yaml#llm config found — LLM features disabled");
       return;
     }
 
     const config = validateLlmConfig(rawConfig);
-    // The same derivation the worker's router uses, so an effort preset means one thing on both
+    // The same derivation the worker's router uses, so an effort preset means one thing on two
     // sides of the process boundary rather than two that drift.
-    this.presets = { presets: config.presets };
-    this.profiles = new Map(deriveModelProfiles(config).map((p) => [p.profileId, p]));
+    //
+    // Held locally until every provider has built. Assigning them here would leave a failed
+    // reload pointing new presets at the previous config's model maps.
+    const presets = { presets: config.presets };
+    const profiles = new Map(deriveModelProfiles(config).map((p) => [p.profileId, p]));
     const byModelId = new Map<string, LanguageModelV4>();
     const entryByModelId = new Map<string, ResolvedModelEntry>();
 
@@ -74,14 +94,15 @@ export class LlmService {
         providers.map(async (entry) => {
           try {
             return {
-              model: await createModel(entry, secrets),
+              model: await createModel(entry, secrets, { log: logger }),
               id: entry.model,
               provider: entry.provider,
               spec: entry.spec,
+              entry,
             };
           } catch (err) {
             if (err instanceof LlmCredentialError || err instanceof LlmConfigValidationError) {
-              console.warn(
+              logger.warn(
                 `[llm] skip tier=${tier} provider=${entry.provider} model=${entry.model} — ${err.message}`
               );
               return null;
@@ -97,25 +118,38 @@ export class LlmService {
         available += 1;
         if (!byModelId.has(r.id)) byModelId.set(r.id, r.model);
         if (!entryByModelId.has(r.id))
-          entryByModelId.set(r.id, { provider: r.provider, modelId: r.id, spec: r.spec });
+          entryByModelId.set(r.id, {
+            provider: r.provider,
+            modelId: r.id,
+            spec: r.spec,
+            entry: r.entry,
+          });
       }
 
       if (available === 0) {
-        console.warn(`[llm] tier=${tier} — no providers available, tier skipped`);
+        logger.warn(`[llm] tier=${tier} — no providers available, tier skipped`);
         continue;
       }
-      console.info(`[llm] tier=${tier} providers=${available}`);
+      logger.info(`[llm] tier=${tier} providers=${available}`);
     }
 
     if (byModelId.size === 0) {
-      console.warn("[llm] no providers available across all tiers — LLM features disabled");
+      logger.warn("[llm] no providers available across all tiers — LLM features disabled");
       return;
     }
 
+    // One swap, after everything succeeded: a reload either takes effect whole or not at all.
     this.configured = true;
     this.logger = logger;
     this.byModelId = byModelId;
     this.entryByModelId = entryByModelId;
+    this.presets = presets;
+    this.profiles = profiles;
+    this.secrets = secrets;
+    this.credentials = credentials;
+    // Principal-scoped models were built from the previous config's entries; keeping them would
+    // serve a model the operator has just changed or removed.
+    this.byPrincipal.clear();
   }
 
   /** Resolves one effort preset to the same fallback chain used by worker model routing. */
@@ -128,7 +162,7 @@ export class LlmService {
     const preset = asEffortPreset(selector);
     if (preset === undefined) return this.getModelById(selector);
     if (isDeprecatedTierAlias(selector)) {
-      console.warn(
+      logger.warn(
         `[llm] selector "${selector}" is a retired tier name; use the "${preset}" effort preset`
       );
     }
@@ -164,13 +198,86 @@ export class LlmService {
     return this.configured;
   }
 
-  /** The pinned spec for a configured model id, for cost attribution and capability derivation. */
-  specFor(id: string): ModelSpec | undefined {
-    return this.entryByModelId.get(id)?.spec;
+  /** The configured entry behind a model id — provider, id and pinned spec, as one pricing input. */
+  entryFor(id: string): ResolvedModelEntry | undefined {
+    return this.entryByModelId.get(id);
   }
 
-  /** Builds a model that executes the whole selected fallback chain, not only its first id. */
-  chainModel(modelIds: readonly string[], logger: FallbackLogger = this.logger): LanguageModel {
+  /**
+   * Builds a model that executes the whole selected chain, not only its first id.
+   *
+   * `responder` is filled in with whichever link actually served, so the caller can price the
+   * answer rather than the request.
+   */
+  /**
+   * The same chain as `chainModel`, but built to act as `principal` wherever that principal holds
+   * their own provider credential.
+   *
+   * Links the principal has no credential for fall back to the shared deployment model, so a
+   * partially-connected principal still gets a whole chain rather than a truncated one.
+   */
+  async chainModelFor(
+    modelIds: readonly string[],
+    principal: PrincipalRef | undefined,
+    logger: FallbackLogger = this.logger,
+    responder?: ModelResponderRef
+  ): Promise<LanguageModel> {
+    if (principal === undefined || this.credentials === undefined) {
+      return this.chainModel(modelIds, logger, responder);
+    }
+    const built = (
+      await Promise.all(modelIds.map((id) => this.principalModel(id, principal)))
+    ).filter((m) => m !== undefined);
+    if (built.length === 0) throw new LlmNotConfiguredError();
+    if (built.length === 1) {
+      if (responder !== undefined) responder.modelId = built[0].modelId;
+      return built[0];
+    }
+    return new FallbackModel(built, logger, responder);
+  }
+
+  /** One model built for one principal, cached; falls back to the shared model when they have none. */
+  private async principalModel(
+    id: string,
+    principal: PrincipalRef
+  ): Promise<LanguageModelV4 | undefined> {
+    const shared = this.byModelId.get(id);
+    const entry = this.entryByModelId.get(id)?.entry;
+    const secrets = this.secrets;
+    const credentials = this.credentials;
+    if (entry === undefined || secrets === undefined || credentials === undefined) return shared;
+
+    const cacheKey = `${principal.kind}:${principal.id}:${id}`;
+    const cached = this.byPrincipal.get(cacheKey);
+    if (cached !== undefined) return cached;
+
+    if ((await credentials.resolve(principal, entry.provider)) === undefined) return shared;
+
+    try {
+      const model = await createModel(entry, secrets, {
+        principal,
+        credentials,
+        log: this.logger,
+      });
+      this.byPrincipal.set(cacheKey, model);
+      return model;
+    } catch (err) {
+      // A principal's own credential being unusable must not take down a call the deployment
+      // credential could still serve; the shared model is the safe, already-working route.
+      this.logger.warn(
+        `[llm] principal credential unusable for model=${id} — using the shared credential (${
+          err instanceof Error ? err.message : String(err)
+        })`
+      );
+      return shared;
+    }
+  }
+
+  chainModel(
+    modelIds: readonly string[],
+    logger: FallbackLogger = this.logger,
+    responder?: ModelResponderRef
+  ): LanguageModel {
     if (!this.configured) throw new LlmNotConfiguredError();
     const built = modelIds.map((id) => this.byModelId.get(id)).filter((m) => m !== undefined);
     // The ids came from the catalog, so an empty chain means every provider behind them failed to
@@ -179,6 +286,11 @@ export class LlmService {
     // looking in the wrong place.
     if (built.length === 0) throw new LlmNotConfiguredError();
     // A single link needs no wrapper — and wrapping would hide a genuinely unconfigured chain.
-    return built.length === 1 ? built[0] : new FallbackModel(built, logger);
+    // Its responder is known without executing anything: there is nothing else that could answer.
+    if (built.length === 1) {
+      if (responder !== undefined) responder.modelId = built[0].modelId;
+      return built[0];
+    }
+    return new FallbackModel(built, logger, responder);
   }
 }

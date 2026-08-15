@@ -73,6 +73,29 @@ export type ModelReasoningLevel = (typeof MODEL_REASONING_LEVELS)[number];
 export const MODEL_DATA_RETENTION = ["none", "zero_retention", "provider_default"] as const;
 export type ModelDataRetention = (typeof MODEL_DATA_RETENTION)[number];
 
+/**
+ * Governance an Agent's turns require of whatever model serves them.
+ *
+ * Shared by both Agent surfaces — `AGENT.md` frontmatter and the Agent Definition — so the thing
+ * an operator may author and the thing the Definition can express cannot drift apart.
+ *
+ * A demand here is matched against what a provider entry declares it satisfies. An entry that
+ * declares nothing is treated as unverifiable, not permissive, so a demand denies it.
+ */
+export const modelPolicySchema = Type.Object(
+  {
+    residency: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+    dataRetention: Type.Optional(
+      Type.Unsafe<ModelDataRetention>({ type: "string", enum: [...MODEL_DATA_RETENTION] })
+    ),
+    allowTraining: Type.Optional(Type.Boolean()),
+    maxLatencyMs: Type.Optional(Type.Integer({ minimum: 0 })),
+    /** Sensitive work keeps caching off regardless of what the profile permits (SPEC §17). */
+    sensitive: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: false }
+);
+
 /** Model modalities are dimensions; unsupported modality is a denial, never silent dropping. */
 export const MODEL_MODALITIES = ["text", "image", "audio", "video"] as const;
 export type ModelModality = (typeof MODEL_MODALITIES)[number];

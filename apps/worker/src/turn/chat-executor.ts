@@ -16,6 +16,7 @@ import { AgentStateRunner, type ApprovalWaitPort, type StateTransitionPort } fro
 import { ConversationTurnCompleter, type TurnCompletionStore } from "../conversation-turn";
 import type { RunExecutor } from "../executors";
 import type { ModelCallReceiptSource } from "../model";
+import type { SpendSink } from "../observability";
 import type { RunOutcome } from "../run-dispatcher";
 import { type TurnContextPort, TurnDriver, type TurnRequest } from "./driver";
 import { TurnGuardrails } from "./guardrails";
@@ -48,6 +49,8 @@ export interface ChatExecutorOptions {
   readonly model: ModelPort | ((input: ChatModelFactoryInput) => ModelPort);
   /** Where a guard that timed out or threw is reported; it is skipped, never allowed to stall. */
   readonly log: { warn(obj: unknown, msg?: string): void };
+  /** Where finished turns are reported as spend. */
+  readonly spend?: SpendSink;
   now?(): Date;
 }
 
@@ -112,6 +115,7 @@ export function createChatExecutor(options: ChatExecutorOptions): RunExecutor {
             budgets: new RunBudgetManager(options.budgets),
             businessId: run.businessId,
             runId: run.id,
+            conversationId: identity.conversationId,
           })
         : options.model;
 
@@ -145,6 +149,7 @@ export function createChatExecutor(options: ChatExecutorOptions): RunExecutor {
       buildEvents: () => writer,
       // Only receipt-capable model ports can name the model actually observed.
       ...(isReceiptSource(model) ? { modelReceipt: () => model.latestModelCallReceipt() } : {}),
+      ...(options.spend === undefined ? {} : { spend: options.spend }),
     });
 
     return driver.run(request);
@@ -171,6 +176,8 @@ export interface ChatModelFactoryInput {
   readonly budgets: RunBudgetManager;
   readonly businessId: string;
   readonly runId: string;
+  /** Which Conversation the turn belongs to, so its model spend can be attributed to it. */
+  readonly conversationId: string;
 }
 
 function runBudget(

@@ -18,6 +18,7 @@ const UNCONFIGURED = null;
 function soul(options: {
   sources: unknown[];
   secrets?: (attempt: number) => Promise<SecretsService>;
+  pricingOverrides?: () => Promise<Record<string, { in: number; out: number }>>;
 }): {
   llm: SoulLlm;
   reads: () => number;
@@ -33,6 +34,9 @@ function soul(options: {
         if (options.secrets) return options.secrets(opens);
         return {} as SecretsService;
       },
+      ...(options.pricingOverrides === undefined
+        ? {}
+        : { pricingOverrides: options.pricingOverrides }),
     }),
     reads: () => reads,
     opens: () => opens,
@@ -114,6 +118,177 @@ const TWO_PROVIDER_SOUL = {
     },
   },
 };
+
+describe("SoulLlm — governance", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    process.env.TEST_KEY = "sk-test";
+  });
+
+  function soulWithConstraints(constraints?: Record<string, unknown>) {
+    return {
+      tiers: {
+        ...TWO_PROVIDER_SOUL.tiers,
+        standard: {
+          providers: [
+            {
+              provider: "openai",
+              model: "gpt-4o",
+              api_key_ref: "env://TEST_KEY",
+              ...(constraints === undefined ? {} : { constraints }),
+            },
+          ],
+        },
+      },
+    };
+  }
+
+  it("denies a model whose declared residency does not match what the turn requires", async () => {
+    const { llm } = soul({ sources: [soulWithConstraints({ residency: "us" })] });
+
+    const resolution = await llm.resolveModel("balanced", { ...ANY, residency: "eu" });
+
+    expect(resolution.kind).toBe("denied");
+    expect(resolution.routing).toMatchObject({ outcome: "denied", reason: "residency_violation" });
+  });
+
+  it("denies a model that declares no residency at all when the turn requires one", async () => {
+    // Undeclared is unverifiable, not permissive. Nothing derived `constraints` from authored
+    // config before, so every model read as undeclared and this denial could never fire.
+    const { llm } = soul({ sources: [soulWithConstraints()] });
+
+    const resolution = await llm.resolveModel("balanced", { ...ANY, residency: "eu" });
+
+    expect(resolution.kind).toBe("denied");
+    expect(resolution.routing).toMatchObject({ outcome: "denied", reason: "residency_violation" });
+  });
+
+  it("serves a model whose declared residency matches", async () => {
+    const { llm } = soul({ sources: [soulWithConstraints({ residency: "eu" })] });
+
+    const resolution = await llm.resolveModel("balanced", { ...ANY, residency: "eu" });
+
+    expect(resolution.kind).toBe("available");
+  });
+
+  it("leaves a turn that demands nothing unaffected by an undeclared posture", async () => {
+    const { llm } = soul({ sources: [soulWithConstraints()] });
+
+    const resolution = await llm.resolveModel("balanced", ANY);
+
+    expect(resolution.kind).toBe("available");
+  });
+});
+
+describe("SoulLlm — cost ceilings and pricing", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    process.env.TEST_KEY = "sk-test";
+  });
+
+  /** `sonnet` is not a priceable id; `gpt-4o` is in the built-in table. */
+  function soulWithCeiling(model: string) {
+    return {
+      tiers: {
+        ...TWO_PROVIDER_SOUL.tiers,
+        standard: {
+          providers: [
+            {
+              provider: "openai",
+              model,
+              api_key_ref: "env://TEST_KEY",
+              budgets: { max_cost_usd: 5 },
+            },
+          ],
+        },
+      },
+    };
+  }
+
+  it("refuses a chain it cannot price when the profile declares a cost ceiling", async () => {
+    // A ceiling that cannot be charged is not a ceiling. Serving the call anyway would make the
+    // limit strictest on the models we can price and absent on the ones we cannot.
+    const { llm } = soul({ sources: [soulWithCeiling("sonnet")] });
+
+    const resolution = await llm.resolveModel("balanced", ANY);
+
+    expect(resolution.kind).toBe("denied");
+    expect(resolution.routing).toMatchObject({ outcome: "denied", reason: "cost_unpriceable" });
+  });
+
+  it("serves the same unpriceable chain when no cost ceiling was declared", async () => {
+    // Denying here would fail Runs that never asked for a limit. The earlier attempt at this fix
+    // probed pricability with a zero-amount budget charge, which the ledger rejects outright, and
+    // so hard-failed every Run regardless of whether it had a ceiling at all.
+    const { llm } = soul({ sources: [TWO_PROVIDER_SOUL] });
+
+    const resolution = await llm.resolveModel("balanced", ANY);
+
+    expect(resolution.kind).toBe("available");
+  });
+
+  it("serves a priceable chain under a declared ceiling", async () => {
+    const { llm } = soul({ sources: [soulWithCeiling("gpt-4o")] });
+
+    const resolution = await llm.resolveModel("balanced", ANY);
+
+    expect(resolution.kind).toBe("available");
+  });
+
+  it("prices a served call, and reports an unpriceable one as unpriced rather than free", async () => {
+    const { llm } = soul({ sources: [TWO_PROVIDER_SOUL] });
+    const resolution = await llm.resolveModel("gpt-4o", ANY);
+
+    if (resolution.kind !== "available") throw new Error("expected an available resolution");
+    expect(resolution.price(1_000_000, 0)).toEqual({
+      kind: "priced",
+      costUsd: 2.5,
+      source: "table",
+    });
+
+    const unpriceable = await llm.resolveModel("sonnet", ANY);
+    if (unpriceable.kind !== "available") throw new Error("expected an available resolution");
+    expect(unpriceable.price(1_000_000, 0)).toEqual({ kind: "unpriced" });
+  });
+
+  it("applies an operator price correction on the branch that charges the budget", async () => {
+    // The override used to reach only the reporting side, so enforcement ran on the stale price.
+    const { llm } = soul({
+      sources: [TWO_PROVIDER_SOUL],
+      pricingOverrides: async () => ({ sonnet: { in: 7, out: 9 } }),
+    });
+
+    const resolution = await llm.resolveModel("sonnet", ANY);
+
+    if (resolution.kind !== "available") throw new Error("expected an available resolution");
+    expect(resolution.price(1_000_000, 0)).toMatchObject({ costUsd: 7, source: "override" });
+  });
+
+  it("treats a subscription seat as unmetered instead of billing published API rates", async () => {
+    // The seat is already paid for; charging it list price fails Runs that had budget left.
+    const { llm } = soul({
+      sources: [
+        {
+          tiers: {
+            ...TWO_PROVIDER_SOUL.tiers,
+            standard: {
+              providers: [
+                { provider: "claude-code", model: "sonnet", api_key_ref: "env://TEST_KEY" },
+              ],
+            },
+          },
+        },
+      ],
+    });
+
+    const resolution = await llm.resolveModel("balanced", ANY);
+
+    if (resolution.kind !== "available") throw new Error("expected an available resolution");
+    expect(resolution.price(1_000_000, 1_000_000)).toEqual({ kind: "subscription" });
+  });
+});
 
 describe("SoulLlm — profile routing", () => {
   beforeEach(() => {

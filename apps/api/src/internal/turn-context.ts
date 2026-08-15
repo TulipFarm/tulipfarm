@@ -3,6 +3,7 @@ import {
   type ContextCandidate,
   DEFAULT_GUARDRAILS,
   type GuardrailsService,
+  type ModelRequirementsPolicy,
   type RecalledMemory,
 } from "@tulipfarm/agent-runtime";
 import type { KnowledgeService } from "@tulipfarm/knowledge";
@@ -17,7 +18,7 @@ import {
   requestArtifactId,
 } from "@tulipfarm/run-kernel";
 import { canonicalHash } from "@tulipfarm/schema";
-import type { SoulLoader } from "@tulipfarm/soul";
+import type { SoulAgent, SoulLoader } from "@tulipfarm/soul";
 import type { IntegrationStore } from "@tulipfarm/storage";
 import type { PresentationContext } from "@tulipfarm/surface";
 import type { ToolRegistry } from "../broker/tool-adapter";
@@ -32,6 +33,7 @@ import type { BundledSkill } from "../soul/skills/bundled";
 import { listAvailableSkills, listEagerSkills } from "../soul/skills/registry";
 import { presentationContextFor, surfaceCatalogPromptFor } from "../surfaces/renderer-registry";
 import { githubDisabledSkillNames, githubExcludedToolNames } from "../tools/github/visibility";
+import { ModelSelectorDeniedError, type ModelSelectorGate } from "./model-authz";
 import { resolveModelSelector } from "./model-selector";
 import type { HostedTurnContext, TurnAuthority, TurnContextResolver } from "./turn-host";
 
@@ -130,6 +132,13 @@ export interface ChatTurnContextResolverOptions {
   /** Live GitHub-install check backing per-turn tool visibility — absent only where a deployment
    * never wired the GitHub tool family at all. */
   readonly githubStatus?: { readonly integrations: IntegrationStore; readonly businessId: string };
+  /**
+   * Decides whether this turn's subject may use the model it named.
+   *
+   * Absent leaves the model path ungated, which is what every turn did before this existed; a
+   * deployment wires it to put `platform.model` behind the one decision function.
+   */
+  readonly modelGate?: ModelSelectorGate;
   now?(): Date;
 }
 
@@ -230,7 +239,9 @@ export class ChatTurnContextResolver implements TurnContextResolver {
     return {
       agentId: agent.name,
       subjectId: authority.subject.id,
-      modelProfileId: resolveModelSelector(request),
+      modelProfileId: await this.authorizeModelSelector(authority, agent, request),
+      ...modelPolicyOf(agent),
+      principal: { kind: authority.subject.kind, id: authority.subject.id },
       contextDigest: manifest.digest,
       guardrailDigest,
       guardrailPolicy,
@@ -244,6 +255,37 @@ export class ChatTurnContextResolver implements TurnContextResolver {
       compacted: dropped.size > 0,
       ...(skillToolScopes === undefined ? {} : { skillToolScopes }),
     };
+  }
+
+  /**
+   * Resolves the requested model, having first asked whether this subject may use it.
+   *
+   * The selector arrives as a free string from the chat request body and used to reach the
+   * provider having passed only a capability-fit check — a question about whether the model
+   * *could* serve the turn, never about whether the caller was *allowed* to ask it to.
+   *
+   * The gate runs in shadow mode until there is evidence over real traffic, so a denial is
+   * reported and the selector still resolves. Enforcement is a separate, evidenced flip.
+   */
+  private async authorizeModelSelector(
+    authority: TurnAuthority,
+    agent: ReturnType<typeof resolveAgent>,
+    request: ChatRequestPayload
+  ): Promise<string> {
+    const selector = resolveModelSelector(request);
+    const gate = this.options.modelGate;
+    if (gate === undefined) return selector;
+
+    const outcome = await gate.authorize({
+      businessId: authority.businessId,
+      subject: authority.subject,
+      agentId: agent.name,
+      selector,
+    });
+    if (outcome.enforced && outcome.wouldDeny) {
+      throw new ModelSelectorDeniedError(selector, outcome.decision.reason);
+    }
+    return selector;
   }
 
   /**
@@ -345,6 +387,19 @@ function timezoneFrom(memory: readonly { key: string; value: string }[]): string
 const MAX_REPAIR_ATTEMPTS = 2;
 
 const SYSTEM_SOURCE_ID = "system";
+
+/**
+ * The Agent's authored model governance, read from validated `AGENT.md` frontmatter.
+ *
+ * The Soul loader has already validated the frontmatter against `AgentFrontmatterSchema`, so an
+ * unparseable policy never reaches here. Absent stays absent: a turn that demands nothing must
+ * keep matching profiles that declare nothing.
+ */
+function modelPolicyOf(agent: SoulAgent): { modelPolicy?: ModelRequirementsPolicy } {
+  const policy = agent.frontmatter.modelPolicy;
+  if (policy === undefined || policy === null || typeof policy !== "object") return {};
+  return { modelPolicy: policy as ModelRequirementsPolicy };
+}
 
 /** Skill Tool scopes come from optional `tools:` frontmatter; absent scopes omit the wire field. */
 function buildSkillToolScopes(
