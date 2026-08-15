@@ -114,8 +114,7 @@
                 "mcp",
                 "openapi",
                 "http",
-                "sandbox",
-                "postgres"
+                "sandbox"
               ],
               "type": "string"
             },

@@ -319,27 +319,6 @@ export {
   syncNotionKnowledge,
 } from "./notion";
 export type {
-  PostgresAdapterContext,
-  PostgresAdapterContextResolver,
-  PostgresAdapterDependencies,
-  PostgresConnectionPort,
-  PostgresGrantAction,
-  PostgresIdempotencyPort,
-  PostgresIntegrationGrant,
-  PostgresIntegrationSession,
-  PostgresQueryResult,
-  PostgresTransactionFailurePhase,
-} from "./postgres";
-export {
-  POSTGRES_ADAPTER_REF,
-  POSTGRES_MUTATION_TOOL_CONTRACT,
-  POSTGRES_READ_TOOL_CONTRACT,
-  POSTGRES_TOOL_CONTRACTS,
-  POSTGRES_TOOL_IDS,
-  PostgresAdapter,
-  PostgresTransactionError,
-} from "./postgres";
-export type {
   SlackChannelAdapterDeps,
   SlackChannelKind,
   SlackDeliveryAdapterDeps,
