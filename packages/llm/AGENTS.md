@@ -17,6 +17,7 @@ subscription-CLI model adapters.
 | `src/fallback.ts`, `src/provider-error.ts` | Fallback order and hard/transient failures. |
 | `src/embeddings.ts`, `src/embedding-provider.ts` | Embedding providers and execution. |
 | `src/model-spec.ts`, `src/pricing.ts` | Model metadata and cost helpers. |
+| `src/prompt-cache.ts` | Whether a prompt prefix asks for provider-side caching. |
 | `src/cli/` | Subscription Provider adapters, jail, transcripts, JSON mode, specs. |
 
 ## Rules
@@ -37,6 +38,8 @@ subscription-CLI model adapters.
 - No direct `console.*`: every notice goes through the injected `LlmLogger`/`EmbeddingLogger`, or
   it misses the log viewer and redaction.
 - Cached input token semantics differ by vendor; report cache read as a breakdown, never an addend.
+- Prompt caching is requested only through `decidePromptCache`, which fails closed: an absent
+  `cacheAllowed` means no profile checked sensitivity, so it must never read as yes.
 - Do not pass ambient vendor env credentials through the CLI jail; only saved credentials.
 - Timed-out CLI turns must throw, not finish as a normal `stop`.
 - Subscription Providers are models only: disable shell, file tools, web, and ambient capability.

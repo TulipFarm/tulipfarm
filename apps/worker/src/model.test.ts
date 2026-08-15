@@ -1089,3 +1089,85 @@ describe("LlmModelPort — the zero-output diagnostic is not a content leak", ()
     expect(digest(a)).toBeDefined();
   });
 });
+
+/**
+ * The metering half of prompt caching shipped long before the asking half. These pin the ask
+ * itself: the decision is unit-tested in `@tulipfarm/llm`, so what matters here is that it reaches
+ * the provider wire, and that routing's refusal survives the trip.
+ */
+describe("LlmModelPort prompt caching", () => {
+  const LONG_SYSTEM = "s".repeat(1024 * 5);
+
+  async function promptFor(overrides: {
+    cacheAllowed?: boolean;
+    provider?: string;
+    system?: string;
+    raw?: boolean;
+  }): Promise<Record<string, unknown>[]> {
+    const mock = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: simulateReadableStream<StreamPart>({
+          chunks: [...textParts("t1", ["ok"]), FINISH],
+        }),
+      }),
+    });
+    const port = new LlmModelPort({
+      model: async (selector): Promise<LlmModelResolution> => ({
+        kind: "available",
+        price: TEST_PRICE,
+        model: mock as unknown as LanguageModel,
+        provider: overrides.provider ?? "anthropic",
+        routing: overrides.raw
+          ? { outcome: "raw_model", selector, resolution: "raw_model_id", modelId: selector }
+          : {
+              outcome: "selected",
+              selector,
+              resolution: "effort_preset",
+              profileId: "primary",
+              chain: [{ profileId: "primary", modelId: "claude-sonnet-5" }],
+              cacheAllowed: overrides.cacheAllowed ?? true,
+              rejectedFallbacks: [],
+            },
+      }),
+    });
+    await port.invoke(
+      request({
+        messages: [
+          { role: "system", content: overrides.system ?? LONG_SYSTEM },
+          { role: "user", content: "hello" },
+        ],
+      })
+    );
+    return mock.doStreamCalls[0]?.prompt as unknown as Record<string, unknown>[];
+  }
+
+  const breakpointOn = (prompt: Record<string, unknown>[]): unknown =>
+    prompt.find((m) => m.role === "system")?.providerOptions;
+
+  it("asks the provider to cache a long, allowed instruction prefix", async () => {
+    expect(breakpointOn(await promptFor({}))).toEqual({
+      anthropic: { cacheControl: { type: "ephemeral" } },
+    });
+  });
+
+  it("sends no breakpoint when routing withheld caching, which is how sensitive prompts stay out", async () => {
+    expect(breakpointOn(await promptFor({ cacheAllowed: false }))).toBeUndefined();
+  });
+
+  it("sends no breakpoint for a raw model id, because no profile checked sensitivity", async () => {
+    expect(breakpointOn(await promptFor({ raw: true }))).toBeUndefined();
+  });
+
+  it("sends no breakpoint to a provider that caches without being asked", async () => {
+    expect(breakpointOn(await promptFor({ provider: "openai" }))).toBeUndefined();
+  });
+
+  it("sends no breakpoint on a prefix too short for the provider to cache", async () => {
+    expect(breakpointOn(await promptFor({ system: "you are helpful" }))).toBeUndefined();
+  });
+
+  it("still delivers the instructions when nothing is cached", async () => {
+    const prompt = await promptFor({ cacheAllowed: false });
+    expect(prompt.find((m) => m.role === "system")?.content).toBe(LONG_SYSTEM);
+  });
+});

@@ -40,6 +40,13 @@ export {
 } from "./pricing";
 export { SecretsPrincipalCredentials } from "./principal-credentials";
 export {
+  decidePromptCache,
+  type PromptCacheAnnotation,
+  type PromptCacheDecision,
+  type PromptCacheInput,
+  type PromptCacheSkip,
+} from "./prompt-cache";
+export {
   createModel,
   type PrincipalCredentialResolver,
   type PrincipalRef,

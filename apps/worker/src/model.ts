@@ -11,8 +11,8 @@ import type {
   ModelUsage,
 } from "@tulipfarm/agent-runtime";
 import { deriveModelRequirements, ModelInvocationError } from "@tulipfarm/agent-runtime";
-import type { CostBasis, PrincipalRef } from "@tulipfarm/llm";
-import { classifyProviderError } from "@tulipfarm/llm";
+import type { CostBasis, PrincipalRef, PromptCacheDecision } from "@tulipfarm/llm";
+import { classifyProviderError, decidePromptCache } from "@tulipfarm/llm";
 import type { ResolvedLimits } from "@tulipfarm/run-kernel";
 import {
   asEffortPreset,
@@ -179,6 +179,17 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
     resolution: Extract<LlmModelResolution, { kind: "available" }>
   ): AsyncIterable<ModelStreamChunk> {
     const { instructions, messages } = splitPrompt(request.messages);
+    // Caching is charged on this path whether or not it was asked for, so the ask happens here
+    // rather than being left to whatever each provider does by default.
+    const prompt = withCacheBreakpoint(
+      instructions,
+      decidePromptCache({
+        provider: resolution.provider,
+        modelId: routedModelId(resolution.routing),
+        cacheAllowed: routedCacheAllowed(resolution.routing),
+        prefixChars: stablePrefixChars(instructions, request.tools),
+      })
+    );
     const startedAt = this.now();
     // Held for the whole call: releasing early would let the next turn in while this one is
     // still occupying a provider connection.
@@ -208,7 +219,7 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
       result = streamText({
         model: resolution.model,
         messages,
-        ...(instructions.length === 0 ? {} : { instructions }),
+        ...(prompt.length === 0 ? {} : { instructions: prompt }),
         ...(request.tools === undefined || request.tools.length === 0
           ? {}
           : { tools: toToolSet(request.tools) }),
@@ -492,6 +503,49 @@ function toOutput(
     };
   }
   return { kind: "text", text };
+}
+
+/** Routing's caching allowance; `undefined` when no profile decided, which is not the same as no. */
+function routedCacheAllowed(routing: RunEventPayloads["model.routed"]): boolean | undefined {
+  return routing.outcome === "selected" ? routing.cacheAllowed : undefined;
+}
+
+/**
+ * Size of the part of the prompt that repeats unchanged between turns.
+ *
+ * Tool declarations sit ahead of the instructions in the provider's cacheable prefix and are just
+ * as stable, so leaving them out would under-measure a prompt that is mostly tool schemas.
+ */
+function stablePrefixChars(
+  instructions: readonly SystemModelMessage[],
+  tools: ModelInvocationRequest["tools"]
+): number {
+  const instructionChars = instructions.reduce((total, m) => total + m.content.length, 0);
+  const toolChars = (tools ?? []).reduce(
+    (total, t) =>
+      total + t.name.length + (t.description?.length ?? 0) + JSON.stringify(t.inputSchema).length,
+    0
+  );
+  return instructionChars + toolChars;
+}
+
+/**
+ * Marks the end of the stable prefix so the provider caches everything up to it.
+ *
+ * Only the last instruction is marked: a breakpoint covers everything before it, so marking each
+ * block would spend the provider's limited breakpoints for no extra coverage. The annotation is
+ * namespaced by provider, so a chain that falls back across vendors carries an option the
+ * answering provider ignores rather than one it misreads.
+ */
+function withCacheBreakpoint(
+  instructions: readonly SystemModelMessage[],
+  decision: PromptCacheDecision
+): SystemModelMessage[] {
+  if (decision.kind === "skip") return [...instructions];
+  const last = instructions.length - 1;
+  return instructions.map((message, index) =>
+    index === last ? { ...message, providerOptions: decision.providerOptions } : message
+  );
 }
 
 /** Convert loop transcript to SDK prompt; tool results stay attributed to their tool calls. */
