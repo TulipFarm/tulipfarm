@@ -1,7 +1,12 @@
 import type { LanguageModelV4, LanguageModelV4CallOptions } from "@ai-sdk/provider";
 import { APICallError, generateText, RetryError } from "ai";
 import { describe, expect, it, vi } from "vitest";
-import { ClassifiedLanguageModel, classifyProviderError, LlmProviderError } from "./provider-error";
+import {
+  ClassifiedLanguageModel,
+  classifyProviderError,
+  LlmProviderError,
+  ProviderUnavailableError,
+} from "./provider-error";
 
 function apiError(
   statusCode: number,
@@ -57,6 +62,12 @@ describe("classifyProviderError", () => {
     expect(classifyProviderError(apiError(429, {}))).toBe("model_rate_limited");
     expect(classifyProviderError(apiError(503, {}))).toBe("model_provider_unavailable");
     expect(classifyProviderError(new Error("secret provider detail"))).toBe("model_error");
+  });
+
+  it("classifies a call shed before it reached the provider as an outage", () => {
+    expect(classifyProviderError(new ProviderUnavailableError("openai", "circuit open"))).toBe(
+      "model_provider_unavailable"
+    );
   });
 });
 

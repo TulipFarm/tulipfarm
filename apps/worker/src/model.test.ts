@@ -1,18 +1,24 @@
 import type {
+  AgentLoopInput,
   ModelInvocationRequest,
   ModelRequirements,
   ModelRequirementsPolicy,
   ModelStreamChunk,
 } from "@tulipfarm/agent-runtime";
-import { ModelInvocationError } from "@tulipfarm/agent-runtime";
+import {
+  AgentLoop,
+  InMemoryLoopCheckpointStore,
+  ModelInvocationError,
+} from "@tulipfarm/agent-runtime";
 import { type CostBasis, LlmProviderError } from "@tulipfarm/llm";
 import type { EffortRung, RunEventEffortInference } from "@tulipfarm/schema";
-import type { LanguageModel } from "ai";
+import { APICallError, type LanguageModel } from "ai";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 import type { EffortInferencePort } from "./effort-inference";
 import type { LlmModelResolution } from "./llm";
 import { LlmModelPort } from "./model";
+import { type ModelCallGate, ProviderGate } from "./model-gate";
 import type { SpendSink } from "./observability";
 
 /**
@@ -1169,5 +1175,122 @@ describe("LlmModelPort prompt caching", () => {
   it("still delivers the instructions when nothing is cached", async () => {
     const prompt = await promptFor({ cacheAllowed: false });
     expect(prompt.find((m) => m.role === "system")?.content).toBe(LONG_SYSTEM);
+  });
+});
+
+/**
+ * The gate refuses a call before the provider is ever dialled, so nothing in the stream's own
+ * failure handling sees it. These pin the whole chain — gate to Turn — because the participant
+ * copy for a shed provider already existed and this path could never reach it.
+ */
+describe("LlmModelPort — a call the provider gate refused", () => {
+  const gatedPort = (gate: ModelCallGate, mock: MockLanguageModelV4): LlmModelPort =>
+    new LlmModelPort({
+      gate,
+      model: async (selector): Promise<LlmModelResolution> => ({
+        kind: "available",
+        price: TEST_PRICE,
+        provider: "openai",
+        model: mock as unknown as LanguageModel,
+        routing: {
+          outcome: "raw_model",
+          selector,
+          resolution: "raw_model_id",
+          modelId: selector,
+        },
+      }),
+    });
+
+  /** Not retryable, so the call fails once and opens the breaker at a known count. */
+  const rateLimited = (): APICallError =>
+    new APICallError({
+      message: "http 429",
+      url: "https://provider.test/v1/responses",
+      requestBodyValues: {},
+      statusCode: 429,
+      responseBody: "{}",
+      isRetryable: false,
+    });
+
+  const failingModel = (): MockLanguageModelV4 =>
+    new MockLanguageModelV4({
+      doStream: async () => {
+        throw rateLimited();
+      },
+    });
+
+  const healthyModel = (): MockLanguageModelV4 =>
+    new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: simulateReadableStream<StreamPart>({
+          chunks: [...textParts("t1", ["hi"]), FINISH],
+        }),
+      }),
+    });
+
+  it("reports a shed provider as unavailable, not as a generic model failure", async () => {
+    const gate = new ProviderGate({ failureThreshold: 1, recoveryAfterMs: 60_000 });
+
+    await expect(gatedPort(gate, failingModel()).invoke(request())).rejects.toMatchObject({
+      name: "ModelInvocationError",
+      reason: "model_rate_limited",
+    });
+
+    const healthy = healthyModel();
+    await expect(gatedPort(gate, healthy).invoke(request())).rejects.toMatchObject({
+      name: "ModelInvocationError",
+      reason: "model_provider_unavailable",
+    });
+    expect(healthy.doStreamCalls).toHaveLength(0);
+  });
+
+  it("reports a call that never got a slot as unavailable", async () => {
+    vi.useFakeTimers();
+    try {
+      const gate = new ProviderGate({ maxConcurrency: 1, queueTimeoutMs: 1_000 });
+      // Another turn holds the only slot for longer than this one is willing to queue.
+      await gate.acquire("openai");
+      const queued = healthyModel();
+
+      const assertion = expect(gatedPort(gate, queued).invoke(request())).rejects.toMatchObject({
+        name: "ModelInvocationError",
+        reason: "model_provider_unavailable",
+      });
+      await vi.advanceTimersByTimeAsync(1_001);
+      await assertion;
+
+      expect(queued.doStreamCalls).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("is the reason the Turn reports, so the participant is told the provider is down", async () => {
+    const gate = new ProviderGate({ failureThreshold: 1, recoveryAfterMs: 60_000 });
+    const turn = (port: LlmModelPort): AgentLoop =>
+      new AgentLoop({
+        model: port,
+        tools: { dispatch: async () => ({ status: "succeeded", callId: "call-1", output: {} }) },
+        checkpoints: new InMemoryLoopCheckpointStore(),
+        events: { append: async () => {} },
+        budget: { consume: async () => ({ outcome: "allowed" }) },
+        isCancelled: async () => false,
+      });
+    const loopInput: AgentLoopInput = {
+      businessId: "biz-1",
+      runId: "run-1",
+      stateId: "state-1",
+      modelProfileId: "balanced",
+      contextDigest: "sha256:context",
+      guardrailDigest: "sha256:guardrail",
+      messages: [{ role: "user", content: "hello" }],
+      tools: [],
+      limits: { maxIterations: 1, maxToolCalls: 1, maxRepairAttempts: 1 },
+    };
+
+    await turn(gatedPort(gate, failingModel())).run(loopInput);
+    const outcome = await turn(gatedPort(gate, healthyModel())).run(loopInput);
+
+    expect(outcome).toMatchObject({ status: "failed", reason: "model_provider_unavailable" });
   });
 });

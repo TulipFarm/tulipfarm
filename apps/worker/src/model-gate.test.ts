@@ -1,5 +1,6 @@
+import { ProviderUnavailableError } from "@tulipfarm/llm";
 import { describe, expect, it, vi } from "vitest";
-import { ProviderGate, ProviderUnavailableError } from "./model-gate";
+import { ProviderGate } from "./model-gate";
 
 const settled = () => new Promise((resolve) => setImmediate(resolve));
 

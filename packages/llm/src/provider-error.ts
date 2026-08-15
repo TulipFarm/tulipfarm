@@ -27,6 +27,25 @@ export class LlmProviderError extends Error {
   }
 }
 
+/**
+ * A call shed before it ever reached the provider: local admission control — the per-provider
+ * concurrency queue or its circuit breaker — refused to dial out.
+ *
+ * Deliberately not an `LlmProviderError`, which marks permanent failures the SDK must stop
+ * retrying. A shed call is transient by construction. It lives here rather than beside the gate
+ * that throws it because `classifyProviderError` is the only classification authority, and a
+ * package may not import from an application.
+ */
+export class ProviderUnavailableError extends Error {
+  constructor(
+    readonly provider: string,
+    reason: string
+  ) {
+    super(`provider ${provider} is not accepting calls: ${reason}`);
+    this.name = "ProviderUnavailableError";
+  }
+}
+
 function lastProviderError(error: unknown): unknown {
   return RetryError.isInstance(error) ? lastProviderError(error.lastError) : error;
 }
@@ -54,6 +73,7 @@ function errorCodes(error: APICallError): Set<string> {
 export function classifyProviderError(error: unknown): LlmProviderFailureReason {
   const providerError = lastProviderError(error);
   if (providerError instanceof LlmProviderError) return providerError.reason;
+  if (providerError instanceof ProviderUnavailableError) return "model_provider_unavailable";
   if (LoadAPIKeyError.isInstance(providerError)) return "model_authentication_failed";
   if (NoSuchModelError.isInstance(providerError)) return "model_not_found";
   if (!APICallError.isInstance(providerError)) return "model_error";
