@@ -2,8 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { decodeCursor } from "../pagination";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { PgResourceRepo, type ResourceDoc, type ResourceHistoryDoc } from "./repo";
 import { createHistoryTableSql, createResourceTableSql } from "./schema";
 
@@ -26,8 +25,7 @@ describe("PgResourceRepo", () => {
   let repo: PgResourceRepo;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     await db.query(createResourceTableSql(TYPE));
     await db.query(createHistoryTableSql(TYPE));
     repo = new PgResourceRepo(db, TYPE);

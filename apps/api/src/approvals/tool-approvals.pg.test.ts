@@ -12,8 +12,7 @@ import { CHAT_REQUEST_SCHEMA_REF, INVOCATION_REQUEST_SCHEMAS } from "@tulipfarm/
 import { ArtifactStore, RunStore, WaitStore } from "@tulipfarm/storage";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ambientTransactionPort, type Queryable, transactionPort } from "../db";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { ApprovalsRepo } from "./runtime-repo";
 import { ToolApprovalService } from "./tool-approvals";
 
@@ -29,8 +28,7 @@ describe("tool approvals as durable waits", () => {
   let invocations: DurableInvocationGateway;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db as unknown as Queryable);
+    db = await makeMigratedPglite();
 
     const queryable = db as unknown as Queryable;
     const validator = new TypedOutputValidator(INVOCATION_REQUEST_SCHEMAS);

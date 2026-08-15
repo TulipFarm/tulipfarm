@@ -1,8 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import {
   type ConversationDoc,
   ConversationOwnerlessError,
@@ -19,8 +18,7 @@ describe("PgConversationRepo", () => {
   let repo: PgConversationRepo;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     repo = new PgConversationRepo(db);
   });
 

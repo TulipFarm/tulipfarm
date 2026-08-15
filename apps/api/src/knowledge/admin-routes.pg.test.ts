@@ -1,8 +1,7 @@
 import type { PGlite } from "@electric-sql/pglite";
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { PgKnowledgeChunkRepo } from "./chunks-repo";
 import { PageRetrievalService } from "./page-search-adapter";
 import { PgKnowledgePageRepo, PgKnowledgeRevisionRepo } from "./repo";
@@ -27,8 +26,7 @@ describe("knowledge admin routes (reindex / backfill / index-status)", () => {
   let app: FastifyInstance;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     const service = new KnowledgeService({
       pages: new PgKnowledgePageRepo(db),
       chunks: new PgKnowledgeChunkRepo(db),

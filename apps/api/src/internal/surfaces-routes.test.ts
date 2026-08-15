@@ -28,10 +28,9 @@ import { createApiClient, formatApiClientCredential } from "../identity/api-clie
 import { MemoryApiClientRepo, MemoryExternalIdentityRepo } from "../identity/fakes";
 import { IngressIdentityResolver } from "../ingress/identity";
 import { IntegrationConversationsRepo } from "../ingress/repo";
-import { runPgMigrations } from "../pg-migrate";
 import { MemorySurfaceActionStore } from "../surfaces/action-store";
 import { MemorySurfaceArtifactStore } from "../surfaces/artifact-store";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { FakeConversationStore } from "../test/turn-host-fixtures";
 
 const TEST_CSRF = "a".repeat(64);
@@ -80,8 +79,7 @@ describe("POST /api/v1/internal/surfaces/interactions", () => {
   let runDeliveries: ChannelRunDeliveryStore;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     const transactions = transactionPort(db as unknown as Queryable);
 
     const sessions = new MemorySessionStore();

@@ -14,8 +14,7 @@ import { createUser, type UserDoc, type UserRepo } from "../auth/users";
 import { type Queryable, transactionPort, withTransaction } from "../db";
 import { InternalRoutineApprovalHost } from "../internal/routine-approval-host";
 import type { PaginatedResult } from "../pagination";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { RoutineApprovalService } from "./routine-approvals";
 import { ApprovalsRepo } from "./runtime-repo";
 import { ToolApprovalService } from "./tool-approvals";
@@ -72,8 +71,7 @@ describe("approval routes — routine_state kind", () => {
   let approvals: ApprovalsRepo;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     approvals = new ApprovalsRepo(db);
 
     const store = new MemorySessionStore();
@@ -143,8 +141,7 @@ describe("approval routes — durable tool_call kind", () => {
   let userId: string;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     approvals = new ApprovalsRepo(db);
 
     const transactions = transactionPort(db as unknown as Queryable);
@@ -336,8 +333,7 @@ describe("approval routes — routine_state kind, decided by role", () => {
   }
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     approvals = new ApprovalsRepo(db);
 
     const queryable = db as unknown as Queryable;

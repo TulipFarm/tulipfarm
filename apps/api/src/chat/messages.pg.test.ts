@@ -2,8 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { decodeCursor } from "../pagination";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { type MessageDoc, type MessagePart, PgMessageRepo } from "./messages";
 
 const CONV_ID = "33333333-3333-3333-3333-333333333333";
@@ -31,8 +30,7 @@ describe("PgMessageRepo", () => {
   let repo: PgMessageRepo;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     await seedConversation(db);
     repo = new PgMessageRepo(db);
   });

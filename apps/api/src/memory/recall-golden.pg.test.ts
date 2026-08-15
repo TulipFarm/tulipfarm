@@ -12,8 +12,7 @@ import type {
 } from "@tulipfarm/memory";
 import { recallMemory } from "@tulipfarm/memory";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { PgMemoryAssertionStore } from "./assertion-store";
 import type { MemoryEmbedder } from "./embedder";
 import { PgPendingMemoryStore } from "./pending-store";
@@ -136,8 +135,7 @@ describe("Memory recall golden set", () => {
   let db: PGlite;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
   });
 
   afterEach(async () => {

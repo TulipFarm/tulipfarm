@@ -1,8 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { IngressDeliveriesRepo, IntegrationConversationsRepo, IntegrationEventsRepo } from "./repo";
 
 describe("ingress repos (PGlite)", () => {
@@ -11,8 +10,7 @@ describe("ingress repos (PGlite)", () => {
   let conversationId: string;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     userId = randomUUID();
     conversationId = randomUUID();
     await db.query(

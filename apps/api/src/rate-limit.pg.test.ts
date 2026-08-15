@@ -1,16 +1,14 @@
 import type { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { runPgMigrations } from "./pg-migrate";
 import { PgRateLimiter } from "./rate-limit";
-import { makePglite } from "./test/pglite";
+import { makeMigratedPglite } from "./test/pglite";
 
 describe("PgRateLimiter (fixed-window)", () => {
   let db: PGlite;
   let limiter: PgRateLimiter;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     limiter = new PgRateLimiter(db);
   });
 

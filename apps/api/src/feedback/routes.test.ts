@@ -9,8 +9,7 @@ import { SESSION_COOKIE } from "../auth/routes";
 import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
 import type { PaginatedResult } from "../pagination";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { FeedbackRepo } from "./repo";
 
 const TEST_CSRF = "a".repeat(64);
@@ -64,8 +63,7 @@ describe("feedback routes", () => {
   let messageId: string;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     const store = new MemorySessionStore();
     const userRepo = new FakeUserRepo();
     const tokenRepo = new FakeTokenRepo();

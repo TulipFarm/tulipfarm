@@ -4,8 +4,7 @@
 import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { PageRetrievalService } from "./page-search-adapter";
 import { DEFAULT_RANKING } from "./retrieval-config";
 
@@ -88,8 +87,7 @@ describe("golden retrieval eval (recall@5)", () => {
   let svc: PageRetrievalService;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     const spaceId = randomUUID();
     await db.query(
       `INSERT INTO knowledge_spaces (id, name, description, created_at, updated_at)

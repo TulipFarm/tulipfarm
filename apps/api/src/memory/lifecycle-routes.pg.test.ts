@@ -10,8 +10,7 @@ import { SESSION_COOKIE } from "../auth/routes";
 import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
 import type { PaginatedResult } from "../pagination";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { EngineMemoryRepo } from "./engine-repo";
 import { PgMemoryEpisodeStore } from "./episode-store";
 import { MemoryLifecycleService } from "./lifecycle-service";
@@ -105,8 +104,7 @@ describe("memory lifecycle routes", () => {
   let otherSid: string;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
 
     const store = new MemorySessionStore();
     const userRepo = new FakeUserRepo();

@@ -2,8 +2,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { MemoryCandidate, MemoryExtractionPort } from "@tulipfarm/memory";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { MemoryExtractionService } from "./extraction-service";
 
 /** End-to-end guard: inferred Memory Assertions require owner confirmation before persistence. */
@@ -42,8 +41,7 @@ describe("MemoryExtractionService", () => {
   let now: Date;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     now = new Date("2025-01-01T00:00:00.000Z");
     extractor = new StubExtractor([candidate()]);
     service = new MemoryExtractionService(db, extractor, undefined, undefined, () => now);

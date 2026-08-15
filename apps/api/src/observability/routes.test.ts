@@ -9,8 +9,7 @@ import { SESSION_COOKIE } from "../auth/routes";
 import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
 import type { PaginatedResult } from "../pagination";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { type LogEventView, PgLogRepo } from "./log-repo";
 import { PgObsRepo } from "./repo";
 import { PgResourceRepo, type ResourceUsage } from "./resource-repo";
@@ -63,8 +62,7 @@ describe("observability routes", () => {
   let memberSid: string;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     service = new ObservabilityService(new PgObsRepo(db));
 
     const store = new MemorySessionStore();

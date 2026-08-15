@@ -25,8 +25,7 @@ import { PgKnowledgeEmissionSink } from "../knowledge-sources/emission-sink";
 import { PgKnowledgeIndexStore } from "../knowledge-sources/index-store";
 import { PgKnowledgeSourceStore } from "../knowledge-sources/source-store";
 import { PgProviderKnowledgeCheckpointStore } from "../knowledge-sources/sync-checkpoint-store";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { PgKnowledgeChunkRepo } from "./chunks-repo";
 import { PageRetrievalService } from "./page-search-adapter";
 import { PgKnowledgePageRepo, PgKnowledgeRevisionRepo } from "./repo";
@@ -167,8 +166,7 @@ describe("K3 Knowledge security through query_knowledge", () => {
   let now: Date;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     sources = new PgKnowledgeSourceStore(db);
     index = new PgKnowledgeIndexStore(db, lexicalOnlyEmbeddings);
     now = NOW;

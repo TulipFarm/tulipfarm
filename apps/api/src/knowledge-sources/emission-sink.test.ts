@@ -2,8 +2,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import type { KnowledgeChunkEmission, KnowledgeSourceEmission } from "@tulipfarm/integrations";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { EmbeddingPort } from "../knowledge/types";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { PgKnowledgeEmissionSink } from "./emission-sink";
 import { PgKnowledgeIndexStore } from "./index-store";
 import { PgKnowledgeSourceStore } from "./source-store";
@@ -63,8 +62,7 @@ describe("PgKnowledgeEmissionSink", () => {
   let index: PgKnowledgeIndexStore;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     sources = new PgKnowledgeSourceStore(db);
     index = new PgKnowledgeIndexStore(db, fakeEmbeddings());
     sink = new PgKnowledgeEmissionSink(sources, index);

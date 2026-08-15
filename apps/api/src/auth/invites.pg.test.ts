@@ -1,8 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import {
   hashInviteToken,
   InviteDeniedError,
@@ -22,8 +21,7 @@ describe("user invites (Postgres)", () => {
   let adminId: string;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     users = new PgUserRepo(db);
     invites = new PgUserInviteRepo(db);
     // One PgUserRepo satisfies both the account lookup and the password write.

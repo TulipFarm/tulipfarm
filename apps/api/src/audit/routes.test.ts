@@ -10,8 +10,7 @@ import { SESSION_COOKIE } from "../auth/routes";
 import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
 import type { PaginatedResult } from "../pagination";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { AuditReadService } from "./read-service";
 import { PgAuditEventRepo } from "./repo";
 
@@ -78,8 +77,7 @@ describe("audit read routes", () => {
   let writer: AuditWriter;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
 
     const repo = new PgAuditEventRepo(db);
     writer = new AuditWriter(repo);

@@ -2,8 +2,7 @@ import { readFileSync } from "node:fs";
 import type { PGlite } from "@electric-sql/pglite";
 import type { MemoryCandidate, MemoryExtractionPort } from "@tulipfarm/memory";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { MemoryExtractionService } from "./extraction-service";
 
 interface GoldenMemoryCandidate extends MemoryCandidate {
@@ -61,8 +60,7 @@ describe("MemoryExtractionService golden set", () => {
   let now: Date;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     extractor = new StubExtractor();
     now = new Date("2026-08-01T12:00:00.000Z");
   });

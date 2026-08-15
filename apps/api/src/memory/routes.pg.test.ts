@@ -8,8 +8,7 @@ import { SESSION_COOKIE } from "../auth/routes";
 import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
 import type { PaginatedResult } from "../pagination";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { EngineMemoryRepo } from "./engine-repo";
 import { MAX_KEY_CHARS, MAX_VALUE_CHARS } from "./limits";
 import { MemoryService } from "./service";
@@ -72,8 +71,7 @@ describe("memory routes", () => {
   let otherUserId: string;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     repo = new EngineMemoryRepo(db);
     const service = new MemoryService(repo);
 

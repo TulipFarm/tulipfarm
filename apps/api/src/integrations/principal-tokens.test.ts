@@ -1,7 +1,6 @@
 import type { PGlite } from "@electric-sql/pglite";
 import { beforeEach, describe, expect, it } from "vitest";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import {
   InMemoryPrincipalProviderTokenRepo,
   PgPrincipalProviderTokenRepo,
@@ -45,8 +44,7 @@ describe("PgPrincipalProviderTokenRepo", () => {
   let repo: PgPrincipalProviderTokenRepo;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     repo = new PgPrincipalProviderTokenRepo(db, "biz-1");
   });
 
@@ -153,8 +151,7 @@ describe("InMemoryPrincipalProviderTokenRepo", () => {
 
 describe("migration 51", () => {
   it("teaches the auth broker's one-use request whose connect it was", async () => {
-    const db = await makePglite();
-    await runPgMigrations(db);
+    const db = await makeMigratedPglite();
     const { rows } = await db.query<{ column_name: string; is_nullable: string }>(
       `SELECT column_name, is_nullable FROM information_schema.columns
         WHERE table_name = 'integration_auth_requests'

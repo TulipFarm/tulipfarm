@@ -25,9 +25,8 @@ import { createUser, type UserDoc, type UserRepo } from "../auth/users";
 import { PgConversationStore } from "../conversations/store.pg";
 import { ambientTransactionPort, type Queryable, transactionPort } from "../db";
 import type { PaginatedResult } from "../pagination";
-import { runPgMigrations } from "../pg-migrate";
 import { runCanceller } from "../runs/cancel";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { PgConversationRepo } from "./conversations";
 import { PgMessageRepo } from "./messages";
 
@@ -119,8 +118,7 @@ describe("durable chat submission over HTTP", () => {
 
   beforeEach(async () => {
     withinBudget = true;
-    db = await makePglite();
-    await runPgMigrations(db as unknown as Queryable);
+    db = await makeMigratedPglite();
 
     const sessionStore = new MemorySessionStore();
     const userRepo = new FakeUserRepo();

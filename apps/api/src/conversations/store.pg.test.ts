@@ -2,8 +2,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Queryable } from "../db";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import type { PersistedTurn } from "./service";
 import { PgConversationStore } from "./store.pg";
 
@@ -39,12 +38,7 @@ describe("PgConversationStore", () => {
   let store: PgConversationStore;
 
   beforeEach(async () => {
-    database = await makePglite();
-    await runPgMigrations(
-      database as unknown as Queryable,
-      () => {},
-      () => {}
-    );
+    database = await makeMigratedPglite();
     await database.query(
       "INSERT INTO conversations (id, user_id, created_at, updated_at) VALUES ($1, $2, $3, $3)",
       [CONVERSATION_ID, USER_ID, CREATED_AT]

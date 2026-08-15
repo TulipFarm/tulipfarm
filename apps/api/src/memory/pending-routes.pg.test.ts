@@ -9,8 +9,7 @@ import { SESSION_COOKIE } from "../auth/routes";
 import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
 import type { PaginatedResult } from "../pagination";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { EngineMemoryRepo } from "./engine-repo";
 import { MemoryExtractionService } from "./extraction-service";
 import { MemoryService } from "./service";
@@ -94,8 +93,7 @@ describe("pending memory routes", () => {
   let otherSid: string;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     extraction = new MemoryExtractionService(db, new StubExtractor());
 
     const store = new MemorySessionStore();

@@ -2,8 +2,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { Queryable } from "../db";
 import { embeddableText } from "../memory/embedder";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import {
   BACKFILL_TARGETS,
   type BackfillEmbedder,
@@ -35,9 +34,8 @@ describe("embedding backfill", () => {
   // full schema build is ~1s, which at one per test made the suite outgrow the hook timeout.
   // Tests are isolated by truncating the tables they touch instead.
   beforeAll(async () => {
-    pg = await makePglite();
+    pg = await makeMigratedPglite();
     db = { query: (text, params) => pg.query(text, params as never[]) as never };
-    await runPgMigrations(db);
   });
 
   afterAll(async () => {

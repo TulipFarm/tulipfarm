@@ -1,8 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { extractHighlights, PageRetrievalService, toPrefixTsQuery } from "./page-search-adapter";
 import { DEFAULT_RANKING } from "./retrieval-config";
 
@@ -56,8 +55,7 @@ describe("PageRetrievalService.searchPages", () => {
   let svc: PageRetrievalService;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     // Explicit config so the trgm pass is deterministic regardless of the env flag.
     svc = new PageRetrievalService(db, { ...DEFAULT_RANKING, trgmFallback: true });
   });
@@ -222,8 +220,7 @@ describe("PageRetrievalService.recentPages", () => {
   let svc: PageRetrievalService;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     svc = new PageRetrievalService(db);
   });
   afterEach(async () => {
