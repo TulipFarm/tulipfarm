@@ -1245,16 +1245,24 @@ describe("LlmModelPort — a call the provider gate refused", () => {
   });
 
   it("reports a call that never got a slot as unavailable", async () => {
-    const gate = new ProviderGate({ maxConcurrency: 1, queueTimeoutMs: 5 });
-    // Another turn holds the only slot for longer than this one is willing to queue.
-    await gate.acquire("openai");
-    const queued = healthyModel();
+    vi.useFakeTimers();
+    try {
+      const gate = new ProviderGate({ maxConcurrency: 1, queueTimeoutMs: 1_000 });
+      // Another turn holds the only slot for longer than this one is willing to queue.
+      await gate.acquire("openai");
+      const queued = healthyModel();
 
-    await expect(gatedPort(gate, queued).invoke(request())).rejects.toMatchObject({
-      name: "ModelInvocationError",
-      reason: "model_provider_unavailable",
-    });
-    expect(queued.doStreamCalls).toHaveLength(0);
+      const assertion = expect(gatedPort(gate, queued).invoke(request())).rejects.toMatchObject({
+        name: "ModelInvocationError",
+        reason: "model_provider_unavailable",
+      });
+      await vi.advanceTimersByTimeAsync(1_001);
+      await assertion;
+
+      expect(queued.doStreamCalls).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("is the reason the Turn reports, so the participant is told the provider is down", async () => {
