@@ -2,11 +2,14 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { IntegrationManifest, SoulIntegration } from "@tulipfarm/soul";
-import { validateAuthSteps, validateThirdPartyManifest } from "@tulipfarm/soul";
+import {
+  bundledIntegrationsDir,
+  validateAuthSteps,
+  validateThirdPartyManifest,
+} from "@tulipfarm/soul";
 import { MemoryEffectStore } from "@tulipfarm/tool-broker";
 import { beforeAll, describe, expect, it } from "vitest";
 import { parse as parseYaml } from "yaml";
-import { bundledIntegrationsDir } from "../../soul/integrations/bundled";
 import { buildDeclarativeTools } from "./tools";
 
 describe("notion bundled integration", () => {

@@ -2,6 +2,7 @@ import type { EventEmitter } from "node:events";
 import type { LlmService } from "@tulipfarm/llm";
 import type { DurableInvocationGateway } from "@tulipfarm/run-kernel";
 import type { SoulLoader } from "@tulipfarm/soul";
+import { DEFAULT_ASSISTANT_NAME } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import type { ConversationStore } from "../conversations/service";
@@ -12,7 +13,6 @@ import {
   sinkFor,
   streamRunEvents,
 } from "../runs/events";
-import { DEFAULT_ASSISTANT_NAME } from "../soul/agents/registry";
 import { isConversationEntryError, resolveConversationEntry } from "./conversation-entry";
 import type { ConversationRepo } from "./conversations";
 import { writeSseHeaders } from "./sse";

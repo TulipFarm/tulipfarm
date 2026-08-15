@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import type { SecretsService } from "@tulipfarm/secrets";
+import { writeLlmConfigToSoulYaml } from "@tulipfarm/soul";
 import { createUser, normalizeEmail, type UserRepo } from "../auth/users";
-import { writeLlmConfigToSoulYaml } from "../soul/llm-config/soul-yaml-io";
 import type { SetupAdminCreator } from "./first-admin";
 import { isProductionMode } from "./service";
 import { patchSoulConfig, readSoulConfig } from "./soul-config";

@@ -3,7 +3,7 @@ import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { type SkillScanFile, scanSkill, skillTrustLevel, THREAT_PATTERNS } from "./guard";
 
-const FIXTURES = resolve(process.cwd(), "src", "soul", "skills", "__fixtures__", "guard");
+const FIXTURES = resolve(__dirname, "__fixtures__", "guard");
 const THREATS = join(FIXTURES, "threats");
 const SAFE = join(FIXTURES, "safe");
 

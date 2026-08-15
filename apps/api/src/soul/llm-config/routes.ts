@@ -18,16 +18,37 @@ import {
 } from "@tulipfarm/schema";
 import { LLM_PROVIDERS, type SecretsService } from "@tulipfarm/secrets";
 import type { SoulLoader, SoulWriter } from "@tulipfarm/soul";
+import { isSoulWriteError, mergeLlmConfigIntoSoulYaml, soulWriteHttpError } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AuditService } from "../../audit/service";
 import { makeSoulAuditWriter } from "../../audit/soul-write";
 import { ErrorSchema } from "../../auth/schemas";
-import type { UserDoc } from "../../auth/users";
+import type { RequireAuthorization } from "../../authz/route-gate";
 import { commitActorFromRequest } from "../commit-actor";
-import { isSoulWriteError, soulWriteHttpError } from "../write-errors";
-import { mergeLlmConfigIntoSoulYaml } from "./soul-yaml-io";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
+
+/**
+ * Provider ids, model ids, tier structure and `api_key_ref` names describe where the business's
+ * prompts are sent and on whose account, so reading them is an operator surface, not a member one.
+ */
+const LLM_CONFIG_READ = {
+  action: "llm_config.read",
+  resourceType: "llm_config",
+  fallback: "admin",
+} as const;
+
+const LLM_CONFIG_RESOLVE = {
+  action: "llm_config.resolve",
+  resourceType: "llm_config",
+  fallback: "admin",
+} as const;
+
+const LLM_CONFIG_WRITE = {
+  action: "llm_config.write",
+  resourceType: "llm_config",
+  fallback: "admin",
+} as const;
 
 // In-memory LiteLLM catalog cache (the JSON is ~large; refetch at most hourly). Shared across
 // resolve-spec calls so adding several models doesn't re-download each time.
@@ -262,6 +283,7 @@ export function registerLlmConfigRoutes(
   llmService: LlmService,
   secrets: SecretsService,
   requireAuth: PreHandler,
+  requireAuthorization: RequireAuthorization,
   // Optional: record LLM config changes as audit evidence. Which model answers, and under whose
   // key, decides both cost and where the business's prompts are sent.
   audit?: AuditService
@@ -270,10 +292,10 @@ export function registerLlmConfigRoutes(
   app.get(
     "/api/v1/llm-providers",
     {
-      preHandler: requireAuth,
+      preHandler: [requireAuth, requireAuthorization(LLM_CONFIG_READ)],
       schema: {
         description:
-          "List the supported LLM providers (registry): id, label, canonical secret key, and required config fields. Drives the Settings provider dropdowns.",
+          "List the supported LLM providers (registry): id, label, canonical secret key, and required config fields. Drives the Settings provider dropdowns. Admin only.",
         tags: ["soul"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         response: {
@@ -285,6 +307,7 @@ export function registerLlmConfigRoutes(
             },
           },
           401: ErrorSchema,
+          403: ErrorSchema,
         },
       },
     },
@@ -294,10 +317,10 @@ export function registerLlmConfigRoutes(
   app.get(
     "/api/v1/provider-config",
     {
-      preHandler: requireAuth,
+      preHandler: [requireAuth, requireAuthorization(LLM_CONFIG_READ)],
       schema: {
         description:
-          "Values of stored provider CONFIG fields (e.g. Azure resource_name, base_url). Secret fields (API keys) are never returned — only non-sensitive config so the UI can show it back.",
+          "Values of stored provider CONFIG fields (e.g. Azure resource_name, base_url). Secret fields (API keys) are never returned — only non-sensitive config so the UI can show it back. Admin only.",
         tags: ["soul"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         response: {
@@ -307,6 +330,7 @@ export function registerLlmConfigRoutes(
             properties: { values: { type: "object", additionalProperties: { type: "string" } } },
           },
           401: ErrorSchema,
+          403: ErrorSchema,
         },
       },
     },
@@ -329,15 +353,16 @@ export function registerLlmConfigRoutes(
   app.get(
     "/api/v1/llm-config",
     {
-      preHandler: requireAuth,
+      preHandler: [requireAuth, requireAuthorization(LLM_CONFIG_READ)],
       schema: {
         description:
-          "Read the current LLM config. A fresh instance with no `llm:` key in soul.yaml gets an empty skeleton (three tiers, no providers) so the editor opens ready to configure.",
+          "Read the current LLM config. Admin only. A fresh instance with no `llm:` key in soul.yaml gets an empty skeleton (three tiers, no providers) so the editor opens ready to configure.",
         tags: ["soul"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         response: {
           200: LlmConfigRouteSchema,
           401: ErrorSchema,
+          403: ErrorSchema,
         },
       },
     },
@@ -350,7 +375,7 @@ export function registerLlmConfigRoutes(
   app.get(
     "/api/v1/llm-config/resolve-spec",
     {
-      preHandler: requireAuth,
+      preHandler: [requireAuth, requireAuthorization(LLM_CONFIG_RESOLVE)],
       schema: {
         description:
           "Resolve a model's spec (pricing/context/capabilities) from LiteLLM for a given provider+model, to pin into llm.config. Admin only. `spec` is null when no confident match was found (use `candidates` and resubmit the selected `candidate`).",
@@ -385,8 +410,6 @@ export function registerLlmConfigRoutes(
       },
     },
     async (req, reply) => {
-      const actor = req.user as UserDoc;
-      if (actor.role !== "admin") return reply.code(403).send({ error: "forbidden" });
       const q = req.query as {
         provider: string;
         model: string;
@@ -414,7 +437,7 @@ export function registerLlmConfigRoutes(
   app.get(
     "/api/v1/llm-config/model-options",
     {
-      preHandler: requireAuth,
+      preHandler: [requireAuth, requireAuthorization(LLM_CONFIG_RESOLVE)],
       schema: {
         description:
           "Suggested model ids for a provider, to populate the Settings model picker. Admin only. For `openai-compatible` with a configured base_url, `source: live` lists the proxy's actually-deployed models (via its `GET /models`); otherwise `source: catalog` lists known LiteLLM ids; `source: unavailable` (+ `reason`) means neither could be reached and the UI falls back to free-text entry.",
@@ -441,8 +464,6 @@ export function registerLlmConfigRoutes(
       },
     },
     async (req, reply) => {
-      const actor = req.user as UserDoc;
-      if (actor.role !== "admin") return reply.code(403).send({ error: "forbidden" });
       const { provider } = req.query as { provider: string };
 
       if (provider === "openai-compatible") {
@@ -470,7 +491,7 @@ export function registerLlmConfigRoutes(
   app.put(
     "/api/v1/llm-config",
     {
-      preHandler: requireAuth,
+      preHandler: [requireAuth, requireAuthorization(LLM_CONFIG_WRITE)],
       schema: {
         description:
           "Replace the LLM config (admin only). Each model's spec (pricing/context/capabilities) is auto-resolved from LiteLLM and pinned; unresolved models require an explicit positive context window. `?refresh=true` re-resolves all. Validated before write; the soul is committed and the LlmService reloaded.",
@@ -491,11 +512,6 @@ export function registerLlmConfigRoutes(
       },
     },
     async (req, reply) => {
-      const actor = req.user as UserDoc;
-      if (actor.role !== "admin") {
-        return reply.code(403).send({ error: "forbidden" });
-      }
-
       let config: LlmConfig;
       try {
         config = validateLlmConfig(req.body);

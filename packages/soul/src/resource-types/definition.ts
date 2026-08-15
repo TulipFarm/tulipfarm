@@ -5,8 +5,8 @@ import {
   type ResourceDefinition,
   SchemaRegistry,
 } from "@tulipfarm/schema";
-import type { SoulResource } from "@tulipfarm/soul";
 import { stringify as stringifyYaml } from "yaml";
+import type { SoulResource } from "../types";
 
 export const RESOURCE_DOMAIN_RE = /^[a-z][a-z0-9_]*(?:[-_][a-z0-9_]+)*$/;
 

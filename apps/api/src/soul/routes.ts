@@ -1,14 +1,21 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { GitSyncService, SoulWriter } from "@tulipfarm/soul";
+import {
+  isSoulWriteError,
+  readSoulFile,
+  resolveSafe,
+  soulWriteHttpError,
+  UnsafePathError,
+  walkTree,
+} from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AuditService } from "../audit/service";
 import { makeSoulAuditWriter, redactRemoteUrl } from "../audit/soul-write";
 import { ErrorSchema } from "../auth/schemas";
+import type { RequireAuthorization } from "../authz/route-gate";
 import { mergeSoulConfig, readSoulConfig, SOUL_GIT_CREDENTIAL_KEY } from "../setup/soul-config";
 import { commitActorFromRequest } from "./commit-actor";
-import { readSoulFile, resolveSafe, UnsafePathError, walkTree } from "./tree";
-import { isSoulWriteError, soulWriteHttpError } from "./write-errors";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -32,6 +39,7 @@ export function registerSoulRoutes(
   gitSync: GitSyncService,
   soulWriter: SoulWriter,
   requireAuth: PreHandler,
+  requireAuthorization: RequireAuthorization,
   secretsService?: SecretsService,
   // Optional: record direct Soul config writes as audit evidence. The git-remote route below is
   // the sharpest of these — it decides where the whole business's Soul repository is pushed.
@@ -54,7 +62,14 @@ export function registerSoulRoutes(
   app.post(
     "/api/v1/soul/push",
     {
-      preHandler: requireAuth,
+      preHandler: [
+        requireAuth,
+        requireAuthorization({
+          action: "soul.git_config.push",
+          resourceType: "soul.git_config",
+          fallback: "admin",
+        }),
+      ],
       schema: {
         description: "Push committed soul changes to origin/main.",
         tags: ["soul"],
@@ -161,7 +176,14 @@ export function registerSoulRoutes(
   app.post(
     "/api/v1/soul/reload",
     {
-      preHandler: requireAuth,
+      preHandler: [
+        requireAuth,
+        requireAuthorization({
+          action: "soul.git_config.reload",
+          resourceType: "soul.git_config",
+          fallback: "admin",
+        }),
+      ],
       schema: {
         description:
           "Re-emit soul.synced so registries (routines, guardrails, resources, LLM config) " +
@@ -211,7 +233,14 @@ export function registerSoulRoutes(
   app.put(
     "/api/v1/business",
     {
-      preHandler: requireAuth,
+      preHandler: [
+        requireAuth,
+        requireAuthorization({
+          action: "soul.business_profile.write",
+          resourceType: "soul.business_profile",
+          fallback: "admin",
+        }),
+      ],
       schema: {
         description:
           "Update the business profile in soul.yaml (admin only). Re-emits soul.synced so the " +
@@ -241,9 +270,6 @@ export function registerSoulRoutes(
       },
     },
     async (req, reply) => {
-      if (req.user?.role !== "admin") {
-        return reply.code(403).send({ error: "forbidden" });
-      }
       const body = req.body as { name: string; description?: string; website?: string };
       const name = body.name.trim();
       if (!name) return reply.code(400).send({ error: "name is required" });
@@ -287,7 +313,14 @@ export function registerSoulRoutes(
   app.get(
     "/api/v1/soul/git-config",
     {
-      preHandler: requireAuth,
+      preHandler: [
+        requireAuth,
+        requireAuthorization({
+          action: "soul.git_config.read",
+          resourceType: "soul.git_config",
+          fallback: "admin",
+        }),
+      ],
       schema: {
         description: "Read the soul git remote config and live sync status.",
         tags: ["soul"],
@@ -348,7 +381,14 @@ export function registerSoulRoutes(
   app.post(
     "/api/v1/soul/sync",
     {
-      preHandler: requireAuth,
+      preHandler: [
+        requireAuth,
+        requireAuthorization({
+          action: "soul.git_config.sync",
+          resourceType: "soul.git_config",
+          fallback: "admin",
+        }),
+      ],
       schema: {
         description: "Manually trigger a sync against the configured soul git remote.",
         tags: ["soul"],
@@ -374,7 +414,14 @@ export function registerSoulRoutes(
   app.put(
     "/api/v1/soul/git-config",
     {
-      preHandler: requireAuth,
+      preHandler: [
+        requireAuth,
+        requireAuthorization({
+          action: "soul.git_config.write",
+          resourceType: "soul.git_config",
+          fallback: "admin",
+        }),
+      ],
       schema: {
         description:
           "Configure (or reconfigure) the soul git remote + credential and sync immediately.",

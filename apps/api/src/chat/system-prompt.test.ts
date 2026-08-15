@@ -1,9 +1,7 @@
 import { assembleSystemPrompt } from "@tulipfarm/agent-runtime";
-import type { SoulAgent } from "@tulipfarm/soul";
+import type { BundledSkill, SoulAgent, SoulCatalogue } from "@tulipfarm/soul";
+import { DEFAULT_ASSISTANT } from "@tulipfarm/soul";
 import { describe, expect, it } from "vitest";
-import { DEFAULT_ASSISTANT } from "../soul/agents/platform-agents";
-import type { SoulCatalogue } from "../soul/catalogue";
-import type { BundledSkill } from "../soul/skills/bundled";
 import { assembleAgentSystemPrompt } from "./system-prompt";
 
 const agent: SoulAgent = {

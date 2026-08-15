@@ -2,6 +2,8 @@ import type { AuthorityLayer } from "@tulipfarm/authz";
 import type { ArtifactService } from "@tulipfarm/run-kernel";
 import { ajv } from "@tulipfarm/schema";
 import type { SoulLoader } from "@tulipfarm/soul";
+import { getDefaultAssistant, resolveAgent } from "@tulipfarm/soul";
+import type { IntegrationStore } from "@tulipfarm/storage";
 import {
   type CompositeToolEntitlement,
   type EffectStore,

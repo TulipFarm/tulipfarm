@@ -35,7 +35,9 @@ export function makeIndexQueueStats(boss: PgBoss, db: Queryable): () => Promise<
           lastError = { message, failedAt: row.completed_on };
         }
       }
-    } catch {}
+    } catch {
+      // Introspection is best-effort: index-status must still answer when pg-boss cannot be read.
+    }
     return { pending, lastError };
   };
 }

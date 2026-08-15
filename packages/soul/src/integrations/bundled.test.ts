@@ -1,8 +1,8 @@
 import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import type { Logger } from "@tulipfarm/soul";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { Logger } from "../types";
 import { bundledIntegrationsDir, loadBundledIntegrations } from "./bundled";
 
 const temporaryDirectories: string[] = [];

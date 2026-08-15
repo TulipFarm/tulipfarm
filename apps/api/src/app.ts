@@ -21,7 +21,13 @@ import type { BatchingLogSink } from "@tulipfarm/observability";
 import type { DurableInvocationGateway } from "@tulipfarm/run-kernel";
 import type { HookExecutor } from "@tulipfarm/sandbox";
 import type { SecretsService } from "@tulipfarm/secrets";
-import type { GitSyncService, SoulLoader, SoulWriter } from "@tulipfarm/soul";
+import type {
+  BundledIntegration,
+  BundledSkill,
+  GitSyncService,
+  SoulLoader,
+  SoulWriter,
+} from "@tulipfarm/soul";
 import type { IntegrationStore } from "@tulipfarm/storage";
 import type { ApprovalsRepo, ToolApprovalService } from "@tulipfarm/tool-host";
 import Fastify, { type FastifyBaseLogger, type FastifyReply, type FastifyRequest } from "fastify";
@@ -43,6 +49,11 @@ import { registerAuthRoutes } from "./auth/routes";
 import type { SessionStore } from "./auth/session-store";
 import type { PasswordWriteRepo, ProfileWriteRepo, UserAdminRepo, UserRepo } from "./auth/users";
 import { buildCapabilityCatalog } from "./authz/capabilities";
+import {
+  makeAuthorizationCheck,
+  makeRequireAuthorization,
+  type RouteAuthorizer,
+} from "./authz/route-gate";
 import { registerAuthzRoutes } from "./authz/routes";
 import type { AuthzAdminService } from "./authz/service";
 import type { ToolRegistry } from "./broker/tool-adapter";
@@ -106,13 +117,11 @@ import type { SetupAdminCreator } from "./setup/first-admin";
 import { registerSetupRoutes, registerSetupStatusRoute } from "./setup/routes";
 import { isHeadlessBoot } from "./setup/service";
 import { registerAgentRoutes } from "./soul/agents/routes";
-import type { BundledIntegration } from "./soul/integrations/bundled";
 import { makeLlmCascadeOnSecretDelete } from "./soul/llm-config/cascade";
 import { registerLlmConfigRoutes } from "./soul/llm-config/routes";
 import { registerResourceTypeRoutes } from "./soul/resource-types/routes";
 import { registerAccessLevelRoutes } from "./soul/roles/routes";
 import { registerSoulRoutes } from "./soul/routes";
-import type { BundledSkill } from "./soul/skills/bundled";
 import { registerSkillRoutes } from "./soul/skills/routes";
 import { MemorySurfaceActionStore, type SurfaceActionStore } from "./surfaces/action-store";
 import { MemorySurfaceArtifactStore, type SurfaceArtifactStore } from "./surfaces/artifact-store";
@@ -177,6 +186,11 @@ export interface AppOptions {
    * which is what every test and the pre-authorization boot path want; production wires it.
    */
   recordAuthorizer?: RecordAuthorizer;
+  /**
+   * Decides route authority for every route carrying a `RouteAuthorization`. Absent falls back to
+   * each declaration's own `fallback`, so a deployment or test without it is never widened.
+   */
+  routeAuthorizer?: RouteAuthorizer;
   reconcileResources?: () => Promise<void>;
   /**
    * Projects authored Soul Roles into durable rows. Wired alongside `gitSync` + `toolRegistry` to
@@ -462,6 +476,8 @@ export async function buildApp(opts: AppOptions = {}) {
       ...(opts.passwordWriteRepo && { passwordWriteRepo: opts.passwordWriteRepo }),
       ...(opts.profileWriteRepo && { profileWriteRepo: opts.profileWriteRepo }),
       ...(opts.userInviteRepo && { inviteRepo: opts.userInviteRepo }),
+      requireAuthorization: makeRequireAuthorization(opts.routeAuthorizer),
+      authorizationCheck: makeAuthorizationCheck(opts.routeAuthorizer),
     });
     const requireAuth = makeRequireAuth({
       store: opts.sessionStore,
@@ -469,6 +485,8 @@ export async function buildApp(opts: AppOptions = {}) {
       tokenRepo: opts.tokenRepo,
       ...(opts.identity?.apiClientRepo && { apiClientRepo: opts.identity.apiClientRepo }),
     });
+    const requireAuthorization = makeRequireAuthorization(opts.routeAuthorizer);
+    const authorizationCheck = makeAuthorizationCheck(opts.routeAuthorizer);
     // Headless boot omits wizard routes (404), but status stays reachable.
     const soulPath = opts.gitSync?.path;
     if (soulPath) {
@@ -480,6 +498,7 @@ export async function buildApp(opts: AppOptions = {}) {
     }
     if (!isHeadlessBoot() && opts.secretsService && opts.gitSync && soulPath) {
       registerSetupRoutes(app, {
+        requireAuthorization,
         userRepo: opts.userRepo,
         sessionStore: opts.sessionStore,
         secretsService: opts.secretsService,
@@ -490,7 +509,7 @@ export async function buildApp(opts: AppOptions = {}) {
       });
     }
     if (opts.secretsService) {
-      registerSecretsRoutes(app, opts.secretsService, requireAuth, {
+      registerSecretsRoutes(app, opts.secretsService, requireAuth, requireAuthorization, {
         onSecretDeleted:
           opts.soulLoader && opts.soulWriter && opts.llmService
             ? makeLlmCascadeOnSecretDelete(
@@ -517,7 +536,7 @@ export async function buildApp(opts: AppOptions = {}) {
     }
 
     if (opts.kvService) {
-      registerKvRoutes(app, opts.kvService, requireAuth);
+      registerKvRoutes(app, opts.kvService, requireAuth, requireAuthorization);
       registerPreferenceRoutes(app, opts.kvService, requireAuth);
     }
     registerSystemRoutes(app, { kv: opts.kvService, ...opts.systemRoutes }, requireAuth);
@@ -525,13 +544,25 @@ export async function buildApp(opts: AppOptions = {}) {
       registerActivityRoutes(app, opts.activityService, requireAuth);
     }
     if (opts.auditReadService) {
-      registerAuditRoutes(app, opts.auditReadService, requireAuth);
+      registerAuditRoutes(app, opts.auditReadService, requireAuth, requireAuthorization);
     }
     if (opts.authzAdmin) {
-      registerAuthzRoutes(app, opts.authzAdmin, requireAuth, opts.rateLimiter);
+      registerAuthzRoutes(
+        app,
+        opts.authzAdmin,
+        requireAuth,
+        requireAuthorization,
+        opts.rateLimiter
+      );
     }
     if (opts.killSwitches) {
-      registerKillSwitchRoutes(app, opts.killSwitches, requireAuth, opts.rateLimiter);
+      registerKillSwitchRoutes(
+        app,
+        opts.killSwitches,
+        requireAuth,
+        requireAuthorization,
+        opts.rateLimiter
+      );
     }
     if (opts.memoryService) {
       registerMemoryRoutes(
@@ -547,6 +578,7 @@ export async function buildApp(opts: AppOptions = {}) {
         app,
         opts.observabilityService,
         requireAuth,
+        requireAuthorization,
         opts.observabilityConfig,
         opts.logRepo,
         opts.resourceRepo
@@ -558,6 +590,7 @@ export async function buildApp(opts: AppOptions = {}) {
         opts.gitSync,
         opts.soulWriter,
         requireAuth,
+        requireAuthorization,
         opts.secretsService,
         opts.auditService
       );
@@ -568,6 +601,7 @@ export async function buildApp(opts: AppOptions = {}) {
           opts.gitSync.path,
           opts.soulLoader,
           requireAuth,
+          authorizationCheck,
           opts.reconcileResources,
           opts.rateLimiter,
           opts.auditService
@@ -579,6 +613,7 @@ export async function buildApp(opts: AppOptions = {}) {
           registerAccessLevelRoutes(app, {
             soulWriter: opts.soulWriter,
             requireAuth,
+            requireAuthorization,
             auditWrite: makeSoulAuditWriter(opts.auditService),
             catalog: () => buildCapabilityCatalog(toolRegistry.getAll()),
             reconcile: reconcileRoles,
@@ -629,6 +664,7 @@ export async function buildApp(opts: AppOptions = {}) {
             opts.secretsService,
             opts.bundledIntegrations ?? new Map(),
             requireAuth,
+            requireAuthorization,
             onConnected,
             opts.githubInstall
               ? {
@@ -663,12 +699,13 @@ export async function buildApp(opts: AppOptions = {}) {
                 onConnected,
                 tokens: opts.integrationAuth.tokens,
               },
-              requireAuth
+              requireAuth,
+              authorizationCheck
             );
           }
         }
         const knowledgeService = opts.knowledgeService;
-        registerOnboardingRoutes(app, opts.soulLoader, requireAuth, {
+        registerOnboardingRoutes(app, opts.soulLoader, requireAuth, requireAuthorization, {
           kvService: opts.kvService,
           llmService: opts.llmService,
           hasAnyKnowledgePage: knowledgeService
@@ -699,6 +736,7 @@ export async function buildApp(opts: AppOptions = {}) {
               opts.llmService,
               opts.secretsService,
               requireAuth,
+              requireAuthorization,
               opts.auditService
             );
           }
@@ -713,6 +751,7 @@ export async function buildApp(opts: AppOptions = {}) {
         http: opts.githubInstall.http,
         soulRepositories: opts.githubInstall.soulRepositories,
         requireAuth,
+        requireAuthorization,
       });
     }
     if (opts.resourceRepoFactory && opts.counterStore && opts.soulLoader) {
@@ -833,6 +872,7 @@ export async function buildApp(opts: AppOptions = {}) {
         app,
         opts.knowledgeService,
         requireAuth,
+        requireAuthorization,
         undefined,
         opts.activityService
       );

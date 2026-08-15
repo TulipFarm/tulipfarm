@@ -42,8 +42,12 @@ describe("describeDeploymentRoles", () => {
     expect(grants).toContain("allow identity.external_link.read on identity");
     expect(grants).toContain("allow record.create on any resource");
     expect(grants).toContain("allow record.update on any resource");
-    expect(grants).toContain("allow llm_config.read on llm_config");
     expect(grants).toContain("allow secret.read on secret");
+  });
+
+  /* Reading the LLM config names every provider, model and api_key_ref, so it is operator-only. */
+  it("denies a member the LLM configuration", () => {
+    expect(member().grants).toContain("deny llm_config.read on llm_config");
   });
 
   /* Members manage their own tokens; the Roles view must not deny all api_token actions. */

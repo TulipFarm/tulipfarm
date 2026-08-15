@@ -1,9 +1,14 @@
 import type { SecretsService } from "@tulipfarm/secrets";
-import type { IntegrationManifest, SoulLoader, SoulWriter } from "@tulipfarm/soul";
+import type {
+  BundledIntegration,
+  IntegrationManifest,
+  SoulLoader,
+  SoulWriter,
+} from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
+import type { AuthorizationCheck } from "../authz/route-gate";
 import { commitActorFromRequest } from "../soul/commit-actor";
-import type { BundledIntegration } from "../soul/integrations/bundled";
 import {
   AuthBrokerError,
   type AuthEndpoints,
@@ -64,7 +69,8 @@ function denialStatus(reason: AuthBrokerError["reason"]): 400 | 404 | 409 | 502 
 export function registerIntegrationAuthRoutes(
   app: FastifyInstance,
   deps: AuthRoutesDeps,
-  requireAuth: PreHandler
+  requireAuth: PreHandler,
+  authorizationCheck: AuthorizationCheck
 ): void {
   const resolveManifest = (slug: string): IntegrationManifest | undefined =>
     mergeIntegrations(deps.soulLoader, deps.bundled).get(slug)?.manifest;
@@ -122,7 +128,15 @@ export function registerIntegrationAuthRoutes(
         return reply.code(401).send({ error: "unauthorized" });
       }
       // User connect is self-service; business connect re-points deployment credentials.
-      if (scope === "business" && (caller.kind !== "user" || caller.role !== "admin")) {
+      if (
+        scope === "business" &&
+        !(await authorizationCheck(caller, {
+          action: "integration_connection.authorize",
+          resourceType: "integration_connection",
+          conditions: { scope: "business" },
+          fallback: "admin",
+        }))
+      ) {
         return reply.code(403).send({ error: "forbidden" });
       }
       if (scope === "user" && deps.tokens === undefined) {

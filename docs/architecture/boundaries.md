@@ -138,6 +138,27 @@ Every owning boundary must cover these cases in contract or state-machine tests 
 - Failure to emit optional telemetry cannot alter correctness. Failure to persist required audit
   evidence follows policy and stops high-risk work when its durability threshold is exceeded.
 
+### How a failure is signalled
+
+Two shapes are sanctioned. Which one applies is decided by the boundary, not by taste, and a third
+shape is a defect.
+
+- **Across a contract boundary** — Tool results, Routine ports, adapter ports — return a
+  discriminated union and never throw. The caller must be able to handle the failure without a
+  `try`. `ok`/`err` (`apps/api/src/tools/types.ts`) and the `{success, error}` form
+  (`ToolCallResult`) are both established; new boundaries use `ok`/`err`.
+- **Inside a process boundary** — HTTP handlers and the services beneath them — throw. Fastify's
+  error handler is the single place that maps a thrown failure onto the versioned envelope above,
+  so a handler that catches in order to build its own response has created a second mapper.
+- **`null` means absent, never failed.** A lookup that found nothing may return `null`. An
+  operation that could not complete may not.
+
+**An error may never be discarded in silence.** `catch {}` is the one shape with no defensible
+reading: it is indistinguishable from success, emits nothing, and hands the caller a value implying
+the work was done. Handle it, log it, or state inside the block why dropping it is correct.
+Deliberate best-effort work — an embedding that may fail without failing the write — is legitimate
+and still has to say so and report. `scripts/error-handling.test.ts` enforces this.
+
 ## V1 reuse and replacement map
 
 Reuse means behavior or a primitive is adapted only after target contract tests pass. It never means

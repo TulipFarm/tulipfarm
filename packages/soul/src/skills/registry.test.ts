@@ -1,5 +1,6 @@
-import type { SoulLoader, SoulSkill } from "@tulipfarm/soul";
 import { describe, expect, it } from "vitest";
+import type { SoulLoader } from "../published-loader";
+import type { SoulSkill } from "../types";
 import type { BundledSkill } from "./bundled";
 import {
   type AvailableSkill,

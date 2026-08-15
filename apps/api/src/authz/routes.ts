@@ -3,6 +3,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import { makeRateLimitHook, type RateLimiter } from "../rate-limit";
+import type { RequireAuthorization, RouteAuthorization } from "./route-gate";
 import {
   AssigneeSchema,
   AUTHZ_SECURITY,
@@ -32,16 +33,13 @@ const AUTHZ_WRITE_WINDOW_MS = 60_000;
 
 const idParam = { type: "string", minLength: 1 } as const;
 
-/** Fail closed: API clients have no role, and only signed-in admin users pass. */
-const requireDeploymentAdmin: PreHandler = async (req, reply) => {
-  if (!req.principal) {
-    await reply.code(401).send({ error: "unauthorized" });
-    return;
-  }
-  if (req.principal.kind !== "user" || req.principal.role !== "admin") {
-    await reply.code(403).send({ error: "forbidden" });
-  }
-};
+/**
+ * Authorization governs itself (authorization-design D8): without this, "can write Soul" becomes
+ * "can grant myself anything" the moment Role definitions live in the Soul.
+ */
+function authz(action: string): RouteAuthorization {
+  return { action, resourceType: "authz", fallback: "admin" };
+}
 
 function actorFrom(req: FastifyRequest): AuthzActor {
   return { actorId: req.principal?.id ?? null, correlationId: req.id };
@@ -70,6 +68,7 @@ export function registerAuthzRoutes(
   app: FastifyInstance,
   service: AuthzAdminService,
   requireAuth: PreHandler,
+  requireAuthorization: RequireAuthorization,
   rateLimiter?: RateLimiter
 ): void {
   const rateLimitHook = rateLimiter
@@ -80,14 +79,15 @@ export function registerAuthzRoutes(
         AUTHZ_WRITE_WINDOW_MS
       )
     : undefined;
-  const gate: PreHandler[] = rateLimitHook
-    ? [rateLimitHook, requireAuth, requireDeploymentAdmin]
-    : [requireAuth, requireDeploymentAdmin];
+  const gate = (authorization: RouteAuthorization): PreHandler[] =>
+    rateLimitHook
+      ? [rateLimitHook, requireAuth, requireAuthorization(authorization)]
+      : [requireAuth, requireAuthorization(authorization)];
 
   app.get(
     "/api/v1/authz/roles",
     {
-      preHandler: gate,
+      preHandler: gate(authz("authz.role.read")),
       schema: {
         description:
           "List every durable Role, distinguishing built-in bootstrap Roles (owner/admin/member) " +
@@ -113,7 +113,7 @@ export function registerAuthzRoutes(
   app.get(
     "/api/v1/authz/roles/:roleId/assignees",
     {
-      preHandler: gate,
+      preHandler: gate(authz("authz.role.read")),
       schema: {
         description: "List the principals a Role is currently assigned to (unexpired only).",
         tags: ["authz"],
@@ -152,7 +152,7 @@ export function registerAuthzRoutes(
   app.get(
     "/api/v1/authz/groups",
     {
-      preHandler: gate,
+      preHandler: gate(authz("authz.group.read")),
       schema: {
         description: "List every principal group.",
         tags: ["authz"],
@@ -176,7 +176,7 @@ export function registerAuthzRoutes(
   app.get(
     "/api/v1/authz/groups/:groupId",
     {
-      preHandler: gate,
+      preHandler: gate(authz("authz.group.read")),
       schema: {
         description: "Get a group with its unexpired members and the Roles it holds.",
         tags: ["authz"],
@@ -210,7 +210,7 @@ export function registerAuthzRoutes(
   app.get(
     "/api/v1/authz/principals/:principalId/grants",
     {
-      preHandler: gate,
+      preHandler: gate(authz("authz.role.read")),
       schema: {
         description:
           "List a principal's effective grants — its direct Role assignments unioned with every " +
@@ -246,7 +246,7 @@ export function registerAuthzRoutes(
   app.get(
     "/api/v1/authz/principals",
     {
-      preHandler: gate,
+      preHandler: gate(authz("authz.role.read")),
       schema: {
         description:
           "List every principal in the deployment. Non-human principals (Integration adapters, " +
@@ -267,7 +267,7 @@ export function registerAuthzRoutes(
   app.post(
     "/api/v1/authz/principals",
     {
-      preHandler: gate,
+      preHandler: gate(authz("authz.principal.register")),
       schema: {
         description:
           "Register a non-human principal so authority can be granted to it. Re-registering an " +
@@ -304,7 +304,7 @@ export function registerAuthzRoutes(
   app.post(
     "/api/v1/authz/explain",
     {
-      preHandler: gate,
+      preHandler: gate(authz("authz.explain")),
       schema: {
         description:
           "Explain the effective-permission decision for a principal + action + resource: the " +
@@ -368,7 +368,7 @@ export function registerAuthzRoutes(
   app.post(
     "/api/v1/authz/roles",
     {
-      preHandler: gate,
+      preHandler: gate(authz("authz.role.author")),
       schema: {
         description:
           "Reserved for Role-definition authoring. Role definitions are the single writer of which " +
@@ -399,7 +399,7 @@ export function registerAuthzRoutes(
   app.post(
     "/api/v1/authz/roles/:roleId/assignments",
     {
-      preHandler: gate,
+      preHandler: gate(authz("authz.role.assign")),
       schema: {
         description: "Assign a Role to a principal, optionally with an expiry.",
         tags: ["authz"],
@@ -440,7 +440,7 @@ export function registerAuthzRoutes(
   app.delete(
     "/api/v1/authz/roles/:roleId/assignments/:principalId",
     {
-      preHandler: gate,
+      preHandler: gate(authz("authz.role.revoke")),
       schema: {
         description: "Revoke a Role from a principal. A no-op assignment still returns 200.",
         tags: ["authz"],
@@ -471,7 +471,7 @@ export function registerAuthzRoutes(
   app.post(
     "/api/v1/authz/groups",
     {
-      preHandler: gate,
+      preHandler: gate(authz("authz.group.write")),
       schema: {
         description: "Create (or upsert) a principal group, optionally with an expiry.",
         tags: ["authz"],
@@ -504,7 +504,7 @@ export function registerAuthzRoutes(
   app.delete(
     "/api/v1/authz/groups/:groupId",
     {
-      preHandler: gate,
+      preHandler: gate(authz("authz.group.write")),
       schema: {
         description:
           "Delete a group. Its memberships and group-held Roles cascade; the principals and Roles " +
@@ -537,7 +537,7 @@ export function registerAuthzRoutes(
   app.post(
     "/api/v1/authz/groups/:groupId/members",
     {
-      preHandler: gate,
+      preHandler: gate(authz("authz.group.member.write")),
       schema: {
         description: "Add a principal to a group, optionally with an expiry.",
         tags: ["authz"],
@@ -578,7 +578,7 @@ export function registerAuthzRoutes(
   app.delete(
     "/api/v1/authz/groups/:groupId/members/:principalId",
     {
-      preHandler: gate,
+      preHandler: gate(authz("authz.group.member.write")),
       schema: {
         description: "Remove a principal from a group. A no-op membership still returns 200.",
         tags: ["authz"],
@@ -612,7 +612,7 @@ export function registerAuthzRoutes(
   app.post(
     "/api/v1/authz/groups/:groupId/roles",
     {
-      preHandler: gate,
+      preHandler: gate(authz("authz.group.role.write")),
       schema: {
         description: "Grant a Role to a group; its members inherit it. Optional expiry.",
         tags: ["authz"],
@@ -653,7 +653,7 @@ export function registerAuthzRoutes(
   app.delete(
     "/api/v1/authz/groups/:groupId/roles/:roleId",
     {
-      preHandler: gate,
+      preHandler: gate(authz("authz.group.role.write")),
       schema: {
         description: "Revoke a Role from a group. A no-op holding still returns 200.",
         tags: ["authz"],

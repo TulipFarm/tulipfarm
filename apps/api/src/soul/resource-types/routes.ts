@@ -4,21 +4,23 @@ import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { analyzeHook, HookAnalysisError } from "@tulipfarm/sandbox";
 import { ajv, TulipFarmValidationError, validateResourceSchema } from "@tulipfarm/schema";
 import type { SoulLoader, SoulWrite, SoulWriter } from "@tulipfarm/soul";
+import {
+  isSoulWriteError,
+  RESOURCE_DOMAIN_RE,
+  resourceDefinitionYaml,
+  resourceEnvelopeError,
+  resourceTypePayload,
+  soulWriteHttpError,
+} from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { parse as parseYaml } from "yaml";
 import type { AuditService } from "../../audit/service";
 import { makeSoulAuditWriter } from "../../audit/soul-write";
 import { ErrorSchema } from "../../auth/schemas";
+import type { AuthorizationCheck, RouteAuthorization } from "../../authz/route-gate";
 import type { RateLimiter } from "../../rate-limit";
 import { makeRateLimitHook } from "../../rate-limit";
 import { commitActorFromRequest } from "../commit-actor";
-import { isSoulWriteError, soulWriteHttpError } from "../write-errors";
-import {
-  RESOURCE_DOMAIN_RE,
-  resourceDefinitionYaml,
-  resourceEnvelopeError,
-  resourceTypePayload,
-} from "./definition";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -96,9 +98,16 @@ const SOUL_WRITE_LIMIT = 60;
 const SOUL_WRITE_WINDOW_MS = 60_000;
 
 /** Resource `domain` changes are the HR/engineering wall and require admin; schema edits do not. */
-function isDeploymentAdmin(req: FastifyRequest): boolean {
-  return req.principal?.kind === "user" && req.principal.role === "admin";
-}
+const SET_DOMAIN: RouteAuthorization = {
+  action: "soul.resource_type.set_domain",
+  resourceType: "soul.resource_type",
+  fallback: "admin",
+};
+const DELETE_DOMAINED: RouteAuthorization = {
+  action: "soul.resource_type.delete_domained",
+  resourceType: "soul.resource_type",
+  fallback: "admin",
+};
 
 export function registerResourceTypeRoutes(
   app: FastifyInstance,
@@ -106,11 +115,14 @@ export function registerResourceTypeRoutes(
   soulPath: string,
   soulLoader: SoulLoader,
   requireAuth: PreHandler,
+  authorizationCheck: AuthorizationCheck,
   reconcile?: () => Promise<void>,
   rateLimiter?: RateLimiter,
   audit?: AuditService
 ): void {
   const auditWrite = makeSoulAuditWriter(audit);
+  const mayChangeDomain = async (req: FastifyRequest, decl: RouteAuthorization): Promise<boolean> =>
+    req.principal !== undefined && (await authorizationCheck(req.principal, decl));
   const rateLimitHook = rateLimiter
     ? makeRateLimitHook(
         rateLimiter,
@@ -164,7 +176,7 @@ export function registerResourceTypeRoutes(
       if (domain !== undefined && !RESOURCE_DOMAIN_RE.test(domain)) {
         return reply.code(400).send({ error: "invalid resource type domain" });
       }
-      if (domain !== undefined && !isDeploymentAdmin(req)) {
+      if (domain !== undefined && !(await mayChangeDomain(req, SET_DOMAIN))) {
         return reply.code(403).send({ error: "only an admin can set a resource type's domain" });
       }
 
@@ -297,7 +309,11 @@ export function registerResourceTypeRoutes(
       const existingDomain = soulLoader.resources.get(name)?.domain;
       // Only a *change* of domain needs admin — a member editing the schema of a domained Resource
       // omits `domain` and keeps the existing wall, which is the ordinary case.
-      if (domain !== undefined && domain !== existingDomain && !isDeploymentAdmin(req)) {
+      if (
+        domain !== undefined &&
+        domain !== existingDomain &&
+        !(await mayChangeDomain(req, SET_DOMAIN))
+      ) {
         return reply.code(403).send({ error: "only an admin can change a resource type's domain" });
       }
       const check = checkSchemaYaml(schemaYaml);
@@ -395,7 +411,10 @@ export function registerResourceTypeRoutes(
       }
       // Without this a member could delete a domained Resource and re-create it domainless,
       // walking around the admin gate on POST and taking the wall down by the back door.
-      if (soulLoader.resources.get(name)?.domain !== undefined && !isDeploymentAdmin(req)) {
+      if (
+        soulLoader.resources.get(name)?.domain !== undefined &&
+        !(await mayChangeDomain(req, DELETE_DOMAINED))
+      ) {
         return reply.code(403).send({ error: "only an admin can delete a domained resource type" });
       }
       try {

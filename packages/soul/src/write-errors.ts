@@ -1,4 +1,4 @@
-import { SoulWriteError } from "@tulipfarm/soul";
+import { SoulWriteError } from "./writer";
 
 /**
  * Translate a `SoulWriter.apply` rejection into an HTTP answer.

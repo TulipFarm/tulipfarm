@@ -1,7 +1,7 @@
 import type { SoulAgent, SoulLoader } from "@tulipfarm/soul";
+import { getAgent, listAgents } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../../auth/schemas";
-import { getAgent, listAgents } from "./registry";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 

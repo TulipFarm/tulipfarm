@@ -1,11 +1,11 @@
 import { existsSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
-import type { IntegrationManifest, Logger } from "@tulipfarm/soul";
 import { parse as parseYaml } from "yaml";
+import type { IntegrationManifest, Logger } from "../types";
 
 const IMAGE_INTEGRATIONS_DIR = "/app/integrations";
-const REPO_INTEGRATIONS_DIR = resolve(__dirname, "../../../../../integrations");
+const REPO_INTEGRATIONS_DIR = resolve(__dirname, "../../../../integrations");
 
 export interface BundledIntegration {
   manifest: IntegrationManifest;

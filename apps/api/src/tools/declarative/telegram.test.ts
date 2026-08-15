@@ -4,6 +4,7 @@ import { ajv } from "@tulipfarm/schema";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { IntegrationManifest, SoulIntegration, ToolBinding } from "@tulipfarm/soul";
 import {
+  bundledIntegrationsDir,
   validateAuthSteps,
   validateIngressContextEnv,
   validateThirdPartyManifest,
@@ -12,7 +13,6 @@ import { MemoryEffectStore } from "@tulipfarm/tool-broker";
 import { beforeAll, describe, expect, it } from "vitest";
 import { parse as parseYaml } from "yaml";
 import { renderVarTemplate } from "../../ingress/template";
-import { bundledIntegrationsDir } from "../../soul/integrations/bundled";
 import { buildDeclarativeTools, declarativeToolName } from "./tools";
 
 describe("telegram bundled integration", () => {

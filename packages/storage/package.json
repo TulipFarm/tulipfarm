@@ -15,6 +15,7 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.3",
+    "@electric-sql/pglite-pgvector": "^0.0.4",
     "@tulipfarm/tsconfig": "workspace:*",
     "@types/node": "^26.1.1",
     "typescript": "^6.0.3"

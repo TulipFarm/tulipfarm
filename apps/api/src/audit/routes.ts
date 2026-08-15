@@ -2,7 +2,7 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
-import type { UserDoc } from "../auth/users";
+import type { RequireAuthorization } from "../authz/route-gate";
 import { type AuditReadService, AuditTooLargeError } from "./read-service";
 import { AUDIT_PAGE_DEFAULT, AUDIT_PAGE_MAX } from "./repo";
 
@@ -99,18 +99,18 @@ function toWire(event: {
   };
 }
 
-function requireAdmin(req: FastifyRequest, reply: FastifyReply): boolean {
-  if ((req.user as UserDoc | undefined)?.role !== "admin") {
-    reply.code(403).send({ error: "forbidden" });
-    return false;
-  }
-  return true;
-}
+/** The ledger records who did what to whom; reading it is an operator surface. */
+const AUDIT_READ = {
+  action: "audit.read",
+  resourceType: "audit",
+  fallback: "admin",
+} as const;
 
 export function registerAuditRoutes(
   app: FastifyInstance,
   service: AuditReadService,
-  requireAuth: PreHandler
+  requireAuth: PreHandler,
+  requireAuthorization: RequireAuthorization
 ): void {
   app.get<{
     Querystring: {
@@ -123,7 +123,7 @@ export function registerAuditRoutes(
   }>(
     "/api/v1/audit/events",
     {
-      preHandler: requireAuth,
+      preHandler: [requireAuth, requireAuthorization(AUDIT_READ)],
       schema: {
         description:
           "Read the audit ledger, newest first (admin only). Cursor is the chainIndex of the " +
@@ -149,7 +149,6 @@ export function registerAuditRoutes(
       },
     },
     async (req, reply) => {
-      if (!requireAdmin(req, reply)) return reply;
       const page = await service.list({
         ...(req.query.limit !== undefined ? { limit: req.query.limit } : {}),
         ...(req.query.cursor !== undefined ? { cursor: req.query.cursor } : {}),
@@ -164,7 +163,7 @@ export function registerAuditRoutes(
   app.get<{ Querystring: { eventCount?: number; tailHash?: string } }>(
     "/api/v1/audit/verify",
     {
-      preHandler: requireAuth,
+      preHandler: [requireAuth, requireAuthorization(AUDIT_READ)],
       schema: {
         description:
           "Re-derive the audit hash chain and report tampering, gaps, forks or reordering " +
@@ -188,7 +187,6 @@ export function registerAuditRoutes(
       },
     },
     async (req, reply) => {
-      if (!requireAdmin(req, reply)) return reply;
       try {
         const report = await service.verify({
           ...(req.query.eventCount !== undefined ? { eventCount: req.query.eventCount } : {}),

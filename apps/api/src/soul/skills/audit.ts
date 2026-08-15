@@ -1,7 +1,7 @@
 import type { LlmService } from "@tulipfarm/llm";
 import { ajv } from "@tulipfarm/schema";
+import type { Finding, GuardResult, SkillTrustLevel } from "@tulipfarm/soul";
 import { generateObject, jsonSchema } from "ai";
-import type { Finding, GuardResult, SkillTrustLevel } from "./guard";
 
 /** SkillAudit is advisory only; natural-language Skills are not sandboxable boundaries. */
 

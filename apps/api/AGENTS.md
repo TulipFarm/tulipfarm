@@ -24,11 +24,12 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
 | `src/runtime/` | Durable invocation callers, Routine invocation resolution, Soul write gateway composition. |
 | `src/internal/` | Service-only Worker callbacks for Context, Tools, delivery, completion. |
 | `src/tools/` | ToolRegistry, batch execution, truncation, declarative egress sync. |
-| `src/resources/`, `src/soul/` | Resource CRUD and Soul-backed agents, skills, resource types. |
+| `src/resources/`, `src/soul/` | Resource CRUD and Soul HTTP routes/Tools; domain logic lives in `@tulipfarm/soul`. |
 | `src/integrations/` | Manifest catalog, connect auth, install, post-connect hooks. |
 | `src/guardrails/` | Guardrail config loading and `soul.synced` reload wiring only. |
-| `src/knowledge/`, `src/knowledge-sources/` | RAG pages/chunks/search and source ingestion API. |
+| `src/knowledge/`, `src/knowledge-sources/` | Knowledge routes/Tools and ingestion API; repositories and OKF live in `@tulipfarm/knowledge`. |
 | `src/memory/`, `src/kv/`, `src/secrets/` | Memory Assertions, scoped KV, secret storage routes. |
+| `src/authz/` | `route-gate.ts` — the sole HTTP path to `decideEffectivePermission`; self-governed routes. |
 | `src/approvals/`, `src/broker/` | Approval routes and Tool effect dispatch composition. |
 | `src/kill-switches/` | Operator-armed emergency stop over mutating effects; admin-gated routes. |
 | `src/surfaces/`, `src/forms/` | Tulip Surface Protocol and form APIs. |
@@ -43,8 +44,13 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
   API may enqueue work, but pg-boss consumers live in the Worker.
 - Soul down-sync stays in this process: it pulls the API-authored worktree, then emits
   `soul.synced` for API-local reload subscribers. Do not move it to the Worker.
-- Each feature route module uses `register<Feature>Routes(app, deps, requireAuth)`; protected
-  route helpers accept `requireAuth` last and are wired in `buildApp` with dependency checks.
+- Each feature route module uses `register<Feature>Routes(app, deps, requireAuth, requireAuthorization)`;
+  both gates precede any optional param and are wired in `buildApp` with dependency checks.
+- A protected route **declares** a `RouteAuthorization` and lets `requireAuthorization` decide; it
+  never compares `user.role` in the handler (ADR authorization-design D4). The declaration's
+  `fallback` is mandatory — a missing authorizer must never widen access. Reflect each new action
+  in `identity/roles.ts`, or the role-catalog fitness test fails.
+  `scripts/route-authorization.test.ts` pins the remaining inline checks as a list that can only shrink.
 - API tests use `buildApp` + Fastify `inject`; never start a real server. Fake repos should be
   real classes; mock `node:fs` at top level when a route does filesystem I/O.
 - Run API tests through the workspace script, e.g. `pnpm --filter @tulipfarm/api test src/auth`.
@@ -55,6 +61,9 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
   `src/test/pglite-snapshot.test.ts` fails the build if the slow pair comes back.
 - PGlite pgvector imports changed across versions: check `@electric-sql/pglite/vector` versus
   `@electric-sql/pglite-pgvector` when bumping PGlite.
+- `apps/api/src` is capped by `scripts/control-plane-size.test.ts`: new domain logic belongs in the
+  owning package. PGlite repository tests stay here even when the repository does not, because this
+  app owns the migrations that build the tables.
 - Tools return `ok(data)` or `err(code, message)`, never throw; ToolRegistry validates
   JSON Schema before execution. Read batches run in parallel; mutating batches are serial.
 - Every write to the authored Soul tree goes through `SoulWriter.apply()` (ADR-007) — routes, Tools
@@ -84,6 +93,6 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
   secret env values to `secret://` refs, commit, and reload Soul.
 - Third-party integration installs copy only regular `manifest.yml` and `setup-guide.md`; manifests
   must stay declarative, https-only for provider URLs, and non-executable.
-- Keep the shared Git source allowlist in `src/soul/git-source.ts`; do not fork SSRF policy.
+- Keep the shared Git source allowlist in `@tulipfarm/soul` (`src/git-source.ts`); do not fork SSRF policy.
 
 See [Integration authoring](../../docs/architecture/building-an-integration.md).

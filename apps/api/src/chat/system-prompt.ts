@@ -1,9 +1,11 @@
 import { type AssembleContext, assembleSystemPrompt } from "@tulipfarm/agent-runtime";
-import type { SoulAgent } from "@tulipfarm/soul";
-import type { PlatformAgent } from "../soul/agents/platform-agents";
-import type { SoulCatalogue } from "../soul/catalogue";
-import type { BundledSkill } from "../soul/skills/bundled";
-import type { AvailableSkill } from "../soul/skills/registry";
+import type {
+  AvailableSkill,
+  BundledSkill,
+  PlatformAgent,
+  SoulAgent,
+  SoulCatalogue,
+} from "@tulipfarm/soul";
 
 export function assembleAgentSystemPrompt(args: {
   agent: SoulAgent;

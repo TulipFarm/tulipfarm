@@ -7,7 +7,7 @@ import {
 } from "@tulipfarm/observability";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
-import type { UserDoc } from "../auth/users";
+import type { RequireAuthorization } from "../authz/route-gate";
 import type { ObservabilityConfig } from "./config";
 import type { LogRepo } from "./log-repo";
 import {
@@ -165,10 +165,18 @@ const SummarySchema = {
  * GET /api/v1/observability/summary?range=24h|7d|30d — pre-aggregated cost/usage dashboard data.
  * Admin-only (mirrors Business → Secrets / Models); the observability dashboard is an admin surface.
  */
+/** Cost, spend, traces and process logs describe the whole deployment, so this is one surface. */
+const OBSERVABILITY_READ = {
+  action: "observability.read",
+  resourceType: "observability",
+  fallback: "admin",
+} as const;
+
 export function registerObservabilityRoutes(
   app: FastifyInstance,
   service: ObservabilityService,
   requireAuth: PreHandler,
+  requireAuthorization: RequireAuthorization,
   config?: ObservabilityConfig,
   logs?: LogRepo,
   resources?: ResourceRepo
@@ -177,7 +185,7 @@ export function registerObservabilityRoutes(
   app.get(
     "/api/v1/observability/config",
     {
-      preHandler: requireAuth,
+      preHandler: [requireAuth, requireAuthorization(OBSERVABILITY_READ)],
       schema: {
         description: "Observability / Grafana export status (admin only; no secrets).",
         tags: ["observability"],
@@ -185,11 +193,7 @@ export function registerObservabilityRoutes(
         response: { 200: ConfigStatusSchema, 401: ErrorSchema, 403: ErrorSchema },
       },
     },
-    async (req, reply) => {
-      const actor = req.user as UserDoc;
-      if (actor.role !== "admin") {
-        return reply.code(403).send({ error: "forbidden" });
-      }
+    async (_req, reply) => {
       return reply.send({
         enabled: config?.enabled ?? false,
         otlpConfigured: config?.otlp != null,
@@ -205,7 +209,7 @@ export function registerObservabilityRoutes(
   app.get(
     "/api/v1/observability/recent",
     {
-      preHandler: requireAuth,
+      preHandler: [requireAuth, requireAuthorization(OBSERVABILITY_READ)],
       schema: {
         description: "Recent chat turns for trace drill-down (admin only).",
         tags: ["observability"],
@@ -219,8 +223,6 @@ export function registerObservabilityRoutes(
       },
     },
     async (req, reply) => {
-      const actor = req.user as UserDoc;
-      if (actor.role !== "admin") return reply.code(403).send({ error: "forbidden" });
       const q = req.query as { limit?: number };
       return reply.send(await service.recentTurns(q.limit ?? 25));
     }
@@ -230,7 +232,7 @@ export function registerObservabilityRoutes(
   app.get(
     "/api/v1/observability/trace/:conversationId",
     {
-      preHandler: requireAuth,
+      preHandler: [requireAuth, requireAuthorization(OBSERVABILITY_READ)],
       schema: {
         description: "Event timeline (llm_call/tool_call/turn) for one conversation (admin only).",
         tags: ["observability"],
@@ -248,8 +250,6 @@ export function registerObservabilityRoutes(
       },
     },
     async (req, reply) => {
-      const actor = req.user as UserDoc;
-      if (actor.role !== "admin") return reply.code(403).send({ error: "forbidden" });
       const { conversationId } = req.params as { conversationId: string };
       return reply.send(await service.trace(conversationId));
     }
@@ -258,7 +258,7 @@ export function registerObservabilityRoutes(
   app.get(
     "/api/v1/observability/summary",
     {
-      preHandler: requireAuth,
+      preHandler: [requireAuth, requireAuthorization(OBSERVABILITY_READ)],
       schema: {
         description: "AI observability cost/usage summary over a trailing window (admin only).",
         tags: ["observability"],
@@ -271,10 +271,6 @@ export function registerObservabilityRoutes(
       },
     },
     async (req, reply) => {
-      const actor = req.user as UserDoc;
-      if (actor.role !== "admin") {
-        return reply.code(403).send({ error: "forbidden" });
-      }
       const q = req.query as Record<string, unknown>;
       const range = isSummaryRange(q.range) ? q.range : "7d";
       return reply.send(await service.summary(range));
@@ -286,7 +282,7 @@ export function registerObservabilityRoutes(
     app.get(
       "/api/v1/observability/resources",
       {
-        preHandler: requireAuth,
+        preHandler: [requireAuth, requireAuthorization(OBSERVABILITY_READ)],
         schema: {
           description:
             "Bucketed CPU and memory usage per service over a time window (admin only). " +
@@ -303,8 +299,6 @@ export function registerObservabilityRoutes(
         },
       },
       async (req, reply) => {
-        const actor = req.user as UserDoc;
-        if (actor.role !== "admin") return reply.code(403).send({ error: "forbidden" });
         const raw = (req.query as { window?: string }).window;
         // The querystring enum already rejects an unknown value with 400; this covers the parameter
         // being absent, which is the ordinary first load.
@@ -321,7 +315,7 @@ export function registerObservabilityRoutes(
   app.get(
     "/api/v1/observability/logs",
     {
-      preHandler: requireAuth,
+      preHandler: [requireAuth, requireAuthorization(OBSERVABILITY_READ)],
       schema: {
         description:
           "Durable error/fatal log records across api, worker, and integration-worker (admin only).",
@@ -342,8 +336,6 @@ export function registerObservabilityRoutes(
       },
     },
     async (req, reply) => {
-      const actor = req.user as UserDoc;
-      if (actor.role !== "admin") return reply.code(403).send({ error: "forbidden" });
       const q = req.query as {
         level?: string;
         service?: string;

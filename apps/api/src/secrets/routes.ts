@@ -4,7 +4,7 @@ import { InvalidSecretKeyError } from "@tulipfarm/secrets";
 import type { CommitActor } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
-import type { UserDoc } from "../auth/users";
+import type { RequireAuthorization } from "../authz/route-gate";
 import { commitActorFromRequest } from "../soul/commit-actor";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
@@ -20,10 +20,30 @@ const SecretMetaSchema = {
   required: ["key", "type", "createdAt", "updatedAt"],
 } as const;
 
+/** Keys and metadata only; values never leave the service, so listing them stays member-visible. */
+const SECRET_READ = {
+  action: "secret.read",
+  resourceType: "secret",
+  fallback: "authenticated",
+} as const;
+
+const SECRET_WRITE = {
+  action: "secret.write",
+  resourceType: "secret",
+  fallback: "admin",
+} as const;
+
+const SECRET_DELETE = {
+  action: "secret.delete",
+  resourceType: "secret",
+  fallback: "admin",
+} as const;
+
 export function registerSecretsRoutes(
   app: FastifyInstance,
   secretsService: SecretsService,
   requireAuth: PreHandler,
+  requireAuthorization: RequireAuthorization,
   opts?: {
     /** Called after a successful delete; errors are caught and logged — never surface to the caller. */
     onSecretDeleted?: (key: string, actor: CommitActor) => Promise<void>;
@@ -32,7 +52,7 @@ export function registerSecretsRoutes(
   app.get(
     "/api/v1/secrets/status",
     {
-      preHandler: requireAuth,
+      preHandler: [requireAuth, requireAuthorization(SECRET_READ)],
       schema: {
         description: "List all secret keys and metadata. Values are never returned.",
         tags: ["secrets"],
@@ -58,7 +78,7 @@ export function registerSecretsRoutes(
   app.put(
     "/api/v1/secrets/:key",
     {
-      preHandler: requireAuth,
+      preHandler: [requireAuth, requireAuthorization(SECRET_WRITE)],
       schema: {
         description: "Create or update a secret (admin only).",
         tags: ["secrets"],
@@ -89,11 +109,6 @@ export function registerSecretsRoutes(
       },
     },
     async (req, reply) => {
-      const actor = req.user as UserDoc;
-      if (actor.role !== "admin") {
-        return reply.code(403).send({ error: "forbidden" });
-      }
-
       const { key } = req.params as { key: string };
       const body = (req.body ?? {}) as { value?: unknown; type?: unknown };
 
@@ -135,7 +150,7 @@ export function registerSecretsRoutes(
   app.delete(
     "/api/v1/secrets/:key",
     {
-      preHandler: requireAuth,
+      preHandler: [requireAuth, requireAuthorization(SECRET_DELETE)],
       schema: {
         description: "Delete a secret (admin only). Idempotent.",
         tags: ["secrets"],
@@ -153,11 +168,6 @@ export function registerSecretsRoutes(
       },
     },
     async (req, reply) => {
-      const actor = req.user as UserDoc;
-      if (actor.role !== "admin") {
-        return reply.code(403).send({ error: "forbidden" });
-      }
-
       const { key } = req.params as { key: string };
       await secretsService.delete(key);
 

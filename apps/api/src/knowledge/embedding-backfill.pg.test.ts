@@ -8,8 +8,8 @@ import {
   registerEmbeddingBackfill,
 } from "@tulipfarm/knowledge";
 import { embeddableText } from "@tulipfarm/memory";
+import type { Queryable } from "@tulipfarm/storage";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { Queryable } from "../db";
 import { makeMigratedPglite } from "../test/pglite";
 
 const DIM = 4;

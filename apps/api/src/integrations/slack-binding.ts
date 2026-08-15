@@ -1,9 +1,9 @@
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { SoulLoader } from "@tulipfarm/soul";
+import { DEFAULT_ASSISTANT_NAME } from "@tulipfarm/soul";
 import type { IntegrationStore } from "@tulipfarm/storage";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
-import { DEFAULT_ASSISTANT_NAME } from "../soul/agents/platform-agents";
 import { integrationSecretKey, resolveConnectionEnv } from "./connection-env";
 
 /* Slack-specific bridge from connected workspace to integration-worker channel routing. */

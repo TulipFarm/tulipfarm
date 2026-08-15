@@ -4,7 +4,12 @@ import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { analyzeHook, HookAnalysisError } from "@tulipfarm/sandbox";
 import { ajv, TulipFarmValidationError, validateResourceSchema } from "@tulipfarm/schema";
 import type { GitSyncService, SoulLoader, SoulWriter } from "@tulipfarm/soul";
-import { SoulWriteError } from "@tulipfarm/soul";
+import {
+  resourceDefinitionYaml,
+  resourceEnvelopeError,
+  resourceTypePayload,
+  SoulWriteError,
+} from "@tulipfarm/soul";
 import {
   type ApiToolDefinition,
   defineApiTool,
@@ -16,11 +21,6 @@ import {
 import { parse as parseYaml } from "yaml";
 import { SYSTEM_SOUL_COMMIT_ACTOR } from "../../runtime/soul-writer";
 import { soulCommitError } from "../../tools/soul-faults";
-import {
-  resourceDefinitionYaml,
-  resourceEnvelopeError,
-  resourceTypePayload,
-} from "./definition.js";
 
 const NAME_RE = /^[a-z][a-z0-9-]*$/;
 const SOUL_RESOURCE_TYPE_TARGET = "soul.resource_type";

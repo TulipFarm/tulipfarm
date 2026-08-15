@@ -11,6 +11,7 @@ import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH, validatePassword } from "../a
 import { ErrorSchema, PublicUserSchema } from "../auth/schemas";
 import { DEFAULT_SESSION_TTL_SECONDS, type SessionStore } from "../auth/session-store";
 import { AdminAlreadyExistsError, createUser, toPublicUser, type UserRepo } from "../auth/users";
+import type { RequireAuthorization } from "../authz/route-gate";
 import { makeRateLimitHook, type RateLimiter } from "../rate-limit";
 import { commitActorFromRequest } from "../soul/commit-actor";
 import type { SetupAdminCreator } from "./first-admin";
@@ -40,6 +41,7 @@ export interface SetupDeps {
   gitSync: GitSyncService;
   soulPath: string;
   requireAuth: PreHandler;
+  requireAuthorization: RequireAuthorization;
   setupAdminCreator?: SetupAdminCreator;
   ttlSeconds?: number;
 }
@@ -111,6 +113,7 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
     gitSync,
     soulPath,
     requireAuth,
+    requireAuthorization,
     setupAdminCreator,
     ttlSeconds = DEFAULT_SESSION_TTL_SECONDS,
   } = deps;
@@ -121,11 +124,11 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
     }
   }
 
-  async function requireAdmin(req: FastifyRequest, reply: FastifyReply): Promise<void> {
-    if (req.user?.role !== "admin") {
-      return reply.code(403).send({ error: "admin role required" });
-    }
-  }
+  const requireSetupAdmin = requireAuthorization({
+    action: "setup.run",
+    resourceType: "setup",
+    fallback: "admin",
+  });
 
   async function requireSetupIncomplete(_req: FastifyRequest, reply: FastifyReply): Promise<void> {
     if ((await readSoulConfig(soulPath)).setupComplete === true) {
@@ -133,7 +136,7 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
     }
   }
 
-  const wizardStep: PreHandler[] = [requireAuth, requireAdmin, requireSetupIncomplete];
+  const wizardStep: PreHandler[] = [requireAuth, requireSetupAdmin, requireSetupIncomplete];
 
   // Step 1: create the first admin and auto-login (sets session + CSRF cookies).
   app.post(
@@ -378,7 +381,7 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
   app.post(
     "/api/v1/setup/complete",
     {
-      preHandler: [requireAuth, requireAdmin],
+      preHandler: [requireAuth, requireSetupAdmin],
       schema: {
         description: "Mark first-run setup as complete.",
         tags: ["setup"],

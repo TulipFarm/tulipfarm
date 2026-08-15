@@ -1,5 +1,5 @@
-import type { SoulLoader } from "@tulipfarm/soul";
 import { listAgents } from "./agents/registry";
+import type { SoulLoader } from "./published-loader";
 
 /** L1 projection for one Soul artifact. */
 export interface SoulCatalogueEntry {

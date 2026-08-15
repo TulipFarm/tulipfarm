@@ -1,8 +1,8 @@
 import type { LlmService } from "@tulipfarm/llm";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { CommitActor, Logger, SoulLoader } from "@tulipfarm/soul";
+import { makeSoulWriterDouble } from "@tulipfarm/soul";
 import { describe, expect, it, vi } from "vitest";
-import { makeSoulWriterDouble } from "../soul-writer-double";
 import { makeLlmCascadeOnSecretDelete } from "./cascade";
 
 // A real config, not a stub: the cascade now hands its result to the soul.yaml merge, which

@@ -18,6 +18,7 @@ import {
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { AuditRecordInput, AuditService } from "../audit/service";
+import { makeRequireAuthorization } from "../authz/route-gate";
 import type { RequestPrincipal } from "../identity/principal";
 import { registerSoulPublicationRoutes, type SoulPublicationRouteDeps } from "./publication-routes";
 
@@ -190,7 +191,12 @@ describe("Soul publication routes", () => {
 
   async function start(principal: RequestPrincipal | null = adminPrincipal): Promise<void> {
     app = Fastify({ logger: false });
-    registerSoulPublicationRoutes(app, deps(), requireAuthFor(principal));
+    registerSoulPublicationRoutes(
+      app,
+      deps(),
+      requireAuthFor(principal),
+      makeRequireAuthorization()
+    );
     await app.ready();
   }
 

@@ -16,6 +16,12 @@ function resolveCitation(path: string): string {
 /** Match both local `requireAdmin` helpers and their literal role comparison. */
 const ADMIN_ROLE_GATE = /\brole\s*(?:!==|===)\s*["']admin["']|\brequireAdmin\b/;
 
+/**
+ * The shared route gate holds the one admin comparison every `RouteAuthorization` falls back to.
+ * It is the mechanism rather than a surface, so it gates no single resource type to cite.
+ */
+const GATE_MECHANISM_FILES: ReadonlySet<string> = new Set(["authz/route-gate.ts"]);
+
 interface EnforcedSurface {
   readonly type: string;
   readonly actions?: readonly string[];
@@ -105,8 +111,10 @@ function withoutComments(source: string): string {
 }
 
 function adminGateFiles(): readonly string[] {
-  return sourceFiles().filter((path) =>
-    ADMIN_ROLE_GATE.test(withoutComments(readFileSync(resolveCitation(path), "utf8")))
+  return sourceFiles().filter(
+    (path) =>
+      !GATE_MECHANISM_FILES.has(path) &&
+      ADMIN_ROLE_GATE.test(withoutComments(readFileSync(resolveCitation(path), "utf8")))
   );
 }
 

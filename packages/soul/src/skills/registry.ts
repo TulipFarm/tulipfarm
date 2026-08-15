@@ -1,4 +1,5 @@
-import type { SoulLoader, SoulSkill } from "@tulipfarm/soul";
+import type { SoulLoader } from "../published-loader";
+import type { SoulSkill } from "../types";
 import type { BundledSkill } from "./bundled";
 
 /** Lazy L1 Skill projection for the `<available-skills>` prompt block. */

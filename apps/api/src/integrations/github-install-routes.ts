@@ -9,9 +9,9 @@ import { integrationAppById, integrationAppField, type SecretsService } from "@t
 import type { IntegrationStore, SoulRepositoryStore } from "@tulipfarm/storage";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
+import type { RequireAuthorization } from "../authz/route-gate";
 import { GitHubInstallHttp } from "./github-http";
 import { type InstalledRepository, listInstalledRepositories } from "./github-install";
-import { refuseNonOperator } from "./operator";
 
 /* GitHub post-connect routes: inspect installs, pick/create the Soul repo, disconnect. */
 
@@ -22,6 +22,7 @@ export interface GitHubInstallDeps {
   secretsService: SecretsService;
   businessId: string;
   requireAuth: PreHandler;
+  requireAuthorization: RequireAuthorization;
   /** Business -> Soul repo mapping (Phase 10 repo-pick/create step). */
   soulRepositories: SoulRepositoryStore;
   /** Overridable for tests — defaults to a real `api.github.com` client. */
@@ -120,7 +121,14 @@ export function registerGitHubInstallRoutes(app: FastifyInstance, deps: GitHubIn
   app.post(
     "/api/v1/integrations/github/installations/:installationId/disconnect",
     {
-      preHandler: deps.requireAuth,
+      preHandler: [
+        deps.requireAuth,
+        deps.requireAuthorization({
+          action: "integration.github.installation.disconnect",
+          resourceType: "integration.github",
+          fallback: "admin",
+        }),
+      ],
       schema: {
         description:
           "Revoke this business's own bookkeeping for one GitHub App installation. Does not " +
@@ -147,8 +155,6 @@ export function registerGitHubInstallRoutes(app: FastifyInstance, deps: GitHubIn
     async (req, reply) => {
       // Disconnecting an installation revokes every Agent's reach through it, and the two
       // Soul-repo routes decide which repository this business's source of truth *is*.
-      // Operator only (see refuseNonOperator).
-      if (refuseNonOperator(req, reply)) return reply;
       const { installationId } = req.params as { installationId: string };
       const snapshot = await deps.integrations.loadProviderSnapshot(deps.businessId, "github");
       const integration = snapshot.integrations.find(
@@ -268,7 +274,14 @@ export function registerGitHubInstallRoutes(app: FastifyInstance, deps: GitHubIn
   app.post(
     "/api/v1/integrations/github/soul-repo",
     {
-      preHandler: deps.requireAuth,
+      preHandler: [
+        deps.requireAuth,
+        deps.requireAuthorization({
+          action: "integration.github.soul_repo.connect",
+          resourceType: "integration.github",
+          fallback: "admin",
+        }),
+      ],
       schema: {
         description: "Connect an already-granted repo as this business's Soul repo.",
         tags: ["integrations"],
@@ -300,8 +313,6 @@ export function registerGitHubInstallRoutes(app: FastifyInstance, deps: GitHubIn
     async (req, reply) => {
       // Disconnecting an installation revokes every Agent's reach through it, and the two
       // Soul-repo routes decide which repository this business's source of truth *is*.
-      // Operator only (see refuseNonOperator).
-      if (refuseNonOperator(req, reply)) return reply;
       const { installationId, owner, repo } = req.body as {
         installationId: string;
         owner: string;
@@ -343,7 +354,14 @@ export function registerGitHubInstallRoutes(app: FastifyInstance, deps: GitHubIn
   app.post(
     "/api/v1/integrations/github/soul-repo/create",
     {
-      preHandler: deps.requireAuth,
+      preHandler: [
+        deps.requireAuth,
+        deps.requireAuthorization({
+          action: "integration.github.soul_repo.create",
+          resourceType: "integration.github",
+          fallback: "admin",
+        }),
+      ],
       schema: {
         description:
           "Create a new repo via the App to hold this business's Soul. Requires " +
@@ -383,8 +401,6 @@ export function registerGitHubInstallRoutes(app: FastifyInstance, deps: GitHubIn
     async (req, reply) => {
       // Disconnecting an installation revokes every Agent's reach through it, and the two
       // Soul-repo routes decide which repository this business's source of truth *is*.
-      // Operator only (see refuseNonOperator).
-      if (refuseNonOperator(req, reply)) return reply;
       const { installationId, owner, repo } = req.body as {
         installationId: string;
         owner: string;

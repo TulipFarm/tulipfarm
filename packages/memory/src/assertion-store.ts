@@ -133,7 +133,9 @@ function assertionFromRow(
 export class PgMemoryAssertionStore implements MemoryStore {
   constructor(
     private readonly db: Queryable,
-    private readonly embedder?: MemoryEmbedder
+    private readonly embedder?: MemoryEmbedder,
+    /** Records a dropped embedding; without it the dense arm degrades invisibly. */
+    private readonly onEmbedError?: (error: unknown) => void
   ) {}
 
   /**
@@ -163,7 +165,9 @@ export class PgMemoryAssertionStore implements MemoryStore {
           embedded.dimension,
         ]
       );
-    } catch {}
+    } catch (error) {
+      this.onEmbedError?.(error);
+    }
   }
 
   /**

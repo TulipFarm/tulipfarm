@@ -16,9 +16,15 @@ Loader, compiler, publisher, and git-sync engine for Soul artifacts. Root `soul/
 | `src/integration-*`, `src/types.ts` | Integration manifest trust/auth contracts. |
 | `src/migrations/`, `src/soul-migrations.ts` | Migrations. |
 | `src/writer.ts` | `SoulWriter` — the one authored-tree write gateway. |
+| `src/skills/`, `src/integrations/`, `src/agents/` | Skill threat scan, bundled discovery, registries, platform agents. |
+| `src/{catalogue,tree,git-source,write-errors}.ts` | Catalogue, safe tree walk, Git source allowlist, write-error mapping. |
+| `src/soul-writer-double.ts` | In-memory `SoulWriter` for tests. |
 
 ## Rules
 - Do not put package code in root `soul/`; it is a separate runtime git repo.
+- `skills/bundled.ts` and `integrations/bundled.ts` locate the repo-root `skills/` and
+  `integrations/` directories by counting `__dirname` levels. Moving either file changes that
+  depth; the fallback chain hides a wrong path in production, so re-check it on any move.
 - `SoulLoader` reads `agents/*/AGENT.md`, `skills/*/SKILL.md`, `resources/*/schema.yml`,
   `routines/*/routine.yaml`, `integrations/*/manifest.yml`, root `soul.yaml`, `guardrails.yaml`;
   resource schemas must pass `validateResourceSchema()` on load.

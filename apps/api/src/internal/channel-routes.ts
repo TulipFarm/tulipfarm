@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { DurableInvocationGateway } from "@tulipfarm/run-kernel";
 import type { SoulLoader } from "@tulipfarm/soul";
+import { getAgent, getDefaultAssistant } from "@tulipfarm/soul";
 import type { ChannelRunDeliveryStore } from "@tulipfarm/storage";
 import { surfaceActionKey } from "@tulipfarm/surface";
 import { createSlackRenderer } from "@tulipfarm/surface-slack";
@@ -15,7 +16,6 @@ import type { ConversationStore } from "../conversations/service";
 import type { IngressIdentityResolver } from "../ingress/identity";
 import type { IntegrationConversationsRepo } from "../ingress/repo";
 import { integrationSecretKey } from "../integrations/connection-env";
-import { getAgent, getDefaultAssistant } from "../soul/agents/registry";
 import type { SurfaceActionStore } from "../surfaces/action-store";
 import type { SurfaceArtifactStore } from "../surfaces/artifact-store";
 

@@ -9,10 +9,10 @@ import {
   type SecretRepo,
   SecretsService,
 } from "@tulipfarm/secrets";
+import { writeLlmConfigToSoulYaml } from "@tulipfarm/soul";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parse } from "yaml";
 import type { UserDoc, UserRepo } from "../auth/users";
-import { writeLlmConfigToSoulYaml } from "../soul/llm-config/soul-yaml-io";
 import { bootstrapFromEnv } from "./bootstrap";
 import type { SetupAdminCreator } from "./first-admin";
 

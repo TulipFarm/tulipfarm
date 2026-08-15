@@ -1,4 +1,4 @@
-import type { SoulAgent } from "@tulipfarm/soul";
+import type { SoulAgent } from "../types";
 
 export const FORGE_SKILL_NAMES = [
   "resource-forge",

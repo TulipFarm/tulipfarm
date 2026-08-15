@@ -12,13 +12,27 @@ import {
   validateSkill,
 } from "@tulipfarm/schema";
 import {
+  ALLOWED_SOURCE_HINT,
+  type BundledSkill,
+  cloneToTemp as cloneSourceToTemp,
   convertLegacySkill,
+  DISABLED_BUNDLED_SKILLS_FILE,
   type GitSyncService,
+  isAllowedSource,
+  isSoulWriteError,
+  mergedSkills,
   parseFrontmatter,
+  persistDisabledBundledSkills,
+  resolveSkill,
+  type SkillScanFile,
   type SoulLoader,
   type SoulSkill,
   type SoulWrite,
   type SoulWriter,
+  scanSkill,
+  skillTrustLevel,
+  soulWriteHttpError,
+  sourceType,
 } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ActivityService } from "../../activity/service";
@@ -26,21 +40,7 @@ import type { AuditService } from "../../audit/service";
 import { makeSoulAuditWriter, redactRemoteUrl, stripUrlCredentials } from "../../audit/soul-write";
 import { ErrorSchema } from "../../auth/schemas";
 import { commitActorFromRequest } from "../commit-actor";
-import {
-  ALLOWED_SOURCE_HINT,
-  cloneToTemp as cloneSourceToTemp,
-  isAllowedSource,
-  sourceType,
-} from "../git-source";
-import { isSoulWriteError, soulWriteHttpError } from "../write-errors";
 import { buildAudit, SKILL_AUDIT_REPORT_SCHEMA } from "./audit";
-import {
-  type BundledSkill,
-  DISABLED_BUNDLED_SKILLS_FILE,
-  persistDisabledBundledSkills,
-} from "./bundled";
-import { type SkillScanFile, scanSkill, skillTrustLevel } from "./guard";
-import { mergedSkills, resolveSkill } from "./registry";
 
 /** Skills HTTP surface; scan/audit never installs, only explicit operator install does. */
 
@@ -243,7 +243,9 @@ async function skillPackageDetail(directory: string | undefined): Promise<SkillP
     try {
       definition = definitionRegistry.validateYaml(definitionFile.content)
         .document as unknown as SkillDefinition;
-    } catch {}
+    } catch {
+      // A malformed skill.yaml is reported to the operator as an unreadable definition, not here.
+    }
   }
   return {
     files: files.map((file) => ({ path: file.path, size: file.size ?? 0 })),
@@ -311,7 +313,9 @@ async function collectSkillFiles(skillDirectory: string): Promise<SkillScanFile[
           const resolved = await realpath(full);
           const fromRoot = relative(root, resolved);
           symlinkEscapes = fromRoot.startsWith("..") || isAbsolute(fromRoot);
-        } catch {}
+        } catch {
+          // Fail closed: an unresolvable symlink stays flagged as escaping the root.
+        }
         files.push({
           path,
           content: symlinkTarget,
@@ -467,7 +471,9 @@ async function readManifest(dir: string): Promise<Map<string, MarketplaceManifes
         if (key && !byName.has(key)) byName.set(key, entry);
       }
     }
-  } catch {}
+  } catch {
+    // marketplace.json is optional metadata; discovery is authoritative without it.
+  }
   return byName;
 }
 

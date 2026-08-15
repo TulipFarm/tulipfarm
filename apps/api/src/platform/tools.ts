@@ -4,8 +4,10 @@ import { isAbsolute, relative, resolve, sep } from "node:path";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { PLATFORM_RUNTIME_TOOLS } from "@tulipfarm/platform-tools";
 import { ajv, TulipFarmValidationError, validateRoutineDefinition } from "@tulipfarm/schema";
+import type { BundledSkill } from "@tulipfarm/soul";
 import {
   type GitSyncService,
+  resolveSkill,
   type SoulAgent,
   type SoulLoader,
   type SoulRoutine,
@@ -17,8 +19,6 @@ import type { RequestContext } from "@tulipfarm/tool-host";
 import { type ApiToolDefinition, defineApiTool } from "@tulipfarm/tool-host";
 import { stringify as stringifyYaml } from "yaml";
 import { SYSTEM_SOUL_COMMIT_ACTOR } from "../runtime/soul-writer";
-import type { BundledSkill } from "../soul/skills/bundled";
-import { resolveSkill } from "../soul/skills/registry";
 import { soulCommitError } from "../tools/soul-faults";
 import { err, ok, type ToolCallResult } from "./tool-result";
 
