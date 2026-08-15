@@ -14,6 +14,7 @@ docs/uat
 docs/qa/runs/
 tasks/
 !apps/api/src/tasks/
+!packages/storage/src/tasks/
 cookies.txt
 references
 !/.agents/skills/tulipfarm-design-system/references/
