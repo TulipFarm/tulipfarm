@@ -16,8 +16,8 @@
     "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/tool-host": "workspace:*",
     "@tulipfarm/constants": "workspace:*",
-    "ai": "^7.0.2",
-    "pg-boss": "^12.23.0",
+    "ai": "^7.0.62",
+    "pg-boss": "^12.27.0",
     "yaml": "^2.8.1",
     "@tulipfarm/llm": "workspace:*"
   },

@@ -19,10 +19,10 @@
     "@tulipfarm/tool-broker": "workspace:*"
   },
   "devDependencies": {
-    "@sinclair/typebox": "^0.34.49",
+    "@sinclair/typebox": "^0.34.52",
     "@tulipfarm/tsconfig": "workspace:*",
     "@types/node": "^26.1.1",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.10"
   }
 }
