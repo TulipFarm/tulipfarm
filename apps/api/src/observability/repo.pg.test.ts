@@ -1,7 +1,6 @@
 import type { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite, makePglite } from "../test/pglite";
 import { PgObsRepo } from "./repo";
 import { ObservabilityService } from "./service";
 
@@ -10,8 +9,7 @@ describe("ObservabilityService + PgObsRepo", () => {
   let service: ObservabilityService;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     service = new ObservabilityService(new PgObsRepo(db));
   });
 

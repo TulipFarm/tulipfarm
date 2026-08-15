@@ -2,8 +2,7 @@ import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import type { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { reconcileResourceTables, registerResourceReconcile } from "./reconcile";
 
 function soulOf(...types: string[]): { resources: Map<string, unknown> } {
@@ -26,8 +25,7 @@ async function count(db: PGlite, type: string): Promise<number> {
 describe("reconcileResourceTables", () => {
   let db: PGlite;
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
   });
   afterEach(async () => {
     await db.close();
@@ -69,8 +67,7 @@ describe("reconcileResourceTables", () => {
 describe("registerResourceReconcile", () => {
   let db: PGlite;
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
   });
   afterEach(async () => {
     await db.close();

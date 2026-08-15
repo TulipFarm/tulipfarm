@@ -3,8 +3,7 @@ import { BatchingLogSink } from "@tulipfarm/observability";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { buildApp } from "../app";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { PgLogRepo } from "./log-repo";
 
 /** Assembled Fastify-to-log_event test for wiring bugs that unit tests of each hop cannot catch. */
@@ -14,8 +13,7 @@ let db: PGlite;
 let sink: BatchingLogSink;
 
 beforeEach(async () => {
-  db = await makePglite();
-  await runPgMigrations(db);
+  db = await makeMigratedPglite();
   const repo = new PgLogRepo(db);
   sink = new BatchingLogSink({
     service: "api",

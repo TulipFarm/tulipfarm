@@ -1,8 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { ApprovalsRepo } from "./runtime-repo";
 
 describe("ApprovalsRepo (PGlite)", () => {
@@ -10,8 +9,7 @@ describe("ApprovalsRepo (PGlite)", () => {
   let repo: ApprovalsRepo;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     repo = new ApprovalsRepo(db);
   });
 

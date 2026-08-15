@@ -2,8 +2,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import type { KnowledgeIndexEntry } from "@tulipfarm/knowledge";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { EmbeddingPort } from "../knowledge/types";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { PgKnowledgeIndexStore } from "./index-store";
 
 const BUSINESS = "11111111-1111-1111-1111-111111111111";
@@ -77,8 +76,7 @@ describe("PgKnowledgeIndexStore", () => {
   let db: PGlite;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     await seedSource(db, BUSINESS, "slack:T1:C1");
   });
 

@@ -1,8 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { PgKnowledgeLinksRepo } from "./links-repo";
 import { PgKnowledgePageRepo } from "./repo";
 import { PgKnowledgeSpaceOverrideRepo } from "./space-overrides-repo";
@@ -49,8 +48,7 @@ describe("PgKnowledgeSpaceRepo", () => {
   let db: PGlite;
   let spaces: PgKnowledgeSpaceRepo;
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     spaces = new PgKnowledgeSpaceRepo(db);
   });
   afterEach(async () => {
@@ -83,8 +81,7 @@ describe("PgKnowledgePageRepo — OKF columns", () => {
   let pages: PgKnowledgePageRepo;
   let spaces: PgKnowledgeSpaceRepo;
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     pages = new PgKnowledgePageRepo(db);
     spaces = new PgKnowledgeSpaceRepo(db);
   });
@@ -128,8 +125,7 @@ describe("PgKnowledgeLinksRepo", () => {
   let spaces: PgKnowledgeSpaceRepo;
   let links: PgKnowledgeLinksRepo;
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     pages = new PgKnowledgePageRepo(db);
     spaces = new PgKnowledgeSpaceRepo(db);
     links = new PgKnowledgeLinksRepo(db);
@@ -236,8 +232,7 @@ describe("PgKnowledgeSpaceOverrideRepo", () => {
   let spaces: PgKnowledgeSpaceRepo;
   let overrides: PgKnowledgeSpaceOverrideRepo;
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     spaces = new PgKnowledgeSpaceRepo(db);
     overrides = new PgKnowledgeSpaceOverrideRepo(db);
   });

@@ -1,8 +1,7 @@
 import type { PGlite } from "@electric-sql/pglite";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import type { MemoryEmbedder } from "./embedder";
 import { EngineMemoryRepo } from "./engine-repo";
 import { PgMemoryRecallIndex } from "./recall-index";
@@ -44,8 +43,7 @@ describe("embedding memory statements on write", () => {
   let db: PGlite;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
   });
 
   afterEach(async () => {

@@ -2,8 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Queryable } from "../db";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { PgKnowledgeChunkRepo } from "./chunks-repo";
 import { indexPage } from "./index-service";
 import { PgKnowledgePageRepo } from "./repo";
@@ -88,8 +87,7 @@ describe("PgKnowledgeChunkRepo", () => {
   let pages: PgKnowledgePageRepo;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     chunks = new PgKnowledgeChunkRepo(db);
     pages = new PgKnowledgePageRepo(db);
   });

@@ -1,7 +1,6 @@
 import type { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { type KvEntry, PgKvRepo } from "./repo";
 
 const USER = "44444444-4444-4444-4444-444444444444";
@@ -25,8 +24,7 @@ describe("PgKvRepo", () => {
   let repo: PgKvRepo;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     repo = new PgKvRepo(db);
   });
 

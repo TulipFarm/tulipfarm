@@ -5,8 +5,7 @@ import type { KnowledgeSourceRecord } from "@tulipfarm/knowledge";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { PgKnowledgeIndexStore } from "../knowledge-sources/index-store";
 import { PgKnowledgeSourceStore } from "../knowledge-sources/source-store";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { PgKnowledgeChunkRepo } from "./chunks-repo";
 import { PageRetrievalService } from "./page-search-adapter";
 import { PgKnowledgePageRepo, PgKnowledgeRevisionRepo } from "./repo";
@@ -83,8 +82,7 @@ describe("query_knowledge unified retrieval", () => {
   let db: PGlite;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
   });
 
   afterEach(async () => {

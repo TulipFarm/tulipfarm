@@ -49,6 +49,10 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
   real classes; mock `node:fs` at top level when a route does filesystem I/O.
 - Run API tests through the workspace script, e.g. `pnpm --filter @tulipfarm/api test src/auth`.
   A root `vitest run` can skip package config or pick up stale `apps/api/dist/` CJS files.
+- A test needing the full schema calls `makeMigratedPglite()`, never `makePglite()` +
+  `runPgMigrations()`. The latter replayed all migrations per test and was half the suite's
+  runtime; the helper restores a per-worker snapshot instead, for the same isolation.
+  `src/test/pglite-snapshot.test.ts` fails the build if the slow pair comes back.
 - PGlite pgvector imports changed across versions: check `@electric-sql/pglite/vector` versus
   `@electric-sql/pglite-pgvector` when bumping PGlite.
 - Tools return `ok(data)` or `err(code, message)`, never throw; ToolRegistry validates

@@ -2,8 +2,7 @@ import { EventEmitter } from "node:events";
 import type { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DOMAIN_EVENTS } from "../domain-events";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { subscribeObservability } from "./events";
 import { PgObsRepo } from "./repo";
 import { ObservabilityService } from "./service";
@@ -20,8 +19,7 @@ describe("subscribeObservability", () => {
   let emitter: EventEmitter;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     emitter = new EventEmitter();
     subscribeObservability(emitter, new ObservabilityService(new PgObsRepo(db)));
   });

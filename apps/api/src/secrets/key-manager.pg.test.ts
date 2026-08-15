@@ -13,8 +13,7 @@ import {
   rotateEnvKek,
 } from "@tulipfarm/secrets";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 
 describe("key-manager over PgDekRepo", () => {
   let db: PGlite;
@@ -22,8 +21,7 @@ describe("key-manager over PgDekRepo", () => {
   let secretRepo: PgSecretRepo;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     dekRepo = new PgDekRepo(db);
     secretRepo = new PgSecretRepo(db);
   });

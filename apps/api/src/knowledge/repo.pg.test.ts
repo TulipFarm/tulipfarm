@@ -1,8 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { PgKnowledgePageRepo, PgKnowledgeRevisionRepo } from "./repo";
 import type { KnowledgePage } from "./types";
 
@@ -31,8 +30,7 @@ describe("PgKnowledgePageRepo", () => {
   let repo: PgKnowledgePageRepo;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     repo = new PgKnowledgePageRepo(db);
   });
   afterEach(async () => {
@@ -157,8 +155,7 @@ describe("PgKnowledgeRevisionRepo", () => {
   let pageRepo: PgKnowledgePageRepo;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     repo = new PgKnowledgeRevisionRepo(db);
     pageRepo = new PgKnowledgePageRepo(db);
   });

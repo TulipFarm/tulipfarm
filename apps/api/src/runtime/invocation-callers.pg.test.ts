@@ -25,8 +25,7 @@ import {
 import { ArtifactStore, PgSoulPublicationStore } from "@tulipfarm/storage";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ambientTransactionPort, type Queryable, transactionPort } from "../db";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import {
   integrationInvoker,
   manualRoutineTrigger,
@@ -71,8 +70,7 @@ describe("non-chat invocation callers", () => {
   let validator: TypedOutputValidator;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db as unknown as Queryable);
+    db = await makeMigratedPglite();
     validator = new TypedOutputValidator(INVOCATION_REQUEST_SCHEMAS);
     const transactions = transactionPort(db as unknown as Queryable);
     const { privateKey, publicKey } = generateKeyPairSync("ed25519");

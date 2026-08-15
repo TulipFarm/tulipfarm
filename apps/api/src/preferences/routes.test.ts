@@ -10,8 +10,7 @@ import { createUser, type UserDoc, type UserRepo } from "../auth/users";
 import { PgKvRepo } from "../kv/repo";
 import { KvService } from "../kv/service";
 import type { PaginatedResult } from "../pagination";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { readCustomInstructions } from "./custom-instructions";
 
 const TEST_CSRF = "a".repeat(64);
@@ -75,8 +74,7 @@ describe("custom instruction routes", () => {
   let memberId: string;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     kvService = new KvService(new PgKvRepo(db));
 
     const store = new MemorySessionStore();

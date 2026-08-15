@@ -2,8 +2,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { Attributes, Span, TelemetryPort } from "@tulipfarm/observability";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { PgMemoryEpisodeStore } from "./episode-store";
 import { MemoryExtractionService } from "./extraction-service";
 import { MemoryRecallService } from "./recall-service";
@@ -63,8 +62,7 @@ describe("PgMemoryEpisodeStore", () => {
   let recall: MemoryRecallService;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     episodes = new PgMemoryEpisodeStore(db);
     recall = new MemoryRecallService(db);
   });

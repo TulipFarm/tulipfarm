@@ -2,8 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { PgKnowledgeChunkRepo } from "./chunks-repo";
 import { PageRetrievalService } from "./page-search-adapter";
 import { PgKnowledgePageRepo, PgKnowledgeRevisionRepo } from "./repo";
@@ -51,8 +50,7 @@ describe("knowledge routes", () => {
   let app: FastifyInstance;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     app = await buildKnowledgeApp(db);
   });
   afterEach(async () => {
@@ -248,8 +246,7 @@ describe("knowledge routes", () => {
   it("reports indexingStatus=lexical-only when no embedding provider is available", {
     timeout: 30_000,
   }, async () => {
-    const db2 = await makePglite();
-    await runPgMigrations(db2);
+    const db2 = await makeMigratedPglite();
     const app2 = await buildKnowledgeApp(db2, false);
     try {
       const res = await app2.inject({

@@ -1,7 +1,6 @@
 import type { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { PgCounterStore } from "./repo";
 
 describe("PgCounterStore", () => {
@@ -9,8 +8,7 @@ describe("PgCounterStore", () => {
   let next: (type: string) => Promise<number>;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     next = new PgCounterStore(db).makeCounterFn();
   });
 

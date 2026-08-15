@@ -1,8 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { PgKnowledgeChunkRepo } from "./chunks-repo";
 import { PgKnowledgeLinksRepo } from "./links-repo";
 import { PageRetrievalService } from "./page-search-adapter";
@@ -57,8 +56,7 @@ describe("KnowledgeService — OKF", () => {
   let db: PGlite;
   let svc: KnowledgeService;
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     svc = makeService(db);
   });
   afterEach(async () => {

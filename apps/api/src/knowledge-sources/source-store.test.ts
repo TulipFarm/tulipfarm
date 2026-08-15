@@ -1,8 +1,7 @@
 import type { PGlite } from "@electric-sql/pglite";
 import type { KnowledgeSourceRecord } from "@tulipfarm/knowledge";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { PgKnowledgeSourceStore } from "./source-store";
 
 const BUSINESS = "11111111-1111-1111-1111-111111111111";
@@ -42,8 +41,7 @@ describe("PgKnowledgeSourceStore", () => {
   let store: PgKnowledgeSourceStore;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     store = new PgKnowledgeSourceStore(db);
   });
 

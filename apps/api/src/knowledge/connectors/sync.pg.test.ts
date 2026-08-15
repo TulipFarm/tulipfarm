@@ -3,8 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runPgMigrations } from "../../pg-migrate";
-import { makePglite } from "../../test/pglite";
+import { makeMigratedPglite } from "../../test/pglite";
 import { PgKnowledgeChunkRepo } from "../chunks-repo";
 import { PageRetrievalService } from "../page-search-adapter";
 import { PgKnowledgePageRepo, PgKnowledgeRevisionRepo } from "../repo";
@@ -59,8 +58,7 @@ describe("connector sync (SampleConnector)", () => {
   }
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     service = new KnowledgeService({
       pages: new PgKnowledgePageRepo(db),
       chunks: new PgKnowledgeChunkRepo(db),

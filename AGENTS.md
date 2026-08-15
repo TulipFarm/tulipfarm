@@ -195,11 +195,27 @@ for markdown-only diffs, and shards the api suite in parallel.
    symlink aside to reproduce CI.
 3. **Only then** treat it as yours — confirm by stashing your diff and re-running.
 
+### A `packages/*` change does not imply running every consumer's suite
+
+The reflex after editing a shared package is to run `api` and `worker` "to be safe". That is 4-5
+minutes, and for most shared-package edits it proves nothing `typecheck` did not already prove.
+
+| What you changed in `packages/*` | What actually needs running |
+| --- | --- |
+| Removed or renamed an export | `pnpm typecheck` — a broken consumer is a *compile* error, not a test failure |
+| Changed a type or signature | `pnpm typecheck`, plus the owning package's suite |
+| Changed runtime behaviour a consumer depends on | The owning package's suite **and** that consumer's |
+| Added a new export nothing calls yet | The owning package's suite |
+
+Only the third row earns a consumer suite. Name the behaviour you changed before you run one; if
+you cannot, `typecheck` is the check you wanted.
+
 ### Do not
 
 - Re-run a tier after an edit that cannot change its result (comments, markdown, a log line).
 - Run `pnpm build` unless you changed build config or need `dist/` — `typecheck` is cheaper.
 - Run any of the above for a documentation-only diff; run targeted doc checks instead.
+- Run a consumer's suite to prove a deletion was safe. That is what `typecheck` is for.
 
 ## Lint / format — Biome
 

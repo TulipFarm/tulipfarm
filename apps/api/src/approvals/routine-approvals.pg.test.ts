@@ -14,8 +14,7 @@ import { ArtifactStore, RunStore, WaitStore } from "@tulipfarm/storage";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ambientTransactionPort, type Queryable, transactionPort, withTransaction } from "../db";
 import { InternalRoutineApprovalHost } from "../internal/routine-approval-host";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { RoutineApprovalService } from "./routine-approvals";
 import { ApprovalsRepo } from "./runtime-repo";
 
@@ -53,8 +52,7 @@ describe("routine approvals as durable waits", () => {
   let invocations: DurableInvocationGateway;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db as unknown as Queryable);
+    db = await makeMigratedPglite();
 
     const queryable = db as unknown as Queryable;
     const validator = new TypedOutputValidator(INVOCATION_REQUEST_SCHEMAS);

@@ -1,16 +1,14 @@
 import type { PGlite } from "@electric-sql/pglite";
 import { PgSecretRepo } from "@tulipfarm/secrets";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runPgMigrations } from "./pg-migrate";
-import { makePglite } from "./test/pglite";
+import { makeMigratedPglite } from "./test/pglite";
 
 describe("PgSecretRepo", () => {
   let db: PGlite;
   let repo: PgSecretRepo;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     repo = new PgSecretRepo(db);
   });
 

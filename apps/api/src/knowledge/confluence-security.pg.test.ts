@@ -9,8 +9,7 @@ import { PgConfluenceKnowledgeCheckpointStore } from "../knowledge-sources/confl
 import { PgKnowledgeEmissionSink } from "../knowledge-sources/emission-sink";
 import { PgKnowledgeIndexStore } from "../knowledge-sources/index-store";
 import { PgKnowledgeSourceStore } from "../knowledge-sources/source-store";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { PgKnowledgeChunkRepo } from "./chunks-repo";
 import { PageRetrievalService } from "./page-search-adapter";
 import { PgKnowledgePageRepo, PgKnowledgeRevisionRepo } from "./repo";
@@ -98,8 +97,7 @@ describe("Confluence Knowledge security through query_knowledge", () => {
   let now: Date;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     api = new FakeConfluenceApi();
     sources = new PgKnowledgeSourceStore(db);
     index = new PgKnowledgeIndexStore(db, lexicalOnlyEmbeddings);

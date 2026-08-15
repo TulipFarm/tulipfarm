@@ -2,8 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { decodeCursor } from "../pagination";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { PgTokenRepo, type TokenDoc } from "./api-tokens";
 
 const USER_ID = "11111111-1111-1111-1111-111111111111";
@@ -32,8 +31,7 @@ describe("PgTokenRepo", () => {
   let repo: PgTokenRepo;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     await seedUser(db);
     repo = new PgTokenRepo(db);
   });

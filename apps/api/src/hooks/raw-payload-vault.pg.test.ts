@@ -3,8 +3,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import { decryptSecret, type SecretEnvelope } from "@tulipfarm/secrets";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Queryable } from "../db";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { PgRawPayloadVault } from "./raw-payload-vault";
 
 describe("PgRawPayloadVault", () => {
@@ -13,8 +12,7 @@ describe("PgRawPayloadVault", () => {
   let vault: PgRawPayloadVault;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db as unknown as Queryable);
+    db = await makeMigratedPglite();
     dekKey = randomBytes(32);
     vault = new PgRawPayloadVault(db as unknown as Queryable, dekKey);
   });

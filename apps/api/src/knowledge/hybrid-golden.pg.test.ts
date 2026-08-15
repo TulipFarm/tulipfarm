@@ -9,8 +9,7 @@
 import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runPgMigrations } from "../pg-migrate";
-import { makePglite } from "../test/pglite";
+import { makeMigratedPglite } from "../test/pglite";
 import { PgKnowledgeChunkRepo } from "./chunks-repo";
 import { PageRetrievalService } from "./page-search-adapter";
 import { PgKnowledgePageRepo, PgKnowledgeRevisionRepo } from "./repo";
@@ -143,8 +142,7 @@ describe("hybrid golden recall@5 (hybrid beats lexical-only)", () => {
   let db: PGlite;
 
   beforeEach(async () => {
-    db = await makePglite();
-    await runPgMigrations(db);
+    db = await makeMigratedPglite();
     const space = await seedSpace(db);
     for (const p of CORPUS) {
       await seedPage(db, { spaceId: space, path: p.path, title: p.title, body: p.body });
