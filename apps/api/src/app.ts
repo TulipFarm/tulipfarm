@@ -774,7 +774,8 @@ export async function buildApp(opts: AppOptions = {}) {
           auditService: opts.auditService,
           memoryService: opts.memoryService,
         },
-        requireAuth
+        requireAuth,
+        authorizationCheck
       );
     }
     if (opts.githubInstall) {

@@ -17,6 +17,7 @@ import type { AuditService } from "../audit/service";
 import { makeSoulAuditWriter } from "../audit/soul-write";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
+import type { AuthorizationCheck } from "../authz/route-gate";
 import { mergeSoulConfig } from "../setup/soul-config";
 import { commitActorFromRequest } from "../soul/commit-actor";
 import { rankTasks } from "./ranking";
@@ -114,7 +115,8 @@ async function loadOwnedTask(
 export function registerTaskRoutes(
   app: FastifyInstance,
   deps: TaskRoutesDeps,
-  requireAuth: PreHandler
+  requireAuth: PreHandler,
+  authorizationCheck: AuthorizationCheck
 ): void {
   const auditWrite = makeSoulAuditWriter(deps.auditService);
 
@@ -206,8 +208,14 @@ export function registerTaskRoutes(
       if (!trimmed) return reply.code(400).send({ error: "value is required" });
 
       if (action.sink === "business_profile") {
-        const user = req.user as UserDoc;
-        if (user.role !== "admin") return reply.code(403).send({ error: "forbidden" });
+        const allowed =
+          req.principal !== undefined &&
+          (await authorizationCheck(req.principal, {
+            action: "task.answer.business_profile",
+            resourceType: "task",
+            fallback: "admin",
+          }));
+        if (!allowed) return reply.code(403).send({ error: "forbidden" });
         if (!BUSINESS_PROFILE_FIELDS.has(action.field)) {
           return reply.code(400).send({ error: `field ${action.field} is not answerable here` });
         }

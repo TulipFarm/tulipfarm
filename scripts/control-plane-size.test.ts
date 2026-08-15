@@ -17,6 +17,10 @@ import { describe, expect, it } from "vitest";
  * The mark is 49,214 rather than 48,718 because a foundation-model campaign added 496 lines to the
  * control plane between the measurement and this landing — the first growth the ratchet has caught.
  *
+ * Raised again to 50,074 for the Task system: `tasks/routes.ts` is Fastify and belongs here, and
+ * `tasks/tools.ts` follows the same handwritten-Tool exception as `tools/github/` and
+ * `tools/slack/` — there is no owning package for bespoke, non-manifest platform Tools to move to.
+ *
  * `apps/api` no longer holds the majority: the packages now carry 73,822 lines to its 49,214.
  *
  * This is that. The ceiling is a high-water mark, not a target — lowering it as code moves out is
@@ -28,7 +32,7 @@ import { describe, expect, it } from "vitest";
  * measure that cannot be gamed without noticing is worth more here than a subtle one.
  */
 
-const CEILING = 49_214;
+const CEILING = 50_074;
 
 /**
  * Domains inside `apps/api/src` that already have a package of the same name. Everything here that
