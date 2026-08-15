@@ -12,7 +12,10 @@ import {
   CHANNEL_RUN_DELIVERY_STORAGE_STATEMENTS,
   CHILD_STORAGE_STATEMENTS,
   CONCURRENCY_STORAGE_STATEMENTS,
+  dropInvalidEmbeddingIndexes,
+  EMBEDDING_COLUMNS,
   EVENT_STORAGE_STATEMENTS,
+  embeddingIndexStatements,
   INTEGRATION_STORAGE_STATEMENTS,
   KILL_SWITCH_STORAGE_STATEMENTS,
   RUN_BROWSE_STORAGE_STATEMENTS,
@@ -25,11 +28,6 @@ import {
 } from "@tulipfarm/storage";
 import { EFFECT_STORAGE_STATEMENTS } from "@tulipfarm/tool-broker";
 import type { Queryable } from "../db";
-import {
-  dropInvalidEmbeddingIndexes,
-  EMBEDDING_COLUMNS,
-  embeddingIndexStatements,
-} from "../vector-search";
 
 export interface PgMigration {
   version: number;

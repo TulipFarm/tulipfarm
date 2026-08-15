@@ -1,7 +1,7 @@
 import type { PGlite } from "@electric-sql/pglite";
+import { type KvEntry, PgKvRepo } from "@tulipfarm/kv";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeMigratedPglite } from "../test/pglite";
-import { type KvEntry, PgKvRepo } from "./repo";
 
 const USER = "44444444-4444-4444-4444-444444444444";
 

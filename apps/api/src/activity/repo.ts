@@ -1,5 +1,5 @@
+import { type PaginatedResult, toPage } from "@tulipfarm/storage";
 import type { Queryable } from "../db";
-import { type PaginatedResult, toPage } from "../pagination";
 
 export type ActivityActorType = "user" | "system";
 export type ActivityStatus = "ok" | "error";

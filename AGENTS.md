@@ -69,6 +69,9 @@ sibling `AGENTS.md`.
 | [`packages/agent-runtime`](packages/agent-runtime/AGENTS.md) | Context assembly, bounded Tool loop, model profiles, delegation |
 | [`packages/run-kernel`](packages/run-kernel/AGENTS.md) | Run/State machines, waits, retries, child Runs |
 | [`packages/tool-broker`](packages/tool-broker/AGENTS.md) | Tool catalog, intent/effect orchestration, approvals |
+| [`packages/tool-host`](packages/tool-host/AGENTS.md) | Tool contract, authorization gate, dispatcher, co-location rule |
+| [`packages/kv`](packages/kv/AGENTS.md) | Agent key-value store and its `kv_*` Tool family |
+| [`packages/platform-tools`](packages/platform-tools/AGENTS.md) | Platform Tools that need no Soul, renderer or credential, so both hosts can run them |
 | [`packages/schema`](packages/schema/AGENTS.md) | Any config shape, TypeBox schema, validator, Run event type |
 | [`packages/soul`](packages/soul/AGENTS.md) | Soul artifact loading, git sync |
 | [`packages/storage`](packages/storage/AGENTS.md) | PostgreSQL repositories, outbox/inbox, blob/vector/cache ports |

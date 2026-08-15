@@ -158,6 +158,9 @@ importers:
       '@tulipfarm/knowledge':
         specifier: workspace:*
         version: link:../../packages/knowledge
+      '@tulipfarm/kv':
+        specifier: workspace:*
+        version: link:../../packages/kv
       '@tulipfarm/llm':
         specifier: workspace:*
         version: link:../../packages/llm
@@ -167,6 +170,9 @@ importers:
       '@tulipfarm/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@tulipfarm/platform-tools':
+        specifier: workspace:*
+        version: link:../../packages/platform-tools
       '@tulipfarm/run-kernel':
         specifier: workspace:*
         version: link:../../packages/run-kernel
@@ -203,6 +209,9 @@ importers:
       '@tulipfarm/tool-broker':
         specifier: workspace:*
         version: link:../../packages/tool-broker
+      '@tulipfarm/tool-host':
+        specifier: workspace:*
+        version: link:../../packages/tool-host
       ai:
         specifier: ^7.0.2
         version: 7.0.2(zod@4.4.3)
@@ -567,12 +576,24 @@ importers:
       '@tulipfarm/integrations':
         specifier: workspace:*
         version: link:../../packages/integrations
+      '@tulipfarm/knowledge':
+        specifier: workspace:*
+        version: link:../../packages/knowledge
+      '@tulipfarm/kv':
+        specifier: workspace:*
+        version: link:../../packages/kv
       '@tulipfarm/llm':
         specifier: workspace:*
         version: link:../../packages/llm
+      '@tulipfarm/memory':
+        specifier: workspace:*
+        version: link:../../packages/memory
       '@tulipfarm/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@tulipfarm/platform-tools':
+        specifier: workspace:*
+        version: link:../../packages/platform-tools
       '@tulipfarm/run-kernel':
         specifier: workspace:*
         version: link:../../packages/run-kernel
@@ -591,6 +612,9 @@ importers:
       '@tulipfarm/storage':
         specifier: workspace:*
         version: link:../../packages/storage
+      '@tulipfarm/tool-host':
+        specifier: workspace:*
+        version: link:../../packages/tool-host
       ai:
         specifier: ^7.0.2
         version: 7.0.2(zod@4.4.3)
@@ -616,12 +640,6 @@ importers:
       '@tulipfarm/authz':
         specifier: workspace:*
         version: link:../../packages/authz
-      '@tulipfarm/knowledge':
-        specifier: workspace:*
-        version: link:../../packages/knowledge
-      '@tulipfarm/memory':
-        specifier: workspace:*
-        version: link:../../packages/memory
       '@tulipfarm/tool-broker':
         specifier: workspace:*
         version: link:../../packages/tool-broker
@@ -819,12 +837,33 @@ importers:
       '@tulipfarm/authz':
         specifier: workspace:*
         version: link:../authz
+      '@tulipfarm/constants':
+        specifier: workspace:*
+        version: link:../constants
+      '@tulipfarm/llm':
+        specifier: workspace:*
+        version: link:../llm
+      '@tulipfarm/observability':
+        specifier: workspace:*
+        version: link:../observability
       '@tulipfarm/schema':
         specifier: workspace:*
         version: link:../schema
       '@tulipfarm/storage':
         specifier: workspace:*
         version: link:../storage
+      '@tulipfarm/tool-host':
+        specifier: workspace:*
+        version: link:../tool-host
+      ai:
+        specifier: ^7.0.2
+        version: 7.0.2(zod@4.4.3)
+      pg-boss:
+        specifier: ^12.23.0
+        version: 12.23.0
+      yaml:
+        specifier: ^2.8.1
+        version: 2.9.0
     devDependencies:
       '@tulipfarm/tsconfig':
         specifier: workspace:*
@@ -835,6 +874,34 @@ importers:
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
+
+  packages/kv:
+    dependencies:
+      '@tulipfarm/schema':
+        specifier: workspace:*
+        version: link:../schema
+      '@tulipfarm/storage':
+        specifier: workspace:*
+        version: link:../storage
+      '@tulipfarm/tool-host':
+        specifier: workspace:*
+        version: link:../tool-host
+    devDependencies:
+      '@electric-sql/pglite':
+        specifier: ^0.5.3
+        version: 0.5.3
+      '@tulipfarm/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      '@types/node':
+        specifier: ^26.1.1
+        version: 26.1.1
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.9
+        version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@26.1.1)(@vitest/coverage-v8@4.1.9)(jsdom@29.1.1(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
   packages/llm:
     dependencies:
@@ -893,12 +960,24 @@ importers:
       '@tulipfarm/audit':
         specifier: workspace:*
         version: link:../audit
+      '@tulipfarm/constants':
+        specifier: workspace:*
+        version: link:../constants
       '@tulipfarm/observability':
         specifier: workspace:*
         version: link:../observability
       '@tulipfarm/schema':
         specifier: workspace:*
         version: link:../schema
+      '@tulipfarm/storage':
+        specifier: workspace:*
+        version: link:../storage
+      '@tulipfarm/tool-host':
+        specifier: workspace:*
+        version: link:../tool-host
+      ai:
+        specifier: ^7.0.2
+        version: 7.0.2(zod@4.4.3)
     devDependencies:
       '@tulipfarm/tsconfig':
         specifier: workspace:*
@@ -918,6 +997,34 @@ importers:
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
+
+  packages/platform-tools:
+    dependencies:
+      '@tulipfarm/agent-runtime':
+        specifier: workspace:*
+        version: link:../agent-runtime
+      '@tulipfarm/schema':
+        specifier: workspace:*
+        version: link:../schema
+      '@tulipfarm/tool-host':
+        specifier: workspace:*
+        version: link:../tool-host
+      ajv:
+        specifier: ^8.17.1
+        version: 8.20.0
+    devDependencies:
+      '@tulipfarm/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      '@types/node':
+        specifier: ^26.1.1
+        version: 26.1.1
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.9
+        version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@26.1.1)(@vitest/coverage-v8@4.1.9)(jsdom@29.1.1(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
   packages/run-kernel:
     dependencies:
@@ -1054,6 +1161,9 @@ importers:
       '@tulipfarm/schema':
         specifier: workspace:*
         version: link:../schema
+      '@tulipfarm/surface':
+        specifier: workspace:*
+        version: link:../surface
     devDependencies:
       '@electric-sql/pglite':
         specifier: ^0.5.3
@@ -1229,6 +1339,49 @@ importers:
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
+
+  packages/tool-host:
+    dependencies:
+      '@tulipfarm/authz':
+        specifier: workspace:*
+        version: link:../authz
+      '@tulipfarm/observability':
+        specifier: workspace:*
+        version: link:../observability
+      '@tulipfarm/run-kernel':
+        specifier: workspace:*
+        version: link:../run-kernel
+      '@tulipfarm/schema':
+        specifier: workspace:*
+        version: link:../schema
+      '@tulipfarm/soul':
+        specifier: workspace:*
+        version: link:../soul
+      '@tulipfarm/storage':
+        specifier: workspace:*
+        version: link:../storage
+      '@tulipfarm/surface':
+        specifier: workspace:*
+        version: link:../surface
+      '@tulipfarm/tool-broker':
+        specifier: workspace:*
+        version: link:../tool-broker
+    devDependencies:
+      '@sinclair/typebox':
+        specifier: ^0.34.49
+        version: 0.34.49
+      '@tulipfarm/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      '@types/node':
+        specifier: ^26.1.1
+        version: 26.1.1
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.9
+        version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@26.1.1)(@vitest/coverage-v8@4.1.9)(jsdom@29.1.1(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
   packages/tsconfig: {}
 

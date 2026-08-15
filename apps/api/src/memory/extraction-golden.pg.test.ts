@@ -1,9 +1,9 @@
 import { readFileSync } from "node:fs";
 import type { PGlite } from "@electric-sql/pglite";
 import type { MemoryCandidate, MemoryExtractionPort } from "@tulipfarm/memory";
+import { MemoryExtractionService } from "@tulipfarm/memory";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeMigratedPglite } from "../test/pglite";
-import { MemoryExtractionService } from "./extraction-service";
 
 interface GoldenMemoryCandidate extends MemoryCandidate {
   readonly id: string;

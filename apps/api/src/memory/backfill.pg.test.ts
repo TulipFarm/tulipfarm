@@ -1,9 +1,9 @@
 import type { PGlite } from "@electric-sql/pglite";
+import { EngineMemoryRepo } from "@tulipfarm/memory";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runPgMigrations } from "../pg-migrate";
 import { PG_MIGRATIONS } from "../pg-migrations/index";
 import { makePglite } from "../test/pglite";
-import { EngineMemoryRepo } from "./engine-repo";
 
 /** Simulate v33 upgrade by seeding legacy rows before the irreversible backfill. */
 

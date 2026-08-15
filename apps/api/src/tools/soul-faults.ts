@@ -1,4 +1,4 @@
-import { err, type ToolCallResult, type ToolErrorCode } from "./types";
+import { err, type ToolCallResult, type ToolErrorCode } from "@tulipfarm/tool-host";
 
 /**
  * Classifies a failure raised while committing to the Soul git tree. `s6-taxonomy` split

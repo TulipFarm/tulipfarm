@@ -12,13 +12,13 @@ import {
   INVOCATION_REQUEST_SCHEMAS,
 } from "@tulipfarm/schema";
 import type { SoulIntegration, SoulLoader } from "@tulipfarm/soul";
-import { MemoryArtifactStore } from "@tulipfarm/storage";
+import { DOMAIN_EVENTS, MemoryArtifactStore } from "@tulipfarm/storage";
+import type { ToolDef } from "@tulipfarm/tool-host";
 import type { FastifyBaseLogger } from "fastify";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { UserDoc } from "../auth/users";
 import type { ToolRegistry } from "../broker/tool-adapter";
 import type { ConversationDoc } from "../chat/conversations";
-import { DOMAIN_EVENTS } from "../domain-events";
 import type { IngressIdentityResolver } from "../ingress/identity";
 import type {
   IntegrationConversation,
@@ -27,7 +27,6 @@ import type {
 } from "../ingress/repo";
 import { BUSINESS_ID, FakeConversationStore, fakeRuns, RUN_ID } from "../test/turn-host-fixtures";
 import { declarativeToolName } from "../tools/declarative/tools";
-import type { ToolDef } from "../tools/types";
 import { DeliveryDeniedError, IngressDeliveryHost } from "./delivery-host";
 import type { HostedRunReader } from "./turn-host";
 

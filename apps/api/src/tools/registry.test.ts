@@ -1,3 +1,11 @@
+import type {
+  ApprovalDecision,
+  ApprovalGate,
+  ApprovalRequestInfo,
+  RequestContext,
+  ToolCallResult,
+  ToolDef,
+} from "@tulipfarm/tool-host";
 import { describe, expect, it, vi } from "vitest";
 import {
   MAX_PRESENTATION_CORRECTIVE_ATTEMPTS,
@@ -6,14 +14,6 @@ import {
   ToolRegistry,
 } from "../broker/tool-adapter";
 import { BatchCoordinator } from "./batch-executor";
-import type {
-  ApprovalDecision,
-  ApprovalGate,
-  ApprovalRequestInfo,
-  RequestContext,
-  ToolCallResult,
-  ToolDef,
-} from "./types";
 
 function makeTool(overrides: Partial<ToolDef> = {}): ToolDef {
   return {
@@ -329,7 +329,7 @@ describe("ToolRegistry", () => {
     it("stores full result in cache and returns truncated result to SDK", async () => {
       const reg = new ToolRegistry();
       reg.register(makeTool({ execute: async () => ({ success: true as const, data: bigList }) }));
-      const cache = new Map<string, import("./types").ToolCallResult>();
+      const cache = new Map<string, import("@tulipfarm/tool-host").ToolCallResult>();
       const ts = reg.buildToolSet(ctx, undefined, cache);
       const result = await ts.test_tool.execute?.(
         {},
@@ -391,7 +391,7 @@ describe("ToolRegistry", () => {
           },
         })
       );
-      const cache = new Map<string, import("./types").ToolCallResult>();
+      const cache = new Map<string, import("@tulipfarm/tool-host").ToolCallResult>();
       const ts = reg.buildToolSet(ctx, undefined, cache);
       await ts.strict.execute?.({}, { messages: [], context: undefined, toolCallId: "tc-inv" });
       expect(cache.has("tc-inv")).toBe(false);
@@ -477,7 +477,7 @@ describe("ToolRegistry", () => {
       const reg = new ToolRegistry();
       reg.register(makeTool({ name: "write_x", mutating: true, execute }));
       const { gate, resolve } = controllableGate();
-      const cache = new Map<string, import("./types").ToolCallResult>();
+      const cache = new Map<string, import("@tulipfarm/tool-host").ToolCallResult>();
       const ts = reg.buildToolSet(approvalCtx, undefined, cache, gate);
 
       const p = ts.write_x.execute?.({}, { messages: [], context: undefined, toolCallId: "tc1" });
@@ -581,7 +581,7 @@ describe("ToolRegistry", () => {
       const reg = new ToolRegistry();
       reg.register(makeTool({ name: "guarded", execute }));
       const guard = vi.fn<RunToolCallGuard>(async () => ({ blocked: true, reason: "x" }));
-      const cache = new Map<string, import("./types").ToolCallResult>();
+      const cache = new Map<string, import("@tulipfarm/tool-host").ToolCallResult>();
       const ts = reg.buildToolSet(ctx, undefined, cache, undefined, guard);
 
       const result = await ts.guarded.execute?.(

@@ -9,13 +9,21 @@ import fastifyStatic from "@fastify/static";
 import swagger from "@fastify/swagger";
 import scalar from "@scalar/fastify-api-reference";
 import type { GuardrailsService } from "@tulipfarm/agent-runtime";
+import type { KnowledgeService } from "@tulipfarm/knowledge";
+import type { KvService } from "@tulipfarm/kv";
 import type { LlmService } from "@tulipfarm/llm";
+import type {
+  MemoryExtractionService,
+  MemoryLifecycleService,
+  MemoryService,
+} from "@tulipfarm/memory";
 import type { BatchingLogSink } from "@tulipfarm/observability";
 import type { DurableInvocationGateway } from "@tulipfarm/run-kernel";
 import type { HookExecutor } from "@tulipfarm/sandbox";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { GitSyncService, SoulLoader, SoulWriter } from "@tulipfarm/soul";
 import type { IntegrationStore } from "@tulipfarm/storage";
+import type { ApprovalsRepo, ToolApprovalService } from "@tulipfarm/tool-host";
 import Fastify, { type FastifyBaseLogger, type FastifyReply, type FastifyRequest } from "fastify";
 import { registerActivityRoutes } from "./activity/routes";
 import type { ActivityService } from "./activity/service";
@@ -23,8 +31,6 @@ import { postgresProbe, probeHealth, type QueryableProbeTarget } from "./admin/h
 import { type OperationalApiDeps, registerOperationalRoutes } from "./admin/routes";
 import { registerApprovalRoutes } from "./approvals/routes";
 import type { RoutineApprovalService } from "./approvals/routine-approvals";
-import type { ApprovalsRepo } from "./approvals/runtime-repo";
-import type { ToolApprovalService } from "./approvals/tool-approvals";
 import type { AuditReadService } from "./audit/read-service";
 import { registerAuditRoutes } from "./audit/routes";
 import type { AuditService } from "./audit/service";
@@ -75,13 +81,8 @@ import { registerSurfaceInternalRoutes } from "./internal/surfaces-routes";
 import { registerKillSwitchRoutes } from "./kill-switches/routes";
 import type { KillSwitchService } from "./kill-switches/service";
 import { registerKnowledgeRoutes } from "./knowledge/routes";
-import type { KnowledgeService } from "./knowledge/service";
 import { registerKvRoutes } from "./kv/routes";
-import type { KvService } from "./kv/service";
-import type { MemoryExtractionService } from "./memory/extraction-service";
-import type { MemoryLifecycleService } from "./memory/lifecycle-service";
 import { registerMemoryRoutes } from "./memory/routes";
-import type { MemoryService } from "./memory/service";
 import type { ObservabilityConfig } from "./observability/config";
 import type { LogRepo } from "./observability/log-repo";
 import { createLogTeeStream } from "./observability/log-stream";

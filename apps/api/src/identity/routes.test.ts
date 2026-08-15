@@ -1,3 +1,4 @@
+import type { PaginatedResult } from "@tulipfarm/storage";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app";
@@ -6,7 +7,6 @@ import { CSRF_COOKIE, CSRF_HEADER } from "../auth/csrf";
 import { SESSION_COOKIE } from "../auth/middleware";
 import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
-import type { PaginatedResult } from "../pagination";
 import { createApiClient, formatApiClientCredential } from "./api-clients";
 import { CHANNEL_BIND_TTL_MS, issueChannelBindToken } from "./channel-link";
 import { MemoryApiClientRepo, MemoryExternalIdentityRepo, MemoryOidcRequestRepo } from "./fakes";

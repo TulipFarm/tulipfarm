@@ -12,6 +12,7 @@ import { githubCheckRunManifest, githubCommentManifest } from "@tulipfarm/surfac
 import { slackMessageManifest, slackModalManifest } from "@tulipfarm/surface-slack/manifest";
 import { telegramManifest } from "@tulipfarm/surface-telegram/manifest";
 import { surfaceWebManifest } from "@tulipfarm/surface-web/manifest";
+import type { SurfacePresentationPort } from "@tulipfarm/tool-host";
 
 export const SURFACE_RENDERER_MANIFESTS: readonly SurfaceRendererManifest[] = Object.freeze([
   surfaceWebManifest,
@@ -64,3 +65,14 @@ export function presentationContextFor(
     rendererCapabilities: surfaceRendererRegistry.capabilitiesFor(target),
   };
 }
+
+/**
+ * The renderer registry projected onto the Tool host's port. A process without this port cannot
+ * present anything, which is exactly what the durable runtime's Tool host reports.
+ */
+export const apiSurfacePresentation: SurfacePresentationPort = {
+  contextFor: presentationContextFor,
+  catalogFor: surfaceCatalogFor,
+  catalogRevisionFor: surfaceCatalogRevisionFor,
+  manifestFor: (target) => surfaceRendererRegistry.manifestFor(target),
+};

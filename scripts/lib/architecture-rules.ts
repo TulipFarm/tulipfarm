@@ -125,7 +125,7 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
     schema: [],
     observability: [],
     // Storage/authz sit directly on the foundations.
-    storage: ["schema", "observability"],
+    storage: ["schema", "observability", "surface"],
     authz: ["schema", "observability"],
     audit: ["schema", "storage", "observability"],
     soul: ["schema", "authz", "audit", "storage", "observability", "surface"],
@@ -133,8 +133,31 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
     "run-kernel": ["schema", "audit", "storage", "observability"],
     sandbox: ["schema", "authz", "audit", "storage", "observability"],
     "tool-broker": ["schema", "authz", "audit", "secrets", "sandbox", "storage", "observability"],
-    knowledge: ["schema", "authz", "audit", "storage", "observability"],
-    memory: ["schema", "authz", "audit", "storage", "observability"],
+    knowledge: [
+      "schema",
+      "authz",
+      "audit",
+      "storage",
+      "observability",
+      "constants",
+      "llm",
+      "tool-host",
+    ],
+    memory: ["schema", "authz", "audit", "storage", "observability", "constants", "tool-host"],
+    // The Tool execution host: the gate, the dispatcher and the Tool contract, so the control
+    // plane and the durable runtime run one implementation rather than two that drift.
+    "tool-host": [
+      "schema",
+      "authz",
+      "soul",
+      "run-kernel",
+      "tool-broker",
+      "surface",
+      "storage",
+      "observability",
+    ],
+    kv: ["schema", "storage", "tool-host"],
+    "platform-tools": ["schema", "tool-host", "agent-runtime"],
     surface: ["schema"],
     "surface-web": ["surface", "ui"],
     "surface-slack": ["surface"],
@@ -179,6 +202,9 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
       "integrations",
       "storage",
       "observability",
+      "tool-host",
+      "kv",
+      "platform-tools",
     ],
     worker: [
       "schema",
@@ -197,6 +223,12 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
       "sandbox",
       "storage",
       "observability",
+      // The Worker hosts the co-locatable Tool families in process. `tool-host` is the single
+      // dispatcher both processes run; the rest are the families whose members clear its
+      // admission rule.
+      "tool-host",
+      "kv",
+      "platform-tools",
     ],
     "integration-worker": [
       "schema",

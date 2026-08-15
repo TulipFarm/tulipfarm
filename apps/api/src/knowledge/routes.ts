@@ -1,19 +1,20 @@
-import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { ActivityService } from "../activity/service";
-import { ErrorSchema } from "../auth/schemas";
-import type { UserDoc } from "../auth/users";
-import { parsePaginationQuery } from "../pagination";
-import type { PageHit, PageRetrievalService } from "./page-search-adapter";
-import { type KnowledgeService, SpaceNameTakenError } from "./service";
 import type {
   IndexingStatus,
   KnowledgePage,
   KnowledgeRevision,
   KnowledgeSource,
   KnowledgeSpace,
+  PageHit,
+  PageRetrievalService,
   SearchFilters,
   SearchHit,
-} from "./types";
+} from "@tulipfarm/knowledge";
+import { type KnowledgeService, SpaceNameTakenError } from "@tulipfarm/knowledge";
+import { parsePaginationQuery } from "@tulipfarm/storage";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { ActivityService } from "../activity/service";
+import { ErrorSchema } from "../auth/schemas";
+import type { UserDoc } from "../auth/users";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 

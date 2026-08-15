@@ -1,6 +1,13 @@
 import { ajv } from "@tulipfarm/schema";
-import { defineApiTool, toToolDef } from "../tools/define";
-import { err, ok, type RequestContext, type ToolCallResult, type ToolDef } from "../tools/types";
+import {
+  defineApiTool,
+  err,
+  ok,
+  type RequestContext,
+  type ToolCallResult,
+  type ToolDef,
+  toToolDef,
+} from "@tulipfarm/tool-host";
 
 function firstError(errors: ReturnType<typeof ajv.compile>["errors"]): string {
   const e = errors?.[0];

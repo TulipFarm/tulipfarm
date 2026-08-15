@@ -1,17 +1,20 @@
 import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
+import type { EmbeddingPort } from "@tulipfarm/knowledge";
+import {
+  KnowledgeService,
+  PageRetrievalService,
+  PgKnowledgeChunkRepo,
+  PgKnowledgeLinksRepo,
+  PgKnowledgePageRepo,
+  PgKnowledgeRevisionRepo,
+  PgKnowledgeSpaceOverrideRepo,
+  PgKnowledgeSpaceRepo,
+} from "@tulipfarm/knowledge";
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeMigratedPglite } from "../test/pglite";
-import { PgKnowledgeChunkRepo } from "./chunks-repo";
-import { PgKnowledgeLinksRepo } from "./links-repo";
-import { PageRetrievalService } from "./page-search-adapter";
-import { PgKnowledgePageRepo, PgKnowledgeRevisionRepo } from "./repo";
 import { registerKnowledgeRoutes } from "./routes";
-import { KnowledgeService } from "./service";
-import { PgKnowledgeSpaceOverrideRepo } from "./space-overrides-repo";
-import { PgKnowledgeSpaceRepo } from "./spaces-repo";
-import type { EmbeddingPort } from "./types";
 
 function lexicalOnly(): EmbeddingPort {
   return {

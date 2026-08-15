@@ -1,4 +1,5 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import type { KvService } from "@tulipfarm/kv";
 import type { LlmService } from "@tulipfarm/llm";
 import type { GitSyncService, SoulLoader, SoulWriter } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -6,7 +7,6 @@ import type { AuditService } from "../audit/service";
 import { makeSoulAuditWriter } from "../audit/soul-write";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
-import type { KvService } from "../kv/service";
 import { mergeSoulConfig } from "../setup/soul-config";
 import { commitActorFromRequest } from "../soul/commit-actor";
 import { isSoulWriteError, soulWriteHttpError } from "../soul/write-errors";

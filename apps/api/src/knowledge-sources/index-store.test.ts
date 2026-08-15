@@ -1,7 +1,6 @@
 import type { PGlite } from "@electric-sql/pglite";
-import type { KnowledgeIndexEntry } from "@tulipfarm/knowledge";
+import type { EmbeddingPort, KnowledgeIndexEntry } from "@tulipfarm/knowledge";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { EmbeddingPort } from "../knowledge/types";
 import { makeMigratedPglite } from "../test/pglite";
 import { PgKnowledgeIndexStore } from "./index-store";
 

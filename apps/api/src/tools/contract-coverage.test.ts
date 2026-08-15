@@ -16,18 +16,18 @@ import {
   RESOURCE_NAME_PATTERN,
   type ToolAdapter,
 } from "@tulipfarm/tool-broker";
+import type { ToolDef } from "@tulipfarm/tool-host";
+import { ledgerOwnsCall } from "@tulipfarm/tool-host";
 import { describe, expect, it } from "vitest";
 import { parse as parseYaml } from "yaml";
 import type { ToolRegistry } from "../broker/tool-adapter";
 import type { IntegrationConversationsRepo } from "../ingress/repo";
-import { ledgerOwnsCall } from "../internal/effect-ledger";
 import { DeclarativeToolSync } from "./declarative/sync";
 import { declarativeToolName } from "./declarative/tools";
 import type { GitHubInstallationDirectory } from "./github/installation";
 import { buildGitHubTools } from "./github/tools";
 import { buildToolRegistry } from "./setup";
 import { buildSlackTools } from "./slack/tools";
-import type { ToolDef } from "./types";
 
 type RegistryServices = Parameters<typeof buildToolRegistry>[0];
 

@@ -6,6 +6,13 @@ import { describe, expect, it } from "vitest";
 import { ADMIN_ONLY_SURFACES, MEMBER_ALLOWED_SURFACES, OWNER_SCOPED_SURFACES } from "./roles";
 
 const SRC_ROOT = resolve(process.cwd(), "src");
+/** A gate that moved into a shared package is cited from the repo root, not from `src`. */
+const REPO_ROOT = resolve(process.cwd(), "../..");
+const PACKAGE_CITATION_PREFIX = "packages/";
+
+function resolveCitation(path: string): string {
+  return path.startsWith(PACKAGE_CITATION_PREFIX) ? join(REPO_ROOT, path) : join(SRC_ROOT, path);
+}
 /** Match both local `requireAdmin` helpers and their literal role comparison. */
 const ADMIN_ROLE_GATE = /\brole\s*(?:!==|===)\s*["']admin["']|\brequireAdmin\b/;
 
@@ -99,7 +106,7 @@ function withoutComments(source: string): string {
 
 function adminGateFiles(): readonly string[] {
   return sourceFiles().filter((path) =>
-    ADMIN_ROLE_GATE.test(withoutComments(readFileSync(join(SRC_ROOT, path), "utf8")))
+    ADMIN_ROLE_GATE.test(withoutComments(readFileSync(resolveCitation(path), "utf8")))
   );
 }
 
@@ -108,7 +115,7 @@ function invalidCitedPathProblem({ entry, path }: CitedPath): string | undefined
     return `${entryLabel(entry)} cites "${path}", which must stay relative to apps/api/src`;
   }
 
-  if (!existsSync(join(SRC_ROOT, path))) {
+  if (!existsSync(resolveCitation(path))) {
     return `${entryLabel(entry)} cites missing file "${path}". Rename the citation or restore the file.`;
   }
 

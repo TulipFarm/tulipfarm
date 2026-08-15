@@ -3,10 +3,10 @@ import { compileOpenApiEgress } from "@tulipfarm/integrations";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { IntegrationManifest, SoulIntegration } from "@tulipfarm/soul";
 import { MemoryEffectStore, toolContractSpecOf } from "@tulipfarm/tool-broker";
+import type { RequestContext } from "@tulipfarm/tool-host";
 import { describe, expect, it } from "vitest";
 import type { ToolRegistry } from "../../broker/tool-adapter";
 import { executeToolBinding } from "../../ingress/bindings";
-import type { RequestContext } from "../types";
 import {
   buildDeclarativeTools,
   declarativeToolName,

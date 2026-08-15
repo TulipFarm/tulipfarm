@@ -1,7 +1,7 @@
 import type { ToolAvailability } from "@tulipfarm/tool-broker";
+import type { ToolDef } from "@tulipfarm/tool-host";
 import { describe, expect, it } from "vitest";
 import { ToolRegistry } from "../broker/tool-adapter";
-import type { ToolDef } from "../tools/types";
 import { allowedToolNamesFor, availableToolsFor } from "./turn-helpers";
 
 // Availability is read from each Tool's own `availableTo`, so the fixture has to carry the

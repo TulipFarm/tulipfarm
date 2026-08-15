@@ -1,0 +1,23 @@
+{
+  "name": "@tulipfarm/platform-tools",
+  "version": "0.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "scripts": {
+    "lint": "biome check --no-errors-on-unmatched .",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@tulipfarm/schema": "workspace:*",
+    "@tulipfarm/tool-host": "workspace:*",
+    "ajv": "^8.17.1",
+    "@tulipfarm/agent-runtime": "workspace:*"
+  },
+  "devDependencies": {
+    "@tulipfarm/tsconfig": "workspace:*",
+    "@types/node": "^26.1.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
+  }
+}

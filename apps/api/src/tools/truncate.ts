@@ -1,4 +1,4 @@
-import { ok, type ToolCallResult } from "./types";
+import { ok, type ToolCallResult } from "@tulipfarm/tool-host";
 
 export const RESULT_CAP = 20;
 

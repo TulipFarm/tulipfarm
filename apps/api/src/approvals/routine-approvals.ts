@@ -1,9 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { DurableWaitError, type DurableWaitManager } from "@tulipfarm/run-kernel";
 import { canonicalHash } from "@tulipfarm/schema";
+import type { ApprovalSignalOutcome, ApprovalsRepo } from "@tulipfarm/tool-host";
 import type { RoutineApprovalPayload } from "../internal/routine-approval-host";
-import type { ApprovalsRepo } from "./runtime-repo";
-import type { ApprovalSignalOutcome } from "./tool-approvals";
 
 /** SPEC §7.2 approval decisions are durable wait signals; roles are user-role grants only. */
 

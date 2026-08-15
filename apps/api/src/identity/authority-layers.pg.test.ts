@@ -9,7 +9,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { transactionPort } from "../db";
 import { makePglite } from "../test/pglite";
-import { LiveAuthorityLayerResolver } from "./authority-layers";
+import { ApiAuthorityLayerResolver } from "./authority-layers";
 import type { RequestPrincipal } from "./principal";
 
 const BUSINESS_ID = "business-1";
@@ -28,12 +28,12 @@ function requestPrincipal(overrides: Partial<RequestPrincipal> = {}): RequestPri
   };
 }
 
-describe("LiveAuthorityLayerResolver", () => {
+describe("ApiAuthorityLayerResolver", () => {
   let db: PGlite;
   let principals: PgPrincipalRepo;
   let roles: PgRoleRepo;
   let groups: PgGroupRepo;
-  let resolver: LiveAuthorityLayerResolver;
+  let resolver: ApiAuthorityLayerResolver;
 
   beforeEach(async () => {
     db = await makePglite();
@@ -44,7 +44,7 @@ describe("LiveAuthorityLayerResolver", () => {
     principals = new PgPrincipalRepo(transactions);
     roles = new PgRoleRepo(transactions);
     groups = new PgGroupRepo(transactions);
-    resolver = new LiveAuthorityLayerResolver({ principals, roles, groups, now: () => NOW });
+    resolver = new ApiAuthorityLayerResolver({ principals, roles, groups, now: () => NOW });
   });
 
   afterEach(async () => {
@@ -423,7 +423,7 @@ describe("LiveAuthorityLayerResolver", () => {
   });
 
   it("ignores group-held Roles when no group repo is wired (fail closed)", async () => {
-    const noGroups = new LiveAuthorityLayerResolver({ principals, roles, now: () => NOW });
+    const noGroups = new ApiAuthorityLayerResolver({ principals, roles, now: () => NOW });
     await seedUserAndGroupRole([
       { action: "record.read", resourceType: "*", domain: "engineering", effect: "allow" },
     ]);

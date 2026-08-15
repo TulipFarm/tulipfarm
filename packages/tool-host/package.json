@@ -1,0 +1,28 @@
+{
+  "name": "@tulipfarm/tool-host",
+  "version": "0.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "scripts": {
+    "lint": "biome check --no-errors-on-unmatched .",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@tulipfarm/authz": "workspace:*",
+    "@tulipfarm/observability": "workspace:*",
+    "@tulipfarm/run-kernel": "workspace:*",
+    "@tulipfarm/schema": "workspace:*",
+    "@tulipfarm/soul": "workspace:*",
+    "@tulipfarm/storage": "workspace:*",
+    "@tulipfarm/surface": "workspace:*",
+    "@tulipfarm/tool-broker": "workspace:*"
+  },
+  "devDependencies": {
+    "@sinclair/typebox": "^0.34.49",
+    "@tulipfarm/tsconfig": "workspace:*",
+    "@types/node": "^26.1.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
+  }
+}

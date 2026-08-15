@@ -1,7 +1,7 @@
+import { KNOWLEDGE_TOOLS } from "@tulipfarm/knowledge";
+import { KV_TOOLS } from "@tulipfarm/kv";
+import { MEMORY_TOOLS } from "@tulipfarm/memory";
 import { describe, expect, it } from "vitest";
-import { KNOWLEDGE_TOOLS } from "../knowledge/tools";
-import { KV_TOOLS } from "../kv/tools";
-import { MEMORY_TOOLS } from "../memory/tools";
 import { FRONTEND_TOOLS } from "../platform/frontend-tools";
 import { PLATFORM_TOOLS } from "../platform/tools";
 import { RESOURCE_TOOLS } from "../resources/tools.js";

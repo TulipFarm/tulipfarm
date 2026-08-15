@@ -13,6 +13,7 @@ import {
   canonicalHash,
   INVOCATION_REQUEST_SCHEMAS,
 } from "@tulipfarm/schema";
+import type { PaginatedResult } from "@tulipfarm/storage";
 import { ArtifactStore, ChildLinkStore, RunEventStore, RunStore } from "@tulipfarm/storage";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -24,7 +25,7 @@ import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
 import { PgConversationStore } from "../conversations/store.pg";
 import { ambientTransactionPort, type Queryable, transactionPort } from "../db";
-import type { PaginatedResult } from "../pagination";
+
 import { runCanceller } from "../runs/cancel";
 import { makeMigratedPglite } from "../test/pglite";
 import { PgConversationRepo } from "./conversations";

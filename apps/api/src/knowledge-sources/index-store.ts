@@ -1,12 +1,12 @@
 import type {
+  EmbeddingPort,
   KnowledgeCandidate,
   KnowledgeIndexEntry,
   KnowledgeIndexQuery,
   MutableKnowledgeIndexPort,
 } from "@tulipfarm/knowledge";
+import { dimLiteral, embeddingDistanceSql } from "@tulipfarm/storage";
 import type { Queryable } from "../db";
-import type { EmbeddingPort } from "../knowledge/types";
-import { dimLiteral, embeddingDistanceSql } from "../vector-search";
 
 interface KnowledgeSourceChunkRow {
   source_id: string;

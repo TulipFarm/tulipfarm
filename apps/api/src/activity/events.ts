@@ -3,7 +3,7 @@ import {
   type ConversationCreatedPayload,
   DOMAIN_EVENTS,
   type ResourceEventPayload,
-} from "../domain-events";
+} from "@tulipfarm/storage";
 import type { ActivityService } from "./service";
 
 function fireAndForget(p: Promise<unknown>): void {

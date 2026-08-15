@@ -1,4 +1,4 @@
-import type { KvService } from "../kv/service";
+import type { KvService } from "@tulipfarm/kv";
 
 /** User-scoped KV coordinates; agent KV tools cannot reach these instructions. */
 export const CUSTOM_INSTRUCTIONS_NAMESPACE = "preferences";

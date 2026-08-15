@@ -10,10 +10,10 @@ import {
   syncNotionKnowledge,
 } from "@tulipfarm/integrations";
 import { evaluateStaleness } from "@tulipfarm/knowledge";
+import { recordJobRun } from "@tulipfarm/observability";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { SoulLoader } from "@tulipfarm/soul";
 import type { PgBoss } from "pg-boss";
-import { recordJobRun } from "../activity/job-run";
 import type { ActivityService } from "../activity/service";
 import type { ExternalLinkKnowledgeIdentityMap } from "../identity/knowledge-identity-map";
 import { resolveConnectionEnv } from "../integrations/connection-env";

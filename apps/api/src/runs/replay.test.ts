@@ -6,6 +6,7 @@ import type {
 } from "@tulipfarm/run-kernel";
 import { compileRoutine, simulateRoutine } from "@tulipfarm/run-kernel";
 import type { routine as routineSchema } from "@tulipfarm/schema";
+import type { PaginatedResult } from "@tulipfarm/storage";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import { buildApp } from "../app";
@@ -14,7 +15,6 @@ import { CSRF_COOKIE, CSRF_HEADER } from "../auth/csrf";
 import { SESSION_COOKIE } from "../auth/routes";
 import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
-import type { PaginatedResult } from "../pagination";
 import type { RunReplayDeps } from "./replay";
 
 const TEST_CSRF = "a".repeat(64);

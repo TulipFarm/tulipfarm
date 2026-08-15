@@ -5,6 +5,10 @@ import {
   type GuardrailsService,
   type RecalledMemory,
 } from "@tulipfarm/agent-runtime";
+import type { KnowledgeService } from "@tulipfarm/knowledge";
+import type { KvService } from "@tulipfarm/kv";
+import type { MemoryRecallService, MemoryService } from "@tulipfarm/memory";
+import { MAX_HISTORY_TOKENS, MAX_TOOL_STEPS } from "@tulipfarm/memory";
 import type { ArtifactService } from "@tulipfarm/run-kernel";
 import {
   chatRequestArtifactId,
@@ -21,11 +25,6 @@ import { estimateTokens } from "../chat/compaction";
 import { assembleAgentSystemPrompt } from "../chat/system-prompt";
 import { availableToolsFor } from "../chat/turn-helpers";
 import type { ConversationStore, PersistedMessage } from "../conversations/service";
-import type { KnowledgeService } from "../knowledge/service";
-import type { KvService } from "../kv/service";
-import { MAX_HISTORY_TOKENS, MAX_TOOL_STEPS } from "../memory/limits";
-import type { MemoryRecallService } from "../memory/recall-service";
-import type { MemoryService } from "../memory/service";
 import { readCustomInstructions } from "../preferences/custom-instructions";
 import { getDefaultAssistant, resolveAgent } from "../soul/agents/registry";
 import { buildSoulCatalogue } from "../soul/catalogue";

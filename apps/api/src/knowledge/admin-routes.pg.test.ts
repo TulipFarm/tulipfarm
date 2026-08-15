@@ -1,13 +1,16 @@
 import type { PGlite } from "@electric-sql/pglite";
+import type { EmbeddingPort } from "@tulipfarm/knowledge";
+import {
+  KnowledgeService,
+  PageRetrievalService,
+  PgKnowledgeChunkRepo,
+  PgKnowledgePageRepo,
+  PgKnowledgeRevisionRepo,
+} from "@tulipfarm/knowledge";
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeMigratedPglite } from "../test/pglite";
-import { PgKnowledgeChunkRepo } from "./chunks-repo";
-import { PageRetrievalService } from "./page-search-adapter";
-import { PgKnowledgePageRepo, PgKnowledgeRevisionRepo } from "./repo";
 import { registerKnowledgeRoutes } from "./routes";
-import { KnowledgeService } from "./service";
-import type { EmbeddingPort } from "./types";
 
 function fakeEmbeddings(): EmbeddingPort {
   return {

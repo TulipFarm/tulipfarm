@@ -1,12 +1,15 @@
 import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
+import type { EmbeddingPort, KnowledgePage } from "@tulipfarm/knowledge";
+import {
+  indexPage,
+  PgKnowledgeChunkRepo,
+  PgKnowledgePageRepo,
+  reindexAll,
+} from "@tulipfarm/knowledge";
 import { EmbeddingUnavailableError } from "@tulipfarm/schema";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeMigratedPglite } from "../test/pglite";
-import { PgKnowledgeChunkRepo } from "./chunks-repo";
-import { indexPage, reindexAll } from "./index-service";
-import { PgKnowledgePageRepo } from "./repo";
-import type { EmbeddingPort, KnowledgePage } from "./types";
 
 function fakeEmbeddings(opts: {
   available: boolean;

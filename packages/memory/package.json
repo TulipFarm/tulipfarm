@@ -11,7 +11,11 @@
   "dependencies": {
     "@tulipfarm/audit": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
-    "@tulipfarm/schema": "workspace:*"
+    "@tulipfarm/schema": "workspace:*",
+    "@tulipfarm/storage": "workspace:*",
+    "@tulipfarm/tool-host": "workspace:*",
+    "@tulipfarm/constants": "workspace:*",
+    "ai": "^7.0.2"
   },
   "devDependencies": {
     "@tulipfarm/tsconfig": "workspace:*",

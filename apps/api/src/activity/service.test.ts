@@ -1,5 +1,5 @@
+import type { PaginatedResult } from "@tulipfarm/storage";
 import { describe, expect, it, vi } from "vitest";
-import type { PaginatedResult } from "../pagination";
 import type { ActivityListOpts, ActivityRepo, ActivityRow } from "./repo";
 import { ActivityService } from "./service";
 

@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
+import type { KnowledgePage, KnowledgeSpace } from "@tulipfarm/knowledge";
+import {
+  PgKnowledgeLinksRepo,
+  PgKnowledgePageRepo,
+  PgKnowledgeSpaceOverrideRepo,
+  PgKnowledgeSpaceRepo,
+} from "@tulipfarm/knowledge";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeMigratedPglite } from "../test/pglite";
-import { PgKnowledgeLinksRepo } from "./links-repo";
-import { PgKnowledgePageRepo } from "./repo";
-import { PgKnowledgeSpaceOverrideRepo } from "./space-overrides-repo";
-import { PgKnowledgeSpaceRepo } from "./spaces-repo";
-import type { KnowledgePage, KnowledgeSpace } from "./types";
 
 function space(over: Partial<KnowledgeSpace> = {}): KnowledgeSpace {
   const now = new Date();

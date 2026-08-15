@@ -8,11 +8,14 @@ import type {
   MemoryTrustTier,
   MemoryType,
 } from "@tulipfarm/memory";
-import { recallMemory, rememberMemory } from "@tulipfarm/memory";
+import {
+  PgMemoryAssertionStore,
+  PgPendingMemoryStore,
+  recallMemory,
+  rememberMemory,
+} from "@tulipfarm/memory";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeMigratedPglite } from "../test/pglite";
-import { PgMemoryAssertionStore } from "./assertion-store";
-import { PgPendingMemoryStore } from "./pending-store";
 
 interface GoldenSupersessionEvent {
   readonly id: string;

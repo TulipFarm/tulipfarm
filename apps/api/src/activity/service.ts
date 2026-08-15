@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { PaginatedResult } from "../pagination";
+import type { PaginatedResult } from "@tulipfarm/storage";
 import type { ActivityListOpts, ActivityRepo, ActivityRow, ActivityStatus } from "./repo";
 
 /** `actorId` present ⇒ user row; absent ⇒ system row. */

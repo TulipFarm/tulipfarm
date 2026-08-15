@@ -1,7 +1,7 @@
+import type { ToolDef } from "@tulipfarm/tool-host";
 import { describe, expect, it, vi } from "vitest";
 import type { ToolRegistry } from "../broker/tool-adapter";
 import { declarativeToolName } from "../tools/declarative/tools";
-import type { ToolDef } from "../tools/types";
 import { postReply } from "./responder";
 
 const RUN = { runId: "run-1", toolCallId: "ingress-reply:1:default" };

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { type PaginatedResult, toPage } from "@tulipfarm/storage";
 import type { ModelMessage, TextPart, ToolCallPart, ToolResultPart } from "ai";
 import type { Queryable } from "../db";
-import { type PaginatedResult, toPage } from "../pagination";
 
 export type MessagePart =
   | { type: "text"; text: string }

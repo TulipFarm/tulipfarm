@@ -1,3 +1,4 @@
+export * from "./domain-events";
 export type {
   AcceptEventResult,
   ClaimedOutboxMessage,

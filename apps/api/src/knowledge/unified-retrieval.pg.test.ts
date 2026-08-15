@@ -1,17 +1,19 @@
 import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
-import type { KnowledgeSourceRecord } from "@tulipfarm/knowledge";
+import type { EmbeddingPort, KnowledgeSourceRecord } from "@tulipfarm/knowledge";
+import {
+  KNOWLEDGE_TOOLS,
+  KnowledgeService,
+  PageRetrievalService,
+  PgKnowledgeChunkRepo,
+  PgKnowledgePageRepo,
+  PgKnowledgeRevisionRepo,
+} from "@tulipfarm/knowledge";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { PgKnowledgeIndexStore } from "../knowledge-sources/index-store";
 import { PgKnowledgeSourceStore } from "../knowledge-sources/source-store";
 import { makeMigratedPglite } from "../test/pglite";
-import { PgKnowledgeChunkRepo } from "./chunks-repo";
-import { PageRetrievalService } from "./page-search-adapter";
-import { PgKnowledgePageRepo, PgKnowledgeRevisionRepo } from "./repo";
-import { KnowledgeService } from "./service";
-import { KNOWLEDGE_TOOLS } from "./tools";
-import type { EmbeddingPort } from "./types";
 
 const NOW = new Date("2026-08-08T12:00:00.000Z");
 

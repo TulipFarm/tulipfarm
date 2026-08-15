@@ -1,4 +1,4 @@
-import type { ApprovalsRepo } from "./runtime-repo";
+import type { ApprovalsRepo } from "@tulipfarm/tool-host";
 
 /** Pending Tool approval projected from durable rows, not in-process Worker state. */
 export interface PendingToolApproval {

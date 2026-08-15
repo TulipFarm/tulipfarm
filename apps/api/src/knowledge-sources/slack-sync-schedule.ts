@@ -5,10 +5,10 @@ import {
   type SlackKnowledgeSyncResult,
   syncSlackKnowledge,
 } from "@tulipfarm/integrations";
+import { recordJobRun } from "@tulipfarm/observability";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { IntegrationStore } from "@tulipfarm/storage";
 import type { PgBoss } from "pg-boss";
-import { recordJobRun } from "../activity/job-run";
 import type { ActivityService } from "../activity/service";
 import { integrationSecretKey } from "../integrations/connection-env";
 import type { PgKnowledgeEmissionSink } from "./emission-sink";

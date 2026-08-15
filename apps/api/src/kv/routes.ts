@@ -1,9 +1,8 @@
+import type { KvEntry, KvScope, KvService } from "@tulipfarm/kv";
+import { MAX_VALUE_BYTES } from "@tulipfarm/kv";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
-import { MAX_VALUE_BYTES } from "./limits";
-import type { KvEntry, KvScope } from "./repo";
-import type { KvService } from "./service";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 

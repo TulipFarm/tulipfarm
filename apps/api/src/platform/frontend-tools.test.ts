@@ -1,5 +1,5 @@
+import type { RequestContext } from "@tulipfarm/tool-host";
 import { describe, expect, it } from "vitest";
-import type { RequestContext } from "../tools/types";
 import {
   clientActionEvent,
   getClientContextTool,

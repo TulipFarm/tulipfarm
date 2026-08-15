@@ -1,10 +1,9 @@
 import type { PGlite } from "@electric-sql/pglite";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import type { MemoryEmbedder } from "@tulipfarm/memory";
+import { EngineMemoryRepo, PgMemoryRecallIndex } from "@tulipfarm/memory";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeMigratedPglite } from "../test/pglite";
-import type { MemoryEmbedder } from "./embedder";
-import { EngineMemoryRepo } from "./engine-repo";
-import { PgMemoryRecallIndex } from "./recall-index";
 
 const USER = "44444444-4444-4444-4444-444444444444";
 

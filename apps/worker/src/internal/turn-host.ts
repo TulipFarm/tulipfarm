@@ -4,6 +4,7 @@ import type {
   ToolDispatchResult,
 } from "@tulipfarm/agent-runtime";
 import type { ParticipantToolCall } from "@tulipfarm/schema";
+import type { TurnAuthority } from "@tulipfarm/tool-host";
 import type { ApprovalWaitPort } from "../agent-state";
 import type {
   TurnCompletionRecord,
@@ -70,6 +71,14 @@ export class HttpTurnHost
   }
 
   /** `ToolDispatchPort`. The far side re-derives the callId's authority from the Run. */
+  /**
+   * The Run-derived authority for this Run's Turn, so Tools hosted in this process execute under
+   * what the Run recorded rather than under anything this process decided for itself.
+   */
+  async authority(runId: string): Promise<TurnAuthority | undefined> {
+    return this.client.find<TurnAuthority>("GET", turnPath(runId, "/authority"), [404, 409]);
+  }
+
   async dispatch(request: ToolDispatchRequest): Promise<ToolDispatchResult> {
     const result = await this.client.require<RemoteToolResult>(
       "POST",

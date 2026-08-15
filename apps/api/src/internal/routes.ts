@@ -100,6 +100,31 @@ const ToolCallSchema = {
   },
 } as const;
 
+const TurnAuthoritySchema = {
+  type: "object",
+  required: ["businessId", "runId", "turn", "subject", "source", "bundleDigest"],
+  properties: {
+    businessId: { type: "string" },
+    runId: { type: "string" },
+    turn: {
+      type: "object",
+      required: ["id", "conversationId", "attempt"],
+      properties: {
+        id: { type: "string" },
+        conversationId: { type: "string" },
+        attempt: { type: "integer" },
+      },
+    },
+    subject: {
+      type: "object",
+      required: ["kind", "id"],
+      properties: { kind: { type: "string" }, id: { type: "string" } },
+    },
+    source: { type: "string" },
+    bundleDigest: { type: "string" },
+  },
+} as const;
+
 const RunParamsSchema = {
   type: "object",
   required: ["runId"],
@@ -305,6 +330,48 @@ export function registerInternalTurnRoutes(
       );
       if (context === undefined) return;
       return reply.send(context);
+    }
+  );
+
+  app.get(
+    "/api/v1/internal/turns/:runId/authority",
+    {
+      preHandler,
+      schema: {
+        description:
+          "The Run-derived authority for one Turn. Handed to an executor that hosts Tools in " +
+          "process, so execution can co-locate with the durable runtime while the answer to " +
+          '"what may this Run do" is still derived here, from the Run row, once per turn.',
+        tags: ["internal"],
+        security: [{ bearerToken: [] }],
+        params: RunParamsSchema,
+        response: {
+          200: TurnAuthoritySchema,
+          401: ErrorSchema,
+          403: ErrorSchema,
+          404: ErrorSchema,
+          409: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { runId } = req.params as { runId: string };
+      const authority = await guard(reply, () =>
+        deps.host.authority(DEPLOYMENT_BUSINESS_ID, runId)
+      );
+      if (authority === undefined) return;
+      return reply.send({
+        businessId: authority.businessId,
+        runId: authority.runId,
+        turn: {
+          id: authority.turn.id,
+          conversationId: authority.turn.conversationId,
+          attempt: authority.turn.attempt,
+        },
+        subject: authority.subject,
+        source: authority.source,
+        bundleDigest: authority.bundleDigest,
+      });
     }
   );
 

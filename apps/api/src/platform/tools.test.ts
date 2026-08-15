@@ -1,16 +1,12 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assembleSystemPrompt } from "@tulipfarm/agent-runtime";
 import type { SoulAgent, SoulRoutine, SoulSkill, SoulWriter } from "@tulipfarm/soul";
 import { describe, expect, it, vi } from "vitest";
 import type { BundledSkill } from "../soul/skills/bundled";
 import {
   callSkillTool,
-  completeStateTool,
-  completeTaskTool,
   delegateToAgentTool,
-  getCurrentTimeTool,
   loadSkillReferenceTool,
   loadSkillTool,
   PLATFORM_TOOLS,
@@ -20,7 +16,6 @@ import {
   soulRepoPushTool,
   transferToAgentTool,
   triggerRoutineTool,
-  validateArtifactTool,
 } from "./tools";
 
 function makeSkill(name: string): SoulSkill {
@@ -229,34 +224,6 @@ describe("loadSkillTool", () => {
 
 // ── complete_task ─────────────────────────────────────────────────────────────
 
-describe("completeTaskTool", () => {
-  it("returns the structured completion result handed back to the front desk", async () => {
-    const res = await completeTaskTool.handler(
-      { status: "success", summary: "built invoices", result: { resources: 1 } },
-      { soulWriter: makeSoulWriter() }
-    );
-    expect(res).toMatchObject({
-      success: true,
-      data: {
-        status: "success",
-        summary: "built invoices",
-        result: { resources: 1 },
-        completed: true,
-      },
-    });
-  });
-
-  it("returns validation_error for an invalid status", async () => {
-    const res = await completeTaskTool.handler(
-      { status: "weird" },
-      { soulWriter: makeSoulWriter() }
-    );
-    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
-  });
-});
-
-// ── load_skill_reference ──────────────────────────────────────────────────────
-
 describe("loadSkillReferenceTool", () => {
   it("returns not_found when soulPath is not set", async () => {
     const res = await loadSkillReferenceTool.handler(
@@ -357,45 +324,6 @@ describe("loadSkillReferenceTool", () => {
 });
 
 // ── validate_artifact ─────────────────────────────────────────────────────────
-
-describe("validateArtifactTool", () => {
-  const schema = {
-    type: "object",
-    required: ["name"],
-    properties: { name: { type: "string" } },
-  };
-
-  it("returns valid:true when artifact matches schema", async () => {
-    const res = await validateArtifactTool.handler(
-      { artifact: { name: "Alice" }, schema },
-      makeCtx()
-    );
-    expect(res).toEqual({ success: true, data: { valid: true } });
-  });
-
-  it("returns valid:false with errors when artifact fails schema", async () => {
-    const res = await validateArtifactTool.handler({ artifact: { name: 123 }, schema }, makeCtx());
-    expect(res).toMatchObject({ success: true, data: { valid: false } });
-    if (!res.success) throw new Error("expected success");
-    const data = res.data as { valid: boolean; errors: unknown[] };
-    expect(data.errors.length).toBeGreaterThan(0);
-  });
-
-  it("returns internal_error for an invalid schema", async () => {
-    const res = await validateArtifactTool.handler(
-      { artifact: {}, schema: { type: "not-a-real-type" } },
-      makeCtx()
-    );
-    expect(res).toMatchObject({ success: false, error: { code: "internal_error" } });
-  });
-
-  it("returns validation_error when args are missing schema", async () => {
-    const res = await validateArtifactTool.handler({ artifact: {} }, makeCtx());
-    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
-  });
-});
-
-// ── transfer_to_agent ─────────────────────────────────────────────────────────
 
 describe("transferToAgentTool", () => {
   it("returns transferred status and agentName", async () => {
@@ -664,39 +592,12 @@ describe("callSkillTool", () => {
 
 // ── complete_state ────────────────────────────────────────────────────────────
 
-describe("completeStateTool", () => {
-  const routineCtx = { routineId: "daily-digest", runId: "run-001" };
-
-  it("returns completion receipt with output", async () => {
-    const ctx: PlatformToolContext = { ...makeCtx(), routineContext: routineCtx };
-    const res = await completeStateTool.handler({ output: { sent: 5 } }, ctx);
-    expect(res).toEqual({
-      success: true,
-      data: { routineId: "daily-digest", runId: "run-001", completed: true, output: { sent: 5 } },
-    });
-  });
-
-  it("sets output to null when omitted", async () => {
-    const ctx: PlatformToolContext = { ...makeCtx(), routineContext: routineCtx };
-    const res = await completeStateTool.handler({}, ctx);
-    expect(res).toMatchObject({ success: true, data: { completed: true, output: null } });
-  });
-
-  it("returns internal_error when no routineContext", async () => {
-    const res = await completeStateTool.handler({}, makeCtx());
-    expect(res).toMatchObject({ success: false, error: { code: "internal_error" } });
-  });
-});
-
-// ── Registry ──────────────────────────────────────────────────────────────────
-
 describe("PLATFORM_TOOLS registry", () => {
   it("exports the consolidated platform tool set in order", () => {
     const names = PLATFORM_TOOLS.map((t) => t.name);
     expect(names).toEqual([
       "load_skill",
       "load_skill_reference",
-      "validate_artifact",
       "transfer_to_agent",
       "delegate_to_agent",
       "trigger_routine",
@@ -704,6 +605,7 @@ describe("PLATFORM_TOOLS registry", () => {
       "routine_picker",
       "soul_repo_push",
       "call_skill",
+      "validate_artifact",
       "complete_state",
       "complete_task",
       "get_current_time",
@@ -717,52 +619,5 @@ describe("PLATFORM_TOOLS registry", () => {
     expect(byName.soul_repo_push).toBe(true);
     expect(byName.call_skill).toBe(false);
     expect(byName.complete_state).toBe(true);
-  });
-});
-
-describe("get_current_time", () => {
-  const ctx = {} as PlatformToolContext;
-
-  /** Narrow the result union so a failure surfaces its message instead of an undefined read. */
-  function data(result: Awaited<ReturnType<typeof getCurrentTimeTool.handler>>): {
-    current: string;
-  } {
-    if (!result.success) throw new Error(`expected success, got ${result.error.message}`);
-    return result.data as { current: string };
-  }
-
-  it("reads the current time in the requested zone", async () => {
-    const { current } = data(await getCurrentTimeTool.handler({ timezone: "Asia/Kolkata" }, ctx));
-    expect(current).toContain("Asia/Kolkata");
-    expect(current).toMatch(/^date: \w+, \d{2} \w+ \d{4}\ntime: \d{2}:\d{2} \(/);
-  });
-
-  it("defaults to UTC when no zone is given", async () => {
-    expect(data(await getCurrentTimeTool.handler({}, ctx)).current).toContain("(UTC, UTC+00:00)");
-  });
-
-  it("renders in the same shape as the <current-context> block so the two cannot drift", async () => {
-    const { current } = data(await getCurrentTimeTool.handler({ timezone: "UTC" }, ctx));
-    const block = assembleSystemPrompt({
-      memory: [],
-      governancePages: [],
-      temporal: { now: new Date(), timezone: "UTC" },
-    });
-    // Same labelled lines, produced by the shared formatter.
-    for (const line of current.split("\n")) {
-      expect(block).toContain(`${line.split(":")[0]}:`);
-    }
-  });
-
-  it("rejects an unknown argument rather than silently ignoring it", async () => {
-    const result = await getCurrentTimeTool.handler({ zone: "Asia/Kolkata" }, ctx);
-    expect(result.success).toBe(false);
-    if (result.success) throw new Error("expected a validation failure");
-    expect(result.error.code).toBe("validation_error");
-  });
-
-  it("is read-only and registered", () => {
-    expect(getCurrentTimeTool.mutating).toBe(false);
-    expect(PLATFORM_TOOLS.map((t) => t.name)).toContain("get_current_time");
   });
 });

@@ -1,6 +1,6 @@
 import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
+import { type PaginatedResult, toPage } from "@tulipfarm/storage";
 import type { Queryable } from "../db";
-import { type PaginatedResult, toPage } from "../pagination";
 
 // Version tag distinguishing pepper-hashed (HMAC) token hashes from legacy bare-SHA-256 ones.
 // Legacy hashes are unprefixed 64-char hex; v2 hashes carry this prefix. The prefix can never

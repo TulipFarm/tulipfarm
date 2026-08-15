@@ -1,5 +1,6 @@
 import type { SoulAgent, SoulLoader } from "@tulipfarm/soul";
-import { DEFAULT_ASSISTANT } from "./platform-agents";
+import type { AgentResolver, HostedAgent } from "@tulipfarm/tool-host";
+import { DEFAULT_ASSISTANT, getDefaultAssistant } from "./platform-agents";
 
 /**
  * User-created Agent registry. Normal chat uses the unlisted default harness when no Soul Agent
@@ -16,6 +17,20 @@ export {
 /** Resolve a named Soul Agent, falling back to the normal-chat harness. */
 export function resolveAgent(soulLoader: SoulLoader | undefined, agentId?: string): SoulAgent {
   return (agentId ? soulLoader?.agents.get(agentId) : undefined) ?? DEFAULT_ASSISTANT;
+}
+
+/**
+ * The `AgentResolver` the Tool host composes with. Only the built-in harness carries a tool
+ * allowlist, so an authored Agent resolves to none and is offered the whole authorized catalog.
+ */
+export function hostedAgentResolver(soulLoader: SoulLoader | undefined): AgentResolver {
+  return {
+    resolve(agentId?: string): HostedAgent {
+      const agent = resolveAgent(soulLoader, agentId);
+      const allowlist = getDefaultAssistant(agent.name)?.toolAllowlist;
+      return { name: agent.name, ...(allowlist === undefined ? {} : { toolAllowlist: allowlist }) };
+    },
+  };
 }
 
 /** The registry view contains only user-created Soul Agents. */

@@ -1,4 +1,4 @@
-import { MAX_HISTORY_TOKENS, RECENT_RETENTION_TOKENS } from "../memory/limits";
+import { MAX_HISTORY_TOKENS, RECENT_RETENTION_TOKENS } from "@tulipfarm/memory";
 import {
   type CompactionCutoff,
   fromSummary,

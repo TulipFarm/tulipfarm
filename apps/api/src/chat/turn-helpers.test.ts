@@ -1,6 +1,6 @@
+import type { ToolDef } from "@tulipfarm/tool-host";
 import { describe, expect, it } from "vitest";
 import { ToolRegistry } from "../broker/tool-adapter";
-import type { ToolDef } from "../tools/types";
 import { allowedToolNamesFor, availableToolsFor, parseLastEventId } from "./turn-helpers";
 
 describe("parseLastEventId", () => {

@@ -1,6 +1,6 @@
+import type { KvService } from "@tulipfarm/kv";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
-import type { KvService } from "../kv/service";
 import { isNewerVersion, runningVersion } from "./version";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;

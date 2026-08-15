@@ -10,11 +10,10 @@ import {
 } from "@tulipfarm/run-kernel";
 import { CHAT_REQUEST_SCHEMA_REF, INVOCATION_REQUEST_SCHEMAS } from "@tulipfarm/schema";
 import { ArtifactStore, RunStore, WaitStore } from "@tulipfarm/storage";
+import { ApprovalsRepo, ToolApprovalService } from "@tulipfarm/tool-host";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ambientTransactionPort, type Queryable, transactionPort } from "../db";
 import { makeMigratedPglite } from "../test/pglite";
-import { ApprovalsRepo } from "./runtime-repo";
-import { ToolApprovalService } from "./tool-approvals";
 
 const SUBJECT = { kind: "user", id: "user-1" } as const;
 const PRINCIPAL = `${SUBJECT.kind}:${SUBJECT.id}`;

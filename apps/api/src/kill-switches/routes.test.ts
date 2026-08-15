@@ -1,5 +1,5 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
-import type { EnableKillSwitchInput, KillSwitchRecord } from "@tulipfarm/storage";
+import type { EnableKillSwitchInput, KillSwitchRecord, PaginatedResult } from "@tulipfarm/storage";
 import { KillSwitchStoreError } from "@tulipfarm/storage";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -10,7 +10,6 @@ import { CSRF_COOKIE, CSRF_HEADER } from "../auth/csrf";
 import { SESSION_COOKIE } from "../auth/routes";
 import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
-import type { PaginatedResult } from "../pagination";
 import { KillSwitchService, type KillSwitchStorePort } from "./service";
 
 const TEST_CSRF = "a".repeat(64);

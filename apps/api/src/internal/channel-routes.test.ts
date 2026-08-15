@@ -10,11 +10,10 @@ import {
 import { INVOCATION_REQUEST_SCHEMAS } from "@tulipfarm/schema";
 import { ChannelRunDeliveryStore, RunStore, WaitStore } from "@tulipfarm/storage";
 import { createSurfaceArtifact } from "@tulipfarm/surface";
+import { ApprovalsRepo, ToolApprovalService } from "@tulipfarm/tool-host";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app";
-import { ApprovalsRepo } from "../approvals/runtime-repo";
-import { ToolApprovalService } from "../approvals/tool-approvals";
 import type { TokenDoc, TokenRepo } from "../auth/api-tokens";
 import { CSRF_COOKIE } from "../auth/csrf";
 import { SESSION_COOKIE } from "../auth/routes";

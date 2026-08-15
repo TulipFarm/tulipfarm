@@ -9,16 +9,16 @@ import {
   type ToolAdapter,
   toolContractSpecOf,
 } from "@tulipfarm/tool-broker";
+import type { ToolDef } from "@tulipfarm/tool-host";
+import { CHAT_DLP_RULES } from "@tulipfarm/tool-host";
 import { describe, expect, it } from "vitest";
 import { DEPLOYMENT_ROLES } from "../identity/roles";
 import type { IntegrationConversationsRepo } from "../ingress/repo";
-import { CHAT_DLP_RULES } from "../internal/tool-gate";
 import { buildDeclarativeTools } from "./declarative/tools";
 import type { GitHubInstallationDirectory } from "./github/installation";
 import { buildGitHubTools } from "./github/tools";
 import { buildToolRegistry } from "./setup";
 import { buildSlackTools } from "./slack/tools";
-import type { ToolDef } from "./types";
 
 const validateDefinition = ajv.compile(ToolContractDefinitionSchema);
 const BUSINESS_ID = "contract-projection-business";

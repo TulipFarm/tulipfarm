@@ -1,5 +1,5 @@
+import { MAX_HISTORY_TOKENS } from "@tulipfarm/memory";
 import { describe, expect, it, vi } from "vitest";
-import { MAX_HISTORY_TOKENS } from "../memory/limits";
 import {
   applySummaryFilter,
   compactHistory,

@@ -12,10 +12,17 @@ import {
   type ToolIntent,
   type ToolTargetRef,
 } from "@tulipfarm/tool-broker";
+import {
+  defineApiTool,
+  err,
+  ok,
+  type RequestContext,
+  type ToolCallResult,
+  type ToolDef,
+  toToolDef,
+} from "@tulipfarm/tool-host";
 import type { IntegrationConversationsRepo } from "../../ingress/repo";
 import { externalThreadKey } from "../../internal/channel-routes";
-import { defineApiTool, toToolDef } from "../define";
-import { err, ok, type RequestContext, type ToolCallResult, type ToolDef } from "../types";
 import type { SlackTooling } from "./compose";
 import { SLACK_BOT_TOKEN_SECRET_REF } from "./credentials";
 

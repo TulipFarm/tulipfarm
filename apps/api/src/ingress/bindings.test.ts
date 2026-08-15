@@ -1,7 +1,7 @@
+import type { ToolDef } from "@tulipfarm/tool-host";
 import { describe, expect, it, vi } from "vitest";
 import type { ToolRegistry } from "../broker/tool-adapter";
 import { declarativeToolName } from "../tools/declarative/tools";
-import type { ToolDef } from "../tools/types";
 import { executeToolBinding, extractFromToolResult, INGRESS_ACTOR } from "./bindings";
 
 function makeRegistry(tools: Partial<ToolDef>[]): ToolRegistry {

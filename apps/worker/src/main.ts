@@ -70,6 +70,9 @@ import { BrokerRoutineToolPort } from "./routine/tool-port";
 import { RunDispatcher } from "./run-dispatcher";
 import { GuardedWorkerSecretsService } from "./secrets-guard";
 import { type DrainableLoop, drain } from "./shutdown";
+import { buildLocalToolHost } from "./tools/local-host";
+import { RoutingToolDispatch } from "./tools/routing-dispatch";
+import { SoulEmbeddings } from "./tools/soul-embeddings";
 import { createChatExecutor } from "./turn/chat-executor";
 import { createIntegrationExecutor } from "./turn/integration-executor";
 import { RunStoreStateTransitions } from "./turn/kernel-ports";
@@ -228,6 +231,24 @@ export async function main(): Promise<void> {
     secrets,
   });
 
+  // Built from the same published config the control plane embeds with, and rebuilt before each
+  // vector-backed answer, so a co-located ranking cannot quietly diverge from the remote one.
+  const localEmbeddings = new SoulEmbeddings({
+    source: () => turnHost.llmConfig(),
+    secrets,
+  });
+
+  // Tools that need no live Soul, no renderer and no provider credential run here, next to the
+  // Run they belong to; everything else still dispatches over the control plane.
+  const localTools = buildLocalToolHost({
+    db: pool,
+    transactions,
+    artifacts: artifactService,
+    waits,
+    embeddings: localEmbeddings,
+  });
+  const toolDispatch = new RoutingToolDispatch(localTools, turnHost, turnHost, logger);
+
   const executors = new RunExecutorRegistry();
   const deliveryTargets = new DeliveryTargetRegistry();
 
@@ -244,6 +265,7 @@ export async function main(): Promise<void> {
 
   const chatExecutor = createChatExecutor({
     host: turnHost,
+    tools: toolDispatch,
     context: turnHost,
     runs: runStore,
     events: runEventStore,

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { GitSyncService, SoulIntegration, SoulLoader } from "@tulipfarm/soul";
+import type { PaginatedResult } from "@tulipfarm/storage";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
@@ -13,7 +14,6 @@ import { CSRF_COOKIE, CSRF_HEADER } from "../auth/csrf";
 import { SESSION_COOKIE } from "../auth/middleware";
 import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
-import type { PaginatedResult } from "../pagination";
 import type { BundledIntegration } from "../soul/integrations/bundled";
 import { makeSoulWriterDouble } from "../soul/soul-writer-double";
 

@@ -28,6 +28,7 @@
     "@tulipfarm/constants": "workspace:*",
     "@tulipfarm/integrations": "workspace:*",
     "@tulipfarm/knowledge": "workspace:*",
+    "@tulipfarm/kv": "workspace:*",
     "@tulipfarm/llm": "workspace:*",
     "@tulipfarm/memory": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
@@ -43,6 +44,7 @@
     "@tulipfarm/surface-telegram": "workspace:*",
     "@tulipfarm/surface-web": "workspace:*",
     "@tulipfarm/tool-broker": "workspace:*",
+    "@tulipfarm/tool-host": "workspace:*",
     "ai": "^7.0.2",
     "dotenv": "^17.4.2",
     "fastify": "^5.8.5",
@@ -50,7 +52,8 @@
     "pg": "^8.22.0",
     "pg-boss": "^12.23.0",
     "simple-icons": "^16.28.0",
-    "yaml": "^2.9.0"
+    "yaml": "^2.9.0",
+    "@tulipfarm/platform-tools": "workspace:*"
   },
   "devDependencies": {
     "@ai-sdk/provider": "^4.0.0",
