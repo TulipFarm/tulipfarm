@@ -68,19 +68,13 @@ volume. See [Docker Compose](/docs/deploy/docker-compose) for what to back up, a
 
 ## Finish setup
 
-Open the printed URL. The app redirects to the setup wizard at `/setup`. Work through
-the three steps:
+Open the printed URL. The app redirects to the setup wizard at `/setup`, which asks one
+question at a time — your name, your email, then a password — to create the admin account.
+This is the only unauthenticated route; it locks once any admin exists.
 
-1. **Admin account** — enter an email and password. This is the only step that requires
-   no authentication; the route locks once any admin exists.
-2. **Business profile** — give your instance a name and optional description.
-3. **LLM provider** — choose a provider (Anthropic, OpenAI, Azure Foundry, or an
-   OpenAI-compatible endpoint), enter your credentials, and pick a model. You can skip
-   this step and configure it later in **Operate → Business → Models**.
-
-After step 3, the wizard marks setup complete in `soul.yaml` and redirects to the main
-workspace. The setup routes lock — no second visitor can claim the instance through the
-wizard.
+Finishing marks setup complete in `soul.yaml` and redirects to the main workspace. An LLM
+provider and your business's name and description come next, inside the app, as the first
+quests from the onboarding Companion — see [Get started](/docs/getting-started).
 
 <Callout type="warn">
   If the installer detected a public IP it prints a TLS warning: the instance is

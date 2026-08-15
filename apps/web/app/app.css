@@ -91,6 +91,9 @@
   --color-code-boolean: var(--code-boolean);
   --color-code-null: var(--code-null);
   --color-code-redacted: var(--code-redacted);
+
+  --color-tulip-stem: var(--tulip-stem);
+  --color-tulip-seed: var(--tulip-seed);
 }
 
 @layer base {
@@ -276,6 +279,79 @@
     stroke-dasharray: none !important;
     stroke-dashoffset: 0 !important;
   }
+}
+
+/*
+ * Onboarding tulip growth. `data-stage` on `.tulip-growth` (0-3) decides which parts *render* —
+ * the animations below are only the transition between stages, never the sole reason a part is
+ * visible. That split matters because the global reduced-motion guard further down flattens every
+ * animation/transition to 0.01ms: a state-driven part still snaps to the right stage, while a
+ * part that depended on its animation to appear would stay invisible forever.
+ */
+.tulip-growth .tulip-stem-path {
+  stroke-dasharray: 1 1;
+  stroke-dashoffset: 1;
+}
+.tulip-growth[data-stage="1"] .tulip-stem-path,
+.tulip-growth[data-stage="2"] .tulip-stem-path,
+.tulip-growth[data-stage="3"] .tulip-stem-path {
+  animation: glyph-sweep 600ms var(--ease-snappy) forwards;
+}
+.tulip-growth .tulip-grow {
+  transform-box: fill-box;
+  transform-origin: bottom center;
+  transform: scaleY(0);
+  opacity: 0;
+  transition:
+    transform 500ms var(--ease-snappy),
+    opacity 500ms var(--ease-snappy);
+}
+.tulip-growth[data-stage="1"] .tulip-grow[data-from="1"],
+.tulip-growth[data-stage="2"] .tulip-grow[data-from="1"],
+.tulip-growth[data-stage="2"] .tulip-grow[data-from="2"],
+.tulip-growth[data-stage="3"] .tulip-grow[data-from="1"],
+.tulip-growth[data-stage="3"] .tulip-grow[data-from="3"] {
+  transform: scaleY(1);
+  opacity: 1;
+}
+/* The closed bud is stage 2 only — the open bloom (data-from="3") replaces it, not stacks on it. */
+.tulip-growth[data-stage="3"] .tulip-bud {
+  transform: scaleY(0);
+  opacity: 0;
+}
+.tulip-growth .tulip-eyes {
+  opacity: 0;
+  transition: opacity 240ms var(--ease-snappy) 260ms;
+}
+.tulip-growth[data-stage="3"] .tulip-eyes {
+  opacity: 1;
+}
+
+/* Same failure mode as the glyph dash above: a neutralized dash must not freeze half-drawn, and
+   a neutralized transform/opacity must not leave a stage's parts stuck invisible. */
+@media (prefers-reduced-motion: reduce) {
+  .tulip-growth .tulip-stem-path {
+    stroke-dasharray: none !important;
+    stroke-dashoffset: 0 !important;
+  }
+}
+
+/* Companion pending-quest dot: one ambient breathe, same family as glyph-breathe. The badge is
+   fully opaque at rest, so the global reduced-motion guard flattening this to 0.01ms just removes
+   the pulse — it never hides the badge itself. */
+@keyframes companion-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 0.7;
+  }
+}
+.companion-badge-pulse {
+  animation: companion-pulse 2.4s ease-in-out infinite;
 }
 
 /*

@@ -20,9 +20,13 @@ export const meta: MetaFunction = () => [{ title: "Chat · tulipfarm" }];
 // Deliberately does no fetching: a clientLoader gates the first paint of the app's landing route,
 // so anything awaited here is blank-screen time. Onboarding is fetched after mount instead.
 export async function clientLoader({ request }: ClientLoaderFunctionArgs) {
-  const agentId = new URL(request.url).searchParams.get("agent") || undefined;
+  const url = new URL(request.url);
+  const agentId = url.searchParams.get("agent") || undefined;
+  // Seeded by the onboarding Companion (a tier-2/3 quest's "chat" action) — drafted into the
+  // composer, never auto-sent.
+  const draft = url.searchParams.get("draft") || undefined;
   const defaultModel: ChatModelSelector = DEFAULT_CHAT_MODEL_SELECTOR;
-  return { agentId, defaultModel };
+  return { agentId, defaultModel, draft };
 }
 
 /*
@@ -62,7 +66,14 @@ function useOnboarding(newChatNonce: number) {
 }
 
 export default function ChatRoute() {
-  const { agentId, defaultModel } = useLoaderData<typeof clientLoader>();
+  const { agentId, defaultModel, draft } = useLoaderData<typeof clientLoader>();
+  // Strip `?draft=` once applied so a reload or Back doesn't redraft over the user's own typing.
+  useEffect(() => {
+    if (!draft) return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("draft");
+    window.history.replaceState(null, "", `${url.pathname}${url.search}`);
+  }, [draft]);
   const { refresh, setActiveChatId, newChatNonce } = useConversations();
   // Dismissal lives here, ABOVE the `newChatNonce`-keyed ChatPanel, so "+ new chat" (which remounts
   // ChatPanel) doesn't resurrect a card the user already dismissed.
@@ -98,6 +109,7 @@ export default function ChatRoute() {
         void dismissOnboardingChecklist().catch(() => {});
       }}
       onConversationChange={onConversationChange}
+      initialDraft={draft}
     />
   );
 }

@@ -147,6 +147,7 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
           type: "object",
           required: ["email", "password"],
           properties: {
+            name: { type: "string", maxLength: 200 },
             email: { type: "string", format: "email" },
             password: {
               type: "string",
@@ -163,7 +164,8 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
       },
     },
     async (req, reply) => {
-      const body = (req.body ?? {}) as { email?: unknown; password?: unknown };
+      const body = (req.body ?? {}) as { name?: unknown; email?: unknown; password?: unknown };
+      const name = typeof body.name === "string" ? body.name.trim() : "";
       const email = typeof body.email === "string" ? body.email : "";
       const password = typeof body.password === "string" ? body.password : "";
       if (!email) {
@@ -178,6 +180,7 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
       try {
         user = await createUser(userRepo, email, password, "admin", {
           setupBootstrap: true,
+          ...(name ? { name } : {}),
           ...(setupAdminCreator ? { insert: (record) => setupAdminCreator.create(record) } : {}),
         });
       } catch (err) {

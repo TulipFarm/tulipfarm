@@ -3,41 +3,44 @@ title: First-run setup and boot modes
 description: How TulipFarm opens the setup wizard or seeds a fresh instance from environment variables.
 ---
 
-A fresh TulipFarm instance needs an admin user, a business profile, and usually an LLM provider
-before it is useful. Setup can happen through the web wizard or through environment-driven headless
-bootstrap.
+A fresh TulipFarm instance needs an admin user before it is useful. Everything else — an LLM
+provider, the business profile — is gathered afterwards, inside the app. Setup can happen through
+the web wizard or through environment-driven headless bootstrap.
 
 ## Wizard mode
 
 Wizard mode is the default when no users exist and no headless admin seed is present — the shape
 `curl | bash` self-hosted installs and local development land in, with no environment variables set.
 When `GET /api/v1/setup/status` returns `needsSetup: true`, the web app redirects to `/setup` and
-walks the operator through three steps: the first admin account, the business profile, and an
-optional LLM provider.
+asks one question at a time — name, email, then password, no step count shown — to create the
+first admin. It stays open only until a user exists, so it cannot mint a second admin.
 
-The admin step creates the first user and logs them in; it stays open only until a user exists, so
-it cannot mint a second admin. The business step records `businessName`, `businessDescription`, and
-the optional `businessWebsite` in `soul.yaml`, and all three become static business context in every
-Agent's system prompt. That profile is not working [memory](/docs/concepts/memory). The LLM step
-stores the provider credentials as [secrets](/docs/concepts/secrets) and writes a default
-`llm` block in `soul.yaml` with all three provider chains pointing at the chosen model and
-**Auto** resolving to **Balanced**; skipping it leaves that to **Operate → Business → Models**.
-
-The LLM step accepts a Claude or ChatGPT
-[subscription](/docs/concepts/llm#subscription-providers) in place of an API key, so an operator
-with a paid plan and no API budget can finish setup. Whichever kind is chosen, the credential is
-validated with one real model call before it is stored — a credential that cannot answer is
-rejected in the wizard rather than kept and discovered at the first chat message.
-
-Finishing calls `POST /api/v1/setup/complete`, which writes `setupComplete: true` to `soul.yaml`.
-The wizard step routes return `403` from then on, while `GET /api/v1/setup/status` remains available
-so the web app can decide whether setup is still open.
+Finishing calls `POST /api/v1/setup/admin` then `POST /api/v1/setup/complete`, which writes
+`setupComplete: true` to `soul.yaml`. The wizard step routes return `403` from then on, while
+`GET /api/v1/setup/status` remains available so the web app can decide whether setup is still open.
 
 <Callout type="info">
 Soul git backup is not part of the wizard. Configure the remote after setup in
 **Operate → Business → Soul**, or seed it at boot with `SOUL_GIT_REMOTE_URL` /
 `SOUL_GIT_CREDENTIAL`.
 </Callout>
+
+## The Companion
+
+Once inside the app, a floating **Companion** — a tulip icon, bottom-right on desktop and a
+top-bar icon on mobile — surfaces what setup used to front-load, one small question at a time. Its
+first quest is an LLM provider: it opens **Operate → Business → Secrets** to add a key, validated
+with one real model call before it is stored, same as the old wizard step, and accepts a Claude or
+ChatGPT [subscription](/docs/concepts/llm#subscription-providers) in place of an API key. Its next
+two quests are the business profile: `businessName` and `businessDescription`, answered inline and
+written straight to `soul.yaml` as static business context in every Agent's system prompt — not
+working [memory](/docs/concepts/memory). Only once those three are answered does the Companion
+unlock further quests: a deterministic setup checklist, then AI-suggested profile gaps answered
+through chat.
+
+A provider key also lets you assign models to the **Fast**, **Balanced**, and **Thorough** chains
+in **Operate → Business → Models**, and choose which profile **Auto** resolves to — the Companion
+does not do this for you.
 
 ## Headless mode
 

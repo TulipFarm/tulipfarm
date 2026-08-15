@@ -673,6 +673,9 @@ export async function buildApp(opts: AppOptions = {}) {
           hasAnyKnowledgePage: knowledgeService
             ? () => knowledgeService.hasAnyKnowledgePage()
             : undefined,
+          gitSync: opts.gitSync,
+          soulWriter: opts.soulWriter,
+          auditService: opts.auditService,
         });
         if (opts.llmService) {
           registerSkillRoutes(

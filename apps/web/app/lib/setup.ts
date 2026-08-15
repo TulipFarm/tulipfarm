@@ -6,9 +6,9 @@ export async function getSetupStatus(): Promise<SetupStatus> {
   return apiGet<SetupStatus>("/api/v1/setup/status");
 }
 
-export async function setupAdmin(email: string, password: string): Promise<void> {
+export async function setupAdmin(name: string, email: string, password: string): Promise<void> {
   // 201 with user body — use apiWrite; we don't need the response body
-  await apiWrite("POST", "/api/v1/setup/admin", { email, password });
+  await apiWrite("POST", "/api/v1/setup/admin", { name, email, password });
 }
 
 export async function setupBusiness(

@@ -203,6 +203,11 @@ safer. Keep domain fetching and mutations out of primitives.
   "Step n of m" plus a progress bar. Mark progress with `aria-current="step"` and an icon, not tone
   alone. An optional step says so on the step, on its fields, and in a skip action beside the
   primary one.
+  - **First-run onboarding is the deliberate exception.** Pre-login account creation
+    (`/setup`) intentionally hides step count and rail — perceived length is the thing being
+    optimized, not flow legibility for a returning operator. It still marks progress for
+    assistive tech via a visually-hidden `role="status"` announcement, just not a visible
+    number.
 - **Master/detail:** context panel owns selection; main surface owns detail and browser history.
 - **Chat:** transcript owns scrolling; composer remains visible without covering the last message.
 - **Chat composer:** show Effort and active Agent as quiet context above the prompt; keep context
@@ -243,7 +248,9 @@ safer. Keep domain fetching and mutations out of primitives.
 - **Chat step timeline:** use a vertical rail to connect ordered execution steps. The rail reports
   real execution state, not decoration. While a Tool call is running, `.run-rail-active` may show an
   indeterminate sweep; under `prefers-reduced-motion: reduce`, it collapses to a static tinted rail.
-  Motion in this system is permitted only when it reports real state.
+  Motion in this system is permitted only when it reports real state. The onboarding tulip's growth
+  (`TulipGrowth`, `/setup`) passes this same test — each stage is answered-input count, not
+  ornament — so treat it as precedent, not an exception, when judging future progress motion.
 - **Chat inspect pane:** separate Tool Input from Tool Output with explicit labels, independent
   borders, and JSON/code coloring from `code-*` tokens. Preserve order, whitespace where it matters,
   redaction markers, empty states, error states, and long-value wrapping without horizontal page
