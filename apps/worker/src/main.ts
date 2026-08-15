@@ -37,6 +37,7 @@ import {
   KillSwitchRepo,
   RunEventStore,
   RunStore,
+  TaskRepo,
   WaitStore,
 } from "@tulipfarm/storage";
 import { PgEffectStore } from "@tulipfarm/tool-broker";
@@ -61,6 +62,7 @@ import { ProviderGate } from "./model-gate";
 import { PgSpendSink } from "./observability";
 import { waitForSchemaFloor } from "./preflight";
 import { startProbeServer } from "./probe-server";
+import { TaskSignalsGatherer } from "./reconcile/task-signals";
 import { buildGitHubTooling } from "./routine/adapters";
 import { BundleRoutineAgentPort } from "./routine/agent-port";
 import { HttpRoutineApprovalPort } from "./routine/approval-port";
@@ -176,13 +178,26 @@ export async function main(): Promise<void> {
   });
   resourceSampler.start();
 
+  const transactions = transactionPort(pool);
+  const internalApi = new InternalApiClient({
+    baseUrl: config.internalApiUrl,
+    credential: config.internalApiCredential,
+  });
+  const turnHost = new HttpTurnHost(internalApi);
+
   let consumersReady = !config.maintenance;
   const jobBoss = config.maintenance
-    ? await startJobConsumers({ databaseUrl: config.databaseUrl, database: pool, log: logger })
+    ? await startJobConsumers({
+        databaseUrl: config.databaseUrl,
+        database: pool,
+        log: logger,
+        businessId: config.businessId,
+        taskStore: new TaskRepo(transactions),
+        taskSignals: new TaskSignalsGatherer(turnHost),
+      })
     : undefined;
   consumersReady = true;
 
-  const transactions = transactionPort(pool);
   const killSwitchRepo = new KillSwitchRepo(transactions);
   // The API owns the audit ledger, so a Worker-side denial leaves its evidence in the Run's own
   // event history plus this log line; the stop itself is enforced identically either way.
@@ -213,12 +228,6 @@ export async function main(): Promise<void> {
   const sweeper = new WaitTimerSweeper(waitStore, resume);
   // Routine timers open here; the same sweeper resolves them.
   const waits = new DurableWaitManager(waitStore, resume);
-
-  const internalApi = new InternalApiClient({
-    baseUrl: config.internalApiUrl,
-    credential: config.internalApiCredential,
-  });
-  const turnHost = new HttpTurnHost(internalApi);
 
   // API mints keys; Worker only loads the active DEK and memoizes the secret service.
   let secretsService: Promise<SecretsService> | undefined;

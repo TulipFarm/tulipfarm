@@ -13,6 +13,7 @@ docs/plans
 docs/uat
 docs/qa/runs/
 tasks/
+!apps/api/src/tasks/
 cookies.txt
 references
 !/.agents/skills/tulipfarm-design-system/references/

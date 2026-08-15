@@ -47,6 +47,8 @@ export function registerSecretsRoutes(
   opts?: {
     /** Called after a successful delete; errors are caught and logged — never surface to the caller. */
     onSecretDeleted?: (key: string, actor: CommitActor) => Promise<void>;
+    /** Called after a successful create/update; errors are caught and logged — never surface to the caller. */
+    onSecretSet?: (key: string, actor: CommitActor) => Promise<void>;
   }
 ): void {
   app.get(
@@ -141,6 +143,16 @@ export function registerSecretsRoutes(
           return reply.code(400).send({ error: err.message });
         }
         throw err;
+      }
+
+      if (opts?.onSecretSet) {
+        try {
+          await opts.onSecretSet(key, commitActorFromRequest(req));
+        } catch (err) {
+          app.log.error(
+            `[secrets] post-set cascade for ${key} failed — ${err instanceof Error ? err.message : String(err)}`
+          );
+        }
       }
 
       return reply.send({ key });

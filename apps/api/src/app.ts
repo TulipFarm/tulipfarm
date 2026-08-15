@@ -28,7 +28,7 @@ import type {
   SoulLoader,
   SoulWriter,
 } from "@tulipfarm/soul";
-import type { IntegrationStore } from "@tulipfarm/storage";
+import type { IntegrationStore, TaskStore } from "@tulipfarm/storage";
 import type { ApprovalsRepo, ToolApprovalService } from "@tulipfarm/tool-host";
 import Fastify, { type FastifyBaseLogger, type FastifyReply, type FastifyRequest } from "fastify";
 import { registerActivityRoutes } from "./activity/routes";
@@ -118,6 +118,7 @@ import { registerSetupRoutes, registerSetupStatusRoute } from "./setup/routes";
 import { isHeadlessBoot } from "./setup/service";
 import { registerAgentRoutes } from "./soul/agents/routes";
 import { makeLlmCascadeOnSecretDelete } from "./soul/llm-config/cascade";
+import { makeLlmCascadeOnSecretSet } from "./soul/llm-config/cascade-set";
 import { registerLlmConfigRoutes } from "./soul/llm-config/routes";
 import { registerResourceTypeRoutes } from "./soul/resource-types/routes";
 import { registerAccessLevelRoutes } from "./soul/roles/routes";
@@ -127,6 +128,7 @@ import { MemorySurfaceActionStore, type SurfaceActionStore } from "./surfaces/ac
 import { MemorySurfaceArtifactStore, type SurfaceArtifactStore } from "./surfaces/artifact-store";
 import { registerSurfaceRoutes } from "./surfaces/routes";
 import { registerSystemRoutes, type SystemRoutesDeps } from "./system/routes";
+import { registerTaskRoutes } from "./tasks/routes";
 import { buildToolRegistry } from "./tools/setup";
 import { registerTriggerRoutes, type TriggerInvokeDeps } from "./triggers/routes";
 
@@ -200,12 +202,19 @@ export interface AppOptions {
   reconcileSoulRoles?: () => Promise<void>;
   domainEventEmitter?: EventEmitter;
   llmService?: LlmService;
+  /**
+   * Kicks the pg-boss `task-reconcile` queue outside its 15-minute cron, so a Task-clearing change
+   * (e.g. auto-connecting a subscription LLM provider) reflects in the Companion within seconds
+   * instead of up to 15 minutes. Absent in tests/deployments with no pg-boss wired.
+   */
+  triggerTaskReconcile?: () => Promise<void>;
   conversationRepo?: ConversationRepo;
   messageRepo?: MessageRepo;
   feedbackRepo?: FeedbackRepo;
   runEvents?: RunEventRouteDeps;
   runReplay?: RunReplayDeps;
   memoryService?: MemoryService;
+  taskStore?: TaskStore;
   memoryExtractionService?: MemoryExtractionService;
   memoryLifecycleService?: MemoryLifecycleService;
   kvService?: KvService;
@@ -478,6 +487,7 @@ export async function buildApp(opts: AppOptions = {}) {
       ...(opts.userInviteRepo && { inviteRepo: opts.userInviteRepo }),
       requireAuthorization: makeRequireAuthorization(opts.routeAuthorizer),
       authorizationCheck: makeAuthorizationCheck(opts.routeAuthorizer),
+      ...(opts.triggerTaskReconcile && { triggerTaskReconcile: opts.triggerTaskReconcile }),
     });
     const requireAuth = makeRequireAuth({
       store: opts.sessionStore,
@@ -518,6 +528,17 @@ export async function buildApp(opts: AppOptions = {}) {
                 opts.llmService,
                 opts.secretsService,
                 app.log
+              )
+            : undefined,
+        onSecretSet:
+          opts.soulLoader && opts.soulWriter && opts.llmService
+            ? makeLlmCascadeOnSecretSet(
+                opts.soulLoader,
+                opts.soulWriter,
+                opts.llmService,
+                opts.secretsService,
+                app.log,
+                opts.triggerTaskReconcile
               )
             : undefined,
       });
@@ -742,6 +763,19 @@ export async function buildApp(opts: AppOptions = {}) {
           }
         }
       }
+    }
+    if (opts.taskStore) {
+      registerTaskRoutes(
+        app,
+        {
+          tasks: opts.taskStore,
+          soulWriter: opts.soulWriter,
+          gitSync: opts.gitSync,
+          auditService: opts.auditService,
+          memoryService: opts.memoryService,
+        },
+        requireAuth
+      );
     }
     if (opts.githubInstall) {
       registerGitHubInstallRoutes(app, {

@@ -336,7 +336,7 @@
   }
 }
 
-/* Companion pending-quest dot: one ambient breathe, same family as glyph-breathe. The badge is
+/* Companion pending-task dot: one ambient breathe, same family as glyph-breathe. The badge is
    fully opaque at rest, so the global reduced-motion guard flattening this to 0.01ms just removes
    the pulse — it never hides the badge itself. */
 @keyframes companion-pulse {

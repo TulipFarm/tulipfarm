@@ -89,6 +89,7 @@ import {
   RunEventStore,
   RunStore,
   SoulRepositoryStore,
+  TaskRepo,
   WaitStore,
 } from "@tulipfarm/storage";
 import { CompositeToolEntitlement, PgEffectStore } from "@tulipfarm/tool-broker";
@@ -244,6 +245,7 @@ import { registerSoulSync } from "./soul-sync";
 import { PgSurfaceActionStore } from "./surfaces/action-store";
 import { PgSurfaceArtifactStore } from "./surfaces/artifact-store";
 import { apiSurfacePresentation, surfaceRendererRegistry } from "./surfaces/renderer-registry";
+import { registerTaskReconcileSchedule, TASK_RECONCILE_QUEUE } from "./tasks/reconcile-schedule";
 import { FetchEgressHttp } from "./tools/declarative/http";
 import { DeclarativeToolSync } from "./tools/declarative/sync";
 import { buildGitHubTooling } from "./tools/github/compose";
@@ -639,6 +641,7 @@ async function boot() {
       memoryTelemetry
     );
     const kvService = new KvService(new PgKvRepo(pool));
+    const taskRepo = new TaskRepo(transactionPort(pool));
     const activityService = new ActivityService(new PgActivityRepo(pool));
     // Audit is separate from activity by design: activity is a UI feed, audit is evidence.
     // Persisted to an append-only ledger the runtime role cannot rewrite (see `audit/repo.ts`).
@@ -794,6 +797,7 @@ async function boot() {
       },
       github: githubTools,
       slack: slackTools,
+      tasks: { businessId: DEPLOYMENT_BUSINESS_ID, tasks: taskRepo },
       platform: {
         events: domainEventEmitter,
         soulLoader,
@@ -926,6 +930,23 @@ async function boot() {
       // without restarting it.
       llmConfig: () => soulLoader.llmConfig,
       pricingOverrides: () => obsConfig.pricingOverrides,
+      taskReconcileSignals: async () => {
+        const businessName =
+          typeof soulLoader.manifest?.businessName === "string"
+            ? soulLoader.manifest.businessName
+            : undefined;
+        const businessDescription =
+          typeof soulLoader.manifest?.businessDescription === "string"
+            ? soulLoader.manifest.businessDescription
+            : undefined;
+        const firstAdmin = await userRepo.findFirstAdmin();
+        const employeeCount = firstAdmin
+          ? (await memoryService.list(firstAdmin._id)).find((e) => e.key === "employeeCount")?.value
+          : undefined;
+        const allUsers = await userRepo.listAll();
+        const memberCount = allUsers.filter((u) => u.status !== "disabled").length;
+        return { businessName, businessDescription, employeeCount, memberCount };
+      },
       // reason: the resume token stays in the process that redeems it.
       routineApprovals: new InternalRoutineApprovalHost({
         runs: runStore,
@@ -989,6 +1010,9 @@ async function boot() {
       },
       domainEventEmitter,
       llmService,
+      triggerTaskReconcile: async () => {
+        await boss.send(TASK_RECONCILE_QUEUE, {});
+      },
       guardrailsService,
       conversationRepo,
       messageRepo,
@@ -999,6 +1023,7 @@ async function boot() {
       memoryExtractionService,
       memoryLifecycleService,
       kvService,
+      taskStore: taskRepo,
       knowledgeService,
       toolRegistry,
       declarativeTools,
@@ -1191,6 +1216,7 @@ async function boot() {
       reconcile: () => soulPublisher.reconcile(DEPLOYMENT_BUSINESS_ID, SOUL_SYNC_COMMIT_ACTOR),
     });
     await registerScheduleDispatch(boss, scheduleDispatcher, { log: app.log });
+    await registerTaskReconcileSchedule(boss);
     await registerObsPruneSchedule(boss, obsConfig.retentionDays * 24 * 60 * 60 * 1000);
     await registerSpendAlertSchedule(boss, obsConfig.spendAlertUsd);
     await registerKnowledgeIndexing(boss, {

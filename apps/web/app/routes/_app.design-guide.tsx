@@ -99,29 +99,32 @@ const TIER_TOKENS = [
 
 const TULIP_STAGES: readonly TulipStage[] = [0, 1, 2, 3];
 
-/** Static specimen quests — one per tier — for the Companion panel showcase. Never wired live. */
-const GUIDE_QUESTS = [
+/** Static specimen Tasks — link, chat, and answer actions — for the Companion panel showcase. Never wired live. */
+const GUIDE_TASKS = [
   {
     id: "provider-key",
-    tier: 1 as const,
-    label: "Plant your model key",
-    hint: "Agents need one provider connected before they can do anything.",
+    title: "Plant your model key",
+    detail: "Agents need one provider connected before they can do anything.",
     action: { kind: "link" as const, href: "/settings/secrets" },
+    blocking: true,
+    status: "open" as const,
+    createdAt: "2026-01-01T00:00:00.000Z",
   },
   {
     id: "checklist-resource",
-    tier: 2 as const,
-    label: "Create your first resource type",
+    title: "Create your first resource type",
     action: { kind: "chat" as const, prompt: "Help me create a resource type." },
+    blocking: true,
+    status: "open" as const,
+    createdAt: "2026-01-01T00:00:00.000Z",
   },
   {
-    id: "profile-employee-count",
-    tier: 3 as const,
-    label: "How many people work here?",
-    action: {
-      kind: "chat" as const,
-      prompt: "Help me record how many employees the business has.",
-    },
+    id: "employee-count",
+    title: "How many people work here?",
+    action: { kind: "answer" as const, field: "employeeCount", sink: "memory" as const },
+    blocking: true,
+    status: "open" as const,
+    createdAt: "2026-01-01T00:00:00.000Z",
   },
 ];
 
@@ -560,11 +563,11 @@ export default function DesignGuideRoute() {
           Pre-login (<code>/setup</code>) drives this with answered-question count, no step number
           shown. In-app, stage 3 is fixed — it is the Companion's collapsed glyph, bottom right on{" "}
           <code>sm</code>+ and a top-bar icon below it, with a pulsing dot badge (never a popup)
-          when a quest is pending.
+          when a Task is pending.
         </p>
         <div className="mt-5 max-w-sm rounded-md border border-border bg-card">
           <CompanionPanel
-            quests={GUIDE_QUESTS}
+            tasks={GUIDE_TASKS}
             loading={false}
             onDismiss={() => {}}
             onAnswered={() => {}}

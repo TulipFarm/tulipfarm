@@ -7,15 +7,16 @@ import {
   useRef,
   useState,
 } from "react";
-import { dismissQuest, listQuests, type Quest } from "~/lib/onboarding";
+import { dismissTask, listTasks, type Task } from "~/lib/tasks";
 
-/* The Companion's quest ladder: poll every ~60s (low-urgency, unlike Approvals) so a quest
-   answered elsewhere (chat, Settings) clears itself out within a minute without a hard refresh. */
+/* The Companion's Task queue: poll every ~60s (low-urgency, unlike Approvals) so a Task closed
+   elsewhere (chat, Settings, the reconciler) clears itself out within a minute without a hard
+   refresh. */
 
 const POLL_INTERVAL_MS = 60_000;
 
 type CompanionContextValue = {
-  quests: Quest[];
+  tasks: Task[];
   loading: boolean;
   open: boolean;
   setOpen: (open: boolean) => void;
@@ -26,7 +27,7 @@ type CompanionContextValue = {
 const CompanionContext = createContext<CompanionContextValue | null>(null);
 
 export function CompanionProvider({ children }: { children: ReactNode }) {
-  const [quests, setQuests] = useState<Quest[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const inFlight = useRef(false);
@@ -36,8 +37,8 @@ export function CompanionProvider({ children }: { children: ReactNode }) {
     if (inFlight.current) return;
     inFlight.current = true;
     try {
-      const items = await listQuests();
-      if (mounted.current) setQuests(items);
+      const items = await listTasks();
+      if (mounted.current) setTasks(items);
     } catch {
       // Keep the last-known list on a transient failure; retry next tick.
     } finally {
@@ -57,16 +58,16 @@ export function CompanionProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   const dismiss = useCallback(async (id: string) => {
-    setQuests((current) => current.filter((q) => q.id !== id));
-    await dismissQuest(id).catch(() => {});
+    setTasks((current) => current.filter((t) => t.id !== id));
+    await dismissTask(id).catch(() => {});
   }, []);
 
-  const value: CompanionContextValue = { quests, loading, open, setOpen, refresh, dismiss };
+  const value: CompanionContextValue = { tasks, loading, open, setOpen, refresh, dismiss };
   return <CompanionContext.Provider value={value}>{children}</CompanionContext.Provider>;
 }
 
 const INERT: CompanionContextValue = {
-  quests: [],
+  tasks: [],
   loading: false,
   open: false,
   setOpen: () => {},

@@ -23,6 +23,7 @@ import {
   type SurfaceComponentToolContext,
 } from "../soul/surface-components/tools.js";
 import { SURFACE_TOOLS } from "../surfaces/tools";
+import { TASK_TOOLS, type TaskToolContext } from "../tasks/tools";
 
 /** Build the startup ToolRegistry; handlers close over services and receive RequestContext. */
 export function buildToolRegistry(services: {
@@ -39,6 +40,8 @@ export function buildToolRegistry(services: {
   skillTools?: SkillToolContext;
   surfaceComponents?: SurfaceComponentToolContext;
   platform?: PlatformToolContext;
+  /** `task_create`/`task_close`; absent leaves both unregistered. */
+  tasks?: TaskToolContext;
   /** GitHub ToolDefs; registered when composed, with live install visibility gated per turn. */
   github?: readonly ToolDef[];
   /** Slack chat ToolDefs from `tools/slack/tools.ts`. */
@@ -119,6 +122,11 @@ export function buildToolRegistry(services: {
   if (services.surfaceComponents) {
     const ctx = services.surfaceComponents;
     registerFamily(SURFACE_COMPONENT_TOOLS, () => ctx);
+  }
+
+  if (services.tasks) {
+    const ctx = services.tasks;
+    registerFamily(TASK_TOOLS, ({ agentId, runId }) => ({ ...ctx, agentId, runId }));
   }
 
   if (services.platform !== undefined) {

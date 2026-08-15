@@ -24,6 +24,14 @@ export interface RemoteTurnIdentity {
   readonly attempt: number;
 }
 
+/** Mirrors `TaskReconcileSignals` in `apps/api/src/internal/routes.ts` across the HTTP boundary. */
+export interface TaskReconcileSignals {
+  readonly businessName?: string;
+  readonly businessDescription?: string;
+  readonly employeeCount?: string;
+  readonly memberCount?: number;
+}
+
 /** A dispatch outcome as the host reports it: the caller already holds the `callId`. */
 type RemoteToolResult =
   | { readonly status: "succeeded"; readonly output: unknown }
@@ -71,6 +79,15 @@ export class HttpTurnHost
       overrides: Record<string, { in: number; out: number }>;
     }>("GET", "/api/v1/internal/observability/pricing");
     return body.overrides;
+  }
+
+  /** Business profile and knowledge/memory signals for the task reconciler; see the API route. */
+  async taskReconcileSignals(): Promise<TaskReconcileSignals | undefined> {
+    return this.client.find<TaskReconcileSignals>(
+      "GET",
+      "/api/v1/internal/task-reconcile-signals",
+      [204]
+    );
   }
 
   /** `TurnContextPort`. */

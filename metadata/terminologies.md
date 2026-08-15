@@ -44,7 +44,7 @@ Never let these bleed: UI/URL never say "conversation"; domain/DB never say "cha
 | The resource feature | **Resources** | — | `/resources` | "Resources" | umbrella |
 | A user-defined schema (Ticket, Customer) | **Resource type** | `ResourceType` | `/resources/:type` | "Resource type" | has a JSON **schema** |
 | The JSON Schema artifact of a type | **Schema** | `schema` | `/resources/:type/schema` | "Schema" | |
-| A single data instance | **Record** | `Record` | `/resources/:type/:id` | "Record" | ⛔ bare "resource" for an instance is BANNED |
+| A single data instance | **Record** | `Record` | `/resources/:type/:id` | "Record" | ⛔ bare "resource" for an instance is BANNED; ⛔ "task" — that names the system Task entity, never a user-built todo/ticket Record |
 | A scheduled/triggered automation | **Routine** | `Routine` | `/routines`, `/api/v1/routines` | "Routines" | `workflow` = only the CNCF spec-format ref |
 | One execution of a routine | **Run** | `Run` | `/routines/:id/runs/:runId` | "Run" | `execution` → retired |
 | A durable, ordered fact a Run emitted while executing | **Run event** | `RunEvent` | `/api/v1/runs/:id/events` | — | DB: run_events; types are the closed vocabulary in `@tulipfarm/schema`; ⛔ `SSE event`/`stream frame` name the transport, not the fact |
@@ -101,7 +101,7 @@ Never let these bleed: UI/URL never say "conversation"; domain/DB never say "cha
 | Assembled model-input window for a turn | **Context** | `Context` | — | — | the Context Engine (assembly, compaction); ≠ Memory |
 | First-run setup wizard | **Onboarding** | `Onboarding` | `/onboarding` | "Onboarding" | route rename from `/setup` deferred — `/setup` is still named in ~10 published docs pages and `apps/web/app/routes/_app.tsx`; tracked in Rename backlog below |
 | The persistent post-login onboarding assistant | **Companion** | `OnboardingCompanion` | — | "Companion" | floating bottom-right ≥`sm`, top-bar icon button below it; never auto-opens; ⛔ "clippy", "mascot", "tour", "walkthrough" |
-| One thing the Companion asks the operator or a user to supply | **Quest** | `Quest` | `/api/v1/onboarding/quests` | "Quest" | tiered: hardcoded gate, derived checklist, AI-generated profile gap; dismissal is per-quest, never global |
+| A system-created unit of work asking a human to do something | **Task** | `Task` | `/api/v1/tasks` | "Task" | created only by the reconciler or an Agent via `task.create`; never user-created — a user-facing todo/ticket product is a Resource Type, not a Task; ⛔ "quest" (retired) |
 | Model Context Protocol (external tool servers) | **MCP** | `MCP` | — | "MCP" | acronym, verbatim |
 | A governed model routing record derived from Soul Config | **ModelProfile** | `ModelProfile` | `/api/v1/model-profiles` | "Model profile" | one word, `PascalCase` — synthesized deterministically from `soul.yaml#llm` and pinned into immutable bundles; holds provider/model, capability, modality, constraints, budgets, fallbacks. There is no authored `models/` directory. ⛔ "tier" as the routing unit — retired |
 | A named effort level a participant may pick | **Effort Preset** | `EffortPreset` | — | "Auto"/"Fast"/"Balanced"/"Thorough" | the ONLY model concept a user sees; maps to a ModelProfile ref, one marked default. ⛔ "quick"/"standard"/"complex" — retired |

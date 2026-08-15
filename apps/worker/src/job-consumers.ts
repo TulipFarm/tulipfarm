@@ -5,12 +5,18 @@ import {
   PgResourceSamplePruner,
   RESOURCE_RETENTION_MS,
 } from "@tulipfarm/observability";
+import type { TaskStore } from "@tulipfarm/storage";
 import { type ConstructorOptions, PgBoss } from "pg-boss";
 import type { Queryable } from "./db";
+import { reconcileTasks } from "./reconcile/task-reconciler";
+import type { TaskSignalsGatherer } from "./reconcile/task-signals";
 import { breached, readSpendWindow, spendAlertMessage } from "./spend-alert";
 
 export const OBS_PRUNE_QUEUE = "obs-event-prune";
 export const SPEND_ALERT_QUEUE = "obs-spend-alert";
+
+/** Setup-gap check every open Task derives from; see `docs/plans/task-system.md` "Producers". */
+export const TASK_RECONCILE_QUEUE = "task-reconcile";
 
 export interface JobConsumerOptions {
   readonly databaseUrl: string;
@@ -20,6 +26,14 @@ export interface JobConsumerOptions {
   readonly boss?: PgBoss;
   /** Where a breached spend ceiling is reported; the operator log spine in production. */
   readonly log?: { error(message: string): void };
+  /**
+   * Task reconciler deps. Optional so pruning-only test setups need not wire them; production
+   * always supplies all three together (see `main.ts`), so the reconcile queue is simply not
+   * registered without them.
+   */
+  readonly businessId?: string;
+  readonly taskStore?: TaskStore;
+  readonly taskSignals?: TaskSignalsGatherer;
 }
 
 interface ObservabilityPruneJob {
@@ -67,6 +81,17 @@ export async function startJobConsumers(options: JobConsumerOptions): Promise<Pg
     if (!breached(window)) return;
     options.log?.error(spendAlertMessage(window));
   });
+
+  if (options.businessId !== undefined && options.taskStore && options.taskSignals) {
+    const businessId = options.businessId;
+    const taskStore = options.taskStore;
+    const taskSignals = options.taskSignals;
+    await boss.createQueue(TASK_RECONCILE_QUEUE);
+    await boss.work(TASK_RECONCILE_QUEUE, async () => {
+      const signals = await taskSignals.gather(businessId);
+      await reconcileTasks({ businessId, signals, taskStore, now: now() });
+    });
+  }
 
   return boss;
 }
