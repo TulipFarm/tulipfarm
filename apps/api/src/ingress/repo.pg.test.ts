@@ -44,22 +44,51 @@ describe("ingress repos (PGlite)", () => {
       expect(await repo.find("github", "T1/C1/171234.5678")).toBeNull();
     });
 
-    it("keeps the first mapping on duplicate insert (ON CONFLICT DO NOTHING)", async () => {
+    it("keeps the first mapping on duplicate insert and returns the winner", async () => {
       const repo = new IntegrationConversationsRepo(db);
       const otherConvo = randomUUID();
       await db.query(
         "INSERT INTO conversations (id, user_id, created_at, updated_at) VALUES ($1, $2, now(), now())",
         [otherConvo, userId]
       );
-      await repo.insert({ integrationSlug: "slack", externalKey: "k", conversationId, userId });
-      await repo.insert({
+      const first = await repo.insert({
+        integrationSlug: "slack",
+        externalKey: "k",
+        conversationId,
+        userId,
+      });
+      const loser = await repo.insert({
         integrationSlug: "slack",
         externalKey: "k",
         conversationId: otherConvo,
         userId,
       });
+      expect(first.conversationId).toBe(conversationId);
+      // The loser is told the winning conversation, not the id it tried to write.
+      expect(loser.conversationId).toBe(conversationId);
       const found = await repo.find("slack", "k");
       expect(found?.conversationId).toBe(conversationId);
+    });
+
+    it("returns one shared winner under concurrent first inserts", async () => {
+      const repo = new IntegrationConversationsRepo(db);
+      const convoB = randomUUID();
+      await db.query(
+        "INSERT INTO conversations (id, user_id, created_at, updated_at) VALUES ($1, $2, now(), now())",
+        [convoB, userId]
+      );
+      const [a, b] = await Promise.all([
+        repo.insert({ integrationSlug: "slack", externalKey: "race", conversationId, userId }),
+        repo.insert({
+          integrationSlug: "slack",
+          externalKey: "race",
+          conversationId: convoB,
+          userId,
+        }),
+      ]);
+      expect(a.conversationId).toBe(b.conversationId);
+      const stored = await repo.find("slack", "race");
+      expect(stored?.conversationId).toBe(a.conversationId);
     });
   });
 

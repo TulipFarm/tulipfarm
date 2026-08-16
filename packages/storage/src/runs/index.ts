@@ -36,6 +36,11 @@ export {
   RUN_EVENT_STORAGE_STATEMENTS,
   RunEventStore,
 } from "./events";
+export type { LoopCheckpoint } from "./loop-checkpoint-store";
+export {
+  LOOP_CHECKPOINT_STORAGE_STATEMENTS,
+  RunLoopCheckpointStore,
+} from "./loop-checkpoint-store";
 export { MemoryWaitStore } from "./memory-wait-store";
 export type {
   AppendAttemptInput,
@@ -71,6 +76,8 @@ export {
   RunPersistenceError,
   RunStore,
 } from "./run-store";
+export type { StateRetryAttempts } from "./state-retry-store";
+export { RunStateRetryStore, STATE_RETRY_STORAGE_STATEMENTS } from "./state-retry-store";
 export type {
   CreateWaitInput,
   DueWaitDecision,

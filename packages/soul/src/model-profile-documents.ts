@@ -55,6 +55,7 @@ export function isGeneratedModelProfile(document: unknown, slug: string): boolea
   try {
     validated = registry.validate(document).document;
   } catch {
+    // A document that fails validation is not a generated model profile.
     return false;
   }
   const metadata = validated.metadata as Record<string, unknown> | undefined;

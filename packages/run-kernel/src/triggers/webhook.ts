@@ -135,6 +135,7 @@ function verifyEd25519(signature: string, rawBody: Buffer, publicKeyHex: string)
   try {
     signatureBytes = Buffer.from(signature, "hex");
   } catch {
+    // Malformed signature bytes verify as false (fail closed), never as valid.
     return false;
   }
   if (signatureBytes.length !== 64) return false;
@@ -189,6 +190,7 @@ async function verifySignature(
   try {
     secret = await secrets.resolve(verification.secretRef);
   } catch {
+    // An unresolvable secret becomes the explicit "secret_unavailable" denial (a 401), never a pass.
     return "secret_unavailable";
   }
   if (secret === "") return "secret_unavailable";

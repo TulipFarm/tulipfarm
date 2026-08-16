@@ -205,6 +205,7 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
         this.options.soulLoader === undefined ? undefined : { soulLoader: this.options.soulLoader }
       );
     } catch {
+      // A target resolver that throws yields a human-readable access-check failure reason.
       return `"${call.name}" could not be resolved to something to check access against`;
     }
 
@@ -238,6 +239,7 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
         this.options.soulLoader === undefined ? undefined : { soulLoader: this.options.soulLoader }
       );
     } catch {
+      // A target resolver that throws contributes no targets to gate against.
       return [];
     }
   }

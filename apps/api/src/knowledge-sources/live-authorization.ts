@@ -31,6 +31,7 @@ export class SlackLiveSourceAuthorization implements LiveSourceAuthorizationPort
     try {
       members = await this.api.listMembers(input.externalId);
     } catch {
+      // A membership lookup failure yields no authorization decision; the caller decides.
       return undefined;
     }
     if (members === undefined) return undefined;

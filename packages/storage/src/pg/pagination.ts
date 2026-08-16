@@ -29,6 +29,7 @@ export function decodeCursor(cursor: string): { createdAt: Date; _id: string } |
     if (Number.isNaN(createdAt.getTime())) return null;
     return { createdAt, _id: parsed._id };
   } catch {
+    // An unparseable cursor is treated as absent; pagination restarts.
     return null;
   }
 }

@@ -11,7 +11,7 @@ import { INVOCATION_REQUEST_SCHEMAS } from "@tulipfarm/schema";
 import { ChannelRunDeliveryStore, RunStore, WaitStore } from "@tulipfarm/storage";
 import { createSurfaceArtifact } from "@tulipfarm/surface";
 import { ApprovalsRepo, ToolApprovalService } from "@tulipfarm/tool-host";
-import type { FastifyInstance } from "fastify";
+import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app";
 import type { TokenDoc, TokenRepo } from "../auth/api-tokens";
@@ -30,6 +30,7 @@ import { MemorySurfaceActionStore } from "../surfaces/action-store";
 import { MemorySurfaceArtifactStore } from "../surfaces/artifact-store";
 import { makeMigratedPglite } from "../test/pglite";
 import { FakeConversationStore } from "../test/turn-host-fixtures";
+import { type ChannelInternalRouteDeps, slackBlocksForReply } from "./channel-routes";
 
 const TEST_CSRF = "a".repeat(64);
 
@@ -374,9 +375,101 @@ describe("/api/v1/internal/channels", () => {
       expect(store.turns).toHaveLength(2);
       expect(store.turns[0]?.conversationId).toBe(store.turns[1]?.conversationId);
     });
-  });
 
-  describe("GET /runs/:runId/reply", () => {
+    it("routes a losing concurrent first message onto the winner and drops its orphan", async () => {
+      // Deterministic stand-in for the race: a competing writer lands the winning mapping in the
+      // window between this request's `find` (null) and its own `insert` (conflict). The full
+      // Fastify+PGlite path serialises real concurrent injects, so the interleave is forced here;
+      // `IntegrationConversationsRepo`'s own `*.pg.test.ts` covers the genuine Promise.all race.
+      const orphanConversationId = randomUUID();
+      const winnerConversationId = randomUUID();
+      const threadKey = "slack:C1:1720000000.000999";
+      const realThreads = new IntegrationConversationsRepo(db as unknown as Queryable);
+      const realConversations = new PgConversationRepo(db as unknown as Queryable);
+
+      const racingThreads: IntegrationConversationsRepo = {
+        find: (slug, key) => realThreads.find(slug, key),
+        exists: (slug, key) => realThreads.exists(slug, key),
+        insert: async (doc) => {
+          if (doc.conversationId === orphanConversationId) {
+            await realConversations.create({
+              _id: winnerConversationId,
+              userId: slackUser._id,
+              agentId: "assistant",
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            });
+            await realThreads.insert({
+              integrationSlug: doc.integrationSlug,
+              externalKey: doc.externalKey,
+              conversationId: winnerConversationId,
+              userId: slackUser._id,
+            });
+          }
+          return realThreads.insert(doc);
+        },
+      } as IntegrationConversationsRepo;
+
+      const racingApp = await buildApp({
+        sessionStore: new MemorySessionStore(),
+        userRepo: new PgUserRepo(db as unknown as Queryable),
+        tokenRepo: new FakeTokenRepo(),
+        identity: { apiClientRepo },
+        toolApprovals,
+        channels: () => ({
+          store,
+          invocations: new DurableInvocationGateway({
+            store: { persist: async (record) => ({ outcome: "started", runId: record.runId }) },
+            validator: new TypedOutputValidator(INVOCATION_REQUEST_SCHEMAS),
+            nextId: () => randomUUID(),
+          }),
+          conversations: realConversations,
+          threads: racingThreads,
+          identity: new IngressIdentityResolver({
+            users: makeUsers([slackUser]),
+            log: { warn: () => {}, error: () => {}, info: () => {}, debug: () => {} } as never,
+            mappings,
+          }),
+          runDeliveries,
+          toolApprovals,
+          newId: () => orphanConversationId,
+          bindLinkUrl: (token) => `http://localhost:4000/link-channel?token=${token}`,
+        }),
+      });
+
+      try {
+        const res = await racingApp.inject({
+          method: "POST",
+          url: "/api/v1/internal/channels/runs",
+          headers: asWorker(),
+          payload: {
+            ...runBody(),
+            message: {
+              externalAppId: "A1",
+              channelId: "C1",
+              threadId: "1720000000.000999",
+              text: "loser",
+            },
+          },
+        });
+
+        expect(res.statusCode).toBe(200);
+        expect(res.json()).toMatchObject({ outcome: "started" });
+        // The Turn rides the winner's Conversation, never the id this request minted.
+        expect(store.turns.at(-1)?.conversationId).toBe(winnerConversationId);
+
+        const mapping = await realThreads.find("slack", threadKey);
+        expect(mapping?.conversationId).toBe(winnerConversationId);
+
+        // The orphaned Conversation the loser created is gone.
+        const orphan = await db.query("SELECT 1 FROM conversations WHERE id = $1", [
+          orphanConversationId,
+        ]);
+        expect(orphan.rows).toHaveLength(0);
+      } finally {
+        await racingApp.close();
+      }
+    });
     it("is pending before the Turn completes", async () => {
       store.turns.push({
         id: "turn-1",
@@ -742,5 +835,105 @@ describe("/api/v1/internal/channels", () => {
         await withSecrets.close();
       }
     });
+  });
+});
+
+describe("slackBlocksForReply", () => {
+  const businessId = DEPLOYMENT_BUSINESS_ID;
+
+  const makeLog = () => {
+    const warn = vi.fn();
+    return { log: { warn } as unknown as FastifyBaseLogger, warn };
+  };
+
+  // A 26-Record RecordTable is a valid Artifact that trips the Slack renderer's 25-Record provider
+  // limit at render time — a faithful stand-in for a renderer that throws on otherwise-good content.
+  const slackArtifact = (records: number) =>
+    createSurfaceArtifact({
+      id: "artifact-1",
+      component:
+        records > 25 ? { name: "RecordTable", version: "1.0" } : { name: "Text", version: "1.0" },
+      props:
+        records > 25
+          ? {
+              columns: ["name"],
+              records: Array.from({ length: records }, (_, i) => ({ name: `r-${i}` })),
+            }
+          : { text: "hello" },
+      target: { channel: "slack", surface: "message" },
+      catalogRevision: "rev-1",
+      audience: ["user-1"],
+      classification: "internal",
+    });
+
+  it("reports absent when no Surface store is configured", async () => {
+    const { log, warn } = makeLog();
+    const result = await slackBlocksForReply(
+      {} as ChannelInternalRouteDeps,
+      businessId,
+      "run-1",
+      log
+    );
+    expect(result).toEqual({ outcome: "absent" });
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("reports absent when the Run presented no Slack message Artifact", async () => {
+    const { log, warn } = makeLog();
+    const deps = {
+      surfaceStore: { findByRun: async () => null },
+      runDeliveries: { find: async () => ({ principalId: "user-1", destination: "C-1" }) },
+    } as unknown as ChannelInternalRouteDeps;
+    expect(await slackBlocksForReply(deps, businessId, "run-1", log)).toEqual({
+      outcome: "absent",
+    });
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("reports absent when there is no delivery to render against", async () => {
+    const { log } = makeLog();
+    const deps = {
+      surfaceStore: { findByRun: async () => slackArtifact(1) },
+      runDeliveries: { find: async () => null },
+    } as unknown as ChannelInternalRouteDeps;
+    expect(await slackBlocksForReply(deps, businessId, "run-1", log)).toEqual({
+      outcome: "absent",
+    });
+  });
+
+  it("renders blocks when a valid Artifact is present", async () => {
+    const { log } = makeLog();
+    const deps = {
+      surfaceStore: { findByRun: async () => slackArtifact(1) },
+      runDeliveries: { find: async () => ({ principalId: "user-1", destination: "C-1" }) },
+      surfaceActionStore: { listForArtifact: async () => ({}) },
+    } as unknown as ChannelInternalRouteDeps;
+    const result = await slackBlocksForReply(deps, businessId, "run-1", log);
+    expect(result.outcome).toBe("rendered");
+    if (result.outcome === "rendered") expect(result.blocks.length).toBeGreaterThan(0);
+  });
+
+  it("reports render_failed — never absent — and signals the operator with correlation data", async () => {
+    const artifact = slackArtifact(26);
+    const { log, warn } = makeLog();
+    const deps = {
+      surfaceStore: { findByRun: async () => artifact },
+      runDeliveries: { find: async () => ({ principalId: "user-1", destination: "C-1" }) },
+      surfaceActionStore: { listForArtifact: async () => ({}) },
+    } as unknown as ChannelInternalRouteDeps;
+
+    const result = await slackBlocksForReply(deps, businessId, "run-1", log);
+
+    expect(result).toEqual({ outcome: "render_failed" });
+    expect(warn).toHaveBeenCalledOnce();
+    const [fields, message] = warn.mock.calls[0] as [Record<string, unknown>, string];
+    expect(fields).toMatchObject({
+      runId: "run-1",
+      businessId,
+      artifactId: artifact.id,
+      artifactRevision: artifact.revision,
+    });
+    expect(fields.err).toBeInstanceOf(Error);
+    expect(message).toContain("render failed");
   });
 });

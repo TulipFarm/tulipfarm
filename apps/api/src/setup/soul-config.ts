@@ -53,6 +53,7 @@ export async function readSoulConfig(soulPath: string): Promise<SoulConfig> {
   try {
     return await readSoulConfigStrict(soulPath);
   } catch {
+    // Tolerant boot/display read (decision S3): malformed config degrades to defaults.
     return {};
   }
 }

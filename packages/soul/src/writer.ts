@@ -145,6 +145,7 @@ export class SoulWriter {
     try {
       return this.store.exists(definitionPath(kind, slug));
     } catch {
+      // An unreadable tree reports the artifact as absent.
       return false;
     }
   }
@@ -154,6 +155,7 @@ export class SoulWriter {
     try {
       return this.store.readFile(definitionPath(kind, slug));
     } catch {
+      // A missing definition file resolves to "absent".
       return null;
     }
   }
@@ -167,6 +169,7 @@ export class SoulWriter {
     try {
       return this.store.readFile(companionPath(kind, slug, name));
     } catch {
+      // A missing companion file resolves to "absent".
       return null;
     }
   }

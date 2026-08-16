@@ -83,6 +83,7 @@ export function readRotatedCodexAuth(codexHome: string, original: string): strin
     // write (the child was SIGKILLed mid-flush) must not overwrite a good stored secret.
     parseCodexAuth(current);
   } catch {
+    // A truncated or unparseable credential must not overwrite the stored one.
     return undefined;
   }
   return current;

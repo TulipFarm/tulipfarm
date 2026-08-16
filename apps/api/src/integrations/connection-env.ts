@@ -80,6 +80,7 @@ export async function resolveSecretRef(
   try {
     return await secrets.get(value.slice(SECRET_REF_PREFIX.length));
   } catch {
+    // A missing or unreadable secret resolves to "unset"; callers gate on undefined.
     return undefined;
   }
 }

@@ -49,6 +49,7 @@ export function createGitHubSoulCredentialProvider(
       try {
         privateKeyPem = await deps.secrets.get(privateKeyField.key);
       } catch {
+        // A missing private key resolves to "no credential"; the caller handles undefined.
         return undefined;
       }
 

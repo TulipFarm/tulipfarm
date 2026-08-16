@@ -36,6 +36,8 @@ import {
   IntegrationStore,
   KillSwitchRepo,
   RunEventStore,
+  RunLoopCheckpointStore,
+  RunStateRetryStore,
   RunStore,
   TaskRepo,
   WaitStore,
@@ -143,6 +145,7 @@ export async function main(): Promise<void> {
         });
         return response.status !== 401;
       } catch {
+        // An unreachable API means the readiness probe has not cleared yet.
         return false;
       }
     },
@@ -216,6 +219,12 @@ export async function main(): Promise<void> {
   const eventStore = new EventStore(transactions, randomUUID);
   const runEventStore = new RunEventStore(transactions);
   const budgetStore = new BudgetStore(transactions);
+  // Durable Agent-loop counters: the one store both Agent-loop sites share, so an approval park
+  // reloads spent Tool-call and repair budget instead of restarting it at zero.
+  const loopCheckpointStore = new RunLoopCheckpointStore(transactions);
+  // Durable per-State-occurrence retry counter, so a Routine State's `retry` budget is not
+  // refunded when the State parks and resumes or the Run crashes and is reclaimed.
+  const stateRetryStore = new RunStateRetryStore(transactions);
   const blobDirectory = join(resolveDataDir() ?? ".tulipfarm", "blobs");
   const artifactService = new ArtifactService(
     new ArtifactStore(transactions),
@@ -297,6 +306,7 @@ export async function main(): Promise<void> {
     budgets: budgetStore,
     transitions: new RunStoreStateTransitions(runStore),
     waits: turnHost,
+    checkpoints: loopCheckpointStore,
     model: ({ events, budgets, businessId, runId, conversationId }) =>
       new LlmModelPort({
         model: (selector, requirements, inference, principal) =>
@@ -350,6 +360,8 @@ export async function main(): Promise<void> {
       runs: runStore,
       scheduler: new RoutineStateScheduler(runStore),
       transitions: new RunStoreStateTransitions(runStore),
+      // Durable retry budget for a State's authored `retry` policy; survives park/resume and crash.
+      retries: stateRetryStore,
       waits,
       // Routine Tools must pass the Broker: pinned authority, ledger reservation, then adapter.
       // No `authority` callback: the bundle layer is the Run's only authority.
@@ -382,6 +394,7 @@ export async function main(): Promise<void> {
         events: runEventStore,
         budgets: budgetStore,
         runs: runStore,
+        checkpoints: loopCheckpointStore,
         log: logger,
       }),
     })

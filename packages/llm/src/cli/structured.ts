@@ -23,6 +23,7 @@ export function firstJsonObject(text: string): string | undefined {
         JSON.parse(candidate);
         return candidate;
       } catch {
+        // A candidate span that does not parse yields no structured object.
         return undefined;
       }
     }

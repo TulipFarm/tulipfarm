@@ -11,6 +11,7 @@ import type { RunEventAppendPort } from "../turn/run-events";
 import {
   BundleRoutineAgentPort,
   type BundleRoutineAgentPortOptions,
+  isRetryableAgentFailure,
   type RoutineAgentRequest,
   type RoutineModelSelection,
 } from "./agent-port";
@@ -455,7 +456,7 @@ describe("BundleRoutineAgentPort", () => {
       })
     );
 
-    expect(result).toEqual({ kind: "failed", reason: "guardrail_input_blocked" });
+    expect(result).toEqual({ kind: "failed", reason: "guardrail_input_blocked", retryable: false });
     expect(invoke).not.toHaveBeenCalled();
   });
 
@@ -464,7 +465,11 @@ describe("BundleRoutineAgentPort", () => {
 
     const result = await port().execute(request());
 
-    expect(result).toEqual({ kind: "failed", reason: "guardrail_output_blocked" });
+    expect(result).toEqual({
+      kind: "failed",
+      reason: "guardrail_output_blocked",
+      retryable: false,
+    });
   });
 
   it("reports a cancelling Run as cancelled rather than answering it", async () => {
@@ -493,5 +498,30 @@ describe("BundleRoutineAgentPort", () => {
     );
 
     expect(result).toEqual({ kind: "succeeded", output: { category: "billing" } });
+  });
+});
+
+describe("isRetryableAgentFailure", () => {
+  it("treats transient provider faults as retryable", () => {
+    for (const reason of ["model_rate_limited", "model_provider_unavailable", "model_error"]) {
+      expect(isRetryableAgentFailure(reason)).toBe(true);
+    }
+  });
+
+  it("treats terminal faults and guardrail blocks as non-retryable", () => {
+    for (const reason of [
+      "model_billing_inactive",
+      "model_authentication_failed",
+      "model_not_found",
+      "iteration_limit",
+      "tool_call_limit",
+      "repair_budget_exhausted",
+      "budget_exhausted",
+      "empty_model_output",
+      "guardrail_input_blocked",
+      "guardrail_output_blocked",
+    ]) {
+      expect(isRetryableAgentFailure(reason)).toBe(false);
+    }
   });
 });

@@ -5,15 +5,32 @@ import { describe, expect, it } from "vitest";
 /**
  * A discarded error must be a decision, not an accident.
  *
- * `catch {}` is the one failure-signalling shape with no defensible reading: it cannot be told
- * apart from a success, it produces no log, and the caller receives a value that says the work
- * succeeded. The two instances this repo carried were both real — a dropped memory embedding, so
- * the dense arm degraded invisibly, and a failed index-queue introspection that reported "no
- * errors" to the operator asking whether indexing had failed.
+ * Two catch shapes report success for work that failed and cannot be told apart from a genuine
+ * success by their caller:
+ *
+ *   - `catch {}` — nothing between the braces. The original, narrowest case.
+ *   - `catch { return <literal>; }` — the whole body is a `return` of a constant sentinel (`null`,
+ *     `undefined`, `[]`, `{}`, `false`, a string, ...). This is the shape that hid L1-2: a Slack
+ *     renderer throwing returned the same `null` used for "no Artifact here", so a renderer bug
+ *     silently stripped a reply's action controls with no operator signal. A sentinel that doubles
+ *     as "nothing here" cannot carry "it failed", and no log is emitted either way.
  *
  * Deliberate swallowing stays legal; it just has to say why, either by naming the error and
- * handling it or by carrying a comment inside the block. That is the whole rule.
+ * handling it or by carrying a comment inside the catch block (any non-whitespace between the
+ * braces and the `return` clears the match). A genuine probe-and-fall-back — parse this, resolve
+ * that, return nothing if it is not there — is legitimate: annotate it, do not delete the rule.
  */
+
+/** `catch {}` or `catch (e) {}` — nothing between the braces but whitespace. */
+const EMPTY_CATCH = /catch\s*(?:\([^)]*\))?\s*\{\s*\}/g;
+
+/**
+ * `catch { return <literal>; }` — the entire body is a `return` of a constant sentinel, so the
+ * error is discarded and the caller is handed a value indistinguishable from "nothing here".
+ * A comment (or any statement) before the `return` breaks the match: that is the escape hatch.
+ */
+const SWALLOW_RETURN =
+  /catch\s*(?:\([^)]*\))?\s*\{\s*return\s+(?:null|undefined|true|false|\[\s*\]|\{\s*\}|-?\d[\d_.eE]*|"[^"]*"|'[^']*'|`[^`]*`)\s*;?\s*\}/g;
 
 function repoRoot(): string {
   let directory = __dirname;
@@ -27,9 +44,6 @@ function repoRoot(): string {
 
 const ROOT = repoRoot();
 const SCANNED = ["apps/api/src", "apps/worker/src", "apps/integration-worker/src", "packages"];
-
-/** `catch {}` or `catch (e) {}` — nothing between the braces but whitespace. */
-const EMPTY_CATCH = /catch\s*(?:\([^)]*\))?\s*\{\s*\}/g;
 
 function sourceFiles(root: string): readonly string[] {
   const files: string[] = [];
@@ -57,9 +71,12 @@ function emptyCatches(): readonly string[] {
   for (const root of SCANNED) {
     for (const file of sourceFiles(root)) {
       const source = readFileSync(file, "utf8");
-      for (const match of source.matchAll(EMPTY_CATCH)) {
-        const line = source.slice(0, match.index).split("\n").length;
-        found.push(`${relative(ROOT, file).split(sep).join("/")}:${line}`);
+      const relativePath = relative(ROOT, file).split(sep).join("/");
+      for (const pattern of [EMPTY_CATCH, SWALLOW_RETURN]) {
+        for (const match of source.matchAll(pattern)) {
+          const line = source.slice(0, match.index).split("\n").length;
+          found.push(`${relativePath}:${line}`);
+        }
       }
     }
   }
@@ -71,7 +88,8 @@ describe("a discarded error is a decision", () => {
     expect(
       emptyCatches(),
       "Handle the error, log it, or say inside the catch why dropping it is correct. " +
-        "An empty catch reports success for work that failed."
+        "An empty catch — or one whose whole body returns a constant sentinel — reports success " +
+        "for work that failed."
     ).toEqual([]);
   });
 });

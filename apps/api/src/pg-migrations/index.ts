@@ -18,12 +18,14 @@ import {
   embeddingIndexStatements,
   INTEGRATION_STORAGE_STATEMENTS,
   KILL_SWITCH_STORAGE_STATEMENTS,
+  LOOP_CHECKPOINT_STORAGE_STATEMENTS,
   RUN_BROWSE_STORAGE_STATEMENTS,
   RUN_EVENT_NOTIFY_STATEMENTS,
   RUN_EVENT_STORAGE_STATEMENTS,
   RUN_STORAGE_STATEMENTS,
   SOUL_PUBLICATION_STORAGE_STATEMENTS,
   SOUL_REPOSITORY_STORAGE_STATEMENTS,
+  STATE_RETRY_STORAGE_STATEMENTS,
   TASK_STORAGE_STATEMENTS,
   WAIT_STORAGE_STATEMENTS,
 } from "@tulipfarm/storage";
@@ -1990,6 +1992,26 @@ export const PG_MIGRATIONS: PgMigration[] = [
     description: "tasks: system-created human work items behind Companion/Tasks/home checklist",
     up: async (q) => {
       for (const sql of TASK_STORAGE_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 54,
+    description:
+      "agent_loop_checkpoints: durable Tool-call and repair counters across approval parks",
+    up: async (q) => {
+      for (const sql of LOOP_CHECKPOINT_STORAGE_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 55,
+    description:
+      "state_retry_attempts: durable Routine State retry budget across park/resume and reclaim",
+    up: async (q) => {
+      for (const sql of STATE_RETRY_STORAGE_STATEMENTS) {
         await q.query(sql);
       }
     },

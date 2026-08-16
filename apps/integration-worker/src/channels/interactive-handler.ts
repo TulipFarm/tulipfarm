@@ -42,6 +42,7 @@ function parseActionValue(value: unknown): { approvalId: string; decision: Decis
   try {
     parsed = JSON.parse(value) as typeof parsed;
   } catch {
+    // A malformed action payload is not a decodable approval decision.
     return undefined;
   }
   if (typeof parsed.approvalId !== "string") return undefined;

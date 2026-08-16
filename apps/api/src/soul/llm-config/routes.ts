@@ -181,6 +181,7 @@ async function fetchLiveModelOptions(
   try {
     baseUrl = await secrets.get("openai-compatible-base-url");
   } catch {
+    // No stored base URL resolves to null; the probe reports unconfigured.
     return null;
   }
   if (!baseUrl) return null;

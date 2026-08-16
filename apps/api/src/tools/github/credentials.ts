@@ -132,6 +132,7 @@ export class GitHubInstallationTokenProvider implements SecretProvider {
       const secrets = await this.deps.secrets();
       privateKeyPem = await secrets.get(privateKeyField.key);
     } catch {
+      // A missing private key resolves to "no credential"; the caller handles undefined.
       return undefined;
     }
 
