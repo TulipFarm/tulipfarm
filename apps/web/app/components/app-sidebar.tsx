@@ -19,6 +19,7 @@ import { logout, type SessionUser } from "~/lib/api";
 import { useApprovals } from "~/lib/approvals-context";
 import { useConversations } from "~/lib/conversations-context";
 import {
+  hasContextPanel,
   iconForPath,
   MODE_META,
   type ProductMode as NavProductMode,
@@ -113,6 +114,7 @@ function Rail({ mode }: { mode: ProductMode }) {
       </nav>
       <div className="flex flex-col items-center gap-1 pb-3">
         <Separator className="mb-2 w-6" />
+        <RailLink mode="farm" active={mode === "farm"} />
         <RailLink mode="settings" active={mode === "settings"} />
         <span className="flex size-10 items-center justify-center">
           <ThemeToggle iconOnly />
@@ -296,6 +298,7 @@ export function AppSidebar({
 } = {}) {
   const { pathname } = useLocation();
   const mode = modeForPath(pathname);
+  const showContext = hasContextPanel(mode);
   const [persistent, setPersistent] = useState(true);
 
   useEffect(() => {
@@ -324,23 +327,24 @@ export function AppSidebar({
         className={cn(
           "fixed inset-y-0 left-0 z-50 flex h-full border-r border-sidebar-border transition-transform duration-200",
           "lg:static lg:z-auto lg:translate-x-0",
-          open
-            ? "w-[312px] translate-x-0"
-            : "w-[312px] -translate-x-full md:static md:w-14 md:translate-x-0",
-          !collapsed && "lg:w-[312px]",
-          collapsed && "lg:w-14"
+          showContext ? "w-[312px]" : "w-14",
+          open ? "translate-x-0" : "-translate-x-full md:static md:w-14 md:translate-x-0",
+          showContext && !collapsed && "lg:w-[312px]",
+          (collapsed || !showContext) && "lg:w-14"
         )}
       >
         <Rail mode={mode} />
-        <div
-          className={cn(
-            "h-full min-w-0 flex-1",
-            !open && "hidden lg:block",
-            collapsed && "lg:hidden"
-          )}
-        >
-          <ContextPanel mode={mode} onNavigate={onClose} isAdmin={isAdmin} />
-        </div>
+        {showContext ? (
+          <div
+            className={cn(
+              "h-full min-w-0 flex-1",
+              !open && "hidden lg:block",
+              collapsed && "lg:hidden"
+            )}
+          >
+            <ContextPanel mode={mode} onNavigate={onClose} isAdmin={isAdmin} />
+          </div>
+        ) : null}
       </aside>
     </>
   );
@@ -481,20 +485,22 @@ export function AppShell({
             <Menu className="size-5" aria-hidden />
           </button>
           <span className="hidden shrink-0 lg:flex">
-            <Tooltip content={collapsed ? "Expand sidebar" : "Collapse sidebar"}>
-              <button
-                type="button"
-                aria-label={collapsed ? "Expand context sidebar" : "Collapse context sidebar"}
-                onClick={toggleCollapsed}
-                className="flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground"
-              >
-                {collapsed ? (
-                  <PanelLeftOpen className="size-4" aria-hidden />
-                ) : (
-                  <PanelLeftClose className="size-4" aria-hidden />
-                )}
-              </button>
-            </Tooltip>
+            {hasContextPanel(modeForPath(pathname)) ? (
+              <Tooltip content={collapsed ? "Expand sidebar" : "Collapse sidebar"}>
+                <button
+                  type="button"
+                  aria-label={collapsed ? "Expand context sidebar" : "Collapse context sidebar"}
+                  onClick={toggleCollapsed}
+                  className="flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground"
+                >
+                  {collapsed ? (
+                    <PanelLeftOpen className="size-4" aria-hidden />
+                  ) : (
+                    <PanelLeftClose className="size-4" aria-hidden />
+                  )}
+                </button>
+              </Tooltip>
+            ) : null}
           </span>
           <Separator orientation="vertical" className="mx-1 hidden h-5 lg:block" />
           <Breadcrumb pathname={pathname} pageTitle={pageTitle} />
