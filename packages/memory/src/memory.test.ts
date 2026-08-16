@@ -1,8 +1,10 @@
 import type { AuditEventInput } from "@tulipfarm/audit";
 import { beforeEach, describe, expect, it } from "vitest";
 import { InMemoryPendingMemoryStore, resolvePendingMemory } from "./confirm";
-import type { MemoryAuditSink, MemoryDeps, MemorySettingsView, RememberRequest } from "./memory";
-import { forgetMemory, InMemoryMemoryStore, rememberMemory } from "./memory";
+import { forgetMemory } from "./forget";
+import type { MemoryAuditSink, MemoryDeps, MemorySettingsView } from "./memory";
+import { InMemoryMemoryStore } from "./memory";
+import { type RememberRequest, rememberMemory } from "./remember";
 import { authorizeMemoryScope } from "./scope";
 
 const NOW = new Date("2026-07-26T12:00:00.000Z");

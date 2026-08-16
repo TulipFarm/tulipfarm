@@ -476,7 +476,12 @@ export class PgMemoryEpisodeStore implements MemoryEpisodeStore {
         model: active === null ? null : `${active.provider}:${active.model}`,
       };
     } catch {
-      // A failed embedding yields no vector; recall degrades rather than the write failing.
+      // A failed embedding yields no vector; recall degrades rather than the write failing. The
+      // counter is the operator signal: an absent or unavailable embedder returns above without
+      // incrementing it, so only a real failure is counted here.
+      recordMemoryCounter(this.telemetry, MEMORY_METRICS.episodeEmbeddingFailures, 1, {
+        outcome: "error",
+      });
       return undefined;
     }
   }

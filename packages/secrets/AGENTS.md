@@ -28,7 +28,9 @@ Credential leases for tool/runtime use.
 - KEK rotation never re-encrypts Secrets: set `ENCRYPTION_KEY_PREVIOUS`, run `keys rotate-kek`.
 - Recovery sets a fresh `ENCRYPTION_KEY`, then `keys recover` unwraps via `RECOVERY_KEY`.
 - Legacy rows (`dek_id IS NULL`) decrypt via `legacyKeys` until `keys backfill` moves them to DEK.
-- `SecretsService` cache uses TTL plus stale-grace; stale serves are logged.
+- `SecretsService` cache uses TTL plus stale-grace; stale serves are logged. Extending past the TTL
+  requires a `findRevision` probe proving the row is unchanged — a rotation or deletion in another
+  process refuses (`secret.stale_refused`), as does an unreadable probe.
 - Always call `assertValidSecretKey()` before writes; it blocks prototype-pollution names.
 - Never log a DEK, recovery KEK, or decrypted value; surface failures as typed errors.
 - `SecretBroker` is default-deny, clamps TTL/uses, resolves values fresh on use, emits metadata

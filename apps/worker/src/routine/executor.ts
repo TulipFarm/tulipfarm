@@ -2,46 +2,30 @@ import type { AuthorityLayer } from "@tulipfarm/authz";
 import {
   type ArtifactService,
   agentOutputSchema,
-  type CompiledExpression,
   type CompiledRoutine,
   type CompiledState,
   compileRoutine,
   decideBranch,
-  type ForeachProgress,
   type IdentityCeiling,
+  InMemoryStateConcurrencyStore,
+  InMemoryStateContentionStore,
   InMemoryStateRetryStore,
-  initForeachProgress,
-  initParallelProgress,
-  isTimerWait,
-  joinForeach,
-  joinParallel,
-  type ParallelProgress,
-  type PersistedWait,
   planAgentInvocation,
-  planApprovalWait,
-  planForeach,
-  planParallel,
-  planTimerWait,
   planToolDispatch,
-  type RegisterWaitInput,
   RoutineInputResolutionError,
   type RoutineStateScheduler,
-  RoutineStepError,
   RUN_EXECUTOR_PRINCIPAL_REF,
-  resolveApproval,
   resolveErrorPath,
-  resolveForeachItems,
   resolveRoutineStateInput,
   retryBackoffMs,
+  routineBudgetScopedLimits,
   routineOccurrenceKey,
-  routineWaitId,
+  type StateConcurrencyStore,
+  type StateContentionStore,
   type StateRetryStore,
   type StateStatus,
   type StepOutcome,
-  settleForeachItem,
-  settleParallelBranch,
   stateOutcome,
-  stepRepeat,
 } from "@tulipfarm/run-kernel";
 import { MANUAL_REQUEST_SCHEMA_REF } from "@tulipfarm/schema";
 import type { RuntimeBundle } from "@tulipfarm/soul";
@@ -50,28 +34,37 @@ import type { StateTransitionPort } from "../agent-state";
 import type { RunExecutor } from "../executors";
 import type { RoutineAgentPort } from "./agent-port";
 import type { RoutineApprovalPort } from "./approval-port";
+import {
+  type ConcurrencyGuardContext,
+  concurrencyBackoffElapsed,
+  underConcurrencyKey,
+} from "./concurrency-guard";
 import type { WorkerRoutineDefinitionLoader } from "./definition-loader";
+import {
+  AGENT_ERROR_PREFIX,
+  artifactId,
+  assertSupportedInput,
+  assertSupportedState,
+  type ChainOutcome,
+  isRefusal,
+  isRetryableFailure,
+  type ManualRoutineRequest,
+  manualRequest,
+  progressionFrom,
+  RoutineExecutionRefusal,
+  type StateOutputs,
+  TOOL_ERROR_PREFIX,
+} from "./execution-support";
+import { type FanOutContext, runComposite } from "./fan-out";
 import type { RoutineToolPort } from "./tool-port";
-
-export type RoutineExecutionRefusalCode =
-  | "invalid_request_artifact"
-  | "missing_state"
-  | "unsupported_context"
-  | "unsupported_join"
-  | "unsupported_state"
-  | "unsupported_wait";
-
-/** Payload-safe refusal for a Routine capability this executor does not yet own. */
-export class RoutineExecutionRefusal extends Error {
-  readonly name = "RoutineExecutionRefusal";
-
-  constructor(
-    readonly code: RoutineExecutionRefusalCode,
-    readonly state: string
-  ) {
-    super(`${code}:${state}`);
-  }
-}
+import {
+  openApproval,
+  openWait,
+  type RoutineWaitPort,
+  resumeApproval,
+  resumeWait,
+  type WaitGateContext,
+} from "./wait-gate";
 
 interface RoutineArtifactReader {
   read: ArtifactService["read"];
@@ -79,12 +72,6 @@ interface RoutineArtifactReader {
 
 interface RoutineRunStateReader {
   listStates: Pick<RunStore, "listStates">["listStates"];
-}
-
-/** Durable-wait surface; the executor never redeems resume tokens. */
-export interface RoutineWaitPort {
-  register(input: RegisterWaitInput): Promise<{ readonly wait: PersistedWait }>;
-  find(businessId: string, waitId: string): Promise<PersistedWait | null>;
 }
 
 interface RoutineExecutorOptions {
@@ -108,47 +95,24 @@ interface RoutineExecutorOptions {
    * executor defaults to a non-durable in-memory store so tests and unconfigured hosts still run.
    */
   readonly retries?: StateRetryStore;
+  /**
+   * Durable mutual exclusion for a State's authored `concurrencyKey`. Contenders live in other
+   * worker processes, so only a durable store actually serializes them; the executor defaults to a
+   * non-durable in-memory store so tests and unconfigured hosts still run.
+   */
+  readonly concurrency?: StateConcurrencyStore;
+  /**
+   * Durable count of the backoff waits a contended State occurrence has already spent. Without a
+   * durable store every resume would hand the contender a fresh ceiling, so a busy key could be
+   * queued for forever instead of the bounded window; the executor defaults to a non-durable
+   * in-memory store so tests and unconfigured hosts still run.
+   */
+  readonly contention?: StateContentionStore;
   /** Backoff sleep between retry attempts; injectable so tests do not wait real time. */
   readonly delay?: (ms: number) => Promise<void>;
   readonly now?: () => Date;
   readonly identityCeiling?: (run: PersistedRun) => IdentityCeiling;
 }
-
-interface ManualRoutineRequest {
-  readonly slug: string;
-  readonly inputs: Record<string, unknown>;
-}
-
-/** How one chain of States — a Run's main line, a fan-out unit, or a loop body — ended. */
-type ChainOutcome = "succeeded" | "failed" | "waiting" | "needs_reconciliation" | "cancelled";
-
-type StateOutputs = Record<string, { readonly output: unknown }>;
-
-const CLAIM_PATH: readonly StateStatus[] = ["ready", "claimed", "running"];
-
-/** Expression roots this executor can reconstruct from the Run's immutable request Artifact. */
-const SUPPORTED_ROOTS: ReadonlySet<string> = new Set(["input", "states", "item", "loop"]);
-
-/** Deterministic State types with no external effect and no Context this executor cannot build. */
-const SUPPORTED_TYPES: ReadonlySet<string> = new Set([
-  "agent",
-  "approval",
-  "branch",
-  "tool",
-  "wait",
-  "parallel",
-  "foreach",
-  "repeat_until",
-]);
-
-/** Error reference an expired `wait` raises, so an authored `onError` handler can claim it. */
-const WAIT_TIMED_OUT = "wait_timed_out";
-
-/** Prefix an authored `onError` handler claims a refused or failed Tool dispatch by. */
-const TOOL_ERROR_PREFIX = "tool_";
-
-/** Prefix an authored `onError` handler claims a refused or failed Agent answer by. */
-const AGENT_ERROR_PREFIX = "agent_";
 
 function defaultIdentityCeiling(run: PersistedRun): IdentityCeiling {
   return {
@@ -159,85 +123,13 @@ function defaultIdentityCeiling(run: PersistedRun): IdentityCeiling {
   };
 }
 
-function artifactId(payloadRef: unknown, state: string): string {
-  if (typeof payloadRef !== "string" || !payloadRef.startsWith("artifact:")) {
-    throw new RoutineExecutionRefusal("invalid_request_artifact", state);
-  }
-  const id = payloadRef.slice("artifact:".length);
-  if (id.length === 0) throw new RoutineExecutionRefusal("invalid_request_artifact", state);
-  return id;
-}
-
-function manualRequest(content: Record<string, unknown>, state: string): ManualRoutineRequest {
-  const { slug, inputs } = content;
-  if (
-    typeof slug !== "string" ||
-    typeof inputs !== "object" ||
-    inputs === null ||
-    Array.isArray(inputs)
-  ) {
-    throw new RoutineExecutionRefusal("invalid_request_artifact", state);
-  }
-  return { slug, inputs: inputs as Record<string, unknown> };
-}
-
-function assertSupportedExpression(expression: CompiledExpression, state: string): void {
-  for (const reference of expression.references) {
-    const [root] = reference.split(".");
-    if (!SUPPORTED_ROOTS.has(root ?? "")) {
-      throw new RoutineExecutionRefusal("unsupported_context", state);
-    }
-  }
-}
-
-function assertSupportedState(state: CompiledState): void {
-  if (!SUPPORTED_TYPES.has(state.type)) {
-    throw new RoutineExecutionRefusal("unsupported_state", state.name);
-  }
-  for (const condition of state.conditions) {
-    assertSupportedExpression(condition.condition, state.name);
-  }
-  if (state.iterator !== null) assertSupportedExpression(state.iterator, state.name);
-  // An `event` wait is resolved by a signal nothing in this process delivers; parking it is the
-  // only honest answer, because opening it would strand the Run on a wait with no signaller.
-  if (state.type === "wait" && !isTimerWait(state)) {
-    throw new RoutineExecutionRefusal("unsupported_wait", state.name);
-  }
-}
-
-function assertSupportedInput(state: CompiledState): void {
-  for (const mapping of state.inputs) {
-    if (mapping.expression !== null) assertSupportedExpression(mapping.expression, state.name);
-  }
-}
-
-function progressionFrom(status: PersistedState["status"]): readonly StateStatus[] | null {
-  // `waiting` re-enters the same claim path: `waiting → ready → claimed → running`.
-  if (status === "pending" || status === "waiting") return CLAIM_PATH;
-  const index = CLAIM_PATH.indexOf(status as StateStatus);
-  return index >= 0 ? CLAIM_PATH.slice(index + 1) : null;
-}
-
-function isRefusal(error: unknown): error is RoutineExecutionRefusal | RoutineStepError {
-  return error instanceof RoutineExecutionRefusal || error instanceof RoutineStepError;
-}
-
-type ClassifiableOutcome = { readonly kind: string; readonly retryable?: boolean };
-
-/**
- * A failure a State's `retry` policy may re-attempt: only one a port explicitly marked
- * `retryable`. Absence of the flag (every `tool` failure, by the effect ledger's design) is
- * terminal, so an unmarked failure is never retried.
- */
-function isRetryableFailure(outcome: ClassifiableOutcome): boolean {
-  return outcome.kind === "failed" && outcome.retryable === true;
-}
-
 /** Executes deterministic Routine States; persists successors before predecessor success. */
 export function createRoutineExecutor(options: RoutineExecutorOptions): RunExecutor {
   const now = options.now ?? (() => new Date());
   const ceiling = options.identityCeiling ?? defaultIdentityCeiling;
   const retries = options.retries ?? new InMemoryStateRetryStore();
+  const concurrency = options.concurrency ?? new InMemoryStateConcurrencyStore();
+  const contention = options.contention ?? new InMemoryStateContentionStore();
   const delay = options.delay ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
   return async (run) => {
@@ -270,6 +162,8 @@ export function createRoutineExecutor(options: RoutineExecutorOptions): RunExecu
       persisted,
       options,
       retries,
+      concurrency,
+      contention,
       delay,
       now,
     });
@@ -287,6 +181,8 @@ interface ExecutionContext {
   readonly persisted: Map<string, PersistedState>;
   readonly options: RoutineExecutorOptions;
   readonly retries: StateRetryStore;
+  readonly concurrency: StateConcurrencyStore;
+  readonly contention: StateContentionStore;
   readonly delay: (ms: number) => Promise<void>;
   readonly now: () => Date;
 }
@@ -370,12 +266,13 @@ class RoutineExecution {
   ): Promise<{ kind: "outcome"; outcome: StepOutcome } | { kind: ChainOutcome }> {
     let outcome: StepOutcome | ChainOutcome | null;
 
-    // A `waiting` State is resolved by its wait, not by re-running it.
-    if (row.status === "waiting") {
+    // A `waiting` State is resolved by its wait, not by re-running it — unless the wait it is on
+    // is a concurrency backoff, which exists precisely to bring it back *into* execution.
+    if (row.status === "waiting" && !(await this.backoffElapsed(state, key))) {
       const resumed =
         state.type === "approval"
-          ? await this.resumeApproval(state, key, row)
-          : await this.resumeWait(state, key, row);
+          ? await resumeApproval(this.waitGate(), state, key, row)
+          : await resumeWait(this.waitGate(), state, key, row);
       if (resumed.kind !== "outcome") return { kind: resumed.kind };
       outcome = resumed.outcome;
     } else {
@@ -384,17 +281,18 @@ class RoutineExecution {
       await this.claim(key, row.status as StateStatus, progression);
       assertSupportedState(state);
 
-      if (state.type === "wait") return this.openWait(state, key);
-      if (state.type === "approval") return this.openApproval(state, key);
+      if (state.type === "wait") return openWait(this.waitGate(), state, key);
+      if (state.type === "approval") return openApproval(this.waitGate(), state, key);
 
-      outcome =
+      outcome = await this.underConcurrencyKey(state, key, () =>
         state.type === "branch"
-          ? decideBranch(state, scope).outcome
+          ? Promise.resolve(decideBranch(state, scope).outcome)
           : state.type === "tool"
-            ? await this.runTool(state, key, scope)
+            ? this.runTool(state, key, scope)
             : state.type === "agent"
-              ? await this.runAgent(state, key, row, scope)
-              : await this.runComposite(state, key, scope, outputs, depth);
+              ? this.runAgent(state, key, row, scope)
+              : runComposite(this.fanOut(), state, key, scope, outputs, depth)
+      );
     }
     if (outcome === null) return { kind: "waiting" };
     if (outcome === "failed") {
@@ -465,6 +363,9 @@ class RoutineExecution {
 
     const plan = planAgentInvocation(state, scope);
     const schema = agentOutputSchema(this.ctx.routine.outputSchemas, plan.outputSchemaRef);
+    // The authored Routine's cost/token ceiling; resolved with the ModelProfile's own budgets by
+    // the port, so the ledger it opens carries one ceiling per key rather than two.
+    const scopedLimits = routineBudgetScopedLimits(this.ctx.routine);
     const result = await this.withRetry(state, key, (attemptNumber) =>
       port.execute({
         businessId: this.ctx.run.businessId,
@@ -474,6 +375,7 @@ class RoutineExecution {
         attempt: row.version + (attemptNumber - 1),
         plan,
         ...(schema === undefined ? {} : { outputSchema: schema }),
+        ...(scopedLimits === undefined ? {} : { scopedLimits: [scopedLimits] }),
         bundle: this.ctx.bundle,
       })
     );
@@ -490,110 +392,6 @@ class RoutineExecution {
     if (decision.kind === "failed") return "failed";
     await this.park(key, `routine:${AGENT_ERROR_PREFIX}${result.reason}`);
     return "needs_reconciliation";
-  }
-
-  /** Fan-out/loop units replay from durable occurrence-key rows, not memory. */
-  private async runComposite(
-    state: CompiledState,
-    key: string,
-    scope: Readonly<Record<string, unknown>>,
-    outputs: StateOutputs,
-    depth: number
-  ): Promise<StepOutcome | ChainOutcome | null> {
-    if (state.type === "parallel") return this.runParallel(state, key, outputs, depth);
-    if (state.type === "foreach") return this.runForeach(state, key, scope, outputs, depth);
-    if (state.type === "repeat_until") return this.runRepeat(state, key, scope, outputs, depth);
-    throw new RoutineExecutionRefusal("unsupported_state", state.name);
-  }
-
-  private async runParallel(
-    state: CompiledState,
-    key: string,
-    outputs: StateOutputs,
-    depth: number
-  ): Promise<StepOutcome | ChainOutcome | null> {
-    let progress: ParallelProgress = initParallelProgress(state);
-
-    for (;;) {
-      const plan = planParallel(state, progress);
-      if (plan.dispatch.length === 0) break;
-      for (const branch of plan.dispatch) {
-        const settled = await this.runUnit(branch, key, branch, {}, outputs, depth);
-        if (settled === "cancelled" || settled === "needs_reconciliation") return settled;
-        progress = settleParallelBranch(progress, branch, unitStatus(settled));
-      }
-    }
-
-    return this.join(joinParallel(state, progress), state);
-  }
-
-  private async runForeach(
-    state: CompiledState,
-    key: string,
-    scope: Readonly<Record<string, unknown>>,
-    outputs: StateOutputs,
-    depth: number
-  ): Promise<StepOutcome | ChainOutcome | null> {
-    if (state.body === null) throw new RoutineStepError("missing_body", state.name);
-    const items = resolveForeachItems(state, scope);
-    let progress: ForeachProgress = initForeachProgress(state, items);
-
-    for (;;) {
-      const plan = planForeach(state, progress);
-      if (plan.dispatch.length === 0) break;
-      for (const index of plan.dispatch) {
-        const settled = await this.runUnit(
-          state.body,
-          key,
-          String(index),
-          { item: items[index] },
-          outputs,
-          depth
-        );
-        if (settled === "cancelled" || settled === "needs_reconciliation") return settled;
-        progress = settleForeachItem(state, progress, index, unitStatus(settled));
-      }
-    }
-
-    return this.join(joinForeach(state, progress), state);
-  }
-
-  /** Bounded loops recover iteration count from rows and elapsed time from State `startedAt`. */
-  private async runRepeat(
-    state: CompiledState,
-    key: string,
-    scope: Readonly<Record<string, unknown>>,
-    outputs: StateOutputs,
-    depth: number
-  ): Promise<StepOutcome | ChainOutcome | null> {
-    const row = this.ctx.persisted.get(key);
-    const startedAtMs = Date.parse(row?.startedAt ?? this.ctx.now().toISOString());
-    let iterations = 0;
-
-    for (;;) {
-      const loopScope = { ...scope, loop: { iteration: iterations } };
-      const decision = stepRepeat(
-        state,
-        { iterations, startedAtMs },
-        loopScope,
-        this.ctx.now().getTime()
-      );
-      if (decision.kind === "exit") return decision.outcome;
-
-      const settled = await this.runUnit(
-        decision.target,
-        key,
-        String(decision.iteration),
-        { loop: { iteration: decision.iteration } },
-        outputs,
-        depth
-      );
-      if (settled === "succeeded") {
-        iterations += 1;
-        continue;
-      }
-      return settled === "waiting" ? null : settled;
-    }
   }
 
   /** Schedule a unit's first State under its occurrence key, then walk that unit's chain. */
@@ -623,130 +421,53 @@ class RoutineExecution {
     return this.runChain(bodyName, prefix, extras, { ...outputs }, depth + 1);
   }
 
-  /** Refuses joins that require cancelling live-timer units this executor cannot cancel. */
-  private join(
-    decision: ReturnType<typeof joinParallel>,
-    state: CompiledState
-  ): StepOutcome | ChainOutcome | null {
-    if (decision.kind === "pending") return null;
-    if (decision.kind === "failed") return "failed";
-    if (decision.cancel.length > 0) {
-      throw new RoutineExecutionRefusal("unsupported_join", state.name);
-    }
-    return decision.outcome;
-  }
-
-  /** Open a durable timer and park the State on it. */
-  private async openWait(
-    state: CompiledState,
-    key: string
-  ): Promise<{ kind: "outcome"; outcome: StepOutcome } | { kind: ChainOutcome }> {
-    const waitId = routineWaitId(this.ctx.run.id, key);
-    // A worker that died between creating the wait and parking the State finds its own wait here.
-    const existing = await this.ctx.options.waits.find(this.ctx.run.businessId, waitId);
-    if (existing === null) {
-      await this.ctx.options.waits.register(
-        planTimerWait(state, {
-          businessId: this.ctx.run.businessId,
-          runId: this.ctx.run.id,
-          waitId,
-          stateKey: key,
-          now: this.ctx.now().toISOString(),
-        })
-      );
-    }
-    await this.transition(key, "running", "waiting");
-    return { kind: "waiting" };
-  }
-
-  /** Opens API-side approval wait; Worker never sees the resume token. */
-  private async openApproval(
-    state: CompiledState,
-    key: string
-  ): Promise<{ kind: "outcome"; outcome: StepOutcome } | { kind: ChainOutcome }> {
-    const port = this.ctx.options.approvals;
-    if (port === undefined) throw new RoutineExecutionRefusal("unsupported_state", state.name);
-
-    await port.open({
-      businessId: this.ctx.run.businessId,
-      runId: this.ctx.run.id,
-      stateKey: key,
-      stateName: state.name,
-      wait: planApprovalWait(state, {
-        businessId: this.ctx.run.businessId,
-        runId: this.ctx.run.id,
-        // Derived from `(runId, occurrence key)` so replay finds the same approval.
-        waitId: routineWaitId(this.ctx.run.id, key),
-        stateKey: key,
-        now: this.ctx.now().toISOString(),
-      }),
-    });
-    await this.transition(key, "running", "waiting");
-    return { kind: "waiting" };
-  }
-
-  /** Rejections take `approval_rejected`; expiries park instead of becoming yes/no. */
-  private async resumeApproval(
+  /** Serializes a State's authored `concurrencyKey`, queueing a contender rather than parking. */
+  private underConcurrencyKey(
     state: CompiledState,
     key: string,
-    row: PersistedState
-  ): Promise<{ kind: "outcome"; outcome: StepOutcome } | { kind: ChainOutcome }> {
-    const port = this.ctx.options.approvals;
-    if (port === undefined) return { kind: "needs_reconciliation" };
-
-    const record = await port.find({
-      businessId: this.ctx.run.businessId,
-      runId: this.ctx.run.id,
-      stateKey: key,
-    });
-    // Missing approval for a parked State is reconciliation-only.
-    if (record === undefined) return { kind: "needs_reconciliation" };
-    if (record.decision === "pending") return { kind: "waiting" };
-
-    await this.claim(key, row.status as StateStatus, CLAIM_PATH);
-    const decision = resolveApproval(
-      state,
-      record.decision === "approved"
-        ? "approved"
-        : record.decision === "denied"
-          ? "rejected"
-          : "expired"
-    );
-    if (decision.kind === "continue" || decision.kind === "handled") {
-      return { kind: "outcome", outcome: decision.outcome };
-    }
-    if (decision.kind === "failed") {
-      await this.transition(key, "running", "failed", `routine:${decision.errorRef}`);
-      return { kind: "failed" };
-    }
-    await this.park(key, `routine:${decision.errorRef}`);
-    return { kind: "needs_reconciliation" };
+    work: () => Promise<StepOutcome | ChainOutcome | null>
+  ): Promise<StepOutcome | ChainOutcome | null> {
+    return underConcurrencyKey(this.guard(), state, key, work);
   }
 
-  /** Resumed timers stay `running` until the caller persists the successor first. */
-  private async resumeWait(
-    state: CompiledState,
-    key: string,
-    row: PersistedState
-  ): Promise<{ kind: "outcome"; outcome: StepOutcome } | { kind: ChainOutcome }> {
-    const wait = await this.ctx.options.waits.find(
-      this.ctx.run.businessId,
-      routineWaitId(this.ctx.run.id, key)
-    );
-    if (wait === null) return { kind: "needs_reconciliation" };
-    if (wait.status === "pending") return { kind: "waiting" };
+  /** True when a `waiting` row is a fired concurrency backoff, so it resumes into execution. */
+  private backoffElapsed(state: CompiledState, key: string): Promise<boolean> {
+    return concurrencyBackoffElapsed(this.guard(), state, key);
+  }
 
-    await this.claim(key, row.status as StateStatus, CLAIM_PATH);
-    if (wait.status === "satisfied") return { kind: "outcome", outcome: stateOutcome(state) };
+  private fanOut(): FanOutContext {
+    return {
+      persisted: this.ctx.persisted,
+      now: this.ctx.now,
+      runUnit: (bodyName, parentKey, unit, extras, outputs, depth) =>
+        this.runUnit(bodyName, parentKey, unit, extras, outputs, depth),
+    };
+  }
 
-    const decision = resolveErrorPath(state, WAIT_TIMED_OUT, "attention");
-    if (decision.kind === "handled") return { kind: "outcome", outcome: decision.outcome };
-    if (decision.kind === "failed") {
-      await this.transition(key, "running", "failed", `routine:${WAIT_TIMED_OUT}`);
-      return { kind: "failed" };
-    }
-    await this.park(key, `routine:${WAIT_TIMED_OUT}`);
-    return { kind: "needs_reconciliation" };
+  private waitGate(): WaitGateContext {
+    return {
+      run: this.ctx.run,
+      waits: this.ctx.options.waits,
+      ...(this.ctx.options.approvals === undefined
+        ? {}
+        : { approvals: this.ctx.options.approvals }),
+      now: this.ctx.now,
+      transition: (key, from, to, reason) => this.transition(key, from, to, reason),
+      claim: (key, from, progression) => this.claim(key, from, progression),
+      park: (key, reason) => this.park(key, reason),
+    };
+  }
+
+  private guard(): ConcurrencyGuardContext {
+    return {
+      run: this.ctx.run,
+      concurrency: this.ctx.concurrency,
+      contention: this.ctx.contention,
+      waits: this.ctx.options.waits,
+      now: this.ctx.now,
+      delay: this.ctx.delay,
+      transition: (key, from, to, reason) => this.transition(key, from, to, reason),
+    };
   }
 
   /**
@@ -847,11 +568,4 @@ class RoutineExecution {
 /** The chain prefix a State's own successors are addressed under. */
 function prefixOf(key: string, stateName: string): string {
   return key.slice(0, key.length - stateName.length);
-}
-
-/** A unit parked on a wait is still running, not settled — its join stays pending. */
-function unitStatus(outcome: ChainOutcome): "succeeded" | "failed" | "running" {
-  if (outcome === "succeeded") return "succeeded";
-  if (outcome === "failed") return "failed";
-  return "running";
 }

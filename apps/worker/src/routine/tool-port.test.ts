@@ -192,13 +192,13 @@ describe("BrokerRoutineToolPort", () => {
     expect(await port().execute(request({ authorityLayers: [] }))).toEqual({ kind: "succeeded" });
   });
 
-  // Limitation: Routine authorization is Tool-granular until ToolContract has target bindings.
-  it("decides at Tool granularity, carrying no target the arguments could have named", async () => {
+  // Contracts that declare no target keep the coarser Tool-granular decision; that is the one
+  // legitimate empty target list, and it is not the same as a target we could not work out.
+  it("decides at Tool granularity when the contract declares no target of its own", async () => {
     expect(await port().execute(request())).toEqual({ kind: "succeeded" });
 
     const dispatched = dispatch.mock.calls[0]?.[0];
     expect(dispatched?.intent.arguments).not.toEqual({});
-    // Without contract-level target bindings, authorization must keep seeing only the Tool.
     expect(dispatched?.intent.targetRefs).toEqual([]);
   });
 
@@ -327,6 +327,139 @@ describe("BrokerRoutineToolPort", () => {
       kind: "failed",
       reason: "invalid_arguments",
     });
+  });
+});
+
+/**
+ * L3-3: the port used to hardcode `targetRefs: []`, so a grant that authorized one Ticket had to
+ * authorize every Ticket. Targets now come from the pinned ToolContract's own declaration.
+ */
+describe("BrokerRoutineToolPort contract-declared targets", () => {
+  const TARGETED: Partial<ToolContractDefinition["spec"]> = {
+    requiredResources: ["github.issue"],
+    targets: [{ type: "github.issue", id: "{repository}#{issueNumber}" }],
+  };
+
+  const ISSUE_ARGUMENTS = { repository: "tulip/farm", issueNumber: 42, body: "hello" };
+
+  function targetedRequest(overrides: Partial<RoutineToolRequest> = {}): RoutineToolRequest {
+    return request({
+      plan: { ...PLAN, arguments: ISSUE_ARGUMENTS },
+      bundle: bundle([
+        { kind: "ToolContract", document: contract(TARGETED) },
+        { kind: "Guardrail", document: guardrail([ALLOW_COMMENT]) },
+      ]),
+      ...overrides,
+    });
+  }
+
+  function operatorLayer(recordSelector: string): readonly AuthorityLayer[] {
+    return [
+      {
+        name: "operator",
+        grants: [
+          {
+            action: "issue.comment",
+            resourceType: "github.issue",
+            recordSelector,
+            effect: "allow",
+          },
+        ],
+      },
+    ];
+  }
+
+  it("carries the object the arguments name into the intent the gate and ledger see", async () => {
+    expect(await port().execute(targetedRequest())).toEqual({ kind: "succeeded" });
+
+    const expected = [{ type: "github.issue", id: "tulip/farm#42" }];
+    expect(dispatch.mock.calls[0]?.[0].intent.targetRefs).toEqual(expected);
+    expect((await effects.get(BUSINESS_ID, PLAN.effectId))?.intent.targetRefs).toEqual(expected);
+  });
+
+  it("lets a grant scoped to exactly that object authorize the call", async () => {
+    const scoped = targetedRequest({ authorityLayers: operatorLayer("tulip/farm#42") });
+
+    expect(await port().execute(scoped)).toEqual({ kind: "succeeded" });
+  });
+
+  it("refuses the same call under a grant scoped to a different object", async () => {
+    const elsewhere = targetedRequest({ authorityLayers: operatorLayer("tulip/farm#7") });
+
+    expect(await port().execute(elsewhere)).toEqual({
+      kind: "failed",
+      reason: "authorization_denied",
+    });
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(await effects.get(BUSINESS_ID, PLAN.effectId)).toBeUndefined();
+  });
+
+  it("refuses rather than falls back to an empty target when an argument names nothing", async () => {
+    const missing = targetedRequest({
+      plan: { ...PLAN, arguments: { repository: "tulip/farm", body: "hello" } },
+    });
+
+    expect(await port().execute(missing)).toEqual({
+      kind: "failed",
+      reason: "target_unresolved",
+    });
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(await effects.get(BUSINESS_ID, PLAN.effectId)).toBeUndefined();
+  });
+
+  it("refuses a declared target no required resource covers, so no grant floor governs it", async () => {
+    const undeclared = targetedRequest({
+      bundle: bundle([
+        {
+          kind: "ToolContract",
+          document: contract({ ...TARGETED, requiredResources: ["github.repository"] }),
+        },
+        { kind: "Guardrail", document: guardrail([ALLOW_COMMENT]) },
+      ]),
+    });
+
+    expect(await port().execute(undeclared)).toEqual({
+      kind: "failed",
+      reason: "target_type_undeclared",
+    });
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it("refuses when deriving would drop a required resource from the decision", async () => {
+    const dropped = targetedRequest({
+      bundle: bundle([
+        {
+          kind: "ToolContract",
+          document: contract({
+            ...TARGETED,
+            requiredResources: ["github.issue", "github.repository"],
+          }),
+        },
+        { kind: "Guardrail", document: guardrail([ALLOW_COMMENT]) },
+      ]),
+    });
+
+    expect(await port().execute(dropped)).toEqual({
+      kind: "failed",
+      reason: "target_drops_resource",
+    });
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it("refuses a derived id that would read as a grant wildcard", async () => {
+    const wildcard = targetedRequest({
+      bundle: bundle([
+        {
+          kind: "ToolContract",
+          document: contract({ ...TARGETED, targets: [{ type: "github.issue", id: "{scope}" }] }),
+        },
+        { kind: "Guardrail", document: guardrail([ALLOW_COMMENT]) },
+      ]),
+      plan: { ...PLAN, arguments: { ...ISSUE_ARGUMENTS, scope: "*" } },
+    });
+
+    expect(await port().execute(wildcard)).toEqual({ kind: "failed", reason: "target_invalid" });
+    expect(dispatch).not.toHaveBeenCalled();
   });
 });
 

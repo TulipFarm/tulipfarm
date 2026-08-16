@@ -1,220 +1,66 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import {
-  type AuthorityLayer,
-  type DlpRule,
-  type GuardrailRule,
-  requiredApproverCount,
-} from "@tulipfarm/authz";
-import {
-  GITHUB_TOOL_CONTRACTS,
-  GITHUB_TOOL_IDS,
-  GitHubAdapter,
-  type GitHubEffectContext,
-  githubEffectMarker,
-  JIRA_TOOL_CONTRACTS,
-  JIRA_TOOL_IDS,
-  JiraAdapter,
-  type JiraEffectContext,
-  jiraEffectLabel,
-  normalizeGitHubIssueEvent,
-} from "@tulipfarm/integrations";
-import { type CompiledState, compileRoutine, type IdentityCeiling } from "@tulipfarm/run-kernel";
+import { requiredApproverCount } from "@tulipfarm/authz";
+import { type CompiledState, compileRoutine } from "@tulipfarm/run-kernel";
 import {
   type AccessGrantDefinition,
-  ajv,
   DEFINITION_REGISTRATIONS,
-  parseYamlDocument,
   routine as routineSchema,
   SchemaRegistry,
 } from "@tulipfarm/schema";
-import { inMemorySecretProvider, SecretBroker, SecretLeaseDeniedError } from "@tulipfarm/secrets";
-import { InMemoryApprovalRepo } from "@tulipfarm/storage";
+import { SecretLeaseDeniedError } from "@tulipfarm/secrets";
+import type { InMemoryApprovalRepo } from "@tulipfarm/storage";
 import {
   AdapterDispatchError,
-  CredentialDispatcher,
-  EffectDispatcher,
-  EffectReconciler,
-  type EffectRecord,
-  MemoryEffectStore,
+  type MemoryEffectStore,
   type ReconciliationResult,
-  ToolApprovalDecisions,
-  ToolApprovalGate,
   ToolApprovalGateError,
-  ToolBroker,
-  ToolCatalog,
   type ToolIntent,
-  type ToolReconciliationAdapter,
-  type ToolReconciliationOutcome,
-  type ToolReconciliationRequest,
 } from "@tulipfarm/tool-broker";
+import { classifyIssue } from "./agent-stub";
 import {
-  GitHubProvider,
-  JiraProvider,
-  type SeedIssueInput,
-  type SignedDelivery,
-  signGitHubDelivery,
-  verifyGitHubSignature,
-} from "./providers";
+  AGENT_PRINCIPAL_ID,
+  APPROVAL_TTL_MS,
+  APPROVER_ROLE,
+  AUTHORITY_LAYERS,
+  accessGrant,
+  authoredString,
+  BUSINESS_ID,
+  type DeliveryInput,
+  DLP_RULES,
+  GITHUB_CREDENTIAL,
+  GITHUB_SECRET_REF,
+  GUARDRAIL_REVISION,
+  GUARDRAIL_RULES,
+  IDENTITY_CEILING,
+  type IngressResult,
+  JIRA_CREDENTIAL,
+  ROUTINE_PRINCIPAL_ID,
+  readDefinition,
+  type TriageClassification,
+  type TriageResult,
+  type TriageStepStatus,
+  toolRefOf,
+} from "./fixtures";
+import { createTriageIngress } from "./ingress";
+import type { GitHubProvider, JiraProvider, SeedIssueInput, SignedDelivery } from "./providers";
+import {
+  blocked,
+  citationsFor,
+  effectIdFor,
+  inputsFor,
+  providerOutputFor,
+  reserveInputFor,
+  scopeOf,
+  type WalkState,
+} from "./walk";
+import { createTriageWiring } from "./wiring";
 
 /** Real governed triage wiring; reads skip the ledger, mutations reserve, resumes replay. */
 
-export const EXAMPLES_DIR = join(
-  import.meta.dirname,
-  "../../../../../examples/github-issue-triage"
-);
-
-const BUSINESS_ID = "biz-triage";
-const REPOSITORY = "tulip/farm";
-const JIRA_SITE_URL = "https://tulip.atlassian.net";
-const GUARDRAIL_REVISION = "guardrail-rev-1";
-const APPROVER_ROLE = "issue-triage-approver";
-const APPROVAL_TTL_MS = 60 * 60 * 1000;
-
-const AGENT_PRINCIPAL_ID = "66666666-6666-4666-8666-666666666666";
-const ROUTINE_PRINCIPAL_ID = "principal-routine";
-const GITHUB_INTEGRATION_ID = "44444444-4444-4444-8444-444444444444";
-const JIRA_INTEGRATION_ID = "55555555-5555-4555-8555-555555555555";
-
-const GITHUB_SECRET_REF = "secret://integrations/github/issue-triage";
-const JIRA_SECRET_REF = "secret://integrations/jira/issue-triage";
-const GITHUB_CREDENTIAL = "github-installation-token-7f3a";
-const JIRA_CREDENTIAL = "jira-api-token-91b2";
-const WEBHOOK_SECRET = "webhook-signing-secret";
-
-const TOOL_ABILITIES = [
-  GITHUB_TOOL_IDS.issueRead,
-  GITHUB_TOOL_IDS.issueSearch,
-  GITHUB_TOOL_IDS.issueComment,
-  GITHUB_TOOL_IDS.issueLabel,
-  GITHUB_TOOL_IDS.issueAssign,
-  GITHUB_TOOL_IDS.issueClose,
-  JIRA_TOOL_IDS.issueCreate,
-  JIRA_TOOL_IDS.userAvailability,
-];
-
-export const IDENTITY_CEILING: IdentityCeiling = {
-  principalKind: "agent",
-  principalId: AGENT_PRINCIPAL_ID,
-  grants: TOOL_ABILITIES,
-  maxRiskClass: "high",
-};
-
-/** The published GitHub and Jira contracts, loaded exactly as the worker loads them. */
-export function triageCatalog(): ToolCatalog {
-  return ToolCatalog.load([...GITHUB_TOOL_CONTRACTS, ...JIRA_TOOL_CONTRACTS]);
-}
-
 /** Agent outputs account ids, not GitHub logins, so prompt text cannot pick assignees. */
-const DIRECTORY: Readonly<Record<string, string>> = {
+const _DIRECTORY: Readonly<Record<string, string>> = {
   "acct-maya": "maya-dev",
   "acct-lee": "lee-dev",
 };
-
-export interface TriageClassification {
-  readonly duplicate: boolean;
-  readonly duplicateOfIssue?: number;
-  readonly labels: readonly string[];
-  readonly summary: string;
-  readonly reply: string;
-  readonly candidateAccountIds: readonly string[];
-}
-
-export type TriageStepStatus =
-  | "completed"
-  | "awaiting_approval"
-  | "ambiguous"
-  | "failed"
-  | "cancelled";
-
-export interface TriageStep {
-  readonly state: string;
-  readonly status: TriageStepStatus;
-  readonly effectId?: string;
-}
-
-export interface TriageResult {
-  readonly outcome: "completed" | "awaiting_approval" | "blocked" | "cancelled";
-  readonly deliveryId: string;
-  readonly issueNumber: number;
-  readonly steps: readonly TriageStep[];
-  readonly citations: readonly string[];
-  readonly pendingApprovalId?: string;
-  readonly blockedReason?: string;
-}
-
-export interface IngressResult {
-  readonly status: number;
-  readonly outcome?: "accepted" | "duplicate";
-  readonly code?: string;
-}
-
-export interface DeliveryInput {
-  readonly deliveryId: string;
-  readonly issueNumber: number;
-}
-
-function readDefinition(file: string): unknown {
-  return parseYamlDocument(readFileSync(join(EXAMPLES_DIR, file), "utf8"));
-}
-
-function accessGrant(registry: SchemaRegistry, file: string): AccessGrantDefinition {
-  return registry.validate(readDefinition(file)).document as AccessGrantDefinition;
-}
-
-function authored(state: CompiledState): Record<string, unknown> {
-  return state.definition as unknown as Record<string, unknown>;
-}
-
-function authoredString(state: CompiledState, key: string): string {
-  const value = authored(state)[key];
-  if (typeof value !== "string") throw new Error(`missing ${key} on state ${state.name}`);
-  return value;
-}
-
-function toolRefOf(state: CompiledState): { readonly name: string; readonly version: string } {
-  const ref = authored(state).toolRef;
-  if (ref === null || typeof ref !== "object") throw new Error(`missing toolRef on ${state.name}`);
-  const { name, version } = ref as Record<string, unknown>;
-  if (typeof name !== "string" || typeof version !== "string") {
-    throw new Error(`malformed toolRef on ${state.name}`);
-  }
-  return { name, version };
-}
-
-function record(value: unknown): Record<string, unknown> {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("expected an object");
-  }
-  return value as Record<string, unknown>;
-}
-
-/** Routine-level authority is broad here; adapter AccessGrants do target narrowing. */
-const AUTHORITY_LAYERS: readonly AuthorityLayer[] = [
-  { name: "routine", grants: [{ action: "*", resourceType: "*", effect: "allow" }] },
-];
-
-/** Assigning and closing are the two steps a human signs off; everything else is policy-allowed. */
-const GUARDRAIL_RULES: readonly GuardrailRule[] = [
-  { id: "triage-allow", effect: "allow", action: "*", resourceType: "*" },
-  {
-    id: "triage-approve-assign",
-    effect: "require_approval",
-    action: GITHUB_TOOL_IDS.issueAssign,
-    resourceType: "*",
-  },
-  {
-    id: "triage-approve-close",
-    effect: "require_approval",
-    action: GITHUB_TOOL_IDS.issueClose,
-    resourceType: "*",
-  },
-];
-
-const DLP_RULES: readonly DlpRule[] = [
-  { dataClass: "source_content", allowedDestinations: ["github", "jira"] },
-  { dataClass: "directory", allowedDestinations: ["jira"] },
-];
 
 export interface TriageHarness {
   readonly businessId: string;
@@ -255,188 +101,36 @@ export async function createTriageHarness(): Promise<TriageHarness> {
   let classification: TriageClassification | undefined;
   let cancelAfterState: string | undefined;
 
+  function requireClassification(): TriageClassification {
+    if (classification === undefined) throw new Error("no classification stub configured");
+    return classification;
+  }
+
   const now = (): Date => new Date(clock);
   const nowIso = (): string => new Date(clock).toISOString();
 
-  const github = new GitHubProvider(GITHUB_CREDENTIAL);
-  const jira = new JiraProvider(JIRA_CREDENTIAL, JIRA_SITE_URL);
-
-  const secrets = new SecretBroker({
-    provider: inMemorySecretProvider({
-      [GITHUB_SECRET_REF]: GITHUB_CREDENTIAL,
-      [JIRA_SECRET_REF]: JIRA_CREDENTIAL,
-    }),
-    authorizer: { authorize: () => ({ allowed: authorizationActive }) },
-    now: () => clock,
-  });
-
-  const githubContext: GitHubEffectContext = {
-    integrationId: GITHUB_INTEGRATION_ID,
-    installation: {
-      businessId: BUSINESS_ID,
-      integrationId: GITHUB_INTEGRATION_ID,
-      installationId: "installation-1",
-      accountLogin: "tulip",
-      repositories: [REPOSITORY],
-      permissions: { issues: "write", metadata: "read" },
-    },
-    principals: [{ kind: "agent", id: AGENT_PRINCIPAL_ID }],
-    grants: [],
-  };
-  const jiraContext: JiraEffectContext = {
-    integrationId: JIRA_INTEGRATION_ID,
-    site: {
-      businessId: BUSINESS_ID,
-      integrationId: JIRA_INTEGRATION_ID,
-      cloudId: "cloud-1",
-      siteUrl: JIRA_SITE_URL,
-      projects: ["ENG"],
-      permissions: { issues: "write", users: "read" },
-    },
-    principals: [{ kind: "agent", id: AGENT_PRINCIPAL_ID }],
-    grants: [],
-  };
-
-  const githubAdapter = new GitHubAdapter({
-    http: github,
-    context: { resolve: async () => ({ ...githubContext, grants: githubGrants }) },
-    now,
-  });
-  const jiraAdapter = new JiraAdapter({
-    http: jira,
-    context: { resolve: async () => ({ ...jiraContext, grants: jiraGrants }) },
-    now,
-  });
-
-  const catalog = triageCatalog();
-  const broker = new ToolBroker(catalog);
-  const effects = new MemoryEffectStore();
-  const approvals = new InMemoryApprovalRepo();
-  const gate = new ToolApprovalGate(approvals, effects);
-  const decisions = new ToolApprovalDecisions(approvals);
-
-  const adapters = new Map<string, GitHubAdapter | JiraAdapter>([
-    ["integration:github", githubAdapter],
-    ["integration:jira", jiraAdapter],
-  ]);
-
-  const dispatcher = new EffectDispatcher({
-    store: effects,
+  const {
+    github,
+    jira,
+    secrets,
+    githubAdapter,
+    jiraAdapter,
     catalog,
-    adapters,
-    credentialDispatcher: new CredentialDispatcher({
-      secrets,
-      reauthorize: () => authorizationActive,
-    }),
-    now: nowIso,
+    broker,
+    effects,
+    approvals,
+    gate,
+    decisions,
+    dispatcher,
+    reconciler,
+  } = createTriageWiring({
+    clock: () => clock,
+    githubGrants: () => githubGrants,
+    jiraGrants: () => jiraGrants,
+    authorized: () => authorizationActive,
   });
 
-  /** Reconciliation re-leases credentials; refused leases stay `ambiguous`, never `not_applied`. */
-  function leasedReconciler(
-    inner: GitHubAdapter | JiraAdapter,
-    secretRef: string
-  ): ToolReconciliationAdapter {
-    return {
-      async reconcile(request: ToolReconciliationRequest): Promise<ToolReconciliationOutcome> {
-        try {
-          const lease = await secrets.lease({
-            scope: {
-              secretRef,
-              toolId: request.intent.toolId,
-              targetId: request.intent.targetRefs[0]?.id,
-              runId: request.intent.runId,
-              stateId: request.intent.stateId,
-              purpose: request.operation,
-            },
-            maxUses: 1,
-          });
-          return await lease.use((credential) => inner.reconcile(request, credential));
-        } catch (error) {
-          if (error instanceof SecretLeaseDeniedError) return inner.reconcile(request);
-          throw error;
-        }
-      },
-    };
-  }
-
-  const reconciler = new EffectReconciler({
-    store: effects,
-    catalog,
-    adapters: new Map<string, ToolReconciliationAdapter>([
-      ["integration:github", leasedReconciler(githubAdapter, GITHUB_SECRET_REF)],
-      ["integration:jira", leasedReconciler(jiraAdapter, JIRA_SECRET_REF)],
-    ]),
-    now: nowIso,
-  });
-
-  const seenDeliveries = new Set<string>();
-  const acceptedEvents: string[] = [];
-
-  function signedDelivery(input: DeliveryInput): SignedDelivery {
-    const issue = github.issue(input.issueNumber);
-    return signGitHubDelivery(WEBHOOK_SECRET, input.deliveryId, {
-      action: "opened",
-      repository: { full_name: REPOSITORY },
-      installation: { id: 1 },
-      sender: { login: issue.author, id: 900 + issue.number },
-      issue: {
-        number: issue.number,
-        title: issue.title,
-        body: issue.body,
-        state: issue.state,
-        html_url: `https://github.com/${REPOSITORY}/issues/${issue.number}`,
-        labels: issue.labels.map((name) => ({ name })),
-      },
-    });
-  }
-
-  async function ingest(delivery: SignedDelivery): Promise<IngressResult> {
-    // Verify before parse, store, or dedupe.
-    if (!verifyGitHubSignature(WEBHOOK_SECRET, delivery)) {
-      return { status: 401, code: "signature_invalid" };
-    }
-    const deliveryId = delivery.headers["x-github-delivery"];
-    if (deliveryId === undefined) return { status: 400, code: "delivery_id_missing" };
-
-    try {
-      normalizeGitHubIssueEvent(JSON.parse(delivery.body));
-    } catch {
-      return { status: 400, code: "payload_rejected" };
-    }
-
-    if (seenDeliveries.has(deliveryId)) return { status: 200, outcome: "duplicate" };
-    seenDeliveries.add(deliveryId);
-    acceptedEvents.push(deliveryId);
-    return { status: 202, outcome: "accepted" };
-  }
-
-  /** Agent stub proposes only; directory resolution prevents arbitrary GitHub assignees. */
-  function classifyIssue(state: CompiledState): Record<string, unknown> {
-    if (classification === undefined) throw new Error("no classification stub configured");
-    const assignees = classification.candidateAccountIds
-      .slice(0, 1)
-      .map((accountId) => DIRECTORY[accountId])
-      .filter((login): login is string => login !== undefined);
-
-    const output: Record<string, unknown> = {
-      duplicate: classification.duplicate,
-      labels: [...classification.labels],
-      summary: classification.summary,
-      reply: classification.reply,
-      candidateAccountIds: [...classification.candidateAccountIds],
-      assignees,
-    };
-    if (classification.duplicateOfIssue !== undefined) {
-      output.duplicateOfIssue = classification.duplicateOfIssue;
-    }
-
-    // Authored output schema is the boundary, before any provider call.
-    const schema = authored(state).output;
-    if (schema !== undefined && !ajv.compile(record(schema))(output)) {
-      throw new Error(`ClassifyIssue produced output outside its declared schema`);
-    }
-    return output;
-  }
+  const { acceptedEvents, ingest, signedDelivery } = createTriageIngress(github);
 
   function targetRefFor(state: CompiledState, input: Record<string, unknown>) {
     const destination = authoredString(state, "destination");
@@ -489,120 +183,6 @@ export async function createTriageHarness(): Promise<TriageHarness> {
     return lease.use((credential) =>
       adapter.dispatch({ intent, idempotencyKey: intent.idempotencyKey, attempt: 1 }, credential)
     );
-  }
-
-  /** Duplicate reservations read provider state instead of repeating confirmed effects. */
-  function providerOutputFor(effect: EffectRecord): Record<string, unknown> | undefined {
-    const source = record(effect.intent.arguments);
-    const key = effect.idempotencyKey;
-
-    switch (effect.intent.action) {
-      case GITHUB_TOOL_IDS.issueLabel:
-        return { labels: [...github.issue(Number(source.issueNumber)).labels] };
-      case GITHUB_TOOL_IDS.issueAssign:
-        return { assignees: [...github.issue(Number(source.issueNumber)).assignees] };
-      case GITHUB_TOOL_IDS.issueClose: {
-        const issue = github.issue(Number(source.issueNumber));
-        return { number: issue.number, state: issue.state, stateReason: issue.stateReason ?? "" };
-      }
-      case GITHUB_TOOL_IDS.issueComment: {
-        const issueNumber = Number(source.issueNumber);
-        const marker = githubEffectMarker(key);
-        const comment = github.comments(issueNumber).find((entry) => entry.body.includes(marker));
-        return comment === undefined
-          ? undefined
-          : {
-              commentId: comment.id,
-              htmlUrl: `https://github.com/${REPOSITORY}/issues/${issueNumber}#issuecomment-${comment.id}`,
-              createdAt: comment.createdAt,
-            };
-      }
-      case JIRA_TOOL_IDS.issueCreate: {
-        const label = jiraEffectLabel(key);
-        const issue = jira.issues().find((entry) => entry.labels.includes(label));
-        return issue === undefined
-          ? undefined
-          : { issueKey: issue.key, issueId: issue.id, url: `${JIRA_SITE_URL}/browse/${issue.key}` };
-      }
-      default:
-        return undefined;
-    }
-  }
-
-  function citationsFor(state: CompiledState, output: unknown): string[] {
-    const value = record(output);
-    switch (state.name) {
-      case "ReadIssue":
-        return [`github:issue:${String(value.repository)}#${String(value.number)}`];
-      case "FindDuplicates":
-        return (Array.isArray(value.items) ? value.items : []).map((entry) => {
-          const item = record(entry);
-          return `github:issue:${String(item.repository)}#${String(item.number)}`;
-        });
-      case "CreateTicket":
-        return [`jira:issue:${String(value.issueKey)}`];
-      case "ReplyDuplicate":
-      case "ReplyTriaged":
-        return [`github:comment:${String(value.commentId)}`];
-      default:
-        return [];
-    }
-  }
-
-  interface WalkState {
-    readonly deliveryId: string;
-    readonly issueNumber: number;
-    readonly mode: "start" | "resume";
-    readonly steps: TriageStep[];
-    readonly citations: string[];
-    readonly outputs: Record<string, unknown>;
-    /** Effects reserved by consuming an Approval, keyed by the gated State they authorize. */
-    readonly preReserved: Map<string, { readonly effectId: string; readonly created: boolean }>;
-  }
-
-  function scopeOf(walk: WalkState): Record<string, unknown> {
-    return {
-      trigger: { repositoryRef: REPOSITORY, issueNumber: walk.issueNumber },
-      states: walk.outputs,
-      input: {},
-    };
-  }
-
-  function inputsFor(state: CompiledState, walk: WalkState): Record<string, unknown> {
-    const scope = scopeOf(walk);
-    const input: Record<string, unknown> = {};
-    for (const mapping of state.inputs) {
-      input[mapping.name] =
-        mapping.expression === null ? mapping.literal : mapping.expression.evaluate(scope);
-    }
-    return input;
-  }
-
-  function blocked(walk: WalkState, reason?: string): TriageResult {
-    return {
-      outcome: "blocked",
-      deliveryId: walk.deliveryId,
-      issueNumber: walk.issueNumber,
-      steps: walk.steps,
-      citations: walk.citations,
-      ...(reason === undefined ? {} : { blockedReason: reason }),
-    };
-  }
-
-  function effectIdFor(walk: WalkState, stateName: string): string {
-    return `effect-${walk.deliveryId}-${stateName}`;
-  }
-
-  function reserveInputFor(state: CompiledState, walk: WalkState, intent: ToolIntent) {
-    return {
-      effectId: effectIdFor(walk, state.name),
-      businessId: BUSINESS_ID,
-      runId: intent.runId,
-      stateId: state.name,
-      logicalEffectOrdinal: state.index,
-      idempotencyKey: intent.idempotencyKey,
-      createdAt: nowIso(),
-    };
   }
 
   /** Runs one Tool State, returning its output or the failed step that stops the Run. */
@@ -666,7 +246,7 @@ export async function createTriageHarness(): Promise<TriageHarness> {
         ? gated.created
         : (
             await effects.reserve({
-              ...reserveInputFor(state, walk, intent),
+              ...reserveInputFor(state, walk, intent, nowIso()),
               intent,
               intentDigest: outcomeDigest(intent),
               guardrailRevision: GUARDRAIL_REVISION,
@@ -675,7 +255,8 @@ export async function createTriageHarness(): Promise<TriageHarness> {
 
     if (!created) {
       const effect = await effects.get(BUSINESS_ID, effectId);
-      const replayed = effect?.state === "confirmed" ? providerOutputFor(effect) : undefined;
+      const replayed =
+        effect?.state === "confirmed" ? providerOutputFor({ github, jira }, effect) : undefined;
       if (replayed === undefined) {
         const status: TriageStepStatus = effect?.state === "ambiguous" ? "ambiguous" : "failed";
         walk.steps.push({ state: state.name, status, effectId });
@@ -777,7 +358,7 @@ export async function createTriageHarness(): Promise<TriageHarness> {
         intent,
         evidenceHashes,
         guardrailRevision: GUARDRAIL_REVISION,
-        effect: reserveInputFor(gatedState, walk, intent),
+        effect: reserveInputFor(gatedState, walk, intent, nowIso()),
         at: now(),
       });
       walk.preReserved.set(gatedName, {
@@ -824,7 +405,7 @@ export async function createTriageHarness(): Promise<TriageHarness> {
           break;
         }
         case "agent": {
-          walk.outputs[state.name] = classifyIssue(state);
+          walk.outputs[state.name] = classifyIssue(requireClassification(), state);
           walk.steps.push({ state: state.name, status: "completed" });
           break;
         }

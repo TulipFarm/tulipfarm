@@ -3,13 +3,19 @@ import type { ToolContractDefinition, ToolContractSpec } from "@tulipfarm/schema
 export interface PublishedToolContract
   extends Omit<
     ToolContractSpec,
-    "requiredActions" | "requiredResources" | "dataClasses" | "allowedDestinations"
+    "requiredActions" | "requiredResources" | "targets" | "dataClasses" | "allowedDestinations"
   > {
   readonly definitionId: string;
   readonly authoredVersion: number;
   readonly publishedDigest: string;
   readonly requiredActions: readonly string[];
   readonly requiredResources: readonly string[];
+  /** Absent means the contract declares no per-object target; see `targets.ts`. */
+  readonly targets?: readonly Readonly<{
+    readonly type: string;
+    readonly id: string;
+    readonly domain?: string;
+  }>[];
   readonly dataClasses: readonly string[];
   readonly allowedDestinations: readonly string[];
 }
@@ -45,6 +51,10 @@ export function publishToolContract(definition: ToolContractDefinition): Publish
     errorSchema: spec.errorSchema === undefined ? undefined : freezeSchema(spec.errorSchema),
     requiredActions: Object.freeze([...(spec.requiredActions ?? [])]),
     requiredResources: Object.freeze([...(spec.requiredResources ?? [])]),
+    targets:
+      spec.targets === undefined
+        ? undefined
+        : Object.freeze(spec.targets.map((target) => Object.freeze({ ...target }))),
     dataClasses: Object.freeze([...(spec.dataClasses ?? [])]),
     allowedDestinations: Object.freeze([...(spec.allowedDestinations ?? [])]),
     idempotency: Object.freeze({ ...spec.idempotency }),

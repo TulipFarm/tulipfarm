@@ -2,18 +2,19 @@ import { describe, expect, it, vi } from "vitest";
 import type {
   ModelInvocationRequest,
   ModelInvocationResult,
+  ModelMessage,
   ModelPort,
   ModelStreamChunk,
 } from "../ports";
 import { ModelInvocationError } from "../ports";
 import { InMemoryLoopCheckpointStore } from "./checkpoint";
-import {
-  AgentLoop,
-  type AgentLoopEvent,
-  type AgentLoopInput,
-  type ToolDispatchPort,
-  type ToolDispatchResult,
-} from "./loop";
+import type {
+  AgentLoopEvent,
+  AgentLoopInput,
+  ToolDispatchPort,
+  ToolDispatchResult,
+} from "./contract";
+import { AgentLoop } from "./loop";
 
 function textResult(text: string): ModelInvocationResult {
   return {
@@ -742,6 +743,125 @@ describe("AgentLoop concurrent dispatch", () => {
 
     expect(outcome).toMatchObject({ status: "failed", reason: "repair_budget_exhausted" });
   });
+
+  const threeReadTools = [
+    ...readTools,
+    { name: "github.release.list", inputSchema: { type: "object" }, mutating: false },
+  ];
+
+  const threeReadCalls = [
+    { callId: "c1", name: "github.issue.search", arguments: {} },
+    { callId: "c2", name: "github.pull_request.search", arguments: {} },
+    { callId: "c3", name: "github.release.list", arguments: {} },
+  ];
+
+  it("applies every dispatched result when an approval fires partway through a batch", async () => {
+    const events = collector();
+    const tools = dispatcher(
+      { status: "succeeded", callId: "c1", output: {} },
+      { status: "awaiting_approval", callId: "c2", approvalId: "appr-2" },
+      { status: "succeeded", callId: "c3", output: { ok: true } }
+    );
+
+    const outcome = await loop({
+      model: scriptedModel(toolCallResult(threeReadCalls)),
+      tools,
+      events: events.sink,
+    }).run(
+      input({
+        tools: threeReadTools,
+        limits: { maxIterations: 9, maxToolCalls: 9, maxRepairAttempts: 2 },
+      })
+    );
+
+    expect(outcome).toMatchObject({
+      status: "awaiting_approval",
+      approvalId: "appr-2",
+      callId: "c2",
+      // Two of the three ran; the parked one is charged by the replay that actually performs it.
+      toolCalls: 2,
+    });
+    // All three were dispatched and charged, so all three must be applied — a call whose result
+    // is never applied leaves an unanswered Tool call in the transcript.
+    expect(
+      events.events.filter((event) => event.type === "tool_call_dispatched").map((e) => e.callId)
+    ).toEqual(["c1", "c2", "c3"]);
+  });
+
+  it("counts a repair from a call dispatched after the batch's approval", async () => {
+    const tools = dispatcher(
+      { status: "awaiting_approval", callId: "c1", approvalId: "appr-1" },
+      { status: "invalid_arguments", callId: "c2", reason: "missing body" },
+      { status: "succeeded", callId: "c3", output: {} }
+    );
+
+    const outcome = await loop({
+      model: scriptedModel(toolCallResult(threeReadCalls)),
+      tools,
+    }).run(
+      input({
+        tools: threeReadTools,
+        limits: { maxIterations: 9, maxToolCalls: 9, maxRepairAttempts: 2 },
+      })
+    );
+
+    expect(outcome).toMatchObject({
+      status: "awaiting_approval",
+      approvalId: "appr-1",
+      repairs: 1,
+    });
+  });
+
+  it("parks on the first approval and reports the superseded one", async () => {
+    const warn = vi.fn();
+    const tools = dispatcher(
+      { status: "succeeded", callId: "c1", output: {} },
+      { status: "awaiting_approval", callId: "c2", approvalId: "appr-2" },
+      { status: "awaiting_approval", callId: "c3", approvalId: "appr-3" }
+    );
+
+    const outcome = await loop({
+      model: scriptedModel(toolCallResult(threeReadCalls)),
+      tools,
+      log: { warn },
+    }).run(
+      input({
+        tools: threeReadTools,
+        limits: { maxIterations: 9, maxToolCalls: 9, maxRepairAttempts: 2 },
+      })
+    );
+
+    expect(outcome).toMatchObject({ status: "awaiting_approval", approvalId: "appr-2" });
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "agent_loop.batch_outcome_superseded",
+        callId: "c3",
+        approvalId: "appr-3",
+        actedOn: "approval",
+      }),
+      expect.any(String)
+    );
+  });
+
+  it("fails on the first decisive outcome when a repair exhausts before a later approval", async () => {
+    const tools = dispatcher(
+      { status: "invalid_arguments", callId: "c1", reason: "bad" },
+      { status: "invalid_arguments", callId: "c2", reason: "bad" },
+      { status: "awaiting_approval", callId: "c3", approvalId: "appr-3" }
+    );
+
+    const outcome = await loop({
+      model: scriptedModel(toolCallResult(threeReadCalls)),
+      tools,
+    }).run(
+      input({
+        tools: threeReadTools,
+        limits: { maxIterations: 9, maxToolCalls: 9, maxRepairAttempts: 1 },
+      })
+    );
+
+    expect(outcome).toMatchObject({ status: "failed", reason: "repair_budget_exhausted" });
+  });
 });
 
 describe("AgentLoop skill-scoped tool narrowing", () => {
@@ -863,5 +983,89 @@ describe("AgentLoop skill-scoped tool narrowing", () => {
 
     expect(outcome).toMatchObject({ status: "completed" });
     expect(tools.calls.map((c) => c.name)).toEqual(["load_skill", "record_search"]);
+  });
+});
+
+describe("AgentLoop resume after an approval park", () => {
+  /** Records the prompt it was handed, so the recovered transcript can be inspected. */
+  function promptRecordingModel(...results: readonly ModelInvocationResult[]): ModelPort & {
+    requests: number;
+    prompts: ModelMessage[][];
+  } {
+    const queue = [...results];
+    const port = {
+      requests: 0,
+      prompts: [] as ModelMessage[][],
+      invoke: async (request: ModelInvocationRequest) => {
+        port.requests += 1;
+        port.prompts.push([...request.messages]);
+        const next = queue.shift();
+        if (next === undefined) throw new Error("model called more times than scripted");
+        return next;
+      },
+    };
+    return port;
+  }
+
+  const mutatingTool = [
+    { name: "github.issue.comment", inputSchema: { type: "object" }, mutating: true },
+  ];
+
+  /** Parks a Turn on an approval, then re-enters the same State against the same checkpoints. */
+  async function parkThenResume(resumeDispatcher: ToolDispatchPort) {
+    const checkpoints = new InMemoryLoopCheckpointStore();
+    const parkEvents = collector();
+    const parked = await loop({
+      model: scriptedModel(
+        toolCallResult([
+          { callId: "c1", name: "github.issue.comment", arguments: { body: "ship it" } },
+        ])
+      ),
+      tools: dispatcher({ status: "awaiting_approval", callId: "c1", approvalId: "appr-1" }),
+      checkpoints,
+      events: parkEvents.sink,
+    }).run(input({ tools: mutatingTool }));
+
+    const resumeEvents = collector();
+    const model = promptRecordingModel(textResult("commented"));
+    const resumed = await loop({
+      model,
+      tools: resumeDispatcher,
+      checkpoints,
+      events: resumeEvents.sink,
+    }).run(input({ tools: mutatingTool }));
+
+    return { parked, parkEvents, resumed, resumeEvents, model };
+  }
+
+  it("replays the approved call without asking the model to re-plan it", async () => {
+    const tools = dispatcher({ status: "succeeded", callId: "c1", output: { commented: true } });
+    const { parked, resumed, model } = await parkThenResume(tools);
+
+    expect(parked).toMatchObject({ status: "awaiting_approval", callId: "c1", toolCalls: 0 });
+    expect(tools.calls).toEqual([{ name: "github.issue.comment", arguments: { body: "ship it" } }]);
+    // One model call on resume: the final answer. The approved call needed no second plan.
+    expect(model.requests).toBe(1);
+    // One iteration from the parked attempt, one from the resumed answer; one Tool call.
+    expect(resumed).toMatchObject({ status: "completed", iterations: 2, toolCalls: 1 });
+  });
+
+  it("continues the event sequence rather than colliding with the parked attempt's", async () => {
+    const { parkEvents, resumeEvents } = await parkThenResume(
+      dispatcher({ status: "succeeded", callId: "c1", output: {} })
+    );
+
+    const parkedHighest = Math.max(...parkEvents.events.map((event) => event.sequence));
+    const resumedLowest = Math.min(...resumeEvents.events.map((event) => event.sequence));
+    expect(resumedLowest).toBeGreaterThan(parkedHighest);
+  });
+
+  it("feeds a denied approval back to the model instead of replaying it forever", async () => {
+    const tools = dispatcher({ status: "denied", callId: "c1", reason: "denied by operator" });
+    const { resumed, model } = await parkThenResume(tools);
+
+    expect(resumed).toMatchObject({ status: "completed" });
+    const transcript = (model.prompts.at(0) ?? []).map((message) => message.content).join("\n");
+    expect(transcript).toContain("denied by operator");
   });
 });

@@ -56,21 +56,8 @@ export type {
   SandboxFileOutputDeclaration,
   SandboxProtocolErrorCode,
   SandboxPublishedFileOutput,
-  SandboxSignature,
-  SandboxSignatureSigner,
-  SandboxSignatureVerifier,
-  SignedSandboxExecutionRequest,
-  SignedSandboxExecutionResult,
 } from "./request";
-export {
-  parseSandboxExecutionRequest,
-  parseSandboxExecutionResult,
-  SandboxProtocolError,
-  signSandboxExecutionRequest,
-  signSandboxExecutionResult,
-  verifySandboxExecutionRequest,
-  verifySandboxExecutionResult,
-} from "./request";
+export { parseSandboxExecutionRequest, parseSandboxExecutionResult } from "./request";
 export type {
   SandboxRuntimeLanguage,
   SandboxRuntimeProfile,
@@ -82,6 +69,19 @@ export {
   SandboxRuntimeProfileRegistry,
   shellTsPythonV1,
 } from "./runtime-profile";
+export type {
+  SandboxSignature,
+  SandboxSignatureSigner,
+  SandboxSignatureVerifier,
+  SignedSandboxExecutionRequest,
+  SignedSandboxExecutionResult,
+} from "./signature";
+export {
+  signSandboxExecutionRequest,
+  signSandboxExecutionResult,
+  verifySandboxExecutionRequest,
+  verifySandboxExecutionResult,
+} from "./signature";
 export type {
   PinnedSkillBundle,
   PublishedSkillOutput,
@@ -102,3 +102,4 @@ export type {
   SkillScanFinding,
 } from "./skill-execution";
 export { SkillExecutionCoordinator, SkillExecutionError } from "./skill-execution";
+export { SandboxProtocolError } from "./wire";

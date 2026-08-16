@@ -1,15 +1,23 @@
 import {
   type ChildAuthority,
   type ChildLink,
+  type ChildLinkAncestry,
   type ChildLinkStore,
   ChildRunError,
   ChildRunManager,
 } from "@tulipfarm/run-kernel";
 import { describe, expect, it } from "vitest";
-import { DelegationCoordinator, type DelegationError, type DelegationRequest } from "./delegate";
+import {
+  type ChildRunStarter,
+  DELEGATION_DEADLINE_LIMIT_KEY,
+  DelegationCoordinator,
+  DelegationError,
+  type DelegationRequest,
+} from "./delegate";
 
 class FakeChildLinkStore implements ChildLinkStore {
   links: ChildLink[] = [];
+  failNextLink = false;
 
   async link(input: {
     parentRunId: string;
@@ -17,6 +25,11 @@ class FakeChildLinkStore implements ChildLinkStore {
     authority: ChildAuthority;
     createdAt: string;
   }): Promise<ChildLink> {
+    if (this.failNextLink) throw new Error("link_store_unavailable");
+    const existing = this.links.find(
+      (link) => link.parentRunId === input.parentRunId && link.childRunId === input.childRunId
+    );
+    if (existing) return existing;
     const link: ChildLink = {
       parentRunId: input.parentRunId,
       childRunId: input.childRunId,
@@ -48,165 +61,224 @@ class FakeChildLinkStore implements ChildLinkStore {
   }
 }
 
-const PARENT_AUTHORITY: ChildAuthority = {
+const DEADLINE = Date.parse("2026-07-25T11:00:00.000Z");
+
+const ROOT_AUTHORITY: ChildAuthority = {
   tools: ["github.issue.read", "github.issue.comment", "knowledge.search"],
   classifications: ["internal", "confidential"],
-  limits: { toolCalls: 20, costUsd: 5 },
+  limits: { toolCalls: 20, costUsd: 5, [DELEGATION_DEADLINE_LIMIT_KEY]: DEADLINE },
 };
 
 const READ_ONLY_TOOLS = new Set(["github.issue.read", "knowledge.search"]);
 
 function coordinator(options: { maxDepth?: number } = {}) {
   const store = new FakeChildLinkStore();
+  const ancestry: ChildLinkAncestry = {
+    parentLink: async (_businessId, childRunId) =>
+      store.links.find((link) => link.childRunId === childRunId) ?? null,
+  };
+  let minted = 0;
+  const started: { childRunId: string; authority: ChildAuthority; deadlineAt: string }[] = [];
+  const cancelled: string[] = [];
+  const starter: ChildRunStarter = {
+    start: async (input) => {
+      minted += 1;
+      const childRunId = `run-child-${minted}`;
+      started.push({ childRunId, authority: input.authority, deadlineAt: input.deadlineAt });
+      return { childRunId, conversationId: `chat-${minted}` };
+    },
+    cancel: async (_businessId, childRunId) => {
+      cancelled.push(childRunId);
+    },
+  };
   const delegation = new DelegationCoordinator({
-    children: new ChildRunManager(store),
+    children: new ChildRunManager(store, ancestry),
     tools: { isReadOnly: (name: string) => READ_ONLY_TOOLS.has(name) },
+    starter,
     policy: { maxDepth: options.maxDepth ?? 2 },
   });
-  return { delegation, store };
+  return { delegation, store, started, cancelled };
 }
 
 function request(overrides: Partial<DelegationRequest> = {}): DelegationRequest {
   return {
     businessId: "biz-1",
     parentRunId: "run-parent",
-    childRunId: "run-child",
-    parent: {
-      authority: PARENT_AUTHORITY,
-      depth: 0,
-      deadlineAt: "2026-07-25T11:00:00.000Z",
-    },
+    agentId: "researcher",
+    task: "Summarise the open issues",
+    rootAuthority: ROOT_AUTHORITY,
     requested: {},
     now: "2026-07-25T10:00:00.000Z",
     ...overrides,
   };
 }
 
-describe("DelegationCoordinator", () => {
-  it("starts a helper read-only, dropping the parent's effect-bearing Tools", async () => {
-    const { delegation } = coordinator();
+describe("DelegationCoordinator.delegate", () => {
+  it("starts the child Run and records the link the Run was started under", async () => {
+    const { delegation, store, started } = coordinator();
+
     const helper = await delegation.delegate(request());
 
-    expect(helper.authority.tools).toEqual(["github.issue.read", "knowledge.search"]);
+    expect(started).toHaveLength(1);
+    expect(helper.childRunId).toBe("run-child-1");
+    expect(helper.conversationId).toBe("chat-1");
+    expect(store.links).toHaveLength(1);
+    expect(store.links[0]).toMatchObject({
+      parentRunId: "run-parent",
+      childRunId: "run-child-1",
+    });
+    expect(started[0].authority).toEqual(helper.authority);
+  });
+
+  it("offers a read-only helper only the Tools that carry no effect", async () => {
+    const { delegation, started } = coordinator();
+
+    const helper = await delegation.delegate(request());
+
     expect(helper.mode).toBe("read_only");
-    expect(helper.depth).toBe(1);
+    expect(helper.authority.tools).toEqual(["github.issue.read", "knowledge.search"]);
+    expect(started[0].authority.tools).not.toContain("github.issue.comment");
   });
 
-  it("grants an effect-bearing Tool only when the helper explicitly asks and the parent holds it", async () => {
-    const { delegation } = coordinator();
-    const helper = await delegation.delegate(
-      request({
-        requested: { mode: "read_write", tools: ["github.issue.comment"] },
-      })
-    );
-
-    expect(helper.authority.tools).toEqual(["github.issue.comment"]);
-    expect(helper.mode).toBe("read_write");
-  });
-
-  it("denies a Tool the parent never held", async () => {
-    const { delegation, store } = coordinator();
+  it("refuses a Tool the parent never held", async () => {
+    const { delegation, store, started } = coordinator();
 
     await expect(
-      delegation.delegate(
-        request({ requested: { mode: "read_write", tools: ["github.repo.delete"] } })
-      )
-    ).rejects.toBeInstanceOf(ChildRunError);
-    expect(store.links).toEqual([]);
+      delegation.delegate(request({ requested: { mode: "read_write", tools: ["billing.refund"] } }))
+    ).rejects.toThrow(ChildRunError);
+    expect(started).toHaveLength(0);
+    expect(store.links).toHaveLength(0);
   });
 
-  it("denies a budget above the parent's ceiling", async () => {
-    const { delegation } = coordinator();
+  it("refuses a limit the parent never held", async () => {
+    const { delegation, started } = coordinator();
 
     await expect(
       delegation.delegate(request({ requested: { limits: { costUsd: 50 } } }))
-    ).rejects.toBeInstanceOf(ChildRunError);
+    ).rejects.toThrow(ChildRunError);
+    expect(started).toHaveLength(0);
   });
 
-  it("denies a classification the parent cannot see", async () => {
-    const { delegation } = coordinator();
+  it("refuses a classification the parent never held", async () => {
+    const { delegation, started } = coordinator();
 
     await expect(
       delegation.delegate(request({ requested: { classifications: ["restricted"] } }))
-    ).rejects.toBeInstanceOf(ChildRunError);
+    ).rejects.toThrow(ChildRunError);
+    expect(started).toHaveLength(0);
   });
 
-  it("denies a deadline later than the parent's and keeps an earlier one", async () => {
-    const { delegation, store } = coordinator();
+  it("refuses a deadline later than the parent's", async () => {
+    const { delegation, started } = coordinator();
 
     await expect(
-      delegation.delegate(request({ requested: { deadlineAt: "2026-07-25T23:00:00.000Z" } }))
-    ).rejects.toMatchObject({ code: "deadline_amplification" });
-    expect(store.links).toEqual([]);
-
-    const helper = await delegation.delegate(
-      request({ requested: { deadlineAt: "2026-07-25T10:30:00.000Z" } })
-    );
-    expect(helper.deadlineAt).toBe("2026-07-25T10:30:00.000Z");
+      delegation.delegate(request({ requested: { deadlineAt: "2026-07-25T12:00:00.000Z" } }))
+    ).rejects.toThrow(new DelegationError("deadline_amplification", "deadlineAt"));
+    expect(started).toHaveLength(0);
   });
 
-  it("refuses to delegate past the configured depth", async () => {
-    const { delegation, store } = coordinator({ maxDepth: 1 });
+  it("refuses an unparseable deadline rather than treating it as inherited", async () => {
+    const { delegation } = coordinator();
 
     await expect(
-      delegation.delegate(request({ parent: { ...request().parent, depth: 1 } }))
-    ).rejects.toMatchObject({ code: "depth_limit_exceeded" });
-    expect(store.links).toEqual([]);
+      delegation.delegate(request({ requested: { deadlineAt: "whenever" } }))
+    ).rejects.toThrow(new DelegationError("deadline_amplification", "deadlineAt"));
   });
 
-  it("propagates cancellation to attached helpers only", async () => {
-    const { delegation } = coordinator();
-    await delegation.delegate(request());
-    await delegation.delegate(request({ childRunId: "run-child-2" }));
-    await delegation.detach({
-      businessId: "biz-1",
-      parentRunId: "run-parent",
-      childRunId: "run-child-2",
-      now: "2026-07-25T10:05:00.000Z",
-    });
+  it("refuses to start a child when the root authority names no deadline at all", async () => {
+    const { delegation, started } = coordinator();
 
-    expect(await delegation.cancellationTargets("biz-1", "run-parent")).toEqual(["run-child"]);
+    await expect(
+      delegation.delegate(
+        request({
+          rootAuthority: { tools: [], classifications: [], limits: {} },
+        })
+      )
+    ).rejects.toThrow(new DelegationError("deadline_unbounded", DELEGATION_DEADLINE_LIMIT_KEY));
+    expect(started).toHaveLength(0);
   });
 
-  it("accepts a helper Artifact only when it matches the declared schema", async () => {
-    const { delegation } = coordinator();
-    const schema = {
-      type: "object",
-      required: ["summary"],
-      properties: { summary: { type: "string" } },
-    };
+  it("unmakes the child Run when its link cannot be recorded", async () => {
+    const { delegation, store, cancelled } = coordinator();
+    store.failNextLink = true;
 
-    const accepted = delegation.acceptArtifact({
-      childRunId: "run-child",
-      schemaRef: "helper.summary.v1",
-      schema,
-      value: { summary: "no regressions found" },
-    });
-    expect(accepted).toMatchObject({
-      outcome: "accepted",
-      artifact: { childRunId: "run-child", schemaRef: "helper.summary.v1" },
-    });
+    await expect(delegation.delegate(request())).rejects.toThrow("link_store_unavailable");
 
-    expect(
-      delegation.acceptArtifact({
-        childRunId: "run-child",
-        schemaRef: "helper.summary.v1",
-        schema,
-        value: { summary: 42 },
-      })
-    ).toMatchObject({ outcome: "rejected", reason: "artifact_schema_mismatch" });
-  });
-
-  it("records the narrowed authority on the durable link, not the requested one", async () => {
-    const { delegation, store } = coordinator();
-    await delegation.delegate(request({ requested: { limits: { toolCalls: 3 } } }));
-
-    expect(store.links[0]?.authority).toMatchObject({
-      tools: ["github.issue.read", "knowledge.search"],
-      limits: { toolCalls: 3, costUsd: 5 },
-    });
+    expect(cancelled).toEqual(["run-child-1"]);
   });
 });
 
-// Type-only guard: the error union stays a closed set of reason codes.
-const _codes: DelegationError["code"][] = ["depth_limit_exceeded", "deadline_amplification"];
+describe("DelegationCoordinator depth", () => {
+  /** Delegates once per hop, each child delegating in turn, until the guard refuses. */
+  async function delegateChain(maxDepth: number, hops: number) {
+    const context = coordinator({ maxDepth });
+    let parentRunId = "run-parent";
+    const depths: number[] = [];
+    for (let hop = 0; hop < hops; hop += 1) {
+      const helper = await context.delegation.delegate(request({ parentRunId }));
+      depths.push(helper.depth);
+      parentRunId = helper.childRunId;
+    }
+    return { ...context, depths, parentRunId };
+  }
+
+  it("counts depth from the persisted chain, so a child cannot restart it", async () => {
+    const { depths } = await delegateChain(3, 3);
+
+    expect(depths).toEqual([1, 2, 3]);
+  });
+
+  it("refuses the hop that would exceed the configured depth", async () => {
+    const { delegation, parentRunId, started } = await delegateChain(2, 2);
+
+    await expect(delegation.delegate(request({ parentRunId }))).rejects.toThrow(
+      new DelegationError("depth_limit_exceeded", "depth")
+    );
+    expect(started).toHaveLength(2);
+  });
+
+  it("a chain cannot outlive the depth limit however the child asks", async () => {
+    const { delegation, parentRunId } = await delegateChain(2, 2);
+
+    for (const requested of [
+      {},
+      { mode: "read_write" as const, tools: ["github.issue.read"] },
+      { deadlineAt: "2026-07-25T10:30:00.000Z" },
+    ]) {
+      await expect(delegation.delegate(request({ parentRunId, requested }))).rejects.toThrow(
+        DelegationError
+      );
+    }
+  });
+});
+
+describe("DelegationCoordinator inherited authority", () => {
+  it("measures a grandchild against the link row, not against the caller's claim", async () => {
+    const { delegation, started } = coordinator({ maxDepth: 3 });
+
+    const child = await delegation.delegate(
+      request({ requested: { deadlineAt: "2026-07-25T10:30:00.000Z" } })
+    );
+    // A wider `rootAuthority` is ignored once the parent Run has a link of its own.
+    await expect(
+      delegation.delegate(
+        request({
+          parentRunId: child.childRunId,
+          rootAuthority: {
+            tools: ["billing.refund"],
+            classifications: ["restricted"],
+            limits: { [DELEGATION_DEADLINE_LIMIT_KEY]: DEADLINE },
+          },
+          requested: { deadlineAt: "2026-07-25T10:45:00.000Z" },
+        })
+      )
+    ).rejects.toThrow(new DelegationError("deadline_amplification", "deadlineAt"));
+
+    const grandchild = await delegation.delegate(request({ parentRunId: child.childRunId }));
+
+    expect(grandchild.authority.tools).toEqual(["github.issue.read", "knowledge.search"]);
+    expect(grandchild.authority.classifications).toEqual(["confidential", "internal"]);
+    expect(grandchild.deadlineAt).toBe("2026-07-25T10:30:00.000Z");
+    expect(started.at(-1)?.deadlineAt).toBe("2026-07-25T10:30:00.000Z");
+  });
+});

@@ -1,13 +1,14 @@
 import { DEFAULT_GUARDRAILS, type GuardrailsService } from "@tulipfarm/agent-runtime";
 import type { MemoryRecallService, MemoryService } from "@tulipfarm/memory";
-import { MAX_HISTORY_TOKENS } from "@tulipfarm/memory";
-import type { ArtifactService } from "@tulipfarm/run-kernel";
+import { MAX_HISTORY_TOKENS, MAX_TOOL_STEPS, MEMORY_METRICS } from "@tulipfarm/memory";
+import type { Attributes, LogLevel, TelemetryPort } from "@tulipfarm/observability";
+import type { ArtifactService, ChildLinkAncestry } from "@tulipfarm/run-kernel";
 import { canonicalHash } from "@tulipfarm/schema";
 import type { BundledSkill, SoulLoader, SoulSkill } from "@tulipfarm/soul";
 import { DEFAULT_ASSISTANT_NAME } from "@tulipfarm/soul";
 import type { ToolAvailability } from "@tulipfarm/tool-broker";
 import { ok, type ToolDef } from "@tulipfarm/tool-host";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { ToolRegistry } from "../broker/tool-adapter";
 import type { PersistedMessage } from "../conversations/service";
 import {
@@ -80,6 +81,8 @@ function makeResolver(
     skills?: readonly SoulSkill[];
     bundledSkills?: Record<string, BundledSkill>;
     memoryRecall?: MemoryRecallService;
+    telemetry?: TelemetryPort;
+    childLinks?: ChildLinkAncestry;
   } = {},
   channelDeliveries?: ChannelDeliveryReader
 ) {
@@ -118,7 +121,9 @@ function makeResolver(
           }
         : {}),
       ...(options.memoryRecall ? { memoryRecall: options.memoryRecall } : {}),
+      ...(options.telemetry ? { telemetry: options.telemetry } : {}),
       ...(channelDeliveries ? { channelDeliveries } : {}),
+      ...(options.childLinks ? { childLinks: options.childLinks } : {}),
       ...(soulLoader ? { soulLoader } : {}),
       ...(bundledSkills ? { bundledSkills } : {}),
     }),
@@ -426,5 +431,184 @@ describe("ChatTurnContextResolver — the retrieved memory tier", () => {
     const context = await resolver.resolve(AUTHORITY);
 
     expect(context.messages[0]?.content).not.toContain("<recalled-memory>");
+  });
+});
+
+describe("ChatTurnContextResolver — the thinned-Context signal", () => {
+  function recaller(impl: () => Promise<unknown>): MemoryRecallService {
+    return { recall: impl } as unknown as MemoryRecallService;
+  }
+
+  interface Recorded {
+    counters: { name: string; value: number; attributes?: Attributes }[];
+    logs: { level: LogLevel; message: string; attributes?: Attributes }[];
+  }
+
+  function recordingTelemetry(): { telemetry: TelemetryPort; recorded: Recorded } {
+    const recorded: Recorded = { counters: [], logs: [] };
+    const telemetry: TelemetryPort = {
+      startSpan: () => ({
+        setAttributes: () => undefined,
+        recordError: () => undefined,
+        end: () => undefined,
+      }),
+      counter: (name, value = 1, attributes) => {
+        recorded.counters.push({ name, value, ...(attributes ? { attributes } : {}) });
+      },
+      log: (level, message, attributes) => {
+        recorded.logs.push({ level, message, ...(attributes ? { attributes } : {}) });
+      },
+    };
+    return { telemetry, recorded };
+  }
+
+  it("counts and logs the turn when recall fails", async () => {
+    const { telemetry, recorded } = recordingTelemetry();
+    const { resolver } = makeResolver({
+      messages: [message({ content: "when is the acme renewal?" })],
+      memoryRecall: recaller(async () => {
+        throw new Error("index unavailable");
+      }),
+      telemetry,
+    });
+
+    await resolver.resolve(AUTHORITY);
+
+    expect(recorded.counters).toEqual([
+      {
+        name: MEMORY_METRICS.contextDegradations,
+        value: 1,
+        attributes: { probe: "recalled_memory" },
+      },
+    ]);
+    expect(recorded.logs).toEqual([
+      {
+        level: "warn",
+        message: "agent context thinned: a context probe failed",
+        attributes: {
+          probe: "recalled_memory",
+          business_id: BUSINESS_ID,
+          run_id: RUN_ID,
+          conversation_id: CONVERSATION_ID,
+        },
+      },
+    ]);
+  });
+
+  it("stays silent when the recall is genuinely empty", async () => {
+    const { telemetry, recorded } = recordingTelemetry();
+    const { resolver } = makeResolver({
+      messages: [message({ content: "when is the acme renewal?" })],
+      memoryRecall: recaller(async () => []),
+      telemetry,
+    });
+
+    await resolver.resolve(AUTHORITY);
+
+    expect(recorded.counters).toEqual([]);
+    expect(recorded.logs).toEqual([]);
+  });
+
+  it("carries no recalled content into the signal", async () => {
+    const { telemetry, recorded } = recordingTelemetry();
+    const { resolver } = makeResolver({
+      messages: [message({ content: "when is the acme renewal?" })],
+      memoryRecall: recaller(async () => {
+        throw new Error("acme renewal moved to Q3");
+      }),
+      telemetry,
+    });
+
+    await resolver.resolve(AUTHORITY);
+
+    expect(JSON.stringify(recorded)).not.toContain("acme");
+    expect(JSON.stringify(recorded)).not.toContain("user-1");
+  });
+
+  it("degrades silently, and still does not fail the turn, with no telemetry wired", async () => {
+    const { resolver } = makeResolver({
+      messages: [message({ content: "when is the acme renewal?" })],
+      memoryRecall: recaller(async () => {
+        throw new Error("index unavailable");
+      }),
+    });
+
+    const context = await resolver.resolve(AUTHORITY);
+
+    expect(context.messages[0]?.content).not.toContain("<recalled-memory>");
+  });
+
+  it("does not let a throwing telemetry sink fail the turn", async () => {
+    const telemetry: TelemetryPort = {
+      startSpan: () => {
+        throw new Error("sink down");
+      },
+      counter: () => {
+        throw new Error("sink down");
+      },
+      log: () => {
+        throw new Error("sink down");
+      },
+    };
+    const { resolver } = makeResolver({
+      messages: [message({ content: "when is the acme renewal?" })],
+      memoryRecall: recaller(async () => {
+        throw new Error("index unavailable");
+      }),
+      telemetry,
+    });
+
+    await expect(resolver.resolve(AUTHORITY)).resolves.toBeDefined();
+  });
+});
+
+describe("ChatTurnContextResolver — a delegated Run's granted authority", () => {
+  const GRANT = {
+    parentRunId: "parent-run",
+    childRunId: RUN_ID,
+    authority: {
+      tools: ["record_list"],
+      classifications: ["business_record"],
+      limits: { maxToolCalls: 2, delegationDeadlineEpochMs: Date.parse("2030-01-01T00:00:00Z") },
+    },
+    detachedAt: null,
+    createdAt: "2026-01-01T00:00:00.000Z",
+  };
+
+  it("offers only the Tools the link row granted, not everything the Agent config allows", async () => {
+    const { resolver } = makeResolver({
+      tools: ["record_list", "record_create"],
+      childLinks: { parentLink: async () => GRANT },
+    });
+
+    const context = await resolver.resolve(AUTHORITY);
+
+    expect(context.tools.map((tool) => tool.name)).toEqual(["record_list"]);
+    expect(context.limits.maxToolCalls).toBe(2);
+  });
+
+  it("leaves an unlinked Run with everything its Agent config offers", async () => {
+    const { resolver } = makeResolver({
+      tools: ["record_list", "record_create"],
+      childLinks: { parentLink: async () => null },
+    });
+
+    const context = await resolver.resolve(AUTHORITY);
+
+    expect(context.tools.map((tool) => tool.name).sort()).toEqual(["record_create", "record_list"]);
+    expect(context.limits.maxToolCalls).toBe(MAX_TOOL_STEPS);
+  });
+
+  it("refuses the turn rather than falling back when the link row cannot be read", async () => {
+    const { resolver } = makeResolver({
+      tools: ["record_list", "record_create"],
+      childLinks: {
+        parentLink: async () => {
+          throw new Error("connection terminated");
+        },
+      },
+    });
+
+    await expect(resolver.resolve(AUTHORITY)).rejects.toMatchObject({ code: "link_unreadable" });
   });
 });

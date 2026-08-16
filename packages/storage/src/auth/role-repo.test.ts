@@ -4,10 +4,8 @@ import {
   type GroupRecord,
   type GroupRoleAssignmentRecord,
   InMemoryGroupRepo,
-  InMemoryRoleRepo,
-  type RoleAssignmentRecord,
-  type RoleRecord,
-} from "./role-repo";
+} from "./group-repo";
+import { InMemoryRoleRepo, type RoleAssignmentRecord, type RoleRecord } from "./role-repo";
 
 const NOW = new Date("2026-07-23T12:00:00Z");
 

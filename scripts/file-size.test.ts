@@ -71,28 +71,8 @@ const IGNORED_DIRS = new Set([
  * which remains forbidden.
  */
 const OVERSIZED: Readonly<Record<string, number>> = {
-  "apps/api/src/pg-migrations/index.ts": 2020,
-  "apps/api/src/index.ts": 1309,
-  "packages/integrations/src/github/adapter.ts": 1349,
-  "packages/surface-web/src/index.tsx": 1286,
-  "apps/worker/test/e2e/github-jira-triage/harness.ts": 937,
-  "packages/storage/src/runs/run-store.ts": 937,
-  "packages/storage/src/soul/publication-store.ts": 934,
-  "apps/api/src/app.ts": 782,
-  "packages/knowledge/src/service.ts": 882,
-  "packages/storage/src/auth/role-repo.ts": 879,
-  "apps/worker/src/routine/executor.ts": 858,
-  "apps/worker/src/model.ts": 749,
-  "packages/memory/src/memory.ts": 714,
-  "apps/api/src/authz/service.ts": 712,
-  "packages/soul/src/skills/guard.ts": 700,
-  "apps/api/src/soul/skills/tools.ts": 663,
-  "packages/soul/src/publication.ts": 662,
-  "packages/agent-runtime/src/loop/loop.ts": 662,
-  "apps/api/src/internal/routes.ts": 631,
-  "apps/api/src/platform/tools.ts": 628,
-  "apps/api/src/integrations/auth-broker.ts": 617,
-  "packages/sandbox/src/request.ts": 614,
+  "apps/api/src/pg-migrations/index.ts": 2061,
+  "apps/api/src/index.ts": 1314,
 };
 
 /**

@@ -28,5 +28,14 @@ typed outputs, Artifacts, limits, budgets, and concurrency.
 - Artifact rows are append-only; ACL and classification must be correct on first write.
 - Routine Runs require `RoutineInvocationResolver`; fail closed before Run id allocation unless
   exact bundle identity and canonical start State resolve from verified active Soul publication.
+- Two concurrency mechanisms, never interchange them: `concurrency.ts` is SPEC §9.1 Run-level
+  target admission (per Run, no expiry); `routine/concurrency-lease.ts` is per-State
+  `concurrencyKey` exclusion (per State occurrence, expiry-bounded so a crash cannot wedge a key),
+  with a durable, jittered, bounded backoff budget for contenders.
+- Authored `limits` reach `LimitSet` only through `routine/authored-limits.ts`; three keys are
+  renamed and `costUsd` is converted to micro-USD. Never cast an authored block to `LimitSet`.
+- `routine/limit-enforcement.ts` is the only place authored limits become enforcement: structural
+  keys narrow `CompiledState.bounds` at compile time, metered keys reach the Run budget ledger at
+  Routine scope. Never open a second ceiling on a quantity `bounds` or the ledger already bounds.
 - Child authority never broadens; detach must be explicit. Cancellation parks in-flight effects.
   Ambiguous effect evidence never becomes `cancelled`.

@@ -36,7 +36,19 @@ export interface TurnEventWriterOptions {
   readonly businessId: string;
   readonly runId: string;
   readonly turnId: string;
-  /** Must be unique per `AgentLoop.run`, or loop event idempotency keys collide. */
+  /**
+   * Which attempt of the Turn this writer speaks for. It is *not* what keeps a resumed Turn's
+   * events distinct: a chat retry mints a new Run, and `run_events` is unique per
+   * `(business, run, idempotencyKey)`, so within the scope uniqueness is enforced in this value
+   * never moves. A Routine Agent State is the only caller for which it varies, because a State
+   * retry re-enters the same Run under a new row version.
+   *
+   * What actually separates a resumed pass's events from the parked pass's is the `key` suffix,
+   * and for loop events that is `AgentLoop`'s `sequence`, reloaded from
+   * `agent_loop_checkpoints.resume_state`. Stop carrying it and the keys collide — silently, since
+   * `RunEventStore.append` resolves a duplicate by keeping the older row. `scripts/
+   * turn-event-key-collision.test.ts` holds that coupling.
+   */
   readonly attempt: number;
   now?(): Date;
 }
@@ -66,7 +78,7 @@ export class DuplicateLoopEventError extends Error {
   constructor(readonly sequence: number) {
     super(
       `loop event sequence ${sequence} was already written for this attempt — ` +
-        "give each AgentLoop.run call its own writer built with a distinct attempt"
+        "an AgentLoop must resume its sequence past what it already emitted, never restart it"
     );
   }
 }

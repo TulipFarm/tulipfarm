@@ -254,7 +254,7 @@ lock users out of their own deployment, so it must be preceded by evidence.
 | 2 | The gate in **shadow mode** — evaluates and logs what it *would* deny, using today's admin/member | none | zero unexpected would-denies over real traffic | **done** — `AUTHZ_MODE=shadow` serves the declaration's `fallback` while still running the engine; every disagreement is logged as `authz.divergence`. Threaded through `buildApp`, so it covers every gated route, not only the two direct call sites |
 | 3 | Flip the gate to enforcing; retire `requireAdmin` | **yes — the first real one** | shadow-mode evidence from step 2 | **done** — `requireAdmin` is gone and gated routes enforce today. Reached before step 2 rather than after it; the ordering debt that created is discharged by shadow mode now existing. See the note below |
 | 4 | Persist principals, groups, assignments, relation tuples; retire `users.role` and `users_single_admin_idx` | multiple administrators become possible | existing users keep exactly their current reach | **done, less two pieces that this table mis-ordered** — eight tables persisted, `users_single_admin_idx` dropped, `users_sync_authorization` keeps them in step. `users.role` and `relation_tuples` are blocked on step 5, not on this step; see the note below |
-| 5 | Soul-authored domains, roles, relations, routing | the business can model itself | a leave-approval routing rule resolves end to end | **partial** — Roles *are* Soul-authored: `soul/roles/` loads into `SoulRole`, `reconcileSoulRoles` projects them into durable rows, and `authz/routes.ts` exposes 17 authoring routes behind the access UI. Domains, relations and routing remain, and `DEPLOYMENT_ROLES` in `identity/roles.ts` is still the compiled-in baseline the deployment boots with |
+| 5 | Soul-authored domains, roles, relations, routing | the business can model itself | a leave-approval routing rule resolves end to end | **partial** — Roles *are* Soul-authored: `soul/roles/` loads into `SoulRole`, `reconcileSoulRoles` projects them into durable rows, and `authz/routes.ts` exposes 17 authoring routes behind the access UI. Domains are *enforceable* but not *authorable*; relations and routing are unbuilt. `DEPLOYMENT_ROLES` in `identity/roles.ts` is still the compiled-in baseline the deployment boots with. See [the step-5 remainder](#on-what-step-5-still-needs) |
 | 6 | Attribute predicates compiled into SQL | per-Record access | list, count, and RAG results stay mutually consistent | **not started** |
 
 Steps 1–3 close the Forge governance hole as a side effect: declaring what those ~30 platform Tools
@@ -301,12 +301,95 @@ belongs there:
 Recording this is the point: an "outstanding" item that is actually blocked reads as neglect, and
 the next person re-derives the ordering from scratch.
 
+### On what step 5 still needs
+
+Re-measured 16 Aug 2026. The one-line status above compresses three items with very different
+shapes; only one of them is genuinely undecided.
+
+**a. Domains are enforceable but not authorable.** Every mechanism D2 asks for exists. `domain` is
+a first-class field on `AccessGrant` (`packages/authz/src/grants.ts`), on the Soul `RoleGrant`
+schema (`packages/schema/src/definitions/role.ts:81-83`), and on a Resource type
+(`packages/schema/src/definitions/resource.ts:34`), where setting it is admin-only and a domained
+type cannot be deleted and re-created domainless
+(`apps/api/src/soul/resource-types/routes.ts:91-99`). The member baseline already fails closed
+against it: `MEMBER_UNDOMAINED_RECORD_ACTIONS` keeps today's reach only for types that declare no
+domain (`apps/api/src/identity/roles.ts:100-110`).
+
+What is missing is one field on the authoring path. `buildLevelDefinition` emits grants carrying
+`effect`, `actions`, `resource` and `delegable` only
+(`apps/api/src/soul/roles/authoring.ts:151-160`), so every business-authored access level is
+domain-less and therefore matches every domain. This is not an open design question — the shape is
+fixed by D2 and the file layout by §4 — it is a `domains` field on `LevelInput`, the matching
+`POST/PATCH /api/v1/authz/levels` body property, and a picker on the access-level screen. It needs
+the UI change to ship with it: an API-only field would be a capability no user can reach, which
+[`AGENTS.md`](../../AGENTS.md) treats as not existing.
+
+The domain *vocabulary* needs no new authored file. The set of domains a deployment uses is
+already observable as the distinct `domain` values across its Resource types, which keeps the D2
+promise that TulipFarm defines none. `soul/authorization/domains.yaml` from §4 buys labels and
+the ability to declare a domain before any Resource uses one; neither is required for the grant
+side to work.
+
+**b. Relations are blocked on a question §4 does not answer: who asserts a tuple.** D6 fixes the
+storage (`relation_tuples`, recursive CTE) and the resolver's shape (bounded operator set, no
+expression language). It does not say where `(alice, reports_to, bob)` comes from, and that is a
+product decision, not an engineering one:
+
+| Option | Cost | Forecloses |
+| --- | --- | --- |
+| **Authored in Soul** (`relations.yaml` per §4) | Consistent with D1 for *definitions*, but tuples are *contents* — D1 puts contents in Postgres. Re-authoring the org chart in git and keeping it current is the failure mode every HR system exists to avoid | Immediate revocation, unless the reconcile loop is fast |
+| **Managed through a UI**, like principals and groups already are | Reuses the `authz/routes.ts` pattern exactly; no new concepts | Nothing, but it is the most work and the least automatic |
+| **Derived from an Integration** (HR provider ingress) | The only option that stays correct without human upkeep | Deployments with no HR integration, unless one of the above also exists |
+| **Derived from existing `principal_groups`** | Free — the tables exist | Anything not expressible as set membership, which is most of "my manager" |
+
+Recommendation: **UI-managed tuples first, Integration-derived second.** It matches where
+assignments already live (D1: Postgres holds current contents), it reuses the routes and the
+last-owner guard already built, and it does not foreclose the Integration path — an adapter can
+write the same table later. Soul-authored tuples should be rejected outright: they put revocable
+contents behind a publish cycle, which D1 exists to prevent.
+
+**c. Routing depends on (b) and on step 6.** `allowedApproverRoles: readonly string[]`
+(`packages/authz/src/approval/decision.ts`) cannot express "my manager" until a relation resolves,
+so `routing/<id>.yaml` cannot be built before (b) lands. Nothing about it is undecided beyond (b).
+
+**What the "authoring surface" open question actually still covers.** Roles answered it by
+precedent: a dedicated admin-gated REST surface plus a capability picker
+(`apps/api/src/soul/roles/routes.ts`, `apps/api/src/authz/capabilities.ts`), deliberately **not** a
+Tool. Domains should follow it. Only (b) is still open, and only on the tuple-source axis above.
+
+### D8 in practice: what stops an Agent granting itself power
+
+The Soul is Agent-writable, and Roles now live in the Soul. That combination is the sharpest edge
+in this document, and it is worth stating exactly what holds it, because the answer is not what it
+looks like.
+
+Nothing in the write path refuses it. `SoulWriter.apply()` accepts any `ArtifactKind`, and `Role`
+is an ordinary entry in `ARTIFACT_LAYOUTS`. What actually prevents self-granting is a property of
+the Tool catalog: **`authz.*` is a route-only vocabulary.** No Tool declares an `authz.*` action,
+so no Tool can be called with the authority to change policy; and because the capability catalog a
+business-authored access level is assembled from is derived *from Tool declarations*
+(`apps/api/src/authz/capabilities.ts:126`), no authored level can grant one either. Authority over
+authorization therefore exists only on the built-in `owner` and `admin` Roles, which
+`reconcileSoulRoles` refuses to project over or reap.
+
+That is a strong property resting on an absence, which is the kind that regresses silently. It is
+now pinned by `scripts/authz-self-grant.test.ts` (one authorization-artifact writer; it is outside
+every Tool's import closure; no Tool declares `authz.*`; the level authoring path refuses to author
+one) and `scripts/authz-lockout-safety.test.ts` (an admin still reaches `authz.level.write` through
+the composed gate under a hostile or empty Soul; no route is wider than the `fallback` it replaced).
+Before step 5's flip goes further, extend those rather than replace them.
+
 ---
 
 ## 6. Open questions
 
-- **Authoring surface.** How the business architect writes domains, roles, and routing — agentic
-  Chat, a dedicated UI, or both. Real product scope; undecided.
+- **Authoring surface.** ~~How the business architect writes domains, roles, and routing — agentic
+  Chat, a dedicated UI, or both.~~ **Answered by precedent for roles, and by extension for
+  domains:** a dedicated admin-gated REST surface with a capability picker, deliberately *not* a
+  Tool, because `authz.*` must stay a route-only vocabulary (see
+  [D8 in practice](#d8-in-practice-what-stops-an-agent-granting-itself-power)). Still open for
+  **relations**, and only on one axis — who asserts a tuple; see
+  [the step-5 remainder](#on-what-step-5-still-needs).
 - **What `member` becomes.** ~~Flipping to allow-list locks out every existing user unless a default
   role reproduces today's reach.~~ **Answered for the shipped roles:** `member` is already an
   allow-list (`MEMBER_ALLOWED_SURFACES`) and `ANY_ACTION_ANY_RESOURCE` is gone. The question survives

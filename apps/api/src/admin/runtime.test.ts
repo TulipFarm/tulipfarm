@@ -59,6 +59,8 @@ function runtime() {
               expiresAt: new Date("2026-07-26T10:00:00.000Z"),
               createdAt: new Date("2026-07-26T09:00:00.000Z"),
               resolvedAt: null,
+              consumedAt: null,
+              consumedByCallId: null,
             },
           ]
         : []

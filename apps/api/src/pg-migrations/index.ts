@@ -25,6 +25,8 @@ import {
   RUN_STORAGE_STATEMENTS,
   SOUL_PUBLICATION_STORAGE_STATEMENTS,
   SOUL_REPOSITORY_STORAGE_STATEMENTS,
+  STATE_CONCURRENCY_STORAGE_STATEMENTS,
+  STATE_CONTENTION_STORAGE_STATEMENTS,
   STATE_RETRY_STORAGE_STATEMENTS,
   TASK_STORAGE_STATEMENTS,
   WAIT_STORAGE_STATEMENTS,
@@ -2014,6 +2016,45 @@ export const PG_MIGRATIONS: PgMigration[] = [
       for (const sql of STATE_RETRY_STORAGE_STATEMENTS) {
         await q.query(sql);
       }
+    },
+  },
+  {
+    version: 56,
+    description:
+      "state_concurrency_leases: durable mutual exclusion for a Routine State's concurrencyKey",
+    up: async (q) => {
+      for (const sql of STATE_CONCURRENCY_STORAGE_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 57,
+    description:
+      "state_concurrency_waits: durable backoff budget for a Routine State contending for a key",
+    up: async (q) => {
+      for (const sql of STATE_CONTENTION_STORAGE_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 58,
+    description:
+      "agent_loop_checkpoints.resume_state: durable Agent-loop transcript across an approval park",
+    up: async (q) => {
+      for (const sql of LOOP_CHECKPOINT_STORAGE_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 59,
+    description:
+      "approvals.consumed_at/consumed_by_call_id: Tool approval decisions are one-use (I-13)",
+    up: async (q) => {
+      await q.query("ALTER TABLE approvals ADD COLUMN IF NOT EXISTS consumed_at timestamptz");
+      await q.query("ALTER TABLE approvals ADD COLUMN IF NOT EXISTS consumed_by_call_id text");
     },
   },
 ];

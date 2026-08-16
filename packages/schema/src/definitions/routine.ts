@@ -41,7 +41,6 @@ export const ROUTINE_CONCURRENCY_POLICIES = [
 const MAX_RETRY_ATTEMPTS = 100;
 
 const RISK_CLASSES = ["low", "medium", "high"] as const;
-const OBSERVABILITY_LEVELS = ["minimal", "standard", "detailed"] as const;
 const PARALLEL_JOINS = ["all", "any", "quorum"] as const;
 const WAIT_KINDS = ["timer", "event"] as const;
 const WAIT_AGGREGATIONS = ["first", "all", "quorum", "window"] as const;
@@ -100,6 +99,16 @@ const onErrorHandler = Type.Object(
   { additionalProperties: false }
 );
 
+/**
+ * Fields every State type shares.
+ *
+ * Deliberately absent, and rejected by `additionalProperties: false` if an author writes them:
+ * a State-level `wallClockMs` (a third spelling of `limits.wallClockMs`, which is where a
+ * per-State wall-clock budget belongs), `retention`, and `observability`. All three validated and
+ * compiled to nothing — no purge path and no capture gate exists to read them — and a config key
+ * that silently does nothing is a worse contract than one that fails. They return with their
+ * implementations, not before.
+ */
 const sharedStateProps = {
   name: stateName,
   transition: Type.Optional(stateName),
@@ -111,7 +120,6 @@ const sharedStateProps = {
   limits: Type.Optional(stateLimits),
   concurrencyKey: Type.Optional(nonEmptyString),
   deadlineMs: Type.Optional(positiveInteger),
-  wallClockMs: Type.Optional(positiveInteger),
   identity: Type.Optional(
     Type.Object(
       {
@@ -128,28 +136,6 @@ const sharedStateProps = {
         maxRiskClass: Type.Optional(
           Type.Unsafe<(typeof RISK_CLASSES)[number]>({ type: "string", enum: [...RISK_CLASSES] })
         ),
-      },
-      { additionalProperties: false }
-    )
-  ),
-  retention: Type.Optional(
-    Type.Object(
-      {
-        resultDays: Type.Optional(positiveInteger),
-        evidenceDays: Type.Optional(positiveInteger),
-      },
-      { additionalProperties: false }
-    )
-  ),
-  observability: Type.Optional(
-    Type.Object(
-      {
-        level: Type.Unsafe<(typeof OBSERVABILITY_LEVELS)[number]>({
-          type: "string",
-          enum: [...OBSERVABILITY_LEVELS],
-        }),
-        captureInputs: Type.Optional(Type.Boolean()),
-        captureOutputs: Type.Optional(Type.Boolean()),
       },
       { additionalProperties: false }
     )

@@ -1,175 +1,35 @@
 import { usdToCostMicros } from "@tulipfarm/run-kernel";
 import { ajv } from "@tulipfarm/schema";
-import type { ModelRequirementsPolicy } from "../models/requirements";
 import type {
-  ModelInvocationFailureReason,
   ModelInvocationRequest,
   ModelInvocationResult,
   ModelMessage,
-  ModelPort,
   ModelUsage,
 } from "../ports";
 import { ModelInvocationError } from "../ports";
-import type { AgentLoopCheckpoint, LoopCheckpointStore } from "./checkpoint";
+import type { AgentLoopCheckpoint } from "./checkpoint";
+import type {
+  AgentLoopDependencies,
+  AgentLoopEvent,
+  AgentLoopEventType,
+  AgentLoopFailureReason,
+  AgentLoopInput,
+  AgentLoopOutcome,
+  ExposedTool,
+  ToolDispatchResult,
+} from "./contract";
+import { extractSkillName, narrowToolsToSkill } from "./narrowing";
+import type { AgentLoopResumeState } from "./resume";
+import type { NormalizedToolCall } from "./transcript";
+import {
+  assistantToolCallMessage,
+  errorText,
+  normalizeCalls,
+  parseJson,
+  toolMessage,
+} from "./transcript";
 
 /** Bounded Tool loop: broker-only effects, untrusted model output, durable budgets. */
-
-export interface AgentLoopLimits {
-  readonly maxIterations: number;
-  readonly maxToolCalls: number;
-  readonly maxRepairAttempts: number;
-}
-
-export interface ExposedTool {
-  readonly name: string;
-  readonly description?: string;
-  readonly inputSchema: Readonly<Record<string, unknown>>;
-  /** Only non-mutating Tools may dispatch concurrently; absent means sequential. */
-  readonly mutating?: boolean;
-}
-
-export interface AgentLoopInput {
-  readonly businessId: string;
-  readonly runId: string;
-  readonly stateId: string;
-  readonly modelProfileId: string;
-  /** Governance the acting Agent requires of the model; see `ModelInvocationRequest.policy`. */
-  readonly modelPolicy?: ModelRequirementsPolicy;
-  /** Whom the turn acts as; see `ModelInvocationRequest.principal`. */
-  readonly principal?: { readonly kind: string; readonly id: string };
-  /** Which Agent the turn runs as, so its spend is attributed rather than pooled. */
-  readonly agentId?: string;
-  /** Digest of the Context manifest the messages were assembled from. */
-  readonly contextDigest: string;
-  readonly guardrailDigest: string;
-  readonly messages: readonly ModelMessage[];
-  readonly tools: readonly ExposedTool[];
-  readonly limits: AgentLoopLimits;
-  readonly outputSchema?: Readonly<Record<string, unknown>>;
-  /** Skill narrowing affects model-visible Tools only; `exposed` remains the auth boundary. */
-  readonly skillToolScopes?: ReadonlyMap<string, readonly string[]>;
-}
-
-/** Structural Tools cannot be hidden by Skill narrowing. */
-const ALWAYS_EXPOSED_TOOL_NAMES: ReadonlySet<string> = new Set([
-  "load_skill",
-  "complete_task",
-  "transfer_to_agent",
-  "delegate_to_agent",
-  "present",
-  "request_input",
-  "update_presentation",
-]);
-
-export interface ToolDispatchRequest {
-  readonly businessId: string;
-  readonly runId: string;
-  readonly stateId: string;
-  readonly callId: string;
-  readonly name: string;
-  readonly arguments: unknown;
-}
-
-export type ToolDispatchResult =
-  | { readonly status: "succeeded"; readonly callId: string; readonly output: unknown }
-  | { readonly status: "denied"; readonly callId: string; readonly reason: string }
-  | { readonly status: "invalid_arguments"; readonly callId: string; readonly reason: string }
-  | { readonly status: "failed"; readonly callId: string; readonly reason: string }
-  | {
-      readonly status: "awaiting_approval";
-      readonly callId: string;
-      readonly approvalId: string;
-    };
-
-export interface ToolDispatchPort {
-  dispatch(request: ToolDispatchRequest): Promise<ToolDispatchResult>;
-}
-
-export type AgentLoopEventType =
-  | "iteration_started"
-  | "text_delta"
-  | "tool_call_dispatched"
-  | "tool_call_rejected"
-  | "awaiting_approval"
-  | "completed"
-  | "failed"
-  | "cancelled";
-
-/** Loop events carry model text only; Tool args/output stay with `ToolDispatchPort`. */
-export interface AgentLoopEvent {
-  readonly sequence: number;
-  readonly businessId: string;
-  readonly runId: string;
-  readonly stateId: string;
-  readonly type: AgentLoopEventType;
-  readonly iteration: number;
-  readonly toolName?: string;
-  readonly callId?: string;
-  readonly outcome?: string;
-  /** Model text released this chunk. Present only on `text_delta`. */
-  readonly text?: string;
-  readonly textIndex?: number;
-  readonly occurredAt: string;
-}
-
-export interface AgentLoopEventSink {
-  append(event: AgentLoopEvent): Promise<void>;
-}
-
-/** Budget manager must charge before use and fail closed. */
-export interface AgentLoopBudgetPort {
-  consume(input: { key: string; amount: number }): Promise<{ outcome: string }>;
-}
-
-export type AgentLoopFailureReason =
-  | "iteration_limit"
-  | "tool_call_limit"
-  | "repair_budget_exhausted"
-  | "budget_exhausted"
-  | ModelInvocationFailureReason
-  | "empty_model_output";
-
-export type AgentLoopOutcome =
-  | {
-      readonly status: "completed";
-      readonly output: unknown;
-      readonly iterations: number;
-      readonly toolCalls: number;
-      readonly repairs: number;
-    }
-  | {
-      readonly status: "failed";
-      readonly reason: AgentLoopFailureReason;
-      readonly iterations: number;
-      readonly toolCalls: number;
-      readonly repairs: number;
-    }
-  | {
-      readonly status: "awaiting_approval";
-      readonly approvalId: string;
-      readonly callId: string;
-      readonly iterations: number;
-      readonly toolCalls: number;
-      readonly repairs: number;
-    }
-  | {
-      readonly status: "cancelled";
-      readonly iterations: number;
-      readonly toolCalls: number;
-      readonly repairs: number;
-    };
-
-export interface AgentLoopDependencies {
-  readonly model: ModelPort;
-  readonly tools: ToolDispatchPort;
-  readonly checkpoints: LoopCheckpointStore;
-  readonly events: AgentLoopEventSink;
-  readonly budget: AgentLoopBudgetPort;
-  isCancelled(): Promise<boolean>;
-  /** Diagnostic only — a blank final completion is otherwise invisible in server logs. */
-  readonly log?: { warn(obj: unknown, msg?: string): void };
-  now?(): Date;
-}
 
 const ITERATION_BUDGET_KEY = "iterations";
 const TOKEN_BUDGET_KEY = "tokens";
@@ -181,8 +41,6 @@ class EventSinkFailure extends Error {
     super("event sink failed");
   }
 }
-
-type CompiledValidator = ReturnType<typeof ajv.compile>;
 
 /** Walks `.cause` to the innermost diagnostic message. */
 function deepestErrorMessage(diagnostic: unknown): string {
@@ -204,21 +62,22 @@ export class AgentLoop {
 
     const exposed = new Map(input.tools.map((tool) => [tool.name, tool]));
     const validate = input.outputSchema === undefined ? undefined : ajv.compile(input.outputSchema);
-    const messages: ModelMessage[] = [...input.messages];
-    let sequence = 0;
+    // The recovered suffix is appended to, not merged with, the caller's messages: the caller
+    // re-assembles the participant-visible history each attempt, and only what the loop itself
+    // added — proposed Tool calls and their results — is missing from it.
+    const recovered = resumed?.resume;
+    const messages: ModelMessage[] = [...input.messages, ...(recovered?.messages ?? [])];
+    let sequence = recovered?.sequence ?? 0;
     // The most recently *successfully* loaded Skill, per the `load_skill` dispatch — a switch
     // replaces it rather than unioning, since the model has moved on and a union only re-grows
     // the catalog this exists to shrink.
-    let activeSkillName: string | undefined;
+    let activeSkillName: string | undefined = recovered?.activeSkillName;
+    // The approved-but-never-executed call this Turn parked on, replayed before the model runs
+    // again so the user's one approval performs the work once, with no re-planning round trip.
+    let replay = recovered?.pendingCall;
 
-    const toolsForIteration = (): readonly ExposedTool[] => {
-      const scope =
-        activeSkillName === undefined ? undefined : input.skillToolScopes?.get(activeSkillName);
-      if (scope === undefined) return input.tools;
-      return input.tools.filter(
-        (t) => ALWAYS_EXPOSED_TOOL_NAMES.has(t.name) || scope.includes(t.name)
-      );
-    };
+    const toolsForIteration = (): readonly ExposedTool[] =>
+      narrowToolsToSkill(input.tools, activeSkillName, input.skillToolScopes);
 
     const emit = async (
       type: AgentLoopEventType,
@@ -239,26 +98,39 @@ export class AgentLoop {
       });
     };
 
-    const checkpoint = async (): Promise<void> => {
+    const checkpoint = async (pendingCall?: AgentLoopResumeState["pendingCall"]): Promise<void> => {
       const next: AgentLoopCheckpoint = {
         businessId: input.businessId,
         runId: input.runId,
         stateId: input.stateId,
         ...counters,
+        resume: {
+          messages: messages.slice(input.messages.length),
+          ...(pendingCall === undefined ? {} : { pendingCall }),
+          ...(activeSkillName === undefined ? {} : { activeSkillName }),
+          sequence,
+          textIndex,
+        },
       };
       await this.deps.checkpoints.save(next);
     };
 
+    /** A settled loop keeps its counters and drops the transcript it no longer owes anyone. */
     const finish = async (
       outcome: AgentLoopOutcome,
       type: AgentLoopEventType
     ): Promise<AgentLoopOutcome> => {
-      await checkpoint();
+      await this.deps.checkpoints.save({
+        businessId: input.businessId,
+        runId: input.runId,
+        stateId: input.stateId,
+        ...counters,
+      });
       await emit(type);
       return outcome;
     };
 
-    let textIndex = 0;
+    let textIndex = recovered?.textIndex ?? 0;
 
     /** Streams text deltas; missing `completed` is a model-adapter contract failure. */
     const callModel = async (request: ModelInvocationRequest): Promise<ModelInvocationResult> => {
@@ -304,9 +176,243 @@ export class AgentLoop {
       return "ok";
     };
 
+    /**
+     * Dispatches one model-proposed batch and records it in the transcript. Returns the
+     * outcome that ends the loop, or `undefined` to keep iterating. `replayed` marks calls
+     * recovered from an approval park: their proposal is already in the recovered transcript,
+     * so it must not be written a second time.
+     */
+    const dispatchCalls = async (
+      calls: readonly NormalizedToolCall[],
+      replayed: boolean
+    ): Promise<AgentLoopOutcome | undefined> => {
+      // Recorded before dispatch so the transcript carries the model's own proposed call
+      // alongside the result it provoked — without this, a validation error arrives as an
+      // unattributed message and the model cannot tell it is feedback on its own last action.
+      if (!replayed) messages.push(assistantToolCallMessage(calls));
+      let approval: { approvalId: string; call: NormalizedToolCall } | undefined;
+
+      // Applies one dispatched result: records the transcript entry, and reports back either
+      // "keep going", the approval this Turn now waits on, or the failure reason that ends it.
+      const applyDispatch = async (
+        call: { callId: string; name: string; arguments: unknown },
+        dispatched: ToolDispatchResult
+      ): Promise<
+        | { kind: "continue" }
+        | { kind: "approval"; approvalId: string; call: NormalizedToolCall }
+        | { kind: "fail"; reason: AgentLoopFailureReason }
+      > => {
+        await emit("tool_call_dispatched", {
+          toolName: call.name,
+          callId: call.callId,
+          outcome: dispatched.status,
+        });
+
+        if (dispatched.status === "awaiting_approval") {
+          return { kind: "approval", approvalId: dispatched.approvalId, call };
+        }
+
+        if (dispatched.status === "invalid_arguments") {
+          counters.repairs += 1;
+          if (counters.repairs > input.limits.maxRepairAttempts) {
+            return { kind: "fail", reason: "repair_budget_exhausted" };
+          }
+          messages.push(
+            toolMessage(call.callId, { error: "invalid_arguments", detail: dispatched.reason })
+          );
+          return { kind: "continue" };
+        }
+
+        if (dispatched.status === "succeeded") {
+          messages.push(toolMessage(call.callId, { output: dispatched.output }));
+          if (call.name === "load_skill") {
+            const loaded = extractSkillName(call.arguments);
+            if (loaded !== undefined) activeSkillName = loaded;
+          }
+          return { kind: "continue" };
+        }
+
+        // Denied and failed calls are data the model must reason about, not a retry signal.
+        messages.push(
+          toolMessage(call.callId, { error: dispatched.status, detail: dispatched.reason })
+        );
+        return { kind: "continue" };
+      };
+
+      let index = 0;
+      while (index < calls.length) {
+        const call = calls[index];
+        const tool = exposed.get(call.name);
+        if (tool === undefined) {
+          // A Tool the caller never exposed is refused here; the broker never sees it.
+          messages.push(toolMessage(call.callId, { error: "tool_not_available" }));
+          await emit("tool_call_rejected", {
+            toolName: call.name,
+            callId: call.callId,
+            outcome: "tool_not_available",
+          });
+          index += 1;
+          continue;
+        }
+
+        if (tool.mutating !== false) {
+          // A write dispatches alone: the next Tool call must never race the effect it causes.
+          // The ceiling is checked before the dispatch, never after: `maxToolCalls` is backed by
+          // a durable checkpoint, so a call counted after its effect would let a resume replay
+          // past the limit.
+          if (counters.toolCalls + 1 > input.limits.maxToolCalls) {
+            return finish({ status: "failed", reason: "tool_call_limit", ...counters }, "failed");
+          }
+          const dispatched = await this.deps.tools.dispatch({
+            businessId: input.businessId,
+            runId: input.runId,
+            stateId: input.stateId,
+            callId: call.callId,
+            name: call.name,
+            arguments: call.arguments,
+          });
+          counters.toolCalls += 1;
+          const outcome = await applyDispatch(call, dispatched);
+          if (outcome.kind === "fail") {
+            return finish({ status: "failed", reason: outcome.reason, ...counters }, "failed");
+          }
+          if (outcome.kind === "approval") {
+            approval = { approvalId: outcome.approvalId, call: outcome.call };
+            break;
+          }
+          index += 1;
+          continue;
+        }
+
+        // A run of consecutive, exposed, non-mutating calls dispatches together — reads share no
+        // effect to race (TOOL-V1-008's "concurrent reads, sequential writes" rule, applied here
+        // too). Peeking with a separate cursor, rather than advancing `index` as the run is
+        // found, is what lets a batch longer than the remaining budget still stop at the exact
+        // call that would exceed it: only the calls actually dispatched advance `index`.
+        let peek = index;
+        const batch: { callId: string; name: string; arguments: unknown }[] = [];
+        while (peek < calls.length) {
+          const next = calls[peek];
+          const nextTool = exposed.get(next.name);
+          if (nextTool === undefined || nextTool.mutating !== false) break;
+          batch.push(next);
+          peek += 1;
+        }
+
+        const available = input.limits.maxToolCalls - counters.toolCalls;
+        if (available <= 0) {
+          return finish({ status: "failed", reason: "tool_call_limit", ...counters }, "failed");
+        }
+        const runBatch = batch.slice(0, available);
+        const dispatched = await Promise.all(
+          runBatch.map((batched) =>
+            this.deps.tools.dispatch({
+              businessId: input.businessId,
+              runId: input.runId,
+              stateId: input.stateId,
+              callId: batched.callId,
+              name: batched.name,
+              arguments: batched.arguments,
+            })
+          )
+        );
+        counters.toolCalls += runBatch.length;
+        index += runBatch.length;
+
+        // Every call in the batch has already run: its effect landed and its Tool-call budget
+        // is already spent. So every result is applied — stopping at the first decisive one
+        // would drop the rest's transcript entries, dispatch events and repair accounting for
+        // work the Run was charged for. Only the *decision* stops: the first decisive outcome
+        // in call order wins, matching what a sequential batch would have produced.
+        let decision:
+          | { kind: "approval"; approvalId: string; call: NormalizedToolCall }
+          | { kind: "fail"; reason: AgentLoopFailureReason }
+          | undefined;
+        for (let i = 0; i < runBatch.length; i += 1) {
+          const batchCall = runBatch[i];
+          const batchResult = dispatched[i];
+          if (batchCall === undefined || batchResult === undefined) continue;
+          const outcome = await applyDispatch(batchCall, batchResult);
+          if (outcome.kind === "continue") continue;
+          if (decision !== undefined) {
+            // A Turn parks on one approval and fails for one reason, so a second decisive
+            // outcome cannot be acted on. A superseded approval stays pending at the broker
+            // with nothing waiting on it; its `tool_call_dispatched` event above is the
+            // record, and this names it for an operator who has to clear it.
+            this.deps.log?.warn(
+              {
+                event: "agent_loop.batch_outcome_superseded",
+                runId: input.runId,
+                stateId: input.stateId,
+                iteration: counters.iterations,
+                callId: batchCall.callId,
+                toolName: batchCall.name,
+                superseded: outcome.kind,
+                ...(outcome.kind === "approval" ? { approvalId: outcome.approvalId } : {}),
+                actedOn: decision.kind,
+              },
+              "batch outcome superseded by an earlier decisive call"
+            );
+            continue;
+          }
+          decision = outcome;
+        }
+        if (decision?.kind === "fail") {
+          return finish({ status: "failed", reason: decision.reason, ...counters }, "failed");
+        }
+        if (decision !== undefined) {
+          approval = { approvalId: decision.approvalId, call: decision.call };
+          break;
+        }
+        // A batch clipped by budget leaves its remainder at `index`; the next pass re-enters this
+        // branch, forms a fresh (now over-budget) peek, and fails via `available <= 0` above
+        // rather than ever dispatching past the limit.
+      }
+
+      if (approval !== undefined) {
+        // A parked call has not run: the dispatcher reports `awaiting_approval` strictly before
+        // it executes the Tool, so the budget it took on dispatch is given back and spent only
+        // by the replay that actually performs the work. Counters and the transcript are made
+        // durable together, so the resumed Turn is charged for exactly what it can still see.
+        counters.toolCalls -= 1;
+        await checkpoint(approval.call);
+        await emit("awaiting_approval");
+        // Saved again for one reason only: to carry the sequence that event just consumed, so the
+        // resumed attempt numbers its events past this one instead of colliding with it. The save
+        // above stays first, because a crash between the two must still find durable counters.
+        await checkpoint(approval.call);
+        return {
+          status: "awaiting_approval",
+          approvalId: approval.approvalId,
+          callId: approval.call.callId,
+          ...counters,
+        };
+      }
+      // Checkpointed after every dispatched batch, so a Turn that dies here resumes with the
+      // Tool results it already paid for rather than re-running them.
+      await checkpoint();
+      return undefined;
+    };
+
     for (;;) {
+      // Order is load-bearing for the whole iteration: cancellation is checked before any spend,
+      // the iteration ceiling before the budget is charged for an iteration that cannot run, and
+      // the budget is charged before the model is called — a charge after the call would let a
+      // Run spend past an exhausted budget. `counters.iterations` only advances once all three
+      // have passed, so a resumed checkpoint never double-counts a refused iteration.
       if (await this.deps.isCancelled()) {
         return finish({ status: "cancelled", ...counters }, "cancelled");
+      }
+
+      // A replayed approval is the tail of an iteration that already ran and was already charged;
+      // it re-enters dispatch without a model call, so it takes no iteration, no budget and no
+      // second assistant message. Everything else asks the model as usual.
+      const replayed = replay;
+      if (replayed !== undefined) {
+        replay = undefined;
+        const outcome = await dispatchCalls([replayed], true);
+        if (outcome !== undefined) return outcome;
+        continue;
       }
 
       if (counters.iterations + 1 > input.limits.maxIterations) {
@@ -377,169 +483,11 @@ export class AgentLoop {
       // operator never set.
 
       if (result.output.kind === "tool_calls") {
-        const calls = normalizeCalls(result.output.calls, counters.iterations);
-        // Recorded before dispatch so the transcript carries the model's own proposed call
-        // alongside the result it provoked — without this, a validation error arrives as an
-        // unattributed message and the model cannot tell it is feedback on its own last action.
-        messages.push(assistantToolCallMessage(calls));
-        let approval: { approvalId: string; callId: string } | undefined;
-
-        // Applies one dispatched result: records the transcript entry, and reports back either
-        // "keep going", the approval this Turn now waits on, or the failure reason that ends it.
-        const applyDispatch = async (
-          call: { callId: string; name: string; arguments: unknown },
-          dispatched: ToolDispatchResult
-        ): Promise<
-          | { kind: "continue" }
-          | { kind: "approval"; approvalId: string; callId: string }
-          | { kind: "fail"; reason: AgentLoopFailureReason }
-        > => {
-          await emit("tool_call_dispatched", {
-            toolName: call.name,
-            callId: call.callId,
-            outcome: dispatched.status,
-          });
-
-          if (dispatched.status === "awaiting_approval") {
-            return { kind: "approval", approvalId: dispatched.approvalId, callId: call.callId };
-          }
-
-          if (dispatched.status === "invalid_arguments") {
-            counters.repairs += 1;
-            if (counters.repairs > input.limits.maxRepairAttempts) {
-              return { kind: "fail", reason: "repair_budget_exhausted" };
-            }
-            messages.push(
-              toolMessage(call.callId, { error: "invalid_arguments", detail: dispatched.reason })
-            );
-            return { kind: "continue" };
-          }
-
-          if (dispatched.status === "succeeded") {
-            messages.push(toolMessage(call.callId, { output: dispatched.output }));
-            if (call.name === "load_skill") {
-              const loaded = extractSkillName(call.arguments);
-              if (loaded !== undefined) activeSkillName = loaded;
-            }
-            return { kind: "continue" };
-          }
-
-          // Denied and failed calls are data the model must reason about, not a retry signal.
-          messages.push(
-            toolMessage(call.callId, { error: dispatched.status, detail: dispatched.reason })
-          );
-          return { kind: "continue" };
-        };
-
-        let index = 0;
-        while (index < calls.length) {
-          const call = calls[index];
-          const tool = exposed.get(call.name);
-          if (tool === undefined) {
-            // A Tool the caller never exposed is refused here; the broker never sees it.
-            messages.push(toolMessage(call.callId, { error: "tool_not_available" }));
-            await emit("tool_call_rejected", {
-              toolName: call.name,
-              callId: call.callId,
-              outcome: "tool_not_available",
-            });
-            index += 1;
-            continue;
-          }
-
-          if (tool.mutating !== false) {
-            // A write dispatches alone: the next Tool call must never race the effect it causes.
-            if (counters.toolCalls + 1 > input.limits.maxToolCalls) {
-              return finish({ status: "failed", reason: "tool_call_limit", ...counters }, "failed");
-            }
-            const dispatched = await this.deps.tools.dispatch({
-              businessId: input.businessId,
-              runId: input.runId,
-              stateId: input.stateId,
-              callId: call.callId,
-              name: call.name,
-              arguments: call.arguments,
-            });
-            counters.toolCalls += 1;
-            const outcome = await applyDispatch(call, dispatched);
-            if (outcome.kind === "fail") {
-              return finish({ status: "failed", reason: outcome.reason, ...counters }, "failed");
-            }
-            if (outcome.kind === "approval") {
-              approval = { approvalId: outcome.approvalId, callId: outcome.callId };
-              break;
-            }
-            index += 1;
-            continue;
-          }
-
-          // A run of consecutive, exposed, non-mutating calls dispatches together — reads share no
-          // effect to race (TOOL-V1-008's "concurrent reads, sequential writes" rule, applied here
-          // too). Peeking with a separate cursor, rather than advancing `index` as the run is
-          // found, is what lets a batch longer than the remaining budget still stop at the exact
-          // call that would exceed it: only the calls actually dispatched advance `index`.
-          let peek = index;
-          const batch: { callId: string; name: string; arguments: unknown }[] = [];
-          while (peek < calls.length) {
-            const next = calls[peek];
-            const nextTool = exposed.get(next.name);
-            if (nextTool === undefined || nextTool.mutating !== false) break;
-            batch.push(next);
-            peek += 1;
-          }
-
-          const available = input.limits.maxToolCalls - counters.toolCalls;
-          if (available <= 0) {
-            return finish({ status: "failed", reason: "tool_call_limit", ...counters }, "failed");
-          }
-          const runBatch = batch.slice(0, available);
-          const dispatched = await Promise.all(
-            runBatch.map((batched) =>
-              this.deps.tools.dispatch({
-                businessId: input.businessId,
-                runId: input.runId,
-                stateId: input.stateId,
-                callId: batched.callId,
-                name: batched.name,
-                arguments: batched.arguments,
-              })
-            )
-          );
-          counters.toolCalls += runBatch.length;
-          index += runBatch.length;
-
-          let failure: AgentLoopFailureReason | undefined;
-          for (
-            let i = 0;
-            i < runBatch.length && failure === undefined && approval === undefined;
-            i += 1
-          ) {
-            const batchCall = runBatch[i];
-            const batchResult = dispatched[i];
-            if (batchCall === undefined || batchResult === undefined) continue;
-            const outcome = await applyDispatch(batchCall, batchResult);
-            if (outcome.kind === "fail") failure = outcome.reason;
-            else if (outcome.kind === "approval") {
-              approval = { approvalId: outcome.approvalId, callId: outcome.callId };
-            }
-          }
-          if (failure !== undefined) {
-            return finish({ status: "failed", reason: failure, ...counters }, "failed");
-          }
-          if (approval !== undefined) break;
-          // A batch clipped by budget leaves its remainder at `index`; the next pass re-enters this
-          // branch, forms a fresh (now over-budget) peek, and fails via `available <= 0` above
-          // rather than ever dispatching past the limit.
-        }
-
-        await checkpoint();
-
-        if (approval !== undefined) {
-          return finish(
-            { status: "awaiting_approval", ...approval, ...counters },
-            "awaiting_approval"
-          );
-        }
+        const outcome = await dispatchCalls(
+          normalizeCalls(result.output.calls, counters.iterations),
+          false
+        );
+        if (outcome !== undefined) return outcome;
         continue;
       }
 
@@ -602,60 +550,4 @@ export class AgentLoop {
       return finish({ status: "completed", output, ...counters }, "completed");
     }
   }
-}
-
-function normalizeCalls(
-  calls: readonly { readonly callId: string; readonly name: string; readonly arguments: unknown }[],
-  iteration: number
-): readonly { callId: string; name: string; arguments: unknown }[] {
-  // Providers sometimes omit or repeat call ids; correlation must stay unambiguous regardless.
-  const seen = new Set<string>();
-  return calls.map((call, index) => {
-    const candidate = call.callId.trim();
-    const callId =
-      candidate === "" || seen.has(candidate) ? `call-${iteration}-${index + 1}` : candidate;
-    seen.add(callId);
-    return { callId, name: call.name, arguments: call.arguments };
-  });
-}
-
-/** `load_skill`'s only argument is `{ name: string }` — the Skill this call switched into. */
-function extractSkillName(callArguments: unknown): string | undefined {
-  if (typeof callArguments !== "object" || callArguments === null) return undefined;
-  const name = (callArguments as { name?: unknown }).name;
-  return typeof name === "string" ? name : undefined;
-}
-
-function toolMessage(callId: string, payload: Record<string, unknown>): ModelMessage {
-  return { role: "tool", content: JSON.stringify({ callId, ...payload }) };
-}
-
-function assistantToolCallMessage(
-  calls: readonly { readonly callId: string; readonly name: string; readonly arguments: unknown }[]
-): ModelMessage {
-  return {
-    role: "assistant",
-    content: JSON.stringify({
-      toolCalls: calls.map((call) => ({
-        callId: call.callId,
-        name: call.name,
-        arguments: call.arguments,
-      })),
-    }),
-  };
-}
-
-function parseJson(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    // Non-JSON text parses to nothing; the caller falls back.
-    return undefined;
-  }
-}
-
-function errorText(validate: CompiledValidator): string {
-  return (validate.errors ?? [])
-    .map((error) => `${error.instancePath || "/"} ${error.message ?? "invalid"}`)
-    .join("; ");
 }

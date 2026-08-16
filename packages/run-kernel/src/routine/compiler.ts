@@ -1,8 +1,10 @@
 import type { routine as routineSchema } from "@tulipfarm/schema";
 import { canonicalHash } from "@tulipfarm/schema";
-import type { LimitSet } from "../limits";
+import { type LimitSet, resolveLimits } from "../limits";
 import type { JsonObject, OutputSchemaRegistration } from "../outputs";
+import { mapAuthoredLimits } from "./authored-limits";
 import { type CompiledExpression, compileExpression, ExpressionError } from "./expressions";
+import { narrowBoundsByLimits } from "./limit-enforcement";
 
 /**
  * Compiles valid Routine shapes into one graph after proving termination, reference order,
@@ -466,6 +468,7 @@ export function compileRoutine(
   };
 
   const compiled = new Map<string, CompiledState>();
+  const routineLimits = mapAuthoredLimits(definition.spec.limits ?? {});
   const outputSchemas: OutputSchemaRegistration[] = [];
 
   for (const [index, state] of states.entries()) {
@@ -524,6 +527,13 @@ export function compileRoutine(
 
     const permissions = readRecord(state, "permissionCeiling");
     const fallback = readRecord(state, "default");
+    const stateLimits = mapAuthoredLimits(readRecord(state, "limits") ?? {});
+    // Narrowest wins across the two scopes an authored Routine can declare (SPEC §9.1), so a
+    // State ceiling tightens the Routine's and never raises it.
+    const boundCeilings = resolveLimits([
+      { scope: "routine", limits: routineLimits },
+      { scope: "state", limits: stateLimits },
+    ]);
 
     compiled.set(
       state.name,
@@ -544,10 +554,10 @@ export function compileRoutine(
         branches: Object.freeze(
           readArray(state, "branches").filter((b): b is string => typeof b === "string")
         ),
-        bounds: checkBounds(state, path),
+        bounds: narrowBoundsByLimits(checkBounds(state, path), boundCeilings),
         join: (readString(state, "join") as CompiledState["join"]) ?? null,
         retry: compileRetry(state, path),
-        limits: (readRecord(state, "limits") ?? {}) as LimitSet,
+        limits: stateLimits,
         identity: {
           principalKind: ceiling.principalKind,
           principalId: ceiling.principalId,
@@ -577,7 +587,7 @@ export function compileRoutine(
     states: compiled,
     order: Object.freeze(order),
     identityCeiling: Object.freeze({ ...ceiling, grants: Object.freeze([...ceiling.grants]) }),
-    limits: (definition.spec.limits ?? {}) as LimitSet,
+    limits: routineLimits,
     requiredToolAbilities: Object.freeze([...(definition.spec.requiredToolAbilities ?? [])]),
     outputSchemas: Object.freeze(outputSchemas),
   });

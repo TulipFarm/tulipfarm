@@ -11,8 +11,8 @@ import {
   type MemoryAssertion,
   type MemoryDeps,
   type MemoryTrustTier,
-  rememberMemory,
 } from "./memory";
+import { rememberMemory } from "./remember";
 import { recallMemory } from "./retrieve";
 
 /** Tests ensure contradiction handling cannot close other scopes, stronger priors, or unseen rows. */

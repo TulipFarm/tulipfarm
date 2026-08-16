@@ -208,15 +208,23 @@ describe("Routine schema", () => {
     expect(() => validateRoutineDefinition(legacyMetadata)).toThrow(SchemaValidationError);
   });
 
-  it("accepts explicit State authority and evidence controls", () => {
+  it("accepts explicit State authority controls", () => {
     const controlled = {
       ...agentState,
       identity: { principalKind: "agent", principalId: "triager" },
       permissionCeiling: { grants: ["ticket.read"], maxRiskClass: "low" },
-      retention: { resultDays: 30, evidenceDays: 365 },
-      observability: { level: "standard", captureInputs: false, captureOutputs: true },
+      concurrencyKey: "triage",
     };
     expect(() => validateRoutineDefinition(routine([controlled]))).not.toThrow();
+  });
+
+  it.each([
+    ["retention", { resultDays: 30, evidenceDays: 365 }],
+    ["observability", { level: "standard", captureInputs: false }],
+    ["wallClockMs", 30_000],
+  ])("rejects %s, which nothing enforces, instead of ignoring it", (field, value) => {
+    const doc = routine([{ ...agentState, [field]: value }]);
+    expect(() => validateRoutineDefinition(doc)).toThrow(SchemaValidationError);
   });
 
   it("fails closed for the wrong kind discriminator", () => {

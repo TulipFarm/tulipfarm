@@ -1,8 +1,11 @@
 import type { EventEmitter } from "node:events";
 import { readFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
+import type { DelegateToAgentInput, DelegationOutcome } from "@tulipfarm/agent-runtime";
+import { DelegationError } from "@tulipfarm/agent-runtime";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { PLATFORM_RUNTIME_TOOLS } from "@tulipfarm/platform-tools";
+import { ChildRunError } from "@tulipfarm/run-kernel";
 import { ajv, TulipFarmValidationError, validateRoutineDefinition } from "@tulipfarm/schema";
 import type { BundledSkill } from "@tulipfarm/soul";
 import {
@@ -20,6 +23,14 @@ import { type ApiToolDefinition, defineApiTool } from "@tulipfarm/tool-host";
 import { stringify as stringifyYaml } from "yaml";
 import { SYSTEM_SOUL_COMMIT_ACTOR } from "../runtime/soul-writer";
 import { soulCommitError } from "../tools/soul-faults";
+import { delegateToAgentTool } from "./delegate-tool";
+import {
+  firstError,
+  SOUL_AGENT_TARGET,
+  SOUL_ROUTINE_TARGET,
+  SOUL_SKILL_TARGET,
+  soulTarget,
+} from "./tool-args";
 import { err, ok, type ToolCallResult } from "./tool-result";
 
 export interface PlatformToolContext {
@@ -34,6 +45,8 @@ export interface PlatformToolContext {
   readonly soulWriter: SoulWriter;
   routineContext?: { routineId: string; runId: string };
   triggerRoutine?: (slug: string, inputs?: Record<string, unknown>) => Promise<{ runId: string }>;
+  /** The one guarded path that starts a delegated child Run; see `./delegation.ts`. */
+  delegateToAgent?: (input: DelegateToAgentInput) => Promise<DelegationOutcome>;
   onRoutinesChanged?: () => Promise<void>;
   bundledSkills?: ReadonlyMap<string, BundledSkill>;
   disabledBundledSkills?: ReadonlySet<string>;
@@ -41,8 +54,6 @@ export interface PlatformToolContext {
   requestContext?: RequestContext;
   events?: EventEmitter;
 }
-
-type AjvErrors = ReturnType<typeof ajv.compile>["errors"];
 
 /** Map a Soul write-gateway rejection onto `routine_forge`'s error vocabulary. */
 function mapRoutineWriteError(e: SoulWriteError): ToolCallResult {
@@ -58,47 +69,11 @@ function mapRoutineWriteError(e: SoulWriteError): ToolCallResult {
   }
 }
 
-/** Delegation authorizes `platform.agent`, not Soul edits to `soul.agent`. */
-const SOUL_AGENT_TARGET = "platform.agent";
-const SOUL_ROUTINE_TARGET = "soul.routine";
-const SOUL_SKILL_TARGET = "soul.skill";
 const SOUL_REPO_TARGET = "soul.repo";
 const SOUL_REPO_ALL_TARGET_ID = "entire-repository";
 
-function stringArg(args: unknown, key: string): string | undefined {
-  if (args === null || typeof args !== "object" || Array.isArray(args)) return undefined;
-  const value = (args as Record<string, unknown>)[key];
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function soulTarget(
-  type: typeof SOUL_AGENT_TARGET | typeof SOUL_ROUTINE_TARGET | typeof SOUL_SKILL_TARGET,
-  args: unknown,
-  key: string
-) {
-  const id = stringArg(args, key);
-  return id === undefined ? [] : [{ type, id }];
-}
-
 function wholeSoulRepoTarget() {
   return [{ type: SOUL_REPO_TARGET, id: SOUL_REPO_ALL_TARGET_ID }];
-}
-
-// Prefer deepest non-oneOf AJV errors so users see the real schema defect.
-function bestError(errors: AjvErrors): NonNullable<AjvErrors>[number] | undefined {
-  if (!errors || errors.length === 0) return undefined;
-  const specific = errors.filter((e) => e.keyword !== "oneOf");
-  const pool = specific.length > 0 ? specific : errors;
-  return pool.reduce((deepest, e) =>
-    e.instancePath.length > deepest.instancePath.length ? e : deepest
-  );
-}
-
-function firstError(errors: AjvErrors): string {
-  const e = bestError(errors);
-  return e
-    ? `${e.instancePath || "(root)"} ${e.message ?? "is invalid"}`.trim()
-    : "invalid arguments";
 }
 
 const LOAD_SKILL_SCHEMA: Record<string, unknown> = {
@@ -247,53 +222,6 @@ export const transferToAgentTool = defineApiTool<PlatformToolContext>({
     if (!agent) return err("not_found", `Agent "${agentId}" not found.`);
     const agentName = typeof agent.frontmatter.name === "string" ? agent.frontmatter.name : agentId;
     return ok({ agentId, agentName, status: "transferred", message: message ?? null });
-  },
-});
-
-const DELEGATE_TO_AGENT_SCHEMA: Record<string, unknown> = {
-  type: "object",
-  additionalProperties: false,
-  required: ["agentId", "task"],
-  properties: {
-    agentId: {
-      type: "string",
-      minLength: 1,
-      description: "Soul name of the agent to delegate to.",
-    },
-    task: { type: "string", minLength: 1, description: "The task description to delegate." },
-    context: {
-      type: "object",
-      description: "Optional structured context to pass to the delegated agent.",
-    },
-  },
-};
-const validateDelegate = ajv.compile(DELEGATE_TO_AGENT_SCHEMA);
-
-export const delegateToAgentTool = defineApiTool<PlatformToolContext>({
-  name: "delegate_to_agent",
-  requiresAmbient: ["soul"],
-  description:
-    "Delegate a sub-task to another agent and record the delegation. The UI surfaces a delegation-event card. Full async execution is deferred (Agents v0.9) — V1 records intent and returns a delegation receipt.",
-  mutating: false,
-  tier: "platform",
-  inputSchema: DELEGATE_TO_AGENT_SCHEMA,
-  authorization: {
-    action: "platform.agent.delegate",
-    resources: ["platform.agent"],
-    targets: (args) => soulTarget(SOUL_AGENT_TARGET, args, "agentId"),
-    dataClasses: ["operational"],
-  },
-  handler: async (args, ctx) => {
-    if (!validateDelegate(args))
-      return err("validation_error", firstError(validateDelegate.errors));
-    const { agentId, task, context } = args as {
-      agentId: string;
-      task: string;
-      context?: Record<string, unknown>;
-    };
-    const agent = ctx.soulLoader?.agents.get(agentId);
-    if (!agent) return err("not_found", `Agent "${agentId}" not found in soul.`);
-    return ok({ agentId, task, context: context ?? null, status: "delegated" });
   },
 });
 

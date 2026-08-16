@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 import { assertValidAssertion, type MemoryAssertionView, type MemoryRepo } from "./assertion-view";
 import type { MemoryLifecycleService } from "./lifecycle-service";
 import { MAX_ENTRIES, MAX_KEY_CHARS, MAX_VALUE_CHARS } from "./limits";
-import type { MemoryAssertion, RememberResult } from "./memory";
+import type { MemoryAssertion } from "./memory";
 import type { MemoryRecallService } from "./recall-service";
+import type { RememberResult } from "./remember";
 import { MemoryService } from "./service";
 import {
   deleteMemoryTool,

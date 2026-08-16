@@ -182,9 +182,10 @@ describe("createChatExecutor durable loop counters", () => {
     await expect(scenario.park()).resolves.toBe("waiting");
     expect(scenario.dispatched).toEqual(["call-1"]);
 
-    // Reclaimed after approval: the ceiling is already spent, so the next Tool call is refused —
-    // it never reaches the broker — and the loop fails on the limit instead of dispatching.
+    // Reclaimed after approval: the parked dispatch never executed, so its charge was refunded and
+    // the approved call is replayed once — which spends the ceiling for real. The next Tool call is
+    // then refused before it reaches the broker, and the loop fails on the limit.
     await expect(scenario.resume()).resolves.toBe("failed");
-    expect(scenario.dispatched).toEqual(["call-1"]);
+    expect(scenario.dispatched).toEqual(["call-1", "call-1"]);
   });
 });

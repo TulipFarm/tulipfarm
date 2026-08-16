@@ -70,7 +70,15 @@ export class RoutingToolDispatch implements ToolDispatchPort {
     return pending;
   }
 
-  /** Drops a finished Run's authority so a long-lived worker does not accumulate them. */
+  /**
+   * Drops a Run's cached authority. The composition root calls this when a dispatch attempt
+   * settles, so the cache lives for exactly one attempt: a long-lived worker cannot accumulate
+   * Run ids, and a Run reclaimed after a park re-reads its authority rather than reusing one
+   * read before the park.
+   *
+   * Callers must not call this while a call for `runId` is still in flight — that only costs an
+   * extra read, but it is the reason the hook is at the dispatch boundary and not inside a Tool.
+   */
   forget(runId: string): void {
     this.authorities.delete(runId);
   }

@@ -8,7 +8,7 @@ import {
   SchemaRegistry,
 } from "@tulipfarm/schema";
 import { describe, expect, it } from "vitest";
-import { EXAMPLES_DIR, IDENTITY_CEILING, triageCatalog } from "./harness";
+import { EXAMPLES_DIR, IDENTITY_CEILING, triageCatalog } from "./fixtures";
 
 function example(file: string): unknown {
   return parseYamlDocument(readFileSync(join(EXAMPLES_DIR, file), "utf8"));

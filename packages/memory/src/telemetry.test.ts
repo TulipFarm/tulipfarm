@@ -4,8 +4,10 @@ import { InMemoryPendingMemoryStore, resolvePendingMemory } from "./confirm";
 import type { MemoryContradictionPort } from "./contradiction";
 import { authorizeMemoryEpisode, type MemoryEpisode } from "./episode";
 import { proposeMemoryCandidates } from "./extract";
+import { eraseMemory } from "./forget";
 import type { MemoryAssertion, MemoryDeps, MemorySettingsView } from "./memory";
-import { eraseMemory, InMemoryMemoryStore, rememberMemory } from "./memory";
+import { InMemoryMemoryStore } from "./memory";
+import { rememberMemory } from "./remember";
 import { recallMemory } from "./retrieve";
 import { MEMORY_METRICS } from "./telemetry";
 

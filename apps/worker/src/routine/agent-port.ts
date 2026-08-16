@@ -24,6 +24,7 @@ import {
   type LimitKey,
   RunBudgetManager,
   type RunBudgetStore,
+  type ScopedLimits,
 } from "@tulipfarm/run-kernel";
 import type { AgentDefinition, ModelProfileDefinition, RunEventPayloads } from "@tulipfarm/schema";
 import { canonicalHash, canonicalize } from "@tulipfarm/schema";
@@ -64,6 +65,12 @@ export interface RoutineAgentRequest {
   readonly outputSchema?: JsonObject;
   /** The Run's exact pinned bundle — the only source of Agent identity and model selection. */
   readonly bundle: RuntimeBundle;
+  /**
+   * Ceilings from scopes broader than the ModelProfile — today the authored Routine's `limits`.
+   * They are resolved with the profile's own budgets before the Run budget ledger is opened, so a
+   * Routine that declared a cost or token ceiling actually gets one.
+   */
+  readonly scopedLimits?: readonly ScopedLimits[];
 }
 
 export interface RoutineAgentPort {
@@ -307,6 +314,7 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
       businessId: request.businessId,
       runId: request.runId,
       profile: primary,
+      scoped: request.scopedLimits ?? [],
     });
     const routing = modelRoutingPayload(agent.spec.modelProfile, selection, budgetLimits);
     await events.emit("model.routed", routing, "model");

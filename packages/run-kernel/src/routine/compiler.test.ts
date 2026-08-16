@@ -284,4 +284,27 @@ describe("compileRoutine", () => {
       );
     }
   });
+
+  it("maps authored limits to runtime keys and units at both Routine and State scope", () => {
+    const bounded: routineSchema.RoutineState = {
+      type: "agent",
+      name: "Classify",
+      agentRef: { name: "triage", version: "1.0.0" },
+      end: true,
+      limits: { wallClockMs: 60_000, activeMs: 30_000, costUsd: 5, tokens: 1_000 },
+    };
+
+    const compiled = compileRoutine(
+      routine([bounded], { limits: { costUsd: 2.5, wallClockMs: 120_000 } }),
+      { identityCeiling: ceiling }
+    );
+
+    expect(compiled.limits).toEqual({ costMicros: 2_500_000, wallTimeMs: 120_000 });
+    expect(compiled.states.get("Classify")?.limits).toEqual({
+      wallTimeMs: 60_000,
+      activeTimeMs: 30_000,
+      costMicros: 5_000_000,
+      tokens: 1_000,
+    });
+  });
 });

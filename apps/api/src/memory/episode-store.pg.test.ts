@@ -193,4 +193,75 @@ describe("PgMemoryEpisodeStore", () => {
     expect(serialized).toContain("tulipfarm.memory.episodes.chunks");
     expect(serialized).toContain("tulipfarm.memory.episodes.recall_candidates");
   });
+
+  function embedder(embedMany: () => Promise<{ embeddings: number[][]; dimension: number }>) {
+    return {
+      isAvailable: () => true,
+      embedMany,
+      getActive: () => ({ provider: "test", model: "test-embed", dimension: 3 }),
+    };
+  }
+
+  async function writeEpisodeWith(
+    chunkEmbedder: ReturnType<typeof embedder> | undefined,
+    records: CapturedTelemetry[]
+  ): Promise<void> {
+    await new PgMemoryEpisodeStore(
+      db,
+      chunkEmbedder,
+      () => new Date("2026-08-08T00:00:00.000Z"),
+      capturingTelemetry(records)
+    ).recordConversationEpisode({
+      principalId: USER,
+      target: {
+        scope: "user_private",
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        subjectPrincipalId: USER,
+      },
+      conversationId: "conversation-1",
+      summary: "The renewal moved to Q3.",
+      decisions: ["Move the renewal to Q3."],
+    });
+  }
+
+  it("counts an episode chunk that lost its vector to a failed embedding", async () => {
+    const records: CapturedTelemetry[] = [];
+
+    await writeEpisodeWith(
+      embedder(async () => {
+        throw new Error("embedding provider unavailable");
+      }),
+      records
+    );
+
+    const failures = records.filter(
+      (record) => record.name === "tulipfarm.memory.episodes.embedding_failures"
+    );
+    expect(failures.length).toBeGreaterThan(0);
+    expect(failures[0]?.attributes).toEqual({ outcome: "error" });
+    expect(JSON.stringify(records)).not.toContain("renewal");
+  });
+
+  it("stays silent when there is simply no embedder to produce a vector", async () => {
+    const records: CapturedTelemetry[] = [];
+
+    await writeEpisodeWith(undefined, records);
+
+    expect(
+      records.filter((record) => record.name === "tulipfarm.memory.episodes.embedding_failures")
+    ).toEqual([]);
+  });
+
+  it("stays silent when an available embedder genuinely returns no vector", async () => {
+    const records: CapturedTelemetry[] = [];
+
+    await writeEpisodeWith(
+      embedder(async () => ({ embeddings: [], dimension: 0 })),
+      records
+    );
+
+    expect(
+      records.filter((record) => record.name === "tulipfarm.memory.episodes.embedding_failures")
+    ).toEqual([]);
+  });
 });

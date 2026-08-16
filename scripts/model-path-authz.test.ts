@@ -156,11 +156,11 @@ describe("the embedding path is metered, bounded and structurally logged", () =>
   it("decides a re-index from the stored corpus, not only from process memory", () => {
     // The in-memory flag cannot see a dimension change made while the process was down, and that
     // is the case that leaves every stored vector permanently unreachable by vector search.
-    const service = read("packages/knowledge/src/service.ts");
+    const service = read("packages/knowledge/src/service-indexing.ts");
     expect(service).toContain("countStaleDimension");
     // Cleared only after the re-index returned: clearing up front loses the signal on a failure.
     expect(service).toMatch(
-      /await this\.reindexAll\(\);\s*(\/\/[^\n]*\n\s*)*this\.deps\.embeddings\.clearPendingReindex\(\);/
+      /await reindexAll\(deps\);\s*(\/\/[^\n]*\n\s*)*deps\.embeddings\.clearPendingReindex\(\);/
     );
     expect(read("apps/api/src/index.ts")).toContain("boot re-index check failed");
   });

@@ -1,6 +1,6 @@
 import type { Queryable } from "@tulipfarm/storage";
 import type { PendingMemory, PendingMemoryStore } from "./confirm";
-import type { RememberRequest } from "./memory";
+import type { RememberRequest } from "./remember";
 
 /** Pending inferred statements live outside `memory_assertions`; rejects are hard-deleted. */
 export class PgPendingMemoryStore implements PendingMemoryStore {

@@ -5,7 +5,14 @@ import { canonicalHash } from "@tulipfarm/schema";
 import type { ToolApprovalDecision, ToolApprovalPort } from "../ports";
 import type { ApprovalRow, ApprovalsRepo } from "./repo";
 
-/** Durable Tool approvals: intent-keyed rows park the Run; one-use wait tokens resume it. */
+/** Durable Tool approvals: intent-keyed rows park the Run; one-use wait tokens resume it.
+ *
+ * A decision is one-use as well (invariant I-13): `decide` hands back the approval id and the
+ * dispatch that will actually execute spends it through `consume`. Consumption, not lookup, is
+ * the spend point — a parked call leaves with `pending` and spends nothing, so the Turn that
+ * resumes still finds its decision, while a *second* identical call in the same Run finds none
+ * and asks a human again.
+ */
 
 /** The schema every approval signal declares. Identity only — a decision carries no payload. */
 export const APPROVAL_SIGNAL_SCHEMA_REF = "tulipfarm.approval.decision.v1";
@@ -37,7 +44,7 @@ export interface ToolApprovalServiceOptions {
 function decisionFor(row: ApprovalRow): ToolApprovalDecision {
   switch (row.status) {
     case "approved":
-      return { status: "approved" };
+      return { status: "approved", approvalId: row.id };
     case "denied":
       return { status: "denied", reason: "denied by operator" };
     case "timeout":
@@ -73,7 +80,11 @@ export class ToolApprovalService implements ToolApprovalPort {
     args: unknown;
   }): Promise<ToolApprovalDecision> {
     const intentDigest = intentOf(input.runId, input.toolName, input.args);
-    const existing = await this.options.repo.findByIntent(input.runId, intentDigest);
+    const existing = await this.options.repo.findByIntent(
+      input.runId,
+      intentDigest,
+      input.toolCallId
+    );
     if (existing !== null) return decisionFor(existing);
 
     const approvalId = this.newId();
@@ -91,6 +102,14 @@ export class ToolApprovalService implements ToolApprovalPort {
       expiresAt: new Date(this.now().getTime() + this.ttlMs),
     });
     return { status: "pending", approvalId };
+  }
+
+  /**
+   * Spends the one-use decision on behalf of the dispatch about to execute it. `false` means this
+   * call may not run: the row is not an open approval, or another call already spent it.
+   */
+  async consume(input: { approvalId: string; toolCallId: string }): Promise<boolean> {
+    return await this.options.repo.consume(input.approvalId, input.toolCallId, this.now());
   }
 
   /** Parks idempotently; stores a one-use server-only token, while the wait stores its digest. */

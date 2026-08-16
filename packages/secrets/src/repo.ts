@@ -34,6 +34,15 @@ export interface SecretRepo {
   findByKey(key: string): Promise<SecretDoc | null>;
   upsert(key: string, fields: SecretEnvelopeFields): Promise<void>;
   delete(key: string): Promise<void>;
+  /**
+   * Current revision marker for a Secret — `updated_at`, or `null` when the row is gone.
+   *
+   * Narrower than {@link SecretRepo.findByKey} on purpose: it reads no ciphertext, so it can
+   * still answer when the full read fails. `SecretsService` uses it, and only it, to prove a
+   * cached plaintext has not been rotated or deleted by another process before extending that
+   * plaintext past its TTL.
+   */
+  findRevision(key: string): Promise<Date | null>;
   // Keys of rows not yet migrated to a DEK (dek_id IS NULL). Drives the backfill.
   listLegacyKeys(): Promise<string[]>;
 }
@@ -95,6 +104,11 @@ export class PgSecretRepo implements SecretRepo {
 
   async delete(key: string): Promise<void> {
     await this.q.query("DELETE FROM secrets WHERE key = $1", [key]);
+  }
+
+  async findRevision(key: string): Promise<Date | null> {
+    const { rows } = await this.q.query("SELECT updated_at FROM secrets WHERE key = $1", [key]);
+    return rows.length > 0 ? (rows[0].updated_at as Date) : null;
   }
 
   async listLegacyKeys(): Promise<string[]> {

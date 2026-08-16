@@ -87,9 +87,10 @@ const WEB_PRESENTATION_CONTEXT = SURFACES.contextFor(
   `conversation:${CONVERSATION_ID}`
 );
 
-function fakeApprovals(decision: ToolApprovalDecision) {
+function fakeApprovals(decision: ToolApprovalDecision, consumable = true) {
   const decide = vi.fn(async () => decision);
-  return { decide, service: { decide } as unknown as ToolApprovalPort };
+  const consume = vi.fn(async () => consumable);
+  return { decide, consume, service: { decide, consume } as unknown as ToolApprovalPort };
 }
 
 describe("RegistryToolDispatcher", () => {
@@ -175,15 +176,21 @@ describe("RegistryToolDispatcher", () => {
 
   it("runs the call the human already approved, and refuses the one they refused", async () => {
     const approved = vi.fn(async () => ok({ done: true }));
+    const approvals = fakeApprovals({ status: "approved", approvalId: "approval-1" });
     const { dispatcher } = makeDispatcher(
       [toolDef({ name: "wipe", mutating: true, execute: approved })],
       fakeArtifacts({ autonomy: "approval-required" }),
-      fakeApprovals({ status: "approved" }).service
+      approvals.service
     );
     await expect(
       dispatcher.dispatch(AUTHORITY, { callId: "c2", name: "wipe", arguments: { text: "hi" } })
     ).resolves.toEqual({ status: "succeeded", output: { done: true } });
     expect(approved).toHaveBeenCalledTimes(1);
+    // The decision is spent by the dispatch that ran it, keyed to that call.
+    expect(approvals.consume).toHaveBeenCalledWith({
+      approvalId: "approval-1",
+      toolCallId: "c2",
+    });
 
     const refused = vi.fn(async () => ok({}));
     const denied = makeDispatcher(
@@ -199,6 +206,41 @@ describe("RegistryToolDispatcher", () => {
       })
     ).resolves.toEqual({ status: "denied", reason: "denied by operator" });
     expect(refused).not.toHaveBeenCalled();
+  });
+
+  it("refuses a call whose approval another call already spent", async () => {
+    const execute = vi.fn(async () => ok({}));
+    const approvals = fakeApprovals({ status: "approved", approvalId: "approval-1" }, false);
+    const { dispatcher } = makeDispatcher(
+      [toolDef({ name: "wipe", mutating: true, execute })],
+      fakeArtifacts({ autonomy: "approval-required" }),
+      approvals.service
+    );
+
+    await expect(
+      dispatcher.dispatch(AUTHORITY, { callId: "c9", name: "wipe", arguments: { text: "hi" } })
+    ).resolves.toMatchObject({ status: "denied" });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when consumption state cannot be read at all", async () => {
+    const execute = vi.fn(async () => ok({}));
+    const service = {
+      decide: async () => ({ status: "approved", approvalId: "approval-1" }),
+      consume: async () => {
+        throw new Error("approvals database is unreachable");
+      },
+    } as unknown as ToolApprovalPort;
+    const { dispatcher } = makeDispatcher(
+      [toolDef({ name: "wipe", mutating: true, execute })],
+      fakeArtifacts({ autonomy: "approval-required" }),
+      service
+    );
+
+    await expect(
+      dispatcher.dispatch(AUTHORITY, { callId: "c10", name: "wipe", arguments: { text: "hi" } })
+    ).resolves.toMatchObject({ status: "denied" });
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it("asks nobody about a read, or about a Tool that opted out of the gate", async () => {

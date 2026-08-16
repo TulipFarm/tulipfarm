@@ -41,6 +41,15 @@ export function routineWaitId(runId: string, stateKey: string): string {
   return derivedId("routine-wait", runId, stateKey);
 }
 
+/**
+ * Wait id of a State occurrence's `attempt`-th concurrency backoff. Distinct from
+ * {@link routineWaitId} because a State's own wait and its backoff timers must never collide, and
+ * distinct per attempt because a resolved wait row is never reused.
+ */
+export function routineConcurrencyWaitId(runId: string, stateKey: string, attempt: number): string {
+  return derivedId("routine-concurrency-wait", runId, `${stateKey}#${attempt}`);
+}
+
 /** Effect ids derive from Run and occurrence key so effect reservation is replay-safe. */
 export function routineEffectId(runId: string, stateKey: string): string {
   return derivedId("routine-effect", runId, stateKey);
