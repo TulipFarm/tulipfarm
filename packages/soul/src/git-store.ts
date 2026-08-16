@@ -125,6 +125,7 @@ export class SoulGitStore {
     try {
       return (await this.git().revparse(["HEAD"])).trim();
     } catch {
+      // No HEAD yet (an empty repo) resolves to null.
       return null;
     }
   }
@@ -145,6 +146,7 @@ export class SoulGitStore {
       if (!statSync(resolved).isFile()) return null;
       return readFileSync(resolved, "utf8");
     } catch {
+      // A missing or unreadable file resolves to "absent".
       return null;
     }
   }
@@ -197,6 +199,7 @@ export class SoulGitStore {
       if (target !== root && !target.startsWith(`${root}${sep}`)) return null;
       return lexical;
     } catch {
+      // A path that cannot be resolved is treated as outside the soul tree.
       return null;
     }
   }

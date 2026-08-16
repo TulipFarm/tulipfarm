@@ -71,6 +71,7 @@ async function probeReachable(baseUrl: string): Promise<boolean> {
     await fetch(new URL(baseUrl).origin, { signal: controller.signal });
     return true;
   } catch {
+    // An unreachable endpoint means the embeddings probe simply fails.
     return false;
   } finally {
     clearTimeout(timer);

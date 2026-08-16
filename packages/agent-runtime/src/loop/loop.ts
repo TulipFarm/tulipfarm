@@ -649,6 +649,7 @@ function parseJson(text: string): unknown {
   try {
     return JSON.parse(text);
   } catch {
+    // Non-JSON text parses to nothing; the caller falls back.
     return undefined;
   }
 }

@@ -11,7 +11,7 @@ import { INVOCATION_REQUEST_SCHEMAS } from "@tulipfarm/schema";
 import { ChannelRunDeliveryStore, RunStore, WaitStore } from "@tulipfarm/storage";
 import { createSurfaceArtifact } from "@tulipfarm/surface";
 import { ApprovalsRepo, ToolApprovalService } from "@tulipfarm/tool-host";
-import type { FastifyInstance } from "fastify";
+import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app";
 import type { TokenDoc, TokenRepo } from "../auth/api-tokens";
@@ -30,6 +30,7 @@ import { MemorySurfaceActionStore } from "../surfaces/action-store";
 import { MemorySurfaceArtifactStore } from "../surfaces/artifact-store";
 import { makeMigratedPglite } from "../test/pglite";
 import { FakeConversationStore } from "../test/turn-host-fixtures";
+import { type ChannelInternalRouteDeps, slackBlocksForReply } from "./channel-routes";
 
 const TEST_CSRF = "a".repeat(64);
 
@@ -834,5 +835,105 @@ describe("/api/v1/internal/channels", () => {
         await withSecrets.close();
       }
     });
+  });
+});
+
+describe("slackBlocksForReply", () => {
+  const businessId = DEPLOYMENT_BUSINESS_ID;
+
+  const makeLog = () => {
+    const warn = vi.fn();
+    return { log: { warn } as unknown as FastifyBaseLogger, warn };
+  };
+
+  // A 26-Record RecordTable is a valid Artifact that trips the Slack renderer's 25-Record provider
+  // limit at render time — a faithful stand-in for a renderer that throws on otherwise-good content.
+  const slackArtifact = (records: number) =>
+    createSurfaceArtifact({
+      id: "artifact-1",
+      component:
+        records > 25 ? { name: "RecordTable", version: "1.0" } : { name: "Text", version: "1.0" },
+      props:
+        records > 25
+          ? {
+              columns: ["name"],
+              records: Array.from({ length: records }, (_, i) => ({ name: `r-${i}` })),
+            }
+          : { text: "hello" },
+      target: { channel: "slack", surface: "message" },
+      catalogRevision: "rev-1",
+      audience: ["user-1"],
+      classification: "internal",
+    });
+
+  it("reports absent when no Surface store is configured", async () => {
+    const { log, warn } = makeLog();
+    const result = await slackBlocksForReply(
+      {} as ChannelInternalRouteDeps,
+      businessId,
+      "run-1",
+      log
+    );
+    expect(result).toEqual({ outcome: "absent" });
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("reports absent when the Run presented no Slack message Artifact", async () => {
+    const { log, warn } = makeLog();
+    const deps = {
+      surfaceStore: { findByRun: async () => null },
+      runDeliveries: { find: async () => ({ principalId: "user-1", destination: "C-1" }) },
+    } as unknown as ChannelInternalRouteDeps;
+    expect(await slackBlocksForReply(deps, businessId, "run-1", log)).toEqual({
+      outcome: "absent",
+    });
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("reports absent when there is no delivery to render against", async () => {
+    const { log } = makeLog();
+    const deps = {
+      surfaceStore: { findByRun: async () => slackArtifact(1) },
+      runDeliveries: { find: async () => null },
+    } as unknown as ChannelInternalRouteDeps;
+    expect(await slackBlocksForReply(deps, businessId, "run-1", log)).toEqual({
+      outcome: "absent",
+    });
+  });
+
+  it("renders blocks when a valid Artifact is present", async () => {
+    const { log } = makeLog();
+    const deps = {
+      surfaceStore: { findByRun: async () => slackArtifact(1) },
+      runDeliveries: { find: async () => ({ principalId: "user-1", destination: "C-1" }) },
+      surfaceActionStore: { listForArtifact: async () => ({}) },
+    } as unknown as ChannelInternalRouteDeps;
+    const result = await slackBlocksForReply(deps, businessId, "run-1", log);
+    expect(result.outcome).toBe("rendered");
+    if (result.outcome === "rendered") expect(result.blocks.length).toBeGreaterThan(0);
+  });
+
+  it("reports render_failed — never absent — and signals the operator with correlation data", async () => {
+    const artifact = slackArtifact(26);
+    const { log, warn } = makeLog();
+    const deps = {
+      surfaceStore: { findByRun: async () => artifact },
+      runDeliveries: { find: async () => ({ principalId: "user-1", destination: "C-1" }) },
+      surfaceActionStore: { listForArtifact: async () => ({}) },
+    } as unknown as ChannelInternalRouteDeps;
+
+    const result = await slackBlocksForReply(deps, businessId, "run-1", log);
+
+    expect(result).toEqual({ outcome: "render_failed" });
+    expect(warn).toHaveBeenCalledOnce();
+    const [fields, message] = warn.mock.calls[0] as [Record<string, unknown>, string];
+    expect(fields).toMatchObject({
+      runId: "run-1",
+      businessId,
+      artifactId: artifact.id,
+      artifactRevision: artifact.revision,
+    });
+    expect(fields.err).toBeInstanceOf(Error);
+    expect(message).toContain("render failed");
   });
 });

@@ -64,6 +64,7 @@ export function guestGrants(
   try {
     assertGuestActive(guest, sponsor, now);
   } catch {
+    // An inactive or expired guest grants nothing.
     return [];
   }
   return guest.grants;

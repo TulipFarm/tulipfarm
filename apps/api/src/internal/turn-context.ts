@@ -309,6 +309,7 @@ export class ChatTurnContextResolver implements TurnContextResolver {
       );
       return (assertions ?? []).map((a) => ({ subject: a.subject, statement: a.statement }));
     } catch {
+      // Memory recall is best-effort context; a lookup failure must not fail the turn.
       return [];
     }
   }

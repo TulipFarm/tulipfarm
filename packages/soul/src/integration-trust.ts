@@ -69,6 +69,7 @@ function urlIssue(url: string): string | undefined {
     // Placeholders are legal in a path or query, so only the authority is parsed here.
     parsed = new URL(`${url.split(/[/?#]/, 3).slice(0, 3).join("/")}/`);
   } catch {
+    // An unparseable authority is reported as an invalid URL.
     return "is not a valid URL";
   }
   if (!parsed.hostname) return "is not a valid URL";

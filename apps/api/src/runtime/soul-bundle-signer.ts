@@ -50,6 +50,7 @@ async function readExistingKey(
   try {
     return await secrets.get(key);
   } catch {
+    // No key stored yet resolves to undefined; a fresh one is minted.
     return undefined;
   }
 }

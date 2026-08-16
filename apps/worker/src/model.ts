@@ -619,6 +619,7 @@ function parseToolCalls(
   try {
     parsed = JSON.parse(content);
   } catch {
+    // Model output that is not valid JSON yields no tool call.
     return undefined;
   }
   if (
@@ -651,6 +652,7 @@ function parseToolResult(
   try {
     parsed = JSON.parse(content);
   } catch {
+    // Model output that is not valid JSON yields no tool call.
     return undefined;
   }
   if (

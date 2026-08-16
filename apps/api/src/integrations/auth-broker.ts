@@ -298,6 +298,7 @@ async function readJsonBody(response: Response): Promise<Record<string, unknown>
     const parsed: unknown = await response.json();
     return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
   } catch {
+    // A non-JSON provider response is still an answer; treat the body as empty.
     return {};
   }
 }

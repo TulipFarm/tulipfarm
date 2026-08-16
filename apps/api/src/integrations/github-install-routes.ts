@@ -54,6 +54,7 @@ async function readAppField(
   try {
     return await secrets.get(field.key);
   } catch {
+    // No stored credential resolves to "unconfigured"; the caller handles undefined.
     return undefined;
   }
 }

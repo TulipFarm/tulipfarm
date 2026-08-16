@@ -18,6 +18,7 @@ export class SlackBotTokenProvider implements SecretProvider {
       const value = await secrets.get(integrationSecretKey("slack", "SLACK_BOT_TOKEN"));
       return { value };
     } catch {
+      // A missing bot token resolves to "no credential"; the caller handles null.
       return null;
     }
   }

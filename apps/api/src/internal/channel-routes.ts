@@ -64,19 +64,45 @@ export function externalThreadKey(provider: string, message: ChannelMessageBody)
   return `${provider}:${message.channelId}:${message.threadId ?? message.channelId}`;
 }
 
-/** Server-renders last Surface Artifact to Slack Block Kit, or `null` when none can be rendered. */
-async function slackBlocksForReply(
+/**
+ * Outcome of rendering the last Surface Artifact for a Channel reply to Slack Block Kit.
+ *
+ * `absent` and `render_failed` were once both `null`, which is the bug this type fixes: a renderer
+ * throwing looked exactly like "this Run presented no Slack message", so a renderer bug silently
+ * stripped an Artifact's action controls (buttons/selects) from the reply with no operator signal.
+ * They are kept distinct so the reply path can leave `absent` silent and log `render_failed`.
+ */
+export type SlackReplyBlocks =
+  | { readonly outcome: "absent" }
+  | { readonly outcome: "rendered"; readonly blocks: readonly Record<string, unknown>[] }
+  | { readonly outcome: "render_failed" };
+
+/**
+ * Server-renders the last Surface Artifact for this Run to Slack Block Kit.
+ *
+ * Returns `absent` when there is genuinely nothing to render — no Surface store, the Run presented
+ * no Slack `message` Artifact, or there is no delivery to render it against — and `render_failed`
+ * only when an Artifact *did* exist and its renderer threw.
+ *
+ * A render failure still degrades to a text-only reply rather than dropping the reply outright: a
+ * renderer bug must never cost the user their answer. The signal instead goes to the operator as a
+ * `warn` carrying the run, business, Artifact id and revision, and the error — enough to find and
+ * re-render the exact Artifact that failed. Losing the action controls is the accepted cost;
+ * losing the reply is not.
+ */
+export async function slackBlocksForReply(
   deps: ChannelInternalRouteDeps,
   businessId: string,
-  runId: string
-): Promise<readonly Record<string, unknown>[] | null> {
-  if (!deps.surfaceStore) return null;
+  runId: string,
+  log: FastifyBaseLogger
+): Promise<SlackReplyBlocks> {
+  if (!deps.surfaceStore) return { outcome: "absent" };
   const artifact = await deps.surfaceStore.findByRun(runId);
   if (artifact?.target.channel !== "slack" || artifact.target.surface !== "message") {
-    return null;
+    return { outcome: "absent" };
   }
   const delivery = await deps.runDeliveries.find(businessId, runId);
-  if (!delivery) return null;
+  if (!delivery) return { outcome: "absent" };
 
   const handles = deps.surfaceActionStore
     ? await deps.surfaceActionStore.listForArtifact(
@@ -91,9 +117,16 @@ async function slackBlocksForReply(
       principal: delivery.principalId,
       actionHandleFor: (action) => handles[surfaceActionKey(action)],
     });
-    return rendered.blocks as unknown as readonly Record<string, unknown>[];
-  } catch {
-    return null;
+    return {
+      outcome: "rendered",
+      blocks: rendered.blocks as unknown as readonly Record<string, unknown>[],
+    };
+  } catch (err) {
+    log.warn(
+      { err, runId, businessId, artifactId: artifact.id, artifactRevision: artifact.revision },
+      "slack surface render failed; replying with text and no action controls"
+    );
+    return { outcome: "render_failed" };
   }
 }
 
@@ -381,13 +414,13 @@ export function registerChannelInternalRoutes(
 
       const messages = await deps.store.listMessages(businessId, turn.conversationId);
       const answer = messages.find((message) => message.id === completion.messageId);
-      const blocks = await slackBlocksForReply(deps, businessId, runId);
+      const rendered = await slackBlocksForReply(deps, businessId, runId, req.log);
       const agentDisplayName = await agentDisplayNameFor(deps, turn.conversationId);
       return reply.send({
         status: "succeeded",
         text: answer?.content.trim() ?? "",
         ...(agentDisplayName ? { agentDisplayName } : {}),
-        ...(blocks ? { blocks } : {}),
+        ...(rendered.outcome === "rendered" ? { blocks: rendered.blocks } : {}),
       });
     }
   );

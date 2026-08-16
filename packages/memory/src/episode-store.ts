@@ -476,6 +476,7 @@ export class PgMemoryEpisodeStore implements MemoryEpisodeStore {
         model: active === null ? null : `${active.provider}:${active.model}`,
       };
     } catch {
+      // A failed embedding yields no vector; recall degrades rather than the write failing.
       return undefined;
     }
   }

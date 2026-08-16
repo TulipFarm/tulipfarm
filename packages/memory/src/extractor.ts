@@ -57,6 +57,7 @@ function parseCandidates(raw: string): readonly unknown[] {
     const candidates = (parsed as { candidates?: unknown }).candidates;
     return Array.isArray(candidates) ? candidates : [];
   } catch {
+    // Unparseable extractor output means no candidate assertions.
     return [];
   }
 }
@@ -122,6 +123,7 @@ export class LlmMemoryExtractor implements MemoryExtractionPort {
       });
       return candidatesFromResponse(text);
     } catch {
+      // A failed extraction yields no candidates; memory learns nothing here.
       return [];
     }
   }

@@ -55,6 +55,7 @@ async function usable(repo: ApiClientRepo, credential: string): Promise<boolean>
     assertApiClientAuthenticatable(client);
     return true;
   } catch {
+    // A credential that fails its assertion is simply not usable.
     return false;
   }
 }

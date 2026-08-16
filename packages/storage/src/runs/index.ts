@@ -76,6 +76,8 @@ export {
   RunPersistenceError,
   RunStore,
 } from "./run-store";
+export type { StateRetryAttempts } from "./state-retry-store";
+export { RunStateRetryStore, STATE_RETRY_STORAGE_STATEMENTS } from "./state-retry-store";
 export type {
   CreateWaitInput,
   DueWaitDecision,
