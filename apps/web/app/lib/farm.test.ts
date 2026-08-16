@@ -12,7 +12,6 @@ import { listResourceTypes } from "./api";
 import {
   CROPS,
   type CropKind,
-  clearFarmCache,
   countsFor,
   cropFor,
   farmSeason,
@@ -46,7 +45,6 @@ function allEmpty() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  clearFarmCache();
   allEmpty();
 });
 
@@ -258,14 +256,16 @@ describe("fetchFarm", () => {
   });
 });
 
+// Each case forces its first read to start from a cold cache. A test-only reset hook would be an
+// export production never calls, so the cases use the same escape the callers have.
 describe("loadFarm", () => {
   test("shares one round of calls between the page and the sidebar", async () => {
-    await Promise.all([loadFarm(), loadFarm()]);
+    await Promise.all([loadFarm({ force: true }), loadFarm()]);
     expect(mocks.skills).toHaveBeenCalledTimes(1);
   });
 
   test("refetches when forced", async () => {
-    await loadFarm();
+    await loadFarm({ force: true });
     await loadFarm({ force: true });
     expect(mocks.skills).toHaveBeenCalledTimes(2);
   });
@@ -273,7 +273,7 @@ describe("loadFarm", () => {
   test("does not cache a failure, so one blackout does not pin the whole TTL", async () => {
     const boom = new Error("api unreachable");
     for (const mock of Object.values(mocks)) mock.mockRejectedValue(boom);
-    await expect(loadFarm()).rejects.toThrow();
+    await expect(loadFarm({ force: true })).rejects.toThrow();
 
     allEmpty();
     await expect(loadFarm()).resolves.toMatchObject({ total: 0 });

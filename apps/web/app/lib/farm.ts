@@ -322,7 +322,3 @@ export function loadFarm(options?: { force?: boolean }): Promise<FarmState> {
   });
   return value;
 }
-
-export function clearFarmCache(): void {
-  cache = null;
-}
