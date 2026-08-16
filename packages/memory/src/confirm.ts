@@ -1,7 +1,7 @@
 /** Inferred Memory stays pending until owner confirmation; denial/expiry leaves nothing durable. */
 
-import type { MemoryAssertion, MemoryDeps, RememberRequest } from "./memory";
-import { commitAssertion } from "./memory";
+import type { MemoryAssertion, MemoryDeps } from "./memory";
+import { commitAssertion, type RememberRequest } from "./remember";
 import type { MemoryScopeDenialReason, MemoryScopeRequest } from "./scope";
 import { authorizeMemoryScope } from "./scope";
 import {

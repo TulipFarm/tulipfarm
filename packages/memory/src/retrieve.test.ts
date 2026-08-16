@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { InMemoryPendingMemoryStore } from "./confirm";
 import type { MemoryAssertion, MemoryDeps, MemorySettingsView } from "./memory";
-import { InMemoryMemoryStore, rememberMemory } from "./memory";
+import { InMemoryMemoryStore } from "./memory";
+import { rememberMemory } from "./remember";
 import type { MemoryEvidenceAuthorizationPort, MemoryRecallIndex } from "./retrieve";
 import { recallMemory } from "./retrieve";
 

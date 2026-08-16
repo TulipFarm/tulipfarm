@@ -14,5 +14,6 @@ export type {
   ToolDispatchPort,
   ToolDispatchRequest,
   ToolDispatchResult,
-} from "./loop";
+} from "./contract";
 export { AgentLoop } from "./loop";
+export type { AgentLoopResumeState } from "./resume";

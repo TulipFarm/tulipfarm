@@ -61,6 +61,7 @@ Production refuses to boot when `ADMIN_EMAIL` and `ADMIN_PASSWORD` are set witho
 | `BOT_GIT_EMAIL` | No | `tulipfarmhq@gmail.com` | Git author email for Soul commits. |
 | `GIT_TERMINAL_PROMPT` | No | Forced to `0` by `@tulipfarm/soul` | Disables interactive git credential prompts. |
 | `BUSINESS_ID` | No | `tulipfarm-local` | Deployment business id used in constants and per-business Soul paths. |
+| `SOUL_BUNDLE_RETENTION_DAYS` | No | `30` (floor `7`) | How long an unreferenced published execution bundle is kept before the nightly retention sweep may delete it. Bundles that are active, previously activated, pinned by a Run, cited by an audit event, or still publishing are never deleted at any age. |
 
 ## Workers and service credentials
 

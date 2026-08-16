@@ -37,6 +37,7 @@ export {
   defineTool,
   publishLocalToolContract,
   RESOURCE_NAME_PATTERN,
+  safeToolTargetRef,
   ToolDefinitionError,
   toolContractSpecOf,
 } from "./define";
@@ -106,3 +107,5 @@ export type {
 export { SandboxToolAdapter } from "./sandbox-adapter";
 export type { ToolCatalogEntry } from "./search";
 export { searchToolContracts } from "./search";
+export type { ToolTargetDerivationErrorCode } from "./targets";
+export { deriveContractTargets, ToolTargetDerivationError } from "./targets";

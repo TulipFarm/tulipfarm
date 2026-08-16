@@ -227,6 +227,41 @@ describe("GitHubAdapter reads", () => {
     expect(http.calls[0]?.query?.q).toBe("repo:tulip/farm is:issue state:open");
   });
 
+  it("shapes a pull request search through the same /search/issues result mapping", async () => {
+    http.route("GET", "/search/issues", {
+      status: 200,
+      headers: {},
+      body: {
+        total_count: 1,
+        items: [
+          {
+            number: 7,
+            title: "Fix the saver",
+            state: "open",
+            html_url: "https://github.com/tulip/farm/pull/7",
+            repository_url: "https://api.github.com/repos/tulip/farm",
+          },
+        ],
+      },
+    });
+    const output = await dispatch(
+      intent(GITHUB_TOOL_IDS.pullRequestSearch, { repository: "tulip/farm", query: "saver" })
+    );
+    expect(output).toEqual({
+      totalCount: 1,
+      items: [
+        {
+          repository: "tulip/farm",
+          number: 7,
+          title: "Fix the saver",
+          state: "open",
+          htmlUrl: "https://github.com/tulip/farm/pull/7",
+        },
+      ],
+    });
+    expect(http.calls[0]?.query?.q).toContain("is:pr");
+  });
+
   it("ORs an explicit repositories list into one search call", async () => {
     resolved = context({
       installation: {

@@ -4,13 +4,20 @@ import {
   DEFAULT_GUARDRAILS,
   type GuardrailsService,
   type ModelRequirementsPolicy,
+  narrowDelegatedTurn,
   type RecalledMemory,
 } from "@tulipfarm/agent-runtime";
 import type { KnowledgeService } from "@tulipfarm/knowledge";
 import type { KvService } from "@tulipfarm/kv";
 import type { MemoryRecallService, MemoryService } from "@tulipfarm/memory";
-import { MAX_HISTORY_TOKENS, MAX_TOOL_STEPS } from "@tulipfarm/memory";
-import type { ArtifactService } from "@tulipfarm/run-kernel";
+import {
+  MAX_HISTORY_TOKENS,
+  MAX_TOOL_STEPS,
+  MEMORY_METRICS,
+  recordMemoryCounter,
+} from "@tulipfarm/memory";
+import type { TelemetryPort } from "@tulipfarm/observability";
+import type { ArtifactService, ChildLinkAncestry } from "@tulipfarm/run-kernel";
 import {
   chatRequestArtifactId,
   INVOKE_STATE_KEY,
@@ -132,6 +139,8 @@ export interface ChatTurnContextResolverOptions {
   readonly bundledSkills?: ReadonlyMap<string, BundledSkill>;
   readonly disabledBundledSkills?: ReadonlySet<string>;
   readonly channelDeliveries?: ChannelDeliveryReader;
+  /** Delegation grants; a failed read refuses rather than falling back to the Agent's config. */
+  readonly childLinks?: ChildLinkAncestry;
   /** Live GitHub-install check backing per-turn tool visibility — absent only where a deployment
    * never wired the GitHub tool family at all. */
   readonly githubStatus?: { readonly integrations: IntegrationStore; readonly businessId: string };
@@ -142,8 +151,16 @@ export interface ChatTurnContextResolverOptions {
    * deployment wires it to put `platform.model` behind the one decision function.
    */
   readonly modelGate?: ModelSelectorGate;
+  /**
+   * Where a thinned-Context signal is emitted. Absent leaves the degradation silent, which is what
+   * every turn did before this existed; a deployment wires it to measure the rate.
+   */
+  readonly telemetry?: TelemetryPort;
   now?(): Date;
 }
+
+/** Which Context probe fell back to an absence value. A bounded enum, never free text. */
+const CONTEXT_PROBE_RECALLED_MEMORY = "recalled_memory";
 
 export class ChatTurnContextResolver implements TurnContextResolver {
   private readonly now: () => Date;
@@ -234,6 +251,16 @@ export class ChatTurnContextResolver implements TurnContextResolver {
         .map((message) => ({ role: message.role, content: message.content })),
     ];
 
+    // A delegated Run may hold less than its Agent config offers; the link row knows how much.
+    const delegated = await narrowDelegatedTurn(this.options.childLinks, authority, {
+      tools,
+      limits: {
+        maxIterations: MAX_TOOL_STEPS,
+        maxToolCalls: MAX_TOOL_STEPS,
+        maxRepairAttempts: MAX_REPAIR_ATTEMPTS,
+      },
+    });
+
     const skillToolScopes = buildSkillToolScopes(
       this.options.soulLoader,
       this.options.bundledSkills
@@ -249,12 +276,8 @@ export class ChatTurnContextResolver implements TurnContextResolver {
       guardrailDigest,
       guardrailPolicy,
       messages,
-      tools,
-      limits: {
-        maxIterations: MAX_TOOL_STEPS,
-        maxToolCalls: MAX_TOOL_STEPS,
-        maxRepairAttempts: MAX_REPAIR_ATTEMPTS,
-      },
+      tools: delegated.tools,
+      limits: delegated.limits,
       compacted: dropped.size > 0,
       ...(skillToolScopes === undefined ? {} : { skillToolScopes }),
     };
@@ -296,21 +319,46 @@ export class ChatTurnContextResolver implements TurnContextResolver {
    * always-on `<memory>` block and the `recall_memory` tool both still work without it.
    */
   private async recallFor(
-    userId: string,
+    authority: TurnAuthority,
     query: string,
     agentId: string
   ): Promise<readonly RecalledMemory[]> {
     try {
       const assertions = await this.options.memoryRecall?.recall(
-        userId,
+        authority.subject.id,
         query,
         RECALLED_MEMORY_LIMIT,
         agentId
       );
       return (assertions ?? []).map((a) => ({ subject: a.subject, statement: a.statement }));
     } catch {
-      // Memory recall is best-effort context; a lookup failure must not fail the turn.
+      // Memory recall is best-effort context; a lookup failure must not fail the turn. The signal
+      // below is what tells this apart from a genuinely empty recall, which returns above.
+      this.signalThinnedContext(authority, CONTEXT_PROBE_RECALLED_MEMORY);
       return [];
+    }
+  }
+
+  /**
+   * Reports that this turn was assembled with thinner Context than it should have had.
+   *
+   * The counter carries only the probe, because Memory telemetry labels are bounded enums; the
+   * correlation an operator needs to find the turn goes on the log record, which has run and
+   * conversation fields for exactly that. Neither carries recalled content.
+   */
+  private signalThinnedContext(authority: TurnAuthority, probe: string): void {
+    const telemetry = this.options.telemetry;
+    if (telemetry === undefined) return;
+    recordMemoryCounter(telemetry, MEMORY_METRICS.contextDegradations, 1, { probe });
+    try {
+      telemetry.log("warn", "agent context thinned: a context probe failed", {
+        probe,
+        business_id: authority.businessId,
+        run_id: authority.runId,
+        conversation_id: authority.turn.conversationId,
+      });
+    } catch {
+      // Telemetry must never affect the turn it is describing.
     }
   }
 
@@ -342,7 +390,7 @@ export class ChatTurnContextResolver implements TurnContextResolver {
       authority.subject.kind === "user" &&
       recallQuery !== undefined &&
       recallQuery.length > 0
-        ? await this.recallFor(authority.subject.id, recallQuery, agent.name)
+        ? await this.recallFor(authority, recallQuery, agent.name)
         : [];
     const governancePages = knowledge ? await knowledge.governancePages() : [];
     const manifest = soulLoader?.manifest;

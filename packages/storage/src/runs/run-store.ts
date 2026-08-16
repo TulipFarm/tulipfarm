@@ -1,4 +1,54 @@
 import type { TransactionPort } from "../ports";
+import {
+  type AppendAttemptInput,
+  type AppendAttemptResult,
+  appendAttemptRow,
+  countStateAttemptRows,
+} from "./attempt-store";
+import {
+  insertLineageRow,
+  listLineageRows,
+  type RunLineage,
+  type RunLineageRelation,
+} from "./lineage-store";
+import {
+  claimNextQueuedRunRows,
+  heartbeatRun,
+  reclaimExpiredRunRows,
+  requeueWaitingRunRow,
+} from "./run-lease-store";
+import { RunPersistenceError } from "./run-persistence-error";
+import { persistedRun, type RunRow } from "./run-row";
+import {
+  type EnsureStateInput,
+  type EnsureStateResult,
+  ensureStateRow,
+  findStateRow,
+  insertStateRow,
+  listStateRows,
+  type PersistedState,
+  type StartStateInput,
+  type StateTransitionInput,
+  transitionStateRow,
+} from "./state-store";
+
+export type {
+  AppendAttemptInput,
+  AppendAttemptResult,
+  AttemptEvent,
+  AttemptEvidence,
+} from "./attempt-store";
+export type { RunLineage, RunLineageRelation } from "./lineage-store";
+export type { RunPersistenceErrorCode } from "./run-persistence-error";
+export { RunPersistenceError } from "./run-persistence-error";
+export type {
+  EnsureStateInput,
+  EnsureStateResult,
+  PersistedState,
+  PersistedStateStatus,
+  StartStateInput,
+  StateTransitionInput,
+} from "./state-store";
 
 export type PersistedRunStatus =
   | "queued"
@@ -10,19 +60,6 @@ export type PersistedRunStatus =
   | "cancelling"
   | "cancelled"
   | "attention_required"
-  | "needs_reconciliation";
-
-export type PersistedStateStatus =
-  | "pending"
-  | "ready"
-  | "claimed"
-  | "running"
-  | "waiting"
-  | "succeeded"
-  | "failed"
-  | "skipped"
-  | "cancelling"
-  | "cancelled"
   | "needs_reconciliation";
 
 export interface RunBundle {
@@ -48,25 +85,6 @@ export interface RunBounds {
   readonly attempts: number;
   readonly sideEffects: number;
 }
-
-export interface StartStateInput {
-  readonly key: string;
-  readonly definitionRef: string;
-  readonly resolvedInput: Record<string, unknown>;
-}
-
-export interface EnsureStateInput extends StartStateInput {
-  readonly businessId: string;
-  readonly runId: string;
-  readonly createdAt: string;
-}
-
-export interface EnsureStateResult {
-  readonly outcome: "inserted" | "existing";
-  readonly state: PersistedState;
-}
-
-export type RunLineageRelation = "child" | "replay";
 
 export interface StartRunInput {
   readonly id: string;
@@ -101,21 +119,6 @@ export interface PersistedRun {
   readonly leaseExpiresAt: string | null;
 }
 
-export interface PersistedState {
-  readonly businessId: string;
-  readonly runId: string;
-  readonly key: string;
-  readonly definitionRef: string;
-  readonly resolvedInput: Record<string, unknown>;
-  readonly status: PersistedStateStatus;
-  readonly version: number;
-  readonly createdAt: string;
-  readonly startedAt: string | null;
-  readonly finishedAt: string | null;
-  readonly resultArtifactId: string | null;
-  readonly errorEvidenceRef: string | null;
-}
-
 export interface RunTransitionInput {
   readonly expectedVersion: number;
   readonly expectedStatus: PersistedRunStatus;
@@ -140,61 +143,6 @@ export interface ClaimNextQueuedInput {
   readonly limit: number;
 }
 
-export interface StateTransitionInput {
-  readonly expectedVersion: number;
-  readonly expectedStatus: PersistedStateStatus;
-  readonly status: PersistedStateStatus;
-  readonly startedAt?: string;
-  readonly finishedAt?: string;
-  readonly resultArtifactId?: string;
-  readonly errorEvidenceRef?: string;
-}
-
-export type AttemptEvent =
-  | "claimed"
-  | "started"
-  | "waiting"
-  | "succeeded"
-  | "failed"
-  | "cancelled"
-  | "lease_expired"
-  | "reconciliation_required";
-
-/** Opaque evidence references only; protected payloads and Secret values are not accepted. */
-export interface AttemptEvidence {
-  readonly agentId?: string;
-  readonly modelProfileId?: string;
-  readonly toolIntentId?: string;
-  readonly auditEventId?: string;
-  readonly resultArtifactId?: string;
-  readonly errorEvidenceRef?: string;
-}
-
-export interface AppendAttemptInput {
-  readonly id: string;
-  readonly businessId: string;
-  readonly runId: string;
-  readonly stateKey: string;
-  readonly attempt: number;
-  readonly sequence: number;
-  readonly event: AttemptEvent;
-  readonly eventDigest: string;
-  readonly occurredAt: string;
-  readonly evidence: AttemptEvidence;
-}
-
-export interface AppendAttemptResult {
-  readonly outcome: "appended" | "duplicate";
-}
-
-export interface RunLineage {
-  readonly businessId: string;
-  readonly sourceRunId: string;
-  readonly targetRunId: string;
-  readonly relation: RunLineageRelation;
-  readonly createdAt: string;
-}
-
 export interface ListRunsInput {
   readonly businessId: string;
   readonly limit: number;
@@ -208,16 +156,6 @@ export interface RunPage {
 }
 
 export const MAX_RUN_PAGE_SIZE = 100;
-
-export type RunPersistenceErrorCode = "attempt_conflict" | "invalid_cursor" | "state_conflict";
-
-export class RunPersistenceError extends Error {
-  readonly name = "RunPersistenceError";
-
-  constructor(readonly code: RunPersistenceErrorCode) {
-    super(code);
-  }
-}
 
 const RUN_STATUS_SQL =
   "'queued', 'claimed', 'running', 'waiting', 'succeeded', 'failed', " +
@@ -385,96 +323,6 @@ export const RUN_STORAGE_STATEMENTS: readonly string[] = [
   ...RUN_BROWSE_STORAGE_STATEMENTS,
 ];
 
-interface RunRow {
-  id: string;
-  business_id: string;
-  source: string;
-  bundle: RunBundle;
-  identity: RunIdentity;
-  bounds: RunBounds;
-  status: PersistedRunStatus;
-  version: number;
-  created_at: string | Date;
-  started_at: string | Date | null;
-  finished_at: string | Date | null;
-  result_artifact_id: string | null;
-  error_evidence_ref: string | null;
-  lease_owner: string | null;
-  lease_expires_at: string | Date | null;
-}
-
-interface StateRow {
-  business_id: string;
-  run_id: string;
-  state_key: string;
-  definition_ref: string;
-  resolved_input: Record<string, unknown>;
-  status: PersistedStateStatus;
-  version: number;
-  created_at: string | Date;
-  started_at: string | Date | null;
-  finished_at: string | Date | null;
-  result_artifact_id: string | null;
-  error_evidence_ref: string | null;
-}
-
-interface AttemptRow {
-  event_digest: string;
-}
-
-interface LineageRow {
-  business_id: string;
-  source_run_id: string;
-  target_run_id: string;
-  relation: RunLineageRelation;
-  created_at: string | Date;
-}
-
-function timestamp(value: string | Date): string {
-  return value instanceof Date ? value.toISOString() : value;
-}
-
-function optionalTimestamp(value: string | Date | null): string | null {
-  return value === null ? null : timestamp(value);
-}
-
-function persistedRun(row: RunRow): PersistedRun {
-  return {
-    id: row.id,
-    businessId: row.business_id,
-    source: row.source,
-    bundle: row.bundle,
-    identity: row.identity,
-    bounds: row.bounds,
-    status: row.status,
-    version: row.version,
-    createdAt: timestamp(row.created_at),
-    startedAt: optionalTimestamp(row.started_at),
-    finishedAt: optionalTimestamp(row.finished_at),
-    resultArtifactId: row.result_artifact_id,
-    errorEvidenceRef: row.error_evidence_ref,
-    leaseOwner: row.lease_owner,
-    leaseExpiresAt: optionalTimestamp(row.lease_expires_at),
-  };
-}
-
-function persistedState(row: StateRow): PersistedState {
-  return {
-    businessId: row.business_id,
-    runId: row.run_id,
-    key: row.state_key,
-    definitionRef: row.definition_ref,
-    resolvedInput: row.resolved_input,
-    status: row.status,
-    version: row.version,
-    createdAt: timestamp(row.created_at),
-    startedAt: optionalTimestamp(row.started_at),
-    finishedAt: optionalTimestamp(row.finished_at),
-    resultArtifactId: row.result_artifact_id,
-    errorEvidenceRef: row.error_evidence_ref,
-  };
-}
-
 interface RunCursor {
   readonly createdAt: string;
   readonly id: string;
@@ -500,12 +348,10 @@ function decodeRunCursor(decoded: string | undefined): RunCursor | null {
   return { createdAt, id };
 }
 
-const RUN_COLUMNS = `id, business_id, source, bundle, identity, bounds, status, version, created_at,
-  started_at, finished_at, result_artifact_id, error_evidence_ref, lease_owner, lease_expires_at`;
-const STATE_COLUMNS = `business_id, run_id, state_key, definition_ref, resolved_input, status,
-  version, created_at, started_at, finished_at, result_artifact_id, error_evidence_ref`;
-
 /** PostgreSQL persistence for business-scoped Runs, States, attempts, and lineage. */
+export const RUN_COLUMNS = `id, business_id, source, bundle, identity, bounds, status, version, created_at,
+  started_at, finished_at, result_artifact_id, error_evidence_ref, lease_owner, lease_expires_at`;
+
 export class RunStore {
   constructor(private readonly transactions: TransactionPort) {}
 
@@ -529,27 +375,17 @@ export class RunStore {
       if (!run) throw new Error("run_insert_without_row");
 
       for (const state of input.states) {
-        await transaction.query(
-          `INSERT INTO run_states (
-             business_id, run_id, state_key, definition_ref, resolved_input, created_at
-           ) VALUES ($1, $2, $3, $4, $5::jsonb, $6::timestamptz)`,
-          [
-            input.businessId,
-            input.id,
-            state.key,
-            state.definitionRef,
-            JSON.stringify(state.resolvedInput),
-            input.createdAt,
-          ]
-        );
+        await insertStateRow(transaction, input.businessId, input.id, state, input.createdAt);
       }
 
       if (input.parentRunId !== undefined) {
-        await transaction.query(
-          `INSERT INTO run_lineage (
-             business_id, source_run_id, target_run_id, relation, created_at
-           ) VALUES ($1, $2, $3, $4, $5::timestamptz)`,
-          [input.businessId, input.parentRunId, input.id, input.lineage ?? "child", input.createdAt]
+        await insertLineageRow(
+          transaction,
+          input.businessId,
+          input.parentRunId,
+          input.id,
+          input.lineage ?? "child",
+          input.createdAt
         );
       }
 
@@ -570,45 +406,7 @@ export class RunStore {
 
   /** Idempotent later-State insert; first schedule timestamp and resolved input win. */
   async ensureState(input: EnsureStateInput): Promise<EnsureStateResult> {
-    return this.transactions.withTransaction(async (transaction) => {
-      const inserted = await transaction.query<StateRow>(
-        `INSERT INTO run_states (
-           business_id, run_id, state_key, definition_ref, resolved_input, created_at
-         ) VALUES ($1, $2, $3, $4, $5::jsonb, $6::timestamptz)
-         ON CONFLICT (business_id, run_id, state_key) DO NOTHING
-         RETURNING ${STATE_COLUMNS}`,
-        [
-          input.businessId,
-          input.runId,
-          input.key,
-          input.definitionRef,
-          JSON.stringify(input.resolvedInput),
-          input.createdAt,
-        ]
-      );
-      const created = inserted.rows[0];
-      if (created) return { outcome: "inserted", state: persistedState(created) };
-
-      const existing = await transaction.query<StateRow>(
-        `SELECT ${STATE_COLUMNS}
-           FROM run_states
-          WHERE business_id = $1
-            AND run_id = $2
-            AND state_key = $3
-            AND definition_ref = $4
-            AND resolved_input = $5::jsonb`,
-        [
-          input.businessId,
-          input.runId,
-          input.key,
-          input.definitionRef,
-          JSON.stringify(input.resolvedInput),
-        ]
-      );
-      const state = existing.rows[0];
-      if (!state) throw new RunPersistenceError("state_conflict");
-      return { outcome: "existing", state: persistedState(state) };
-    });
+    return this.transactions.withTransaction((transaction) => ensureStateRow(transaction, input));
   }
 
   /** Keyset-paged newest Runs; offsets would skip/repeat under live inserts. */
@@ -635,16 +433,9 @@ export class RunStore {
   }
 
   async listStates(businessId: string, runId: string): Promise<readonly PersistedState[]> {
-    return this.transactions.withTransaction(async (transaction) => {
-      const result = await transaction.query<StateRow>(
-        `SELECT ${STATE_COLUMNS}
-           FROM run_states
-          WHERE business_id = $1 AND run_id = $2
-          ORDER BY state_key`,
-        [businessId, runId]
-      );
-      return result.rows.map(persistedState);
-    });
+    return this.transactions.withTransaction((transaction) =>
+      listStateRows(transaction, businessId, runId)
+    );
   }
 
   async findState(
@@ -652,16 +443,9 @@ export class RunStore {
     runId: string,
     stateKey: string
   ): Promise<PersistedState | null> {
-    return this.transactions.withTransaction(async (transaction) => {
-      const result = await transaction.query<StateRow>(
-        `SELECT ${STATE_COLUMNS}
-           FROM run_states
-          WHERE business_id = $1 AND run_id = $2 AND state_key = $3`,
-        [businessId, runId, stateKey]
-      );
-      const row = result.rows[0];
-      return row ? persistedState(row) : null;
-    });
+    return this.transactions.withTransaction((transaction) =>
+      findStateRow(transaction, businessId, runId, stateKey)
+    );
   }
 
   async transitionRun(
@@ -710,21 +494,9 @@ export class RunStore {
     owner: string,
     heartbeat: HeartbeatInput
   ): Promise<boolean> {
-    return this.transactions.withTransaction(async (transaction) => {
-      const result = await transaction.query<{ id: string }>(
-        `UPDATE runs
-            SET version = version + 1,
-                lease_expires_at = $5::timestamptz
-          WHERE business_id = $1
-            AND id = $2
-            AND version = $3
-            AND lease_owner = $4
-            AND status IN ('claimed', 'running')
-          RETURNING id`,
-        [businessId, runId, heartbeat.expectedVersion, owner, heartbeat.leaseExpiresAt]
-      );
-      return result.rows.length === 1;
-    });
+    return this.transactions.withTransaction((transaction) =>
+      heartbeatRun(transaction, businessId, runId, owner, heartbeat)
+    );
   }
 
   /** Requeues Runs whose worker lease expired so another worker can claim them. */
@@ -733,33 +505,9 @@ export class RunStore {
     now: string,
     limit: number
   ): Promise<readonly PersistedRun[]> {
-    return this.transactions.withTransaction(async (transaction) => {
-      const result = await transaction.query<RunRow>(
-        `WITH candidates AS (
-           SELECT id
-             FROM runs
-            WHERE business_id = $1
-              AND status IN ('claimed', 'running')
-              AND lease_expires_at <= $2::timestamptz
-            ORDER BY lease_expires_at
-            FOR UPDATE SKIP LOCKED
-            LIMIT $3
-         )
-         UPDATE runs
-            SET status = 'queued',
-                version = version + 1,
-                lease_owner = NULL,
-                lease_expires_at = NULL
-           FROM candidates
-          WHERE runs.id = candidates.id
-         RETURNING runs.id, runs.business_id, runs.source, runs.bundle, runs.identity, runs.bounds,
-                   runs.status, runs.version, runs.created_at, runs.started_at, runs.finished_at,
-                   runs.result_artifact_id, runs.error_evidence_ref, runs.lease_owner,
-                   runs.lease_expires_at`,
-        [businessId, now, Math.max(0, limit)]
-      );
-      return result.rows.map(persistedRun);
-    });
+    return this.transactions.withTransaction((transaction) =>
+      reclaimExpiredRunRows(transaction, businessId, now, limit)
+    );
   }
 
   /** Claims a batch of queued Runs with an owned, timed lease so a worker can start them. */
@@ -768,35 +516,9 @@ export class RunStore {
     owner: string,
     input: ClaimNextQueuedInput
   ): Promise<readonly PersistedRun[]> {
-    return this.transactions.withTransaction(async (transaction) => {
-      const leaseExpiresAt = new Date(
-        new Date(input.now).getTime() + input.leaseDurationMs
-      ).toISOString();
-      const result = await transaction.query<RunRow>(
-        `WITH candidates AS (
-           SELECT id
-             FROM runs
-            WHERE business_id = $1
-              AND status = 'queued'
-            ORDER BY created_at
-            FOR UPDATE SKIP LOCKED
-            LIMIT $4
-         )
-         UPDATE runs
-            SET status = 'claimed',
-                version = version + 1,
-                lease_owner = $2,
-                lease_expires_at = $3::timestamptz
-           FROM candidates
-          WHERE runs.id = candidates.id
-         RETURNING runs.id, runs.business_id, runs.source, runs.bundle, runs.identity, runs.bounds,
-                   runs.status, runs.version, runs.created_at, runs.started_at, runs.finished_at,
-                   runs.result_artifact_id, runs.error_evidence_ref, runs.lease_owner,
-                   runs.lease_expires_at`,
-        [businessId, owner, leaseExpiresAt, Math.max(0, input.limit)]
-      );
-      return result.rows.map(persistedRun);
-    });
+    return this.transactions.withTransaction((transaction) =>
+      claimNextQueuedRunRows(transaction, businessId, owner, input)
+    );
   }
 
   /**
@@ -804,19 +526,9 @@ export class RunStore {
    * still in `waiting` moves, so a duplicate resume never requeues the same Run twice.
    */
   async requeueWaitingRun(businessId: string, runId: string): Promise<boolean> {
-    return this.transactions.withTransaction(async (transaction) => {
-      const result = await transaction.query<{ id: string }>(
-        `UPDATE runs
-            SET status = 'queued',
-                version = version + 1
-          WHERE business_id = $1
-            AND id = $2
-            AND status = 'waiting'
-          RETURNING id`,
-        [businessId, runId]
-      );
-      return result.rows.length === 1;
-    });
+    return this.transactions.withTransaction((transaction) =>
+      requeueWaitingRunRow(transaction, businessId, runId)
+    );
   }
 
   async transitionState(
@@ -825,77 +537,13 @@ export class RunStore {
     stateKey: string,
     transition: StateTransitionInput
   ): Promise<boolean> {
-    return this.transactions.withTransaction(async (transaction) => {
-      const result = await transaction.query<{ state_key: string }>(
-        `UPDATE run_states
-            SET status = $6,
-                version = version + 1,
-                started_at = COALESCE($7::timestamptz, started_at),
-                finished_at = COALESCE($8::timestamptz, finished_at),
-                result_artifact_id = COALESCE($9, result_artifact_id),
-                error_evidence_ref = COALESCE($10, error_evidence_ref)
-          WHERE business_id = $1
-            AND run_id = $2
-            AND state_key = $3
-            AND version = $4
-            AND status = $5
-          RETURNING state_key`,
-        [
-          businessId,
-          runId,
-          stateKey,
-          transition.expectedVersion,
-          transition.expectedStatus,
-          transition.status,
-          transition.startedAt ?? null,
-          transition.finishedAt ?? null,
-          transition.resultArtifactId ?? null,
-          transition.errorEvidenceRef ?? null,
-        ]
-      );
-      return result.rows.length === 1;
-    });
+    return this.transactions.withTransaction((transaction) =>
+      transitionStateRow(transaction, businessId, runId, stateKey, transition)
+    );
   }
 
   async appendAttempt(input: AppendAttemptInput): Promise<AppendAttemptResult> {
-    return this.transactions.withTransaction(async (transaction) => {
-      const inserted = await transaction.query<{ id: string }>(
-        `INSERT INTO state_attempts (
-           id, business_id, run_id, state_key, attempt, sequence, event,
-           event_digest, occurred_at, evidence
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::timestamptz, $10::jsonb)
-         ON CONFLICT (business_id, run_id, state_key, attempt, sequence) DO NOTHING
-         RETURNING id`,
-        [
-          input.id,
-          input.businessId,
-          input.runId,
-          input.stateKey,
-          input.attempt,
-          input.sequence,
-          input.event,
-          input.eventDigest,
-          input.occurredAt,
-          JSON.stringify(input.evidence),
-        ]
-      );
-      if (inserted.rows.length === 1) return { outcome: "appended" };
-
-      const existing = await transaction.query<AttemptRow>(
-        `SELECT event_digest
-           FROM state_attempts
-          WHERE business_id = $1
-            AND run_id = $2
-            AND state_key = $3
-            AND attempt = $4
-            AND sequence = $5`,
-        [input.businessId, input.runId, input.stateKey, input.attempt, input.sequence]
-      );
-      if (existing.rows[0]?.event_digest !== input.eventDigest) {
-        throw new RunPersistenceError("attempt_conflict");
-      }
-      return { outcome: "duplicate" };
-    });
+    return this.transactions.withTransaction((transaction) => appendAttemptRow(transaction, input));
   }
 
   /** Highest attempt number recorded per State key, for Run inspector read models. */
@@ -903,34 +551,14 @@ export class RunStore {
     businessId: string,
     runId: string
   ): Promise<ReadonlyMap<string, number>> {
-    return this.transactions.withTransaction(async (transaction) => {
-      const result = await transaction.query<{ state_key: string; attempts: string | number }>(
-        `SELECT state_key, MAX(attempt) AS attempts
-           FROM state_attempts
-          WHERE business_id = $1 AND run_id = $2
-          GROUP BY state_key`,
-        [businessId, runId]
-      );
-      return new Map(result.rows.map((row) => [row.state_key, Number(row.attempts)]));
-    });
+    return this.transactions.withTransaction((transaction) =>
+      countStateAttemptRows(transaction, businessId, runId)
+    );
   }
 
   async listLineage(businessId: string, targetRunId: string): Promise<readonly RunLineage[]> {
-    return this.transactions.withTransaction(async (transaction) => {
-      const result = await transaction.query<LineageRow>(
-        `SELECT business_id, source_run_id, target_run_id, relation, created_at
-           FROM run_lineage
-          WHERE business_id = $1 AND target_run_id = $2
-          ORDER BY created_at, source_run_id`,
-        [businessId, targetRunId]
-      );
-      return result.rows.map((row) => ({
-        businessId: row.business_id,
-        sourceRunId: row.source_run_id,
-        targetRunId: row.target_run_id,
-        relation: row.relation,
-        createdAt: timestamp(row.created_at),
-      }));
-    });
+    return this.transactions.withTransaction((transaction) =>
+      listLineageRows(transaction, businessId, targetRunId)
+    );
   }
 }

@@ -39,6 +39,9 @@ class FakeRepo implements SecretRepo {
   async listLegacyKeys(): Promise<string[]> {
     return [...this.docs.values()].filter((d) => d.dekId === null).map((d) => d.key);
   }
+  async findRevision(key: string): Promise<Date | null> {
+    return this.docs.get(key)?.updatedAt ?? null;
+  }
 
   seedLegacy(key: string, plaintext: string, envKey: Buffer): void {
     this.docs.set(key, {

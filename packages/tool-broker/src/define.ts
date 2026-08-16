@@ -200,6 +200,17 @@ function safeTargetRef(tool: string, ref: ToolTargetRef): ToolTargetRef | undefi
   };
 }
 
+/**
+ * The same target grammar a code-defined Tool's `authorization.targets` is held to, for callers
+ * that derive a ref from a declaration rather than a function (see `targets.ts`).
+ *
+ * @returns `undefined` when the id names nothing usable; throws on a ref that abuses the grammar.
+ * @throws {ToolDefinitionError} on a reserved id, or a malformed type or domain.
+ */
+export function safeToolTargetRef(tool: string, ref: ToolTargetRef): ToolTargetRef | undefined {
+  return safeTargetRef(tool, ref);
+}
+
 export function defineTool<Ctx, Result>(
   input: DefineToolInput<Ctx, Result>
 ): ToolDefinition<Ctx, Result> {

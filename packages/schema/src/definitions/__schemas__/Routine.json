@@ -312,29 +312,6 @@
                     "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
                     "type": "string"
                   },
-                  "observability": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "captureInputs": {
-                        "type": "boolean"
-                      },
-                      "captureOutputs": {
-                        "type": "boolean"
-                      },
-                      "level": {
-                        "enum": [
-                          "minimal",
-                          "standard",
-                          "detailed"
-                        ],
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "level"
-                    ],
-                    "type": "object"
-                  },
                   "onError": {
                     "items": {
                       "additionalProperties": false,
@@ -390,20 +367,6 @@
                     },
                     "type": "object"
                   },
-                  "retention": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "evidenceDays": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "resultDays": {
-                        "minimum": 1,
-                        "type": "integer"
-                      }
-                    },
-                    "type": "object"
-                  },
                   "retry": {
                     "additionalProperties": false,
                     "properties": {
@@ -433,10 +396,6 @@
                   },
                   "type": {
                     "const": "agent"
-                  },
-                  "wallClockMs": {
-                    "minimum": 1,
-                    "type": "integer"
                   }
                 },
                 "required": [
@@ -550,29 +509,6 @@
                     "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
                     "type": "string"
                   },
-                  "observability": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "captureInputs": {
-                        "type": "boolean"
-                      },
-                      "captureOutputs": {
-                        "type": "boolean"
-                      },
-                      "level": {
-                        "enum": [
-                          "minimal",
-                          "standard",
-                          "detailed"
-                        ],
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "level"
-                    ],
-                    "type": "object"
-                  },
                   "onError": {
                     "items": {
                       "additionalProperties": false,
@@ -628,20 +564,6 @@
                     },
                     "type": "object"
                   },
-                  "retention": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "evidenceDays": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "resultDays": {
-                        "minimum": 1,
-                        "type": "integer"
-                      }
-                    },
-                    "type": "object"
-                  },
                   "retry": {
                     "additionalProperties": false,
                     "properties": {
@@ -693,10 +615,6 @@
                   },
                   "type": {
                     "const": "tool"
-                  },
-                  "wallClockMs": {
-                    "minimum": 1,
-                    "type": "integer"
                   }
                 },
                 "required": [
@@ -837,29 +755,6 @@
                     "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
                     "type": "string"
                   },
-                  "observability": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "captureInputs": {
-                        "type": "boolean"
-                      },
-                      "captureOutputs": {
-                        "type": "boolean"
-                      },
-                      "level": {
-                        "enum": [
-                          "minimal",
-                          "standard",
-                          "detailed"
-                        ],
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "level"
-                    ],
-                    "type": "object"
-                  },
                   "onError": {
                     "items": {
                       "additionalProperties": false,
@@ -915,20 +810,6 @@
                     },
                     "type": "object"
                   },
-                  "retention": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "evidenceDays": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "resultDays": {
-                        "minimum": 1,
-                        "type": "integer"
-                      }
-                    },
-                    "type": "object"
-                  },
                   "retry": {
                     "additionalProperties": false,
                     "properties": {
@@ -958,10 +839,6 @@
                   },
                   "type": {
                     "const": "branch"
-                  },
-                  "wallClockMs": {
-                    "minimum": 1,
-                    "type": "integer"
                   }
                 },
                 "required": [
@@ -1083,29 +960,6 @@
                     "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
                     "type": "string"
                   },
-                  "observability": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "captureInputs": {
-                        "type": "boolean"
-                      },
-                      "captureOutputs": {
-                        "type": "boolean"
-                      },
-                      "level": {
-                        "enum": [
-                          "minimal",
-                          "standard",
-                          "detailed"
-                        ],
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "level"
-                    ],
-                    "type": "object"
-                  },
                   "onError": {
                     "items": {
                       "additionalProperties": false,
@@ -1161,20 +1015,6 @@
                     },
                     "type": "object"
                   },
-                  "retention": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "evidenceDays": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "resultDays": {
-                        "minimum": 1,
-                        "type": "integer"
-                      }
-                    },
-                    "type": "object"
-                  },
                   "retry": {
                     "additionalProperties": false,
                     "properties": {
@@ -1204,10 +1044,6 @@
                   },
                   "type": {
                     "const": "parallel"
-                  },
-                  "wallClockMs": {
-                    "minimum": 1,
-                    "type": "integer"
                   }
                 },
                 "required": [
@@ -1326,29 +1162,6 @@
                     "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
                     "type": "string"
                   },
-                  "observability": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "captureInputs": {
-                        "type": "boolean"
-                      },
-                      "captureOutputs": {
-                        "type": "boolean"
-                      },
-                      "level": {
-                        "enum": [
-                          "minimal",
-                          "standard",
-                          "detailed"
-                        ],
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "level"
-                    ],
-                    "type": "object"
-                  },
                   "onError": {
                     "items": {
                       "additionalProperties": false,
@@ -1404,20 +1217,6 @@
                     },
                     "type": "object"
                   },
-                  "retention": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "evidenceDays": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "resultDays": {
-                        "minimum": 1,
-                        "type": "integer"
-                      }
-                    },
-                    "type": "object"
-                  },
                   "retry": {
                     "additionalProperties": false,
                     "properties": {
@@ -1447,10 +1246,6 @@
                   },
                   "type": {
                     "const": "foreach"
-                  },
-                  "wallClockMs": {
-                    "minimum": 1,
-                    "type": "integer"
                   }
                 },
                 "required": [
@@ -1570,29 +1365,6 @@
                     "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
                     "type": "string"
                   },
-                  "observability": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "captureInputs": {
-                        "type": "boolean"
-                      },
-                      "captureOutputs": {
-                        "type": "boolean"
-                      },
-                      "level": {
-                        "enum": [
-                          "minimal",
-                          "standard",
-                          "detailed"
-                        ],
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "level"
-                    ],
-                    "type": "object"
-                  },
                   "onError": {
                     "items": {
                       "additionalProperties": false,
@@ -1648,20 +1420,6 @@
                     },
                     "type": "object"
                   },
-                  "retention": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "evidenceDays": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "resultDays": {
-                        "minimum": 1,
-                        "type": "integer"
-                      }
-                    },
-                    "type": "object"
-                  },
                   "retry": {
                     "additionalProperties": false,
                     "properties": {
@@ -1691,10 +1449,6 @@
                   },
                   "type": {
                     "const": "repeat_until"
-                  },
-                  "wallClockMs": {
-                    "minimum": 1,
-                    "type": "integer"
                   }
                 },
                 "required": [
@@ -1797,29 +1551,6 @@
                     "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
                     "type": "string"
                   },
-                  "observability": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "captureInputs": {
-                        "type": "boolean"
-                      },
-                      "captureOutputs": {
-                        "type": "boolean"
-                      },
-                      "level": {
-                        "enum": [
-                          "minimal",
-                          "standard",
-                          "detailed"
-                        ],
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "level"
-                    ],
-                    "type": "object"
-                  },
                   "onError": {
                     "items": {
                       "additionalProperties": false,
@@ -1871,20 +1602,6 @@
                           "high"
                         ],
                         "type": "string"
-                      }
-                    },
-                    "type": "object"
-                  },
-                  "retention": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "evidenceDays": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "resultDays": {
-                        "minimum": 1,
-                        "type": "integer"
                       }
                     },
                     "type": "object"
@@ -1959,10 +1676,6 @@
                       "kind"
                     ],
                     "type": "object"
-                  },
-                  "wallClockMs": {
-                    "minimum": 1,
-                    "type": "integer"
                   }
                 },
                 "required": [
@@ -2071,29 +1784,6 @@
                     "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
                     "type": "string"
                   },
-                  "observability": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "captureInputs": {
-                        "type": "boolean"
-                      },
-                      "captureOutputs": {
-                        "type": "boolean"
-                      },
-                      "level": {
-                        "enum": [
-                          "minimal",
-                          "standard",
-                          "detailed"
-                        ],
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "level"
-                    ],
-                    "type": "object"
-                  },
                   "onError": {
                     "items": {
                       "additionalProperties": false,
@@ -2149,20 +1839,6 @@
                     },
                     "type": "object"
                   },
-                  "retention": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "evidenceDays": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "resultDays": {
-                        "minimum": 1,
-                        "type": "integer"
-                      }
-                    },
-                    "type": "object"
-                  },
                   "retry": {
                     "additionalProperties": false,
                     "properties": {
@@ -2192,10 +1868,6 @@
                   },
                   "type": {
                     "const": "approval"
-                  },
-                  "wallClockMs": {
-                    "minimum": 1,
-                    "type": "integer"
                   }
                 },
                 "required": [
@@ -2304,29 +1976,6 @@
                     "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
                     "type": "string"
                   },
-                  "observability": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "captureInputs": {
-                        "type": "boolean"
-                      },
-                      "captureOutputs": {
-                        "type": "boolean"
-                      },
-                      "level": {
-                        "enum": [
-                          "minimal",
-                          "standard",
-                          "detailed"
-                        ],
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "level"
-                    ],
-                    "type": "object"
-                  },
                   "onError": {
                     "items": {
                       "additionalProperties": false,
@@ -2382,20 +2031,6 @@
                     },
                     "type": "object"
                   },
-                  "retention": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "evidenceDays": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "resultDays": {
-                        "minimum": 1,
-                        "type": "integer"
-                      }
-                    },
-                    "type": "object"
-                  },
                   "retry": {
                     "additionalProperties": false,
                     "properties": {
@@ -2425,10 +2060,6 @@
                   },
                   "type": {
                     "const": "human_task"
-                  },
-                  "wallClockMs": {
-                    "minimum": 1,
-                    "type": "integer"
                   }
                 },
                 "required": [
@@ -2551,29 +2182,6 @@
                     "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
                     "type": "string"
                   },
-                  "observability": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "captureInputs": {
-                        "type": "boolean"
-                      },
-                      "captureOutputs": {
-                        "type": "boolean"
-                      },
-                      "level": {
-                        "enum": [
-                          "minimal",
-                          "standard",
-                          "detailed"
-                        ],
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "level"
-                    ],
-                    "type": "object"
-                  },
                   "onError": {
                     "items": {
                       "additionalProperties": false,
@@ -2629,20 +2237,6 @@
                     },
                     "type": "object"
                   },
-                  "retention": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "evidenceDays": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "resultDays": {
-                        "minimum": 1,
-                        "type": "integer"
-                      }
-                    },
-                    "type": "object"
-                  },
                   "retry": {
                     "additionalProperties": false,
                     "properties": {
@@ -2672,10 +2266,6 @@
                   },
                   "type": {
                     "const": "form"
-                  },
-                  "wallClockMs": {
-                    "minimum": 1,
-                    "type": "integer"
                   }
                 },
                 "required": [
@@ -2783,29 +2373,6 @@
                     "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
                     "type": "string"
                   },
-                  "observability": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "captureInputs": {
-                        "type": "boolean"
-                      },
-                      "captureOutputs": {
-                        "type": "boolean"
-                      },
-                      "level": {
-                        "enum": [
-                          "minimal",
-                          "standard",
-                          "detailed"
-                        ],
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "level"
-                    ],
-                    "type": "object"
-                  },
                   "onError": {
                     "items": {
                       "additionalProperties": false,
@@ -2861,20 +2428,6 @@
                     },
                     "type": "object"
                   },
-                  "retention": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "evidenceDays": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "resultDays": {
-                        "minimum": 1,
-                        "type": "integer"
-                      }
-                    },
-                    "type": "object"
-                  },
                   "retry": {
                     "additionalProperties": false,
                     "properties": {
@@ -2926,10 +2479,6 @@
                   },
                   "type": {
                     "const": "child_routine"
-                  },
-                  "wallClockMs": {
-                    "minimum": 1,
-                    "type": "integer"
                   }
                 },
                 "required": [
@@ -3036,29 +2585,6 @@
                     "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
                     "type": "string"
                   },
-                  "observability": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "captureInputs": {
-                        "type": "boolean"
-                      },
-                      "captureOutputs": {
-                        "type": "boolean"
-                      },
-                      "level": {
-                        "enum": [
-                          "minimal",
-                          "standard",
-                          "detailed"
-                        ],
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "level"
-                    ],
-                    "type": "object"
-                  },
                   "onError": {
                     "items": {
                       "additionalProperties": false,
@@ -3114,20 +2640,6 @@
                     },
                     "type": "object"
                   },
-                  "retention": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "evidenceDays": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "resultDays": {
-                        "minimum": 1,
-                        "type": "integer"
-                      }
-                    },
-                    "type": "object"
-                  },
                   "retry": {
                     "additionalProperties": false,
                     "properties": {
@@ -3161,10 +2673,6 @@
                   },
                   "type": {
                     "const": "compensate"
-                  },
-                  "wallClockMs": {
-                    "minimum": 1,
-                    "type": "integer"
                   }
                 },
                 "required": [

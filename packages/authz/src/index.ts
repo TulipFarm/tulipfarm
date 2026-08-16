@@ -18,6 +18,16 @@ export {
   assertApproverEligible,
   requiredApproverCount,
 } from "./approval/decision";
+export type { DelegatedAuthority } from "./delegated-authority";
+export {
+  DELEGATED_DATA_ACTION,
+  DELEGATED_DATA_RESOURCE,
+  DELEGATED_TOOL_ACTION,
+  DELEGATED_TOOL_RESOURCE,
+  delegatedAuthorityLayer,
+  delegatedDataClassRequest,
+  delegatedToolRequest,
+} from "./delegated-authority";
 export type {
   AuthorityLayer,
   AuthzDecision,

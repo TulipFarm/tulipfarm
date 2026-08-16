@@ -1,3 +1,4 @@
+import { delegationCatalogOf, withDelegatedAuthority } from "@tulipfarm/agent-runtime";
 import {
   KNOWLEDGE_TOOLS,
   KnowledgeService,
@@ -20,7 +21,7 @@ import {
 } from "@tulipfarm/memory";
 import { PLATFORM_RUNTIME_TOOLS, type PlatformRuntimeContext } from "@tulipfarm/platform-tools";
 import type { ArtifactService, DurableWaitManager } from "@tulipfarm/run-kernel";
-import type { Queryable, TransactionPort } from "@tulipfarm/storage";
+import { ChildLinkAncestryStore, type Queryable, type TransactionPort } from "@tulipfarm/storage";
 import {
   type ApiToolDefinition,
   ApprovalsRepo,
@@ -137,21 +138,29 @@ export function buildLocalToolHost(options: LocalToolHostOptions): LocalToolHost
     }
   }
 
-  const dispatcher = new RegistryToolDispatcher({
-    registry: catalog,
-    artifacts: options.artifacts,
-    gate: new LiveToolGate(),
-    // Without this the gate is skipped entirely; the dispatcher's constructor enforces its
-    // presence, and it reads the same principal, Role and grant rows the control plane reads.
-    authorityLayers: buildLiveAuthorityLayerResolver(options.transactions),
-    // Only `decide` is reachable from here. Parking a Run mints a one-use resume token, and that
-    // stays on the control-plane path via `HttpTurnHost.register`.
-    approvals: new ToolApprovalService({
-      repo: new ApprovalsRepo(options.db),
-      waits: options.waits,
-    }),
-    localDispatchOnly: true,
-  });
+  // A delegated Run is bounded by its link row wherever it executes: co-locating execution must
+  // not co-locate a weaker answer to what the Run may do.
+  const dispatcher = withDelegatedAuthority(
+    {
+      links: new ChildLinkAncestryStore(options.db),
+      catalog: delegationCatalogOf(catalog),
+    },
+    new RegistryToolDispatcher({
+      registry: catalog,
+      artifacts: options.artifacts,
+      gate: new LiveToolGate(),
+      // Without this the gate is skipped entirely; the dispatcher's constructor enforces its
+      // presence, and it reads the same principal, Role and grant rows the control plane reads.
+      authorityLayers: buildLiveAuthorityLayerResolver(options.transactions),
+      // Only `decide` is reachable from here. Parking a Run mints a one-use resume token, and that
+      // stays on the control-plane path via `HttpTurnHost.register`.
+      approvals: new ToolApprovalService({
+        repo: new ApprovalsRepo(options.db),
+        waits: options.waits,
+      }),
+      localDispatchOnly: true,
+    })
+  );
 
   const ready = async (name: string): Promise<boolean> => {
     if (!VECTOR_BACKED.has(name)) return true;

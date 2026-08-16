@@ -1,5 +1,4 @@
 import type { routine as routineSchema } from "@tulipfarm/schema";
-import type { LimitSet } from "../limits";
 import type { JsonObject } from "../outputs";
 import {
   type CompiledRoutine,
@@ -40,7 +39,8 @@ export interface SingleAgentRoutineInput {
   readonly agentRef: { readonly name: string; readonly version: string };
   readonly identityCeiling: IdentityCeiling;
   readonly outputSchema?: JsonObject;
-  readonly limits?: LimitSet;
+  /** Authored spelling and units (`costUsd`, `wallClockMs`), not the runtime `LimitSet`. */
+  readonly limits?: NonNullable<routineSchema.RoutineSpec["limits"]>;
   readonly maxRepairAttempts?: number;
 }
 

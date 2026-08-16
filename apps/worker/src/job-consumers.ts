@@ -5,6 +5,12 @@ import {
   PgResourceSamplePruner,
   RESOURCE_RETENTION_MS,
 } from "@tulipfarm/observability";
+import {
+  bundleRetentionMessage,
+  pruneUnreferencedBundles,
+  SOUL_BUNDLE_RETENTION_MS,
+  type UnreferencedBundleDeleter,
+} from "@tulipfarm/soul";
 import type { TaskStore } from "@tulipfarm/storage";
 import { type ConstructorOptions, PgBoss } from "pg-boss";
 import type { Queryable } from "./db";
@@ -14,6 +20,9 @@ import { breached, readSpendWindow, spendAlertMessage } from "./spend-alert";
 
 export const OBS_PRUNE_QUEUE = "obs-event-prune";
 export const SPEND_ALERT_QUEUE = "obs-spend-alert";
+
+/** Must match `SOUL_BUNDLE_PRUNE_QUEUE` in `apps/api/src/soul/bundle-prune-schedule.ts`. */
+export const SOUL_BUNDLE_PRUNE_QUEUE = "soul-bundle-prune";
 
 /** Setup-gap check every open Task derives from; see `docs/plans/task-system.md` "Producers". */
 export const TASK_RECONCILE_QUEUE = "task-reconcile";
@@ -25,7 +34,7 @@ export interface JobConsumerOptions {
   /** Test seam; production always constructs the non-migrating client below. */
   readonly boss?: PgBoss;
   /** Where a breached spend ceiling is reported; the operator log spine in production. */
-  readonly log?: { error(message: string): void };
+  readonly log?: { error(message: string): void; info?(message: string): void };
   /**
    * Task reconciler deps. Optional so pruning-only test setups need not wire them; production
    * always supplies all three together (see `main.ts`), so the reconcile queue is simply not
@@ -34,6 +43,11 @@ export interface JobConsumerOptions {
   readonly businessId?: string;
   readonly taskStore?: TaskStore;
   readonly taskSignals?: TaskSignalsGatherer;
+  /**
+   * Published-bundle retention. Paired with `businessId` for the same reason as the reconciler:
+   * without both there is nothing to sweep, so the queue is simply not registered.
+   */
+  readonly bundles?: UnreferencedBundleDeleter;
 }
 
 interface ObservabilityPruneJob {
@@ -42,6 +56,10 @@ interface ObservabilityPruneJob {
 
 interface SpendAlertJob {
   readonly thresholdUsd?: number;
+}
+
+interface SoulBundlePruneJob {
+  readonly retentionMs?: number;
 }
 
 /**
@@ -81,6 +99,26 @@ export async function startJobConsumers(options: JobConsumerOptions): Promise<Pg
     if (!breached(window)) return;
     options.log?.error(spendAlertMessage(window));
   });
+
+  if (options.businessId !== undefined && options.bundles) {
+    const businessId = options.businessId;
+    const bundles = options.bundles;
+    await boss.createQueue(SOUL_BUNDLE_PRUNE_QUEUE);
+    await boss.work<SoulBundlePruneJob>(SOUL_BUNDLE_PRUNE_QUEUE, async (jobs) => {
+      const configured = jobs[0]?.data.retentionMs;
+      const retentionMs =
+        typeof configured === "number" && configured > 0 ? configured : SOUL_BUNDLE_RETENTION_MS;
+      const result = await pruneUnreferencedBundles({
+        store: bundles,
+        businessId,
+        now: now(),
+        retentionMs,
+      });
+      // The pass is bounded, so a large backlog drains across scheduled runs. Reporting every
+      // pass — including the zero-delete ones — is how an operator sees that it is keeping up.
+      options.log?.info?.(bundleRetentionMessage(businessId, result));
+    });
+  }
 
   if (options.businessId !== undefined && options.taskStore && options.taskSignals) {
     const businessId = options.businessId;

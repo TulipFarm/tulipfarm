@@ -8,6 +8,32 @@ export interface LoopCheckpoint {
   readonly iterations: number;
   readonly toolCalls: number;
   readonly repairs: number;
+  /**
+   * The unfinished loop's own transcript — proposed Tool calls, their results, and the approved
+   * call still owed execution. Absent once the loop settles, so Tool arguments and outputs are
+   * not retained past the Turn that still needs them.
+   */
+  readonly resume?: LoopResumeState;
+}
+
+/**
+ * Structural mirror of `AgentLoopResumeState` in `@tulipfarm/agent-runtime`, which owns the
+ * meaning of every field. Restated rather than imported because storage sits below the runtime
+ * in the dependency order, exactly as `LoopCheckpoint` restates the loop's counters.
+ */
+export interface LoopResumeState {
+  readonly messages: readonly {
+    readonly role: "system" | "user" | "assistant" | "tool";
+    readonly content: string;
+  }[];
+  readonly pendingCall?: {
+    readonly callId: string;
+    readonly name: string;
+    readonly arguments: unknown;
+  };
+  readonly activeSkillName?: string;
+  readonly sequence: number;
+  readonly textIndex: number;
 }
 
 export const LOOP_CHECKPOINT_STORAGE_STATEMENTS: readonly string[] = [
@@ -21,22 +47,29 @@ export const LOOP_CHECKPOINT_STORAGE_STATEMENTS: readonly string[] = [
     iterations   bigint NOT NULL DEFAULT 0 CHECK (iterations >= 0),
     tool_calls   bigint NOT NULL DEFAULT 0 CHECK (tool_calls >= 0),
     repairs      bigint NOT NULL DEFAULT 0 CHECK (repairs >= 0),
+    resume_state jsonb,
     updated_at   timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (business_id, run_id, state_id),
     FOREIGN KEY (business_id, run_id) REFERENCES runs(business_id, id)
   )`,
+  // Deployments that ran the counters-only version of this table predate `resume_state`.
+  `ALTER TABLE agent_loop_checkpoints ADD COLUMN IF NOT EXISTS resume_state jsonb`,
 ];
 
 interface LoopCheckpointRow {
   iterations: string | number;
   tool_calls: string | number;
   repairs: string | number;
+  resume_state: LoopResumeState | null;
 }
 
 /**
  * Durable Agent-loop counters. The loop `save`s the same key repeatedly, so the write is an
  * idempotent, monotonic upsert: a counter only ever climbs. `GREATEST` makes a stale or racing
  * writer unable to lower a ceiling that a later pass already advanced past.
+ *
+ * `resume_state` is the one field that is *not* monotonic: it is the loop's live transcript, so
+ * the latest writer replaces it outright and a settled loop clears it.
  */
 export class RunLoopCheckpointStore {
   constructor(private readonly transactions: TransactionPort) {}
@@ -48,7 +81,7 @@ export class RunLoopCheckpointStore {
   ): Promise<LoopCheckpoint | undefined> {
     return this.transactions.withTransaction(async (transaction) => {
       const result = await transaction.query<LoopCheckpointRow>(
-        `SELECT iterations, tool_calls, repairs
+        `SELECT iterations, tool_calls, repairs, resume_state
            FROM agent_loop_checkpoints
           WHERE business_id = $1 AND run_id = $2 AND state_id = $3`,
         [businessId, runId, stateId]
@@ -62,6 +95,9 @@ export class RunLoopCheckpointStore {
         iterations: Number(row.iterations),
         toolCalls: Number(row.tool_calls),
         repairs: Number(row.repairs),
+        ...(row.resume_state === null || row.resume_state === undefined
+          ? {}
+          : { resume: row.resume_state }),
       };
     });
   }
@@ -70,12 +106,14 @@ export class RunLoopCheckpointStore {
     await this.transactions.withTransaction((transaction) =>
       transaction.query(
         `INSERT INTO agent_loop_checkpoints
-           (business_id, run_id, state_id, iterations, tool_calls, repairs, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, now())
+           (business_id, run_id, state_id, iterations, tool_calls, repairs, resume_state,
+            updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, now())
          ON CONFLICT (business_id, run_id, state_id) DO UPDATE SET
            iterations = GREATEST(agent_loop_checkpoints.iterations, EXCLUDED.iterations),
            tool_calls = GREATEST(agent_loop_checkpoints.tool_calls, EXCLUDED.tool_calls),
            repairs = GREATEST(agent_loop_checkpoints.repairs, EXCLUDED.repairs),
+           resume_state = EXCLUDED.resume_state,
            updated_at = now()`,
         [
           checkpoint.businessId,
@@ -84,6 +122,7 @@ export class RunLoopCheckpointStore {
           checkpoint.iterations,
           checkpoint.toolCalls,
           checkpoint.repairs,
+          checkpoint.resume === undefined ? null : JSON.stringify(checkpoint.resume),
         ]
       )
     );

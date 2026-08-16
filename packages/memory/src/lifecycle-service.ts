@@ -3,15 +3,10 @@ import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { Queryable } from "@tulipfarm/storage";
 import { PgMemoryAssertionStore } from "./assertion-store";
 import type { MemoryEmbedder } from "./embedder";
-import type {
-  EraseResult,
-  ForgetResult,
-  MemoryDeps,
-  MemorySettingsView,
-  RememberResult,
-} from "./memory";
-import { eraseMemory, forgetMemory, rememberMemory, rememberProceduralCorrection } from "./memory";
+import { type EraseResult, eraseMemory, type ForgetResult, forgetMemory } from "./forget";
+import type { MemoryDeps, MemorySettingsView } from "./memory";
 import { PgPendingMemoryStore } from "./pending-store";
+import { type RememberResult, rememberMemory, rememberProceduralCorrection } from "./remember";
 import type { MemoryTelemetryPort } from "./telemetry";
 
 export const USER_MEMORY_LIFECYCLE_SETTINGS: MemorySettingsView = {

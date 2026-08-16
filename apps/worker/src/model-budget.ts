@@ -4,6 +4,7 @@ import {
   RunBudgetManager,
   type RunBudgetStore,
   resolveModelProfileBudgetLimits,
+  type ScopedLimits,
 } from "@tulipfarm/run-kernel";
 import type { ModelProfileSpec, RunEventPayloads } from "@tulipfarm/schema";
 
@@ -30,8 +31,14 @@ export async function openModelProfileRunBudget(input: {
   readonly businessId: string;
   readonly runId: string;
   readonly profile: Pick<ModelProfileSpec, "budgets">;
+  /**
+   * Broader ceilings this Run already operates under — today the authored Routine's `limits`.
+   * They are resolved in the same narrowest-wins pass as the profile's own budgets, so the ledger
+   * is opened from one ceiling per key rather than from two sources that could disagree.
+   */
+  readonly scoped?: readonly ScopedLimits[];
 }): Promise<ModelBudgetEvidence | undefined> {
-  const limits = resolveModelProfileBudgetLimits(input.profile);
+  const limits = resolveModelProfileBudgetLimits(input.profile, input.scoped ?? []);
   const evidence = modelBudgetEvidence(limits);
   if (evidence === undefined) return undefined;
   await new RunBudgetManager(input.budgets).open({

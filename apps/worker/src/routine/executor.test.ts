@@ -1,10 +1,14 @@
 import {
   type ArtifactContent,
+  InMemoryStateConcurrencyStore,
+  InMemoryStateContentionStore,
   InMemoryStateRetryStore,
   type RegisterWaitInput,
   RoutineStateScheduler,
+  routineConcurrencyWaitId,
   routineEffectId,
   routineWaitId,
+  STATE_CONCURRENCY_MAX_WAITS,
 } from "@tulipfarm/run-kernel";
 import { MANUAL_REQUEST_SCHEMA_REF, type routine } from "@tulipfarm/schema";
 import type { PersistedRun, PersistedState, PersistedWait } from "@tulipfarm/storage";
@@ -145,6 +149,14 @@ class StateHarness implements StateTransitionPort {
     const wait = this.waits.get(id);
     if (wait === undefined) throw new Error(`no wait for ${stateKey}`);
     this.waits.set(id, { ...wait, status, resolvedAt: STARTED_AT });
+  }
+
+  /** Stands in for the deadline sweep firing a State's concurrency backoff timer. */
+  resolveConcurrencyWait(stateKey: string, attempt: number): void {
+    const id = routineConcurrencyWaitId(run().id, stateKey, attempt);
+    const wait = this.waits.get(id);
+    if (wait === undefined) throw new Error(`no backoff wait ${attempt} for ${stateKey}`);
+    this.waits.set(id, { ...wait, status: "satisfied", resolvedAt: STARTED_AT });
   }
 
   async transition(input: Parameters<StateTransitionPort["transition"]>[0]): Promise<void> {
@@ -1187,5 +1199,301 @@ describe("createRoutineExecutor — retry policy", () => {
     expect(calls).toBe(5);
     expect((await retries.load("business-1", run().id, "Start"))?.attempts).toBe(5);
     expect(harness.transitions).toContain("Start:running->failed");
+  });
+});
+
+describe("createRoutineExecutor — concurrencyKey", () => {
+  const bundle = { digest: "bundle-digest" } as unknown as LoadedRoutineDefinition["bundle"];
+  const OTHER_RUN = "00000000-0000-4000-8000-0000000000ff";
+
+  function keyedAgentState(concurrencyKey?: string): routine.RoutineState {
+    return {
+      type: "agent",
+      name: "Start",
+      agentRef: { name: "triage", version: "1" },
+      ...(concurrencyKey === undefined ? {} : { concurrencyKey }),
+      end: true,
+    } as routine.RoutineState;
+  }
+
+  function keyedExecutor(input: {
+    harness: StateHarness;
+    agent: RoutineAgentPort;
+    concurrency: InMemoryStateConcurrencyStore;
+    contention?: InMemoryStateContentionStore;
+    concurrencyKey?: string;
+    delay?: (ms: number) => Promise<void>;
+  }) {
+    return createRoutineExecutor({
+      definitions: {
+        load: async () =>
+          ({
+            document: definition([keyedAgentState(input.concurrencyKey)]),
+            bundle,
+          }) as LoadedRoutineDefinition,
+      },
+      artifacts: { read: async () => requestArtifact },
+      runs: { listStates: async () => [...input.harness.states.values()] },
+      scheduler: input.harness.scheduler,
+      transitions: input.harness,
+      waits: input.harness.waitPort,
+      agents: input.agent,
+      concurrency: input.concurrency,
+      ...(input.contention === undefined ? {} : { contention: input.contention }),
+      delay: input.delay ?? (async () => {}),
+      now: () => new Date(STARTED_AT),
+    });
+  }
+
+  const succeedingAgent: RoutineAgentPort = {
+    execute: async () => ({ kind: "succeeded", output: null }),
+  };
+
+  it("holds the key while the State runs and frees it when the State settles", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const concurrency = new InMemoryStateConcurrencyStore();
+    let heldDuringExecution: string | undefined;
+    const agent: RoutineAgentPort = {
+      execute: async () => {
+        const contender = await concurrency.acquire({
+          businessId: "business-1",
+          concurrencyKey: "digest",
+          runId: OTHER_RUN,
+          stateKey: "Start",
+          now: STARTED_AT,
+          expiresAt: "2026-08-02T01:00:00.000Z",
+        });
+        heldDuringExecution = contender.kind;
+        return { kind: "succeeded", output: null };
+      },
+    };
+
+    const execute = keyedExecutor({ harness, agent, concurrency, concurrencyKey: "digest" });
+    await expect(execute(run())).resolves.toBe("succeeded");
+
+    expect(heldDuringExecution).toBe("busy");
+    // Released on settle, so the next Run to want the key gets it immediately.
+    await expect(
+      concurrency.acquire({
+        businessId: "business-1",
+        concurrencyKey: "digest",
+        runId: OTHER_RUN,
+        stateKey: "Start",
+        now: STARTED_AT,
+        expiresAt: "2026-08-02T01:00:00.000Z",
+      })
+    ).resolves.toEqual({ kind: "acquired" });
+  });
+
+  it("frees the key when the State fails, not only when it succeeds", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const concurrency = new InMemoryStateConcurrencyStore();
+    const agent: RoutineAgentPort = {
+      execute: async () => ({ kind: "failed", reason: "model_error", retryable: false }),
+    };
+
+    const execute = keyedExecutor({ harness, agent, concurrency, concurrencyKey: "digest" });
+    await expect(execute(run())).resolves.toBe("failed");
+    await expect(
+      concurrency.acquire({
+        businessId: "business-1",
+        concurrencyKey: "digest",
+        runId: OTHER_RUN,
+        stateKey: "Start",
+        now: STARTED_AT,
+        expiresAt: "2026-08-02T01:00:00.000Z",
+      })
+    ).resolves.toEqual({ kind: "acquired" });
+  });
+
+  it("queues on a durable backoff rather than running unserialized when the key is held", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const concurrency = new InMemoryStateConcurrencyStore();
+    await concurrency.acquire({
+      businessId: "business-1",
+      concurrencyKey: "digest",
+      runId: OTHER_RUN,
+      stateKey: "Start",
+      now: STARTED_AT,
+      expiresAt: "2026-08-02T01:00:00.000Z",
+    });
+    let calls = 0;
+    const agent: RoutineAgentPort = {
+      execute: async () => {
+        calls += 1;
+        return { kind: "succeeded", output: null };
+      },
+    };
+
+    const execute = keyedExecutor({
+      harness,
+      agent,
+      concurrency,
+      concurrencyKey: "digest",
+      delay: async () => {},
+    });
+    await expect(execute(run())).resolves.toBe("waiting");
+    expect(calls).toBe(0);
+    expect(harness.transitions).toContain("Start:running->waiting");
+    expect(harness.transitions).not.toContain("Start:running->needs_reconciliation");
+    // The wait is a backoff timer, addressed apart from the State's own wait id.
+    expect(harness.waits.has(routineConcurrencyWaitId(run().id, "Start", 1))).toBe(true);
+    expect(harness.waits.has(routineWaitId(run().id, "Start"))).toBe(false);
+  });
+
+  it("parks once the durable backoff budget is exhausted, never running unserialized", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const concurrency = new InMemoryStateConcurrencyStore();
+    const contention = new InMemoryStateContentionStore();
+    await concurrency.acquire({
+      businessId: "business-1",
+      concurrencyKey: "digest",
+      runId: OTHER_RUN,
+      stateKey: "Start",
+      now: STARTED_AT,
+      expiresAt: "2026-08-02T01:00:00.000Z",
+    });
+    let calls = 0;
+    const agent: RoutineAgentPort = {
+      execute: async () => {
+        calls += 1;
+        return { kind: "succeeded", output: null };
+      },
+    };
+    const execute = keyedExecutor({
+      harness,
+      agent,
+      concurrency,
+      contention,
+      concurrencyKey: "digest",
+      delay: async () => {},
+    });
+
+    // Each pass opens one backoff, fires it, and comes back into execution to try the key again.
+    for (let pass = 1; pass <= STATE_CONCURRENCY_MAX_WAITS; pass += 1) {
+      await expect(execute(run())).resolves.toBe("waiting");
+      harness.resolveConcurrencyWait("Start", pass);
+    }
+    await expect(execute(run())).resolves.toBe("needs_reconciliation");
+
+    expect(calls).toBe(0);
+    expect(harness.transitions).toContain("Start:running->needs_reconciliation");
+    expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:concurrency_key_busy");
+    // The budget is durable, so a further pass does not refund itself another queue.
+    await expect(contention.load("business-1", run().id, "Start")).resolves.toMatchObject({
+      waits: STATE_CONCURRENCY_MAX_WAITS,
+    });
+  });
+
+  it("resumes a fired backoff into execution, not past it", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const concurrency = new InMemoryStateConcurrencyStore();
+    const contention = new InMemoryStateContentionStore();
+    await concurrency.acquire({
+      businessId: "business-1",
+      concurrencyKey: "digest",
+      runId: OTHER_RUN,
+      stateKey: "Start",
+      now: STARTED_AT,
+      expiresAt: "2026-08-02T01:00:00.000Z",
+    });
+    let calls = 0;
+    const agent: RoutineAgentPort = {
+      execute: async () => {
+        calls += 1;
+        return { kind: "succeeded", output: null };
+      },
+    };
+    const execute = keyedExecutor({
+      harness,
+      agent,
+      concurrency,
+      contention,
+      concurrencyKey: "digest",
+      delay: async () => {},
+    });
+
+    await expect(execute(run())).resolves.toBe("waiting");
+    expect(calls).toBe(0);
+
+    // Holder releases, sweep fires the timer, contender is requeued.
+    await concurrency.release("business-1", "digest", OTHER_RUN, "Start");
+    harness.resolveConcurrencyWait("Start", 1);
+
+    await expect(execute(run())).resolves.toBe("succeeded");
+    // Resuming *into* the State: its effect ran exactly once, it was not skipped as satisfied.
+    expect(calls).toBe(1);
+    expect(harness.transitions).toContain("Start:waiting->ready");
+  });
+
+  it("re-parks on an unfired backoff without spending a second one", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const concurrency = new InMemoryStateConcurrencyStore();
+    const contention = new InMemoryStateContentionStore();
+    await concurrency.acquire({
+      businessId: "business-1",
+      concurrencyKey: "digest",
+      runId: OTHER_RUN,
+      stateKey: "Start",
+      now: STARTED_AT,
+      expiresAt: "2026-08-02T01:00:00.000Z",
+    });
+    const execute = keyedExecutor({
+      harness,
+      agent: succeedingAgent,
+      concurrency,
+      contention,
+      concurrencyKey: "digest",
+      delay: async () => {},
+    });
+
+    await expect(execute(run())).resolves.toBe("waiting");
+    // Crash-and-reclaim before the sweep fires: the State is back at `running`, its wait pending.
+    harness.states.set("Start", { ...state("Start", "running"), version: 9 });
+    await expect(execute(run())).resolves.toBe("waiting");
+
+    await expect(contention.load("business-1", run().id, "Start")).resolves.toMatchObject({
+      waits: 1,
+    });
+    expect(harness.waits.has(routineConcurrencyWaitId(run().id, "Start", 2))).toBe(false);
+  });
+
+  it("takes a key whose holder crashed and left an expired lease", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const concurrency = new InMemoryStateConcurrencyStore();
+    await concurrency.acquire({
+      businessId: "business-1",
+      concurrencyKey: "digest",
+      runId: OTHER_RUN,
+      stateKey: "Start",
+      now: "2026-08-01T00:00:00.000Z",
+      expiresAt: "2026-08-01T00:01:00.000Z",
+    });
+
+    const execute = keyedExecutor({
+      harness,
+      agent: succeedingAgent,
+      concurrency,
+      concurrencyKey: "digest",
+    });
+    await expect(execute(run())).resolves.toBe("succeeded");
+  });
+
+  it("never touches the store for a State that authored no key", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const concurrency = new InMemoryStateConcurrencyStore();
+    const execute = keyedExecutor({ harness, agent: succeedingAgent, concurrency });
+
+    await expect(execute(run())).resolves.toBe("succeeded");
+    await expect(
+      concurrency.acquire({
+        businessId: "business-1",
+        concurrencyKey: "digest",
+        runId: OTHER_RUN,
+        stateKey: "Start",
+        now: STARTED_AT,
+        expiresAt: "2026-08-02T01:00:00.000Z",
+      })
+    ).resolves.toEqual({ kind: "acquired" });
   });
 });

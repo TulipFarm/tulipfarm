@@ -95,6 +95,24 @@ function needsApproval(definition: ToolDef, autonomy: string | undefined): boole
   );
 }
 
+/**
+ * Spends the one-use approval this dispatch is about to act on. Fails closed: a decision that
+ * cannot be spent is not a decision this call may run under.
+ */
+async function spendApproval(
+  approvals: ToolApprovalPort,
+  approvalId: string,
+  callId: string
+): Promise<boolean> {
+  try {
+    return await approvals.consume({ approvalId, toolCallId: callId });
+  } catch {
+    // Consumption state that cannot be read is ambiguous, and an ambiguous approval is a refusal:
+    // running here would be the exact silent reuse the one-use rule exists to stop.
+    return false;
+  }
+}
+
 export class RegistryToolDispatcher implements TurnToolDispatcher {
   private readonly now: () => Date;
 
@@ -345,6 +363,18 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
       }
       if (decision.status === "denied") {
         return { status: "denied", reason: decision.reason };
+      }
+      // One-use (I-13): spend the decision here, at the dispatch that will execute it, not at the
+      // lookup. A parked call left with `awaiting_approval` above and spent nothing, so the Turn
+      // that resumes still finds its decision; the *next* identical call in this Run finds none
+      // and asks a human again instead of riding the approval this one was given.
+      if (!(await spendApproval(this.options.approvals, decision.approvalId, call.callId))) {
+        return {
+          status: "denied",
+          reason:
+            `the approval for tool "${call.name}" was already used by another call; ` +
+            "this one needs its own approval",
+        };
       }
     }
 

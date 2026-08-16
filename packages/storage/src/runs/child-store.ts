@@ -1,4 +1,4 @@
-import type { TransactionPort } from "../ports";
+import type { Queryable, TransactionPort } from "../ports";
 
 export interface ChildAuthorityRecord {
   readonly tools: readonly string[];
@@ -82,6 +82,30 @@ function persistedChildLink(row: ChildLinkRow): PersistedChildLink {
 }
 
 const CHILD_LINK_COLUMNS = "parent_run_id, child_run_id, authority, detached_at, created_at";
+
+/**
+ * Reverse lookup over the link table: what one Run was granted when it was delegated.
+ *
+ * Read-only and outside the transaction port, because every host that executes a child Run has to
+ * bound it by its grant — the control plane and the co-located Tool host alike — and neither may
+ * carry its own copy of this query.
+ */
+export class ChildLinkAncestryStore {
+  constructor(private readonly q: Queryable) {}
+
+  async parentLink(businessId: string, childRunId: string): Promise<PersistedChildLink | null> {
+    const { rows } = await this.q.query<ChildLinkRow>(
+      `SELECT ${CHILD_LINK_COLUMNS}
+         FROM run_child_links
+        WHERE business_id = $1 AND child_run_id = $2
+        ORDER BY created_at
+        LIMIT 1`,
+      [businessId, childRunId]
+    );
+    const row = rows[0];
+    return row === undefined ? null : persistedChildLink(row);
+  }
+}
 
 /** Durable parent/child Run links driven by `@tulipfarm/run-kernel`'s `ChildRunManager`. */
 export class ChildLinkStore {

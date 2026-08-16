@@ -9,12 +9,8 @@ import {
   proposeMemoryCandidates,
   screenMemoryCandidate,
 } from "./extract";
-import {
-  InMemoryMemoryStore,
-  type MemoryDeps,
-  type MemorySettingsView,
-  rememberMemory,
-} from "./memory";
+import { InMemoryMemoryStore, type MemoryDeps, type MemorySettingsView } from "./memory";
+import { rememberMemory } from "./remember";
 import type { MemoryScopeRequest, MemoryScopeTarget } from "./scope";
 
 const BIZ = "biz-1";

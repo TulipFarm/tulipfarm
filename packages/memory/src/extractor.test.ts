@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { candidatesFromResponse, MAX_CANDIDATES_PER_TURN } from "./extractor";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { candidatesFromResponse, LlmMemoryExtractor, MAX_CANDIDATES_PER_TURN } from "./extractor";
+import { MEMORY_METRICS, type MemoryTelemetryPort } from "./telemetry";
+
+const generateText = vi.hoisted(() => vi.fn());
+vi.mock("ai", () => ({ generateText }));
 
 /** Untrusted model output must fail into no candidates, not malformed candidates. */
 
@@ -159,5 +163,68 @@ describe("candidatesFromResponse", () => {
     );
 
     expect(candidate?.entities).toEqual([]);
+  });
+});
+
+describe("LlmMemoryExtractor — the failed-extraction signal", () => {
+  function sink() {
+    const counters: { name: string; value: number }[] = [];
+    const telemetry = {
+      counter: (name: string, value: number) => void counters.push({ name, value }),
+      startSpan: () => ({
+        setAttributes: () => undefined,
+        recordError: () => undefined,
+        end: () => undefined,
+      }),
+    } as unknown as MemoryTelemetryPort;
+    return { counters, telemetry };
+  }
+
+  const messages = [{ role: "user" as const, content: "I work at Acme." }];
+  const model = () => ({}) as never;
+  const businessId = "biz-1";
+
+  beforeEach(() => {
+    generateText.mockReset();
+  });
+
+  it("counts a turn whose extraction threw", async () => {
+    const { counters, telemetry } = sink();
+    generateText.mockRejectedValueOnce(new Error("model unavailable"));
+
+    await expect(
+      new LlmMemoryExtractor(model, telemetry).extract({ businessId, messages })
+    ).resolves.toEqual([]);
+    expect(counters).toEqual([{ name: MEMORY_METRICS.extractionFailures, value: 1 }]);
+  });
+
+  it("stays silent when the turn simply held nothing worth remembering", async () => {
+    // The whole point of the signal: an empty result that never threw must not look like a
+    // failure, or the counter measures noise instead of thinned future Context.
+    const { counters, telemetry } = sink();
+    generateText.mockResolvedValueOnce({ text: response([]) });
+
+    await expect(
+      new LlmMemoryExtractor(model, telemetry).extract({ businessId, messages })
+    ).resolves.toEqual([]);
+    expect(counters).toEqual([]);
+  });
+
+  it("stays silent on an empty transcript, which never reaches the model", async () => {
+    const { counters, telemetry } = sink();
+
+    await expect(
+      new LlmMemoryExtractor(model, telemetry).extract({ businessId, messages: [] })
+    ).resolves.toEqual([]);
+    expect(counters).toEqual([]);
+    expect(generateText).not.toHaveBeenCalled();
+  });
+
+  it("still degrades to no candidates when no telemetry is configured", async () => {
+    generateText.mockRejectedValueOnce(new Error("model unavailable"));
+
+    await expect(new LlmMemoryExtractor(model).extract({ businessId, messages })).resolves.toEqual(
+      []
+    );
   });
 });

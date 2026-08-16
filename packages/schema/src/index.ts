@@ -167,6 +167,14 @@ export {
   serializeSkill,
   validateSkill,
 } from "./skill-frontmatter";
+export {
+  SKILL_ACTIVATE_SCHEMA,
+  SKILL_CREATE_SCHEMA,
+  SKILL_DELETE_SCHEMA,
+  SKILL_GET_SCHEMA,
+  SKILL_LIST_SCHEMA,
+  SKILL_UPDATE_SCHEMA,
+} from "./skill-tool-schemas";
 export type { SoulConfig } from "./soul-config";
 export { SoulConfigSchema, validateSoulConfig } from "./soul-config";
 export type { CounterFn } from "./transforms";

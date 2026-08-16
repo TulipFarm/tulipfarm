@@ -82,6 +82,13 @@ export {
   MAX_CANDIDATES_PER_TURN,
 } from "./extractor";
 export {
+  type EraseResult,
+  eraseMemory,
+  type ForgetRequest,
+  type ForgetResult,
+  forgetMemory,
+} from "./forget";
+export {
   type FactInput,
   MemoryLifecycleService,
   ONBOARDING_MEMORY_LIFECYCLE_SETTINGS,
@@ -98,12 +105,6 @@ export {
   RECENT_RETENTION_TOKENS,
 } from "./limits";
 export {
-  commitAssertion,
-  type EraseResult,
-  eraseMemory,
-  type ForgetRequest,
-  type ForgetResult,
-  forgetMemory,
   InMemoryMemoryStore,
   MEMORY_TRUST_TIERS,
   MEMORY_TYPES,
@@ -124,12 +125,6 @@ export {
   type MemoryTrustTier,
   type MemoryType,
   matchesScopeFilter,
-  type ProceduralCorrectionRequest,
-  type RememberDenialReason,
-  type RememberRequest,
-  type RememberResult,
-  rememberMemory,
-  rememberProceduralCorrection,
 } from "./memory";
 export { PgPendingMemoryStore } from "./pending-store";
 export {
@@ -146,6 +141,15 @@ export {
 } from "./rank";
 export { PgMemoryRecallIndex } from "./recall-index";
 export { MemoryRecallService } from "./recall-service";
+export {
+  commitAssertion,
+  type ProceduralCorrectionRequest,
+  type RememberDenialReason,
+  type RememberRequest,
+  type RememberResult,
+  rememberMemory,
+  rememberProceduralCorrection,
+} from "./remember";
 export {
   type MemoryExclusion,
   type MemoryExclusionReason,

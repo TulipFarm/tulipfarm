@@ -44,13 +44,20 @@ reconciliation, turn execution, delivery classification, projections, and outbox
 - Routine replay safety depends on persisting successors first and durable occurrence keys.
 - Wait ids derive from `(runId, occurrence key)`; `event` waits are refused as `unsupported_wait`.
 - Routine `tool` States are the only Routine Tool authority: authorize, reserve, then dispatch.
+- A Routine Tool intent carries the objects the pinned ToolContract's `spec.targets` declares, so a
+  grant can name one Record; a declared target the arguments cannot answer refuses the State.
 - No `authorityLayers` source and no adapter map both park; do not add provider side routes here.
 - Routine `agent` States use the authored Agent version, same AgentLoop, and pinned Context.
 - Routine Agent States expose no Tools, use deployment default guardrails, and record null output.
 - Agent `instructions.md` is a Soul companion hash, not bundled prompt text; use personality.
 - Approval resume tokens never cross to the worker; replay by wait id and State occurrence.
 - Tools hosted in `src/tools/` must clear `localDispatchRefusal`; boot fails rather than weaken it.
-- Authority for a co-located Tool is still read from the API per Run, never derived here.
+- Authority for a co-located Tool is still read from the API per Run, never derived here, and is
+  cached for one dispatch attempt only; `main.ts` evicts it when the attempt settles.
+- A State's `concurrencyKey` is held by a durable expiry-bounded lease; a contender queues on a
+  durable backoff timer in `routine/concurrency-guard.ts` and parks only at the bounded ceiling.
+- A fired concurrency backoff resumes *into* the State body; only `wait`/`approval` States resume
+  past themselves, so never route a `waiting` row through `resumeWait` without checking.
 - Approval role authority only knows recorded `admin`/`member`; other roles fail closed.
 - Unsupported effect States and live-timer join cancellations park, never pretend success.
 - Chat `invoke` may start `pending` or `waiting`; reclaim through ready/claimed before running.

@@ -1,12 +1,12 @@
 import type { SandboxIsolation } from "./ports/sandbox";
 import {
-  SandboxProtocolError,
   type SandboxSignature,
   type SandboxSignatureSigner,
   type SandboxSignatureVerifier,
   signSandboxPayload,
   verifySandboxPayload,
-} from "./request";
+} from "./signature";
+import { SandboxProtocolError } from "./wire";
 
 /**
  * Backend-produced evidence bound to a fresh request challenge. Capability flags describe

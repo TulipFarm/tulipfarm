@@ -11,7 +11,7 @@ export type {
   LinkChildInput,
   PersistedChildLink,
 } from "./child-store";
-export { CHILD_STORAGE_STATEMENTS, ChildLinkStore } from "./child-store";
+export { CHILD_STORAGE_STATEMENTS, ChildLinkAncestryStore, ChildLinkStore } from "./child-store";
 export type {
   ConcurrencyAdmissionAction,
   ConcurrencyAdmitInput,
@@ -36,7 +36,7 @@ export {
   RUN_EVENT_STORAGE_STATEMENTS,
   RunEventStore,
 } from "./events";
-export type { LoopCheckpoint } from "./loop-checkpoint-store";
+export type { LoopCheckpoint, LoopResumeState } from "./loop-checkpoint-store";
 export {
   LOOP_CHECKPOINT_STORAGE_STATEMENTS,
   RunLoopCheckpointStore,
@@ -76,6 +76,20 @@ export {
   RunPersistenceError,
   RunStore,
 } from "./run-store";
+export type {
+  AcquireStateConcurrencyInput,
+  StateConcurrencyAcquisition,
+  StateConcurrencyLease,
+} from "./state-concurrency-store";
+export {
+  RunStateConcurrencyStore,
+  STATE_CONCURRENCY_STORAGE_STATEMENTS,
+} from "./state-concurrency-store";
+export type { StateContentionWaits } from "./state-contention-store";
+export {
+  RunStateContentionStore,
+  STATE_CONTENTION_STORAGE_STATEMENTS,
+} from "./state-contention-store";
 export type { StateRetryAttempts } from "./state-retry-store";
 export { RunStateRetryStore, STATE_RETRY_STORAGE_STATEMENTS } from "./state-retry-store";
 export type {

@@ -58,6 +58,9 @@ class FakeSecretRepo implements SecretRepo {
   async listLegacyKeys(): Promise<string[]> {
     return [];
   }
+  async findRevision(): Promise<Date | null> {
+    return null;
+  }
 }
 
 function makeFakeGitSync() {

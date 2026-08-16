@@ -40,6 +40,19 @@ async function seedRunsFkTarget(db: PGlite): Promise<void> {
   )`);
 }
 
+/**
+ * The `approvals` table that migration v59 (one-use decision columns) alters. Fixtures whose
+ * floor is above the baseline that creates it must stand it in.
+ */
+async function seedApprovalsAlterTarget(db: PGlite): Promise<void> {
+  await db.query(`CREATE TABLE IF NOT EXISTS approvals (
+    id      uuid PRIMARY KEY,
+    kind    text NOT NULL,
+    status  text NOT NULL DEFAULT 'pending',
+    payload jsonb NOT NULL
+  )`);
+}
+
 describe("runPgMigrations", () => {
   let db: PGlite;
 
@@ -59,6 +72,7 @@ describe("runPgMigrations", () => {
     await db.query("CREATE TABLE messages (id uuid PRIMARY KEY)");
     await db.query("CREATE TABLE users (id uuid PRIMARY KEY, password_hash text NOT NULL)");
     await seedRunsFkTarget(db);
+    await seedApprovalsAlterTarget(db);
     await db.query("CREATE TABLE run_events (run_id uuid NOT NULL, sequence bigint NOT NULL)");
     await db.query(`CREATE TABLE api_clients (
       id            uuid PRIMARY KEY,
@@ -349,6 +363,7 @@ describe("runPgMigrations", () => {
       )`);
       await db.query("INSERT INTO schema_version (id, version) VALUES (true, 48)");
       await seedRunsFkTarget(db);
+      await seedApprovalsAlterTarget(db);
       await db.query(`INSERT INTO soul_execution_bundles (
         digest, business_id, changeset_id, commit_sha, bundle, signature
       ) VALUES (
@@ -420,6 +435,7 @@ describe("runPgMigrations", () => {
       // v27 needs pgvector for `knowledge_source_chunks.embedding`; baseline v1 usually creates it.
       await db.query("CREATE EXTENSION IF NOT EXISTS vector");
       await seedRunsFkTarget(db);
+      await seedApprovalsAlterTarget(db);
       await db.query(`INSERT INTO runs (id, bundle)
         VALUES ('00000000-0000-4000-8000-000000000001', '{"routineId":"chat"}'::jsonb)`);
       await db.query(`CREATE TABLE schema_version (
@@ -491,6 +507,7 @@ describe("runPgMigrations", () => {
       await db.query("INSERT INTO schema_version (id, version) VALUES (true, 31)");
       await seedEmbeddingTablesAsOf(db, 31);
       await seedRunsFkTarget(db);
+      await seedApprovalsAlterTarget(db);
 
       await runPgMigrations(db, undefined, () => {});
 
@@ -515,6 +532,7 @@ describe("runPgMigrations", () => {
       await db.query("INSERT INTO schema_version (id, version) VALUES (true, 31)");
       await seedEmbeddingTablesAsOf(db, 31);
       await seedRunsFkTarget(db);
+      await seedApprovalsAlterTarget(db);
 
       await expect(runPgMigrations(db, undefined, () => {})).resolves.not.toThrow();
     });
@@ -681,6 +699,7 @@ describe("runPgMigrations concurrency and atomicity", () => {
       )`);
       await db.query("INSERT INTO schema_version (id, version) VALUES (true, 49)");
       await seedRunsFkTarget(db);
+      await seedApprovalsAlterTarget(db);
 
       await runPgMigrations(db, undefined, NOOP_LOG);
 

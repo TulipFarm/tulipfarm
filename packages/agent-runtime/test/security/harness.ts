@@ -1,8 +1,14 @@
-import type { ChildAuthority, ChildLink, ChildLinkStore } from "@tulipfarm/run-kernel";
+import type {
+  ChildAuthority,
+  ChildLink,
+  ChildLinkAncestry,
+  ChildLinkStore,
+} from "@tulipfarm/run-kernel";
 import {
   AgentLoop,
   type AgentLoopEvent,
   type AgentLoopInput,
+  type ChildRunStarter,
   InMemoryLoopCheckpointStore,
   type ModelInvocationResult,
   type ToolDispatchResult,
@@ -99,4 +105,28 @@ export class FakeChildLinkStore implements ChildLinkStore {
   async listChildren(_businessId: string, parentRunId: string): Promise<readonly ChildLink[]> {
     return this.links.filter((link) => link.parentRunId === parentRunId);
   }
+}
+
+/** Ancestry over the same fake rows, so depth is read from links a spawn actually wrote. */
+export function fakeAncestry(store: FakeChildLinkStore): ChildLinkAncestry {
+  return {
+    parentLink: async (_businessId, childRunId) =>
+      store.links.find((link) => link.childRunId === childRunId) ?? null,
+  };
+}
+
+/** Records what a delegation would have started; the coordinator owns the only such port. */
+export function fakeChildRunStarter(): ChildRunStarter & {
+  readonly started: { childRunId: string; authority: ChildAuthority }[];
+} {
+  const started: { childRunId: string; authority: ChildAuthority }[] = [];
+  return {
+    started,
+    start: async (input) => {
+      const childRunId = `run-child-${started.length + 1}`;
+      started.push({ childRunId, authority: input.authority });
+      return { childRunId, conversationId: `chat-${started.length}` };
+    },
+    cancel: async () => {},
+  };
 }

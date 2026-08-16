@@ -35,8 +35,9 @@ Individual Tool families (`packages/kv`, `apps/api/src/tools/**`), the model-fac
 - **`eligibility.ts` fails closed.** A process without a live Soul, a renderer registry or
   provider credential leases must not authorize a Tool that needs them. Widening the rule needs a
   reason why the weaker check is still the same check.
-- **`ToolApprovalPort` exposes only `decide`.** `registerWait` mints a one-use resume token and
-  must stay in the control plane; see `apps/worker/AGENTS.md`.
+- **`ToolApprovalPort` exposes `decide` and `consume` only.** `consume` spends the one-use decision
+  at the dispatch that executes it (I-13); `registerWait` mints a one-use resume token and must
+  stay in the control plane — see `apps/worker/AGENTS.md`.
 - No dependency on `@tulipfarm/agent-runtime` — it depends on this package's consumers' shape, not
   the reverse. Narrow structural types instead.
 - `scripts/tool-colocation.test.ts` pins who may host what; it fails the build on drift.

@@ -32,6 +32,20 @@ export {
   EXECUTION_BUNDLE_VERSION,
   InMemoryBundleStore,
 } from "./bundle";
+export type {
+  BundleRetentionPassInput,
+  BundleRetentionPassResult,
+  UnreferencedBundleDeleter,
+} from "./bundle-retention";
+export {
+  bundleRetentionMessage,
+  pruneUnreferencedBundles,
+  SOUL_BUNDLE_PRUNE_BATCH,
+  SOUL_BUNDLE_PRUNE_MAX_BATCHES,
+  SOUL_BUNDLE_RETENTION_DAYS,
+  SOUL_BUNDLE_RETENTION_MS,
+} from "./bundle-retention";
+export type { BundleRetentionInput } from "./bundle-store.pg";
 export { PgBundleStore, SOUL_BUNDLE_STORAGE_STATEMENTS } from "./bundle-store.pg";
 export type { SoulCatalogue, SoulCatalogueEntry } from "./catalogue";
 export { buildSoulCatalogue } from "./catalogue";

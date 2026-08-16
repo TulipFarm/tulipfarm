@@ -4,14 +4,10 @@ import type { Queryable } from "@tulipfarm/storage";
 import { PgMemoryAssertionStore } from "./assertion-store";
 import { assertValidAssertion, type MemoryAssertionView, type MemoryRepo } from "./assertion-view";
 import type { MemoryEmbedder } from "./embedder";
-import {
-  forgetMemory,
-  type MemoryAssertion,
-  type MemoryDeps,
-  type MemorySettingsView,
-  rememberMemory,
-} from "./memory";
+import { forgetMemory } from "./forget";
+import type { MemoryAssertion, MemoryDeps, MemorySettingsView } from "./memory";
 import { PgPendingMemoryStore } from "./pending-store";
+import { rememberMemory } from "./remember";
 import type { MemoryScopeRequest } from "./scope";
 import type { MemoryTelemetryPort } from "./telemetry";
 

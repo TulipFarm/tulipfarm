@@ -4,6 +4,7 @@ import type { FastifyBaseLogger, FastifyInstance, FastifyReply, FastifyRequest }
 import { ErrorSchema } from "../auth/schemas";
 import * as DeliveryHost from "./delivery-host";
 import * as RoutineApprovalHost from "./routine-approval-host";
+import { registerRoutineApprovalRoutes } from "./routine-approval-routes";
 import * as InternalSchemas from "./schemas";
 import * as TurnHost from "./turn-host";
 
@@ -29,8 +30,6 @@ const ROUTINE_APPROVAL_DENIAL_STATUS: Readonly<
   run_not_running: 409,
   not_a_routine: 400,
 };
-
-type DenialGuard = <T>(reply: FastifyReply, run: () => Promise<T>) => Promise<T | undefined>;
 
 export interface InternalTurnRouteDeps {
   readonly host: TurnHost.InternalTurnHost;
@@ -555,76 +554,6 @@ export function registerInternalTurnRoutes(
         deliveries.postReplyForAttempt(DEPLOYMENT_BUSINESS_ID, runId, body)
       );
       if (posted !== undefined) return reply.send(posted);
-    }
-  );
-}
-
-function registerRoutineApprovalRoutes(
-  app: FastifyInstance,
-  host: RoutineApprovalHost.InternalRoutineApprovalHost | undefined,
-  preHandler: PreHandler[],
-  guard: DenialGuard
-): void {
-  if (host === undefined) return;
-
-  app.post(
-    "/api/v1/internal/runs/:runId/routine-approvals",
-    {
-      preHandler,
-      schema: {
-        description: "Open or replay a Routine approval and register its wait.",
-        tags: ["internal"],
-        security: [{ bearerToken: [] }],
-        params: InternalSchemas.InternalRunParamsSchema,
-        body: InternalSchemas.InternalRoutineApprovalOpenBodySchema,
-        response: {
-          200: InternalSchemas.InternalRoutineApprovalResponseSchema,
-          400: ErrorSchema,
-          401: ErrorSchema,
-          403: ErrorSchema,
-          404: ErrorSchema,
-          409: ErrorSchema,
-        },
-      },
-    },
-    async (req, reply) => {
-      const { runId } = req.params as { runId: string };
-      const body = req.body as RoutineApprovalHost.OpenRoutineApprovalInput;
-      const opened = await guard(reply, () => host.open(DEPLOYMENT_BUSINESS_ID, runId, body));
-      if (opened !== undefined) return reply.send(opened);
-    }
-  );
-
-  app.get(
-    "/api/v1/internal/runs/:runId/routine-approvals",
-    {
-      preHandler,
-      schema: {
-        description: "Read the decision for a Routine approval, if one exists.",
-        tags: ["internal"],
-        security: [{ bearerToken: [] }],
-        params: InternalSchemas.InternalRunParamsSchema,
-        querystring: InternalSchemas.InternalRoutineApprovalQuerySchema,
-        response: {
-          200: InternalSchemas.InternalRoutineApprovalResponseSchema,
-          204: InternalSchemas.InternalRoutineApprovalEmptyResponseSchema,
-          400: ErrorSchema,
-          401: ErrorSchema,
-          403: ErrorSchema,
-          404: ErrorSchema,
-          409: ErrorSchema,
-        },
-      },
-    },
-    async (req, reply) => {
-      const { runId } = req.params as { runId: string };
-      const { stateKey } = req.query as { stateKey: string };
-      const found = await guard(reply, () =>
-        host.find(DEPLOYMENT_BUSINESS_ID, runId, stateKey).then((record) => record ?? null)
-      );
-      if (found === undefined) return;
-      if (found === null) return reply.code(204).send();
-      return reply.send(found);
     }
   );
 }

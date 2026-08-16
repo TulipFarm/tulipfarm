@@ -11,6 +11,7 @@ import {
   resolvePendingMemory,
 } from "../../src/confirm";
 import type { MemoryContradictionInput, MemoryContradictionPort } from "../../src/contradiction";
+import { eraseMemory, forgetMemory } from "../../src/forget";
 import type {
   MemoryAssertion,
   MemoryAuditSink,
@@ -19,11 +20,10 @@ import type {
   MemoryProvenance,
   MemorySettingsView,
   MemoryTrustTier,
-  RememberRequest,
-  RememberResult,
 } from "../../src/memory";
-import { eraseMemory, forgetMemory, InMemoryMemoryStore, rememberMemory } from "../../src/memory";
+import { InMemoryMemoryStore } from "../../src/memory";
 import type { MemoryCandidateSignals } from "../../src/rank";
+import { type RememberRequest, type RememberResult, rememberMemory } from "../../src/remember";
 import type { MemoryRecallIndex, MemoryRecallIndexRequest } from "../../src/retrieve";
 import { recallMemory } from "../../src/retrieve";
 import type { MemoryScopeRequest, MemoryScopeTarget } from "../../src/scope";

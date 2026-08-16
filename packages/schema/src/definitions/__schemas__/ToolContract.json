@@ -246,6 +246,36 @@
           ],
           "type": "string"
         },
+        "targets": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "domain": {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              "id": {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              "type": {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "id"
+            ],
+            "type": "object"
+          },
+          "maxItems": 16,
+          "minItems": 1,
+          "type": "array"
+        },
         "timeout": {
           "additionalProperties": false,
           "properties": {

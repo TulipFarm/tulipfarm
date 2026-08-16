@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { hostname } from "node:os";
-import { GuardrailsService } from "@tulipfarm/agent-runtime";
+import { delegationCatalogOf, GuardrailsService } from "@tulipfarm/agent-runtime";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { FetchEgressHttp, GuardedEgressHttp } from "@tulipfarm/integrations";
 import {
@@ -78,6 +78,7 @@ import {
   BudgetStore,
   ChannelMentionedThreadStore,
   ChannelRunDeliveryStore,
+  ChildLinkAncestryStore,
   ChildLinkStore,
   EventStore,
   ensureEmbeddingIndexes,
@@ -93,14 +94,8 @@ import {
   TaskRepo,
   WaitStore,
 } from "@tulipfarm/storage";
-import { CompositeToolEntitlement, PgEffectStore } from "@tulipfarm/tool-broker";
-import {
-  ApprovalsRepo,
-  CredentialResolver,
-  LiveToolGate,
-  RegistryToolDispatcher,
-  ToolApprovalService,
-} from "@tulipfarm/tool-host";
+import { PgEffectStore } from "@tulipfarm/tool-broker";
+import { ApprovalsRepo, ToolApprovalService } from "@tulipfarm/tool-host";
 import { config } from "dotenv";
 import type { FastifyBaseLogger } from "fastify";
 import { PgBoss } from "pg-boss";
@@ -170,9 +165,9 @@ import { PgIntegrationAuthRequestRepo } from "./integrations/auth-broker";
 import { resolveSecretRef } from "./integrations/connection-env";
 import { PgPrincipalProviderTokenRepo } from "./integrations/principal-tokens";
 import { IngressDeliveryHost } from "./internal/delivery-host";
-import { GitHubEntitlementPort, HttpGitHubPermissionApi } from "./internal/github-entitlement";
 import { ModelSelectorGate, modelGateModeFromEnv } from "./internal/model-authz";
 import { InternalRoutineApprovalHost } from "./internal/routine-approval-host";
+import { buildDelegatedToolDispatch } from "./internal/tool-dispatch";
 import { ChatTurnContextResolver } from "./internal/turn-context";
 import { InternalTurnHost } from "./internal/turn-host";
 import { KillSwitchService } from "./kill-switches/service";
@@ -204,6 +199,7 @@ import { registerSpendAlertSchedule } from "./observability/spend-alert";
 import { createObservabilityTelemetryPort } from "./observability/telemetry-port";
 import { OtlpTracesExporter } from "./observability/traces";
 import { runPgMigrations } from "./pg-migrate";
+import { createAgentDelegation, startChildConversation } from "./platform/delegation";
 import { PgRateLimiter } from "./rate-limit";
 import { LiveRecordAuthorizer } from "./resources/authorize";
 import { reconcileResourceTables, registerResourceReconcile } from "./resources/reconcile";
@@ -246,7 +242,7 @@ import {
   provisionIntegrationWorkerCredential,
   provisionWorkerCredential,
 } from "./setup/worker-credential";
-import { hostedAgentResolver } from "./soul/agents/registry";
+import { bundleRetentionMs, registerSoulBundlePruneSchedule } from "./soul/bundle-prune-schedule";
 import { createGitHubSoulCredentialProvider } from "./soul/github-repo-credential";
 import { registerSoulPublicationRoutes } from "./soul/publication-routes";
 import { registerSoulSync } from "./soul-sync";
@@ -257,7 +253,6 @@ import { registerTaskReconcileSchedule, TASK_RECONCILE_QUEUE } from "./tasks/rec
 import { DeclarativeToolSync } from "./tools/declarative/sync";
 import { buildGitHubTooling } from "./tools/github/compose";
 import { buildGitHubTools } from "./tools/github/tools";
-import { githubExcludedToolNames } from "./tools/github/visibility";
 import { buildToolRegistry } from "./tools/setup";
 import { buildSlackTooling } from "./tools/slack/compose";
 import { buildSlackTools } from "./tools/slack/tools";
@@ -550,7 +545,7 @@ async function boot() {
     );
     const memoryExtractionService = new MemoryExtractionService(
       pool,
-      new LlmMemoryExtractor(() => llmService.effortModel("fast")),
+      new LlmMemoryExtractor(() => llmService.effortModel("fast"), memoryTelemetry),
       guardrailsService,
       embeddingService,
       () => new Date(),
@@ -690,6 +685,23 @@ async function boot() {
     });
 
     // (resource records/types, agents, skills, platform tools). Without this, a chat turn only
+    const delegationConversations = new PgConversationStore(pool);
+    const childLinks = new ChildLinkAncestryStore(pool);
+    // Read at call time: the registry is still being built on the next statement.
+    const delegationCatalog = delegationCatalogOf({ getAll: () => toolRegistry.getAll() });
+    const agentDelegation = createAgentDelegation({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      links: new ChildLinkStore(runTransactions),
+      ancestry: childLinks,
+      startChildConversation: startChildConversation({
+        conversations: conversationRepo,
+        store: delegationConversations,
+        invocations,
+      }),
+      conversations: delegationConversations,
+      cancelRun: runCancel.cancel,
+      catalog: delegationCatalog,
+    });
     const toolRegistry = buildToolRegistry({
       memory: memoryService,
       memoryRecall: memoryRecallService,
@@ -726,6 +738,7 @@ async function boot() {
         bundledSkills,
         disabledBundledSkills,
         triggerRoutine: manualRoutineTrigger(invocations),
+        delegateToAgent: agentDelegation.delegate,
         onRoutinesChanged: async () => {
           await soulLoader.reload();
           // Ticks immediately so a newly-authored/edited schedule is reconciled without waiting up
@@ -771,6 +784,7 @@ async function boot() {
           bundledSkills,
           disabledBundledSkills,
           channelDeliveries: channelRunDeliveries,
+          childLinks,
           githubStatus: { integrations: integrationStore, businessId: DEPLOYMENT_BUSINESS_ID },
           // Authority layers L1/L2 for the model path, off the same live resolver the Tool gate
           // uses, so `platform.model` is decided by the one decision function rather than a copy.
@@ -781,8 +795,11 @@ async function boot() {
             mode: modelGateModeFromEnv(),
             log: (event, message) => console.warn(JSON.stringify({ ...event, msg: message })),
           }),
+          telemetry: memoryTelemetry,
         }),
-        tools: new RegistryToolDispatcher({
+        tools: buildDelegatedToolDispatch({
+          links: childLinks,
+          catalog: delegationCatalog,
           registry: toolRegistry,
           artifacts: runArtifacts,
           soulLoader,
@@ -792,26 +809,12 @@ async function boot() {
           surfaceStore: surfaceArtifactStore,
           surfaceActionStore,
           guardrails: guardrailsService,
-          agents: hostedAgentResolver(soulLoader),
-          visibility: {
-            excludedToolNames: (businessId) =>
-              githubExcludedToolNames({ integrations: integrationStore, businessId }),
-          },
-          // the agent allowlist alone; with them, no chat Tool executes without a grant.
-          gate: new LiveToolGate(),
           authorityLayers: authorityLayerResolver,
-          // D7. Without this every provider Tool spends the deployment's shared credential and the
-          credentials: new CredentialResolver({ tokens: principalTokens, soulLoader }),
-          // Authority layer L5. Every GitHub Tool spends the App installation's credential, so
-          // without this the platform's answer to "may this person touch that repo" is whatever
-          entitlements: new CompositeToolEntitlement([
-            new GitHubEntitlementPort(
-              externalIdentityRepo,
-              new HttpGitHubPermissionApi(githubTooling.installationToken)
-            ),
-          ]),
-          // s6-ledger. Without this a mutating platform Tool — Record CRUD, Soul Forge, memory,
-          effects: new PgEffectStore(runTransactions),
+          integrations: integrationStore,
+          tokens: principalTokens,
+          identities: externalIdentityRepo,
+          githubInstallationToken: githubTooling.installationToken,
+          transactions: runTransactions,
         }),
         approvals: {
           // was minted with — never one the Worker names for itself.
@@ -1139,6 +1142,8 @@ async function boot() {
     await registerScheduleDispatch(boss, scheduleDispatcher, { log: app.log });
     await registerTaskReconcileSchedule(boss);
     await registerObsPruneSchedule(boss, obsConfig.retentionDays * 24 * 60 * 60 * 1000);
+    // Every Soul commit publishes a bundle, so this table grows for the life of the deployment.
+    await registerSoulBundlePruneSchedule(boss, bundleRetentionMs(process.env));
     await registerSpendAlertSchedule(boss, obsConfig.spendAlertUsd);
     await registerKnowledgeIndexing(boss, {
       service: knowledgeService,

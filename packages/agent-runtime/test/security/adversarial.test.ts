@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   assembleContext,
   type ContextCandidate,
+  DELEGATION_DEADLINE_LIMIT_KEY,
   DelegationCoordinator,
   evaluateActivation,
   InMemoryLoopCheckpointStore,
@@ -14,7 +15,13 @@ import {
   selectModelProfile,
   type ToolDispatchResult,
 } from "../../src";
-import { FakeChildLinkStore, loopHarness, TOOL_NAME } from "./harness";
+import {
+  FakeChildLinkStore,
+  fakeAncestry,
+  fakeChildRunStarter,
+  loopHarness,
+  TOOL_NAME,
+} from "./harness";
 
 /** Adversarial corpus for authority, instruction, and durable-limit invariants. */
 
@@ -323,25 +330,27 @@ describe("Skills and helpers cannot amplify authority", () => {
   });
 
   it("denies a helper Run that asks for more than its parent holds", async () => {
+    const store = new FakeChildLinkStore();
+    const starter = fakeChildRunStarter();
     const delegation = new DelegationCoordinator({
-      children: new ChildRunManager(new FakeChildLinkStore()),
+      children: new ChildRunManager(store, fakeAncestry(store)),
       tools: { isReadOnly: (name) => name.endsWith(".read") },
+      starter,
       policy: { maxDepth: 2 },
     });
-    const parent = {
-      authority: {
-        tools: ["github.issue.read"],
-        classifications: ["internal"],
-        limits: { costUsd: 1 },
-      },
-      depth: 0,
-      deadlineAt: "2026-07-25T11:00:00.000Z",
-    };
     const base = {
       businessId: "biz-1",
       parentRunId: "run-parent",
-      childRunId: "run-child",
-      parent,
+      agentId: "helper",
+      task: "look at the ticket",
+      rootAuthority: {
+        tools: ["github.issue.read"],
+        classifications: ["internal"],
+        limits: {
+          costUsd: 1,
+          [DELEGATION_DEADLINE_LIMIT_KEY]: Date.parse("2026-07-25T11:00:00.000Z"),
+        },
+      },
       now: "2026-07-25T10:00:00.000Z",
     };
 
@@ -360,33 +369,37 @@ describe("Skills and helpers cannot amplify authority", () => {
         requested: { deadlineAt: "2026-07-30T00:00:00.000Z" },
       })
     ).rejects.toMatchObject({ code: "deadline_amplification" });
+    // No refusal may leave a started child Run behind.
+    expect(starter.started).toHaveLength(0);
   });
 
   it("starts a helper read-only even when the parent could write", async () => {
+    const store = new FakeChildLinkStore();
+    const starter = fakeChildRunStarter();
     const delegation = new DelegationCoordinator({
-      children: new ChildRunManager(new FakeChildLinkStore()),
+      children: new ChildRunManager(store, fakeAncestry(store)),
       tools: { isReadOnly: (name) => name.endsWith(".read") },
+      starter,
       policy: { maxDepth: 2 },
     });
 
     const helper = await delegation.delegate({
       businessId: "biz-1",
       parentRunId: "run-parent",
-      childRunId: "run-child",
-      parent: {
-        authority: {
-          tools: ["github.issue.read", "github.issue.comment"],
-          classifications: ["internal"],
-          limits: {},
-        },
-        depth: 0,
-        deadlineAt: "2026-07-25T11:00:00.000Z",
+      agentId: "helper",
+      task: "look at the ticket",
+      rootAuthority: {
+        tools: ["github.issue.read", "github.issue.comment"],
+        classifications: ["internal"],
+        limits: { [DELEGATION_DEADLINE_LIMIT_KEY]: Date.parse("2026-07-25T11:00:00.000Z") },
       },
       requested: {},
       now: "2026-07-25T10:00:00.000Z",
     });
 
     expect(helper.authority.tools).toEqual(["github.issue.read"]);
+    // The Run the coordinator started carries the narrowed authority, not the parent's.
+    expect(starter.started[0].authority.tools).toEqual(["github.issue.read"]);
   });
 });
 

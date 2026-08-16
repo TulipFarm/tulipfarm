@@ -27,6 +27,19 @@ export const MEMORY_METRICS = {
   episodeAccess: "tulipfarm.memory.episodes.access",
   episodeChunks: "tulipfarm.memory.episodes.chunks",
   episodeRecallCandidates: "tulipfarm.memory.episodes.recall_candidates",
+  /**
+   * One Agent turn assembled with thinner Context than it should have had, because a Context probe
+   * failed and fell back to an absence value. Without it a failed probe is indistinguishable from a
+   * genuinely empty one and its rate is unmeasured. Labelled by `probe` only.
+   */
+  contextDegradations: "tulipfarm.memory.context.degradations",
+  /** An episode chunk stored without a vector because embedding threw; future recall is thinner. */
+  episodeEmbeddingFailures: "tulipfarm.memory.episodes.embedding_failures",
+  /**
+   * An extraction that threw, so the turn taught Memory nothing. Thins *future* Context and is
+   * otherwise indistinguishable from a turn that genuinely held nothing worth remembering.
+   */
+  extractionFailures: "tulipfarm.memory.extraction.failures",
 } as const;
 
 export const MEMORY_SPANS = {

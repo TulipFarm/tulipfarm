@@ -1,6 +1,7 @@
 import { generateText, type LanguageModel } from "ai";
 import type { MemoryCandidate, MemoryExtractionInput, MemoryExtractionPort } from "./extract";
 import type { MEMORY_TYPES } from "./memory";
+import { MEMORY_METRICS, type MemoryTelemetryPort, recordMemoryCounter } from "./telemetry";
 
 /**
  * LLM-backed Memory extraction (SPEC §14.3). Runs *after* a turn has answered, never inside it:
@@ -111,7 +112,10 @@ export function candidatesFromResponse(raw: string): readonly MemoryCandidate[] 
  * degrade to extracting nothing rather than failing.
  */
 export class LlmMemoryExtractor implements MemoryExtractionPort {
-  constructor(private readonly getModel: () => LanguageModel) {}
+  constructor(
+    private readonly getModel: () => LanguageModel,
+    private readonly telemetry?: MemoryTelemetryPort
+  ) {}
 
   async extract(input: MemoryExtractionInput): Promise<readonly MemoryCandidate[]> {
     const transcript = renderMessages(input.messages);
@@ -123,7 +127,10 @@ export class LlmMemoryExtractor implements MemoryExtractionPort {
       });
       return candidatesFromResponse(text);
     } catch {
-      // A failed extraction yields no candidates; memory learns nothing here.
+      // A failed extraction yields no candidates; memory learns nothing here. The counter above
+      // the return is what separates that from a turn holding nothing worth remembering, which
+      // reaches the same empty result without ever entering this catch.
+      recordMemoryCounter(this.telemetry, MEMORY_METRICS.extractionFailures, 1);
       return [];
     }
   }

@@ -1,13 +1,7 @@
 /** Extraction proposes inferred Pending Memory only; candidates are statements, not instructions. */
 
-import type {
-  MemoryDeps,
-  MemoryTrustTier,
-  MemoryType,
-  RememberRequest,
-  RememberResult,
-} from "./memory";
-import { rememberMemory } from "./memory";
+import type { MemoryDeps, MemoryTrustTier, MemoryType } from "./memory";
+import { type RememberRequest, type RememberResult, rememberMemory } from "./remember";
 import type { MemoryScopeRequest, MemoryScopeTarget } from "./scope";
 import {
   endMemorySpan,

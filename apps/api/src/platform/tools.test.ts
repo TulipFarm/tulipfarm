@@ -1,12 +1,12 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assembleSystemPrompt } from "@tulipfarm/agent-runtime";
+import { assembleSystemPrompt, DelegationError } from "@tulipfarm/agent-runtime";
 import type { BundledSkill, SoulAgent, SoulRoutine, SoulSkill, SoulWriter } from "@tulipfarm/soul";
 import { describe, expect, it, vi } from "vitest";
+import { delegateToAgentTool } from "./delegate-tool";
 import {
   callSkillTool,
-  delegateToAgentTool,
   loadSkillReferenceTool,
   loadSkillTool,
   PLATFORM_TOOLS,
@@ -373,27 +373,62 @@ describe("transferToAgentTool", () => {
 // ── delegate_to_agent ─────────────────────────────────────────────────────────
 
 describe("delegateToAgentTool", () => {
-  it("returns delegated status with task and context", async () => {
+  const delegationOutcome = {
+    agentId: "worker",
+    childRunId: "child-run",
+    conversationId: "child-chat",
+    depth: 1,
+    deadlineAt: "2026-01-01T00:10:00.000Z",
+    status: "succeeded" as const,
+    result: "done",
+  };
+
+  it("starts a child Run through the coordinator and returns its outcome", async () => {
+    const delegate = vi.fn(async () => delegationOutcome);
     const ctx = makeCtx({}, { worker: makeAgent("worker", "Worker") });
+    ctx.delegateToAgent = delegate;
+    ctx.requestContext = { userId: "u1", runId: "parent-run" };
     const res = await delegateToAgentTool.handler(
       { agentId: "worker", task: "Summarise report", context: { reportId: "r1" } },
       ctx
     );
+    expect(delegate).toHaveBeenCalledWith({
+      parentRunId: "parent-run",
+      agentId: "worker",
+      task: "Summarise report",
+      context: { reportId: "r1" },
+    });
     expect(res).toEqual({
       success: true,
-      data: {
-        agentId: "worker",
-        task: "Summarise report",
-        context: { reportId: "r1" },
-        status: "delegated",
-      },
+      data: { ...delegationOutcome, task: "Summarise report" },
     });
   });
 
-  it("sets context to null when omitted", async () => {
+  it("refuses rather than returning a receipt when no Run is in scope", async () => {
     const ctx = makeCtx({}, { worker: makeAgent("worker") });
+    ctx.delegateToAgent = vi.fn(async () => delegationOutcome);
     const res = await delegateToAgentTool.handler({ agentId: "worker", task: "Do something" }, ctx);
-    expect(res).toMatchObject({ success: true, data: { context: null } });
+    expect(res).toMatchObject({ success: false, error: { code: "unavailable" } });
+  });
+
+  it("refuses rather than returning a receipt when delegation is not composed", async () => {
+    const ctx = makeCtx({}, { worker: makeAgent("worker") });
+    ctx.requestContext = { userId: "u1", runId: "parent-run" };
+    const res = await delegateToAgentTool.handler({ agentId: "worker", task: "Do something" }, ctx);
+    expect(res).toMatchObject({ success: false, error: { code: "unavailable" } });
+  });
+
+  it("maps a guard denial to a validation error", async () => {
+    const ctx = makeCtx({}, { worker: makeAgent("worker") });
+    ctx.requestContext = { userId: "u1", runId: "parent-run" };
+    ctx.delegateToAgent = vi.fn(async () => {
+      throw new DelegationError("depth_limit_exceeded", "depth");
+    });
+    const res = await delegateToAgentTool.handler({ agentId: "worker", task: "Do it" }, ctx);
+    expect(res).toMatchObject({
+      success: false,
+      error: { code: "validation_error", message: "depth_limit_exceeded:depth" },
+    });
   });
 
   it("returns not_found for unknown agent", async () => {

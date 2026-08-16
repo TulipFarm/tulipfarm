@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   type ChildAuthority,
   type ChildLink,
+  type ChildLinkAncestry,
   type ChildLinkStore,
   ChildRunError,
   ChildRunManager,
@@ -61,6 +62,13 @@ class FakeChildLinkStore implements ChildLinkStore {
   async listChildren(_businessId: string, parentRunId: string): Promise<readonly ChildLink[]> {
     return this.links.filter((link) => link.parentRunId === parentRunId);
   }
+}
+
+function ancestryOf(store: FakeChildLinkStore): ChildLinkAncestry {
+  return {
+    parentLink: async (_businessId, childRunId) =>
+      store.links.find((link) => link.childRunId === childRunId) ?? null,
+  };
 }
 
 describe("narrowChildAuthority", () => {
@@ -127,7 +135,9 @@ describe("ChildRunManager", () => {
   it("persists the narrowed authority, never the requested one", async () => {
     const store = new FakeChildLinkStore();
 
-    const link = await spawn(new ChildRunManager(store), { tools: ["crm.read"] });
+    const link = await spawn(new ChildRunManager(store, ancestryOf(store)), {
+      tools: ["crm.read"],
+    });
 
     expect(link.authority).toEqual({
       tools: ["crm.read"],
@@ -140,15 +150,15 @@ describe("ChildRunManager", () => {
   it("refuses to persist a link when the child asked to broaden authority", async () => {
     const store = new FakeChildLinkStore();
 
-    await expect(spawn(new ChildRunManager(store), { tools: ["billing.refund"] })).rejects.toThrow(
-      ChildRunError
-    );
+    await expect(
+      spawn(new ChildRunManager(store, ancestryOf(store)), { tools: ["billing.refund"] })
+    ).rejects.toThrow(ChildRunError);
     expect(store.links).toHaveLength(0);
   });
 
   it("is idempotent so a retried spawn cannot re-widen an existing link", async () => {
     const store = new FakeChildLinkStore();
-    const manager = new ChildRunManager(store);
+    const manager = new ChildRunManager(store, ancestryOf(store));
 
     await spawn(manager, { tools: ["crm.read"] });
     const again = await spawn(manager, {});
@@ -157,9 +167,9 @@ describe("ChildRunManager", () => {
     expect(store.links).toHaveLength(1);
   });
 
-  it("detaches a child explicitly and excludes it from attached children", async () => {
+  it("detaches a child explicitly and records when it happened", async () => {
     const store = new FakeChildLinkStore();
-    const manager = new ChildRunManager(store);
+    const manager = new ChildRunManager(store, ancestryOf(store));
     await spawn(manager, {});
 
     const detached = await manager.detach({
@@ -170,13 +180,13 @@ describe("ChildRunManager", () => {
     });
 
     expect(detached).toBe(true);
-    expect(await manager.listAttached(BUSINESS_ID, PARENT_ID)).toEqual([]);
-    expect(await manager.listChildren(BUSINESS_ID, PARENT_ID)).toHaveLength(1);
+    const [link] = await manager.listChildren(BUSINESS_ID, PARENT_ID);
+    expect(link.detachedAt).toBe("2026-07-25T10:01:00.000Z");
   });
 
   it("reports a second detach as a no-op rather than failing the caller", async () => {
     const store = new FakeChildLinkStore();
-    const manager = new ChildRunManager(store);
+    const manager = new ChildRunManager(store, ancestryOf(store));
     await spawn(manager, {});
     const detach = () =>
       manager.detach({
@@ -192,7 +202,10 @@ describe("ChildRunManager", () => {
   });
 
   it("rejects a Run that would be its own child", async () => {
-    const manager = new ChildRunManager(new FakeChildLinkStore());
+    const manager = new ChildRunManager(
+      new FakeChildLinkStore(),
+      ancestryOf(new FakeChildLinkStore())
+    );
 
     await expect(
       manager.spawn({
@@ -204,5 +217,70 @@ describe("ChildRunManager", () => {
         now: "2026-07-25T10:00:00.000Z",
       })
     ).rejects.toThrow(new ChildRunError("child_self_link", "childRunId"));
+  });
+});
+
+describe("ChildRunManager.ancestors", () => {
+  const chainId = (n: number) => `00000000-0000-4000-8000-00000000010${n}`;
+
+  async function chain(depth: number): Promise<ChildRunManager> {
+    const store = new FakeChildLinkStore();
+    const manager = new ChildRunManager(store, ancestryOf(store));
+    for (let i = 0; i < depth; i += 1) {
+      await manager.spawn({
+        businessId: BUSINESS_ID,
+        parentRunId: chainId(i),
+        childRunId: chainId(i + 1),
+        parentAuthority: PARENT,
+        requestedAuthority: {},
+        now: "2026-07-25T10:00:00.000Z",
+      });
+    }
+    return manager;
+  }
+
+  it("reads the persisted chain nearest parent first", async () => {
+    const manager = await chain(3);
+
+    const ancestors = await manager.ancestors(BUSINESS_ID, chainId(3), 10);
+
+    expect(ancestors.map((link) => link.parentRunId)).toEqual([chainId(2), chainId(1), chainId(0)]);
+  });
+
+  it("returns no ancestors for an unlinked root Run", async () => {
+    const manager = await chain(0);
+
+    expect(await manager.ancestors(BUSINESS_ID, chainId(0), 10)).toEqual([]);
+  });
+
+  it("stops at the requested limit rather than walking the whole history", async () => {
+    const manager = await chain(5);
+
+    expect(await manager.ancestors(BUSINESS_ID, chainId(5), 2)).toHaveLength(2);
+  });
+
+  it("terminates on a cyclic link rather than looping forever", async () => {
+    const store = new FakeChildLinkStore();
+    const manager = new ChildRunManager(store, ancestryOf(store));
+    store.links.push(
+      {
+        parentRunId: chainId(1),
+        childRunId: chainId(0),
+        authority: PARENT,
+        detachedAt: null,
+        createdAt: "2026-07-25T10:00:00.000Z",
+      },
+      {
+        parentRunId: chainId(0),
+        childRunId: chainId(1),
+        authority: PARENT,
+        detachedAt: null,
+        createdAt: "2026-07-25T10:00:00.000Z",
+      }
+    );
+
+    // Stops at the first repeat rather than walking the cycle up to the limit.
+    const ancestors = await manager.ancestors(BUSINESS_ID, chainId(0), 100);
+    expect(ancestors.map((link) => link.parentRunId)).toEqual([chainId(1)]);
   });
 });

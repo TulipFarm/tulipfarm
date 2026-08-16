@@ -13,7 +13,7 @@ export type { SecretEnvelope } from "./crypto";
 export { DecryptError, decryptSecret, encryptSecret } from "./crypto";
 export type { DekRepo, InsertWrapInput, KekLabel, WrappedDekRow } from "./dek-repo";
 export { PgDekRepo } from "./dek-repo";
-export { SecretsService, SecretUnavailableError } from "./encrypted-store";
+export { SecretRevokedError, SecretsService, SecretUnavailableError } from "./encrypted-store";
 export type {
   IntegrationAppField,
   IntegrationAppFieldRole,

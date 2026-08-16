@@ -37,6 +37,8 @@ import {
   KillSwitchRepo,
   RunEventStore,
   RunLoopCheckpointStore,
+  RunStateConcurrencyStore,
+  RunStateContentionStore,
   RunStateRetryStore,
   RunStore,
   TaskRepo,
@@ -197,6 +199,7 @@ export async function main(): Promise<void> {
         businessId: config.businessId,
         taskStore: new TaskRepo(transactions),
         taskSignals: new TaskSignalsGatherer(turnHost),
+        bundles: new PgBundleStore(transactions),
       })
     : undefined;
   consumersReady = true;
@@ -225,6 +228,14 @@ export async function main(): Promise<void> {
   // Durable per-State-occurrence retry counter, so a Routine State's `retry` budget is not
   // refunded when the State parks and resumes or the Run crashes and is reclaimed.
   const stateRetryStore = new RunStateRetryStore(transactions);
+  // Durable mutual exclusion for a Routine State's `concurrencyKey`. Contenders are in other
+  // worker processes, so only a shared durable lease actually serializes what the author asked
+  // not to overlap; an in-process store would serialize this worker and nothing else.
+  const stateConcurrencyStore = new RunStateConcurrencyStore(transactions);
+  // Durable backoff budget for a contender on that key. It has to outlive the park it pays for:
+  // a counter reloaded as zero would give every resume a fresh ceiling and turn a bounded queue
+  // into an unbounded one.
+  const stateContentionStore = new RunStateContentionStore(transactions);
   const blobDirectory = join(resolveDataDir() ?? ".tulipfarm", "blobs");
   const artifactService = new ArtifactService(
     new ArtifactStore(transactions),
@@ -362,6 +373,10 @@ export async function main(): Promise<void> {
       transitions: new RunStoreStateTransitions(runStore),
       // Durable retry budget for a State's authored `retry` policy; survives park/resume and crash.
       retries: stateRetryStore,
+      // Durable, cross-worker exclusion for a State's authored `concurrencyKey`.
+      concurrency: stateConcurrencyStore,
+      // Durable backoff budget, so a contended key queues on a timer instead of an operator.
+      contention: stateContentionStore,
       waits,
       // Routine Tools must pass the Broker: pinned authority, ledger reservation, then adapter.
       // No `authority` callback: the bundle layer is the Run's only authority.
@@ -404,7 +419,19 @@ export async function main(): Promise<void> {
     leases,
     businessId: config.businessId,
     owner: config.owner,
-    handler: (run) => executors.execute(run),
+    // Every co-located Tool call this process makes happens inside this handler and is awaited
+    // by it, so its settlement — succeeded, failed, parked on a wait, cancelled, or thrown — is
+    // the one point where no further dispatch can follow for this Run. Evicting here bounds the
+    // authority cache by in-flight Runs instead of by process lifetime, and covers terminal
+    // paths this worker never observes: a Run abandoned, cancelled, or reconciled while parked
+    // was already forgotten when it parked.
+    handler: async (run) => {
+      try {
+        return await executors.execute(run);
+      } finally {
+        toolDispatch.forget(run.id);
+      }
+    },
     now: () => new Date(),
     leaseDurationMs: config.leaseDurationMs,
     batchSize: config.batchSize,

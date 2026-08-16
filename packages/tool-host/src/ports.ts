@@ -62,12 +62,12 @@ export interface GuardrailRevisionSource {
 
 /** What the dispatcher does with a Tool call that needs a human. */
 export type ToolApprovalDecision =
-  | { readonly status: "approved" }
+  | { readonly status: "approved"; readonly approvalId: string }
   | { readonly status: "denied"; readonly reason: string }
   | { readonly status: "pending"; readonly approvalId: string };
 
 /**
- * The standing decision for one Tool intent. Deliberately excludes wait registration: parking a
+ * The one-use decision for one Tool intent. Deliberately excludes wait registration: parking a
  * Run mints a one-use resume token, and that token must never reach a process that only executes.
  */
 export interface ToolApprovalPort {
@@ -78,4 +78,10 @@ export interface ToolApprovalPort {
     toolName: string;
     args: unknown;
   }): Promise<ToolApprovalDecision>;
+  /**
+   * Spends an approved decision at the dispatch that will execute it. `false` means the decision
+   * is no longer available to this call — another call spent it — and the dispatch must be
+   * refused rather than run on an approval nobody granted it.
+   */
+  consume(input: { approvalId: string; toolCallId: string }): Promise<boolean>;
 }

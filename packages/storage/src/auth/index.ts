@@ -3,6 +3,13 @@ export type {
   ExternalIdentityRepo,
 } from "./external-identity-repo";
 export { InMemoryExternalIdentityRepo } from "./external-identity-repo";
+export type {
+  GroupMembershipRecord,
+  GroupRecord,
+  GroupRepo,
+  GroupRoleAssignmentRecord,
+} from "./group-repo";
+export { InMemoryGroupRepo, PgGroupRepo } from "./group-repo";
 export type { GuestRecord, GuestRepo, GuestStatus } from "./guest-repo";
 export { InMemoryGuestRepo } from "./guest-repo";
 export type { JitGrantIssuanceRecord, JitGrantRepo } from "./jit-repo";
@@ -22,21 +29,11 @@ export { InMemoryRecertificationRepo } from "./recertification-repo";
 export type {
   GrantEffect,
   GrantRecord,
-  GroupMembershipRecord,
-  GroupRecord,
-  GroupRepo,
-  GroupRoleAssignmentRecord,
   RoleAssignableTo,
   RoleAssignmentRecord,
   RoleRecord,
   RoleRepo,
 } from "./role-repo";
-export {
-  AUTHORIZATION_STORAGE_STATEMENTS,
-  InMemoryGroupRepo,
-  InMemoryRoleRepo,
-  PgGroupRepo,
-  PgRoleRepo,
-} from "./role-repo";
+export { AUTHORIZATION_STORAGE_STATEMENTS, InMemoryRoleRepo, PgRoleRepo } from "./role-repo";
 export type { SessionRecord, SessionRepo } from "./session-repo";
 export { InMemorySessionRepo } from "./session-repo";

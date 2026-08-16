@@ -5,7 +5,12 @@ import type { LlmService } from "@tulipfarm/llm";
 import {
   ajv,
   LlmNotConfiguredError,
-  SkillFrontmatterSchema,
+  SKILL_ACTIVATE_SCHEMA,
+  SKILL_CREATE_SCHEMA,
+  SKILL_DELETE_SCHEMA,
+  SKILL_GET_SCHEMA,
+  SKILL_LIST_SCHEMA,
+  SKILL_UPDATE_SCHEMA,
   serializeSkill,
   validateSkill,
 } from "@tulipfarm/schema";
@@ -95,19 +100,6 @@ function firstError(validate: ReturnType<typeof ajv.compile>): string {
   return `${e.instancePath || "(root)"} ${e.message ?? "is invalid"}`.trim();
 }
 
-const PUBLIC_FRONTMATTER_SCHEMA = {
-  ...SkillFrontmatterSchema,
-  properties: {
-    name: SkillFrontmatterSchema.properties.name,
-    description: SkillFrontmatterSchema.properties.description,
-    eager: SkillFrontmatterSchema.properties.eager,
-    category: SkillFrontmatterSchema.properties.category,
-    version: SkillFrontmatterSchema.properties.version,
-    author: SkillFrontmatterSchema.properties.author,
-    license: SkillFrontmatterSchema.properties.license,
-  },
-} as const;
-
 function publicFrontmatter(frontmatter: Record<string, unknown>): {
   frontmatter: Record<string, unknown>;
   pendingAudit: boolean;
@@ -118,27 +110,7 @@ function publicFrontmatter(frontmatter: Record<string, unknown>): {
 
 // ── skill_create ──────────────────────────────────────────────────────────────
 
-const CREATE_SCHEMA = {
-  type: "object",
-  required: ["name", "body", "frontmatter"],
-  additionalProperties: false,
-  properties: {
-    name: {
-      type: "string",
-      minLength: 1,
-      description:
-        "Skill name using lowercase letters, numbers, dots, underscores, or hyphens. Becomes the soul directory name.",
-    },
-    body: { type: "string", description: "Markdown skill body (instructions/content)." },
-    frontmatter: {
-      ...PUBLIC_FRONTMATTER_SCHEMA,
-      description:
-        "YAML frontmatter. name must match the Skill name and description is required. Unknown benign fields are allowed; underscore-prefixed and authority-grant fields are forbidden.",
-    },
-  },
-} as const;
-
-const validateCreate = ajv.compile(CREATE_SCHEMA);
+const validateCreate = ajv.compile(SKILL_CREATE_SCHEMA);
 
 const skillCreate = defineApiTool<SkillToolContext>({
   name: "skill_create",
@@ -146,7 +118,7 @@ const skillCreate = defineApiTool<SkillToolContext>({
     "Create a new skill in the soul repo. Writes SKILL.md (pending audit), commits it to the soul repo, runs SkillAudit synchronously, and returns the audit report. The skill is not active in prompt assembly until confirmed via skill_activate.",
   tier: "system",
   mutating: true,
-  inputSchema: CREATE_SCHEMA,
+  inputSchema: SKILL_CREATE_SCHEMA,
   authorization: {
     action: "soul.skill.create",
     resources: ["soul.skill"],
@@ -242,37 +214,7 @@ const skillCreate = defineApiTool<SkillToolContext>({
 
 // NOTE: no top-level `anyOf` — OpenAI-family models reject tool parameter schemas with a top-level
 // anyOf/oneOf/allOf/enum/not. The replacement-vs-patch constraints are enforced in the handler.
-const UPDATE_SCHEMA = {
-  type: "object",
-  required: ["name"],
-  additionalProperties: false,
-  properties: {
-    name: { type: "string", minLength: 1, description: "Skill name to update." },
-    body: { type: "string", description: "New markdown body (replaces existing)." },
-    frontmatter: {
-      ...PUBLIC_FRONTMATTER_SCHEMA,
-      description:
-        "New complete frontmatter (replaces existing). name and description are required. Omit to keep current.",
-    },
-    old_string: {
-      type: "string",
-      description:
-        "Exact Skill body text to replace in surgical patch mode. Must be unique unless replace_all is true.",
-    },
-    new_string: {
-      type: "string",
-      description:
-        "Replacement text for surgical patch mode. Use an empty string to delete the matched text.",
-    },
-    replace_all: {
-      type: "boolean",
-      description:
-        "Replace every old_string occurrence instead of requiring a unique match. Defaults to false.",
-    },
-  },
-} as const;
-
-const validateUpdate = ajv.compile(UPDATE_SCHEMA);
+const validateUpdate = ajv.compile(SKILL_UPDATE_SCHEMA);
 
 const skillUpdate = defineApiTool<SkillToolContext>({
   name: "skill_update",
@@ -280,7 +222,7 @@ const skillUpdate = defineApiTool<SkillToolContext>({
     "Update an existing Skill. Prefer old_string/new_string for surgical body fixes; use body and/or frontmatter only for full replacements. Patch text must be unique unless replace_all is true. Updates preserve audit state and do not re-run SkillAudit. The change is committed to the soul repo.",
   tier: "system",
   mutating: true,
-  inputSchema: UPDATE_SCHEMA,
+  inputSchema: SKILL_UPDATE_SCHEMA,
   authorization: {
     action: "soul.skill.update",
     resources: ["soul.skill"],
@@ -418,16 +360,7 @@ const skillUpdate = defineApiTool<SkillToolContext>({
 
 // ── skill_get ─────────────────────────────────────────────────────────────────
 
-const GET_SCHEMA = {
-  type: "object",
-  required: ["name"],
-  additionalProperties: false,
-  properties: {
-    name: { type: "string", minLength: 1, description: "Skill name." },
-  },
-} as const;
-
-const validateGet = ajv.compile(GET_SCHEMA);
+const validateGet = ajv.compile(SKILL_GET_SCHEMA);
 
 const skillGet = defineApiTool<SkillToolContext>({
   name: "skill_get",
@@ -435,7 +368,7 @@ const skillGet = defineApiTool<SkillToolContext>({
     "Get a Skill's frontmatter, markdown body, and provenance from the merged Soul-over-bundled view.",
   tier: "system",
   mutating: false,
-  inputSchema: GET_SCHEMA,
+  inputSchema: SKILL_GET_SCHEMA,
   authorization: {
     action: "soul.skill.read",
     resources: ["soul.skill"],
@@ -460,20 +393,14 @@ const skillGet = defineApiTool<SkillToolContext>({
 
 // ── skill_list ────────────────────────────────────────────────────────────────
 
-const LIST_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  properties: {},
-} as const;
-
-const validateList = ajv.compile(LIST_SCHEMA);
+const validateList = ajv.compile(SKILL_LIST_SCHEMA);
 
 const skillList = defineApiTool<SkillToolContext>({
   name: "skill_list",
   description: "List Skills from the merged Soul-over-bundled view with provenance.",
   tier: "system",
   mutating: false,
-  inputSchema: LIST_SCHEMA,
+  inputSchema: SKILL_LIST_SCHEMA,
   authorization: {
     action: "soul.skill.list",
     resources: ["soul.skill"],
@@ -495,16 +422,7 @@ const skillList = defineApiTool<SkillToolContext>({
 
 // ── skill_delete ──────────────────────────────────────────────────────────────
 
-const DELETE_SCHEMA = {
-  type: "object",
-  required: ["name"],
-  additionalProperties: false,
-  properties: {
-    name: { type: "string", minLength: 1, description: "Skill name to delete." },
-  },
-} as const;
-
-const validateDelete = ajv.compile(DELETE_SCHEMA);
+const validateDelete = ajv.compile(SKILL_DELETE_SCHEMA);
 
 const skillDelete = defineApiTool<SkillToolContext>({
   name: "skill_delete",
@@ -512,7 +430,7 @@ const skillDelete = defineApiTool<SkillToolContext>({
     "Delete a Skill from the merged view. Soul Skills are removed; bundled Skills are hidden with a persistent tombstone. The change is committed to the soul repo.",
   tier: "system",
   mutating: true,
-  inputSchema: DELETE_SCHEMA,
+  inputSchema: SKILL_DELETE_SCHEMA,
   authorization: {
     action: "soul.skill.delete",
     resources: ["soul.skill"],
@@ -586,16 +504,7 @@ const skillDelete = defineApiTool<SkillToolContext>({
 
 // ── skill_activate ────────────────────────────────────────────────────────────
 
-const ACTIVATE_SCHEMA = {
-  type: "object",
-  required: ["name"],
-  additionalProperties: false,
-  properties: {
-    name: { type: "string", minLength: 1, description: "Skill name to activate." },
-  },
-} as const;
-
-const validateActivate = ajv.compile(ACTIVATE_SCHEMA);
+const validateActivate = ajv.compile(SKILL_ACTIVATE_SCHEMA);
 
 const skillActivate = defineApiTool<SkillToolContext>({
   name: "skill_activate",
@@ -603,7 +512,7 @@ const skillActivate = defineApiTool<SkillToolContext>({
     "Activate a forge-created skill after the operator has reviewed its SkillAudit report. Removes the _pendingAudit marker, commits, and reloads — making the skill available in prompt assembly.",
   tier: "system",
   mutating: true,
-  inputSchema: ACTIVATE_SCHEMA,
+  inputSchema: SKILL_ACTIVATE_SCHEMA,
   authorization: {
     action: "soul.skill.activate",
     resources: ["soul.skill"],

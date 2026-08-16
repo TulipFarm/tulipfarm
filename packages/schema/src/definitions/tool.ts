@@ -21,6 +21,25 @@ const embeddedJsonSchema = Type.Unsafe<Record<string, unknown>>({
   additionalProperties: true,
 });
 
+/**
+ * How one call's arguments name the object it acts on, so a grant can be scoped to that object
+ * rather than to the whole Tool. `id` is a template over the call's own arguments: `{issueNumber}`
+ * interpolates a dotted argument path, and anything else is literal. Every declared `type` must
+ * also appear in `requiredResources`, because derived targets replace the static resource list at
+ * the authorization gate.
+ */
+const targetBindingListSchema = Type.Array(
+  Type.Object(
+    {
+      type: Type.String({ minLength: 1, maxLength: 128 }),
+      id: Type.String({ minLength: 1, maxLength: 512 }),
+      domain: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    },
+    { additionalProperties: false }
+  ),
+  { minItems: 1, maxItems: 16 }
+);
+
 const toolSpecSchema = Type.Object(
   {
     toolId: Type.String({ minLength: 1, maxLength: 256 }),
@@ -34,6 +53,7 @@ const toolSpecSchema = Type.Object(
     mutating: Type.Boolean(),
     requiredActions: Type.Optional(refListSchema),
     requiredResources: Type.Optional(refListSchema),
+    targets: Type.Optional(targetBindingListSchema),
     dataClasses: Type.Optional(refListSchema),
     allowedDestinations: Type.Optional(refListSchema),
     dryRun: Type.Boolean(),

@@ -1,54 +1,19 @@
 /** Sandbox requests/results carry signed Artifact refs only: no env, credentials, or mounts. */
 
-export type SandboxProtocolErrorCode =
-  | "backend_failure"
-  | "compute_limit_exceeded"
-  | "egress_denied"
-  | "guardrail_missing"
-  | "invalid_attestation"
-  | "invalid_attestation_signature"
-  | "invalid_request_signature"
-  | "invalid_result_shape"
-  | "invalid_result_signature"
-  | "request_expired"
-  | "request_lifetime_exceeded"
-  | "request_not_current"
-  | "request_replayed"
-  | "result_binding_mismatch"
-  | "result_limit_exceeded"
-  | "unsafe_request_shape"
-  | "weak_backend_isolation"
-  | "workspace_limit_exceeded"
-  | "workspace_not_destroyed";
+import {
+  assertExactKeys,
+  assertKeysWithOptional,
+  assertRecord,
+  requireBoolean,
+  requireInteger,
+  requireSafeRelativePath,
+  requireString,
+  requireStringArray,
+  SandboxProtocolError,
+} from "./wire";
 
-const ERROR_MESSAGES: Readonly<Record<SandboxProtocolErrorCode, string>> = {
-  backend_failure: "sandbox backend failed",
-  compute_limit_exceeded: "sandbox compute limit denied",
-  egress_denied: "sandbox egress denied",
-  guardrail_missing: "sandbox guardrail is required",
-  invalid_attestation: "sandbox backend attestation is invalid",
-  invalid_attestation_signature: "sandbox backend attestation signature is invalid",
-  invalid_request_signature: "sandbox request signature is invalid",
-  invalid_result_shape: "sandbox result is invalid",
-  invalid_result_signature: "sandbox result signature is invalid",
-  request_expired: "sandbox request has expired",
-  request_lifetime_exceeded: "sandbox request lifetime exceeds the guardrail",
-  request_not_current: "sandbox request is not current",
-  request_replayed: "sandbox request has already been claimed",
-  result_binding_mismatch: "sandbox result does not match the request",
-  result_limit_exceeded: "sandbox result exceeded an execution limit",
-  unsafe_request_shape: "sandbox request contains an unsafe or invalid field",
-  weak_backend_isolation: "sandbox backend cannot satisfy production isolation",
-  workspace_limit_exceeded: "sandbox workspace limit denied",
-  workspace_not_destroyed: "sandbox workspace destruction was not attested",
-};
-
-export class SandboxProtocolError extends Error {
-  constructor(readonly code: SandboxProtocolErrorCode) {
-    super(ERROR_MESSAGES[code]);
-    this.name = "SandboxProtocolError";
-  }
-}
+export type { SandboxProtocolErrorCode } from "./wire";
+export { SandboxProtocolError };
 
 export interface SandboxComputeLimits {
   readonly timeoutMs: number;
@@ -140,100 +105,6 @@ export interface SandboxExecutionResult {
   };
   readonly startedAtMs: number;
   readonly completedAtMs: number;
-}
-
-export interface SandboxSignature {
-  readonly keyId: string;
-  readonly value: string;
-}
-
-export interface SignedSandboxExecutionRequest {
-  readonly body: SandboxExecutionRequest;
-  readonly signature: SandboxSignature;
-}
-
-export interface SignedSandboxExecutionResult {
-  readonly body: SandboxExecutionResult;
-  readonly signature: SandboxSignature;
-}
-
-export interface SandboxSignatureSigner {
-  readonly keyId: string;
-  sign(payload: Uint8Array): Promise<string>;
-}
-
-export interface SandboxSignatureVerifier {
-  verify(keyId: string, payload: Uint8Array, signature: string): Promise<boolean>;
-}
-
-type UnknownRecord = Record<string, unknown>;
-
-function isRecord(value: unknown): value is UnknownRecord {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function assertRecord(value: unknown, code: SandboxProtocolErrorCode): UnknownRecord {
-  if (!isRecord(value)) {
-    throw new SandboxProtocolError(code);
-  }
-  return value;
-}
-
-function assertExactKeys(
-  value: UnknownRecord,
-  keys: readonly string[],
-  code: SandboxProtocolErrorCode
-): void {
-  const allowed = new Set(keys);
-  if (Object.keys(value).some((key) => !allowed.has(key))) {
-    throw new SandboxProtocolError(code);
-  }
-  if (keys.some((key) => !(key in value))) {
-    throw new SandboxProtocolError(code);
-  }
-}
-
-function assertKeysWithOptional(
-  value: UnknownRecord,
-  required: readonly string[],
-  optional: readonly string[],
-  code: SandboxProtocolErrorCode
-): void {
-  const allowed = new Set([...required, ...optional]);
-  if (Object.keys(value).some((key) => !allowed.has(key))) {
-    throw new SandboxProtocolError(code);
-  }
-  if (required.some((key) => !(key in value))) {
-    throw new SandboxProtocolError(code);
-  }
-}
-
-function requireString(value: unknown, code: SandboxProtocolErrorCode): string {
-  if (typeof value !== "string" || value.length === 0 || value.length > 512) {
-    throw new SandboxProtocolError(code);
-  }
-  return value;
-}
-
-function requireInteger(value: unknown, code: SandboxProtocolErrorCode, minimum = 0): number {
-  if (!Number.isSafeInteger(value) || (value as number) < minimum) {
-    throw new SandboxProtocolError(code);
-  }
-  return value as number;
-}
-
-function requireBoolean(value: unknown, code: SandboxProtocolErrorCode): boolean {
-  if (typeof value !== "boolean") {
-    throw new SandboxProtocolError(code);
-  }
-  return value;
-}
-
-function requireStringArray(value: unknown, code: SandboxProtocolErrorCode): readonly string[] {
-  if (!Array.isArray(value) || value.length > 1_000) {
-    throw new SandboxProtocolError(code);
-  }
-  return value.map((item) => requireString(item, code));
 }
 
 export function parseSandboxExecutionRequest(input: unknown): SandboxExecutionRequest {
@@ -391,19 +262,6 @@ export function parseSandboxExecutionRequest(input: unknown): SandboxExecutionRe
   };
 }
 
-function requireSafeRelativePath(value: unknown, code: SandboxProtocolErrorCode): string {
-  const path = requireString(value, code);
-  const segments = path.split("/");
-  if (
-    path.startsWith("/") ||
-    path.includes("\\") ||
-    segments.some((segment) => segment.length === 0 || segment === "." || segment === "..")
-  ) {
-    throw new SandboxProtocolError(code);
-  }
-  return path;
-}
-
 export function parseSandboxExecutionResult(input: unknown): SandboxExecutionResult {
   const code = "invalid_result_shape";
   const body = assertRecord(input, code);
@@ -476,138 +334,4 @@ export function parseSandboxExecutionResult(input: unknown): SandboxExecutionRes
     startedAtMs: requireInteger(body.startedAtMs, code),
     completedAtMs: requireInteger(body.completedAtMs, code),
   };
-}
-
-function canonicalJson(value: unknown): string {
-  if (value === null || typeof value === "boolean" || typeof value === "string") {
-    return JSON.stringify(value);
-  }
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
-  }
-  if (isRecord(value)) {
-    return `{${Object.keys(value)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
-      .join(",")}}`;
-  }
-  throw new SandboxProtocolError("unsafe_request_shape");
-}
-
-function utf8(value: string): Uint8Array {
-  const bytes: number[] = [];
-  for (const character of value) {
-    const point = character.codePointAt(0);
-    if (point === undefined) {
-      continue;
-    }
-    if (point <= 0x7f) {
-      bytes.push(point);
-    } else if (point <= 0x7ff) {
-      bytes.push(0xc0 | (point >> 6), 0x80 | (point & 0x3f));
-    } else if (point <= 0xffff) {
-      bytes.push(0xe0 | (point >> 12), 0x80 | ((point >> 6) & 0x3f), 0x80 | (point & 0x3f));
-    } else {
-      bytes.push(
-        0xf0 | (point >> 18),
-        0x80 | ((point >> 12) & 0x3f),
-        0x80 | ((point >> 6) & 0x3f),
-        0x80 | (point & 0x3f)
-      );
-    }
-  }
-  return Uint8Array.from(bytes);
-}
-
-function signingPayload(domain: string, body: unknown): Uint8Array {
-  return utf8(`${domain}\n${canonicalJson(body)}`);
-}
-
-export async function signSandboxPayload(
-  domain: string,
-  body: unknown,
-  signer: SandboxSignatureSigner
-): Promise<SandboxSignature> {
-  if (signer.keyId.length === 0) {
-    throw new SandboxProtocolError("unsafe_request_shape");
-  }
-  return {
-    keyId: signer.keyId,
-    value: await signer.sign(signingPayload(domain, body)),
-  };
-}
-
-export async function verifySandboxPayload(
-  domain: string,
-  body: unknown,
-  signatureInput: unknown,
-  verifier: SandboxSignatureVerifier,
-  invalidCode: SandboxProtocolErrorCode
-): Promise<void> {
-  const signature = assertRecord(signatureInput, invalidCode);
-  assertExactKeys(signature, ["keyId", "value"], invalidCode);
-  const keyId = requireString(signature.keyId, invalidCode);
-  const value = requireString(signature.value, invalidCode);
-  if (!(await verifier.verify(keyId, signingPayload(domain, body), value))) {
-    throw new SandboxProtocolError(invalidCode);
-  }
-}
-
-export async function signSandboxExecutionRequest(
-  input: SandboxExecutionRequest,
-  signer: SandboxSignatureSigner
-): Promise<SignedSandboxExecutionRequest> {
-  const body = parseSandboxExecutionRequest(input);
-  return {
-    body,
-    signature: await signSandboxPayload("tulipfarm.sandbox.request.v1", body, signer),
-  };
-}
-
-export async function verifySandboxExecutionRequest(
-  input: SignedSandboxExecutionRequest,
-  verifier: SandboxSignatureVerifier
-): Promise<SandboxExecutionRequest> {
-  const signed = assertRecord(input, "invalid_request_signature");
-  assertExactKeys(signed, ["body", "signature"], "invalid_request_signature");
-  const body = parseSandboxExecutionRequest(signed.body);
-  await verifySandboxPayload(
-    "tulipfarm.sandbox.request.v1",
-    body,
-    signed.signature,
-    verifier,
-    "invalid_request_signature"
-  );
-  return body;
-}
-
-export async function signSandboxExecutionResult(
-  input: SandboxExecutionResult,
-  signer: SandboxSignatureSigner
-): Promise<SignedSandboxExecutionResult> {
-  const body = parseSandboxExecutionResult(input);
-  return {
-    body,
-    signature: await signSandboxPayload("tulipfarm.sandbox.result.v1", body, signer),
-  };
-}
-
-export async function verifySandboxExecutionResult(
-  input: SignedSandboxExecutionResult,
-  verifier: SandboxSignatureVerifier
-): Promise<SandboxExecutionResult> {
-  const signed = assertRecord(input, "invalid_result_signature");
-  assertExactKeys(signed, ["body", "signature"], "invalid_result_signature");
-  const body = parseSandboxExecutionResult(signed.body);
-  await verifySandboxPayload(
-    "tulipfarm.sandbox.result.v1",
-    body,
-    signed.signature,
-    verifier,
-    "invalid_result_signature"
-  );
-  return body;
 }

@@ -44,7 +44,7 @@ parse the table below and assert every legacy path is absent from the current tr
 | LB-08 | config-write | `packages/soul/src/soul-loader.ts` | The Soul loader reads and can skip invalid entries at load time; it acts as an alternate, fail-open write/read path rather than the single fail-closed changeset and publication gateway | I-05 | high |
 | LB-09 | secret-resolution | `packages/secrets/src/service.ts` | Secret resolution has no scoped Secret Broker lease, rotation, or revocation semantics; stale plaintext can remain usable and is not bound to an authorized Tool dispatch | I-10 | high |
 | LB-10 | auth | `apps/api/src/auth/users.ts` | Only fixed `admin` and `member` roles exist; there are no custom user/Agent roles or scoped AccessGrants, so authority cannot narrow through delegation or Run Context | I-03 | high |
-| LB-11 | approval-persistence | `apps/api/src/approvals/repo.ts` | The approvals table is a persistence seed lacking exact intent binding, expiry semantics, Guardrail evidence, and four-eyes enforcement; decisions are not one-use or digest-bound | I-13 | medium |
+| LB-11 | approval-persistence | `apps/api/src/approvals/repo.ts` | The approvals table lacks Guardrail evidence binding and four-eyes enforcement. Decisions are digest-bound and one-use as of the `consumed_at`/`consumed_by_call_id` columns (migration 59): the dispatch that executes spends the decision, so an identical repeat in the same Run asks again | I-13 | medium |
 | LB-12 | direct-effect | `apps/api/src/routines/driver.ts` | The Routine driver dispatches effects with CAS/persist-first patterns but no effect ledger, idempotency key, or ambiguity reconciliation; retries can double-apply external effects | I-09 | medium |
 | LB-13 | table | `apps/api/src/routines/repo.ts` | Routine persistence snapshots definitions but stores a mutable Context and a limited status model; it is superseded by Runs, States, attempts, waits, and effect records | I-08 | medium |
 | LB-14 | surface | `apps/api/src/surface/surface-store.ts` | Tulip Surface Protocol surfaces are process/local store rows rather than immutable authorized Artifacts with signed, expiring action descriptors; client actions are not re-authorized against a signed intent | I-14 | medium |
@@ -73,7 +73,8 @@ keep confirming none returns as a shadow authority:
 
 - A second Tool-exposure path that skips the broker (any direct `buildToolSet`/`registry.register`
   outside `packages/tool-broker`) re-creates LB-02/LB-04.
-- Any in-process approval `Map` or non-digest-bound decision re-creates LB-03/LB-11.
+- Any in-process approval `Map`, non-digest-bound decision, or approval that survives the dispatch
+  it authorized re-creates LB-03/LB-11.
 - Any ingress or channel path that borrows a Conversation owner's identity re-creates LB-01.
 - Any Soul read/write outside the changeset gateway re-creates LB-08.
 - Any retrieval that ranks before an ACL check re-creates LB-05.

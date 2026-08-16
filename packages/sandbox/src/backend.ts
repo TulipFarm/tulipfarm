@@ -8,17 +8,16 @@ import {
   authorizeSandboxExecutionRequest,
   type SandboxGuardrail,
 } from "./guardrail";
+import type { SandboxExecutionResult } from "./request";
 import {
-  type SandboxExecutionResult,
-  SandboxProtocolError,
-  type SandboxProtocolErrorCode,
   type SandboxSignatureSigner,
   type SandboxSignatureVerifier,
   type SignedSandboxExecutionRequest,
   type SignedSandboxExecutionResult,
   signSandboxExecutionRequest,
   verifySandboxExecutionResult,
-} from "./request";
+} from "./signature";
+import { SandboxProtocolError, type SandboxProtocolErrorCode } from "./wire";
 
 /** Production backends use fresh workspaces, signed limits, one-use credentials, and no mounts. */
 export interface SandboxBackend {

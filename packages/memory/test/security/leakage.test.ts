@@ -6,6 +6,7 @@
 import type { AuditEventInput } from "@tulipfarm/audit";
 import { describe, expect, it } from "vitest";
 import { InMemoryPendingMemoryStore, resolvePendingMemory } from "../../src/confirm";
+import { forgetMemory } from "../../src/forget";
 import type {
   MemoryAuditSink,
   MemoryDeps,
@@ -13,7 +14,8 @@ import type {
   MemoryProvenance,
   MemorySettingsView,
 } from "../../src/memory";
-import { forgetMemory, InMemoryMemoryStore, rememberMemory } from "../../src/memory";
+import { InMemoryMemoryStore } from "../../src/memory";
+import { rememberMemory } from "../../src/remember";
 import { recallMemory } from "../../src/retrieve";
 import type { MemoryScopeRequest, MemoryScopeTarget } from "../../src/scope";
 

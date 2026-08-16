@@ -137,6 +137,9 @@ class FakeSecretRepo implements SecretRepo {
   async listLegacyKeys() {
     return [];
   }
+  async findRevision(key: string): Promise<Date | null> {
+    return this.map.get(key)?.updatedAt ?? null;
+  }
 }
 
 function cookieHeader(cookies: { name: string; value: string }[]): string {

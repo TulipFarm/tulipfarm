@@ -17,6 +17,12 @@ import {
 import type { CommitActor } from "./commit-signing";
 import type { BundleSourceFile } from "./compiler";
 import { compileExecutionBundle } from "./compiler";
+import type { SoulPublicationErrorCode } from "./publication-error";
+import { SoulPublicationError } from "./publication-error";
+import {
+  LruRuntimeBundleVerificationCache,
+  type RuntimeBundleVerificationCache,
+} from "./runtime-bundle-verification-cache";
 import { verifyExecutionBundle } from "./signatures";
 import type { Logger } from "./types";
 
@@ -24,11 +30,11 @@ import type { Logger } from "./types";
 
 export const SOUL_PUBLICATION_TOPIC = "soul.publication.requested";
 
-/**
- * Runtime reads are hot, while bundles are immutable. 128 verified bundles covers normal recent
- * authoring churn without letting auto-publish create an unbounded process-memory cache.
- */
-export const VERIFIED_RUNTIME_BUNDLE_CACHE_MAX_ENTRIES = 128;
+export type { RuntimeBundleVerificationCache } from "./runtime-bundle-verification-cache";
+export {
+  LruRuntimeBundleVerificationCache,
+  VERIFIED_RUNTIME_BUNDLE_CACHE_MAX_ENTRIES,
+} from "./runtime-bundle-verification-cache";
 
 /**
  * Publication stages are idempotent DB/blob steps, so a short lease prevents double-processing in
@@ -48,39 +54,8 @@ export const SOUL_PUBLICATION_RETRY_BASE_DELAY_MS = 30 * 1000;
 /** Cap retries so operators see steady progress instead of hour-scale invisible sleeps. */
 export const SOUL_PUBLICATION_RETRY_MAX_DELAY_MS = 15 * 60 * 1000;
 
-export type SoulPublicationErrorCode =
-  | "DIGEST_MISMATCH"
-  | "DIGEST_CONFLICT"
-  | "BUNDLE_STORE_FAILED"
-  | "BUNDLE_UNAVAILABLE"
-  | "PROJECTION_FAILED"
-  | "ACTIVATION_FAILED"
-  | "EMPTY_ACTIVATION_REFUSED"
-  | "NO_ACTIVE_VERSION"
-  | "UNKNOWN_PUBLICATION";
-
-/**
- * Deterministic, payload-safe publication failure. Carries changeset/digest identifiers only —
- * never authored content, secret references, or user data.
- */
-export class SoulPublicationError extends Error {
-  readonly code: SoulPublicationErrorCode;
-  readonly changesetId?: string;
-  /** Non-retriable content failure: retrying the identical bundle can never succeed. */
-  readonly fatal: boolean;
-
-  constructor(
-    code: SoulPublicationErrorCode,
-    message: string,
-    details: { changesetId?: string; cause?: unknown; fatal?: boolean } = {}
-  ) {
-    super(message, details.cause !== undefined ? { cause: details.cause } : undefined);
-    this.name = "SoulPublicationError";
-    this.code = code;
-    this.fatal = details.fatal ?? false;
-    if (details.changesetId !== undefined) this.changesetId = details.changesetId;
-  }
-}
+export type { SoulPublicationErrorCode } from "./publication-error";
+export { SoulPublicationError } from "./publication-error";
 
 export interface SoulPublishRequest {
   /** The compiled, hashed, and signed bundle for the committed tree. */
@@ -108,59 +83,6 @@ export interface SoulPublicationOutcome {
   readonly nextAttemptAt?: string;
   readonly deadLetteredAt?: string;
   readonly deadLetterReason?: string;
-}
-
-export interface RuntimeBundleVerificationCache {
-  get(digest: string, verifier: BundleVerifier): RuntimeBundle | undefined;
-  set(digest: string, verifier: BundleVerifier, bundle: RuntimeBundle): void;
-}
-
-export class LruRuntimeBundleVerificationCache implements RuntimeBundleVerificationCache {
-  private readonly entries = new Map<string, RuntimeBundle>();
-  private readonly verifierIds = new WeakMap<BundleVerifier, string>();
-  private nextVerifierId = 1;
-  private readonly maxEntries: number;
-
-  constructor(maxEntries = VERIFIED_RUNTIME_BUNDLE_CACHE_MAX_ENTRIES) {
-    this.maxEntries = Math.max(0, Math.trunc(maxEntries));
-  }
-
-  get(digest: string, verifier: BundleVerifier): RuntimeBundle | undefined {
-    const key = this.cacheKey(digest, verifier);
-    const cached = this.entries.get(key);
-    if (cached === undefined) return undefined;
-    this.entries.delete(key);
-    this.entries.set(key, cached);
-    return cached;
-  }
-
-  set(digest: string, verifier: BundleVerifier, bundle: RuntimeBundle): void {
-    if (this.maxEntries === 0) return;
-    const key = this.cacheKey(digest, verifier);
-    this.entries.delete(key);
-    this.entries.set(key, bundle);
-    while (this.entries.size > this.maxEntries) {
-      const oldest = this.entries.keys().next().value;
-      if (typeof oldest !== "string") break;
-      this.entries.delete(oldest);
-    }
-  }
-
-  private cacheKey(digest: string, verifier: BundleVerifier): string {
-    // Digest alone is unsafe across verifier rotation: a digest verified by an old trust set must
-    // not bypass a new verifier that has removed or replaced a key.
-    const verifierId = this.verifierId(verifier);
-    return `${verifierId}\u0000${verifier.trustedKeyIds.join("\u0000")}\u0000${digest}`;
-  }
-
-  private verifierId(verifier: BundleVerifier): string {
-    const existing = this.verifierIds.get(verifier);
-    if (existing !== undefined) return existing;
-    const next = `verifier-${this.nextVerifierId}`;
-    this.nextVerifierId += 1;
-    this.verifierIds.set(verifier, next);
-    return next;
-  }
 }
 
 export interface SoulPublicationCoordinatorOptions {

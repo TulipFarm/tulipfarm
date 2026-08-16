@@ -183,9 +183,74 @@ describe("tool approvals as durable waits", () => {
         toolName: "record_delete",
         args: { id: "record-1" },
       })
-    ).toEqual({ status: "approved" });
+    ).toEqual({ status: "approved", approvalId });
 
     expect((await repo.listPending("tool_call")).length).toBe(0);
+  });
+
+  it("asks again for a second identical call once the approved one has been spent", async () => {
+    const runId = await startRunningRun();
+    const { approvalId } = await requestApproval(runId, "call-1");
+    await park(runId, approvalId);
+    await approvals.signal({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      approvalId,
+      decision: "approved",
+      principal: PRINCIPAL,
+    });
+
+    // The dispatch that will execute spends the decision, keyed to its own call id.
+    expect(await approvals.consume({ approvalId, toolCallId: "call-1" })).toBe(true);
+    // A redelivery of that same dispatch is one authorized call, not two.
+    expect(await approvals.consume({ approvalId, toolCallId: "call-1" })).toBe(true);
+    // Another call cannot take it.
+    expect(await approvals.consume({ approvalId, toolCallId: "call-2" })).toBe(false);
+
+    // The same intent again is a new question for a human, not a silent repeat.
+    const repeat = await approvals.decide({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      runId,
+      toolCallId: "call-2",
+      toolName: "record_delete",
+      args: { id: "record-1" },
+    });
+    expect(repeat.status).toBe("pending");
+    expect(repeat).not.toMatchObject({ approvalId });
+
+    // …while the call that spent it still resolves to the decision it was given, so a redelivered
+    // dispatch of the approved call performs the approved work rather than parking again.
+    expect(
+      await approvals.decide({
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        runId,
+        toolCallId: "call-1",
+        toolName: "record_delete",
+        args: { id: "record-1" },
+      })
+    ).toEqual({ status: "approved", approvalId });
+  });
+
+  it("never lets a denial be spent, so a retry keeps getting the same no", async () => {
+    const runId = await startRunningRun();
+    const { approvalId } = await requestApproval(runId, "call-1");
+    await park(runId, approvalId);
+    await approvals.signal({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      approvalId,
+      decision: "denied",
+      principal: PRINCIPAL,
+    });
+
+    expect(await approvals.consume({ approvalId, toolCallId: "call-1" })).toBe(false);
+    expect(
+      await approvals.decide({
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        runId,
+        toolCallId: "call-2",
+        toolName: "record_delete",
+        args: { id: "record-1" },
+      })
+    ).toEqual({ status: "denied", reason: "denied by operator" });
   });
 
   it("asks again for a different intent on the same Run", async () => {

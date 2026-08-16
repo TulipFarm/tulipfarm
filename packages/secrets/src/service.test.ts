@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { encryptSecret } from "./crypto";
-import { SecretsService, SecretUnavailableError } from "./encrypted-store";
+import { SecretRevokedError, SecretsService, SecretUnavailableError } from "./encrypted-store";
 import type { ActiveDek } from "./key-manager";
 import type { SecretDoc, SecretEnvelopeFields, SecretRepo } from "./repo";
 
@@ -9,6 +9,9 @@ class FakeRepo implements SecretRepo {
   readonly docs = new Map<string, SecretDoc>();
   findCalls = 0;
   throwOnFind = false;
+  throwOnRevision = false;
+  revisionCalls = 0;
+  private writes = 0;
 
   async list() {
     return [...this.docs.values()].map(({ key, type, createdAt, updatedAt }) => ({
@@ -28,7 +31,9 @@ class FakeRepo implements SecretRepo {
   }
 
   async upsert(key: string, fields: SecretEnvelopeFields): Promise<void> {
-    const now = new Date();
+    // Strictly increasing so two writes in the same millisecond still differ, the way Postgres
+    // `updated_at` does at microsecond resolution.
+    const now = new Date(Date.now() + this.writes++);
     const existing = this.docs.get(key);
     this.docs.set(key, {
       _id: existing?._id ?? key,
@@ -49,6 +54,14 @@ class FakeRepo implements SecretRepo {
 
   async listLegacyKeys(): Promise<string[]> {
     return [...this.docs.values()].filter((d) => d.dekId === null).map((d) => d.key);
+  }
+
+  async findRevision(key: string): Promise<Date | null> {
+    this.revisionCalls += 1;
+    if (this.throwOnRevision) {
+      throw new Error("datastore unreachable");
+    }
+    return this.docs.get(key)?.updatedAt ?? null;
   }
 }
 
@@ -201,6 +214,131 @@ describe("SecretsService", () => {
     await svc.set("api.key", "v2"); // evicts cache
     expect(await svc.get("api.key")).toBe("v2");
     expect(repo.findCalls).toBe(2);
+  });
+});
+
+describe("SecretsService — cross-process revocation on the stale path", () => {
+  // Two SecretsService instances over one repository stand in for the API and Worker processes,
+  // which each construct their own store over the same `secrets` table.
+  type WarnLog = { warn: (obj: object, msg: string) => void };
+
+  function makeLog() {
+    return { warn: vi.fn<(obj: object, msg: string) => void>() };
+  }
+
+  function twoProcesses(log: WarnLog, clock: () => number) {
+    const repo = new FakeRepo();
+    const dek = makeDek();
+    const opts = { now: clock, ttlMs: 1000, staleMs: 5000, log };
+    return {
+      repo,
+      api: new SecretsService(repo, dek, opts),
+      worker: new SecretsService(repo, dek, opts),
+    };
+  }
+
+  it("refuses a rotated Secret rather than serving the revoked plaintext from another process", async () => {
+    const log = makeLog();
+    let t = 0;
+    const { repo, api, worker } = twoProcesses(log, () => t);
+
+    await api.set("provider.token", "v1");
+    expect(await worker.get("provider.token")).toBe("v1"); // Worker caches v1 at t=0
+
+    await api.set("provider.token", "v2"); // rotation in the API process only
+
+    repo.throwOnFind = true;
+    t = 2000; // past ttlMs, inside staleMs — the L6-5 window
+
+    await expect(worker.get("provider.token")).rejects.toBeInstanceOf(SecretRevokedError);
+    expect(log.warn).toHaveBeenCalledWith(
+      { key: "provider.token", reason: "revoked" },
+      "secret.stale_refused"
+    );
+    expect(log.warn).not.toHaveBeenCalledWith({ key: "provider.token" }, "secret.served_stale");
+  });
+
+  it("refuses a deleted Secret rather than serving it from another process's cache", async () => {
+    const log = makeLog();
+    let t = 0;
+    const { repo, api, worker } = twoProcesses(log, () => t);
+
+    await api.set("provider.token", "v1");
+    expect(await worker.get("provider.token")).toBe("v1");
+
+    await api.delete("provider.token"); // revocation in the API process only
+
+    repo.throwOnFind = true;
+    t = 2000;
+
+    await expect(worker.get("provider.token")).rejects.toBeInstanceOf(SecretRevokedError);
+  });
+
+  it("still serves stale when the other process only read the same, unchanged Secret", async () => {
+    const log = makeLog();
+    let t = 0;
+    const { repo, api, worker } = twoProcesses(log, () => t);
+
+    await api.set("provider.token", "v1");
+    await worker.get("provider.token");
+
+    repo.throwOnFind = true;
+    t = 2000;
+
+    expect(await worker.get("provider.token")).toBe("v1");
+    expect(log.warn).toHaveBeenCalledWith({ key: "provider.token" }, "secret.served_stale");
+  });
+
+  it("drops the cache after a revocation refusal, so recovery re-reads rather than re-refusing", async () => {
+    const log = makeLog();
+    let t = 0;
+    const { repo, api, worker } = twoProcesses(log, () => t);
+
+    await api.set("provider.token", "v1");
+    await worker.get("provider.token");
+    await api.set("provider.token", "v2");
+
+    repo.throwOnFind = true;
+    t = 2000;
+    await expect(worker.get("provider.token")).rejects.toBeInstanceOf(SecretRevokedError);
+
+    repo.throwOnFind = false;
+    expect(await worker.get("provider.token")).toBe("v2");
+  });
+
+  it("fails closed when the revocation probe itself cannot be made", async () => {
+    const log = makeLog();
+    let t = 0;
+    const { repo, worker } = twoProcesses(log, () => t);
+
+    await worker.set("provider.token", "v1");
+    await worker.get("provider.token");
+
+    repo.throwOnFind = true;
+    repo.throwOnRevision = true; // whole datastore unreachable
+    t = 2000;
+
+    const error = await worker.get("provider.token").catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(SecretUnavailableError);
+    expect(error).not.toBeInstanceOf(SecretRevokedError);
+    expect(log.warn).toHaveBeenCalledWith(
+      { key: "provider.token", reason: "revocation_unknown" },
+      "secret.stale_refused"
+    );
+  });
+
+  it("does not probe while the cache is still fresh", async () => {
+    const log = makeLog();
+    let t = 0;
+    const { repo, worker } = twoProcesses(log, () => t);
+
+    await worker.set("provider.token", "v1");
+    await worker.get("provider.token");
+    expect(repo.revisionCalls).toBe(0);
+
+    t = 500; // inside ttlMs
+    expect(await worker.get("provider.token")).toBe("v1");
+    expect(repo.revisionCalls).toBe(0);
   });
 });
 

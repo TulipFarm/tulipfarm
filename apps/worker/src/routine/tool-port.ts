@@ -11,6 +11,7 @@ import type { GuardrailDefinition, ToolContractDefinition } from "@tulipfarm/sch
 import type { RuntimeBundle } from "@tulipfarm/soul";
 import {
   type CredentialDispatcher,
+  deriveContractTargets,
   EffectDispatcher,
   type EffectStore,
   type ToolAdapter,
@@ -19,6 +20,8 @@ import {
   ToolCatalogError,
   ToolDispatchError,
   type ToolIntent,
+  ToolTargetDerivationError,
+  type ToolTargetRef,
 } from "@tulipfarm/tool-broker";
 import { GITHUB_INSTALLATION_SECRET_REF, githubInstallationSecretRef } from "./github-credentials";
 
@@ -94,7 +97,7 @@ function scopedCredentialRef(plan: ToolDispatchPlan): string | undefined {
   return ref;
 }
 
-function intentOf(request: RoutineToolRequest): ToolIntent {
+function intentOf(request: RoutineToolRequest, targetRefs: readonly ToolTargetRef[]): ToolIntent {
   const { plan } = request;
   const credentialRef = scopedCredentialRef(plan);
   return {
@@ -106,12 +109,24 @@ function intentOf(request: RoutineToolRequest): ToolIntent {
     toolId: plan.toolRef.name,
     toolVersion: plan.toolRef.version,
     action: plan.action,
-    targetRefs: [],
+    targetRefs,
     arguments: plan.arguments,
     ...(plan.destination === undefined ? {} : { destination: plan.destination }),
     ...(credentialRef === undefined ? {} : { credentialRef }),
     idempotencyKey: plan.idempotencyKey,
   };
+}
+
+/**
+ * The objects this call will touch, taken from the pinned ToolContract's own declaration.
+ *
+ * An unknown contract derives nothing on purpose: the broker owns that refusal and answers it as
+ * `unknown_contract`, which is a better answer than a derivation failure for the same cause.
+ */
+function targetsOf(catalog: ToolCatalog, request: RoutineToolRequest): readonly ToolTargetRef[] {
+  const contract = catalog.get(request.plan.toolRef.name, request.plan.toolRef.version);
+  if (contract === undefined) return [];
+  return deriveContractTargets(contract, request.plan.arguments);
 }
 
 /** Replay durable effects; only reconciliation may resolve `ambiguous`. */
@@ -156,7 +171,19 @@ export class BrokerRoutineToolPort implements RoutineToolPort {
       throw error;
     }
 
-    const intent = intentOf(request);
+    let targetRefs: readonly ToolTargetRef[];
+    try {
+      targetRefs = targetsOf(catalog, request);
+    } catch (error) {
+      // A contract that declares a target the call cannot name must be refused, never widened to a
+      // Tool-granular decision by handing the gate an empty target list.
+      if (error instanceof ToolTargetDerivationError) {
+        return { kind: "failed", reason: error.code };
+      }
+      throw error;
+    }
+
+    const intent = intentOf(request, targetRefs);
     const outcome = new ToolBroker(catalog).authorize(intent, {
       authorityLayers: [...request.authorityLayers, this.authorityFor(request.bundle)],
       guardrailRules: policy.rules,

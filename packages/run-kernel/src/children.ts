@@ -36,6 +36,14 @@ export class ChildRunError extends Error {
   }
 }
 
+/**
+ * Reverse lookup over the parent/child link table. Depth and inherited authority are read from
+ * the persisted chain rather than supplied by the caller, so a child cannot restart the count.
+ */
+export interface ChildLinkAncestry {
+  parentLink(businessId: string, childRunId: string): Promise<ChildLink | null>;
+}
+
 export interface ChildLinkStore {
   link(input: {
     businessId: string;
@@ -116,7 +124,28 @@ export function narrowChildAuthority(
  * Parent/child links persist narrowed authority and are idempotent across retried spawns.
  */
 export class ChildRunManager {
-  constructor(private readonly store: ChildLinkStore) {}
+  constructor(
+    private readonly store: ChildLinkStore,
+    private readonly ancestry: ChildLinkAncestry
+  ) {}
+
+  /**
+   * Links from `runId` upwards, nearest parent first, stopping at `limit` hops. Bounding the walk
+   * is what makes an unbounded or cyclic chain a refusal rather than a hang.
+   */
+  async ancestors(businessId: string, runId: string, limit: number): Promise<readonly ChildLink[]> {
+    const chain: ChildLink[] = [];
+    const seen = new Set<string>([runId]);
+    let current = runId;
+    while (chain.length < limit) {
+      const link = await this.ancestry.parentLink(businessId, current);
+      if (link === null || seen.has(link.parentRunId)) break;
+      chain.push(link);
+      seen.add(link.parentRunId);
+      current = link.parentRunId;
+    }
+    return chain;
+  }
 
   async spawn(input: SpawnChildInput): Promise<ChildLink> {
     if (input.parentRunId === input.childRunId) {
@@ -138,10 +167,5 @@ export class ChildRunManager {
 
   async listChildren(businessId: string, parentRunId: string): Promise<readonly ChildLink[]> {
     return this.store.listChildren(businessId, parentRunId);
-  }
-
-  async listAttached(businessId: string, parentRunId: string): Promise<readonly ChildLink[]> {
-    const links = await this.store.listChildren(businessId, parentRunId);
-    return links.filter((link) => link.detachedAt === null);
   }
 }

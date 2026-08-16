@@ -1,12 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { InMemoryPendingMemoryStore } from "../../src/confirm";
 import type { MemoryContradictionPort } from "../../src/contradiction";
-import {
-  InMemoryMemoryStore,
-  type MemoryDeps,
-  type MemorySettingsView,
-  rememberMemory,
-} from "../../src/memory";
+import { InMemoryMemoryStore, type MemoryDeps, type MemorySettingsView } from "../../src/memory";
+import { rememberMemory } from "../../src/remember";
 import { recallMemory } from "../../src/retrieve";
 import { type GoldenSupersessionCase, goldenFixtures } from "./fixtures";
 
