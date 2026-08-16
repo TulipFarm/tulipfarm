@@ -268,6 +268,10 @@ export function registerChannelInternalRoutes(
       if (mapping === null) {
         const conversationId = newId();
         const now = new Date();
+        // The mapping FK requires the Conversation to exist before the mapping row, so we cannot
+        // reorder to create it only on the winning path. Instead we create, then let the mapping
+        // insert tell us who actually won: on a lost race we drop our orphaned Conversation so it
+        // never surfaces in the owner's list, and route this Turn onto the winning Conversation.
         await deps.conversations.create({
           _id: conversationId,
           userId: body.principal.id,
@@ -275,18 +279,15 @@ export function registerChannelInternalRoutes(
           createdAt: now,
           updatedAt: now,
         });
-        await deps.threads.insert({
+        mapping = await deps.threads.insert({
           integrationSlug: body.provider,
           externalKey: threadKey,
           conversationId,
           userId: body.principal.id,
         });
-        mapping = {
-          integrationSlug: body.provider,
-          externalKey: threadKey,
-          conversationId,
-          userId: body.principal.id,
-        };
+        if (mapping.conversationId !== conversationId) {
+          await deps.conversations.deleteOwned(conversationId, body.principal.id);
+        }
       }
 
       const principal: ChatTurnPrincipal = {

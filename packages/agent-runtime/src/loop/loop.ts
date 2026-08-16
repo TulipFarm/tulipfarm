@@ -195,7 +195,7 @@ export class AgentLoop {
   constructor(private readonly deps: AgentLoopDependencies) {}
 
   async run(input: AgentLoopInput): Promise<AgentLoopOutcome> {
-    const resumed = await this.deps.checkpoints.load(input.runId, input.stateId);
+    const resumed = await this.deps.checkpoints.load(input.businessId, input.runId, input.stateId);
     const counters = {
       iterations: resumed?.iterations ?? 0,
       toolCalls: resumed?.toolCalls ?? 0,

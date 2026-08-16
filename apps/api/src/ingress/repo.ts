@@ -48,12 +48,37 @@ export class IntegrationConversationsRepo {
     return r.rows.length > 0;
   }
 
-  /** Insert a mapping; a concurrent duplicate wins silently (first writer keeps the row). */
-  async insert(doc: IntegrationConversation): Promise<void> {
-    await this.db.query(
-      "INSERT INTO integration_conversations (integration_slug, external_key, conversation_id, user_id) VALUES ($1, $2, $3, $4) ON CONFLICT (integration_slug, external_key) DO NOTHING",
+  /**
+   * Insert a mapping and return the row that actually maps the thread. On a concurrent conflict
+   * the first writer keeps the row, so a losing caller gets the *winner's* mapping back — never
+   * the values it tried to write. Callers must route on the returned `conversationId` rather than
+   * trusting the id they minted, or two first messages fork one thread into two Conversations.
+   */
+  async insert(doc: IntegrationConversation): Promise<IntegrationConversation> {
+    const inserted = await this.db.query(
+      "INSERT INTO integration_conversations (integration_slug, external_key, conversation_id, user_id) VALUES ($1, $2, $3, $4) ON CONFLICT (integration_slug, external_key) DO NOTHING RETURNING integration_slug, external_key, conversation_id, user_id",
       [doc.integrationSlug, doc.externalKey, doc.conversationId, doc.userId]
     );
+    const row = inserted.rows[0] as
+      | { integration_slug: string; external_key: string; conversation_id: string; user_id: string }
+      | undefined;
+    if (row) {
+      return {
+        integrationSlug: row.integration_slug,
+        externalKey: row.external_key,
+        conversationId: row.conversation_id,
+        userId: row.user_id,
+      };
+    }
+    // DO NOTHING returned no row: a concurrent writer already holds the key. Re-read to learn the
+    // winner instead of assuming our own insert took effect.
+    const winner = await this.find(doc.integrationSlug, doc.externalKey);
+    if (winner === null) {
+      throw new Error(
+        `integration_conversations mapping vanished after conflict: ${doc.integrationSlug}:${doc.externalKey}`
+      );
+    }
+    return winner;
   }
 }
 

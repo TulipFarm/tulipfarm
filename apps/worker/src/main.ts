@@ -36,6 +36,7 @@ import {
   IntegrationStore,
   KillSwitchRepo,
   RunEventStore,
+  RunLoopCheckpointStore,
   RunStore,
   TaskRepo,
   WaitStore,
@@ -216,6 +217,9 @@ export async function main(): Promise<void> {
   const eventStore = new EventStore(transactions, randomUUID);
   const runEventStore = new RunEventStore(transactions);
   const budgetStore = new BudgetStore(transactions);
+  // Durable Agent-loop counters: the one store both Agent-loop sites share, so an approval park
+  // reloads spent Tool-call and repair budget instead of restarting it at zero.
+  const loopCheckpointStore = new RunLoopCheckpointStore(transactions);
   const blobDirectory = join(resolveDataDir() ?? ".tulipfarm", "blobs");
   const artifactService = new ArtifactService(
     new ArtifactStore(transactions),
@@ -297,6 +301,7 @@ export async function main(): Promise<void> {
     budgets: budgetStore,
     transitions: new RunStoreStateTransitions(runStore),
     waits: turnHost,
+    checkpoints: loopCheckpointStore,
     model: ({ events, budgets, businessId, runId, conversationId }) =>
       new LlmModelPort({
         model: (selector, requirements, inference, principal) =>
@@ -382,6 +387,7 @@ export async function main(): Promise<void> {
         events: runEventStore,
         budgets: budgetStore,
         runs: runStore,
+        checkpoints: loopCheckpointStore,
         log: logger,
       }),
     })

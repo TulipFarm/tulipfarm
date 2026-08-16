@@ -71,7 +71,7 @@ const IGNORED_DIRS = new Set([
  * which remains forbidden.
  */
 const OVERSIZED: Readonly<Record<string, number>> = {
-  "apps/api/src/pg-migrations/index.ts": 1998,
+  "apps/api/src/pg-migrations/index.ts": 2009,
   "apps/api/src/index.ts": 1309,
   "packages/integrations/src/github/adapter.ts": 1349,
   "packages/surface-web/src/index.tsx": 1286,

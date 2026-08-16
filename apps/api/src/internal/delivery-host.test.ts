@@ -117,8 +117,12 @@ class FakeThreadsRepo {
     return this.rows.has(`${slug}:${key}`);
   }
 
-  async insert(doc: IntegrationConversation): Promise<void> {
-    this.rows.set(`${doc.integrationSlug}:${doc.externalKey}`, doc);
+  async insert(doc: IntegrationConversation): Promise<IntegrationConversation> {
+    const key = `${doc.integrationSlug}:${doc.externalKey}`;
+    const existing = this.rows.get(key);
+    if (existing) return existing;
+    this.rows.set(key, doc);
+    return doc;
   }
 }
 
@@ -193,6 +197,12 @@ async function harness(
     conversations: {
       create: async (doc: ConversationDoc) => {
         conversations.push(doc);
+      },
+      deleteOwned: async (id: string, userId: string) => {
+        const index = conversations.findIndex((doc) => doc._id === id && doc.userId === userId);
+        if (index === -1) return "not_found" as const;
+        conversations.splice(index, 1);
+        return "deleted" as const;
       },
     },
     threads: threads as unknown as IntegrationConversationsRepo,
@@ -375,6 +385,44 @@ describe("IngressDeliveryHost.attachChat", () => {
 
     expect(conversations).toHaveLength(0);
     expect(store.turns[0]?.conversationId).toBe("conversation-9");
+  });
+
+  it("routes onto the winner and drops the orphan when it loses the mapping race", async () => {
+    const { host, store, threads, conversations } = await harness();
+    // A concurrent first message already mapped this thread to its own Conversation, owned by the
+    // same sender. Our `find` still reads null (the write lands in the gap), so we take the create
+    // branch and must recover the winner from the conflicting insert.
+    threads.rows.set(`${SLUG}:${THREAD_KEY}`, {
+      integrationSlug: SLUG,
+      externalKey: THREAD_KEY,
+      conversationId: "winner-conv",
+      userId: "user-1",
+    });
+    vi.spyOn(threads, "find").mockResolvedValueOnce(null);
+
+    const attached = await host.attachChat(BUSINESS_ID, RUN_ID, CHAT);
+
+    expect(attached).toMatchObject({ outcome: "attached" });
+    expect(store.turns[0]?.conversationId).toBe("winner-conv");
+    // The Conversation this call minted is gone; only the winner's mapping remains.
+    expect(conversations).toHaveLength(0);
+  });
+
+  it("refuses the turn when the race winner belongs to a different sender", async () => {
+    const { host, store, threads, conversations } = await harness();
+    threads.rows.set(`${SLUG}:${THREAD_KEY}`, {
+      integrationSlug: SLUG,
+      externalKey: THREAD_KEY,
+      conversationId: "winner-conv",
+      userId: "user-2",
+    });
+    vi.spyOn(threads, "find").mockResolvedValueOnce(null);
+
+    const attached = await host.attachChat(BUSINESS_ID, RUN_ID, CHAT);
+
+    expect(attached).toEqual({ outcome: "ignored", reason: "sender_not_thread_owner" });
+    expect(store.turns).toHaveLength(0);
+    expect(conversations).toHaveLength(0);
   });
 
   it("runs no turn for an unlinked sender and offers the bind link itself", async () => {
