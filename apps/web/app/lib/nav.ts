@@ -6,6 +6,7 @@ import {
   Brain,
   Building2,
   Cpu,
+  Flower2,
   Gauge,
   History,
   Inbox,
@@ -25,7 +26,7 @@ import {
   Workflow,
 } from "lucide-react";
 
-export type ProductMode = "chat" | "build" | "knowledge" | "operate" | "settings";
+export type ProductMode = "chat" | "farm" | "build" | "knowledge" | "operate" | "settings";
 
 export type NavItem = {
   to: string;
@@ -53,6 +54,7 @@ export type NavSection = {
  */
 export const MODE_META: Record<ProductMode, { label: string; to: string; icon: LucideIcon }> = {
   chat: { label: "Chat", to: "/", icon: MessageSquare },
+  farm: { label: "Farm", to: "/farm", icon: Flower2 },
   build: { label: "Build", to: "/resources", icon: Boxes },
   knowledge: { label: "Knowledge", to: "/knowledge", icon: BookOpen },
   operate: { label: "Operate", to: "/inbox", icon: Activity },
@@ -60,6 +62,16 @@ export const MODE_META: Record<ProductMode, { label: string; to: string; icon: L
 };
 
 export const PRIMARY_MODES = ["chat", "build", "knowledge", "operate"] as const;
+
+/**
+ * Modes whose page is the whole surface. They own the full width and publish their own navigation,
+ * so a context panel beside them would only repeat what the page already shows.
+ */
+export const FULL_BLEED_MODES: readonly ProductMode[] = ["farm"];
+
+export function hasContextPanel(mode: ProductMode): boolean {
+  return !FULL_BLEED_MODES.includes(mode);
+}
 
 export const MODE_SECTIONS: Record<"build" | "operate" | "settings", NavSection[]> = {
   build: [
@@ -213,6 +225,7 @@ export function visibleSections(
 
 export function modeForPath(pathname: string): ProductMode {
   if (pathname.startsWith("/settings") || pathname.startsWith("/design-guide")) return "settings";
+  if (pathname.startsWith("/farm")) return "farm";
   if (pathname.startsWith("/knowledge")) return "knowledge";
   if (
     pathname.startsWith("/business") ||
@@ -236,6 +249,7 @@ export function modeForPath(pathname: string): ProductMode {
 }
 
 const PAGE_META: Array<{ prefix: string; label: string; icon: LucideIcon }> = [
+  { prefix: "/farm", label: "Farm", icon: Flower2 },
   { prefix: "/business/activities", label: "Activities", icon: History },
   { prefix: "/business/observability", label: "Observability", icon: Gauge },
   { prefix: "/business/profile", label: "Business profile", icon: Building2 },

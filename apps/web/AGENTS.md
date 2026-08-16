@@ -20,12 +20,14 @@ client data loading, schema-driven resource UI, and browser rendering of Surface
 | `app/routes/` | Remix SPA routes under `_app`; Chat is `/`. |
 | `app/components/` | App-local layout, state, resource, markdown, chat, and Surface components. |
 | `app/components/design-guide/` | Section groups and shared wrappers for the development-only `/design-guide` route. |
+| `app/components/farm/` | The `/farm` perspective tulip field canvas and its season/legend strips. |
 | `app/components/ui/` | Vendored shadcn primitives for this app only. |
 | `app/lib/api.ts` | API client with cookies, CSRF header, optional bearer token, `ApiError`. |
 | `app/lib/schema.ts` | JSON-Schema field detection, list/detail/form metadata, value rendering. |
 | `app/lib/chat/` | Chat SSE event types, parser, and timeline reducer. |
 | `app/lib/surface/` | Tulip Surface Protocol browser integration. |
 | `app/lib/agents.ts`, `app/lib/skills.ts` | Typed API wrappers for Agents and Skills. |
+| `app/lib/farm.ts` | Crop metadata, the parallel Soul read behind `/farm`, and season thresholds. |
 | `app/lib/nav.ts`, `app/lib/badges.ts` | Sidebar navigation and mocked V1 badge counts. |
 | `app/lib/kill-switches.ts` | Emergency-stop client; the scope picker is built from the API's enforceable list. |
 | `components.json` | shadcn config. |
@@ -52,6 +54,25 @@ client data loading, schema-driven resource UI, and browser rendering of Surface
 - `app/components/ui` is app-local shadcn. A component only becomes shared once a second app needs
   it; there is no shared React package to reach for.
 - Badge counts in `app/lib/badges.ts` are mocked in the V1 shell.
+- `/farm` draws one tulip per Soul artifact. Everything it encodes must be a fact `app/lib/farm.ts`
+  can point at — colour is kind from the `data-*` palette, the bed is that kind's real share, the
+  head is a real dormant state, and position comes from a hash of the planting id, never
+  `Math.random`. The canvas is `aria-hidden`, so `CropLegend` is the accessible counterpart and must
+  keep publishing the same links.
+- Only what the **business** made earns a tulip. Two API fields lie about this: every shipped skill
+  reports `provenance: "builtin"` and every shipped integration reports `installed: true`. Count
+  skills with `provenance !== "builtin"` and integrations with `status === "connected"`, or a brand
+  new instance claims a farm it never planted.
+- `/farm`'s skyline — treeline, windmill, barn — is scenery, not data: it is drawn only in
+  `--muted-foreground`, never a crop colour. The two facts it does carry are the business name on
+  the barn (unsigned when the instance has none) and sails that turn only while something is
+  planted. It stands on `Field.skyY`, above the tallest bloom, and is dropped entirely when the
+  crop leaves no headroom.
+- `/farm` is full bleed: `FULL_BLEED_MODES` in `app/lib/nav.ts` suppresses its context panel and the
+  collapse toggle. Add a mode there rather than special-casing `AppSidebar`.
+- `?mock=N` on `/farm` draws a pretend field from `app/lib/farm.mock.ts`, for reviewing the visuals
+  on an instance that has planted nothing. It is gated on `import.meta.env.DEV` and the page labels
+  itself while it is on. Never import that module from the real load path.
 - Web Vitest must use `vitest.config.ts` with `@vitejs/plugin-react` and jsdom, not the Remix Vite
   plugin. Components with Remix routing primitives need `createRemixStub`.
 - Known issue: broad web test failures can come from `~/` alias resolution; compare with a clean

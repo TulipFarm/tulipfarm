@@ -116,6 +116,41 @@ test("renders the global product-mode rail and Chat context", () => {
   expect(screen.getByRole("link", { name: "Recent chats" })).toHaveAttribute("href", "/chats");
 });
 
+test("keeps Farm out of the working modes, beside the other utilities", () => {
+  render(<SidebarStub initialEntries={["/"]} />);
+  const rail = screen.getByRole("navigation", { name: "Product modes" });
+  const working = ["Chat", "Build", "Knowledge", "Operate"];
+
+  expect(
+    within(rail)
+      .getAllByRole("link")
+      .map((link) => link.getAttribute("aria-label"))
+  ).toEqual(working);
+
+  const order = screen
+    .getAllByRole("link")
+    .map((link) => link.getAttribute("aria-label"))
+    .filter((label) => label && [...working, "Farm", "Settings"].includes(label));
+  expect(order).toEqual([...working, "Farm", "Settings"]);
+});
+
+test("gives Farm the whole surface, with no context panel to repeat the page", () => {
+  render(<ShellStub initialEntries={["/farm"]} />);
+
+  expect(screen.queryByRole("navigation", { name: "Farm" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /context sidebar/ })).not.toBeInTheDocument();
+  expect(screen.getByRole("navigation", { name: "Product modes" })).toBeInTheDocument();
+});
+
+test("keeps the Farm rail off-canvas on mobile instead of pinning it over the field", () => {
+  render(<ShellStub initialEntries={["/farm"]} />);
+
+  const aside = screen.getByRole("complementary", { name: "Application navigation" });
+  // Without the off-canvas transform the fixed rail sits on top of the page at phone widths.
+  expect(aside.className).toContain("-translate-x-full");
+  expect(aside.className).toContain("md:translate-x-0");
+});
+
 test("renders Build destinations in the contextual sidebar", () => {
   render(<SidebarStub initialEntries={["/resources"]} />);
   expect(screen.getByRole("link", { name: "Build" })).toHaveAttribute("aria-current", "page");
