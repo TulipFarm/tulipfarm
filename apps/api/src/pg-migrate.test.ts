@@ -26,6 +26,20 @@ async function seedEmbeddingTablesAsOf(db: PGlite, version: number): Promise<voi
   }
 }
 
+/**
+ * The `runs` FK target that migration v54 (`agent_loop_checkpoints`) references. Fixtures whose
+ * floor is above v4 — where the real `runs` table is created — must stand it in, matching the real
+ * `UNIQUE (business_id, id)` the foreign key points at.
+ */
+async function seedRunsFkTarget(db: PGlite): Promise<void> {
+  await db.query(`CREATE TABLE IF NOT EXISTS runs (
+    id          uuid PRIMARY KEY,
+    business_id text NOT NULL DEFAULT '${DEPLOYMENT_BUSINESS_ID}',
+    bundle      jsonb NOT NULL DEFAULT '{}'::jsonb,
+    UNIQUE (business_id, id)
+  )`);
+}
+
 describe("runPgMigrations", () => {
   let db: PGlite;
 
@@ -44,7 +58,7 @@ describe("runPgMigrations", () => {
     await seedEmbeddingTablesAsOf(db, 14);
     await db.query("CREATE TABLE messages (id uuid PRIMARY KEY)");
     await db.query("CREATE TABLE users (id uuid PRIMARY KEY, password_hash text NOT NULL)");
-    await db.query("CREATE TABLE runs (id uuid PRIMARY KEY, bundle jsonb NOT NULL)");
+    await seedRunsFkTarget(db);
     await db.query("CREATE TABLE run_events (run_id uuid NOT NULL, sequence bigint NOT NULL)");
     await db.query(`CREATE TABLE api_clients (
       id            uuid PRIMARY KEY,
@@ -334,6 +348,7 @@ describe("runPgMigrations", () => {
         CONSTRAINT schema_version_single_row CHECK (id)
       )`);
       await db.query("INSERT INTO schema_version (id, version) VALUES (true, 48)");
+      await seedRunsFkTarget(db);
       await db.query(`INSERT INTO soul_execution_bundles (
         digest, business_id, changeset_id, commit_sha, bundle, signature
       ) VALUES (
@@ -404,10 +419,7 @@ describe("runPgMigrations", () => {
     it("backfills the Run source from the formerly overloaded Routine id", async () => {
       // v27 needs pgvector for `knowledge_source_chunks.embedding`; baseline v1 usually creates it.
       await db.query("CREATE EXTENSION IF NOT EXISTS vector");
-      await db.query(`CREATE TABLE runs (
-        id uuid PRIMARY KEY,
-        bundle jsonb NOT NULL
-      )`);
+      await seedRunsFkTarget(db);
       await db.query(`INSERT INTO runs (id, bundle)
         VALUES ('00000000-0000-4000-8000-000000000001', '{"routineId":"chat"}'::jsonb)`);
       await db.query(`CREATE TABLE schema_version (
@@ -478,6 +490,7 @@ describe("runPgMigrations", () => {
       )`);
       await db.query("INSERT INTO schema_version (id, version) VALUES (true, 31)");
       await seedEmbeddingTablesAsOf(db, 31);
+      await seedRunsFkTarget(db);
 
       await runPgMigrations(db, undefined, () => {});
 
@@ -501,6 +514,7 @@ describe("runPgMigrations", () => {
       )`);
       await db.query("INSERT INTO schema_version (id, version) VALUES (true, 31)");
       await seedEmbeddingTablesAsOf(db, 31);
+      await seedRunsFkTarget(db);
 
       await expect(runPgMigrations(db, undefined, () => {})).resolves.not.toThrow();
     });
@@ -666,6 +680,7 @@ describe("runPgMigrations concurrency and atomicity", () => {
         CONSTRAINT schema_version_single_row CHECK (id)
       )`);
       await db.query("INSERT INTO schema_version (id, version) VALUES (true, 49)");
+      await seedRunsFkTarget(db);
 
       await runPgMigrations(db, undefined, NOOP_LOG);
 

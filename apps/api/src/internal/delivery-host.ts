@@ -93,7 +93,7 @@ export interface IngressDeliveryHostOptions {
   readonly runs: HostedRunReader;
   readonly artifacts: ArtifactService;
   readonly store: ConversationStore;
-  readonly conversations: Pick<ConversationRepo, "create">;
+  readonly conversations: Pick<ConversationRepo, "create" | "deleteOwned">;
   readonly threads: IntegrationConversationsRepo;
   readonly integrationEvents: IntegrationEventsRepo;
   readonly soulLoader: SoulLoader;
@@ -184,19 +184,34 @@ export class IngressDeliveryHost {
     const now = this.now();
     let conversationId = mapping?.conversationId;
     if (conversationId === undefined) {
-      conversationId = this.newId();
+      const mintedId = this.newId();
       await this.options.conversations.create({
-        _id: conversationId,
+        _id: mintedId,
         userId: user._id,
         createdAt: now,
         updatedAt: now,
       });
-      await this.options.threads.insert({
+      // The mapping insert, not our minted id, decides who owns the thread: on a lost race a
+      // concurrent first message already created the Conversation, so we route onto its mapping,
+      // drop our now-orphaned Conversation, and re-apply the ownership guard against the winner we
+      // did not write — the pre-read guard above never saw it.
+      const winner = await this.options.threads.insert({
         integrationSlug: delivery.slug,
         externalKey: delivery.threadKey,
-        conversationId,
+        conversationId: mintedId,
         userId: user._id,
       });
+      if (winner.conversationId !== mintedId) {
+        await this.options.conversations.deleteOwned(mintedId, user._id);
+        if (winner.userId !== user._id) {
+          this.options.log.warn(
+            { slug: delivery.slug, runId },
+            "channel sender does not own the mapped Conversation; refusing the turn"
+          );
+          return { outcome: "ignored", reason: "sender_not_thread_owner" };
+        }
+      }
+      conversationId = winner.conversationId;
     }
 
     const turnId = this.newId();

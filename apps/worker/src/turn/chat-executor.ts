@@ -2,6 +2,7 @@ import {
   AgentLoop,
   type AgentLoopBudgetPort,
   InMemoryLoopCheckpointStore,
+  type LoopCheckpointStore,
   type ModelPort,
   type ToolDispatchPort,
 } from "@tulipfarm/agent-runtime";
@@ -46,6 +47,12 @@ export interface ChatExecutorOptions {
   readonly budgets: RunBudgetStore;
   readonly transitions: StateTransitionPort;
   readonly waits: ApprovalWaitPort;
+  /**
+   * Durable Agent-loop counters, so an approval park cannot reset `maxToolCalls`/`maxRepairAttempts`
+   * by re-entering with a fresh store. Defaults to in-memory for tests; production injects the
+   * PostgreSQL store from the composition root.
+   */
+  readonly checkpoints?: LoopCheckpointStore;
   readonly model: ModelPort | ((input: ChatModelFactoryInput) => ModelPort);
   /** Where a guard that timed out or threw is reported; it is skipped, never allowed to stall. */
   readonly log: { warn(obj: unknown, msg?: string): void };
@@ -126,7 +133,7 @@ export function createChatExecutor(options: ChatExecutorOptions): RunExecutor {
       model,
       // Guard before announcing; refused Tool calls never ran.
       tools: guardrails.guard(announceToolCalls(options.tools ?? options.host, writer), writer),
-      checkpoints: new InMemoryLoopCheckpointStore(),
+      checkpoints: options.checkpoints ?? new InMemoryLoopCheckpointStore(),
       events: writer,
       budget: runBudget(options.budgets, run.businessId, run.id),
       isCancelled: async () => {

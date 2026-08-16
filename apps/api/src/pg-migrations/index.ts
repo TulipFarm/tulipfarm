@@ -18,6 +18,7 @@ import {
   embeddingIndexStatements,
   INTEGRATION_STORAGE_STATEMENTS,
   KILL_SWITCH_STORAGE_STATEMENTS,
+  LOOP_CHECKPOINT_STORAGE_STATEMENTS,
   RUN_BROWSE_STORAGE_STATEMENTS,
   RUN_EVENT_NOTIFY_STATEMENTS,
   RUN_EVENT_STORAGE_STATEMENTS,
@@ -1990,6 +1991,16 @@ export const PG_MIGRATIONS: PgMigration[] = [
     description: "tasks: system-created human work items behind Companion/Tasks/home checklist",
     up: async (q) => {
       for (const sql of TASK_STORAGE_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 54,
+    description:
+      "agent_loop_checkpoints: durable Tool-call and repair counters across approval parks",
+    up: async (q) => {
+      for (const sql of LOOP_CHECKPOINT_STORAGE_STATEMENTS) {
         await q.query(sql);
       }
     },

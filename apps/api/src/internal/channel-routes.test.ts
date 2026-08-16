@@ -374,9 +374,101 @@ describe("/api/v1/internal/channels", () => {
       expect(store.turns).toHaveLength(2);
       expect(store.turns[0]?.conversationId).toBe(store.turns[1]?.conversationId);
     });
-  });
 
-  describe("GET /runs/:runId/reply", () => {
+    it("routes a losing concurrent first message onto the winner and drops its orphan", async () => {
+      // Deterministic stand-in for the race: a competing writer lands the winning mapping in the
+      // window between this request's `find` (null) and its own `insert` (conflict). The full
+      // Fastify+PGlite path serialises real concurrent injects, so the interleave is forced here;
+      // `IntegrationConversationsRepo`'s own `*.pg.test.ts` covers the genuine Promise.all race.
+      const orphanConversationId = randomUUID();
+      const winnerConversationId = randomUUID();
+      const threadKey = "slack:C1:1720000000.000999";
+      const realThreads = new IntegrationConversationsRepo(db as unknown as Queryable);
+      const realConversations = new PgConversationRepo(db as unknown as Queryable);
+
+      const racingThreads: IntegrationConversationsRepo = {
+        find: (slug, key) => realThreads.find(slug, key),
+        exists: (slug, key) => realThreads.exists(slug, key),
+        insert: async (doc) => {
+          if (doc.conversationId === orphanConversationId) {
+            await realConversations.create({
+              _id: winnerConversationId,
+              userId: slackUser._id,
+              agentId: "assistant",
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            });
+            await realThreads.insert({
+              integrationSlug: doc.integrationSlug,
+              externalKey: doc.externalKey,
+              conversationId: winnerConversationId,
+              userId: slackUser._id,
+            });
+          }
+          return realThreads.insert(doc);
+        },
+      } as IntegrationConversationsRepo;
+
+      const racingApp = await buildApp({
+        sessionStore: new MemorySessionStore(),
+        userRepo: new PgUserRepo(db as unknown as Queryable),
+        tokenRepo: new FakeTokenRepo(),
+        identity: { apiClientRepo },
+        toolApprovals,
+        channels: () => ({
+          store,
+          invocations: new DurableInvocationGateway({
+            store: { persist: async (record) => ({ outcome: "started", runId: record.runId }) },
+            validator: new TypedOutputValidator(INVOCATION_REQUEST_SCHEMAS),
+            nextId: () => randomUUID(),
+          }),
+          conversations: realConversations,
+          threads: racingThreads,
+          identity: new IngressIdentityResolver({
+            users: makeUsers([slackUser]),
+            log: { warn: () => {}, error: () => {}, info: () => {}, debug: () => {} } as never,
+            mappings,
+          }),
+          runDeliveries,
+          toolApprovals,
+          newId: () => orphanConversationId,
+          bindLinkUrl: (token) => `http://localhost:4000/link-channel?token=${token}`,
+        }),
+      });
+
+      try {
+        const res = await racingApp.inject({
+          method: "POST",
+          url: "/api/v1/internal/channels/runs",
+          headers: asWorker(),
+          payload: {
+            ...runBody(),
+            message: {
+              externalAppId: "A1",
+              channelId: "C1",
+              threadId: "1720000000.000999",
+              text: "loser",
+            },
+          },
+        });
+
+        expect(res.statusCode).toBe(200);
+        expect(res.json()).toMatchObject({ outcome: "started" });
+        // The Turn rides the winner's Conversation, never the id this request minted.
+        expect(store.turns.at(-1)?.conversationId).toBe(winnerConversationId);
+
+        const mapping = await realThreads.find("slack", threadKey);
+        expect(mapping?.conversationId).toBe(winnerConversationId);
+
+        // The orphaned Conversation the loser created is gone.
+        const orphan = await db.query("SELECT 1 FROM conversations WHERE id = $1", [
+          orphanConversationId,
+        ]);
+        expect(orphan.rows).toHaveLength(0);
+      } finally {
+        await racingApp.close();
+      }
+    });
     it("is pending before the Turn completes", async () => {
       store.turns.push({
         id: "turn-1",

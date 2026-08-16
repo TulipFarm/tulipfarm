@@ -9,18 +9,29 @@ export interface AgentLoopCheckpoint {
 }
 
 export interface LoopCheckpointStore {
-  load(runId: string, stateId: string): Promise<AgentLoopCheckpoint | undefined>;
+  load(
+    businessId: string,
+    runId: string,
+    stateId: string
+  ): Promise<AgentLoopCheckpoint | undefined>;
   save(checkpoint: AgentLoopCheckpoint): Promise<void>;
 }
 
 export class InMemoryLoopCheckpointStore implements LoopCheckpointStore {
   private readonly checkpoints = new Map<string, AgentLoopCheckpoint>();
 
-  async load(runId: string, stateId: string): Promise<AgentLoopCheckpoint | undefined> {
-    return this.checkpoints.get(`${runId}/${stateId}`);
+  async load(
+    businessId: string,
+    runId: string,
+    stateId: string
+  ): Promise<AgentLoopCheckpoint | undefined> {
+    return this.checkpoints.get(`${businessId}/${runId}/${stateId}`);
   }
 
   async save(checkpoint: AgentLoopCheckpoint): Promise<void> {
-    this.checkpoints.set(`${checkpoint.runId}/${checkpoint.stateId}`, checkpoint);
+    this.checkpoints.set(
+      `${checkpoint.businessId}/${checkpoint.runId}/${checkpoint.stateId}`,
+      checkpoint
+    );
   }
 }

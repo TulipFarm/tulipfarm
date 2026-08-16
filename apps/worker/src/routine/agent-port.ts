@@ -9,6 +9,7 @@ import {
   type GuardContext,
   GuardrailsService,
   InMemoryLoopCheckpointStore,
+  type LoopCheckpointStore,
   type ModelPort,
   type ModelProfileCatalog,
   type ModelProfileSelection,
@@ -69,6 +70,12 @@ export interface BundleRoutineAgentPortOptions {
   readonly events: RunEventAppendPort;
   readonly budgets: RunBudgetStore;
   readonly runs: Pick<RunStore, "find">;
+  /**
+   * Durable Agent-loop counters. A Routine Agent State exposes no Tools, so it cannot park on
+   * approval today, but the store is injected for parity with Chat and to keep limits durable if
+   * that ever changes. Defaults to in-memory for tests.
+   */
+  readonly checkpoints?: LoopCheckpointStore;
   /** Where a guard that timed out or threw is reported; it is skipped, never allowed to stall. */
   readonly log: { warn(obj: unknown, msg?: string): void };
   readonly now?: () => Date;
@@ -306,7 +313,7 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
         routing,
       }),
       tools: NO_TOOLS,
-      checkpoints: new InMemoryLoopCheckpointStore(),
+      checkpoints: this.options.checkpoints ?? new InMemoryLoopCheckpointStore(),
       events,
       budget: this.budget(request),
       isCancelled: async () => {
