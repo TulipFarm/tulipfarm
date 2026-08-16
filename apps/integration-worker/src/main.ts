@@ -58,6 +58,7 @@ export async function main(): Promise<void> {
         });
         return response.status !== 401;
       } catch {
+        // An unreachable API means the readiness probe has not cleared yet.
         return false;
       }
     },

@@ -9,6 +9,7 @@ import {
   decideBranch,
   type ForeachProgress,
   type IdentityCeiling,
+  InMemoryStateRetryStore,
   initForeachProgress,
   initParallelProgress,
   isTimerWait,
@@ -31,8 +32,10 @@ import {
   resolveErrorPath,
   resolveForeachItems,
   resolveRoutineStateInput,
+  retryBackoffMs,
   routineOccurrenceKey,
   routineWaitId,
+  type StateRetryStore,
   type StateStatus,
   type StepOutcome,
   settleForeachItem,
@@ -99,6 +102,14 @@ interface RoutineExecutorOptions {
   readonly approvals?: RoutineApprovalPort;
   /** Fail-closed authority; this process may not mint authority of its own. */
   readonly authority?: (run: PersistedRun, state: CompiledState) => readonly AuthorityLayer[];
+  /**
+   * Durable per-State-occurrence retry counter. A State's authored `retry` policy is only honoured
+   * when this is present and durable; without it a park-and-resume would refund the budget. The
+   * executor defaults to a non-durable in-memory store so tests and unconfigured hosts still run.
+   */
+  readonly retries?: StateRetryStore;
+  /** Backoff sleep between retry attempts; injectable so tests do not wait real time. */
+  readonly delay?: (ms: number) => Promise<void>;
   readonly now?: () => Date;
   readonly identityCeiling?: (run: PersistedRun) => IdentityCeiling;
 }
@@ -211,10 +222,23 @@ function isRefusal(error: unknown): error is RoutineExecutionRefusal | RoutineSt
   return error instanceof RoutineExecutionRefusal || error instanceof RoutineStepError;
 }
 
+type ClassifiableOutcome = { readonly kind: string; readonly retryable?: boolean };
+
+/**
+ * A failure a State's `retry` policy may re-attempt: only one a port explicitly marked
+ * `retryable`. Absence of the flag (every `tool` failure, by the effect ledger's design) is
+ * terminal, so an unmarked failure is never retried.
+ */
+function isRetryableFailure(outcome: ClassifiableOutcome): boolean {
+  return outcome.kind === "failed" && outcome.retryable === true;
+}
+
 /** Executes deterministic Routine States; persists successors before predecessor success. */
 export function createRoutineExecutor(options: RoutineExecutorOptions): RunExecutor {
   const now = options.now ?? (() => new Date());
   const ceiling = options.identityCeiling ?? defaultIdentityCeiling;
+  const retries = options.retries ?? new InMemoryStateRetryStore();
+  const delay = options.delay ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
   return async (run) => {
     const loaded = await options.definitions.load(run);
@@ -245,6 +269,8 @@ export function createRoutineExecutor(options: RoutineExecutorOptions): RunExecu
       request,
       persisted,
       options,
+      retries,
+      delay,
       now,
     });
     // `waiting` holds no lease; replay starts from durable rows after the sweep requeues it.
@@ -260,6 +286,8 @@ interface ExecutionContext {
   readonly request: ManualRoutineRequest;
   readonly persisted: Map<string, PersistedState>;
   readonly options: RoutineExecutorOptions;
+  readonly retries: StateRetryStore;
+  readonly delay: (ms: number) => Promise<void>;
   readonly now: () => Date;
 }
 
@@ -397,18 +425,20 @@ class RoutineExecution {
     const port = this.ctx.options.tools;
     if (port === undefined) throw new RoutineExecutionRefusal("unsupported_state", state.name);
 
-    const result = await port.execute({
-      businessId: this.ctx.run.businessId,
-      runId: this.ctx.run.id,
-      stateKey: key,
-      plan: planToolDispatch(state, scope, {
+    const result = await this.withRetry(state, key, () =>
+      port.execute({
         businessId: this.ctx.run.businessId,
         runId: this.ctx.run.id,
         stateKey: key,
-      }),
-      bundle: this.ctx.bundle,
-      authorityLayers: this.ctx.options.authority?.(this.ctx.run, state) ?? [],
-    });
+        plan: planToolDispatch(state, scope, {
+          businessId: this.ctx.run.businessId,
+          runId: this.ctx.run.id,
+          stateKey: key,
+        }),
+        bundle: this.ctx.bundle,
+        authorityLayers: this.ctx.options.authority?.(this.ctx.run, state) ?? [],
+      })
+    );
 
     if (result.kind === "succeeded") return stateOutcome(state);
     if (result.kind !== "failed") {
@@ -435,16 +465,18 @@ class RoutineExecution {
 
     const plan = planAgentInvocation(state, scope);
     const schema = agentOutputSchema(this.ctx.routine.outputSchemas, plan.outputSchemaRef);
-    const result = await port.execute({
-      businessId: this.ctx.run.businessId,
-      runId: this.ctx.run.id,
-      stateKey: key,
-      // Claimed row version keeps retried loop events from colliding with prior attempts.
-      attempt: row.version,
-      plan,
-      ...(schema === undefined ? {} : { outputSchema: schema }),
-      bundle: this.ctx.bundle,
-    });
+    const result = await this.withRetry(state, key, (attemptNumber) =>
+      port.execute({
+        businessId: this.ctx.run.businessId,
+        runId: this.ctx.run.id,
+        stateKey: key,
+        // Claimed row version plus the retry attempt keep each attempt's loop events distinct.
+        attempt: row.version + (attemptNumber - 1),
+        plan,
+        ...(schema === undefined ? {} : { outputSchema: schema }),
+        bundle: this.ctx.bundle,
+      })
+    );
 
     if (result.kind === "succeeded") return stateOutcome(state);
     if (result.kind === "cancelled") return "cancelled";
@@ -715,6 +747,46 @@ class RoutineExecution {
     }
     await this.park(key, `routine:${WAIT_TIMED_OUT}`);
     return { kind: "needs_reconciliation" };
+  }
+
+  /**
+   * Runs one State effect under its authored `retry` policy.
+   *
+   * A failure the effect's port marked `retryable` (a transient provider fault) is re-attempted
+   * until the durable attempt count reaches `maxAttempts`; a success, a terminal failure, or a park
+   * returns at once. The count is loaded from and written to the durable store before every
+   * attempt, so a park-and-resume or a crash-and-reclaim continues from the attempts already spent
+   * rather than restarting the budget — the same durability the Run's budget ledger gives. A State
+   * with no `retry` policy makes exactly one attempt and never touches the store.
+   *
+   * A crash between recording the final attempt and settling the State can cost one extra attempt
+   * on reclaim; the guarantee is that the budget is never *refunded*, never that it is never
+   * exceeded by one.
+   */
+  private async withRetry<T extends { readonly kind: string }>(
+    state: CompiledState,
+    key: string,
+    attempt: (attemptNumber: number) => Promise<T>
+  ): Promise<T> {
+    const policy = state.retry;
+    if (policy === null) return attempt(1);
+
+    const loaded = await this.ctx.retries.load(this.ctx.run.businessId, this.ctx.run.id, key);
+    let made = loaded?.attempts ?? 0;
+    for (;;) {
+      made += 1;
+      // Persist before the attempt so a crash mid-attempt cannot refund the budget it spends.
+      await this.ctx.retries.record({
+        businessId: this.ctx.run.businessId,
+        runId: this.ctx.run.id,
+        stateKey: key,
+        attempts: made,
+      });
+      const outcome = await attempt(made);
+      if (made >= policy.maxAttempts || !isRetryableFailure(outcome)) return outcome;
+      const backoffMs = retryBackoffMs(policy, made);
+      if (backoffMs > 0) await this.ctx.delay(backoffMs);
+    }
   }
 
   /** Persist the successor before its predecessor succeeds. */

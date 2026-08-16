@@ -145,6 +145,7 @@ export function createEd25519BundleVerifier(
       try {
         return verify(null, payloadBytes(payload), publicKey, signatureBytes(signature.value));
       } catch {
+        // A malformed signature or key verifies as false, never as valid.
         return false;
       }
     },

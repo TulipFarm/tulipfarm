@@ -235,6 +235,7 @@ async function existingViewFiles(
     const entries = await readdir(join(directory(context, slug), "views"));
     return entries.filter((entry) => entry.endsWith(".yaml"));
   } catch {
+    // A missing views directory means there are no views to list.
     return [];
   }
 }

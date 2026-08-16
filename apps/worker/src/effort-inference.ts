@@ -66,6 +66,7 @@ async function readPin(
   try {
     return await source.read();
   } catch {
+    // An unreadable pin yields no inferred effort; the default applies.
     return undefined;
   }
 }

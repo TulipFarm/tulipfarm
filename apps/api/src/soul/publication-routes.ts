@@ -128,6 +128,7 @@ function decodeCursor(cursor: string): CursorState | null {
     }
     return parsed as CursorState;
   } catch {
+    // An unparseable cursor is treated as absent; pagination restarts from the top.
     return null;
   }
 }

@@ -1,5 +1,6 @@
 import {
   type ArtifactContent,
+  InMemoryStateRetryStore,
   type RegisterWaitInput,
   RoutineStateScheduler,
   routineEffectId,
@@ -9,7 +10,7 @@ import { MANUAL_REQUEST_SCHEMA_REF, type routine } from "@tulipfarm/schema";
 import type { PersistedRun, PersistedState, PersistedWait } from "@tulipfarm/storage";
 import { describe, expect, it } from "vitest";
 import type { StateTransitionPort } from "../agent-state";
-import type { RoutineAgentOutcome, RoutineAgentRequest } from "./agent-port";
+import type { RoutineAgentOutcome, RoutineAgentPort, RoutineAgentRequest } from "./agent-port";
 import type {
   RoutineApprovalDecision,
   RoutineApprovalPort,
@@ -819,7 +820,7 @@ describe("createRoutineExecutor — agent States", () => {
         },
       ]),
       harness,
-      { kind: "failed", reason: "guardrail_output_blocked" }
+      { kind: "failed", reason: "guardrail_output_blocked", retryable: false }
     );
 
     await expect(execute(run())).resolves.toBe("succeeded");
@@ -831,6 +832,7 @@ describe("createRoutineExecutor — agent States", () => {
     const execute = agentExecutor(definition([classifyState]), harness, {
       kind: "failed",
       reason: "model_error",
+      retryable: true,
     });
 
     await expect(execute(run())).resolves.toBe("failed");
@@ -1013,5 +1015,177 @@ describe("createRoutineExecutor — approval States", () => {
       "needs_reconciliation"
     );
     expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:unsupported_state");
+  });
+});
+
+describe("createRoutineExecutor — retry policy", () => {
+  const bundle = { digest: "bundle-digest" } as unknown as LoadedRoutineDefinition["bundle"];
+
+  function retryingAgentState(maxAttempts: number, backoffMs?: number): routine.RoutineState {
+    return {
+      type: "agent",
+      name: "Start",
+      agentRef: { name: "triage", version: "1" },
+      retry: { maxAttempts, ...(backoffMs === undefined ? {} : { backoffMs }) },
+      end: true,
+    } as routine.RoutineState;
+  }
+
+  function retryExecutor(input: {
+    document: routine.RoutineDefinition;
+    harness: StateHarness;
+    agent: RoutineAgentPort;
+    retries: InMemoryStateRetryStore;
+    delay?: (ms: number) => Promise<void>;
+  }) {
+    return createRoutineExecutor({
+      definitions: {
+        load: async () => ({ document: input.document, bundle }) as LoadedRoutineDefinition,
+      },
+      artifacts: { read: async () => requestArtifact },
+      runs: { listStates: async () => [...input.harness.states.values()] },
+      scheduler: input.harness.scheduler,
+      transitions: input.harness,
+      waits: input.harness.waitPort,
+      agents: input.agent,
+      retries: input.retries,
+      delay: input.delay ?? (async () => {}),
+      now: () => new Date(STARTED_AT),
+    });
+  }
+
+  it("re-attempts a transient Agent failure and succeeds on a later attempt", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const retries = new InMemoryStateRetryStore();
+    let calls = 0;
+    const agent: RoutineAgentPort = {
+      execute: async () => {
+        calls += 1;
+        return calls < 2
+          ? { kind: "failed", reason: "model_provider_unavailable", retryable: true }
+          : { kind: "succeeded", output: null };
+      },
+    };
+
+    const execute = retryExecutor({
+      document: definition([retryingAgentState(3)]),
+      harness,
+      agent,
+      retries,
+    });
+
+    await expect(execute(run())).resolves.toBe("succeeded");
+    expect(calls).toBe(2);
+    expect((await retries.load("business-1", run().id, "Start"))?.attempts).toBe(2);
+    expect(harness.transitions).toContain("Start:running->succeeded");
+  });
+
+  it("exhausts maxAttempts on a persistent transient failure and terminates", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const retries = new InMemoryStateRetryStore();
+    let calls = 0;
+    const agent: RoutineAgentPort = {
+      execute: async () => {
+        calls += 1;
+        return { kind: "failed", reason: "model_rate_limited", retryable: true };
+      },
+    };
+
+    const execute = retryExecutor({
+      document: definition([retryingAgentState(2)]),
+      harness,
+      agent,
+      retries,
+    });
+
+    await expect(execute(run())).resolves.toBe("failed");
+    expect(calls).toBe(2);
+    expect((await retries.load("business-1", run().id, "Start"))?.attempts).toBe(2);
+    expect(harness.transitions).toContain("Start:running->failed");
+  });
+
+  it("does not retry a terminal failure even under a retry policy", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const retries = new InMemoryStateRetryStore();
+    let calls = 0;
+    const agent: RoutineAgentPort = {
+      execute: async () => {
+        calls += 1;
+        return { kind: "failed", reason: "guardrail_output_blocked", retryable: false };
+      },
+    };
+
+    const execute = retryExecutor({
+      document: definition([retryingAgentState(5)]),
+      harness,
+      agent,
+      retries,
+    });
+
+    await expect(execute(run())).resolves.toBe("failed");
+    expect(calls).toBe(1);
+    expect(harness.transitions).toContain("Start:running->failed");
+  });
+
+  it("waits the authored backoff between attempts", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const retries = new InMemoryStateRetryStore();
+    const delays: number[] = [];
+    let calls = 0;
+    const agent: RoutineAgentPort = {
+      execute: async () => {
+        calls += 1;
+        return calls < 3
+          ? { kind: "failed", reason: "model_error", retryable: true }
+          : { kind: "succeeded", output: null };
+      },
+    };
+
+    const execute = retryExecutor({
+      document: definition([retryingAgentState(3, 100)]),
+      harness,
+      agent,
+      retries,
+      delay: async (ms) => {
+        delays.push(ms);
+      },
+    });
+
+    await expect(execute(run())).resolves.toBe("succeeded");
+    expect(calls).toBe(3);
+    expect(delays).toEqual([100, 100]);
+  });
+
+  it("does not refund the attempt budget across a crash and resume", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const retries = new InMemoryStateRetryStore();
+    let calls = 0;
+    let resumed = false;
+    const agent: RoutineAgentPort = {
+      execute: async () => {
+        calls += 1;
+        // Crash on the second physical attempt of the first invocation, after its count is durable.
+        if (calls === 2 && !resumed) throw new Error("injected crash");
+        return { kind: "failed", reason: "model_error", retryable: true };
+      },
+    };
+
+    const execute = retryExecutor({
+      document: definition([retryingAgentState(5)]),
+      harness,
+      agent,
+      retries,
+    });
+
+    await expect(execute(run())).rejects.toThrow("injected crash");
+    expect((await retries.load("business-1", run().id, "Start"))?.attempts).toBe(2);
+
+    resumed = true;
+    // The resumed State must continue from the 2 attempts already spent, not restart at zero:
+    // 3 more physical attempts (3rd, 4th, 5th) reach the ceiling — a refund would take 5 more.
+    await expect(execute(run())).resolves.toBe("failed");
+    expect(calls).toBe(5);
+    expect((await retries.load("business-1", run().id, "Start"))?.attempts).toBe(5);
+    expect(harness.transitions).toContain("Start:running->failed");
   });
 });

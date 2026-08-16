@@ -27,7 +27,14 @@ import { GITHUB_INSTALLATION_SECRET_REF, githubInstallationSecretRef } from "./g
 export type RoutineToolOutcome =
   /** Dispatched and confirmed, or recognized as an effect this Run already confirmed. */
   | { readonly kind: "succeeded" }
-  /** A definitive negative the authored `onError` path may claim, named by its reason code. */
+  /**
+   * A definitive negative the authored `onError` path may claim, named by its reason code.
+   *
+   * Tool failures are always terminal for the `retry` policy: the effect ledger keys an effect by
+   * its `(run, state)` occurrence, so a re-dispatch replays this same confirmed result rather than
+   * re-running the provider. A genuinely transient fault never lands here — it surfaces as
+   * `unavailable`/`effect_ambiguous` and parks for reconciliation, which is its own durable retry.
+   */
   | { readonly kind: "failed"; readonly reason: string }
   /** Policy requires a human. Routine Approvals are not composed yet, so the Run parks. */
   | { readonly kind: "awaiting_approval"; readonly reason: string }

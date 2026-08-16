@@ -56,6 +56,7 @@ function tryDecrypt(decoded: DecodedEnvelope, key: Buffer): string | null {
 
     return Buffer.concat([decipher.update(decoded.ciphertext), decipher.final()]).toString("utf8");
   } catch {
+    // Undecryptable ciphertext (wrong key or tampered) resolves to null, never a partial plaintext.
     return null;
   }
 }

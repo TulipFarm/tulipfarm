@@ -10,6 +10,7 @@ import {
   GuardrailsService,
   InMemoryLoopCheckpointStore,
   type LoopCheckpointStore,
+  type ModelInvocationFailureReason,
   type ModelPort,
   type ModelProfileCatalog,
   type ModelProfileSelection,
@@ -37,8 +38,13 @@ import { TurnEventWriter } from "../turn/run-events";
 export type RoutineAgentOutcome =
   /** The Agent answered, and the answer satisfied whatever schema the State declared. */
   | { readonly kind: "succeeded"; readonly output: unknown }
-  /** A definitive negative the authored `onError` path may claim, named by its reason code. */
-  | { readonly kind: "failed"; readonly reason: string }
+  /**
+   * A definitive negative the authored `onError` path may claim, named by its reason code.
+   * `retryable` marks a transient provider fault the executor may re-attempt under the State's
+   * `retry` policy; a deterministic refusal (Guardrail block, config denial, exhausted budget) is
+   * terminal and re-running only spends tokens to reach the same answer.
+   */
+  | { readonly kind: "failed"; readonly reason: string; readonly retryable: boolean }
   /** The loop held a Tool call for a human; this port cannot open that Approval. */
   | { readonly kind: "awaiting_approval"; readonly reason: string }
   /** The Run is being cancelled; the executor leaves the State to the cancellation manager. */
@@ -91,6 +97,26 @@ export interface RoutineModelSelection {
 
 /** Run statuses that mean the question must stop being asked. */
 const CANCELLING_STATUSES: ReadonlySet<string> = new Set(["cancelling", "cancelled"]);
+
+/**
+ * Which Agent-loop failures are worth another attempt under a State's `retry` policy.
+ *
+ * Only transient provider faults are: a rate limit or an unavailable/errored provider can clear on
+ * its own before the next attempt. Everything else an Agent State can fail with — a blocked
+ * Guardrail, a config-level model denial (billing inactive, bad key, unknown model), an exhausted
+ * token/repair/iteration budget, or empty output already nudged within the repair budget — is
+ * deterministic, so re-running only spends tokens to reach the identical refusal.
+ */
+const RETRYABLE_AGENT_FAILURES: ReadonlySet<string> = new Set<ModelInvocationFailureReason>([
+  "model_rate_limited",
+  "model_provider_unavailable",
+  "model_error",
+]);
+
+/** True when re-attempting the Agent could plausibly change the outcome. */
+export function isRetryableAgentFailure(reason: string): boolean {
+  return RETRYABLE_AGENT_FAILURES.has(reason);
+}
 
 /** Routine Agent exposes no Tools; one model call plus authored repair attempts. */
 const MAX_ITERATIONS = 1;
@@ -234,7 +260,9 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
     const question = canonicalize(plan.input);
 
     const guardedInput = await guardrails.runInput(question, guardContext);
-    if (guardedInput.blocked) return { kind: "failed", reason: "guardrail_input_blocked" };
+    if (guardedInput.blocked) {
+      return { kind: "failed", reason: "guardrail_input_blocked", retryable: false };
+    }
 
     const events = new TurnEventWriter({
       events: this.options.events,
@@ -341,14 +369,22 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
     });
 
     if (outcome.status === "cancelled") return { kind: "cancelled" };
-    if (outcome.status === "failed") return { kind: "failed", reason: outcome.reason };
+    if (outcome.status === "failed") {
+      return {
+        kind: "failed",
+        reason: outcome.reason,
+        retryable: isRetryableAgentFailure(outcome.reason),
+      };
+    }
     if (outcome.status === "awaiting_approval") {
       return { kind: "awaiting_approval", reason: "approval_required" };
     }
 
     // Last zero-cost refusal point: no State is settled and no downstream effect has run.
     const guardedOutput = await guardrails.runOutput(answerText(outcome.output), guardContext);
-    if (guardedOutput.blocked) return { kind: "failed", reason: "guardrail_output_blocked" };
+    if (guardedOutput.blocked) {
+      return { kind: "failed", reason: "guardrail_output_blocked", retryable: false };
+    }
 
     return { kind: "succeeded", output: outcome.output };
   }

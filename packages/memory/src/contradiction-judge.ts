@@ -32,6 +32,7 @@ export function contradictedIdsFromResponse(raw: string): readonly string[] {
     if (!Array.isArray(ids)) return [];
     return ids.filter((id): id is string => typeof id === "string" && id.trim().length > 0);
   } catch {
+    // Unparseable judge output means no contradictions were found.
     return [];
   }
 }

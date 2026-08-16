@@ -36,6 +36,7 @@ export async function fetchLiteLlmCatalog(opts?: {
     if (!data || typeof data !== "object") return null;
     return data as LiteLlmCatalog;
   } catch {
+    // An unreachable or malformed catalog resolves to "no catalog".
     return null;
   } finally {
     clearTimeout(timer);

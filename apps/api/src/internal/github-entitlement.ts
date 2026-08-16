@@ -210,6 +210,7 @@ export class HttpGitHubPermissionApi implements GitHubPermissionApi {
         }
       );
     } catch {
+      // A transport failure leaves the entitlement unknown, not denied.
       return undefined;
     }
 
@@ -220,6 +221,7 @@ export class HttpGitHubPermissionApi implements GitHubPermissionApi {
     try {
       body = await response.json();
     } catch {
+      // A non-JSON body leaves the entitlement unknown, not denied.
       return undefined;
     }
     const permission = (body as { permission?: unknown } | null)?.permission;
@@ -275,6 +277,7 @@ export class HttpGitHubPermissionApi implements GitHubPermissionApi {
         },
       });
     } catch {
+      // A transport failure leaves the entitlement unknown, not denied.
       return undefined;
     }
     if (response.status === 404) return NOT_FOUND;
@@ -282,6 +285,7 @@ export class HttpGitHubPermissionApi implements GitHubPermissionApi {
     try {
       return await response.json();
     } catch {
+      // A non-JSON body leaves the entitlement unknown, not denied.
       return undefined;
     }
   }

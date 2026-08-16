@@ -63,6 +63,7 @@ function parseYamlObject(content: string): Record<string, unknown> | undefined {
   try {
     parsed = parseYaml(content) as unknown;
   } catch {
+    // Unparseable YAML resolves to "no object".
     return undefined;
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined;
