@@ -103,17 +103,17 @@ and `loadCorpus` will refuse it.
 
 Both pinned models are **vendor CLI subscription seats**, not metered API keys. They cost $0 per
 call and spend a personal quota instead, so `--max-tokens` is the only ceiling that can bind them —
-and `--model` refuses to run without it.
+and `--model` refuses to run without one.
 
 ```bash
-pnpm eval                                               # scripted: free, no credentials
-
-export CLAUDE_CODE_OAUTH_TOKEN="$(claude setup-token)"  # sonnet  -> claude-code
-pnpm eval --model sonnet --case support-answers-without-tools --max-tokens 20000
-
-export CODEX_AUTH_JSON="$(cat ~/.codex/auth.json)"      # luna    -> codex
-pnpm eval --model luna --case support-answers-without-tools --max-tokens 20000
+pnpm eval                                    # scripted: free, deterministic, no credentials
+pnpm eval:sonnet                             # claude-code seat, prompts for the token
+pnpm eval:luna                               # codex seat, reads ~/.codex/auth.json
+pnpm eval:sonnet --case support-answers-without-tools --max-tokens 5000
 ```
+
+`scripts/seat.sh` collects the credential into its own environment, so it never enters your shell,
+your history, or a file. It defaults `--max-tokens` to 20000 and never overrides one you passed.
 
 A seat is one person's, so a public repo cannot hold it as a secret. Where a release Sweep runs
 is still open — see `.scratch/harness-eval/spec.md`.

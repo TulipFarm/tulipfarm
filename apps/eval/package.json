@@ -5,6 +5,8 @@
   "main": "src/index.ts",
   "scripts": {
     "eval": "tsx src/cli.ts",
+    "eval:sonnet": "sh scripts/seat.sh sonnet",
+    "eval:luna": "sh scripts/seat.sh luna",
     "lint": "biome check --no-errors-on-unmatched .",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"

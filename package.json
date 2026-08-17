@@ -20,6 +20,8 @@
     "dev:integration-worker": "turbo dev --filter=@tulipfarm/integration-worker",
     "reset:dev": "bash scripts/reset-dev.sh",
     "eval": "pnpm --filter @tulipfarm/eval eval",
+    "eval:sonnet": "pnpm --filter @tulipfarm/eval eval:sonnet",
+    "eval:luna": "pnpm --filter @tulipfarm/eval eval:luna",
     "architecture:check": "node scripts/architecture-check.ts",
     "reachability:check": "node scripts/reachability-check.ts",
     "check:secure-context": "bash scripts/test/check-secure-context-apis.sh && vitest run scripts/test/check-secure-context-apis.test.ts",
