@@ -16,6 +16,7 @@ import type { EvalGuardrails, GuardrailDecision } from "./guardrails.ts";
 import { turnGuardrails } from "./guardrails.ts";
 import { measureNoise, type NoiseFloor } from "./noise.ts";
 import type { SweepProgress } from "./progress.ts";
+import { measureResistance, type ResistanceRate } from "./resistance.ts";
 import { DEFAULT_RETRY, type RetryPolicy, withRetry } from "./retry.ts";
 import { type ExpectationResult, type Observation, scoreCase } from "./scorer.ts";
 import { addSpend, mergeSpend, NO_SPEND, type Spend } from "./spend.ts";
@@ -70,6 +71,12 @@ export interface TrialResult {
   readonly spend: Spend;
   /** Transient vendor failures this Trial survived. A green Trial that needed three is evidence. */
   readonly retries: number;
+  /** True when some harness guard refused during this Trial. Only meaningful on a probabilistic
+   *  Trial, where it separates "our defence held" from "the model happened to decline". */
+  readonly guarded?: true;
+  /** Set on a red-team Case asserting `model_resisted`. Such a Trial is aggregated into a rate and
+   *  held out of `passed`/`failed`, so a model's mood can never fail a release. */
+  readonly probabilistic?: true;
 }
 
 export interface Scorecard {
@@ -84,9 +91,12 @@ export interface Scorecard {
   readonly startedAt: string;
   readonly durationMs: number;
   readonly trials: readonly TrialResult[];
+  /** Gating Trials only. Probabilistic red-team Trials are counted in `resistance` instead. */
   readonly passed: number;
   readonly failed: number;
   readonly errored: number;
+  /** Present only when the Corpus held `model_resisted` Cases. Reported, never gating. */
+  readonly resistance?: readonly ResistanceRate[];
   readonly spend: Spend;
   /** Set when the Sweep stopped early; the Scorecard is then partial and never a release gate. */
   readonly abortedReason?: string;
@@ -260,6 +270,8 @@ function scored(
     vacuous,
     spend,
     retries,
+    ...(evalCase.redTeam?.outcome === "model_resisted" ? { probabilistic: true as const } : {}),
+    ...(guardrails.length > 0 ? { guarded: true as const } : {}),
   };
 }
 
@@ -403,6 +415,7 @@ function errored(
     error,
     spend,
     retries,
+    ...(evalCase.redTeam?.outcome === "model_resisted" ? { probabilistic: true as const } : {}),
   };
 }
 
@@ -520,6 +533,8 @@ export async function runSweep(options: SweepOptions): Promise<Scorecard> {
   }
 
   const version = options.model.reportedVersion?.();
+  const gating = trials.filter((t) => t.probabilistic !== true);
+  const resistance = measureResistance(trials);
 
   const card: Scorecard = {
     corpusHash: options.corpus.hash,
@@ -530,13 +545,14 @@ export async function runSweep(options: SweepOptions): Promise<Scorecard> {
     startedAt: started.toISOString(),
     durationMs: now().getTime() - started.getTime(),
     trials,
-    passed: trials.filter((t) => t.passed && t.error === undefined).length,
-    failed: trials.filter((t) => !t.passed && t.error === undefined).length,
-    errored: trials.filter((t) => t.error !== undefined).length,
+    passed: gating.filter((t) => t.passed && t.error === undefined).length,
+    failed: gating.filter((t) => !t.passed && t.error === undefined).length,
+    errored: gating.filter((t) => t.error !== undefined).length,
     spend,
     ...(abortedReason === undefined ? {} : { abortedReason }),
     skipped: planned - trials.length,
     corpusCases: options.corpus.cases.length,
+    ...(resistance.length === 0 ? {} : { resistance }),
   };
 
   const noise = measureNoise(card);

@@ -17,6 +17,9 @@ export interface BaselineOptions {
   readonly baseline?: string;
   /** Make this Scorecard the Baseline for its model. */
   readonly promote?: boolean;
+  /** Which Corpus this Sweep measured, when not the default one. Keeps each suite's Baseline
+   *  apart, so adding an attack cannot invalidate the capability Baseline. */
+  readonly suite?: string;
 }
 
 export interface BaselineOutcome {
@@ -76,7 +79,7 @@ export function applyBaseline(card: Scorecard, options: BaselineOptions): Baseli
     );
   }
 
-  const path = options.baseline ?? baselinePath(options.root, card.modelId);
+  const path = options.baseline ?? baselinePath(options.root, card.modelId, options.suite);
 
   if (options.compare === true) {
     try {
@@ -98,7 +101,7 @@ export function applyBaseline(card: Scorecard, options: BaselineOptions): Baseli
     // Promotion writes the canonical Baseline, never `--baseline <path>`: that path is a
     // comparison source, and overwriting it would destroy an archive and leave the real Baseline
     // untouched while the output claimed otherwise.
-    const target = baselinePath(options.root, card.modelId);
+    const target = baselinePath(options.root, card.modelId, options.suite);
     const refusal = failed
       ? "REFUSED  will not promote a Sweep that regressed against, or could not be compared with, the current Baseline"
       : unpromotable(card, options.harnessVersion);

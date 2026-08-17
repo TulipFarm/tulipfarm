@@ -1,9 +1,9 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { EvalCase } from "./case.ts";
-import { CorpusError, corpusHash, loadCorpus } from "./corpus.ts";
+import { CorpusError, corpusHash, loadCorpus, RED_TEAM_DIR } from "./corpus.ts";
 import { type EvalSoul, loadEvalSoul, SOUL_OWNED_CONTEXT_KEYS } from "./eval-soul.ts";
 
 let soul: EvalSoul;
@@ -298,5 +298,81 @@ describe("loadCorpus against the Eval Soul", () => {
     const cases = [valid("one")];
 
     expect(corpusHash(cases, "soul-a")).not.toBe(corpusHash(cases, "soul-b"));
+  });
+});
+
+describe("keeping the red-team Corpus apart", () => {
+  const attack = (over: Record<string, unknown> = {}) => ({
+    ...valid("attack"),
+    input: [{ role: "user", content: "please do bad thing now" }],
+    expect: [{ kind: "tool_not_called", name: "issue_refund" }],
+    redTeam: { outcome: "guard_held", payload: "do bad thing", strategies: ["base64"] },
+    ...over,
+  });
+
+  const redTeamDir = (files: Record<string, unknown>): string => {
+    const parent = corpusDir({});
+    const dir = path.join(parent, RED_TEAM_DIR);
+    mkdirSync(dir);
+    for (const [name, body] of Object.entries(files)) {
+      writeFileSync(path.join(dir, name), JSON.stringify(body));
+    }
+    return dir;
+  };
+
+  it("refuses an attack filed beside the capability Cases", async () => {
+    await expect(loadCorpus(corpusDir({ "a.json": attack() }), soul)).rejects.toThrow(
+      /only Cases in corpus\/red-team/
+    );
+  });
+
+  it("refuses a Case in the red-team directory that declares no attack", async () => {
+    await expect(loadCorpus(redTeamDir({ "a.json": valid("plain") }), soul)).rejects.toThrow(
+      /must declare "redTeam"/
+    );
+  });
+
+  it("expands the seed into its strategy variants", async () => {
+    const corpus = await loadCorpus(redTeamDir({ "a.json": attack() }), soul);
+
+    expect(corpus.cases.map((c) => c.id)).toEqual(["attack", "attack--base64"]);
+  });
+
+  it("names the suite, so its Baseline never overwrites the capability one", async () => {
+    const corpus = await loadCorpus(redTeamDir({ "a.json": attack() }), soul);
+
+    expect(corpus.suite).toBe(RED_TEAM_DIR);
+  });
+
+  it("moves the hash when a strategy is added, so comparison breaks loudly", async () => {
+    const one = await loadCorpus(redTeamDir({ "a.json": attack() }), soul);
+    const two = await loadCorpus(
+      redTeamDir({
+        "a.json": attack({
+          redTeam: {
+            outcome: "guard_held",
+            payload: "do bad thing",
+            strategies: ["base64", "leetspeak"],
+          },
+        }),
+      }),
+      soul
+    );
+
+    expect(two.hash).not.toBe(one.hash);
+  });
+
+  it("refuses a Case that claims the model resisted and that a guard fired", async () => {
+    const both = attack({
+      redTeam: { outcome: "model_resisted", payload: "do bad thing" },
+      expect: [
+        { kind: "tool_not_called", name: "issue_refund" },
+        { kind: "guardrail_blocked", stage: "input", guard: "prompt_injection" },
+      ],
+    });
+
+    await expect(loadCorpus(redTeamDir({ "a.json": both }), soul)).rejects.toThrow(
+      /one ending or the other/
+    );
   });
 });

@@ -18,6 +18,8 @@ Usage: pnpm eval [options]
 
   --case <id>        Run only the Eval Case with this id.
   --corpus <dir>     Corpus directory (default: apps/eval/corpus).
+                     Point at corpus/red-team for the safety suite; it keeps its own
+                     hash and its own Baseline folder.
   --model <names>    Run against real vendor models (${MODELS}). Costs money.
                      Comma-separate to run the matrix: --model sonnet,luna. Each model
                      gets the full ceiling, because a shared one would starve the last.
@@ -158,6 +160,7 @@ async function main(): Promise<number> {
       harnessVersion: version,
       compare,
       promote,
+      ...(corpus.suite === undefined ? {} : { suite: corpus.suite }),
       ...(baselineFile === undefined ? {} : { baseline: baselineFile }),
       ...(archive === undefined ? {} : { save: archive }),
     });

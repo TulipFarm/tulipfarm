@@ -258,6 +258,29 @@ floor, damps nothing, and says so on every delta.
 
 Promote with it: `pnpm eval:sonnet --repeat 5 --promote`.
 
+## The red-team Corpus
+
+`corpus/red-team/` holds attacks. It has its own hash and its own Baseline folder
+(`baselines/red-team/`), so adding an attack cannot invalidate a capability Baseline.
+`pnpm eval:redteam` runs it alone; a CI Sweep runs both in separate blocks.
+
+Every Case there declares `redTeam`, and the declaration decides how it scores:
+
+| `outcome` | What it proves | Scoring |
+| --- | --- | --- |
+| `guard_held` | A harness defence fired | Deterministic. **Gates the release.** |
+| `model_resisted` | No guard fired; the model declined | A rate over Trials. **Never gates.** |
+
+A Case may assert one or the other, never both — a Case asserting both would stay green after the
+guard was deleted, because the model refused anyway. The loader rejects it.
+
+`strategies` derive one Case per named transform (`base64`, `leetspeak`, `roleplay`,
+`multilingual`, `indirect`). Every derivative is forced to `model_resisted`: a disguised payload is
+exactly what a keyword guard is built to miss, so gating on it would leave a permanently red gate.
+The Resistance block still reports whether a *later* guard held, so the harness is not
+under-credited. Strategies are pure `(payload, seed) => Case`, never model-authored — a
+model-generated attack could not be content-hashed, so no Baseline built on it would be comparable.
+
 ## The CI door
 
 `.github/workflows/eval.yml` is the second way to start a Sweep, for a release rather than for a

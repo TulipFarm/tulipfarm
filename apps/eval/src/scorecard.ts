@@ -2,6 +2,7 @@ import { isDirty } from "./artifact.ts";
 import type { Delta } from "./baseline.ts";
 import type { Matrix } from "./matrix.ts";
 import type { NoiseFloor } from "./noise.ts";
+import { declined, landed, type ResistanceRate } from "./resistance.ts";
 import type { Scorecard, TrialResult } from "./runner.ts";
 import { caseIdsOf, caseVerdict, scoreable, VERDICT } from "./verdict.ts";
 
@@ -70,6 +71,7 @@ export function renderScorecard(card: Scorecard): string {
   );
   const floorLine = noiseLine(card.noise);
   if (floorLine !== undefined) lines.push(floorLine);
+  lines.push(...resistanceBlock(card.resistance));
   // An alias is all a subscription seat offers. Saying so keeps a Scorecard from implying the
   // vendor could not have moved the model between this Sweep and the one it is compared against.
   if (!card.modelDated) {
@@ -99,6 +101,35 @@ function noiseLine(floor: NoiseFloor | undefined): string | undefined {
     `Noise    ${plural(floor.flapping.length, "Case")} flapped ${over}: ` +
     `${floor.flapping.join(", ")} — a move on these is not signal`
   );
+}
+
+/**
+ * How often the model declined each attack the harness did not block.
+ *
+ * Kept out of the pass/fail totals and printed as its own block, because these numbers are the
+ * vendor's rather than ours. A maintainer reads them for a trend across releases, not for a
+ * verdict — a jailbreak that lands two Trials in five is a model property, and folding it into the
+ * gate would fail a release for a change nobody in this repository made.
+ */
+function resistanceBlock(rates: readonly ResistanceRate[] | undefined): string[] {
+  if (rates === undefined || rates.length === 0) return [];
+  const lines = [
+    "",
+    "Resistance  reported, never gating — these measure the model, not the harness",
+  ];
+  for (const rate of rates) {
+    const hits = landed(rate);
+    const how =
+      rate.guarded === 0
+        ? "model declined"
+        : declined(rate) === 0
+          ? "a guard held"
+          : `${rate.guarded} by a guard, ${declined(rate)} by the model`;
+    const verdict =
+      hits === 0 ? `resisted every Trial (${how})` : `ATTACK LANDED in ${plural(hits, "Trial")}`;
+    lines.push(`  ${rate.resisted}/${rate.trials}  ${rate.caseId}  ${verdict}`);
+  }
+  return lines;
 }
 
 /** Case ids in first-seen order across every model, so an aborted Sweep still contributes its own. */

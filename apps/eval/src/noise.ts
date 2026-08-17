@@ -39,7 +39,12 @@ export function measureNoise(card: Scorecard): NoiseFloor | undefined {
     // repeat count of its luckiest Case would overstate how much of the Corpus the floor covers.
     repeats = Math.min(repeats, ran.length);
 
-    const scoreable = ran.filter((t) => t.error === undefined && !t.vacuous);
+    // Probabilistic red-team Trials are held out too. They are *expected* to disagree — that
+    // disagreement is the resistance rate — so counting them would report the measurement itself
+    // as noise and damp every real capability regression alongside it.
+    const scoreable = ran.filter(
+      (t) => t.error === undefined && !t.vacuous && t.probabilistic !== true
+    );
     if (scoreable.length < 2) continue;
     measured += 1;
     if (scoreable.some((t) => t.passed !== scoreable[0]?.passed)) flapping.push(caseId);

@@ -4,6 +4,7 @@ import type {
   ModelMessage,
   ModelOutput,
 } from "@tulipfarm/agent-runtime";
+import type { RedTeam } from "./red-team.ts";
 
 /**
  * One deterministic, model-free check against a Trial's observation.
@@ -74,6 +75,9 @@ export interface EvalCase {
   readonly expect: readonly Expectation[];
   /** Raised above 1 only for Cases used to measure the Noise Floor. */
   readonly trials?: number;
+  /** Present only on Cases in `corpus/red-team/`. Declares which of the two good endings this
+   *  Case asserts, which decides whether it gates the release or is reported as a rate. */
+  readonly redTeam?: RedTeam;
 }
 
 export const LOOP_LIMITS = {

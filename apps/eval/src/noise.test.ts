@@ -93,3 +93,18 @@ describe("noiseBand", () => {
     expect(noiseBand(undefined)).toBe(0);
   });
 });
+
+describe("what the floor refuses to count", () => {
+  it("holds probabilistic red-team Trials out, so resistance is not read as noise", () => {
+    const floor = measureNoise(
+      card([
+        trial("attack", 1, true, { probabilistic: true }),
+        trial("attack", 2, false, { probabilistic: true }),
+        trial("plain", 1, true),
+        trial("plain", 2, true),
+      ])
+    );
+
+    expect(floor).toEqual({ repeats: 2, flapping: [], measured: 1 });
+  });
+});

@@ -4,6 +4,7 @@ import path from "node:path";
 import type { AssembleContext } from "@tulipfarm/agent-runtime";
 import type { EvalCase } from "./case.ts";
 import { type EvalSoul, SOUL_OWNED_CONTEXT_KEYS, soulContext } from "./eval-soul.ts";
+import { expandRedTeam, type RedTeamOutcome } from "./red-team.ts";
 import { OUTPUT_FLAGS } from "./scorer.ts";
 
 export class CorpusError extends Error {
@@ -19,6 +20,8 @@ export interface Corpus {
   readonly hash: string;
   /** The Eval Soul every Case in this Corpus is measured against. */
   readonly soul: EvalSoul;
+  /** Which Corpus this is, when it is not the default capability one. Names its Baseline folder. */
+  readonly suite?: string;
 }
 
 /**
@@ -60,6 +63,17 @@ const GUARD_STAGES = ["input", "tool_call", "output"] as const;
  * which is the safe direction: the alternative is a Case naming a guard that can never fire.
  */
 const GUARD_NAMES = ["prompt_injection", "tool_blocklist", "content_filter"] as const;
+
+/**
+ * The directory whose Cases may carry `redTeam`, and only whose Cases may.
+ *
+ * Separation is by directory rather than by convention because the two corpora have separate
+ * hashes and separate Baselines: an attack added beside the capability Cases would invalidate the
+ * capability Baseline, and a safety regression would have to be found inside the capability grid.
+ */
+export const RED_TEAM_DIR = "red-team";
+
+const RED_TEAM_OUTCOMES: readonly RedTeamOutcome[] = ["guard_held", "model_resisted"];
 
 /** A required field's type, or the closed set of values it may take. */
 type FieldType = "string" | "number" | "strings" | "any" | readonly string[];
@@ -155,7 +169,39 @@ function validate(raw: unknown, file: string): EvalCase {
       ), `${file}: expectation "${kind}" needs a ${describeField(type)} field "${field}"`);
     }
   }
+  if (c.redTeam !== undefined) {
+    validateRedTeam(c.redTeam, file);
+    const guard = (c.expect as { kind: string }[]).find((e) => e.kind.startsWith("guardrail_"));
+    require((c.redTeam as { outcome?: unknown }).outcome !== "model_resisted" ||
+      guard ===
+        undefined, `${file}: a "model_resisted" Case asserts the model declined, but it also asserts ` +
+      `"${guard?.kind}" — a harness defence. A Case may assert one ending or the other, never ` +
+      `both, or the guard could stop firing and the Case stay green because the model refused anyway.`);
+  }
   return raw as EvalCase;
+}
+
+/**
+ * Check the red-team declaration a Case carries.
+ *
+ * The rule worth the code is the last one. A Case that asserted both endings would let a harness
+ * regression hide behind a model that happened to decline anyway: the guard stops firing, the
+ * model still refuses, and the Case stays green while the defence is gone.
+ */
+function validateRedTeam(raw: unknown, file: string): void {
+  require(typeof raw === "object" && raw !== null, `${file}: "redTeam" must be an object`);
+  const rt = raw as Record<string, unknown>;
+  require(RED_TEAM_OUTCOMES.includes(
+    rt.outcome as RedTeamOutcome
+  ), `${file}: "redTeam.outcome" must be one of ${RED_TEAM_OUTCOMES.join(", ")}`);
+  require(typeof rt.payload === "string" &&
+    rt.payload.length >
+      0, `${file}: "redTeam.payload" must be the attack text, so a strategy has something to rewrite`);
+  require(rt.strategies === undefined ||
+    (Array.isArray(rt.strategies) &&
+      rt.strategies.every(
+        (v) => typeof v === "string"
+      )), `${file}: "redTeam.strategies" must be an array of strategy names`);
 }
 
 /**
@@ -294,11 +340,33 @@ export async function loadCorpus(dir: string, soul: EvalSoul): Promise<Corpus> {
     if (previous !== undefined) {
       throw new CorpusError(`duplicate Case id "${evalCase.id}" in ${previous} and ${name}`);
     }
+    const isRedTeamDir = path.basename(dir) === RED_TEAM_DIR;
+    require(evalCase.redTeam === undefined ||
+      isRedTeamDir, `${name}: only Cases in corpus/${RED_TEAM_DIR}/ may declare "redTeam"; an attack here would ` +
+      `invalidate the capability Baseline every time one was added.`);
+    require(evalCase.redTeam !== undefined ||
+      !isRedTeamDir, `${name}: every Case in corpus/${RED_TEAM_DIR}/ must declare "redTeam", so it is explicit ` +
+      `whether it gates the release or is reported as a resistance rate.`);
     seen.set(evalCase.id, name);
-    cases.push(evalCase);
+    // Expanded after the seed is validated and grounded, so a fault is reported against the file
+    // the author wrote rather than against a derived id that exists in no file.
+    for (const derived of expandRedTeam(evalCase, name)) {
+      const clash = seen.get(derived.id);
+      if (clash !== undefined && derived.id !== evalCase.id) {
+        throw new CorpusError(`derived Case id "${derived.id}" collides with ${clash}`);
+      }
+      seen.set(derived.id, name);
+      cases.push(derived);
+    }
   }
 
   if (cases.length === 0) throw new CorpusError(`no Eval Cases found in ${dir}`);
   cases.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-  return { cases, hash: corpusHash(cases, soul.hash), soul };
+  const suite = path.basename(dir) === RED_TEAM_DIR ? RED_TEAM_DIR : undefined;
+  return {
+    cases,
+    hash: corpusHash(cases, soul.hash),
+    soul,
+    ...(suite === undefined ? {} : { suite }),
+  };
 }
