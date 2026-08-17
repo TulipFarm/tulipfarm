@@ -1,4 +1,5 @@
 import type { Corpus } from "./corpus.ts";
+import type { SweepProgress } from "./progress.ts";
 import type { RetryPolicy } from "./retry.ts";
 import { type ModelBinding, runSweep, type Scorecard, type SweepOptions } from "./runner.ts";
 
@@ -39,6 +40,8 @@ export interface MatrixOptions {
   readonly maxSpendUsd?: number;
   readonly maxTokens?: number;
   readonly retry?: RetryPolicy;
+  /** Passed to each Sweep in turn, so a long matrix reports which model is in flight. */
+  onProgress?(event: SweepProgress): void;
   now?(): Date;
   /** Seam for tests; production always runs the real Sweep. */
   sweep?(options: SweepOptions): Promise<Scorecard>;
@@ -81,6 +84,7 @@ export async function runMatrix(options: MatrixOptions): Promise<Matrix> {
         ...(options.maxSpendUsd === undefined ? {} : { maxSpendUsd: options.maxSpendUsd }),
         ...(options.maxTokens === undefined ? {} : { maxTokens: options.maxTokens }),
         ...(options.retry === undefined ? {} : { retry: options.retry }),
+        ...(options.onProgress === undefined ? {} : { onProgress: options.onProgress }),
         ...(options.now === undefined ? {} : { now: options.now }),
       });
       const dead = wholeModelFault(card);

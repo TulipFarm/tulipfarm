@@ -4,6 +4,7 @@ import { resolveBindings } from "./bindings.ts";
 import { loadCorpus } from "./corpus.ts";
 import { runMatrix } from "./matrix.ts";
 import { PINNED_MODELS } from "./model.ts";
+import { progressReporter } from "./progress.ts";
 import type { Scorecard } from "./runner.ts";
 import { renderMatrix, renderScorecard } from "./scorecard.ts";
 
@@ -55,9 +56,19 @@ async function main(): Promise<number> {
   if (modelName !== undefined && maxTokens === undefined) {
     throw new Error("--model needs --max-tokens: a seat costs $0, so --max-spend cannot bound it");
   }
+  // Only the real-model path is slow enough to need it, and only stderr may carry it: the
+  // Scorecard on stdout is the artifact, and chatter interleaved into it would corrupt a reader.
+  const onProgress =
+    modelName === undefined
+      ? undefined
+      : progressReporter((text) => {
+          process.stderr.write(text);
+        });
+
   const matrix = await runMatrix({
     corpus,
     models,
+    ...(onProgress === undefined ? {} : { onProgress }),
     ...(caseFilter === undefined ? {} : { caseFilter }),
     ...(maxSpendUsd === undefined ? {} : { maxSpendUsd }),
     ...(maxTokens === undefined ? {} : { maxTokens }),

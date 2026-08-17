@@ -11,6 +11,7 @@ import {
 } from "@tulipfarm/agent-runtime";
 import { type EvalCase, LOOP_LIMITS } from "./case.ts";
 import type { Corpus } from "./corpus.ts";
+import type { SweepProgress } from "./progress.ts";
 import { DEFAULT_RETRY, type RetryPolicy, withRetry } from "./retry.ts";
 import { type ExpectationResult, type Observation, scoreCase } from "./scorer.ts";
 import { addSpend, mergeSpend, NO_SPEND, type Spend } from "./spend.ts";
@@ -102,6 +103,12 @@ export interface SweepOptions {
    */
   readonly maxTokens?: number;
   readonly retry?: RetryPolicy;
+  /**
+   * Called as the Sweep advances, so a run against a real seat is not several silent minutes.
+   *
+   * Optional and side-effect-only: the Scorecard is unchanged whether anything listens.
+   */
+  onProgress?(event: SweepProgress): void;
   now?(): Date;
 }
 
@@ -331,6 +338,8 @@ export async function runSweep(options: SweepOptions): Promise<Scorecard> {
   const trials: TrialResult[] = [];
   let spend = NO_SPEND;
   let abortedReason: string | undefined;
+  const report = options.onProgress ?? (() => {});
+  report({ kind: "sweep-start", modelId: options.model.id, cases: selected.length, planned });
 
   outer: for (const evalCase of selected) {
     const count = Math.max(1, evalCase.trials ?? 1);
@@ -340,9 +349,18 @@ export async function runSweep(options: SweepOptions): Promise<Scorecard> {
       const stop = ceilingReached(spend, options, trials.length, planned);
       if (stop !== undefined) {
         abortedReason = stop;
+        report({ kind: "sweep-aborted", reason: stop });
         break outer;
       }
+      report({
+        kind: "trial-start",
+        caseId: evalCase.id,
+        trial,
+        index: trials.length + 1,
+        planned,
+      });
       const result = await runTrial(evalCase, options.model, trial, retryPolicy);
+      report({ kind: "trial-end", result });
       trials.push(result);
       spend = mergeSpend(spend, result.spend);
     }

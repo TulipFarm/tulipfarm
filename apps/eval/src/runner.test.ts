@@ -279,4 +279,49 @@ describe("runSweep spend", () => {
 
     expect(card.modelVersion).toBeUndefined();
   });
+
+  it("reports each Trial as it starts and finishes, so a slow Sweep is never silent", async () => {
+    const events: string[] = [];
+
+    await runSweep({
+      corpus: corpusOf([
+        answering("a", "ok", [{ kind: "output_contains", text: "hello" }]),
+        answering("b", "ok", [{ kind: "output_contains", text: "hello" }]),
+      ]),
+      model: scriptedBinding(),
+      onProgress: (e) => {
+        events.push(e.kind === "trial-start" ? `start:${e.caseId}` : e.kind);
+      },
+    });
+
+    expect(events).toEqual(["sweep-start", "start:a", "trial-end", "start:b", "trial-end"]);
+  });
+
+  it("reports stopping early, so a truncated Sweep does not look like a finished one", async () => {
+    const events: string[] = [];
+
+    await runSweep({
+      corpus: corpusOf([
+        answering("a", "ok", [{ kind: "output_contains", text: "hello" }]),
+        answering("b", "ok", [{ kind: "output_contains", text: "hello" }]),
+      ]),
+      // The scripted binding spends nothing, so no ceiling can ever trip on it.
+      model: {
+        id: "metered",
+        create: () => ({
+          invoke: async (request) => ({
+            requestId: request.requestId,
+            output: { kind: "text", text: "hello" },
+            usage: { inputTokens: 100, outputTokens: 1 },
+          }),
+        }),
+      },
+      maxTokens: 1,
+      onProgress: (e) => {
+        events.push(e.kind);
+      },
+    });
+
+    expect(events).toContain("sweep-aborted");
+  });
 });

@@ -32,6 +32,7 @@ Only its own Cases need updating when their observable behaviour moves.
 | `src/retry.ts` | `withRetry` — transient vendor failures, retried and counted. |
 | `src/spend.ts` | `Spend` totals: tokens, dollars, and what could not be priced. |
 | `src/scorecard.ts` | Text rendering. |
+| `src/progress.ts` | `progressReporter` — live per-Trial output while a real Sweep runs. |
 | `src/args.ts` | Option parsing. Split out so a mistyped ceiling is a tested refusal. |
 | `src/cli.ts` | `pnpm eval`. |
 | `corpus/` | The Cases. One JSON file each, `id` matching the filename. |
@@ -73,6 +74,10 @@ Only its own Cases need updating when their observable behaviour moves.
   Trials. A Sweep that scored nothing is collapsed into `ModelRun.unavailable` rather than rendered
   as a column of `ERR`, which would read as the harness differing under that model when nothing was
   measured at all. It still fails the command; the model that did run keeps its results.
+- **A real Sweep reports as it goes, on stderr.** A Trial against a seat takes seconds and a matrix
+  takes minutes; a command that prints nothing until it is done looks hung, and a killed run has
+  spent its quota for no Scorecard. Progress never touches stdout — the Scorecard there is the
+  artifact a release reads, and interleaved chatter would corrupt anything parsing it.
 - **`corpusHash` is the unit of comparability.** Two Scorecards with different hashes are not
   comparable. Never compare across `modelId` either.
 - **Every Case carries a `script`,** so the whole Corpus runs free and deterministically in ordinary

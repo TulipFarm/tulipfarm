@@ -12,6 +12,7 @@ export type {
   PinnedModelName,
 } from "./model.ts";
 export { isPinnedModelName, PINNED_MODELS, pinnedBinding, providerEntry } from "./model.ts";
+export { progressReporter, type SweepProgress } from "./progress.ts";
 export type { RetryObserver, RetryPolicy } from "./retry.ts";
 export { DEFAULT_RETRY, TRANSIENT_REASONS, withRetry } from "./retry.ts";
 export type { ModelBinding, Scorecard, SweepOptions, TrialResult } from "./runner.ts";
