@@ -245,7 +245,7 @@ export function pinnedBinding(
   };
 }
 
-async function defaultCreateModel(
+export async function defaultCreateModel(
   entry: ProviderEntry,
   secrets: SecretsService,
   options?: { timeoutMs?: number }

@@ -104,6 +104,11 @@ const EXPECTATION_FIELDS: Record<string, readonly [string, FieldType][]> = {
     ["guard", GUARD_NAMES],
   ],
   guardrail_allowed: [["stage", GUARD_STAGES]],
+  rubric_score: [
+    ["criteria", "strings"],
+    ["min", "number"],
+  ],
+  rubric_denies: [["question", "string"]],
 };
 
 /**
@@ -128,13 +133,23 @@ function canonical(value: unknown): string {
  * the Agent, the business and the catalogue. A fixture edit that left this hash alone would let a
  * Sweep be compared against a Baseline that measured a different Context entirely.
  */
-export function corpusHash(cases: readonly EvalCase[], soulHash: string): string {
+export function corpusHash(
+  cases: readonly EvalCase[],
+  soulHash: string,
+  judgeVersion = "no-judge"
+): string {
   const sorted = [...cases].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-  return createHash("sha256")
-    .update(canonical(sorted))
-    .update("\0soul\0")
-    .update(soulHash)
-    .digest("hex");
+  return (
+    createHash("sha256")
+      .update(canonical(sorted))
+      .update("\0soul\0")
+      .update(soulHash)
+      // Swapping the Judge re-scores every rubric Case, so it must break comparison as loudly as
+      // editing a Case does. Left out of the hash, a Judge change would silently rewrite history.
+      .update("\0judge\0")
+      .update(judgeVersion)
+      .digest("hex")
+  );
 }
 
 function require(condition: boolean, message: string): asserts condition {
@@ -306,7 +321,11 @@ function fieldOk(value: unknown, type: FieldType): boolean {
  * Throws rather than skipping on any malformed Case: a Corpus that quietly drops a Case reports a
  * pass rate over a smaller denominator than the maintainer believes they are reading.
  */
-export async function loadCorpus(dir: string, soul: EvalSoul): Promise<Corpus> {
+export async function loadCorpus(
+  dir: string,
+  soul: EvalSoul,
+  judgeVersion?: string
+): Promise<Corpus> {
   let names: string[];
   try {
     names = (await readdir(dir)).filter((n) => n.endsWith(".json")).sort();

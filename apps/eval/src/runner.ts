@@ -14,6 +14,8 @@ import type { Corpus } from "./corpus.ts";
 import { type EvalSoul, soulContext } from "./eval-soul.ts";
 import type { EvalGuardrails, GuardrailDecision } from "./guardrails.ts";
 import { turnGuardrails } from "./guardrails.ts";
+import type { Judge } from "./judge.ts";
+import { scoreJudged } from "./judged.ts";
 import { measureNoise, type NoiseFloor } from "./noise.ts";
 import type { SweepProgress } from "./progress.ts";
 import { measureResistance, type ResistanceRate } from "./resistance.ts";
@@ -144,6 +146,14 @@ export interface SweepOptions {
   readonly maxTokens?: number;
   readonly retry?: RetryPolicy;
   /**
+   * Scores the Cases that carry a rubric.
+   *
+   * Absent is fine for a Corpus with none. A Corpus that has one and no Judge errors every such
+   * Trial rather than skipping it: a quality check that passes because nothing measured it is
+   * worse than no check at all.
+   */
+  readonly judge?: Judge;
+  /**
    * Run every Case this many extra times over what it declares, to measure the noise floor.
    *
    * Multiplies rather than replaces, so a Case that already declares Trials for its own reasons
@@ -257,17 +267,23 @@ async function guardOutput(
   return guarded.blocked ? { kind: "text", text: guarded.message } : output;
 }
 
-function scored(
+async function scored(
   evalCase: EvalCase,
   trial: number,
   vacuous: boolean,
   spend: Spend,
   retries: number,
   guardrails: readonly GuardrailDecision[],
+  judge: Judge | undefined,
   observation: Omit<Observation, "guardrails">
-): TrialResult {
+): Promise<TrialResult> {
   const full: Observation = { ...observation, guardrails };
-  const expectations = scoreCase(evalCase.expect, full);
+  // Judged results are appended rather than interleaved. A rubric is the slowest and least
+  // reproducible check in the framework, so it reads last on the Scorecard too.
+  const expectations = [
+    ...scoreCase(evalCase.expect, full),
+    ...(await scoreJudged(evalCase.expect, full, judge)),
+  ];
   return {
     caseId: evalCase.id,
     trial,
@@ -288,7 +304,8 @@ async function runTrial(
   soul: EvalSoul,
   binding: ModelBinding,
   trial: number,
-  retryPolicy: RetryPolicy
+  retryPolicy: RetryPolicy,
+  judge: Judge | undefined
 ): Promise<TrialResult> {
   const vacuous = evalCase.expect.length === 0;
   const tools = toolDispatcher(evalCase);
@@ -354,7 +371,7 @@ async function runTrial(
     // so a refused request must cost nothing and must never reach the vendor.
     const guarded = await guardInput(guards, evalCase.input);
     if (guarded.blocked) {
-      return scored(evalCase, trial, vacuous, spend, retries, guards.decisions, {
+      return await scored(evalCase, trial, vacuous, spend, retries, guards.decisions, judge, {
         systemPrompt,
         toolCalls: [],
         output: { kind: "text", text: guarded.message },
@@ -384,7 +401,7 @@ async function runTrial(
 
     const answered =
       outcome.status === "completed" ? asOutput(outcome.output, lastOutput) : lastOutput;
-    return scored(evalCase, trial, vacuous, spend, retries, guards.decisions, {
+    return await scored(evalCase, trial, vacuous, spend, retries, guards.decisions, judge, {
       systemPrompt,
       toolCalls: tools.calls,
       // The output guard is the last thing production runs before an answer becomes durable, so a
@@ -533,7 +550,8 @@ export async function runSweep(options: SweepOptions): Promise<Scorecard> {
         options.corpus.soul,
         options.model,
         trial,
-        retryPolicy
+        retryPolicy,
+        options.judge
       );
       report({ kind: "trial-end", result });
       trials.push(result);

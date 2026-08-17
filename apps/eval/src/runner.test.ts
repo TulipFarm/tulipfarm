@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { EvalCase } from "./case.ts";
 import { corpusHash } from "./corpus.ts";
 import { type EvalSoul, loadEvalSoul } from "./eval-soul.ts";
+import { JudgeError } from "./rubric.ts";
 import type { ModelBinding } from "./runner.ts";
 import { plannedTrials, runSweep, selectCases } from "./runner.ts";
 import { scriptedBinding } from "./scripted.ts";
@@ -557,5 +558,45 @@ describe("repeating a Sweep to measure its noise floor", () => {
     const card = await runSweep({ corpus, model: scriptedBinding() });
 
     expect(card.noise).toBeUndefined();
+  });
+});
+
+describe("a Case scored by a Judge", () => {
+  const judged = (min: number) => ({
+    ...answering("j", "Ticket 4821 is open.", []),
+    expect: [{ kind: "rubric_score" as const, criteria: ["cites the ticket id"], min }],
+  });
+
+  it("passes the Trial when the Judge clears the floor", async () => {
+    const card = await runSweep({
+      corpus: corpusOf([judged(4)]),
+      model: scriptedBinding(),
+      judge: { version: "fake", judge: async () => ({ reasoning: "cites 4821", score: 5 }) },
+    });
+
+    expect(card.passed).toBe(1);
+  });
+
+  it("errors the Trial when the Judge is unreachable, rather than failing it", async () => {
+    // The distinction the Judge exists or dies on: a Judge that is down must not be reported as a
+    // quality regression, or a maintainer spends a release chasing a change nobody made.
+    const card = await runSweep({
+      corpus: corpusOf([judged(4)]),
+      model: scriptedBinding(),
+      judge: {
+        version: "fake",
+        judge: async () => {
+          throw new JudgeError("502");
+        },
+      },
+    });
+
+    expect(card).toMatchObject({ errored: 1, failed: 0, passed: 0 });
+  });
+
+  it("errors the Trial when no Judge is configured at all", async () => {
+    const card = await runSweep({ corpus: corpusOf([judged(4)]), model: scriptedBinding() });
+
+    expect(card).toMatchObject({ errored: 1, passed: 0 });
   });
 });

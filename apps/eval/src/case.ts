@@ -43,6 +43,17 @@ export type Expectation =
    *  did — a Case that only asserted "something blocked" would go on passing after the policy was
    *  replaced by a stricter unrelated rule. */
   | { readonly kind: "guardrail_blocked"; readonly stage: string; readonly guard: string }
+  /** Prose quality the deterministic Expectations cannot reach, scored by a pinned third-vendor
+   *  Judge against explicit criteria. Use only where `===` genuinely cannot do the job — a rubric
+   *  is slower, costs money and is less reproducible than a string check. */
+  | {
+      readonly kind: "rubric_score";
+      readonly criteria: readonly string[];
+      /** The lowest score on the fixed 1–5 scale that still passes. */
+      readonly min: number;
+    }
+  /** The safety variant: one question, answered, rather than a quality rating. */
+  | { readonly kind: "rubric_denies"; readonly question: string }
   /** No guard refused at this stage. This is what catches an over-eager guardrail: the Case fails
    *  when a stage that should have let a benign turn through starts refusing it. */
   | { readonly kind: "guardrail_allowed"; readonly stage: string };
@@ -85,3 +96,12 @@ export const LOOP_LIMITS = {
   maxToolCalls: 16,
   maxRepairAttempts: 2,
 } as const;
+
+/**
+ * Expectation kinds a Judge answers rather than the deterministic scorer.
+ *
+ * Lives here rather than beside either scorer so both can import it without a cycle.
+ */
+export function isJudged(a: Expectation): boolean {
+  return a.kind === "rubric_score" || a.kind === "rubric_denies";
+}

@@ -4,8 +4,9 @@ import { harnessVersion, scorecardPath } from "./artifact.ts";
 import { resolveBindings } from "./bindings.ts";
 import { loadCorpus } from "./corpus.ts";
 import { loadEvalSoul } from "./eval-soul.ts";
+import { createJudge, judgeIdentity, judgeVersion } from "./judge.ts";
 import { runMatrix } from "./matrix.ts";
-import { PINNED_MODELS } from "./model.ts";
+import { defaultCreateModel, PINNED_MODELS } from "./model.ts";
 import { progressReporter } from "./progress.ts";
 import { applyBaseline } from "./release.ts";
 import { plannedTrials, type Scorecard, selectCases } from "./runner.ts";
@@ -69,7 +70,11 @@ async function main(): Promise<number> {
   assertKnownFlags(argv);
 
   const dir = resolve(flag(argv, "--corpus") ?? resolve(__dirname, "..", "corpus"));
-  const corpus = await loadCorpus(dir, await loadEvalSoul());
+  // Read before the Corpus, because the Judge's identity is part of the Corpus hash: a Sweep with
+  // a different Judge is measuring something else and must not compare against the old Baseline.
+  const identity = judgeIdentity();
+  const judge = identity === undefined ? undefined : createJudge(identity, defaultCreateModel);
+  const corpus = await loadCorpus(dir, await loadEvalSoul(), judgeVersion(identity));
 
   const caseFilter = flag(argv, "--case");
   const selected = selectCases(corpus.cases, caseFilter);
@@ -148,6 +153,7 @@ async function main(): Promise<number> {
     ...(caseFilter === undefined ? {} : { caseFilter }),
     ...(maxSpendUsd === undefined ? {} : { maxSpendUsd }),
     ...(maxTokens === undefined ? {} : { maxTokens }),
+    ...(judge === undefined ? {} : { judge }),
     ...(repeat === undefined ? {} : { repeat }),
   });
 

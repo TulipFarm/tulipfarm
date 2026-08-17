@@ -1,5 +1,5 @@
 import type { ModelOutput } from "@tulipfarm/agent-runtime";
-import type { Expectation } from "./case.ts";
+import { type Expectation, isJudged } from "./case.ts";
 import type { GuardrailDecision } from "./guardrails.ts";
 
 /** What one Trial produced, reduced to the facts Expectations are allowed to read. */
@@ -143,6 +143,11 @@ function balanced(text: string): string | undefined {
 
 function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: string } {
   switch (a.kind) {
+    // Answered by a Judge in `scoreJudged`, not here. Reaching this arm means a judged Expectation
+    // was routed through the deterministic scorer, which would score prose with `===`.
+    case "rubric_score":
+    case "rubric_denies":
+      throw new Error(`expectation "${a.kind}" is judged, not scored deterministically`);
     case "prompt_contains":
       return obs.systemPrompt.includes(a.text)
         ? { passed: true, detail: "present in the assembled prompt" }
@@ -325,5 +330,7 @@ export function scoreCase(
   expect: readonly Expectation[],
   observation: Observation
 ): readonly ExpectationResult[] {
-  return expect.map((expectation) => ({ expectation, ...evaluate(expectation, observation) }));
+  return expect
+    .filter((expectation) => !isJudged(expectation))
+    .map((expectation) => ({ expectation, ...evaluate(expectation, observation) }));
 }

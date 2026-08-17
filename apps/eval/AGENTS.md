@@ -286,6 +286,26 @@ own. The safety block groups by class, never by Case id, and prints a row for ev
 or not one is covered, so a coverage gap is as visible as a failure. One `LEAKED` at high severity
 fails the run on its own.
 
+## The Judge
+
+Deterministic Expectations are the backbone. `rubric_score` and `rubric_denies` exist only where
+`===` genuinely cannot do the job, and both are answered by a pinned third-vendor Judge reached
+through the existing `openai-compatible` provider — configuration, not a new adapter.
+
+Configure it with `EVAL_JUDGE_BASE_URL`, `EVAL_JUDGE_MODEL`, `EVAL_JUDGE_API_KEY`. Pointing it at
+a vendor already under test is refused: a model grading its own homework scores itself generously
+and nothing in the result shows it. The Judge's identity is folded into the Corpus hash, so
+swapping it breaks comparison loudly rather than silently re-scoring history.
+
+Two rules that are the whole point:
+
+- A failed, empty, unparseable or out-of-range Judge reply **errors the Trial**. It is never a low
+  score — a Judge that is down would otherwise be indistinguishable from a quality regression.
+- A Case carrying a rubric with no Judge configured **errors** rather than skipping. A quality
+  check that passes because nothing measured it reads as coverage, which is worse than no check.
+
+The default Corpus carries no rubric Case, so `pnpm eval` needs no Judge and no key.
+
 ## The CI door
 
 `.github/workflows/eval.yml` is the second way to start a Sweep, for a release rather than for a
