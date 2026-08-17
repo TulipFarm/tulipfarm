@@ -1,0 +1,22 @@
+{
+  "name": "@tulipfarm/eval",
+  "version": "0.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "scripts": {
+    "eval": "tsx src/cli.ts",
+    "lint": "biome check --no-errors-on-unmatched .",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@tulipfarm/agent-runtime": "workspace:*"
+  },
+  "devDependencies": {
+    "@tulipfarm/tsconfig": "workspace:*",
+    "@types/node": "^26.1.1",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
+  }
+}

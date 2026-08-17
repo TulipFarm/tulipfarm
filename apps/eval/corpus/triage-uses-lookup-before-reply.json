@@ -1,0 +1,47 @@
+{
+  "id": "triage-uses-lookup-before-reply",
+  "tier": "l2",
+  "agent": "triage",
+  "context": {
+    "agentId": "triage",
+    "personality": "Terse. States the ticket status and nothing else.",
+    "customInstructions": "Always look the ticket up before answering. Never guess a status.",
+    "memory": [],
+    "governancePages": [],
+    "availableTools": [{ "name": "lookup_ticket", "description": "Fetch a ticket by id." }]
+  },
+  "input": [{ "role": "user", "content": "What is the status of ticket 4821?" }],
+  "tools": [
+    {
+      "name": "lookup_ticket",
+      "description": "Fetch a ticket by id.",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "ticketId": { "type": "string" } },
+        "required": ["ticketId"]
+      }
+    }
+  ],
+  "toolResults": [{ "name": "lookup_ticket", "output": { "status": "open", "owner": "dana" } }],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [{ "callId": "c1", "name": "lookup_ticket", "arguments": { "ticketId": "4821" } }]
+    },
+    { "kind": "text", "text": "Ticket 4821 is open, owned by dana." }
+  ],
+  "expect": [
+    { "kind": "prompt_contains", "text": "agentId: triage" },
+    { "kind": "prompt_contains", "text": "Never guess a status." },
+    { "kind": "tool_called", "name": "lookup_ticket" },
+    {
+      "kind": "tool_argument_equals",
+      "name": "lookup_ticket",
+      "path": "ticketId",
+      "value": "4821"
+    },
+    { "kind": "tool_call_count", "count": 1 },
+    { "kind": "output_contains", "text": "open" },
+    { "kind": "loop_status", "status": "completed" }
+  ]
+}

@@ -37,8 +37,6 @@
     "apps/web/app/lib/knowledge-api.ts#createPage",
     "apps/web/app/lib/knowledge-api.ts#updatePage",
     "apps/web/app/lib/setup.ts#setupGit",
-    "packages/agent-runtime/src/evals/suite.ts#evaluateActivation",
-    "packages/agent-runtime/src/evals/suite.ts#runEvalSuite",
     "packages/agent-runtime/src/models/effort-router.ts#scorePrompt",
     "packages/agent-runtime/src/skills/resolve.ts#resolveSkills",
     "packages/audit/src/erase.ts#EraseError",

@@ -66,6 +66,7 @@ sibling `AGENTS.md`.
 | [`apps/worker`](apps/worker/AGENTS.md) | Run dispatch, Agent/Tool States, timers, reconciliation, projections |
 | [`apps/integration-worker`](apps/integration-worker/AGENTS.md) | Integration ingress, sync, delivery, retries |
 | [`apps/docs`](apps/docs/AGENTS.md) | Public Fumadocs site content and conventions |
+| [`apps/eval`](apps/eval/AGENTS.md) | Offline eval Corpus, Assertions, Sweeps, Scorecards |
 | [`packages/agent-runtime`](packages/agent-runtime/AGENTS.md) | Context assembly, bounded Tool loop, model profiles, delegation |
 | [`packages/run-kernel`](packages/run-kernel/AGENTS.md) | Run/State machines, waits, retries, child Runs |
 | [`packages/curator`](packages/curator/AGENTS.md) | Curator prompt, output schema, citation and injection validation, proposal templating |

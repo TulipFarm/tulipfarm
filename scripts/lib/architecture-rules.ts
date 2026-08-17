@@ -266,6 +266,10 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
     ],
     // `apps/web` uses shared wire schemas and presentation-only packages.
     web: ["schema", "surface", "surface-web", "editor"],
+    // `apps/eval` drives the real Agent loop and Context assembler against a versioned Corpus.
+    // It is an app, not a package, because a package may not import from `apps/*` and the L3
+    // tier has to reach the same executor a real turn runs through.
+    eval: ["agent-runtime"],
   },
   // Legacy v1 edges that still exist during cutover. Each is a target package
   // importing a not-yet-replaced legacy package; removed when its owner passes
