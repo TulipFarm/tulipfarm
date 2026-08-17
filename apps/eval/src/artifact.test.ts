@@ -8,6 +8,7 @@ import {
   buildArtifact,
   readArtifact,
   SCHEMA_VERSION,
+  scorecardPath,
   writeArtifact,
 } from "./artifact.ts";
 import type { Scorecard } from "./runner.ts";
@@ -109,5 +110,16 @@ describe("baselinePath", () => {
   it("refuses a model id that would escape the Baseline directory", () => {
     expect(() => baselinePath("/root", "../../etc/passwd")).toThrow(ArtifactError);
     expect(() => baselinePath("/root", "vendor/model")).toThrow(ArtifactError);
+  });
+});
+
+describe("scorecardPath", () => {
+  it("names a Matrix Scorecard after the model that produced it", () => {
+    expect(scorecardPath("/out", "sonnet")).toBe("/out/sonnet.json");
+    expect(scorecardPath("/out", "luna")).toBe("/out/luna.json");
+  });
+
+  it("refuses a model id that would escape the directory it was given", () => {
+    expect(() => scorecardPath("/out", "../../etc/passwd")).toThrow(ArtifactError);
   });
 });

@@ -16,6 +16,7 @@ export const FLAGS = [
   "--baseline",
   "--promote",
   "--save",
+  "--save-dir",
 ] as const;
 
 /**

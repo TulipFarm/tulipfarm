@@ -245,5 +245,18 @@ credential does not arrive truncated: the prompt hangs, with nothing to indicate
 `stty -g` state is saved and restored, including on Ctrl-C. Abort with Ctrl-C, not Ctrl-D: with the
 line editor off the kernel no longer treats Ctrl-D as end-of-file.
 
-A seat is one person's, so a public repo cannot hold it as a secret. Where a release Sweep runs
-is still open — see `.scratch/harness-eval/spec.md`.
+## The CI door
+
+`.github/workflows/eval.yml` is the second way to start a Sweep, for a release rather than for a
+change you are making. It runs `scripts/seat.sh` too, so a green Actions run and a green
+`pnpm eval:matrix` came from one runner, not from two that agree today.
+
+Three things make it maintainer-only and it needs all three: `workflow_dispatch` is the only
+trigger and a fork cannot dispatch into the upstream repo; the `eval` Environment holds
+`CLAUDE_CODE_OAUTH_TOKEN` and `CODEX_AUTH_JSON`, which GitHub never exposes to a fork's run; and
+that Environment's required reviewer pauses the job before it spends a token. `workflow.test.ts`
+pins all three, so adding `pull_request:` to run evals on PRs fails the suite instead of opening
+two personal seats to anyone who can open a PR.
+
+CI passes `--save-dir`, the Matrix form of `--save`: it writes `<dir>/<model>.json` for every
+model measured, and is uploaded whole as the run's artifact.

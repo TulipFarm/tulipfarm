@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { assertKnownFlags, flag, positive, present } from "./args.ts";
-import { harnessVersion } from "./artifact.ts";
+import { harnessVersion, scorecardPath } from "./artifact.ts";
 import { resolveBindings } from "./bindings.ts";
 import { loadCorpus } from "./corpus.ts";
 import { loadEvalSoul } from "./eval-soul.ts";
@@ -34,6 +34,8 @@ Usage: pnpm eval [options]
                      automatic: a Baseline is a reference, so promoting is a decision.
   --save <path>      Archive this Scorecard as JSON. One model only, since one path
                      cannot hold two.
+  --save-dir <dir>   Archive every Scorecard this Sweep produced, as <dir>/<model>.json.
+                     The Matrix form of --save, and what CI uploads.
   --help             Show this message.
 
 Without --model the Corpus runs against the scripted binding: free, deterministic, no
@@ -77,12 +79,19 @@ async function main(): Promise<number> {
   const promote = present(argv, "--promote");
   const baselineFile = flag(argv, "--baseline");
   const save = flag(argv, "--save");
+  const saveDir = flag(argv, "--save-dir");
   // Two models write two Scorecards, and one path can only hold one. Silently keeping the last
   // would archive a file whose name says nothing about which model is inside it.
   if (save !== undefined && models.length > 1) {
-    throw new Error("--save takes one model: name it with --model, or use --promote per model");
+    throw new Error("--save takes one model: name it with --model, or use --save-dir for a Matrix");
   }
   if (present(argv, "--save") && save === undefined) throw new Error("--save needs a path");
+  if (present(argv, "--save-dir") && saveDir === undefined) {
+    throw new Error("--save-dir needs a directory");
+  }
+  if (save !== undefined && saveDir !== undefined) {
+    throw new Error("--save and --save-dir both archive this Sweep; pass one");
+  }
   // A `--case` Sweep shares the Corpus hash while covering one Case, so a delta against it would
   // report every other Case as "not comparable" and pass. Refused here as well as in `release.ts`,
   // so the operator is told before spending quota rather than after.
@@ -138,13 +147,14 @@ async function main(): Promise<number> {
   let baselineFailed = false;
   for (const run of matrix.runs) {
     if (run.card === undefined) continue;
+    const archive = saveDir === undefined ? save : scorecardPath(saveDir, run.card.modelId);
     const outcome = applyBaseline(run.card, {
       root: resolve(__dirname, ".."),
       harnessVersion: version,
       compare,
       promote,
       ...(baselineFile === undefined ? {} : { baseline: baselineFile }),
-      ...(save === undefined ? {} : { save }),
+      ...(archive === undefined ? {} : { save: archive }),
     });
     process.stdout.write(outcome.text);
     if (outcome.failed) baselineFailed = true;

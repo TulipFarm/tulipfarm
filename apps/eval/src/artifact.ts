@@ -97,10 +97,21 @@ export function readArtifact(path: string): ScorecardArtifact {
   return artifact as ScorecardArtifact;
 }
 
+/**
+ * Where one model's Scorecard is written inside a directory.
+ *
+ * A model id reaches this from the command line, so it is checked against the same rule as a
+ * Baseline filename: a `../` in it would otherwise write the Scorecard outside the directory the
+ * operator named.
+ */
+export function scorecardPath(dir: string, modelId: string): string {
+  if (!SAFE_ID.test(modelId)) {
+    throw new ArtifactError(`model id "${modelId}" cannot be used as a Scorecard filename`);
+  }
+  return join(dir, `${modelId}.json`);
+}
+
 /** Where the promoted Baseline for one model lives. One file per model, committed to the repo. */
 export function baselinePath(root: string, modelId: string): string {
-  if (!SAFE_ID.test(modelId)) {
-    throw new ArtifactError(`model id "${modelId}" cannot be used as a Baseline filename`);
-  }
-  return join(root, "baselines", `${modelId}.json`);
+  return scorecardPath(join(root, "baselines"), modelId);
 }
