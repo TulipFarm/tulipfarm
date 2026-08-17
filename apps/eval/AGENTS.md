@@ -148,10 +148,16 @@ never enters your shell, your history, or a file. It defaults `--max-tokens` to 
 overrides one you passed.
 
 Codex's credential is a JSON document rather than a token, but it is pasted the same way: from
-`$CODEX_AUTH_JSON`, else `${CODEX_HOME:-~/.codex}/auth.json`, else the prompt, **on one line**.
-Wrapping quotes are stripped, and a multi-line paste is refused — `read` keeps only its first line,
-so it would arrive as a lone `{` and the vendor answers that with a bare 401 that says nothing
-about the paste. `jq -c . ~/.codex/auth.json` prints a paste-able line.
+`$CODEX_AUTH_JSON`, else `$CODEX_AUTH_FILE`, else `${CODEX_HOME:-~/.codex}/auth.json`, else the
+prompt, **on one line**. Wrapping quotes are stripped and a multi-line paste is refused, because
+`read` keeps only the first line and the vendor answers a lone `{` with a bare 401 that says
+nothing about the paste.
+
+The prompt turns the terminal's line editor off first. A tty in canonical mode **discards any line
+past `MAX_CANON`** — 1024 bytes on macOS — and never delivers the newline, so a multi-kilobyte
+credential does not arrive truncated: the prompt hangs, with nothing to indicate why. The full
+`stty -g` state is saved and restored, including on Ctrl-C. Abort with Ctrl-C, not Ctrl-D: with the
+line editor off the kernel no longer treats Ctrl-D as end-of-file.
 
 A seat is one person's, so a public repo cannot hold it as a secret. Where a release Sweep runs
 is still open — see `.scratch/harness-eval/spec.md`.

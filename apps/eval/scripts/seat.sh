@@ -17,20 +17,30 @@ set -eu
 models=$1
 shift
 
-# Restore the terminal even if the read is interrupted, or the shell is left with echo off.
+# Restore the terminal even if the read is interrupted, or the shell is left mid-prompt.
+tty_state=""
 restore_tty() {
+  if [ -n "$tty_state" ]; then
+    stty "$tty_state" 2>/dev/null || true
+  fi
   stty echo 2>/dev/null || true
 }
 
 prompt_secret() {
   printf '%s\n' "$2" >&2
   printf 'paste it here (hidden), then press enter: ' >&2
-  # EXIT covers what INT cannot: under `set -e` a failed read — Ctrl-D, or any non-interactive
-  # stdin — kills the script between `stty -echo` and the restore, leaving the operator typing
-  # blind into a terminal with echo off.
+  tty_state=$(stty -g 2>/dev/null || true)
+  # EXIT covers what INT cannot: under `set -e` a failed read — any non-interactive stdin — kills
+  # the script between the stty calls and the restore, leaving the operator typing blind into a
+  # terminal whose line discipline is still switched off. Abort with Ctrl-C: with the line editor
+  # off the kernel no longer treats Ctrl-D as end-of-file, though ISIG stays on so Ctrl-C works.
   trap 'restore_tty' EXIT
   trap 'restore_tty; exit 130' INT
   stty -echo 2>/dev/null || true
+  # Canonical mode discards any line past MAX_CANON — 1024 bytes on macOS — and never delivers the
+  # newline, so a multi-kilobyte credential does not arrive truncated: the prompt simply hangs. A
+  # Codex auth.json is several KB of JWTs, so the line editor has to be off for the paste to land.
+  stty -icanon min 1 time 0 2>/dev/null || true
   secret=""
   IFS= read -r secret || true
   restore_tty
@@ -70,7 +80,8 @@ accept_codex_json() {
       ;;
     \{*)
       printf 'that credential is truncated: a multi-line paste keeps only its first line.\n' >&2
-      printf 'Paste the whole of auth.json as one line — jq -c . ~/.codex/auth.json prints it.\n' >&2
+      printf 'Point CODEX_AUTH_FILE at the file instead:\n' >&2
+      printf '  CODEX_AUTH_FILE=/path/to/auth.json pnpm eval:matrix\n' >&2
       exit 1
       ;;
     *)
@@ -90,12 +101,21 @@ collect() {
       export CLAUDE_CODE_OAUTH_TOKEN
       ;;
     luna)
+      # A file is the only route that cannot be defeated by the terminal: see prompt_secret.
+      if [ -z "${CODEX_AUTH_JSON:-}" ] && [ -n "${CODEX_AUTH_FILE:-}" ]; then
+        if [ ! -r "$CODEX_AUTH_FILE" ]; then
+          printf 'CODEX_AUTH_FILE is not readable: %s\n' "$CODEX_AUTH_FILE" >&2
+          exit 1
+        fi
+        CODEX_AUTH_JSON=$(cat "$CODEX_AUTH_FILE")
+      fi
       if [ -z "${CODEX_AUTH_JSON:-}" ]; then
         auth="${CODEX_HOME:-$HOME/.codex}/auth.json"
         if [ -r "$auth" ]; then
           CODEX_AUTH_JSON=$(cat "$auth")
         else
-          prompt_secret CODEX_AUTH_JSON "Codex seat credential: the contents of auth.json, on one line. Get one with: codex login"
+          prompt_secret CODEX_AUTH_JSON "Codex seat credential: the contents of auth.json, on one line.
+If the paste does not land, save it to a file and use: CODEX_AUTH_FILE=/path/to/auth.json"
           accept_codex_json "$secret"
         fi
       fi
