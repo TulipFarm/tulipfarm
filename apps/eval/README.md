@@ -190,6 +190,26 @@ that import, so L3 owns the Conversation half itself and shares the executor. Th
 wiring is covered by `apps/api`'s `durable-submission.pg.test.ts`, so the residual gap is the
 route handler, not the Turn.
 
+### Journeys
+
+An L3 Case may carry a `journey` of further Turns, run against the same Conversation, database and
+Soul. They exist for **one** seam a single Turn cannot reach: whether what a Turn *committed* is
+what the next Turn can *see*. Between Turns the Soul is re-read with a fresh `SoulLoader` and the
+Conversation is re-read from the database, so the real writer and the real loader end up on
+opposite sides of one assertion.
+
+That is not hypothetical. Building this tier turned up a live case of exactly that shape: the Soul
+writer's canonical mode commits `agents/<slug>/agent.yaml`, but `SoulLoader` only reads the legacy
+`AGENT.md` — so the write succeeded, the commit landed, and the product could not see it. A
+single-Turn Case asserting `soul_committed` passes straight through that. The journey Case
+`l3-a-committed-agent-is-visible-next-turn` does not.
+
+History is deliberately re-read from `eval_messages` rather than accumulated in a variable: holding
+it in memory would let a journey pass while the Turn persisted nothing at all.
+
+Keep journeys rare. Anything a journey appears to test other than that seam — ordering, wording,
+refusal — is carried far more cheaply by an L2 Case.
+
 Each Trial gets a fresh clone of a memoised migrated snapshot, and the Eval Soul is
 `git reset --hard`-ed back to its load-time commit in a `finally` — otherwise a Case that writes
 a Soul artifact would be visible to every Case scored after it.

@@ -91,6 +91,18 @@ export interface ScriptedToolResult {
   readonly error?: string;
 }
 
+/**
+ * One Turn of a multi-Turn journey, in the same vocabulary a single-Turn Case already uses.
+ *
+ * Reusing `input`, `script` and `toolResults` rather than inventing journey-specific names keeps
+ * the Case format one format: a journey Turn is a Case's Turn, not a new kind of thing.
+ */
+export interface JourneyTurn {
+  readonly input: readonly ModelMessage[];
+  readonly toolResults?: readonly ScriptedToolResult[];
+  readonly script?: readonly ModelOutput[];
+}
+
 export interface EvalCase {
   readonly id: string;
   /**
@@ -113,6 +125,14 @@ export interface EvalCase {
    * credentials develop the framework.
    */
   readonly script?: readonly ModelOutput[];
+  /**
+   * L3 only. Further Turns run against the same Conversation, database and Soul as `input`.
+   *
+   * This exists for one seam a single Turn cannot reach: whether what a Turn *committed* is what
+   * the next Turn can *see*. Everything else a journey appears to test — history, ordering — is
+   * carried more cheaply by an L2 Case, so keep journeys rare.
+   */
+  readonly journey?: readonly JourneyTurn[];
   readonly expect: readonly Expectation[];
   /** Raised above 1 only for Cases used to measure the Noise Floor. */
   readonly trials?: number;

@@ -196,6 +196,19 @@ function validate(raw: unknown, file: string): EvalCase {
       !isPersisted(a as Expectation), `${file}: expectation "${kind}" reads persisted state, ` +
       `which only tier "l3" observes; this Case is tier ${JSON.stringify(c.tier)}`);
   }
+  if (c.journey !== undefined) {
+    require(Array.isArray(c.journey) &&
+      c.journey.length > 0, `${file}: "journey" must be a non-empty array of further Turns`);
+    // A journey needs a database and a Conversation to span, and only L3 has either. On an L2
+    // Case the field would be read by nothing and the Case would quietly measure one Turn.
+    require(c.tier ===
+      "l3", `${file}: "journey" needs tier "l3"; this Case is tier ${JSON.stringify(c.tier)}`);
+    for (const turn of c.journey as unknown[]) {
+      const t = turn as { input?: unknown };
+      require(Array.isArray(t.input) &&
+        t.input.length > 0, `${file}: every "journey" Turn needs a non-empty "input"`);
+    }
+  }
   if (c.redTeam !== undefined) {
     validateRedTeam(c.redTeam, file);
     const guard = (c.expect as { kind: string }[]).find((e) => e.kind.startsWith("guardrail_"));
@@ -253,6 +266,11 @@ function givenToModel(c: EvalCase, fromSoul: Partial<AssembleContext>): string {
   walk(c.context);
   walk(c.input);
   walk(c.toolResults ?? []);
+  // A journey's later Turns are handed to the model too, so a fact stated only there is grounded.
+  for (const turn of c.journey ?? []) {
+    walk(turn.input);
+    walk(turn.toolResults ?? []);
+  }
   return found.join("\n");
 }
 

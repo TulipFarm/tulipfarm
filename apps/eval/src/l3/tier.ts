@@ -14,7 +14,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type { ToolDispatchPort } from "@tulipfarm/agent-runtime";
+import type { ModelMessage, ToolDispatchPort } from "@tulipfarm/agent-runtime";
 import { INVOKE_STATE_KEY } from "@tulipfarm/run-kernel";
 import type { PersistedRun } from "@tulipfarm/storage";
 import {
@@ -22,7 +22,7 @@ import {
   createChatExecutor,
   RunStoreStateTransitions,
 } from "@tulipfarm/turn-executor";
-import type { EvalCase } from "../case.ts";
+import type { EvalCase, JourneyTurn } from "../case.ts";
 import type { EvalSoul } from "../eval-soul.ts";
 import { type ModelBinding, toolDispatcher } from "../runner.ts";
 import { evalTurnContext } from "./context.ts";
@@ -133,7 +133,8 @@ async function readBack(
     [BUSINESS_ID, turnId]
   );
   const message = await database.query(
-    "SELECT content FROM eval_messages WHERE business_id = $1 AND turn_id = $2 ORDER BY seq",
+    `SELECT content FROM eval_messages
+     WHERE business_id = $1 AND turn_id = $2 AND role = 'assistant' ORDER BY seq`,
     [BUSINESS_ID, turnId]
   );
   const events = await database.query(
@@ -162,27 +163,52 @@ async function readBack(
  * and a second process to a tier whose whole job is one Turn, and the executor is the same function
  * the Worker's job handler calls either way.
  */
-export async function runPersistedTurn(options: L3Options): Promise<PersistedTurn> {
-  const database = options.database ?? (await openEvalDatabase());
-  const owned = options.database === undefined;
+async function runOneTurn(
+  options: L3Options,
+  shared: {
+    database: EvalDatabase;
+    conversationId: string;
+    soul: EvalSoul;
+    soulWrites: SoulWriterTool;
+    /** What this Turn newly submits, as distinct from the history it was handed. */
+    submit: readonly ModelMessage[];
+  }
+): Promise<PersistedTurn> {
+  const { database, conversationId, soul, soulWrites } = shared;
   const runId = randomUUID();
   const turnId = randomUUID();
-  const conversationId = randomUUID();
-  let soulWrites: SoulWriterTool | undefined;
-
-  try {
+  {
     await mintRun(database, runId, turnId);
     await database.query(
       `INSERT INTO eval_turns (business_id, run_id, turn_id, conversation_id, attempt)
        VALUES ($1, $2, $3, $4, 1)`,
       [BUSINESS_ID, runId, turnId, conversationId]
     );
+    // The product writes the participant's Message when the Turn is submitted, not when it is
+    // executed. Mirrored here so a journey's later Turn reads back a two-sided Conversation.
+    for (const [index, message] of shared.submit.entries()) {
+      await database.query(
+        `INSERT INTO eval_messages
+           (id, business_id, conversation_id, turn_id, attempt, role, content)
+         VALUES ($1, $2, $3, $4, 1, $5, $6)`,
+        [
+          `msg-${turnId}-in-${index}`,
+          BUSINESS_ID,
+          conversationId,
+          turnId,
+          message.role,
+          typeof message.content === "string" ? message.content : JSON.stringify(message.content),
+        ]
+      );
+    }
 
     const scripted = toolDispatcher(options.evalCase);
-    soulWrites = soulWriterTool(options.soul);
+    // The writer is shared across a journey so its reset restores the pre-journey commit, which
+    // means its `commits` accumulate. Only this Turn's slice belongs to this Turn.
+    const committedBefore = soulWrites.commits.length;
     const tools = routeTools(scripted.port, soulWrites.port);
     const host = evalTurnHost(database);
-    const context = evalTurnContext({ evalCase: options.evalCase, soul: options.soul });
+    const context = evalTurnContext({ evalCase: options.evalCase, soul });
     const executor = createChatExecutor({
       host: { ...host, dispatch: tools.dispatch },
       context,
@@ -212,13 +238,109 @@ export async function runPersistedTurn(options: L3Options): Promise<PersistedTur
 
     return await readBack(database, runId, turnId, {
       toolCalls: scripted.calls.map((call) => call.name),
-      soulCommits: soulWrites.commits,
+      soulCommits: soulWrites.commits.slice(committedBefore),
       systemPrompt: context.systemPrompt,
     });
+  }
+}
+
+/**
+ * Reads the Conversation back as model messages, so a later Turn sees what an earlier one said.
+ *
+ * The history is re-read from the database rather than accumulated in memory. Holding it in a
+ * variable would let a journey pass while the Turn persisted nothing at all, which is the exact
+ * failure a journey exists to detect.
+ */
+async function priorMessages(
+  database: EvalDatabase,
+  conversationId: string
+): Promise<readonly ModelMessage[]> {
+  const rows = await database.query(
+    `SELECT role, content FROM eval_messages
+     WHERE business_id = $1 AND conversation_id = $2 ORDER BY seq`,
+    [BUSINESS_ID, conversationId]
+  );
+  return rows.rows.map((row) => ({
+    role: String(row.role) as ModelMessage["role"],
+    content: String(row.content),
+  }));
+}
+
+/**
+ * Folds a journey's Turns into the one shape a Case scores against.
+ *
+ * Tool calls, Soul commits and Run events accumulate, because a Case asserting "the artifact was
+ * committed" does not care which Turn committed it. Everything else is the last Turn's — except a
+ * non-terminal Run status, which is reported from the first Turn that failed. Taking the last
+ * would let a journey whose opening Turn died report success.
+ */
+function foldJourney(turns: readonly PersistedTurn[]): PersistedTurn {
+  const last = turns[turns.length - 1];
+  if (last === undefined) throw new Error("a journey ran no Turns");
+  const broken = turns.find((turn) => turn.runStatus !== "succeeded");
+  return {
+    ...last,
+    runStatus: broken?.runStatus ?? last.runStatus,
+    stateStatus: broken?.stateStatus ?? last.stateStatus,
+    events: turns.flatMap((turn) => turn.events),
+    toolCalls: turns.flatMap((turn) => turn.toolCalls),
+    soulCommits: turns.flatMap((turn) => turn.soulCommits),
+  };
+}
+
+/**
+ * Runs a Case's Turn, then each Turn of its journey, against one Conversation and one database.
+ */
+export async function runPersistedTurn(options: L3Options): Promise<PersistedTurn> {
+  const database = options.database ?? (await openEvalDatabase());
+  const owned = options.database === undefined;
+  const conversationId = randomUUID();
+  const soulWrites = soulWriterTool(options.soul);
+
+  try {
+    const first = await runOneTurn(options, {
+      database,
+      conversationId,
+      soul: options.soul,
+      soulWrites,
+      submit: options.evalCase.input,
+    });
+    const journey = options.evalCase.journey ?? [];
+    if (journey.length === 0) return first;
+
+    const turns: PersistedTurn[] = [first];
+    for (const turn of journey) {
+      // Reloaded per Turn so an artifact the previous Turn committed is visible to this one, and
+      // history is re-read so this Turn is handed what was actually persisted.
+      const soul = await options.soul.reload();
+      const history = await priorMessages(database, conversationId);
+      turns.push(
+        await runOneTurn(
+          { ...options, evalCase: journeyCase(options.evalCase, turn, history) },
+          { database, conversationId, soul, soulWrites, submit: turn.input }
+        )
+      );
+    }
+    return foldJourney(turns);
   } finally {
     // Before the database, because a Soul left dirty contaminates the next Trial in a way a fresh
     // database cannot undo: the Soul is loaded once per Sweep and shared.
-    soulWrites?.reset();
+    soulWrites.reset();
     if (owned) await database.close();
   }
+}
+
+/** A journey Turn, expressed as the single-Turn Case the rest of the tier already knows how to run. */
+function journeyCase(
+  evalCase: EvalCase,
+  turn: JourneyTurn,
+  history: readonly ModelMessage[]
+): EvalCase {
+  return {
+    ...evalCase,
+    input: [...history, ...turn.input],
+    toolResults: turn.toolResults,
+    script: turn.script,
+    journey: undefined,
+  };
 }

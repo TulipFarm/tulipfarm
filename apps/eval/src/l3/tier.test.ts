@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import type { EvalCase } from "../case.ts";
 import { type EvalSoul, loadEvalSoul } from "../eval-soul.ts";
+import type { ModelBinding } from "../runner.ts";
 import { scriptedBinding } from "../scripted.ts";
 import { SOUL_WRITE_TOOL } from "./soul-write.ts";
 import { runPersistedTurn } from "./tier.ts";
@@ -198,6 +199,105 @@ describe("a Turn that changes configuration", () => {
 
       const after = execFileSync("git", ["rev-parse", "HEAD"], { cwd: soul.path }).toString();
       expect(after).toBe(before);
+    },
+    TIMEOUT
+  );
+});
+
+describe("a journey", () => {
+  it(
+    "shows a later Turn the artifact an earlier Turn committed",
+    async () => {
+      soul ??= await loadEvalSoul();
+      const turn = await runPersistedTurn({
+        evalCase: {
+          ...writing(
+            "---\ndescription: Handles invoices.\ndomain: support\n---\n\nYou answer billing questions."
+          ),
+          journey: [
+            {
+              input: [{ role: "user", content: "Which agents exist now?" }],
+              script: [{ kind: "text", text: "Support and billing." }],
+            },
+          ],
+        },
+        soul,
+        binding: scriptedBinding(),
+      });
+
+      // The prompt is the *second* Turn's, assembled from a Soul reloaded after the first Turn
+      // committed. If the writer commits a path the loader cannot read, this is what notices.
+      expect(turn.systemPrompt).toContain("billing");
+      expect(turn.answer).toBe("Support and billing.");
+      expect(turn.soulCommits).toHaveLength(1);
+    },
+    TIMEOUT
+  );
+
+  it(
+    "hands a later Turn the Conversation as it was actually persisted",
+    async () => {
+      soul ??= await loadEvalSoul();
+      const seen: string[][] = [];
+      const inner = scriptedBinding();
+      const recording: ModelBinding = {
+        id: "recording",
+        create: (evalCase) => {
+          const port = inner.create(evalCase);
+          return {
+            invoke: async (request) => {
+              seen.push(request.messages.map((m) => `${m.role}:${String(m.content)}`));
+              return port.invoke(request);
+            },
+          };
+        },
+      };
+
+      const turn = await runPersistedTurn({
+        evalCase: {
+          ...answering("We open at 9am."),
+          journey: [
+            {
+              input: [{ role: "user", content: "And on Sundays?" }],
+              script: [{ kind: "text", text: "Closed on Sundays." }],
+            },
+          ],
+        },
+        soul,
+        binding: recording,
+      });
+
+      expect(turn.answer).toBe("Closed on Sundays.");
+      // Both sides of the first exchange, read back out of the database, then the new question.
+      expect(seen[1]?.slice(1)).toEqual([
+        "user:When do you open?",
+        "assistant:We open at 9am.",
+        "user:And on Sundays?",
+      ]);
+    },
+    TIMEOUT
+  );
+
+  it(
+    "reports the first broken Turn, not the last one's success",
+    async () => {
+      soul ??= await loadEvalSoul();
+      const turn = await runPersistedTurn({
+        evalCase: {
+          ...answering("We open at 9am."),
+          journey: [
+            {
+              input: [{ role: "user", content: "And on Sundays?" }],
+              script: [{ kind: "text", text: "Closed on Sundays." }],
+            },
+          ],
+        },
+        soul,
+        binding: scriptedBinding(),
+      });
+
+      expect(turn.runStatus).toBe("succeeded");
+      expect(turn.events.filter((e) => e === "turn.finished")).toHaveLength(2);
     },
     TIMEOUT
   );
