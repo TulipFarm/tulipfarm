@@ -229,7 +229,7 @@ describe("renderMatrix", () => {
       ])
     );
 
-    expect(out).toContain("agree on all 1 comparable Cases");
+    expect(out).toContain("agree on all 1 comparable Case");
     expect(out).toContain("NOT COMPARABLE  2 of 3 Cases");
   });
 
@@ -247,8 +247,17 @@ describe("renderMatrix", () => {
       ])
     );
 
-    expect(out).toContain("DISAGREEMENT  1 of 1 comparable Cases");
+    expect(out).toContain("DISAGREEMENT  1 of 1 comparable Case");
     expect(out).toMatch(/a\s+sonnet=PASS\s+luna=FAIL/);
     expect(out).toContain("NOT COMPARABLE  1 of 2 Cases");
+  });
+
+  it("does not print a header over an empty grid when nothing was measured", () => {
+    const out = renderMatrix(matrix([{ modelId: "luna", unavailable: "codex login required" }]));
+
+    expect(out).toContain("1 model  ");
+    expect(out).toContain("No Case was measured");
+    expect(out).not.toMatch(/Case\s+luna\n/);
+    expect(out).toContain("codex login required");
   });
 });

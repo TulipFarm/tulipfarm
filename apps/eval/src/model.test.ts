@@ -269,4 +269,48 @@ describe("pinnedBinding", () => {
       new RegExp(SONNET.credentialHint)
     );
   });
+
+  it("refuses a malformed Codex credential before spending a single Trial", async () => {
+    const before = process.env.CODEX_AUTH_JSON;
+    process.env.CODEX_AUTH_JSON = "not json at all";
+    try {
+      const binding = pinnedBinding(PINNED_MODELS.luna, {
+        createModel: async () => {
+          throw new Error("the model must never be built");
+        },
+      });
+
+      await expect(binding.preflight?.()).rejects.toThrow(
+        /CODEX_AUTH_JSON is malformed.*not valid JSON/is
+      );
+    } finally {
+      if (before === undefined) delete process.env.CODEX_AUTH_JSON;
+      else process.env.CODEX_AUTH_JSON = before;
+    }
+  });
+
+  it("refuses a missing credential up front, naming the variable and how to get it", async () => {
+    const before = process.env.CODEX_AUTH_JSON;
+    delete process.env.CODEX_AUTH_JSON;
+    try {
+      const binding = pinnedBinding(PINNED_MODELS.luna);
+
+      await expect(binding.preflight?.()).rejects.toThrow(/CODEX_AUTH_JSON.*codex login/s);
+    } finally {
+      if (before !== undefined) process.env.CODEX_AUTH_JSON = before;
+    }
+  });
+
+  it("accepts a well-formed Codex sign-in blob", async () => {
+    const before = process.env.CODEX_AUTH_JSON;
+    process.env.CODEX_AUTH_JSON = JSON.stringify({ tokens: { refresh_token: "rt" } });
+    try {
+      const binding = pinnedBinding(PINNED_MODELS.luna);
+
+      await expect(binding.preflight?.()).resolves.toBeUndefined();
+    } finally {
+      if (before === undefined) delete process.env.CODEX_AUTH_JSON;
+      else process.env.CODEX_AUTH_JSON = before;
+    }
+  });
 });

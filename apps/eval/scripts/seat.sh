@@ -53,14 +53,18 @@ collect() {
       export CLAUDE_CODE_OAUTH_TOKEN
       ;;
     luna)
-      # Codex's credential is a JSON document, not something anyone types. Read the file the CLI
-      # already wrote, and only fall back to a paste when it is missing.
-      if [ -z "${CODEX_AUTH_JSON:-}" ] && [ -r "$HOME/.codex/auth.json" ]; then
-        CODEX_AUTH_JSON=$(cat "$HOME/.codex/auth.json")
-      fi
+      # auth.json is a multi-line JSON document, not something anyone types — and `read` would keep
+      # only its first line, producing a credential the vendor rejects with a bare 401. Read the
+      # file the CLI wrote, and refuse outright rather than prompt for a paste that cannot work.
       if [ -z "${CODEX_AUTH_JSON:-}" ]; then
-        prompt_secret CODEX_AUTH_JSON "Codex seat credential. Run: codex login (writes ~/.codex/auth.json)"
-        CODEX_AUTH_JSON=$secret
+        auth="${CODEX_HOME:-$HOME/.codex}/auth.json"
+        if [ ! -r "$auth" ]; then
+          printf 'no Codex credential: %s does not exist.\n' "$auth" >&2
+          printf 'Run `codex login` (needs a ChatGPT Plus/Pro/Business plan), then try again.\n' >&2
+          printf 'On another machine, set CODEX_AUTH_JSON to that file\047s contents instead.\n' >&2
+          exit 1
+        fi
+        CODEX_AUTH_JSON=$(cat "$auth")
       fi
       export CODEX_AUTH_JSON
       ;;

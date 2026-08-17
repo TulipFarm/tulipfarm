@@ -43,6 +43,14 @@ export interface ModelBinding {
   readonly dated?: boolean;
   /** The Effort rung this binding pins. Recorded so a reader knows what was measured. */
   readonly effort?: string;
+  /**
+   * Checked once before the first Trial, and expected to throw when the model cannot be measured.
+   *
+   * A credential that is set but malformed is otherwise only discovered by calling the vendor, and
+   * every Case in the Corpus then fails the same way, slowly. Rejecting up front costs no Trials
+   * and lets a Matrix record the model as unavailable rather than as a column of errors.
+   */
+  preflight?(): Promise<void> | void;
 }
 
 export interface TrialResult {
@@ -339,6 +347,7 @@ export async function runSweep(options: SweepOptions): Promise<Scorecard> {
   let spend = NO_SPEND;
   let abortedReason: string | undefined;
   const report = options.onProgress ?? (() => {});
+  await options.model.preflight?.();
   report({ kind: "sweep-start", modelId: options.model.id, cases: selected.length, planned });
 
   outer: for (const evalCase of selected) {

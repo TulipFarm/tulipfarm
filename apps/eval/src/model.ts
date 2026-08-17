@@ -69,6 +69,13 @@ export interface PinnedModel {
    * as a harness result, and nothing on the Scorecard could reveal it.
    */
   readonly forbiddenEnv: readonly string[];
+  /**
+   * The shape the credential must already have, checked before the first Trial.
+   *
+   * Declared rather than supplied as a function so `PINNED_MODELS` stays data, and so the provider
+   * SDK that knows the shape is still only imported when a real model is actually selected.
+   */
+  readonly credentialShape?: "codex-auth-json";
 }
 
 /**
@@ -103,6 +110,7 @@ export const PINNED_MODELS = {
     dated: false,
     effort: "balanced",
     forbiddenEnv: ["OPENAI_BASE_URL"],
+    credentialShape: "codex-auth-json",
   },
 } as const satisfies Record<string, PinnedModel>;
 
@@ -183,6 +191,27 @@ export function pinnedBinding(
   // provider handshake on every Case for no gain.
   let client: Promise<LanguageModel> | undefined;
 
+  const preflight = async (): Promise<void> => {
+    assertNotRedirected(pinned);
+    const raw = process.env[pinned.credentialEnv];
+    if (raw === undefined || raw.trim() === "") {
+      throw new Error(
+        `${pinned.credentialEnv} is not set. Get the credential with: ${pinned.credentialHint}`
+      );
+    }
+    if (pinned.credentialShape === "codex-auth-json") {
+      const { parseCodexAuth } = await import("@tulipfarm/llm");
+      try {
+        parseCodexAuth(raw);
+      } catch (error) {
+        // Named so the reader knows which variable to fix, and so `withCredentialHint` recognises
+        // the failure and appends the command that produces a good one.
+        const why = error instanceof Error ? error.message : String(error);
+        throw withCredentialHint(new Error(`${pinned.credentialEnv} is malformed: ${why}`), pinned);
+      }
+    }
+  };
+
   const model = async (): Promise<LanguageModel> => {
     assertNotRedirected(pinned);
     client ??= create(
@@ -206,6 +235,7 @@ export function pinnedBinding(
     effort: pinned.effort,
     dated: pinned.dated,
     reportedVersion: () => reported,
+    preflight,
     create: (_evalCase: EvalCase): ModelPort => ({
       invoke: async (request) =>
         invokeOnce(await model(), pinned, request, (version) => {

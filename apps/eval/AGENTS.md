@@ -99,6 +99,11 @@ Only its own Cases need updating when their observable behaviour moves.
   rolls forward reads exactly like a harness regression — but neither seat publishes one, so
   `dated: false` prints a `NOTE`. A reported version is recorded only when it differs from the id
   we asked for; the SDK echoes the request otherwise, and an echo is not a confirmation.
+- **A credential is checked before the first Trial, not by the vendor.** `preflight` rejects a
+  missing or malformed one up front: a bad `CODEX_AUTH_JSON` otherwise fails every Case in the
+  Corpus identically and slowly, and reads as a model that behaves differently rather than one that
+  was never reachable. `credentialShape` stays declarative so the provider SDK is still only
+  imported when a real model is selected.
 - **A seat may not be redirected.** `--model` refuses to start when a base-URL override is in the
   environment: the vendor CLIs pass one through their jail, and a Sweep measured against a proxy
   has no field on the Scorecard that could reveal it.
@@ -133,7 +138,7 @@ and `--model` refuses to run without one.
 ```bash
 pnpm eval                                    # scripted: free, deterministic, no credentials
 pnpm eval:sonnet                             # claude-code seat, prompts for the token
-pnpm eval:luna                               # codex seat, reads ~/.codex/auth.json
+pnpm eval:luna                               # codex seat, reads ~/.codex/auth.json (needs `codex login`)
 pnpm eval:matrix                             # both seats, same Corpus, side by side
 pnpm eval:sonnet --case support-answers-without-tools --max-tokens 5000
 ```

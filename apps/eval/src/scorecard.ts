@@ -110,6 +110,10 @@ function caseIds(matrix: Matrix): string[] {
   return seen;
 }
 
+function plural(n: number, noun: string): string {
+  return `${n} ${noun}${n === 1 ? "" : "s"}`;
+}
+
 function pad(text: string, width: number): string {
   return text.padEnd(width, " ");
 }
@@ -129,16 +133,23 @@ export function renderMatrix(matrix: Matrix): string {
 
   const lines: string[] = [
     "",
-    `Matrix  corpus=${matrix.corpusHash.slice(0, 16)}  ${models.length} models  ${matrix.durationMs}ms`,
-    "",
-    `${pad("Case", caseWidth)}  ${models.map((m, i) => pad(m, widths[i] ?? m.length)).join("  ")}`,
+    `Matrix  corpus=${matrix.corpusHash.slice(0, 16)}  ${plural(models.length, "model")}  ${matrix.durationMs}ms`,
   ];
 
-  for (const id of ids) {
-    const cells = matrix.runs.map((run, i) =>
-      pad(run.card === undefined ? VERDICT_UNAVAILABLE : verdict(run.card, id), widths[i] ?? 0)
+  // A header row over no rows reads as an empty result rather than as a run that never started.
+  if (ids.length === 0) {
+    lines.push("", "No Case was measured — see each model below for why.");
+  } else {
+    lines.push(
+      "",
+      `${pad("Case", caseWidth)}  ${models.map((m, i) => pad(m, widths[i] ?? m.length)).join("  ")}`
     );
-    lines.push(`${pad(id, caseWidth)}  ${cells.join("  ")}`);
+    for (const id of ids) {
+      const cells = matrix.runs.map((run, i) =>
+        pad(run.card === undefined ? VERDICT_UNAVAILABLE : verdict(run.card, id), widths[i] ?? 0)
+      );
+      lines.push(`${pad(id, caseWidth)}  ${cells.join("  ")}`);
+    }
   }
 
   lines.push(...disagreementLines(matrix, ids));
@@ -185,12 +196,12 @@ function disagreementLines(matrix: Matrix, ids: string[]): string[] {
     split.length === 0
       ? [
           "",
-          `Models agree on all ${comparable.length} comparable Cases — this run shows no ` +
-            "model-specific harness behaviour.",
+          `Models agree on all ${plural(comparable.length, "comparable Case")} — this run shows ` +
+            "no model-specific harness behaviour.",
         ]
       : [
           "",
-          `DISAGREEMENT  ${split.length} of ${comparable.length} comparable Cases`,
+          `DISAGREEMENT  ${split.length} of ${plural(comparable.length, "comparable Case")}`,
           ...split.map(detail),
           "  A Case that lands differently on each model is a property of the harness under that model.",
           "  These models are a control on the measurement, not competitors: this is not a ranking.",
@@ -199,7 +210,7 @@ function disagreementLines(matrix: Matrix, ids: string[]): string[] {
   if (incomparable.length > 0) {
     lines.push(
       "",
-      `NOT COMPARABLE  ${incomparable.length} of ${ids.length} Cases`,
+      `NOT COMPARABLE  ${incomparable.length} of ${plural(ids.length, "Case")}`,
       ...incomparable.map(detail),
       `  ${VERDICT_ERRORED} is a vendor fault and ${VERDICT_NOT_RUN} means the Case never ran. ` +
         "Neither is a verdict on the harness,",
