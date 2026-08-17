@@ -191,6 +191,11 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
       "memory",
       "observability",
     ],
+    // Translation between the `ModelPort` contract and the Vercel AI SDK's prompt, tool and usage
+    // shapes. Extracted from the Worker so the offline eval harness converts a request and reads a
+    // result exactly as production does — a second copy would let the eval score a tool call the
+    // product would never make. Pure functions only: no provider, no credential, no I/O.
+    "model-adapter": ["agent-runtime", "llm"],
     // How one Chat Turn executes, extracted from the Worker so a second host — the offline eval
     // harness — can drive a real Turn without importing an app. It declares the ports it needs
     // (`RunExecutor`, `SpendSink`, `ModelCallReceiptSource`) rather than importing the Worker's
@@ -255,6 +260,7 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
       "kv",
       "platform-tools",
       "turn-executor",
+      "model-adapter",
     ],
     "integration-worker": [
       "schema",
@@ -275,7 +281,17 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
     // `apps/eval` drives the real Agent loop and Context assembler against a versioned Corpus.
     // It is an app, not a package, because a package may not import from `apps/*` and the L3
     // tier has to reach the same executor a real turn runs through.
-    eval: ["agent-runtime", "turn-executor"],
+    //
+    // `llm` is an allowlisted edge here rather than a `legacyExceptions` entry, because it is not
+    // the same debt the API and the Worker carry. Those two import it for *product* model
+    // resolution, which is meant to move into `agent-runtime`. The eval imports it to build one
+    // deliberately pinned model and to price the call, and `priceCall` is enforced as the single
+    // authority on cost (`scripts/llm-pricing-authority.test.ts`) — so pricing an eval call any
+    // other way is already forbidden. `schema` and `secrets` come with `createModel`'s signature:
+    // a `ProviderEntry` to describe the model and a `SecretsService` to resolve its key. Building
+    // the client any other way would diverge from production in the one layer the eval must hold
+    // constant.
+    eval: ["agent-runtime", "turn-executor", "model-adapter", "llm", "schema", "secrets"],
   },
   // Legacy v1 edges that still exist during cutover. Each is a target package
   // importing a not-yet-replaced legacy package; removed when its owner passes

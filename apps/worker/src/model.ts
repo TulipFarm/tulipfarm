@@ -12,6 +12,15 @@ import type {
 import { deriveModelRequirements, ModelInvocationError } from "@tulipfarm/agent-runtime";
 import type { PrincipalRef } from "@tulipfarm/llm";
 import { classifyProviderError, decidePromptCache } from "@tulipfarm/llm";
+import {
+  splitPrompt,
+  stablePrefixChars,
+  tokenDetail,
+  toOutput,
+  toToolSet,
+  UsageAccumulator,
+  withCacheBreakpoint,
+} from "@tulipfarm/model-adapter";
 import type { ResolvedLimits } from "@tulipfarm/run-kernel";
 import {
   asEffortPreset,
@@ -25,14 +34,6 @@ import { type ModelMessage as SdkMessage, streamText } from "ai";
 import type { EffortInferencePort } from "./effort-inference";
 import type { LlmModelResolution } from "./llm";
 import type { ModelCallGate } from "./model-gate";
-import {
-  splitPrompt,
-  stablePrefixChars,
-  toOutput,
-  toToolSet,
-  withCacheBreakpoint,
-} from "./model-prompt";
-import { tokenDetail, UsageAccumulator } from "./model-usage";
 import { ModelCallWatchdog, withAbort } from "./model-watchdog";
 import type { SpendSink } from "./observability";
 

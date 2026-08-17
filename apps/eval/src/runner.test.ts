@@ -116,6 +116,28 @@ describe("runSweep", () => {
     expect(card.trials.find((t) => t.caseId === "boom")?.error).toBeDefined();
   });
 
+  it("blames a mute vendor on the vendor, not on the Case", async () => {
+    // `empty_model_output` is raised after the repair budget is spent nudging a provider that
+    // answered with nothing. It is the one loop failure that is the vendor's fault yet carries no
+    // `model_` prefix; scoring it as a failure would read as a harness regression.
+    const mute: ModelBinding = {
+      id: "mute",
+      create: () => ({
+        invoke: async (request) => ({
+          requestId: request.requestId,
+          output: { kind: "text", text: "" },
+          usage: { inputTokens: 10, outputTokens: 0, costBasis: "subscription" },
+        }),
+      }),
+    };
+    const corpus = corpusOf([answering("mute", "", [{ kind: "output_contains", text: "x" }])]);
+
+    const card = await runSweep({ corpus, model: mute });
+
+    expect(card.errored).toBe(1);
+    expect(card.failed).toBe(0);
+  });
+
   it("records the Corpus hash and model id, because a Scorecard without them cannot be compared", async () => {
     const corpus = corpusOf([answering("x", "y", [])]);
     const card = await runSweep({ corpus, model: scriptedBinding() });
@@ -154,5 +176,107 @@ describe("runSweep", () => {
     });
     expect(card.trials[0].passed).toBe(true);
     expect(card.trials[0].vacuous).toBe(true);
+  });
+});
+
+describe("runSweep spend", () => {
+  /** A binding that charges a fixed amount per Trial and reports a vendor version. */
+  const charging = (costUsd: number, version?: string): ModelBinding => ({
+    id: "priced",
+    ...(version === undefined ? {} : { reportedVersion: () => version }),
+    create: () => ({
+      invoke: async (request) => ({
+        requestId: request.requestId,
+        output: { kind: "text", text: "answer" },
+        usage: { inputTokens: 1000, outputTokens: 200, costUsd, costBasis: "priced" },
+      }),
+    }),
+  });
+
+  const cases = (n: number) =>
+    corpusOf(
+      Array.from({ length: n }, (_, i) => ({
+        id: `c${i}`,
+        tier: "l2" as const,
+        agent: "triage",
+        context: { agentId: "triage", memory: [], governancePages: [] },
+        input: [{ role: "user" as const, content: "hello" }],
+        expect: [{ kind: "output_contains" as const, text: "answer" }],
+      }))
+    );
+
+  it("totals what the Sweep spent across every Trial", async () => {
+    const card = await runSweep({ corpus: cases(3), model: charging(0.01) });
+
+    expect(card.spend).toMatchObject({ costUsd: 0.03, calls: 3, inputTokens: 3000 });
+    expect(card.skipped).toBe(0);
+  });
+
+  it("stops launching Trials once the ceiling is reached, and says so", async () => {
+    // The ceiling cannot be an exact cap — a call's cost is only knowable after it is made — so
+    // the bound is one Trial of overrun rather than the whole remaining Corpus.
+    const card = await runSweep({ corpus: cases(10), model: charging(0.01), maxSpendUsd: 0.025 });
+
+    expect(card.trials).toHaveLength(3);
+    expect(card.skipped).toBe(7);
+    expect(card.abortedReason).toMatch(/spend ceiling reached/);
+  });
+
+  it("refuses to keep going when a dollar ceiling is bounding a total it understates", async () => {
+    // An unpriced call cost real money and adds 0 to `costUsd`. Letting the Sweep continue would
+    // run the whole Corpus while reporting there was budget left.
+    const unpriceable: ModelBinding = {
+      id: "unpriceable",
+      create: () => ({
+        invoke: async (request) => ({
+          requestId: request.requestId,
+          output: { kind: "text", text: "answer" },
+          usage: { inputTokens: 1000, outputTokens: 200, costBasis: "unpriced" },
+        }),
+      }),
+    };
+
+    const card = await runSweep({ corpus: cases(5), model: unpriceable, maxSpendUsd: 100 });
+
+    expect(card.trials).toHaveLength(1);
+    expect(card.abortedReason).toMatch(/could not be priced/);
+  });
+
+  it("stops on a token ceiling, which is the only one a subscription seat can trip", async () => {
+    // A seat's marginal cost is genuinely zero, so `maxSpendUsd` never fires on one. Without a
+    // token ceiling a runaway Corpus would exhaust the operator's quota unopposed.
+    const seat: ModelBinding = {
+      id: "seat",
+      create: () => ({
+        invoke: async (request) => ({
+          requestId: request.requestId,
+          output: { kind: "text", text: "answer" },
+          usage: { inputTokens: 1000, outputTokens: 200, costBasis: "subscription" },
+        }),
+      }),
+    };
+
+    const card = await runSweep({
+      corpus: cases(10),
+      model: seat,
+      maxSpendUsd: 100,
+      maxTokens: 2500,
+    });
+
+    expect(card.trials).toHaveLength(3);
+    expect(card.abortedReason).toMatch(/token ceiling reached/);
+    expect(card.spend).toMatchObject({ costUsd: 0, subscription: 3 });
+  });
+
+  it("records the version the vendor reported, not the one that was asked for", async () => {
+    const card = await runSweep({ corpus: cases(1), model: charging(0, "sonnet-rev2") });
+
+    expect(card.modelVersion).toBe("sonnet-rev2");
+  });
+
+  it("leaves the version unset when the binding cannot observe one", async () => {
+    const card = await runSweep({ corpus: cases(1), model: charging(0) });
+
+    expect(card.modelVersion).toBeUndefined();
   });
 });

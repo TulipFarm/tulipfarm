@@ -13,6 +13,7 @@
     "@tulipfarm/kv": "workspace:*",
     "@tulipfarm/llm": "workspace:*",
     "@tulipfarm/memory": "workspace:*",
+    "@tulipfarm/model-adapter": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/platform-tools": "workspace:*",
     "@tulipfarm/run-kernel": "workspace:*",
