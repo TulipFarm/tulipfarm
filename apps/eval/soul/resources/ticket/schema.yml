@@ -1,0 +1,14 @@
+title: Ticket
+description: A customer support ticket.
+type: object
+properties:
+  ticketId:
+    type: string
+  subject:
+    type: string
+  status:
+    type: string
+    enum: [open, pending, closed]
+  owner:
+    type: string
+required: [ticketId, status]

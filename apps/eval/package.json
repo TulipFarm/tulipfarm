@@ -18,6 +18,7 @@
     "@tulipfarm/model-adapter": "workspace:*",
     "@tulipfarm/schema": "workspace:*",
     "@tulipfarm/secrets": "workspace:*",
+    "@tulipfarm/soul": "workspace:*",
     "ai": "^7.0.2"
   },
   "devDependencies": {

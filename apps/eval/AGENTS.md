@@ -31,6 +31,8 @@ Only its own Cases need updating when their observable behaviour moves.
 | `src/model.ts` | `PINNED_MODELS` and `pinnedBinding` — the real-vendor binding. The only file here that touches a credential. |
 | `src/retry.ts` | `withRetry` — transient vendor failures, retried and counted. |
 | `src/spend.ts` | `Spend` totals: tokens, dollars, and what could not be priced. |
+| `soul/` | The **Eval Soul**: the frozen fixture business every Case is measured against. Ordinary tracked files. |
+| `src/eval-soul.ts` | `loadEvalSoul` — copies the fixture to a throwaway git repo and reads it with the real `SoulLoader`; `soulContext` maps an Agent into the assembler. |
 | `src/verdict.ts` | `caseVerdict`, `scoreable` — one Case collapsed into one word. Shared so the grid and a Baseline delta can never disagree. |
 | `src/baseline.ts` | `compareToBaseline` — pure. Refuses a delta across two Corpora or two models. |
 | `src/artifact.ts` | `ScorecardArtifact` read/write, `harnessVersion`, `baselinePath`. The durable form. |
@@ -44,6 +46,23 @@ Only its own Cases need updating when their observable behaviour moves.
 
 ## Rules
 
+- **The Eval Soul is loaded, never constructed.** `loadEvalSoul` runs the real `SoulLoader` and the
+  real `buildSoulCatalogue` over `apps/eval/soul/`. An eval that hand-built the catalogue would be
+  measuring its own fixture code and would keep passing after the loader broke.
+- **`soulContext` mirrors production's mapping** (`apps/api/src/chat/system-prompt.ts`): the
+  AGENT.md **body** is `personality`, not `customInstructions`. A different mapping here would
+  measure a prompt no real turn ever sees.
+- **A Case names an Agent; it may not restate one.** The Corpus refuses any `context` field in
+  `SOUL_OWNED_CONTEXT_KEYS` — which is exactly the key set `soulContext` returns, derived rather
+  than restated. A Case's `context` is spread *over* the Soul's, so a field supplied but not
+  refused is a field the Case silently owns; deriving the list is what stops that drift.
+  A Case that restated them would drift from the fixture and go on passing after the Soul stopped
+  supplying them — the regression naming an Agent exists to catch. A Case's `context` is per-turn
+  material only: memory, tagged Resources, the Tool index, user-authored `customInstructions`.
+- **The fixture is copied to a temp git repo per load,** never read where it sits: it cannot carry
+  its own `.git` inside this repository, and L3's Soul writes must not dirty the tracked fixture.
+- **The Eval Soul's hash is folded into `corpusHash`.** A fixture edit changes half of what a Case
+  measures, so it must invalidate every Baseline exactly as a Case edit does.
 - **The assembler must stay in the path.** `AgentLoopInput.messages` is *already assembled*, so a
   runner that fed hand-written prompts to the loop would never catch a Context-assembly regression.
   `runTrial` calls `assembleSystemPrompt` itself; `prompt_contains` is the expectation that proves it.

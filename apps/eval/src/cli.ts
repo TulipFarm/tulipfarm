@@ -3,6 +3,7 @@ import { assertKnownFlags, flag, positive, present } from "./args.ts";
 import { harnessVersion } from "./artifact.ts";
 import { resolveBindings } from "./bindings.ts";
 import { loadCorpus } from "./corpus.ts";
+import { loadEvalSoul } from "./eval-soul.ts";
 import { runMatrix } from "./matrix.ts";
 import { PINNED_MODELS } from "./model.ts";
 import { progressReporter } from "./progress.ts";
@@ -52,7 +53,7 @@ async function main(): Promise<number> {
   assertKnownFlags(argv);
 
   const dir = resolve(flag(argv, "--corpus") ?? resolve(__dirname, "..", "corpus"));
-  const corpus = await loadCorpus(dir);
+  const corpus = await loadCorpus(dir, await loadEvalSoul());
 
   const caseFilter = flag(argv, "--case");
   const modelName = flag(argv, "--model");

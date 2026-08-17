@@ -1,9 +1,19 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { EvalCase } from "./case.ts";
 import { CorpusError, corpusHash, loadCorpus } from "./corpus.ts";
+import { type EvalSoul, loadEvalSoul, SOUL_OWNED_CONTEXT_KEYS } from "./eval-soul.ts";
+
+let soul: EvalSoul;
+beforeAll(async () => {
+  soul = await loadEvalSoul();
+});
+
+afterAll(() => soul.dispose());
+
+const load = (dir: string) => loadCorpus(dir, soul);
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -30,79 +40,83 @@ const valid = (id: string): EvalCase => ({
 
 describe("corpusHash", () => {
   it("is stable across key order and whitespace", () => {
-    const a = corpusHash([valid("one")]);
+    const a = corpusHash([valid("one")], "soul");
     const reordered = { ...valid("one") };
     const shuffled = Object.fromEntries(Object.entries(reordered).reverse()) as unknown as EvalCase;
-    expect(corpusHash([shuffled])).toBe(a);
+    expect(corpusHash([shuffled], "soul")).toBe(a);
   });
 
   it("changes when a Case changes semantically", () => {
-    const a = corpusHash([valid("one")]);
+    const a = corpusHash([valid("one")], "soul");
     const changed: EvalCase = {
       ...valid("one"),
       expect: [{ kind: "loop_status", status: "failed" }],
     };
-    expect(corpusHash([changed])).not.toBe(a);
+    expect(corpusHash([changed], "soul")).not.toBe(a);
   });
 
   it("changes when a Case is added", () => {
-    expect(corpusHash([valid("one"), valid("two")])).not.toBe(corpusHash([valid("one")]));
+    expect(corpusHash([valid("one"), valid("two")], "soul")).not.toBe(
+      corpusHash([valid("one")], "soul")
+    );
   });
 
   it("does not change when Cases are listed in a different order", () => {
-    expect(corpusHash([valid("two"), valid("one")])).toBe(corpusHash([valid("one"), valid("two")]));
+    expect(corpusHash([valid("two"), valid("one")], "soul")).toBe(
+      corpusHash([valid("one"), valid("two")], "soul")
+    );
   });
 });
 
 describe("loadCorpus", () => {
   it("loads every Case file and sorts them by id", async () => {
     const dir = corpusDir({ "b.json": valid("beta"), "a.json": valid("alpha") });
-    const corpus = await loadCorpus(dir);
+    const corpus = await load(dir);
     expect(corpus.cases.map((c) => c.id)).toEqual(["alpha", "beta"]);
     expect(corpus.hash).toHaveLength(64);
   });
 
   it("ignores files that are not .json", async () => {
     const dir = corpusDir({ "a.json": valid("alpha"), "README.md": "not a case" });
-    expect((await loadCorpus(dir)).cases).toHaveLength(1);
+    expect((await load(dir)).cases).toHaveLength(1);
   });
 
   it("names the offending file when JSON is malformed", async () => {
     const dir = corpusDir({ "broken.json": "{ not json" });
-    await expect(loadCorpus(dir)).rejects.toThrow(CorpusError);
-    await expect(loadCorpus(dir)).rejects.toThrow(/broken\.json/);
+    await expect(load(dir)).rejects.toThrow(CorpusError);
+    await expect(load(dir)).rejects.toThrow(/broken\.json/);
   });
 
   it("rejects a Case missing a required field, naming the field", async () => {
     const { agent: _agent, ...noAgent } = valid("alpha");
     const dir = corpusDir({ "a.json": noAgent });
-    await expect(loadCorpus(dir)).rejects.toThrow(/agent/);
+    await expect(load(dir)).rejects.toThrow(/agent/);
   });
 
   it("rejects a duplicate Case id, because a Scorecard keys on it", async () => {
     const dir = corpusDir({ "a.json": valid("same"), "b.json": valid("same") });
-    await expect(loadCorpus(dir)).rejects.toThrow(/same/);
+    await expect(load(dir)).rejects.toThrow(/same/);
   });
 
   it("rejects an unknown expectation kind rather than silently passing it", async () => {
     const bad = { ...valid("alpha"), expect: [{ kind: "definitely_not_real" }] };
     const dir = corpusDir({ "a.json": bad });
-    await expect(loadCorpus(dir)).rejects.toThrow(/definitely_not_real/);
+    await expect(load(dir)).rejects.toThrow(/definitely_not_real/);
   });
 
   it("rejects a tier it cannot run", async () => {
     const dir = corpusDir({ "a.json": { ...valid("alpha"), tier: "l3" } });
-    await expect(loadCorpus(dir)).rejects.toThrow(/l3/);
+    await expect(load(dir)).rejects.toThrow(/l3/);
   });
 
   it("fails loudly on an empty directory rather than reporting a vacuous pass", async () => {
     const dir = corpusDir({});
-    await expect(loadCorpus(dir)).rejects.toThrow(/no Eval Cases/);
+    await expect(load(dir)).rejects.toThrow(/no Eval Cases/);
   });
 
   it("rejects a Case that expects nothing, because it would always pass", async () => {
     const dir = corpusDir({ "a.json": { ...valid("alpha"), expect: [] } });
-    await expect(loadCorpus(dir)).rejects.toThrow(/expects nothing/);
+    await expect(load(dir)).rejects.toThrow(/expects nothing/);
   });
 
   it("rejects an expectation missing the field its kind needs", async () => {
@@ -116,7 +130,7 @@ describe("loadCorpus", () => {
     ];
     for (const expectation of cases) {
       const dir = corpusDir({ "a.json": { ...valid("alpha"), expect: [expectation] } });
-      await expect(loadCorpus(dir)).rejects.toThrow(new RegExp(String(expectation.kind)));
+      await expect(load(dir)).rejects.toThrow(new RegExp(String(expectation.kind)));
     }
   });
 
@@ -131,7 +145,7 @@ describe("loadCorpus", () => {
         ],
       },
     });
-    await expect(loadCorpus(dir)).resolves.toBeDefined();
+    await expect(load(dir)).resolves.toBeDefined();
   });
 });
 
@@ -148,7 +162,7 @@ describe("loadCorpus grounding", () => {
   it("refuses text the model was never given, which it could only produce by guessing", async () => {
     const dir = corpusDir({ "a.json": withExpect([{ kind: "output_contains", text: "9am" }]) });
 
-    await expect(loadCorpus(dir)).rejects.toThrow(/appears nowhere in the Case's context/);
+    await expect(load(dir)).rejects.toThrow(/appears nowhere in the Eval Soul/);
   });
 
   it("does not let the script ground an expectation", async () => {
@@ -161,7 +175,7 @@ describe("loadCorpus grounding", () => {
       }),
     });
 
-    await expect(loadCorpus(dir)).rejects.toThrow(CorpusError);
+    await expect(load(dir)).rejects.toThrow(CorpusError);
   });
 
   it("accepts text the Context gave the model", async () => {
@@ -171,7 +185,7 @@ describe("loadCorpus grounding", () => {
       }),
     });
 
-    await expect(loadCorpus(dir)).resolves.toBeDefined();
+    await expect(load(dir)).resolves.toBeDefined();
   });
 
   it("accepts text a Tool result gave the model", async () => {
@@ -181,7 +195,7 @@ describe("loadCorpus grounding", () => {
       }),
     });
 
-    await expect(loadCorpus(dir)).resolves.toBeDefined();
+    await expect(load(dir)).resolves.toBeDefined();
   });
 
   it("checks a pattern against what was given, not only a literal", async () => {
@@ -194,8 +208,8 @@ describe("loadCorpus grounding", () => {
       "bare.json": withExpect([{ kind: "output_matches", pattern: "9\\s*am" }]),
     });
 
-    await expect(loadCorpus(dir)).resolves.toBeDefined();
-    await expect(loadCorpus(bare)).rejects.toThrow(CorpusError);
+    await expect(load(dir)).resolves.toBeDefined();
+    await expect(load(bare)).rejects.toThrow(CorpusError);
   });
 
   it("allows a deliberate ungrounded expectation when the author states why", async () => {
@@ -211,7 +225,7 @@ describe("loadCorpus grounding", () => {
       ]),
     });
 
-    await expect(loadCorpus(dir)).resolves.toBeDefined();
+    await expect(load(dir)).resolves.toBeDefined();
   });
 
   it("does not accept a blank reason as a reason", async () => {
@@ -219,7 +233,7 @@ describe("loadCorpus grounding", () => {
       "a.json": withExpect([{ kind: "output_contains", text: "9am", ungrounded: "" }]),
     });
 
-    await expect(loadCorpus(dir)).rejects.toThrow(CorpusError);
+    await expect(load(dir)).rejects.toThrow(CorpusError);
   });
 
   it("grounds an Expectation in a fact the Case capitalised differently", async () => {
@@ -230,13 +244,48 @@ describe("loadCorpus grounding", () => {
         id: "cased",
         tier: "l2",
         agent: "support",
-        context: { agentId: "support", memory: [{ key: "h", value: "Opens at 9AM." }] },
+        context: { memory: [{ key: "h", value: "Opens at 9AM." }] },
         input: [{ role: "user", content: "when?" }],
         script: [{ kind: "text", text: "9am" }],
         expect: [{ kind: "output_contains", text: "9am" }],
       },
     });
 
-    await expect(loadCorpus(dir)).resolves.toBeDefined();
+    await expect(load(dir)).resolves.toBeDefined();
+  });
+});
+
+describe("loadCorpus against the Eval Soul", () => {
+  it("refuses a Case naming an Agent the Eval Soul does not define", async () => {
+    const dir = corpusDir({ "a.json": { ...valid("a"), agent: "ghost" } });
+
+    await expect(load(dir)).rejects.toThrow(/defines no Agent "ghost"/);
+  });
+
+  it("refuses a Case that restates what the Eval Soul owns", async () => {
+    for (const field of SOUL_OWNED_CONTEXT_KEYS) {
+      const dir = corpusDir({
+        "a.json": { ...valid("a"), context: { memory: [], governancePages: [], [field]: "x" } },
+      });
+
+      await expect(load(dir)).rejects.toThrow(new RegExp(`context.${field}`));
+    }
+  });
+
+  it("grounds an Expectation in a fact only the Eval Soul supplies", async () => {
+    const dir = corpusDir({
+      "a.json": {
+        ...valid("a"),
+        expect: [{ kind: "output_contains", text: "Never guess a status" }],
+      },
+    });
+
+    await expect(load(dir)).resolves.toBeDefined();
+  });
+
+  it("moves the Corpus version when the Eval Soul changes, so no Baseline survives it", () => {
+    const cases = [valid("one")];
+
+    expect(corpusHash(cases, "soul-a")).not.toBe(corpusHash(cases, "soul-b"));
   });
 });

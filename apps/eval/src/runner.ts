@@ -11,6 +11,7 @@ import {
 } from "@tulipfarm/agent-runtime";
 import { type EvalCase, LOOP_LIMITS } from "./case.ts";
 import type { Corpus } from "./corpus.ts";
+import { type EvalSoul, soulContext } from "./eval-soul.ts";
 import type { SweepProgress } from "./progress.ts";
 import { DEFAULT_RETRY, type RetryPolicy, withRetry } from "./retry.ts";
 import { type ExpectationResult, type Observation, scoreCase } from "./scorer.ts";
@@ -169,6 +170,7 @@ function toolDispatcher(evalCase: EvalCase) {
 
 async function runTrial(
   evalCase: EvalCase,
+  soul: EvalSoul,
   binding: ModelBinding,
   trial: number,
   retryPolicy: RetryPolicy
@@ -177,9 +179,14 @@ async function runTrial(
   const tools = toolDispatcher(evalCase);
   let lastOutput: ModelOutput | undefined;
 
-  // The real assembler runs here. Without it the tier would measure the Tool loop against a
-  // hand-written prompt and would never notice a Context-assembly regression.
-  const systemPrompt = assembleSystemPrompt(evalCase.context);
+  // The real assembler runs here, over the real Soul. Without either, the tier would measure the
+  // Tool loop against a hand-written prompt and would never notice a Context-assembly regression.
+  // The Soul goes first: what an Agent is belongs to the fixture, and a Case may only add the
+  // per-turn material a real turn would carry — memory, tagged Resources, the Tool index.
+  const systemPrompt = assembleSystemPrompt({
+    ...soulContext(soul, evalCase.agent),
+    ...evalCase.context,
+  });
 
   // Created once per Trial: a binding may hold per-Case state (the scripted binding holds the
   // script cursor), so rebuilding it per call would replay the first response forever.
@@ -377,7 +384,13 @@ export async function runSweep(options: SweepOptions): Promise<Scorecard> {
         index: trials.length + 1,
         planned,
       });
-      const result = await runTrial(evalCase, options.model, trial, retryPolicy);
+      const result = await runTrial(
+        evalCase,
+        options.corpus.soul,
+        options.model,
+        trial,
+        retryPolicy
+      );
       report({ kind: "trial-end", result });
       trials.push(result);
       spend = mergeSpend(spend, result.spend);

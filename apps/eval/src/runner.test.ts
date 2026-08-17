@@ -1,11 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { EvalCase } from "./case.ts";
 import { corpusHash } from "./corpus.ts";
+import { type EvalSoul, loadEvalSoul } from "./eval-soul.ts";
 import type { ModelBinding } from "./runner.ts";
 import { runSweep } from "./runner.ts";
 import { scriptedBinding } from "./scripted.ts";
 
-const corpusOf = (cases: EvalCase[]) => ({ cases, hash: corpusHash(cases) });
+let soul: EvalSoul;
+beforeAll(async () => {
+  soul = await loadEvalSoul();
+});
+
+afterAll(() => soul.dispose());
+
+const corpusOf = (cases: EvalCase[]) => ({ cases, hash: corpusHash(cases, soul.hash), soul });
 
 const answering = (id: string, text: string, expectations: EvalCase["expect"]): EvalCase => ({
   id,

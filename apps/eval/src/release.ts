@@ -1,12 +1,5 @@
-import {
-  ArtifactError,
-  baselinePath,
-  buildArtifact,
-  isDirty,
-  readArtifact,
-  writeArtifact,
-} from "./artifact.ts";
-import { BaselineMismatchError, compareToBaseline } from "./baseline.ts";
+import { baselinePath, buildArtifact, isDirty, readArtifact, writeArtifact } from "./artifact.ts";
+import { compareToBaseline } from "./baseline.ts";
 import type { Scorecard } from "./runner.ts";
 import { renderDelta } from "./scorecard.ts";
 import { caseIdsOf } from "./verdict.ts";

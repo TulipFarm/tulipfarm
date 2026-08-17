@@ -9,12 +9,12 @@ repo, not a fixture outside it.
 
 **Blocked by:** 03
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] A frozen fixture Soul is version controlled, outside the runtime soul repo, and initialised as
+- [x] A frozen fixture Soul is version controlled, outside the runtime soul repo, and initialised as
       a real git repository — the Soul writer requires one, and L3 will need it
-- [ ] It defines its own Agents, Skills, Resource types, Routines and guardrails
-- [ ] The real Soul loader reads it; the eval does not construct the catalogue by hand
-- [ ] An Eval Case names an Agent in the Eval Soul
-- [ ] A change to the fixture changes the Corpus version, so a fixture edit cannot silently
+- [x] It defines its own Agents, Skills, Resource types, Routines and guardrails
+- [x] The real Soul loader reads it; the eval does not construct the catalogue by hand
+- [x] An Eval Case names an Agent in the Eval Soul
+- [x] A change to the fixture changes the Corpus version, so a fixture edit cannot silently
       invalidate a comparison

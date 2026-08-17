@@ -1,0 +1,11 @@
+input:
+  - guard: prompt_injection
+    sensitivity: high
+tool-call:
+  - guard: tool_blocklist
+    block:
+      - issue_refund
+output:
+  - guard: content_filter
+    patterns:
+      - credit_card

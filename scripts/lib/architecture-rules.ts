@@ -291,7 +291,7 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
     // a `ProviderEntry` to describe the model and a `SecretsService` to resolve its key. Building
     // the client any other way would diverge from production in the one layer the eval must hold
     // constant.
-    eval: ["agent-runtime", "turn-executor", "model-adapter", "llm", "schema", "secrets"],
+    eval: ["agent-runtime", "turn-executor", "model-adapter", "llm", "schema", "secrets", "soul"],
   },
   // Legacy v1 edges that still exist during cutover. Each is a target package
   // importing a not-yet-replaced legacy package; removed when its owner passes

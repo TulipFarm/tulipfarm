@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { EvalCase } from "./case.ts";
 import type { Corpus } from "./corpus.ts";
 import { corpusHash } from "./corpus.ts";
+import { type EvalSoul, loadEvalSoul } from "./eval-soul.ts";
 import { runMatrix } from "./matrix.ts";
 import type { ModelBinding, Scorecard, SweepOptions, TrialResult } from "./runner.ts";
 import { NO_SPEND } from "./spend.ts";
@@ -15,7 +16,18 @@ const evalCase = (id: string): EvalCase => ({
   expect: [{ kind: "loop_status", status: "completed" }],
 });
 
-const corpusOf = (cases: EvalCase[]): Corpus => ({ cases, hash: corpusHash(cases) });
+let soul: EvalSoul;
+beforeAll(async () => {
+  soul = await loadEvalSoul();
+});
+
+afterAll(() => soul.dispose());
+
+const corpusOf = (cases: EvalCase[]): Corpus => ({
+  cases,
+  hash: corpusHash(cases, soul.hash),
+  soul,
+});
 
 const binding = (id: string): ModelBinding => ({
   id,

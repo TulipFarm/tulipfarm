@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
+import type { AssembleContext } from "@tulipfarm/agent-runtime";
 import type { EvalCase } from "./case.ts";
+import { type EvalSoul, SOUL_OWNED_CONTEXT_KEYS, soulContext } from "./eval-soul.ts";
 import { OUTPUT_FLAGS } from "./scorer.ts";
 
 export class CorpusError extends Error {
@@ -13,9 +15,20 @@ export class CorpusError extends Error {
 
 export interface Corpus {
   readonly cases: readonly EvalCase[];
-  /** sha256 over the canonical form of every Case. Part of Sweep identity. */
+  /** sha256 over the canonical form of every Case *and* the Eval Soul. Part of Sweep identity. */
   readonly hash: string;
+  /** The Eval Soul every Case in this Corpus is measured against. */
+  readonly soul: EvalSoul;
 }
+
+/**
+ * Context fields the Eval Soul owns, which therefore no Case may set.
+ *
+ * Without this a Case could quietly restate its Agent's identity and drift from the fixture, and
+ * the Sweep would go on passing after the Soul loader stopped supplying it — which is exactly the
+ * regression naming an Agent was meant to catch.
+ */
+const SOUL_OWNED = SOUL_OWNED_CONTEXT_KEYS;
 
 /**
  * Required fields per Expectation kind.
@@ -63,10 +76,20 @@ function canonical(value: unknown): string {
   return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonical(v)}`).join(",")}}`;
 }
 
-/** Hash is order-independent: Cases are sorted by id first, so file naming cannot move it. */
-export function corpusHash(cases: readonly EvalCase[]): string {
+/**
+ * Hash is order-independent: Cases are sorted by id first, so file naming cannot move it.
+ *
+ * The Eval Soul's hash is folded in because the Soul is half of what a Case measures — it supplies
+ * the Agent, the business and the catalogue. A fixture edit that left this hash alone would let a
+ * Sweep be compared against a Baseline that measured a different Context entirely.
+ */
+export function corpusHash(cases: readonly EvalCase[], soulHash: string): string {
   const sorted = [...cases].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-  return createHash("sha256").update(canonical(sorted)).digest("hex");
+  return createHash("sha256")
+    .update(canonical(sorted))
+    .update("\0soul\0")
+    .update(soulHash)
+    .digest("hex");
 }
 
 function require(condition: boolean, message: string): asserts condition {
@@ -102,9 +125,7 @@ function validate(raw: unknown, file: string): EvalCase {
       ), `${file}: expectation "${kind}" needs a ${type === "strings" ? "non-empty string array" : type} field "${field}"`);
     }
   }
-  const evalCase = raw as EvalCase;
-  requireGrounded(evalCase, file);
-  return evalCase;
+  return raw as EvalCase;
 }
 
 /**
@@ -113,7 +134,7 @@ function validate(raw: unknown, file: string): EvalCase {
  * Deliberately excludes `script`. The scripted binding's output is the fake model's own words, and
  * an expectation grounded only in those is checking the script against itself.
  */
-function givenToModel(c: EvalCase): string {
+function givenToModel(c: EvalCase, fromSoul: Partial<AssembleContext>): string {
   const found: string[] = [];
   const walk = (value: unknown): void => {
     if (typeof value === "string") found.push(value);
@@ -121,6 +142,7 @@ function givenToModel(c: EvalCase): string {
     else if (value !== null && typeof value === "object")
       for (const v of Object.values(value)) walk(v);
   };
+  walk(fromSoul);
   walk(c.context);
   walk(c.input);
   walk(c.toolResults ?? []);
@@ -138,8 +160,8 @@ function givenToModel(c: EvalCase): string {
  * the Context — so this bans the *silent* ones, not the deliberate ones. Stating a reason is the
  * whole point: an author who cannot write one has found their own bug.
  */
-function requireGrounded(c: EvalCase, file: string): void {
-  const given = givenToModel(c);
+function requireGrounded(c: EvalCase, file: string, fromSoul: Partial<AssembleContext>): void {
+  const given = givenToModel(c, fromSoul);
   for (const e of c.expect) {
     if (e.kind !== "output_contains" && e.kind !== "output_matches") continue;
     if (typeof e.ungrounded === "string" && e.ungrounded.length > 0) continue;
@@ -157,7 +179,8 @@ function requireGrounded(c: EvalCase, file: string): void {
       }
     }
     require(grounded, `${file}: expectation "${e.kind}" looks for ${JSON.stringify(needle)}, which appears nowhere ` +
-      `in the Case's context, input or tool results — a real model could only produce it by ` +
+      `in the Eval Soul, the Case's context, input or tool results — a real model could only ` +
+      `produce it by ` +
       `guessing. Put the fact where the model is given it, or set "ungrounded" to the reason ` +
       `this is about wording or format rather than recall.`);
   }
@@ -183,7 +206,7 @@ function fieldOk(value: unknown, type: "string" | "number" | "strings" | "any"):
  * Throws rather than skipping on any malformed Case: a Corpus that quietly drops a Case reports a
  * pass rate over a smaller denominator than the maintainer believes they are reading.
  */
-export async function loadCorpus(dir: string): Promise<Corpus> {
+export async function loadCorpus(dir: string, soul: EvalSoul): Promise<Corpus> {
   let names: string[];
   try {
     names = (await readdir(dir)).filter((n) => n.endsWith(".json")).sort();
@@ -202,6 +225,18 @@ export async function loadCorpus(dir: string): Promise<Corpus> {
       throw new CorpusError(`${name}: invalid JSON — ${(cause as Error).message}`);
     }
     const evalCase = validate(parsed, name);
+    for (const field of SOUL_OWNED) {
+      require((evalCase.context as unknown as Record<string, unknown>)[field] ===
+        undefined, `${name}: "context.${field}" is the Eval Soul's to set, not the Case's. Name the Agent ` +
+        `with "agent" and edit apps/eval/soul instead.`);
+    }
+    let fromSoul: Partial<AssembleContext>;
+    try {
+      fromSoul = soulContext(soul, evalCase.agent);
+    } catch (cause) {
+      throw new CorpusError(`${name}: ${(cause as Error).message}`);
+    }
+    requireGrounded(evalCase, name, fromSoul);
     const previous = seen.get(evalCase.id);
     if (previous !== undefined) {
       throw new CorpusError(`duplicate Case id "${evalCase.id}" in ${previous} and ${name}`);
@@ -212,5 +247,5 @@ export async function loadCorpus(dir: string): Promise<Corpus> {
 
   if (cases.length === 0) throw new CorpusError(`no Eval Cases found in ${dir}`);
   cases.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-  return { cases, hash: corpusHash(cases) };
+  return { cases, hash: corpusHash(cases, soul.hash), soul };
 }

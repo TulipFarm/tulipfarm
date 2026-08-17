@@ -3,7 +3,6 @@
   "tier": "l2",
   "agent": "support",
   "context": {
-    "agentId": "support",
     "customInstructions": "Answer opening-hours questions directly. Do not call a tool for them.",
     "memory": [
       {
@@ -11,11 +10,7 @@
         "value": "Opens at 9am on Saturdays."
       }
     ],
-    "governancePages": [],
-    "business": {
-      "name": "Tulip Supply Co",
-      "description": "Wholesale bulbs."
-    }
+    "governancePages": []
   },
   "input": [
     {
@@ -54,8 +49,12 @@
       "text": "Opens at 9am on Saturdays."
     },
     {
+      "kind": "prompt_contains",
+      "text": "Wholesale flower bulbs, sold to garden centres."
+    },
+    {
       "kind": "prompt_omits",
-      "text": "agentId: triage"
+      "text": "Never guess a status."
     },
     {
       "kind": "tool_not_called",

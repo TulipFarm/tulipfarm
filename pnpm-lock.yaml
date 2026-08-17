@@ -358,6 +358,9 @@ importers:
       '@tulipfarm/secrets':
         specifier: workspace:*
         version: link:../../packages/secrets
+      '@tulipfarm/soul':
+        specifier: workspace:*
+        version: link:../../packages/soul
       ai:
         specifier: ^7.0.2
         version: 7.0.2(zod@4.4.3)
