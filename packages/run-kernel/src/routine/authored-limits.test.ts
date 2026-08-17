@@ -3,10 +3,10 @@ import { LimitError } from "../limits";
 import { mapAuthoredLimits } from "./authored-limits";
 
 describe("mapAuthoredLimits", () => {
-  it("renames the three keys the runtime spells differently", () => {
-    expect(mapAuthoredLimits({ wallClockMs: 60_000, activeMs: 30_000 })).toEqual({
+  it("renames the two keys the runtime spells differently", () => {
+    expect(mapAuthoredLimits({ wallClockMs: 60_000, costUsd: 1 })).toEqual({
       wallTimeMs: 60_000,
-      activeTimeMs: 30_000,
+      costMicros: 1_000_000,
     });
   });
 
@@ -20,16 +20,13 @@ describe("mapAuthoredLimits", () => {
     expect(mapAuthoredLimits({ costUsd: 0.0000001 })).toEqual({ costMicros: 1 });
   });
 
-  it("passes the eight identically spelled keys through unchanged", () => {
+  it("passes the five identically spelled keys through unchanged", () => {
     const authored = {
       tokens: 1_000,
       iterations: 5,
       fanOut: 3,
       parallelism: 2,
-      artifactBytes: 4_096,
-      resultRows: 100,
-      networkBytes: 8_192,
-      sideEffects: 0,
+      retries: 0,
     };
     expect(mapAuthoredLimits(authored)).toEqual(authored);
   });
@@ -41,6 +38,8 @@ describe("mapAuthoredLimits", () => {
   it("refuses a key it cannot map instead of dropping it", () => {
     expect(() => mapAuthoredLimits({ wallTimeMs: 60_000 })).toThrow(LimitError);
     expect(() => mapAuthoredLimits({ wallTimeMs: 60_000 })).toThrow("invalid_limit:wallTimeMs");
+    // A quantity nothing meters is refused rather than accepted and left inert (L3-10).
+    expect(() => mapAuthoredLimits({ networkBytes: 5_000 })).toThrow("invalid_limit:networkBytes");
   });
 
   it("refuses values the runtime cannot enforce", () => {

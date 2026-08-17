@@ -190,7 +190,6 @@ describe("approval routes — durable tool_call kind", () => {
         effectiveSubject: { kind: "user", id: subjectId },
         guardrailContextRef: "guardrails:1",
       },
-      bounds: { wallTimeMs: 60_000, activeTimeMs: 60_000, attempts: 1, sideEffects: 8 },
       states: [
         {
           key: "invoke",
@@ -206,6 +205,13 @@ describe("approval routes — durable tool_call kind", () => {
       toolCallId: "call-1",
       toolName: "record_delete",
       args: { id: "record-1" },
+      requesterPrincipalId: `user:${subjectId}`,
+      demand: {
+        demandedBy: "guardrail_rule",
+        guardrailRevision: "gr-1",
+        reason: "approval_required",
+        ruleId: "rule-1",
+      },
     });
     if (decision.status !== "pending") throw new Error("expected a pending approval");
 
@@ -366,7 +372,6 @@ describe("approval routes — routine_state kind, decided by role", () => {
         effectiveSubject: { kind: "user", id: "author" },
         guardrailContextRef: "guardrails:1",
       },
-      bounds: { wallTimeMs: 60_000, activeTimeMs: 60_000, attempts: 1, sideEffects: 8 },
       states: [
         {
           key: "Approve",

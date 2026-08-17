@@ -689,6 +689,13 @@ describe("/api/v1/internal/channels", () => {
         toolCallId: "call-1",
         toolName: "record_delete",
         args: { id: "record-1" },
+        requesterPrincipalId: "user:requester-1",
+        demand: {
+          demandedBy: "guardrail_rule",
+          guardrailRevision: "gr-1",
+          reason: "approval_required",
+          ruleId: "rule-1",
+        },
       });
       if (decision.status !== "pending") throw new Error("expected a pending approval");
 
@@ -732,7 +739,6 @@ describe("/api/v1/internal/channels", () => {
           effectiveSubject: { kind: "user", id: slackUser._id },
           guardrailContextRef: "guardrails:1",
         },
-        bounds: { wallTimeMs: 60_000, activeTimeMs: 60_000, attempts: 1, sideEffects: 8 },
         states: [
           {
             key: "invoke",
@@ -747,6 +753,13 @@ describe("/api/v1/internal/channels", () => {
         toolCallId: "call-1",
         toolName: "record_delete",
         args: { id: "record-1" },
+        requesterPrincipalId: "user:requester-1",
+        demand: {
+          demandedBy: "guardrail_rule",
+          guardrailRevision: "gr-1",
+          reason: "approval_required",
+          ruleId: "rule-1",
+        },
       });
       if (decision.status !== "pending") throw new Error("expected a pending approval");
       await toolApprovals.registerWait({

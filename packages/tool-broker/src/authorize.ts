@@ -4,6 +4,7 @@ import {
   type DlpRule,
   decideEffectivePermission,
   evaluateGuardrail,
+  type GuardrailDecisionReason,
   type GuardrailRule,
 } from "@tulipfarm/authz";
 import type { PublishedToolContract } from "./contract";
@@ -32,9 +33,21 @@ export type ToolAuthorizationDenialReason =
   | "destination_denied"
   | "missing_guardrail_revision";
 
+/**
+ * Why this policy evaluation demanded a human. Carried out of the decision so the approval a
+ * caller then creates can be bound to the evaluation that caused it, rather than to the bare fact
+ * that something did (I-13).
+ */
+export interface ApprovalDemandEvidence {
+  readonly requiredBy: "guardrail_rule" | "sandbox_contract";
+  readonly reason: GuardrailDecisionReason | "sandbox_mutating_adapter";
+  /** Id of the Guardrail rule whose `require_approval` effect decided; absent for the contract. */
+  readonly ruleId?: string;
+}
+
 export type ToolPolicyOutcome =
   | { readonly outcome: "authorized" }
-  | { readonly outcome: "awaiting_approval" }
+  | { readonly outcome: "awaiting_approval"; readonly demand?: ApprovalDemandEvidence }
   | { readonly outcome: "denied"; readonly reason: ToolAuthorizationDenialReason };
 
 function protectedRequests(intent: ToolIntent, contract: PublishedToolContract) {
@@ -74,7 +87,10 @@ export function authorizeToolIntent(
 
   // A sandbox script may perform an opaque provider mutation. Its source and exact intent must be
   // approved even when a broader Guardrail would normally allow unattended low-risk execution.
-  let approvalRequired = contract.adapter.kind === "sandbox" && contract.mutating;
+  let demand: ApprovalDemandEvidence | undefined =
+    contract.adapter.kind === "sandbox" && contract.mutating
+      ? { requiredBy: "sandbox_contract", reason: "sandbox_mutating_adapter" }
+      : undefined;
   for (const request of protectedRequests(intent, contract)) {
     const authz = decideEffectivePermission(context.authorityLayers, request, context.now);
     if (!authz.allowed) return { outcome: "denied", reason: "authorization_denied" };
@@ -88,7 +104,15 @@ export function authorizeToolIntent(
     if (guardrail.effect === "deny") {
       return { outcome: "denied", reason: "guardrail_denied" };
     }
-    approvalRequired ||= guardrail.effect === "require_approval";
+    // The first rule that demands a human is the one the approver is shown; a later rule saying
+    // the same thing adds no evidence, and overwriting would attribute the ask to the wrong rule.
+    if (guardrail.effect === "require_approval" && demand === undefined) {
+      demand = {
+        requiredBy: "guardrail_rule",
+        reason: guardrail.reason,
+        ...(guardrail.ruleId === undefined ? {} : { ruleId: guardrail.ruleId }),
+      };
+    }
   }
 
   const dlp = checkDlpBoundary(context.dlpRules, {
@@ -98,5 +122,7 @@ export function authorizeToolIntent(
     secretDetected: context.secretDetected,
   });
   if (dlp.effect === "deny") return { outcome: "denied", reason: "dlp_denied" };
-  return approvalRequired ? { outcome: "awaiting_approval" } : { outcome: "authorized" };
+  return demand === undefined
+    ? { outcome: "authorized" }
+    : { outcome: "awaiting_approval", demand };
 }

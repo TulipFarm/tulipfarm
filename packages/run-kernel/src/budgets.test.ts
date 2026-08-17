@@ -69,7 +69,7 @@ describe("RunBudgetManager", () => {
     const store = new FakeBudgetStore();
     const resolved = resolveLimits([
       { scope: "deployment", limits: { tokens: 1_000 } },
-      { scope: "agent", limits: { tokens: 100, sideEffects: 2 } },
+      { scope: "agent", limits: { tokens: 100, fanOut: 2 } },
     ]);
 
     await manager(store).open({
@@ -80,7 +80,7 @@ describe("RunBudgetManager", () => {
     });
 
     expect(store.budgets.get(`${BUSINESS_ID}:${RUN_ID}:tokens`)?.limit).toBe(100);
-    expect(store.budgets.get(`${BUSINESS_ID}:${RUN_ID}:sideEffects`)?.limit).toBe(2);
+    expect(store.budgets.get(`${BUSINESS_ID}:${RUN_ID}:fanOut`)?.limit).toBe(2);
   });
 
   it("allows consumption up to the ceiling and reports remaining budget", async () => {
@@ -149,7 +149,7 @@ describe("RunBudgetManager", () => {
     const result = await budgets.consume({
       businessId: BUSINESS_ID,
       runId: RUN_ID,
-      key: "networkBytes",
+      key: "costMicros",
       amount: 4_096,
     });
 

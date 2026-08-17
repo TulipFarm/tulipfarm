@@ -32,10 +32,12 @@ typed outputs, Artifacts, limits, budgets, and concurrency.
   target admission (per Run, no expiry); `routine/concurrency-lease.ts` is per-State
   `concurrencyKey` exclusion (per State occurrence, expiry-bounded so a crash cannot wedge a key),
   with a durable, jittered, bounded backoff budget for contenders.
-- Authored `limits` reach `LimitSet` only through `routine/authored-limits.ts`; three keys are
+- Authored `limits` reach `LimitSet` only through `routine/authored-limits.ts`; two keys are
   renamed and `costUsd` is converted to micro-USD. Never cast an authored block to `LimitSet`.
-- `routine/limit-enforcement.ts` is the only place authored limits become enforcement: structural
-  keys narrow `CompiledState.bounds` at compile time, metered keys reach the Run budget ledger at
-  Routine scope. Never open a second ceiling on a quantity `bounds` or the ledger already bounds.
+- `routine/limit-enforcement.ts` is the only place authored limits become enforcement, and every
+  `LIMIT_KEYS` entry must name its surface there or the file stops compiling: `bounds`, `retry` or
+  the Routine-scope budget ledger. Never open a second ceiling on a bounded quantity, and give a
+  quantity nothing meters no key at all, so authoring it fails validation instead of bounding
+  nothing (`scripts/routine-limit-coverage.test.ts`).
 - Child authority never broadens; detach must be explicit. Cancellation parks in-flight effects.
   Ambiguous effect evidence never becomes `cancelled`.

@@ -5,6 +5,7 @@ export type {
 } from "./approval-gate";
 export { ToolApprovalDecisions, ToolApprovalGate, ToolApprovalGateError } from "./approval-gate";
 export type {
+  ApprovalDemandEvidence,
   ToolAuthorizationContext,
   ToolAuthorizationDenialReason,
   ToolPolicyOutcome,

@@ -33,7 +33,6 @@ function run(id: string): StartRunInput {
       effectiveSubject: { kind: "agent", id: "agent-1" },
       guardrailContextRef: "guardrail-context-1",
     },
-    bounds: { wallTimeMs: 60_000, activeTimeMs: 30_000, attempts: 3, sideEffects: 2 },
     createdAt: CREATED_AT,
     states: [{ key: "apply", definitionRef: "sha256:bundle-1#/states/apply", resolvedInput: {} }],
   };

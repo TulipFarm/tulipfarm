@@ -115,14 +115,6 @@
         "limits": {
           "additionalProperties": false,
           "properties": {
-            "activeMs": {
-              "minimum": 1,
-              "type": "integer"
-            },
-            "artifactBytes": {
-              "minimum": 1,
-              "type": "integer"
-            },
             "costUsd": {
               "minimum": 0,
               "type": "number"
@@ -135,19 +127,11 @@
               "minimum": 1,
               "type": "integer"
             },
-            "networkBytes": {
-              "minimum": 1,
-              "type": "integer"
-            },
             "parallelism": {
               "minimum": 1,
               "type": "integer"
             },
-            "resultRows": {
-              "minimum": 1,
-              "type": "integer"
-            },
-            "sideEffects": {
+            "retries": {
               "minimum": 0,
               "type": "integer"
             },
@@ -255,14 +239,6 @@
                   "limits": {
                     "additionalProperties": false,
                     "properties": {
-                      "activeMs": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "artifactBytes": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
                       "costUsd": {
                         "minimum": 0,
                         "type": "number"
@@ -275,19 +251,11 @@
                         "minimum": 1,
                         "type": "integer"
                       },
-                      "networkBytes": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
                       "parallelism": {
                         "minimum": 1,
                         "type": "integer"
                       },
-                      "resultRows": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "sideEffects": {
+                      "retries": {
                         "minimum": 0,
                         "type": "integer"
                       },
@@ -457,14 +425,6 @@
                   "limits": {
                     "additionalProperties": false,
                     "properties": {
-                      "activeMs": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "artifactBytes": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
                       "costUsd": {
                         "minimum": 0,
                         "type": "number"
@@ -477,19 +437,11 @@
                         "minimum": 1,
                         "type": "integer"
                       },
-                      "networkBytes": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
                       "parallelism": {
                         "minimum": 1,
                         "type": "integer"
                       },
-                      "resultRows": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "sideEffects": {
+                      "retries": {
                         "minimum": 0,
                         "type": "integer"
                       },
@@ -703,14 +655,6 @@
                   "limits": {
                     "additionalProperties": false,
                     "properties": {
-                      "activeMs": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "artifactBytes": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
                       "costUsd": {
                         "minimum": 0,
                         "type": "number"
@@ -723,19 +667,11 @@
                         "minimum": 1,
                         "type": "integer"
                       },
-                      "networkBytes": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
                       "parallelism": {
                         "minimum": 1,
                         "type": "integer"
                       },
-                      "resultRows": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "sideEffects": {
+                      "retries": {
                         "minimum": 0,
                         "type": "integer"
                       },
@@ -904,14 +840,6 @@
                   "limits": {
                     "additionalProperties": false,
                     "properties": {
-                      "activeMs": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "artifactBytes": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
                       "costUsd": {
                         "minimum": 0,
                         "type": "number"
@@ -924,19 +852,11 @@
                         "minimum": 1,
                         "type": "integer"
                       },
-                      "networkBytes": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
                       "parallelism": {
                         "minimum": 1,
                         "type": "integer"
                       },
-                      "resultRows": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "sideEffects": {
+                      "retries": {
                         "minimum": 0,
                         "type": "integer"
                       },
@@ -1102,14 +1022,6 @@
                   "limits": {
                     "additionalProperties": false,
                     "properties": {
-                      "activeMs": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "artifactBytes": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
                       "costUsd": {
                         "minimum": 0,
                         "type": "number"
@@ -1122,19 +1034,11 @@
                         "minimum": 1,
                         "type": "integer"
                       },
-                      "networkBytes": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
                       "parallelism": {
                         "minimum": 1,
                         "type": "integer"
                       },
-                      "resultRows": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "sideEffects": {
+                      "retries": {
                         "minimum": 0,
                         "type": "integer"
                       },
@@ -1305,14 +1209,6 @@
                   "limits": {
                     "additionalProperties": false,
                     "properties": {
-                      "activeMs": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "artifactBytes": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
                       "costUsd": {
                         "minimum": 0,
                         "type": "number"
@@ -1325,19 +1221,11 @@
                         "minimum": 1,
                         "type": "integer"
                       },
-                      "networkBytes": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
                       "parallelism": {
                         "minimum": 1,
                         "type": "integer"
                       },
-                      "resultRows": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "sideEffects": {
+                      "retries": {
                         "minimum": 0,
                         "type": "integer"
                       },
@@ -1499,14 +1387,6 @@
                   "limits": {
                     "additionalProperties": false,
                     "properties": {
-                      "activeMs": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "artifactBytes": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
                       "costUsd": {
                         "minimum": 0,
                         "type": "number"
@@ -1519,19 +1399,11 @@
                         "minimum": 1,
                         "type": "integer"
                       },
-                      "networkBytes": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
                       "parallelism": {
                         "minimum": 1,
                         "type": "integer"
                       },
-                      "resultRows": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "sideEffects": {
+                      "retries": {
                         "minimum": 0,
                         "type": "integer"
                       },
@@ -1732,14 +1604,6 @@
                   "limits": {
                     "additionalProperties": false,
                     "properties": {
-                      "activeMs": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "artifactBytes": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
                       "costUsd": {
                         "minimum": 0,
                         "type": "number"
@@ -1752,19 +1616,11 @@
                         "minimum": 1,
                         "type": "integer"
                       },
-                      "networkBytes": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
                       "parallelism": {
                         "minimum": 1,
                         "type": "integer"
                       },
-                      "resultRows": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "sideEffects": {
+                      "retries": {
                         "minimum": 0,
                         "type": "integer"
                       },
@@ -1924,14 +1780,6 @@
                   "limits": {
                     "additionalProperties": false,
                     "properties": {
-                      "activeMs": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "artifactBytes": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
                       "costUsd": {
                         "minimum": 0,
                         "type": "number"
@@ -1944,19 +1792,11 @@
                         "minimum": 1,
                         "type": "integer"
                       },
-                      "networkBytes": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
                       "parallelism": {
                         "minimum": 1,
                         "type": "integer"
                       },
-                      "resultRows": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "sideEffects": {
+                      "retries": {
                         "minimum": 0,
                         "type": "integer"
                       },
@@ -2130,14 +1970,6 @@
                   "limits": {
                     "additionalProperties": false,
                     "properties": {
-                      "activeMs": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "artifactBytes": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
                       "costUsd": {
                         "minimum": 0,
                         "type": "number"
@@ -2150,19 +1982,11 @@
                         "minimum": 1,
                         "type": "integer"
                       },
-                      "networkBytes": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
                       "parallelism": {
                         "minimum": 1,
                         "type": "integer"
                       },
-                      "resultRows": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "sideEffects": {
+                      "retries": {
                         "minimum": 0,
                         "type": "integer"
                       },
@@ -2314,14 +2138,6 @@
                   "limits": {
                     "additionalProperties": false,
                     "properties": {
-                      "activeMs": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "artifactBytes": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
                       "costUsd": {
                         "minimum": 0,
                         "type": "number"
@@ -2334,19 +2150,11 @@
                         "minimum": 1,
                         "type": "integer"
                       },
-                      "networkBytes": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
                       "parallelism": {
                         "minimum": 1,
                         "type": "integer"
                       },
-                      "resultRows": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "sideEffects": {
+                      "retries": {
                         "minimum": 0,
                         "type": "integer"
                       },
@@ -2533,14 +2341,6 @@
                   "limits": {
                     "additionalProperties": false,
                     "properties": {
-                      "activeMs": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "artifactBytes": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
                       "costUsd": {
                         "minimum": 0,
                         "type": "number"
@@ -2553,19 +2353,11 @@
                         "minimum": 1,
                         "type": "integer"
                       },
-                      "networkBytes": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
                       "parallelism": {
                         "minimum": 1,
                         "type": "integer"
                       },
-                      "resultRows": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "sideEffects": {
+                      "retries": {
                         "minimum": 0,
                         "type": "integer"
                       },

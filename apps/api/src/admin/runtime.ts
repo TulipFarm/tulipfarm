@@ -1,8 +1,12 @@
 import { createHash } from "node:crypto";
-import type { ApprovalsRepo, ToolApprovalService } from "@tulipfarm/tool-host";
+import {
+  type ApprovalsRepo,
+  listPendingToolApprovals,
+  type PendingToolApproval,
+  type ToolApprovalService,
+} from "@tulipfarm/tool-host";
 import type { FastifyRequest } from "fastify";
 import type { ActivityService } from "../activity/service";
-import { listPendingToolApprovals, type PendingToolApproval } from "../approvals/pending";
 import type { AuthorizationCheck, RouteAuthorization } from "../authz/route-gate";
 import { makeAuthorizationCheck } from "../authz/route-gate";
 import { describeDeploymentRoles } from "../identity/roles";

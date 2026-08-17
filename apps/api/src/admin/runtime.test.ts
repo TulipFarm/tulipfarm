@@ -61,6 +61,10 @@ function runtime() {
               resolvedAt: null,
               consumedAt: null,
               consumedByCallId: null,
+              requesterPrincipalId: null,
+              guardrailEvidence: null,
+              guardrailEvidenceDigest: null,
+              approverPrincipalId: null,
             },
           ]
         : []

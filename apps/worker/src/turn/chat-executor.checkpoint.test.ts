@@ -32,7 +32,6 @@ const RUN: PersistedRun = {
     effectiveSubject: { kind: "user", id: "user-1" },
     guardrailContextRef: "sha256:guardrail",
   },
-  bounds: { wallTimeMs: 60_000, activeTimeMs: 30_000, attempts: 3, sideEffects: 10 },
   status: "running",
   version: 2,
   createdAt: "2026-01-01T00:00:00.000Z",

@@ -291,7 +291,7 @@ describe("compileRoutine", () => {
       name: "Classify",
       agentRef: { name: "triage", version: "1.0.0" },
       end: true,
-      limits: { wallClockMs: 60_000, activeMs: 30_000, costUsd: 5, tokens: 1_000 },
+      limits: { wallClockMs: 60_000, retries: 2, costUsd: 5, tokens: 1_000 },
     };
 
     const compiled = compileRoutine(
@@ -302,7 +302,7 @@ describe("compileRoutine", () => {
     expect(compiled.limits).toEqual({ costMicros: 2_500_000, wallTimeMs: 120_000 });
     expect(compiled.states.get("Classify")?.limits).toEqual({
       wallTimeMs: 60_000,
-      activeTimeMs: 30_000,
+      retries: 2,
       costMicros: 5_000_000,
       tokens: 1_000,
     });

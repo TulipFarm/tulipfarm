@@ -12,6 +12,11 @@ import {
   type ToolAuthorizationDenialReason,
   type ToolTargetRef,
 } from "@tulipfarm/tool-broker";
+import {
+  type ApprovalDemand,
+  AUTONOMY_APPROVAL_DEMAND,
+  UNATTRIBUTED_APPROVAL_DEMAND,
+} from "./approvals/evidence";
 import type {
   HostedToolCall,
   HostedToolResult,
@@ -85,7 +90,7 @@ export interface RegistryToolDispatcherOptions {
 
 type AuthorizeVerdict =
   | { readonly decision: "proceed" }
-  | { readonly decision: "approval" }
+  | { readonly decision: "approval"; readonly demand: ApprovalDemand }
   | { readonly decision: "denied"; readonly result: HostedToolResult };
 
 /** Worker approvals mirror the web path: mutating, `approval-required`, and not opted out. */
@@ -179,7 +184,21 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
 
     if (outcome.outcome === "authorized") return { decision: "proceed" };
     // Policy-level approval is not a pass; it must park even outside `approval-required`.
-    if (outcome.outcome === "awaiting_approval") return { decision: "approval" };
+    if (outcome.outcome === "awaiting_approval") {
+      return {
+        decision: "approval",
+        demand: {
+          ...(outcome.demand === undefined
+            ? UNATTRIBUTED_APPROVAL_DEMAND
+            : {
+                demandedBy: outcome.demand.requiredBy,
+                reason: outcome.demand.reason,
+                ...(outcome.demand.ruleId === undefined ? {} : { ruleId: outcome.demand.ruleId }),
+              }),
+          guardrailRevision: this.options.guardrails?.revision ?? "none",
+        },
+      };
+    }
     return {
       decision: "denied",
       result: { status: "denied", reason: denialReason(call.name, outcome.reason) },
@@ -357,6 +376,16 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
         toolCallId: call.callId,
         toolName: definition.name,
         args: call.arguments,
+        requesterPrincipalId: `${authority.subject.kind}:${authority.subject.id}`,
+        // The Guardrail evaluation's own account of why, or the Turn's autonomy where policy
+        // allowed the call and only the declared autonomy demanded a human.
+        demand:
+          verdict.decision === "approval"
+            ? verdict.demand
+            : {
+                ...AUTONOMY_APPROVAL_DEMAND,
+                guardrailRevision: this.options.guardrails?.revision ?? "none",
+              },
       });
       if (decision.status === "pending") {
         return { status: "awaiting_approval", approvalId: decision.approvalId };

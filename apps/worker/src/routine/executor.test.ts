@@ -57,12 +57,6 @@ function run(): PersistedRun {
       effectiveSubject: { kind: "agent", id: "assistant" },
       guardrailContextRef: "guardrail:default",
     },
-    bounds: {
-      wallTimeMs: 60_000,
-      activeTimeMs: 30_000,
-      attempts: 3,
-      sideEffects: 0,
-    },
     status: "running",
     version: 2,
     createdAt: STARTED_AT,

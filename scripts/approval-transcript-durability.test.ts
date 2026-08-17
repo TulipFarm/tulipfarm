@@ -42,6 +42,13 @@ const RUN_ID = "00000000-0000-4000-8000-0000000000a1";
 const CONVERSATION_ID = "00000000-0000-4000-8000-0000000000a2";
 const TURN_ID = "00000000-0000-4000-8000-0000000000a3";
 const USER_ID = "00000000-0000-4000-8000-0000000000a4";
+/** Every approval records who asked and what demanded a human; the table requires both (I-13). */
+const APPROVAL_REQUESTER = `user:${USER_ID}`;
+const APPROVAL_DEMAND = {
+  demandedBy: "autonomy_policy",
+  guardrailRevision: "none",
+  reason: "autonomy_requires_approval",
+} as const;
 const MESSAGE_ID = "00000000-0000-4000-8000-0000000000a5";
 const STATE_KEY = "invoke";
 const CREATED_AT = new Date("2026-08-16T00:00:00.000Z");
@@ -57,7 +64,6 @@ function startRun(): StartRunInput {
       effectiveSubject: { kind: "user", id: USER_ID },
       guardrailContextRef: "guardrail-context-1",
     },
-    bounds: { wallTimeMs: 60_000, activeTimeMs: 30_000, attempts: 3, sideEffects: 4 },
     createdAt: CREATED_AT.toISOString(),
     states: [
       { key: STATE_KEY, definitionRef: "sha256:bundle-1#/states/invoke", resolvedInput: {} },
@@ -127,6 +133,8 @@ function dispatcher(approvals: ToolApprovalService): ToolDispatchPort & {
           toolCallId: request.callId,
           toolName: request.name,
           args: request.arguments,
+          requesterPrincipalId: APPROVAL_REQUESTER,
+          demand: APPROVAL_DEMAND,
         });
         if (decision.status === "pending") {
           return {

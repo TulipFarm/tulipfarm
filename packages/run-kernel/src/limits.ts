@@ -18,19 +18,20 @@ export const LIMIT_SCOPES = [
 
 export type LimitScope = (typeof LIMIT_SCOPES)[number];
 
+/**
+ * Every limit an author may declare, and every one the runtime enforces — the two sets are the
+ * same set on purpose. A key here that no meter reaches would read as a live safety control and
+ * stop nothing, so a quantity nothing counts is left out of the schema entirely and the author is
+ * told at validation time. `scripts/routine-limit-coverage.test.ts` holds the two sides together.
+ */
 export const LIMIT_KEYS = [
   "wallTimeMs",
-  "activeTimeMs",
   "tokens",
   "costMicros",
   "retries",
   "iterations",
   "fanOut",
   "parallelism",
-  "artifactBytes",
-  "resultRows",
-  "networkBytes",
-  "sideEffects",
 ] as const;
 
 export type LimitKey = (typeof LIMIT_KEYS)[number];

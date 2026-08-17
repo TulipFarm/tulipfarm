@@ -52,12 +52,6 @@ function run(override: Partial<PersistedRun> = {}): PersistedRun {
       effectiveSubject: { kind: "agent", id: "assistant" },
       guardrailContextRef: "guardrail:default",
     },
-    bounds: {
-      wallTimeMs: 60_000,
-      activeTimeMs: 30_000,
-      attempts: 3,
-      sideEffects: 0,
-    },
     status: "claimed",
     version: 1,
     createdAt: "2026-08-02T00:00:00.000Z",

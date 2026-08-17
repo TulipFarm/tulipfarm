@@ -123,6 +123,13 @@ describe("tool approvals as durable waits", () => {
       toolCallId,
       toolName: "record_delete",
       args: { id: "record-1" },
+      requesterPrincipalId: "user:requester-1",
+      demand: {
+        demandedBy: "guardrail_rule",
+        guardrailRevision: "gr-1",
+        reason: "approval_required",
+        ruleId: "rule-1",
+      },
     });
     if (decision.status !== "pending") throw new Error(`expected pending, got ${decision.status}`);
     return { approvalId: decision.approvalId };
@@ -182,6 +189,13 @@ describe("tool approvals as durable waits", () => {
         toolCallId: "call-2",
         toolName: "record_delete",
         args: { id: "record-1" },
+        requesterPrincipalId: "user:requester-1",
+        demand: {
+          demandedBy: "guardrail_rule",
+          guardrailRevision: "gr-1",
+          reason: "approval_required",
+          ruleId: "rule-1",
+        },
       })
     ).toEqual({ status: "approved", approvalId });
 
@@ -213,6 +227,13 @@ describe("tool approvals as durable waits", () => {
       toolCallId: "call-2",
       toolName: "record_delete",
       args: { id: "record-1" },
+      requesterPrincipalId: "user:requester-1",
+      demand: {
+        demandedBy: "guardrail_rule",
+        guardrailRevision: "gr-1",
+        reason: "approval_required",
+        ruleId: "rule-1",
+      },
     });
     expect(repeat.status).toBe("pending");
     expect(repeat).not.toMatchObject({ approvalId });
@@ -226,6 +247,13 @@ describe("tool approvals as durable waits", () => {
         toolCallId: "call-1",
         toolName: "record_delete",
         args: { id: "record-1" },
+        requesterPrincipalId: "user:requester-1",
+        demand: {
+          demandedBy: "guardrail_rule",
+          guardrailRevision: "gr-1",
+          reason: "approval_required",
+          ruleId: "rule-1",
+        },
       })
     ).toEqual({ status: "approved", approvalId });
   });
@@ -249,6 +277,13 @@ describe("tool approvals as durable waits", () => {
         toolCallId: "call-2",
         toolName: "record_delete",
         args: { id: "record-1" },
+        requesterPrincipalId: "user:requester-1",
+        demand: {
+          demandedBy: "guardrail_rule",
+          guardrailRevision: "gr-1",
+          reason: "approval_required",
+          ruleId: "rule-1",
+        },
       })
     ).toEqual({ status: "denied", reason: "denied by operator" });
   });
@@ -263,6 +298,13 @@ describe("tool approvals as durable waits", () => {
       toolCallId: "call-2",
       toolName: "record_delete",
       args: { id: "record-2" },
+      requesterPrincipalId: "user:requester-1",
+      demand: {
+        demandedBy: "guardrail_rule",
+        guardrailRevision: "gr-1",
+        reason: "approval_required",
+        ruleId: "rule-1",
+      },
     });
 
     expect(other.status).toBe("pending");
@@ -290,6 +332,13 @@ describe("tool approvals as durable waits", () => {
         toolCallId: "call-2",
         toolName: "record_delete",
         args: { id: "record-1" },
+        requesterPrincipalId: "user:requester-1",
+        demand: {
+          demandedBy: "guardrail_rule",
+          guardrailRevision: "gr-1",
+          reason: "approval_required",
+          ruleId: "rule-1",
+        },
       })
     ).toEqual({ status: "denied", reason: "denied by operator" });
   });

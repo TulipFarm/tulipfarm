@@ -1,15 +1,18 @@
 import type { LimitKey, LimitSet, ResolvedLimits, ScopedLimits } from "../limits";
-import type { CompiledBounds, CompiledRoutine } from "./compiler";
+import type { CompiledBounds, CompiledRetryPolicy, CompiledRoutine } from "./compiler";
 
 /**
  * Where an authored `limits` key is actually enforced.
  *
- * Two enforcement surfaces already exist and neither was reading `limits`: a State's structural
- * `bounds`, checked by the `foreach`/`parallel`/`repeat_until` processors, and the Run budget
- * ledger, charged by the Agent loop. Rather than open a third ceiling on quantities those two
- * already bound — two ceilings that can disagree is worse than one that is missing — each
- * authored key is routed into whichever of the two already meters it, and the keys neither meters
- * stay unenforced instead of pretending.
+ * Three enforcement surfaces already exist and none was reading `limits`: a State's structural
+ * `bounds`, checked by the `foreach`/`parallel`/`repeat_until` processors; the Run budget ledger,
+ * charged by the Agent loop; and the State `retry` policy, spent against the durable attempt
+ * counter by the executor. Rather than open a fourth ceiling on quantities those already bound —
+ * two ceilings that can disagree is worse than one that is missing — each authored key is routed
+ * into whichever of the three already meters it.
+ *
+ * A key no surface meters is not accepted and left inert: it is absent from `LIMIT_KEYS` and from
+ * the authored schema, so declaring it fails validation loudly instead of bounding nothing.
  */
 
 /**
@@ -18,19 +21,53 @@ import type { CompiledBounds, CompiledRoutine } from "./compiler";
  * ceiling per quantity. A key whose bound is absent supplies it, which is why `foreach`,
  * `parallel` and `repeat_until` can now be bounded from `limits` alone.
  */
-const BOUND_BY_LIMIT_KEY = {
+export const BOUND_BY_LIMIT_KEY = {
   fanOut: "maxItems",
   parallelism: "maxConcurrency",
   iterations: "maxIterations",
   wallTimeMs: "maxDurationMs",
 } as const satisfies Partial<Record<LimitKey, keyof CompiledBounds>>;
 
+/** The enforcement surface that meters each limit key. */
+export type LimitEnforcementSurface = "bounds" | "ledger" | "retry";
+
 /**
- * Limit keys the Run budget ledger charges. The Agent loop debits exactly these two, so they are
- * the only keys for which opening a budget row creates a ceiling that anything can reach; a row
- * for an unmetered key would read as a live control and stop nothing.
+ * Every limit key and the one surface that meters it.
+ *
+ * `satisfies Record<LimitKey, ...>` is the compile-time half of the L3-10 control: adding a key to
+ * `LIMIT_KEYS` without naming where it is enforced stops this file compiling, and
+ * `scripts/routine-limit-coverage.test.ts` checks the named surface actually carries it.
  */
-const LEDGER_METERED_LIMIT_KEYS: readonly LimitKey[] = ["tokens", "costMicros"];
+export const ENFORCEMENT_SURFACE_BY_LIMIT_KEY = {
+  fanOut: "bounds",
+  parallelism: "bounds",
+  iterations: "bounds",
+  wallTimeMs: "bounds",
+  tokens: "ledger",
+  costMicros: "ledger",
+  retries: "retry",
+} as const satisfies Record<LimitKey, LimitEnforcementSurface>;
+
+function limitKeysMeteredBy(surface: LimitEnforcementSurface): readonly LimitKey[] {
+  const entries = Object.entries(ENFORCEMENT_SURFACE_BY_LIMIT_KEY) as readonly [
+    LimitKey,
+    LimitEnforcementSurface,
+  ][];
+  return entries.filter(([, declared]) => declared === surface).map(([key]) => key);
+}
+
+/**
+ * Limit keys the Run budget ledger charges. The Agent loop debits exactly these, so they are the
+ * only keys for which opening a budget row creates a ceiling that anything can reach; a row for an
+ * unmetered key would read as a live control and stop nothing.
+ */
+export const LEDGER_METERED_LIMIT_KEYS: readonly LimitKey[] = limitKeysMeteredBy("ledger");
+
+/**
+ * Limit keys enforced against a State's `retry` policy, whose attempts the executor spends against
+ * a durable per-occurrence counter.
+ */
+export const RETRY_METERED_LIMIT_KEYS: readonly LimitKey[] = limitKeysMeteredBy("retry");
 
 /**
  * Narrows a State's structural bounds by the resolved limit ceilings.
@@ -51,6 +88,26 @@ export function narrowBoundsByLimits(
     if (current === null || ceiling.value < current) narrowed[boundKey] = ceiling.value;
   }
   return narrowed;
+}
+
+/**
+ * Narrows a State's `retry` policy by the resolved `retries` ceiling.
+ *
+ * A State with no policy makes exactly one attempt, which is already under every ceiling, so a
+ * limit never supplies a policy — it can only take attempts away, never grant them.
+ */
+export function narrowRetryByLimits(
+  retry: CompiledRetryPolicy | null,
+  resolved: ResolvedLimits
+): CompiledRetryPolicy | null {
+  if (retry === null) return retry;
+  let maxAttempts = retry.maxAttempts;
+  for (const key of RETRY_METERED_LIMIT_KEYS) {
+    const ceiling = resolved[key];
+    // A ceiling counts re-attempts, so it allows one first attempt plus that many more.
+    if (ceiling !== undefined) maxAttempts = Math.min(maxAttempts, ceiling.value + 1);
+  }
+  return maxAttempts === retry.maxAttempts ? retry : { ...retry, maxAttempts };
 }
 
 /**

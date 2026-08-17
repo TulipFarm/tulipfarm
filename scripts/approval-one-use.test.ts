@@ -48,6 +48,13 @@ const RUN_ID = "00000000-0000-4000-8000-0000000000b1";
 const CONVERSATION_ID = "00000000-0000-4000-8000-0000000000b2";
 const TURN_ID = "00000000-0000-4000-8000-0000000000b3";
 const USER_ID = "00000000-0000-4000-8000-0000000000b4";
+/** Every approval records who asked and what demanded a human; the table requires both (I-13). */
+const APPROVAL_REQUESTER = `user:${USER_ID}`;
+const APPROVAL_DEMAND = {
+  demandedBy: "autonomy_policy",
+  guardrailRevision: "none",
+  reason: "autonomy_requires_approval",
+} as const;
 const STATE_KEY = "invoke";
 const CREATED_AT = new Date("2026-08-16T00:00:00.000Z");
 
@@ -65,7 +72,6 @@ function startRun(): StartRunInput {
       effectiveSubject: { kind: "user", id: USER_ID },
       guardrailContextRef: "guardrail-context-1",
     },
-    bounds: { wallTimeMs: 60_000, activeTimeMs: 30_000, attempts: 3, sideEffects: 4 },
     createdAt: CREATED_AT.toISOString(),
     states: [
       { key: STATE_KEY, definitionRef: "sha256:bundle-1#/states/invoke", resolvedInput: {} },
@@ -260,6 +266,8 @@ describe("one approval authorizes one dispatch (L6-6)", () => {
         toolCallId: "c3",
         toolName: WRITE_TOOL,
         args: WRITE_ARGS,
+        requesterPrincipalId: APPROVAL_REQUESTER,
+        demand: APPROVAL_DEMAND,
       })
     ).toMatchObject({ status: "pending" });
 
@@ -272,6 +280,8 @@ describe("one approval authorizes one dispatch (L6-6)", () => {
         toolCallId: "c1",
         toolName: WRITE_TOOL,
         args: WRITE_ARGS,
+        requesterPrincipalId: APPROVAL_REQUESTER,
+        demand: APPROVAL_DEMAND,
       })
     ).toEqual({ status: "approved", approvalId });
   });

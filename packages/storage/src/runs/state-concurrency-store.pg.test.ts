@@ -36,7 +36,6 @@ function run(id: string, businessId: string): StartRunInput {
       effectiveSubject: { kind: "user", id: "user-1" },
       guardrailContextRef: "guardrail-context-1",
     },
-    bounds: { wallTimeMs: 60_000, activeTimeMs: 30_000, attempts: 3, sideEffects: 2 },
     createdAt: CREATED_AT,
     states: [{ key: "Notify", definitionRef: "sha256:bundle-1#/states/Notify", resolvedInput: {} }],
   };

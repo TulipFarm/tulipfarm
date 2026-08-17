@@ -22,16 +22,12 @@ const sameUnit = (authored: number): number => authored;
 
 const AUTHORED_LIMIT_MAPPINGS = {
   wallClockMs: { key: "wallTimeMs", toRuntimeValue: sameUnit },
-  activeMs: { key: "activeTimeMs", toRuntimeValue: sameUnit },
   costUsd: { key: "costMicros", toRuntimeValue: usdToCostMicros },
   tokens: { key: "tokens", toRuntimeValue: sameUnit },
   iterations: { key: "iterations", toRuntimeValue: sameUnit },
   fanOut: { key: "fanOut", toRuntimeValue: sameUnit },
   parallelism: { key: "parallelism", toRuntimeValue: sameUnit },
-  artifactBytes: { key: "artifactBytes", toRuntimeValue: sameUnit },
-  resultRows: { key: "resultRows", toRuntimeValue: sameUnit },
-  networkBytes: { key: "networkBytes", toRuntimeValue: sameUnit },
-  sideEffects: { key: "sideEffects", toRuntimeValue: sameUnit },
+  retries: { key: "retries", toRuntimeValue: sameUnit },
 } satisfies Record<AuthoredLimitKey, AuthoredLimitMapping>;
 
 const MAPPING_BY_AUTHORED_KEY: ReadonlyMap<string, AuthoredLimitMapping> = new Map(
