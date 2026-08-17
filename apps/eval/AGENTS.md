@@ -25,6 +25,8 @@ Only its own Cases need updating when their observable behaviour moves.
 | `src/corpus.ts` | Loading and validating `corpus/*.json`; `corpusHash` — the content hash. |
 | `src/scorer.ts` | `scoreCase` — pure and total. No I/O, no model, no clock. |
 | `src/runner.ts` | `runSweep` and `ModelBinding` — **the single seam this framework adds.** |
+| `src/matrix.ts` | `runMatrix` — the same Corpus across several models, one Scorecard each. |
+| `src/bindings.ts` | `resolveBindings` — turns `--model sonnet,luna` into the bindings to measure. |
 | `src/scripted.ts` | `scriptedBinding` — replays each Case's `script`. Free, deterministic. |
 | `src/model.ts` | `PINNED_MODELS` and `pinnedBinding` — the real-vendor binding. The only file here that touches a credential. |
 | `src/retry.ts` | `withRetry` — transient vendor failures, retried and counted. |
@@ -53,6 +55,24 @@ Only its own Cases need updating when their observable behaviour moves.
 - **An unscripted Tool call succeeds with empty output** rather than erroring, so a Case need not
   model a Tool whose result it does not care about. Pin the interaction with `tool_call_count` or
   `tool_not_called` when it matters.
+- **Two models are a control, not a contest.** A Case that passes on one seat and fails on the
+  other is telling you the harness change is model-specific — that is the whole reason a second
+  vendor earns its quota. `renderMatrix` names the split Cases and says in words that this is not
+  a ranking, because a two-column grid reads as a scoreboard unless it denies it.
+- **Models run one after another, never at once,** and each gets the **full** ceiling rather than a
+  share of one. Two seats in flight make throttling likelier, which lands as retries and changed
+  timing on whichever Scorecard was unlucky; a shared budget would be spent by whoever ran first
+  and truncate the last, and a partial Scorecard is not comparable with a complete one. Columns
+  follow declaration order — sorting by result would turn the control into a leaderboard.
+- **Only a scored Case is comparable.** An `ERR` is a vendor fault and a `-` means the Case never
+  ran, so `renderMatrix` holds both out of the disagreement count and lists them under `NOT
+  COMPARABLE`. Comparing them would report a rate limit or a spent ceiling as model-specific
+  harness behaviour — the confound the whole framework exists to remove.
+- **One model failing whole does not discard the other.** `runSweep` almost never rejects — a
+  missing credential surfaces inside the call, so a dead seat yields a full Scorecard of errored
+  Trials. A Sweep that scored nothing is collapsed into `ModelRun.unavailable` rather than rendered
+  as a column of `ERR`, which would read as the harness differing under that model when nothing was
+  measured at all. It still fails the command; the model that did run keeps its results.
 - **`corpusHash` is the unit of comparability.** Two Scorecards with different hashes are not
   comparable. Never compare across `modelId` either.
 - **Every Case carries a `script`,** so the whole Corpus runs free and deterministically in ordinary
@@ -109,10 +129,11 @@ and `--model` refuses to run without one.
 pnpm eval                                    # scripted: free, deterministic, no credentials
 pnpm eval:sonnet                             # claude-code seat, prompts for the token
 pnpm eval:luna                               # codex seat, reads ~/.codex/auth.json
+pnpm eval:matrix                             # both seats, same Corpus, side by side
 pnpm eval:sonnet --case support-answers-without-tools --max-tokens 5000
 ```
 
-`scripts/seat.sh` collects the credential into its own environment, so it never enters your shell,
+`scripts/seat.sh` collects every named seat's credential up front, into its own environment, so it never enters your shell,
 your history, or a file. It defaults `--max-tokens` to 20000 and never overrides one you passed.
 
 A seat is one person's, so a public repo cannot hold it as a secret. Where a release Sweep runs

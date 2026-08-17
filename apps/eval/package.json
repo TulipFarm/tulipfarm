@@ -7,6 +7,7 @@
     "eval": "tsx src/cli.ts",
     "eval:sonnet": "sh scripts/seat.sh sonnet",
     "eval:luna": "sh scripts/seat.sh luna",
+    "eval:matrix": "sh scripts/seat.sh sonnet,luna",
     "lint": "biome check --no-errors-on-unmatched .",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"

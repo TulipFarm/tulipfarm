@@ -1,0 +1,254 @@
+import { describe, expect, it } from "vitest";
+import type { Matrix } from "./matrix.ts";
+import type { Scorecard, TrialResult } from "./runner.ts";
+import { renderMatrix } from "./scorecard.ts";
+import { NO_SPEND } from "./spend.ts";
+
+const trial = (caseId: string, over: Partial<TrialResult> = {}): TrialResult => ({
+  caseId,
+  trial: 1,
+  status: "completed",
+  passed: true,
+  vacuous: false,
+  retries: 0,
+  spend: NO_SPEND,
+  expectations: [],
+  ...over,
+});
+
+const card = (
+  modelId: string,
+  trials: TrialResult[],
+  over: Partial<Scorecard> = {}
+): Scorecard => ({
+  corpusHash: "abcdef0123456789",
+  modelId,
+  modelDated: false,
+  startedAt: "2025-01-01T00:00:00.000Z",
+  durationMs: 10,
+  trials,
+  passed: trials.filter((t) => t.passed).length,
+  failed: trials.filter((t) => !t.passed).length,
+  errored: 0,
+  skipped: 0,
+  spend: NO_SPEND,
+  ...over,
+});
+
+const matrix = (runs: Matrix["runs"]): Matrix => ({
+  corpusHash: "abcdef0123456789cafe",
+  startedAt: "2025-01-01T00:00:00.000Z",
+  durationMs: 100,
+  runs,
+});
+
+describe("renderMatrix", () => {
+  it("shows one Corpus measured by every model, so neither column can be read alone", () => {
+    const out = renderMatrix(
+      matrix([
+        { modelId: "sonnet", card: card("sonnet", [trial("a"), trial("b")]) },
+        { modelId: "luna", card: card("luna", [trial("a"), trial("b")]) },
+      ])
+    );
+
+    expect(out).toContain("corpus=abcdef0123456789");
+    expect(out).toMatch(/Case\s+sonnet\s+luna/);
+    expect(out).toMatch(/a\s+PASS\s+PASS/);
+  });
+
+  it("names the Cases the models disagree on, which is the whole point of a second model", () => {
+    const out = renderMatrix(
+      matrix([
+        { modelId: "sonnet", card: card("sonnet", [trial("a"), trial("b")]) },
+        {
+          modelId: "luna",
+          card: card("luna", [trial("a"), trial("b", { passed: false })]),
+        },
+      ])
+    );
+
+    expect(out).toContain("DISAGREEMENT");
+    expect(out).toMatch(/b\s+sonnet=PASS\s+luna=FAIL/);
+  });
+
+  it("refuses the ranking reading in words, not only by omission", () => {
+    // The failure mode is a reader treating the two columns as a scoreboard. Nothing about a
+    // grid prevents that on its own, so the Matrix says what it is for.
+    const out = renderMatrix(
+      matrix([
+        { modelId: "sonnet", card: card("sonnet", [trial("a")]) },
+        { modelId: "luna", card: card("luna", [trial("a", { passed: false })]) },
+      ])
+    );
+
+    expect(out).toMatch(/control on the (measurement|harness)/i);
+    expect(out).toMatch(/not (competitors|a ranking)/i);
+  });
+
+  it("says so when the models agreed, rather than leaving silence to be read as agreement", () => {
+    const out = renderMatrix(
+      matrix([
+        { modelId: "sonnet", card: card("sonnet", [trial("a")]) },
+        { modelId: "luna", card: card("luna", [trial("a")]) },
+      ])
+    );
+
+    expect(out).toMatch(/agree/i);
+    expect(out).not.toContain("DISAGREEMENT");
+  });
+
+  it("marks a model that could not be measured, and does not score it as a failure", () => {
+    const out = renderMatrix(
+      matrix([
+        { modelId: "sonnet", card: card("sonnet", [trial("a")]) },
+        { modelId: "luna", unavailable: "CODEX_AUTH_JSON is not set" },
+      ])
+    );
+
+    expect(out).toMatch(/a\s+PASS\s+n\/a/);
+    expect(out).toContain("CODEX_AUTH_JSON is not set");
+    expect(out).not.toContain("DISAGREEMENT");
+  });
+
+  it("distinguishes an errored Case from a failed one in the grid", () => {
+    const out = renderMatrix(
+      matrix([
+        {
+          modelId: "sonnet",
+          card: card("sonnet", [trial("a", { passed: false, error: "vendor died" })], {
+            errored: 1,
+            failed: 0,
+            passed: 0,
+          }),
+        },
+      ])
+    );
+
+    expect(out).toMatch(/a\s+ERR/);
+  });
+
+  it("marks a Case that passed while checking nothing", () => {
+    const out = renderMatrix(
+      matrix([{ modelId: "sonnet", card: card("sonnet", [trial("a", { vacuous: true })]) }])
+    );
+
+    expect(out).toMatch(/a\s+VAC/);
+  });
+
+  it("keeps each model's own detail, so a failure is still debuggable", () => {
+    const out = renderMatrix(
+      matrix([
+        {
+          modelId: "sonnet",
+          card: card("sonnet", [
+            trial("a", {
+              passed: false,
+              expectations: [
+                {
+                  expectation: { kind: "output_contains", text: "refund" },
+                  passed: false,
+                  detail: "output does not contain it",
+                },
+              ],
+            }),
+          ]),
+        },
+      ])
+    );
+
+    expect(out).toContain("output_contains: output does not contain it");
+  });
+
+  it("reports each model's spend on its own, never pooled", () => {
+    const out = renderMatrix(
+      matrix([
+        {
+          modelId: "sonnet",
+          card: card("sonnet", [trial("a")], {
+            spend: { ...NO_SPEND, calls: 1, inputTokens: 100, outputTokens: 10 },
+          }),
+        },
+        {
+          modelId: "luna",
+          card: card("luna", [trial("a")], {
+            spend: { ...NO_SPEND, calls: 1, inputTokens: 700, outputTokens: 70 },
+          }),
+        },
+      ])
+    );
+
+    expect(out).toContain("100 in");
+    expect(out).toContain("700 in");
+    expect(out).not.toContain("800 in");
+  });
+
+  it("does not call a vendor error a disagreement — that is the confound it exists to remove", () => {
+    const out = renderMatrix(
+      matrix([
+        { modelId: "sonnet", card: card("sonnet", [trial("a"), trial("b")]) },
+        {
+          modelId: "luna",
+          card: card("luna", [trial("a"), trial("b", { passed: false, error: "rate limited" })], {
+            errored: 1,
+            failed: 0,
+          }),
+        },
+      ])
+    );
+
+    expect(out).not.toContain("DISAGREEMENT");
+    expect(out).toContain("NOT COMPARABLE");
+    expect(out).toMatch(/b\s+sonnet=PASS\s+luna=ERR/);
+  });
+
+  it("does not call a Case one model never reached a disagreement", () => {
+    const out = renderMatrix(
+      matrix([
+        { modelId: "sonnet", card: card("sonnet", [trial("a"), trial("b")]) },
+        { modelId: "luna", card: card("luna", [trial("a")], { skipped: 1 }) },
+      ])
+    );
+
+    expect(out).not.toContain("DISAGREEMENT");
+    expect(out).toContain("NOT COMPARABLE");
+    expect(out).toMatch(/b\s+sonnet=PASS\s+luna=-/);
+  });
+
+  it("counts the agreement over the Cases that were comparable, not over the whole Corpus", () => {
+    const out = renderMatrix(
+      matrix([
+        { modelId: "sonnet", card: card("sonnet", [trial("a"), trial("b"), trial("c")]) },
+        {
+          modelId: "luna",
+          card: card("luna", [trial("a"), trial("b", { passed: false, error: "vendor died" })], {
+            errored: 1,
+            failed: 0,
+            skipped: 1,
+          }),
+        },
+      ])
+    );
+
+    expect(out).toContain("agree on all 1 comparable Cases");
+    expect(out).toContain("NOT COMPARABLE  2 of 3 Cases");
+  });
+
+  it("still reports a real disagreement alongside Cases that could not be compared", () => {
+    const out = renderMatrix(
+      matrix([
+        { modelId: "sonnet", card: card("sonnet", [trial("a"), trial("b")]) },
+        {
+          modelId: "luna",
+          card: card("luna", [trial("a", { passed: false }), trial("b", { error: "boom" })], {
+            errored: 1,
+            failed: 1,
+          }),
+        },
+      ])
+    );
+
+    expect(out).toContain("DISAGREEMENT  1 of 1 comparable Cases");
+    expect(out).toMatch(/a\s+sonnet=PASS\s+luna=FAIL/);
+    expect(out).toContain("NOT COMPARABLE  1 of 2 Cases");
+  });
+});

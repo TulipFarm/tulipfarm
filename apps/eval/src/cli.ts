@@ -1,10 +1,11 @@
 import { resolve } from "node:path";
 import { assertKnownFlags, flag, positive } from "./args.ts";
+import { resolveBindings } from "./bindings.ts";
 import { loadCorpus } from "./corpus.ts";
-import { isPinnedModelName, PINNED_MODELS, pinnedBinding } from "./model.ts";
-import { type ModelBinding, runSweep } from "./runner.ts";
-import { renderScorecard } from "./scorecard.ts";
-import { scriptedBinding } from "./scripted.ts";
+import { runMatrix } from "./matrix.ts";
+import { PINNED_MODELS } from "./model.ts";
+import type { Scorecard } from "./runner.ts";
+import { renderMatrix, renderScorecard } from "./scorecard.ts";
 
 const MODELS = Object.keys(PINNED_MODELS).join(", ");
 
@@ -13,7 +14,9 @@ Usage: pnpm eval [options]
 
   --case <id>        Run only the Eval Case with this id.
   --corpus <dir>     Corpus directory (default: apps/eval/corpus).
-  --model <name>     Run against a real vendor model (${MODELS}). Costs money.
+  --model <names>    Run against real vendor models (${MODELS}). Costs money.
+                     Comma-separate to run the matrix: --model sonnet,luna. Each model
+                     gets the full ceiling, because a shared one would starve the last.
   --max-spend <usd>  Stop launching Trials once this much has been spent.
   --max-tokens <n>   Stop launching Trials once this many tokens are used. The only
                      ceiling that binds a subscription seat, whose dollar cost is zero.
@@ -25,13 +28,9 @@ that seat's credential in the environment and consumes your quota. Always bound 
 --max-tokens: a seat's dollar cost is zero, so --max-spend can never stop one.
 `;
 
-/** No `--model` means the free scripted tier; a name must be one this repo has pinned. */
-function resolveBinding(name: string | undefined): ModelBinding {
-  if (name === undefined) return scriptedBinding();
-  if (!isPinnedModelName(name)) {
-    throw new Error(`unknown model "${name}" — pinned models are: ${MODELS}`);
-  }
-  return pinnedBinding(PINNED_MODELS[name]);
+/** A Sweep clears a release only when it measured everything it set out to measure. */
+function unclean(card: Scorecard): number {
+  return card.failed + card.errored + card.skipped + card.trials.filter((t) => t.vacuous).length;
 }
 
 async function main(): Promise<number> {
@@ -48,7 +47,7 @@ async function main(): Promise<number> {
 
   const caseFilter = flag(argv, "--case");
   const modelName = flag(argv, "--model");
-  const model = resolveBinding(modelName);
+  const models = resolveBindings(modelName);
   const maxSpendUsd = positive(flag(argv, "--max-spend"), "--max-spend");
   const maxTokens = positive(flag(argv, "--max-tokens"), "--max-tokens");
   // A real Sweep spends a finite quota. Refusing here is the only place that can stop an
@@ -56,20 +55,24 @@ async function main(): Promise<number> {
   if (modelName !== undefined && maxTokens === undefined) {
     throw new Error("--model needs --max-tokens: a seat costs $0, so --max-spend cannot bound it");
   }
-  const card = await runSweep({
+  const matrix = await runMatrix({
     corpus,
-    model,
+    models,
     ...(caseFilter === undefined ? {} : { caseFilter }),
     ...(maxSpendUsd === undefined ? {} : { maxSpendUsd }),
     ...(maxTokens === undefined ? {} : { maxTokens }),
   });
 
-  process.stdout.write(renderScorecard(card));
+  // One model is not a matrix, and a grid of one column reads as if a comparison were made.
+  const single = matrix.runs.length === 1 ? matrix.runs[0] : undefined;
+  if (single?.card !== undefined) process.stdout.write(renderScorecard(single.card));
+  else process.stdout.write(renderMatrix(matrix));
 
-  // An errored, vacuous or never-run Trial fails the command too. A Sweep that could not measure
-  // something has not cleared a release; only a complete, green Scorecard has.
-  const vacuous = card.trials.filter((t) => t.vacuous).length;
-  return card.failed + card.errored + vacuous + card.skipped > 0 ? 1 : 0;
+  // A model that could not be measured fails the command as surely as a failing Case: a Matrix
+  // missing a leg has not cleared a release, whatever the leg that ran says.
+  const unmeasured = matrix.runs.filter((r) => r.card === undefined).length;
+  const dirty = matrix.runs.reduce((n, r) => n + (r.card === undefined ? 0 : unclean(r.card)), 0);
+  return unmeasured + dirty > 0 ? 1 : 0;
 }
 
 main().then(

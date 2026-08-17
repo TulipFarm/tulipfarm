@@ -1,3 +1,4 @@
+import type { Matrix } from "./matrix.ts";
 import type { Scorecard, TrialResult } from "./runner.ts";
 
 const CHECK = "PASS";
@@ -73,4 +74,138 @@ export function renderScorecard(card: Scorecard): string {
   if (card.abortedReason !== undefined) lines.push(`ABORTED  ${card.abortedReason}`);
   lines.push("");
   return lines.join("\n");
+}
+
+const VERDICT_UNAVAILABLE = "n/a";
+const VERDICT_NOT_RUN = "-";
+const VERDICT_ERRORED = BANG.trim();
+
+/**
+ * A verdict the Corpus actually produced, and so one that can be compared across models.
+ *
+ * `ERR` is a vendor fault and `-` means the Case never ran, and neither says anything about the
+ * harness. Comparing them would manufacture exactly the confound this framework exists to remove.
+ */
+function scoreable(v: string): boolean {
+  return v === CHECK || v === CROSS || v === "VAC";
+}
+
+/** One Case's verdict for one model, collapsed from however many Trials it ran. */
+function verdict(card: Scorecard, caseId: string): string {
+  const trials = card.trials.filter((t) => t.caseId === caseId);
+  if (trials.length === 0) return VERDICT_NOT_RUN;
+  if (trials.some((t) => t.error !== undefined)) return VERDICT_ERRORED;
+  if (trials.some((t) => t.vacuous)) return "VAC";
+  return trials.every((t) => t.passed) ? CHECK : CROSS;
+}
+
+/** Case ids in first-seen order across every model, so an aborted Sweep still contributes its own. */
+function caseIds(matrix: Matrix): string[] {
+  const seen: string[] = [];
+  for (const run of matrix.runs) {
+    for (const trial of run.card?.trials ?? []) {
+      if (!seen.includes(trial.caseId)) seen.push(trial.caseId);
+    }
+  }
+  return seen;
+}
+
+function pad(text: string, width: number): string {
+  return text.padEnd(width, " ");
+}
+
+/**
+ * Render a Matrix: one Corpus, several models, side by side.
+ *
+ * The grid leads because the cross-model pattern is the thing a second model was added to reveal.
+ * Each model's own Scorecard follows unchanged, so a failure stays as debuggable as it is in a
+ * single-model Sweep.
+ */
+export function renderMatrix(matrix: Matrix): string {
+  const ids = caseIds(matrix);
+  const models = matrix.runs.map((r) => r.modelId);
+  const caseWidth = Math.max(4, ...ids.map((id) => id.length));
+  const widths = models.map((m) => Math.max(m.length, VERDICT_UNAVAILABLE.length));
+
+  const lines: string[] = [
+    "",
+    `Matrix  corpus=${matrix.corpusHash.slice(0, 16)}  ${models.length} models  ${matrix.durationMs}ms`,
+    "",
+    `${pad("Case", caseWidth)}  ${models.map((m, i) => pad(m, widths[i] ?? m.length)).join("  ")}`,
+  ];
+
+  for (const id of ids) {
+    const cells = matrix.runs.map((run, i) =>
+      pad(run.card === undefined ? VERDICT_UNAVAILABLE : verdict(run.card, id), widths[i] ?? 0)
+    );
+    lines.push(`${pad(id, caseWidth)}  ${cells.join("  ")}`);
+  }
+
+  lines.push(...disagreementLines(matrix, ids));
+
+  for (const run of matrix.runs) {
+    if (run.card === undefined) {
+      lines.push("", `${run.modelId}  NOT MEASURED  ${run.unavailable ?? "no reason given"}`);
+      continue;
+    }
+    lines.push(renderScorecard(run.card).replace(/\n$/, ""));
+  }
+
+  lines.push("");
+  return lines.join("\n");
+}
+
+/**
+ * Name the Cases the models landed on differently.
+ *
+ * This is the only reason a second model is worth its quota: a Case that passes on one and fails
+ * on the other says the harness change under test is model-specific. The note is spelled out
+ * because a two-column grid reads as a scoreboard unless it says otherwise, and a maintainer who
+ * reads it that way will pick a model instead of fixing the harness.
+ *
+ * Only Cases every measured model actually scored can be compared. A Case one model errored on, or
+ * never reached because its ceiling stopped the Sweep, is reported as not comparable — calling it
+ * a disagreement would blame the harness for a rate limit or a budget.
+ */
+function disagreementLines(matrix: Matrix, ids: string[]): string[] {
+  const measured = matrix.runs.filter(
+    (r): r is typeof r & { card: Scorecard } => r.card !== undefined
+  );
+  if (measured.length < 2) return [];
+
+  const verdicts = new Map(ids.map((id) => [id, measured.map((r) => verdict(r.card, id))]));
+  const comparable = ids.filter((id) => (verdicts.get(id) ?? []).every(scoreable));
+  const incomparable = ids.filter((id) => !comparable.includes(id));
+  const split = comparable.filter((id) => new Set(verdicts.get(id)).size > 1);
+
+  const detail = (id: string): string =>
+    `  ${id}  ${measured.map((r, i) => `${r.modelId}=${verdicts.get(id)?.[i]}`).join("  ")}`;
+
+  const lines: string[] =
+    split.length === 0
+      ? [
+          "",
+          `Models agree on all ${comparable.length} comparable Cases — this run shows no ` +
+            "model-specific harness behaviour.",
+        ]
+      : [
+          "",
+          `DISAGREEMENT  ${split.length} of ${comparable.length} comparable Cases`,
+          ...split.map(detail),
+          "  A Case that lands differently on each model is a property of the harness under that model.",
+          "  These models are a control on the measurement, not competitors: this is not a ranking.",
+        ];
+
+  if (incomparable.length > 0) {
+    lines.push(
+      "",
+      `NOT COMPARABLE  ${incomparable.length} of ${ids.length} Cases`,
+      ...incomparable.map(detail),
+      `  ${VERDICT_ERRORED} is a vendor fault and ${VERDICT_NOT_RUN} means the Case never ran. ` +
+        "Neither is a verdict on the harness,",
+      "  so these Cases are held out of the comparison rather than counted as a disagreement."
+    );
+  }
+
+  return lines;
 }
