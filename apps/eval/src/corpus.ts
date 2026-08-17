@@ -37,10 +37,22 @@ const SOUL_OWNED = SOUL_OWNED_CONTEXT_KEYS;
  * regex and pass against anything, and a missing `path` would throw inside the scorer. Both turn
  * an unchecked Case into a green one, which is the failure mode this framework exists to prevent.
  */
-const EXPECTATION_FIELDS: Record<
-  string,
-  readonly [string, "string" | "number" | "strings" | "any"][]
-> = {
+/** The three points a guard can refuse, mirroring `RunEventGuardrailStage`. */
+const GUARD_STAGES = ["input", "tool_call", "output"] as const;
+
+/**
+ * Every guard `validateGuardrailsConfig` accepts.
+ *
+ * Spelled out rather than imported because the schema declares them as TypeBox literals with no
+ * runtime array to read. A guard added there and not here fails Corpus load with a clear message,
+ * which is the safe direction: the alternative is a Case naming a guard that can never fire.
+ */
+const GUARD_NAMES = ["prompt_injection", "tool_blocklist", "content_filter"] as const;
+
+/** A required field's type, or the closed set of values it may take. */
+type FieldType = "string" | "number" | "strings" | "any" | readonly string[];
+
+const EXPECTATION_FIELDS: Record<string, readonly [string, FieldType][]> = {
   prompt_contains: [["text", "string"]],
   prompt_omits: [["text", "string"]],
   tool_called: [["name", "string"]],
@@ -53,12 +65,18 @@ const EXPECTATION_FIELDS: Record<
   ],
   output_contains: [["text", "string"]],
   output_matches: [["pattern", "string"]],
+  output_omits: [["text", "string"]],
   output_field_equals: [
     ["path", "string"],
     ["value", "any"],
   ],
   loop_status: [["status", "string"]],
   tool_call_count: [["count", "number"]],
+  guardrail_blocked: [
+    ["stage", GUARD_STAGES],
+    ["guard", GUARD_NAMES],
+  ],
+  guardrail_allowed: [["stage", GUARD_STAGES]],
 };
 
 /**
@@ -122,7 +140,7 @@ function validate(raw: unknown, file: string): EvalCase {
       require(fieldOk(
         record[field],
         type
-      ), `${file}: expectation "${kind}" needs a ${type === "strings" ? "non-empty string array" : type} field "${field}"`);
+      ), `${file}: expectation "${kind}" needs a ${describeField(type)} field "${field}"`);
     }
   }
   return raw as EvalCase;
@@ -150,11 +168,16 @@ function givenToModel(c: EvalCase, fromSoul: Partial<AssembleContext>): string {
 }
 
 /**
- * Refuses a content expectation the model has no way to satisfy except by inventing the answer.
+ * Refuses a content expectation the model has no way to satisfy except by inventing the answer,
+ * and an `output_omits` for text the model was never given.
  *
  * This is the one authoring fault the scripted tier structurally cannot catch: there the fake
  * model is told to emit exactly what the expectation checks, so the Case passes by construction
  * and only reveals itself against a real model — as a failure that reads like a regression.
+ *
+ * `output_omits` fails the other way and is worse for it. Text absent from the Context can never
+ * appear in the answer, so the expectation passes whatever the harness does — a guardrail Case
+ * that would go on passing after the guard was deleted.
  *
  * Ungrounded expectations are legitimate — refusal wording and output format are not recalled from
  * the Context — so this bans the *silent* ones, not the deliberate ones. Stating a reason is the
@@ -163,30 +186,44 @@ function givenToModel(c: EvalCase, fromSoul: Partial<AssembleContext>): string {
 function requireGrounded(c: EvalCase, file: string, fromSoul: Partial<AssembleContext>): void {
   const given = givenToModel(c, fromSoul);
   for (const e of c.expect) {
-    if (e.kind !== "output_contains" && e.kind !== "output_matches") continue;
+    if (e.kind !== "output_contains" && e.kind !== "output_matches" && e.kind !== "output_omits")
+      continue;
     if (typeof e.ungrounded === "string" && e.ungrounded.length > 0) continue;
-    const needle = e.kind === "output_contains" ? e.text : e.pattern;
+    const needle = e.kind === "output_matches" ? e.pattern : e.text;
     let grounded: boolean;
     // Matched exactly as the scorer will match it, or a Case could be refused as ungrounded and
     // then pass, or be admitted and then fail.
-    if (e.kind === "output_contains") grounded = given.toLowerCase().includes(needle.toLowerCase());
-    else {
+    if (e.kind === "output_matches") {
       try {
         grounded = new RegExp(needle, OUTPUT_FLAGS).test(given);
       } catch {
         // An uncompilable pattern is the scorer's failure to report, not this check's.
         continue;
       }
-    }
+    } else grounded = given.toLowerCase().includes(needle.toLowerCase());
+
+    const why =
+      e.kind === "output_omits"
+        ? `the model is never given it, so it could not have emitted it and this expectation ` +
+          `passes even with the guard removed. Put the text in a Tool result or the Context so ` +
+          `the guard has something to catch, or set "ungrounded" to the reason this is about ` +
+          `invention rather than leakage.`
+        : `a real model could only produce it by guessing. Put the fact where the model is ` +
+          `given it, or set "ungrounded" to the reason this is about wording or format rather ` +
+          `than recall.`;
     require(grounded, `${file}: expectation "${e.kind}" looks for ${JSON.stringify(needle)}, which appears nowhere ` +
-      `in the Eval Soul, the Case's context, input or tool results — a real model could only ` +
-      `produce it by ` +
-      `guessing. Put the fact where the model is given it, or set "ungrounded" to the reason ` +
-      `this is about wording or format rather than recall.`);
+      `in the Eval Soul, the Case's context, input or tool results — ${why}`);
   }
 }
 
-function fieldOk(value: unknown, type: "string" | "number" | "strings" | "any"): boolean {
+/** How a rejected field is described back to the author. */
+function describeField(type: FieldType): string {
+  if (typeof type !== "string") return `one of ${type.map((v) => JSON.stringify(v)).join(", ")}`;
+  return type === "strings" ? "non-empty string array" : type;
+}
+
+function fieldOk(value: unknown, type: FieldType): boolean {
+  if (typeof type !== "string") return typeof value === "string" && type.includes(value);
   switch (type) {
     case "string":
       return typeof value === "string" && value.length > 0;

@@ -12,6 +12,8 @@ import {
 import { type EvalCase, LOOP_LIMITS } from "./case.ts";
 import type { Corpus } from "./corpus.ts";
 import { type EvalSoul, soulContext } from "./eval-soul.ts";
+import type { EvalGuardrails, GuardrailDecision } from "./guardrails.ts";
+import { turnGuardrails } from "./guardrails.ts";
 import type { SweepProgress } from "./progress.ts";
 import { DEFAULT_RETRY, type RetryPolicy, withRetry } from "./retry.ts";
 import { type ExpectationResult, type Observation, scoreCase } from "./scorer.ts";
@@ -168,6 +170,65 @@ function toolDispatcher(evalCase: EvalCase) {
   };
 }
 
+/**
+ * Guards the latest user message, as `TurnDriver.guardInput` does.
+ *
+ * Returns the guarded message list, not just the refusal: a guard may *transform* rather than
+ * block, and discarding the transform would send the model text production would never have sent.
+ */
+async function guardInput(
+  guards: EvalGuardrails,
+  input: readonly ModelMessage[]
+): Promise<
+  | { readonly blocked: true; readonly message: string }
+  | { readonly blocked: false; readonly messages: readonly ModelMessage[] }
+> {
+  let index = input.length - 1;
+  while (index >= 0 && input[index]?.role !== "user") index -= 1;
+  const current = index < 0 ? undefined : input[index];
+  if (current === undefined) return { blocked: false, messages: input };
+
+  const guarded = await guards.input(current.content);
+  if (guarded.blocked) return guarded;
+
+  const messages = [...input];
+  messages[index] = { role: current.role, content: guarded.text };
+  return { blocked: false, messages };
+}
+
+/** Blocked answers are replaced by the guard's message, never dropped. */
+async function guardOutput(
+  guards: EvalGuardrails,
+  output: ModelOutput | undefined
+): Promise<ModelOutput | undefined> {
+  if (output?.kind !== "text") return output;
+  const guarded = await guards.output(output.text);
+  return guarded.blocked ? { kind: "text", text: guarded.message } : output;
+}
+
+function scored(
+  evalCase: EvalCase,
+  trial: number,
+  vacuous: boolean,
+  spend: Spend,
+  retries: number,
+  guardrails: readonly GuardrailDecision[],
+  observation: Omit<Observation, "guardrails">
+): TrialResult {
+  const full: Observation = { ...observation, guardrails };
+  const expectations = scoreCase(evalCase.expect, full);
+  return {
+    caseId: evalCase.id,
+    trial,
+    passed: expectations.every((a) => a.passed),
+    expectations,
+    status: observation.status,
+    vacuous,
+    spend,
+    retries,
+  };
+}
+
 async function runTrial(
   evalCase: EvalCase,
   soul: EvalSoul,
@@ -177,6 +238,7 @@ async function runTrial(
 ): Promise<TrialResult> {
   const vacuous = evalCase.expect.length === 0;
   const tools = toolDispatcher(evalCase);
+  const guards = turnGuardrails(soul, `${evalCase.id}#${trial}`);
   let lastOutput: ModelOutput | undefined;
 
   // The real assembler runs here, over the real Soul. Without either, the tier would measure the
@@ -223,7 +285,9 @@ async function runTrial(
 
   const loop = new AgentLoop({
     model,
-    tools: tools.port,
+    // Guards wrap the dispatcher exactly as `TurnDriver` wraps it, so a blocked Tool reaches the
+    // model as a denial it must recover from — not as a call that silently never happened.
+    tools: guards.guard(tools.port),
     checkpoints: new InMemoryLoopCheckpointStore(),
     events: { append: async () => {} },
     budget: { consume: async () => ({ outcome: "allowed" }) },
@@ -231,20 +295,31 @@ async function runTrial(
     log,
   });
 
-  const messages: ModelMessage[] = [{ role: "system", content: systemPrompt }, ...evalCase.input];
-  const input: AgentLoopInput = {
-    businessId: "eval",
-    runId: `${evalCase.id}#${trial}`,
-    stateId: "invoke",
-    modelProfileId: "eval",
-    contextDigest: "sha256:eval",
-    guardrailDigest: "sha256:eval",
-    messages,
-    tools: evalCase.tools ?? [],
-    limits: LOOP_LIMITS,
-  };
-
   try {
+    // Ordering is the driver's: the input guard settles the turn before any model or Tool work,
+    // so a refused request must cost nothing and must never reach the vendor.
+    const guarded = await guardInput(guards, evalCase.input);
+    if (guarded.blocked) {
+      return scored(evalCase, trial, vacuous, spend, retries, guards.decisions, {
+        systemPrompt,
+        toolCalls: [],
+        output: { kind: "text", text: guarded.message },
+        status: "completed",
+      });
+    }
+
+    const input: AgentLoopInput = {
+      businessId: "eval",
+      runId: `${evalCase.id}#${trial}`,
+      stateId: "invoke",
+      modelProfileId: "eval",
+      contextDigest: "sha256:eval",
+      guardrailDigest: guards.digest,
+      messages: [{ role: "system", content: systemPrompt }, ...guarded.messages],
+      tools: evalCase.tools ?? [],
+      limits: LOOP_LIMITS,
+    };
+
     const outcome = await loop.run(input);
 
     // A vendor call that died is not a verdict on the harness. Scoring a rate-limit as a Case
@@ -253,23 +328,16 @@ async function runTrial(
       return errored(evalCase, trial, vacuous, modelError ?? outcome.reason, spend, retries);
     }
 
-    const observation: Observation = {
+    const answered =
+      outcome.status === "completed" ? asOutput(outcome.output, lastOutput) : lastOutput;
+    return scored(evalCase, trial, vacuous, spend, retries, guards.decisions, {
       systemPrompt,
       toolCalls: tools.calls,
-      output: outcome.status === "completed" ? asOutput(outcome.output, lastOutput) : lastOutput,
+      // The output guard is the last thing production runs before an answer becomes durable, so a
+      // Case scores the text a participant would actually have received.
+      output: await guardOutput(guards, answered),
       status: outcome.status,
-    };
-    const expectations = scoreCase(evalCase.expect, observation);
-    return {
-      caseId: evalCase.id,
-      trial,
-      passed: expectations.every((a) => a.passed),
-      expectations,
-      status: outcome.status,
-      vacuous,
-      spend,
-      retries,
-    };
+    });
   } catch (cause) {
     return errored(
       evalCase,

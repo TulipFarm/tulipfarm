@@ -1,5 +1,6 @@
 import type { ModelOutput } from "@tulipfarm/agent-runtime";
 import type { Expectation } from "./case.ts";
+import type { GuardrailDecision } from "./guardrails.ts";
 
 /** What one Trial produced, reduced to the facts Expectations are allowed to read. */
 export interface Observation {
@@ -8,6 +9,8 @@ export interface Observation {
   readonly toolCalls: readonly { readonly name: string; readonly arguments: unknown }[];
   readonly output: ModelOutput | undefined;
   readonly status: string;
+  /** Guard refusals in the order they fired. Empty means the policy let the whole turn through. */
+  readonly guardrails: readonly GuardrailDecision[];
 }
 
 export interface ExpectationResult {
@@ -53,6 +56,75 @@ function outputText(output: ModelOutput | undefined): string | undefined {
   if (output === undefined) return undefined;
   if (output.kind === "text") return output.text;
   if (output.kind === "structured") return JSON.stringify(output.value);
+  return undefined;
+}
+
+/**
+ * The structured value an `output_field_equals` may read.
+ *
+ * A vendor that supports a structured response returns one; the CLI subscription seats this
+ * framework runs on return JSON as ordinary text. Every candidate is tried rather than the first
+ * one that looks plausible: a model that plans inside a fence before answering, prefaces the
+ * object with a sentence, or trails commentary after it has still returned the structure the Case
+ * asked for, and failing those would measure a model's prose habits rather than the harness.
+ */
+function structuredValue(output: ModelOutput | undefined): { found: boolean; value?: unknown } {
+  if (output === undefined) return { found: false };
+  if (output.kind === "structured") return { found: true, value: output.value };
+  if (output.kind !== "text") return { found: false };
+
+  for (const candidate of jsonCandidates(output.text)) {
+    try {
+      const value = JSON.parse(candidate);
+      if (typeof value === "object" && value !== null) return { found: true, value };
+    } catch {
+      // Try the next candidate; a fence holding prose is not a failure to report.
+    }
+  }
+  return { found: false };
+}
+
+/** Substrings that might be the JSON, widest net first-match-wins order. */
+function jsonCandidates(text: string): string[] {
+  const candidates: string[] = [];
+  for (const match of text.matchAll(/```[a-z]*\s*([\s\S]*?)```/gi)) {
+    const body = match[1]?.trim();
+    if (body !== undefined && body.length > 0) candidates.push(body);
+  }
+  candidates.push(text.trim());
+  const braced = balanced(text);
+  if (braced !== undefined) candidates.push(braced);
+  return candidates;
+}
+
+/** The first brace- or bracket-balanced span, so preamble and trailing prose fall away. */
+function balanced(text: string): string | undefined {
+  const start = text.search(/[[{]/);
+  if (start < 0) return undefined;
+  const close = text[start] === "{" ? "}" : "]";
+  const open = text[start] as string;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i += 1) {
+    const ch = text[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (inString) {
+      if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === open) depth += 1;
+    else if (ch === close) {
+      depth -= 1;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
   return undefined;
 }
 
@@ -127,6 +199,16 @@ function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: 
           };
     }
 
+    case "output_omits": {
+      const text = outputText(obs.output);
+      // No text is not evidence the string was removed: a Case asserting a guard scrubbed the
+      // answer must not pass on a turn that produced no answer at all.
+      if (text === undefined) return { passed: false, detail: "no output text to read" };
+      return text.toLowerCase().includes(a.text.toLowerCase())
+        ? { passed: false, detail: `output still contains ${show(a.text)} — said ${excerpt(text)}` }
+        : { passed: true, detail: `absent from output` };
+    }
+
     case "output_matches": {
       // An absent pattern would compile to `/(?:)/` and match anything, so it must fail rather
       // than hand back a pass nobody checked.
@@ -151,10 +233,15 @@ function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: 
 
     case "output_field_equals": {
       if (obs.output === undefined) return { passed: false, detail: "no output to read" };
-      if (obs.output.kind !== "structured") {
-        return { passed: false, detail: `output is ${obs.output.kind}, not structured` };
+      const structured = structuredValue(obs.output);
+      if (!structured.found) {
+        const said = outputText(obs.output);
+        return {
+          passed: false,
+          detail: `output is not structured data${said === undefined ? "" : ` — said ${excerpt(said)}`}`,
+        };
       }
-      const read = readPath(obs.output.value, a.path);
+      const read = readPath(structured.value, a.path);
       if (!read.found) return { passed: false, detail: `output has no path ${a.path}` };
       return equal(read.value, a.value)
         ? { passed: true, detail: `${a.path} = ${show(a.value)}` }
@@ -165,7 +252,27 @@ function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: 
       return obs.status === a.status
         ? { passed: true, detail: `status ${a.status}` }
         : { passed: false, detail: `status was ${obs.status}, expected ${a.status}` };
+
+    case "guardrail_blocked": {
+      const hit = obs.guardrails.find((d) => d.stage === a.stage && d.guard === a.guard);
+      return hit === undefined
+        ? { passed: false, detail: `no ${a.guard} refusal at ${a.stage}; ${firedAt(obs)}` }
+        : { passed: true, detail: `${a.guard} refused at ${a.stage}: ${hit.reason}` };
+    }
+
+    case "guardrail_allowed": {
+      const hit = obs.guardrails.find((d) => d.stage === a.stage);
+      return hit === undefined
+        ? { passed: true, detail: `no guard refused at ${a.stage}` }
+        : { passed: false, detail: `${hit.guard} refused at ${a.stage}: ${hit.reason}` };
+    }
   }
+}
+
+/** What did fire, so a missed refusal reads as evidence rather than a bare "not found". */
+function firedAt(obs: Observation): string {
+  if (obs.guardrails.length === 0) return "no guard refused anywhere in the turn";
+  return `guards that did refuse: ${obs.guardrails.map((d) => `${d.stage}/${d.guard}`).join(", ")}`;
 }
 
 /**

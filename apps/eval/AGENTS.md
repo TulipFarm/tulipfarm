@@ -33,6 +33,7 @@ Only its own Cases need updating when their observable behaviour moves.
 | `src/spend.ts` | `Spend` totals: tokens, dollars, and what could not be priced. |
 | `soul/` | The **Eval Soul**: the frozen fixture business every Case is measured against. Ordinary tracked files. |
 | `src/eval-soul.ts` | `loadEvalSoul` — copies the fixture to a throwaway git repo and reads it with the real `SoulLoader`; `soulContext` maps an Agent into the assembler. |
+| `src/guardrails.ts` | Runs the Eval Soul's `guardrails.yaml` through the production `TurnGuardrails`; collects refusals off the real Run events. |
 | `src/verdict.ts` | `caseVerdict`, `scoreable` — one Case collapsed into one word. Shared so the grid and a Baseline delta can never disagree. |
 | `src/baseline.ts` | `compareToBaseline` — pure. Refuses a delta across two Corpora or two models. |
 | `src/artifact.ts` | `ScorecardArtifact` read/write, `harnessVersion`, `baselinePath`. The durable form. |
@@ -63,6 +64,14 @@ Only its own Cases need updating when their observable behaviour moves.
   its own `.git` inside this repository, and L3's Soul writes must not dirty the tracked fixture.
 - **The Eval Soul's hash is folded into `corpusHash`.** A fixture edit changes half of what a Case
   measures, so it must invalidate every Baseline exactly as a Case edit does.
+- **Guards run in the turn, and are production's.** `turnGuardrails` enforces the fixture policy
+  with `TurnGuardrails` and computes the digest as `turn-context.ts` does. Input refusals settle
+  the turn before any model call, Tool refusals reach the model as denials, output refusals replace
+  the answer — the driver's ordering, because a Case that measured a different ordering would pass
+  on a harness no participant ever meets.
+- **`output_field_equals` reads JSON returned as text.** Both compared models are CLI subscription
+  seats that answer in text, so demanding `kind: "structured"` would make a structured-output Case
+  unpassable on both.
 - **The assembler must stay in the path.** `AgentLoopInput.messages` is *already assembled*, so a
   runner that fed hand-written prompts to the loop would never catch a Context-assembly regression.
   `runTrial` calls `assembleSystemPrompt` itself; `prompt_contains` is the expectation that proves it.
@@ -141,6 +150,13 @@ Only its own Cases need updating when their observable behaviour moves.
   is the one authoring fault the scripted tier cannot catch, and it surfaces against a real model
   as a failure that reads like a regression. Genuinely ungrounded checks — refusal wording, output
   format — set `ungrounded` to the reason; the rule bans the silent ones, not the deliberate ones.
+  **`output_omits` is held to the same rule for the opposite reason**: text the model was never
+  given can never appear, so an ungrounded one passes with the guard deleted.
+- **A guardrail Case must fail with the guard removed.** Assert `guardrail_blocked` with the guard
+  named, and make the model's route to the violation mechanical — a Tool result that hands it the
+  card number, a lookup whose `nextAction` names the blocked Tool. A Case that merely hopes the
+  model misbehaves measures the vendor's mood. Prove it by editing `soul/guardrails.yaml` and
+  checking that Case, and only that Case, turns red.
 - **Nothing selects the model but the pin.** `pinnedBinding` hands the loop a port wrapping one
   directly-constructed model, so the Model Profile catalogue, the tier router and the Effort
   classifier are all out of the path. Effort is declared on the `PinnedModel`, never inferred: a

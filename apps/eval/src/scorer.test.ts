@@ -10,6 +10,7 @@ const base: Observation = {
   ],
   output: { kind: "text", text: "I opened a ticket for you." },
   status: "completed",
+  guardrails: [],
 };
 
 const only = (a: Expectation, obs: Observation = base) => scoreCase([a], obs)[0];
@@ -237,5 +238,167 @@ describe("a failing output Expectation shows what the model actually said", () =
     const r = only({ kind: "output_contains", text: "zzz" }, saying("   "));
 
     expect(r.detail).toContain("<empty>");
+  });
+});
+
+describe("guardrail expectations", () => {
+  const blocked: Observation = {
+    ...base,
+    guardrails: [
+      { stage: "tool_call", guard: "tool_blocklist", reason: "issue_refund is blocked" },
+    ],
+  };
+
+  it("passes when the named guard refused at the named stage", () => {
+    expect(
+      only({ kind: "guardrail_blocked", stage: "tool_call", guard: "tool_blocklist" }, blocked)
+        .passed
+    ).toBe(true);
+  });
+
+  it("fails when a different guard fired, so a Case cannot pass on the wrong rule", () => {
+    const result = only(
+      { kind: "guardrail_blocked", stage: "tool_call", guard: "content_filter" },
+      blocked
+    );
+
+    expect(result.passed).toBe(false);
+    expect(result.detail).toContain("tool_call/tool_blocklist");
+  });
+
+  it("fails when nothing refused, and says so rather than reporting a bare miss", () => {
+    const result = only({ kind: "guardrail_blocked", stage: "output", guard: "content_filter" });
+
+    expect(result.passed).toBe(false);
+    expect(result.detail).toContain("no guard refused anywhere in the turn");
+  });
+
+  it("passes guardrail_allowed only when the stage let the turn through", () => {
+    expect(only({ kind: "guardrail_allowed", stage: "tool_call" }).passed).toBe(true);
+    expect(only({ kind: "guardrail_allowed", stage: "tool_call" }, blocked).passed).toBe(false);
+  });
+
+  it("scopes guardrail_allowed to its own stage", () => {
+    expect(only({ kind: "guardrail_allowed", stage: "output" }, blocked).passed).toBe(true);
+  });
+});
+
+describe("structured output read from text", () => {
+  const withOutput = (output: Observation["output"]): Observation => ({ ...base, output });
+
+  it("reads a bare JSON object a vendor returned as text", () => {
+    const obs = withOutput({ kind: "text", text: '{"status":"open","owner":"dana"}' });
+
+    expect(only({ kind: "output_field_equals", path: "status", value: "open" }, obs).passed).toBe(
+      true
+    );
+  });
+
+  it("reads a JSON object inside a fenced block", () => {
+    const obs = withOutput({ kind: "text", text: 'Here:\n```json\n{"status":"open"}\n```' });
+
+    expect(only({ kind: "output_field_equals", path: "status", value: "open" }, obs).passed).toBe(
+      true
+    );
+  });
+
+  it("still reads a genuinely structured output", () => {
+    const obs = withOutput({ kind: "structured", value: { status: "closed" } });
+
+    expect(only({ kind: "output_field_equals", path: "status", value: "closed" }, obs).passed).toBe(
+      true
+    );
+  });
+
+  it("reads JSON after a prose preamble", () => {
+    const obs = withOutput({ kind: "text", text: 'Here is the report:\n{"status":"open"}' });
+
+    expect(only({ kind: "output_field_equals", path: "status", value: "open" }, obs).passed).toBe(
+      true
+    );
+  });
+
+  it("reads JSON followed by trailing commentary", () => {
+    const obs = withOutput({
+      kind: "text",
+      text: '{"status":"open"}\n\nLet me know if you need more.',
+    });
+
+    expect(only({ kind: "output_field_equals", path: "status", value: "open" }, obs).passed).toBe(
+      true
+    );
+  });
+
+  it("skips a leading fence that holds the model's plan, not the answer", () => {
+    const obs = withOutput({
+      kind: "text",
+      text: '```\nfirst look the ticket up\n```\n\n```json\n{"status":"open"}\n```',
+    });
+
+    expect(only({ kind: "output_field_equals", path: "status", value: "open" }, obs).passed).toBe(
+      true
+    );
+  });
+
+  it("tolerates an upper-case language tag", () => {
+    const obs = withOutput({ kind: "text", text: '```JSON\n{"status":"open"}\n```' });
+
+    expect(only({ kind: "output_field_equals", path: "status", value: "open" }, obs).passed).toBe(
+      true
+    );
+  });
+
+  it("is not confused by a brace inside a JSON string", () => {
+    const obs = withOutput({ kind: "text", text: 'Report: {"status":"open {not json}"} done.' });
+
+    expect(
+      only({ kind: "output_field_equals", path: "status", value: "open {not json}" }, obs).passed
+    ).toBe(true);
+  });
+
+  it("refuses a bare primitive, which no path could ever be read from", () => {
+    const obs = withOutput({ kind: "text", text: "123" });
+
+    expect(only({ kind: "output_field_equals", path: "status", value: 123 }, obs).passed).toBe(
+      false
+    );
+  });
+
+  it("fails on prose, and quotes what the model said instead", () => {
+    const result = only(
+      { kind: "output_field_equals", path: "status", value: "open" },
+      withOutput({ kind: "text", text: "The ticket is open." })
+    );
+
+    expect(result.passed).toBe(false);
+    expect(result.detail).toContain("The ticket is open.");
+  });
+
+  it("fails on malformed JSON rather than throwing", () => {
+    const result = only(
+      { kind: "output_field_equals", path: "status", value: "open" },
+      withOutput({ kind: "text", text: '{"status":' })
+    );
+
+    expect(result.passed).toBe(false);
+  });
+});
+
+describe("output_omits", () => {
+  it("passes when the text is absent", () => {
+    expect(only({ kind: "output_omits", text: "4111" }).passed).toBe(true);
+  });
+
+  it("fails when the text survived, and quotes the answer", () => {
+    const result = only({ kind: "output_omits", text: "ticket" });
+
+    expect(result.passed).toBe(false);
+    expect(result.detail).toContain("opened a ticket");
+  });
+
+  it("fails when there was no answer at all, rather than calling that a scrub", () => {
+    const obs: Observation = { ...base, output: undefined };
+
+    expect(only({ kind: "output_omits", text: "4111" }, obs).passed).toBe(false);
   });
 });

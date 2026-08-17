@@ -361,6 +361,9 @@ importers:
       '@tulipfarm/soul':
         specifier: workspace:*
         version: link:../../packages/soul
+      '@tulipfarm/turn-executor':
+        specifier: workspace:*
+        version: link:../../packages/turn-executor
       ai:
         specifier: ^7.0.2
         version: 7.0.2(zod@4.4.3)

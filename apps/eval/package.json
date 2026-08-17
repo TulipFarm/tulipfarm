@@ -19,6 +19,7 @@
     "@tulipfarm/schema": "workspace:*",
     "@tulipfarm/secrets": "workspace:*",
     "@tulipfarm/soul": "workspace:*",
+    "@tulipfarm/turn-executor": "workspace:*",
     "ai": "^7.0.2"
   },
   "devDependencies": {
