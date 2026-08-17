@@ -21,7 +21,6 @@ function run(overrides: Partial<PersistedRun> = {}): PersistedRun {
       effectiveSubject: { kind: "agent", id: "agent-1" },
       guardrailContextRef: "guardrail-context-1",
     },
-    bounds: { wallTimeMs: 60_000, activeTimeMs: 30_000, attempts: 3, sideEffects: 2 },
     status: "queued",
     version: 0,
     createdAt: "2026-07-25T09:00:00.000Z",

@@ -27,7 +27,6 @@ const RUN: PersistedRun = {
     effectiveSubject: { kind: "agent", id: "agent-1" },
     guardrailContextRef: "guardrail-context-1",
   },
-  bounds: { wallTimeMs: 60_000, activeTimeMs: 30_000, attempts: 3, sideEffects: 2 },
   status: "running",
   version: 2,
   createdAt: "2026-08-02T10:00:00.000Z",

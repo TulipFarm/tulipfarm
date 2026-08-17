@@ -19,6 +19,7 @@ import {
   INTEGRATION_STORAGE_STATEMENTS,
   KILL_SWITCH_STORAGE_STATEMENTS,
   LOOP_CHECKPOINT_STORAGE_STATEMENTS,
+  RUN_BOUNDS_REMOVAL_STATEMENTS,
   RUN_BROWSE_STORAGE_STATEMENTS,
   RUN_EVENT_NOTIFY_STATEMENTS,
   RUN_EVENT_STORAGE_STATEMENTS,
@@ -32,6 +33,7 @@ import {
   WAIT_STORAGE_STATEMENTS,
 } from "@tulipfarm/storage";
 import { EFFECT_STORAGE_STATEMENTS } from "@tulipfarm/tool-broker";
+import { APPROVAL_EVIDENCE_STORAGE_STATEMENTS } from "@tulipfarm/tool-host";
 import type { Queryable } from "../db";
 
 export interface PgMigration {
@@ -2055,6 +2057,24 @@ export const PG_MIGRATIONS: PgMigration[] = [
     up: async (q) => {
       await q.query("ALTER TABLE approvals ADD COLUMN IF NOT EXISTS consumed_at timestamptz");
       await q.query("ALTER TABLE approvals ADD COLUMN IF NOT EXISTS consumed_by_call_id text");
+    },
+  },
+  {
+    version: 60,
+    description: "approvals: immutable Guardrail evidence, requester, approver (I-13)",
+    up: async (q) => {
+      for (const sql of APPROVAL_EVIDENCE_STORAGE_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 61,
+    description: "runs.bounds: drop the required Run bounds no reader ever consulted (L3-10)",
+    up: async (q) => {
+      for (const sql of RUN_BOUNDS_REMOVAL_STATEMENTS) {
+        await q.query(sql);
+      }
     },
   },
 ];

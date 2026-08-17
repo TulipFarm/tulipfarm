@@ -33,12 +33,6 @@ function run(overrides: Partial<StartRunInput> = {}): StartRunInput {
       effectiveSubject: { kind: "agent", id: "agent-1" },
       guardrailContextRef: "guardrail-context-1",
     },
-    bounds: {
-      wallTimeMs: 60_000,
-      activeTimeMs: 30_000,
-      attempts: 3,
-      sideEffects: 2,
-    },
     createdAt: CREATED_AT,
     states: [
       {
@@ -76,7 +70,7 @@ describe("RunStore (PostgreSQL)", () => {
     await database.close();
   });
 
-  it("atomically persists immutable bundle, identity, bounds, and typed States", async () => {
+  it("atomically persists immutable bundle, identity, and typed States", async () => {
     const persisted = await store.start(run());
 
     expect(persisted).toMatchObject({
@@ -86,7 +80,6 @@ describe("RunStore (PostgreSQL)", () => {
       version: 0,
       bundle: run().bundle,
       identity: run().identity,
-      bounds: run().bounds,
     });
     expect(await store.listStates("business-1", persisted.id)).toEqual([
       expect.objectContaining({

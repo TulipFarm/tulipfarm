@@ -3,6 +3,12 @@ import type { InvocationPrincipal } from "@tulipfarm/run-kernel";
 import { DurableWaitError, type DurableWaitManager } from "@tulipfarm/run-kernel";
 import { canonicalHash } from "@tulipfarm/schema";
 import type { ToolApprovalDecision, ToolApprovalPort } from "../ports";
+import {
+  type ApprovalDemand,
+  type ApprovalGuardrailEvidence,
+  approvalEvidenceDigest,
+  readApprovalEvidence,
+} from "./evidence";
 import type { ApprovalRow, ApprovalsRepo } from "./repo";
 
 /** Durable Tool approvals: intent-keyed rows park the Run; one-use wait tokens resume it.
@@ -31,6 +37,9 @@ export interface ToolApprovalPayload {
   /** Present once the Run actually parked; absent while the loop is still deciding to. */
   readonly waitId?: string;
 }
+
+/** Roles whose holders may decide a Tool approval, mirroring the `approval` surface grant. */
+export const APPROVAL_DECIDER_ROLES: readonly string[] = ["role:admin", "role:member"];
 
 export interface ToolApprovalServiceOptions {
   readonly repo: ApprovalsRepo;
@@ -78,6 +87,10 @@ export class ToolApprovalService implements ToolApprovalPort {
     toolCallId: string;
     toolName: string;
     args: unknown;
+    /** The principal whose Turn is asking. Four-eyes has nothing to check without it. */
+    requesterPrincipalId: string;
+    /** What demanded a human, from the evaluation that demanded it. */
+    demand: ApprovalDemand;
   }): Promise<ToolApprovalDecision> {
     const intentDigest = intentOf(input.runId, input.toolName, input.args);
     const existing = await this.options.repo.findByIntent(
@@ -95,11 +108,19 @@ export class ToolApprovalService implements ToolApprovalPort {
       toolName: input.toolName,
       args: input.args,
     };
+    const evidence: ApprovalGuardrailEvidence = {
+      ...input.demand,
+      toolName: input.toolName,
+      intentDigest,
+      demandedAt: this.now().toISOString(),
+    };
     await this.options.repo.insert({
       id: approvalId,
       kind: "tool_call",
       payload,
       expiresAt: new Date(this.now().getTime() + this.ttlMs),
+      requesterPrincipalId: input.requesterPrincipalId,
+      evidence,
     });
     return { status: "pending", approvalId };
   }
@@ -133,9 +154,11 @@ export class ToolApprovalService implements ToolApprovalPort {
       kind: "approval",
       aggregation: "first",
       schemaRef: APPROVAL_SIGNAL_SCHEMA_REF,
-      // The person the turn acts as is the person who decides its approvals. Recorded on the wait
-      // so the kernel enforces it under the row lock, rather than a route deciding case by case.
-      allowedPrincipals: [`${input.subject.kind}:${input.subject.id}`],
+      // Four-eyes (I-13) needs somebody other than the requester to be able to decide, so the
+      // wait admits the Roles that hold the `approval` surface as well as the requester. The
+      // requester is kept because a deployment with no other eligible approver must not be unable
+      // to decide at all; `signal` is what refuses self-approval when someone else could decide.
+      allowedPrincipals: [`${input.subject.kind}:${input.subject.id}`, ...APPROVAL_DECIDER_ROLES],
       expectedSignals: 1,
       quorum: null,
       deadlineAt: row.expiresAt.toISOString(),
@@ -162,7 +185,16 @@ export class ToolApprovalService implements ToolApprovalPort {
     };
   }
 
-  /** Checks principal, settles row, then signals wait so resumed dispatch does not re-park. */
+  /**
+   * Checks evidence and approver, settles the row, then signals the wait.
+   *
+   * Four-eyes (I-13): the principal that asked for an effect may not be the principal that
+   * authorizes it, whenever any other principal could. Where nobody else could — a deployment
+   * with exactly one active user — the requester decides and the row records them as the
+   * approver, so the exemption is visible in the audit trail rather than silent. Refusing outright
+   * would leave a solo deployment unable to run any approved Tool at all, which is a worse
+   * failure than the one four-eyes prevents.
+   */
   async signal(input: {
     businessId: string;
     approvalId: string;
@@ -182,9 +214,34 @@ export class ToolApprovalService implements ToolApprovalPort {
 
     const wait = await this.options.waits.find(input.businessId, waitId);
     if (wait === null) return "not_found";
-    if (!wait.allowedPrincipals.includes(input.principal)) return "forbidden";
 
-    if (!(await this.options.repo.settlePending(input.approvalId, input.decision))) {
+    // Evidence first: a decision on an approval whose recorded Guardrail evidence is missing or no
+    // longer matches its digest is a decision about something other than what was asked.
+    const evidence = readApprovalEvidence(row.guardrailEvidence);
+    if (
+      evidence === null ||
+      row.guardrailEvidenceDigest === null ||
+      approvalEvidenceDigest(evidence) !== row.guardrailEvidenceDigest
+    ) {
+      return "forbidden";
+    }
+
+    const requester = row.requesterPrincipalId;
+    // A row that never recorded who asked cannot be four-eyes checked, so it is not decidable.
+    if (requester === null) return "forbidden";
+
+    const principalAs = await this.approverPrincipal(wait.allowedPrincipals, input.principal);
+    if (principalAs === null) return "forbidden";
+    if (
+      input.principal === requester &&
+      (await this.options.repo.countOtherEligibleApprovers(requester)) > 0
+    ) {
+      return "forbidden";
+    }
+
+    if (
+      !(await this.options.repo.settlePending(input.approvalId, input.decision, input.principal))
+    ) {
       return "already_settled";
     }
 
@@ -194,11 +251,15 @@ export class ToolApprovalService implements ToolApprovalPort {
         businessId: input.businessId,
         runId,
         token: resumeToken,
-        principal: input.principal,
+        principal: principalAs,
         schemaRef: APPROVAL_SIGNAL_SCHEMA_REF,
         // One decision per approval: a replayed request redeems nothing a second time.
         correlationKey: `approval:${input.approvalId}`,
-        signalDigest: canonicalHash({ approvalId: input.approvalId, decision: input.decision }),
+        signalDigest: canonicalHash({
+          approvalId: input.approvalId,
+          decision: input.decision,
+          decidedBy: input.principal,
+        }),
         receivedAt: this.now().toISOString(),
       });
     } catch (error) {
@@ -208,6 +269,19 @@ export class ToolApprovalService implements ToolApprovalPort {
       return "already_settled";
     }
     return "resumed";
+  }
+
+  /**
+   * The principal form this decider may signal as: itself when the wait names it, otherwise a Role
+   * it holds that the wait allows. `null` means the wait admits nothing this decider has.
+   */
+  private async approverPrincipal(
+    allowedPrincipals: readonly string[],
+    principal: string
+  ): Promise<string | null> {
+    if (allowedPrincipals.includes(principal)) return principal;
+    const held = await this.options.repo.rolesForPrincipal(principal);
+    return allowedPrincipals.find((allowed) => held.includes(allowed)) ?? null;
   }
 }
 

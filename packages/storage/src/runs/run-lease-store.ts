@@ -50,7 +50,7 @@ export async function reclaimExpiredRunRows(
             lease_expires_at = NULL
        FROM candidates
       WHERE runs.id = candidates.id
-     RETURNING runs.id, runs.business_id, runs.source, runs.bundle, runs.identity, runs.bounds,
+     RETURNING runs.id, runs.business_id, runs.source, runs.bundle, runs.identity,
                runs.status, runs.version, runs.created_at, runs.started_at, runs.finished_at,
                runs.result_artifact_id, runs.error_evidence_ref, runs.lease_owner,
                runs.lease_expires_at`,
@@ -86,7 +86,7 @@ export async function claimNextQueuedRunRows(
             lease_expires_at = $3::timestamptz
        FROM candidates
       WHERE runs.id = candidates.id
-     RETURNING runs.id, runs.business_id, runs.source, runs.bundle, runs.identity, runs.bounds,
+     RETURNING runs.id, runs.business_id, runs.source, runs.bundle, runs.identity,
                runs.status, runs.version, runs.created_at, runs.started_at, runs.finished_at,
                runs.result_artifact_id, runs.error_evidence_ref, runs.lease_owner,
                runs.lease_expires_at`,

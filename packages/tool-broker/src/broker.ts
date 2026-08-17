@@ -1,5 +1,6 @@
 import { ajv } from "@tulipfarm/schema";
 import {
+  type ApprovalDemandEvidence,
   authorizeToolIntent,
   type ToolAuthorizationContext,
   type ToolAuthorizationDenialReason,
@@ -26,7 +27,10 @@ interface ToolBrokerOutcomeBase {
 
 export type ToolBrokerOutcome =
   | (ToolBrokerOutcomeBase & { readonly outcome: "authorized" })
-  | (ToolBrokerOutcomeBase & { readonly outcome: "awaiting_approval" })
+  | (ToolBrokerOutcomeBase & {
+      readonly outcome: "awaiting_approval";
+      readonly demand?: ApprovalDemandEvidence;
+    })
   | (Partial<ToolBrokerOutcomeBase> & {
       readonly outcome: "denied";
       readonly reason: ToolBrokerDenialReason;
@@ -63,7 +67,6 @@ export class ToolBroker {
     }
 
     const policy = authorizeToolIntent(intent, contract, context);
-    if (policy.outcome === "denied") return { ...base, ...policy };
-    return { ...base, outcome: policy.outcome };
+    return { ...base, ...policy };
   }
 }

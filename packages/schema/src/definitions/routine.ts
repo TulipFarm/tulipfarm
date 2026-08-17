@@ -75,16 +75,12 @@ const retryPolicy = Type.Object(
 const stateLimits = Type.Object(
   {
     wallClockMs: Type.Optional(positiveInteger),
-    activeMs: Type.Optional(positiveInteger),
     tokens: Type.Optional(positiveInteger),
     costUsd: Type.Optional(Type.Number({ minimum: 0 })),
     iterations: Type.Optional(positiveInteger),
     fanOut: Type.Optional(positiveInteger),
     parallelism: Type.Optional(positiveInteger),
-    artifactBytes: Type.Optional(positiveInteger),
-    resultRows: Type.Optional(positiveInteger),
-    networkBytes: Type.Optional(positiveInteger),
-    sideEffects: Type.Optional(Type.Integer({ minimum: 0 })),
+    retries: Type.Optional(Type.Integer({ minimum: 0 })),
   },
   { additionalProperties: false }
 );

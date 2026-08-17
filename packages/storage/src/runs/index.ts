@@ -56,7 +56,6 @@ export type {
   PersistedRunStatus,
   PersistedState,
   PersistedStateStatus,
-  RunBounds,
   RunBundle,
   RunIdentity,
   RunLineage,
@@ -71,6 +70,7 @@ export type {
 } from "./run-store";
 export {
   MAX_RUN_PAGE_SIZE,
+  RUN_BOUNDS_REMOVAL_STATEMENTS,
   RUN_BROWSE_STORAGE_STATEMENTS,
   RUN_STORAGE_STATEMENTS,
   RunPersistenceError,

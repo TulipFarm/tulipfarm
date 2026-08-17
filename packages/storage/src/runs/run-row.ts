@@ -1,10 +1,4 @@
-import type {
-  PersistedRun,
-  PersistedRunStatus,
-  RunBounds,
-  RunBundle,
-  RunIdentity,
-} from "./run-store";
+import type { PersistedRun, PersistedRunStatus, RunBundle, RunIdentity } from "./run-store";
 import { optionalTimestamp, timestamp } from "./timestamps";
 
 export interface RunRow {
@@ -13,7 +7,6 @@ export interface RunRow {
   source: string;
   bundle: RunBundle;
   identity: RunIdentity;
-  bounds: RunBounds;
   status: PersistedRunStatus;
   version: number;
   created_at: string | Date;
@@ -32,7 +25,6 @@ export function persistedRun(row: RunRow): PersistedRun {
     source: row.source,
     bundle: row.bundle,
     identity: row.identity,
-    bounds: row.bounds,
     status: row.status,
     version: row.version,
     createdAt: timestamp(row.created_at),

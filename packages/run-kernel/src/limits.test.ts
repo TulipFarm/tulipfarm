@@ -42,11 +42,11 @@ describe("resolveLimits", () => {
 describe("narrowestWins", () => {
   it("returns the effective numeric ceiling for a key", () => {
     const resolved = resolveLimits([
-      { scope: "deployment", limits: { sideEffects: 9 } },
-      { scope: "tool", limits: { sideEffects: 2 } },
+      { scope: "deployment", limits: { retries: 9 } },
+      { scope: "tool", limits: { retries: 2 } },
     ]);
 
-    expect(narrowestWins(resolved, "sideEffects")).toBe(2);
+    expect(narrowestWins(resolved, "retries")).toBe(2);
     expect(narrowestWins(resolved, "tokens")).toBeNull();
   });
 });

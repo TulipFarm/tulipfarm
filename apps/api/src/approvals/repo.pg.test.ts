@@ -1,8 +1,19 @@
 import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
-import { ApprovalsRepo } from "@tulipfarm/tool-host";
+import { type ApprovalGuardrailEvidence, ApprovalsRepo } from "@tulipfarm/tool-host";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeMigratedPglite } from "../test/pglite";
+
+/** Every `tool_call` row carries the Guardrail evidence that demanded it; the table requires it. */
+const EVIDENCE: ApprovalGuardrailEvidence = {
+  demandedBy: "guardrail_rule",
+  guardrailRevision: "gr-1",
+  reason: "approval_required",
+  ruleId: "rule-1",
+  toolName: "write_x",
+  intentDigest: "sha256:intent",
+  demandedAt: "2026-08-16T00:00:00.000Z",
+};
 
 describe("ApprovalsRepo (PGlite)", () => {
   let db: PGlite;
@@ -25,6 +36,8 @@ describe("ApprovalsRepo (PGlite)", () => {
       kind: "tool_call",
       payload: { toolName: "write_x", args: { a: 1 } },
       expiresAt,
+      requesterPrincipalId: "user:requester-1",
+      evidence: EVIDENCE,
     });
 
     const row = await repo.findById(id);
@@ -42,6 +55,8 @@ describe("ApprovalsRepo (PGlite)", () => {
       kind: "tool_call",
       payload: {},
       expiresAt: new Date(Date.now() + 300_000),
+      requesterPrincipalId: "user:requester-1",
+      evidence: EVIDENCE,
     });
 
     await repo.settle(id, "approved");
@@ -58,6 +73,8 @@ describe("ApprovalsRepo (PGlite)", () => {
       kind: "tool_call",
       payload: {},
       expiresAt: new Date(Date.now() + 300_000),
+      requesterPrincipalId: "user:requester-1",
+      evidence: EVIDENCE,
     });
 
     await repo.settle(id, "denied");
@@ -72,6 +89,8 @@ describe("ApprovalsRepo (PGlite)", () => {
       kind: "tool_call",
       payload: {},
       expiresAt: new Date(Date.now() + 300_000),
+      requesterPrincipalId: "user:requester-1",
+      evidence: EVIDENCE,
     });
 
     expect(await repo.settlePending(id, "approved")).toBe(true);
@@ -91,6 +110,8 @@ describe("ApprovalsRepo (PGlite)", () => {
       kind: "tool_call",
       payload,
       expiresAt: new Date(Date.now() + 300_000),
+      requesterPrincipalId: "user:requester-1",
+      evidence: EVIDENCE,
     });
 
     const row = await repo.findById(id);

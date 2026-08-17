@@ -103,7 +103,6 @@ export async function insertQueuedRun(
       effectiveSubject: { kind: "user", id: "user-1" },
       guardrailContextRef: "identity:user",
     },
-    bounds: { wallTimeMs: 3_600_000, activeTimeMs: 900_000, attempts: 3, sideEffects: 100 },
     createdAt: new Date().toISOString(),
     states: [
       {

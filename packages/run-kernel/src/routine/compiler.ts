@@ -4,7 +4,7 @@ import { type LimitSet, resolveLimits } from "../limits";
 import type { JsonObject, OutputSchemaRegistration } from "../outputs";
 import { mapAuthoredLimits } from "./authored-limits";
 import { type CompiledExpression, compileExpression, ExpressionError } from "./expressions";
-import { narrowBoundsByLimits } from "./limit-enforcement";
+import { narrowBoundsByLimits, narrowRetryByLimits } from "./limit-enforcement";
 
 /**
  * Compiles valid Routine shapes into one graph after proving termination, reference order,
@@ -556,7 +556,7 @@ export function compileRoutine(
         ),
         bounds: narrowBoundsByLimits(checkBounds(state, path), boundCeilings),
         join: (readString(state, "join") as CompiledState["join"]) ?? null,
-        retry: compileRetry(state, path),
+        retry: narrowRetryByLimits(compileRetry(state, path), boundCeilings),
         limits: stateLimits,
         identity: {
           principalKind: ceiling.principalKind,

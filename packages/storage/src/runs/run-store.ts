@@ -79,13 +79,6 @@ export interface RunIdentity {
   readonly guardrailContextRef: string;
 }
 
-export interface RunBounds {
-  readonly wallTimeMs: number;
-  readonly activeTimeMs: number;
-  readonly attempts: number;
-  readonly sideEffects: number;
-}
-
 export interface StartRunInput {
   readonly id: string;
   readonly businessId: string;
@@ -93,7 +86,6 @@ export interface StartRunInput {
   readonly source: string;
   readonly bundle: RunBundle;
   readonly identity: RunIdentity;
-  readonly bounds: RunBounds;
   readonly createdAt: string;
   readonly states: readonly StartStateInput[];
   readonly parentRunId?: string;
@@ -107,7 +99,6 @@ export interface PersistedRun {
   readonly source: string;
   readonly bundle: RunBundle;
   readonly identity: RunIdentity;
-  readonly bounds: RunBounds;
   readonly status: PersistedRunStatus;
   readonly version: number;
   readonly createdAt: string;
@@ -173,6 +164,21 @@ export const RUN_BROWSE_STORAGE_STATEMENTS: readonly string[] = [
     ON runs (business_id, created_at DESC, id DESC)`,
 ];
 
+/** Immutable Run identity. Kept separate because the bounds removal must replace it in place. */
+const RUN_IDENTITY_IMMUTABLE_FUNCTION = `CREATE OR REPLACE FUNCTION reject_run_identity_change()
+    RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      IF OLD.id IS DISTINCT FROM NEW.id
+        OR OLD.business_id IS DISTINCT FROM NEW.business_id
+        OR OLD.bundle IS DISTINCT FROM NEW.bundle
+        OR OLD.identity IS DISTINCT FROM NEW.identity
+        OR OLD.created_at IS DISTINCT FROM NEW.created_at THEN
+        RAISE EXCEPTION 'run_identity_immutable';
+      END IF;
+      RETURN NEW;
+    END;
+    $$`;
+
 export const RUN_STORAGE_STATEMENTS: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS runs (
     id                    uuid PRIMARY KEY,
@@ -180,14 +186,6 @@ export const RUN_STORAGE_STATEMENTS: readonly string[] = [
     source                text NOT NULL CHECK (length(source) > 0),
     bundle                jsonb NOT NULL CHECK (jsonb_typeof(bundle) = 'object'),
     identity              jsonb NOT NULL CHECK (jsonb_typeof(identity) = 'object'),
-    bounds                jsonb NOT NULL CHECK (
-      jsonb_typeof(bounds) = 'object'
-      AND bounds ?& ARRAY['wallTimeMs', 'activeTimeMs', 'attempts', 'sideEffects']
-      AND (bounds->>'wallTimeMs')::bigint > 0
-      AND (bounds->>'activeTimeMs')::bigint > 0
-      AND (bounds->>'attempts')::integer >= 0
-      AND (bounds->>'sideEffects')::integer >= 0
-    ),
     status                text NOT NULL DEFAULT 'queued'
       CHECK (status IN (${RUN_STATUS_SQL})),
     version               integer NOT NULL DEFAULT 0 CHECK (version >= 0),
@@ -272,20 +270,7 @@ export const RUN_STORAGE_STATEMENTS: readonly string[] = [
   `CREATE TRIGGER run_lineage_append_only
     BEFORE UPDATE OR DELETE ON run_lineage
     FOR EACH ROW EXECUTE FUNCTION reject_run_append_only_change()`,
-  `CREATE OR REPLACE FUNCTION reject_run_identity_change()
-    RETURNS trigger LANGUAGE plpgsql AS $$
-    BEGIN
-      IF OLD.id IS DISTINCT FROM NEW.id
-        OR OLD.business_id IS DISTINCT FROM NEW.business_id
-        OR OLD.bundle IS DISTINCT FROM NEW.bundle
-        OR OLD.identity IS DISTINCT FROM NEW.identity
-        OR OLD.bounds IS DISTINCT FROM NEW.bounds
-        OR OLD.created_at IS DISTINCT FROM NEW.created_at THEN
-        RAISE EXCEPTION 'run_identity_immutable';
-      END IF;
-      RETURN NEW;
-    END;
-    $$`,
+  RUN_IDENTITY_IMMUTABLE_FUNCTION,
   "DROP TRIGGER IF EXISTS runs_identity_immutable ON runs",
   `CREATE TRIGGER runs_identity_immutable
     BEFORE UPDATE ON runs
@@ -323,6 +308,19 @@ export const RUN_STORAGE_STATEMENTS: readonly string[] = [
   ...RUN_BROWSE_STORAGE_STATEMENTS,
 ];
 
+/**
+ * Drops the `runs.bounds` column, whose four fields no reader ever consulted (L3-10).
+ *
+ * A Run's real ceilings live in the compiled Routine — `bounds`/`retry` per State — and in the Run
+ * budget ledger; the column only ever held constants a single writer invented. The immutability
+ * trigger names its columns, so its function must stop naming `bounds` before the column goes,
+ * or the next `UPDATE` on a Run would raise inside the trigger.
+ */
+export const RUN_BOUNDS_REMOVAL_STATEMENTS: readonly string[] = [
+  RUN_IDENTITY_IMMUTABLE_FUNCTION,
+  "ALTER TABLE runs DROP COLUMN IF EXISTS bounds",
+];
+
 interface RunCursor {
   readonly createdAt: string;
   readonly id: string;
@@ -349,7 +347,7 @@ function decodeRunCursor(decoded: string | undefined): RunCursor | null {
 }
 
 /** PostgreSQL persistence for business-scoped Runs, States, attempts, and lineage. */
-export const RUN_COLUMNS = `id, business_id, source, bundle, identity, bounds, status, version, created_at,
+export const RUN_COLUMNS = `id, business_id, source, bundle, identity, status, version, created_at,
   started_at, finished_at, result_artifact_id, error_evidence_ref, lease_owner, lease_expires_at`;
 
 export class RunStore {
@@ -358,8 +356,8 @@ export class RunStore {
   async start(input: StartRunInput): Promise<PersistedRun> {
     return this.transactions.withTransaction(async (transaction) => {
       const inserted = await transaction.query<RunRow>(
-        `INSERT INTO runs (id, business_id, source, bundle, identity, bounds, created_at)
-         VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7::timestamptz)
+        `INSERT INTO runs (id, business_id, source, bundle, identity, created_at)
+         VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6::timestamptz)
          RETURNING ${RUN_COLUMNS}`,
         [
           input.id,
@@ -367,7 +365,6 @@ export class RunStore {
           input.source,
           JSON.stringify(input.bundle),
           JSON.stringify(input.identity),
-          JSON.stringify(input.bounds),
           input.createdAt,
         ]
       );

@@ -5,6 +5,7 @@ import type {
   SurfaceRendererManifest,
   SurfaceTarget,
 } from "@tulipfarm/surface";
+import type { ApprovalDemand } from "./approvals/evidence";
 
 /**
  * Ports the Tool host needs but must not own. Each one is something a process may legitimately
@@ -77,6 +78,10 @@ export interface ToolApprovalPort {
     toolCallId: string;
     toolName: string;
     args: unknown;
+    /** Who is asking. An approval that does not record it cannot be four-eyes checked (I-13). */
+    requesterPrincipalId: string;
+    /** The policy evaluation that demanded a human, bound to the approval it creates. */
+    demand: ApprovalDemand;
   }): Promise<ToolApprovalDecision>;
   /**
    * Spends an approved decision at the dispatch that will execute it. `false` means the decision

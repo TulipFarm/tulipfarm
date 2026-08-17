@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { resolveLimits } from "../limits";
-import type { CompiledBounds } from "./compiler";
-import { narrowBoundsByLimits, routineBudgetScopedLimits } from "./limit-enforcement";
+import type { CompiledBounds, CompiledRetryPolicy } from "./compiler";
+import {
+  narrowBoundsByLimits,
+  narrowRetryByLimits,
+  routineBudgetScopedLimits,
+} from "./limit-enforcement";
 
 const UNBOUNDED: CompiledBounds = {
   maxItems: null,
@@ -73,8 +77,36 @@ describe("routineBudgetScopedLimits", () => {
   it("drops keys the Run budget ledger never charges", () => {
     expect(
       routineBudgetScopedLimits({
-        limits: { tokens: 10, wallTimeMs: 1, activeTimeMs: 1, sideEffects: 1, networkBytes: 1 },
+        limits: { tokens: 10, wallTimeMs: 1, retries: 1, fanOut: 1 },
       })
     ).toEqual({ scope: "routine", limits: { tokens: 10 } });
+  });
+});
+
+describe("narrowRetryByLimits", () => {
+  const policy: CompiledRetryPolicy = { maxAttempts: 5, backoffMs: 100, multiplier: 2 };
+
+  it("leaves the policy alone when no limit names retries", () => {
+    expect(narrowRetryByLimits(policy, resolveLimits([]))).toBe(policy);
+  });
+
+  it("caps attempts at one first attempt plus the allowed retries", () => {
+    const resolved = resolveLimits([{ scope: "routine", limits: { retries: 1 } }]);
+    expect(narrowRetryByLimits(policy, resolved)).toEqual({ ...policy, maxAttempts: 2 });
+  });
+
+  it("never raises attempts above the authored policy", () => {
+    const resolved = resolveLimits([{ scope: "routine", limits: { retries: 99 } }]);
+    expect(narrowRetryByLimits(policy, resolved)).toBe(policy);
+  });
+
+  it("leaves a State with no policy at its single attempt rather than granting retries", () => {
+    const resolved = resolveLimits([{ scope: "routine", limits: { retries: 3 } }]);
+    expect(narrowRetryByLimits(null, resolved)).toBeNull();
+  });
+
+  it("denies every retry when the ceiling is zero", () => {
+    const resolved = resolveLimits([{ scope: "state", limits: { retries: 0 } }]);
+    expect(narrowRetryByLimits(policy, resolved)?.maxAttempts).toBe(1);
   });
 });

@@ -1,4 +1,17 @@
 export {
+  type ApprovalDemand,
+  type ApprovalGuardrailEvidence,
+  AUTONOMY_APPROVAL_DEMAND,
+  approvalEvidenceDigest,
+  readApprovalEvidence,
+  UNATTRIBUTED_APPROVAL_DEMAND,
+} from "./approvals/evidence";
+export {
+  listPendingToolApprovals,
+  type PendingToolApproval,
+} from "./approvals/pending";
+export {
+  APPROVAL_EVIDENCE_STORAGE_STATEMENTS,
   type ApprovalKind,
   type ApprovalRow,
   type ApprovalStatus,
@@ -6,6 +19,7 @@ export {
   ApprovalsRepo,
 } from "./approvals/repo";
 export {
+  APPROVAL_DECIDER_ROLES,
   APPROVAL_SIGNAL_SCHEMA_REF,
   APPROVAL_WAIT_TTL_MS,
   type ApprovalSignalOutcome,
