@@ -222,6 +222,96 @@ describe("ClaudeCodeModel — turn translation", () => {
     expect(generated.usage.outputTokens.total).toBe(23);
   });
 
+  it("takes the turn total from the result message, not the pre-write snapshot", async () => {
+    // Anthropic reports `output_tokens: 1` on the assistant message: that is the count at
+    // `message_start`, before the model has written anything. Trusting it reported ~1 output
+    // token for every completed turn, so every cost derived from it was wrong.
+    script = [
+      assistant("msg_1", [{ type: "text", text: "We open at 9am." }], {
+        input_tokens: 974,
+        output_tokens: 1,
+      }),
+      result({ usage: { input_tokens: 974, output_tokens: 23 } }),
+    ];
+    const model = new ClaudeCodeModel("sonnet", "tok");
+
+    const generated = await model.doGenerate(callOptions());
+
+    expect(generated.usage.inputTokens.total).toBe(974);
+    expect(generated.usage.outputTokens.total).toBe(23);
+  });
+
+  it("reports cache reads from the result total as a breakdown of input, not an addend", async () => {
+    script = [
+      assistant("msg_1", [{ type: "text", text: "ok" }], { input_tokens: 10, output_tokens: 1 }),
+      result({
+        usage: {
+          input_tokens: 10,
+          output_tokens: 40,
+          cache_read_input_tokens: 900,
+          cache_creation_input_tokens: 5,
+        },
+      }),
+    ];
+    const model = new ClaudeCodeModel("sonnet", "tok");
+
+    const generated = await model.doGenerate(callOptions());
+
+    expect(generated.usage.inputTokens.total).toBe(915);
+    expect(generated.usage.inputTokens.cacheRead).toBe(900);
+    expect(generated.usage.inputTokens.noCache).toBe(15);
+  });
+
+  it("names the model the vendor resolved the alias to", async () => {
+    // We address the seat as "sonnet". Only `modelUsage` says which dated model actually ran, and
+    // without it a comparison across two Sweeps cannot tell a vendor roll-forward from a change
+    // we made ourselves.
+    script = [
+      assistant("msg_1", [{ type: "text", text: "ok" }], { input_tokens: 10, output_tokens: 1 }),
+      result({
+        usage: { input_tokens: 10, output_tokens: 4 },
+        modelUsage: { "claude-sonnet-4-5-20250929": { outputTokens: 4 } },
+      }),
+    ];
+    const model = new ClaudeCodeModel("sonnet", "tok");
+
+    const generated = await model.doGenerate(callOptions());
+
+    expect(generated.response?.modelId).toBe("claude-sonnet-4-5-20250929");
+  });
+
+  it("names no model when more than one ran, rather than picking one", async () => {
+    script = [
+      assistant("msg_1", [{ type: "text", text: "ok" }], { input_tokens: 10, output_tokens: 1 }),
+      result({
+        usage: { input_tokens: 10, output_tokens: 4 },
+        modelUsage: { "claude-sonnet-4-5-20250929": {}, "claude-haiku-4-5-20251001": {} },
+      }),
+    ];
+    const model = new ClaudeCodeModel("sonnet", "tok");
+
+    const generated = await model.doGenerate(callOptions());
+
+    expect(generated.response?.modelId).toBeUndefined();
+  });
+
+  it("falls back to the per-message snapshots when a tool call cut the turn short", async () => {
+    // An interrupted turn never reaches a `result`, so the snapshots are the only account of what
+    // it consumed. Reporting nothing would make a tool-calling turn look free.
+    script = [
+      assistant("msg_1", [{ type: "tool_use", id: "t1", name: "lookup", input: {} }], {
+        input_tokens: 50,
+        output_tokens: 12,
+      }),
+    ];
+    const model = new ClaudeCodeModel("sonnet", "tok");
+
+    const generated = await model.doGenerate(callOptions());
+
+    expect(generated.usage.inputTokens.total).toBe(50);
+    expect(generated.usage.outputTokens.total).toBe(12);
+  });
+
   it("folds cache tokens into the input total", async () => {
     script = [
       assistant("msg_1", [], {
