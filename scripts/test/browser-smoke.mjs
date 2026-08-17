@@ -30,6 +30,7 @@ if (!BASE_URL) {
 
 const EMAIL = "smoke@tulipfarm.test";
 const PASSWORD = "smoke-password-123";
+const BUSINESS = "Smoke Test Co";
 const MESSAGE = "browser smoke test message";
 
 const log = (msg) => console.log(`\x1b[0;36m[browser-smoke]\x1b[0m ${msg}`);
@@ -101,12 +102,15 @@ try {
   if (onSetup) {
     log("running the setup wizard");
 
-    // One question per screen: name, then email, then password, then Finish.
+    // One question per screen: name, email, password, business name. Only the last screen
+    // renders "Finish", so every earlier answer has to be submitted with "Continue".
     await page.locator('input[type="text"]').fill("Smoke Test");
     await page.getByRole("button", { name: "Continue" }).click();
     await page.locator('input[type="email"]').fill(EMAIL);
     await page.getByRole("button", { name: "Continue" }).click();
     await page.locator('input[type="password"]').fill(PASSWORD);
+    await page.getByRole("button", { name: "Continue" }).click();
+    await page.locator('input[type="text"]').fill(BUSINESS);
     await page.getByRole("button", { name: "Finish" }).click();
   } else {
     log("instance already configured — signing in");

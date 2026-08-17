@@ -96,14 +96,18 @@ export async function completeOrSignIn(page: Page): Promise<void> {
   const onSetup = page.url().includes("/setup");
   const email = "smoke@tulipfarm.test";
   const password = "smoke-password-123";
+  const businessName = "Smoke Test Co";
 
   if (onSetup) {
-    // One question per screen: name, then email, then password, then Finish.
+    // One question per screen: name, email, password, business name. Only the last screen
+    // renders "Finish", so every earlier answer has to be submitted with "Continue".
     await page.locator('input[type="text"]').fill("Smoke Test");
     await page.getByRole("button", { name: "Continue" }).click();
     await page.locator('input[type="email"]').fill(email);
     await page.getByRole("button", { name: "Continue" }).click();
     await page.locator('input[type="password"]').fill(password);
+    await page.getByRole("button", { name: "Continue" }).click();
+    await page.locator('input[type="text"]').fill(businessName);
     await page.getByRole("button", { name: "Finish" }).click();
   } else {
     await page.getByLabel("email").fill(email);
