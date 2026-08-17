@@ -20,6 +20,7 @@ reconciliation, turn execution, delivery classification, projections, and outbox
 | `src/executors.ts`, `src/delivery.ts` | Run source and delivery target registries. |
 | `src/turn/` | Chat/integration turn executors, Context, guardrails, events, completion. |
 | `src/routine/` | Routine executor plus Tool, Agent, and approval ports. |
+| `src/curator/` | Curator Run executor (resolve pinned context, reason once, submit raw output) and the `curator-sweep` fan-out. |
 | `src/internal/` | HTTP ports back to `/api/v1/internal/*`; Run identity is re-derived by API. |
 | `src/tools/` | In-process Tool host for co-locatable families, and the routing dispatcher. |
 | `src/hooks/` | Sandbox worker bundle for Integration delivery classification. |
@@ -38,7 +39,13 @@ reconciliation, turn execution, delivery classification, projections, and outbox
 - Never migrate here; API owns `schema_version`; raise `REQUIRED_SCHEMA_VERSION` when needed.
 - Boot fails closed with `process.exit(1)`; unsafe drain timeout exits non-zero.
 - Leases/CAS are the only claim; recover expired leases, never force statuses.
-- Registered Run sources are `chat`, `integration`, and `routine`; unknown sources reconcile.
+- Registered Run sources are `chat`, `integration`, `routine`, and `curator`; unknown sources
+  reconcile.
+- The Curator executor holds no judgement: it never chooses inputs, validates output, or applies
+  effects. The API re-derives all of that from the job's own manifest.
+- `curator-sweep` (*/5, bare pg-boss, scheduled by the API) is deterministic maintenance only: it
+  reconciles Tasks, then asks the API to mint one Run per user with a backlog. Its queue name is a
+  plain string shared with `apps/api/src/curator/sweep-schedule.ts` — rename both or neither.
 - Integration Runs classify delivery, then hand real turns to the same chat executor as web chat.
 - Routine execution reads only the Run's exact signed bundle and immutable request Artifact.
 - Routine replay safety depends on persisting successors first and durable occurrence keys.

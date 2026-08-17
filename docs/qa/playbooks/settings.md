@@ -3,12 +3,12 @@ id: settings
 area: Settings and business configuration
 suites: [smoke, full]
 routes:
-  ["/settings/profile", "/settings/appearance", "/settings/auth", "/settings/memory",
+  ["/settings/profile", "/settings/appearance", "/settings/auth", "/settings/instructions",
   "/business/profile", "/business/models", "/business/secrets", "/business/soul",
   "/business/activities", "/business/observability", "/business/guardrails",
   "/business/people", "/business/about"]
 preconditions: [restore-after required on any change]
-blast_radius: full CRUD only on qa-<run-id>-* secrets, tokens, and memory assertions this run
+blast_radius: full CRUD only on qa-<run-id>-* secrets and tokens this run
   creates; every other setting is read, then any prior value touched is recorded and restored in the
   same scenario; never enters a real credential anywhere, never clicks "Sync now" or submits the
   Soul git-remote form, never breaks the live model routing config
@@ -18,7 +18,8 @@ smoke_scenarios: [S1, S8]
 
 # Settings and business configuration
 
-Settings is now strictly **personal**: Profile, Appearance, Auth, and Memory. Business-wide
+Settings is now strictly **personal**: Profile, Appearance, Auth, and Custom instructions.
+Business-wide
 configuration lives in **Operate** under the Work, Health, and Business groups. This playbook still
 runs late in `full` because it is allowed to mutate a small number of owned QA artifacts, and every
 scenario that changes a value restores or deletes it immediately inside that scenario.
@@ -28,7 +29,12 @@ scenario that changes a value restores or deletes it immediately inside that sce
 Verified against the current routes and `apps/web/app/lib/nav.ts` before authoring these steps.
 
 - Personal Settings contains `/settings/profile`, `/settings/appearance`, `/settings/auth`, and
-  `/settings/memory`. `/settings` redirects to `/settings/profile`.
+  `/settings/instructions`. `/settings` redirects to `/settings/profile`.
+- Memory has no page of its own. It is one Markdown document the system maintains per user, shown
+  read-only in a "Memory" panel on `/settings/profile`. A user reads it and can never edit it, so
+  any editor, Save button, or per-fact control there is a regression. The panel is always present;
+  before anything has been written it reads "Nothing yet.". A missing panel means the request
+  failed — investigate it, do not record it as expected.
 - Operate > Work contains Inbox, Runs, and Business Activities (`/business/activities`). Operate >
   Health contains Operations and Observability (`/business/observability`, admin-only read).
   Operate > Business contains Business profile, Models, Secrets, Integrations, Soul, Guardrails,
@@ -49,8 +55,8 @@ Signed-in tab, either role.
 | # | Action | Expected |
 | --- | --- | --- |
 | 1 | `navigate /settings` | Redirects to `/settings/profile` within 5s |
-| 2 | Inspect the Settings sidebar | Personal items appear: Profile, Appearance, Auth, Memory |
-| 3 | Click Profile, Appearance, Auth, and Memory | Each loads within 5s with exactly one `h1` matching the item label |
+| 2 | Inspect the Settings sidebar | Personal items appear: Profile, Appearance, Auth, Custom instructions |
+| 3 | Click Profile, Appearance, Auth, and Custom instructions | Each loads within 5s with exactly one `h1` matching the item label |
 | 4 | Switch to Operate and inspect groups | Work, Health, and Business headings appear; Business contains Business profile, Models, Secrets, Integrations, Soul, Guardrails, People (admin only), About |
 | 5 | Navigate to `/business/profile`, `/business/models`, `/business/secrets`, `/business/soul`, `/business/activities`, `/business/guardrails`, and `/business/about` | Each loads within 5s with one matching `h1` |
 | 6 | If admin, also navigate to `/business/people` and `/business/observability`; if member, open each URL directly | Admin sees the page; member sees the explicit admin-only message |
@@ -64,9 +70,12 @@ Signed-in tab, either role.
 | 2 | `expect` field labels `Name`, `Email`, `Role`, `Status`, and `User ID` | Account fields are read-only; only display name is editable |
 | 3 | Record the current display name, type `qa-<run-id> tester`, `click` `Save` | Status "Display name updated." appears and the sidebar account chip updates |
 | 4 | Restore the recorded display name and `click` `Save` | Original value restored before leaving the scenario |
-| 5 | `navigate /settings/appearance` | Heading "Appearance"; Theme choices System, Light, Dark render |
-| 6 | Record the current theme, select the other palette, then restore the recorded option | Theme changes immediately and is restored; no Save button is expected |
-| 7 | `capture` screenshot, console delta, failed requests | — |
+| 5 | Scroll to the "Memory" panel | The panel renders, showing either one syntax-highlighted Markdown page or "Nothing yet." |
+| 6 | Try to type into it and scan it for controls | Text is not editable; there is no Save, no `Keep`/`Discard`/`Forget`, no key/value row, no per-fact delete. Any of these is a regression |
+| 7 | `expect` the footer reads `<n> / 20,000 characters` | The used/budget counter is present; `n` matches the visible page |
+| 8 | `navigate /settings/appearance` | Heading "Appearance"; Theme choices System, Light, Dark render |
+| 9 | Record the current theme, select the other palette, then restore the recorded option | Theme changes immediately and is restored; no Save button is expected |
+| 10 | `capture` screenshot, console delta, failed requests | — |
 
 ## S3 — `/settings/auth`: password validation and API tokens
 
@@ -83,18 +92,15 @@ Signed-in tab. Never enter the operator's real current password.
 | 7 | `click` `Revoke` on the QA token row | Row is removed; no other token is touched |
 | 8 | `capture` screenshot, console delta, failed requests | — |
 
-## S4 — `/settings/memory`: custom instructions and saved memories
+## S4 — `/settings/instructions`: custom instructions
 
 | # | Action | Expected |
 | --- | --- | --- |
-| 1 | `navigate /settings/memory` | Heading "Memory"; panels "Custom instructions" and "Saved memories" render; "Suggested memories" appears only if suggestions exist |
+| 1 | `navigate /settings/instructions` | Heading "Custom instructions"; a single editor panel renders |
 | 2 | Record current Custom instructions, append `qa-<run-id> temporary instruction`, `click` `Save` | Status "Instructions updated." appears; character counter stays under 4000 |
 | 3 | Restore the recorded Custom instructions and `click` `Save` | Original instructions restored before leaving the scenario |
-| 4 | Observe Suggested memories without clicking `Keep` or `Discard` | Operator's real inferred memories remain untouched |
-| 5 | Add saved memory key `qa-<run-id>-note` and value `qa test value`, then `click` `Set` | Row appears in Saved memories |
-| 6 | Re-enter the same key | Inline duplicate-key error appears; no duplicate row |
-| 7 | Edit the QA row value to `qa test value v2`, `click` `Save`, then delete it through the `Delete memory` modal | Row updates, then is removed; no pre-existing memory changes |
-| 8 | `capture` screenshot, console delta, failed requests | — |
+| 4 | Scan the page for any memory surface | No "Saved memories", no "Suggested memories", no `Keep`/`Discard`/`Forget` control, no key/value row. Their presence is a regression, not a feature |
+| 5 | `capture` screenshot, console delta, failed requests | — |
 
 ## S5 — `/business/models`: effort presets and fallback chains (validation-only)
 
@@ -156,7 +162,7 @@ message.
 
 | # | Action | Expected |
 | --- | --- | --- |
-| 1 | Resize to 375px on `/settings/auth`, `/settings/memory`, `/business/secrets`, and `/business/soul` | Layout remains usable, no page-level horizontal overflow |
+| 1 | Resize to 375px on `/settings/auth`, `/settings/instructions`, `/business/secrets`, and `/business/soul` | Layout remains usable, no page-level horizontal overflow |
 | 2 | Record the current theme in `/settings/appearance`, switch to the other palette, revisit pages touched this run, then restore the original theme | Labels, badges, alerts, sheets, and code/tree view remain legible in both themes |
 | 3 | Tab through `/settings/auth` | Order follows visible order: Current password, New password, Confirm new password, Change password, New token name, Create, token row actions |
 | 4 | Tab through `/business/secrets` admin add form | Provider, then provider-specific fields or Key/Value, then Save credential; focus rings visible |

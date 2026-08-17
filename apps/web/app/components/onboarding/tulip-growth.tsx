@@ -3,7 +3,7 @@ import { cn } from "~/lib/utils";
 export type TulipStage = 0 | 1 | 2 | 3;
 
 export interface TulipGrowthProps {
-  /** How many of the three setup questions are answered. Drives which parts render. */
+  /** How many of the four setup questions are answered. Drives which parts render. */
   stage: TulipStage;
   className?: string;
   /** Rendered size in px; keeps the 120x160 aspect ratio. Defaults to the full pre-login size. */
@@ -16,6 +16,10 @@ export interface TulipGrowthProps {
  * inside the "motion reports real state" rule rather than being ornamental. `stage` decides which
  * parts *render*; CSS in app.css only animates the transition between them, so a reduced-motion
  * visitor still lands on the correct stage instead of an animation that never completes.
+ *
+ * The bloom is the brand mark's three-petal face: two outer petals with a deeper centre petal
+ * over them, whose tips sit low enough to leave a notch on each side. Petals drawn as one flat
+ * fill, or tipped at the same height, merge into a single blob that no longer reads as a tulip.
  */
 export function TulipGrowth({ stage, className, width = 120, height = 160 }: TulipGrowthProps) {
   return (
@@ -32,7 +36,7 @@ export function TulipGrowth({ stage, className, width = 120, height = 160 }: Tul
 
       <path
         className="tulip-stem-path"
-        d="M60,140 L60,70"
+        d="M60,140 L60,72"
         pathLength={1}
         fill="none"
         stroke="var(--tulip-stem)"
@@ -43,34 +47,39 @@ export function TulipGrowth({ stage, className, width = 120, height = 160 }: Tul
       <path
         className="tulip-grow"
         data-from={1}
-        d="M60,118 C42,113 36,98 45,86 C56,100 60,110 60,118 Z"
+        d="M60,120 C45,116 35,103 38,87 C52,95 59,106 60,120 Z"
         fill="var(--tulip-stem)"
       />
       <path
         className="tulip-grow"
         data-from={1}
-        d="M60,124 C78,120 85,105 77,92 C65,106 60,116 60,124 Z"
+        d="M60,128 C75,124 85,111 82,95 C68,103 61,114 60,128 Z"
         fill="var(--tulip-stem)"
       />
 
-      <ellipse
+      <path
         className="tulip-grow tulip-bud"
         data-from={2}
-        cx={60}
-        cy={58}
-        rx={12}
-        ry={18}
+        d="M60,36 C68,45 72,57 72,66 C72,75 67,80 60,81 C53,80 48,75 48,66 C48,57 52,45 60,36 Z"
         fill="var(--primary)"
       />
 
       <g className="tulip-grow" data-from={3}>
-        <path d="M60,72 L48,36 C48,20 60,10 60,26 Z" fill="var(--primary)" />
-        <path d="M60,72 L72,36 C72,20 60,10 60,26 Z" fill="var(--primary)" />
-        <path d="M60,72 L60,20 C68,10 74,20 74,32 C74,52 66,66 60,72 Z" fill="var(--primary)" />
-        <path d="M60,72 L60,20 C52,10 46,20 46,32 C46,52 54,66 60,72 Z" fill="var(--primary)" />
+        <path
+          d="M58,80 C44,79 33,71 30,58 C27,45 32,32 41,26 C50,36 56,54 58,80 Z"
+          fill="var(--primary)"
+        />
+        <path
+          d="M62,80 C76,79 87,71 90,58 C93,45 88,32 79,26 C70,36 64,54 62,80 Z"
+          fill="var(--primary)"
+        />
+        <path
+          d="M60,14 C70,26 76,42 76,56 C76,70 69,78 60,80 C51,78 44,70 44,56 C44,42 50,26 60,14 Z"
+          fill="var(--tulip-petal-deep)"
+        />
         <g className="tulip-eyes">
-          <ellipse cx={53} cy={46} rx={4} ry={5} fill="var(--primary-foreground)" />
-          <ellipse cx={67} cy={46} rx={4} ry={5} fill="var(--primary-foreground)" />
+          <ellipse cx={54} cy={58} rx={5} ry={6.5} fill="var(--primary-foreground)" />
+          <ellipse cx={66} cy={58} rx={5} ry={6.5} fill="var(--primary-foreground)" />
         </g>
       </g>
     </svg>

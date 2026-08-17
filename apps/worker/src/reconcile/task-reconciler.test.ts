@@ -10,6 +10,7 @@ const BUSINESS = "business-1";
 const UNSATISFIED: TaskCheckSignals = {
   hasProviderKey: false,
   businessName: undefined,
+  setupComplete: true,
 };
 
 function transactionPort(database: PGlite): TransactionPort {

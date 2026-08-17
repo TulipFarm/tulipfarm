@@ -3,10 +3,10 @@ import { Sheet } from "~/components/ui/sheet";
 import { useCompanion } from "~/lib/companion-context";
 import { CompanionPanel } from "./companion-panel";
 
-/* The brand mark (public/logo-*.png) is a rounder, tighter three-petal face than the growth
-   illustration's four pointed petals, and is already tuned to read at small/app-icon sizes — the
-   growth SVG's bloom, cropped down to avatar size, collapses into an unreadable blob instead of a
-   face. So the collapsed trigger uses the brand mark, not `TulipGrowth`. */
+/* The brand mark (public/logo-*.png) shares the growth illustration's three-petal face but is
+   tuned to read at small/app-icon sizes — the growth SVG carries soil, stem and leaves too, so
+   cropping its bloom down to avatar size collapses it into an unreadable blob. So the collapsed
+   trigger uses the brand mark, not `TulipGrowth`. */
 const AVATAR_SRC = "/logo-128.png";
 
 /**

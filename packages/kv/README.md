@@ -1,9 +1,9 @@
 # kv — generic scoped key-value store (KV-V1)
 
 A single Postgres table (`kv_store`) for arbitrary platform values — application salt, install id,
-feature flags, cached/bootstrap state, agent scratch data. Fills the gap left by the three existing
-stores: `secrets` (encrypted), `working_memory` (per-user, char-capped), `resources` (soul-defined
-documents). Plaintext JSONB — anything genuinely secret belongs in `secrets`.
+feature flags, cached/bootstrap state, agent scratch data. Fills the gap left by the two existing
+stores: `secrets` (encrypted) and `resources` (soul-defined documents). Plaintext JSONB — anything
+genuinely secret belongs in `secrets`.
 
 ## Model
 

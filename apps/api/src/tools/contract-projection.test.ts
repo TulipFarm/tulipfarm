@@ -80,9 +80,7 @@ function localDefinitions(): readonly LabeledDefinition[] {
   return definitionsFrom(
     "local",
     buildToolRegistry({
-      memory: stub,
-      memoryRecall: stub,
-      memoryLifecycle: stub,
+      memoryDocuments: stub,
       kv: stub,
       knowledge: stub,
       resources: stub,

@@ -1,6 +1,10 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import { recordCuratorWork } from "@tulipfarm/storage";
 import type { Queryable } from "../db";
+import { withTransaction } from "../db";
 import type {
+  CompleteTurnInput,
+  CompleteTurnResult,
   ConversationStore,
   PersistedMessage,
   PersistedTurn,
@@ -55,6 +59,35 @@ interface CompletionRow {
 
 const TURN_COLUMNS = `id, conversation_id, idempotency_key, request_message_id, status, attempt,
   run_id, cursor, superseded_run_ids, created_at, updated_at`;
+
+async function saveTurnWith(q: Queryable, turn: PersistedTurn): Promise<void> {
+  await q.query(
+    `INSERT INTO conversation_turns (
+       id, conversation_id, idempotency_key, request_message_id, status, attempt, run_id,
+       cursor, superseded_run_ids, created_at, updated_at
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::uuid[], $10, $11)
+     ON CONFLICT (id) DO UPDATE SET
+       status = EXCLUDED.status,
+       attempt = EXCLUDED.attempt,
+       run_id = EXCLUDED.run_id,
+       cursor = EXCLUDED.cursor,
+       superseded_run_ids = EXCLUDED.superseded_run_ids,
+       updated_at = EXCLUDED.updated_at`,
+    [
+      turn.id,
+      turn.conversationId,
+      turn.idempotencyKey,
+      turn.requestMessageId,
+      turn.status,
+      turn.attempt,
+      turn.runId,
+      turn.cursor,
+      [...turn.supersededRunIds],
+      turn.createdAt,
+      turn.updatedAt,
+    ]
+  );
+}
 
 function toTurn(row: TurnRow): PersistedTurn {
   return {
@@ -161,32 +194,7 @@ export class PgConversationStore implements ConversationStore {
 
   async saveTurn(turn: PersistedTurn): Promise<void> {
     assertDeploymentBusiness(turn.businessId);
-    await this.q.query(
-      `INSERT INTO conversation_turns (
-         id, conversation_id, idempotency_key, request_message_id, status, attempt, run_id,
-         cursor, superseded_run_ids, created_at, updated_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::uuid[], $10, $11)
-       ON CONFLICT (id) DO UPDATE SET
-         status = EXCLUDED.status,
-         attempt = EXCLUDED.attempt,
-         run_id = EXCLUDED.run_id,
-         cursor = EXCLUDED.cursor,
-         superseded_run_ids = EXCLUDED.superseded_run_ids,
-         updated_at = EXCLUDED.updated_at`,
-      [
-        turn.id,
-        turn.conversationId,
-        turn.idempotencyKey,
-        turn.requestMessageId,
-        turn.status,
-        turn.attempt,
-        turn.runId,
-        turn.cursor,
-        [...turn.supersededRunIds],
-        turn.createdAt,
-        turn.updatedAt,
-      ]
-    );
+    await saveTurnWith(this.q, turn);
   }
 
   async listMessages(
@@ -230,21 +238,34 @@ export class PgConversationStore implements ConversationStore {
     return row ? toCompletion(row) : undefined;
   }
 
-  async saveCompletion(completion: TurnCompletion): Promise<void> {
-    assertDeploymentBusiness(completion.businessId);
-    // must leave the recorded answer — and the Message it names — exactly as it stands.
-    await this.q.query(
-      `INSERT INTO turn_completions (turn_id, attempt, status, message_id, cursor, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (turn_id, attempt) DO NOTHING`,
-      [
-        completion.turnId,
-        completion.attempt,
-        completion.status,
-        completion.messageId,
-        completion.cursor,
-        completion.createdAt,
-      ]
-    );
+  async completeTurn(input: CompleteTurnInput): Promise<CompleteTurnResult> {
+    assertDeploymentBusiness(input.completion.businessId);
+    if (input.turn) assertDeploymentBusiness(input.turn.businessId);
+    return withTransaction(this.q, async (tx) => {
+      // must leave the recorded answer — and the Message it names — exactly as it stands.
+      const inserted = await tx.query(
+        `INSERT INTO turn_completions (turn_id, attempt, status, message_id, cursor, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (turn_id, attempt) DO NOTHING
+         RETURNING turn_id`,
+        [
+          input.completion.turnId,
+          input.completion.attempt,
+          input.completion.status,
+          input.completion.messageId,
+          input.completion.cursor,
+          input.completion.createdAt,
+        ]
+      );
+      const completionInserted = inserted.rows.length > 0;
+
+      if (input.turn) await saveTurnWith(tx, input.turn);
+      // A redelivery of an already-recorded completion must not re-enqueue the work, or one Turn
+      // could be mined many times over.
+      if (input.work && completionInserted) {
+        await recordCuratorWork(tx, input.work, input.completion.createdAt);
+      }
+      return { completionInserted };
+    });
   }
 }

@@ -20,6 +20,11 @@ export const DOMAIN_EVENTS = {
   // (ingress worker). Routine event triggers consume it, narrowed via their `filter` expression
   // (e.g. trigger.payload.integration === "slack" && trigger.payload.event === "member_joined_channel").
   INTEGRATION_EVENT: "integration.event",
+  // The Curator's whole loop reports through this one event: mint outcomes and their skip reasons,
+  // settlement effect counts, per-rejection reasons, host denials, crash recovery, and memory
+  // document size/compaction. It carries no subject id, because an operator dashboard must never
+  // become a way to read who learned what.
+  CURATOR_OBSERVED: "curator.observed",
 } as const;
 
 export interface ResourceEventPayload {
@@ -117,4 +122,32 @@ export interface SurfaceRenderedPayload {
   delivery?: "pending" | "delivered" | "ambiguous" | "failed";
   validationPaths: readonly string[];
   surfaceInteraction?: SurfaceInteraction;
+}
+
+/**
+ * One report from any point in the Curator loop. Every field is a bounded enum or a number, never
+ * a user id, a section body, or a model string, so the whole payload is safe to label a metric
+ * with and safe to hand an operator dashboard.
+ */
+export interface CuratorObservedPayload {
+  /** Where in the loop this came from. */
+  stage: "mint" | "settle" | "denial" | "recovery" | "document";
+  /** Absent only where the loop genuinely does not know it yet — a denial for a job that was
+   *  never found has no scope to report. */
+  scope?: "user" | "business";
+  /** Bounded per stage: `minted`/`skipped`, `settled`, the `CuratorHostDenial` code,
+   *  `recovered`/`abandoned`/`swept`, or `written`/`compacted`. */
+  outcome: string;
+  /** The refusal vocabulary — a `MintSkip`, or a settlement rejection reason such as
+   *  `section_changed`, `quote_not_found`, or `governance_hijack`. */
+  reason?: string;
+  /** How many of `outcome` this reports, for stages that summarise a batch. Defaults to one. */
+  count?: number;
+  /** Effects the settlement kept, and how many it dropped. Counted, never named. */
+  recorded?: number;
+  rejected?: number;
+  /** Age of the oldest unserved work at sweep time — the loop's real staleness. */
+  backlogAgeSeconds?: number;
+  /** Size of the memory document after a write, which is what compaction exists to bound. */
+  documentBytes?: number;
 }

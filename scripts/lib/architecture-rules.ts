@@ -144,6 +144,23 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
       "tool-host",
     ],
     memory: ["schema", "authz", "audit", "storage", "observability", "constants", "tool-host"],
+    // Pure reasoning logic for the Curator: prompt assembly, output schema, citation validation,
+    // document merge and Proposal mapping. It performs no IO, so it needs no store or authz port —
+    // the API owns every effect it proposes.
+    curator: ["schema", "constants", "observability"],
+    // The Curator's server half: minting a job and its Run, pinning context, revalidating output
+    // and recovering a crashed mint. Separate from `curator` because that package is pure and this
+    // one must reach the gateway and the store; separate from `apps/api` because none of it is
+    // Fastify. It holds no SQL of its own — every table it touches it reaches through `storage`.
+    "curator-host": [
+      "schema",
+      "constants",
+      "observability",
+      "curator",
+      "memory",
+      "run-kernel",
+      "storage",
+    ],
     // The Tool execution host: the gate, the dispatcher and the Tool contract, so the control
     // plane and the durable runtime run one implementation rather than two that drift.
     "tool-host": [
@@ -194,6 +211,8 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
       "sandbox",
       "knowledge",
       "memory",
+      "curator",
+      "curator-host",
       "surface",
       "surface-web",
       "surface-slack",
@@ -218,6 +237,7 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
       "agent-runtime",
       "knowledge",
       "memory",
+      "curator",
       "surface",
       "integrations",
       "sandbox",

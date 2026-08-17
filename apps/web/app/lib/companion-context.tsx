@@ -1,3 +1,4 @@
+import { useLocation } from "@remix-run/react";
 import {
   createContext,
   type ReactNode,
@@ -9,9 +10,10 @@ import {
 } from "react";
 import { dismissTask, listTasks, type Task } from "~/lib/tasks";
 
-/* The Companion's Task queue: poll every ~60s (low-urgency, unlike Approvals) so a Task closed
-   elsewhere (chat, Settings, the reconciler) clears itself out within a minute without a hard
-   refresh. */
+/* The Companion's Task queue. The poll is a slow backstop, not the primary path: a Task usually
+   closes within seconds of the action that satisfied it — connecting a provider, finishing setup —
+   so polling alone would spend up to a minute telling the user to do something they just did.
+   Navigating and returning to the tab refetch instead, which is when they are actually looking. */
 
 const POLL_INTERVAL_MS = 60_000;
 
@@ -27,11 +29,13 @@ type CompanionContextValue = {
 const CompanionContext = createContext<CompanionContextValue | null>(null);
 
 export function CompanionProvider({ children }: { children: ReactNode }) {
+  const { pathname } = useLocation();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const inFlight = useRef(false);
   const mounted = useRef(true);
+  const lastPath = useRef<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (inFlight.current) return;
@@ -51,11 +55,27 @@ export function CompanionProvider({ children }: { children: ReactNode }) {
     mounted.current = true;
     void refresh();
     const id = setInterval(() => void refresh(), POLL_INTERVAL_MS);
+    const onWake = () => {
+      if (document.visibilityState !== "hidden") void refresh();
+    };
+    window.addEventListener("focus", onWake);
+    document.addEventListener("visibilitychange", onWake);
     return () => {
       mounted.current = false;
       clearInterval(id);
+      window.removeEventListener("focus", onWake);
+      document.removeEventListener("visibilitychange", onWake);
     };
   }, [refresh]);
+
+  // Settings pages are where a Task's gap actually gets closed, so arriving somewhere new is the
+  // moment the list is most likely stale. The mount effect above already fetched for the first
+  // pathname, so only a genuine change refetches.
+  useEffect(() => {
+    const previous = lastPath.current;
+    lastPath.current = pathname;
+    if (previous !== null && previous !== pathname) void refresh();
+  }, [pathname, refresh]);
 
   const dismiss = useCallback(async (id: string) => {
     setTasks((current) => current.filter((t) => t.id !== id));

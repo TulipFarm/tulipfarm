@@ -1,5 +1,7 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import { MEMORY_DOCUMENT_STORAGE_STATEMENTS } from "@tulipfarm/memory";
 import { INVOCATION_STORAGE_STATEMENTS } from "@tulipfarm/run-kernel";
+import { MEMORY_SECTION_HEADINGS, MEMORY_SECTION_KEYS } from "@tulipfarm/schema";
 import { SOUL_BUNDLE_STORAGE_STATEMENTS } from "@tulipfarm/soul";
 import {
   ARTIFACT_STORAGE_STATEMENTS,
@@ -12,6 +14,9 @@ import {
   CHANNEL_RUN_DELIVERY_STORAGE_STATEMENTS,
   CHILD_STORAGE_STATEMENTS,
   CONCURRENCY_STORAGE_STATEMENTS,
+  CURATOR_ADMISSION_STATEMENTS,
+  CURATOR_STORAGE_STATEMENTS,
+  CURATOR_WORK_STORAGE_STATEMENTS,
   dropInvalidEmbeddingIndexes,
   EMBEDDING_COLUMNS,
   EVENT_STORAGE_STATEMENTS,
@@ -139,16 +144,6 @@ const BASELINE_STATEMENTS: string[] = [
     created_at      timestamptz NOT NULL
   )`,
   "CREATE INDEX IF NOT EXISTS messages_conversation_created_idx ON messages (conversation_id, created_at, id)",
-  `CREATE TABLE IF NOT EXISTS working_memory (
-    user_id             uuid NOT NULL,
-    key                 text NOT NULL,
-    value               text NOT NULL,
-    written_by_agent_id text,
-    created_at          timestamptz NOT NULL,
-    last_written_at     timestamptz NOT NULL,
-    PRIMARY KEY (user_id, key)
-  )`,
-  "CREATE INDEX IF NOT EXISTS working_memory_lru_idx ON working_memory (user_id, last_written_at)",
   `CREATE TABLE IF NOT EXISTS rate_limits (
     key          text NOT NULL,
     window_start timestamptz NOT NULL,
@@ -576,8 +571,6 @@ const CONFLUENCE_KNOWLEDGE_CHECKPOINT_STATEMENTS: string[] = [
 ];
 
 /** Durable resume positions for K3 Knowledge sync providers. */
-// Legacy `working_memory` stays one release as recovery for the Memory cutover.
-
 const KNOWLEDGE_SYNC_CHECKPOINT_STATEMENTS: string[] = [
   `CREATE TABLE IF NOT EXISTS knowledge_sync_checkpoints (
     provider       text NOT NULL,
@@ -587,192 +580,6 @@ const KNOWLEDGE_SYNC_CHECKPOINT_STATEMENTS: string[] = [
     PRIMARY KEY (provider, integration_id)
   )`,
 ];
-
-/**
- * Memory storage: scoped, versioned Assertions; edits supersede instead of overwriting.
- * `memory_pending` is separate so unconfirmed inferences are unreachable by Assertion queries.
- */
-const MEMORY_STATEMENTS: string[] = [
-  `CREATE TABLE IF NOT EXISTS memory_assertions (
-    business_id          text NOT NULL,
-    assertion_id         text NOT NULL,
-    scope                text NOT NULL,
-    subject_principal_id text,
-    agent_id             text,
-    role_id              text,
-    run_id               text,
-    subject              text NOT NULL,
-    statement            text NOT NULL,
-    memory_type          text NOT NULL,
-    trust_tier           text NOT NULL,
-    confidence           double precision NOT NULL,
-    importance           double precision NOT NULL,
-    origin               text NOT NULL,
-    author_principal_id  text NOT NULL,
-    author_agent_id      text,
-    provenance_run_id    text,
-    confirmation         text NOT NULL,
-    status               text NOT NULL,
-    version              integer NOT NULL,
-    created_at           timestamptz NOT NULL,
-    updated_at           timestamptz NOT NULL,
-    recorded_until       timestamptz,
-    valid_from           timestamptz NOT NULL,
-    valid_to             timestamptz,
-    expires_at           timestamptz,
-    supersedes_id        text,
-    superseded_by_id     text,
-    entities             text[] NOT NULL DEFAULT '{}',
-    access_count         integer NOT NULL DEFAULT 0,
-    last_accessed_at     timestamptz,
-    PRIMARY KEY (business_id, assertion_id)
-  )`,
-  `CREATE INDEX IF NOT EXISTS memory_assertions_scope_idx
-     ON memory_assertions (business_id, scope, subject_principal_id, agent_id, role_id, run_id)
-     WHERE status = 'active'`,
-  `CREATE INDEX IF NOT EXISTS memory_assertions_subject_idx
-     ON memory_assertions (business_id, scope, subject_principal_id, subject)
-     WHERE status = 'active'`,
-  "CREATE INDEX IF NOT EXISTS memory_assertions_entities_gin ON memory_assertions USING gin (entities)",
-  `CREATE TABLE IF NOT EXISTS memory_evidence (
-    business_id  text NOT NULL,
-    assertion_id text NOT NULL,
-    position     integer NOT NULL,
-    kind         text NOT NULL,
-    ref          text NOT NULL,
-    source_id    text,
-    revision     text,
-    PRIMARY KEY (business_id, assertion_id, position),
-    FOREIGN KEY (business_id, assertion_id)
-      REFERENCES memory_assertions (business_id, assertion_id) ON DELETE CASCADE
-  )`,
-  "CREATE INDEX IF NOT EXISTS memory_evidence_source_idx ON memory_evidence (business_id, source_id)",
-  `CREATE TABLE IF NOT EXISTS memory_pending (
-    business_id  text NOT NULL,
-    pending_id   text NOT NULL,
-    request      jsonb NOT NULL,
-    requested_at timestamptz NOT NULL,
-    expires_at   timestamptz NOT NULL,
-    PRIMARY KEY (business_id, pending_id)
-  )`,
-  "CREATE INDEX IF NOT EXISTS memory_pending_expiry_idx ON memory_pending (business_id, expires_at)",
-];
-
-/** Backfills `working_memory` to confirmed preferences; old table stays for recovery. */
-/** Recall columns index short Assertions in place; nullable embeddings keep lexical fallback. */
-const MEMORY_RECALL_INDEX_STATEMENTS: string[] = [
-  `ALTER TABLE memory_assertions
-     ADD COLUMN IF NOT EXISTS tsv tsvector
-     GENERATED ALWAYS AS (to_tsvector('english', subject || ' ' || statement)) STORED`,
-  "ALTER TABLE memory_assertions ADD COLUMN IF NOT EXISTS embedding vector",
-  "ALTER TABLE memory_assertions ADD COLUMN IF NOT EXISTS embedding_model text",
-  "ALTER TABLE memory_assertions ADD COLUMN IF NOT EXISTS embedding_dim integer",
-  `CREATE INDEX IF NOT EXISTS memory_assertions_tsv_idx
-     ON memory_assertions USING gin (tsv)`,
-];
-
-/** Episodes use chunks, but project back to authorized MemoryAssertions for recall. */
-const MEMORY_EPISODE_STATEMENTS: string[] = [
-  `CREATE TABLE IF NOT EXISTS memory_episodes (
-    business_id          text NOT NULL,
-    episode_id           text NOT NULL,
-    assertion_id         text NOT NULL,
-    scope                text NOT NULL,
-    subject_principal_id text,
-    agent_id             text,
-    role_id              text,
-    run_id               text,
-    source_type          text NOT NULL,
-    source_id            text NOT NULL,
-    summary              text NOT NULL,
-    decisions            text[] NOT NULL DEFAULT '{}',
-    outcome              text NOT NULL DEFAULT '',
-    author_principal_id  text NOT NULL,
-    author_agent_id      text,
-    provenance_run_id    text,
-    evidence             jsonb NOT NULL DEFAULT '[]',
-    started_at           timestamptz,
-    ended_at             timestamptz,
-    created_at           timestamptz NOT NULL,
-    updated_at           timestamptz NOT NULL,
-    PRIMARY KEY (business_id, episode_id),
-    UNIQUE (business_id, source_type, source_id),
-    FOREIGN KEY (business_id, assertion_id)
-      REFERENCES memory_assertions (business_id, assertion_id) ON DELETE CASCADE
-  )`,
-  `CREATE INDEX IF NOT EXISTS memory_episodes_scope_idx
-     ON memory_episodes (business_id, scope, subject_principal_id, agent_id, role_id, run_id)`,
-  `CREATE INDEX IF NOT EXISTS memory_episodes_assertion_idx
-     ON memory_episodes (business_id, assertion_id)`,
-  `CREATE TABLE IF NOT EXISTS memory_chunks (
-    business_id          text NOT NULL,
-    chunk_id             text NOT NULL,
-    episode_id           text NOT NULL,
-    assertion_id         text NOT NULL,
-    scope                text NOT NULL,
-    subject_principal_id text,
-    agent_id             text,
-    role_id              text,
-    run_id               text,
-    chunk_type           text NOT NULL,
-    position             integer NOT NULL,
-    text                 text NOT NULL,
-    tsv                  tsvector
-      GENERATED ALWAYS AS (to_tsvector('english', text)) STORED,
-    embedding            vector,
-    embedding_model      text,
-    embedding_dim        integer,
-    created_at           timestamptz NOT NULL,
-    PRIMARY KEY (business_id, chunk_id),
-    FOREIGN KEY (business_id, episode_id)
-      REFERENCES memory_episodes (business_id, episode_id) ON DELETE CASCADE,
-    FOREIGN KEY (business_id, assertion_id)
-      REFERENCES memory_assertions (business_id, assertion_id) ON DELETE CASCADE
-  )`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS memory_chunks_episode_position_idx
-     ON memory_chunks (business_id, episode_id, position)`,
-  `CREATE INDEX IF NOT EXISTS memory_chunks_assertion_idx
-     ON memory_chunks (business_id, assertion_id)`,
-  `CREATE INDEX IF NOT EXISTS memory_chunks_scope_idx
-     ON memory_chunks (business_id, scope, subject_principal_id, agent_id, role_id, run_id)`,
-  "CREATE INDEX IF NOT EXISTS memory_chunks_tsv_idx ON memory_chunks USING gin (tsv)",
-];
-
-/** Erasure helpers add the missing pending-candidate lookup; cascades remove owned rows. */
-const MEMORY_ERASURE_STATEMENTS: string[] = [
-  `CREATE INDEX IF NOT EXISTS memory_pending_supersedes_idx
-     ON memory_pending (business_id, ((request ->> 'supersedesId')))`,
-];
-
-async function backfillWorkingMemory(q: Queryable, businessId: string): Promise<void> {
-  // Databases reconstructed from arbitrary versions may legitimately lack this table.
-  const { rows } = await q.query("SELECT to_regclass('public.working_memory') AS table_name");
-  if ((rows[0] as { table_name: string | null } | undefined)?.table_name == null) return;
-
-  await q.query(
-    `INSERT INTO memory_assertions (
-       business_id, assertion_id, scope, subject_principal_id, subject, statement,
-       memory_type, trust_tier, confidence, importance, origin,
-       author_principal_id, author_agent_id, confirmation, status, version,
-       created_at, updated_at, valid_from, entities, access_count
-     )
-     SELECT
-       $1, gen_random_uuid()::text, 'user_private', wm.user_id::text, wm.key, wm.value,
-       'preference', 'user_stated', 1, 1, 'explicit',
-       wm.user_id::text, wm.written_by_agent_id, 'confirmed', 'active', 1,
-       wm.created_at, wm.last_written_at, wm.created_at, '{}', 0
-     FROM working_memory wm
-     WHERE NOT EXISTS (
-       SELECT 1 FROM memory_assertions a
-       WHERE a.business_id = $1
-         AND a.scope = 'user_private'
-         AND a.subject_principal_id = wm.user_id::text
-         AND a.subject = wm.key
-     )
-     ON CONFLICT DO NOTHING`,
-    [businessId]
-  );
-}
 
 /** One-use auth requests hold PKCE verifier server-side to prevent replay and browser swapping. */
 const INTEGRATION_AUTH_REQUEST_STATEMENTS: string[] = [
@@ -1096,126 +903,101 @@ async function seedAuthorizationBootstrap(q: Queryable): Promise<void> {
   `);
 }
 
+/**
+ * Most migrations do nothing but run a package's `*_STORAGE_STATEMENTS` in order. Spelling that
+ * loop out per migration hid the ones that do something else among 37 identical copies.
+ */
+function applyStatements(...groups: readonly (readonly string[])[]): PgMigration["up"] {
+  return async (q) => {
+    for (const group of groups) {
+      for (const sql of group) {
+        await q.query(sql);
+      }
+    }
+  };
+}
+
+/**
+ * Renders the retired six-key section projection as the Markdown page that replaced it. Local to
+ * migration 65 because no live code reads that shape any more; importing a renderer for it would
+ * keep a dead structure alive in `@tulipfarm/memory` to serve one already-executed migration.
+ */
+function renderProjectionRow(value: unknown): string {
+  const source = (value ?? {}) as Record<string, unknown>;
+  return MEMORY_SECTION_KEYS.map((key) => {
+    const raw = source[key];
+    const content = typeof raw === "string" ? raw.trim() : "";
+    return content ? `## ${MEMORY_SECTION_HEADINGS[key]}\n\n${content}` : "";
+  })
+    .filter((part) => part.length > 0)
+    .join("\n\n");
+}
+
 export const PG_MIGRATIONS: PgMigration[] = [
   {
     version: 1,
     description: "greenfield baseline",
-    up: async (q) => {
-      for (const sql of BASELINE_STATEMENTS) {
-        await q.query(sql);
-      }
-    },
+    up: applyStatements(BASELINE_STATEMENTS),
   },
   {
     version: 2,
     description: "hardened authentication and identity",
-    up: async (q) => {
-      for (const sql of IDENTITY_STATEMENTS) {
-        await q.query(sql);
-      }
-    },
+    up: applyStatements(IDENTITY_STATEMENTS),
   },
   {
     version: 3,
     description: "transactional event inbox and outbox",
-    up: async (q) => {
-      for (const sql of EVENT_STORAGE_STATEMENTS) {
-        await q.query(sql);
-      }
-    },
+    up: applyStatements(EVENT_STORAGE_STATEMENTS),
   },
   {
     version: 4,
     description: "durable Runs, States, attempts, and lineage",
-    up: async (q) => {
-      for (const sql of RUN_STORAGE_STATEMENTS) {
-        await q.query(sql);
-      }
-    },
+    up: applyStatements(RUN_STORAGE_STATEMENTS),
   },
   {
     version: 5,
     description: "immutable typed outputs and Artifacts",
-    up: async (q) => {
-      for (const sql of ARTIFACT_STORAGE_STATEMENTS) {
-        await q.query(sql);
-      }
-    },
+    up: applyStatements(ARTIFACT_STORAGE_STATEMENTS),
   },
   {
     version: 6,
     description: "durable waits, timers, and resume tokens",
-    up: async (q) => {
-      for (const sql of WAIT_STORAGE_STATEMENTS) {
-        await q.query(sql);
-      }
-    },
+    up: applyStatements(WAIT_STORAGE_STATEMENTS),
   },
   {
     version: 7,
     description: "budgets, limits, and target concurrency",
-    up: async (q) => {
-      for (const sql of [...BUDGET_STORAGE_STATEMENTS, ...CONCURRENCY_STORAGE_STATEMENTS]) {
-        await q.query(sql);
-      }
-    },
+    up: applyStatements(BUDGET_STORAGE_STATEMENTS, CONCURRENCY_STORAGE_STATEMENTS),
   },
   {
     version: 8,
     description: "child Run links",
-    up: async (q) => {
-      for (const sql of CHILD_STORAGE_STATEMENTS) {
-        await q.query(sql);
-      }
-    },
+    up: applyStatements(CHILD_STORAGE_STATEMENTS),
   },
   {
     version: 9,
     description: "persisted Run event stream",
-    up: async (q) => {
-      for (const sql of RUN_EVENT_STORAGE_STATEMENTS) {
-        await q.query(sql);
-      }
-    },
+    up: applyStatements(RUN_EVENT_STORAGE_STATEMENTS),
   },
   {
     version: 10,
     description: "durable Tool intents and effect ledger",
-    up: async (q) => {
-      for (const sql of EFFECT_STORAGE_STATEMENTS) {
-        await q.query(sql);
-      }
-    },
+    up: applyStatements(EFFECT_STORAGE_STATEMENTS),
   },
   {
     version: 11,
     description: "Integration Apps, installations, AccessGrants, and channel routing",
-    up: async (q) => {
-      for (const sql of [
-        ...INTEGRATION_STORAGE_STATEMENTS,
-        ...CHANNEL_DELIVERY_STORAGE_STATEMENTS,
-      ]) {
-        await q.query(sql);
-      }
-    },
+    up: applyStatements(INTEGRATION_STORAGE_STATEMENTS, CHANNEL_DELIVERY_STORAGE_STATEMENTS),
   },
   {
     version: 12,
     description: "unified durable invocation cutover",
-    up: async (q) => {
-      for (const sql of INVOCATION_STORAGE_STATEMENTS) {
-        await q.query(sql);
-      }
-    },
+    up: applyStatements(INVOCATION_STORAGE_STATEMENTS),
   },
   {
     version: 13,
     description: "operational Run browser page order",
-    up: async (q) => {
-      for (const sql of RUN_BROWSE_STORAGE_STATEMENTS) {
-        await q.query(sql);
-      }
-    },
+    up: applyStatements(RUN_BROWSE_STORAGE_STATEMENTS),
   },
   {
     version: 14,
@@ -1311,14 +1093,7 @@ export const PG_MIGRATIONS: PgMigration[] = [
   {
     version: 20,
     description: "durable Soul publication and immutable execution bundles",
-    up: async (q) => {
-      for (const sql of [
-        ...SOUL_PUBLICATION_STORAGE_STATEMENTS,
-        ...SOUL_BUNDLE_STORAGE_STATEMENTS,
-      ]) {
-        await q.query(sql);
-      }
-    },
+    up: applyStatements(SOUL_PUBLICATION_STORAGE_STATEMENTS, SOUL_BUNDLE_STORAGE_STATEMENTS),
   },
   {
     version: 21,
@@ -1336,33 +1111,21 @@ export const PG_MIGRATIONS: PgMigration[] = [
   {
     version: 22,
     description: "encrypted raw webhook payload vault",
-    up: async (q) => {
-      for (const sql of WEBHOOK_VAULT_STATEMENTS) {
-        await q.query(sql);
-      }
-    },
+    up: applyStatements(WEBHOOK_VAULT_STATEMENTS),
   },
   {
     version: 23,
     description: "Channel inbound dedup, run-delivery correlation, and mention-thread tracking",
-    up: async (q) => {
-      for (const sql of [
-        ...CHANNEL_INBOUND_STORAGE_STATEMENTS,
-        ...CHANNEL_RUN_DELIVERY_STORAGE_STATEMENTS,
-        ...CHANNEL_MENTIONED_THREAD_STORAGE_STATEMENTS,
-      ]) {
-        await q.query(sql);
-      }
-    },
+    up: applyStatements(
+      CHANNEL_INBOUND_STORAGE_STATEMENTS,
+      CHANNEL_RUN_DELIVERY_STORAGE_STATEMENTS,
+      CHANNEL_MENTIONED_THREAD_STORAGE_STATEMENTS
+    ),
   },
   {
     version: 24,
     description: "channel_run_deliveries: track the posted approval prompt",
-    up: async (q) => {
-      for (const sql of CHANNEL_RUN_DELIVERY_APPROVAL_COLUMNS_STATEMENTS) {
-        await q.query(sql);
-      }
-    },
+    up: applyStatements(CHANNEL_RUN_DELIVERY_APPROVAL_COLUMNS_STATEMENTS),
   },
   {
     version: 25,
@@ -1406,105 +1169,64 @@ export const PG_MIGRATIONS: PgMigration[] = [
   {
     version: 28,
     description: "soul_repositories: one business's Soul repo mapping (Phase 10)",
-    up: async (q) => {
-      for (const sql of SOUL_REPOSITORY_STORAGE_STATEMENTS) {
-        await q.query(sql);
-      }
-    },
+    up: applyStatements(SOUL_REPOSITORY_STORAGE_STATEMENTS),
   },
   {
     version: 29,
     description: "knowledge_source_records / knowledge_source_chunks: ACL-first Knowledge storage",
-    up: async (q) => {
-      for (const sql of KNOWLEDGE_SOURCES_STATEMENTS) {
-        await q.query(sql);
-      }
-    },
+    up: applyStatements(KNOWLEDGE_SOURCES_STATEMENTS),
   },
   {
     version: 30,
     description: "slack_knowledge_checkpoints: durable per-channel Slack Knowledge sync cursor",
-    up: async (q) => {
-      for (const sql of SLACK_KNOWLEDGE_CHECKPOINT_STATEMENTS) {
-        await q.query(sql);
-      }
-    },
+    up: applyStatements(SLACK_KNOWLEDGE_CHECKPOINT_STATEMENTS),
   },
   {
     version: 31,
     description: "routine_schedule_state: cron/interval/datetime Routine trigger fire-state",
-    up: async (q) => {
-      for (const sql of ROUTINE_SCHEDULE_STATE_STATEMENTS) {
-        await q.query(sql);
-      }
-    },
+    up: applyStatements(ROUTINE_SCHEDULE_STATE_STATEMENTS),
   },
   {
     // Leave version 32 unused; renumbering would make upgraded deployments skip migrations.
+    // 33-36 built the memory assertion engine — assertions, evidence, pending confirmations,
+    // episodes, chunks and their recall indexes. That engine was replaced by the Memory Document
+    // and deleted, so these slots create nothing: a database made today never gets the tables, and
+    // migration 66 drops them from any database that already did. The versions stay because
+    // renumbering would make an upgraded deployment skip whatever took their place.
     version: 33,
-    description:
-      "memory_assertions / memory_evidence / memory_pending: scoped, versioned, bi-temporal Memory",
-    up: async (q) => {
-      for (const sql of MEMORY_STATEMENTS) {
-        await q.query(sql);
-      }
-      await backfillWorkingMemory(q, DEPLOYMENT_BUSINESS_ID);
-    },
+    description: "retired: memory assertion engine tables (see migration 66)",
+    up: applyStatements([]),
   },
   {
     version: 34,
-    description: "memory_assertions: lexical + vector recall index columns",
-    up: async (q) => {
-      for (const sql of MEMORY_RECALL_INDEX_STATEMENTS) {
-        await q.query(sql);
-      }
-    },
+    description: "retired: memory assertion recall index",
+    up: applyStatements([]),
   },
   {
     version: 35,
-    description: "memory_episodes / memory_chunks: episodic Memory recall index",
-    up: async (q) => {
-      for (const sql of MEMORY_EPISODE_STATEMENTS) {
-        await q.query(sql);
-      }
-    },
+    description: "retired: memory episode tables",
+    up: applyStatements([]),
   },
   {
     version: 36,
-    description: "memory erasure helper indexes",
-    up: async (q) => {
-      for (const sql of MEMORY_ERASURE_STATEMENTS) {
-        await q.query(sql);
-      }
-    },
+    description: "retired: memory erasure helper indexes",
+    up: applyStatements([]),
   },
   {
     version: 37,
     description: "confluence_knowledge_checkpoints: durable Confluence Knowledge sync cursor",
-    up: async (q) => {
-      for (const sql of CONFLUENCE_KNOWLEDGE_CHECKPOINT_STATEMENTS) {
-        await q.query(sql);
-      }
-    },
+    up: applyStatements(CONFLUENCE_KNOWLEDGE_CHECKPOINT_STATEMENTS),
   },
   {
     version: 38,
     description: "knowledge_sync_checkpoints: durable K3 Knowledge sync cursors",
-    up: async (q) => {
-      for (const sql of KNOWLEDGE_SYNC_CHECKPOINT_STATEMENTS) {
-        await q.query(sql);
-      }
-    },
+    up: applyStatements(KNOWLEDGE_SYNC_CHECKPOINT_STATEMENTS),
   },
   {
     // Renumbered from 31; main had already shipped 31-38.
     version: 39,
     description: "integration_auth_requests: one-use state + PKCE verifier for the auth broker",
-    up: async (q) => {
-      for (const sql of INTEGRATION_AUTH_REQUEST_STATEMENTS) {
-        await q.query(sql);
-      }
-    },
+    up: applyStatements(INTEGRATION_AUTH_REQUEST_STATEMENTS),
   },
   {
     // Renumbered from 32 for the same skip-avoidance reason as 39.
@@ -1581,20 +1303,12 @@ export const PG_MIGRATIONS: PgMigration[] = [
   {
     version: 43,
     description: "log_event: durable error/fatal log spine for the observability UI",
-    up: async (q) => {
-      for (const sql of LOG_EVENT_STATEMENTS) {
-        await q.query(sql);
-      }
-    },
+    up: applyStatements(LOG_EVENT_STATEMENTS),
   },
   {
     version: 44,
     description: "resource_sample: per-process CPU and memory samples",
-    up: async (q) => {
-      for (const sql of RESOURCE_SAMPLE_STATEMENTS) {
-        await q.query(sql);
-      }
-    },
+    up: applyStatements(RESOURCE_SAMPLE_STATEMENTS),
   },
   {
     version: 45,
@@ -1976,49 +1690,29 @@ export const PG_MIGRATIONS: PgMigration[] = [
   {
     version: 51,
     description: "per-principal provider credentials for user-scoped Tool calls",
-    up: async (q) => {
-      for (const sql of PRINCIPAL_PROVIDER_TOKEN_STATEMENTS) {
-        await q.query(sql);
-      }
-    },
+    up: applyStatements(PRINCIPAL_PROVIDER_TOKEN_STATEMENTS),
   },
   {
     version: 52,
     description: "durable mutation kill switches for the effect plane",
-    up: async (q) => {
-      for (const sql of KILL_SWITCH_STORAGE_STATEMENTS) {
-        await q.query(sql);
-      }
-    },
+    up: applyStatements(KILL_SWITCH_STORAGE_STATEMENTS),
   },
   {
     version: 53,
     description: "tasks: system-created human work items behind Companion/Tasks/home checklist",
-    up: async (q) => {
-      for (const sql of TASK_STORAGE_STATEMENTS) {
-        await q.query(sql);
-      }
-    },
+    up: applyStatements(TASK_STORAGE_STATEMENTS),
   },
   {
     version: 54,
     description:
       "agent_loop_checkpoints: durable Tool-call and repair counters across approval parks",
-    up: async (q) => {
-      for (const sql of LOOP_CHECKPOINT_STORAGE_STATEMENTS) {
-        await q.query(sql);
-      }
-    },
+    up: applyStatements(LOOP_CHECKPOINT_STORAGE_STATEMENTS),
   },
   {
     version: 55,
     description:
       "state_retry_attempts: durable Routine State retry budget across park/resume and reclaim",
-    up: async (q) => {
-      for (const sql of STATE_RETRY_STORAGE_STATEMENTS) {
-        await q.query(sql);
-      }
-    },
+    up: applyStatements(STATE_RETRY_STORAGE_STATEMENTS),
   },
   {
     version: 56,
@@ -2076,5 +1770,99 @@ export const PG_MIGRATIONS: PgMigration[] = [
         await q.query(sql);
       }
     },
+  },
+  {
+    version: 62,
+    description: "memory document: one Markdown page per user, plus durable Curator work",
+    up: applyStatements(MEMORY_DOCUMENT_STORAGE_STATEMENTS, CURATOR_WORK_STORAGE_STATEMENTS),
+  },
+  {
+    version: 63,
+    description: "curator jobs, effect ledger, candidates, task metadata sidecar, admission ledger",
+    up: applyStatements(CURATOR_STORAGE_STATEMENTS, CURATOR_ADMISSION_STATEMENTS),
+  },
+  {
+    version: 64,
+    // The index is declared in CURATOR_STORAGE_STATEMENTS so one file owns the table's shape, but a
+    // database that already ran 63 never revisits it. `IF NOT EXISTS` makes replaying it here a
+    // no-op on a fresh install and the only way an upgraded one gets it.
+    description: "curator effect index for the shadow review window read",
+    up: applyStatements([
+      `CREATE INDEX IF NOT EXISTS curator_effect_review_idx
+         ON curator_effect (business_id, created_at DESC)`,
+    ]),
+  },
+  {
+    version: 65,
+    // Migration 62 stored the document as a six-key `jsonb` projection; the page a model is given
+    // is now the stored bytes themselves. A database created after this ships gets the text column
+    // from 62 directly, so this is a no-op there — hence the column probe rather than an
+    // unconditional ALTER. `renderProjectionRow` is local because the shape it reads no longer
+    // exists anywhere else; importing a renderer for it would keep a retired shape alive in the
+    // package just to serve one already-executed migration.
+    description: "memory document: store the rendered Markdown page, not a section projection",
+    up: async (q) => {
+      for (const table of ["user_memory", "user_memory_revisions"]) {
+        const probe = await q.query<{ present: boolean }>(
+          `SELECT EXISTS (
+             SELECT 1 FROM information_schema.columns
+              WHERE table_name = $1 AND column_name = 'sections'
+           ) AS present`,
+          [table]
+        );
+        if (!probe.rows[0]?.present) continue;
+
+        await q.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS document text`);
+        const rows = await q.query<{ ctid: string; sections: unknown }>(
+          `SELECT ctid::text AS ctid, sections FROM ${table}`
+        );
+        for (const row of rows.rows) {
+          const raw = typeof row.sections === "string" ? JSON.parse(row.sections) : row.sections;
+          await q.query(`UPDATE ${table} SET document = $1 WHERE ctid = $2::tid`, [
+            renderProjectionRow(raw),
+            row.ctid,
+          ]);
+        }
+        await q.query(`UPDATE ${table} SET document = '' WHERE document IS NULL`);
+        await q.query(`ALTER TABLE ${table} ALTER COLUMN document SET NOT NULL`);
+        await q.query(`ALTER TABLE ${table} DROP COLUMN sections`);
+      }
+      await q.query(
+        `ALTER TABLE user_memory
+           DROP CONSTRAINT IF EXISTS user_memory_sections_complete,
+           DROP CONSTRAINT IF EXISTS user_memory_sections_closed`
+      );
+    },
+  },
+  {
+    version: 66,
+    // The assertion engine is gone: no reads, no writes, no Tools, no routes. Dropping its tables
+    // in the same change is the point — a schema that still describes a retired store is what
+    // invites someone to write to it again. There is nothing to preserve: the document was never
+    // derived from these rows.
+    description: "drop the retired memory assertion engine tables",
+    up: applyStatements([
+      "DROP TABLE IF EXISTS memory_chunks CASCADE",
+      "DROP TABLE IF EXISTS memory_episodes CASCADE",
+      "DROP TABLE IF EXISTS memory_pending CASCADE",
+      "DROP TABLE IF EXISTS memory_evidence CASCADE",
+      "DROP TABLE IF EXISTS memory_assertions CASCADE",
+    ]),
+  },
+  {
+    version: 67,
+    description: "allow the task-answer memory writer; drop legacy working_memory",
+    up: applyStatements([
+      `ALTER TABLE user_memory_revisions DROP CONSTRAINT IF EXISTS user_memory_revisions_writer_check`,
+      `ALTER TABLE user_memory_revisions
+         ADD CONSTRAINT user_memory_revisions_writer_check
+         CHECK (writer IN ('tool', 'curator', 'task', 'erasure'))`,
+      // `working_memory` was the assertion engine's key/value scratch tier. It has had no reader
+      // or writer since the Memory Document replaced it, so leaving it would only invite one.
+      "DROP TABLE IF EXISTS working_memory CASCADE",
+      // v66 shipped an incomplete list and already recorded itself, so it can never re-run there.
+      "DROP TABLE IF EXISTS memory_chunks CASCADE",
+      "DROP TABLE IF EXISTS memory_evidence CASCADE",
+    ]),
   },
 ];

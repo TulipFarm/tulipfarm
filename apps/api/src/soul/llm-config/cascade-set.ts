@@ -5,6 +5,7 @@ import type { SecretsService } from "@tulipfarm/secrets";
 import { llmProviderForFieldKey } from "@tulipfarm/secrets";
 import type { CommitActor, Logger, SoulLoader, SoulWriter } from "@tulipfarm/soul";
 import { mergeLlmConfigIntoSoulYaml } from "@tulipfarm/soul";
+import { kickCuratorSweep } from "../../curator/sweep-schedule";
 
 /**
  * Subscription CLI providers ship a fixed, known model per tier (`packages/llm/src/cli/specs.ts`),
@@ -28,9 +29,9 @@ export function makeLlmCascadeOnSecretSet(
   llmService: LlmService,
   secretsService: SecretsService,
   logger: Logger,
-  /** Kicks the Task reconciler outside its 15-minute cron so "Connect a model provider" clears
+  /** Kicks the Curator sweep outside its five-minute cron so "Connect a model provider" clears
    * within seconds of the auto-connect commit, not on the next scheduled tick. */
-  triggerTaskReconcile?: () => Promise<void>
+  triggerCuratorSweep?: () => Promise<void>
 ): (setKey: string, actor: CommitActor) => Promise<void> {
   return async (setKey: string, actor: CommitActor): Promise<void> => {
     const currentConfig = soulLoader.llmConfig as LlmConfig | undefined;
@@ -97,15 +98,7 @@ export function makeLlmCascadeOnSecretSet(
     await soulLoader.reload();
     await llmService.init(soulLoader.llmConfig, secretsService, logger);
 
-    if (triggerTaskReconcile) {
-      try {
-        await triggerTaskReconcile();
-      } catch (err) {
-        logger.error(
-          `[llm] task-reconcile kick after ${owner.id} auto-connect failed — ${err instanceof Error ? err.message : String(err)}`
-        );
-      }
-    }
+    await kickCuratorSweep(triggerCuratorSweep, logger, `${owner.id} auto-connect`);
 
     logger.info(`[llm] ${owner.id} auto-connected after secret ${setKey} added`);
   };

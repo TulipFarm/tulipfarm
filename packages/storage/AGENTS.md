@@ -20,6 +20,7 @@ publication, approvals, integrations, events, and blob/vector/cache/queue ports.
 | `src/integrations/` | Integration install/state and channel inbound/delivery stores. |
 | `src/approvals/`, `src/events/` | Approval persistence and generic event store. |
 | `src/kill-switches/` | Durable mutation kill switches backing the effect-plane emergency stop. |
+| `src/curator/` | Curator jobs, pinned input manifests and context pins, effect ledger, per-user work queue, daily spend admission, the claim-and-reserve mint transaction, stale-job reconciliation, and the read-only shadow review queries (`review.ts`, which writes nothing by design). |
 | `src/pagination.ts`, `src/vector-search.ts` | Cursor paging and pgvector index/distance SQL shared by every repository. |
 
 ## Rules
@@ -42,3 +43,6 @@ publication, approvals, integrations, events, and blob/vector/cache/queue ports.
   audience-scoped, and gapless per Run.
 - Kill switch rows are never deleted or re-enabled: standing one down stamps `disabled_at`, because
   whether a stop was live at a given instant is incident evidence.
+- A Curator effect carries an immutable execution mode, and a `shadow` effect may never rest in
+  `pending` (DB CHECK `curator_effect_shadow_is_terminal`). Enabling the Curator must not be able to
+  apply output that was only ever reasoned about in shadow.

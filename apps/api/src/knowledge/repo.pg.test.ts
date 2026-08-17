@@ -131,15 +131,6 @@ describe("PgKnowledgePageRepo", () => {
     expect(await repo.governancePages()).toHaveLength(0);
   });
 
-  it("hasAnyActive flips with the presence of an active page", async () => {
-    expect(await repo.hasAnyActive()).toBe(false);
-    const d = page();
-    await repo.insert(d);
-    expect(await repo.hasAnyActive()).toBe(true);
-    await repo.softDelete(d._id);
-    expect(await repo.hasAnyActive()).toBe(false); // soft-deleted no longer counts
-  });
-
   it("governancePages returns only active + alwaysLoadForAgents", async () => {
     await repo.insert(page({ alwaysLoadForAgents: true }));
     await repo.insert(page({ alwaysLoadForAgents: false }));

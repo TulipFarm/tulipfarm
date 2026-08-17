@@ -29,6 +29,100 @@ import { describe, expect, it } from "vitest";
  * effect-plane wave that moved it also added `adapterFor()` to the declarative composition root,
  * which is Fastify-adjacent wiring and stays — so the net is 41 lines out, not 62.
  *
+ * It came down again to 49,930 with the Memory Document backfill. The service reads
+ * `memory_assertions` and writes documents through `MemoryDocumentRepo` and touches no Fastify, so
+ * it lives in `packages/memory/src/document` beside the store it writes to; only its HTTP route
+ * stayed here. This ratchet is what caught it — it was first written into the app purely because
+ * that is where the route was.
+ *
+ * The Curator moved it twice in one wave, in both directions, and the pair is the point. It came
+ * down to 49,671 when `host.ts` and `mint.ts` left for `packages/curator-host`, the Turn reader
+ * for `packages/storage` and the Soul projection for `packages/curator` — none of them touch
+ * Fastify. It then went back up 31 to 49,702 for the three internal routes those moves made
+ * possible (`mint`, `reconcile`, `context`/`effects`) plus the composition that assembles them.
+ * Routes are the one thing that genuinely has to be here. Net against the mark this wave started
+ * from, the control plane is 228 lines smaller.
+ *
+ * The mark then moved to 49,811 on merging with #388-#390, whose authz role gate, thread mappings
+ * and Routine retry work all added routes and wiring here. That is upstream growth, not the
+ * Curator's: main's own ceiling for it was 50,033, so re-measuring the merged tree lowers the
+ * ceiling by 222 rather than raising it. This is the re-baselining case — the number is measured
+ * against the new merge-base, never widened to fit a diff.
+ *
+ * It moved to 49,816 for the first-run reconcile kick: `/setup/complete` now enqueues a reconcile
+ * so a brand-new instance surfaces its setup gaps at minute 0 instead of up to fifteen minutes
+ * later. That is a route side effect and has to be here. The wave paid most of its own way — the
+ * kick-and-swallow block had been copied into three handlers, and collapsing it into
+ * `kickTaskReconcile` gave back 24 of the 29 lines the feature cost.
+ *
+ * The mark then moved to 50,101 on merging with #391-#393, which lifted `AppOptions` into its own
+ * `app-options.ts` and added the delegation, approval-evidence and sampler wiring the runtime
+ * controls needed. All of it is upstream's, and all of it arrived through upstream's own review:
+ * the merge-base measured 49,740, main measured 50,021, and this branch measured 49,816, so the
+ * merged tree is the sum of two independently reviewed diffs rather than new growth. Re-baselining
+ * against a new merge-base, as above, is not the same as widening an allowance to fit a diff.
+ *
+ * It moved to 50,116 for the wizard's soul reload. `/setup/business` wrote `soul.yaml` and never
+ * refreshed the in-memory manifest, so the business name stayed empty until the API restarted —
+ * reconcile signals could not see it, and Agents spoke with no business name. The fix is route
+ * wiring by definition: a `SetupDeps` field, one composition line, and a `writeSoulConfig` helper
+ * that both direct writes now share, so patch-commit-reload is a single path a future wizard step
+ * cannot half-implement. That helper is what kept the cost to 15 lines rather than 28 — it
+ * replaced two inline write blocks. There is no package this could move to; it exists only to
+ * compensate for setup running before the SoulWriter gateway does. A follow-up added 3 more —
+ * a `setupComplete` signal on the same internal route — after the reconciler was found opening a
+ * Task for the business name while the wizard was still asking for it. Both are the same defect:
+ * first-run setup is a second writer the rest of the system cannot see.
+ *
+ * It moved to 50,204 for the Curator's observability, and this is the largest single raise so far,
+ * so it carries the most justification. The Curator applies model-derived effects to a user's
+ * Memory; the rule is that it does not go live until an operator can see what it decided and why
+ * it refused. That means mint outcomes and their skip reasons, settlement effect counts, the
+ * validation rejection vocabulary, host denials, crash recovery, and backlog staleness. Three
+ * quarters of the cost is Fastify by definition: the four internal routes are the only place the
+ * API learns any of those outcomes, and each report has to be taken where the outcome is produced.
+ * The reasoning itself did not move here — the observation shape is `CuratorObservedPayload` in
+ * `packages/storage`, the loop's decisions stay in `@tulipfarm/curator-host`, and the routes only
+ * name what already happened. What kept the cost down: reporting rides the existing domain-event
+ * bus rather than threading a metrics sink through the request path, so no handler holds a sink
+ * and a broken exporter cannot refuse a settlement; and `SERVICE_ERRORS`/`JOB_PARAMS` collapsed
+ * schema fragments the four routes had been repeating, which paid back 13 of the lines.
+ *
+ * It moved to 50,377 for the shadow review surface, and the reason is that shadow mode was
+ * write-only. The Curator has been recording what it *would* do into a ledger that applies to
+ * nothing, and the cutover precondition says that output must be validated before the loop is
+ * enabled — a claim nobody can make about a table only `psql` can read. `GET /api/v1/curator/shadow`
+ * is the whole of that surface: one route, one response, counts plus the recent effects. 134 of the
+ * 162 lines are that route and the schema the OpenAPI rule requires of it; the rest is its
+ * `AppOptions` field and one registration. What did *not* land here: the reads are
+ * `packages/storage/src/curator/review.ts`, and the disclosure policy — who may see a memory patch
+ * in full — is `redactShadowEffect`/`projectShadowEffect` in the pure `packages/curator`, which is
+ * where it can be tested against the payload shapes rather than through HTTP. The handler is three
+ * lines because of that. It is registered in `app.ts` and deliberately not in the internal route
+ * family: that family is service-only by contract, and one shared options field for both audiences
+ * is exactly how a gate ends up applied to the wrong audience. The last 6 lines are the
+ * `ADMIN_ONLY_SURFACES` entry, which that catalog's own comment requires of any new route gate, and
+ * migration 64, which this directory owns by convention — the index the review read needs was
+ * first written into migration 63's statement list, where no already-migrated database would ever
+ * have seen it.
+ *
+ * Migration 65 is the next +42: converting `user_memory` from a section projection to the stored
+ * Markdown page needs the old rows rendered before the column goes, and a data migration can only
+ * live in the ledger that runs it. The rendering itself was pushed into `@tulipfarm/memory`, next
+ * to the renderer whose vocabulary it depends on — what remains here is the ALTER sequence.
+ *
+ * `GET /api/v1/memory/document` is the next +69, and it is the smallest surface that can honestly
+ * exist: a user cannot be told a hidden page decides how they are answered and then be given no way
+ * to read it. 58 of those lines are the route file, most of them the response schema the OpenAPI
+ * rule requires; the rest is one `AppOptions` field, one registration and one composition line.
+ * There is no handler logic to move out — it reads one row and reports its length against the
+ * budget. Deliberately absent: any write verb. Read-only is the contract, so there is no body
+ * schema, no CSRF path and no authority check beyond "your own document".
+ *
+ * The assertion engine that `memory/routes.ts` served is deleted, and this edition of the ceiling
+ * is 1,015 lines below the last: `memory/routes.ts`, the extraction service, the engine repository
+ * and thirteen of their pg tests went with it.
+ *
  * This is that. The ceiling is a high-water mark, not a target — lowering it as code moves out is
  * the point, and the only edit this file should ever receive. Raising it needs a reviewed reason,
  * because "the number went up again" is exactly the event three editions failed to catch.
@@ -38,7 +132,7 @@ import { describe, expect, it } from "vitest";
  * measure that cannot be gamed without noticing is worth more here than a subtle one.
  */
 
-const CEILING = 50_033;
+const CEILING = 49_491;
 
 /**
  * Domains inside `apps/api/src` that already have a package of the same name. Everything here that

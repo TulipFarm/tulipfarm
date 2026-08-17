@@ -1,39 +1,37 @@
 # Memory (`@tulipfarm/memory`)
-Scoped, versioned memory assertions, confirmations, provenance, contradiction handling, ranking,
-supersession, and expiry.
+A user's memory is **one Markdown page** — `user_memory.document` — injected whole into every turn.
+There is no key/value store, no assertion engine, no relevance recall: the model always sees all of
+it.
 
 ## Read on / Skip
-- **Read on if** you touch memory scopes, explicit confirmation, inferred statements,
-  supersession/tombstones, recall ranking, evidence authorization, or memory telemetry.
-- **Skip if** you touch Knowledge retrieval (`../knowledge/AGENTS.md`), Agent prompt assembly
-  (`../agent-runtime/AGENTS.md`), storage repositories, or authz primitives.
+- **Read on if** you touch the Memory Document — sections, deltas, budgets, revisions, hashing,
+  rendering, or the `update_memory` Tool.
+- **Skip if** you touch Knowledge retrieval, prompt assembly, storage repositories, or authz.
 
 ## Map
 | Path | Owns |
 | --- | --- |
-| `src/{scope,memory,confirm}.ts` | Scope auth, assertions, confirmation, tombstones. |
-| `src/{retrieve,rank,contradiction}.ts` | Recall, ranking, contradiction handling. |
-| `src/{extract,episode}.ts` | Extraction and episode modeling. |
+| `src/document/sections.ts` | Char budgets and the `## Recent decisions` cap. The section vocabulary itself is `@tulipfarm/schema`'s, because memory, curator and api all have to agree on it. |
+| `src/document/document.ts` | Grammar, canonicalization, deltas, section replacement, hashing, render + its inverse parser. Pure. |
+| `src/document/store.ts` | Every line of SQL in the package. `user_memory.document` holds the rendered page itself, so `psql` shows the bytes the model got; `parseMemoryDocument` inverts the render, losslessly *only* because of the no-heading rule below. |
+| `src/document/tool.ts` | `update_memory` — the sole model-facing write. |
 | `src/telemetry.ts` | Redaction-safe metric/span names and helpers. |
-| `src/{assertion-view,service,limits}.ts` | Keyed KV view of an Assertion, its write policy, and the caps. |
-| `src/embedder.ts` | `MemoryEmbedder` port and the text an assertion is indexed by. |
-| `src/pg/` | Postgres `MemoryStore` / `PendingMemoryStore` over `@tulipfarm/storage`'s `Queryable`. |
-| `test/security/` | Scope/requester/lifecycle/evidence-provider side-channel matrices. |
+| `src/limits.ts` | Turn-loop bounds (`MAX_TOOL_STEPS`, history/retention token budgets). |
 
 ## Rules
-- May import only `@tulipfarm/schema`, `authz`, `audit`, `storage`, and `observability`; see
-  [dependency rules](../../docs/architecture/dependency-rules.md).
-- `src/pg/` is the only place that may hold SQL. It takes `Queryable` from `@tulipfarm/storage`
-  rather than declaring its own, so the control plane can hand it the pool it already has.
-- Anything needing `@tulipfarm/constants` or `agent-runtime` stays in `apps/api/src/memory` — those
-  edges are not in this package's allowlist and adding one would be an architecture decision.
-- Scope auth matches the scope owner, not a caller capability; unknown or disabled scopes deny.
-- Durable writes require explicit confirmation; this package never infers or persists unscoped
-  memory.
-- Edits supersede instead of overwrite. Forgetting keeps a tombstone, not statement text.
-- Denied or expired pending inferred statements are deleted and persist nothing.
-- Recall reauthorizes scope and Knowledge evidence every time through an injected
-  `MemoryEvidenceAuthorizationPort`; this package must not import `@tulipfarm/knowledge`.
-- Telemetry labels/attributes are bounded enums or counts only; never pass statements, subjects,
-  entities, queries, principals, businesses, assertions, pending memories, episodes,
-  conversations, or Run ids.
+- May import only `@tulipfarm/schema`, `authz`, `audit`, `storage`, `observability` — see
+  [dependency rules](../../docs/architecture/dependency-rules.md). Anything needing `constants` or
+  `agent-runtime` stays in `apps/api/src/memory`.
+- **A Tool may only apply a delta.** `applyDelta` touches only entries the caller named, so it
+  cannot destroy a concurrent writer's line, and no version or hash exists to get wrong.
+  `replaceSection` overwrites, so it demands the current section hash and a writer type excluding
+  `"tool"` — a DB CHECK enforces that again, because a caller-supplied `writer` is not evidence.
+- `canonicalMemoryLine` is the one canonicalization rule — dedupe, removal matching, hashing and
+  render all use it. A second lets a fact be "present" for an add and "absent" for a remove.
+- One fact per line, no heading at any level inside a section: removal matches whole entries, so a
+  multi-line fact could be half-deleted into a different, false statement. Enforced at storage
+  time, not only at render, so no writer can forge or split a section.
+- An over-budget mutation is **rejected** and the previous document survives — never truncated,
+  because a silent truncation loses a fact the user was told was remembered.
+- Telemetry labels/attributes are bounded enums or counts only — never document text, section
+  content, or any principal/business/conversation/Run id.

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  type CompleteTurnInput,
+  type CompleteTurnResult,
   ConversationAccessError,
   ConversationService,
   type ConversationStore,
@@ -63,13 +65,16 @@ class FakeStore implements ConversationStore {
     );
   }
 
-  async saveCompletion(completion: TurnCompletion): Promise<void> {
+  async completeTurn(input: CompleteTurnInput): Promise<CompleteTurnResult> {
     const recorded = await this.findCompletion(
-      completion.businessId,
-      completion.turnId,
-      completion.attempt
+      input.completion.businessId,
+      input.completion.turnId,
+      input.completion.attempt
     );
-    if (recorded === undefined) this.completions.push(completion);
+    const completionInserted = recorded === undefined;
+    if (completionInserted) this.completions.push(input.completion);
+    if (input.turn) await this.saveTurn(input.turn);
+    return { completionInserted };
   }
 }
 

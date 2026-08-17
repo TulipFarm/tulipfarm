@@ -104,9 +104,12 @@
   --code-redacted: oklch(0.6 0.05 75);
 
   /* Onboarding growth. Not in the categorical/status/run families: a seed and a stem are not
-     data, content status, or execution state — just what the tulip is made of. */
+     data, content status, or execution state — just what the tulip is made of. `petal-deep` is the
+     centre petal: three petals in one flat `--primary` collapse into a single silhouette, so the
+     centre carries a deeper shade to keep the outer two readable as separate petals. */
   --tulip-stem: oklch(0.5 0.11 150);
   --tulip-seed: oklch(0.52 0.04 75);
+  --tulip-petal-deep: oklch(0.38 0.15 25);
 }
 
 [data-sidebar="collapsed"] {
@@ -198,4 +201,5 @@
 
   --tulip-stem: oklch(0.68 0.1 150);
   --tulip-seed: oklch(0.62 0.03 75);
+  --tulip-petal-deep: oklch(0.56 0.15 25);
 }

@@ -70,6 +70,148 @@ describe("serializeDoc — text + marks", () => {
   });
 });
 
+// Pasted rich text nests blocks inside blocks (`bulletList > listItem > paragraph`). A flat walk
+// dropped every one of those, so a pasted document sent only its bare top-level paragraphs.
+describe("serializeDoc — block structure", () => {
+  const paraBlock = (...inline: PMNode[]): PMNode => ({ type: "paragraph", content: inline });
+  const item = (...blocks: PMNode[]): PMNode => ({ type: "listItem", content: blocks });
+
+  it("writes a bulletList as markdown dashes instead of dropping it", () => {
+    const doc: PMNode = {
+      type: "doc",
+      content: [
+        paraBlock(text("Work")),
+        {
+          type: "bulletList",
+          content: [item(paraBlock(text("first"))), item(paraBlock(text("second")))],
+        },
+      ],
+    };
+    expect(serializeDoc(doc).text).toBe("Work\n\n- first\n- second");
+  });
+
+  it("keeps inline marks and mentions inside a list item", () => {
+    const doc: PMNode = {
+      type: "doc",
+      content: [
+        {
+          type: "bulletList",
+          content: [
+            item(
+              paraBlock(text("Co-founder of "), text("TulipFarm", [{ type: "bold" }]), text(".")),
+              paraBlock(mention("mentionSkill", "copywriting"))
+            ),
+          ],
+        },
+      ],
+    };
+    const out = serializeDoc(doc);
+    expect(out.text).toBe("- Co-founder of **TulipFarm**.\n\n  /copywriting");
+    expect(out.skills).toEqual(["copywriting"]);
+  });
+
+  it("numbers an orderedList from its start attribute", () => {
+    const doc: PMNode = {
+      type: "doc",
+      content: [
+        {
+          type: "orderedList",
+          attrs: { start: 3 },
+          content: [item(paraBlock(text("three"))), item(paraBlock(text("four")))],
+        },
+      ],
+    };
+    expect(serializeDoc(doc).text).toBe("3. three\n4. four");
+  });
+
+  it("indents a list nested inside a list item", () => {
+    const doc: PMNode = {
+      type: "doc",
+      content: [
+        {
+          type: "bulletList",
+          content: [
+            item(paraBlock(text("outer")), {
+              type: "bulletList",
+              content: [item(paraBlock(text("inner")))],
+            }),
+          ],
+        },
+      ],
+    };
+    expect(serializeDoc(doc).text).toBe("- outer\n\n  - inner");
+  });
+
+  it("prefixes every line of a blockquote, leaving blank lines bare", () => {
+    const doc: PMNode = {
+      type: "doc",
+      content: [{ type: "blockquote", content: [paraBlock(text("one")), paraBlock(text("two"))] }],
+    };
+    expect(serializeDoc(doc).text).toBe("> one\n>\n> two");
+  });
+
+  it("fences a codeBlock with its language and applies no marks inside", () => {
+    const doc: PMNode = {
+      type: "doc",
+      content: [
+        {
+          type: "codeBlock",
+          attrs: { language: "ts" },
+          content: [text("const a = 1;", [{ type: "bold" }])],
+        },
+      ],
+    };
+    expect(serializeDoc(doc).text).toBe("```ts\nconst a = 1;\n```");
+  });
+
+  it("grows the fence past a backtick run in the code", () => {
+    const doc: PMNode = {
+      type: "doc",
+      content: [{ type: "codeBlock", content: [text("```\nnested\n```")] }],
+    };
+    expect(serializeDoc(doc).text).toBe("````\n```\nnested\n```\n````");
+  });
+
+  it("writes a horizontalRule as a thematic break", () => {
+    const doc: PMNode = {
+      type: "doc",
+      content: [paraBlock(text("a")), { type: "horizontalRule" }, paraBlock(text("b"))],
+    };
+    expect(serializeDoc(doc).text).toBe("a\n\n---\n\nb");
+  });
+
+  it("drops empty blocks rather than emitting runs of blank lines", () => {
+    const doc: PMNode = {
+      type: "doc",
+      content: [paraBlock(text("a")), { type: "paragraph" }, paraBlock(text("b"))],
+    };
+    expect(serializeDoc(doc).text).toBe("a\n\nb");
+  });
+
+  it("routes the turn from an @agent mention buried in a list item", () => {
+    const doc: PMNode = {
+      type: "doc",
+      content: [
+        {
+          type: "bulletList",
+          content: [item(paraBlock(mention("mentionAgent", "Billing"), text(" please")))],
+        },
+      ],
+    };
+    const out = serializeDoc(doc);
+    expect(out.text).toBe("- @Billing please");
+    expect(out.agentId).toBe("Billing");
+  });
+
+  it("walks an unknown wrapper block instead of dropping its text", () => {
+    const doc: PMNode = {
+      type: "doc",
+      content: [{ type: "someFutureBlock", content: [paraBlock(text("kept"))] }],
+    };
+    expect(serializeDoc(doc).text).toBe("kept");
+  });
+});
+
 describe("serializeDoc — mentions", () => {
   it("keeps mentions as literal @/ / /# tokens in the text", () => {
     const doc = para(
@@ -201,5 +343,23 @@ describe("firstAgentMentionId", () => {
       ],
     };
     expect(firstAgentMentionId(doc)).toBe("Second");
+  });
+
+  it("finds an agent mention nested inside a list item", () => {
+    const doc: PMNode = {
+      type: "doc",
+      content: [
+        {
+          type: "bulletList",
+          content: [
+            {
+              type: "listItem",
+              content: [{ type: "paragraph", content: [mention("mentionAgent", "Nested")] }],
+            },
+          ],
+        },
+      ],
+    };
+    expect(firstAgentMentionId(doc)).toBe("Nested");
   });
 });

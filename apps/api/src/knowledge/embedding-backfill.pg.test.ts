@@ -7,7 +7,6 @@ import {
   EMBEDDING_BACKFILL_QUEUE,
   registerEmbeddingBackfill,
 } from "@tulipfarm/knowledge";
-import { embeddableText } from "@tulipfarm/memory";
 import type { Queryable } from "@tulipfarm/storage";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { makeMigratedPglite } from "../test/pglite";
@@ -45,8 +44,7 @@ describe("embedding backfill", () => {
   beforeEach(async () => {
     await db.query(
       `TRUNCATE knowledge_chunks, knowledge_pages, knowledge_source_chunks,
-                knowledge_source_records, memory_assertions, memory_chunks,
-                memory_episodes CASCADE`
+                knowledge_source_records CASCADE`
     );
   });
 
@@ -262,58 +260,6 @@ describe("embedding backfill", () => {
 
     await expect(handler?.()).resolves.not.toThrow();
     expect(errors).toHaveLength(1);
-  });
-
-  /** Backfill text and model strings must match write-path construction byte-for-byte. */
-  describe("agreement with the write path", () => {
-    it("embeds memory chunks exactly as episode-store does", () => {
-      const target = BACKFILL_TARGETS.find((t) => t.table === "memory_chunks");
-      // embedChunk -> embedOne(embedder, embeddableText("episode", text))
-      expect(embeddableText("episode", "X")).toBe("episode: X");
-      expect(target?.textSql).toBe("'episode: ' || text");
-    });
-
-    it("embeds memory assertions exactly as assertion-store does", () => {
-      const target = BACKFILL_TARGETS.find((t) => t.table === "memory_assertions");
-      expect(embeddableText("S", "T")).toBe("S: T");
-      expect(target?.textSql).toBe("subject || ': ' || statement");
-    });
-
-    /** Memory writes `provider:model`; knowledge writes bare model and compares equality. */
-    it("records the model in each table's own format", async () => {
-      const pageId = await seedPage();
-      await db.query(
-        `INSERT INTO knowledge_chunks (id, page_id, chunk_index, content, tsv, created_at)
-         VALUES (gen_random_uuid(), $1, 0, 'k', to_tsvector('english','k'), now())`,
-        [pageId]
-      );
-      await db.query(
-        `INSERT INTO memory_assertions
-           (business_id, assertion_id, scope, subject, statement, memory_type, trust_tier,
-            confidence, importance, origin, author_principal_id, confirmation, status, version,
-            created_at, updated_at, valid_from)
-         VALUES ('b1', 'a1', 'business', 'S', 'T', 'fact', 'verified', 1, 1, 'run', 'p1',
-                 'confirmed', 'active', 1, now(), now(), now())`
-      );
-      await db.query(
-        `INSERT INTO memory_episodes
-           (business_id, episode_id, assertion_id, scope, source_type, source_id, summary,
-            author_principal_id, created_at, updated_at)
-         VALUES ('b1', 'e1', 'a1', 'business', 'run', 'r1', 's', 'p1', now(), now())`
-      );
-      await db.query(
-        `INSERT INTO memory_chunks (business_id, chunk_id, episode_id, assertion_id, scope,
-                                    chunk_type, position, text, created_at)
-         VALUES ('b1', 'c1', 'e1', 'a1', 'business', 'note', 0, 'm', now())`
-      );
-
-      await backfillEmbeddings(db, embedder());
-
-      const k = await db.query("SELECT model FROM knowledge_chunks LIMIT 1");
-      const m = await db.query("SELECT embedding_model FROM memory_chunks LIMIT 1");
-      expect(k.rows[0]?.model).toBe("m1");
-      expect(m.rows[0]?.embedding_model).toBe("test:m1");
-    });
   });
 
   /** Poison rows must not starve the whole table; failed batches fall back to per-row attempts. */

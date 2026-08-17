@@ -116,25 +116,12 @@ export interface TurnApprovalRegistrar {
   ): Promise<{ waitId: string }>;
 }
 
-/** Narrow seam for memory extraction; the host must not read or approve Pending Memory. */
-export interface TurnMemoryExtractor {
-  extractFromTurn(request: {
-    userId: string;
-    agentId?: string;
-    runId?: string;
-    outcome?: string;
-    messages: readonly { role: string; content: string }[];
-  }): Promise<unknown>;
-}
-
 export interface InternalTurnHostOptions {
   readonly runs: HostedRunReader;
   readonly store: ConversationStore;
   readonly context: TurnContextResolver;
   readonly tools: TurnToolDispatcher;
   readonly approvals?: TurnApprovalRegistrar;
-  /** Optional destination for completed-turn Memory mining. */
-  readonly memory?: TurnMemoryExtractor;
   newId?(): string;
   now?(): Date;
 }
@@ -240,45 +227,42 @@ export class InternalTurnHost {
     cursor: number;
     messageId: string | null;
   }): Promise<void> {
-    const { turn } = await this.authority(input.businessId, input.runId);
-    await this.options.store.saveCompletion({
-      businessId: input.businessId,
-      turnId: turn.id,
-      attempt: input.attempt,
-      status: input.status,
-      messageId: input.messageId,
-      cursor: input.cursor,
-      createdAt: this.now(),
-    });
+    const { turn, subject } = await this.authority(input.businessId, input.runId);
+    const now = this.now();
     // Late completion from a superseded attempt must not restate the Turn outcome.
-    if (input.attempt < turn.attempt) return;
-    await this.options.store.saveTurn({
-      ...turn,
-      status: input.status,
-      // The reader's resume point moves with the answer, so a client reconnecting after the turn
-      // ended asks for what follows this attempt rather than replaying it.
-      cursor: input.cursor,
-      updatedAt: this.now(),
-    });
-    this.mineForMemory(input.status, turn, input.runId);
-  }
-
-  /** Extracts Memory after completion for eligible user-owned chats only. */
-  private mineForMemory(status: TurnCompletionStatus, turn: PersistedTurn, runId: string): void {
-    const memory = this.options.memory;
-    if (memory === undefined || status !== "succeeded") return;
-    void (async () => {
-      const { subject } = await this.authority(turn.businessId, runId);
-      if (subject.kind !== "user") return;
-      const messages = await this.options.store.listMessages(turn.businessId, turn.conversationId);
-      await memory.extractFromTurn({
-        userId: subject.id,
-        runId,
-        outcome: status,
-        messages: messages.map((m) => ({ role: m.role, content: m.content })),
-      });
-    })().catch(() => {
-      // Inferring memory is best-effort; the turn it came from is already answered.
+    const current = input.attempt >= turn.attempt;
+    await this.options.store.completeTurn({
+      completion: {
+        businessId: input.businessId,
+        turnId: turn.id,
+        attempt: input.attempt,
+        status: input.status,
+        messageId: input.messageId,
+        cursor: input.cursor,
+        createdAt: now,
+      },
+      ...(current
+        ? {
+            turn: {
+              ...turn,
+              status: input.status,
+              // The reader's resume point moves with the answer, so a client reconnecting after
+              // the turn ended asks for what follows this attempt rather than replaying it.
+              cursor: input.cursor,
+              updatedAt: now,
+            },
+          }
+        : {}),
+      ...(current && input.status === "succeeded" && subject.kind === "user"
+        ? {
+            work: {
+              businessId: input.businessId,
+              userId: subject.id,
+              reason: "turn_completed" as const,
+              sourceKey: turn.id,
+            },
+          }
+        : {}),
     });
   }
 }

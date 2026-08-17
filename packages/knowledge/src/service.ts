@@ -155,11 +155,6 @@ export class KnowledgeService {
     return this.deps.pages.list(opts);
   }
 
-  /** True if at least one active knowledge page exists — the onboarding "knowledge done" signal. */
-  hasAnyKnowledgePage(): Promise<boolean> {
-    return this.deps.pages.hasAnyActive();
-  }
-
   /** Derived read-only index state for a page (from its chunks). */
   getIndexingStatus(pageId: string): Promise<IndexingStatus> {
     return this.deps.chunks.getIndexingStatus(pageId);

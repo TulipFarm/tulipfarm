@@ -1,5 +1,7 @@
 /** SPEC §10/§18: persist the Turn before dispatch; stream resumes from its durable cursor. */
 
+import type { CuratorWorkRef } from "@tulipfarm/storage";
+
 export type TurnStatus = "pending" | "running" | "start_failed" | "succeeded" | "failed";
 
 export interface PersistedMessage {
@@ -58,8 +60,25 @@ export interface ConversationStore {
     turnId: string,
     attempt: number
   ): Promise<TurnCompletion | undefined>;
-  /** First write for an attempt wins; a redelivery of the same attempt must not overwrite it. */
-  saveCompletion(completion: TurnCompletion): Promise<void>;
+  /**
+   * One transaction for the completion, the Turn status, and any Curator work the Turn earns.
+   * Recording work afterwards would lose every Turn whose process died in between, and no later
+   * sweep could discover it — the Turn is already `succeeded`, so nothing marks it unmined.
+   */
+  completeTurn(input: CompleteTurnInput): Promise<CompleteTurnResult>;
+}
+
+export interface CompleteTurnInput {
+  readonly completion: TurnCompletion;
+  /** Omitted for a superseded attempt, which must not restate the Turn outcome. */
+  readonly turn?: PersistedTurn;
+  /** Written only when the completion insert wins, so a redelivery cannot re-enqueue it. */
+  readonly work?: CuratorWorkRef;
+}
+
+export interface CompleteTurnResult {
+  /** False when this attempt's completion was already recorded. */
+  readonly completionInserted: boolean;
 }
 
 export interface RunLauncher {

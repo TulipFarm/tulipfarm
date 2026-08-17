@@ -61,7 +61,9 @@ const IGNORED_DIRS = new Set([
  * `apps/api/src/pg-migrations/index.ts` is the one entry that is expected to
  * grow: it is an append-only ledger of applied migrations, and rewriting
  * history to shorten it would be a defect. It carries a separate, higher
- * allowance for that reason.
+ * allowance for that reason, and that allowance moves up by exactly the size of
+ * each migration appended — six lines for the Curator schema (#55), plus one
+ * for the admission ledger statements it applies alongside them.
  *
  * Five allowances were re-baselined when the Task system (#384) and the egress
  * caging fix (#385) landed on main: that growth arrived through review before
@@ -69,6 +71,14 @@ const IGNORED_DIRS = new Set([
  * saw would fail the build for work already accepted. Re-baselining against a
  * new merge-base is not the same as widening an allowance to excuse a diff,
  * which remains forbidden.
+ *
+ * The two entries above were re-measured after the Curator merged with #388-#390.
+ * Both sides had raised them for the same reason — appended migrations — so
+ * neither number described the merged file. The measurement did: the ledger
+ * gained three migrations and lost 106 lines of boilerplate to `applyStatements`,
+ * ending below both claims. Taking the measurement rather than the higher claim
+ * is the ratchet working; keeping upstream's would have banked slack no file
+ * was using.
  */
 const OVERSIZED: Readonly<Record<string, number>> = {
   "apps/api/src/pg-migrations/index.ts": 2081,

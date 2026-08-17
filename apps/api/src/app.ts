@@ -7,6 +7,7 @@ import helmet from "@fastify/helmet";
 import fastifyStatic from "@fastify/static";
 import swagger from "@fastify/swagger";
 import scalar from "@scalar/fastify-api-reference";
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { registerActivityRoutes } from "./activity/routes";
 import { postgresProbe, probeHealth } from "./admin/health";
@@ -21,18 +22,17 @@ import { makeAuthorizationCheck, makeRequireAuthorization } from "./authz/route-
 import { registerAuthzRoutes } from "./authz/routes";
 import { registerConversationRoutes } from "./chat/conversation-routes";
 import { registerChatRoutes } from "./chat/routes";
+import { registerCuratorReviewRoutes } from "./curator/review-routes";
 import { registerFeedbackRoutes } from "./feedback/routes";
 import { registerFormRoutes } from "./forms/routes";
 import { registerHookIngressRoutes } from "./hooks/routes";
 import { registerIngressRoutes } from "./ingress/routes";
 import { registerGitHubInstallRoutes } from "./integrations/github-install-routes";
-import { registerChannelInternalRoutes } from "./internal/channel-routes";
-import { registerInternalTurnRoutes } from "./internal/routes";
-import { registerSurfaceInternalRoutes } from "./internal/surfaces-routes";
+import { registerInternalRouteFamily } from "./internal/route-family";
 import { registerKillSwitchRoutes } from "./kill-switches/routes";
 import { registerKnowledgeRoutes } from "./knowledge/routes";
 import { registerKvRoutes } from "./kv/routes";
-import { registerMemoryRoutes } from "./memory/routes";
+import { registerMemoryDocumentRoute } from "./memory/document-routes";
 import { createLogTeeStream } from "./observability/log-stream";
 import { registerObservabilityRoutes } from "./observability/routes";
 import { registerPreferenceRoutes } from "./preferences/routes";
@@ -267,7 +267,7 @@ export async function buildApp(opts: AppOptions = {}) {
       ...(opts.userInviteRepo && { inviteRepo: opts.userInviteRepo }),
       requireAuthorization,
       authorizationCheck,
-      ...(opts.triggerTaskReconcile && { triggerTaskReconcile: opts.triggerTaskReconcile }),
+      ...(opts.triggerCuratorSweep && { triggerCuratorSweep: opts.triggerCuratorSweep }),
     });
     const requireAuth = makeRequireAuth({
       store: opts.sessionStore,
@@ -294,6 +294,10 @@ export async function buildApp(opts: AppOptions = {}) {
         gitSync: opts.gitSync,
         soulPath,
         requireAuth,
+        ...(opts.triggerCuratorSweep && { triggerCuratorSweep: opts.triggerCuratorSweep }),
+        ...(opts.soulLoader && {
+          reloadSoul: () => opts.soulLoader?.reload() ?? Promise.resolve(),
+        }),
       });
     }
     if (opts.secretsService) {
@@ -316,7 +320,7 @@ export async function buildApp(opts: AppOptions = {}) {
                 opts.llmService,
                 opts.secretsService,
                 app.log,
-                opts.triggerTaskReconcile
+                opts.triggerCuratorSweep
               )
             : undefined,
       });
@@ -334,6 +338,15 @@ export async function buildApp(opts: AppOptions = {}) {
       registerRoutineCatalogRoutes(app, opts.routineCatalog, requireAuth);
     }
 
+    if (opts.curatorReview) {
+      registerCuratorReviewRoutes(
+        app,
+        opts.curatorReview,
+        DEPLOYMENT_BUSINESS_ID,
+        requireAuth,
+        requireAuthorization
+      );
+    }
     if (opts.kvService) {
       registerKvRoutes(app, opts.kvService, requireAuth, requireAuthorization);
       registerPreferenceRoutes(app, opts.kvService, requireAuth);
@@ -363,15 +376,7 @@ export async function buildApp(opts: AppOptions = {}) {
         opts.rateLimiter
       );
     }
-    if (opts.memoryService) {
-      registerMemoryRoutes(
-        app,
-        opts.memoryService,
-        requireAuth,
-        opts.memoryExtractionService,
-        opts.memoryLifecycleService
-      );
-    }
+    if (opts.memoryDocuments) registerMemoryDocumentRoute(app, opts.memoryDocuments, requireAuth);
     if (opts.observabilityService) {
       registerObservabilityRoutes(
         app,
@@ -392,7 +397,7 @@ export async function buildApp(opts: AppOptions = {}) {
           soulWriter: opts.soulWriter,
           gitSync: opts.gitSync,
           auditService: opts.auditService,
-          memoryService: opts.memoryService,
+          ...(opts.memoryDocuments === undefined ? {} : { memoryDocuments: opts.memoryDocuments }),
         },
         requireAuth,
         authorizationCheck
@@ -427,10 +432,7 @@ export async function buildApp(opts: AppOptions = {}) {
       const toolRegistry =
         opts.toolRegistry ??
         buildToolRegistry({
-          memory: opts.memoryService,
-          ...(opts.memoryLifecycleService === undefined
-            ? {}
-            : { memoryLifecycle: opts.memoryLifecycleService }),
+          ...(opts.memoryDocuments === undefined ? {} : { memoryDocuments: opts.memoryDocuments }),
           kv: opts.kvService,
           knowledge: opts.knowledgeService,
         });
@@ -439,7 +441,6 @@ export async function buildApp(opts: AppOptions = {}) {
         {
           repo: opts.conversationRepo,
           messageRepo: opts.messageRepo,
-          memory: opts.memoryService,
           knowledge: opts.knowledgeService,
           soulLoader: opts.soulLoader,
           toolRegistry,
@@ -492,27 +493,7 @@ export async function buildApp(opts: AppOptions = {}) {
     if (opts.runEvents) {
       registerRunEventRoutes(app, opts.runEvents, requireAuth, opts.rateLimiter);
     }
-    if (opts.internalTurns) {
-      registerInternalTurnRoutes(app, opts.internalTurns, requireAuth);
-    }
-    if (opts.channels) {
-      const channelDeps = opts.channels(app.log);
-      registerChannelInternalRoutes(app, channelDeps, requireAuth);
-      if (channelDeps.surfaceActionStore) {
-        registerSurfaceInternalRoutes(
-          app,
-          {
-            identity: channelDeps.identity,
-            actions: channelDeps.surfaceActionStore,
-            store: channelDeps.store,
-            invocations: channelDeps.invocations,
-            runDeliveries: channelDeps.runDeliveries,
-            ...(opts.guardrailsService ? { guardrails: opts.guardrailsService } : {}),
-          },
-          requireAuth
-        );
-      }
-    }
+    registerInternalRouteFamily(app, opts, requireAuth);
     if (opts.runReplay) {
       registerRunReplayRoutes(app, opts.runReplay, requireAuth, opts.rateLimiter);
     }

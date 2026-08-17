@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { RequireAuthorization, RouteAuthorization } from "../../authz/route-gate";
+import { kickCuratorSweep } from "../../curator/sweep-schedule";
 import { issueInvite, type UserInviteRepo } from "../invites";
 import { ErrorSchema, InviteSchema, PublicUserSchema } from "../schemas";
 import {
@@ -26,7 +27,7 @@ export function registerAdminUserRoutes(
   requireAuth: PreHandler,
   requireAuthorization: RequireAuthorization,
   rateLimitHook?: PreHandler,
-  triggerTaskReconcile?: () => Promise<void>
+  triggerCuratorSweep?: () => Promise<void>
 ): void {
   const gate = requireAuthorization(USER_MANAGE);
   const adminOnly: PreHandler[] = rateLimitHook
@@ -83,15 +84,7 @@ export function registerAdminUserRoutes(
           userId: user._id,
           createdBy: req.user._id,
         });
-        if (triggerTaskReconcile) {
-          try {
-            await triggerTaskReconcile();
-          } catch (err) {
-            app.log.error(
-              `[tasks] reconcile kick after inviting ${user._id} failed — ${err instanceof Error ? err.message : String(err)}`
-            );
-          }
-        }
+        await kickCuratorSweep(triggerCuratorSweep, app.log, `inviting ${user._id}`);
         return reply.code(201).send({
           user: toPublicUser(user),
           invite: { token: invite.token, expiresAt: invite.expiresAt.toISOString() },

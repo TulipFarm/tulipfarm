@@ -139,6 +139,4 @@ export const EMBEDDING_COLUMNS: readonly {
 }[] = [
   { table: "knowledge_chunks", column: "embedding", dimColumn: "dim" },
   { table: "knowledge_source_chunks", column: "embedding", dimColumn: "dim" },
-  { table: "memory_assertions", column: "embedding", dimColumn: "embedding_dim" },
-  { table: "memory_chunks", column: "embedding", dimColumn: "embedding_dim" },
 ];

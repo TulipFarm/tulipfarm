@@ -35,26 +35,6 @@ export const BACKFILL_TARGETS: readonly BackfillTarget[] = [
     dimColumn: "dim",
     modelFormat: "bare",
   },
-  {
-    // Memory backfill must match write-path embedding text exactly.
-    table: "memory_assertions",
-    keys: ["business_id", "assertion_id"],
-    textSql: "subject || ': ' || statement",
-    embeddingColumn: "embedding",
-    modelColumn: "embedding_model",
-    dimColumn: "embedding_dim",
-    modelFormat: "provider-qualified",
-  },
-  {
-    // Episodes embed wrapped text; backfill must match or recall ranks incomparable vectors.
-    table: "memory_chunks",
-    keys: ["business_id", "chunk_id"],
-    textSql: "'episode: ' || text",
-    embeddingColumn: "embedding",
-    modelColumn: "embedding_model",
-    dimColumn: "embedding_dim",
-    modelFormat: "provider-qualified",
-  },
 ];
 
 export interface BackfillEmbedder {

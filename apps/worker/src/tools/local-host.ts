@@ -1,4 +1,5 @@
 import { delegationCatalogOf, withDelegatedAuthority } from "@tulipfarm/agent-runtime";
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import {
   KNOWLEDGE_TOOLS,
   KnowledgeService,
@@ -12,12 +13,9 @@ import {
 } from "@tulipfarm/knowledge";
 import { KV_TOOLS, KvService, type KvToolContext, PgKvRepo } from "@tulipfarm/kv";
 import {
-  EngineMemoryRepo,
-  MEMORY_TOOLS,
-  MemoryLifecycleService,
-  MemoryRecallService,
-  MemoryService,
-  type ToolContext as MemoryToolContext,
+  MEMORY_DOCUMENT_TOOLS,
+  MemoryDocumentRepo,
+  type MemoryDocumentToolContext,
 } from "@tulipfarm/memory";
 import { PLATFORM_RUNTIME_TOOLS, type PlatformRuntimeContext } from "@tulipfarm/platform-tools";
 import type { ArtifactService, DurableWaitManager } from "@tulipfarm/run-kernel";
@@ -79,7 +77,7 @@ export interface LocalToolHost {
 }
 
 /** Families whose answers are ranked by the embedder, so their quality tracks its freshness. */
-const VECTOR_BACKED = new Set([...MEMORY_TOOLS, ...KNOWLEDGE_TOOLS].map((tool) => tool.name));
+const VECTOR_BACKED = new Set(KNOWLEDGE_TOOLS.map((tool) => tool.name));
 
 function hostedFamilies(options: LocalToolHostOptions): readonly HostedFamily<never>[] {
   const kv = new KvService(new PgKvRepo(options.db));
@@ -91,10 +89,19 @@ function hostedFamilies(options: LocalToolHostOptions): readonly HostedFamily<ne
     definitions: PLATFORM_RUNTIME_TOOLS,
     context: () => ({}),
   };
+  const documents = new MemoryDocumentRepo(options.transactions);
+  // The Memory Document is stored and returned whole, so nothing here ranks by embedding: this
+  // family is hosted unconditionally rather than behind the freshness gate.
+  const memoryFamily: HostedFamily<MemoryDocumentToolContext> = {
+    definitions: MEMORY_DOCUMENT_TOOLS,
+    context: (ctx) => ({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      ...principal(ctx),
+      documents,
+      ...(ctx.runId === undefined ? {} : { runId: ctx.runId }),
+    }),
+  };
   const embeddings = options.embeddings;
-  const memory = new MemoryService(new EngineMemoryRepo(options.db, undefined, embeddings));
-  const recall = new MemoryRecallService(options.db, embeddings);
-  const lifecycle = new MemoryLifecycleService(options.db, () => new Date(), embeddings);
 
   const knowledge = new KnowledgeService({
     pages: new PgKnowledgePageRepo(options.db),
@@ -110,15 +117,17 @@ function hostedFamilies(options: LocalToolHostOptions): readonly HostedFamily<ne
     ...(options.enqueueIndexJob === undefined ? {} : { enqueueIndex: options.enqueueIndexJob }),
   });
 
-  const vectorBacked: [HostedFamily<MemoryToolContext>, HostedFamily<KnowledgeToolContext>] = [
-    {
-      definitions: MEMORY_TOOLS,
-      context: (ctx) => ({ ...principal(ctx), service: memory, recall, lifecycle }),
-    },
-    { definitions: KNOWLEDGE_TOOLS, context: (ctx) => ({ ...principal(ctx), service: knowledge }) },
-  ];
+  const vectorBacked: HostedFamily<KnowledgeToolContext> = {
+    definitions: KNOWLEDGE_TOOLS,
+    context: (ctx) => ({ ...principal(ctx), service: knowledge }),
+  };
 
-  return [kvFamily, platformFamily, ...vectorBacked] as unknown as readonly HostedFamily<never>[];
+  return [
+    kvFamily,
+    platformFamily,
+    memoryFamily,
+    vectorBacked,
+  ] as unknown as readonly HostedFamily<never>[];
 }
 
 /**

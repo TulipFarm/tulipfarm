@@ -116,7 +116,6 @@ describe("get_current_time", () => {
   it("renders in the same shape as the <current-context> block so the two cannot drift", async () => {
     const { current } = data(await getCurrentTimeTool.handler({ timezone: "UTC" }, ctx));
     const block = assembleSystemPrompt({
-      memory: [],
       governancePages: [],
       temporal: { now: new Date(), timezone: "UTC" },
     });

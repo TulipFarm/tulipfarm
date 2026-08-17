@@ -59,6 +59,11 @@ export class LlmService {
   /** Principal-scoped models, keyed `kind:id:modelId`. Built once, then reused like the shared set. */
   private readonly byPrincipal: Map<string, LanguageModelV4> = new Map();
 
+  /** Whether any provider built. Callers that must not start work without one ask this first. */
+  get isConfigured(): boolean {
+    return this.configured;
+  }
+
   async init(
     rawConfig: unknown,
     secrets: SecretsService,
@@ -191,11 +196,6 @@ export class LlmService {
   /** Whether a model id was configured, so a caller can choose a route without catching a throw. */
   hasModelId(id: string): boolean {
     return this.byModelId.has(id);
-  }
-
-  /** Whether any provider built at all, e.g. to gate a "add a provider key" onboarding quest. */
-  isConfigured(): boolean {
-    return this.configured;
   }
 
   /** The configured entry behind a model id — provider, id and pinned spec, as one pricing input. */

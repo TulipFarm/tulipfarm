@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { hostname } from "node:os";
 import { delegationCatalogOf, GuardrailsService } from "@tulipfarm/agent-runtime";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { FetchEgressHttp, GuardedEgressHttp } from "@tulipfarm/integrations";
@@ -23,23 +22,7 @@ import {
 } from "@tulipfarm/knowledge";
 import { KvService, PgKvRepo } from "@tulipfarm/kv";
 import { EmbeddingService, LlmService } from "@tulipfarm/llm";
-import {
-  EngineMemoryRepo,
-  LlmContradictionJudge,
-  LlmMemoryExtractor,
-  MemoryExtractionService,
-  MemoryLifecycleService,
-  MemoryRecallService,
-  MemoryService,
-  PgMemoryEpisodeStore,
-} from "@tulipfarm/memory";
-import {
-  BatchingLogSink,
-  MutationKillSwitchGuard,
-  PgResourceWriter,
-  processResourceProbe,
-  ResourceSampler,
-} from "@tulipfarm/observability";
+import { MutationKillSwitchGuard } from "@tulipfarm/observability";
 import {
   ArtifactService,
   DurableInvocationGateway,
@@ -133,6 +116,8 @@ import { AuthzAdminService } from "./authz/service";
 import { PgConversationRepo } from "./chat/conversations";
 import { PgMessageRepo } from "./chat/messages";
 import { PgConversationStore } from "./conversations/store.pg";
+import { buildCurator } from "./curator/compose";
+import { CURATOR_SWEEP_QUEUE, registerCuratorSweepSchedule } from "./curator/sweep-schedule";
 import {
   ambientTransactionPort,
   connectPg,
@@ -186,14 +171,15 @@ import { registerSlackKnowledgeSync } from "./knowledge-sources/slack-sync-sched
 import { PgKnowledgeSourceStore } from "./knowledge-sources/source-store";
 import { PgProviderKnowledgeCheckpointStore } from "./knowledge-sources/sync-checkpoint-store";
 import { registerLlmReload } from "./llm-reload";
+import { buildMemoryServices } from "./memory/composition";
 import { parseObservabilityConfig } from "./observability/config";
 import { createEmbeddingUsageSink } from "./observability/embedding-usage";
 import { subscribeObservability } from "./observability/events";
-import { PgLogRepo } from "./observability/log-repo";
 import { OtlpMetricsExporter } from "./observability/metrics";
 import { registerObsPruneSchedule } from "./observability/prune-schedule";
 import { PgObsRepo } from "./observability/repo";
 import { PgResourceRepo } from "./observability/resource-repo";
+import { startProcessSamplers } from "./observability/samplers";
 import { ObservabilityService } from "./observability/service";
 import { registerSpendAlertSchedule } from "./observability/spend-alert";
 import { createObservabilityTelemetryPort } from "./observability/telemetry-port";
@@ -249,7 +235,6 @@ import { registerSoulSync } from "./soul-sync";
 import { PgSurfaceActionStore } from "./surfaces/action-store";
 import { PgSurfaceArtifactStore } from "./surfaces/artifact-store";
 import { apiSurfacePresentation, surfaceRendererRegistry } from "./surfaces/renderer-registry";
-import { registerTaskReconcileSchedule, TASK_RECONCILE_QUEUE } from "./tasks/reconcile-schedule";
 import { DeclarativeToolSync } from "./tools/declarative/sync";
 import { buildGitHubTooling } from "./tools/github/compose";
 import { buildGitHubTools } from "./tools/github/tools";
@@ -515,44 +500,11 @@ async function boot() {
     const embeddingService = new EmbeddingService({
       usage: createEmbeddingUsageSink(observabilityService, () => obsConfig.pricingOverrides),
     });
-    const logRepo = new PgLogRepo(pool);
-    const logSink = new BatchingLogSink({ service: "api", writer: logRepo });
-    logSink.start();
-    const resourceSampler = new ResourceSampler({
-      service: "api",
-      instance: `${hostname()}:${process.pid}`,
-      probe: processResourceProbe(process),
-      writer: new PgResourceWriter(pool),
-    });
-    resourceSampler.start();
+    const { logRepo, logSink, resourceSampler } = startProcessSamplers(pool);
     const memoryTelemetry = createObservabilityTelemetryPort(observabilityService);
-    // without forcing the boot order to change.
-    const memoryService = new MemoryService(
-      new EngineMemoryRepo(pool, undefined, embeddingService, memoryTelemetry)
-    );
-    const memoryRecallService = new MemoryRecallService(pool, embeddingService, memoryTelemetry);
-    const memoryEpisodeStore = new PgMemoryEpisodeStore(
+    const { documents: memoryDocuments } = buildMemoryServices({
       pool,
-      embeddingService,
-      undefined,
-      memoryTelemetry
-    );
-    const memoryLifecycleService = new MemoryLifecycleService(
-      pool,
-      () => new Date(),
-      embeddingService,
-      memoryTelemetry
-    );
-    const memoryExtractionService = new MemoryExtractionService(
-      pool,
-      new LlmMemoryExtractor(() => llmService.effortModel("fast"), memoryTelemetry),
-      guardrailsService,
-      embeddingService,
-      () => new Date(),
-      new LlmContradictionJudge(() => llmService.effortModel("fast")),
-      memoryEpisodeStore,
-      memoryTelemetry
-    );
+    });
     const kvService = new KvService(new PgKvRepo(pool));
     const taskRepo = new TaskRepo(transactionPort(pool));
     const activityService = new ActivityService(new PgActivityRepo(pool));
@@ -703,9 +655,7 @@ async function boot() {
       catalog: delegationCatalog,
     });
     const toolRegistry = buildToolRegistry({
-      memory: memoryService,
-      memoryRecall: memoryRecallService,
-      memoryLifecycle: memoryLifecycleService,
+      memoryDocuments,
       kv: kvService,
       knowledge: knowledgeService,
       surfaceComponents: { gitSync, soulWriter, surfaceSupport: surfaceRendererRegistry },
@@ -770,14 +720,12 @@ async function boot() {
       host: new InternalTurnHost({
         runs: runStore,
         store: conversationStore,
-        memory: memoryExtractionService,
         context: new ChatTurnContextResolver({
           artifacts: runArtifacts,
           store: conversationStore,
           soulLoader,
           toolRegistry,
-          memory: memoryService,
-          memoryRecall: memoryRecallService,
+          memoryDocuments,
           kv: kvService,
           knowledge: knowledgeService,
           guardrails: guardrailsService,
@@ -862,13 +810,10 @@ async function boot() {
           typeof soulLoader.manifest?.businessDescription === "string"
             ? soulLoader.manifest.businessDescription
             : undefined;
-        const firstAdmin = await userRepo.findFirstAdmin();
-        const employeeCount = firstAdmin
-          ? (await memoryService.list(firstAdmin._id)).find((e) => e.key === "employeeCount")?.value
-          : undefined;
+        const setupComplete = soulLoader.manifest?.setupComplete === true;
         const allUsers = await userRepo.listAll();
         const memberCount = allUsers.filter((u) => u.status !== "disabled").length;
-        return { businessName, businessDescription, employeeCount, memberCount };
+        return { businessName, businessDescription, setupComplete, memberCount };
       },
       // reason: the resume token stays in the process that redeems it.
       routineApprovals: new InternalRoutineApprovalHost({
@@ -934,8 +879,8 @@ async function boot() {
       },
       domainEventEmitter,
       llmService,
-      triggerTaskReconcile: async () => {
-        await boss.send(TASK_RECONCILE_QUEUE, {});
+      triggerCuratorSweep: async () => {
+        await boss.send(CURATOR_SWEEP_QUEUE, {});
       },
       guardrailsService,
       conversationRepo,
@@ -943,11 +888,18 @@ async function boot() {
       feedbackRepo,
       surfaceArtifactStore,
       surfaceActionStore,
-      memoryService,
-      memoryExtractionService,
-      memoryLifecycleService,
+      memoryDocuments,
       kvService,
       taskStore: taskRepo,
+      ...buildCurator({
+        pool,
+        documents: memoryDocuments,
+        tasks: taskRepo,
+        soul: soulLoader,
+        invocations,
+        llm: llmService,
+        events: domainEventEmitter,
+      }),
       knowledgeService,
       toolRegistry,
       declarativeTools,
@@ -1140,7 +1092,7 @@ async function boot() {
       reconcile: () => soulPublisher.reconcile(DEPLOYMENT_BUSINESS_ID, SOUL_SYNC_COMMIT_ACTOR),
     });
     await registerScheduleDispatch(boss, scheduleDispatcher, { log: app.log });
-    await registerTaskReconcileSchedule(boss);
+    await registerCuratorSweepSchedule(boss);
     await registerObsPruneSchedule(boss, obsConfig.retentionDays * 24 * 60 * 60 * 1000);
     // Every Soul commit publishes a bundle, so this table grows for the life of the deployment.
     await registerSoulBundlePruneSchedule(boss, bundleRetentionMs(process.env));

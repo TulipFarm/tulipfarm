@@ -37,11 +37,10 @@ Preflight always runs. It is the only playbook that aborts the run on failure.
 | 17 | Design System | [`design-system.md`](design-system.md) | `/design-guide` | smoke, full | S1 | — | 8m |
 | 18 | Setup & Onboarding | [`onboarding-setup.md`](onboarding-setup.md) | `/setup`, `/onboarding` | smoke, full | S1 | fresh incognito context available | 8m |
 | 19 | Guardrails & Governance | [`guardrails-governance.md`](guardrails-governance.md) | `/business/guardrails` | smoke, full | S1 | signed-in session; admin for writes | 10m |
-| 20 | Memory Lifecycle | [`memory-lifecycle.md`](memory-lifecycle.md) | `/settings/memory` | smoke, full | S1 | — | 10m |
-| 21 | Soul Git Operations | [`soul-git-operations.md`](soul-git-operations.md) | `/business/soul` | smoke, full | S1 | — | 10m |
-| 22 | Models Fallback Resilience | [`llm-fallback-resilience.md`](llm-fallback-resilience.md) | `/business/models` | smoke, full | S1 | model provider configured | 10m |
+| 20 | Soul Git Operations | [`soul-git-operations.md`](soul-git-operations.md) | `/business/soul` | smoke, full | S1 | — | 10m |
+| 21 | Models Fallback Resilience | [`llm-fallback-resilience.md`](llm-fallback-resilience.md) | `/business/models` | smoke, full | S1 | model provider configured | 10m |
 
-All 23 playbooks (00 through 22) are fully implemented and ready for execution across every route, state machine, and subsystem. See `docs/plans/2026-08-09-qa-agent-playbooks.md` for background and architecture decisions.
+All 22 playbooks (00 through 21) are fully implemented and ready for execution across every route, state machine, and subsystem. See `docs/plans/2026-08-09-qa-agent-playbooks.md` for background and architecture decisions.
 
 ## Ordering
 

@@ -47,10 +47,7 @@ const ALWAYS_ON_TOOL_NAMES = [
 ] as const;
 
 const EXPECTED_FAMILY_TOOL_NAMES = [
-  {
-    family: "memory",
-    names: ["delete_memory", "recall_memory", "remember_correction", "update_memory"],
-  },
+  { family: "memory", names: ["update_memory"] },
   { family: "kv", names: ["kv_delete", "kv_get", "kv_list", "kv_set"] },
   {
     family: "knowledge",
@@ -165,14 +162,6 @@ const EXPECTED_TOTAL_TOOL_COUNT =
   ALWAYS_ON_TOOL_NAMES.length +
   EXPECTED_FAMILY_TOOL_NAMES.reduce((sum, family) => sum + family.names.length, 0);
 
-const EXPECTED_MEMORY_WITHOUT_OPTIONAL_SERVICES = ["delete_memory", "update_memory"] as const;
-const EXPECTED_MEMORY_WITH_ALL_SERVICES = [
-  "delete_memory",
-  "recall_memory",
-  "remember_correction",
-  "update_memory",
-] as const;
-
 const EXPECTED_CREDENTIAL_MODES_BY_PROVIDER = {
   github: "user_preferred",
   "google-docs": "service",
@@ -211,9 +200,7 @@ function inert<T>(): T {
 function stubbedCoreServices(): RegistryServices {
   const stub = inert<never>();
   return {
-    memory: stub,
-    memoryRecall: stub,
-    memoryLifecycle: stub,
+    memoryDocuments: stub,
     kv: stub,
     knowledge: stub,
     resources: stub,
@@ -444,22 +431,10 @@ describe("tool contract coverage", () => {
     expect(tools.length, "total registered Tool count").toBe(EXPECTED_TOTAL_TOOL_COUNT);
   });
 
-  it("keeps the memory family shape explicit when optional services are absent or present", () => {
-    const memoryOnlyNames = withoutAlwaysOn(registryNames({ memory: inert<never>() }));
-    expect(memoryOnlyNames, "memory without recall/lifecycle services").toEqual(
-      EXPECTED_MEMORY_WITHOUT_OPTIONAL_SERVICES
-    );
-
-    const memoryWithAllServicesNames = withoutAlwaysOn(
-      registryNames({
-        memory: inert<never>(),
-        memoryRecall: inert<never>(),
-        memoryLifecycle: inert<never>(),
-      })
-    );
-    expect(memoryWithAllServicesNames, "memory with recall/lifecycle services").toEqual(
-      EXPECTED_MEMORY_WITH_ALL_SERVICES
-    );
+  it("registers the whole memory family from the document repository alone", () => {
+    expect(withoutAlwaysOn(registryNames({ memoryDocuments: inert<never>() }))).toEqual([
+      "update_memory",
+    ]);
   });
 
   it("gives every registered Tool a declaration the gate can read", () => {

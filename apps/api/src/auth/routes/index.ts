@@ -28,9 +28,9 @@ interface AuthRouteOptions {
   requireAuthorization?: RequireAuthorization;
   /** The value form of the same decision, for owner-scoped surfaces. */
   authorizationCheck?: AuthorizationCheck;
-  /** Kicks the Task reconciler outside its 15-minute cron after an invite is issued, so
+  /** Kicks the Curator sweep outside its five-minute cron after an invite is issued, so
    * "Invite your team" clears within seconds instead of waiting for the next scheduled tick. */
-  triggerTaskReconcile?: () => Promise<void>;
+  triggerCuratorSweep?: () => Promise<void>;
 }
 
 const AUTH_LIMIT = 100;
@@ -93,7 +93,7 @@ export function registerAuthRoutes(
       requireAuth,
       options.requireAuthorization ?? makeRequireAuthorization(),
       preHandler,
-      options.triggerTaskReconcile
+      options.triggerCuratorSweep
     );
   }
   registerIdentityRoutes(

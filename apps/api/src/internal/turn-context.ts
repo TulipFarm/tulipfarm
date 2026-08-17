@@ -5,16 +5,16 @@ import {
   type GuardrailsService,
   type ModelRequirementsPolicy,
   narrowDelegatedTurn,
-  type RecalledMemory,
 } from "@tulipfarm/agent-runtime";
 import type { KnowledgeService } from "@tulipfarm/knowledge";
 import type { KvService } from "@tulipfarm/kv";
-import type { MemoryRecallService, MemoryService } from "@tulipfarm/memory";
+import type { MemoryDocumentRepo } from "@tulipfarm/memory";
 import {
   MAX_HISTORY_TOKENS,
   MAX_TOOL_STEPS,
   MEMORY_METRICS,
   recordMemoryCounter,
+  timezoneFromMemoryDocument,
 } from "@tulipfarm/memory";
 import type { TelemetryPort } from "@tulipfarm/observability";
 import type { ArtifactService, ChildLinkAncestry } from "@tulipfarm/run-kernel";
@@ -87,9 +87,6 @@ export interface ChatRequestPayload {
   readonly llmDecision?: boolean;
 }
 
-/** Retrieved memory is deliberately small; the Agent can call `recall_memory` for more. */
-const RECALLED_MEMORY_LIMIT = 5;
-
 /** Recall scores against the newest user message, never the assistant's own words. */
 function latestUserMessage(history: readonly { role: string; content: string }[]): string {
   for (let i = history.length - 1; i >= 0; i--) {
@@ -126,14 +123,13 @@ export interface ChatTurnContextResolverOptions {
   readonly store: ConversationStore;
   readonly soulLoader?: SoulLoader;
   readonly toolRegistry?: ToolRegistry;
-  readonly memory?: MemoryService;
+  /** The user's Memory Document. Absent leaves the `<memory>` block out of the prompt. */
+  readonly memoryDocuments?: MemoryDocumentRepo;
   /**
    * Backs the user's standing `<custom-instructions>`. Absent leaves the block unrendered, which
    * is what every turn did before the setting existed.
    */
   readonly kv?: KvService;
-  /** Durable relevance recall. Absent leaves the `<recalled-memory>` tier empty. */
-  readonly memoryRecall?: MemoryRecallService;
   readonly knowledge?: KnowledgeService;
   readonly guardrails?: GuardrailsService;
   readonly bundledSkills?: ReadonlyMap<string, BundledSkill>;
@@ -315,31 +311,6 @@ export class ChatTurnContextResolver implements TurnContextResolver {
   }
 
   /**
-   * Recall is best-effort: a retrieval failure degrades the prompt, it does not fail the turn. The
-   * always-on `<memory>` block and the `recall_memory` tool both still work without it.
-   */
-  private async recallFor(
-    authority: TurnAuthority,
-    query: string,
-    agentId: string
-  ): Promise<readonly RecalledMemory[]> {
-    try {
-      const assertions = await this.options.memoryRecall?.recall(
-        authority.subject.id,
-        query,
-        RECALLED_MEMORY_LIMIT,
-        agentId
-      );
-      return (assertions ?? []).map((a) => ({ subject: a.subject, statement: a.statement }));
-    } catch {
-      // Memory recall is best-effort context; a lookup failure must not fail the turn. The signal
-      // below is what tells this apart from a genuinely empty recall, which returns above.
-      this.signalThinnedContext(authority, CONTEXT_PROBE_RECALLED_MEMORY);
-      return [];
-    }
-  }
-
-  /**
    * Reports that this turn was assembled with thinner Context than it should have had.
    *
    * The counter carries only the probe, because Memory telemetry labels are bounded enums; the
@@ -371,27 +342,20 @@ export class ChatTurnContextResolver implements TurnContextResolver {
     disabledSkills?: ReadonlySet<string>,
     recallQuery?: string
   ): Promise<string> {
-    const { soulLoader, memory, knowledge, bundledSkills } = this.options;
+    const { soulLoader, knowledge, bundledSkills } = this.options;
     const disabledBundledSkills = disabledSkills ?? this.options.disabledBundledSkills;
     // Memory is a person's, so a Run acting as an Integration or an Agent has none to read.
-    const memoryAssertions =
-      memory && authority.subject.kind === "user" ? await memory.list(authority.subject.id) : [];
+    const forUser = authority.subject.kind === "user";
+    const memoryDocument =
+      this.options.memoryDocuments && forUser
+        ? await this.options.memoryDocuments.render(authority.businessId, authority.subject.id)
+        : undefined;
     // Same subject rule: standing instructions are a person's, so a Run acting as an Integration
     // or an Agent has none to honor.
     const customInstructions =
       this.options.kv && authority.subject.kind === "user"
         ? await readCustomInstructions(this.options.kv, authority.subject.id)
         : undefined;
-    // Same subject rule as the always-on block: durable memory belongs to a person, so a Run acting
-    // as an Integration or an Agent recalls nothing. The engine re-authorizes regardless; this
-    // avoids asking it a question with no principal to answer for.
-    const recalledMemory =
-      this.options.memoryRecall &&
-      authority.subject.kind === "user" &&
-      recallQuery !== undefined &&
-      recallQuery.length > 0
-        ? await this.recallFor(authority, recallQuery, agent.name)
-        : [];
     const governancePages = knowledge ? await knowledge.governancePages() : [];
     const manifest = soulLoader?.manifest;
     const surfaceComponents = [...(soulLoader?.surfaceComponents.values() ?? [])];
@@ -409,8 +373,7 @@ export class ChatTurnContextResolver implements TurnContextResolver {
           typeof manifest?.businessWebsite === "string" ? manifest.businessWebsite : undefined,
       },
       customInstructions,
-      memory: memoryAssertions,
-      recalledMemory,
+      ...(memoryDocument === undefined ? {} : { memoryDocument }),
       governancePages,
       availableSkills: listAvailableSkills(soulLoader, bundledSkills, disabledBundledSkills),
       bundledSkills,
@@ -425,7 +388,11 @@ export class ChatTurnContextResolver implements TurnContextResolver {
         excludedTools
       ),
       surfaceCatalog: surfaceCatalogPromptFor(presentationContext.target, surfaceComponents),
-      temporal: { now: this.now(), timezone: timezoneFrom(memoryAssertions) },
+      temporal: {
+        now: this.now(),
+        timezone:
+          memoryDocument === undefined ? undefined : timezoneFromMemoryDocument(memoryDocument),
+      },
     });
   }
 }

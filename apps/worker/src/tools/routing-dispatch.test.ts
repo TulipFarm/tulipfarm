@@ -202,7 +202,7 @@ describe("RoutingToolDispatch business scope", () => {
 
 describe("RoutingToolDispatch readiness", () => {
   it("routes remote when this process cannot answer as well as the control plane", async () => {
-    const local = localHost(["recall_memory"], async () => false);
+    const local = localHost(["kv_get"], async () => false);
     const remote = new RecordingRemote();
     const routing = new RoutingToolDispatch(
       local,
@@ -211,14 +211,14 @@ describe("RoutingToolDispatch readiness", () => {
       SILENT
     );
 
-    const result = await routing.dispatch(request("recall_memory"));
+    const result = await routing.dispatch(request("kv_get"));
 
     expect(outputOf(result)).toBe("remote");
     expect(local.calls).toEqual([]);
   });
 
   it("asks readiness before spending an authority read", async () => {
-    const local = localHost(["recall_memory"], async () => false);
+    const local = localHost(["kv_get"], async () => false);
     const remote = new RecordingRemote();
     let authorityReads = 0;
     const routing = new RoutingToolDispatch(
@@ -233,7 +233,7 @@ describe("RoutingToolDispatch readiness", () => {
       SILENT
     );
 
-    await routing.dispatch(request("recall_memory"));
+    await routing.dispatch(request("kv_get"));
 
     expect(authorityReads).toBe(0);
   });

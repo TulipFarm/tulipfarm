@@ -1,5 +1,6 @@
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { KnowledgeService } from "@tulipfarm/knowledge";
-import type { MemoryService } from "@tulipfarm/memory";
+import type { MemoryDocumentRepo } from "@tulipfarm/memory";
 import type { BundledSkill, SoulLoader } from "@tulipfarm/soul";
 import {
   buildSoulCatalogue,
@@ -41,8 +42,9 @@ async function findOwnedConversation(
 /** Read/update routes over conversation metadata + messages (no streaming). */
 export interface ConversationRoutesDeps {
   repo: ConversationRepo;
+  /** The conversation owner's Memory Document, so the reconstructed prompt matches the live one. */
+  memoryDocuments?: MemoryDocumentRepo;
   messageRepo: MessageRepo;
-  memory?: MemoryService;
   knowledge?: KnowledgeService;
   soulLoader?: SoulLoader;
   toolRegistry?: ToolRegistry;
@@ -61,7 +63,7 @@ export function registerConversationRoutes(
   const {
     repo,
     messageRepo,
-    memory,
+    memoryDocuments,
     knowledge,
     soulLoader,
     toolRegistry,
@@ -396,11 +398,14 @@ export function registerConversationRoutes(
           return reply.code(404).send({ error: "conversation not found" });
         }
         // Reconstruct this conversation's durable system prompt with no per-turn ephemeral skills /
-        // resources (there is no in-flight turn) — mirrors the chat route's front-desk assembly. Memory
-        // is the conversation owner's, so the prompt matches what the LLM actually saw for this chat.
+        // resources (there is no in-flight turn) — mirrors the chat route's front-desk assembly.
+        // Memory is the conversation owner's, so the prompt matches what the LLM saw for this chat.
         const agent = resolveAgent(soulLoader, convo.agentId);
         const platformAgent = getDefaultAssistant(agent.name);
-        const memoryAssertions = memory && convo.userId ? await memory.list(convo.userId) : [];
+        const memoryDocument =
+          memoryDocuments && convo.userId
+            ? await memoryDocuments.render(DEPLOYMENT_BUSINESS_ID, convo.userId)
+            : undefined;
         const governancePages = knowledge ? await knowledge.governancePages() : [];
         const presentationContext = presentationContextFor(
           { channel: "web", surface: "chat" },
@@ -425,7 +430,7 @@ export function registerConversationRoutes(
         const systemPrompt = assembleAgentSystemPrompt({
           agent,
           platformAgent,
-          memory: memoryAssertions,
+          ...(memoryDocument === undefined ? {} : { memoryDocument }),
           governancePages,
           availableSkills: listAvailableSkills(soulLoader, bundledSkills, skillsDisabled),
           bundledSkills,

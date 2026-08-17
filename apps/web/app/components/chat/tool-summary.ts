@@ -95,8 +95,6 @@ const VERB_BY_SUFFIX: readonly (readonly [RegExp, string])[] = [
   [/_assign$/, "Assigned"],
   [/_label$/, "Labelled"],
   [/_push$/, "Pushed to"],
-  [/^recall_memory$/, "Recalled memory"],
-  [/^remember_correction$/, "Remembered correction"],
   [/^load_skill$/, "Loaded skill"],
 ];
 

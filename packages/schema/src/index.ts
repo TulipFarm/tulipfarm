@@ -65,10 +65,19 @@ export {
   LegacyIntegrationManifestSchema,
   validateLegacyIntegrationManifest,
 } from "./integration-manifest";
-export type { InvocationRequestSchema } from "./invocation";
+export type {
+  CuratorBusinessRequest,
+  CuratorRequest,
+  CuratorUserRequest,
+  CuratorWorkReason,
+  InvocationRequestSchema,
+} from "./invocation";
 export {
   CHAT_REQUEST_SCHEMA,
   CHAT_REQUEST_SCHEMA_REF,
+  CURATOR_REQUEST_SCHEMA,
+  CURATOR_REQUEST_SCHEMA_REF,
+  CURATOR_WORK_REASONS,
   INTEGRATION_REQUEST_SCHEMA,
   INTEGRATION_REQUEST_SCHEMA_REF,
   INVOCATION_REQUEST_SCHEMAS,
@@ -93,6 +102,16 @@ export {
   UnknownModelError,
   validateLlmConfig,
 } from "./llm";
+export {
+  emptyMemorySections,
+  isMemorySectionKey,
+  MEMORY_SECTION_HEADINGS,
+  MEMORY_SECTION_KEYS,
+  MEMORY_SECTION_PURPOSE,
+  MEMORY_TIMEZONE_PREFIX,
+  type MemorySectionKey,
+  type MemorySections,
+} from "./memory-document";
 export type {
   DerivedModelProfile,
   EffortPreset,

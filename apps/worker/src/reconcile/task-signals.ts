@@ -36,6 +36,9 @@ export class TaskSignalsGatherer {
     return {
       hasProviderKey: hasAnyProvider(llmConfig),
       businessName: apiSignals?.businessName,
+      // Absent signals mean the API could not be read; treating that as "setup still running"
+      // keeps the reconciler from opening wizard-owned Tasks on a guess.
+      setupComplete: apiSignals?.setupComplete === true,
     };
   }
 }

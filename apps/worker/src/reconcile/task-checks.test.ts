@@ -4,11 +4,13 @@ import { evaluateTaskChecks, type TaskCheckSignals } from "./task-checks";
 const SATISFIED: TaskCheckSignals = {
   hasProviderKey: true,
   businessName: "Acme",
+  setupComplete: true,
 };
 
 const UNSATISFIED: TaskCheckSignals = {
   hasProviderKey: false,
   businessName: undefined,
+  setupComplete: true,
 };
 
 function byKey(signals: TaskCheckSignals, dedupeKey: string) {
@@ -53,5 +55,25 @@ describe("evaluateTaskChecks", () => {
       blocking: true,
       action: { kind: "answer", field: "businessName", sink: "business_profile" },
     });
+  });
+
+  it("asks nothing about the business name while the wizard is still asking for it", () => {
+    const midSetup = byKey({ ...UNSATISFIED, setupComplete: false }, "business-name");
+    expect(midSetup.satisfied).toBe(true);
+  });
+
+  it("still asks when setup ended without a name, as a headless bootstrap can", () => {
+    const noName = byKey({ ...UNSATISFIED, setupComplete: true }, "business-name");
+    expect(noName.satisfied).toBe(false);
+  });
+
+  it("treats a blank name as unanswered, since the wizard writes empty strings", () => {
+    const blank = byKey({ ...SATISFIED, businessName: "   " }, "business-name");
+    expect(blank.satisfied).toBe(false);
+  });
+
+  it("leaves the provider key gap open mid-setup, which the wizard does not cover", () => {
+    const midSetup = byKey({ ...UNSATISFIED, setupComplete: false }, "provider-key");
+    expect(midSetup.satisfied).toBe(false);
   });
 });

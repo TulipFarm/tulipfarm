@@ -7,6 +7,25 @@ function exporter(fetchImpl?: typeof fetch) {
   return new OtlpMetricsExporter(TARGET, () => 1_700_000_000_000, fetchImpl ?? (vi.fn() as never));
 }
 
+type OtlpMetric = {
+  name: string;
+  sum?: { dataPoints: Array<{ asDouble: number }> };
+  histogram?: { dataPoints: Array<{ count: number; sum: number }> };
+};
+
+function metricsByName(e: { buildPayload(): unknown }): Record<string, OtlpMetric> {
+  const payload = e.buildPayload() as {
+    resourceMetrics: [{ scopeMetrics: [{ metrics: OtlpMetric[] }] }];
+  };
+  return Object.fromEntries(
+    payload.resourceMetrics[0].scopeMetrics[0].metrics.map((metric) => [metric.name, metric])
+  );
+}
+
+function sumOf(metric: OtlpMetric): number {
+  return (metric.sum?.dataPoints ?? []).reduce((total, point) => total + point.asDouble, 0);
+}
+
 describe("OtlpMetricsExporter", () => {
   it("accumulates cumulative counters with bounded labels", () => {
     const e = exporter();
@@ -136,6 +155,71 @@ describe("OtlpMetricsExporter", () => {
     expect(byName.soul_publication_latency_ms.histogram?.dataPoints).toEqual([
       expect.objectContaining({ count: 1, sum: 42 }),
     ]);
+  });
+
+  it("records Curator stages, effect states, rejection reasons, and staleness", () => {
+    const e = exporter();
+    e.recordCurator({ stage: "mint", scope: "user", outcome: "minted" });
+    e.recordCurator({
+      stage: "mint",
+      scope: "user",
+      outcome: "skipped",
+      reason: "budget_exhausted",
+    });
+    e.recordCurator({
+      stage: "settle",
+      scope: "user",
+      outcome: "settled",
+      recorded: 3,
+      rejected: 2,
+    });
+    e.recordCurator({ stage: "recovery", outcome: "recovered", count: 4 });
+    e.recordCurator({ stage: "recovery", outcome: "swept", backlogAgeSeconds: 600 });
+    e.recordCurator({ stage: "document", scope: "user", outcome: "written", documentBytes: 8_192 });
+
+    const byName = metricsByName(e);
+
+    expect(sumOf(byName.curator_stages_total)).toBe(1 + 1 + 1 + 4 + 1 + 1);
+    expect(sumOf(byName.curator_effects_total)).toBe(5);
+    expect(byName.curator_effects_total.sum?.dataPoints).toHaveLength(2);
+    expect(byName.curator_rejections_total.sum?.dataPoints).toEqual([
+      expect.objectContaining({ asDouble: 1 }),
+    ]);
+    expect(byName.curator_backlog_age_seconds.histogram?.dataPoints).toEqual([
+      expect.objectContaining({ count: 1, sum: 600 }),
+    ]);
+    expect(byName.curator_document_bytes.histogram?.dataPoints).toEqual([
+      expect.objectContaining({ count: 1, sum: 8_192 }),
+    ]);
+  });
+
+  // A denial for a job that was never found has no scope. Dropping the label entirely would make
+  // its series shape differ from every other Curator series and break dashboard grouping.
+  it("labels a scopeless Curator report as unknown rather than omitting the label", () => {
+    const e = exporter();
+    e.recordCurator({ stage: "denial", outcome: "job_not_found" });
+
+    const point = metricsByName(e).curator_stages_total.sum?.dataPoints[0] as unknown as {
+      attributes: Array<{ key: string; value: { stringValue: string } }>;
+    };
+    const scope = point.attributes.find((attribute) => attribute.key === "scope");
+
+    expect(scope?.value.stringValue).toBe("unknown");
+  });
+
+  // Zero effects is the normal shape of a settlement that kept nothing, and an emitted zero would
+  // create a permanently flat series that hides the moment real effects start arriving.
+  it("adds no effect series when a settlement recorded and rejected nothing", () => {
+    const e = exporter();
+    e.recordCurator({
+      stage: "settle",
+      scope: "business",
+      outcome: "settled",
+      recorded: 0,
+      rejected: 0,
+    });
+
+    expect(metricsByName(e).curator_effects_total).toBeUndefined();
   });
 
   it("POSTs OTLP JSON with basic auth to /v1/metrics", async () => {

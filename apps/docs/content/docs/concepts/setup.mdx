@@ -28,15 +28,13 @@ Soul git backup is not part of the wizard. Configure the remote after setup in
 ## The Companion
 
 Once inside the app, a floating **Companion** — a tulip icon, bottom-right on desktop and a
-top-bar icon on mobile — surfaces what setup used to front-load, one small question at a time. Its
-first quest is an LLM provider: it opens **Operate → Business → Secrets** to add a key, validated
+top-bar icon on mobile — surfaces what setup used to front-load, one small Task at a time. Its
+first Task is an LLM provider: it opens **Operate → Business → Secrets** to add a key, validated
 with one real model call before it is stored, same as the old wizard step, and accepts a Claude or
 ChatGPT [subscription](/docs/concepts/llm#subscription-providers) in place of an API key. Its next
-two quests are the business profile: `businessName` and `businessDescription`, answered inline and
+Task is the business profile: `businessName` and `businessDescription`, answered inline and
 written straight to `soul.yaml` as static business context in every Agent's system prompt — not
-working [memory](/docs/concepts/memory). Only once those three are answered does the Companion
-unlock further quests: a deterministic setup checklist, then AI-suggested profile gaps answered
-through chat.
+working [memory](/docs/concepts/memory).
 
 A provider key also lets you assign models to the **Fast**, **Balanced**, and **Thorough** chains
 in **Operate → Business → Models**, and choose which profile **Auto** resolves to — the Companion

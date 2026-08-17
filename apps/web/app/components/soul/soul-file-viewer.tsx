@@ -1,17 +1,12 @@
 import { useEffect, useState } from "react";
 import { ApiError } from "~/lib/api";
-import { highlight } from "~/lib/shiki";
 import { getSoulFile, type SoulFile } from "~/lib/soul";
+import { useHighlighted } from "~/lib/use-highlighted";
 
 /*
  * Read-only source viewer for a single soul file. Fetches raw content from the API, then
  * renders it with Shiki (client-side).
  */
-
-function readTheme(): "light" | "dark" {
-  if (typeof document === "undefined") return "light";
-  return document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
-}
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -20,28 +15,18 @@ function formatBytes(bytes: number): string {
 
 export function SoulFileViewer({ path }: { path: string | null }) {
   const [file, setFile] = useState<SoulFile | null>(null);
-  const [html, setHtml] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [theme, setTheme] = useState<"light" | "dark">(readTheme);
-
-  useEffect(() => {
-    const read = () => setTheme(readTheme());
-    window.addEventListener("themechange", read);
-    return () => window.removeEventListener("themechange", read);
-  }, []);
 
   useEffect(() => {
     if (!path) {
       setFile(null);
-      setHtml(null);
       return;
     }
     let cancelled = false;
     setLoading(true);
     setError(null);
     setFile(null); // drop stale size/content from the previous selection immediately
-    setHtml(null);
     getSoulFile(path)
       .then((f) => {
         if (!cancelled) setFile(f);
@@ -60,23 +45,8 @@ export function SoulFileViewer({ path }: { path: string | null }) {
     };
   }, [path]);
 
-  useEffect(() => {
-    if (!file || file.binary || file.tooLarge) {
-      setHtml(null);
-      return;
-    }
-    let cancelled = false;
-    highlight(file.content, file.language, theme)
-      .then((out) => {
-        if (!cancelled) setHtml(out);
-      })
-      .catch(() => {
-        if (!cancelled) setHtml(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [file, theme]);
+  const showable = file && !file.binary && !file.tooLarge ? file : null;
+  const html = useHighlighted(showable?.content ?? null, showable?.language ?? "plaintext");
 
   if (!path) {
     return (

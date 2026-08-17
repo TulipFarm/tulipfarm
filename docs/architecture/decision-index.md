@@ -36,7 +36,18 @@ Detailed contracts:
 | ADR-018 | Current behavior is replaced beside existing behavior and cut over by capability | No users require DB compatibility; old routes/workers are removed only after target acceptance proves replacements | Application owners |
 | ADR-019 | V1 ships no public customer CLI, general SDK, native app, or desktop app | Focuses security and product support on responsive browser and approved HTTP/Integration surfaces | `apps/api`, `apps/web` |
 | ADR-020 | Applications compose; packages own domain decisions; packages never import applications | Prevents cycles, hidden ownership, and duplicated business rules | Dependency rules |
-| ADR-026 | Memory is scoped Assertions plus Pending Memory, Episodes, and content-free telemetry | Preserves user control, history, Point-in-time Recall, and operator visibility without leaking statements, subjects, entities, queries, or high-cardinality ids | `packages/memory` |
+| ADR-027 | A user's Memory is one Markdown Memory Document, always injected whole, written by named-entry delta from Tools and by stale-checked section replacement from privileged writers | Removes relevance recall, versioned Assertions, and the confirmation queue as sources of silent omission; the document is current truth, so what the model reads is exactly what was written | `packages/storage`, `apps/api` |
+| ADR-028 | The Curator is one durable Run per user or business that proposes every model-derived effect; deterministic maintenance stays deterministic | Model reasoning cannot execute outside `packages/run-kernel` (ADR-004); one loop replaces four half-built mechanisms for memory, Knowledge, Tasks, and suggestions | `packages/curator`, `apps/worker` |
+| ADR-029 | Curator output names only a closed `kind` and a Run-scoped subject; the server templates every user-visible string, URL, and dedupe key | A Proposal pill inserts its prompt straight into Chat, so model-authored text there is a direct injection path into the user's next turn | `packages/curator`, `apps/api` |
+
+## Superseded decisions
+
+Superseded decisions stay listed until their mechanism is deleted, because the old path remains live
+through cutover (ADR-018).
+
+| ID | Decision | Superseded by | Removed when |
+| --- | --- | --- | --- |
+| ADR-026 | Memory is scoped Assertions plus Pending Memory, Episodes, and content-free telemetry | ADR-027 | fully retired — `packages/memory` internals, the memory routes, the Settings memory panes and the five `memory_*` tables are deleted (migrations v66, v67) |
 
 ## Terminology decisions
 
@@ -66,6 +77,10 @@ These spellings supersede earlier conflicting names without changing behavior.
 | Approval by heuristic or expired/mismatched decision | Approval must bind one exact normalized intent and current policy evidence |
 | Local/SSH/container shell as production isolation | Workspace abstraction is useful but is not a strong security boundary |
 | Compatibility with v1 internals or development DB | Clean contracts are preferred; cutover tests protect behavior instead |
+| Key/value or fact-level Memory operations instead of section patches | Reintroduces the identity model ADR-027 retired; a per-section stale check already prevents lost updates |
+| A business-scoped Memory Document mirroring the user one | Business learning belongs in Knowledge, which already has ACLs, citations, and human review |
+| Curator reasoning as a bare pg-boss job beside the deterministic sweep | Model-derived effects outside the run kernel would fork recovery, concurrency, budget, and audit (ADR-004) |
+| A business Run emitting Proposals directly | Business scope cannot name an audience; only the target user's own Run may read their document and personalize |
 
 ## Change control
 

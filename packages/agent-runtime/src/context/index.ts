@@ -2,8 +2,6 @@ export type {
   AssembleContext,
   AvailableSkill,
   EagerSkill,
-  MemoryEntry,
-  RecalledMemory,
   SoulCatalogue,
   SoulCatalogueEntry,
   TemporalContext,

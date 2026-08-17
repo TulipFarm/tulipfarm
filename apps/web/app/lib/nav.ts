@@ -197,11 +197,10 @@ export const MODE_SECTIONS: Record<"build" | "operate" | "settings", NavSection[
           description: "Your password and the API tokens that act on your behalf.",
         },
         {
-          to: "/settings/memory",
-          label: "Memory",
+          to: "/settings/instructions",
+          label: "Custom instructions",
           icon: Brain,
-          description:
-            "Standing instructions you write, and the facts assistants have saved about you.",
+          description: "Standing guidance every assistant follows, written by you.",
         },
         { to: "/design-guide", label: "Design guide", icon: Sparkles, devOnly: true },
       ],
@@ -263,7 +262,7 @@ const PAGE_META: Array<{ prefix: string; label: string; icon: LucideIcon }> = [
   { prefix: "/settings/profile", label: "Profile", icon: UserRound },
   { prefix: "/settings/appearance", label: "Appearance", icon: Palette },
   { prefix: "/settings/auth", label: "Auth", icon: ShieldCheck },
-  { prefix: "/settings/memory", label: "Memory", icon: Brain },
+  { prefix: "/settings/instructions", label: "Custom instructions", icon: Brain },
   { prefix: "/resources", label: "Resources", icon: Boxes },
   { prefix: "/agents", label: "Agents", icon: Bot },
   { prefix: "/skills", label: "Skills", icon: Puzzle },

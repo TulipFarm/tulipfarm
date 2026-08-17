@@ -15,6 +15,7 @@ import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parse, stringify } from "yaml";
 import { buildApp } from "../app";
+import type { AppOptions } from "../app-options";
 import type { TokenDoc, TokenRepo } from "../auth/api-tokens";
 import { CSRF_COOKIE, CSRF_HEADER } from "../auth/csrf";
 import { MemorySessionStore } from "../auth/session-store";
@@ -146,7 +147,19 @@ function cookieHeader(cookies: { name: string; value: string }[]): string {
   return cookies.map((c) => `${c.name}=${c.value}`).join("; ");
 }
 
-async function makeApp(dir: string): Promise<FastifyInstance> {
+/** The wizard writes `soul.yaml` directly, outside the SoulWriter gateway that normally reloads,
+ * so `reload` is the only thing keeping the in-memory manifest honest. Only that is stubbed. */
+function fakeSoulLoader(reload: () => Promise<void>): AppOptions["soulLoader"] {
+  return { reload } as unknown as AppOptions["soulLoader"];
+}
+
+async function makeApp(
+  dir: string,
+  extra: {
+    triggerCuratorSweep?: () => Promise<void>;
+    soulLoader?: AppOptions["soulLoader"];
+  } = {}
+): Promise<FastifyInstance> {
   const soulPath = path.join(dir, "soul");
   vi.stubEnv("SOUL_PATH", soulPath);
   vi.stubEnv("ENCRYPTION_KEY", crypto.randomBytes(32).toString("base64"));
@@ -162,6 +175,7 @@ async function makeApp(dir: string): Promise<FastifyInstance> {
       key: randomBytes(32),
     }),
     gitSync: new GitSyncService(soulPath, undefined, async () => undefined, console),
+    ...extra,
   });
 }
 
@@ -479,6 +493,89 @@ describe("setup routes", () => {
     expect(cfg.setupComplete).toBe(true);
     const status = await app.inject({ method: "GET", url: "/api/v1/setup/status" });
     expect(status.json()).toEqual({ needsSetup: false });
+  });
+
+  it("complete kicks the Curator sweep so setup gaps show at minute 0, not minute 5", async () => {
+    await app.close();
+    const triggerCuratorSweep = vi.fn(async () => {});
+    app = await makeApp(dir, { triggerCuratorSweep });
+    const cookies = await createAdmin();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/setup/complete",
+      headers: authHeaders(cookies),
+    });
+    expect(res.statusCode).toBe(204);
+    expect(triggerCuratorSweep).toHaveBeenCalledOnce();
+  });
+
+  it("complete still succeeds when the reconcile kick throws", async () => {
+    await app.close();
+    const triggerCuratorSweep = vi.fn(async () => {
+      throw new Error("boss down");
+    });
+    app = await makeApp(dir, { triggerCuratorSweep });
+    const cookies = await createAdmin();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/setup/complete",
+      headers: authHeaders(cookies),
+    });
+    expect(res.statusCode).toBe(204);
+  });
+
+  it("business reloads the soul so the new name is live without a restart", async () => {
+    await app.close();
+    const reload = vi.fn(async () => {});
+    app = await makeApp(dir, { soulLoader: fakeSoulLoader(reload) });
+    const cookies = await createAdmin();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/setup/business",
+      headers: authHeaders(cookies),
+      payload: { name: "Acme" },
+    });
+    expect(res.statusCode).toBe(204);
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it("reloads the soul before kicking the reconciler, so signals never read a stale name", async () => {
+    await app.close();
+    const order: string[] = [];
+    const reload = vi.fn(async () => {
+      order.push("reload");
+    });
+    const triggerCuratorSweep = vi.fn(async () => {
+      order.push("kick");
+    });
+    app = await makeApp(dir, { triggerCuratorSweep, soulLoader: fakeSoulLoader(reload) });
+    const cookies = await createAdmin();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/setup/complete",
+      headers: authHeaders(cookies),
+    });
+    expect(res.statusCode).toBe(204);
+    expect(order).toEqual(["reload", "kick"]);
+  });
+
+  it("business still succeeds when the soul reload throws", async () => {
+    await app.close();
+    const reload = vi.fn(async () => {
+      throw new Error("git gone");
+    });
+    app = await makeApp(dir, { soulLoader: fakeSoulLoader(reload) });
+    const cookies = await createAdmin();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/setup/business",
+      headers: authHeaders(cookies),
+      payload: { name: "Acme" },
+    });
+    expect(res.statusCode).toBe(204);
+    expect(parse(await fs.readFile(path.join(dir, "soul", "soul.yaml"), "utf8")).businessName).toBe(
+      "Acme"
+    );
   });
 
   it("headless boot: status returns 200 needsSetup=false even when wizard routes absent", async () => {
