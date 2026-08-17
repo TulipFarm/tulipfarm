@@ -1,4 +1,5 @@
 import type { PersistedRun } from "@tulipfarm/storage";
+import type { RunEventAppendPort } from "@tulipfarm/turn-executor";
 import { describe, expect, it } from "vitest";
 import type {
   RemoteAttachResult,
@@ -7,7 +8,6 @@ import type {
 } from "../internal/delivery-host";
 import type { RunOutcome } from "../run-dispatcher";
 import { createIntegrationExecutor, type IntegrationExecutorOptions } from "./integration-executor";
-import type { RunEventAppendPort } from "./run-events";
 
 const RUN: PersistedRun = {
   id: "run-1",

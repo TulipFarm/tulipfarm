@@ -11,8 +11,8 @@ import {
 import { canonicalHash } from "@tulipfarm/schema";
 import type { BudgetConsumeResult, PersistedRun, PersistedState } from "@tulipfarm/storage";
 import { describe, expect, it } from "vitest";
-import type { TurnCompletionRecord, TurnCompletionStore } from "../conversation-turn";
 import { type ChatExecutorHost, createChatExecutor } from "./chat-executor";
+import type { TurnCompletionRecord, TurnCompletionStore } from "./conversation-turn";
 import type { ResolvedTurnContext, TurnContextPort } from "./driver";
 import type { RunEventAppendPort } from "./run-events";
 

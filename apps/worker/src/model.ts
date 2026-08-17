@@ -89,19 +89,9 @@ export interface LlmModelPortOptions {
   now?(): number;
 }
 
-export interface ModelCallReceipt {
-  readonly modelId: string;
-  /** What the participant asked for — including `auto`, which is a request, not an outcome. */
-  readonly effortPreset?: EffortPreset;
-  /** Actual rung, when knowable, so clients can escalate `auto` without guessing. */
-  readonly effortApplied?: EffortRung;
-  readonly modelCallLatencyMs: number;
-}
+import type { ModelCallReceipt, ModelCallReceiptSource } from "@tulipfarm/turn-executor";
 
-/** Latest-call receipt is scoped to this Turn-attempt port, not a process registry. */
-export interface ModelCallReceiptSource {
-  latestModelCallReceipt(): ModelCallReceipt | undefined;
-}
+export type { ModelCallReceipt, ModelCallReceiptSource } from "@tulipfarm/turn-executor";
 
 export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
   private receipt: ModelCallReceipt | undefined;

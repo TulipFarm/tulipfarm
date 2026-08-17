@@ -1,6 +1,6 @@
 import type { StateStatus } from "@tulipfarm/run-kernel";
 import type { RunStore } from "@tulipfarm/storage";
-import type { StateTransitionPort } from "../agent-state";
+import type { StateTransitionPort } from "./agent-state";
 
 /** RunStore State transitions use fresh versions, so CAS races fail instead of overwriting. */
 

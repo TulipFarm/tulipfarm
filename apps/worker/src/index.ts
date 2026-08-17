@@ -5,25 +5,30 @@ export {
   AgentStateRunner,
   type AgentStateRunnerOptions,
   type ApprovalWaitPort,
+  type ChatExecutorOptions,
+  type CompleteTurnInput,
+  type CompleteTurnResult,
+  ConversationTurnCompleter,
+  type ConversationTurnCompleterOptions,
+  createChatExecutor,
+  MissingStateError,
+  RunStoreStateTransitions,
+  reclaimPendingState,
+  reclaimWaitingState,
+  StateTransitionConflictError,
   type StateTransitionPort,
-} from "./agent-state";
+  type TurnCompletionRecord,
+  type TurnCompletionRef,
+  type TurnCompletionStatus,
+  type TurnCompletionStore,
+  type TurnOutcome,
+} from "@tulipfarm/turn-executor";
 export {
   loadConfig,
   REQUIRED_SCHEMA_VERSION,
   type WorkerConfig,
   WorkerConfigError,
 } from "./config";
-export {
-  type CompleteTurnInput,
-  type CompleteTurnResult,
-  ConversationTurnCompleter,
-  type ConversationTurnCompleterOptions,
-  type TurnCompletionRecord,
-  type TurnCompletionRef,
-  type TurnCompletionStatus,
-  type TurnCompletionStore,
-  type TurnOutcome,
-} from "./conversation-turn";
 export {
   type DeliveryTarget,
   DeliveryTargetRegistry,
@@ -59,14 +64,3 @@ export {
   type RunOutcome,
 } from "./run-dispatcher";
 export { type DrainableLoop, type DrainOptions, type DrainOutcome, drain } from "./shutdown";
-export {
-  type ChatExecutorOptions,
-  createChatExecutor,
-} from "./turn/chat-executor";
-export {
-  MissingStateError,
-  RunStoreStateTransitions,
-  reclaimPendingState,
-  reclaimWaitingState,
-  StateTransitionConflictError,
-} from "./turn/kernel-ports";

@@ -1,8 +1,8 @@
 import type { RunLeaseManager } from "@tulipfarm/run-kernel";
 import type { PersistedRun } from "@tulipfarm/storage";
+import type { RunOutcome } from "@tulipfarm/turn-executor";
 
-/** Executor outcome; `waiting` parks, and `cancelled` is left to RunCancellationManager. */
-export type RunOutcome = "succeeded" | "failed" | "waiting" | "needs_reconciliation" | "cancelled";
+export type { RunOutcome } from "@tulipfarm/turn-executor";
 
 export interface RunDispatcherOptions {
   leases: RunLeaseManager;

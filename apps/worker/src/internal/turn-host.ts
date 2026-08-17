@@ -5,14 +5,16 @@ import type {
 } from "@tulipfarm/agent-runtime";
 import type { ParticipantToolCall } from "@tulipfarm/schema";
 import type { TurnAuthority } from "@tulipfarm/tool-host";
-import type { ApprovalWaitPort } from "../agent-state";
 import type {
+  ApprovalWaitPort,
+  ResolvedTurnContext,
   TurnCompletionRecord,
   TurnCompletionRef,
   TurnCompletionStatus,
   TurnCompletionStore,
-} from "../conversation-turn";
-import type { ResolvedTurnContext, TurnContextPort, TurnRequest } from "../turn/driver";
+  TurnContextPort,
+  TurnRequest,
+} from "@tulipfarm/turn-executor";
 import type { InternalApiClient } from "./client";
 
 /** API-backed turn ports; every path names only a Run and API re-derives authority. */

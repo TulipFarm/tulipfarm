@@ -1,6 +1,6 @@
 import type { PersistedState, RunStore, StateTransitionInput } from "@tulipfarm/storage";
 import { describe, expect, it } from "vitest";
-import type { StateTransitionPort } from "../agent-state";
+import type { StateTransitionPort } from "./agent-state";
 import {
   MissingStateError,
   RunStoreStateTransitions,

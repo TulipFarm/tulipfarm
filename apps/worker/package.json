@@ -22,6 +22,7 @@
     "@tulipfarm/soul": "workspace:*",
     "@tulipfarm/storage": "workspace:*",
     "@tulipfarm/tool-host": "workspace:*",
+    "@tulipfarm/turn-executor": "workspace:*",
     "ai": "^7.0.2",
     "dotenv": "^17.4.2",
     "isolated-vm": "^7.0.0",

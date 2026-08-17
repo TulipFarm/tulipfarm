@@ -13,15 +13,12 @@ import {
   type RunBudgetStore,
 } from "@tulipfarm/run-kernel";
 import type { PersistedRun, RunStore } from "@tulipfarm/storage";
-import { AgentStateRunner, type ApprovalWaitPort, type StateTransitionPort } from "../agent-state";
-import { ConversationTurnCompleter, type TurnCompletionStore } from "../conversation-turn";
-import type { RunExecutor } from "../executors";
-import type { ModelCallReceiptSource } from "../model";
-import type { SpendSink } from "../observability";
-import type { RunOutcome } from "../run-dispatcher";
+import { AgentStateRunner, type ApprovalWaitPort, type StateTransitionPort } from "./agent-state";
+import { ConversationTurnCompleter, type TurnCompletionStore } from "./conversation-turn";
 import { type TurnContextPort, TurnDriver, type TurnRequest } from "./driver";
 import { TurnGuardrails } from "./guardrails";
 import { reclaimPendingState, reclaimWaitingState } from "./kernel-ports";
+import type { ModelCallReceiptSource, RunExecutor, RunOutcome, SpendSink } from "./ports";
 import { type RunEventAppendPort, TurnEventWriter } from "./run-events";
 import { announceToolCalls } from "./tool-events";
 

@@ -18,7 +18,7 @@ reconciliation, turn execution, delivery classification, projections, and outbox
 | `src/config.ts`, `src/data-dir.ts` | Env/defaults, schema floor, worker credentials/secrets. |
 | `src/db.ts`, `src/preflight.ts`, `src/loop.ts` | Local `pg`, schema check, backing-off loops. |
 | `src/executors.ts`, `src/delivery.ts` | Run source and delivery target registries. |
-| `src/turn/` | Chat/integration turn executors, Context, guardrails, events, completion. |
+| `src/turn/` | Integration turn executor. Chat Turn execution moved to [`packages/turn-executor`](../../packages/turn-executor/AGENTS.md). |
 | `src/routine/` | Routine executor plus Tool, Agent, and approval ports. |
 | `src/curator/` | Curator Run executor (resolve pinned context, reason once, submit raw output) and the `curator-sweep` fan-out. |
 | `src/internal/` | HTTP ports back to `/api/v1/internal/*`; Run identity is re-derived by API. |

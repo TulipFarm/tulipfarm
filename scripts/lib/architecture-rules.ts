@@ -191,6 +191,11 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
       "memory",
       "observability",
     ],
+    // How one Chat Turn executes, extracted from the Worker so a second host — the offline eval
+    // harness — can drive a real Turn without importing an app. It declares the ports it needs
+    // (`RunExecutor`, `SpendSink`, `ModelCallReceiptSource`) rather than importing the Worker's
+    // implementations of them.
+    "turn-executor": ["schema", "run-kernel", "agent-runtime", "storage"],
     // Applications compose packages; they never import another application. `constants` holds the
     // shared, non-sensitive deployment defaults (e.g. the business scope) that the API and the
     // worker must agree on and cannot share any other way.
@@ -249,6 +254,7 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
       "tool-host",
       "kv",
       "platform-tools",
+      "turn-executor",
     ],
     "integration-worker": [
       "schema",
@@ -269,7 +275,7 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
     // `apps/eval` drives the real Agent loop and Context assembler against a versioned Corpus.
     // It is an app, not a package, because a package may not import from `apps/*` and the L3
     // tier has to reach the same executor a real turn runs through.
-    eval: ["agent-runtime"],
+    eval: ["agent-runtime", "turn-executor"],
   },
   // Legacy v1 edges that still exist during cutover. Each is a target package
   // importing a not-yet-replaced legacy package; removed when its owner passes

@@ -6,16 +6,14 @@ import type {
   ModelRequirementsPolicy,
 } from "@tulipfarm/agent-runtime";
 import type { StateStatus } from "@tulipfarm/run-kernel";
-import type { AgentStateRequest, AgentStateResult, AgentStateRunner } from "../agent-state";
+import type { AgentStateRequest, AgentStateResult, AgentStateRunner } from "./agent-state";
 import type {
   CompleteTurnResult,
   ConversationTurnCompleter,
   TurnOutcome,
-} from "../conversation-turn";
-import type { ModelCallReceipt } from "../model";
-import type { SpendSink } from "../observability";
-import type { RunOutcome } from "../run-dispatcher";
+} from "./conversation-turn";
 import type { TurnGuardrails } from "./guardrails";
+import type { ModelCallReceipt, RunOutcome, SpendSink } from "./ports";
 import type { TurnEventWriter } from "./run-events";
 
 /** Orders one turn; emit `turn.finished` only after completion is durable. */

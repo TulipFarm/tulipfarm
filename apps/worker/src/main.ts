@@ -46,6 +46,7 @@ import {
   WaitStore,
 } from "@tulipfarm/storage";
 import { PgEffectStore } from "@tulipfarm/tool-broker";
+import { createChatExecutor, RunStoreStateTransitions } from "@tulipfarm/turn-executor";
 import { config as loadEnv } from "dotenv";
 import { loadConfig, REQUIRED_SCHEMA_VERSION, type WorkerConfig } from "./config";
 import { CURATOR_RUN_SOURCE, createCuratorExecutor } from "./curator/executor";
@@ -84,9 +85,7 @@ import { type DrainableLoop, drain } from "./shutdown";
 import { buildLocalToolHost } from "./tools/local-host";
 import { RoutingToolDispatch } from "./tools/routing-dispatch";
 import { SoulEmbeddings } from "./tools/soul-embeddings";
-import { createChatExecutor } from "./turn/chat-executor";
 import { createIntegrationExecutor } from "./turn/integration-executor";
-import { RunStoreStateTransitions } from "./turn/kernel-ports";
 
 /** Consumer identity recorded on every outbox receipt this process writes. */
 const OUTBOX_CONSUMER = "worker.run-dispatch";

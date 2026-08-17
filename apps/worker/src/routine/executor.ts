@@ -30,7 +30,7 @@ import {
 import { MANUAL_REQUEST_SCHEMA_REF } from "@tulipfarm/schema";
 import type { RuntimeBundle } from "@tulipfarm/soul";
 import type { PersistedRun, PersistedState, RunStore } from "@tulipfarm/storage";
-import type { StateTransitionPort } from "../agent-state";
+import type { StateTransitionPort } from "@tulipfarm/turn-executor";
 import type { RunExecutor } from "../executors";
 import type { RoutineAgentPort } from "./agent-port";
 import type { RoutineApprovalPort } from "./approval-port";

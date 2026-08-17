@@ -1,6 +1,7 @@
 import { type IngressDecision, parseDecision } from "@tulipfarm/integrations";
 import type { HookExecutor } from "@tulipfarm/sandbox";
 import type { PersistedRun } from "@tulipfarm/storage";
+import { type RunEventAppendPort, TurnEventWriter } from "@tulipfarm/turn-executor";
 import type { RunExecutor } from "../executors";
 import type {
   HttpDeliveryHost,
@@ -8,7 +9,6 @@ import type {
   RemoteReplyOutcome,
 } from "../internal/delivery-host";
 import type { RunOutcome } from "../run-dispatcher";
-import { type RunEventAppendPort, TurnEventWriter } from "./run-events";
 
 /** Integration deliveries classify in a no-grant worker isolate and emit one classification. */
 

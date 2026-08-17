@@ -646,6 +646,9 @@ importers:
       '@tulipfarm/tool-host':
         specifier: workspace:*
         version: link:../../packages/tool-host
+      '@tulipfarm/turn-executor':
+        specifier: workspace:*
+        version: link:../../packages/turn-executor
       ai:
         specifier: ^7.0.2
         version: 7.0.2(zod@4.4.3)
@@ -1474,6 +1477,34 @@ importers:
         version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@26.1.1)(@vitest/coverage-v8@4.1.9)(jsdom@29.1.1(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
   packages/tsconfig: {}
+
+  packages/turn-executor:
+    dependencies:
+      '@tulipfarm/agent-runtime':
+        specifier: workspace:*
+        version: link:../agent-runtime
+      '@tulipfarm/run-kernel':
+        specifier: workspace:*
+        version: link:../run-kernel
+      '@tulipfarm/schema':
+        specifier: workspace:*
+        version: link:../schema
+      '@tulipfarm/storage':
+        specifier: workspace:*
+        version: link:../storage
+    devDependencies:
+      '@tulipfarm/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      '@types/node':
+        specifier: ^26.1.1
+        version: 26.1.1
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.9
+        version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@26.1.1)(@vitest/coverage-v8@4.1.9)(jsdom@29.1.1(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
 packages:
 

@@ -2,7 +2,7 @@ import type { AgentLoopInput, AgentLoopOutcome } from "@tulipfarm/agent-runtime"
 import { RunTransitionError, type StateStatus } from "@tulipfarm/run-kernel";
 import { describe, expect, it } from "vitest";
 import { type AgentStateRequest, AgentStateRunner } from "./agent-state";
-import { StateTransitionConflictError } from "./turn/kernel-ports";
+import { StateTransitionConflictError } from "./kernel-ports";
 
 const counters = { iterations: 1, toolCalls: 0, repairs: 0 };
 

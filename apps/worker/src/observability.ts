@@ -1,41 +1,8 @@
 import { randomUUID } from "node:crypto";
-import type { ModelUsage } from "@tulipfarm/agent-runtime";
+import type { LlmCallRecord, SpendSink, TurnRecord } from "@tulipfarm/turn-executor";
 import type { Queryable } from "./db";
 
-/** One model call, as the spend ledger records it. */
-export interface LlmCallRecord {
-  readonly conversationId?: string;
-  readonly agentId?: string;
-  readonly model?: string;
-  readonly provider?: string;
-  readonly tier?: string;
-  readonly usage?: ModelUsage;
-  readonly durationMs?: number;
-  readonly status: "ok" | "error";
-  readonly runId?: string;
-  readonly turnId?: string;
-}
-
-/** One finished turn, for the reliability and volume half of the dashboard. */
-export interface TurnRecord {
-  readonly conversationId?: string;
-  readonly agentId?: string;
-  readonly durationMs?: number;
-  readonly status: "ok" | "error";
-  readonly runId?: string;
-  readonly turnId?: string;
-}
-
-/**
- * Where the Worker reports what it spent.
- *
- * Both methods return void rather than a promise on purpose: recording spend must never be able
- * to fail, slow, or block the turn it is describing.
- */
-export interface SpendSink {
-  recordLlmCall(record: LlmCallRecord): void;
-  recordTurn(record: TurnRecord): void;
-}
+export type { LlmCallRecord, SpendSink, TurnRecord } from "@tulipfarm/turn-executor";
 
 /** Drops undefined keys so the stored attributes stay compact rather than full of nulls. */
 function compact(obj: Record<string, unknown>): Record<string, unknown> {

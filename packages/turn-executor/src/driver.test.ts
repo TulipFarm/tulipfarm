@@ -5,13 +5,12 @@ import {
 } from "@tulipfarm/agent-runtime";
 import { canonicalHash } from "@tulipfarm/schema";
 import { describe, expect, it, vi } from "vitest";
-import { AgentStateRunner } from "../agent-state";
+import { AgentStateRunner } from "./agent-state";
 import {
   ConversationTurnCompleter,
   type TurnCompletionRecord,
   type TurnCompletionStore,
-} from "../conversation-turn";
-import type { ModelCallReceipt } from "../model";
+} from "./conversation-turn";
 import {
   type ResolvedTurnContext,
   type TurnContextPort,
@@ -19,6 +18,7 @@ import {
   type TurnRequest,
 } from "./driver";
 import { TurnGuardrails } from "./guardrails";
+import type { ModelCallReceipt } from "./ports";
 import { type RunEventAppendPort, TurnEventWriter } from "./run-events";
 
 /** The policy the driver enforces, and the digest the Context must record for it. */

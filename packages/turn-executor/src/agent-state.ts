@@ -1,6 +1,6 @@
 import type { AgentLoopInput, AgentLoopOutcome } from "@tulipfarm/agent-runtime";
 import { assertStateTransition, type StateStatus } from "@tulipfarm/run-kernel";
-import { StateTransitionConflictError } from "./turn/kernel-ports";
+import { StateTransitionConflictError } from "./kernel-ports";
 
 /** Maps Agent loop outcomes onto legal Run-kernel State transitions and durable waits. */
 
