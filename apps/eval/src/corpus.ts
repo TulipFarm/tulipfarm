@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import type { AssembleContext } from "@tulipfarm/agent-runtime";
-import type { EvalCase } from "./case.ts";
+import { type EvalCase, type Expectation, isPersisted } from "./case.ts";
 import { type EvalSoul, SOUL_OWNED_CONTEXT_KEYS, soulContext } from "./eval-soul.ts";
 import { expandRedTeam, type RedTeamOutcome } from "./red-team.ts";
 import { OUTPUT_FLAGS } from "./scorer.ts";
@@ -109,6 +109,11 @@ const EXPECTATION_FIELDS: Record<string, readonly [string, FieldType][]> = {
     ["min", "number"],
   ],
   rubric_denies: [["question", "string"]],
+  run_status: [["status", "string"]],
+  state_status: [["status", "string"]],
+  turn_status: [["status", "string"]],
+  run_event_emitted: [["eventType", "string"]],
+  soul_committed: [["path", "string"]],
 };
 
 /**
@@ -163,8 +168,9 @@ function validate(raw: unknown, file: string): EvalCase {
     require(typeof c[field] === "string" &&
       (c[field] as string).length > 0, `${file}: missing required field "${field}"`);
   }
-  require(c.tier ===
-    "l2", `${file}: tier ${JSON.stringify(c.tier)} is not runnable; expected "l2"`);
+  require(c.tier === "l2" ||
+    c.tier ===
+      "l3", `${file}: tier ${JSON.stringify(c.tier)} is not runnable; expected "l2" or "l3"`);
   require(typeof c.context === "object" && c.context !== null, `${file}: missing "context"`);
   require(Array.isArray(c.input) &&
     c.input.length > 0, `${file}: "input" must be a non-empty array`);
@@ -184,6 +190,11 @@ function validate(raw: unknown, file: string): EvalCase {
         type
       ), `${file}: expectation "${kind}" needs a ${describeField(type)} field "${field}"`);
     }
+    // Caught here rather than at scoring time: an L2 Sweep has no persisted state to read, so
+    // this Case could only ever error — and it would do so after the model calls were paid for.
+    require(c.tier === "l3" ||
+      !isPersisted(a as Expectation), `${file}: expectation "${kind}" reads persisted state, ` +
+      `which only tier "l3" observes; this Case is tier ${JSON.stringify(c.tier)}`);
   }
   if (c.redTeam !== undefined) {
     validateRedTeam(c.redTeam, file);

@@ -352,6 +352,9 @@ importers:
       '@tulipfarm/model-adapter':
         specifier: workspace:*
         version: link:../../packages/model-adapter
+      '@tulipfarm/run-kernel':
+        specifier: workspace:*
+        version: link:../../packages/run-kernel
       '@tulipfarm/schema':
         specifier: workspace:*
         version: link:../../packages/schema
@@ -361,6 +364,9 @@ importers:
       '@tulipfarm/soul':
         specifier: workspace:*
         version: link:../../packages/soul
+      '@tulipfarm/storage':
+        specifier: workspace:*
+        version: link:../../packages/storage
       '@tulipfarm/turn-executor':
         specifier: workspace:*
         version: link:../../packages/turn-executor
@@ -368,6 +374,9 @@ importers:
         specifier: ^7.0.2
         version: 7.0.2(zod@4.4.3)
     devDependencies:
+      '@electric-sql/pglite':
+        specifier: ^0.5.3
+        version: 0.5.3
       '@tulipfarm/tsconfig':
         specifier: workspace:*
         version: link:../../packages/tsconfig

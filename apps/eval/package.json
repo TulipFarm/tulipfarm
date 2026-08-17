@@ -18,13 +18,16 @@
     "@tulipfarm/agent-runtime": "workspace:*",
     "@tulipfarm/llm": "workspace:*",
     "@tulipfarm/model-adapter": "workspace:*",
+    "@tulipfarm/run-kernel": "workspace:*",
     "@tulipfarm/schema": "workspace:*",
     "@tulipfarm/secrets": "workspace:*",
     "@tulipfarm/soul": "workspace:*",
+    "@tulipfarm/storage": "workspace:*",
     "@tulipfarm/turn-executor": "workspace:*",
     "ai": "^7.0.2"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.3",
     "@tulipfarm/tsconfig": "workspace:*",
     "@types/node": "^26.1.1",
     "tsx": "^4.22.4",

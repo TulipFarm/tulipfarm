@@ -56,7 +56,32 @@ export type Expectation =
   | { readonly kind: "rubric_denies"; readonly question: string }
   /** No guard refused at this stage. This is what catches an over-eager guardrail: the Case fails
    *  when a stage that should have let a benign turn through starts refusing it. */
-  | { readonly kind: "guardrail_allowed"; readonly stage: string };
+  | { readonly kind: "guardrail_allowed"; readonly stage: string }
+  /** L3 only. The Run's terminal status, as the Run kernel recorded it. */
+  | { readonly kind: "run_status"; readonly status: string }
+  /** L3 only. The `invoke` State's terminal status — a Turn that answered but left its State
+   *  parked is a Run the reconciler will pick up, not a finished turn. */
+  | { readonly kind: "state_status"; readonly status: string }
+  /** L3 only. The Turn was completed, and with this verdict. */
+  | { readonly kind: "turn_status"; readonly status: string }
+  /** L3 only. This Run event type was appended durably. L2 stubs the event port, so this is the
+   *  only place a Turn that stopped emitting its events can be caught. */
+  | { readonly kind: "run_event_emitted"; readonly eventType: string }
+  /** L3 only. A Soul artifact was committed to the Eval Soul's real git repository. */
+  | { readonly kind: "soul_committed"; readonly path: string };
+
+/** Expectations that read persisted state, which only the L3 tier can observe. */
+const PERSISTED_KINDS: ReadonlySet<string> = new Set([
+  "run_status",
+  "state_status",
+  "turn_status",
+  "run_event_emitted",
+  "soul_committed",
+]);
+
+export function isPersisted(expectation: Expectation): boolean {
+  return PERSISTED_KINDS.has(expectation.kind);
+}
 
 /** A faked Tool dispatch, matched to a call by Tool name and consumed in order. */
 export interface ScriptedToolResult {
@@ -68,7 +93,12 @@ export interface ScriptedToolResult {
 
 export interface EvalCase {
   readonly id: string;
-  readonly tier: "l2";
+  /**
+   * `l2` drives the Agent loop directly; `l3` drives the product's own Chat executor against a real
+   * database. Nearly all the signal is at L2, and L3 is deliberately small — it exists to prove the
+   * Run lifecycle around the loop, which L2 stubs and therefore cannot notice breaking.
+   */
+  readonly tier: "l2" | "l3";
   readonly agent: string;
   /** What feeds the real Context assembler. The assembler's output is what the model sees. */
   readonly context: AssembleContext;

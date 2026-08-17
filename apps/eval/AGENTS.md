@@ -34,6 +34,7 @@ Only its own Cases need updating when their observable behaviour moves.
 | `soul/` | The **Eval Soul**: the frozen fixture business every Case is measured against. Ordinary tracked files. |
 | `src/eval-soul.ts` | `loadEvalSoul` — copies the fixture to a throwaway git repo and reads it with the real `SoulLoader`; `soulContext` maps an Agent into the assembler. |
 | `src/guardrails.ts` | Runs the Eval Soul's `guardrails.yaml` through the production `TurnGuardrails`; collects refusals off the real Run events. |
+| `src/l3/` | The persisted tier: one Turn through the real Chat executor on in-process PGlite. `tier.ts` is the entry point. |
 | `src/verdict.ts` | `caseVerdict`, `scoreable` — one Case collapsed into one word. Shared so the grid and a Baseline delta can never disagree. |
 | `src/baseline.ts` | `compareToBaseline` — pure. Refuses a delta across two Corpora or two models. |
 | `src/artifact.ts` | `ScorecardArtifact` read/write, `harnessVersion`, `baselinePath`. The durable form. |

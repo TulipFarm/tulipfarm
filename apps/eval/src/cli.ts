@@ -44,6 +44,12 @@ Usage: pnpm eval [options]
                      The Matrix form of --save, and what CI uploads.
   --help             Show this message.
 
+A Case carrying a rubric is scored by a Judge, configured with EVAL_JUDGE_BASE_URL,
+EVAL_JUDGE_MODEL and EVAL_JUDGE_API_KEY. It must be a third vendor: pointing it at one
+already under test is refused, because a model grading its own homework scores itself
+generously and nothing on the Scorecard would show it. Its identity is part of the Corpus
+hash, so swapping Judges invalidates the Baseline rather than quietly re-scoring history.
+
 Without --model the Corpus runs against the scripted binding: free, deterministic, no
 credentials. --model drives a real vendor CLI on your own subscription seat, which needs
 that seat's credential in the environment and consumes your quota. Always bound it with

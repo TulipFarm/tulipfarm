@@ -11,6 +11,22 @@ export interface Observation {
   readonly status: string;
   /** Guard refusals in the order they fired. Empty means the policy let the whole turn through. */
   readonly guardrails: readonly GuardrailDecision[];
+  /**
+   * What the Turn persisted. Present only on an L3 Trial.
+   *
+   * Absent rather than empty on L2, so a persisted-state Expectation on an L2 Case fails with a
+   * reason instead of quietly reading zeroes and passing.
+   */
+  readonly persisted?: PersistedState;
+}
+
+/** The durable half of a Turn, as the L3 tier read it back out of the database. */
+export interface PersistedState {
+  readonly runStatus: string;
+  readonly stateStatus: string;
+  readonly turnStatus: string | null;
+  readonly events: readonly string[];
+  readonly soulCommits: readonly { readonly message: string; readonly paths: readonly string[] }[];
 }
 
 export interface ExpectationResult {
@@ -141,8 +157,63 @@ function balanced(text: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Reports a persisted-state Expectation on a Trial that never persisted anything.
+ *
+ * A missing observation is the tier being wrong, not the product misbehaving, so it fails loudly
+ * with the reason. Passing it would let an L3 Expectation ride silently on an L2 Case and report
+ * coverage of a lifecycle nothing exercised.
+ */
+function notPersisted(kind: string): { passed: boolean; detail: string } {
+  return { passed: false, detail: `${kind} reads persisted state, which only an L3 Case has` };
+}
+
 function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: string } {
   switch (a.kind) {
+    case "run_status":
+    case "state_status":
+    case "turn_status": {
+      const persisted = obs.persisted;
+      if (persisted === undefined) return notPersisted(a.kind);
+      const actual =
+        a.kind === "run_status"
+          ? persisted.runStatus
+          : a.kind === "state_status"
+            ? persisted.stateStatus
+            : (persisted.turnStatus ?? "not completed");
+      return actual === a.status
+        ? { passed: true, detail: `${a.kind} is ${actual}` }
+        : { passed: false, detail: `${a.kind} is ${actual}, expected ${a.status}` };
+    }
+
+    case "run_event_emitted": {
+      const persisted = obs.persisted;
+      if (persisted === undefined) return notPersisted(a.kind);
+      return persisted.events.includes(a.eventType)
+        ? { passed: true, detail: `${a.eventType} was appended` }
+        : {
+            passed: false,
+            detail: `no ${a.eventType} Run event; the Turn appended ${
+              persisted.events.length === 0 ? "none" : persisted.events.join(", ")
+            }`,
+          };
+    }
+
+    case "soul_committed": {
+      const persisted = obs.persisted;
+      if (persisted === undefined) return notPersisted(a.kind);
+      return persisted.soulCommits.some((commit) => commit.paths.includes(a.path))
+        ? { passed: true, detail: `${a.path} was committed to the Eval Soul` }
+        : {
+            passed: false,
+            detail: `no Soul commit touched ${a.path}; ${
+              persisted.soulCommits.length === 0
+                ? "the Turn committed nothing"
+                : `it committed ${persisted.soulCommits.flatMap((c) => c.paths).join(", ")}`
+            }`,
+          };
+    }
+
     // Answered by a Judge in `scoreJudged`, not here. Reaching this arm means a judged Expectation
     // was routed through the deterministic scorer, which would score prose with `===`.
     case "rubric_score":

@@ -105,8 +105,24 @@ describe("loadCorpus", () => {
   });
 
   it("rejects a tier it cannot run", async () => {
+    const dir = corpusDir({ "a.json": { ...valid("alpha"), tier: "l4" } });
+    await expect(load(dir)).rejects.toThrow(/l4/);
+  });
+
+  it("rejects a persisted expectation on an L2 Case, before any model call is spent", async () => {
+    const dir = corpusDir({
+      "a.json": {
+        ...valid("alpha"),
+        expect: [{ kind: "run_status", status: "succeeded" }],
+      },
+    });
+    await expect(load(dir)).rejects.toThrow(/only tier "l3" observes/);
+  });
+
+  it("accepts an L3 Case", async () => {
     const dir = corpusDir({ "a.json": { ...valid("alpha"), tier: "l3" } });
-    await expect(load(dir)).rejects.toThrow(/l3/);
+    const corpus = await load(dir);
+    expect(corpus.cases[0]?.tier).toBe("l3");
   });
 
   it("fails loudly on an empty directory rather than reporting a vacuous pass", async () => {

@@ -1,0 +1,47 @@
+{
+  "id": "l3-turn-is-durable-end-to-end",
+  "tier": "l3",
+  "agent": "support",
+  "context": {
+    "memoryDocument": "## Other durable facts\nOpens at 9am on Saturdays.",
+    "governancePages": []
+  },
+  "input": [
+    {
+      "role": "user",
+      "content": "When do you open on Saturdays?"
+    }
+  ],
+  "script": [
+    {
+      "kind": "text",
+      "text": "We open at 9am on Saturdays."
+    }
+  ],
+  "expect": [
+    {
+      "kind": "prompt_contains",
+      "text": "Tulip Supply Co"
+    },
+    {
+      "kind": "output_matches",
+      "pattern": "9(:\\s*00)?\\s*a\\.?\\s*m\\.?"
+    },
+    {
+      "kind": "run_status",
+      "status": "succeeded"
+    },
+    {
+      "kind": "state_status",
+      "status": "succeeded"
+    },
+    {
+      "kind": "turn_status",
+      "status": "succeeded"
+    },
+    {
+      "kind": "run_event_emitted",
+      "eventType": "turn.finished"
+    }
+  ]
+}

@@ -158,12 +158,41 @@ Vocabulary is binding: [`metadata/terminologies.md` → Offline eval](../../meta
 
 ## Adding a Case
 
-Drop a JSON file in `corpus/`. Required: `id`, `tier: "l2"`, `agent`, `context`, a non-empty
+Drop a JSON file in `corpus/`. Required: `id`, `tier` (`"l2"` or `"l3"`), `agent`, `context`, a non-empty
 `input`, and `expect`. Run `pnpm eval --case <id>` to check it in isolation.
 
 Put every fact the answer needs into `context` or `toolResults`, never only into `script`. A Case
 whose expected answer is not somewhere the model was handed cannot be satisfied except by luck,
 and `loadCorpus` will refuse it.
+
+## The two tiers
+
+**L2** is the default and where nearly every Case belongs. It assembles the real system prompt,
+runs the real Tool loop, and applies the real guardrails — all in memory, in milliseconds, with
+no database. It can observe everything the harness *decides*.
+
+**L3** exists for the one thing L2 structurally cannot see: whether a decision **survives**. It
+boots an in-process PGlite from `@tulipfarm/storage`'s own DDL, mints a real Run, and drives
+`createChatExecutor` from `@tulipfarm/turn-executor` — the same executor a production Turn runs
+through — then reads the persisted result back. That unlocks five Expectation kinds L2 cannot
+honour: `run_status`, `state_status`, `turn_status`, `run_event_emitted` and `soul_committed`.
+`loadCorpus` refuses any of them on an L2 Case, so the mistake costs no model calls.
+
+It deliberately stays small. Each L3 Case costs ~1.5s of setup against L2's milliseconds, and the
+extra reach buys nothing for a Case about prompt content or Tool ordering. Reach for L3 only when
+the assertion is genuinely about durability.
+
+**Why it does not enter through the API's `/chat` route,** which is the path a real user takes:
+`docs/architecture/dependency-rules.md` rule 1 forbids an app importing another app, and the
+conversation repository, the migrations and the routes all live in `apps/api`.
+`packages/turn-executor` was extracted precisely so this eval could drive a real Turn without
+that import, so L3 owns the Conversation half itself and shares the executor. The API's own
+wiring is covered by `apps/api`'s `durable-submission.pg.test.ts`, so the residual gap is the
+route handler, not the Turn.
+
+Each Trial gets a fresh clone of a memoised migrated snapshot, and the Eval Soul is
+`git reset --hard`-ed back to its load-time commit in a `finally` — otherwise a Case that writes
+a Soul artifact would be visible to every Case scored after it.
 
 ## Running against a real model
 

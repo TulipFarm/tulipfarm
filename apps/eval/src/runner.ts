@@ -16,6 +16,7 @@ import type { EvalGuardrails, GuardrailDecision } from "./guardrails.ts";
 import { turnGuardrails } from "./guardrails.ts";
 import type { Judge } from "./judge.ts";
 import { scoreJudged } from "./judged.ts";
+import { runPersistedTurn } from "./l3/tier.ts";
 import { measureNoise, type NoiseFloor } from "./noise.ts";
 import type { SweepProgress } from "./progress.ts";
 import { measureResistance, type ResistanceRate } from "./resistance.ts";
@@ -195,7 +196,7 @@ function isVendorFault(reason: AgentLoopFailureReason): boolean {
  *   a gap has to be visible to the model as a failure it must recover from rather than be papered
  *   over with a success.
  */
-function toolDispatcher(evalCase: EvalCase) {
+export function toolDispatcher(evalCase: EvalCase) {
   type Scripted = NonNullable<EvalCase["toolResults"]>[number];
   const pending: Scripted[] = [...(evalCase.toolResults ?? [])];
   const served = new Map<string, Scripted>();
@@ -299,6 +300,48 @@ async function scored(
   };
 }
 
+/**
+ * One Turn through the product's own Chat executor, against a real database.
+ *
+ * The Observation is built from what the Turn *persisted* rather than from what the loop returned,
+ * because that is the whole point of the tier: an answer the model produced but the product failed
+ * to store is not an answer a participant ever received.
+ */
+async function runL3Trial(
+  evalCase: EvalCase,
+  soul: EvalSoul,
+  binding: ModelBinding,
+  trial: number,
+  judge: Judge | undefined
+): Promise<TrialResult> {
+  const vacuous = evalCase.expect.length === 0;
+  try {
+    const turn = await runPersistedTurn({ evalCase, soul, binding });
+    return await scored(evalCase, trial, vacuous, NO_SPEND, 0, [], judge, {
+      systemPrompt: turn.systemPrompt,
+      toolCalls: turn.toolCalls.map((name) => ({ name, arguments: {} })),
+      output: turn.answer === null ? undefined : { kind: "text", text: turn.answer },
+      status: turn.runStatus === "succeeded" ? "completed" : turn.runStatus,
+      persisted: {
+        runStatus: turn.runStatus,
+        stateStatus: turn.stateStatus,
+        turnStatus: turn.turnStatus,
+        events: turn.events,
+        soulCommits: turn.soulCommits,
+      },
+    });
+  } catch (cause) {
+    return errored(
+      evalCase,
+      trial,
+      vacuous,
+      cause instanceof Error ? cause.message : String(cause),
+      NO_SPEND,
+      0
+    );
+  }
+}
+
 async function runTrial(
   evalCase: EvalCase,
   soul: EvalSoul,
@@ -307,6 +350,7 @@ async function runTrial(
   retryPolicy: RetryPolicy,
   judge: Judge | undefined
 ): Promise<TrialResult> {
+  if (evalCase.tier === "l3") return await runL3Trial(evalCase, soul, binding, trial, judge);
   const vacuous = evalCase.expect.length === 0;
   const tools = toolDispatcher(evalCase);
   const guards = turnGuardrails(soul, `${evalCase.id}#${trial}`);
