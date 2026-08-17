@@ -60,6 +60,12 @@ Only its own Cases need updating when their observable behaviour moves.
   the framework.
 - **`loadCorpus` throws rather than skipping** a malformed Case: silently dropping one reports a
   pass rate over a smaller denominator than the reader believes.
+- **A content expectation must be grounded in what the model was given** — its text or pattern has
+  to appear in the Case's `context`, `input` or `toolResults`. `script` does not count; it is the
+  fake model's own words, so an expectation grounded there checks the script against itself. This
+  is the one authoring fault the scripted tier cannot catch, and it surfaces against a real model
+  as a failure that reads like a regression. Genuinely ungrounded checks — refusal wording, output
+  format — set `ungrounded` to the reason; the rule bans the silent ones, not the deliberate ones.
 - **Nothing selects the model but the pin.** `pinnedBinding` hands the loop a port wrapping one
   directly-constructed model, so the Model Profile catalogue, the tier router and the Effort
   classifier are all out of the path. Effort is declared on the `PinnedModel`, never inferred: a
@@ -88,6 +94,10 @@ Only its own Cases need updating when their observable behaviour moves.
 
 Drop a JSON file in `corpus/`. Required: `id`, `tier: "l2"`, `agent`, `context`, a non-empty
 `input`, and `expect`. Run `pnpm eval --case <id>` to check it in isolation.
+
+Put every fact the answer needs into `context` or `toolResults`, never only into `script`. A Case
+whose expected answer is not somewhere the model was handed cannot be satisfied except by luck,
+and `loadCorpus` will refuse it.
 
 ## Running against a real model
 

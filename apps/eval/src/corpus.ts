@@ -101,7 +101,63 @@ function validate(raw: unknown, file: string): EvalCase {
       ), `${file}: expectation "${kind}" needs a ${type === "strings" ? "non-empty string array" : type} field "${field}"`);
     }
   }
-  return raw as EvalCase;
+  const evalCase = raw as EvalCase;
+  requireGrounded(evalCase, file);
+  return evalCase;
+}
+
+/**
+ * Every string the model was actually handed: its Context, the conversation, and any Tool result.
+ *
+ * Deliberately excludes `script`. The scripted binding's output is the fake model's own words, and
+ * an expectation grounded only in those is checking the script against itself.
+ */
+function givenToModel(c: EvalCase): string {
+  const found: string[] = [];
+  const walk = (value: unknown): void => {
+    if (typeof value === "string") found.push(value);
+    else if (Array.isArray(value)) for (const item of value) walk(item);
+    else if (value !== null && typeof value === "object")
+      for (const v of Object.values(value)) walk(v);
+  };
+  walk(c.context);
+  walk(c.input);
+  walk(c.toolResults ?? []);
+  return found.join("\n");
+}
+
+/**
+ * Refuses a content expectation the model has no way to satisfy except by inventing the answer.
+ *
+ * This is the one authoring fault the scripted tier structurally cannot catch: there the fake
+ * model is told to emit exactly what the expectation checks, so the Case passes by construction
+ * and only reveals itself against a real model — as a failure that reads like a regression.
+ *
+ * Ungrounded expectations are legitimate — refusal wording and output format are not recalled from
+ * the Context — so this bans the *silent* ones, not the deliberate ones. Stating a reason is the
+ * whole point: an author who cannot write one has found their own bug.
+ */
+function requireGrounded(c: EvalCase, file: string): void {
+  const given = givenToModel(c);
+  for (const e of c.expect) {
+    if (e.kind !== "output_contains" && e.kind !== "output_matches") continue;
+    if (typeof e.ungrounded === "string" && e.ungrounded.length > 0) continue;
+    const needle = e.kind === "output_contains" ? e.text : e.pattern;
+    let grounded: boolean;
+    if (e.kind === "output_contains") grounded = given.includes(needle);
+    else {
+      try {
+        grounded = new RegExp(needle).test(given);
+      } catch {
+        // An uncompilable pattern is the scorer's failure to report, not this check's.
+        continue;
+      }
+    }
+    require(grounded, `${file}: expectation "${e.kind}" looks for ${JSON.stringify(needle)}, which appears nowhere ` +
+      `in the Case's context, input or tool results — a real model could only produce it by ` +
+      `guessing. Put the fact where the model is given it, or set "ungrounded" to the reason ` +
+      `this is about wording or format rather than recall.`);
+  }
 }
 
 function fieldOk(value: unknown, type: "string" | "number" | "strings" | "any"): boolean {

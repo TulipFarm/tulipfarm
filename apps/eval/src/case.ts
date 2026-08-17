@@ -26,8 +26,8 @@ export type Expectation =
       readonly path: string;
       readonly value: unknown;
     }
-  | { readonly kind: "output_contains"; readonly text: string }
-  | { readonly kind: "output_matches"; readonly pattern: string }
+  | { readonly kind: "output_contains"; readonly text: string; readonly ungrounded?: string }
+  | { readonly kind: "output_matches"; readonly pattern: string; readonly ungrounded?: string }
   | { readonly kind: "output_field_equals"; readonly path: string; readonly value: unknown }
   | { readonly kind: "loop_status"; readonly status: string }
   | { readonly kind: "tool_call_count"; readonly count: number };

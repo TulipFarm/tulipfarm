@@ -134,3 +134,91 @@ describe("loadCorpus", () => {
     await expect(loadCorpus(dir)).resolves.toBeDefined();
   });
 });
+
+describe("loadCorpus grounding", () => {
+  const withExpect = (
+    expectations: EvalCase["expect"],
+    over: Partial<EvalCase> = {}
+  ): EvalCase => ({
+    ...valid("c1"),
+    expect: [...expectations, { kind: "loop_status", status: "completed" }],
+    ...over,
+  });
+
+  it("refuses text the model was never given, which it could only produce by guessing", async () => {
+    const dir = corpusDir({ "a.json": withExpect([{ kind: "output_contains", text: "9am" }]) });
+
+    await expect(loadCorpus(dir)).rejects.toThrow(/appears nowhere in the Case's context/);
+  });
+
+  it("does not let the script ground an expectation", async () => {
+    // The exact bug this check exists for. The scripted binding is told to say "9am", so the Case
+    // passes for free in CI and only fails against a real model — reading as a regression in the
+    // harness rather than as the authoring mistake it is.
+    const dir = corpusDir({
+      "a.json": withExpect([{ kind: "output_contains", text: "9am" }], {
+        script: [{ kind: "text", text: "We open at 9am." }],
+      }),
+    });
+
+    await expect(loadCorpus(dir)).rejects.toThrow(CorpusError);
+  });
+
+  it("accepts text the Context gave the model", async () => {
+    const dir = corpusDir({
+      "a.json": withExpect([{ kind: "output_contains", text: "9am" }], {
+        context: { memory: [{ key: "hours", value: "Opens at 9am." }], governancePages: [] },
+      }),
+    });
+
+    await expect(loadCorpus(dir)).resolves.toBeDefined();
+  });
+
+  it("accepts text a Tool result gave the model", async () => {
+    const dir = corpusDir({
+      "a.json": withExpect([{ kind: "output_contains", text: "open" }], {
+        toolResults: [{ name: "lookup_ticket", output: { status: "open" } }],
+      }),
+    });
+
+    await expect(loadCorpus(dir)).resolves.toBeDefined();
+  });
+
+  it("checks a pattern against what was given, not only a literal", async () => {
+    const dir = corpusDir({
+      "grounded.json": withExpect([{ kind: "output_matches", pattern: "9\\s*am" }], {
+        context: { memory: [{ key: "hours", value: "Opens at 9am." }], governancePages: [] },
+      }),
+    });
+    const bare = corpusDir({
+      "bare.json": withExpect([{ kind: "output_matches", pattern: "9\\s*am" }]),
+    });
+
+    await expect(loadCorpus(dir)).resolves.toBeDefined();
+    await expect(loadCorpus(bare)).rejects.toThrow(CorpusError);
+  });
+
+  it("allows a deliberate ungrounded expectation when the author states why", async () => {
+    // Refusal wording and output shape are not recalled from the Context. Banning them outright
+    // would push authors to weaken real Cases; requiring a reason only bans the silent ones.
+    const dir = corpusDir({
+      "a.json": withExpect([
+        {
+          kind: "output_contains",
+          text: "cannot",
+          ungrounded: "tests refusal wording, not recall",
+        },
+      ]),
+    });
+
+    await expect(loadCorpus(dir)).resolves.toBeDefined();
+  });
+
+  it("does not accept a blank reason as a reason", async () => {
+    const dir = corpusDir({
+      "a.json": withExpect([{ kind: "output_contains", text: "9am", ungrounded: "" }]),
+    });
+
+    await expect(loadCorpus(dir)).rejects.toThrow(CorpusError);
+  });
+});
