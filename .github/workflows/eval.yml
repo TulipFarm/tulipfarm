@@ -75,6 +75,11 @@ jobs:
           COMPARE: ${{ inputs.baseline }}
           SUITES: ${{ inputs.suites }}
         run: |
+          # `+e` is deliberate and load-bearing. GitHub runs `run:` under `bash -e` by default, and
+          # `set -uo pipefail` does not clear it — so without this the first failing Sweep would
+          # abort the step and silently skip the red-team suite, which is the one a maintainer is
+          # most tempted to skip and least able to afford skipping.
+          set +e
           set -uo pipefail
           # The two suites are swept in separate blocks with separate Scorecards, because they have
           # separate Corpus hashes and separate Baselines. Running them as one Sweep would make
