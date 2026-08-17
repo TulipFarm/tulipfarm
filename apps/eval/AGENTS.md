@@ -147,11 +147,11 @@ pnpm eval:sonnet --case support-answers-without-tools --max-tokens 5000
 never enters your shell, your history, or a file. It defaults `--max-tokens` to 20000 and never
 overrides one you passed.
 
-Codex's credential is a JSON document. The script takes it from `$CODEX_AUTH_JSON`, then
-`$CODEX_AUTH_FILE`, then `${CODEX_HOME:-~/.codex}/auth.json`, and only then prompts — where it
-accepts **either** the JSON on one line **or** a path to the file. `read` keeps only the first line,
-so a pretty-printed paste arrives as a lone `{`; that is detected and named rather than sent to the
-vendor, which would reject it with a bare 401 that says nothing about the paste.
+Codex's credential is a JSON document rather than a token, but it is pasted the same way: from
+`$CODEX_AUTH_JSON`, else `${CODEX_HOME:-~/.codex}/auth.json`, else the prompt, **on one line**.
+Wrapping quotes are stripped, and a multi-line paste is refused — `read` keeps only its first line,
+so it would arrive as a lone `{` and the vendor answers that with a bare 401 that says nothing
+about the paste. `jq -c . ~/.codex/auth.json` prints a paste-able line.
 
 A seat is one person's, so a public repo cannot hold it as a secret. Where a release Sweep runs
 is still open — see `.scratch/harness-eval/spec.md`.

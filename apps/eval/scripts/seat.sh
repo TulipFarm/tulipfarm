@@ -43,32 +43,39 @@ prompt_secret() {
   fi
 }
 
-# The Codex prompt takes either the JSON itself or a path to it.
+# Accept a pasted Codex credential.
 #
-# `read` keeps only the first line, so a pretty-printed auth.json pasted straight in arrives as a
-# lone "{" — which the vendor rejects with a bare 401 that says nothing about the paste. A path
-# always survives, and a truncated paste is named as one rather than sent.
+# Two things go wrong with a paste that the vendor cannot tell you about — it answers both with a
+# bare 401 that says nothing about the input. First, a credential is usually copied inside quotes
+# and arrives carrying them. Second, `read` keeps only the first line, so a pretty-printed
+# auth.json arrives as a lone "{". Both are caught here instead.
 #
 # Sets CODEX_AUTH_JSON directly: inside `$(...)` an `exit` would only leave the subshell, and the
 # script would carry on with an empty credential.
-resolve_auth() {
-  case "$1" in
+accept_codex_json() {
+  value=$1
+  case "$value" in
+    \'*\')
+      value=${value#\'}
+      value=${value%\'}
+      ;;
+    \"*\")
+      value=${value#\"}
+      value=${value%\"}
+      ;;
+  esac
+  case "$value" in
     \{*\})
-      CODEX_AUTH_JSON=$1
+      CODEX_AUTH_JSON=$value
       ;;
     \{*)
-      printf 'that credential is truncated — a multi-line paste keeps only its first line.\n' >&2
-      printf 'Give the path to auth.json instead, or paste it as a single line.\n' >&2
+      printf 'that credential is truncated: a multi-line paste keeps only its first line.\n' >&2
+      printf 'Paste the whole of auth.json as one line — jq -c . ~/.codex/auth.json prints it.\n' >&2
       exit 1
       ;;
     *)
-      path=$1
-      case "$path" in "~/"*) path="$HOME/${path#\~/}" ;; esac
-      if [ ! -r "$path" ]; then
-        printf 'neither JSON nor a readable file: %s\n' "$path" >&2
-        exit 1
-      fi
-      CODEX_AUTH_JSON=$(cat "$path")
+      printf 'that is not a JSON object: paste the contents of auth.json, which starts with {.\n' >&2
+      exit 1
       ;;
   esac
 }
@@ -83,16 +90,13 @@ collect() {
       export CLAUDE_CODE_OAUTH_TOKEN
       ;;
     luna)
-      if [ -z "${CODEX_AUTH_JSON:-}" ] && [ -n "${CODEX_AUTH_FILE:-}" ]; then
-        CODEX_AUTH_JSON=$(cat "$CODEX_AUTH_FILE")
-      fi
       if [ -z "${CODEX_AUTH_JSON:-}" ]; then
         auth="${CODEX_HOME:-$HOME/.codex}/auth.json"
         if [ -r "$auth" ]; then
           CODEX_AUTH_JSON=$(cat "$auth")
         else
-          prompt_secret CODEX_AUTH_JSON "Codex seat credential: paste auth.json as ONE line, or give the path to the file."
-          resolve_auth "$secret"
+          prompt_secret CODEX_AUTH_JSON "Codex seat credential: the contents of auth.json, on one line. Get one with: codex login"
+          accept_codex_json "$secret"
         fi
       fi
       export CODEX_AUTH_JSON
