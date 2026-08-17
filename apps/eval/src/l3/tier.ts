@@ -37,6 +37,12 @@ import { evalTurnHost } from "./turn-host.ts";
 
 const BUSINESS_ID = "eval";
 
+/** One dispatched Tool call, as a Case's Tool Expectations read it. */
+export interface ToolCall {
+  readonly name: string;
+  readonly arguments: unknown;
+}
+
 /**
  * No Case waits on an approval, and one that did would hang rather than fail.
  *
@@ -62,8 +68,8 @@ export interface PersistedTurn {
   readonly answer: string | null;
   /** Run event types in the order they were appended. */
   readonly events: readonly string[];
-  /** Tool names the Turn actually dispatched. */
-  readonly toolCalls: readonly string[];
+  /** Every Tool the Turn dispatched, in order, with the arguments it was called with. */
+  readonly toolCalls: readonly ToolCall[];
   /** Commits the Turn landed in the Eval Soul's real git repository. */
   readonly soulCommits: readonly SoulCommit[];
   /** The prompt the real Context assembler produced, so `prompt_contains` works at L3 too. */
@@ -109,10 +115,19 @@ async function mintRun(database: EvalDatabase, runId: string, turnId: string): P
  * Routing by name rather than merging keeps the two honest: a Case cannot accidentally script a
  * result for `soul_write` and have the tier report a commit that never happened.
  */
-function routeTools(scripted: ToolDispatchPort, soulWrites: ToolDispatchPort): ToolDispatchPort {
+function routeTools(
+  scripted: { port: ToolDispatchPort; calls: ToolCall[] },
+  soulWrites: ToolDispatchPort
+): ToolDispatchPort {
   return {
-    dispatch: (request) =>
-      request.name === SOUL_WRITE_TOOL ? soulWrites.dispatch(request) : scripted.dispatch(request),
+    dispatch: (request) => {
+      if (request.name !== SOUL_WRITE_TOOL) return scripted.port.dispatch(request);
+      // Recorded into the same log the scripted dispatcher keeps. Without this a Soul write is
+      // invisible to the scorer, and `tool_not_called soul_write` — the natural way to assert an
+      // agent must not reconfigure the business — passes even as the commit lands.
+      scripted.calls.push({ name: request.name, arguments: request.arguments });
+      return soulWrites.dispatch(request);
+    },
   };
 }
 
@@ -121,7 +136,7 @@ async function readBack(
   runId: string,
   turnId: string,
   observed: {
-    toolCalls: readonly string[];
+    toolCalls: readonly ToolCall[];
     soulCommits: readonly SoulCommit[];
     systemPrompt: string;
   }
@@ -206,7 +221,7 @@ async function runOneTurn(
     // The writer is shared across a journey so its reset restores the pre-journey commit, which
     // means its `commits` accumulate. Only this Turn's slice belongs to this Turn.
     const committedBefore = soulWrites.commits.length;
-    const tools = routeTools(scripted.port, soulWrites.port);
+    const tools = routeTools(scripted, soulWrites.port);
     const host = evalTurnHost(database);
     const context = evalTurnContext({ evalCase: options.evalCase, soul });
     const executor = createChatExecutor({
@@ -237,7 +252,7 @@ async function runOneTurn(
     });
 
     return await readBack(database, runId, turnId, {
-      toolCalls: scripted.calls.map((call) => call.name),
+      toolCalls: [...scripted.calls],
       soulCommits: soulWrites.commits.slice(committedBefore),
       systemPrompt: context.systemPrompt,
     });
@@ -274,14 +289,26 @@ async function priorMessages(
  * non-terminal Run status, which is reported from the first Turn that failed. Taking the last
  * would let a journey whose opening Turn died report success.
  */
-function foldJourney(turns: readonly PersistedTurn[]): PersistedTurn {
+export function foldJourney(turns: readonly PersistedTurn[]): PersistedTurn {
   const last = turns[turns.length - 1];
   if (last === undefined) throw new Error("a journey ran no Turns");
-  const broken = turns.find((turn) => turn.runStatus !== "succeeded");
+  // Each status is folded independently. Sourcing them all from the first Turn whose *Run* failed
+  // would hide the case `state_status` exists for: a Turn that answers, reports success, and
+  // leaves its State parked. That combination is reachable, so it must not fall through to the
+  // last Turn's value.
+  // `??` would be wrong here: a `turnStatus` of null is itself the "never completed" signal, and
+  // coalescing it away would report the last Turn's success instead.
+  const firstBad = <K extends "runStatus" | "stateStatus" | "turnStatus">(
+    key: K
+  ): PersistedTurn[K] => {
+    const bad = turns.find((turn) => turn[key] !== "succeeded");
+    return bad === undefined ? last[key] : bad[key];
+  };
   return {
     ...last,
-    runStatus: broken?.runStatus ?? last.runStatus,
-    stateStatus: broken?.stateStatus ?? last.stateStatus,
+    runStatus: firstBad("runStatus"),
+    stateStatus: firstBad("stateStatus"),
+    turnStatus: firstBad("turnStatus"),
     events: turns.flatMap((turn) => turn.events),
     toolCalls: turns.flatMap((turn) => turn.toolCalls),
     soulCommits: turns.flatMap((turn) => turn.soulCommits),
@@ -295,9 +322,12 @@ export async function runPersistedTurn(options: L3Options): Promise<PersistedTur
   const database = options.database ?? (await openEvalDatabase());
   const owned = options.database === undefined;
   const conversationId = randomUUID();
-  const soulWrites = soulWriterTool(options.soul);
+  let soulWrites: SoulWriterTool | undefined;
 
   try {
+    // Inside the `try`: it shells out to git, and constructing it above would leak the database
+    // opened on the line before if that throws.
+    soulWrites = soulWriterTool(options.soul);
     const first = await runOneTurn(options, {
       database,
       conversationId,
@@ -325,8 +355,13 @@ export async function runPersistedTurn(options: L3Options): Promise<PersistedTur
   } finally {
     // Before the database, because a Soul left dirty contaminates the next Trial in a way a fresh
     // database cannot undo: the Soul is loaded once per Sweep and shared.
-    soulWrites.reset();
-    if (owned) await database.close();
+    // The reset shells out to git and can throw; the database must be closed regardless, or a
+    // Sweep leaks one PGlite instance per Trial for the rest of the run.
+    try {
+      soulWrites?.reset();
+    } finally {
+      if (owned) await database.close();
+    }
   }
 }
 

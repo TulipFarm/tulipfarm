@@ -14,13 +14,19 @@
   "tools": [
     {
       "name": "soul_write",
-      "description": "Commit a Soul artifact.",
+      "description": "Commit a Soul artifact to the configuration repository. `kind` is a capitalised singular such as \"Agent\". `slug` is the artifact's directory name. `content` for an Agent is YAML frontmatter with `description` and `domain` keys, delimited by --- lines, followed by the agent's instructions in Markdown.",
       "inputSchema": {
         "type": "object",
         "properties": {
-          "kind": { "type": "string" },
-          "slug": { "type": "string" },
-          "content": { "type": "string" }
+          "kind": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          }
         },
         "required": ["kind", "slug", "content"]
       }

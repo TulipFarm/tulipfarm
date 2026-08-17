@@ -83,6 +83,17 @@ export function isPersisted(expectation: Expectation): boolean {
   return PERSISTED_KINDS.has(expectation.kind);
 }
 
+/**
+ * Expectations that read guardrail decisions, which only the L2 tier collects.
+ *
+ * L3 really does run the guards — the executor calls them — but it does not surface their
+ * decisions, so `guardrail_allowed` would pass by finding nothing rather than by the guard having
+ * allowed anything.
+ */
+export function isGuardrail(expectation: Expectation): boolean {
+  return expectation.kind.startsWith("guardrail_");
+}
+
 /** A faked Tool dispatch, matched to a call by Tool name and consumed in order. */
 export interface ScriptedToolResult {
   readonly name: string;

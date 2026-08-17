@@ -319,7 +319,7 @@ async function runL3Trial(
     const turn = await runPersistedTurn({ evalCase, soul, binding });
     return await scored(evalCase, trial, vacuous, NO_SPEND, 0, [], judge, {
       systemPrompt: turn.systemPrompt,
-      toolCalls: turn.toolCalls.map((name) => ({ name, arguments: {} })),
+      toolCalls: turn.toolCalls,
       output: turn.answer === null ? undefined : { kind: "text", text: turn.answer },
       status: turn.runStatus === "succeeded" ? "completed" : turn.runStatus,
       persisted: {

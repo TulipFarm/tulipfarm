@@ -13,7 +13,13 @@
 
 import { execFileSync } from "node:child_process";
 import type { ToolDispatchPort } from "@tulipfarm/agent-runtime";
-import { createHmacCommitSigner, SoulGitStore, SoulWriteError, SoulWriter } from "@tulipfarm/soul";
+import {
+  createHmacCommitSigner,
+  hermeticGitEnv,
+  SoulGitStore,
+  SoulWriteError,
+  SoulWriter,
+} from "@tulipfarm/soul";
 import type { EvalSoul } from "../eval-soul.ts";
 
 export const SOUL_WRITE_TOOL = "soul_write";
@@ -57,7 +63,13 @@ interface WriteArguments {
  */
 export function soulWriterTool(soul: EvalSoul): SoulWriterTool {
   const commits: SoulCommit[] = [];
-  const base = execFileSync("git", ["rev-parse", "HEAD"], { cwd: soul.path }).toString().trim();
+  // `hermeticGitEnv` is not optional. An exported GIT_DIR — which every Git hook, `rebase --exec`
+  // and `bisect run` sets — overrides `cwd` entirely, so without it `base` would be the
+  // maintainer's own HEAD and `reset` would `git reset --hard` and `git clean -fd` their checkout,
+  // destroying uncommitted work. `reset` runs in a `finally` on every Trial, including failing ones.
+  const git = (...args: string[]): string =>
+    execFileSync("git", args, { cwd: soul.path, env: hermeticGitEnv() }).toString();
+  const base = git("rev-parse", "HEAD").trim();
   const store = new SoulGitStore(
     soul.path,
     createHmacCommitSigner("eval", "eval-soul-commit-key"),
@@ -70,8 +82,8 @@ export function soulWriterTool(soul: EvalSoul): SoulWriterTool {
   return {
     commits,
     reset: () => {
-      execFileSync("git", ["reset", "--hard", base], { cwd: soul.path, stdio: "ignore" });
-      execFileSync("git", ["clean", "-fd"], { cwd: soul.path, stdio: "ignore" });
+      git("reset", "--hard", base);
+      git("clean", "-fd");
     },
     port: {
       dispatch: async (call) => {

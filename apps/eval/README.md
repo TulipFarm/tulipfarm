@@ -190,6 +190,11 @@ that import, so L3 owns the Conversation half itself and shares the executor. Th
 wiring is covered by `apps/api`'s `durable-submission.pg.test.ts`, so the residual gap is the
 route handler, not the Turn.
 
+`loadCorpus` refuses two mismatches before a Sweep spends anything: a persisted Expectation on an
+L2 Case, and a `guardrail_*` Expectation on an L3 Case. Both would otherwise pass by finding
+nothing. L3 does run the real guards — the executor calls them — but it does not collect their
+decisions, so guardrail Cases belong at L2 where they are measured.
+
 ### Journeys
 
 An L3 Case may carry a `journey` of further Turns, run against the same Conversation, database and

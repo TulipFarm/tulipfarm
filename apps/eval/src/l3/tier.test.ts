@@ -5,7 +5,7 @@ import { type EvalSoul, loadEvalSoul } from "../eval-soul.ts";
 import type { ModelBinding } from "../runner.ts";
 import { scriptedBinding } from "../scripted.ts";
 import { SOUL_WRITE_TOOL } from "./soul-write.ts";
-import { runPersistedTurn } from "./tier.ts";
+import { foldJourney, type PersistedTurn, runPersistedTurn } from "./tier.ts";
 
 const TIMEOUT = 60_000;
 
@@ -202,6 +202,26 @@ describe("a Turn that changes configuration", () => {
     },
     TIMEOUT
   );
+
+  it(
+    "reports the Soul write as a Tool call, so an Expectation can forbid it",
+    async () => {
+      soul ??= await loadEvalSoul();
+      const turn = await runPersistedTurn({
+        evalCase: writing(
+          "---\ndescription: Handles invoices.\ndomain: support\n---\n\nYou answer billing questions."
+        ),
+        soul,
+        binding: scriptedBinding(),
+      });
+
+      // Routed away from the scripted dispatcher, this call was once invisible to the scorer, and
+      // `tool_not_called soul_write` passed while the commit landed.
+      expect(turn.toolCalls.map((call) => call.name)).toEqual([SOUL_WRITE_TOOL]);
+      expect(turn.toolCalls[0]?.arguments).toMatchObject({ kind: "Agent", slug: "billing" });
+    },
+    TIMEOUT
+  );
 });
 
 describe("a journey", () => {
@@ -279,7 +299,7 @@ describe("a journey", () => {
   );
 
   it(
-    "reports the first broken Turn, not the last one's success",
+    "runs every Turn against the same Conversation",
     async () => {
       soul ??= await loadEvalSoul();
       const turn = await runPersistedTurn({
@@ -301,4 +321,46 @@ describe("a journey", () => {
     },
     TIMEOUT
   );
+});
+
+describe("folding a journey into one result", () => {
+  const turn = (over: Partial<PersistedTurn>): PersistedTurn => ({
+    runStatus: "succeeded",
+    stateStatus: "succeeded",
+    turnStatus: "succeeded",
+    answer: null,
+    events: [],
+    toolCalls: [],
+    soulCommits: [],
+    systemPrompt: "",
+    ...over,
+  });
+
+  it("reports an early Turn's failure rather than the last one's success", () => {
+    const folded = foldJourney([turn({ runStatus: "failed" }), turn({ answer: "fine" })]);
+    expect(folded.runStatus).toBe("failed");
+    expect(folded.answer).toBe("fine");
+  });
+
+  it("folds each status independently, so a parked State is not hidden by a succeeded Run", () => {
+    // Reachable: the executor returns "succeeded" without touching the State when the Turn is a
+    // stale attempt. Folding every status off the first *Run* failure would miss it entirely.
+    const folded = foldJourney([turn({ stateStatus: "pending" }), turn({})]);
+    expect(folded.runStatus).toBe("succeeded");
+    expect(folded.stateStatus).toBe("pending");
+  });
+
+  it("reports an early Turn that was never completed", () => {
+    const folded = foldJourney([turn({ turnStatus: null }), turn({})]);
+    expect(folded.turnStatus).toBeNull();
+  });
+
+  it("accumulates what a Case asks about across the whole journey", () => {
+    const folded = foldJourney([
+      turn({ events: ["turn.started"], toolCalls: [{ name: "a", arguments: {} }] }),
+      turn({ events: ["turn.finished"], toolCalls: [{ name: "b", arguments: {} }] }),
+    ]);
+    expect(folded.events).toEqual(["turn.started", "turn.finished"]);
+    expect(folded.toolCalls.map((c) => c.name)).toEqual(["a", "b"]);
+  });
 });

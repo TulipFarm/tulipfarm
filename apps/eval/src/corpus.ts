@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import type { AssembleContext } from "@tulipfarm/agent-runtime";
-import { type EvalCase, type Expectation, isPersisted } from "./case.ts";
+import { type EvalCase, type Expectation, isGuardrail, isPersisted } from "./case.ts";
 import { type EvalSoul, SOUL_OWNED_CONTEXT_KEYS, soulContext } from "./eval-soul.ts";
 import { expandRedTeam, type RedTeamOutcome } from "./red-team.ts";
 import { OUTPUT_FLAGS } from "./scorer.ts";
@@ -195,6 +195,11 @@ function validate(raw: unknown, file: string): EvalCase {
     require(c.tier === "l3" ||
       !isPersisted(a as Expectation), `${file}: expectation "${kind}" reads persisted state, ` +
       `which only tier "l3" observes; this Case is tier ${JSON.stringify(c.tier)}`);
+    // The mirror of the rule above. L3 runs the guards but does not collect their decisions, so
+    // this would pass by finding nothing — the vacuous pass this framework exists to prevent.
+    require(c.tier !== "l3" ||
+      !isGuardrail(a as Expectation), `${file}: expectation "${kind}" reads guardrail decisions, ` +
+      `which only tier "l2" collects; move this Case to tier "l2"`);
   }
   if (c.journey !== undefined) {
     require(Array.isArray(c.journey) &&

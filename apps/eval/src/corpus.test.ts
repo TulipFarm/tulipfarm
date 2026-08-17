@@ -119,6 +119,27 @@ describe("loadCorpus", () => {
     await expect(load(dir)).rejects.toThrow(/only tier "l3" observes/);
   });
 
+  it("rejects a guardrail expectation on an L3 Case, which never collects a decision", async () => {
+    const dir = corpusDir({
+      "a.json": {
+        ...valid("alpha"),
+        tier: "l3",
+        expect: [{ kind: "guardrail_allowed", stage: "input" }],
+      },
+    });
+    await expect(load(dir)).rejects.toThrow(/only tier "l2" collects/);
+  });
+
+  it("rejects a journey on an L2 Case, which has no Conversation to span", async () => {
+    const dir = corpusDir({
+      "a.json": {
+        ...valid("alpha"),
+        journey: [{ input: [{ role: "user", content: "and then?" }] }],
+      },
+    });
+    await expect(load(dir)).rejects.toThrow(/"journey" needs tier "l3"/);
+  });
+
   it("accepts an L3 Case", async () => {
     const dir = corpusDir({ "a.json": { ...valid("alpha"), tier: "l3" } });
     const corpus = await load(dir);
