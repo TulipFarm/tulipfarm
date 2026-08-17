@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertKnownFlags, flag, positive } from "./args.ts";
+import { assertKnownFlags, flag, positive, present } from "./args.ts";
 
 describe("flag", () => {
   it("reads the separated form", () => {
@@ -43,5 +43,20 @@ describe("positive", () => {
 
   it("passes an absent option through untouched", () => {
     expect(positive(undefined, "--max-tokens")).toBeUndefined();
+  });
+});
+
+describe("flag with a missing value", () => {
+  it("does not read a following option as the value", () => {
+    expect(flag(["--max-tokens", "--model", "luna"], "--max-tokens")).toBeUndefined();
+    expect(flag(["--baseline", "--promote"], "--baseline")).toBeUndefined();
+  });
+});
+
+describe("present", () => {
+  it("reports a valueless option", () => {
+    expect(present(["--promote"], "--promote")).toBe(true);
+    expect(present(["--baseline", "path"], "--baseline")).toBe(true);
+    expect(present(["--model", "luna"], "--promote")).toBe(false);
   });
 });

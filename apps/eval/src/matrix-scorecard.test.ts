@@ -31,6 +31,7 @@ const card = (
   failed: trials.filter((t) => !t.passed).length,
   errored: 0,
   skipped: 0,
+  corpusCases: 1,
   spend: NO_SPEND,
   ...over,
 });
@@ -224,6 +225,7 @@ describe("renderMatrix", () => {
             errored: 1,
             failed: 0,
             skipped: 1,
+            corpusCases: 2,
           }),
         },
       ])

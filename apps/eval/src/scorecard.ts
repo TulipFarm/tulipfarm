@@ -1,5 +1,8 @@
+import { isDirty } from "./artifact.ts";
+import type { Delta } from "./baseline.ts";
 import type { Matrix } from "./matrix.ts";
 import type { Scorecard, TrialResult } from "./runner.ts";
+import { caseIdsOf, caseVerdict, scoreable, VERDICT } from "./verdict.ts";
 
 const CHECK = "PASS";
 const CROSS = "FAIL";
@@ -76,35 +79,12 @@ export function renderScorecard(card: Scorecard): string {
   return lines.join("\n");
 }
 
-const VERDICT_UNAVAILABLE = "n/a";
-const VERDICT_NOT_RUN = "-";
-const VERDICT_ERRORED = BANG.trim();
-
-/**
- * A verdict the Corpus actually produced, and so one that can be compared across models.
- *
- * `ERR` is a vendor fault and `-` means the Case never ran, and neither says anything about the
- * harness. Comparing them would manufacture exactly the confound this framework exists to remove.
- */
-function scoreable(v: string): boolean {
-  return v === CHECK || v === CROSS || v === "VAC";
-}
-
-/** One Case's verdict for one model, collapsed from however many Trials it ran. */
-function verdict(card: Scorecard, caseId: string): string {
-  const trials = card.trials.filter((t) => t.caseId === caseId);
-  if (trials.length === 0) return VERDICT_NOT_RUN;
-  if (trials.some((t) => t.error !== undefined)) return VERDICT_ERRORED;
-  if (trials.some((t) => t.vacuous)) return "VAC";
-  return trials.every((t) => t.passed) ? CHECK : CROSS;
-}
-
 /** Case ids in first-seen order across every model, so an aborted Sweep still contributes its own. */
 function caseIds(matrix: Matrix): string[] {
   const seen: string[] = [];
   for (const run of matrix.runs) {
-    for (const trial of run.card?.trials ?? []) {
-      if (!seen.includes(trial.caseId)) seen.push(trial.caseId);
+    for (const id of run.card === undefined ? [] : caseIdsOf(run.card)) {
+      if (!seen.includes(id)) seen.push(id);
     }
   }
   return seen;
@@ -129,7 +109,7 @@ export function renderMatrix(matrix: Matrix): string {
   const ids = caseIds(matrix);
   const models = matrix.runs.map((r) => r.modelId);
   const caseWidth = Math.max(4, ...ids.map((id) => id.length));
-  const widths = models.map((m) => Math.max(m.length, VERDICT_UNAVAILABLE.length));
+  const widths = models.map((m) => Math.max(m.length, VERDICT.unavailable.length));
 
   const lines: string[] = [
     "",
@@ -146,7 +126,10 @@ export function renderMatrix(matrix: Matrix): string {
     );
     for (const id of ids) {
       const cells = matrix.runs.map((run, i) =>
-        pad(run.card === undefined ? VERDICT_UNAVAILABLE : verdict(run.card, id), widths[i] ?? 0)
+        pad(
+          run.card === undefined ? VERDICT.unavailable : caseVerdict(run.card, id),
+          widths[i] ?? 0
+        )
       );
       lines.push(`${pad(id, caseWidth)}  ${cells.join("  ")}`);
     }
@@ -184,7 +167,7 @@ function disagreementLines(matrix: Matrix, ids: string[]): string[] {
   );
   if (measured.length < 2) return [];
 
-  const verdicts = new Map(ids.map((id) => [id, measured.map((r) => verdict(r.card, id))]));
+  const verdicts = new Map(ids.map((id) => [id, measured.map((r) => caseVerdict(r.card, id))]));
   const comparable = ids.filter((id) => (verdicts.get(id) ?? []).every(scoreable));
   const incomparable = ids.filter((id) => !comparable.includes(id));
   const split = comparable.filter((id) => new Set(verdicts.get(id)).size > 1);
@@ -212,11 +195,64 @@ function disagreementLines(matrix: Matrix, ids: string[]): string[] {
       "",
       `NOT COMPARABLE  ${incomparable.length} of ${plural(ids.length, "Case")}`,
       ...incomparable.map(detail),
-      `  ${VERDICT_ERRORED} is a vendor fault and ${VERDICT_NOT_RUN} means the Case never ran. ` +
+      `  ${VERDICT.errored} is a vendor fault and ${VERDICT.notRun} means the Case never ran. ` +
         "Neither is a verdict on the harness,",
       "  so these Cases are held out of the comparison rather than counted as a disagreement."
     );
   }
 
   return lines;
+}
+
+/**
+ * Render a Sweep as a change against its Baseline.
+ *
+ * A Scorecard alone is an absolute number nobody can act on — 14 of 20 is neither good nor bad. The
+ * only question a release asks is whether this harness is worse than the last one, and that is a
+ * delta. Regressions lead, because they are the only line that should stop a release.
+ */
+export function renderDelta(delta: Delta, baselineVersion: string): string {
+  const move = (d: (typeof delta.cases)[number]) => `  ${d.caseId}  ${d.before} -> ${d.after}`;
+  const of = (change: string) => delta.cases.filter((c) => c.change === change);
+  const regressed = of("regressed");
+  const fixed = of("fixed");
+  const held = of("not-comparable");
+
+  const lines: string[] = [
+    "",
+    `Delta  model=${delta.modelId}  corpus=${delta.corpusHash.slice(0, 16)}  ` +
+      `baseline=${baselineVersion}`,
+  ];
+
+  if (regressed.length > 0) {
+    lines.push("", `REGRESSED  ${plural(regressed.length, "Case")}`, ...regressed.map(move));
+  }
+  if (fixed.length > 0) {
+    lines.push("", `FIXED  ${plural(fixed.length, "Case")}`, ...fixed.map(move));
+  }
+  if (held.length > 0) {
+    lines.push(
+      "",
+      `NOT COMPARABLE  ${plural(held.length, "Case")}`,
+      ...held.map(move),
+      `  ${VERDICT.errored} is a vendor fault and ${VERDICT.notRun} means the Case never ran on ` +
+        "one side.",
+      "  Neither is a verdict on the harness, so neither counts as a regression."
+    );
+  }
+  if (regressed.length === 0 && fixed.length === 0) {
+    lines.push("", "No change against the Baseline on any comparable Case.");
+  }
+
+  lines.push("", `${delta.passedBefore} passed before, ${delta.passedAfter} passed after`);
+  // A Baseline promoted from a dirty tree names a commit that never existed, so nobody else can
+  // reproduce the number this run is being measured against.
+  if (isDirty(baselineVersion)) {
+    lines.push(
+      `WARN     Baseline was promoted from an uncommitted tree (${baselineVersion}) — ` +
+        "it is not reproducible."
+    );
+  }
+  lines.push("");
+  return lines.join("\n");
 }

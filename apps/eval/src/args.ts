@@ -6,14 +6,35 @@
  * operator believes the run was bounded, and no output can tell them otherwise.
  */
 
-export const FLAGS = ["--corpus", "--case", "--model", "--max-spend", "--max-tokens"] as const;
+export const FLAGS = [
+  "--corpus",
+  "--case",
+  "--model",
+  "--max-spend",
+  "--max-tokens",
+  "--baseline",
+  "--promote",
+  "--save",
+] as const;
 
-/** Accepts both `--name value` and `--name=value`; the second form used to be dropped silently. */
+/**
+ * Accepts both `--name value` and `--name=value`; the second form used to be dropped silently.
+ *
+ * A following `--option` is never taken as the value. `--max-tokens --model luna` would otherwise
+ * read as a ceiling of "--model", which fails a number check loudly only by luck.
+ */
 export function flag(argv: string[], name: string): string | undefined {
   const inline = argv.find((arg) => arg.startsWith(`${name}=`));
   if (inline !== undefined) return inline.slice(name.length + 1);
   const at = argv.indexOf(name);
-  return at === -1 ? undefined : argv[at + 1];
+  if (at === -1) return undefined;
+  const next = argv[at + 1];
+  return next === undefined || next.startsWith("--") ? undefined : next;
+}
+
+/** Whether a valueless option such as `--promote` was given at all. */
+export function present(argv: string[], name: string): boolean {
+  return argv.some((arg) => arg === name || arg.startsWith(`${name}=`));
 }
 
 /** Rejects any `--option` not in {@link FLAGS}, so a typo cannot pass for an absent ceiling. */

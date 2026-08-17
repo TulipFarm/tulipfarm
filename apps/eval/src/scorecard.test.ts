@@ -25,6 +25,7 @@ const card = (over: Partial<Scorecard> = {}): Scorecard => ({
   failed: 0,
   errored: 0,
   skipped: 0,
+  corpusCases: 1,
   trials: [trial()],
   spend: { ...NO_SPEND, calls: 1, inputTokens: 100, outputTokens: 20, subscription: 1 },
   ...over,

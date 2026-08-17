@@ -31,10 +31,15 @@ Only its own Cases need updating when their observable behaviour moves.
 | `src/model.ts` | `PINNED_MODELS` and `pinnedBinding` — the real-vendor binding. The only file here that touches a credential. |
 | `src/retry.ts` | `withRetry` — transient vendor failures, retried and counted. |
 | `src/spend.ts` | `Spend` totals: tokens, dollars, and what could not be priced. |
-| `src/scorecard.ts` | Text rendering. |
+| `src/verdict.ts` | `caseVerdict`, `scoreable` — one Case collapsed into one word. Shared so the grid and a Baseline delta can never disagree. |
+| `src/baseline.ts` | `compareToBaseline` — pure. Refuses a delta across two Corpora or two models. |
+| `src/artifact.ts` | `ScorecardArtifact` read/write, `harnessVersion`, `baselinePath`. The durable form. |
+| `src/release.ts` | `applyBaseline` — archive, compare, promote. The only place a Baseline is written. |
+| `src/scorecard.ts` | Text rendering, including `renderDelta`. |
 | `src/progress.ts` | `progressReporter` — live per-Trial output while a real Sweep runs. |
 | `src/args.ts` | Option parsing. Split out so a mistyped ceiling is a tested refusal. |
 | `src/cli.ts` | `pnpm eval`. |
+| `baselines/<model>.json` | The promoted reference per model, committed so git history records the harness improving. |
 | `corpus/` | The Cases. One JSON file each, `id` matching the filename. |
 
 ## Rules
@@ -79,7 +84,25 @@ Only its own Cases need updating when their observable behaviour moves.
   spent its quota for no Scorecard. Progress never touches stdout — the Scorecard there is the
   artifact a release reads, and interleaved chatter would corrupt anything parsing it.
 - **`corpusHash` is the unit of comparability.** Two Scorecards with different hashes are not
-  comparable. Never compare across `modelId` either.
+  comparable. Never compare across `modelId` either. `compareToBaseline` *throws* on either
+  mismatch rather than returning a number, and the CLI prints `REFUSED` and fails: a delta computed
+  across two Corpora is confident, precise and entirely fictitious, which is worse than no delta.
+  It follows that a Corpus edit can never manufacture an improvement — it invalidates the Baseline.
+- **Nothing becomes the Baseline on its own.** Promotion is `--promote` and only `--promote`.
+  A run that promoted itself would make every later delta a comparison against whatever ran most
+  recently, which is the drift a Baseline exists to detect. Promotion is refused from an
+  uncommitted tree (nobody else can reproduce it), from a partial Sweep (its unreached Cases become
+  permanently incomparable) and from one with vendor errors. A `--case` Sweep counts as partial:
+  it keeps the whole Corpus hash while covering one Case, so `Scorecard.corpusCases` records what
+  the Corpus held and promotion is refused unless the Sweep covered it. The scripted binding cannot
+  be promoted at all: it is told what to say, so it cannot fail.
+- **A regressed Sweep cannot promote itself,** even when `--baseline --promote` are given together.
+  Promoting the run that just failed the gate would launder the regression into the reference and
+  the next run would read green. Promotion also always writes `baselines/<model>.json`, never the
+  file named by `--baseline <path>` — that path is a comparison source, and overwriting it would
+  destroy an archive while the output claimed the Baseline had moved.
+- **A regression fails the command; a fix does not.** That is the whole release gate. `ERR` and
+  never-run Cases are held out of the delta for the same reason they are held out of the grid.
 - **Every Case carries a `script`,** so the whole Corpus runs free and deterministically in ordinary
   CI. A real-model binding ignores it. This is what lets a contributor without vendor keys develop
   the framework.

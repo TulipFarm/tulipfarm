@@ -5,14 +5,14 @@
 
 **Blocked by:** 07
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] A Scorecard can be explicitly promoted to Baseline — nothing becomes Baseline automatically,
+- [x] A Scorecard can be explicitly promoted to Baseline — nothing becomes Baseline automatically,
       so a bad run never silently becomes the reference
-- [ ] Baselines are stored per harness version and per model
-- [ ] The Scorecard shows the delta against the Baseline, per Case and in aggregate
-- [ ] A Corpus version mismatch **refuses** to compute a delta and fails loudly. Silent re-scoring
+- [x] Baselines are stored per harness version and per model
+- [x] The Scorecard shows the delta against the Baseline, per Case and in aggregate
+- [x] A Corpus version mismatch **refuses** to compute a delta and fails loudly. Silent re-scoring
       against a different Corpus or Judge is the most dangerous failure available here, because it
       produces a confident and entirely fictitious number
-- [ ] A Corpus edit therefore cannot manufacture a fake improvement
-- [ ] The Scorecard is a durable, archivable artifact
+- [x] A Corpus edit therefore cannot manufacture a fake improvement
+- [x] The Scorecard is a durable, archivable artifact

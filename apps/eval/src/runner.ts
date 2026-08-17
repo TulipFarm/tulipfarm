@@ -88,6 +88,15 @@ export interface Scorecard {
   readonly abortedReason?: string;
   /** Cases the Sweep never reached, because it stopped early. */
   readonly skipped: number;
+  /**
+   * How many Cases the Corpus holds, which is not how many this Sweep ran.
+   *
+   * `--case` narrows the selection but not the hash, so a filtered Sweep is fully comparable by
+   * `corpusHash` while covering one Case. Without this number nothing downstream can tell that
+   * apart from a complete Sweep, and such a Scorecard promoted to Baseline would hide every Case
+   * it omitted behind a permanent "not comparable".
+   */
+  readonly corpusCases: number;
 }
 
 export interface SweepOptions {
@@ -392,5 +401,6 @@ export async function runSweep(options: SweepOptions): Promise<Scorecard> {
     spend,
     ...(abortedReason === undefined ? {} : { abortedReason }),
     skipped: planned - trials.length,
+    corpusCases: options.corpus.cases.length,
   };
 }

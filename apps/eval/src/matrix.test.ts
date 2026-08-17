@@ -50,6 +50,7 @@ const card = (modelId: string, over: Partial<Scorecard> = {}): Scorecard => ({
   failed: 0,
   errored: 0,
   skipped: 0,
+  corpusCases: 1,
   spend: NO_SPEND,
   ...over,
 });
