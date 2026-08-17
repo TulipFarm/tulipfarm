@@ -119,9 +119,12 @@ function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: 
     case "output_contains": {
       const text = outputText(obs.output);
       if (text === undefined) return { passed: false, detail: "no output text to read" };
-      return text.includes(a.text)
+      return text.toLowerCase().includes(a.text.toLowerCase())
         ? { passed: true, detail: "present in output" }
-        : { passed: false, detail: `output does not contain ${show(a.text)}` };
+        : {
+            passed: false,
+            detail: `output does not contain ${show(a.text)} — said ${excerpt(text)}`,
+          };
     }
 
     case "output_matches": {
@@ -134,13 +137,16 @@ function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: 
       if (text === undefined) return { passed: false, detail: "no output text to read" };
       let re: RegExp;
       try {
-        re = new RegExp(a.pattern);
+        re = new RegExp(a.pattern, OUTPUT_FLAGS);
       } catch {
         return { passed: false, detail: `invalid pattern ${show(a.pattern)}` };
       }
       return re.test(text)
         ? { passed: true, detail: "output matched" }
-        : { passed: false, detail: `output did not match ${show(a.pattern)}` };
+        : {
+            passed: false,
+            detail: `output did not match ${show(a.pattern)} — said ${excerpt(text)}`,
+          };
     }
 
     case "output_field_equals": {
@@ -168,6 +174,30 @@ function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: 
  * Pure and total: every Expectation yields a result, a failure never short-circuits the rest, and a
  * malformed Expectation fails rather than throwing — an eval that crashes tells a maintainer nothing.
  */
+/**
+ * Case-insensitive, because we control the prompt but the model controls its own prose.
+ *
+ * A Case that fails because one vendor wrote "9 AM" where another wrote "9am" is measuring
+ * capitalisation, not the harness — and nobody authoring an Expectation means "and in lower case".
+ * The `prompt_*` Expectations stay exact: that string is one this repo assembled.
+ */
+export const OUTPUT_FLAGS = "i";
+
+const EXCERPT_LIMIT = 240;
+
+/**
+ * What the model actually said, for a failure detail.
+ *
+ * Without it a failing content Expectation cannot be acted on at all: the reader knows the answer
+ * was wrong but not how, and has to re-run the vendor to find out. Whitespace is collapsed so a
+ * multi-line answer cannot break the Scorecard's layout.
+ */
+function excerpt(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  if (flat === "") return "<empty>";
+  return flat.length > EXCERPT_LIMIT ? `${show(flat.slice(0, EXCERPT_LIMIT))}…` : show(flat);
+}
+
 export function scoreCase(
   expect: readonly Expectation[],
   observation: Observation

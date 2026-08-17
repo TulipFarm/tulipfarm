@@ -85,6 +85,14 @@ Only its own Cases need updating when their observable behaviour moves.
   the framework.
 - **`loadCorpus` throws rather than skipping** a malformed Case: silently dropping one reports a
   pass rate over a smaller denominator than the reader believes.
+- **Output Expectations are case-insensitive; prompt Expectations are exact.** We assemble the
+  prompt, so `prompt_contains` can demand the byte. The model writes its own prose, so a Case that
+  failed because one vendor wrote "9 AM" where another wrote "9am" would be measuring
+  capitalisation rather than the harness. The grounding guard matches the same way, or a Case could
+  be refused as ungrounded and then pass.
+- **A failing output Expectation quotes what the model said.** Without it the reader knows the
+  answer was wrong but not how, and has to spend the vendor quota again to find out. Collapsed to
+  one line and truncated so it cannot flood the Scorecard.
 - **A content expectation must be grounded in what the model was given** — its text or pattern has
   to appear in the Case's `context`, `input` or `toolResults`. `script` does not count; it is the
   fake model's own words, so an expectation grounded there checks the script against itself. This

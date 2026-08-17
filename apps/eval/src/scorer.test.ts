@@ -177,3 +177,65 @@ describe("scoring a Case", () => {
     expect(results.map((r) => r.passed)).toEqual([false, false, false]);
   });
 });
+
+describe("output expectations are judged on substance, not on surface", () => {
+  const saying = (text: string): Observation => ({ ...base, output: { kind: "text", text } });
+
+  it("matches a fact the model capitalised differently", () => {
+    expect(
+      only({ kind: "output_matches", pattern: "9\\s*am" }, saying("We open at 9 AM.")).passed
+    ).toBe(true);
+  });
+
+  it("contains a fact the model capitalised differently", () => {
+    expect(
+      only({ kind: "output_contains", text: "ticket" }, saying("Opened a TICKET.")).passed
+    ).toBe(true);
+  });
+
+  it("still rejects a different fact", () => {
+    expect(
+      only({ kind: "output_matches", pattern: "9\\s*am" }, saying("We open at 10am.")).passed
+    ).toBe(false);
+  });
+
+  it("keeps the prompt Expectations exact — that string is one this repo assembled", () => {
+    expect(only({ kind: "prompt_contains", text: "AGENTID: TRIAGE" }).passed).toBe(false);
+  });
+});
+
+describe("a failing output Expectation shows what the model actually said", () => {
+  const saying = (text: string): Observation => ({ ...base, output: { kind: "text", text } });
+
+  it("quotes the answer, so the failure can be acted on without re-running the vendor", () => {
+    const r = only({ kind: "output_matches", pattern: "9am" }, saying("We open at half past ten."));
+
+    expect(r.detail).toContain("half past ten");
+  });
+
+  it("quotes it for a missing substring too", () => {
+    const r = only({ kind: "output_contains", text: "refund" }, saying("I cannot help with that."));
+
+    expect(r.detail).toContain("I cannot help with that.");
+  });
+
+  it("collapses newlines, which would otherwise break the Scorecard's layout", () => {
+    const r = only({ kind: "output_contains", text: "zzz" }, saying("one\ntwo\n\nthree"));
+
+    expect(r.detail).toContain("one two three");
+    expect(r.detail).not.toContain("\n");
+  });
+
+  it("truncates a long answer rather than flooding the Scorecard", () => {
+    const r = only({ kind: "output_contains", text: "zzz" }, saying("x".repeat(5000)));
+
+    expect(r.detail.length).toBeLessThan(400);
+    expect(r.detail).toContain("…");
+  });
+
+  it("says so when the model said nothing at all", () => {
+    const r = only({ kind: "output_contains", text: "zzz" }, saying("   "));
+
+    expect(r.detail).toContain("<empty>");
+  });
+});

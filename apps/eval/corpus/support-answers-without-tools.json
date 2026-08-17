@@ -67,7 +67,7 @@
     },
     {
       "kind": "output_matches",
-      "pattern": "9\\s*am"
+      "pattern": "9(:\\s*00)?\\s*a\\.?\\s*m\\.?"
     },
     {
       "kind": "loop_status",

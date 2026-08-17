@@ -221,4 +221,22 @@ describe("loadCorpus grounding", () => {
 
     await expect(loadCorpus(dir)).rejects.toThrow(CorpusError);
   });
+
+  it("grounds an Expectation in a fact the Case capitalised differently", async () => {
+    // The scorer matches output case-insensitively, so this guard must too — otherwise a Case is
+    // refused as ungrounded and would have passed, or admitted and then fails.
+    const dir = corpusDir({
+      "cased.json": {
+        id: "cased",
+        tier: "l2",
+        agent: "support",
+        context: { agentId: "support", memory: [{ key: "h", value: "Opens at 9AM." }] },
+        input: [{ role: "user", content: "when?" }],
+        script: [{ kind: "text", text: "9am" }],
+        expect: [{ kind: "output_contains", text: "9am" }],
+      },
+    });
+
+    await expect(loadCorpus(dir)).resolves.toBeDefined();
+  });
 });

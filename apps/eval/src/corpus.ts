@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import type { EvalCase } from "./case.ts";
+import { OUTPUT_FLAGS } from "./scorer.ts";
 
 export class CorpusError extends Error {
   constructor(message: string) {
@@ -144,10 +145,12 @@ function requireGrounded(c: EvalCase, file: string): void {
     if (typeof e.ungrounded === "string" && e.ungrounded.length > 0) continue;
     const needle = e.kind === "output_contains" ? e.text : e.pattern;
     let grounded: boolean;
-    if (e.kind === "output_contains") grounded = given.includes(needle);
+    // Matched exactly as the scorer will match it, or a Case could be refused as ungrounded and
+    // then pass, or be admitted and then fail.
+    if (e.kind === "output_contains") grounded = given.toLowerCase().includes(needle.toLowerCase());
     else {
       try {
-        grounded = new RegExp(needle).test(given);
+        grounded = new RegExp(needle, OUTPUT_FLAGS).test(given);
       } catch {
         // An uncompilable pattern is the scorer's failure to report, not this check's.
         continue;
