@@ -4,12 +4,7 @@
   "agent": "support",
   "context": {
     "customInstructions": "Answer opening-hours questions directly. Do not call a tool for them.",
-    "memory": [
-      {
-        "key": "saturday_hours",
-        "value": "Opens at 9am on Saturdays."
-      }
-    ],
+    "memoryDocument": "## Other durable facts\nOpens at 9am on Saturdays.",
     "governancePages": []
   },
   "input": [

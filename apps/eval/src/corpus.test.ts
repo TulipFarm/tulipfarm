@@ -33,7 +33,7 @@ const valid = (id: string): EvalCase => ({
   id,
   tier: "l2",
   agent: "triage",
-  context: { memory: [], governancePages: [] },
+  context: { governancePages: [] },
   input: [{ role: "user", content: "hello" }],
   expect: [{ kind: "loop_status", status: "completed" }],
 });
@@ -181,7 +181,7 @@ describe("loadCorpus grounding", () => {
   it("accepts text the Context gave the model", async () => {
     const dir = corpusDir({
       "a.json": withExpect([{ kind: "output_contains", text: "9am" }], {
-        context: { memory: [{ key: "hours", value: "Opens at 9am." }], governancePages: [] },
+        context: { memoryDocument: "Opens at 9am.", governancePages: [] },
       }),
     });
 
@@ -201,7 +201,7 @@ describe("loadCorpus grounding", () => {
   it("checks a pattern against what was given, not only a literal", async () => {
     const dir = corpusDir({
       "grounded.json": withExpect([{ kind: "output_matches", pattern: "9\\s*am" }], {
-        context: { memory: [{ key: "hours", value: "Opens at 9am." }], governancePages: [] },
+        context: { memoryDocument: "Opens at 9am.", governancePages: [] },
       }),
     });
     const bare = corpusDir({
@@ -244,7 +244,7 @@ describe("loadCorpus grounding", () => {
         id: "cased",
         tier: "l2",
         agent: "support",
-        context: { memory: [{ key: "h", value: "Opens at 9AM." }] },
+        context: { memoryDocument: "Opens at 9AM." },
         input: [{ role: "user", content: "when?" }],
         script: [{ kind: "text", text: "9am" }],
         expect: [{ kind: "output_contains", text: "9am" }],
@@ -265,11 +265,22 @@ describe("loadCorpus against the Eval Soul", () => {
   it("refuses a Case that restates what the Eval Soul owns", async () => {
     for (const field of SOUL_OWNED_CONTEXT_KEYS) {
       const dir = corpusDir({
-        "a.json": { ...valid("a"), context: { memory: [], governancePages: [], [field]: "x" } },
+        "a.json": { ...valid("a"), context: { governancePages: [], [field]: "x" } },
       });
 
       await expect(load(dir)).rejects.toThrow(new RegExp(`context.${field}`));
     }
+  });
+
+  it("refuses a Case carrying a context field the assembler no longer reads", async () => {
+    const dir = corpusDir({
+      "a.json": {
+        ...valid("a"),
+        context: { governancePages: [], memory: [{ key: "hours", value: "Opens at 9am." }] },
+      },
+    });
+
+    await expect(load(dir)).rejects.toThrow(/"context.memory" is retired/);
   });
 
   it("grounds an Expectation in a fact only the Eval Soul supplies", async () => {

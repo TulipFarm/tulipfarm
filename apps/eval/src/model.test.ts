@@ -53,7 +53,7 @@ const evalCase = (): EvalCase => ({
   tier: "l2",
   agent: "triage",
   input: [{ role: "user", content: "hello" }],
-  context: { agentId: "eval", memory: [], governancePages: [] },
+  context: { agentId: "eval", governancePages: [] },
   expect: [],
 });
 

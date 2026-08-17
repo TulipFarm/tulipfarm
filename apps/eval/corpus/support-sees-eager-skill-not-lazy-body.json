@@ -3,7 +3,6 @@
   "tier": "l2",
   "agent": "support",
   "context": {
-    "memory": [],
     "governancePages": []
   },
   "input": [
@@ -13,15 +12,32 @@
     }
   ],
   "tools": [],
-  "script": [{ "kind": "text", "text": "Yes, we sell wholesale bulbs to garden centres." }],
+  "script": [
+    {
+      "kind": "text",
+      "text": "Yes, we sell wholesale bulbs to garden centres."
+    }
+  ],
   "expect": [
     {
       "kind": "prompt_contains",
       "text": "Do not use bullet lists unless the customer asked for one."
     },
-    { "kind": "prompt_contains", "text": "refund-policy" },
-    { "kind": "prompt_omits", "text": "A refund is approved by finance, never by an agent." },
-    { "kind": "output_matches", "pattern": "garden cent(re|er)s?" },
-    { "kind": "loop_status", "status": "completed" }
+    {
+      "kind": "prompt_contains",
+      "text": "refund-policy"
+    },
+    {
+      "kind": "prompt_omits",
+      "text": "A refund is approved by finance, never by an agent."
+    },
+    {
+      "kind": "output_matches",
+      "pattern": "garden cent(re|er)s?"
+    },
+    {
+      "kind": "loop_status",
+      "status": "completed"
+    }
   ]
 }

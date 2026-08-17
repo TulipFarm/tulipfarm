@@ -4,7 +4,6 @@
   "agent": "triage",
   "context": {
     "customInstructions": "Reply with a single JSON object and nothing else. Use exactly the keys ticketId, status and owner, taken from the lookup result.",
-    "memory": [],
     "governancePages": []
   },
   "input": [
@@ -19,7 +18,11 @@
       "description": "Fetch a ticket by id.",
       "inputSchema": {
         "type": "object",
-        "properties": { "ticketId": { "type": "string" } },
+        "properties": {
+          "ticketId": {
+            "type": "string"
+          }
+        },
         "required": ["ticketId"]
       }
     }
@@ -27,13 +30,25 @@
   "toolResults": [
     {
       "name": "lookup_ticket",
-      "output": { "ticketId": "4821", "status": "closed", "owner": "dana" }
+      "output": {
+        "ticketId": "4821",
+        "status": "closed",
+        "owner": "dana"
+      }
     }
   ],
   "script": [
     {
       "kind": "tool_calls",
-      "calls": [{ "callId": "c1", "name": "lookup_ticket", "arguments": { "ticketId": "4821" } }]
+      "calls": [
+        {
+          "callId": "c1",
+          "name": "lookup_ticket",
+          "arguments": {
+            "ticketId": "4821"
+          }
+        }
+      ]
     },
     {
       "kind": "text",
@@ -41,10 +56,28 @@
     }
   ],
   "expect": [
-    { "kind": "tool_called", "name": "lookup_ticket" },
-    { "kind": "output_field_equals", "path": "ticketId", "value": "4821" },
-    { "kind": "output_field_equals", "path": "status", "value": "closed" },
-    { "kind": "output_field_equals", "path": "owner", "value": "dana" },
-    { "kind": "loop_status", "status": "completed" }
+    {
+      "kind": "tool_called",
+      "name": "lookup_ticket"
+    },
+    {
+      "kind": "output_field_equals",
+      "path": "ticketId",
+      "value": "4821"
+    },
+    {
+      "kind": "output_field_equals",
+      "path": "status",
+      "value": "closed"
+    },
+    {
+      "kind": "output_field_equals",
+      "path": "owner",
+      "value": "dana"
+    },
+    {
+      "kind": "loop_status",
+      "status": "completed"
+    }
   ]
 }

@@ -3,7 +3,6 @@
   "tier": "l2",
   "agent": "triage",
   "context": {
-    "memory": [],
     "governancePages": [],
     "availableTools": [
       {

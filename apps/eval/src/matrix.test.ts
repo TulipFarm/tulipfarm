@@ -11,7 +11,7 @@ const evalCase = (id: string): EvalCase => ({
   id,
   tier: "l2",
   agent: "triage",
-  context: { agentId: "triage", memory: [], governancePages: [] },
+  context: { agentId: "triage", governancePages: [] },
   input: [{ role: "user", content: "hello" }],
   expect: [{ kind: "loop_status", status: "completed" }],
 });

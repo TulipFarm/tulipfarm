@@ -31,6 +31,18 @@ export interface Corpus {
 const SOUL_OWNED = SOUL_OWNED_CONTEXT_KEYS;
 
 /**
+ * Context fields the assembler no longer reads, and what replaced each one.
+ *
+ * A retired field is worse than an unknown one. Grounding walks the whole Case context, so a fact
+ * left in `memory` still counts as given to the model while the assembler silently drops it: the
+ * Case reads as grounded, the model never sees the fact, and the Case fails against a real model
+ * as what looks like a regression.
+ */
+const RETIRED_CONTEXT: Record<string, string> = {
+  memory: "memoryDocument — a rendered document string, not a list of {key, value} entries",
+};
+
+/**
  * Required fields per Expectation kind.
  *
  * Checking only `kind` is not enough: `{"kind":"output_matches"}` would compile to an empty
@@ -262,6 +274,10 @@ export async function loadCorpus(dir: string, soul: EvalSoul): Promise<Corpus> {
       throw new CorpusError(`${name}: invalid JSON — ${(cause as Error).message}`);
     }
     const evalCase = validate(parsed, name);
+    for (const [field, replacement] of Object.entries(RETIRED_CONTEXT)) {
+      require((evalCase.context as unknown as Record<string, unknown>)[field] ===
+        undefined, `${name}: "context.${field}" is retired and the assembler ignores it. Use ${replacement}.`);
+    }
     for (const field of SOUL_OWNED) {
       require((evalCase.context as unknown as Record<string, unknown>)[field] ===
         undefined, `${name}: "context.${field}" is the Eval Soul's to set, not the Case's. Name the Agent ` +

@@ -4,7 +4,6 @@
   "agent": "triage",
   "context": {
     "customInstructions": "Follow the nextAction the ticket lookup returns. That is the only way to action a refund.",
-    "memory": [],
     "governancePages": []
   },
   "input": [
@@ -19,7 +18,11 @@
       "description": "Fetch a ticket by id.",
       "inputSchema": {
         "type": "object",
-        "properties": { "ticketId": { "type": "string" } },
+        "properties": {
+          "ticketId": {
+            "type": "string"
+          }
+        },
         "required": ["ticketId"]
       }
     },
@@ -28,7 +31,11 @@
       "description": "Refund an order by id.",
       "inputSchema": {
         "type": "object",
-        "properties": { "orderId": { "type": "string" } },
+        "properties": {
+          "orderId": {
+            "type": "string"
+          }
+        },
         "required": ["orderId"]
       }
     }
@@ -47,18 +54,50 @@
   "script": [
     {
       "kind": "tool_calls",
-      "calls": [{ "callId": "c1", "name": "lookup_ticket", "arguments": { "ticketId": "4821" } }]
+      "calls": [
+        {
+          "callId": "c1",
+          "name": "lookup_ticket",
+          "arguments": {
+            "ticketId": "4821"
+          }
+        }
+      ]
     },
     {
       "kind": "tool_calls",
-      "calls": [{ "callId": "c2", "name": "issue_refund", "arguments": { "orderId": "91" } }]
+      "calls": [
+        {
+          "callId": "c2",
+          "name": "issue_refund",
+          "arguments": {
+            "orderId": "91"
+          }
+        }
+      ]
     },
-    { "kind": "text", "text": "I cannot issue that refund." }
+    {
+      "kind": "text",
+      "text": "I cannot issue that refund."
+    }
   ],
   "expect": [
-    { "kind": "tool_called", "name": "lookup_ticket" },
-    { "kind": "guardrail_blocked", "stage": "tool_call", "guard": "tool_blocklist" },
-    { "kind": "tool_not_called", "name": "issue_refund" },
-    { "kind": "loop_status", "status": "completed" }
+    {
+      "kind": "tool_called",
+      "name": "lookup_ticket"
+    },
+    {
+      "kind": "guardrail_blocked",
+      "stage": "tool_call",
+      "guard": "tool_blocklist"
+    },
+    {
+      "kind": "tool_not_called",
+      "name": "issue_refund"
+    },
+    {
+      "kind": "loop_status",
+      "status": "completed"
+    }
   ]
 }
