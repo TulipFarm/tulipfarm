@@ -1,7 +1,7 @@
 import type { ModelOutput } from "@tulipfarm/agent-runtime";
-import type { Assertion } from "./case.ts";
+import type { Expectation } from "./case.ts";
 
-/** What one Trial produced, reduced to the facts Assertions are allowed to read. */
+/** What one Trial produced, reduced to the facts Expectations are allowed to read. */
 export interface Observation {
   /** The prompt the real Context assembler produced for this Trial. */
   readonly systemPrompt: string;
@@ -10,16 +10,16 @@ export interface Observation {
   readonly status: string;
 }
 
-export interface AssertionResult {
-  readonly assertion: Assertion;
+export interface ExpectationResult {
+  readonly expectation: Expectation;
   readonly passed: boolean;
   /** Why it failed, or what satisfied it. Always populated, so a Scorecard never says only "false". */
   readonly detail: string;
 }
 
 function readPath(value: unknown, path: string): { found: boolean; value: unknown } {
-  // Guards a malformed Assertion that reached the scorer directly: `scoreCase` must be total, and
-  // splitting `undefined` here would throw where the contract promises a failed Assertion.
+  // Guards a malformed Expectation that reached the scorer directly: `scoreCase` must be total, and
+  // splitting `undefined` here would throw where the contract promises a failed Expectation.
   if (typeof path !== "string" || path.length === 0) return { found: false, value: undefined };
   let current = value;
   for (const segment of path.split(".")) {
@@ -48,7 +48,7 @@ function show(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
-/** Text an `output_*` assertion may read; tool-call output is deliberately not stringified. */
+/** Text an `output_*` expectation may read; tool-call output is deliberately not stringified. */
 function outputText(output: ModelOutput | undefined): string | undefined {
   if (output === undefined) return undefined;
   if (output.kind === "text") return output.text;
@@ -56,7 +56,7 @@ function outputText(output: ModelOutput | undefined): string | undefined {
   return undefined;
 }
 
-function evaluate(a: Assertion, obs: Observation): { passed: boolean; detail: string } {
+function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: string } {
   switch (a.kind) {
     case "prompt_contains":
       return obs.systemPrompt.includes(a.text)
@@ -165,12 +165,12 @@ function evaluate(a: Assertion, obs: Observation): { passed: boolean; detail: st
 /**
  * Score one Trial's observation against a Case's expectations.
  *
- * Pure and total: every Assertion yields a result, a failure never short-circuits the rest, and a
- * malformed Assertion fails rather than throwing — an eval that crashes tells a maintainer nothing.
+ * Pure and total: every Expectation yields a result, a failure never short-circuits the rest, and a
+ * malformed Expectation fails rather than throwing — an eval that crashes tells a maintainer nothing.
  */
 export function scoreCase(
-  expect: readonly Assertion[],
+  expect: readonly Expectation[],
   observation: Observation
-): readonly AssertionResult[] {
-  return expect.map((assertion) => ({ assertion, ...evaluate(assertion, observation) }));
+): readonly ExpectationResult[] {
+  return expect.map((expectation) => ({ expectation, ...evaluate(expectation, observation) }));
 }

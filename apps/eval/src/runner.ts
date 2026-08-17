@@ -10,7 +10,7 @@ import {
 } from "@tulipfarm/agent-runtime";
 import { type EvalCase, LOOP_LIMITS } from "./case.ts";
 import type { Corpus } from "./corpus.ts";
-import { type AssertionResult, type Observation, scoreCase } from "./scorer.ts";
+import { type ExpectationResult, type Observation, scoreCase } from "./scorer.ts";
 
 /**
  * How a Sweep obtains a model for one Case.
@@ -28,10 +28,10 @@ export interface TrialResult {
   readonly caseId: string;
   readonly trial: number;
   readonly passed: boolean;
-  readonly assertions: readonly AssertionResult[];
+  readonly expectations: readonly ExpectationResult[];
   readonly status: string;
-  /** True when the Case asserted nothing, so a green Scorecard cannot hide an empty Case. */
-  readonly unasserted: boolean;
+  /** True when the Case expected nothing, so a green Scorecard cannot hide an empty Case. */
+  readonly vacuous: boolean;
   /** Set only for an infrastructure failure, which is never scored as a Case failure. */
   readonly error?: string;
 }
@@ -85,7 +85,7 @@ async function runTrial(
   binding: ModelBinding,
   trial: number
 ): Promise<TrialResult> {
-  const unasserted = evalCase.expect.length === 0;
+  const vacuous = evalCase.expect.length === 0;
   const tools = toolDispatcher(evalCase);
   let lastOutput: ModelOutput | undefined;
 
@@ -143,7 +143,7 @@ async function runTrial(
     // A vendor call that died is not a verdict on the harness. Scoring a rate-limit as a Case
     // failure is precisely the confound this framework exists to remove, so it is counted apart.
     if (outcome.status === "failed" && outcome.reason.startsWith("model_")) {
-      return errored(evalCase, trial, unasserted, modelError ?? outcome.reason);
+      return errored(evalCase, trial, vacuous, modelError ?? outcome.reason);
     }
 
     const observation: Observation = {
@@ -152,39 +152,34 @@ async function runTrial(
       output: outcome.status === "completed" ? asOutput(outcome.output, lastOutput) : lastOutput,
       status: outcome.status,
     };
-    const assertions = scoreCase(evalCase.expect, observation);
+    const expectations = scoreCase(evalCase.expect, observation);
     return {
       caseId: evalCase.id,
       trial,
-      passed: assertions.every((a) => a.passed),
-      assertions,
+      passed: expectations.every((a) => a.passed),
+      expectations,
       status: outcome.status,
-      unasserted,
+      vacuous,
     };
   } catch (cause) {
     return errored(
       evalCase,
       trial,
-      unasserted,
+      vacuous,
       cause instanceof Error ? cause.message : String(cause)
     );
   }
 }
 
 /** An infrastructure failure is never a pass and never a Case failure. */
-function errored(
-  evalCase: EvalCase,
-  trial: number,
-  unasserted: boolean,
-  error: string
-): TrialResult {
+function errored(evalCase: EvalCase, trial: number, vacuous: boolean, error: string): TrialResult {
   return {
     caseId: evalCase.id,
     trial,
     passed: false,
-    assertions: [],
+    expectations: [],
     status: "errored",
-    unasserted,
+    vacuous,
     error,
   };
 }

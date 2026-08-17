@@ -28,13 +28,13 @@ describe("runSweep", () => {
     expect(card.errored).toBe(0);
   });
 
-  it("reports a failing Case as failed and keeps the assertion detail", async () => {
+  it("reports a failing Case as failed and keeps the expectation detail", async () => {
     const corpus = corpusOf([
       answering("greets", "hello there", [{ kind: "output_contains", text: "goodbye" }]),
     ]);
     const card = await runSweep({ corpus, model: scriptedBinding() });
     expect(card.failed).toBe(1);
-    expect(card.trials[0].assertions[0].detail).toContain("goodbye");
+    expect(card.trials[0].expectations[0].detail).toContain("goodbye");
   });
 
   it("runs the real Context assembler, so the prompt is measurable", async () => {
@@ -100,7 +100,7 @@ describe("runSweep", () => {
       ],
     };
     const card = await runSweep({ corpus: corpusOf([withTools]), model: scriptedBinding() });
-    expect(card.trials[0].assertions.every((a) => a.passed)).toBe(true);
+    expect(card.trials[0].expectations.every((a) => a.passed)).toBe(true);
   });
 
   it("does not abort the Sweep when one Case errors, and counts it apart from a failure", async () => {
@@ -147,12 +147,12 @@ describe("runSweep", () => {
     ).rejects.toThrow(/ghost/);
   });
 
-  it("treats a Case with no assertions as passing but marks it unasserted", async () => {
+  it("treats a Case with no expectations as passing but marks it vacuous", async () => {
     const card = await runSweep({
       corpus: corpusOf([answering("empty", "x", [])]),
       model: scriptedBinding(),
     });
     expect(card.trials[0].passed).toBe(true);
-    expect(card.trials[0].unasserted).toBe(true);
+    expect(card.trials[0].vacuous).toBe(true);
   });
 });

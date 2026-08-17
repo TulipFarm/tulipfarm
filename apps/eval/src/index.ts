@@ -1,10 +1,10 @@
-export type { Assertion, EvalCase, ScriptedToolResult } from "./case.ts";
+export type { EvalCase, Expectation, ScriptedToolResult } from "./case.ts";
 export { LOOP_LIMITS } from "./case.ts";
 export type { Corpus } from "./corpus.ts";
 export { CorpusError, corpusHash, loadCorpus } from "./corpus.ts";
 export type { ModelBinding, Scorecard, SweepOptions, TrialResult } from "./runner.ts";
 export { runSweep } from "./runner.ts";
 export { renderScorecard } from "./scorecard.ts";
-export type { AssertionResult, Observation } from "./scorer.ts";
+export type { ExpectationResult, Observation } from "./scorer.ts";
 export { scoreCase } from "./scorer.ts";
 export { ScriptExhaustedError, scriptedBinding } from "./scripted.ts";

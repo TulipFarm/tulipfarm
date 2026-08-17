@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Assertion } from "./case.ts";
+import type { Expectation } from "./case.ts";
 import { type Observation, scoreCase } from "./scorer.ts";
 
 const base: Observation = {
@@ -12,9 +12,9 @@ const base: Observation = {
   status: "completed",
 };
 
-const only = (a: Assertion, obs: Observation = base) => scoreCase([a], obs)[0];
+const only = (a: Expectation, obs: Observation = base) => scoreCase([a], obs)[0];
 
-describe("prompt assertions", () => {
+describe("prompt expectations", () => {
   it("passes when the assembled prompt contains the text", () => {
     expect(only({ kind: "prompt_contains", text: "agentId: triage" }).passed).toBe(true);
   });
@@ -31,7 +31,7 @@ describe("prompt assertions", () => {
   });
 });
 
-describe("tool assertions", () => {
+describe("tool expectations", () => {
   it("detects a Tool that was called and one that was not", () => {
     expect(only({ kind: "tool_called", name: "search" }).passed).toBe(true);
     expect(only({ kind: "tool_called", name: "refund.issue" }).passed).toBe(false);
@@ -46,7 +46,7 @@ describe("tool assertions", () => {
     );
   });
 
-  it("fails an order assertion naming a Tool that never ran", () => {
+  it("fails an order expectation naming a Tool that never ran", () => {
     const r = only({ kind: "tool_call_order", names: ["search", "never"] });
     expect(r.passed).toBe(false);
     expect(r.detail).toContain("never");
@@ -63,7 +63,7 @@ describe("tool assertions", () => {
     ).toBe(false);
   });
 
-  it("fails an argument assertion when the Tool never ran", () => {
+  it("fails an argument expectation when the Tool never ran", () => {
     const r = only({ kind: "tool_argument_equals", name: "ghost", path: "a", value: 1 });
     expect(r.passed).toBe(false);
     expect(r.detail).toContain("never called");
@@ -75,14 +75,14 @@ describe("tool assertions", () => {
   });
 });
 
-describe("output assertions", () => {
+describe("output expectations", () => {
   it("matches text output by substring and regex", () => {
     expect(only({ kind: "output_contains", text: "opened a ticket" }).passed).toBe(true);
     expect(only({ kind: "output_matches", pattern: "^I opened" }).passed).toBe(true);
     expect(only({ kind: "output_matches", pattern: "^refund" }).passed).toBe(false);
   });
 
-  it("treats a malformed regex as a failed assertion, not a crash", () => {
+  it("treats a malformed regex as a failed expectation, not a crash", () => {
     const r = only({ kind: "output_matches", pattern: "([unclosed" });
     expect(r.passed).toBe(false);
     expect(r.detail).toContain("invalid pattern");
@@ -114,14 +114,14 @@ describe("output assertions", () => {
     );
   });
 
-  it("fails an output assertion when the loop produced nothing", () => {
+  it("fails an output expectation when the loop produced nothing", () => {
     const obs: Observation = { ...base, output: undefined };
     const r = only({ kind: "output_contains", text: "anything" }, obs);
     expect(r.passed).toBe(false);
     expect(r.detail).toContain("no output");
   });
 
-  it("does not read text assertions against tool_calls output", () => {
+  it("does not read text expectations against tool_calls output", () => {
     const obs: Observation = {
       ...base,
       output: { kind: "tool_calls", calls: [{ callId: "1", name: "search", arguments: {} }] },
@@ -138,7 +138,7 @@ describe("loop status", () => {
 });
 
 describe("scoring a Case", () => {
-  it("returns one result per assertion, in order", () => {
+  it("returns one result per expectation, in order", () => {
     const results = scoreCase(
       [
         { kind: "loop_status", status: "completed" },
@@ -149,7 +149,7 @@ describe("scoring a Case", () => {
     expect(results.map((r) => r.passed)).toEqual([true, true]);
   });
 
-  it("scores every assertion even after one fails", () => {
+  it("scores every expectation even after one fails", () => {
     const results = scoreCase(
       [
         { kind: "tool_called", name: "ghost" },
@@ -164,7 +164,7 @@ describe("scoring a Case", () => {
     expect(scoreCase([], base)).toEqual([]);
   });
 
-  it("fails, rather than passing or throwing, on a malformed assertion", () => {
+  it("fails, rather than passing or throwing, on a malformed expectation", () => {
     // These cannot come from `loadCorpus`, which rejects them, but `scoreCase` is documented as
     // total: a missing pattern must not compile to an empty regex that matches everything, and a
     // missing path must not throw inside a path split.
@@ -172,7 +172,7 @@ describe("scoring a Case", () => {
       { kind: "output_matches" },
       { kind: "output_field_equals", value: 1 },
       { kind: "tool_argument_equals", name: "search", value: 1 },
-    ] as unknown as Assertion[];
+    ] as unknown as Expectation[];
     const results = scoreCase(malformed, base);
     expect(results.map((r) => r.passed)).toEqual([false, false, false]);
   });

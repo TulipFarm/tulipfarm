@@ -17,13 +17,13 @@ export interface Corpus {
 }
 
 /**
- * Required fields per Assertion kind.
+ * Required fields per Expectation kind.
  *
  * Checking only `kind` is not enough: `{"kind":"output_matches"}` would compile to an empty
  * regex and pass against anything, and a missing `path` would throw inside the scorer. Both turn
  * an unchecked Case into a green one, which is the failure mode this framework exists to prevent.
  */
-const ASSERTION_FIELDS: Record<
+const EXPECTATION_FIELDS: Record<
   string,
   readonly [string, "string" | "number" | "strings" | "any"][]
 > = {
@@ -85,20 +85,20 @@ function validate(raw: unknown, file: string): EvalCase {
   require(Array.isArray(c.input) &&
     c.input.length > 0, `${file}: "input" must be a non-empty array`);
   // An empty `expect` would score as a pass — `[].every(...)` is true — and clear the release
-  // gate having checked nothing. A Case that asserts nothing is an authoring mistake, not a Case.
+  // gate having checked nothing. A Case that expects nothing is an authoring mistake, not a Case.
   require(Array.isArray(c.expect) &&
     c.expect.length >
-      0, `${file}: "expect" must be a non-empty array; a Case that asserts nothing always passes`);
+      0, `${file}: "expect" must be a non-empty array; a Case that expects nothing always passes`);
   for (const a of c.expect as unknown[]) {
     const kind = (a as { kind?: unknown } | null)?.kind;
     require(typeof kind === "string" &&
-      kind in ASSERTION_FIELDS, `${file}: unknown assertion kind ${JSON.stringify(kind)}`);
+      kind in EXPECTATION_FIELDS, `${file}: unknown expectation kind ${JSON.stringify(kind)}`);
     const record = a as Record<string, unknown>;
-    for (const [field, type] of ASSERTION_FIELDS[kind as string]) {
+    for (const [field, type] of EXPECTATION_FIELDS[kind as string]) {
       require(fieldOk(
         record[field],
         type
-      ), `${file}: assertion "${kind}" needs a ${type === "strings" ? "non-empty string array" : type} field "${field}"`);
+      ), `${file}: expectation "${kind}" needs a ${type === "strings" ? "non-empty string array" : type} field "${field}"`);
     }
   }
   return raw as EvalCase;
@@ -112,7 +112,7 @@ function fieldOk(value: unknown, type: "string" | "number" | "strings" | "any"):
       return typeof value === "number" && Number.isFinite(value);
     case "strings":
       return Array.isArray(value) && value.length > 0 && value.every((v) => typeof v === "string");
-    // `value` in an equality assertion may legitimately be null, false or 0; only absence is wrong.
+    // `value` in an equality expectation may legitimately be null, false or 0; only absence is wrong.
     case "any":
       return value !== undefined;
   }

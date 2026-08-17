@@ -39,10 +39,10 @@ async function main(): Promise<number> {
 
   process.stdout.write(renderScorecard(card));
 
-  // An errored or unasserted Trial fails the command too. A Sweep that could not measure
+  // An errored or vacuous Trial fails the command too. A Sweep that could not measure
   // something has not cleared a release; only a complete, green Scorecard has.
-  const unasserted = card.trials.filter((t) => t.unasserted).length;
-  return card.failed + card.errored + unasserted > 0 ? 1 : 0;
+  const vacuous = card.trials.filter((t) => t.vacuous).length;
+  return card.failed + card.errored + vacuous > 0 ? 1 : 0;
 }
 
 main().then(

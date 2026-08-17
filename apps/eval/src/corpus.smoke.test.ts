@@ -9,7 +9,7 @@ const CORPUS_DIR = path.join(__dirname, "..", "corpus");
 /**
  * Guards the shipped Corpus itself, not the framework.
  *
- * Without this, a malformed Case or one whose script no longer drives its Assertions would only
+ * Without this, a malformed Case or one whose script no longer drives its Expectations would only
  * surface when a maintainer ran the CLI — which, for a pre-release gate, is far too late.
  */
 describe("shipped corpus", () => {
@@ -19,11 +19,11 @@ describe("shipped corpus", () => {
 
     const card = await runSweep({ corpus, model: scriptedBinding() });
     const bad = card.trials.filter((t) => !t.passed);
-    expect(bad.map((t) => `${t.caseId}: ${t.error ?? JSON.stringify(t.assertions)}`)).toEqual([]);
+    expect(bad.map((t) => `${t.caseId}: ${t.error ?? JSON.stringify(t.expectations)}`)).toEqual([]);
     expect(card.errored).toBe(0);
   });
 
-  it("has no unasserted Case, because one would pass without checking anything", async () => {
+  it("has no vacuous Case, because one would pass without checking anything", async () => {
     const corpus = await loadCorpus(CORPUS_DIR);
     expect(corpus.cases.filter((c) => c.expect.length === 0).map((c) => c.id)).toEqual([]);
   });

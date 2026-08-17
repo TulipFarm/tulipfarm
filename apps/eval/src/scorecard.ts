@@ -7,7 +7,7 @@ const BANG = "ERR ";
 function describe(trial: TrialResult): string {
   if (trial.error !== undefined) return `${BANG} ${trial.caseId}#${trial.trial}  ${trial.error}`;
   const mark = trial.passed ? CHECK : CROSS;
-  const note = trial.unasserted ? "  (unasserted)" : "";
+  const note = trial.vacuous ? "  (vacuous)" : "";
   return `${mark} ${trial.caseId}#${trial.trial}  [${trial.status}]${note}`;
 }
 
@@ -27,17 +27,17 @@ export function renderScorecard(card: Scorecard): string {
   for (const trial of card.trials) {
     lines.push(describe(trial));
     if (trial.error !== undefined) continue;
-    for (const assertion of trial.assertions) {
-      if (assertion.passed) continue;
-      lines.push(`     - ${assertion.assertion.kind}: ${assertion.detail}`);
+    for (const expectation of trial.expectations) {
+      if (expectation.passed) continue;
+      lines.push(`     - ${expectation.expectation.kind}: ${expectation.detail}`);
     }
   }
 
-  const unasserted = card.trials.filter((t) => t.unasserted).length;
+  const vacuous = card.trials.filter((t) => t.vacuous).length;
   lines.push(
     "",
     `${card.passed} passed, ${card.failed} failed, ${card.errored} errored` +
-      (unasserted > 0 ? `, ${unasserted} unasserted` : ""),
+      (vacuous > 0 ? `, ${vacuous} vacuous` : ""),
     ""
   );
   return lines.join("\n");

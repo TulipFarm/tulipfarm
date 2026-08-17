@@ -84,7 +84,7 @@ describe("loadCorpus", () => {
     await expect(loadCorpus(dir)).rejects.toThrow(/same/);
   });
 
-  it("rejects an unknown assertion kind rather than silently passing it", async () => {
+  it("rejects an unknown expectation kind rather than silently passing it", async () => {
     const bad = { ...valid("alpha"), expect: [{ kind: "definitely_not_real" }] };
     const dir = corpusDir({ "a.json": bad });
     await expect(loadCorpus(dir)).rejects.toThrow(/definitely_not_real/);
@@ -100,12 +100,12 @@ describe("loadCorpus", () => {
     await expect(loadCorpus(dir)).rejects.toThrow(/no Eval Cases/);
   });
 
-  it("rejects a Case that asserts nothing, because it would always pass", async () => {
+  it("rejects a Case that expects nothing, because it would always pass", async () => {
     const dir = corpusDir({ "a.json": { ...valid("alpha"), expect: [] } });
-    await expect(loadCorpus(dir)).rejects.toThrow(/asserts nothing/);
+    await expect(loadCorpus(dir)).rejects.toThrow(/expects nothing/);
   });
 
-  it("rejects an assertion missing the field its kind needs", async () => {
+  it("rejects an expectation missing the field its kind needs", async () => {
     const cases: Record<string, unknown>[] = [
       { kind: "output_matches" },
       { kind: "prompt_contains" },
@@ -114,13 +114,13 @@ describe("loadCorpus", () => {
       { kind: "tool_call_count" },
       { kind: "tool_call_order", names: [] },
     ];
-    for (const assertion of cases) {
-      const dir = corpusDir({ "a.json": { ...valid("alpha"), expect: [assertion] } });
-      await expect(loadCorpus(dir)).rejects.toThrow(new RegExp(String(assertion.kind)));
+    for (const expectation of cases) {
+      const dir = corpusDir({ "a.json": { ...valid("alpha"), expect: [expectation] } });
+      await expect(loadCorpus(dir)).rejects.toThrow(new RegExp(String(expectation.kind)));
     }
   });
 
-  it("accepts an equality assertion whose expected value is null, false or zero", async () => {
+  it("accepts an equality expectation whose expected value is null, false or zero", async () => {
     const dir = corpusDir({
       "a.json": {
         ...valid("alpha"),

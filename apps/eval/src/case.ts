@@ -8,10 +8,10 @@ import type {
 /**
  * One deterministic, model-free check against a Trial's observation.
  *
- * Assertions are data, never functions, so a Corpus can be content-hashed and a Case can be
+ * Expectations are data, never functions, so a Corpus can be content-hashed and a Case can be
  * authored without writing code.
  */
-export type Assertion =
+export type Expectation =
   /** The assembled system prompt contains this text — the only check that proves the real Context
    *  assembler ran, rather than a hand-written prompt being fed to the loop. */
   | { readonly kind: "prompt_contains"; readonly text: string }
@@ -57,7 +57,7 @@ export interface EvalCase {
    * credentials develop the framework.
    */
   readonly script?: readonly ModelOutput[];
-  readonly expect: readonly Assertion[];
+  readonly expect: readonly Expectation[];
   /** Raised above 1 only for Cases used to measure the Noise Floor. */
   readonly trials?: number;
 }
