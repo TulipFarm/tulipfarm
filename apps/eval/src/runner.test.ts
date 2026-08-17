@@ -459,3 +459,73 @@ describe("planning the Trials a ceiling is sized against", () => {
     expect(plannedTrials(selectCases([c("a", 3), c("b", 9)], "a"))).toBe(3);
   });
 });
+
+describe("the scripted Tool dispatcher", () => {
+  /** Calls `tool` twice, then answers — and records every message the model was shown. */
+  const callsTwice = (tool: string) => {
+    const seen: string[] = [];
+    const binding: ModelBinding = {
+      id: "twice",
+      create: () => {
+        let turn = 0;
+        return {
+          invoke: async (request) => {
+            seen.push(request.messages.map((m) => `${m.role}:${m.content}`).join("|"));
+            turn += 1;
+            return {
+              requestId: request.requestId,
+              output:
+                turn <= 2
+                  ? {
+                      kind: "tool_calls" as const,
+                      calls: [{ callId: `c${turn}`, name: tool, arguments: {} }],
+                    }
+                  : { kind: "text" as const, text: "done" },
+              usage: { inputTokens: 1, outputTokens: 1 },
+            };
+          },
+        };
+      },
+    };
+    return { seen, binding };
+  };
+
+  const calling = (id: string, tool: string): EvalCase => ({
+    id,
+    tier: "l2",
+    agent: "triage",
+    context: { memory: [], governancePages: [] },
+    input: [{ role: "user", content: "hello" }],
+    tools: [{ name: tool, description: "d", inputSchema: { type: "object", properties: {} } }],
+    toolResults: [{ name: "lookup_ticket", output: { ticketStatus: "open" } }],
+    expect: [{ kind: "loop_status", status: "completed" }],
+  });
+
+  it("repeats the last result when a Tool is called more often than the Case scripted", async () => {
+    // An empty success would be a payload the author never wrote, and a model reads an empty
+    // result as a reason to call again — the harness would be inventing the model's next move.
+    const { seen, binding } = callsTwice("lookup_ticket");
+
+    const card = await runSweep({
+      corpus: corpusOf([calling("repeat", "lookup_ticket")]),
+      model: binding,
+    });
+
+    expect(card.passed).toBe(1);
+    const shown = seen.at(-1) ?? "";
+    // Counted on the full result payload, not the bare word: the assembled prompt says "open" too.
+    expect(shown.split('{"ticketStatus":"open"}').length - 1).toBe(2);
+  });
+
+  it("fails a Tool the Case never scripted, rather than faking a success", async () => {
+    const { seen, binding } = callsTwice("send_email");
+
+    const card = await runSweep({
+      corpus: corpusOf([calling("unscripted", "send_email")]),
+      model: binding,
+    });
+
+    expect(card.passed).toBe(1);
+    expect(seen.at(-1)).toContain("scripts no result for Tool");
+  });
+});

@@ -47,6 +47,19 @@ function equal(a: unknown, b: unknown): boolean {
   return ak.every((k) => k in bx && equal(ax[k], bx[k]));
 }
 
+/**
+ * Every call with its arguments, in order.
+ *
+ * A count on its own cannot be acted on. "2 Tool calls, expected 1" leaves the reader unable to
+ * tell a model that called one Tool twice with identical arguments — which would point at the
+ * harness re-dispatching — from one that split the work across two different calls, which is the
+ * vendor's own strategy and no concern of ours. Recovering that costs another Sweep otherwise.
+ */
+function calls(made: readonly { readonly name: string; readonly arguments: unknown }[]): string {
+  if (made.length === 0) return "none";
+  return made.map((c) => `${c.name}(${excerpt(show(c.arguments))})`).join(" then ");
+}
+
 function show(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
@@ -186,7 +199,10 @@ function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: 
     case "tool_call_count":
       return obs.toolCalls.length === a.count
         ? { passed: true, detail: `${a.count} Tool calls` }
-        : { passed: false, detail: `${obs.toolCalls.length} Tool calls, expected ${a.count}` };
+        : {
+            passed: false,
+            detail: `${obs.toolCalls.length} Tool calls, expected ${a.count} — called ${calls(obs.toolCalls)}`,
+          };
 
     case "output_contains": {
       const text = outputText(obs.output);

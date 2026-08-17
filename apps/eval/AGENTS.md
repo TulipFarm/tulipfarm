@@ -152,6 +152,16 @@ Only its own Cases need updating when their observable behaviour moves.
   format — set `ungrounded` to the reason; the rule bans the silent ones, not the deliberate ones.
   **`output_omits` is held to the same rule for the opposite reason**: text the model was never
   given can never appear, so an ungrounded one passes with the guard deleted.
+- **`tool_call_count` is only a harness assertion at zero.** `count: 0` says the turn reached no
+  Tool at all — that a guard settled it, or that the Agent answered from its Context — and the
+  harness decides that. Any positive count pins how many times a model chose to call something,
+  which is vendor strategy: `luna` calls a lookup twice where `sonnet` calls it once, and neither
+  is a harness defect. Assert `tool_called`, `tool_argument_equals` and `tool_call_order` instead;
+  `loop_status` already catches a runaway loop.
+- **A Case must script a result for every Tool it exposes.** An unscripted call fails with a
+  message naming the Tool, and a Tool called more often than the Case scripted repeats its last
+  result. Neither fabricates an empty success — a payload the author never wrote would drive the
+  rest of the turn, and a model reads an empty result as a reason to call again.
 - **A guardrail Case must fail with the guard removed.** Assert `guardrail_blocked` with the guard
   named, and make the model's route to the violation mechanical — a Tool result that hands it the
   card number, a lookup whose `nextAction` names the blocked Tool. A Case that merely hopes the

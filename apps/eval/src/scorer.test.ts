@@ -74,6 +74,22 @@ describe("tool expectations", () => {
     expect(only({ kind: "tool_call_count", count: 2 }).passed).toBe(true);
     expect(only({ kind: "tool_call_count", count: 3 }).passed).toBe(false);
   });
+
+  it("names the calls it counted, so a wrong count can be acted on", () => {
+    // A bare count cannot distinguish a harness re-dispatching one call from a model choosing to
+    // split its work, and recovering the difference costs another Sweep against a paid seat.
+    const r = only({ kind: "tool_call_count", count: 1 });
+    expect(r.passed).toBe(false);
+    expect(r.detail).toContain('search({"query":"refund"})');
+    expect(r.detail).toContain("then");
+    expect(r.detail).toContain("ticket.create(");
+  });
+
+  it("says so plainly when the count is wrong because nothing ran", () => {
+    const r = only({ kind: "tool_call_count", count: 1 }, { ...base, toolCalls: [] });
+    expect(r.passed).toBe(false);
+    expect(r.detail).toContain("called none");
+  });
 });
 
 describe("output expectations", () => {

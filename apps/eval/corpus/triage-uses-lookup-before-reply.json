@@ -80,10 +80,6 @@
       "value": "4821"
     },
     {
-      "kind": "tool_call_count",
-      "count": 1
-    },
-    {
       "kind": "output_contains",
       "text": "open"
     },
