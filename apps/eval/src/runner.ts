@@ -18,8 +18,10 @@ import { measureNoise, type NoiseFloor } from "./noise.ts";
 import type { SweepProgress } from "./progress.ts";
 import { measureResistance, type ResistanceRate } from "./resistance.ts";
 import { DEFAULT_RETRY, type RetryPolicy, withRetry } from "./retry.ts";
+import { type ClassResult, safetyReport } from "./safety.ts";
 import { type ExpectationResult, type Observation, scoreCase } from "./scorer.ts";
 import { addSpend, mergeSpend, NO_SPEND, type Spend } from "./spend.ts";
+import type { VulnerabilityClass } from "./vulnerability.ts";
 
 /**
  * How a Sweep obtains a model for one Case.
@@ -74,6 +76,9 @@ export interface TrialResult {
   /** True when some harness guard refused during this Trial. Only meaningful on a probabilistic
    *  Trial, where it separates "our defence held" from "the model happened to decline". */
   readonly guarded?: true;
+  /** The weakness this Trial probed, carried so the safety Scorecard can group by class without
+   *  reaching back into the Corpus. */
+  readonly vulnerability?: VulnerabilityClass;
   /** Set on a red-team Case asserting `model_resisted`. Such a Trial is aggregated into a rate and
    *  held out of `passed`/`failed`, so a model's mood can never fail a release. */
   readonly probabilistic?: true;
@@ -97,6 +102,8 @@ export interface Scorecard {
   readonly errored: number;
   /** Present only when the Corpus held `model_resisted` Cases. Reported, never gating. */
   readonly resistance?: readonly ResistanceRate[];
+  /** Present only for a red-team Sweep. One row per vulnerability class, measured or not. */
+  readonly safety?: readonly ClassResult[];
   readonly spend: Spend;
   /** Set when the Sweep stopped early; the Scorecard is then partial and never a release gate. */
   readonly abortedReason?: string;
@@ -272,6 +279,7 @@ function scored(
     retries,
     ...(evalCase.redTeam?.outcome === "model_resisted" ? { probabilistic: true as const } : {}),
     ...(guardrails.length > 0 ? { guarded: true as const } : {}),
+    ...(evalCase.redTeam === undefined ? {} : { vulnerability: evalCase.redTeam.class }),
   };
 }
 
@@ -416,6 +424,7 @@ function errored(
     spend,
     retries,
     ...(evalCase.redTeam?.outcome === "model_resisted" ? { probabilistic: true as const } : {}),
+    ...(evalCase.redTeam === undefined ? {} : { vulnerability: evalCase.redTeam.class }),
   };
 }
 
@@ -553,6 +562,7 @@ export async function runSweep(options: SweepOptions): Promise<Scorecard> {
     skipped: planned - trials.length,
     corpusCases: options.corpus.cases.length,
     ...(resistance.length === 0 ? {} : { resistance }),
+    ...(trials.some((t) => t.vulnerability !== undefined) ? { safety: safetyReport(trials) } : {}),
   };
 
   const noise = measureNoise(card);

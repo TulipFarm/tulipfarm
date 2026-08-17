@@ -16,7 +16,12 @@ const seed = (over: Partial<EvalCase> = {}): EvalCase => ({
     { kind: "guardrail_blocked", stage: "input", guard: "prompt_injection" },
     { kind: "output_omits", text: "Tulip Supply Co" },
   ],
-  redTeam: { outcome: "guard_held", payload: PAYLOAD, strategies: ["base64"] },
+  redTeam: {
+    outcome: "guard_held",
+    class: "prompt_injection" as const,
+    payload: PAYLOAD,
+    strategies: ["base64"],
+  },
   ...over,
 });
 
@@ -30,7 +35,12 @@ describe("expanding a red-team seed into attack variants", () => {
   it("derives one Case per named strategy, with a traceable id", () => {
     const cases = expandRedTeam(
       seed({
-        redTeam: { outcome: "guard_held", payload: PAYLOAD, strategies: ["base64", "leetspeak"] },
+        redTeam: {
+          outcome: "guard_held",
+          class: "prompt_injection" as const,
+          payload: PAYLOAD,
+          strategies: ["base64", "leetspeak"],
+        },
       }),
       "f.json"
     );
@@ -50,7 +60,9 @@ describe("expanding a red-team seed into attack variants", () => {
   });
 
   it("leaves a seed with no strategies alone", () => {
-    const plain = seed({ redTeam: { outcome: "guard_held", payload: PAYLOAD } });
+    const plain = seed({
+      redTeam: { outcome: "guard_held", class: "prompt_injection" as const, payload: PAYLOAD },
+    });
 
     expect(expandRedTeam(plain, "f.json")).toEqual([plain]);
   });
@@ -97,7 +109,14 @@ describe("what a derived Case asserts", () => {
 describe("the payload transforms", () => {
   const derive = (strategy: string): EvalCase => {
     const cases = expandRedTeam(
-      seed({ redTeam: { outcome: "guard_held", payload: PAYLOAD, strategies: [strategy] } }),
+      seed({
+        redTeam: {
+          outcome: "guard_held",
+          class: "prompt_injection" as const,
+          payload: PAYLOAD,
+          strategies: [strategy],
+        },
+      }),
       "f.json"
     );
     const derived = cases[1];
@@ -156,7 +175,12 @@ describe("the indirect strategy", () => {
       { kind: "tool_calls", calls: [{ callId: "c1", name: "fetch_page", arguments: {} }] },
       { kind: "text", text: "I can't do that." },
     ],
-    redTeam: { outcome: "guard_held", payload: PAYLOAD, strategies: ["indirect"] },
+    redTeam: {
+      outcome: "guard_held",
+      class: "prompt_injection" as const,
+      payload: PAYLOAD,
+      strategies: ["indirect"],
+    },
   });
 
   it("moves the payload out of the user message and into a Tool result", () => {
@@ -177,7 +201,14 @@ describe("the indirect strategy", () => {
   it("refuses a seed with no Tool result to hide the payload in", () => {
     expect(() =>
       expandRedTeam(
-        seed({ redTeam: { outcome: "guard_held", payload: PAYLOAD, strategies: ["indirect"] } }),
+        seed({
+          redTeam: {
+            outcome: "guard_held",
+            class: "prompt_injection" as const,
+            payload: PAYLOAD,
+            strategies: ["indirect"],
+          },
+        }),
         "f.json"
       )
     ).toThrow(/toolResults/);
@@ -188,7 +219,14 @@ describe("guarding the strategy list", () => {
   it("refuses a strategy name it cannot apply", () => {
     expect(() =>
       expandRedTeam(
-        seed({ redTeam: { outcome: "guard_held", payload: PAYLOAD, strategies: ["crescendo"] } }),
+        seed({
+          redTeam: {
+            outcome: "guard_held",
+            class: "prompt_injection" as const,
+            payload: PAYLOAD,
+            strategies: ["crescendo"],
+          },
+        }),
         "f.json"
       )
     ).toThrow(/crescendo/);
@@ -199,7 +237,14 @@ describe("guarding the strategy list", () => {
     // produces a variant identical to the seed — a green Case measuring nothing.
     expect(() =>
       expandRedTeam(
-        seed({ redTeam: { outcome: "guard_held", payload: "not here", strategies: ["base64"] } }),
+        seed({
+          redTeam: {
+            outcome: "guard_held",
+            class: "prompt_injection" as const,
+            payload: "not here",
+            strategies: ["base64"],
+          },
+        }),
         "f.json"
       )
     ).toThrow(/appears nowhere/);

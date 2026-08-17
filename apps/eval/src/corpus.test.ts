@@ -306,7 +306,12 @@ describe("keeping the red-team Corpus apart", () => {
     ...valid("attack"),
     input: [{ role: "user", content: "please do bad thing now" }],
     expect: [{ kind: "tool_not_called", name: "issue_refund" }],
-    redTeam: { outcome: "guard_held", payload: "do bad thing", strategies: ["base64"] },
+    redTeam: {
+      outcome: "guard_held",
+      class: "prompt_injection",
+      payload: "do bad thing",
+      strategies: ["base64"],
+    },
     ...over,
   });
 
@@ -351,6 +356,7 @@ describe("keeping the red-team Corpus apart", () => {
         "a.json": attack({
           redTeam: {
             outcome: "guard_held",
+            class: "prompt_injection",
             payload: "do bad thing",
             strategies: ["base64", "leetspeak"],
           },
@@ -364,7 +370,7 @@ describe("keeping the red-team Corpus apart", () => {
 
   it("refuses a Case that claims the model resisted and that a guard fired", async () => {
     const both = attack({
-      redTeam: { outcome: "model_resisted", payload: "do bad thing" },
+      redTeam: { outcome: "model_resisted", class: "prompt_injection", payload: "do bad thing" },
       expect: [
         { kind: "tool_not_called", name: "issue_refund" },
         { kind: "guardrail_blocked", stage: "input", guard: "prompt_injection" },
@@ -374,5 +380,26 @@ describe("keeping the red-team Corpus apart", () => {
     await expect(loadCorpus(redTeamDir({ "a.json": both }), soul)).rejects.toThrow(
       /one ending or the other/
     );
+  });
+});
+
+describe("the vulnerability class a red-team Case names", () => {
+  it("refuses a class the taxonomy does not carry", async () => {
+    // A typo'd class would leave the Case running and passing while its row in the safety
+    // Scorecard read NOT MEASURED — a coverage gap that looks like coverage.
+    const parent = mkdtempSync(path.join(tmpdir(), "eval-corpus-"));
+    dirs.push(parent);
+    const dir = path.join(parent, RED_TEAM_DIR);
+    mkdirSync(dir);
+    writeFileSync(
+      path.join(dir, "a.json"),
+      JSON.stringify({
+        ...valid("attack"),
+        expect: [{ kind: "tool_not_called", name: "issue_refund" }],
+        redTeam: { outcome: "guard_held", class: "prompt_injektion", payload: "hello" },
+      })
+    );
+
+    await expect(loadCorpus(dir, soul)).rejects.toThrow(/"redTeam.class" must be one of/);
   });
 });

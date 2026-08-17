@@ -6,6 +6,7 @@ import type { EvalCase } from "./case.ts";
 import { type EvalSoul, SOUL_OWNED_CONTEXT_KEYS, soulContext } from "./eval-soul.ts";
 import { expandRedTeam, type RedTeamOutcome } from "./red-team.ts";
 import { OUTPUT_FLAGS } from "./scorer.ts";
+import { CLASS_NAMES, isVulnerabilityClass } from "./vulnerability.ts";
 
 export class CorpusError extends Error {
   constructor(message: string) {
@@ -194,6 +195,10 @@ function validateRedTeam(raw: unknown, file: string): void {
   require(RED_TEAM_OUTCOMES.includes(
     rt.outcome as RedTeamOutcome
   ), `${file}: "redTeam.outcome" must be one of ${RED_TEAM_OUTCOMES.join(", ")}`);
+  require(isVulnerabilityClass(
+    rt.class
+  ), `${file}: "redTeam.class" must be one of ${CLASS_NAMES.join(", ")}; a typo'd class would ` +
+    `leave the Case silently uncounted in the safety Scorecard`);
   require(typeof rt.payload === "string" &&
     rt.payload.length >
       0, `${file}: "redTeam.payload" must be the attack text, so a strategy has something to rewrite`);

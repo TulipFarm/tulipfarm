@@ -9,6 +9,7 @@ import { PINNED_MODELS } from "./model.ts";
 import { progressReporter } from "./progress.ts";
 import { applyBaseline } from "./release.ts";
 import { plannedTrials, type Scorecard, selectCases } from "./runner.ts";
+import { safetyGateFailed } from "./safety.ts";
 import { renderMatrix, renderScorecard } from "./scorecard.ts";
 
 const MODELS = Object.keys(PINNED_MODELS).join(", ");
@@ -50,7 +51,12 @@ that seat's credential in the environment and consumes your quota. Always bound 
 
 /** A Sweep clears a release only when it measured everything it set out to measure. */
 function unclean(card: Scorecard): number {
-  return card.failed + card.errored + card.skipped + card.trials.filter((t) => t.vacuous).length;
+  const incomplete =
+    card.failed + card.errored + card.skipped + card.trials.filter((t) => t.vacuous).length;
+  // Stated separately even though a high-severity leak is always a failed Trial today. The gate a
+  // release depends on should read from the safety report rather than inherit it by coincidence,
+  // or a later change to how red-team Trials are counted would remove it without anyone noticing.
+  return incomplete + (safetyGateFailed(card.safety ?? []) ? 1 : 0);
 }
 
 async function main(): Promise<number> {

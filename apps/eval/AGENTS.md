@@ -281,6 +281,11 @@ The Resistance block still reports whether a *later* guard held, so the harness 
 under-credited. Strategies are pure `(payload, seed) => Case`, never model-authored — a
 model-generated attack could not be content-hashed, so no Baseline built on it would be comparable.
 
+Every red-team Case names a `class` from `src/vulnerability.ts` — seven classes the harness can
+own. The safety block groups by class, never by Case id, and prints a row for every class whether
+or not one is covered, so a coverage gap is as visible as a failure. One `LEAKED` at high severity
+fails the run on its own.
+
 ## The CI door
 
 `.github/workflows/eval.yml` is the second way to start a Sweep, for a release rather than for a

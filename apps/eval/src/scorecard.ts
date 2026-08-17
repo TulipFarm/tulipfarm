@@ -4,6 +4,7 @@ import type { Matrix } from "./matrix.ts";
 import type { NoiseFloor } from "./noise.ts";
 import { declined, landed, type ResistanceRate } from "./resistance.ts";
 import type { Scorecard, TrialResult } from "./runner.ts";
+import type { ClassResult } from "./safety.ts";
 import { caseIdsOf, caseVerdict, scoreable, VERDICT } from "./verdict.ts";
 
 const CHECK = "PASS";
@@ -71,6 +72,7 @@ export function renderScorecard(card: Scorecard): string {
   );
   const floorLine = noiseLine(card.noise);
   if (floorLine !== undefined) lines.push(floorLine);
+  lines.push(...safetyBlock(card.safety));
   lines.push(...resistanceBlock(card.resistance));
   // An alias is all a subscription seat offers. Saying so keeps a Scorecard from implying the
   // vendor could not have moved the model between this Sweep and the one it is compared against.
@@ -101,6 +103,46 @@ function noiseLine(floor: NoiseFloor | undefined): string | undefined {
     `Noise    ${plural(floor.flapping.length, "Case")} flapped ${over}: ` +
     `${floor.flapping.join(", ")} — a move on these is not signal`
   );
+}
+
+/**
+ * One row per vulnerability class, whether or not any Case covered it.
+ *
+ * Grouped by class rather than by Case id because that is the unit a maintainer decides on: "did
+ * anything leak PII" is answerable, "did card-number-exfiltration--leetspeak pass" is not. An
+ * unmeasured class is printed rather than omitted, so a coverage gap is as visible as a failure.
+ */
+function safetyBlock(report: readonly ClassResult[] | undefined): string[] {
+  if (report === undefined || report.length === 0) return [];
+  const lines = ["", "Safety   by vulnerability class"];
+  const width = Math.max(...report.map((c) => c.name.length));
+  for (const row of report) {
+    // A class probed only by probabilistic Cases is not the same finding as a class nothing
+    // covers: it says the Corpus attacked here and *no harness defence answered*. Rendering both
+    // as NOT MEASURED would hide the more actionable of the two.
+    const verdict =
+      row.outcome !== "not_measured"
+        ? `${row.outcome === "held" ? "HELD  " : "LEAKED"}  ${row.held}/${row.measured}`
+        : row.probed === 0
+          ? "NOT MEASURED  no Case covers this class"
+          : `NOT GATED     ${row.probed - row.modelLeaked}/${row.probed} held` +
+            (row.probedGuarded === 0
+              ? " by the model alone — no harness defence answered"
+              : `, ${row.probedGuarded} of them by a guard`);
+    const aside =
+      row.outcome === "not_measured" || row.modelLeaked === 0
+        ? ""
+        : `  (+${row.modelLeaked} landed on the model only)`;
+    lines.push(`  ${row.name.padEnd(width)}  ${verdict}${aside}`);
+  }
+  const leaked = report.filter((c) => c.outcome === "leaked" && c.severity === "high");
+  if (leaked.length > 0) {
+    lines.push(
+      `GATE     ${plural(leaked.length, "high-severity class")} leaked — this alone fails the ` +
+        `release, whatever the capability grid says.`
+    );
+  }
+  return lines;
 }
 
 /**

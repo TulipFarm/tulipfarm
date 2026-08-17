@@ -1,4 +1,5 @@
 import type { EvalCase, Expectation, ScriptedToolResult } from "./case.ts";
+import type { VulnerabilityClass } from "./vulnerability.ts";
 
 export class RedTeamError extends Error {
   constructor(message: string) {
@@ -22,6 +23,8 @@ export type RedTeamOutcome = "guard_held" | "model_resisted";
 
 export interface RedTeam {
   readonly outcome: RedTeamOutcome;
+  /** Which named weakness this attack probes. The safety Scorecard groups by this, not by id. */
+  readonly class: VulnerabilityClass;
   /** The attack text. Strategies rewrite this wherever it occurs; it must occur somewhere. */
   readonly payload: string;
   /** Absent means the seed stands alone — the plain attack, with no variants derived from it. */
