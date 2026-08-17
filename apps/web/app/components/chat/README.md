@@ -42,7 +42,10 @@ separately-named ProseMirror node with its own suggestion `pluginKey`:
 
 `editor/serialize.ts` is the pure, DOM-free core (unit-tested): `serializeDoc(editor.getJSON())` →
 `{ text (markdown, mentions as literal `@/ / /# / ~` tokens), agentId, skills, resources, knowledge }`; link hrefs are
-scheme-sanitized. `editor/mentions.ts` builds the extensions + portals the `editor/mention-list.tsx`
+scheme-sanitized. Its block walk is **recursive** — pasted rich text nests blocks inside blocks
+(`bulletList > listItem > paragraph`, `blockquote > paragraph`), so lists, quotes, fenced code and
+rules round-trip to markdown and mentions buried in a list item still route the turn. A flat walk
+silently sent only the top-level paragraphs. `editor/mentions.ts` builds the extensions + portals the `editor/mention-list.tsx`
 dropdown via `ReactRenderer` (no tippy, mirrors `model-selector.tsx` positioning); `editor/use-mention-data.ts`
 fetches the agent/skill/resource lists once (the `~knowledge` menu is server-searched per keystroke instead).
 Enter sends (deferred to the suggestion menu while one is open); Shift+Enter

@@ -4,8 +4,7 @@ import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
 import { vector } from "@electric-sql/pglite-pgvector";
 import { InMemoryAuditEventRepo } from "@tulipfarm/audit";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
-import type { MemoryAssertionView, MemoryRepo } from "@tulipfarm/memory";
-import { MemoryService } from "@tulipfarm/memory";
+import { MEMORY_DOCUMENT_STORAGE_STATEMENTS, MemoryDocumentRepo } from "@tulipfarm/memory";
 import { type GitSyncService, makeSoulWriterDouble } from "@tulipfarm/soul";
 import { TASK_STORAGE_STATEMENTS, type TaskAction, TaskRepo } from "@tulipfarm/storage";
 import type { FastifyInstance } from "fastify";
@@ -64,23 +63,6 @@ class FakeTokenRepo implements TokenRepo {
   }
 }
 
-class FakeMemoryRepo implements MemoryRepo {
-  rows: MemoryAssertionView[] = [];
-  async upsert(doc: MemoryAssertionView) {
-    const i = this.rows.findIndex((r) => r.userId === doc.userId && r.key === doc.key);
-    if (i >= 0) this.rows[i] = doc;
-    else this.rows.push(doc);
-  }
-  async deleteByKey(userId: string, key: string) {
-    const before = this.rows.length;
-    this.rows = this.rows.filter((r) => !(r.userId === userId && r.key === key));
-    return this.rows.length < before;
-  }
-  async listByUser(userId: string) {
-    return this.rows.filter((r) => r.userId === userId);
-  }
-}
-
 function makeFakeGitSync() {
   return {
     commit: vi.fn().mockResolvedValue({ sha: "abc1234", filesChanged: 0 }),
@@ -93,7 +75,9 @@ function makeFakeGitSync() {
 /** Real TaskRepo against in-process PGlite, mirroring `task-repo.pg.test.ts`'s setup. */
 async function makeTaskRepo(): Promise<{ repo: TaskRepo; database: PGlite }> {
   const database = await PGlite.create({ extensions: { vector, citext, pg_trgm } });
-  for (const sql of TASK_STORAGE_STATEMENTS) await database.exec(sql);
+  for (const sql of [...TASK_STORAGE_STATEMENTS, ...MEMORY_DOCUMENT_STORAGE_STATEMENTS]) {
+    await database.exec(sql);
+  }
   const repo = new TaskRepo({
     withTransaction: (operation) => database.transaction((tx) => operation(tx as never)),
   });
@@ -104,7 +88,7 @@ interface Harness {
   app: FastifyInstance;
   database: PGlite;
   repo: TaskRepo;
-  memoryRepo: FakeMemoryRepo;
+  documents: MemoryDocumentRepo;
   auditRepo: InMemoryAuditEventRepo;
   adminSid: string;
   memberSid: string;
@@ -121,8 +105,10 @@ async function appWith(): Promise<Harness> {
   const member = await createUser(userRepo, "member@example.com", "pass", "member");
   const adminSid = await sessionStore.create(admin._id);
   const memberSid = await sessionStore.create(member._id);
-  const memoryRepo = new FakeMemoryRepo();
   const auditRepo = new InMemoryAuditEventRepo();
+  const documents = new MemoryDocumentRepo({
+    withTransaction: (operation) => database.transaction((tx) => operation(tx as never)),
+  });
 
   const app = await buildApp({
     sessionStore,
@@ -132,14 +118,14 @@ async function appWith(): Promise<Harness> {
     soulWriter: makeSoulWriterDouble().writer,
     taskStore: repo,
     auditService: new AuditService(auditRepo, DEPLOYMENT_BUSINESS_ID),
-    memoryService: new MemoryService(memoryRepo),
+    memoryDocuments: documents,
   });
 
   return {
     app,
     database,
     repo,
-    memoryRepo,
+    documents,
     auditRepo,
     adminSid,
     memberSid,
@@ -248,7 +234,7 @@ describe("tasks routes", () => {
       expect(auditChain.length).toBeGreaterThan(0);
     });
 
-    it("memory sink calls MemoryService.update for the caller", async () => {
+    it("memory sink writes the answer into the caller's own Memory Document", async () => {
       const task = await seedTask(h, {
         assigneeKind: "user",
         assigneeId: h.memberId,
@@ -260,9 +246,11 @@ describe("tasks routes", () => {
         req(h.memberSid, "POST", `/api/v1/tasks/${task.id}/answer`, { value: "12" })
       );
       expect(res.statusCode).toBe(200);
-      const stored = await h.memoryRepo.listByUser(h.memberId);
-      expect(stored).toHaveLength(1);
-      expect(stored[0]).toMatchObject({ key: "employeeCount", value: "12" });
+      expect(await h.documents.render(DEPLOYMENT_BUSINESS_ID, h.memberId)).toContain(
+        "employeeCount: 12"
+      );
+      // Another user's answer must never reach this one's page.
+      expect(await h.documents.render(DEPLOYMENT_BUSINESS_ID, h.adminId)).toBe("");
     });
 
     it("400s when the task's action is not answer", async () => {

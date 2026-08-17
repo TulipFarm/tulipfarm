@@ -78,8 +78,6 @@ export interface KnowledgePageRepo {
   governancePages(): Promise<KnowledgePage[]>;
   /** Active pages, for a full re-index pass. */
   listActive(): Promise<KnowledgePage[]>;
-  /** Cheap existence check for any active page — the onboarding "knowledge done" signal. */
-  hasAnyActive(): Promise<boolean>;
   /** Resolve a page by (spaceId, path) — used for cross-link resolution. */
   getBySpacePath(spaceId: string, path: string): Promise<KnowledgePage | null>;
   /** Active pages in a space, ordered by path (export / navigate / graph / index synthesis). */
@@ -209,13 +207,6 @@ export class PgKnowledgePageRepo implements KnowledgePageRepo {
       `SELECT ${PAGE_COLS} FROM knowledge_pages WHERE active=true ORDER BY created_at, id`
     );
     return rows.map(rowToPage);
-  }
-
-  async hasAnyActive(): Promise<boolean> {
-    const { rows } = await this.q.query(
-      "SELECT EXISTS (SELECT 1 FROM knowledge_pages WHERE active=true) AS present"
-    );
-    return (rows[0] as { present: boolean }).present;
   }
 
   async getBySpacePath(spaceId: string, path: string): Promise<KnowledgePage | null> {

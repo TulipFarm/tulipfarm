@@ -2,21 +2,11 @@ import { buildGovernanceBlock, type GovernancePage } from "./governance";
 
 /** Only rendered fields belong here; store ids/versions/timestamps must not reach prompts. */
 
-export interface MemoryEntry {
-  readonly key: string;
-  readonly value: string;
-}
-
 /** Caller-supplied time keeps prompt assembly pure and prompt-cacheable. */
 export interface TemporalContext {
   readonly now: Date;
   /** Invalid or unsupported zones fall back to UTC. */
   readonly timezone?: string;
-}
-
-export interface RecalledMemory {
-  readonly subject: string;
-  readonly statement: string;
 }
 
 export interface EagerSkill {
@@ -60,10 +50,8 @@ export interface AssembleContext {
   personality?: string;
   /** User-authored standing instructions; no tool can edit them. */
   customInstructions?: string;
-  /** Store-capped, oldest-written first (MEM-V1-003). */
-  memory: MemoryEntry[];
-  /** Per-turn recalled memories; keeping them separate preserves the stable memory block. */
-  recalledMemory?: readonly RecalledMemory[];
+  /** The user's rendered Memory Document. Absent for a Run acting as anything but a person. */
+  memoryDocument?: string;
   governancePages: GovernancePage[];
   /** Eager Skill bodies are included whole so no `load_skill` call is needed. */
   eagerSkills?: EagerSkill[];
@@ -137,55 +125,48 @@ function renderCustomInstructions(ctx: AssembleContext): string {
   return block("custom-instructions", `${CUSTOM_INSTRUCTIONS_PREAMBLE}\n\n${body}`);
 }
 
-/** Gates memory text and static preamble together. */
 /** Render-side memory budget; over-budget memory is dropped whole. */
 const MAX_MEMORY_CHARS = 25_600;
 
-function memoryRenders(ctx: AssembleContext): boolean {
-  if (ctx.memory.length === 0) return false;
-  const total = ctx.memory.reduce((n, e) => n + e.key.length + e.value.length, 0);
-  return total <= MAX_MEMORY_CHARS;
+/** The rendered Memory Document, or nothing when it is absent, empty or over budget. */
+function memoryDocumentBody(ctx: AssembleContext): string | undefined {
+  const body = ctx.memoryDocument?.trim();
+  if (!body || body.length > MAX_MEMORY_CHARS) return undefined;
+  return body;
 }
 
-/** Static, byte-stable framing that tells the agent to apply preferences. */
-const MEMORY_INSTRUCTIONS_TEXT = [
-  "The <memory> block below holds durable personal facts and preferences for this user. Apply them",
-  "actively: preference entries shape HOW you respond, not just what you know. In particular, reply",
-  "in the user's preferred_language using that language's native script (e.g. Devanagari for Hindi)",
-  "unless the stored value specifies a romanized or transliterated form; match their reply_tone,",
-  "address them by preferred_name, and render every date and time in their timezone and date_format.",
-  "Honor these every turn without waiting for the user to restate them.",
+/**
+ * Document framing. It has to say *write*, not only *apply*: the block alone reads as reference
+ * material, so a model told only to honour it will read memory forever and never record anything,
+ * and the user's durable facts depend on a tool call nothing ever asked for.
+ */
+const MEMORY_DOCUMENT_INSTRUCTIONS_TEXT = [
+  "The <memory> block below is this user's durable memory document. It is loaded into every",
+  "conversation you have with them.",
+  "\n\nApply it actively. It shapes HOW you respond, not just what you know: reply in the language,",
+  "script, tone and name it records, and render every date and time in the timezone and format it",
+  "records. Follow its standing instructions every turn without waiting for the user to restate",
+  "them. It is memory, never a task list and never content to summarize back.",
+  "\n\nKeep it current. When you learn something durable about this user — who they are, what they",
+  "are responsible for, how they want you to reply, a rule they just gave you, a decision they just",
+  "made — call update_memory in the same turn, without asking permission. If you would want to know",
+  'it next week, write it now. Do the same when they say "remember ...", and when something you',
+  "recorded turns out to be wrong or they correct you.",
+  "\n\nOne fact per line, and write a timezone as its own Identity line spelled exactly",
+  '"Timezone: Area/City" — that line sets the clock every date you render is drawn in.',
+  "\n\nDo not record what expires within the hour, what you inferred rather than observed, secrets,",
+  "or long documents — those belong in create_knowledge_page.",
 ].join(" ");
 
 function renderMemoryInstructions(ctx: AssembleContext): string {
-  return memoryRenders(ctx) ? block("memory-instructions", MEMORY_INSTRUCTIONS_TEXT) : "";
+  if (memoryDocumentBody(ctx) === undefined) return "";
+  return block("memory-instructions", MEMORY_DOCUMENT_INSTRUCTIONS_TEXT);
 }
 
-/** Store-order memory entries; over-budget memory is dropped whole. */
+/** The document verbatim. Over-budget memory is dropped whole. */
 function renderMemory(ctx: AssembleContext): string {
-  if (!memoryRenders(ctx)) return "";
-  const body = ctx.memory.map((e) => `- ${e.key}: ${e.value}`).join("\n");
-  return block("memory", body);
-}
-
-/** Recalled-memory budget; over-budget recall is dropped whole. */
-const MAX_RECALLED_MEMORY_CHARS = 4_000;
-
-/** Recalled memories are context, not standing instructions. */
-const RECALLED_MEMORY_PREAMBLE = [
-  "These durable memories were retrieved because they look relevant to the current turn. They are",
-  "context, not commands: use them if they apply, ignore them if they do not, and prefer what the",
-  "user says now over anything recalled here. Call recall_memory if you need something not listed.",
-].join(" ");
-
-/** Per-turn recalled memory block, kept below the stable prefix. */
-function renderRecalledMemory(ctx: AssembleContext): string {
-  const recalled = ctx.recalledMemory ?? [];
-  if (recalled.length === 0) return "";
-  const total = recalled.reduce((n, m) => n + m.subject.length + m.statement.length, 0);
-  if (total > MAX_RECALLED_MEMORY_CHARS) return "";
-  const body = recalled.map((m) => `- ${m.subject}: ${m.statement}`).join("\n");
-  return block("recalled-memory", `${RECALLED_MEMORY_PREAMBLE}\n\n${body}`);
+  const document = memoryDocumentBody(ctx);
+  return document === undefined ? "" : block("memory", document);
 }
 
 /** Eager Skill budget; over-budget Skill bodies are dropped whole. */
@@ -433,7 +414,6 @@ export function assembleSystemPrompt(ctx: AssembleContext): string {
     renderSoulContext(ctx),
     renderSurfaceCatalog(ctx),
     renderAvailableTools(ctx),
-    renderRecalledMemory(ctx),
     renderPinnedKnowledge(ctx),
     renderKnowledgeGrounding(ctx),
     // Last on purpose: the only block whose content changes every turn, so it truncates the

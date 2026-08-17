@@ -1,5 +1,5 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
-import type { MemoryService } from "@tulipfarm/memory";
+import type { MemoryDocumentRepo } from "@tulipfarm/memory";
 import {
   type GitSyncService,
   isSoulWriteError,
@@ -32,8 +32,8 @@ export interface TaskRoutesDeps {
   readonly soulWriter?: SoulWriter;
   readonly gitSync?: GitSyncService;
   readonly auditService?: AuditService;
-  /** Sink for a `memory` action answer. */
-  readonly memoryService?: MemoryService;
+  /** The user's Memory Document; a `memory` sink answer is appended to it. */
+  readonly memoryDocuments?: MemoryDocumentRepo;
 }
 
 const TaskActionSchema = {
@@ -241,9 +241,18 @@ export function registerTaskRoutes(
         deps.gitSync.emit("soul.synced");
         await auditWrite(req, "soul-config.update", "soul:business-profile", { task: task.id });
       } else {
-        if (!deps.memoryService) return reply.code(400).send({ error: "memory unavailable" });
+        if (!deps.memoryDocuments) return reply.code(400).send({ error: "memory unavailable" });
         const user = req.user as UserDoc;
-        await deps.memoryService.update(user._id, action.field, trimmed);
+        // Answers land in "Other durable facts" as `field: value`: the Task supplies a label, not
+        // a section, and guessing one from a free-text field would file facts under the wrong
+        // heading far more often than it would help.
+        await deps.memoryDocuments.applyDelta({
+          businessId: DEPLOYMENT_BUSINESS_ID,
+          userId: user._id,
+          delta: { section: "other_facts", add: [`${action.field}: ${trimmed}`] },
+          writer: "task",
+          now: new Date(),
+        });
       }
 
       try {

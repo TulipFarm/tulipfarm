@@ -53,7 +53,8 @@ export interface InternalTurnRouteDeps {
 export interface TaskReconcileSignals {
   readonly businessName?: string;
   readonly businessDescription?: string;
-  readonly employeeCount?: string;
+  /** False while the first-run wizard is still in flight; it owns some questions until it ends. */
+  readonly setupComplete?: boolean;
   /**
    * Non-disabled users (`active` or `invited`), admin included. Counts a sent-but-unredeemed
    * invite as team growth — unlike the Worker's own `principals` table, which maps `invited` to
@@ -142,8 +143,8 @@ export function registerInternalTurnRoutes(
       schema: {
         description:
           "Soul manifest and memory signals the task reconciler cannot reach directly: business " +
-          "name/description and the employeeCount memory field. Empty (204) until a deployment " +
-          "wires a supplier.",
+          "name/description, whether first-run setup finished, " +
+          "field. Empty (204) until a deployment wires a supplier.",
         tags: ["internal"],
         security: [{ bearerToken: [] }],
         response: {

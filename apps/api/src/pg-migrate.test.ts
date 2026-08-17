@@ -10,8 +10,6 @@ import { makePglite } from "./test/pglite";
 const EMBEDDING_TABLE_ORIGINS = [
   { table: "knowledge_chunks", dimColumn: "dim", createdAt: 1 },
   { table: "knowledge_source_chunks", dimColumn: "dim", createdAt: 29 },
-  { table: "memory_assertions", dimColumn: "embedding_dim", createdAt: 33 },
-  { table: "memory_chunks", dimColumn: "embedding_dim", createdAt: 35 },
 ] as const;
 
 /** Mid-history fixtures need embedding tables before v45 adds their indexes. */
@@ -52,6 +50,29 @@ async function seedApprovalsAlterTarget(db: PGlite): Promise<void> {
     payload jsonb NOT NULL
   )`);
 }
+
+describe("the migration ledger is append-only", () => {
+  it("assigns every migration a distinct version", () => {
+    const seen = new Map<number, string[]>();
+    for (const migration of PG_MIGRATIONS) {
+      const descriptions = seen.get(migration.version) ?? [];
+      descriptions.push(migration.description);
+      seen.set(migration.version, descriptions);
+    }
+    const collisions = [...seen]
+      .filter(([, descriptions]) => descriptions.length > 1)
+      .map(([version, descriptions]) => `${version}: ${descriptions.join(" | ")}`);
+    expect(
+      collisions,
+      "two branches appended the same version — renumber the unreleased one last"
+    ).toEqual([]);
+  });
+
+  it("declares versions in ascending order", () => {
+    const versions = PG_MIGRATIONS.map((migration) => migration.version);
+    expect(versions).toEqual([...versions].sort((a, b) => a - b));
+  });
+});
 
 describe("runPgMigrations", () => {
   let db: PGlite;
@@ -671,6 +692,76 @@ describe("runPgMigrations concurrency and atomicity", () => {
     expect(rows.at(-1)?.description).toBe(
       PG_MIGRATIONS.find((m) => m.version === latestVersion)?.description
     );
+  });
+
+  describe("migration 64", () => {
+    /**
+     * The regression this exists for: the index was first written into
+     * `CURATOR_STORAGE_STATEMENTS`, which migration 63 applies. A fresh database therefore had it
+     * and every test passed, while every already-migrated deployment — the ones that actually
+     * matter — would have run the shadow review's window read as a full scan forever.
+     */
+    it("adds the review index to a database that already applied 63", async () => {
+      await runPgMigrations(db, undefined, NOOP_LOG);
+      await db.query("DROP INDEX curator_effect_review_idx");
+      await db.query("UPDATE schema_version SET version = 63 WHERE id = true");
+      await db.query("DELETE FROM schema_migrations WHERE version >= 64");
+
+      await runPgMigrations(db, undefined, NOOP_LOG);
+
+      const { rows } = await db.query<{ indexname: string }>(
+        "SELECT indexname FROM pg_indexes WHERE indexname = 'curator_effect_review_idx'"
+      );
+      expect(rows).toHaveLength(1);
+    });
+  });
+
+  describe("migration 65", () => {
+    /**
+     * The document used to be a six-key `jsonb` projection. A deployment that ran 62 before this
+     * shipped holds real user memory in that shape, and `CREATE TABLE IF NOT EXISTS` never
+     * revisits an existing table — so without this migration those rows would be read through a
+     * `document` column that does not exist, and every user's memory would read as empty.
+     */
+    it("renders an existing jsonb projection into the Markdown page", async () => {
+      await runPgMigrations(db, undefined, NOOP_LOG);
+      await db.query("ALTER TABLE user_memory DROP COLUMN document");
+      await db.query("ALTER TABLE user_memory ADD COLUMN sections jsonb NOT NULL DEFAULT '{}'");
+      await db.query("ALTER TABLE user_memory_revisions DROP COLUMN document");
+      await db.query(
+        "ALTER TABLE user_memory_revisions ADD COLUMN sections jsonb NOT NULL DEFAULT '{}'"
+      );
+      await db.query(
+        `INSERT INTO user_memory (business_id, user_id, sections, version, revision_id, document_hash)
+         VALUES ('b', 'u', $1, 1, gen_random_uuid(), 'h')`,
+        [JSON.stringify({ identity: "Lives in Bangalore", preferences: "Prefers ASCII diagrams" })]
+      );
+      await db.query("UPDATE schema_version SET version = 64 WHERE id = true");
+      await db.query("DELETE FROM schema_migrations WHERE version >= 65");
+
+      await runPgMigrations(db, undefined, NOOP_LOG);
+
+      const { rows } = await db.query<{ document: string }>(
+        "SELECT document FROM user_memory WHERE business_id = 'b' AND user_id = 'u'"
+      );
+      expect(rows[0]?.document).toBe(
+        "## Identity\n\nLives in Bangalore\n\n## Preferences\n\nPrefers ASCII diagrams"
+      );
+    });
+
+    it("is a no-op on a database created after the text column shipped", async () => {
+      await runPgMigrations(db, undefined, NOOP_LOG);
+      await db.query("UPDATE schema_version SET version = 64 WHERE id = true");
+      await db.query("DELETE FROM schema_migrations WHERE version >= 65");
+
+      await expect(runPgMigrations(db, undefined, NOOP_LOG)).resolves.toBeUndefined();
+
+      const { rows } = await db.query<{ data_type: string }>(
+        `SELECT data_type FROM information_schema.columns
+          WHERE table_name = 'user_memory' AND column_name = 'document'`
+      );
+      expect(rows[0]?.data_type).toBe("text");
+    });
   });
 
   describe("migration 50", () => {

@@ -70,11 +70,11 @@ const CLUSTER_SPECIMEN: Extract<TimelinePart, { kind: "tool" }>[] = [
   {
     kind: "tool",
     toolCallId: "call_cluster_2",
-    toolName: "recall_memory",
+    toolName: "update_memory",
     args: { argsDigest: "sha256:aa02" },
     status: "done",
     outcome: "ok",
-    argsPreview: { json: JSON.stringify({ scope: "customer:4120" }) },
+    argsPreview: { json: JSON.stringify({ section: "working_context" }) },
     resultPreview: { json: JSON.stringify({ success: true, assertions: 2 }) },
     meta: { tier: "platform", durationMs: 90 },
   },

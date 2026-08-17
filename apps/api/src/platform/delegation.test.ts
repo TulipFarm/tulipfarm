@@ -11,6 +11,8 @@ import type { Queryable, QueryResult, TransactionPort } from "@tulipfarm/storage
 import { ChildLinkAncestryStore, ChildLinkStore } from "@tulipfarm/storage";
 import { beforeEach, describe, expect, it } from "vitest";
 import type {
+  CompleteTurnInput,
+  CompleteTurnResult,
   ConversationStore,
   PersistedMessage,
   PersistedTurn,
@@ -103,6 +105,17 @@ class FakeConversationStore implements ConversationStore {
   }
   async saveCompletion(completion: TurnCompletion) {
     this.completions.push(completion);
+  }
+  async completeTurn(input: CompleteTurnInput): Promise<CompleteTurnResult> {
+    const recorded = await this.findCompletion(
+      input.completion.businessId,
+      input.completion.turnId,
+      input.completion.attempt
+    );
+    const completionInserted = recorded === undefined;
+    if (completionInserted) this.completions.push(input.completion);
+    if (input.turn) await this.saveTurn(input.turn);
+    return { completionInserted };
   }
 
   /** Stands in for the Worker answering the helper's Turn. */

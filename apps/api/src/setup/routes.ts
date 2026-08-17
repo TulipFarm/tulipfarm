@@ -12,6 +12,7 @@ import { ErrorSchema, PublicUserSchema } from "../auth/schemas";
 import { DEFAULT_SESSION_TTL_SECONDS, type SessionStore } from "../auth/session-store";
 import { AdminAlreadyExistsError, createUser, toPublicUser, type UserRepo } from "../auth/users";
 import type { RequireAuthorization } from "../authz/route-gate";
+import { kickCuratorSweep } from "../curator/sweep-schedule";
 import { makeRateLimitHook, type RateLimiter } from "../rate-limit";
 import { commitActorFromRequest } from "../soul/commit-actor";
 import type { SetupAdminCreator } from "./first-admin";
@@ -44,6 +45,13 @@ export interface SetupDeps {
   requireAuthorization: RequireAuthorization;
   setupAdminCreator?: SetupAdminCreator;
   ttlSeconds?: number;
+  /** Kicks the reconciler when the wizard finishes; without it a brand-new instance shows an empty
+   * Tasks list until the next five-minute cron tick, hiding the setup gaps it exists to surface. */
+  triggerCuratorSweep?: () => Promise<void>;
+  /** Refreshes the in-memory Soul after the wizard's direct `soul.yaml` writes, which bypass the
+   * SoulWriter gateway that normally reloads. Without it every reader of `manifest` — reconcile
+   * signals, and any Agent speaking for the business — serves the empty name until a restart. */
+  reloadSoul?: () => Promise<void>;
 }
 
 function setSessionCookies(
@@ -115,6 +123,8 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
     requireAuth,
     requireAuthorization,
     setupAdminCreator,
+    triggerCuratorSweep,
+    reloadSoul,
     ttlSeconds = DEFAULT_SESSION_TTL_SECONDS,
   } = deps;
 
@@ -122,6 +132,24 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
     if ((await userRepo.count()) > 0) {
       return reply.code(403).send({ error: "setup already complete" });
     }
+  }
+
+  /** Every direct `soul.yaml` write in the wizard goes through here. First-run setup runs before
+   * the artifact catalog — and therefore the SoulWriter gateway — exists, so it cannot route
+   * through it, but it must still do the two things the gateway would: stage that one file by name
+   * (never `git add -A`, which would sweep in unrelated worktree state) and reload the in-memory
+   * manifest, without which every reader of `manifest` — reconcile signals, and any Agent speaking
+   * for the business — serves the empty pre-setup name until the process restarts. */
+  async function writeSoulConfig(
+    patch: Parameters<typeof patchSoulConfig>[1],
+    message: string,
+    req: FastifyRequest
+  ): Promise<void> {
+    await patchSoulConfig(soulPath, patch);
+    await gitSync.commitPaths(message, ["soul.yaml"], commitActorFromRequest(req)).catch(() => {});
+    await reloadSoul?.().catch((error) => {
+      app.log.warn({ err: error }, "[setup] soul reload failed; manifest stale until restart");
+    });
   }
 
   const requireSetupAdmin = requireAuthorization({
@@ -233,17 +261,11 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
       const description = typeof body.description === "string" ? body.description : "";
       const website = typeof body.website === "string" ? body.website.trim() : "";
       if (!name) return reply.code(400).send({ error: "name is required" });
-      await patchSoulConfig(soulPath, {
-        businessName: name,
-        businessDescription: description,
-        businessWebsite: website,
-      });
-      await gitSync
-        // First-run setup writes soul.yaml before the artifact catalog — and therefore the
-        // SoulWriter gateway — exists, so it cannot route through it. It stages that one file by
-        // name rather than `git add -A`, so it can never sweep in unrelated worktree state.
-        .commitPaths("chore: set business profile", ["soul.yaml"], commitActorFromRequest(req))
-        .catch(() => {});
+      await writeSoulConfig(
+        { businessName: name, businessDescription: description, businessWebsite: website },
+        "chore: set business profile",
+        req
+      );
       return reply.code(204).send();
     }
   );
@@ -394,12 +416,8 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
       },
     },
     async (req, reply) => {
-      await patchSoulConfig(soulPath, { setupComplete: true });
-      await gitSync
-        // Same as the business-profile write above: pre-gateway, and staged by name so the
-        // `gitRemoteUrl` patch written earlier in the wizard is the only other file it can carry.
-        .commitPaths("chore: complete first-run setup", ["soul.yaml"], commitActorFromRequest(req))
-        .catch(() => {});
+      await writeSoulConfig({ setupComplete: true }, "chore: complete first-run setup", req);
+      await kickCuratorSweep(triggerCuratorSweep, app.log, "first-run setup");
       return reply.code(204).send();
     }
   );

@@ -1,6 +1,7 @@
 export * from "./approvals";
 export * from "./artifacts";
 export * from "./auth";
+export * from "./curator";
 export * from "./events";
 export * from "./integrations";
 export * from "./kill-switches";

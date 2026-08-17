@@ -1,5 +1,8 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import type { CuratorWorkRef } from "@tulipfarm/storage";
 import type {
+  CompleteTurnInput,
+  CompleteTurnResult,
   ConversationStore,
   PersistedMessage,
   PersistedTurn,
@@ -37,6 +40,7 @@ export class FakeConversationStore implements ConversationStore {
   readonly messages: PersistedMessage[] = [];
   readonly turns: PersistedTurn[] = [];
   readonly completions: TurnCompletion[] = [];
+  readonly work: CuratorWorkRef[] = [];
 
   async findTurnByIdempotencyKey(_businessId: string, key: string) {
     return this.turns.find((candidate) => candidate.idempotencyKey === key);
@@ -70,13 +74,17 @@ export class FakeConversationStore implements ConversationStore {
     );
   }
 
-  async saveCompletion(completion: TurnCompletion) {
+  async completeTurn(input: CompleteTurnInput): Promise<CompleteTurnResult> {
     const recorded = await this.findCompletion(
-      completion.businessId,
-      completion.turnId,
-      completion.attempt
+      input.completion.businessId,
+      input.completion.turnId,
+      input.completion.attempt
     );
-    if (recorded === undefined) this.completions.push(completion);
+    const completionInserted = recorded === undefined;
+    if (completionInserted) this.completions.push(input.completion);
+    if (input.turn) await this.saveTurn(input.turn);
+    if (input.work && completionInserted) this.work.push(input.work);
+    return { completionInserted };
   }
 }
 

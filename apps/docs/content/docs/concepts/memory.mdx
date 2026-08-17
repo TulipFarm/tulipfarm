@@ -1,76 +1,74 @@
 ---
 title: Memory
-description: Durable, scoped facts an assistant recalls across chats — and what belongs elsewhere.
+description: One Markdown page per person, written by the assistant and read on every turn.
 ---
 
 Memory is what an assistant durably recalls about you across chats. It is for preferences and
 recurring user-specific facts, not for static business identity or durable business Records.
 
-Memory is made of **Assertions** — one scoped, versioned statement each, carrying where it came
-from and how far it is trusted. An Assertion belongs to a **Memory Scope** that decides who may
-use it; a personal preference lives in your private scope and is never readable by another user.
+Your Memory is **one Markdown page**. Not a list of rows, not a search index — a page, and the
+assistant sees all of it on every turn. There is nothing to retrieve, so there is nothing that can
+fail to be retrieved at the moment you needed it.
 
-## How Memory reaches an answer
+## What is on the page
 
-Two tiers, and they behave differently:
+Six sections, always in this order:
 
-- The **Core Block** is the always-on set rendered into every turn. It is small on purpose.
-- **Recalled Memory** is fetched per turn by relevance to what you just asked. It is context for
-  that answer only, never a standing instruction.
+| Section | Holds |
+| --- | --- |
+| `## Identity` | who you are — role, team, location, timezone |
+| `## Standing instructions` | durable always/never rules you have stated |
+| `## Working context` | what you are currently working on |
+| `## Preferences` | language, tone, format |
+| `## Recent decisions` | the newest 15, dated |
+| `## Other durable facts` | anything lasting that fits nowhere above |
 
-When an assistant needs something it cannot see in either tier — an older preference or a past
-decision — it searches with `recall_memory`.
+One fact per line, and no headings inside a section — that is what keeps a correction able to
+remove exactly the line it meant.
 
-## Saving and removing
+## Who writes it
 
-Assistants save with `update_memory` and remove with `delete_memory`. You can inspect and edit
-your own Memory at `/settings/memory`, backed by `GET /api/v1/memory`, `PUT /api/v1/memory/{key}`,
-and `DELETE /api/v1/memory/{key}`.
+Three writers, one page:
 
-Good Memory is small, useful across turns, and safe to show the person who owns it — preferred
-tone, recurring formatting choices, personal role context.
+- **The assistant, mid-chat.** It decides something you said is durable and calls `update_memory`.
+- **You, explicitly.** "Remember that I play cricket" takes the same path; you just chose the moment.
+- **The Curator**, a background loop that reads finished chats and folds what it learns into the
+  page. You are not asked to approve each fact — a queue of small confirmations is a worse
+  experience than the occasional wrong fact, which the next correction overwrites.
 
-## Suggested memories are proposed, never assumed
+`update_memory` only ever adds and removes lines you name. It never restates a whole section, so
+two writers working at once merge instead of overwriting each other.
 
-After a chat finishes, TulipFarm mines it for durable facts. Nothing inferred is saved silently:
-each one becomes a **Pending Memory** that waits for you. Suggested memories appear at
-`/settings/memory` for you to confirm or deny, and denying one persists nothing.
+## Reading and correcting it
 
-Only things you state directly are stored without asking.
+You can read it — the **Memory** panel on `/settings/profile` shows the whole page — but you cannot
+edit it there, and that is deliberate: Memory is what TulipFarm concluded about you, not a list you
+curate. To change something, say so in a chat; the correction is applied by the same writer that
+made the original claim, so it leaves a trail.
+
+What you author directly is **Custom instructions** at `/settings/instructions` — standing guidance
+applied to every conversation. The two are separate on purpose: one is yours, one is the
+assistant's.
 
 ## Correcting how an Agent behaves
 
 Memory normally holds statements of fact, never instructions. That ban is deliberate: text that
 arrives from a document or a third party must never come back as an order the Agent follows.
 
-Your own corrections are the one exception. When you tell an Agent "when I ask for the weekly
-report, always include the churn number", it records that with `remember_correction` as a
-**procedural** Assertion, and applies it on future turns. The engine only accepts a procedural
-write that is explicit and stated by you — an Agent cannot infer a standing instruction from your
-behaviour, or lift one out of a document it read. `POST /api/v1/memory/corrections` records the
-same thing directly.
+Your own corrections are the one exception, and they land in `## Standing instructions`. When you
+tell an Agent "when I ask for the weekly report, always include the churn number", it records that
+and applies it on future turns. It only accepts such a write when you stated it explicitly — an
+Agent cannot infer a standing instruction from your behaviour, or lift one out of a document it
+read.
 
-## Changing your mind
+## Size and erasure
 
-Memory keeps time. When a newer Assertion contradicts an older one, the old statement is not
-overwritten — its validity is closed at the moment the new fact became true, so the record of what
-was true, and when, survives. Asking what was true at a past moment returns the answer that held
-then.
+The page has a character budget, per section and overall. A write that would exceed it is
+**rejected** rather than truncated: a silently trimmed page would drop a fact you were told was
+remembered.
 
-## Forgetting and erasing
-
-Two different things, deliberately:
-
-- **Forget** soft-removes an Assertion. The statement text is cleared but the row remains, so the
-  lineage of what happened stays auditable.
-- **Erase** hard-purges it, along with its evidence, any Pending Memory referencing it, its recall
-  rows, and derived Episodes. Audit keeps counts only.
-
-## Episodes
-
-Beyond individual facts, TulipFarm keeps **Episodes** — durable summaries of what happened, what
-was decided, and how it turned out, derived from a chat or a Run. Episodes are recallable from
-other chats, which is what lets an assistant refer back to work you did somewhere else.
+Erasing a person removes the page and its whole revision history together. Deleting only the
+current page would leave every superseded copy of the same fact behind.
 
 ## What belongs in the system prompt
 

@@ -1,8 +1,14 @@
 import { hostname } from "node:os";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 
-/** Refuse to boot below the schema floor the worker's queries require. */
-export const REQUIRED_SCHEMA_VERSION = 21;
+/**
+ * Refuse to boot below the schema floor the worker's work requires.
+ *
+ * 63, not 62: the sweep's own query only needs `curator_user_work` from 62, but every mint it
+ * posts is served against the job, effect and admission tables from 63. A worker that booted
+ * between the two would sweep a real backlog into an API that cannot record the answer.
+ */
+export const REQUIRED_SCHEMA_VERSION = 63;
 
 export interface WorkerConfig {
   readonly databaseUrl: string;

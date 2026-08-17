@@ -156,16 +156,9 @@ export function registerSoulRouteFamily(
           );
         }
       }
-      const knowledgeService = opts.knowledgeService;
-      registerOnboardingRoutes(app, opts.soulLoader, requireAuth, requireAuthorization, {
+      registerOnboardingRoutes(app, opts.soulLoader, requireAuth, {
         kvService: opts.kvService,
         llmService: opts.llmService,
-        hasAnyKnowledgePage: knowledgeService
-          ? () => knowledgeService.hasAnyKnowledgePage()
-          : undefined,
-        gitSync: opts.gitSync,
-        soulWriter: opts.soulWriter,
-        auditService: opts.auditService,
       });
       if (opts.llmService) {
         registerSkillRoutes(

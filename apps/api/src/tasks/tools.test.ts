@@ -151,6 +151,29 @@ describe("task_create / task_close Tool definitions", () => {
     expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
   });
 
+  it("task_create refuses to write into the reserved Curator dedupe namespace", async () => {
+    const store = new FakeTaskStore();
+    const res = await taskCreateTool.handler(
+      {
+        ...VALID_CREATE_ARGS,
+        dedupeKey: "curator:create_agent_for_integration:integration:github",
+      },
+      ctxFor(store)
+    );
+    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
+    expect(store.upserted).toEqual([]);
+  });
+
+  it("task_close refuses to close a Curator Proposal out from under it", async () => {
+    const store = new FakeTaskStore();
+    const res = await taskCloseTool.handler(
+      { dedupeKey: "curator:automate_resource_type:resource_type:tickets", reason: "not now" },
+      ctxFor(store)
+    );
+    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
+    expect(store.closed).toEqual([]);
+  });
+
   it("both Tools are mutating and never throw on bad input", async () => {
     for (const tool of TASK_TOOLS) {
       expect(tool.mutating).toBe(true);

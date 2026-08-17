@@ -232,4 +232,54 @@ describe("subscribeObservability", () => {
     const turn = await db.query("SELECT status, attributes FROM obs_event WHERE type = 'turn'");
     expect(turn.rows[0]).toMatchObject({ status: "ok", attributes: { steps: 1 } });
   });
+  // The Curator reports through the same bus as everything else, so nothing in its request path
+  // ever holds a metrics sink and a broken exporter cannot refuse a settlement.
+  it("routes a Curator observation to the metrics sink and nowhere durable", async () => {
+    const emitter = new EventEmitter();
+    const seen: unknown[] = [];
+    subscribeObservability(emitter, new ObservabilityService(new PgObsRepo(db)), {
+      metrics: {
+        recordLlmCall() {},
+        recordToolCall() {},
+        recordTurn() {},
+        recordJob() {},
+        recordCurator(d) {
+          seen.push(d);
+        },
+      },
+    });
+
+    emitter.emit(DOMAIN_EVENTS.CURATOR_OBSERVED, {
+      stage: "mint",
+      scope: "user",
+      outcome: "skipped",
+      reason: "budget_exhausted",
+    });
+    await flush();
+
+    expect(seen).toEqual([
+      { stage: "mint", scope: "user", outcome: "skipped", reason: "budget_exhausted" },
+    ]);
+    const { rows } = await db.query("SELECT count(*)::int AS n FROM obs_event");
+    expect((rows[0] as { n: number }).n).toBe(0);
+  });
+
+  it("never propagates a throwing Curator sink", () => {
+    const emitter = new EventEmitter();
+    subscribeObservability(emitter, new ObservabilityService(new PgObsRepo(db)), {
+      metrics: {
+        recordLlmCall() {},
+        recordToolCall() {},
+        recordTurn() {},
+        recordJob() {},
+        recordCurator() {
+          throw new Error("curator sink boom");
+        },
+      },
+    });
+
+    expect(() =>
+      emitter.emit(DOMAIN_EVENTS.CURATOR_OBSERVED, { stage: "denial", outcome: "job_not_found" })
+    ).not.toThrow();
+  });
 });

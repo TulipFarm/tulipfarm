@@ -547,14 +547,16 @@ describe("IngressDeliveryHost.postReplyForAttempt", () => {
       content: "  Here is your answer  ",
       createdAt: NOW,
     });
-    await store.saveCompletion({
-      businessId: BUSINESS_ID,
-      turnId: attached.turnId,
-      attempt: 1,
-      status: "succeeded",
-      messageId: "answer-1",
-      cursor: 1,
-      createdAt: NOW,
+    await store.completeTurn({
+      completion: {
+        businessId: BUSINESS_ID,
+        turnId: attached.turnId,
+        attempt: 1,
+        status: "succeeded",
+        messageId: "answer-1",
+        cursor: 1,
+        createdAt: NOW,
+      },
     });
 
     await expect(

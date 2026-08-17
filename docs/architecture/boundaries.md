@@ -64,7 +64,8 @@ contract; they do not reimplement its decisions.
 | Tool effects and approvals | `packages/tool-broker` | Catalog and intent/effect orchestration that consumes authorization decisions, credential leases, audit appends, exact approvals, and reconciliation |
 | Agent and model behavior | `packages/agent-runtime` | Context assembly, model profiles, bounded Tool loop, budgets, delegation |
 | Knowledge authorization | `packages/knowledge` | Source ACL ingestion, retrieval, provenance, invalidation, deletion |
-| Durable Memory | `packages/memory` | Scoped Assertions, Pending Memory confirmation, provenance, recall reauthorization, Contradictions, Episodes, Forget, and Erase |
+| Durable Memory | `packages/memory` | The Memory Document: fixed sections, storage-time grammar, delta application, privileged stale-checked section replacement, canonical render, budgets, revisions, Erase¹ |
+| Curator reasoning | `packages/curator` | Curator prompt, output schema, citation and entailment validation, Memory Document merge, Proposal mapping — pure logic, no IO |
 | Tulip Surface Protocol and forms | `packages/surface` | Safe presentation schemas, Artifacts, signed actions, form contracts |
 | Integrations | `packages/integrations` | Adapter contracts, event normalization, delivery, identity mapping, checkpoints |
 | Isolated execution | `packages/sandbox` | Execution request, backend ports, workspace, egress and resource controls |
@@ -83,6 +84,9 @@ Application ownership is composition-only:
 | `apps/worker` | Run dispatch, Agent/Tool steps, timers, reconciliation, projections |
 | `apps/integration-worker` | Integration ingress, sync, delivery, rate limits, reconciliation |
 | `apps/web` | Responsive browser product over authorized APIs |
+
+¹ ADR-027 supersedes ADR-026. The retired engine — Assertions, Pending Memory, Episodes, relevance
+recall — is deleted; `packages/memory` is the Memory Document and nothing else. Owner unchanged.
 
 ## Release-blocking invariant map
 
@@ -108,6 +112,9 @@ add stricter checks but cannot bypass or broaden the owner's decision.
 | I-15 | Audit evidence is append-only, hash-linked, separately sealed, and supports cryptographic erasure | `packages/audit` | Append API links prior hash; verifier and sealed segment detect removal, reorder, or mutation; authorized key destruction erases protected payloads while retaining tombstone and chain-integrity evidence, and legal holds block erasure |
 | I-16 | Optional infrastructure is never required for correctness | `packages/storage` | Provider ports declare capabilities; PostgreSQL fallback remains authoritative under adapter loss |
 | I-17 | Memory content never leaks through recall side channels or telemetry | `packages/memory` | Recall authorizes scope and Knowledge evidence before truncation; exclusions are reason counts only; metrics/spans use bounded enums and counts, never statements, subjects, entities, queries, or ids |
+| I-18 | A Memory Document is only ever mutated one named section at a time, and a Tool can only ever apply a delta | `packages/memory` | A Tool reaches `applyDelta`, which touches only the entries the caller named, so a concurrent writer's entry cannot be destroyed and no stale check is needed. Whole-section replacement is a separate repository method requiring the current section hash and a writer type that excludes `"tool"`, backed by a DB CHECK; both lock the row before applying |
+| I-19 | Curator model output names only a closed kind and a Run-scoped subject | `packages/curator` | Output schema forbids user-visible text, URLs, target ids, and dedupe keys; the server templates every rendered string and derives every key |
+| I-20 | One Curator Run reads exactly one user's private context | `packages/curator` | Business Runs receive only sanitized declarative candidates and emit audience-free seeds; a business Run cannot name an audience or emit a Proposal |
 
 ## Durable failure contract
 

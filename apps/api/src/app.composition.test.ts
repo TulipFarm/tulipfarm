@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -40,6 +40,35 @@ function routeGatingOptions(source: string): Set<string> {
   return found;
 }
 
+/**
+ * What each `Pick<AppOptions, ...>` helper contributes, keyed by function name.
+ *
+ * Without this a spread — `...buildCurator({ ... })` — composes options the scan below cannot see,
+ * so every option a helper supplies would be reported missing while in fact being wired. Reading
+ * the helper's own return annotation keeps the two halves from drifting: widening the `Pick` is
+ * what tells this test the new key exists.
+ */
+function helperContributions(root: string): Map<string, string[]> {
+  const contributions = new Map<string, string[]>();
+  const walk = (directory: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const full = join(directory, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name.endsWith(".ts") && !entry.name.includes(".test.")) {
+        const source = readFileSync(full, "utf8");
+        for (const match of source.matchAll(
+          /function (\w+)\([\s\S]*?\): Pick<AppOptions,([^>]*)>/g
+        )) {
+          const keys = [...match[2].matchAll(/"(\w+)"/g)].map((key) => key[1]);
+          if (match[1] && keys.length > 0) contributions.set(match[1], keys);
+        }
+      }
+    }
+  };
+  walk(root);
+  return contributions;
+}
+
 /** Top-level keys of the object literal passed to the production `buildApp` call. */
 function composedOptions(source: string): Set<string> {
   const start = source.indexOf("buildApp({");
@@ -60,10 +89,13 @@ function composedOptions(source: string): Set<string> {
   }
 
   const keys = new Set<string>();
+  const helpers = helperContributions(__dirname);
   for (const line of source.slice(start, end).split("\n")) {
     // Depth-1 entries are indented exactly six spaces inside `const app = await buildApp({`.
     const match = line.match(/^ {6}(\w+)[,:]/);
     if (match?.[1]) keys.add(match[1]);
+    const spread = line.match(/^ {6}\.\.\.(\w+)\(/);
+    for (const key of (spread?.[1] && helpers.get(spread[1])) || []) keys.add(key);
   }
   return keys;
 }

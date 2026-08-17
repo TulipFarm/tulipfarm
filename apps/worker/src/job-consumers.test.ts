@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Queryable } from "./db";
 
 import {
+  CURATOR_SWEEP_QUEUE,
   jobBossOptions,
   OBS_PRUNE_QUEUE,
   SOUL_BUNDLE_PRUNE_QUEUE,
@@ -41,6 +42,89 @@ describe("startJobConsumers", () => {
     expect(query).toHaveBeenCalledWith("DELETE FROM obs_event WHERE ts < $1 RETURNING id", [
       new Date(now.getTime() - 60_000),
     ]);
+  });
+
+  it("kicks one sweep at boot so setup gaps do not wait for the first cron tick", async () => {
+    const send = vi.fn(
+      async (_name: string, _data?: object | null, _options?: Record<string, unknown>) => "job-id"
+    );
+    const boss = {
+      start: vi.fn(async () => {}),
+      createQueue: vi.fn(async () => {}),
+      work: vi.fn(async () => "worker-id"),
+      send,
+    };
+
+    await startJobConsumers({
+      databaseUrl: "postgres://database/tulipfarm",
+      database: { query: vi.fn(async () => ({ rows: [] })) } as Queryable,
+      boss: boss as unknown as PgBoss,
+      businessId: "business-1",
+      taskStore: {} as never,
+      taskSignals: { gather: vi.fn() } as never,
+    });
+
+    expect(send).toHaveBeenCalledOnce();
+    const [queue, , options] = send.mock.calls[0] ?? [];
+    expect(queue).toBe(CURATOR_SWEEP_QUEUE);
+    // Its own key keeps the boot kick out of the scheduler's dedupe slot, so it cannot swallow a
+    // cron tick; the window collapses the restart storm `tsx watch` produces into one run.
+    expect(options?.singletonKey).toBe("boot");
+    expect(options?.singletonSeconds).toBeGreaterThan(0);
+  });
+
+  // The Curator half needs a model. If its failure could skip the deterministic half, the very
+  // Task that tells the operator to connect one would disappear exactly when it is needed.
+  it("reconciles Tasks before the Curator fan-out, and still does so when it fails", async () => {
+    const order: string[] = [];
+    const gather = vi.fn(async () => {
+      order.push("gather");
+      return {} as never;
+    });
+    const curatorSweep = vi.fn(async () => {
+      order.push("curator");
+      throw new Error("no model provider configured");
+    });
+    const boss = {
+      start: vi.fn(async () => {}),
+      createQueue: vi.fn(async () => {}),
+      work: vi.fn(
+        async (_name: string, _handler: (jobs: unknown[]) => Promise<void>) => "worker-id"
+      ),
+      send: vi.fn(async () => "job-id"),
+    };
+
+    await startJobConsumers({
+      databaseUrl: "postgres://database/tulipfarm",
+      database: { query: vi.fn(async () => ({ rows: [] })) } as Queryable,
+      boss: boss as unknown as PgBoss,
+      businessId: "business-1",
+      taskStore: { upsertOpen: vi.fn(), closeByDedupeKey: vi.fn() } as never,
+      taskSignals: { gather } as never,
+      curatorSweep,
+    });
+
+    const sweep = boss.work.mock.calls.find(([queue]) => queue === CURATOR_SWEEP_QUEUE)?.[1];
+    await expect(sweep?.([])).rejects.toThrow("no model provider configured");
+    expect(order).toEqual(["gather", "curator"]);
+  });
+
+  it("registers no sweep queue, and no boot kick, without task deps", async () => {
+    const boss = {
+      start: vi.fn(async () => {}),
+      createQueue: vi.fn(async () => {}),
+      work: vi.fn(async () => "worker-id"),
+      send: vi.fn(async () => "job-id"),
+    };
+
+    await startJobConsumers({
+      databaseUrl: "postgres://database/tulipfarm",
+      database: { query: vi.fn(async () => ({ rows: [] })) } as Queryable,
+      boss: boss as unknown as PgBoss,
+    });
+
+    expect(boss.send).not.toHaveBeenCalled();
+    expect(boss.createQueue).not.toHaveBeenCalledWith(CURATOR_SWEEP_QUEUE);
   });
 });
 

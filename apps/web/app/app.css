@@ -405,6 +405,49 @@
 .tf-editor em {
   font-style: italic;
 }
+/* Pasted rich text keeps its block structure, so the box has to show it. Tailwind's preflight
+ * strips list markers and indentation, which made a pasted list read as unmarked plain lines —
+ * indistinguishable from paragraphs, and the reason a lost list went unnoticed until send. */
+.tf-editor :where(ul, ol) {
+  margin: 0.5rem 0;
+  padding-left: 1.25rem;
+}
+.tf-editor :where(ul) {
+  list-style: disc;
+}
+.tf-editor :where(ol) {
+  list-style: decimal;
+}
+.tf-editor :where(li) {
+  margin: 0.125rem 0;
+}
+.tf-editor :where(li) :where(p + p) {
+  margin-top: 0.25rem;
+}
+.tf-editor :where(blockquote) {
+  margin: 0.5rem 0;
+  padding-left: 0.75rem;
+  border-left: 2px solid var(--border);
+  color: var(--muted-foreground);
+}
+.tf-editor :where(pre) {
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.75rem;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--muted);
+}
+.tf-editor :where(pre) code {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.tf-editor :where(hr) {
+  margin: 0.75rem 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
 /* The wiki page editor fills a tall area so the whole box is click-to-edit, not just line 1.
  * Scoped to `.tf-page-editor` (the page editor's contenteditable) so the chat composer is unaffected. */
 .tf-page-editor {

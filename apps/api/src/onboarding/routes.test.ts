@@ -149,11 +149,7 @@ async function appWith(opts: AppOpts = {}) {
     soulLoader: makeSoulLoader(opts.resources ?? [], opts),
     llmService: opts.withLlm ? makeFakeLlm() : undefined,
     kvService: opts.withKv ? new KvService(new FakeKvRepo()) : undefined,
-    knowledgeService: opts.withKv
-      ? ({
-          hasAnyKnowledgePage: async () => opts.hasKnowledge ?? false,
-        } as unknown as KnowledgeService)
-      : undefined,
+    knowledgeService: opts.withKv ? ({} as unknown as KnowledgeService) : undefined,
   });
   const req = (method: "GET" | "PUT", url: string, payload?: object) => ({
     method,

@@ -28,7 +28,7 @@ export interface RemoteTurnIdentity {
 export interface TaskReconcileSignals {
   readonly businessName?: string;
   readonly businessDescription?: string;
-  readonly employeeCount?: string;
+  readonly setupComplete?: boolean;
   readonly memberCount?: number;
 }
 

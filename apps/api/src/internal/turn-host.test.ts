@@ -14,52 +14,17 @@ import {
   type HostedToolResult,
   InternalTurnHost,
   type TurnAuthority,
-  type TurnMemoryExtractor,
 } from "./turn-host";
 
 const NOW = new Date("2026-07-27T00:01:00.000Z");
 
-/** Records what the host hands the extractor, and nothing more — the seam is deliberately one-way. */
-class RecordingMemory implements TurnMemoryExtractor {
-  readonly calls: {
-    userId: string;
-    runId?: string;
-    outcome?: string;
-    messages: readonly { content: string }[];
-  }[] = [];
-  private resolveIdle: (() => void) | undefined;
-
-  async extractFromTurn(request: {
-    userId: string;
-    runId?: string;
-    outcome?: string;
-    messages: readonly { role: string; content: string }[];
-  }): Promise<unknown> {
-    this.calls.push(request);
-    this.resolveIdle?.();
-    return undefined;
-  }
-
-  /** Mining is detached, so a test has to let the microtask queue drain before asserting. */
-  async settle(): Promise<void> {
-    await new Promise((resolve) => setImmediate(resolve));
-  }
-}
-
-function makeHost(
-  options: {
-    runs?: HostedRunReader;
-    store?: FakeConversationStore;
-    memory?: TurnMemoryExtractor;
-  } = {}
-) {
+function makeHost(options: { runs?: HostedRunReader; store?: FakeConversationStore } = {}) {
   const store = options.store ?? new FakeConversationStore();
   const seen: { context: TurnAuthority[]; tools: TurnAuthority[] } = { context: [], tools: [] };
   let issued = 0;
   const host = new InternalTurnHost({
     runs: options.runs ?? fakeRuns(),
     store,
-    ...(options.memory === undefined ? {} : { memory: options.memory }),
     context: {
       async resolve(authority) {
         seen.context.push(authority);
@@ -230,88 +195,6 @@ describe("InternalTurnHost", () => {
       status: "succeeded",
       cursor: 12,
       updatedAt: CREATED_AT,
-    });
-  });
-
-  describe("mining a finished turn for memory", () => {
-    async function complete(
-      options: { memory: RecordingMemory; runs?: HostedRunReader },
-      status: "succeeded" | "failed" = "succeeded"
-    ) {
-      const store = new FakeConversationStore();
-      store.turns.push(turn());
-      store.messages.push({
-        id: "message-0",
-        businessId: BUSINESS_ID,
-        conversationId: CONVERSATION_ID,
-        turnId: TURN_ID,
-        role: "user",
-        content: "I work at Acme.",
-        attempt: 1,
-        createdAt: CREATED_AT,
-      });
-      const { host } = makeHost({
-        store,
-        memory: options.memory,
-        ...(options.runs ? { runs: options.runs } : {}),
-      });
-      await host.completeTurn({
-        businessId: BUSINESS_ID,
-        runId: RUN_ID,
-        attempt: 1,
-        status,
-        cursor: 1,
-        messageId: "message-0",
-      });
-      await options.memory.settle();
-    }
-
-    it("hands the completed conversation to the extractor", async () => {
-      const memory = new RecordingMemory();
-      await complete({ memory });
-
-      expect(memory.calls).toHaveLength(1);
-      expect(memory.calls[0].userId).toBe("user-1");
-      expect(memory.calls[0].runId).toBe(RUN_ID);
-      expect(memory.calls[0].outcome).toBe("succeeded");
-      expect(memory.calls[0].messages.map((m) => m.content)).toEqual(["I work at Acme."]);
-    });
-
-    it("mines nothing from a failed turn", async () => {
-      const memory = new RecordingMemory();
-      await complete({ memory }, "failed");
-
-      expect(memory.calls).toEqual([]);
-    });
-
-    it("mines nothing when the Run acts for something other than a user", async () => {
-      const memory = new RecordingMemory();
-      await complete({ memory, runs: fakeRuns({ subject: { kind: "agent", id: "agent-1" } }) });
-
-      expect(memory.calls).toEqual([]);
-    });
-
-    it("completes the turn even when the extractor throws", async () => {
-      const memory = new RecordingMemory();
-      memory.extractFromTurn = async () => {
-        throw new Error("extraction exploded");
-      };
-      const store = new FakeConversationStore();
-      store.turns.push(turn());
-      const { host } = makeHost({ store, memory });
-
-      await expect(
-        host.completeTurn({
-          businessId: BUSINESS_ID,
-          runId: RUN_ID,
-          attempt: 1,
-          status: "succeeded",
-          cursor: 1,
-          messageId: null,
-        })
-      ).resolves.toBeUndefined();
-      await memory.settle();
-      expect(store.turns[0].status).toBe("succeeded");
     });
   });
 });

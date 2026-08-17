@@ -26,12 +26,15 @@
     "@tulipfarm/audit": "workspace:*",
     "@tulipfarm/authz": "workspace:*",
     "@tulipfarm/constants": "workspace:*",
+    "@tulipfarm/curator": "workspace:*",
+    "@tulipfarm/curator-host": "workspace:*",
     "@tulipfarm/integrations": "workspace:*",
     "@tulipfarm/knowledge": "workspace:*",
     "@tulipfarm/kv": "workspace:*",
     "@tulipfarm/llm": "workspace:*",
     "@tulipfarm/memory": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
+    "@tulipfarm/platform-tools": "workspace:*",
     "@tulipfarm/run-kernel": "workspace:*",
     "@tulipfarm/sandbox": "workspace:*",
     "@tulipfarm/schema": "workspace:*",
@@ -52,8 +55,7 @@
     "pg": "^8.22.0",
     "pg-boss": "^12.23.0",
     "simple-icons": "^16.28.0",
-    "yaml": "^2.9.0",
-    "@tulipfarm/platform-tools": "workspace:*"
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@ai-sdk/provider": "^4.0.0",

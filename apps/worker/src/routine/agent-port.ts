@@ -259,7 +259,6 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
     const system = assembleSystemPrompt({
       agentId: plan.agentRef.name,
       ...(agent.spec.personality === undefined ? {} : { personality: agent.spec.personality }),
-      memory: [],
       governancePages: [],
       // No participant timezone exists; use the Run clock so the Agent does not guess dates.
       temporal: { now: this.now() },

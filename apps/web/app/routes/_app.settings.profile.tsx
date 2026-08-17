@@ -1,6 +1,7 @@
 import { useRevalidator } from "@remix-run/react";
 import { type FormEvent, useState } from "react";
 import { FormStatus } from "~/components/form-status";
+import { MemoryDocumentPanel } from "~/components/settings/memory-document-panel";
 import { Button } from "~/components/ui/button";
 import { Field, ReadonlyField } from "~/components/ui/field";
 import { Input } from "~/components/ui/input";
@@ -93,6 +94,8 @@ export default function ProfileSettings() {
           </ReadonlyField>
         </dl>
       </Panel>
+
+      <MemoryDocumentPanel />
     </div>
   );
 }

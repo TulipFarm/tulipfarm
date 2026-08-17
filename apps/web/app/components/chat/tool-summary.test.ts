@@ -16,8 +16,7 @@ describe("toolFamily", () => {
     expect(toolFamily("github_issue_comment")).toBe("github");
     expect(toolFamily("send_slack_message")).toBe("slack");
     expect(toolFamily("kv_set")).toBe("storage");
-    expect(toolFamily("recall_memory")).toBe("memory");
-    expect(toolFamily("remember_correction")).toBe("memory");
+    expect(toolFamily("update_memory")).toBe("memory");
     expect(toolFamily("memory_read")).toBe("memory");
     expect(toolFamily("search_docs")).toBe("knowledge");
     expect(toolFamily("read_page")).toBe("knowledge");
@@ -126,7 +125,6 @@ describe("describeToolCall", () => {
     // next to past-tense rows in the same run.
     expect(describeToolCall("list_resource_types", {})).toBe("Listed resource types");
     expect(describeToolCall("create_knowledge_page", {})).toBe("Created knowledge page");
-    expect(describeToolCall("delete_memory", {})).toBe("Deleted memory");
     expect(describeToolCall("create_space", { name: "Ops" })).toBe("Created space Ops");
   });
 

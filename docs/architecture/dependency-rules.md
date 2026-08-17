@@ -50,6 +50,8 @@ An omitted edge is forbidden.
 | `packages/surface-github` | `packages/surface` |
 | `packages/integrations` | `packages/schema`, `packages/authz`, `packages/audit`, `packages/tool-broker`, `packages/storage`, `packages/observability` |
 | `packages/agent-runtime` | `packages/schema`, `packages/authz`, `packages/audit`, `packages/run-kernel`, `packages/tool-broker`, `packages/knowledge`, `packages/memory`, `packages/observability` |
+| `packages/curator` | `packages/schema`, `packages/constants`, `packages/observability` |
+| `packages/curator-host` | `packages/schema`, `packages/constants`, `packages/curator`, `packages/memory`, `packages/run-kernel`, `packages/storage`, `packages/observability` |
 
 `packages/integrations` may implement the public Tool adapter interface owned by
 `packages/tool-broker`; the broker does not import Integration implementations. `packages/agent-runtime`
@@ -60,8 +62,8 @@ the Agent runtime. Applications register implementations during composition.
 
 | Consumer | May import from |
 | --- | --- |
-| `apps/api` | `schema`, `soul`, `constants`, `authz`, `audit`, `secrets`, `run-kernel`, `tool-broker`, `agent-runtime`, `knowledge`, `memory`, `surface`, `surface-web`, `surface-slack`, `surface-telegram`, `surface-github`, `sandbox`, `integrations`, `storage`, `observability`, `tool-host`, `kv`, `platform-tools` |
-| `apps/worker` | `schema`, `constants`, `authz`, `audit`, `secrets`, `soul`, `run-kernel`, `tool-broker`, `agent-runtime`, `knowledge`, `memory`, `surface`, `integrations`, `sandbox`, `storage`, `observability`, `tool-host`, `kv`, `platform-tools` |
+| `apps/api` | `schema`, `soul`, `constants`, `authz`, `audit`, `secrets`, `run-kernel`, `tool-broker`, `agent-runtime`, `knowledge`, `memory`, `curator`, `curator-host`, `surface`, `surface-web`, `surface-slack`, `surface-telegram`, `surface-github`, `sandbox`, `integrations`, `storage`, `observability`, `tool-host`, `kv`, `platform-tools` |
+| `apps/worker` | `schema`, `constants`, `authz`, `audit`, `secrets`, `soul`, `run-kernel`, `tool-broker`, `agent-runtime`, `knowledge`, `memory`, `curator`, `surface`, `integrations`, `sandbox`, `storage`, `observability`, `tool-host`, `kv`, `platform-tools` |
 | `apps/integration-worker` | `schema`, `authz`, `audit`, `run-kernel`, `tool-broker`, `integrations`, `storage`, `observability` |
 | `apps/web` | `schema`, `surface`, `surface-web`, and presentation-only packages such as `ui`/`editor` |
 

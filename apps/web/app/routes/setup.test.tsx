@@ -9,10 +9,12 @@ import SetupRoute from "./setup";
 vi.mock("~/lib/setup", () => ({
   getSetupStatus: vi.fn(),
   setupAdmin: vi.fn(),
+  setupBusiness: vi.fn(),
   completeSetup: vi.fn(),
 }));
 
 const setupAdmin = vi.mocked(setupLib.setupAdmin);
+const setupBusiness = vi.mocked(setupLib.setupBusiness);
 const completeSetup = vi.mocked(setupLib.completeSetup);
 
 afterEach(() => {
@@ -32,11 +34,15 @@ async function answerAll(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: "Continue" }));
 
   await user.type(await screen.findByLabelText(/^password/i), "mypassword");
+  await user.click(screen.getByRole("button", { name: "Continue" }));
+
+  await user.type(await screen.findByLabelText(/what's your business called/i), "Acme Tulips");
 }
 
-test("creates the admin, then completes setup, on the final answer", async () => {
+test("creates the admin, records the business, then completes setup", async () => {
   const user = userEvent.setup();
   setupAdmin.mockResolvedValue(undefined as never);
+  setupBusiness.mockResolvedValue(undefined as never);
   completeSetup.mockResolvedValue(undefined as never);
   renderRoute();
 
@@ -46,6 +52,7 @@ test("creates the admin, then completes setup, on the final answer", async () =>
   await waitFor(() =>
     expect(setupAdmin).toHaveBeenCalledWith("Ada Lovelace", "admin@example.com", "mypassword")
   );
+  expect(setupBusiness).toHaveBeenCalledWith("Acme Tulips", "", "");
   expect(completeSetup).toHaveBeenCalledTimes(1);
 });
 
@@ -88,7 +95,28 @@ test("requires at least 8 characters for the password", async () => {
 
   await user.type(await screen.findByLabelText(/^password/i), "short");
 
-  expect(screen.getByRole("button", { name: "Finish" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+});
+
+test("does not replay admin creation when the business step fails", async () => {
+  const user = userEvent.setup();
+  setupAdmin.mockResolvedValue(undefined as never);
+  setupBusiness
+    .mockRejectedValueOnce(new ApiError(400, "name is required"))
+    .mockResolvedValue(undefined as never);
+  completeSetup.mockResolvedValue(undefined as never);
+  renderRoute();
+
+  await answerAll(user);
+  await user.click(screen.getByRole("button", { name: "Finish" }));
+
+  expect(await screen.findByText("name is required")).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Finish" }));
+
+  // A second admin call would 403 — setup would be unrecoverable without a database reset.
+  await waitFor(() => expect(completeSetup).toHaveBeenCalledTimes(1));
+  expect(setupAdmin).toHaveBeenCalledTimes(1);
+  expect(setupBusiness).toHaveBeenCalledTimes(2);
 });
 
 test("rewinds to the question named by a 422's field path", async () => {

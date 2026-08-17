@@ -80,7 +80,7 @@ test("maps deep routes to stable product modes and top-bar titles", () => {
   expect(modeForPath("/skills/forecasting")).toBe("build");
   expect(modeForPath("/knowledge/spaces/ops")).toBe("knowledge");
   expect(modeForPath("/runs/run-1")).toBe("operate");
-  expect(modeForPath("/settings/memory")).toBe("settings");
+  expect(modeForPath("/settings/instructions")).toBe("settings");
   expect(modeForPath("/design-guide")).toBe("settings");
   expect(titleForPath("/resources/tickets")).toBe("Resources");
   expect(titleForPath("/operations")).toBe("Operations");
@@ -178,7 +178,7 @@ test("renders Operate destinations and the live Inbox badge", () => {
 
 test("renders only personal destinations under Settings", () => {
   render(<SidebarStub initialEntries={["/settings/profile"]} />);
-  for (const label of ["Profile", "Appearance", "Auth", "Memory"]) {
+  for (const label of ["Profile", "Appearance", "Auth", "Custom instructions"]) {
     expect(screen.getByRole("link", { name: label })).toBeInTheDocument();
   }
   // Workspace configuration is Operate's job now, so none of it may appear here.

@@ -1,14 +1,10 @@
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { KnowledgeService } from "@tulipfarm/knowledge";
 import { KNOWLEDGE_TOOLS } from "@tulipfarm/knowledge";
 import type { KvService } from "@tulipfarm/kv";
 import { KV_TOOLS } from "@tulipfarm/kv";
-import type { MemoryLifecycleService, MemoryRecallService, MemoryService } from "@tulipfarm/memory";
-import {
-  MEMORY_TOOLS,
-  recallMemoryTool,
-  rememberCorrectionTool,
-  type ToolContext,
-} from "@tulipfarm/memory";
+import type { MemoryDocumentRepo } from "@tulipfarm/memory";
+import { MEMORY_DOCUMENT_TOOLS } from "@tulipfarm/memory";
 import type { RequestContext, ToolDef } from "@tulipfarm/tool-host";
 import { type ApiToolDefinition, toToolDef } from "@tulipfarm/tool-host";
 import { ToolRegistry } from "../broker/tool-adapter";
@@ -27,11 +23,8 @@ import { TASK_TOOLS, type TaskToolContext } from "../tasks/tools";
 
 /** Build the startup ToolRegistry; handlers close over services and receive RequestContext. */
 export function buildToolRegistry(services: {
-  memory?: MemoryService;
-  /** Durable relevance recall. Absent leaves `recall_memory` reporting itself unavailable. */
-  memoryRecall?: MemoryRecallService;
-  /** Procedural corrections and forget/erase. Absent leaves `remember_correction` unregistered. */
-  memoryLifecycle?: MemoryLifecycleService;
+  /** The user's Memory Document. Absent leaves `update_memory` unregistered. */
+  memoryDocuments?: MemoryDocumentRepo;
   kv?: KvService;
   knowledge?: KnowledgeService;
   resources?: ResourceServices;
@@ -59,24 +52,15 @@ export function buildToolRegistry(services: {
     }
   }
 
-  if (services.memory) {
-    const svc = services.memory;
-    const recall = services.memoryRecall;
-    const lifecycle = services.memoryLifecycle;
-    // Do not offer a Tool whose required service is absent.
-    const unavailable = new Set<ApiToolDefinition<ToolContext>>();
-    if (recall === undefined) unavailable.add(recallMemoryTool);
-    if (lifecycle === undefined) unavailable.add(rememberCorrectionTool);
-    registerFamily(
-      MEMORY_TOOLS.filter((t) => !unavailable.has(t)),
-      ({ userId, agentId }) => ({
-        userId,
-        service: svc,
-        agentId,
-        ...(recall === undefined ? {} : { recall }),
-        ...(lifecycle === undefined ? {} : { lifecycle }),
-      })
-    );
+  if (services.memoryDocuments) {
+    const documents = services.memoryDocuments;
+    registerFamily(MEMORY_DOCUMENT_TOOLS, ({ userId, agentId, runId }) => ({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      userId,
+      documents,
+      agentId,
+      runId,
+    }));
   }
 
   if (services.kv) {

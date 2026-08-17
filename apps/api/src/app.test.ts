@@ -1,16 +1,25 @@
 import type { FastifyInstance } from "fastify";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "./app";
+
+/**
+ * Pinned so the assertions below do not depend on the developer's `.env.local`: the allowed origin
+ * falls back through `CORS_ORIGIN`, `PUBLIC_URL` and `VITE_PORT`, so a checkout running its web app
+ * on any port but 4000 would otherwise fail this file.
+ */
+const ALLOWED_ORIGIN = "http://localhost:4000";
 
 describe("Fastify app", () => {
   let app: FastifyInstance;
 
   beforeEach(async () => {
+    vi.stubEnv("CORS_ORIGIN", ALLOWED_ORIGIN);
     app = await buildApp();
   });
 
   afterEach(async () => {
     await app.close();
+    vi.unstubAllEnvs();
   });
 
   it("GET /health returns 200 with status ok", async () => {
@@ -60,9 +69,9 @@ describe("Fastify app", () => {
     const res = await app.inject({
       method: "GET",
       url: "/health",
-      headers: { origin: "http://localhost:4000" },
+      headers: { origin: ALLOWED_ORIGIN },
     });
-    expect(res.headers["access-control-allow-origin"]).toBe("http://localhost:4000");
+    expect(res.headers["access-control-allow-origin"]).toBe(ALLOWED_ORIGIN);
   });
 
   it("does not reflect unknown origins in CORS header", async () => {

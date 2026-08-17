@@ -5,11 +5,7 @@ import type { GuardrailsService } from "@tulipfarm/agent-runtime";
 import type { KnowledgeService } from "@tulipfarm/knowledge";
 import type { KvService } from "@tulipfarm/kv";
 import type { LlmService } from "@tulipfarm/llm";
-import type {
-  MemoryExtractionService,
-  MemoryLifecycleService,
-  MemoryService,
-} from "@tulipfarm/memory";
+import type { MemoryDocumentRepo } from "@tulipfarm/memory";
 import type { BatchingLogSink } from "@tulipfarm/observability";
 import type { DurableInvocationGateway } from "@tulipfarm/run-kernel";
 import type { HookExecutor } from "@tulipfarm/sandbox";
@@ -41,6 +37,8 @@ import type { ConversationRepo } from "./chat/conversations";
 import type { MessageRepo } from "./chat/messages";
 import type { ChatRunCanceller } from "./chat/routes";
 import type { ConversationStore } from "./conversations/service";
+import type { CuratorReviewDeps } from "./curator/review-routes";
+import type { CuratorRouteDeps } from "./curator/routes";
 import type { FeedbackRepo } from "./feedback/repo";
 import type { FormsRoutesDeps } from "./forms/routes";
 import type { HookIngressDeps } from "./hooks/routes";
@@ -71,6 +69,8 @@ import type { SystemRoutesDeps } from "./system/routes";
 import type { TriggerInvokeDeps } from "./triggers/routes";
 
 export interface AppOptions {
+  /** Backs the read-only Memory panel on `/settings/profile`. */
+  readonly memoryDocuments?: MemoryDocumentRepo;
   sessionStore?: SessionStore;
   userRepo?: UserRepo;
   userAdminRepo?: UserAdminRepo;
@@ -146,20 +146,17 @@ export interface AppOptions {
   domainEventEmitter?: EventEmitter;
   llmService?: LlmService;
   /**
-   * Kicks the pg-boss `task-reconcile` queue outside its 15-minute cron, so a Task-clearing change
-   * (e.g. auto-connecting a subscription LLM provider) reflects in the Companion within seconds
-   * instead of up to 15 minutes. Absent in tests/deployments with no pg-boss wired.
+   * Kicks the pg-boss `curator-sweep` queue outside its five-minute cron, so a Task-clearing
+   * change (e.g. auto-connecting a subscription LLM provider) reflects in the Companion within
+   * seconds instead of up to five minutes. Absent in tests/deployments with no pg-boss wired.
    */
-  triggerTaskReconcile?: () => Promise<void>;
+  triggerCuratorSweep?: () => Promise<void>;
   conversationRepo?: ConversationRepo;
   messageRepo?: MessageRepo;
   feedbackRepo?: FeedbackRepo;
   runEvents?: RunEventRouteDeps;
   runReplay?: RunReplayDeps;
-  memoryService?: MemoryService;
   taskStore?: TaskStore;
-  memoryExtractionService?: MemoryExtractionService;
-  memoryLifecycleService?: MemoryLifecycleService;
   kvService?: KvService;
   triggerInvoke?: TriggerInvokeDeps;
   forms?: FormsRoutesDeps;
@@ -211,6 +208,10 @@ export interface AppOptions {
    * principals only; PR 4 moves the implementations into the Worker and this surface goes away.
    */
   internalTurns?: InternalTurnRouteDeps;
+  curator?: CuratorRouteDeps;
+  /** The admin-facing shadow review surface. Separate from `curator` because that family is
+   *  service-only, and one field for both audiences is how a gate gets applied to the wrong one. */
+  curatorReview?: CuratorReviewDeps;
   /**
    * Datastore handle backing `/readyz`. Absent (tests, partial assemblies) means readiness reports
    * ok on process liveness alone.

@@ -37,13 +37,13 @@ change is indistinguishable from a semantic one.
 Treat a release as digest-affecting when it changes any Tool's `authorization.action` or the targets
 returned by a `targetsFor` derivation.
 
-The **effect-plane hardening release** does both. Known changes:
+The **effect-plane hardening release** does both. Known changes (the retired assertion
+engine's `delete_memory`, `recall_memory` and `remember_correction` are gone, so a digest naming
+one of them predates the Memory Document and cannot be reconciled — retire the ledger row):
 
 | Tool | Field | Before | After |
 | --- | --- | --- | --- |
-| `update_memory` | action / target | `memory.remember` / `memory:<key>` | `memory.service.remember` / `memory.service:<key>` |
-| `delete_memory` | action / target | `memory.forget` / `memory:<key>` | `memory.service.forget` / `memory.service:<key>` |
-| `remember_correction` | action / target | `memory.remember` / `memory:<subject>` | `memory.lifecycle.remember` / `memory.lifecycle:<subject>` |
+| `update_memory` | action / target | `memory.remember` / `memory:<key>` | `memory.document.write` / `memory.section:<section>` |
 | `resource_hooks_get` | action | `soul.resource_type.read` | `soul.resource_type.hooks.read` |
 | GitHub searches, `github_repository_list` | targets | `[]` | `github.installation:all-repositories` |
 | `soul_repo_push` | targets | `[]` | `soul.repo:entire-repository` |

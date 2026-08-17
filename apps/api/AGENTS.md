@@ -16,19 +16,20 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
 
 | Path | Owns |
 | --- | --- |
-| `src/app.ts`, `src/index.ts` | App composition, dependency wiring, boot lifecycle. |
+| `src/app.ts`, `src/index.ts` | App composition, dependency wiring, boot lifecycle. Per-feature wiring belongs in that feature's own `compose.ts`; both files are at their size cap. |
 | [`src/auth/`](src/auth/AGENTS.md) | Sessions, CSRF, passwords, users, invites, API tokens. |
 | [`src/identity/`](src/identity/AGENTS.md) | Principals, OIDC, step-up, API clients. |
 | `src/chat/`, `src/conversations/` | Chat routes, Turn persistence, durable stream handoff. |
 | `src/runs/` | Persisted Run event SSE, cursor resume, cancellation. |
 | `src/runtime/` | Durable invocation callers, Routine invocation resolution, Soul write gateway composition. |
-| `src/internal/` | Service-only Worker callbacks for Context, Tools, delivery, completion. |
+| `src/internal/` | Service-only Worker callbacks for Context, Tools, delivery, completion. `route-family.ts` registers the whole service-principal plane — put new internal families there, not in `app.ts`. |
+| `src/curator/` | The Curator's internal routes, the admin-only shadow review route, composition, and the `curator-sweep` schedule, and nothing else. Reasoning is `@tulipfarm/curator`, minting/pinning/revalidation is `@tulipfarm/curator-host`, tables are `packages/storage`, the model call is the Worker's. |
 | `src/tools/` | ToolRegistry, batch execution, truncation, declarative egress sync. |
 | `src/resources/`, `src/soul/` | Resource CRUD and Soul HTTP routes/Tools; domain logic lives in `@tulipfarm/soul`. |
 | `src/integrations/` | Manifest catalog, connect auth, install, post-connect hooks. |
 | `src/guardrails/` | Guardrail config loading and `soul.synced` reload wiring only. |
 | `src/knowledge/`, `src/knowledge-sources/` | Knowledge routes/Tools and ingestion API; repositories and OKF live in `@tulipfarm/knowledge`. |
-| `src/memory/`, `src/kv/`, `src/secrets/` | Memory Assertions, scoped KV, secret storage routes. |
+| `src/memory/`, `src/kv/`, `src/secrets/` | Memory Document composition, its read-only route and erasure; scoped KV; secret storage routes. |
 | `src/authz/` | `route-gate.ts` — the sole HTTP path to `decideEffectivePermission`; self-governed routes. |
 | `src/approvals/`, `src/broker/` | Approval routes and Tool effect dispatch composition. |
 | `src/tasks/` | Task routes, ranking. System-created human work items — no user-facing create route. |
@@ -82,6 +83,17 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
   and must ship `guardrailPolicy`; missing or invalid config falls back to `DEFAULT_GUARDRAILS`.
 - A Run-minting request must go through `DurableInvocationGateway.start()` with a real request
   Artifact. Never pass a `payloadRef` that names nothing.
+- The Curator's model call belongs to the Worker, never this process. `POST /internal/curator/*/effects`
+  accepts raw model output plus the `contextDigest` it was produced from, then reloads the pinned
+  inputs and re-derives every decision. A Worker-authored effect is not trusted input.
+- `curator:<kind>:<subject-kind>:<subject-id>` is a reserved Task dedupe namespace. `tasks/tools.ts`
+  rejects it from Agents so a Proposal's identity cannot be forged or resurrected from a Tool call.
+- `GET /curator/shadow` is admin-gated and user-facing, so it registers in `app.ts` — never in the
+  internal route family, which is service-only by contract. Disclosure is `projectShadowEffect`'s
+  decision, not the route's: a memory patch or Proposal goes out in full only to its own subject.
+- The Curator reports through `DOMAIN_EVENTS.CURATOR_OBSERVED` and never holds a `MetricsSink`.
+  `observability/events.ts` maps it to metrics. Emit no subject id: an operator dashboard must not
+  become a way to read who learned what. Reporting can never fail the work it describes.
 - Chat turns are persisted only through `ChatTurnSubmitter`; no turn executes in this process.
   Stopping a turn cancels its Run.
 - Routine invocations resolve only through `runtime/invocation-definitions.ts`; never fall back to

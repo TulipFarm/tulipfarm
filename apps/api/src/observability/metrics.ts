@@ -1,5 +1,7 @@
 /** Dependency-free OTLP metrics export with bounded labels and cumulative monotonic sums. */
 
+import type { CuratorObservedPayload } from "@tulipfarm/storage";
+
 export interface LlmCallMetric {
   model: string;
   provider: string | null;
@@ -27,6 +29,7 @@ export interface MetricsSink {
     delivery?: string;
     validationPaths: readonly string[];
   }): void;
+  recordCurator?(d: CuratorObservedPayload): void;
 }
 
 type LabelSet = Record<string, string>;
@@ -117,9 +120,14 @@ export class OtlpMetricsExporter implements MetricsSink {
     surface_validation_total: new Counter(),
     surface_interaction_total: new Counter(),
     surface_delivery_total: new Counter(),
+    curator_stages_total: new Counter(),
+    curator_effects_total: new Counter(),
+    curator_rejections_total: new Counter(),
   };
   private readonly histograms: Record<string, Histogram> = {
     soul_publication_latency_ms: new Histogram(),
+    curator_backlog_age_seconds: new Histogram(),
+    curator_document_bytes: new Histogram(),
   };
   private timer: ReturnType<typeof setInterval> | null = null;
   private readonly startUnixNano: string;
@@ -192,6 +200,29 @@ export class OtlpMetricsExporter implements MetricsSink {
     }
     if (d.delivery) {
       this.counters.surface_delivery_total.add({ ...labels, status: d.delivery });
+    }
+  }
+
+  recordCurator(d: CuratorObservedPayload): void {
+    const scope = d.scope ?? "unknown";
+    this.counters.curator_stages_total.add(
+      { stage: d.stage, scope, outcome: d.outcome },
+      d.count ?? 1
+    );
+    // Separate series from the stage counter: a settlement that kept nothing and one that never
+    // ran are very different alerts, and one counter would make them look identical.
+    if (d.reason) this.counters.curator_rejections_total.add({ scope, reason: d.reason });
+    if (d.recorded) {
+      this.counters.curator_effects_total.add({ scope, state: "recorded" }, d.recorded);
+    }
+    if (d.rejected) {
+      this.counters.curator_effects_total.add({ scope, state: "rejected" }, d.rejected);
+    }
+    if (d.backlogAgeSeconds !== undefined) {
+      this.histograms.curator_backlog_age_seconds.record({ scope }, d.backlogAgeSeconds);
+    }
+    if (d.documentBytes !== undefined) {
+      this.histograms.curator_document_bytes.record({ scope }, d.documentBytes);
     }
   }
 

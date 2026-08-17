@@ -5,7 +5,7 @@ import { PromptField } from "~/components/onboarding/prompt-field";
 import { TulipGrowth, type TulipStage } from "~/components/onboarding/tulip-growth";
 import { Button } from "~/components/ui/button";
 import { ApiError } from "~/lib/api";
-import { completeSetup, getSetupStatus, setupAdmin } from "~/lib/setup";
+import { completeSetup, getSetupStatus, setupAdmin, setupBusiness } from "~/lib/setup";
 import { cn } from "~/lib/utils";
 
 export const meta: MetaFunction = () => [{ title: "Setup · tulipfarm" }];
@@ -21,7 +21,7 @@ export async function clientLoader() {
 // drops to the 36px control height the rest of the app uses.
 const controlClass = "h-11 text-base sm:h-9 sm:text-sm";
 
-type Question = 0 | 1 | 2;
+type Question = 0 | 1 | 2 | 3;
 
 const QUESTIONS: readonly {
   label: string;
@@ -42,7 +42,29 @@ const QUESTIONS: readonly {
     type: "password",
     autoComplete: "new-password",
   },
+  {
+    label: "What's your business called?",
+    hint: "Agents use this name when they speak for you.",
+    type: "text",
+    autoComplete: "organization",
+  },
 ];
+
+const LAST_QUESTION: Question = 3;
+
+/**
+ * Which question owns a failed submit. Once the admin exists only the business step can still
+ * fail, and its 400 carries no field path — so the admin-side path mapping would misread the
+ * business route's own `name` field as the admin's.
+ */
+function questionForError(err: unknown, adminExists: boolean): Question | null {
+  if (adminExists) return LAST_QUESTION;
+  if (!(err instanceof ApiError)) return null;
+  if (err.path === "name") return 0;
+  if (err.path === "email") return 1;
+  if (err.path === "password") return 2;
+  return null;
+}
 
 function ErrorAlert({ message }: { message: string }) {
   return (
@@ -62,20 +84,25 @@ export default function SetupRoute() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [businessName, setBusinessName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Survives a failed submit: the admin route rejects a second call with 403, so a retry after
+  // the business step failed must not replay it.
+  const adminExists = useRef(false);
 
-  // Stage mirrors how many of the three answers are already committed — the tulip's growth is the
-  // question index itself while an answer is being typed, and only reaches 3 once setup finishes.
+  // Stage mirrors how many answers are already committed. The tulip has four states for four
+  // questions, so it blooms on the final question and holds that through submission.
   const stage: TulipStage = busy ? 3 : question;
 
-  const values = [name, email, password];
+  const values = [name, email, password, businessName];
   const setValue = (v: string) => {
     if (question === 0) setName(v);
     else if (question === 1) setEmail(v);
-    else setPassword(v);
+    else if (question === 2) setPassword(v);
+    else setBusinessName(v);
   };
 
   const goTo = (next: Question) => {
@@ -91,26 +118,22 @@ export default function SetupRoute() {
     setBusy(true);
     setError(null);
     try {
-      await setupAdmin(name.trim(), email.trim(), password);
+      if (!adminExists.current) {
+        await setupAdmin(name.trim(), email.trim(), password);
+        adminExists.current = true;
+      }
+      // The admin call issues the session cookie that this step's `wizardStep` guard requires,
+      // so it can only run second.
+      await setupBusiness(businessName.trim(), "", "");
       await completeSetup();
       navigate("/", { replace: true });
     } catch (err) {
       setBusy(false);
       const message =
         err instanceof ApiError ? err.message : "Setup failed — is the API reachable?";
-      // A 422 names the offending field — rewind to the question that owns it.
-      const owner =
-        err instanceof ApiError
-          ? err.path === "email"
-            ? 1
-            : err.path === "password"
-              ? 2
-              : err.path === "name"
-                ? 0
-                : null
-          : null;
+      const owner = questionForError(err, adminExists.current);
       if (owner !== null && owner !== question) {
-        setQuestion(owner as Question);
+        setQuestion(owner);
       }
       setError(message);
       headingRef.current?.focus();
@@ -120,7 +143,7 @@ export default function SetupRoute() {
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
-    if (question < 2) {
+    if (question < LAST_QUESTION) {
       goTo((question + 1) as Question);
     } else {
       void finish();
@@ -134,7 +157,7 @@ export default function SetupRoute() {
     <main className="flex min-h-svh flex-col items-center justify-center gap-10 px-6 py-12">
       <TulipGrowth stage={stage} />
       <p role="status" className="sr-only">
-        {Math.min(question, 3)} of 3 answered
+        {question} of 4 answered
       </p>
 
       <div className="flex w-full max-w-sm flex-col gap-6">
@@ -180,9 +203,9 @@ export default function SetupRoute() {
               {busy ? (
                 <>
                   <Loader2 aria-hidden className="size-4 motion-safe:animate-spin" />
-                  Creating account…
+                  Setting things up…
                 </>
-              ) : question === 2 ? (
+              ) : question === LAST_QUESTION ? (
                 "Finish"
               ) : (
                 "Continue"

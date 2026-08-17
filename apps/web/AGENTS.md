@@ -20,6 +20,7 @@ client data loading, schema-driven resource UI, and browser rendering of Surface
 | `app/routes/` | Remix SPA routes under `_app`; Chat is `/`. |
 | `app/components/` | App-local layout, state, resource, markdown, chat, and Surface components. |
 | `app/components/design-guide/` | Section groups and shared wrappers for the development-only `/design-guide` route. |
+| `app/components/settings/` | Panels mounted by `_app.settings.*` routes; the Memory panel is read-only by contract. |
 | `app/components/farm/` | The `/farm` perspective tulip field canvas and its season/legend strips. |
 | `app/components/ui/` | Vendored shadcn primitives for this app only. |
 | `app/lib/api.ts` | API client with cookies, CSRF header, optional bearer token, `ApiError`. |

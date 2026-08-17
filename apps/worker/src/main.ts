@@ -35,6 +35,7 @@ import {
   FileSystemBlobPort,
   IntegrationStore,
   KillSwitchRepo,
+  listUsersWithDueWork,
   RunEventStore,
   RunLoopCheckpointStore,
   RunStateConcurrencyStore,
@@ -47,6 +48,8 @@ import {
 import { PgEffectStore } from "@tulipfarm/tool-broker";
 import { config as loadEnv } from "dotenv";
 import { loadConfig, REQUIRED_SCHEMA_VERSION, type WorkerConfig } from "./config";
+import { CURATOR_RUN_SOURCE, createCuratorExecutor } from "./curator/executor";
+import { sweepCurator } from "./curator/sweep";
 import { resolveDataDir, waitForDataDirEnv } from "./data-dir";
 import { connectPg, transactionPort } from "./db";
 import { DeliveryTargetRegistry } from "./delivery";
@@ -199,6 +202,13 @@ export async function main(): Promise<void> {
         businessId: config.businessId,
         taskStore: new TaskRepo(transactions),
         taskSignals: new TaskSignalsGatherer(turnHost),
+        curatorSweep: () =>
+          sweepCurator({
+            businessId: config.businessId,
+            backlog: (input) => listUsersWithDueWork(pool, input),
+            api: internalApi,
+            log: logger,
+          }),
         bundles: new PgBundleStore(transactions),
       })
     : undefined;
@@ -349,6 +359,16 @@ export async function main(): Promise<void> {
     log: logger,
   });
   executors.register(CHAT_RUN_SOURCE, chatExecutor);
+
+  executors.register(
+    CURATOR_RUN_SOURCE,
+    createCuratorExecutor({
+      api: internalApi,
+      models: { model: (selector, requirements) => llm.model(selector, requirements) },
+      artifacts: artifactService,
+      log: logger,
+    })
+  );
 
   executors.register(
     INTEGRATION_RUN_SOURCE,

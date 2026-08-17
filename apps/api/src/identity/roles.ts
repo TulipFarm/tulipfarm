@@ -55,11 +55,6 @@ export const ADMIN_ONLY_SURFACES: readonly {
   { type: "knowledge_source", actions: ["*"], enforcedIn: "knowledge/routes.ts" },
   { type: "kv_system", actions: ["*"], enforcedIn: "kv/routes.ts" },
   { type: "setup", actions: ["*"], enforcedIn: "setup/routes.ts" },
-  {
-    type: "onboarding",
-    actions: ["onboarding.quest.answer"],
-    enforcedIn: "onboarding/routes.ts",
-  },
   { type: "operations", actions: ["*"], enforcedIn: "admin/runtime.ts; index.ts" },
   /** Arming the effect-plane emergency stop halts other people's work, so it is never self-service. */
   {
@@ -68,6 +63,12 @@ export const ADMIN_ONLY_SURFACES: readonly {
     enforcedIn: "kill-switches/routes.ts",
   },
   { type: "audit", actions: ["*"], enforcedIn: "audit/routes.ts" },
+  /**
+   * Shadow review discloses what the Curator inferred about people. The route withholds another
+   * user's memory patches and Proposals from every reader, so this gate decides who sees the
+   * counts and the business-bound output, not who can read a colleague's document.
+   */
+  { type: "curator", actions: ["curator.review"], enforcedIn: "curator/review-routes.ts" },
   { type: "soul.business_profile", actions: ["*"], enforcedIn: "soul/routes.ts" },
   /**
    * The Soul git remote decides where the whole business's configuration is pushed, so re-pointing
@@ -150,7 +151,7 @@ export const MEMBER_ALLOWED_SURFACES: readonly {
   {
     type: "platform.memory",
     actions: ["*"],
-    enforcedIn: "memory/routes.ts; packages/memory/src/tools.ts",
+    enforcedIn: "memory/document-routes.ts; packages/memory/src/document/tool.ts",
   },
   { type: "onboarding", actions: ["*"], enforcedIn: "onboarding/routes.ts" },
   { type: "preference", actions: ["*"], enforcedIn: "preferences/routes.ts" },

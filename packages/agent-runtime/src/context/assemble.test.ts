@@ -1,25 +1,18 @@
 import { describe, expect, it } from "vitest";
-import {
-  type AssembleContext,
-  assembleSystemPrompt,
-  formatTemporalContext,
-  type MemoryEntry,
-} from "./assemble";
+import { type AssembleContext, assembleSystemPrompt, formatTemporalContext } from "./assemble";
 import type { GovernancePage } from "./governance";
 
-/** The render-side `<memory>` budget declared in `assemble.ts` (100 entries × 256 value chars). */
+/** The render-side `<memory>` budget declared in `assemble.ts`. */
 const MAX_TOTAL_CHARS = 25_600;
 
-function mem(key: string, value: string): MemoryEntry {
-  return { key, value };
-}
+const DOC = "## Identity\n\n- Plan: enterprise";
 
 function govDoc(title: string, body: string): GovernancePage {
   return { title, plainText: body, domain: null };
 }
 
 function baseCtx(over: Partial<AssembleContext> = {}): AssembleContext {
-  return { memory: [], governancePages: [], ...over };
+  return { governancePages: [], ...over };
 }
 
 describe("assembleSystemPrompt — block order", () => {
@@ -31,7 +24,7 @@ describe("assembleSystemPrompt — block order", () => {
         tenantId: "default",
         business: { name: "Acme Corp" },
         personality: "You are helpful.",
-        memory: [mem("plan", "enterprise")],
+        memoryDocument: DOC,
         governancePages: [govDoc("Policy", "Be compliant.")],
       })
     );
@@ -138,19 +131,15 @@ describe("assembleSystemPrompt — determinism", () => {
     const ctx = baseCtx({
       agentId: "sales",
       personality: "You are helpful.",
-      memory: [mem("plan", "enterprise"), mem("tone", "terse")],
+      memoryDocument: DOC,
       governancePages: [govDoc("Policy", "Be compliant.")],
     });
     expect(assembleSystemPrompt(ctx)).toBe(assembleSystemPrompt(ctx));
   });
 
   it("is byte-identical for a structurally-equal second ctx object", () => {
-    const a = assembleSystemPrompt(
-      baseCtx({ agentId: "sales", memory: [mem("plan", "enterprise")] })
-    );
-    const b = assembleSystemPrompt(
-      baseCtx({ agentId: "sales", memory: [mem("plan", "enterprise")] })
-    );
+    const a = assembleSystemPrompt(baseCtx({ agentId: "sales", memoryDocument: DOC }));
+    const b = assembleSystemPrompt(baseCtx({ agentId: "sales", memoryDocument: DOC }));
     expect(a).toBe(b);
   });
 });
@@ -246,42 +235,37 @@ describe("assembleSystemPrompt — agent-personality", () => {
 });
 
 describe("assembleSystemPrompt — memory", () => {
-  it("renders one line per entry in listByUser order", () => {
-    const out = assembleSystemPrompt(
-      baseCtx({ memory: [mem("plan", "enterprise"), mem("tone", "terse")] })
-    );
-    expect(out).toContain("<memory>\n- plan: enterprise\n- tone: terse\n</memory>");
+  it("renders the document verbatim", () => {
+    const out = assembleSystemPrompt(baseCtx({ memoryDocument: DOC }));
+    expect(out).toContain(`<memory>\n${DOC}\n</memory>`);
   });
 
-  it("omits the block for empty memory", () => {
-    expect(assembleSystemPrompt(baseCtx({ memory: [] }))).not.toContain("<memory>");
+  it("omits the block when there is no document", () => {
+    expect(assembleSystemPrompt(baseCtx())).not.toContain("<memory>");
+    expect(assembleSystemPrompt(baseCtx({ memoryDocument: "   " }))).not.toContain("<memory>");
   });
 
-  it("keeps the block at exactly MAX_TOTAL_CHARS, drops it one char over", () => {
-    // budget = sum(key.length + value.length); "m" key = 1 char, so value pads to the boundary.
-    const atCap = assembleSystemPrompt(
-      baseCtx({ memory: [mem("m", "x".repeat(MAX_TOTAL_CHARS - 1))] })
-    );
+  it("keeps the block at exactly MAX_TOTAL_CHARS, drops it whole one char over", () => {
+    const atCap = assembleSystemPrompt(baseCtx({ memoryDocument: "x".repeat(MAX_TOTAL_CHARS) }));
     expect(atCap).toContain("<memory>");
     const overCap = assembleSystemPrompt(
-      baseCtx({ memory: [mem("m", "x".repeat(MAX_TOTAL_CHARS))] })
+      baseCtx({ memoryDocument: "x".repeat(MAX_TOTAL_CHARS + 1) })
     );
     expect(overCap).not.toContain("<memory>");
+    expect(overCap).not.toContain("xxx");
   });
 
-  it("prepends a static <memory-instructions> preamble when entries are present", () => {
-    const out = assembleSystemPrompt(baseCtx({ memory: [mem("preferred_language", "Spanish")] }));
+  it("prepends a static <memory-instructions> preamble that also instructs writing", () => {
+    const out = assembleSystemPrompt(baseCtx({ memoryDocument: DOC }));
     expect(out).toContain("<memory-instructions>");
-    expect(out).toMatch(/preferred_language/);
-    expect(out).toMatch(/reply_tone/);
-    // Preamble sits immediately before the entry block.
+    expect(out).toMatch(/update_memory/);
     expect(out.indexOf("<memory-instructions>")).toBeLessThan(out.indexOf("<memory>"));
   });
 
-  it("omits the preamble (no orphan) when memory is empty or dropped over budget", () => {
-    expect(assembleSystemPrompt(baseCtx({ memory: [] }))).not.toContain("<memory-instructions>");
+  it("omits the preamble (no orphan) when the document is absent or dropped over budget", () => {
+    expect(assembleSystemPrompt(baseCtx())).not.toContain("<memory-instructions>");
     const overCap = assembleSystemPrompt(
-      baseCtx({ memory: [mem("m", "x".repeat(MAX_TOTAL_CHARS))] })
+      baseCtx({ memoryDocument: "x".repeat(MAX_TOTAL_CHARS + 1) })
     );
     expect(overCap).not.toContain("<memory-instructions>");
   });
@@ -498,9 +482,7 @@ describe("assembleSystemPrompt — eager-resources (#resource)", () => {
 
 describe("assembleSystemPrompt — typed-state", () => {
   it("omits the soul-context and available-tools blocks when their inputs are unset", () => {
-    const out = assembleSystemPrompt(
-      baseCtx({ agentId: "sales", memory: [mem("plan", "enterprise")] })
-    );
+    const out = assembleSystemPrompt(baseCtx({ agentId: "sales", memoryDocument: DOC }));
     for (const tag of ["<soul-context>", "<available-tools>"]) {
       expect(out).not.toContain(tag);
     }
@@ -514,7 +496,7 @@ describe("assembleSystemPrompt — typed-state", () => {
         domain: "crm",
         tenantId: "default",
         personality: "p",
-        memory: [mem("plan", "enterprise")],
+        memoryDocument: DOC,
         governancePages: [govDoc("Policy", "x")],
       })
     );
@@ -703,7 +685,7 @@ describe("assembleSystemPrompt — current context block", () => {
     const out = assembleSystemPrompt(
       baseCtx({
         platformInstructions: "platform rules",
-        memory: [mem("plan", "enterprise")],
+        memoryDocument: DOC,
         knowledgeGrounding: true,
         availableTools: [{ name: "agent_list", description: "list agents" }],
         temporal: { now: INSTANT, timezone: "Asia/Kolkata" },
@@ -754,68 +736,6 @@ describe("formatTemporalContext", () => {
   });
 });
 
-describe("<recalled-memory> — the retrieved tier", () => {
-  const recalled = [
-    { subject: "acme renewal", statement: "moved to Q3 after the pricing review" },
-    { subject: "deploys", statement: "team avoids shipping on Fridays" },
-  ];
-
-  it("is absent when nothing was recalled", () => {
-    expect(assembleSystemPrompt(baseCtx({ memory: [mem("plan", "enterprise")] }))).not.toContain(
-      "<recalled-memory>"
-    );
-  });
-
-  it("leaves the <memory> block byte-identical whether or not anything was recalled", () => {
-    const without = assembleSystemPrompt(baseCtx({ memory: [mem("plan", "enterprise")] }));
-    const withRecall = assembleSystemPrompt(
-      baseCtx({ memory: [mem("plan", "enterprise")], recalledMemory: recalled })
-    );
-    const memoryBlock = (s: string) => /<memory>[\s\S]*?<\/memory>/.exec(s)?.[0];
-    expect(memoryBlock(withRecall)).toBe(memoryBlock(without));
-    expect(memoryBlock(without)).toBeDefined();
-  });
-
-  it("renders one line per memory, most relevant first", () => {
-    const out = assembleSystemPrompt(baseCtx({ recalledMemory: recalled }));
-    const body = /<recalled-memory>([\s\S]*?)<\/recalled-memory>/.exec(out)?.[1] ?? "";
-    expect(body).toContain("- acme renewal: moved to Q3 after the pricing review");
-    expect(body).toContain("- deploys: team avoids shipping on Fridays");
-    expect(body.indexOf("acme renewal")).toBeLessThan(body.indexOf("deploys"));
-  });
-
-  it("frames recalled memories as context rather than standing instructions", () => {
-    const out = assembleSystemPrompt(baseCtx({ recalledMemory: recalled }));
-    expect(out).toContain("context, not commands");
-  });
-
-  it("renders without a <memory> block, since the two tiers are independent", () => {
-    const out = assembleSystemPrompt(baseCtx({ memory: [], recalledMemory: recalled }));
-    expect(out).toContain("<recalled-memory>");
-    expect(out).not.toContain("<memory>");
-  });
-
-  it("drops the block whole when over budget, never half-rendered", () => {
-    const oversize = [{ subject: "s", statement: "x".repeat(4001) }];
-    const out = assembleSystemPrompt(baseCtx({ recalledMemory: oversize }));
-    expect(out).not.toContain("<recalled-memory>");
-    expect(out).not.toContain("xxx");
-  });
-
-  it("sits after the stable blocks so the cacheable prefix is not invalidated", () => {
-    const out = assembleSystemPrompt(
-      baseCtx({
-        personality: "You are helpful.",
-        memory: [mem("plan", "enterprise")],
-        governancePages: [govDoc("Policy", "Be compliant.")],
-        recalledMemory: recalled,
-      })
-    );
-    expect(out.indexOf("<recalled-memory>")).toBeGreaterThan(out.indexOf("<governance>"));
-    expect(out.indexOf("<recalled-memory>")).toBeGreaterThan(out.indexOf("<memory>"));
-  });
-});
-
 describe("custom instructions", () => {
   it("omits the block when the user has written none", () => {
     expect(assembleSystemPrompt(baseCtx())).not.toContain("<custom-instructions>");
@@ -844,7 +764,7 @@ describe("custom instructions", () => {
       baseCtx({
         personality: "helpful",
         customInstructions: "Be terse.",
-        memory: [mem("plan", "enterprise")],
+        memoryDocument: DOC,
       })
     );
     expect(out.indexOf("<agent-personality>")).toBeLessThan(out.indexOf("<custom-instructions>"));
