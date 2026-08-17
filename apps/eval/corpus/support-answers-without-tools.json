@@ -5,29 +5,73 @@
   "context": {
     "agentId": "support",
     "customInstructions": "Answer opening-hours questions directly. Do not call a tool for them.",
-    "memory": [],
+    "memory": [
+      {
+        "key": "saturday_hours",
+        "value": "Opens at 9am on Saturdays."
+      }
+    ],
     "governancePages": [],
-    "business": { "name": "Tulip Supply Co", "description": "Wholesale bulbs." }
+    "business": {
+      "name": "Tulip Supply Co",
+      "description": "Wholesale bulbs."
+    }
   },
-  "input": [{ "role": "user", "content": "When do you open on Saturdays?" }],
+  "input": [
+    {
+      "role": "user",
+      "content": "When do you open on Saturdays?"
+    }
+  ],
   "tools": [
     {
       "name": "lookup_ticket",
       "description": "Fetch a ticket by id.",
       "inputSchema": {
         "type": "object",
-        "properties": { "ticketId": { "type": "string" } },
+        "properties": {
+          "ticketId": {
+            "type": "string"
+          }
+        },
         "required": ["ticketId"]
       }
     }
   ],
-  "script": [{ "kind": "text", "text": "We open at 9am on Saturdays." }],
+  "script": [
+    {
+      "kind": "text",
+      "text": "We open at 9am on Saturdays."
+    }
+  ],
   "expect": [
-    { "kind": "prompt_contains", "text": "Tulip Supply Co" },
-    { "kind": "prompt_omits", "text": "agentId: triage" },
-    { "kind": "tool_not_called", "name": "lookup_ticket" },
-    { "kind": "tool_call_count", "count": 0 },
-    { "kind": "output_matches", "pattern": "9\\s*am" },
-    { "kind": "loop_status", "status": "completed" }
+    {
+      "kind": "prompt_contains",
+      "text": "Tulip Supply Co"
+    },
+    {
+      "kind": "prompt_contains",
+      "text": "Opens at 9am on Saturdays."
+    },
+    {
+      "kind": "prompt_omits",
+      "text": "agentId: triage"
+    },
+    {
+      "kind": "tool_not_called",
+      "name": "lookup_ticket"
+    },
+    {
+      "kind": "tool_call_count",
+      "count": 0
+    },
+    {
+      "kind": "output_matches",
+      "pattern": "9\\s*am"
+    },
+    {
+      "kind": "loop_status",
+      "status": "completed"
+    }
   ]
 }
