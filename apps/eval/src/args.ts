@@ -15,6 +15,7 @@ export const FLAGS = [
   "--max-tokens-per-trial",
   "--baseline",
   "--promote",
+  "--repeat",
   "--save",
   "--save-dir",
 ] as const;

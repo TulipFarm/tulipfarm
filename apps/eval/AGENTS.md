@@ -245,6 +245,19 @@ credential does not arrive truncated: the prompt hangs, with nothing to indicate
 `stty -g` state is saved and restored, including on Ctrl-C. Abort with Ctrl-C, not Ctrl-D: with the
 line editor off the kernel no longer treats Ctrl-D as end-of-file.
 
+## The noise floor
+
+There is no temperature, top-p or seed control anywhere in the model invocation path, so a Sweep
+cannot run at temperature 0 and two identical Sweeps are not guaranteed to agree. `--repeat <n>`
+runs every Case `n` times and records which Cases disagreed **with themselves**.
+
+A delta then damps against the Baseline's own recorded floor, per Case rather than by count: a
+movement on a Case the Baseline saw flap is `NO SIGNAL`, and a movement on one that never flapped
+is a regression however many others flapped. A Baseline promoted without `--repeat` records no
+floor, damps nothing, and says so on every delta.
+
+Promote with it: `pnpm eval:sonnet --repeat 5 --promote`.
+
 ## The CI door
 
 `.github/workflows/eval.yml` is the second way to start a Sweep, for a release rather than for a

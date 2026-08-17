@@ -14,6 +14,7 @@ import type { Corpus } from "./corpus.ts";
 import { type EvalSoul, soulContext } from "./eval-soul.ts";
 import type { EvalGuardrails, GuardrailDecision } from "./guardrails.ts";
 import { turnGuardrails } from "./guardrails.ts";
+import { measureNoise, type NoiseFloor } from "./noise.ts";
 import type { SweepProgress } from "./progress.ts";
 import { DEFAULT_RETRY, type RetryPolicy, withRetry } from "./retry.ts";
 import { type ExpectationResult, type Observation, scoreCase } from "./scorer.ts";
@@ -100,6 +101,8 @@ export interface Scorecard {
    * it omitted behind a permanent "not comparable".
    */
   readonly corpusCases: number;
+  /** Run-to-run variance, when this Sweep repeated its Corpus enough to measure any. */
+  readonly noise?: NoiseFloor;
 }
 
 export interface SweepOptions {
@@ -123,6 +126,13 @@ export interface SweepOptions {
    */
   readonly maxTokens?: number;
   readonly retry?: RetryPolicy;
+  /**
+   * Run every Case this many extra times over what it declares, to measure the noise floor.
+   *
+   * Multiplies rather than replaces, so a Case that already declares Trials for its own reasons
+   * keeps them. A repeat of 1 is the ordinary Sweep.
+   */
+  readonly repeat?: number;
   /**
    * Called as the Sweep advances, so a run against a real seat is not several silent minutes.
    *
@@ -451,8 +461,13 @@ export function selectCases(
   return caseFilter === undefined ? cases : cases.filter((c) => c.id === caseFilter);
 }
 
-export function plannedTrials(cases: readonly EvalCase[]): number {
-  return cases.reduce((n, c) => n + Math.max(1, c.trials ?? 1), 0);
+export function plannedTrials(cases: readonly EvalCase[], repeat = 1): number {
+  return cases.reduce((n, c) => n + trialCount(c, repeat), 0);
+}
+
+/** How many Trials one Case runs, once its own declaration and the Sweep's repeat are combined. */
+export function trialCount(evalCase: EvalCase, repeat = 1): number {
+  return Math.max(1, evalCase.trials ?? 1) * Math.max(1, repeat);
 }
 
 export async function runSweep(options: SweepOptions): Promise<Scorecard> {
@@ -464,7 +479,7 @@ export async function runSweep(options: SweepOptions): Promise<Scorecard> {
     throw new Error(`no Eval Case matches "${options.caseFilter}"`);
   }
 
-  const planned = plannedTrials(selected);
+  const planned = plannedTrials(selected, options.repeat);
   const retryPolicy = options.retry ?? DEFAULT_RETRY;
   const trials: TrialResult[] = [];
   let spend = NO_SPEND;
@@ -474,7 +489,7 @@ export async function runSweep(options: SweepOptions): Promise<Scorecard> {
   report({ kind: "sweep-start", modelId: options.model.id, cases: selected.length, planned });
 
   outer: for (const evalCase of selected) {
-    const count = Math.max(1, evalCase.trials ?? 1);
+    const count = trialCount(evalCase, options.repeat);
     for (let trial = 1; trial <= count; trial += 1) {
       // Checked before launching rather than after: cost is only knowable once a call is made,
       // so the last Trial before the ceiling is allowed to exceed it and the next is not started.
@@ -506,7 +521,7 @@ export async function runSweep(options: SweepOptions): Promise<Scorecard> {
 
   const version = options.model.reportedVersion?.();
 
-  return {
+  const card: Scorecard = {
     corpusHash: options.corpus.hash,
     modelId: options.model.id,
     ...(version === undefined ? {} : { modelVersion: version }),
@@ -523,4 +538,7 @@ export async function runSweep(options: SweepOptions): Promise<Scorecard> {
     skipped: planned - trials.length,
     corpusCases: options.corpus.cases.length,
   };
+
+  const noise = measureNoise(card);
+  return noise === undefined ? card : { ...card, noise };
 }

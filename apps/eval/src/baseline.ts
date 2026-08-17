@@ -1,3 +1,4 @@
+import type { NoiseFloor } from "./noise.ts";
 import type { Scorecard } from "./runner.ts";
 import { caseIdsOf, caseVerdict, scoreable, VERDICT, type Verdict } from "./verdict.ts";
 
@@ -12,7 +13,7 @@ import { caseIdsOf, caseVerdict, scoreable, VERDICT, type Verdict } from "./verd
  * or a vacuous one says nothing about the harness, and counting any of them as a regression would
  * make the delta report exactly the noise this framework exists to remove.
  */
-export type CaseChange = "fixed" | "regressed" | "unchanged" | "not-comparable";
+export type CaseChange = "fixed" | "regressed" | "unchanged" | "not-comparable" | "no-signal";
 
 export interface CaseDelta {
   readonly caseId: string;
@@ -29,6 +30,10 @@ export interface Delta {
   readonly cases: readonly CaseDelta[];
   readonly regressed: number;
   readonly fixed: number;
+  /** Cases that moved, on which the Baseline's own repeated Trials had already disagreed. */
+  readonly noSignal: number;
+  /** The floor this delta was damped against, when the Baseline recorded one. */
+  readonly floor?: NoiseFloor;
   readonly passedBefore: number;
   readonly passedAfter: number;
 }
@@ -44,10 +49,19 @@ export class BaselineMismatchError extends Error {
   }
 }
 
-function changeOf(before: Verdict, after: Verdict): CaseChange {
-  if (!scoreable(before) || !scoreable(after)) return "not-comparable";
-  if (before === after) return "unchanged";
-  return after === VERDICT.passed ? "fixed" : "regressed";
+/**
+ * A movement is only news on a Case that held still when nothing changed.
+ *
+ * The Baseline's own repeated Trials are the evidence. A Case that disagreed with itself there
+ * will disagree again, and reporting that as a regression would train a maintainer to ignore the
+ * report — which is strictly worse than not producing one. Damping is per Case rather than by
+ * count: a regression on a Case that never flapped is real however many others did.
+ */
+function changeOf(before: Verdict, after: Verdict, flapping: readonly string[], id: string) {
+  if (!scoreable(before) || !scoreable(after)) return "not-comparable" as const;
+  if (before === after) return "unchanged" as const;
+  if (flapping.includes(id)) return "no-signal" as const;
+  return after === VERDICT.passed ? ("fixed" as const) : ("regressed" as const);
 }
 
 /**
@@ -76,10 +90,11 @@ export function compareToBaseline(baseline: Scorecard, current: Scorecard): Delt
   const ids = [...caseIdsOf(baseline)];
   for (const id of caseIdsOf(current)) if (!ids.includes(id)) ids.push(id);
 
+  const flapping = baseline.noise?.flapping ?? [];
   const cases = ids.map((caseId): CaseDelta => {
     const before = caseVerdict(baseline, caseId);
     const after = caseVerdict(current, caseId);
-    return { caseId, change: changeOf(before, after), before, after };
+    return { caseId, change: changeOf(before, after, flapping, caseId), before, after };
   });
 
   return {
@@ -88,6 +103,8 @@ export function compareToBaseline(baseline: Scorecard, current: Scorecard): Delt
     cases,
     regressed: cases.filter((c) => c.change === "regressed").length,
     fixed: cases.filter((c) => c.change === "fixed").length,
+    noSignal: cases.filter((c) => c.change === "no-signal").length,
+    ...(baseline.noise === undefined ? {} : { floor: baseline.noise }),
     passedBefore: baseline.passed,
     passedAfter: current.passed,
   };

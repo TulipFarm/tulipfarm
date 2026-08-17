@@ -214,3 +214,34 @@ describe("runMatrix", () => {
     expect(matrix.runs[0]?.unavailable).toBeUndefined();
   });
 });
+
+describe("handing Sweep options to each model", () => {
+  it("forwards every knob it was given, so a new one cannot be silently dropped", async () => {
+    const seen: SweepOptions[] = [];
+
+    await runMatrix({
+      corpus: corpusOf([evalCase("a")]),
+      models: [binding("sonnet"), binding("luna")],
+      caseFilter: "a",
+      maxTokens: 99,
+      repeat: 4,
+      sweep: async (options) => {
+        seen.push(options);
+        return card("x");
+      },
+    });
+
+    // Asserted as a whole object rather than field by field: a check that names the fields would
+    // need editing to notice a field it does not name, which is exactly how `repeat` was lost.
+    for (const options of seen) {
+      expect({ ...options, model: undefined, corpus: undefined }).toEqual({
+        model: undefined,
+        corpus: undefined,
+        caseFilter: "a",
+        maxTokens: 99,
+        repeat: 4,
+      });
+    }
+    expect(seen).toHaveLength(2);
+  });
+});

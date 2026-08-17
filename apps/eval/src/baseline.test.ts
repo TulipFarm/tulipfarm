@@ -115,3 +115,48 @@ describe("compareToBaseline", () => {
     expect(delta.cases[0]).toMatchObject({ before: "PASS", after: "FAIL" });
   });
 });
+
+describe("damping a delta against the Baseline's noise floor", () => {
+  const fails = (id: string) => trial(id, { passed: false });
+  const withFloor = (base: Scorecard, flapping: string[]): Scorecard => ({
+    ...base,
+    noise: { repeats: 3, flapping, measured: flapping.length },
+  });
+
+  it("reports a movement on a Case the Baseline saw flap as no signal", () => {
+    const before = withFloor(card([trial("flappy")]), ["flappy"]);
+
+    const delta = compareToBaseline(before, card([fails("flappy")]));
+
+    expect(delta.cases[0]?.change).toBe("no-signal");
+    expect(delta.regressed).toBe(0);
+    expect(delta.noSignal).toBe(1);
+  });
+
+  it("still reports a regression on a Case that never flapped", () => {
+    const before = withFloor(card([trial("steady"), trial("flappy")]), ["flappy"]);
+
+    const delta = compareToBaseline(before, card([fails("steady"), fails("flappy")]));
+
+    expect(delta.regressed).toBe(1);
+    expect(delta.noSignal).toBe(1);
+    expect(delta.cases.find((c) => c.caseId === "steady")?.change).toBe("regressed");
+  });
+
+  it("damps nothing when the Baseline never measured a floor", () => {
+    const delta = compareToBaseline(card([trial("a")]), card([fails("a")]));
+
+    expect(delta.regressed).toBe(1);
+    expect(delta.noSignal).toBe(0);
+    expect(delta.floor).toBeUndefined();
+  });
+
+  it("damps a fix as readily as a regression, so noise cannot be claimed as progress", () => {
+    const before = withFloor(card([fails("flappy")]), ["flappy"]);
+
+    const delta = compareToBaseline(before, card([trial("flappy")]));
+
+    expect(delta.fixed).toBe(0);
+    expect(delta.noSignal).toBe(1);
+  });
+});

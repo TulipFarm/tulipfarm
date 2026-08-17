@@ -65,6 +65,17 @@ export function applyBaseline(card: Scorecard, options: BaselineOptions): Baseli
     lines.push("", `Saved  ${options.save}`);
   }
 
+  // Advisory, never a refusal: a Baseline with no floor is still a usable reference, it just
+  // cannot tell a real regression from the Corpus moving on its own. Refusing would leave a
+  // maintainer with no Baseline at all, which is strictly worse.
+  if (options.promote === true && card.noise === undefined) {
+    lines.push(
+      "",
+      "NOTE     this Sweep measured no noise floor, so deltas against it will damp nothing.",
+      "         Re-promote with --repeat <n> to record how much this Corpus moves on its own."
+    );
+  }
+
   const path = options.baseline ?? baselinePath(options.root, card.modelId);
 
   if (options.compare === true) {

@@ -1,6 +1,7 @@
 import { isDirty } from "./artifact.ts";
 import type { Delta } from "./baseline.ts";
 import type { Matrix } from "./matrix.ts";
+import type { NoiseFloor } from "./noise.ts";
 import type { Scorecard, TrialResult } from "./runner.ts";
 import { caseIdsOf, caseVerdict, scoreable, VERDICT } from "./verdict.ts";
 
@@ -67,6 +68,8 @@ export function renderScorecard(card: Scorecard): string {
       (card.skipped > 0 ? `, ${card.skipped} never run` : ""),
     spendLine(card)
   );
+  const floorLine = noiseLine(card.noise);
+  if (floorLine !== undefined) lines.push(floorLine);
   // An alias is all a subscription seat offers. Saying so keeps a Scorecard from implying the
   // vendor could not have moved the model between this Sweep and the one it is compared against.
   if (!card.modelDated) {
@@ -77,6 +80,25 @@ export function renderScorecard(card: Scorecard): string {
   if (card.abortedReason !== undefined) lines.push(`ABORTED  ${card.abortedReason}`);
   lines.push("");
   return lines.join("\n");
+}
+
+/**
+ * What the Sweep's own repeats revealed about how much it moves on its own.
+ *
+ * Printed beside the totals rather than buried, because it is the number that says how much of the
+ * rest of the Scorecard to believe.
+ */
+function noiseLine(floor: NoiseFloor | undefined): string | undefined {
+  if (floor === undefined) return undefined;
+  if (floor.repeats < 2) {
+    return `Noise    NOT MEASURED  at least one Case ran once, so the Corpus was not repeated`;
+  }
+  const over = `over ${floor.repeats} repeats of ${plural(floor.measured, "Case")}`;
+  if (floor.flapping.length === 0) return `Noise    0 Cases flapped ${over} — deltas are signal`;
+  return (
+    `Noise    ${plural(floor.flapping.length, "Case")} flapped ${over}: ` +
+    `${floor.flapping.join(", ")} — a move on these is not signal`
+  );
 }
 
 /** Case ids in first-seen order across every model, so an aborted Sweep still contributes its own. */
@@ -240,8 +262,26 @@ export function renderDelta(delta: Delta, baselineVersion: string): string {
       "  Neither is a verdict on the harness, so neither counts as a regression."
     );
   }
+  const damped = of("no-signal");
+  if (damped.length > 0) {
+    lines.push(
+      "",
+      `NO SIGNAL  ${plural(damped.length, "Case")}`,
+      ...damped.map(move),
+      "  The Baseline's own repeated Trials already disagreed on these, so this movement is",
+      "  inside the measured noise floor and is not counted as a change either way."
+    );
+  }
   if (regressed.length === 0 && fixed.length === 0) {
     lines.push("", "No change against the Baseline on any comparable Case.");
+  }
+  // A Baseline with no floor damps nothing. Saying so stops a clean delta from being read as
+  // evidence of stability when it is only evidence that stability was never measured.
+  if (delta.floor === undefined) {
+    lines.push(
+      "NOTE     Baseline recorded no noise floor, so nothing was damped. " +
+        "Promote one with --repeat."
+    );
   }
 
   lines.push("", `${delta.passedBefore} passed before, ${delta.passedAfter} passed after`);

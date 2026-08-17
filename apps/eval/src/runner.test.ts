@@ -529,3 +529,33 @@ describe("the scripted Tool dispatcher", () => {
     expect(seen.at(-1)).toContain("scripts no result for Tool");
   });
 });
+
+describe("repeating a Sweep to measure its noise floor", () => {
+  it("multiplies each Case's own Trials rather than replacing them", async () => {
+    const corpus = corpusOf([{ ...answering("a", "answer", []), trials: 2 }]);
+
+    const card = await runSweep({ corpus, model: scriptedBinding(), repeat: 3 });
+
+    expect(card.trials).toHaveLength(6);
+  });
+
+  it("records a floor of zero when every repeat of a Case agreed", async () => {
+    const corpus = corpusOf([
+      answering("a", "answer", [{ kind: "output_contains", text: "answer" }]),
+    ]);
+
+    const card = await runSweep({ corpus, model: scriptedBinding(), repeat: 4 });
+
+    expect(card.noise).toEqual({ repeats: 4, flapping: [], measured: 1 });
+  });
+
+  it("records no floor at all when the Sweep did not repeat", async () => {
+    const corpus = corpusOf([
+      answering("a", "answer", [{ kind: "output_contains", text: "answer" }]),
+    ]);
+
+    const card = await runSweep({ corpus, model: scriptedBinding() });
+
+    expect(card.noise).toBeUndefined();
+  });
+});

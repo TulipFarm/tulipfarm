@@ -32,6 +32,8 @@ Usage: pnpm eval [options]
                      model (apps/eval/baselines/<model>.json), and fail on a regression.
   --promote          Make this Sweep the Baseline for each model it measured. Never
                      automatic: a Baseline is a reference, so promoting is a decision.
+  --repeat <n>       Run every Case n times to measure the noise floor. Promote with it,
+                     so the Baseline records how much this Corpus moves on its own.
   --save <path>      Archive this Scorecard as JSON. One model only, since one path
                      cannot hold two.
   --save-dir <dir>   Archive every Scorecard this Sweep produced, as <dir>/<model>.json.
@@ -68,13 +70,15 @@ async function main(): Promise<number> {
   const maxSpendUsd = positive(flag(argv, "--max-spend"), "--max-spend");
   const fixedTokens = positive(flag(argv, "--max-tokens"), "--max-tokens");
   const perTrial = positive(flag(argv, "--max-tokens-per-trial"), "--max-tokens-per-trial");
+  const repeat = positive(flag(argv, "--repeat"), "--repeat");
   if (fixedTokens !== undefined && perTrial !== undefined) {
     throw new Error("--max-tokens and --max-tokens-per-trial set the same ceiling; pass one");
   }
   // Resolved against the Trials this Sweep will actually launch, so a `--case` run is bounded for
   // the one Case it measures rather than for a Corpus it is not going to touch.
   const maxTokens =
-    fixedTokens ?? (perTrial === undefined ? undefined : perTrial * plannedTrials(selected));
+    fixedTokens ??
+    (perTrial === undefined ? undefined : perTrial * plannedTrials(selected, repeat));
   const compare = present(argv, "--baseline");
   const promote = present(argv, "--promote");
   const baselineFile = flag(argv, "--baseline");
@@ -136,6 +140,7 @@ async function main(): Promise<number> {
     ...(caseFilter === undefined ? {} : { caseFilter }),
     ...(maxSpendUsd === undefined ? {} : { maxSpendUsd }),
     ...(maxTokens === undefined ? {} : { maxTokens }),
+    ...(repeat === undefined ? {} : { repeat }),
   });
 
   // One model is not a matrix, and a grid of one column reads as if a comparison were made.

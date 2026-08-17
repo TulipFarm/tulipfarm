@@ -25,24 +25,17 @@ export interface Matrix {
   readonly runs: readonly ModelRun[];
 }
 
-export interface MatrixOptions {
-  readonly corpus: Corpus;
+/**
+ * Every Sweep knob, plus the models to apply them to.
+ *
+ * Extends `SweepOptions` rather than restating it: the fields were listed twice and forwarded by
+ * hand, so `repeat` was added to the Sweep, accepted by the CLI, and silently dropped here — a
+ * Sweep that ran once while reporting it had repeated. Deriving the type makes the next such
+ * addition a compile error, and forwarding by rest spread makes it require no forwarding at all.
+ */
+export interface MatrixOptions extends Omit<SweepOptions, "model"> {
   /** Measured in the order given; never reordered by result. */
   readonly models: readonly ModelBinding[];
-  readonly caseFilter?: string;
-  /**
-   * Applied to each model separately, not across the Matrix.
-   *
-   * A budget shared across models would be spent by whichever ran first and would truncate the
-   * last one's Sweep. A partial Scorecard cannot be compared with a complete one, so a shared
-   * ceiling would quietly destroy the only comparison the Matrix exists to support.
-   */
-  readonly maxSpendUsd?: number;
-  readonly maxTokens?: number;
-  readonly retry?: RetryPolicy;
-  /** Passed to each Sweep in turn, so a long matrix reports which model is in flight. */
-  onProgress?(event: SweepProgress): void;
-  now?(): Date;
   /** Seam for tests; production always runs the real Sweep. */
   sweep?(options: SweepOptions): Promise<Scorecard>;
 }
@@ -71,22 +64,15 @@ function wholeModelFault(card: Scorecard): { unavailable: string } | undefined {
 
 export async function runMatrix(options: MatrixOptions): Promise<Matrix> {
   const now = options.now ?? (() => new Date());
+  const { models: _models, sweep: _sweep, ...tuning } = options;
   const sweep = options.sweep ?? runSweep;
   const started = now();
   const runs: ModelRun[] = [];
 
   for (const model of options.models) {
     try {
-      const card = await sweep({
-        corpus: options.corpus,
-        model,
-        ...(options.caseFilter === undefined ? {} : { caseFilter: options.caseFilter }),
-        ...(options.maxSpendUsd === undefined ? {} : { maxSpendUsd: options.maxSpendUsd }),
-        ...(options.maxTokens === undefined ? {} : { maxTokens: options.maxTokens }),
-        ...(options.retry === undefined ? {} : { retry: options.retry }),
-        ...(options.onProgress === undefined ? {} : { onProgress: options.onProgress }),
-        ...(options.now === undefined ? {} : { now: options.now }),
-      });
+      const card = await sweep({ ...tuning, model });
+
       const dead = wholeModelFault(card);
       runs.push(dead === undefined ? { modelId: model.id, card } : { modelId: model.id, ...dead });
     } catch (error) {
