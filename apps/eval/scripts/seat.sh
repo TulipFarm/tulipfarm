@@ -43,6 +43,36 @@ prompt_secret() {
   fi
 }
 
+# The Codex prompt takes either the JSON itself or a path to it.
+#
+# `read` keeps only the first line, so a pretty-printed auth.json pasted straight in arrives as a
+# lone "{" — which the vendor rejects with a bare 401 that says nothing about the paste. A path
+# always survives, and a truncated paste is named as one rather than sent.
+#
+# Sets CODEX_AUTH_JSON directly: inside `$(...)` an `exit` would only leave the subshell, and the
+# script would carry on with an empty credential.
+resolve_auth() {
+  case "$1" in
+    \{*\})
+      CODEX_AUTH_JSON=$1
+      ;;
+    \{*)
+      printf 'that credential is truncated — a multi-line paste keeps only its first line.\n' >&2
+      printf 'Give the path to auth.json instead, or paste it as a single line.\n' >&2
+      exit 1
+      ;;
+    *)
+      path=$1
+      case "$path" in "~/"*) path="$HOME/${path#\~/}" ;; esac
+      if [ ! -r "$path" ]; then
+        printf 'neither JSON nor a readable file: %s\n' "$path" >&2
+        exit 1
+      fi
+      CODEX_AUTH_JSON=$(cat "$path")
+      ;;
+  esac
+}
+
 collect() {
   case "$1" in
     sonnet)
@@ -53,18 +83,17 @@ collect() {
       export CLAUDE_CODE_OAUTH_TOKEN
       ;;
     luna)
-      # auth.json is a multi-line JSON document, not something anyone types — and `read` would keep
-      # only its first line, producing a credential the vendor rejects with a bare 401. Read the
-      # file the CLI wrote, and refuse outright rather than prompt for a paste that cannot work.
+      if [ -z "${CODEX_AUTH_JSON:-}" ] && [ -n "${CODEX_AUTH_FILE:-}" ]; then
+        CODEX_AUTH_JSON=$(cat "$CODEX_AUTH_FILE")
+      fi
       if [ -z "${CODEX_AUTH_JSON:-}" ]; then
         auth="${CODEX_HOME:-$HOME/.codex}/auth.json"
-        if [ ! -r "$auth" ]; then
-          printf 'no Codex credential: %s does not exist.\n' "$auth" >&2
-          printf 'Run `codex login` (needs a ChatGPT Plus/Pro/Business plan), then try again.\n' >&2
-          printf 'On another machine, set CODEX_AUTH_JSON to that file\047s contents instead.\n' >&2
-          exit 1
+        if [ -r "$auth" ]; then
+          CODEX_AUTH_JSON=$(cat "$auth")
+        else
+          prompt_secret CODEX_AUTH_JSON "Codex seat credential: paste auth.json as ONE line, or give the path to the file."
+          resolve_auth "$secret"
         fi
-        CODEX_AUTH_JSON=$(cat "$auth")
       fi
       export CODEX_AUTH_JSON
       ;;

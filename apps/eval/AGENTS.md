@@ -138,13 +138,20 @@ and `--model` refuses to run without one.
 ```bash
 pnpm eval                                    # scripted: free, deterministic, no credentials
 pnpm eval:sonnet                             # claude-code seat, prompts for the token
-pnpm eval:luna                               # codex seat, reads ~/.codex/auth.json (needs `codex login`)
+pnpm eval:luna                               # codex seat, reads ~/.codex/auth.json
 pnpm eval:matrix                             # both seats, same Corpus, side by side
 pnpm eval:sonnet --case support-answers-without-tools --max-tokens 5000
 ```
 
-`scripts/seat.sh` collects every named seat's credential up front, into its own environment, so it never enters your shell,
-your history, or a file. It defaults `--max-tokens` to 20000 and never overrides one you passed.
+`scripts/seat.sh` collects every named seat's credential up front, into its own environment, so it
+never enters your shell, your history, or a file. It defaults `--max-tokens` to 20000 and never
+overrides one you passed.
+
+Codex's credential is a JSON document. The script takes it from `$CODEX_AUTH_JSON`, then
+`$CODEX_AUTH_FILE`, then `${CODEX_HOME:-~/.codex}/auth.json`, and only then prompts — where it
+accepts **either** the JSON on one line **or** a path to the file. `read` keeps only the first line,
+so a pretty-printed paste arrives as a lone `{`; that is detected and named rather than sent to the
+vendor, which would reject it with a bare 401 that says nothing about the paste.
 
 A seat is one person's, so a public repo cannot hold it as a secret. Where a release Sweep runs
 is still open — see `.scratch/harness-eval/spec.md`.
