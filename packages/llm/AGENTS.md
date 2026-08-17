@@ -29,7 +29,12 @@ subscription-CLI model adapters.
 - API-keyed providers read `entry.api_key_ref`: `env://VAR` from env, else `secrets.get(ref)`.
 - Fallback hard failures propagate: auth, `404`, abort. `429`, `5xx`, timeout fall through.
 - Bad Subscription Provider credentials throw `LlmProviderError("model_authentication_failed")`.
-- CLI usage reports are running totals, not deltas; never sum them.
+- CLI usage reports are running totals, not deltas; never sum them. A turn's totals come from the
+  terminal `result` message where the CLI sends one: an `assistant` message carries the snapshot
+  taken before the model wrote, so its output count is a placeholder, not an answer. Per-message
+  snapshots remain the fallback for a turn cut short by a tool call, which never reaches a result.
+- A Subscription Provider is addressed by an alias. Where the CLI names the model it resolved to,
+  yield `model-version`; a caller otherwise cannot tell a vendor roll-forward from its own change.
 - Embedding failover is width-scoped: a standby may answer only if it declares the *same*
   `dimension` as the active provider. A different width writes vectors the next query can never
   match, and nothing errors.

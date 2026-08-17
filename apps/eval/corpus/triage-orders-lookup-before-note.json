@@ -1,0 +1,123 @@
+{
+  "id": "triage-orders-lookup-before-note",
+  "tier": "l2",
+  "agent": "triage",
+  "context": {
+    "customInstructions": "Look the ticket up first, then record what you found with add_note. Never write a note before the lookup returns.",
+    "governancePages": []
+  },
+  "input": [
+    {
+      "role": "user",
+      "content": "Check ticket 4821 and note its status on the ticket."
+    }
+  ],
+  "tools": [
+    {
+      "name": "lookup_ticket",
+      "description": "Fetch a ticket by id.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ticketId": {
+            "type": "string"
+          }
+        },
+        "required": ["ticketId"]
+      }
+    },
+    {
+      "name": "add_note",
+      "description": "Append a note to a ticket.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ticketId": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": ["ticketId", "note"]
+      }
+    }
+  ],
+  "toolResults": [
+    {
+      "name": "lookup_ticket",
+      "output": {
+        "ticketId": "4821",
+        "status": "pending",
+        "owner": "dana"
+      }
+    },
+    {
+      "name": "add_note",
+      "output": {
+        "ok": true
+      }
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "c1",
+          "name": "lookup_ticket",
+          "arguments": {
+            "ticketId": "4821"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "c2",
+          "name": "add_note",
+          "arguments": {
+            "ticketId": "4821",
+            "note": "Status is pending."
+          }
+        }
+      ]
+    },
+    {
+      "kind": "text",
+      "text": "Ticket 4821 is pending. Noted."
+    }
+  ],
+  "expect": [
+    {
+      "kind": "tool_call_order",
+      "names": ["lookup_ticket", "add_note"]
+    },
+    {
+      "kind": "tool_argument_equals",
+      "name": "lookup_ticket",
+      "path": "ticketId",
+      "value": "4821"
+    },
+    {
+      "kind": "tool_argument_equals",
+      "name": "add_note",
+      "path": "ticketId",
+      "value": "4821"
+    },
+    {
+      "kind": "output_contains",
+      "text": "pending"
+    },
+    {
+      "kind": "guardrail_allowed",
+      "stage": "tool_call"
+    },
+    {
+      "kind": "loop_status",
+      "status": "completed"
+    }
+  ]
+}

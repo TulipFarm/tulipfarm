@@ -1,0 +1,20 @@
+id: daily-backlog-sweep
+version: "1.0.0"
+name: Daily backlog sweep
+description: Reports tickets left open for more than three days.
+start: Report
+x-triggers:
+  - type: cron
+    schedule: "0 8 * * *"
+functions:
+  - name: triageAgent
+    operation: agent:triage
+states:
+  - name: Report
+    type: operation
+    end: true
+    actions:
+      - functionRef:
+          refName: triageAgent
+          arguments:
+            prompt: List every open ticket older than three days and name the oldest.

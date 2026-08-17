@@ -66,10 +66,13 @@ sibling `AGENTS.md`.
 | [`apps/worker`](apps/worker/AGENTS.md) | Run dispatch, Agent/Tool States, timers, reconciliation, projections |
 | [`apps/integration-worker`](apps/integration-worker/AGENTS.md) | Integration ingress, sync, delivery, retries |
 | [`apps/docs`](apps/docs/AGENTS.md) | Public Fumadocs site content and conventions |
+| [`apps/eval`](apps/eval/AGENTS.md) | Offline eval Corpus, Assertions, Sweeps, Scorecards |
 | [`packages/agent-runtime`](packages/agent-runtime/AGENTS.md) | Context assembly, bounded Tool loop, model profiles, delegation |
 | [`packages/run-kernel`](packages/run-kernel/AGENTS.md) | Run/State machines, waits, retries, child Runs |
 | [`packages/curator`](packages/curator/AGENTS.md) | Curator prompt, output schema, citation and injection validation, proposal templating |
 | [`packages/curator-host`](packages/curator-host/AGENTS.md) | Minting a Curator job and its Run, context pinning, output revalidation, crash recovery |
+| [`packages/model-adapter`](packages/model-adapter/AGENTS.md) | Translating `ModelPort` requests, tool calls and usage to and from the AI SDK |
+| [`packages/turn-executor`](packages/turn-executor/AGENTS.md) | Chat Turn execution, Agent States, Turn guardrails, Run events |
 | [`packages/tool-broker`](packages/tool-broker/AGENTS.md) | Tool catalog, intent/effect orchestration, approvals |
 | [`packages/tool-host`](packages/tool-host/AGENTS.md) | Tool contract, authorization gate, dispatcher, co-location rule |
 | [`packages/kv`](packages/kv/AGENTS.md) | Agent key-value store and its `kv_*` Tool family |

@@ -162,6 +162,16 @@ export class ClaudeCodeModel extends CliLanguageModel {
 
       /** Deduplicate cumulative assistant usage by message id before summing. */
       const usageById = new Map<string, { input: number; output: number }>();
+      /** The `result` message's own totals, which supersede the per-message snapshots. */
+      let settled:
+        | {
+            input_tokens?: number;
+            output_tokens?: number;
+            cache_read_input_tokens?: number;
+            cache_creation_input_tokens?: number;
+          }
+        | undefined;
+      let resolvedModel: string | undefined;
       let buffered = "";
       let sawToolCall = false;
 
@@ -234,6 +244,13 @@ export class ClaudeCodeModel extends CliLanguageModel {
             subtype?: string;
             result?: string;
             is_error?: boolean;
+            usage?: {
+              input_tokens?: number;
+              output_tokens?: number;
+              cache_read_input_tokens?: number;
+              cache_creation_input_tokens?: number;
+            };
+            modelUsage?: Record<string, unknown>;
           };
           // A rejected credential still reports `subtype: "success"` — only `is_error` and the
           // `result` text distinguish it from a real completion, so both must be checked.
@@ -250,11 +267,36 @@ export class ClaudeCodeModel extends CliLanguageModel {
             }
             throw new Error(text);
           }
+          // The turn's own totals. An `assistant` message carries the usage snapshot taken before
+          // the model wrote anything — Anthropic reports `output_tokens: 1` there — so summing
+          // those alone reported roughly one output token for every completed turn.
+          if (result.usage) settled = result.usage;
+          // Keyed by the model the vendor resolved the alias to. Only trusted when there is
+          // exactly one: several means the turn was not one model, and naming a single version
+          // then would assert something the run does not support.
+          const ran = Object.keys(result.modelUsage ?? {});
+          if (ran.length === 1 && ran[0]) resolvedModel = ran[0];
         }
       }
 
       if (jsonMode && buffered) {
         yield { type: "text-delta", delta: firstJsonObject(buffered) ?? buffered };
+      }
+
+      if (resolvedModel !== undefined) yield { type: "model-version", modelId: resolvedModel };
+
+      // A tool call interrupts the turn before any `result` arrives, so the per-message snapshots
+      // remain the only account of what that partial turn consumed.
+      if (settled) {
+        const cacheRead = settled.cache_read_input_tokens ?? 0;
+        yield {
+          type: "usage",
+          inputTokens:
+            (settled.input_tokens ?? 0) + cacheRead + (settled.cache_creation_input_tokens ?? 0),
+          outputTokens: settled.output_tokens ?? 0,
+          ...(cacheRead > 0 ? { cacheReadTokens: cacheRead } : {}),
+        };
+        return;
       }
 
       let inputTokens = 0;

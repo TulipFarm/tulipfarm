@@ -1,8 +1,7 @@
 import type { PersistedRun } from "@tulipfarm/storage";
-import type { RunOutcome } from "./run-dispatcher";
+import type { RunExecutor, RunOutcome } from "@tulipfarm/turn-executor";
 
-/** Executes one claimed Run to a terminal outcome. Registered per Run source at composition. */
-export type RunExecutor = (run: PersistedRun, signal?: AbortSignal) => Promise<RunOutcome>;
+export type { RunExecutor } from "@tulipfarm/turn-executor";
 
 export class UnregisteredRunSourceError extends Error {
   readonly name = "UnregisteredRunSourceError";

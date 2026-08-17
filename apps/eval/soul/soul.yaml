@@ -1,0 +1,8 @@
+# The Eval Soul: a frozen business the Corpus is measured against.
+#
+# It is deliberately small and deliberately boring. Every value here reaches the model through the
+# real Context assembler, so anything added becomes something a Case can assert on — and anything
+# changed moves the Corpus version and invalidates every Baseline.
+businessName: Tulip Supply Co
+businessDescription: Wholesale flower bulbs, sold to garden centres.
+businessWebsite: https://tulip-supply.example

@@ -94,6 +94,7 @@ export {
   convertLegacyDefinitions,
   convertLegacySkill,
 } from "./converters/legacy-definitions";
+export { hermeticGitEnv } from "./git-env";
 export {
   ALLOWED_SOURCE_HINT,
   cloneToTemp,

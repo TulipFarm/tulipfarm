@@ -12,7 +12,15 @@ import type {
 export type CliTurnEvent =
   | { type: "text-delta"; delta: string }
   | { type: "tool-call"; toolCallId: string; toolName: string; input: unknown }
-  | { type: "usage"; inputTokens: number; outputTokens: number; cacheReadTokens?: number };
+  | { type: "usage"; inputTokens: number; outputTokens: number; cacheReadTokens?: number }
+  /**
+   * The model the vendor actually ran, when it reports one.
+   *
+   * Both CLIs are addressed by an alias, so without this the id on the way out is only the id we
+   * asked for. A caller comparing two runs cannot otherwise tell a changed harness from a vendor
+   * that moved the alias underneath it.
+   */
+  | { type: "model-version"; modelId: string };
 
 /** Default per-call wall clock before a CLI subprocess is aborted as hung. */
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
@@ -77,9 +85,11 @@ export abstract class CliLanguageModel implements LanguageModelV4 {
       let text = "";
       let usage: LanguageModelV4Usage = emptyUsage();
       let sawToolCall = false;
+      let modelId: string | undefined;
 
       for await (const event of this.runTurn(options, signal)) {
         if (event.type === "text-delta") text += event.delta;
+        else if (event.type === "model-version") modelId = event.modelId;
         else if (event.type === "tool-call") {
           sawToolCall = true;
           content.push({
@@ -102,6 +112,7 @@ export abstract class CliLanguageModel implements LanguageModelV4 {
         finishReason: finishReasonFor(sawToolCall),
         usage,
         warnings: [],
+        ...(modelId === undefined ? {} : { response: { modelId } }),
       };
     } finally {
       clear();
@@ -137,6 +148,8 @@ export abstract class CliLanguageModel implements LanguageModelV4 {
               });
             } else if (event.type === "usage") {
               usage = toUsage(event.inputTokens, event.outputTokens, event.cacheReadTokens);
+            } else if (event.type === "model-version") {
+              controller.enqueue({ type: "response-metadata", modelId: event.modelId });
             }
           }
           if (timedOut()) throw new Error(`CLI provider turn timed out after ${timeoutMs}ms`);

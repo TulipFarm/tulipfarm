@@ -12,8 +12,8 @@ import {
 } from "@tulipfarm/run-kernel";
 import { MANUAL_REQUEST_SCHEMA_REF, type routine } from "@tulipfarm/schema";
 import type { PersistedRun, PersistedState, PersistedWait } from "@tulipfarm/storage";
+import type { StateTransitionPort } from "@tulipfarm/turn-executor";
 import { describe, expect, it } from "vitest";
-import type { StateTransitionPort } from "../agent-state";
 import type { RoutineAgentOutcome, RoutineAgentPort, RoutineAgentRequest } from "./agent-port";
 import type {
   RoutineApprovalDecision,

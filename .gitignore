@@ -27,3 +27,12 @@ references
 playwright-report/
 test-results/
 .claude/worktrees
+
+# Sweep output. Baselines are committed; a Scorecard from an ad-hoc run is not, and an untracked
+# one left in the tree would mark the harness dirty and block the next Baseline promotion.
+apps/eval/scorecards/
+apps/eval/scorecard.txt
+
+# Planning notes for work in progress — the spec and tickets behind a change, not the change.
+# They are written for whoever is building it and go stale the moment it lands.
+.scratch/

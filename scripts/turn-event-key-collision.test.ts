@@ -2,7 +2,6 @@ import type { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Queryable } from "../apps/api/src/db";
 import { makeMigratedPglite } from "../apps/api/src/test/pglite";
-import { TurnEventWriter } from "../apps/worker/src/turn/run-events";
 import type {
   AgentLoopInput,
   ToolDispatchPort,
@@ -23,6 +22,7 @@ import { RunLoopCheckpointStore } from "../packages/storage/src/runs/loop-checkp
 import { RunStore, type StartRunInput } from "../packages/storage/src/runs/run-store";
 import { ApprovalsRepo } from "../packages/tool-host/src/approvals/repo";
 import { ToolApprovalService } from "../packages/tool-host/src/approvals/tool-approvals";
+import { TurnEventWriter } from "../packages/turn-executor/src/run-events";
 
 /**
  * Fitness function for L4-7: a resumed Turn must not write a Run event under a key its earlier

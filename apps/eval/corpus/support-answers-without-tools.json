@@ -1,0 +1,71 @@
+{
+  "id": "support-answers-without-tools",
+  "tier": "l2",
+  "agent": "support",
+  "context": {
+    "customInstructions": "Answer opening-hours questions directly. Do not call a tool for them.",
+    "memoryDocument": "## Other durable facts\nOpens at 9am on Saturdays.",
+    "governancePages": []
+  },
+  "input": [
+    {
+      "role": "user",
+      "content": "When do you open on Saturdays?"
+    }
+  ],
+  "tools": [
+    {
+      "name": "lookup_ticket",
+      "description": "Fetch a ticket by id.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ticketId": {
+            "type": "string"
+          }
+        },
+        "required": ["ticketId"]
+      }
+    }
+  ],
+  "script": [
+    {
+      "kind": "text",
+      "text": "We open at 9am on Saturdays."
+    }
+  ],
+  "expect": [
+    {
+      "kind": "prompt_contains",
+      "text": "Tulip Supply Co"
+    },
+    {
+      "kind": "prompt_contains",
+      "text": "Opens at 9am on Saturdays."
+    },
+    {
+      "kind": "prompt_contains",
+      "text": "Wholesale flower bulbs, sold to garden centres."
+    },
+    {
+      "kind": "prompt_omits",
+      "text": "Never guess a status."
+    },
+    {
+      "kind": "tool_not_called",
+      "name": "lookup_ticket"
+    },
+    {
+      "kind": "tool_call_count",
+      "count": 0
+    },
+    {
+      "kind": "output_matches",
+      "pattern": "9(:\\s*00)?\\s*a\\.?\\s*m\\.?"
+    },
+    {
+      "kind": "loop_status",
+      "status": "completed"
+    }
+  ]
+}

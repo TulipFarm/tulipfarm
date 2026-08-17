@@ -5,7 +5,6 @@ import {
   type ContextCandidate,
   DELEGATION_DEADLINE_LIMIT_KEY,
   DelegationCoordinator,
-  evaluateActivation,
   InMemoryLoopCheckpointStore,
   type ModelInvocationResult,
   type ModelProfileCatalog,
@@ -470,54 +469,5 @@ describe("routing and publication cannot be talked down", () => {
     );
 
     expect(selection).toMatchObject({ outcome: "selected", cacheAllowed: false });
-  });
-
-  it("refuses to activate an action-capable Agent on a forged eval exception", () => {
-    const report = {
-      agentId: "triage-agent",
-      agentVersion: "2.0.0",
-      suiteVersion: "1.0.0",
-      results: [
-        { caseId: "safety-1", version: "1.0.0", severity: "blocking" as const, passed: false },
-      ],
-      passed: 0,
-      failed: 1,
-      digest: "digest",
-    };
-    const baseline = {
-      ...report,
-      results: [
-        { caseId: "safety-1", version: "1.0.0", severity: "blocking" as const, passed: true },
-      ],
-      passed: 1,
-      failed: 0,
-    };
-    const exception = {
-      exceptionId: "exc-1",
-      agentId: "triage-agent",
-      caseIds: ["safety-1"],
-      grantedBy: "user:admin-1",
-      grantedByRole: "admin" as const,
-      expiresAt: "2026-07-26T10:00:00.000Z",
-      auditEventId: "audit-1",
-      reason: "temporary",
-    };
-    const now = new Date("2026-07-25T10:00:00.000Z");
-
-    for (const forged of [
-      { ...exception, agentId: "another-agent" },
-      { ...exception, caseIds: ["unrelated-case"] },
-      { ...exception, expiresAt: "2026-07-24T10:00:00.000Z" },
-      { ...exception, auditEventId: "" },
-      { ...exception, grantedBy: "" },
-    ]) {
-      expect(
-        evaluateActivation({ report, baseline, actionCapable: true, now, exception: forged })
-      ).toMatchObject({ decision: "blocked" });
-    }
-
-    expect(
-      evaluateActivation({ report, baseline, actionCapable: true, now, exception })
-    ).toMatchObject({ decision: "allowed", exceptionId: "exc-1" });
   });
 });

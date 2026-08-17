@@ -6,8 +6,8 @@ import type {
 import type { AgentInvocationPlan } from "@tulipfarm/run-kernel";
 import type { AgentDefinition, ModelProfileDefinition } from "@tulipfarm/schema";
 import type { BundleDefinition, RuntimeBundle } from "@tulipfarm/soul";
+import type { RunEventAppendPort } from "@tulipfarm/turn-executor";
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
-import type { RunEventAppendPort } from "../turn/run-events";
 import {
   BundleRoutineAgentPort,
   type BundleRoutineAgentPortOptions,

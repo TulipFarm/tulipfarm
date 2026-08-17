@@ -30,9 +30,9 @@ import type { AgentDefinition, ModelProfileDefinition, RunEventPayloads } from "
 import { canonicalHash, canonicalize } from "@tulipfarm/schema";
 import type { RuntimeBundle } from "@tulipfarm/soul";
 import type { RunStore } from "@tulipfarm/storage";
+import type { RunEventAppendPort } from "@tulipfarm/turn-executor";
+import { TurnEventWriter } from "@tulipfarm/turn-executor";
 import { type ModelBudgetEvidence, openModelProfileRunBudget } from "../model-budget";
-import type { RunEventAppendPort } from "../turn/run-events";
-import { TurnEventWriter } from "../turn/run-events";
 
 /** Routine Agent authority: read pinned bundles, run chat-equivalent guards, expose no Tools. */
 

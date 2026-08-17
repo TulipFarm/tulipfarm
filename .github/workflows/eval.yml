@@ -1,0 +1,104 @@
+name: Eval
+
+# The second front door to the eval harness: the first is `pnpm eval:matrix` on a maintainer's
+# own machine. Both run `apps/eval/scripts/seat.sh`, so a green result here and a green result
+# there came from the same runner rather than from two implementations that agree today.
+#
+# Three separate things keep this maintainer-only, and it needs all three. `workflow_dispatch` is
+# the only trigger, and a fork cannot dispatch a workflow in the upstream repo. The `eval`
+# Environment holds the two seat credentials, and GitHub never exposes an Environment secret to a
+# workflow run from a fork. The Environment's required reviewer then pauses the job before it
+# spends anything, so even a maintainer's mis-click costs no quota until someone approves it.
+on:
+  workflow_dispatch:
+    inputs:
+      models:
+        description: "Seats to sweep"
+        type: choice
+        default: sonnet,luna
+        options:
+          - sonnet,luna
+          - sonnet
+          - luna
+      max_tokens_per_trial:
+        description: "Token ceiling per Trial, per model"
+        type: string
+        default: "15000"
+      case:
+        description: "Run one Eval Case by id (leave empty for the whole Corpus)"
+        type: string
+        default: ""
+      baseline:
+        description: "Compare against the promoted Baseline and fail on a regression"
+        type: boolean
+        default: false
+
+# A Sweep spends a finite subscription quota, so a second run never cancels a first: the cancelled
+# one would have spent its tokens for a Scorecard nobody reads.
+concurrency:
+  group: eval-${{ inputs.models }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sweep:
+    name: Sweep ${{ inputs.models }}
+    runs-on: ubuntu-latest
+    # The reviewer gate and the seat credentials both live here. Removing this line would not just
+    # drop the approval step — it would leave the run with no credentials at all.
+    environment: eval
+    # A vendor CLI that hangs holds the seat and blocks the release it was run to clear. The
+    # harness bounds tokens, which a hung call never consumes, so wall-clock has to be bounded here.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - name: Sweep
+        id: sweep
+        working-directory: apps/eval
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+          MODELS: ${{ inputs.models }}
+          PER_TRIAL: ${{ inputs.max_tokens_per_trial }}
+          CASE: ${{ inputs.case }}
+          COMPARE: ${{ inputs.baseline }}
+        run: |
+          set -euo pipefail
+          args=(--save-dir scorecards --max-tokens-per-trial "$PER_TRIAL")
+          [ -z "$CASE" ] || args+=(--case "$CASE")
+          [ "$COMPARE" != "true" ] || args+=(--baseline)
+          # Progress is on stderr and streams straight to the log, so a watching maintainer sees
+          # each Trial land. The Scorecard is on stdout and only prints once the Sweep is over, so
+          # capturing it costs no liveness and gives the summary step an exact copy to quote.
+          # `pnpm exec` rather than a bare `sh`: `tsx` is a local devDependency, and a CI step's
+          # PATH does not carry `node_modules/.bin` the way a `pnpm run` script's does.
+          set +e
+          pnpm exec sh scripts/seat.sh "$MODELS" "${args[@]}" > scorecard.txt
+          status=$?
+          cat scorecard.txt
+          exit $status
+      - name: Summarise
+        if: always()
+        working-directory: apps/eval
+        run: |
+          set -euo pipefail
+          {
+            echo "## Eval — \`${{ inputs.models }}\`"
+            echo
+            echo '```text'
+            cat scorecard.txt 2>/dev/null || echo "the Sweep produced no Scorecard"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload Scorecards
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: eval-${{ github.run_id }}
+          path: |
+            apps/eval/scorecards/
+            apps/eval/scorecard.txt
+          if-no-files-found: warn
+          retention-days: 90

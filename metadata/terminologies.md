@@ -108,6 +108,34 @@ Never let these bleed: UI/URL never say "conversation"; domain/DB never say "cha
 ¹ `plugin` remains valid ONLY for build/library tooling (vite, rehype, Chart.js) — never for a Skill.
 ² `collection` is reserved exclusively for "a Postgres/MongoDB collection" (infra). It never means a knowledge grouping.
 
+### Offline eval
+
+Maintainer-only vocabulary, owned by `apps/eval`. None of it is a product surface: it has no
+REST path, no app URL and no UI label, and a participant never meets any of these words.
+
+Two product rules are deliberately relaxed here, and only here:
+
+- **Models are named directly.** The product rule is that a participant picks an Effort Preset,
+  never a model. A Sweep is the opposite by design — it exists to compare named models, so it
+  names them.
+- **A Trial's own execution is not a Run.** `Run` is reserved for a Routine execution across the
+  run kernel. A Trial *contains* real Runs when it drives the real executor, which is exactly why
+  it cannot also be called one.
+
+| Concept (what it is) | Canonical | Code | REST / URL | UI label | Notes & retired synonyms |
+|---|---|---|---|---|---|
+| One complete offline eval execution: the whole Corpus against every model under test, at one harness commit | **Sweep** | `runSweep` | — | — | the unit a release gate passes or fails; ⛔ "eval run" (see above), ⛔ "eval suite", "benchmark run" |
+| One Eval Case run once against one model | **Trial** | `TrialResult`, `runTrial` | — | — | the atom a Sweep is made of; repeated Trials of the same Case are what measure the Noise Floor. ⛔ "sample", "rollout", "attempt" |
+| One frozen scenario: the input, its fixtures, and the Expectations it must meet | **Eval Case** | `EvalCase`, `corpus/*.json` | — | — | "Case" alone is fine inside `apps/eval`. ⛔ "test case" — that belongs to Vitest, and conflating the two hides which one a red build means |
+| The versioned set of Eval Cases, content-hashed so a Scorecard names the exact inputs it scored | **Corpus** | `loadCorpus`, `corpusHash` | — | — | ⛔ "dataset", "test suite", "eval set" |
+| One deterministic, data-only check a Trial must satisfy | **Expectation** | `Expectation`, `expect` | — | — | data, never a function, so a Corpus stays content-hashable. ⛔ "assertion" — taken by Memory, and one word cannot name two concepts |
+| A Trial that passed while expecting nothing, so its pass means nothing | **Vacuous** | `vacuous` | — | — | rejected at Corpus load and counted against the CLI exit code; the framework's worst failure mode, so it is named rather than left implicit |
+| The verdict of one Sweep: every Trial's outcome, plus the Corpus hash and harness commit that produced it | **Scorecard** | `Scorecard`, `renderScorecard` | — | — | ⛔ "report", "results", "summary" |
+| The Scorecard of an already-released harness commit, that a candidate is measured against | **Baseline** | `Baseline` | — | — | ⛔ "control", "golden", "reference run" |
+| The spread across repeated identical Trials; a difference smaller than it is not a result | **Noise Floor** | `noiseFloor` | — | — | the whole point of the framework — it separates a real improvement from model variance. ⛔ "variance", "error bar", "jitter" |
+| A pinned model that scores what an Expectation cannot express | **Judge** | `Judge` | — | — | pinned and version-recorded per Sweep, or it becomes a moving ruler. ⛔ "grader", "rubric model", "LLM-as-a-judge" used as a noun |
+| The fixed Soul a Sweep loads, so Cases do not drift when the dev Soul changes | **Eval Soul** | `evalSoul` | — | — | ⛔ "fixture soul", "test soul", "mock soul" |
+
 ## Banned / retired terms (quick lookup)
 
 | Don't write | Write instead | Status |
@@ -140,6 +168,11 @@ Never let these bleed: UI/URL never say "conversation"; domain/DB never say "cha
 | procedural correction | `## Standing instructions` | retired |
 | memory scope / memory type / trust tier / validity interval / point-in-time recall / contradiction | — | retired — the document is the current truth, so there is nothing to version, rank or time-travel |
 | quest | Proposal | retired — the endpoints had zero consumers and are deleted |
+| eval run | sweep | clean — `Run` is a Routine execution; a Trial contains real Runs |
+| test case (meaning an eval scenario) | eval case | clean — "test case" belongs to Vitest |
+| assertion (meaning an eval check) | expectation | clean — "assertion" is Vitest's `expect`; an Expectation is a property a Case declares, not a runtime check |
+| dataset / eval set | corpus | clean |
+| grader / rubric model | judge | clean |
 
 ## Completed Renames (done 2026-06-27)
 

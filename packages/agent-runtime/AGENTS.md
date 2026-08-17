@@ -18,7 +18,6 @@ orchestration. It owns prompt assembly and runtime control, not model providers.
 | `src/skills/` | Exact-version Skill resolution, trust tiers, scanning, ability intersection. |
 | `src/loop/` | Bounded durable Tool loop; the broker is the only effect path. |
 | `src/delegation/` | Helper Agents as child Runs: depth, deadline and authority narrowing (`delegate.ts`), and the composition that mints and awaits the child (`composition.ts`). |
-| `src/evals/` | Versioned eval suites and publication activation gate. |
 | `test/security/` | Injection and non-amplification corpus. |
 
 ## Rules
