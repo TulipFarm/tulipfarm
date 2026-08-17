@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { measureNoise, noiseBand } from "./noise.ts";
+import { measureNoise } from "./noise.ts";
 import type { Scorecard, TrialResult } from "./runner.ts";
 import { NO_SPEND } from "./spend.ts";
 
@@ -43,7 +43,6 @@ describe("measureNoise", () => {
     const floor = measureNoise(card([trial("a", 1, true), trial("a", 2, true)]));
 
     expect(floor).toEqual({ repeats: 2, flapping: [], measured: 1 });
-    expect(noiseBand(floor)).toBe(0);
   });
 
   it("names the Case whose own Trials disagreed", () => {
@@ -57,7 +56,6 @@ describe("measureNoise", () => {
     );
 
     expect(floor?.flapping).toEqual(["flappy"]);
-    expect(noiseBand(floor)).toBe(1);
   });
 
   it("holds a Case out of the floor when a vendor fault took one of its Trials", () => {
@@ -85,12 +83,6 @@ describe("measureNoise", () => {
     );
 
     expect(floor).toEqual({ repeats: 2, flapping: [], measured: 0 });
-  });
-});
-
-describe("noiseBand", () => {
-  it("is zero when no floor was ever measured, so nothing is excused as noise", () => {
-    expect(noiseBand(undefined)).toBe(0);
   });
 });
 

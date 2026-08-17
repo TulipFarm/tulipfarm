@@ -56,14 +56,3 @@ export function measureNoise(card: Scorecard): NoiseFloor | undefined {
 
   return { repeats: Number.isFinite(repeats) ? repeats : 1, flapping, measured };
 }
-
-/**
- * How many Cases may move between two Sweeps before the movement means anything.
- *
- * Zero without a measured floor, so an unmeasured Baseline excuses nothing. The alternative —
- * assuming some tolerance — would silently swallow real regressions on the Baselines that happen
- * to carry the least evidence.
- */
-export function noiseBand(floor: NoiseFloor | undefined): number {
-  return floor?.flapping.length ?? 0;
-}
