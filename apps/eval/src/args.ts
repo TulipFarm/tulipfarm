@@ -12,6 +12,7 @@ export const FLAGS = [
   "--model",
   "--max-spend",
   "--max-tokens",
+  "--max-tokens-per-trial",
   "--baseline",
   "--promote",
   "--save",

@@ -3,7 +3,7 @@ import type { EvalCase } from "./case.ts";
 import { corpusHash } from "./corpus.ts";
 import { type EvalSoul, loadEvalSoul } from "./eval-soul.ts";
 import type { ModelBinding } from "./runner.ts";
-import { runSweep } from "./runner.ts";
+import { plannedTrials, runSweep, selectCases } from "./runner.ts";
 import { scriptedBinding } from "./scripted.ts";
 
 let soul: EvalSoul;
@@ -428,5 +428,34 @@ describe("the Eval Soul's guardrails", () => {
     const card = await runSweep({ corpus, model: scriptedBinding() });
 
     expect(card.passed).toBe(1);
+  });
+});
+
+describe("planning the Trials a ceiling is sized against", () => {
+  const c = (id: string, trials?: number): EvalCase => ({
+    ...answering(id, "hi", [{ kind: "loop_status", status: "completed" }]),
+    ...(trials === undefined ? {} : { trials }),
+  });
+
+  it("counts one Trial per Case by default", () => {
+    expect(plannedTrials([c("a"), c("b")])).toBe(2);
+  });
+
+  it("counts repeats, so a noise-floor Sweep is not bounded as if it ran once", () => {
+    // The ceiling is resolved per Trial. Counting Cases instead would give a Sweep that repeats
+    // every Case five times the allowance of one that runs each once, and truncate it silently.
+    expect(plannedTrials([c("a", 5), c("b")])).toBe(6);
+  });
+
+  it("treats a nonsense repeat count as one Trial, matching what the Sweep will run", () => {
+    expect(plannedTrials([c("a", 0)])).toBe(1);
+  });
+
+  it("selects every Case when no filter is given", () => {
+    expect(selectCases([c("a"), c("b")], undefined).map((x) => x.id)).toEqual(["a", "b"]);
+  });
+
+  it("bounds a filtered Sweep by the Case it measures, not the Corpus it skips", () => {
+    expect(plannedTrials(selectCases([c("a", 3), c("b", 9)], "a"))).toBe(3);
   });
 });

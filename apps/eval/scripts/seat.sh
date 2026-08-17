@@ -136,14 +136,19 @@ done
 # A seat reports no dollar cost, so only a token ceiling can bound a Sweep. Supply a default rather
 # than let the run be refused, but never override a ceiling the caller chose. The ceiling is per
 # model, so a matrix run gets each model the same allowance rather than making them share one.
+#
+# Expressed per Trial, not as a Sweep total. A fixed total is sized for the Corpus of the day it
+# was written: the 20000 that comfortably held two Cases truncated the Sweep at five of nine once
+# the guardrail Cases landed, and a truncated Sweep is reported as NOT COMPARABLE rather than as a
+# result. 15000 is roughly triple the heaviest per-Trial cost observed on either seat.
 ceiling=""
 for arg in "$@"; do
   case "$arg" in
-    --max-tokens | --max-tokens=*) ceiling=1 ;;
+    --max-tokens | --max-tokens=* | --max-tokens-per-trial | --max-tokens-per-trial=*) ceiling=1 ;;
   esac
 done
 if [ -z "$ceiling" ]; then
-  set -- "$@" --max-tokens 20000
+  set -- "$@" --max-tokens-per-trial 15000
 fi
 
 exec tsx src/cli.ts --model "$models" "$@"

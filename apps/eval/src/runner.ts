@@ -413,19 +413,34 @@ function asOutput(output: unknown, last: ModelOutput | undefined): ModelOutput |
  * The single seam the eval framework adds. One Case failing never aborts the Sweep — one bad Case
  * must not cost the whole run's information.
  */
+/**
+ * Cases a filter selects, and how many Trials they plan.
+ *
+ * Shared with `cli.ts` so a per-Trial ceiling is resolved against exactly the Trials this Sweep
+ * will launch. Two counts that could drift would let the ceiling be computed for one Sweep and
+ * enforced on another.
+ */
+export function selectCases(
+  cases: readonly EvalCase[],
+  caseFilter: string | undefined
+): readonly EvalCase[] {
+  return caseFilter === undefined ? cases : cases.filter((c) => c.id === caseFilter);
+}
+
+export function plannedTrials(cases: readonly EvalCase[]): number {
+  return cases.reduce((n, c) => n + Math.max(1, c.trials ?? 1), 0);
+}
+
 export async function runSweep(options: SweepOptions): Promise<Scorecard> {
   const now = options.now ?? (() => new Date());
   const started = now();
 
-  const selected =
-    options.caseFilter === undefined
-      ? options.corpus.cases
-      : options.corpus.cases.filter((c) => c.id === options.caseFilter);
+  const selected = selectCases(options.corpus.cases, options.caseFilter);
   if (selected.length === 0) {
     throw new Error(`no Eval Case matches "${options.caseFilter}"`);
   }
 
-  const planned = selected.reduce((n, c) => n + Math.max(1, c.trials ?? 1), 0);
+  const planned = plannedTrials(selected);
   const retryPolicy = options.retry ?? DEFAULT_RETRY;
   const trials: TrialResult[] = [];
   let spend = NO_SPEND;

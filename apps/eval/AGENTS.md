@@ -198,7 +198,7 @@ and `loadCorpus` will refuse it.
 ## Running against a real model
 
 Both pinned models are **vendor CLI subscription seats**, not metered API keys. They cost $0 per
-call and spend a personal quota instead, so `--max-tokens` is the only ceiling that can bind them —
+call and spend a personal quota instead, so a token ceiling is the only one that can bind them —
 and `--model` refuses to run without one.
 
 ```bash
@@ -209,9 +209,19 @@ pnpm eval:matrix                             # both seats, same Corpus, side by 
 pnpm eval:sonnet --case support-answers-without-tools --max-tokens 5000
 ```
 
+- **Express the ceiling per Trial, not per Sweep.** `--max-tokens-per-trial <n>` is multiplied by
+  the Trials the Sweep plans, so it survives the Corpus growing and a `--case` filter shrinking it.
+  A fixed `--max-tokens` is sized for the Corpus of the day it was written: the 20000 that held two
+  Cases comfortably truncated the Sweep at five of nine once the guardrail Cases landed — and a
+  truncated Sweep reports its unrun Cases as `NOT COMPARABLE`, which reads like a smaller Corpus
+  rather than like a mistake. The two flags are mutually exclusive.
+- **Budget per Trial from the heavier seat.** The two are not close: `luna` spends roughly 5.2k
+  input tokens per model call against `sonnet`'s 1.7k, so a three-call Case costs it ~16k. The
+  `seat.sh` default of 15000 per Trial is set from that, not from the average.
+
 `scripts/seat.sh` collects every named seat's credential up front, into its own environment, so it
-never enters your shell, your history, or a file. It defaults `--max-tokens` to 20000 and never
-overrides one you passed.
+never enters your shell, your history, or a file. It defaults `--max-tokens-per-trial` to 15000 and
+never overrides a ceiling you passed.
 
 Codex's credential is a JSON document rather than a token, but it is pasted the same way: from
 `$CODEX_AUTH_JSON`, else `$CODEX_AUTH_FILE`, else `${CODEX_HOME:-~/.codex}/auth.json`, else the

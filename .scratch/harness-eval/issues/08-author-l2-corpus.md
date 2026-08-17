@@ -53,8 +53,40 @@ Supporting harness work this needed:
   framework compares are CLI subscription seats that answer in text; requiring
   `kind: "structured"` would have made the structured-output Case unpassable on either.
 
-**Not yet verified on real models.** The Corpus hash moved to `d19ca272924436f8`; the last
-green Matrix was `73eadab347f453cf`. The final checkbox above is satisfied scripted only.
+**Verified on both models.** Every Case that ran passed on `sonnet` and on `luna`, at Corpus
+`d19ca272924436f8`. The run also found a harness bug, fixed below.
+
+| Model | Result |
+| --- | --- |
+| `sonnet` | 8 of 9 Cases run, 8 passed, 0 failed, 0 errored |
+| `luna` | 5 of 9 Cases run, 5 passed, 0 failed, 0 errored |
+
+## The ceiling did not scale with the Corpus
+
+Neither Sweep finished. `seat.sh` defaulted `--max-tokens` to a fixed 20000, chosen when the Corpus
+held two Cases; nine Cases blew it. `sonnet` stopped after 8 Trials, `luna` after 5.
+
+Nothing scored wrongly — the unrun Cases were reported as `never run` and held out of the Matrix as
+`NOT COMPARABLE`, which is the designed behaviour. But that is exactly what makes the failure
+dangerous: a truncated Sweep reads like a smaller Corpus, not like a mistake, and it silently
+shrank the comparison to 5 of 8 Cases.
+
+The two seats are not comparable in cost, which is why a single fixed number could not serve both:
+
+| Seat | Input tokens per model call |
+| --- | --- |
+| `sonnet` | ~1.7k |
+| `luna` | ~5.2k |
+
+Fixed by making the ceiling scale with the work:
+
+- New `--max-tokens-per-trial <n>`, multiplied by the Trials the Sweep actually plans. It survives
+  the Corpus growing, a `--case` filter shrinking it, and ticket 14 adding repeat Trials.
+- `plannedTrials` and `selectCases` are exported from `runner.ts` and shared with `cli.ts`, so the
+  count the ceiling is sized against cannot drift from the count the Sweep runs.
+- `--max-tokens` and `--max-tokens-per-trial` are mutually exclusive and refuse each other.
+- `seat.sh` now defaults to `--max-tokens-per-trial 15000`, set from `luna`'s worst observed Case
+  (~16k for three calls) rather than from the average.
 
 ## Review findings, resolved
 

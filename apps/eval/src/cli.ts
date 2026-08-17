@@ -8,7 +8,7 @@ import { runMatrix } from "./matrix.ts";
 import { PINNED_MODELS } from "./model.ts";
 import { progressReporter } from "./progress.ts";
 import { applyBaseline } from "./release.ts";
-import type { Scorecard } from "./runner.ts";
+import { plannedTrials, type Scorecard, selectCases } from "./runner.ts";
 import { renderMatrix, renderScorecard } from "./scorecard.ts";
 
 const MODELS = Object.keys(PINNED_MODELS).join(", ");
@@ -24,6 +24,10 @@ Usage: pnpm eval [options]
   --max-spend <usd>  Stop launching Trials once this much has been spent.
   --max-tokens <n>   Stop launching Trials once this many tokens are used. The only
                      ceiling that binds a subscription seat, whose dollar cost is zero.
+  --max-tokens-per-trial <n>
+                     The same ceiling, expressed per Trial and multiplied by the Trials
+                     this Sweep plans. Prefer it: a fixed --max-tokens is sized for the
+                     Corpus of the day it was written and silently truncates the next one.
   --baseline [path]  Report this Sweep as a delta against the promoted Baseline for each
                      model (apps/eval/baselines/<model>.json), and fail on a regression.
   --promote          Make this Sweep the Baseline for each model it measured. Never
@@ -35,7 +39,7 @@ Usage: pnpm eval [options]
 Without --model the Corpus runs against the scripted binding: free, deterministic, no
 credentials. --model drives a real vendor CLI on your own subscription seat, which needs
 that seat's credential in the environment and consumes your quota. Always bound it with
---max-tokens: a seat's dollar cost is zero, so --max-spend can never stop one.
+--max-tokens-per-trial: a seat's dollar cost is zero, so --max-spend can never stop one.
 `;
 
 /** A Sweep clears a release only when it measured everything it set out to measure. */
@@ -56,10 +60,19 @@ async function main(): Promise<number> {
   const corpus = await loadCorpus(dir, await loadEvalSoul());
 
   const caseFilter = flag(argv, "--case");
+  const selected = selectCases(corpus.cases, caseFilter);
   const modelName = flag(argv, "--model");
   const models = resolveBindings(modelName);
   const maxSpendUsd = positive(flag(argv, "--max-spend"), "--max-spend");
-  const maxTokens = positive(flag(argv, "--max-tokens"), "--max-tokens");
+  const fixedTokens = positive(flag(argv, "--max-tokens"), "--max-tokens");
+  const perTrial = positive(flag(argv, "--max-tokens-per-trial"), "--max-tokens-per-trial");
+  if (fixedTokens !== undefined && perTrial !== undefined) {
+    throw new Error("--max-tokens and --max-tokens-per-trial set the same ceiling; pass one");
+  }
+  // Resolved against the Trials this Sweep will actually launch, so a `--case` run is bounded for
+  // the one Case it measures rather than for a Corpus it is not going to touch.
+  const maxTokens =
+    fixedTokens ?? (perTrial === undefined ? undefined : perTrial * plannedTrials(selected));
   const compare = present(argv, "--baseline");
   const promote = present(argv, "--promote");
   const baselineFile = flag(argv, "--baseline");
@@ -93,7 +106,10 @@ async function main(): Promise<number> {
   // A real Sweep spends a finite quota. Refusing here is the only place that can stop an
   // unbounded one, because a seat reports no dollar cost for a ceiling to act on.
   if (modelName !== undefined && maxTokens === undefined) {
-    throw new Error("--model needs --max-tokens: a seat costs $0, so --max-spend cannot bound it");
+    throw new Error(
+      "--model needs a token ceiling: a seat costs $0, so --max-spend cannot bound it. " +
+        "Pass --max-tokens-per-trial <n>, or --max-tokens <n> for a fixed one"
+    );
   }
   // Only the real-model path is slow enough to need it, and only stderr may carry it: the
   // Scorecard on stdout is the artifact, and chatter interleaved into it would corrupt a reader.
