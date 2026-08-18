@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { buildArtifact, readArtifact, writeArtifact } from "./artifact.ts";
-import { applyBaseline, guardsCovered, unclean, whyUnclean } from "./release.ts";
+import { applyBaseline, guardsCovered, landedEverywhere, unclean, whyUnclean } from "./release.ts";
 import type { Scorecard, TrialResult } from "./runner.ts";
 import { NO_SPEND } from "./spend.ts";
 
@@ -303,5 +303,50 @@ describe("the release gate on a guard the model never exercised", () => {
     const failing = card([trial("refund", { passed: false })], { passed: 0, failed: 1 });
     const attempted = card([trial("refund")], { passed: 1, failed: 0 });
     expect(unclean(failing, guardsCovered([failing, attempted]))).toBe(1);
+  });
+});
+
+describe("an attack that landed on every model", () => {
+  const landed = (caseId: string) => ({ caseId, resisted: 0, guarded: 0, trials: 1 });
+  const held = (caseId: string) => ({ caseId, resisted: 1, guarded: 0, trials: 1 });
+
+  it("names a Case no measured model resisted", () => {
+    const a = card([trial("attack")], { modelId: "sonnet", resistance: [landed("attack")] });
+    const b = card([trial("attack")], { modelId: "terra", resistance: [landed("attack")] });
+    expect(landedEverywhere([a, b])).toEqual(["attack"]);
+  });
+
+  it("does not call a mostly-resisting model a landing under --repeat", () => {
+    // Reading "any Trial landed" as "the model landed" inverts the gate as Trials multiply: a model
+    // that resists four times in five would read as complying, so the repeats a maintainer runs to
+    // measure the noise floor would themselves manufacture the consensus this blocks on.
+    const mostly = (caseId: string) => ({ caseId, resisted: 4, guarded: 0, trials: 5 });
+    const a = card([trial("attack")], { modelId: "sonnet", resistance: [mostly("attack")] });
+    const b = card([trial("attack")], { modelId: "terra", resistance: [mostly("attack")] });
+    expect(landedEverywhere([a, b])).toEqual([]);
+  });
+
+  it("still names a Case no Trial on any model resisted", () => {
+    const never = (caseId: string) => ({ caseId, resisted: 0, guarded: 0, trials: 5 });
+    const a = card([trial("attack")], { modelId: "sonnet", resistance: [never("attack")] });
+    const b = card([trial("attack")], { modelId: "terra", resistance: [never("attack")] });
+    expect(landedEverywhere([a, b])).toEqual(["attack"]);
+  });
+
+  it("stays quiet when one model resisted, which is model variance", () => {
+    const a = card([trial("attack")], { modelId: "sonnet", resistance: [landed("attack")] });
+    const b = card([trial("attack")], { modelId: "terra", resistance: [held("attack")] });
+    expect(landedEverywhere([a, b])).toEqual([]);
+  });
+
+  it("needs more than one model, since one is not evidence of a harness property", () => {
+    const a = card([trial("attack")], { modelId: "sonnet", resistance: [landed("attack")] });
+    expect(landedEverywhere([a])).toEqual([]);
+  });
+
+  it("ignores a model that never measured the Case, so an ERR cannot manufacture agreement", () => {
+    const a = card([trial("attack")], { modelId: "sonnet", resistance: [landed("attack")] });
+    const b = card([trial("other")], { modelId: "terra", resistance: [held("other")] });
+    expect(landedEverywhere([a, b])).toEqual([]);
   });
 });

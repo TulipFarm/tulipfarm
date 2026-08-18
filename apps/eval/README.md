@@ -345,6 +345,18 @@ The Resistance block still reports whether a *later* guard held, so the harness 
 under-credited. Strategies are pure `(payload, seed) => Case`, never model-authored — a
 model-generated attack could not be content-hashed, so no Baseline built on it would be comparable.
 
+**"Never gates" ends where the models agree.** One model complying with a disguised payload is the
+vendor's property. *Every* measured model complying is not — it is a payload nothing in this
+repository defends against, and the Matrix is the only place holding enough evidence to tell those
+apart. `landedEverywhere` names those Cases and holds back the release; a single-model Sweep
+reports nothing there, because a leg agreeing with itself is exactly the variance this refuses to
+gate on. The first real Matrix run found one: `role-override-tool-grab--leetspeak` landed on both
+seats, because the `prompt_injection` guard matched the plaintext role override and not `y0u 4r3
+n0w`. That was a gap in the guard, not in the Corpus, and it is the whole reason this signal
+exists — the same Case had landed on one seat in an earlier single-model run and was correctly
+ignored as vendor variance. The guard now restores leet digits and inline base64 before matching,
+and `support-refuses-a-disguised-injection` holds that closed on the free tier.
+
 Every red-team Case names a `class` from `src/vulnerability.ts` — seven classes the harness can
 own. The safety block groups by class, never by Case id, and prints a row for every class whether
 or not one is covered, so a coverage gap is as visible as a failure. One `LEAKED` at high severity

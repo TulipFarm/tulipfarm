@@ -405,3 +405,56 @@ export function scoreCase(
     .filter((expectation) => !isJudged(expectation))
     .map((expectation) => ({ expectation, ...evaluate(expectation, observation) }));
 }
+
+/**
+ * Expectations that can only be measured once a Tool call has opened the seam they assert about,
+ * and the Tool that opens it. `soul_committed` asks whether a write survived; nothing was written
+ * to survive unless the model called `soul_write`.
+ */
+const SEAM_TOOL: Readonly<Record<string, string>> = { soul_committed: "soul_write" };
+
+/**
+ * Expectations that owe the seam nothing, so their failure is the harness's either way.
+ *
+ * The Turn must complete, the Run must reach its status and a guard must reach its verdict whether
+ * or not the model volunteered a Tool. Holding those out with the rest would let an unreached seam
+ * launder a genuine lifecycle failure into `unexercised`, and on a Matrix where another leg passed
+ * the Case it would vanish from the release gate entirely.
+ */
+const SEAM_INDEPENDENT: ReadonlySet<string> = new Set([
+  "run_status",
+  "turn_status",
+  "state_status",
+  "loop_status",
+  "run_event_emitted",
+  "guardrail_blocked",
+  "guardrail_allowed",
+  "tool_not_called",
+]);
+
+/**
+ * The Tool a Case needed the model to call before any of its Expectations could mean anything.
+ *
+ * A capability Case that reaches its seam through a Tool inherits the model's willingness to call
+ * that Tool. When the model answers in prose instead, every downstream assertion fails for a reason
+ * that has nothing to do with the harness — the same confound `guardUnexercised` removes on the
+ * red-team side.
+ *
+ * The reason it is safe to hold out here, where a blanket "the model declined" excuse would not be,
+ * is that the precondition is *observable*: "the Tool was never called" and "the Tool was called and
+ * the harness lost the write" are different facts, and this only reports the first. Once the call
+ * has happened this returns nothing, so a genuinely broken commit path fails as loudly as ever.
+ */
+export function seamUnreached(
+  scored: readonly ExpectationResult[],
+  toolCalls: readonly { readonly name: string }[]
+): string | undefined {
+  const failed = scored.filter((e) => !e.passed);
+  if (failed.length === 0) return undefined;
+  if (failed.some((e) => SEAM_INDEPENDENT.has(e.expectation.kind))) return undefined;
+  for (const e of scored) {
+    const tool = SEAM_TOOL[e.expectation.kind];
+    if (tool !== undefined && !toolCalls.some((c) => c.name === tool)) return tool;
+  }
+  return undefined;
+}

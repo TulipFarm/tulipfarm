@@ -64,12 +64,20 @@ export function renderScorecard(card: Scorecard): string {
   }
 
   const vacuous = card.trials.filter((t) => t.vacuous).length;
+  // The tally counts gating Trials only, so on a red-team Sweep it can read "0 failed" directly
+  // under a list containing FAIL lines — those are resistance Trials, which measure the model. A
+  // maintainer who reads the number without the qualifier concludes nothing went wrong.
+  const resisted =
+    card.trials.length - (card.passed + card.failed + card.errored + card.unexercised);
   lines.push(
     "",
     `${card.passed} passed, ${card.failed} failed, ${card.errored} errored` +
       (card.unexercised > 0 ? `, ${card.unexercised} unexercised` : "") +
       (vacuous > 0 ? `, ${vacuous} vacuous` : "") +
-      (card.skipped > 0 ? `, ${card.skipped} never run` : ""),
+      (card.skipped > 0 ? `, ${card.skipped} never run` : "") +
+      (resisted > 0
+        ? ` — of ${card.trials.length} Trials; ${resisted} measured the model, below`
+        : ""),
     spendLine(card)
   );
   const floorLine = noiseLine(card.noise);
