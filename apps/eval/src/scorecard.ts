@@ -427,7 +427,11 @@ export function renderDelta(delta: Delta, baselineVersion: string): string {
     );
   }
 
-  lines.push("", `${delta.passedBefore} passed before, ${delta.passedAfter} passed after`);
+  lines.push(
+    "",
+    `${delta.passedBefore} of ${plural(delta.cases.length, "Case")} passed before, ` +
+      `${delta.passedAfter} after`
+  );
   // A Baseline promoted from a dirty tree names a commit that never existed, so nobody else can
   // reproduce the number this run is being measured against.
   if (isDirty(baselineVersion)) {

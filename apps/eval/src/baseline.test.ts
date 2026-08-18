@@ -110,6 +110,16 @@ describe("compareToBaseline", () => {
     expect(delta.passedAfter).toBe(2);
   });
 
+  it("counts Cases, not Trials, so a repeated Baseline is on the same scale as the Sweep", () => {
+    const delta = compareToBaseline(
+      card([trial("a"), trial("a", { trial: 2 }), trial("a", { trial: 3 })]),
+      card([trial("a")])
+    );
+
+    expect(delta.passedBefore).toBe(1);
+    expect(delta.passedAfter).toBe(1);
+  });
+
   it("keeps both verdicts on every Case, so a reader need not hold the Baseline open", () => {
     const delta = compareToBaseline(card([trial("a")]), card([trial("a", { passed: false })]));
 

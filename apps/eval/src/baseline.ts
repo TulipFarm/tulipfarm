@@ -34,6 +34,13 @@ export interface Delta {
   readonly noSignal: number;
   /** The floor this delta was damped against, when the Baseline recorded one. */
   readonly floor?: NoiseFloor;
+  /**
+   * How many *Cases* passed on each side — never Trials.
+   *
+   * A Baseline is promoted with `--repeat n` and a release check runs once, so a Trial count puts
+   * the two sides on different scales: an unchanged Sweep reads as "55 passed before, 11 after",
+   * which is a collapse to every eye that sees it and a lie under every one that reads on.
+   */
   readonly passedBefore: number;
   readonly passedAfter: number;
 }
@@ -105,7 +112,7 @@ export function compareToBaseline(baseline: Scorecard, current: Scorecard): Delt
     fixed: cases.filter((c) => c.change === "fixed").length,
     noSignal: cases.filter((c) => c.change === "no-signal").length,
     ...(baseline.noise === undefined ? {} : { floor: baseline.noise }),
-    passedBefore: baseline.passed,
-    passedAfter: current.passed,
+    passedBefore: cases.filter((c) => c.before === VERDICT.passed).length,
+    passedAfter: cases.filter((c) => c.after === VERDICT.passed).length,
   };
 }
