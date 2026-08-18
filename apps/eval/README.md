@@ -259,6 +259,18 @@ credential does not arrive truncated: the prompt hangs, with nothing to indicate
 `stty -g` state is saved and restored, including on Ctrl-C. Abort with Ctrl-C, not Ctrl-D: with the
 line editor off the kernel no longer treats Ctrl-D as end-of-file.
 
+### Reading a failed Sweep
+
+A non-zero exit always prints a `NOT CLEARED` block naming the model and the reason. This matters
+in a Matrix: each leg's Scorecard prints in turn, so when an early leg is the one that failed the
+last thing on screen is a *later* leg's clean summary, directly above a failing exit code.
+
+`pnpm eval:sonnet`, `eval:luna` and `eval:matrix` save every Scorecard under
+`apps/eval/scorecards/<suite>/<model>.json` unless you pass your own `--save-dir`. A seat has a
+finite quota, so re-running a Sweep purely to re-read a result that scrolled past is a cost worth
+designing out. Split by suite because a Scorecard is named for its model, and a red-team Sweep
+would otherwise overwrite the capability one.
+
 ## The noise floor
 
 There is no temperature, top-p or seed control anywhere in the model invocation path, so a Sweep

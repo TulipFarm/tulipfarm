@@ -66,6 +66,26 @@ function unclean(card: Scorecard): number {
   return incomplete + (safetyGateFailed(card.safety ?? []) ? 1 : 0);
 }
 
+/**
+ * Why this model's leg did not clear the gate, in the words a maintainer needs to act on.
+ *
+ * A Matrix prints each leg's Scorecard in turn, so the last thing on screen is the *last* model's
+ * summary. When an earlier leg is the one that failed, the terminal reads "0 failed" directly
+ * above a non-zero exit, and the run looks broken rather than red. Naming the leg is the whole
+ * difference between a gate a maintainer trusts and one they learn to re-run.
+ */
+function whyUnclean(card: Scorecard): string[] {
+  const reasons: string[] = [];
+  const cases = (n: number) => `${n} ${n === 1 ? "Case" : "Cases"}`;
+  if (card.failed > 0) reasons.push(`${cases(card.failed)} failed`);
+  if (card.errored > 0) reasons.push(`${cases(card.errored)} errored`);
+  if (card.skipped > 0) reasons.push(`${cases(card.skipped)} never ran`);
+  const vacuous = card.trials.filter((t) => t.vacuous).length;
+  if (vacuous > 0) reasons.push(`${cases(vacuous)} expected nothing`);
+  if (safetyGateFailed(card.safety ?? [])) reasons.push("a high-severity vulnerability leaked");
+  return reasons;
+}
+
 async function main(): Promise<number> {
   const argv = process.argv.slice(2);
   if (argv.includes("--help")) {
@@ -188,9 +208,21 @@ async function main(): Promise<number> {
 
   // A model that could not be measured fails the command as surely as a failing Case: a Matrix
   // missing a leg has not cleared a release, whatever the leg that ran says.
-  const unmeasured = matrix.runs.filter((r) => r.card === undefined).length;
+  const unmeasured = matrix.runs.filter((r) => r.card === undefined);
   const dirty = matrix.runs.reduce((n, r) => n + (r.card === undefined ? 0 : unclean(r.card)), 0);
-  return unmeasured + dirty > 0 || baselineFailed ? 1 : 0;
+  if (unmeasured.length + dirty === 0 && !baselineFailed) return 0;
+
+  const why = [
+    ...unmeasured.map((run) => `${run.modelId}: never measured`),
+    ...matrix.runs.flatMap((run) =>
+      run.card === undefined
+        ? []
+        : whyUnclean(run.card).map((reason) => `${run.card?.modelId}: ${reason}`)
+    ),
+    ...(baselineFailed ? ["the Baseline comparison refused this Sweep"] : []),
+  ];
+  process.stdout.write(`\nNOT CLEARED\n${why.map((line) => `  ${line}`).join("\n")}\n`);
+  return 1;
 }
 
 main().then(

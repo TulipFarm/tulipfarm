@@ -151,4 +151,23 @@ if [ -z "$ceiling" ]; then
   set -- "$@" --max-tokens-per-trial 15000
 fi
 
+# Every seat Sweep keeps its Scorecard. A Matrix prints each leg in turn, so a failing early leg
+# scrolls away behind the ones after it — and without an artifact the only way to read it back is
+# to sweep again, which spends quota a subscription seat has a finite amount of. Same rule as the
+# ceiling above: supply a default, never override a directory the caller chose.
+# Split by suite, for the same reason the Baselines are: a Scorecard is named for its model, so
+# a red-team Sweep and a capability Sweep sharing one directory would have the second silently
+# overwrite the first. This mirrors the `--save-dir scorecards/$suite` the CI workflow passes.
+saving=""
+suite=capability
+for arg in "$@"; do
+  case "$arg" in
+    --save-dir | --save-dir=* | --save | --save=*) saving=1 ;;
+    */red-team | */red-team/) suite=red-team ;;
+  esac
+done
+if [ -z "$saving" ]; then
+  set -- "$@" --save-dir "scorecards/$suite"
+fi
+
 exec tsx src/cli.ts --model "$models" "$@"
