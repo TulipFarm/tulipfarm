@@ -66,7 +66,7 @@ describe("renderDelta", () => {
   it("reports the aggregate, so a run is read as a change and not as a score", () => {
     const out = delta([trial("a"), trial("b", { passed: false })], [trial("a"), trial("b")]);
 
-    expect(out).toContain("1 passed before, 2 passed after");
+    expect(out).toContain("1 of 2 Cases passed before, 2 after");
   });
 
   it("says so plainly when nothing moved, rather than printing an empty report", () => {
