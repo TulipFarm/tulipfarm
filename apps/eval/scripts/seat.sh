@@ -100,7 +100,7 @@ collect() {
       fi
       export CLAUDE_CODE_OAUTH_TOKEN
       ;;
-    luna)
+    terra)
       # A file is the only route that cannot be defeated by the terminal: see prompt_secret.
       if [ -z "${CODEX_AUTH_JSON:-}" ] && [ -n "${CODEX_AUTH_FILE:-}" ]; then
         if [ ! -r "$CODEX_AUTH_FILE" ]; then
@@ -122,7 +122,7 @@ If the paste does not land, save it to a file and use: CODEX_AUTH_FILE=/path/to/
       export CODEX_AUTH_JSON
       ;;
     *)
-      printf 'unknown model "%s" — expected: sonnet, luna\n' "$1" >&2
+      printf 'unknown model "%s" — expected: sonnet, terra\n' "$1" >&2
       exit 1
       ;;
   esac

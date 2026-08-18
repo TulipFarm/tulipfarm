@@ -16,15 +16,15 @@ describe("resolveBindings", () => {
   });
 
   it("resolves a comma-separated matrix in the order it was written", () => {
-    const bindings = resolveBindings("luna,sonnet");
+    const bindings = resolveBindings("terra,sonnet");
 
-    expect(bindings.map((b) => b.id)).toEqual(["luna", "sonnet"]);
+    expect(bindings.map((b) => b.id)).toEqual(["terra", "sonnet"]);
   });
 
   it("tolerates spacing around the separators", () => {
-    const bindings = resolveBindings(" sonnet , luna ");
+    const bindings = resolveBindings(" sonnet , terra ");
 
-    expect(bindings.map((b) => b.id)).toEqual(["sonnet", "luna"]);
+    expect(bindings.map((b) => b.id)).toEqual(["sonnet", "terra"]);
   });
 
   it("refuses the same model twice, which would spend quota to compare it with itself", () => {

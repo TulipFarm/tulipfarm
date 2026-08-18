@@ -69,7 +69,7 @@ describe("compareToBaseline", () => {
 
   it("refuses to compare one model against another", () => {
     expect(() =>
-      compareToBaseline(card([trial("a")]), card([trial("a")], { modelId: "luna" }))
+      compareToBaseline(card([trial("a")]), card([trial("a")], { modelId: "terra" }))
     ).toThrow(BaselineMismatchError);
   });
 

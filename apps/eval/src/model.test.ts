@@ -11,7 +11,7 @@ type DoStreamResult = Awaited<ReturnType<MockLanguageModelV4["doStream"]>>;
 type StreamPart = DoStreamResult["stream"] extends ReadableStream<infer Part> ? Part : never;
 
 const SONNET = PINNED_MODELS.sonnet;
-const LUNA = PINNED_MODELS.luna;
+const LUNA = PINNED_MODELS.terra;
 
 const usage = (input: number, output: number, cacheRead = 0, cacheWrite = 0) => ({
   inputTokens: { total: input, noCache: input - cacheRead - cacheWrite, cacheRead, cacheWrite },
@@ -274,7 +274,7 @@ describe("pinnedBinding", () => {
     const before = process.env.CODEX_AUTH_JSON;
     process.env.CODEX_AUTH_JSON = "not json at all";
     try {
-      const binding = pinnedBinding(PINNED_MODELS.luna, {
+      const binding = pinnedBinding(PINNED_MODELS.terra, {
         createModel: async () => {
           throw new Error("the model must never be built");
         },
@@ -293,7 +293,7 @@ describe("pinnedBinding", () => {
     const before = process.env.CODEX_AUTH_JSON;
     delete process.env.CODEX_AUTH_JSON;
     try {
-      const binding = pinnedBinding(PINNED_MODELS.luna);
+      const binding = pinnedBinding(PINNED_MODELS.terra);
 
       await expect(binding.preflight?.()).rejects.toThrow(/CODEX_AUTH_JSON.*codex login/s);
     } finally {
@@ -305,7 +305,7 @@ describe("pinnedBinding", () => {
     const before = process.env.CODEX_AUTH_JSON;
     process.env.CODEX_AUTH_JSON = JSON.stringify({ tokens: { refresh_token: "rt" } });
     try {
-      const binding = pinnedBinding(PINNED_MODELS.luna);
+      const binding = pinnedBinding(PINNED_MODELS.terra);
 
       await expect(binding.preflight?.()).resolves.toBeUndefined();
     } finally {

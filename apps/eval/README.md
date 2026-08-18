@@ -115,8 +115,8 @@ Vocabulary is binding: [`metadata/terminologies.md` → Offline eval](../../meta
 - **`tool_call_count` is only a harness assertion at zero.** `count: 0` says the turn reached no
   Tool at all — that a guard settled it, or that the Agent answered from its Context — and the
   harness decides that. Any positive count pins how many times a model chose to call something,
-  which is vendor strategy: `luna` calls a lookup twice where `sonnet` calls it once, and neither
-  is a harness defect. Assert `tool_called`, `tool_argument_equals` and `tool_call_order` instead;
+  which is vendor strategy: one seat has been seen calling a lookup twice where the other calls it
+  once, and neither is a harness defect. Assert `tool_called`, `tool_argument_equals` and `tool_call_order` instead;
   `loop_status` already catches a runaway loop.
 - **A Case must script a result for every Tool it exposes.** An unscripted call fails with a
   message naming the Tool, and a Tool called more often than the Case scripted repeats its last
@@ -225,10 +225,17 @@ Both pinned models are **vendor CLI subscription seats**, not metered API keys. 
 call and spend a personal quota instead, so a token ceiling is the only one that can bind them —
 and `--model` refuses to run without one.
 
+The two are pinned at **the same tier on purpose**: `sonnet` and `gpt-5.6-terra` are each their
+vendor's mid "standard" rung, as `CLI_TIER_MODELS` in `apps/api/src/soul/llm-config/cascade-set.ts`
+declares. A second model earns its quota only as a *control* — it tells you whether a result is a
+property of the harness or of one vendor — and a control drawn from a different rung cannot do
+that. A capability gap would then be indistinguishable from a harness bug, which is the exact
+confusion this framework exists to remove. If you move one seat, move the other to match.
+
 ```bash
 pnpm eval                                    # scripted: free, deterministic, no credentials
 pnpm eval:sonnet                             # claude-code seat, prompts for the token
-pnpm eval:luna                               # codex seat, reads ~/.codex/auth.json
+pnpm eval:terra                              # codex seat, reads ~/.codex/auth.json
 pnpm eval:matrix                             # both seats, same Corpus, side by side
 pnpm eval:sonnet --case support-answers-without-tools --max-tokens 5000
 ```
@@ -239,9 +246,12 @@ pnpm eval:sonnet --case support-answers-without-tools --max-tokens 5000
   Cases comfortably truncated the Sweep at five of nine once the guardrail Cases landed — and a
   truncated Sweep reports its unrun Cases as `NOT COMPARABLE`, which reads like a smaller Corpus
   rather than like a mistake. The two flags are mutually exclusive.
-- **Budget per Trial from the heavier seat.** The two are not close: `luna` spends roughly 5.2k
-  input tokens per model call against `sonnet`'s 1.7k, so a three-call Case costs it ~16k. The
-  `seat.sh` default of 15000 per Trial is set from that, not from the average.
+- **Budget per Trial from the heavier seat.** The two are not close: the Codex seat was measured at
+  roughly 5.2k input tokens per model call against `sonnet`'s 1.7k, so a three-call Case cost it
+  ~16k. The `seat.sh` default of 15000 per Trial is set from that, not from the average. That
+  measurement was taken on `gpt-5.6-luna`; the seat is now `gpt-5.6-terra`, which is a larger,
+  reasoning-enabled model and can be expected to spend more. Re-measure before trusting the default
+  — a Sweep that trips the ceiling reports its unrun Cases as `NOT COMPARABLE`, not as an error.
 
 `scripts/seat.sh` collects every named seat's credential up front, into its own environment, so it
 never enters your shell, your history, or a file. It defaults `--max-tokens-per-trial` to 15000 and
@@ -265,7 +275,7 @@ A non-zero exit always prints a `NOT CLEARED` block naming the model and the rea
 in a Matrix: each leg's Scorecard prints in turn, so when an early leg is the one that failed the
 last thing on screen is a *later* leg's clean summary, directly above a failing exit code.
 
-`pnpm eval:sonnet`, `eval:luna` and `eval:matrix` save every Scorecard under
+`pnpm eval:sonnet`, `eval:terra` and `eval:matrix` save every Scorecard under
 `apps/eval/scorecards/<suite>/<model>.json` unless you pass your own `--save-dir`. A seat has a
 finite quota, so re-running a Sweep purely to re-read a result that scrolled past is a cost worth
 designing out. Split by suite because a Scorecard is named for its model, and a red-team Sweep

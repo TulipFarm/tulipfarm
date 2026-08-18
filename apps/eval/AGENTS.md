@@ -26,7 +26,7 @@ Only its own Cases need updating when their observable behaviour moves.
 | `src/scorer.ts` | `scoreCase` — pure and total. No I/O, no model, no clock. |
 | `src/runner.ts` | `runSweep` and `ModelBinding` — **the single seam this framework adds.** |
 | `src/matrix.ts` | `runMatrix` — the same Corpus across several models, one Scorecard each. |
-| `src/bindings.ts` | `resolveBindings` — turns `--model sonnet,luna` into the bindings to measure. |
+| `src/bindings.ts` | `resolveBindings` — turns `--model sonnet,terra` into the bindings to measure. |
 | `src/scripted.ts` | `scriptedBinding` — replays each Case's `script`. Free, deterministic. |
 | `src/model.ts` | `PINNED_MODELS` and `pinnedBinding` — the real-vendor binding. The only file here that touches a credential. |
 | `src/retry.ts` | `withRetry` — transient vendor failures, retried and counted. |
@@ -72,6 +72,6 @@ before changing how a Case is scored, run or compared.** These are the ones that
 | --- | --- |
 | `pnpm eval` | The capability Corpus on the free scripted tier. |
 | `pnpm eval:redteam` | The attack Corpus, scripted. |
-| `pnpm eval:sonnet` / `eval:luna` | One real seat. Needs that seat's credential. |
+| `pnpm eval:sonnet` / `eval:terra` | One real seat. Needs that seat's credential. |
 | `pnpm eval:matrix` / `eval:redteam:matrix` | Both seats, one Scorecard each plus a grid. |
 | `pnpm eval -- --help` | Every flag. |

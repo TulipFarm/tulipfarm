@@ -6,10 +6,10 @@
   "scripts": {
     "eval": "tsx src/cli.ts",
     "eval:sonnet": "sh scripts/seat.sh sonnet",
-    "eval:luna": "sh scripts/seat.sh luna",
-    "eval:matrix": "sh scripts/seat.sh sonnet,luna",
+    "eval:terra": "sh scripts/seat.sh terra",
+    "eval:matrix": "sh scripts/seat.sh sonnet,terra",
     "eval:redteam": "tsx src/cli.ts --corpus corpus/red-team",
-    "eval:redteam:matrix": "sh scripts/seat.sh sonnet,luna --corpus corpus/red-team",
+    "eval:redteam:matrix": "sh scripts/seat.sh sonnet,terra --corpus corpus/red-team",
     "lint": "biome check --no-errors-on-unmatched .",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"

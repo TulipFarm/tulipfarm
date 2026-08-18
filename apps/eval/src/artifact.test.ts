@@ -105,7 +105,7 @@ describe("writeArtifact / readArtifact", () => {
 describe("baselinePath", () => {
   it("stores one Baseline per model, because two models are never comparable", () => {
     expect(baselinePath("/root", "sonnet")).toBe("/root/baselines/sonnet.json");
-    expect(baselinePath("/root", "luna")).toBe("/root/baselines/luna.json");
+    expect(baselinePath("/root", "terra")).toBe("/root/baselines/terra.json");
   });
 
   it("refuses a model id that would escape the Baseline directory", () => {
@@ -117,7 +117,7 @@ describe("baselinePath", () => {
 describe("scorecardPath", () => {
   it("names a Matrix Scorecard after the model that produced it", () => {
     expect(scorecardPath("/out", "sonnet")).toBe("/out/sonnet.json");
-    expect(scorecardPath("/out", "luna")).toBe("/out/luna.json");
+    expect(scorecardPath("/out", "terra")).toBe("/out/terra.json");
   });
 
   it("refuses a model id that would escape the directory it was given", () => {

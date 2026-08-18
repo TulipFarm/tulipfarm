@@ -73,15 +73,15 @@ describe("runMatrix", () => {
     const seen: string[] = [];
     const matrix = await runMatrix({
       corpus: corpusOf([evalCase("a")]),
-      models: [binding("sonnet"), binding("luna")],
+      models: [binding("sonnet"), binding("terra")],
       sweep: async (o: SweepOptions) => {
         seen.push(`${o.model.id}:${o.corpus.hash}`);
         return card(o.model.id);
       },
     });
 
-    expect(seen).toEqual([`sonnet:${matrix.corpusHash}`, `luna:${matrix.corpusHash}`]);
-    expect(matrix.runs.map((r) => r.modelId)).toEqual(["sonnet", "luna"]);
+    expect(seen).toEqual([`sonnet:${matrix.corpusHash}`, `terra:${matrix.corpusHash}`]);
+    expect(matrix.runs.map((r) => r.modelId)).toEqual(["sonnet", "terra"]);
   });
 
   it("keeps the declared order rather than ordering by result", async () => {
@@ -89,12 +89,12 @@ describe("runMatrix", () => {
     // whether a harness change lands differently on each, not to be ranked against one another.
     const matrix = await runMatrix({
       corpus: corpusOf([evalCase("a")]),
-      models: [binding("luna"), binding("sonnet")],
+      models: [binding("terra"), binding("sonnet")],
       sweep: async (o: SweepOptions) =>
-        card(o.model.id, o.model.id === "luna" ? { passed: 0, failed: 1 } : {}),
+        card(o.model.id, o.model.id === "terra" ? { passed: 0, failed: 1 } : {}),
     });
 
-    expect(matrix.runs.map((r) => r.modelId)).toEqual(["luna", "sonnet"]);
+    expect(matrix.runs.map((r) => r.modelId)).toEqual(["terra", "sonnet"]);
   });
 
   it("runs one model at a time, so neither is measured under the other's throttling", async () => {
@@ -102,7 +102,7 @@ describe("runMatrix", () => {
     let overlapped = false;
     await runMatrix({
       corpus: corpusOf([evalCase("a")]),
-      models: [binding("sonnet"), binding("luna")],
+      models: [binding("sonnet"), binding("terra")],
       sweep: async (o: SweepOptions) => {
         active += 1;
         if (active > 1) overlapped = true;
@@ -120,7 +120,7 @@ describe("runMatrix", () => {
     // a whole Sweep's worth of information lost to a fault in something else.
     const matrix = await runMatrix({
       corpus: corpusOf([evalCase("a")]),
-      models: [binding("sonnet"), binding("luna")],
+      models: [binding("sonnet"), binding("terra")],
       sweep: async (o: SweepOptions) => {
         if (o.model.id === "sonnet") throw new Error("CODEX_AUTH_JSON is not set");
         return card(o.model.id);
@@ -138,7 +138,7 @@ describe("runMatrix", () => {
     const ceilings: (number | undefined)[] = [];
     await runMatrix({
       corpus: corpusOf([evalCase("a")]),
-      models: [binding("sonnet"), binding("luna")],
+      models: [binding("sonnet"), binding("terra")],
       maxTokens: 20_000,
       sweep: async (o: SweepOptions) => {
         ceilings.push(o.maxTokens);
@@ -174,7 +174,7 @@ describe("runMatrix", () => {
   });
 
   it("reports a model that scored nothing as unavailable, not as a column of errors", async () => {
-    const dead = card("luna", {
+    const dead = card("terra", {
       trials: [
         { ...aTrial("a"), passed: false, error: "CLAUDE_CODE_OAUTH_TOKEN is not set" },
         { ...aTrial("b"), passed: false, error: "CLAUDE_CODE_OAUTH_TOKEN is not set" },
@@ -187,7 +187,7 @@ describe("runMatrix", () => {
 
     const matrix = await runMatrix({
       corpus: corpusOf([evalCase("a")]),
-      models: [binding("luna")],
+      models: [binding("terra")],
       sweep: async () => dead,
     });
 
@@ -196,7 +196,7 @@ describe("runMatrix", () => {
   });
 
   it("keeps a Scorecard that scored something, however badly the rest of it went", async () => {
-    const partial = card("luna", {
+    const partial = card("terra", {
       trials: [
         { ...aTrial("a"), passed: false },
         { ...aTrial("b"), passed: false, error: "rate limited" },
@@ -209,7 +209,7 @@ describe("runMatrix", () => {
 
     const matrix = await runMatrix({
       corpus: corpusOf([evalCase("a")]),
-      models: [binding("luna")],
+      models: [binding("terra")],
       sweep: async () => partial,
     });
 
@@ -224,7 +224,7 @@ describe("handing Sweep options to each model", () => {
 
     await runMatrix({
       corpus: corpusOf([evalCase("a")]),
-      models: [binding("sonnet"), binding("luna")],
+      models: [binding("sonnet"), binding("terra")],
       caseFilter: "a",
       maxTokens: 99,
       repeat: 4,

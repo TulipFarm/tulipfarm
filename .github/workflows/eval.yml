@@ -15,11 +15,11 @@ on:
       models:
         description: "Seats to sweep"
         type: choice
-        default: sonnet,luna
+        default: sonnet,terra
         options:
-          - sonnet,luna
+          - sonnet,terra
           - sonnet
-          - luna
+          - terra
       max_tokens_per_trial:
         description: "Token ceiling per Trial, per model"
         type: string

@@ -21,7 +21,7 @@
     "reset:dev": "bash scripts/reset-dev.sh",
     "eval": "pnpm --filter @tulipfarm/eval eval",
     "eval:sonnet": "pnpm --filter @tulipfarm/eval eval:sonnet",
-    "eval:luna": "pnpm --filter @tulipfarm/eval eval:luna",
+    "eval:terra": "pnpm --filter @tulipfarm/eval eval:terra",
     "eval:matrix": "pnpm --filter @tulipfarm/eval eval:matrix",
     "eval:redteam": "pnpm --filter @tulipfarm/eval eval:redteam",
     "eval:redteam:matrix": "pnpm --filter @tulipfarm/eval eval:redteam:matrix",
