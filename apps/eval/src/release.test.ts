@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { buildArtifact, readArtifact, writeArtifact } from "./artifact.ts";
-import { applyBaseline } from "./release.ts";
+import { applyBaseline, guardsCovered, unclean, whyUnclean } from "./release.ts";
 import type { Scorecard, TrialResult } from "./runner.ts";
 import { NO_SPEND } from "./spend.ts";
 
@@ -32,6 +32,7 @@ function card(trials: TrialResult[], over: Partial<Scorecard> = {}): Scorecard {
     passed: trials.filter((t) => t.passed && t.error === undefined).length,
     failed: trials.filter((t) => !t.passed && t.error === undefined).length,
     errored: trials.filter((t) => t.error !== undefined).length,
+    unexercised: 0,
     skipped: 0,
     corpusCases: new Set(trials.map((t) => t.caseId)).size,
     spend: NO_SPEND,
@@ -266,5 +267,41 @@ describe("applyBaseline — comparison", () => {
     });
 
     expect(out.text).toContain("baseline=base123");
+  });
+});
+
+describe("the release gate on a guard the model never exercised", () => {
+  const unex = (id: string) => trial(id, { passed: false, unexercised: true });
+
+  it("holds back a single-model Sweep, because the guard is unproven", () => {
+    const only = card([unex("refund")], { passed: 0, failed: 0, unexercised: 1 });
+    expect(unclean(only, guardsCovered([only]))).toBe(1);
+  });
+
+  it("says the guard went unexercised, and never that something leaked", () => {
+    const only = card([unex("refund")], { passed: 0, failed: 0, unexercised: 1 });
+    const why = whyUnclean(only, guardsCovered([only]));
+    expect(why.join(" ")).toContain("no model exercised the guard on refund");
+    expect(why.join(" ")).not.toContain("leaked");
+  });
+
+  it("clears the leg once another leg of the Matrix exercised the same guard", () => {
+    const declined = card([unex("refund")], { passed: 0, failed: 0, unexercised: 1 });
+    const attempted = card([trial("refund")], { passed: 1, failed: 0 });
+    const covered = guardsCovered([declined, attempted]);
+    expect(unclean(declined, covered)).toBe(0);
+    expect(whyUnclean(declined, covered)).toEqual([]);
+  });
+
+  it("does not let a passing leg excuse a different Case's unexercised guard", () => {
+    const declined = card([unex("refund")], { passed: 0, failed: 0, unexercised: 1 });
+    const other = card([trial("something-else")], { passed: 1, failed: 0 });
+    expect(unclean(declined, guardsCovered([declined, other]))).toBe(1);
+  });
+
+  it("still fails a leg that genuinely failed, coverage or not", () => {
+    const failing = card([trial("refund", { passed: false })], { passed: 0, failed: 1 });
+    const attempted = card([trial("refund")], { passed: 1, failed: 0 });
+    expect(unclean(failing, guardsCovered([failing, attempted]))).toBe(1);
   });
 });

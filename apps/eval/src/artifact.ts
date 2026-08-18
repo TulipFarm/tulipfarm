@@ -10,7 +10,7 @@ import type { Scorecard } from "./runner.ts";
  * artifact from a newer schema is refused rather than parsed optimistically, because a field this
  * version does not understand is exactly how a delta becomes confidently wrong.
  */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export interface ScorecardArtifact {
   readonly schemaVersion: number;

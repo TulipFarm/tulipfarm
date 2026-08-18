@@ -5,11 +5,12 @@ import type { NoiseFloor } from "./noise.ts";
 import { declined, landed, type ResistanceRate } from "./resistance.ts";
 import type { Scorecard, TrialResult } from "./runner.ts";
 import type { ClassResult } from "./safety.ts";
-import { caseIdsOf, caseVerdict, scoreable, VERDICT } from "./verdict.ts";
+import { caseIdsOf, caseVerdict, scoreable, VERDICT, type Verdict } from "./verdict.ts";
 
 const CHECK = "PASS";
 const CROSS = "FAIL";
 const BANG = "ERR ";
+const UNEX = "UNEX";
 
 /**
  * What the Sweep spent, and how much of that it cannot see.
@@ -31,7 +32,7 @@ function spendLine(card: Scorecard): string {
 
 function describe(trial: TrialResult): string {
   if (trial.error !== undefined) return `${BANG} ${trial.caseId}#${trial.trial}  ${trial.error}`;
-  const mark = trial.passed ? CHECK : CROSS;
+  const mark = trial.unexercised === true ? UNEX : trial.passed ? CHECK : CROSS;
   const note = trial.vacuous ? "  (vacuous)" : "";
   const retried = trial.retries > 0 ? `  (${trial.retries} retried)` : "";
   return `${mark} ${trial.caseId}#${trial.trial}  [${trial.status}]${note}${retried}`;
@@ -66,6 +67,7 @@ export function renderScorecard(card: Scorecard): string {
   lines.push(
     "",
     `${card.passed} passed, ${card.failed} failed, ${card.errored} errored` +
+      (card.unexercised > 0 ? `, ${card.unexercised} unexercised` : "") +
       (vacuous > 0 ? `, ${vacuous} vacuous` : "") +
       (card.skipped > 0 ? `, ${card.skipped} never run` : ""),
     spendLine(card)
@@ -134,6 +136,16 @@ function safetyBlock(report: readonly ClassResult[] | undefined): string[] {
         ? ""
         : `  (+${row.modelLeaked} landed on the model only)`;
     lines.push(`  ${row.name.padEnd(width)}  ${verdict}${aside}`);
+  }
+  const unexercised = report.filter((c) => c.unexercised > 0);
+  if (unexercised.length > 0) {
+    lines.push(
+      `GUARD    ${plural(unexercised.length, "class")} had a guard this model never made it ` +
+        `attempt: ${unexercised.map((c) => c.name).join(", ")}.`,
+      "         Nothing leaked — the model declined first — but the guard is still unproven here.",
+      "         Strengthen the attack until the model takes the bait, or measure it on a model",
+      "         that does. A Matrix leg where another model attempted it counts as covered."
+    );
   }
   const leaked = report.filter((c) => c.outcome === "leaked" && c.severity === "high");
   if (leaked.length > 0) {
@@ -256,6 +268,54 @@ export function renderMatrix(matrix: Matrix): string {
  * never reached because its ceiling stopped the Sweep, is reported as not comparable — calling it
  * a disagreement would blame the harness for a rate limit or a budget.
  */
+/**
+ * Which red-team guards the Matrix as a whole managed to exercise, and which none of it did.
+ *
+ * A `guard_held` Case can only measure its guard on a model willing to attempt the attack, and that
+ * willingness is the vendor's property, not the harness's. Read one model at a time, a safer model
+ * looks like a coverage hole. Read across the Matrix, it usually is not one: the other leg attempted
+ * it and the guard answered.
+ *
+ * This is the second reason a second model earns its quota. The first is disagreement; this is
+ * coverage. A guard *no* leg exercised is the real gap, and it is the only one worth acting on.
+ */
+function guardCoverageLines(
+  measured: readonly { readonly modelId: string; readonly card: Scorecard }[],
+  ids: readonly string[],
+  verdicts: ReadonlyMap<string, readonly Verdict[]>
+): string[] {
+  const anyUnexercised = ids.filter((id) =>
+    (verdicts.get(id) ?? []).some((v) => v === VERDICT.unexercised)
+  );
+  if (anyUnexercised.length === 0) return [];
+
+  const exercisedOn = (id: string): string[] =>
+    measured.filter((_, i) => verdicts.get(id)?.[i] === VERDICT.passed).map((r) => r.modelId);
+
+  const covered = anyUnexercised.filter((id) => exercisedOn(id).length > 0);
+  const uncovered = anyUnexercised.filter((id) => exercisedOn(id).length === 0);
+
+  const lines: string[] = [];
+  if (covered.length > 0) {
+    lines.push(
+      "",
+      `GUARD COVERED  ${plural(covered.length, "Case")} one model declined but another attempted`,
+      ...covered.map((id) => `  ${id}  exercised on ${exercisedOn(id).join(", ")}`),
+      "  The guard was measured and held. A model that declines the bait is safer, not a gap."
+    );
+  }
+  if (uncovered.length > 0) {
+    lines.push(
+      "",
+      `GUARD UNCOVERED  ${plural(uncovered.length, "Case")} no model attempted`,
+      ...uncovered.map((id) => `  ${id}`),
+      "  Nothing leaked, but no leg proved the guard fires. Strengthen the attack until a model",
+      "  takes the bait — an unexercised guard can rot without a single Case turning red."
+    );
+  }
+  return lines;
+}
+
 function disagreementLines(matrix: Matrix, ids: string[]): string[] {
   const measured = matrix.runs.filter(
     (r): r is typeof r & { card: Scorecard } => r.card !== undefined
@@ -284,6 +344,8 @@ function disagreementLines(matrix: Matrix, ids: string[]): string[] {
           "  A Case that lands differently on each model is a property of the harness under that model.",
           "  These models are a control on the measurement, not competitors: this is not a ranking.",
         ];
+
+  lines.push(...guardCoverageLines(measured, ids, verdicts));
 
   if (incomparable.length > 0) {
     lines.push(

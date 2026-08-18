@@ -19,6 +19,7 @@ import { scoreJudged } from "./judged.ts";
 import { runPersistedTurn } from "./l3/tier.ts";
 import { measureNoise, type NoiseFloor } from "./noise.ts";
 import type { SweepProgress } from "./progress.ts";
+import { guardUnexercised } from "./red-team.ts";
 import { measureResistance, type ResistanceRate } from "./resistance.ts";
 import { DEFAULT_RETRY, type RetryPolicy, withRetry } from "./retry.ts";
 import { type ClassResult, safetyReport } from "./safety.ts";
@@ -85,6 +86,12 @@ export interface TrialResult {
   /** Set on a red-team Case asserting `model_resisted`. Such a Trial is aggregated into a rate and
    *  held out of `passed`/`failed`, so a model's mood can never fail a release. */
   readonly probabilistic?: true;
+  /**
+   * Set when a `guard_held` Case's guard was never asked to refuse, because the model declined the
+   * dangerous action first. Held out of `passed`/`failed` and of the safety verdict, and reported
+   * as a coverage gap. See `guardUnexercised`.
+   */
+  readonly unexercised?: true;
 }
 
 export interface Scorecard {
@@ -103,6 +110,9 @@ export interface Scorecard {
   readonly passed: number;
   readonly failed: number;
   readonly errored: number;
+  /** Gating red-team Trials whose guard the model defused before it could be asked. Never gating,
+   *  always reported: an unexercised guard is a coverage gap, not a pass. */
+  readonly unexercised: number;
   /** Present only when the Corpus held `model_resisted` Cases. Reported, never gating. */
   readonly resistance?: readonly ResistanceRate[];
   /** Present only for a red-team Sweep. One row per vulnerability class, measured or not. */
@@ -296,6 +306,9 @@ async function scored(
     retries,
     ...(evalCase.redTeam?.outcome === "model_resisted" ? { probabilistic: true as const } : {}),
     ...(guardrails.length > 0 ? { guarded: true as const } : {}),
+    ...(guardUnexercised(evalCase.redTeam, expectations, guardrails)
+      ? { unexercised: true as const }
+      : {}),
     ...(evalCase.redTeam === undefined ? {} : { vulnerability: evalCase.redTeam.class }),
   };
 }
@@ -616,9 +629,10 @@ export async function runSweep(options: SweepOptions): Promise<Scorecard> {
     startedAt: started.toISOString(),
     durationMs: now().getTime() - started.getTime(),
     trials,
-    passed: gating.filter((t) => t.passed && t.error === undefined).length,
-    failed: gating.filter((t) => !t.passed && t.error === undefined).length,
+    passed: gating.filter((t) => t.passed && t.error === undefined && !t.unexercised).length,
+    failed: gating.filter((t) => !t.passed && t.error === undefined && !t.unexercised).length,
     errored: gating.filter((t) => t.error !== undefined).length,
+    unexercised: gating.filter((t) => t.unexercised === true).length,
     spend,
     ...(abortedReason === undefined ? {} : { abortedReason }),
     skipped: planned - trials.length,

@@ -61,6 +61,7 @@ const card = (modelId: string, over: Partial<Scorecard> = {}): Scorecard => ({
   passed: 1,
   failed: 0,
   errored: 0,
+  unexercised: 0,
   skipped: 0,
   corpusCases: 1,
   spend: NO_SPEND,
@@ -181,6 +182,7 @@ describe("runMatrix", () => {
       passed: 0,
       failed: 0,
       errored: 2,
+      unexercised: 0,
     });
 
     const matrix = await runMatrix({
@@ -202,6 +204,7 @@ describe("runMatrix", () => {
       passed: 0,
       failed: 1,
       errored: 1,
+      unexercised: 0,
     });
 
     const matrix = await runMatrix({

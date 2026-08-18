@@ -30,6 +30,7 @@ const card = (
   passed: trials.filter((t) => t.passed).length,
   failed: trials.filter((t) => !t.passed).length,
   errored: 0,
+  unexercised: 0,
   skipped: 0,
   corpusCases: 1,
   spend: NO_SPEND,
@@ -118,6 +119,7 @@ describe("renderMatrix", () => {
           modelId: "sonnet",
           card: card("sonnet", [trial("a", { passed: false, error: "vendor died" })], {
             errored: 1,
+            unexercised: 0,
             failed: 0,
             passed: 0,
           }),
@@ -191,6 +193,7 @@ describe("renderMatrix", () => {
           modelId: "luna",
           card: card("luna", [trial("a"), trial("b", { passed: false, error: "rate limited" })], {
             errored: 1,
+            unexercised: 0,
             failed: 0,
           }),
         },
@@ -223,6 +226,7 @@ describe("renderMatrix", () => {
           modelId: "luna",
           card: card("luna", [trial("a"), trial("b", { passed: false, error: "vendor died" })], {
             errored: 1,
+            unexercised: 0,
             failed: 0,
             skipped: 1,
             corpusCases: 2,
@@ -243,6 +247,7 @@ describe("renderMatrix", () => {
           modelId: "luna",
           card: card("luna", [trial("a", { passed: false }), trial("b", { error: "boom" })], {
             errored: 1,
+            unexercised: 0,
             failed: 1,
           }),
         },
@@ -261,5 +266,44 @@ describe("renderMatrix", () => {
     expect(out).toContain("No Case was measured");
     expect(out).not.toMatch(/Case\s+luna\n/);
     expect(out).toContain("codex login required");
+  });
+});
+
+describe("a guard one model exercised and another did not", () => {
+  const unex = (id: string) => trial(id, { passed: false, unexercised: true });
+
+  it("reports the guard as covered by the Matrix, because some model did attempt it", () => {
+    const out = renderMatrix(
+      matrix([
+        { modelId: "sonnet", card: card("sonnet", [unex("refund")], { unexercised: 1 }) },
+        { modelId: "luna", card: card("luna", [trial("refund")]) },
+      ])
+    );
+
+    expect(out).toContain("GUARD COVERED");
+    expect(out).toMatch(/refund\s+exercised on luna/);
+  });
+
+  it("does not call that a disagreement, because UNEX is not a verdict", () => {
+    const out = renderMatrix(
+      matrix([
+        { modelId: "sonnet", card: card("sonnet", [unex("refund")], { unexercised: 1 }) },
+        { modelId: "luna", card: card("luna", [trial("refund")]) },
+      ])
+    );
+
+    expect(out).not.toContain("DISAGREEMENT");
+  });
+
+  it("reports a guard no model exercised as an uncovered gap instead", () => {
+    const out = renderMatrix(
+      matrix([
+        { modelId: "sonnet", card: card("sonnet", [unex("refund")], { unexercised: 1 }) },
+        { modelId: "luna", card: card("luna", [unex("refund")], { unexercised: 1 }) },
+      ])
+    );
+
+    expect(out).toContain("GUARD UNCOVERED");
+    expect(out).not.toContain("GUARD COVERED");
   });
 });

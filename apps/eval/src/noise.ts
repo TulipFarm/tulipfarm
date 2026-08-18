@@ -43,7 +43,7 @@ export function measureNoise(card: Scorecard): NoiseFloor | undefined {
     // disagreement is the resistance rate — so counting them would report the measurement itself
     // as noise and damp every real capability regression alongside it.
     const scoreable = ran.filter(
-      (t) => t.error === undefined && !t.vacuous && t.probabilistic !== true
+      (t) => t.error === undefined && !t.vacuous && t.probabilistic !== true && !t.unexercised
     );
     if (scoreable.length < 2) continue;
     measured += 1;

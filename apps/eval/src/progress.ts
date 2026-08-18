@@ -28,10 +28,11 @@ function seconds(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
-/** `ERR` and `VAC` are not verdicts on the Case; they must not read as one mid-run either. */
+/** `ERR`, `VAC` and `UNEX` are not verdicts on the Case; they must not read as one mid-run either. */
 function verdictOf(result: TrialResult): string {
   if (result.error !== undefined) return "ERR";
   if (result.vacuous) return "VAC";
+  if (result.unexercised === true) return "UNEX";
   return result.passed ? "PASS" : "FAIL";
 }
 

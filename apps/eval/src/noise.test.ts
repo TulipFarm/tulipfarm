@@ -28,6 +28,7 @@ function card(trials: TrialResult[]): Scorecard {
     passed: trials.filter((t) => t.passed).length,
     failed: trials.filter((t) => !t.passed && t.error === undefined).length,
     errored: trials.filter((t) => t.error !== undefined).length,
+    unexercised: 0,
     spend: NO_SPEND,
     skipped: 0,
     corpusCases: new Set(trials.map((t) => t.caseId)).size,

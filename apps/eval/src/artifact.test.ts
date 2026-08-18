@@ -25,6 +25,7 @@ function card(overrides: Partial<Scorecard> = {}): Scorecard {
     passed: 1,
     failed: 0,
     errored: 0,
+    unexercised: 0,
     skipped: 0,
     corpusCases: 0,
     spend: NO_SPEND,

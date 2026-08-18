@@ -8,9 +8,8 @@ import { createJudge, judgeIdentity, judgeVersion } from "./judge.ts";
 import { runMatrix } from "./matrix.ts";
 import { defaultCreateModel, PINNED_MODELS } from "./model.ts";
 import { progressReporter } from "./progress.ts";
-import { applyBaseline } from "./release.ts";
+import { applyBaseline, guardsCovered, unclean, whyUnclean } from "./release.ts";
 import { plannedTrials, type Scorecard, selectCases } from "./runner.ts";
-import { safetyGateFailed } from "./safety.ts";
 import { renderMatrix, renderScorecard } from "./scorecard.ts";
 
 const MODELS = Object.keys(PINNED_MODELS).join(", ");
@@ -55,36 +54,6 @@ credentials. --model drives a real vendor CLI on your own subscription seat, whi
 that seat's credential in the environment and consumes your quota. Always bound it with
 --max-tokens-per-trial: a seat's dollar cost is zero, so --max-spend can never stop one.
 `;
-
-/** A Sweep clears a release only when it measured everything it set out to measure. */
-function unclean(card: Scorecard): number {
-  const incomplete =
-    card.failed + card.errored + card.skipped + card.trials.filter((t) => t.vacuous).length;
-  // Stated separately even though a high-severity leak is always a failed Trial today. The gate a
-  // release depends on should read from the safety report rather than inherit it by coincidence,
-  // or a later change to how red-team Trials are counted would remove it without anyone noticing.
-  return incomplete + (safetyGateFailed(card.safety ?? []) ? 1 : 0);
-}
-
-/**
- * Why this model's leg did not clear the gate, in the words a maintainer needs to act on.
- *
- * A Matrix prints each leg's Scorecard in turn, so the last thing on screen is the *last* model's
- * summary. When an earlier leg is the one that failed, the terminal reads "0 failed" directly
- * above a non-zero exit, and the run looks broken rather than red. Naming the leg is the whole
- * difference between a gate a maintainer trusts and one they learn to re-run.
- */
-function whyUnclean(card: Scorecard): string[] {
-  const reasons: string[] = [];
-  const cases = (n: number) => `${n} ${n === 1 ? "Case" : "Cases"}`;
-  if (card.failed > 0) reasons.push(`${cases(card.failed)} failed`);
-  if (card.errored > 0) reasons.push(`${cases(card.errored)} errored`);
-  if (card.skipped > 0) reasons.push(`${cases(card.skipped)} never ran`);
-  const vacuous = card.trials.filter((t) => t.vacuous).length;
-  if (vacuous > 0) reasons.push(`${cases(vacuous)} expected nothing`);
-  if (safetyGateFailed(card.safety ?? [])) reasons.push("a high-severity vulnerability leaked");
-  return reasons;
-}
 
 async function main(): Promise<number> {
   const argv = process.argv.slice(2);
@@ -209,7 +178,13 @@ async function main(): Promise<number> {
   // A model that could not be measured fails the command as surely as a failing Case: a Matrix
   // missing a leg has not cleared a release, whatever the leg that ran says.
   const unmeasured = matrix.runs.filter((r) => r.card === undefined);
-  const dirty = matrix.runs.reduce((n, r) => n + (r.card === undefined ? 0 : unclean(r.card)), 0);
+  // Computed across every leg, not per leg: a guard one model declined and another attempted has
+  // been measured, and failing the declining leg for it would punish the safer model.
+  const covered = guardsCovered(matrix.runs.flatMap((r) => (r.card === undefined ? [] : [r.card])));
+  const dirty = matrix.runs.reduce(
+    (n, r) => n + (r.card === undefined ? 0 : unclean(r.card, covered)),
+    0
+  );
   if (unmeasured.length + dirty === 0 && !baselineFailed) return 0;
 
   const why = [
@@ -217,7 +192,7 @@ async function main(): Promise<number> {
     ...matrix.runs.flatMap((run) =>
       run.card === undefined
         ? []
-        : whyUnclean(run.card).map((reason) => `${run.card?.modelId}: ${reason}`)
+        : whyUnclean(run.card, covered).map((reason) => `${run.card?.modelId}: ${reason}`)
     ),
     ...(baselineFailed ? ["the Baseline comparison refused this Sweep"] : []),
   ];

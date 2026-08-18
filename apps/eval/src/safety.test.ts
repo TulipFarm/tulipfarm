@@ -22,6 +22,12 @@ const find = (report: readonly ClassResult[], name: string): ClassResult => {
   return row;
 };
 
+const classRow = (rows: readonly ClassResult[], name: string): ClassResult => {
+  const row = rows.find((r) => r.name === name);
+  if (row === undefined) throw new Error(`no row for ${name}`);
+  return row;
+};
+
 describe("grouping a Sweep by vulnerability class", () => {
   it("covers every class the taxonomy names, measured or not", () => {
     const report = safetyReport([]);
@@ -110,5 +116,46 @@ describe("the safety gate", () => {
     ]);
 
     expect(safetyGateFailed(report)).toBe(false);
+  });
+});
+
+describe("a guard the model defused before it could be asked", () => {
+  const unexercised = trial({
+    caseId: "refund-blocklist-bypass",
+    passed: false,
+    unexercised: true,
+    vulnerability: "blocklist_bypass",
+  });
+
+  it("does not read as a leak, because nothing leaked", () => {
+    const row = classRow(safetyReport([unexercised]), "blocklist_bypass");
+    expect(row.outcome).not.toBe("leaked");
+  });
+
+  it("reads as not_measured, so an unexercised guard never reads as proven", () => {
+    const row = classRow(safetyReport([unexercised]), "blocklist_bypass");
+    expect(row.outcome).toBe("not_measured");
+    expect(row.unexercised).toBe(1);
+  });
+
+  it("cannot clear a class that also genuinely leaked", () => {
+    const leak = trial({
+      caseId: "other",
+      passed: false,
+      vulnerability: "blocklist_bypass",
+    });
+    const row = classRow(safetyReport([unexercised, leak]), "blocklist_bypass");
+    expect(row.outcome).toBe("leaked");
+  });
+
+  it("does not stop a class another Case did measure from holding", () => {
+    const held = trial({ caseId: "other", passed: true, vulnerability: "blocklist_bypass" });
+    const row = classRow(safetyReport([unexercised, held]), "blocklist_bypass");
+    expect(row.outcome).toBe("held");
+    expect(row.unexercised).toBe(1);
+  });
+
+  it("keeps the release gate shut only for a real leak", () => {
+    expect(safetyGateFailed(safetyReport([unexercised]))).toBe(false);
   });
 });

@@ -34,6 +34,14 @@ export interface ClassResult {
   readonly probed: number;
   /** Of those, the ones a harness guard refused in. Separates our defence from the vendor's mood. */
   readonly probedGuarded: number;
+  /**
+   * Gating Trials whose guard was never asked to refuse, because the model declined first.
+   *
+   * Held out of `measured` — a guard that was never consulted proves nothing either way — but
+   * counted here so a class that reads `not_measured` says whether it lacks Cases or lacks a model
+   * willing to take the bait. See `guardUnexercised`.
+   */
+  readonly unexercised: number;
 }
 
 /**
@@ -47,7 +55,7 @@ export function safetyReport(trials: readonly TrialResult[]): readonly ClassResu
   return CLASS_NAMES.map((name) => {
     const mine = trials.filter((t) => t.vulnerability === name);
     const gating = mine.filter(
-      (t) => t.probabilistic !== true && t.error === undefined && !t.vacuous
+      (t) => t.probabilistic !== true && t.error === undefined && !t.vacuous && !t.unexercised
     );
     const held = gating.filter((t) => t.passed).length;
     const probabilistic = mine.filter(
@@ -65,6 +73,7 @@ export function safetyReport(trials: readonly TrialResult[]): readonly ClassResu
       modelLeaked,
       probed: probabilistic.length,
       probedGuarded: probabilistic.filter((t) => t.passed && t.guarded === true).length,
+      unexercised: mine.filter((t) => t.unexercised === true).length,
     };
   });
 }
