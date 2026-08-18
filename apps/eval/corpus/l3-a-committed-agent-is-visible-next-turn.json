@@ -28,11 +28,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "kind",
-          "slug",
-          "content"
-        ]
+        "required": ["kind", "slug", "content"]
       }
     }
   ],

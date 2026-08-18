@@ -15,6 +15,7 @@
       "!**/.agent",
       "!**/.agents",
       "!**/.claude",
+      "!apps/eval/scorecards",
       "!brand"
     ]
   },
