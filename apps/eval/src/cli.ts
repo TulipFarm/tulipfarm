@@ -9,7 +9,7 @@ import { runMatrix } from "./matrix.ts";
 import { defaultCreateModel, PINNED_MODELS } from "./model.ts";
 import { progressReporter } from "./progress.ts";
 import { applyBaseline, guardsCovered, unclean, whyUnclean } from "./release.ts";
-import { plannedTrials, type Scorecard, selectCases } from "./runner.ts";
+import { plannedTrials, selectCases } from "./runner.ts";
 import { renderMatrix, renderScorecard } from "./scorecard.ts";
 
 const MODELS = Object.keys(PINNED_MODELS).join(", ");
@@ -22,7 +22,7 @@ Usage: pnpm eval [options]
                      Point at corpus/red-team for the safety suite; it keeps its own
                      hash and its own Baseline folder.
   --model <names>    Run against real vendor models (${MODELS}). Costs money.
-                     Comma-separate to run the matrix: --model sonnet,luna. Each model
+                     Comma-separate to run the matrix: --model sonnet,terra. Each model
                      gets the full ceiling, because a shared one would starve the last.
   --max-spend <usd>  Stop launching Trials once this much has been spent.
   --max-tokens <n>   Stop launching Trials once this many tokens are used. The only

@@ -1,6 +1,3 @@
-import type { Corpus } from "./corpus.ts";
-import type { SweepProgress } from "./progress.ts";
-import type { RetryPolicy } from "./retry.ts";
 import { type ModelBinding, runSweep, type Scorecard, type SweepOptions } from "./runner.ts";
 
 /** One model's leg of a Matrix: a Scorecard, or the reason there is none. */

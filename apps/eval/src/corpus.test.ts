@@ -440,3 +440,24 @@ describe("the vulnerability class a red-team Case names", () => {
     await expect(loadCorpus(dir, soul)).rejects.toThrow(/"redTeam.class" must be one of/);
   });
 });
+
+describe("carrying the Judge version into the Corpus hash", () => {
+  const dir = () => corpusDir({ "a.json": valid("one") });
+
+  it("changes the hash when the Judge changes, so a Baseline cannot survive a re-score", async () => {
+    const d = dir();
+    const before = await loadCorpus(d, soul, "judge-v1");
+    const after = await loadCorpus(d, soul, "judge-v2");
+    expect(after.hash).not.toBe(before.hash);
+  });
+
+  it("agrees with corpusHash, so the loader and the hash cannot drift apart", async () => {
+    const corpus = await loadCorpus(dir(), soul, "judge-v1");
+    expect(corpus.hash).toBe(corpusHash(corpus.cases, soul.hash, "judge-v1"));
+  });
+
+  it("keeps the no-Judge hash unchanged, so an existing Baseline still compares", async () => {
+    const corpus = await loadCorpus(dir(), soul);
+    expect(corpus.hash).toBe(corpusHash(corpus.cases, soul.hash));
+  });
+});

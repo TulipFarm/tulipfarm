@@ -423,7 +423,7 @@ export async function loadCorpus(
   const suite = path.basename(dir) === RED_TEAM_DIR ? RED_TEAM_DIR : undefined;
   return {
     cases,
-    hash: corpusHash(cases, soul.hash),
+    hash: corpusHash(cases, soul.hash, judgeVersion),
     soul,
     ...(suite === undefined ? {} : { suite }),
   };
