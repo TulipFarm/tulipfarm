@@ -11,6 +11,7 @@ import {
 } from "@tulipfarm/agent-runtime";
 import { type EvalCase, LOOP_LIMITS } from "./case.ts";
 import type { Corpus } from "./corpus.ts";
+import { toolDispatcher } from "./dispatch.ts";
 import { type EvalSoul, soulContext } from "./eval-soul.ts";
 import type { EvalGuardrails, GuardrailDecision } from "./guardrails.ts";
 import { turnGuardrails } from "./guardrails.ts";
@@ -24,7 +25,7 @@ import { measureResistance, type ResistanceRate } from "./resistance.ts";
 import { DEFAULT_RETRY, type RetryPolicy, withRetry } from "./retry.ts";
 import { type ClassResult, safetyReport } from "./safety.ts";
 import { type ExpectationResult, type Observation, scoreCase } from "./scorer.ts";
-import { addSpend, mergeSpend, NO_SPEND, type Spend } from "./spend.ts";
+import { addSpend, ceilingReached, mergeSpend, NO_SPEND, type Spend } from "./spend.ts";
 import type { VulnerabilityClass } from "./vulnerability.ts";
 
 /**
@@ -190,56 +191,6 @@ export interface SweepOptions {
  */
 function isVendorFault(reason: AgentLoopFailureReason): boolean {
   return reason.startsWith("model_") || reason === "empty_model_output";
-}
-
-/**
- * Faked dispatch: results are matched by Tool name and consumed in call order.
- *
- * A call with nothing left to consume must never be answered with an empty success. That is a
- * result the Case author never wrote, and the model's whole subsequent turn is then driven by a
- * fiction — an empty payload reads to a model as "the Tool returned nothing", which is itself a
- * reason to call it again. Two honest answers instead:
- *
- * - A Tool whose scripted results are used up **repeats its last one**. A model may call a read
- *   twice, and a real read is idempotent, so repeating is what actually would have happened.
- * - A Tool the Case never scripted at all **fails**, naming itself. That is an authoring gap, and
- *   a gap has to be visible to the model as a failure it must recover from rather than be papered
- *   over with a success.
- */
-export function toolDispatcher(evalCase: EvalCase) {
-  type Scripted = NonNullable<EvalCase["toolResults"]>[number];
-  const pending: Scripted[] = [...(evalCase.toolResults ?? [])];
-  const served = new Map<string, Scripted>();
-  const calls: { name: string; arguments: unknown }[] = [];
-  return {
-    calls,
-    port: {
-      dispatch: async (request: {
-        callId: string;
-        name: string;
-        arguments: unknown;
-      }): Promise<ToolDispatchResult> => {
-        calls.push({ name: request.name, arguments: request.arguments });
-        const at = pending.findIndex((r) => r.name === request.name);
-        let result: Scripted | undefined;
-        if (at === -1) result = served.get(request.name);
-        else {
-          [result] = pending.splice(at, 1);
-          if (result !== undefined) served.set(request.name, result);
-        }
-        if (result === undefined) {
-          return {
-            status: "failed",
-            callId: request.callId,
-            reason: `the Eval Case scripts no result for Tool "${request.name}"`,
-          };
-        }
-        return result.error === undefined
-          ? { status: "succeeded", callId: request.callId, output: result.output ?? {} }
-          : { status: "failed", callId: request.callId, reason: result.error };
-      },
-    },
-  };
 }
 
 /**
@@ -512,34 +463,6 @@ function errored(
   };
 }
 
-/**
- * Whether the Sweep has run out of budget, checked before launching rather than after.
- *
- * Cost is only knowable once a call has been made, so no ceiling can be exact. Checking at the
- * Trial boundary bounds the overrun to one Trial instead of to the whole remaining Corpus.
- */
-function ceilingReached(
-  spend: Spend,
-  options: SweepOptions,
-  done: number,
-  planned: number
-): string | undefined {
-  const suffix = `after ${done} of ${planned} Trials`;
-  if (options.maxSpendUsd !== undefined && spend.costUsd >= options.maxSpendUsd) {
-    return `spend ceiling reached: $${spend.costUsd.toFixed(4)} of $${options.maxSpendUsd} ${suffix}`;
-  }
-  // A dollar ceiling cannot bound a total it is known to understate. Continuing would let the
-  // Sweep run to the end of the Corpus while reporting it had budget left.
-  if (options.maxSpendUsd !== undefined && options.maxTokens === undefined && spend.unpriced > 0) {
-    return `${spend.unpriced} call(s) could not be priced, so a dollar ceiling cannot bound this Sweep — pass --max-tokens ${suffix}`;
-  }
-  const tokens = spend.inputTokens + spend.outputTokens;
-  if (options.maxTokens !== undefined && tokens >= options.maxTokens) {
-    return `token ceiling reached: ${tokens} of ${options.maxTokens} tokens ${suffix}`;
-  }
-  return undefined;
-}
-
 /** A completed loop returns its own output; fall back to the last model output for tool-only runs. */
 function asOutput(output: unknown, last: ModelOutput | undefined): ModelOutput | undefined {
   if (typeof output === "string") return { kind: "text", text: output };
@@ -547,12 +470,6 @@ function asOutput(output: unknown, last: ModelOutput | undefined): ModelOutput |
   return last;
 }
 
-/**
- * Execute a Corpus against one model binding and return a Scorecard.
- *
- * The single seam the eval framework adds. One Case failing never aborts the Sweep — one bad Case
- * must not cost the whole run's information.
- */
 /**
  * Cases a filter selects, and how many Trials they plan.
  *
@@ -576,6 +493,12 @@ export function trialCount(evalCase: EvalCase, repeat = 1): number {
   return Math.max(1, evalCase.trials ?? 1) * Math.max(1, repeat);
 }
 
+/**
+ * Execute a Corpus against one model binding and return a Scorecard.
+ *
+ * The single seam the eval framework adds. One Case failing never aborts the Sweep — one bad Case
+ * must not cost the whole run's information.
+ */
 export async function runSweep(options: SweepOptions): Promise<Scorecard> {
   const now = options.now ?? (() => new Date());
   const started = now();

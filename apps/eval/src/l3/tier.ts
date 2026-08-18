@@ -23,8 +23,9 @@ import {
   RunStoreStateTransitions,
 } from "@tulipfarm/turn-executor";
 import type { EvalCase, JourneyTurn } from "../case.ts";
+import { toolDispatcher } from "../dispatch.ts";
 import type { EvalSoul } from "../eval-soul.ts";
-import { type ModelBinding, toolDispatcher } from "../runner.ts";
+import type { ModelBinding } from "../runner.ts";
 import { addSpend, mergeSpend, NO_SPEND, type Spend } from "../spend.ts";
 import { evalTurnContext } from "./context.ts";
 import { type EvalDatabase, openEvalDatabase } from "./database.ts";

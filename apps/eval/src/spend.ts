@@ -68,3 +68,43 @@ export function mergeSpend(a: Spend, b: Spend): Spend {
     calls: a.calls + b.calls,
   };
 }
+
+/**
+ * The two limits a Sweep can be bounded by.
+ *
+ * Narrower than `SweepOptions` on purpose: a ceiling is a question about spend, so it belongs to
+ * the module that owns spend. Taking the whole options object here would make this module depend
+ * on the runner it is meant to serve.
+ */
+export interface Ceiling {
+  readonly maxSpendUsd?: number;
+  readonly maxTokens?: number;
+}
+
+/**
+ * Whether the Sweep has run out of budget, checked before launching rather than after.
+ *
+ * Cost is only knowable once a call has been made, so no ceiling can be exact. Checking at the
+ * Trial boundary bounds the overrun to one Trial instead of to the whole remaining Corpus.
+ */
+export function ceilingReached(
+  spend: Spend,
+  ceiling: Ceiling,
+  done: number,
+  planned: number
+): string | undefined {
+  const suffix = `after ${done} of ${planned} Trials`;
+  if (ceiling.maxSpendUsd !== undefined && spend.costUsd >= ceiling.maxSpendUsd) {
+    return `spend ceiling reached: $${spend.costUsd.toFixed(4)} of $${ceiling.maxSpendUsd} ${suffix}`;
+  }
+  // A dollar ceiling cannot bound a total it is known to understate. Continuing would let the
+  // Sweep run to the end of the Corpus while reporting it had budget left.
+  if (ceiling.maxSpendUsd !== undefined && ceiling.maxTokens === undefined && spend.unpriced > 0) {
+    return `${spend.unpriced} call(s) could not be priced, so a dollar ceiling cannot bound this Sweep — pass --max-tokens ${suffix}`;
+  }
+  const tokens = spend.inputTokens + spend.outputTokens;
+  if (ceiling.maxTokens !== undefined && tokens >= ceiling.maxTokens) {
+    return `token ceiling reached: ${tokens} of ${ceiling.maxTokens} tokens ${suffix}`;
+  }
+  return undefined;
+}
