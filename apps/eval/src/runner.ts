@@ -256,7 +256,7 @@ async function scored(
     retries,
     ...(evalCase.redTeam?.outcome === "model_resisted" ? { probabilistic: true as const } : {}),
     ...(guardrails.length > 0 ? { guarded: true as const } : {}),
-    ...(guardUnexercised(evalCase.redTeam, expectations, guardrails) ||
+    ...(guardUnexercised(expectations, guardrails) ||
     seamUnreached(expectations, observation.toolCalls) !== undefined
       ? { unexercised: true as const }
       : {}),
