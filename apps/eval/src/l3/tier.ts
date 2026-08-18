@@ -14,7 +14,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type { ModelMessage, ToolDispatchPort } from "@tulipfarm/agent-runtime";
+import type { ModelMessage, ModelUsage, ToolDispatchPort } from "@tulipfarm/agent-runtime";
 import { INVOKE_STATE_KEY } from "@tulipfarm/run-kernel";
 import type { PersistedRun } from "@tulipfarm/storage";
 import {
@@ -25,6 +25,7 @@ import {
 import type { EvalCase, JourneyTurn } from "../case.ts";
 import type { EvalSoul } from "../eval-soul.ts";
 import { type ModelBinding, toolDispatcher } from "../runner.ts";
+import { addSpend, mergeSpend, NO_SPEND, type Spend } from "../spend.ts";
 import { evalTurnContext } from "./context.ts";
 import { type EvalDatabase, openEvalDatabase } from "./database.ts";
 import {
@@ -74,6 +75,15 @@ export interface PersistedTurn {
   readonly soulCommits: readonly SoulCommit[];
   /** The prompt the real Context assembler produced, so `prompt_contains` works at L3 too. */
   readonly systemPrompt: string;
+  /**
+   * What the Turn billed the seat.
+   *
+   * Recorded rather than assumed zero: an L3 Trial calls the same paid vendor an L2 Trial does, and
+   * a journey calls it once per Turn. Reported as `NO_SPEND` it would be invisible to
+   * `ceilingReached`, so the one ceiling that can bound a subscription seat — tokens — would not
+   * bound the most expensive tier in the framework.
+   */
+  readonly spend: Spend;
 }
 
 export interface L3Options {
@@ -84,6 +94,14 @@ export interface L3Options {
   readonly turn?: number;
   /** Overridden only by tests that need to inspect the database afterwards. */
   readonly database?: EvalDatabase;
+  /**
+   * Called with each model call's usage as it happens, mirroring L2's `attemptUsage`.
+   *
+   * The returned `spend` is enough for a Turn that completes, but a Turn that throws half way has
+   * still billed the seat. Reporting that as zero would let a Case that crashes late spend real
+   * quota invisibly, so the caller is told per call rather than only at the end.
+   */
+  readonly onUsage?: (usage: ModelUsage) => void;
 }
 
 async function mintRun(database: EvalDatabase, runId: string, turnId: string): Promise<void> {
@@ -139,6 +157,7 @@ async function readBack(
     toolCalls: readonly ToolCall[];
     soulCommits: readonly SoulCommit[];
     systemPrompt: string;
+    spend: Spend;
   }
 ): Promise<PersistedTurn> {
   const run = await database.runs.find(BUSINESS_ID, runId);
@@ -165,6 +184,7 @@ async function readBack(
       turnRow?.status === undefined || turnRow.status === null ? null : String(turnRow.status),
     answer: message.rows[0] === undefined ? null : String(message.rows[0].content),
     events: events.rows.map((row) => String(row.event_type)),
+    spend: observed.spend,
     toolCalls: observed.toolCalls,
     soulCommits: observed.soulCommits,
     systemPrompt: observed.systemPrompt,
@@ -222,6 +242,19 @@ async function runOneTurn(
     // means its `commits` accumulate. Only this Turn's slice belongs to this Turn.
     const committedBefore = soulWrites.commits.length;
     const tools = routeTools(scripted, soulWrites.port);
+    // Wrapped rather than passed straight through: the executor owns the call loop, so this is the
+    // only seam where an L3 Turn's usage can be observed at all.
+    let spend = NO_SPEND;
+    const port = options.binding.create(options.evalCase);
+    const metered = {
+      invoke: async (request: Parameters<typeof port.invoke>[0]) => {
+        const result = await port.invoke(request);
+        spend = addSpend(spend, result.usage);
+        options.onUsage?.(result.usage);
+        return result;
+      },
+    };
+
     const host = evalTurnHost(database);
     const context = evalTurnContext({ evalCase: options.evalCase, soul });
     const executor = createChatExecutor({
@@ -232,7 +265,7 @@ async function runOneTurn(
       budgets: database.budgets,
       transitions: new RunStoreStateTransitions(database.runs),
       waits: NO_APPROVALS,
-      model: options.binding.create(options.evalCase),
+      model: metered,
       log: { warn: () => {} },
     });
 
@@ -255,6 +288,7 @@ async function runOneTurn(
       toolCalls: [...scripted.calls],
       soulCommits: soulWrites.commits.slice(committedBefore),
       systemPrompt: context.systemPrompt,
+      spend,
     });
   }
 }
@@ -312,6 +346,7 @@ export function foldJourney(turns: readonly PersistedTurn[]): PersistedTurn {
     events: turns.flatMap((turn) => turn.events),
     toolCalls: turns.flatMap((turn) => turn.toolCalls),
     soulCommits: turns.flatMap((turn) => turn.soulCommits),
+    spend: turns.reduce<Spend>((total, turn) => mergeSpend(total, turn.spend), NO_SPEND),
   };
 }
 

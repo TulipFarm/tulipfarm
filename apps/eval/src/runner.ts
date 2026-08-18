@@ -328,9 +328,19 @@ async function runL3Trial(
   judge: Judge | undefined
 ): Promise<TrialResult> {
   const vacuous = evalCase.expect.length === 0;
+  // Accumulated out here, not read off the result: a Turn that throws after two paid calls must
+  // still report what it billed, exactly as an L2 Trial does.
+  let spend = NO_SPEND;
   try {
-    const turn = await runPersistedTurn({ evalCase, soul, binding });
-    return await scored(evalCase, trial, vacuous, NO_SPEND, 0, [], judge, {
+    const turn = await runPersistedTurn({
+      evalCase,
+      soul,
+      binding,
+      onUsage: (usage) => {
+        spend = addSpend(spend, usage);
+      },
+    });
+    return await scored(evalCase, trial, vacuous, turn.spend, 0, [], judge, {
       systemPrompt: turn.systemPrompt,
       toolCalls: turn.toolCalls,
       output: turn.answer === null ? undefined : { kind: "text", text: turn.answer },
@@ -349,7 +359,7 @@ async function runL3Trial(
       trial,
       vacuous,
       cause instanceof Error ? cause.message : String(cause),
-      NO_SPEND,
+      spend,
       0
     );
   }

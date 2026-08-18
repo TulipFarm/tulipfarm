@@ -4,6 +4,7 @@ import type { EvalCase } from "../case.ts";
 import { type EvalSoul, loadEvalSoul } from "../eval-soul.ts";
 import type { ModelBinding } from "../runner.ts";
 import { scriptedBinding } from "../scripted.ts";
+import { NO_SPEND } from "../spend.ts";
 import { SOUL_WRITE_TOOL } from "./soul-write.ts";
 import { foldJourney, type PersistedTurn, runPersistedTurn } from "./tier.ts";
 
@@ -329,6 +330,7 @@ describe("folding a journey into one result", () => {
     stateStatus: "succeeded",
     turnStatus: "succeeded",
     answer: null,
+    spend: NO_SPEND,
     events: [],
     toolCalls: [],
     soulCommits: [],
@@ -363,4 +365,52 @@ describe("folding a journey into one result", () => {
     expect(folded.events).toEqual(["turn.started", "turn.finished"]);
     expect(folded.toolCalls.map((c) => c.name)).toEqual(["a", "b"]);
   });
+});
+
+describe("what an L3 Turn costs", () => {
+  /** A binding that answers once and reports a real bill, so spend can be observed. */
+  const billing = (): ModelBinding => ({
+    id: "billing",
+    dated: true,
+    create: () => ({
+      invoke: async () => ({
+        output: { kind: "text" as const, text: "done" },
+        usage: { inputTokens: 1200, outputTokens: 34, costUsd: 0, costBasis: "priced" as const },
+        requestId: "billing-1",
+      }),
+    }),
+  });
+
+  it(
+    "reports the tokens the Turn actually spent, so a ceiling can bound it",
+    async () => {
+      soul ??= await loadEvalSoul();
+      const turn = await runPersistedTurn({
+        evalCase: answering("ignored"),
+        soul,
+        binding: billing(),
+      });
+
+      expect(turn.spend.inputTokens).toBe(1200);
+      expect(turn.spend.outputTokens).toBe(34);
+      expect(turn.spend.calls).toBe(1);
+    },
+    TIMEOUT
+  );
+
+  it(
+    "adds up every Turn of a journey, not just the last",
+    async () => {
+      soul ??= await loadEvalSoul();
+      const journey: EvalCase = {
+        ...answering("ignored"),
+        journey: [{ input: [{ role: "user", content: "again" }], script: [] }],
+      };
+      const turn = await runPersistedTurn({ evalCase: journey, soul, binding: billing() });
+
+      expect(turn.spend.inputTokens).toBe(2400);
+      expect(turn.spend.calls).toBe(2);
+    },
+    TIMEOUT
+  );
 });

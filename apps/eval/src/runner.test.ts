@@ -655,3 +655,83 @@ describe("a guard_held Case the model defused before the guard was asked", () =>
     expect(card.unexercised).toBe(0);
   });
 });
+
+describe("what a failing L3 Trial reports as spent", () => {
+  it("reports the tokens billed by the Turns that ran before the failure", async () => {
+    let call = 0;
+    const burning: ModelBinding = {
+      id: "burning",
+      dated: true,
+      create: () => ({
+        invoke: async () => {
+          call += 1;
+          if (call > 1) throw new Error("vendor died");
+          return {
+            output: { kind: "text" as const, text: "first" },
+            usage: {
+              inputTokens: 900,
+              outputTokens: 20,
+              costUsd: 0,
+              costBasis: "priced" as const,
+            },
+            requestId: "burn-1",
+          };
+        },
+      }),
+    };
+    const l3: EvalCase = {
+      id: "l3-throws",
+      tier: "l3",
+      agent: "support",
+      context: { governancePages: [] },
+      input: [{ role: "user", content: "hello" }],
+      expect: [{ kind: "run_status", status: "succeeded" }],
+      script: [{ kind: "text", text: "unused" }],
+      journey: [{ input: [{ role: "user", content: "again" }], script: [] }],
+    };
+    const card = await runSweep({ corpus: corpusOf([l3]), model: burning });
+
+    // Turn 2's vendor error fails the Trial. Turn 1 was still billed, and a ceiling that could not
+    // see those tokens would let a failing Case spend real quota invisibly.
+    expect(card.trials[0].status).toBe("failed");
+    expect(card.trials[0].spend.inputTokens).toBe(900);
+    expect(card.trials[0].spend.outputTokens).toBe(20);
+  });
+
+  it("lets a token ceiling stop an L3 Sweep, which zero-reported spend never could", async () => {
+    const heavy: ModelBinding = {
+      id: "heavy",
+      dated: true,
+      create: () => ({
+        invoke: async () => ({
+          output: { kind: "text" as const, text: "done" },
+          usage: {
+            inputTokens: 5000,
+            outputTokens: 100,
+            costUsd: 0,
+            costBasis: "subscription" as const,
+          },
+          requestId: "heavy-1",
+        }),
+      }),
+    };
+    const l3 = (id: string): EvalCase => ({
+      id,
+      tier: "l3",
+      agent: "support",
+      context: { governancePages: [] },
+      input: [{ role: "user", content: "hello" }],
+      expect: [],
+      script: [{ kind: "text", text: "unused" }],
+    });
+    const card = await runSweep({
+      corpus: corpusOf([l3("l3-a"), l3("l3-b"), l3("l3-c")]),
+      model: heavy,
+      maxSpendUsd: 100,
+      maxTokens: 6000,
+    });
+
+    expect(card.abortedReason).toMatch(/token ceiling reached/);
+    expect(card.trials.length).toBeLessThan(3);
+  });
+});

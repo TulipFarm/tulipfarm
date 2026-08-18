@@ -182,6 +182,10 @@ It deliberately stays small. Each L3 Case costs ~1.5s of setup against L2's mill
 extra reach buys nothing for a Case about prompt content or Tool ordering. Reach for L3 only when
 the assertion is genuinely about durability.
 
+It is also the **most expensive tier per Case**, because a `journey` bills the seat once per Turn
+rather than once per Case. Every one of those calls is metered and counted against the ceiling, so
+a runaway L3 Case stops like any other — but budget for it when sizing `--max-tokens-per-trial`.
+
 **Why it does not enter through the API's `/chat` route,** which is the path a real user takes:
 `docs/architecture/dependency-rules.md` rule 1 forbids an app importing another app, and the
 conversation repository, the migrations and the routes all live in `apps/api`.
