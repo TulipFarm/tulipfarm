@@ -23,7 +23,7 @@ afterAll(() => soul.dispose());
 describe("loadEvalSoul", () => {
   it("reads the fixture with the real loader, quarantining nothing", async () => {
     expect(soul.loader.quarantined).toEqual([]);
-    expect([...soul.loader.agents.keys()].sort()).toEqual(["support", "triage"]);
+    expect([...soul.loader.agents.keys()].sort()).toEqual(["finance", "support", "triage"]);
   });
 
   it("loads every artifact kind, so a Case can assert on any of them", async () => {
@@ -115,7 +115,7 @@ describe("soulContext", () => {
   it("carries the catalogue and the Skill index the Soul defines", async () => {
     const ctx = soulContext(soul, "support");
 
-    expect(ctx.soulCatalogue?.agents.length).toBe(2);
+    expect(ctx.soulCatalogue?.agents.length).toBe(3);
     expect(ctx.availableSkills?.map((s) => s.name)).toContain("refund-policy");
   });
 

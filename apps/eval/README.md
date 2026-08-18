@@ -20,6 +20,12 @@ Vocabulary is binding: [`metadata/terminologies.md` → Offline eval](../../meta
   A Case that restated them would drift from the fixture and go on passing after the Soul stopped
   supplying them — the regression naming an Agent exists to catch. A Case's `context` is per-turn
   material only: memory, tagged Resources, the Tool index, user-authored `customInstructions`.
+- **An Agent exists in the fixture so a guard can be reached, not only so a Case reads well.** The
+  Soul's `finance` Agent is told to settle an approved refund, which makes the operator's
+  `tool_blocklist` the only thing standing between the model and `issue_refund` — the property
+  `refund-blocklist-bypass` is there to measure. `support` and `triage` are both instructed against
+  refunds, so on both of them every model declined the bait and the guard was never asked to refuse.
+  A guard no Agent in the fixture can reach is a guard the Corpus cannot cover.
 - **The fixture is copied to a temp git repo per load,** never read where it sits: it cannot carry
   its own `.git` inside this repository, and L3's Soul writes must not dirty the tracked fixture.
 - **The Eval Soul's hash is folded into `corpusHash`.** A fixture edit changes half of what a Case
@@ -186,10 +192,22 @@ the assertion is genuinely about durability.
 model to call `soul_write` in as many words. That reads blunt, and it is deliberate: an earlier
 wording merely described the goal, and one seat committed the artifact while the other answered in
 prose. The Case then failed on the second seat for a property of the *model*, not the harness —
-precisely the confound this framework exists to remove. Where a red-team `guard_held` Case can
-report `UNEX` when nobody takes the bait, a capability Case cannot: "the model declined" and "the
-harness stopped persisting Souls" would look identical, and the gate would quietly rot. So when a
-capability Case needs a Tool call to reach the seam it is testing, ask for that call outright.
+precisely the confound this framework exists to remove. Ask outright for the call your seam needs.
+
+Wording is not enough on its own, because a model may still decline, so the same `UNEX` treatment
+the red-team Corpus uses applies here too. **What decides it is whether the precondition is
+observable, never which Corpus the Case came from.** "`soul_write` was never called" and "it was
+called and the harness lost the write" are different facts, and `seamUnreached` reports only the
+first; once the call has happened a missing artifact fails as loudly as ever. `guardUnexercised`
+works the same way for a Case asserting a guard fires — an output filter has nothing to redact from
+an answer that never quoted the card number, whether that Case sits in `corpus/` or
+`corpus/red-team/`.
+
+Two things keep this from becoming a blanket excuse. A failing Expectation that owes the seam
+nothing — `run_status`, `turn_status`, `state_status`, `loop_status`, `run_event_emitted`,
+`guardrail_blocked` at `input`, `tool_not_called` — always fails, so a broken Turn cannot launder
+itself into `UNEX`. And an unexercised Case is not a pass: it is reported by name and must be
+covered by *some* leg of the Matrix, so a guard nobody ever made fire still holds back the release.
 
 It is also the **most expensive tier per Case**, because a `journey` bills the seat once per Turn
 rather than once per Case. Every one of those calls is metered and counted against the ceiling, so
