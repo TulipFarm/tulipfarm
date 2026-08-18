@@ -2,6 +2,7 @@
 
 import type { EventEmitter } from "node:events";
 import type { GuardrailsService } from "@tulipfarm/agent-runtime";
+import type { FileService } from "@tulipfarm/files";
 import type { PublicOriginsService } from "@tulipfarm/integrations";
 import type { KnowledgeDenialSink, KnowledgeService } from "@tulipfarm/knowledge";
 import type { KvService } from "@tulipfarm/kv";
@@ -162,6 +163,8 @@ export interface AppOptions {
   runEvents?: RunEventRouteDeps;
   runReplay?: RunReplayDeps;
   taskStore?: TaskStore;
+  /** Composed in `index.ts`, where the blob substrate lives. Absent in tests that never upload. */
+  fileService?: FileService;
   kvService?: KvService;
   triggerInvoke?: TriggerInvokeDeps;
   forms?: FormsRoutesDeps;

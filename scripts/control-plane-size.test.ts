@@ -130,6 +130,28 @@ import { describe, expect, it } from "vitest";
  * the part union, the legacy-row normaliser, the text projection — lives in `@tulipfarm/schema`,
  * so what landed here is three import statements and no new branch.
  *
+ * File upload is the next +269, and it is the largest single raise this file has taken. What
+ * landed: `files/routes.ts` (four routes, most of it the response schemas the OpenAPI rule
+ * requires, plus the raw-stream content-type parsers, which are Fastify by definition) and its
+ * 13 pg tests, which boot the real app and speak real HTTP because the things they pin — a
+ * refused media type, a 413 on a declared length, one Principal being unable to read another's
+ * File — are only observable through the stack. Migration 68 lives here by the same convention as
+ * 64 and 65.
+ *
+ * What did *not* land here, and the extraction is the reason this number is 269 and not 374: the
+ * whole of `@tulipfarm/files` — the limits, the magic-byte sniffer, the filename normaliser, the
+ * repository and the ordered upload pipeline. Two further pieces were moved out after this ratchet
+ * caught them, both first written into the app purely because the route was: `files/http.ts` (the
+ * File wire shape, the `FileError`-to-status table, the RFC-5987 disposition and the download
+ * headers — all facts about Files, none about Fastify) and `files/attachments.ts`, which resolves
+ * the file ids a Chat request claims against the caller's authority and touches no HTTP at all.
+ *
+ * The review of that slice added the last 117, all of it schema and the tests that pin it: the
+ * `file` variant on the Message response schema, without which fast-json-stringify failed the
+ * whole page and one attachment made a Conversation unloadable, plus three route tests — the
+ * serializer round trip that caught it, an attachment-only Message, and the proof that a refused
+ * attachment leaves neither a Turn nor an empty Conversation behind.
+ *
  * This is that. The ceiling is a high-water mark, not a target — lowering it as code moves out is
  * the point, and the only edit this file should ever receive. Raising it needs a reviewed reason,
  * because "the number went up again" is exactly the event three editions failed to catch.

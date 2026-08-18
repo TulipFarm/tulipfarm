@@ -24,6 +24,7 @@ import { registerConversationRoutes } from "./chat/conversation-routes";
 import { registerChatRoutes } from "./chat/routes";
 import { registerCuratorReviewRoutes } from "./curator/review-routes";
 import { registerFeedbackRoutes } from "./feedback/routes";
+import { registerFileRoutes } from "./files/routes";
 import { registerFormRoutes } from "./forms/routes";
 import { registerHookIngressRoutes } from "./hooks/routes";
 import { registerIngressRoutes } from "./ingress/routes";
@@ -404,6 +405,9 @@ export async function buildApp(opts: AppOptions = {}) {
       );
     }
     registerSoulRouteFamily(app, opts, requireAuth, requireAuthorization, authorizationCheck);
+    if (opts.fileService) {
+      registerFileRoutes(app, { files: opts.fileService }, requireAuth, requireAuthorization);
+    }
     if (opts.taskStore) {
       registerTaskRoutes(
         app,
@@ -480,6 +484,7 @@ export async function buildApp(opts: AppOptions = {}) {
             ...(opts.runCancel ? { cancel: opts.runCancel } : {}),
             ...(opts.soulLoader ? { soulLoader: opts.soulLoader } : {}),
             ...(opts.domainEventEmitter ? { events: opts.domainEventEmitter } : {}),
+            ...(opts.fileService ? { fileService: opts.fileService } : {}),
           },
           requireAuth
         );

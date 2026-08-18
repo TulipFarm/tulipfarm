@@ -124,3 +124,42 @@ describe("messagesToTimeline", () => {
     ]);
   });
 });
+
+describe("messagesToTimeline and user attachments", () => {
+  const userMessage = (content: unknown) => ({
+    _id: "user",
+    conversationId: "conversation",
+    role: "user" as const,
+    content: content as string,
+    createdAt: "2026-01-01T00:00:00.000Z",
+  });
+
+  it("restores an attached File so a reloaded transcript still shows the image", () => {
+    const timeline = messagesToTimeline([
+      userMessage([
+        { type: "text", text: "what is this?" },
+        { type: "file", fileId: "f1", mediaType: "image/png", name: "shot.png" },
+      ]),
+    ]);
+
+    expect(timeline[0]?.parts).toEqual([
+      { kind: "text", text: "what is this?" },
+      { kind: "file", fileId: "f1", mediaType: "image/png", name: "shot.png" },
+    ]);
+  });
+
+  it("restores a message that is an attachment and nothing else", () => {
+    const timeline = messagesToTimeline([
+      userMessage([{ type: "file", fileId: "f1", mediaType: "image/png", name: "shot.png" }]),
+    ]);
+
+    expect(timeline[0]?.parts).toEqual([
+      { kind: "file", fileId: "f1", mediaType: "image/png", name: "shot.png" },
+    ]);
+  });
+
+  it("still restores a plain text message, which is stored as a bare string", () => {
+    const timeline = messagesToTimeline([userMessage("just words")]);
+    expect(timeline[0]?.parts).toEqual([{ kind: "text", text: "just words" }]);
+  });
+});

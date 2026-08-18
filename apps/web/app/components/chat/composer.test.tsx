@@ -40,6 +40,15 @@ vi.mock("~/components/chat/editor/mentions", () => ({
 }));
 vi.mock("~/components/chat/editor/use-mention-data", () => ({ useMentionData: () => () => [] }));
 
+// The upload transport is mocked, not the staging logic: these tests are about what the composer
+// does with an upload's outcome, and a real XHR has none under jsdom.
+const cancelUpload = vi.fn();
+const uploadFile = vi.hoisted(() => vi.fn());
+vi.mock("~/lib/files", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("~/lib/files")>()),
+  uploadFile: (...args: unknown[]) => uploadFile(...args),
+}));
+
 // A plain single-paragraph document.
 const textDoc = (t: string): PMNode => ({
   type: "doc",
@@ -52,6 +61,18 @@ beforeEach(() => {
   setContent.mockClear();
   selectTextblockEnd.mockClear();
   viewFocus.mockClear();
+  cancelUpload.mockClear();
+  uploadFile.mockReset();
+  uploadFile.mockImplementation((file: File) => ({
+    done: Promise.resolve({
+      id: "file-1",
+      filename: file.name,
+      mediaType: file.type,
+      sizeBytes: file.size,
+      createdAt: "2024-01-01T00:00:00.000Z",
+    }),
+    cancel: cancelUpload,
+  }));
 });
 
 test("Model Selector sets the per-message effort preset override on send", async () => {
@@ -69,6 +90,7 @@ test("Model Selector sets the per-message effort preset override on send", async
     skills: [],
     resources: [],
     knowledgePages: [],
+    files: [],
   });
   expect(clearContent).toHaveBeenCalled();
 });
@@ -86,6 +108,7 @@ test("the effort preset defaults to Auto when nothing is chosen", async () => {
     skills: [],
     resources: [],
     knowledgePages: [],
+    files: [],
   });
 });
 
@@ -102,6 +125,7 @@ test("the effort preset can default from the active agent", async () => {
     skills: [],
     resources: [],
     knowledgePages: [],
+    files: [],
   });
 });
 
@@ -133,13 +157,108 @@ test("send serializes mentions into agentId + skills + resources", async () => {
     skills: ["copywriting"],
     resources: ["tickets"],
     knowledgePages: [],
+    files: [],
   });
 });
 
-test("the composer exposes no file-attachment affordance", () => {
+test("the composer offers an attach control that accepts only supported types", () => {
   const { container } = render(<Composer onSend={vi.fn()} />);
-  expect(container.querySelector('input[type="file"]')).toBeNull();
-  expect(screen.queryByLabelText(/attach|upload|file/i)).toBeNull();
+  const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+  expect(input).not.toBeNull();
+  expect(input.multiple).toBe(true);
+  // The picker filters to the same allowlist the server enforces, so a refusal is rare and
+  // legible rather than a surprise after a full upload.
+  expect(input.accept).toContain("image/png");
+  expect(input.accept).toContain("application/pdf");
+  expect(input.accept).not.toContain("image/svg+xml");
+  expect(screen.getByLabelText("Attach file")).toBeTruthy();
+});
+
+test("choosing a file shows a removable chip and sends its id once uploaded", async () => {
+  const user = userEvent.setup();
+  const onSend = vi.fn();
+  doc = textDoc("what is this?");
+  const { container } = render(<Composer onSend={onSend} />);
+
+  const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+  await user.upload(input, new File(["png-bytes"], "shot.png", { type: "image/png" }));
+
+  expect(await screen.findByText("shot.png")).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "Send prompt" }));
+
+  expect(onSend).toHaveBeenCalledWith(
+    "what is this?",
+    expect.objectContaining({
+      files: [{ fileId: "file-1", mediaType: "image/png", name: "shot.png" }],
+    })
+  );
+});
+
+test("an attachment with no text is a message in its own right", async () => {
+  const user = userEvent.setup();
+  const onSend = vi.fn();
+  doc = textDoc("");
+  const { container } = render(<Composer onSend={onSend} />);
+
+  const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+  await user.upload(input, new File(["png"], "shot.png", { type: "image/png" }));
+  await screen.findByText("shot.png");
+  await user.click(screen.getByRole("button", { name: "Send prompt" }));
+
+  expect(onSend).toHaveBeenCalledWith(
+    "",
+    expect.objectContaining({
+      files: [{ fileId: "file-1", mediaType: "image/png", name: "shot.png" }],
+    })
+  );
+});
+
+test("an empty message with nothing attached still does not send", async () => {
+  const user = userEvent.setup();
+  const onSend = vi.fn();
+  doc = textDoc("");
+  render(<Composer onSend={onSend} />);
+
+  await user.click(screen.getByRole("button", { name: "Send prompt" }));
+  expect(onSend).not.toHaveBeenCalled();
+});
+
+test("an over-sized file is refused in the browser, before any request", async () => {
+  const user = userEvent.setup();
+  const { container } = render(<Composer onSend={vi.fn()} />);
+  const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+
+  const huge = new File(["x"], "huge.png", { type: "image/png" });
+  Object.defineProperty(huge, "size", { value: 26 * 1024 * 1024 });
+  await user.upload(input, huge);
+
+  expect(await screen.findByText(/larger than 25 MB/)).toBeTruthy();
+  expect(uploadFile).not.toHaveBeenCalled();
+});
+
+test("removing a chip mid-upload cancels the request", async () => {
+  const user = userEvent.setup();
+  // Never resolves: the point is what happens while bytes are still going out.
+  uploadFile.mockReturnValue({ done: new Promise(() => {}), cancel: cancelUpload });
+  const { container } = render(<Composer onSend={vi.fn()} />);
+  const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+  await user.upload(input, new File(["b"], "shot.png", { type: "image/png" }));
+
+  await user.click(await screen.findByLabelText("Cancel upload of shot.png"));
+  expect(cancelUpload).toHaveBeenCalled();
+  expect(screen.queryByText("shot.png")).toBeNull();
+});
+
+test("a message will not send while an upload is still in flight", async () => {
+  const user = userEvent.setup();
+  const onSend = vi.fn();
+  uploadFile.mockReturnValue({ done: new Promise(() => {}), cancel: cancelUpload });
+  const { container } = render(<Composer onSend={onSend} />);
+  const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+  await user.upload(input, new File(["b"], "shot.png", { type: "image/png" }));
+
+  await user.click(screen.getByRole("button", { name: "Send prompt" }));
+  expect(onSend).not.toHaveBeenCalled();
 });
 
 test("a Suggested prompt drafts editable text without sending", async () => {

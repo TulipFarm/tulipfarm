@@ -20,6 +20,17 @@ export const MessageSchema = {
               {
                 type: "object",
                 additionalProperties: false,
+                required: ["type", "fileId", "mediaType", "name"],
+                properties: {
+                  type: { const: "file" },
+                  fileId: { type: "string" },
+                  mediaType: { type: "string" },
+                  name: { type: "string" },
+                },
+              },
+              {
+                type: "object",
+                additionalProperties: false,
                 required: ["type", "toolCallId", "toolName", "args"],
                 properties: {
                   type: { const: "tool-call" },

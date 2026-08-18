@@ -125,6 +125,9 @@ export type ParsedFrame = { seq: number; type: string; data: unknown };
 export type Autonomy = "full" | "supervised" | "approval-required" | "manual";
 export type ChatModelSelector = EffortPreset;
 
+/** A File already uploaded and ready to attach; `fileId` is what the request actually sends. */
+export type AttachedFile = { fileId: string; mediaType: string; name: string };
+
 export type ChatTurnOptions = {
   model?: ChatModelSelector;
   autonomy?: Autonomy;
@@ -132,6 +135,7 @@ export type ChatTurnOptions = {
   skills?: string[];
   resources?: string[];
   knowledgePages?: string[];
+  files?: AttachedFile[];
 };
 
 export type ChatTurnSource = {
@@ -157,6 +161,7 @@ export type ModelReceipt = {
 
 export type TimelinePart =
   | { kind: "text"; text: string }
+  | { kind: "file"; fileId: string; mediaType: string; name: string }
   | {
       kind: "tool";
       toolCallId: string;

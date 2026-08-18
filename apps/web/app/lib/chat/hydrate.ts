@@ -156,6 +156,29 @@ function mergeToolResults(assistant: ChatMessage, content: WireMessagePart[]): v
 // `feedback` so a restored transcript shows prior votes. The assistant's persisted id is kept as
 // `serverId` (the React-key `id` stays a fresh uuid) so feedback can target the persisted row; user
 // turns carry no `serverId` since only assistant replies are rateable.
+/**
+ * A user Message is a string only when it is text alone; anything with an attachment arrives as
+ * parts. Dropping the non-string form — which this did before Files existed — silently rendered
+ * every message carrying an image as blank.
+ */
+function userParts(content: ConversationMessage["content"]): TimelinePart[] {
+  if (typeof content === "string") return [{ kind: "text", text: content }];
+  const parts: TimelinePart[] = [];
+  for (const part of content) {
+    if (part.type === "text") {
+      if (part.text.length > 0) parts.push({ kind: "text", text: part.text });
+    } else if (part.type === "file") {
+      parts.push({
+        kind: "file",
+        fileId: part.fileId,
+        mediaType: part.mediaType,
+        name: part.name,
+      });
+    }
+  }
+  return parts.length > 0 ? parts : [{ kind: "text", text: "" }];
+}
+
 export function messagesToTimeline(
   docs: ConversationMessage[],
   votes?: Map<string, "up" | "down">
@@ -165,8 +188,7 @@ export function messagesToTimeline(
   let surfaceOnly = false;
   for (const doc of docs) {
     if (doc.role === "user") {
-      const text = typeof doc.content === "string" ? doc.content : "";
-      out.push({ id: newId(), role: "user", parts: [{ kind: "text", text }], sealed: true });
+      out.push({ id: newId(), role: "user", parts: userParts(doc.content), sealed: true });
       lastAssistant = undefined;
       surfaceOnly = false;
     } else if (doc.role === "assistant") {

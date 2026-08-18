@@ -2,6 +2,7 @@ import Placeholder from "@tiptap/extension-placeholder";
 import { EditorContent, useEditor, useEditorState } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus";
 import StarterKit from "@tiptap/starter-kit";
+import { ALLOWED_MEDIA_TYPES } from "@tulipfarm/files";
 import {
   ArrowUp,
   AtSign,
@@ -12,6 +13,7 @@ import {
   Database,
   Italic,
   Link as LinkIcon,
+  Paperclip,
   Slash,
   Square,
 } from "lucide-react";
@@ -19,8 +21,9 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { AgentGlyph } from "~/components/agent-glyph";
 import { Tooltip } from "~/components/ui/tooltip";
 import type { Autonomy } from "~/lib/agents";
-import type { ChatModelSelector } from "~/lib/chat/types";
+import type { AttachedFile, ChatModelSelector } from "~/lib/chat/types";
 import type { Suggestion } from "~/lib/onboarding";
+import { AttachmentStrip } from "./attachment-strip";
 import { buildMentionExtensions, MENTION_PLUGIN_KEYS } from "./editor/mentions";
 import { firstAgentMentionId, type PMNode, serializeDoc } from "./editor/serialize";
 import { useMentionData } from "./editor/use-mention-data";
@@ -29,6 +32,7 @@ import {
   effectiveEffortPreset,
   ModelSelector,
 } from "./model-selector";
+import { useAttachments } from "./use-attachments";
 
 /** What a composed turn carries to the parent: the effort preset plus the resolved mention tags. */
 export type ComposerSendOptions = {
@@ -37,6 +41,7 @@ export type ComposerSendOptions = {
   skills: string[];
   resources: string[];
   knowledgePages: string[];
+  files: AttachedFile[];
 };
 
 export type ComposerAgent = {
@@ -75,6 +80,7 @@ export function Composer({
   // editorProps is frozen at creation, so route Enter through a ref that always holds the latest
   // closure (current preset/busy/onSend) — avoids the classic Tiptap stale-closure on send.
   const submitRef = useRef<() => void>(() => {});
+  const pasteRef = useRef<(files: File[]) => void>(() => {});
   // The last sent document (Tiptap JSON), stashed before clearing so Stop can restore it verbatim —
   // mention chips included (getJSON ↔ setContent round-trips exactly).
   const lastSentDocRef = useRef<PMNode | null>(null);
@@ -104,6 +110,14 @@ export function Composer({
           return true;
         }
         return false;
+      },
+      // Routed through a ref for the same reason as Enter: `editorProps` is frozen at creation.
+      handlePaste: (_view, event) => {
+        const pasted = Array.from(event.clipboardData?.files ?? []);
+        if (pasted.length === 0) return false;
+        event.preventDefault();
+        pasteRef.current(pasted);
+        return true;
       },
     },
   });
@@ -136,13 +150,27 @@ export function Composer({
     setModel(preset);
   }, [preset]);
 
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const { attachments, add, remove, clear, readyFiles, uploading } = useAttachments();
+
+  pasteRef.current = add;
+
   submitRef.current = () => {
     if (!editor || busy) return;
     const doc = editor.getJSON() as PMNode;
     const { text, agentId, skills, resources, knowledge } = serializeDoc(doc);
-    if (!text) return;
-    onSend(text, { model, agentId, skills, resources, knowledgePages: knowledge });
+    // An attachment alone is a message: "what is this?" is often the whole question.
+    const files = readyFiles.map((file) => ({
+      fileId: file.fileId as string,
+      mediaType: file.mediaType,
+      name: file.name,
+    }));
+    if (!text && files.length === 0) return;
+    // Sending now would drop whatever is still in flight, silently.
+    if (uploading) return;
+    onSend(text, { model, agentId, skills, resources, knowledgePages: knowledge, files });
     lastSentDocRef.current = doc;
+    clear();
     editor.commands.clearContent();
   };
 
@@ -248,7 +276,23 @@ export function Composer({
             </BubbleMenu>
           ) : null}
           <EditorContent editor={editor} />
+          <AttachmentStrip attachments={attachments} onRemove={remove} />
           <div className="flex items-center gap-1 px-2 pb-2 pt-0.5">
+            <input
+              accept={ALLOWED_MEDIA_TYPES.join(",")}
+              aria-label="Attach files"
+              className="hidden"
+              multiple
+              onChange={(event) => {
+                add(Array.from(event.target.files ?? []));
+                event.target.value = "";
+              }}
+              ref={fileInputRef}
+              type="file"
+            />
+            <ContextTrigger label="Attach file" onClick={() => fileInputRef.current?.click()}>
+              <Paperclip aria-hidden className="size-4" />
+            </ContextTrigger>
             <ContextTrigger
               label="Mention Agent"
               shortcut="@"
@@ -342,15 +386,17 @@ function ContextTrigger({
   children,
 }: {
   label: string;
-  shortcut: string;
+  /** Absent for a trigger with no keyboard shortcut; "Attach file ()" reads badly aloud. */
+  shortcut?: string;
   onClick: () => void;
   children: ReactNode;
 }) {
+  const described = shortcut === undefined ? label : `${label} (${shortcut})`;
   return (
-    <Tooltip content={`${label} (${shortcut})`}>
+    <Tooltip content={described}>
       <button
         type="button"
-        aria-label={`${label} (${shortcut})`}
+        aria-label={described}
         onClick={onClick}
         className="inline-flex size-11 items-center justify-center rounded-md text-muted-foreground transition hover:bg-accent hover:text-foreground active:scale-95 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25 sm:size-9"
       >

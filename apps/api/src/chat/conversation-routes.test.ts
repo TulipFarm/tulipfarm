@@ -50,3 +50,54 @@ describe("conversation deletion route", () => {
     expect(response.json().error).toContain("Turn in progress");
   });
 });
+
+/**
+ * The response schema is the reader's contract. A part shape it does not enumerate is not merely
+ * dropped — fast-json-stringify fails the whole response, so one attachment would make an entire
+ * conversation unloadable.
+ */
+describe("listing messages that carry an attachment", () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    app = Fastify();
+    const repo = {
+      findById: async () => ({ _id: "chat-1", userId: "user-1" }),
+    } as unknown as ConversationRepo;
+    const messageRepo = {
+      listByConversation: async () => ({
+        items: [
+          {
+            _id: "message-1",
+            conversationId: "chat-1",
+            role: "user" as const,
+            content: [
+              { type: "text", text: "what is this?" },
+              { type: "file", fileId: "f1", mediaType: "image/png", name: "shot.png" },
+            ],
+            createdAt: new Date("2026-01-01T00:00:00.000Z"),
+          },
+        ],
+        nextCursor: null,
+      }),
+    } as unknown as MessageRepo;
+    registerConversationRoutes(app, { repo, messageRepo }, async (request) => {
+      request.user = { _id: "user-1" } as UserDoc;
+    });
+    await app.ready();
+  });
+
+  afterEach(async () => {
+    await app.close();
+  });
+
+  it("serializes the file part instead of failing the whole page", async () => {
+    const response = await app.inject({ method: "GET", url: "/api/v1/chats/chat-1/messages" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().messages[0].content).toEqual([
+      { type: "text", text: "what is this?" },
+      { type: "file", fileId: "f1", mediaType: "image/png", name: "shot.png" },
+    ]);
+  });
+});

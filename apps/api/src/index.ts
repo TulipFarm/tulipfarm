@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
+import { join } from "node:path";
 import { delegationCatalogOf, GuardrailsService } from "@tulipfarm/agent-runtime";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import { FileService, PgFileRepo } from "@tulipfarm/files";
 import { FetchEgressHttp, GuardedEgressHttp, PublicOriginsService } from "@tulipfarm/integrations";
 import {
   buildDefaultRegistry,
@@ -67,6 +69,7 @@ import {
   ChildLinkStore,
   EventStore,
   ensureEmbeddingIndexes,
+  FileSystemBlobPort,
   IntegrationStore,
   KillSwitchRepo,
   PgGroupRepo,
@@ -229,6 +232,7 @@ import {
   assertNoOrphanedDeks,
   type BootstrapSecretsResult,
   bootstrapSecrets,
+  resolveDataDir,
 } from "./setup/bootstrap-secrets";
 import { PgSetupAdminCreator } from "./setup/first-admin";
 import { readSoulConfig, SOUL_GIT_CREDENTIAL_KEY } from "./setup/soul-config";
@@ -521,6 +525,13 @@ async function boot() {
     });
     const kvService = new KvService(new PgKvRepo(pool));
     const taskRepo = new TaskRepo(transactionPort(pool));
+    // Uploads land on the filesystem blob store for now. Slice 11 swaps this one construction for
+    // the S3 driver; nothing above the port changes, which is the point of the port.
+    const fileService = new FileService({
+      repo: new PgFileRepo(pool),
+      blobs: new FileSystemBlobPort(join(resolveDataDir() ?? process.cwd(), "blobs")),
+      newId: () => randomUUID(),
+    });
     const activityService = new ActivityService(new PgActivityRepo(pool));
     // Audit is separate from activity by design: activity is a UI feed, audit is evidence.
     // Persisted to an append-only ledger the runtime role cannot rewrite (see `audit/repo.ts`).
@@ -927,6 +938,7 @@ async function boot() {
       memoryDocuments,
       kvService,
       taskStore: taskRepo,
+      fileService,
       ...buildCurator({
         pool,
         documents: memoryDocuments,

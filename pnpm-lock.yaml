@@ -158,6 +158,9 @@ importers:
       '@tulipfarm/curator-host':
         specifier: workspace:*
         version: link:../../packages/curator-host
+      '@tulipfarm/files':
+        specifier: workspace:*
+        version: link:../../packages/files
       '@tulipfarm/integrations':
         specifier: workspace:*
         version: link:../../packages/integrations
@@ -510,6 +513,9 @@ importers:
       '@tulipfarm/editor':
         specifier: workspace:*
         version: link:../../packages/editor
+      '@tulipfarm/files':
+        specifier: workspace:*
+        version: link:../../packages/files
       '@tulipfarm/schema':
         specifier: workspace:*
         version: link:../../packages/schema
@@ -935,6 +941,34 @@ importers:
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
+
+  packages/files:
+    dependencies:
+      '@tulipfarm/constants':
+        specifier: workspace:*
+        version: link:../constants
+      '@tulipfarm/schema':
+        specifier: workspace:*
+        version: link:../schema
+      '@tulipfarm/storage':
+        specifier: workspace:*
+        version: link:../storage
+    devDependencies:
+      '@electric-sql/pglite':
+        specifier: ^0.5.3
+        version: 0.5.3
+      '@tulipfarm/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      '@types/node':
+        specifier: ^26.1.1
+        version: 26.1.1
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.9
+        version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@26.1.1)(@vitest/coverage-v8@4.1.9)(jsdom@29.1.1(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
   packages/integrations:
     dependencies:

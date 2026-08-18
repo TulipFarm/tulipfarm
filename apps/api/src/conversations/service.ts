@@ -1,6 +1,11 @@
 /** SPEC §10/§18: persist the Turn before dispatch; stream resumes from its durable cursor. */
 
-import { contentText, type MessageContent, textContent } from "@tulipfarm/schema";
+import {
+  contentText,
+  type MessageContent,
+  type MessageFilePart,
+  textContent,
+} from "@tulipfarm/schema";
 import type { CuratorWorkRef } from "@tulipfarm/storage";
 
 export type TurnStatus = "pending" | "running" | "start_failed" | "succeeded" | "failed";
@@ -119,6 +124,14 @@ export interface StartTurnInput {
   readonly businessId: string;
   readonly conversationId: string;
   readonly content: string;
+  /**
+   * Files to attach, already checked as readable by the caller.
+   *
+   * The check does not belong here: this service persists a Turn, and by the time it is called the
+   * route has already resolved each id against the caller's authority. Passing resolved Files
+   * rather than ids is what keeps that impossible to forget.
+   */
+  readonly files?: readonly MessageFilePart[];
   readonly idempotencyKey: string;
 }
 
@@ -163,7 +176,7 @@ export class ConversationService {
       conversationId: input.conversationId,
       turnId,
       role: "user",
-      content: textContent(input.content),
+      content: [...textContent(input.content), ...(input.files ?? [])],
       createdAt: now,
     });
 

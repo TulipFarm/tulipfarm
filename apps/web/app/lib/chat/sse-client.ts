@@ -271,7 +271,7 @@ export function createRunEventMapper(): (frame: ParsedFrame) => ChatEvent[] {
 }
 
 export type ChatRequestBody = {
-  message: { role: "user"; content: string };
+  message: { role: "user"; content: string; fileIds?: string[] };
   conversationId?: string;
   model?: ChatModelSelector;
   agentId?: string;

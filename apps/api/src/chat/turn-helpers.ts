@@ -10,7 +10,7 @@ import type { ToolRegistry } from "../broker/tool-adapter";
 
 export interface ChatBody {
   conversationId?: string;
-  message: { role: "user"; content: string };
+  message: { role: "user"; content: string; fileIds?: string[] };
   model?: string;
   agentId?: string;
   autonomy?: "full" | "supervised" | "approval-required" | "manual";

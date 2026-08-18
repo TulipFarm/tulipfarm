@@ -35,7 +35,25 @@ export const CHAT_REQUEST_SCHEMA = {
       additionalProperties: false,
       properties: {
         role: { type: "string", enum: ["user"] },
-        content: { type: "string", minLength: 1 },
+        /**
+         * May be empty only when `fileIds` is not: an image on its own is a whole question, and
+         * "what is this?" is often typed by the attachment rather than the keyboard. The route
+         * rejects a message that is empty of both.
+         */
+        content: { type: "string" },
+        /**
+         * Files already uploaded by this caller, to be attached to the message.
+         *
+         * Ids rather than parts: the stored Message is an ordered part list, but letting a client
+         * author that list directly would let it invent part kinds and interleave text it did not
+         * type. The server builds the parts and re-checks that each File is one the caller may
+         * read, because an id from a client is a claim, not a capability.
+         */
+        fileIds: {
+          type: "array",
+          maxItems: 10,
+          items: { type: "string", minLength: 1 },
+        },
       },
     },
     model: { type: "string", minLength: 1, pattern: "^\\S+$" },
