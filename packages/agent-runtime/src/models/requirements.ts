@@ -1,4 +1,4 @@
-import { contentText } from "@tulipfarm/schema";
+import { contentText, type ModelModality, modalityForMediaType } from "@tulipfarm/schema";
 import type { ModelInvocationRequest } from "../ports/model";
 import type { ModelRequirements } from "./profile";
 
@@ -42,9 +42,33 @@ export function deriveModelRequirements(
   const { sensitive = false, ...governance } = policy;
   return {
     ...governance,
+    inputModalities: inputModalitiesFor(request, policy.inputModalities),
     needsTools: (request.tools?.length ?? 0) > 0,
     needsStructuredOutput: request.outputSchema !== undefined,
     estimatedContextTokens: estimateContextTokens(request),
     sensitive,
   };
+}
+
+/**
+ * What the turn's own content demands, unioned onto what policy already demanded.
+ *
+ * Derived from the resolved attachments rather than from the transcript's file parts, because
+ * attachments are exactly what will be sent. A file part in an older Message resolves to nothing
+ * and reaches no provider, so counting it would demand vision of every later Turn — one image
+ * would pin the whole conversation to a vision model for good.
+ *
+ * It is `checkModelProfile` reading this that turns an unsupported modality into a refusal —
+ * before any provider call — rather than a silent drop at the adapter.
+ */
+function inputModalitiesFor(
+  request: ModelInvocationRequest,
+  declared: readonly ModelModality[] | undefined
+): readonly ModelModality[] {
+  const modalities: ModelModality[] = [...(declared ?? ["text"])];
+  for (const file of request.attachments ?? []) {
+    const modality = modalityForMediaType(file.mediaType);
+    if (!modalities.includes(modality)) modalities.push(modality);
+  }
+  return modalities;
 }

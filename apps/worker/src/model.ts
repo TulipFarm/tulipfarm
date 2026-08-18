@@ -132,9 +132,7 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
       `model:${request.requestId}`
     );
     if (resolution.kind === "denied") {
-      throw new Error(
-        `model profile "${resolution.routing.profileId}" denied: ${resolution.routing.reason}`
-      );
+      throw new Error(denialMessage(resolution.routing, requirements));
     }
 
     try {
@@ -167,7 +165,7 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
     request: ModelInvocationRequest,
     resolution: Extract<LlmModelResolution, { kind: "available" }>
   ): AsyncIterable<ModelStreamChunk> {
-    const { instructions, messages } = splitPrompt(request.messages);
+    const { instructions, messages } = splitPrompt(request.messages, request.attachments);
     // Caching is charged on this path whether or not it was asked for, so the ask happens here
     // rather than being left to whatever each provider does by default.
     const prompt = withCacheBreakpoint(
@@ -416,6 +414,26 @@ function describeMessage(message: SdkMessage | undefined): unknown {
       };
     }),
   };
+}
+
+/**
+ * Why routing refused, in terms of what the request actually asked for.
+ *
+ * A modality denial names the modalities rather than reporting `modality_unsupported`, because
+ * that reason alone leaves an operator to guess whether the attachment, the model or the profile
+ * is at fault. This is the whole visible outcome of attaching a File to a text-only model — the
+ * OpenAI-compatible adapter behind Ollama, vLLM and LM Studio being the common case — so it has
+ * to say which modality was wanted and which model would not take it.
+ */
+function denialMessage(
+  routing: { readonly profileId: string; readonly reason?: string },
+  requirements: ModelRequirements
+): string {
+  const denied = `model profile "${routing.profileId}" denied: ${routing.reason}`;
+  if (routing.reason !== "modality_unsupported") return denied;
+  const wanted = (requirements.inputModalities ?? []).filter((m) => m !== "text");
+  if (wanted.length === 0) return denied;
+  return `${denied} — this turn needs ${wanted.join(" and ")} input, which no model in the profile accepts`;
 }
 
 function latestUserPrompt(messages: readonly ModelMessage[]): string | undefined {

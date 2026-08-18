@@ -58,6 +58,21 @@ export class InternalApiClient {
     return (await response.json()) as T;
   }
 
+  /**
+   * Fetch raw bytes rather than JSON. `undefined` for the `absentOn` statuses.
+   *
+   * Separate from `find` because a File's bytes are not JSON and buffering them through
+   * `response.json()` would both fail and lie about why.
+   */
+  async bytes(path: string, absentOn: readonly number[]): Promise<Uint8Array | undefined> {
+    const response = await this.send("GET", path);
+    if (absentOn.includes(response.status)) return undefined;
+    if (!response.ok) {
+      throw new InternalApiError(response.status, "GET", path, await safeText(response));
+    }
+    return new Uint8Array(await response.arrayBuffer());
+  }
+
   private async send(method: "GET" | "POST", path: string, body?: unknown): Promise<Response> {
     return this.fetch(`${this.options.baseUrl}${path}`, {
       method,

@@ -98,6 +98,15 @@ export const InternalRunParamsSchema = {
   properties: { runId: { type: "string", minLength: 1 } },
 } as const;
 
+export const InternalTurnAttachmentParamsSchema = {
+  type: "object",
+  required: ["runId", "fileId"],
+  properties: {
+    runId: { type: "string", minLength: 1 },
+    fileId: { type: "string", minLength: 1 },
+  },
+} as const;
+
 export const InternalLlmConfigResponseSchema = {
   type: "object",
   additionalProperties: true,
@@ -179,6 +188,19 @@ export const InternalTurnContextResponseSchema = {
         type: "object",
         required: ["role", "content"],
         properties: { role: { type: "string" }, content: MessageContentSchema },
+      },
+    },
+    attachments: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["fileId", "mediaType", "name"],
+        additionalProperties: false,
+        properties: {
+          fileId: { type: "string" },
+          mediaType: { type: "string" },
+          name: { type: "string" },
+        },
       },
     },
     tools: {

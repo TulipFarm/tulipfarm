@@ -83,6 +83,8 @@ type FieldType = "string" | "number" | "strings" | "any" | readonly string[];
 const EXPECTATION_FIELDS: Record<string, readonly [string, FieldType][]> = {
   prompt_contains: [["text", "string"]],
   prompt_omits: [["text", "string"]],
+  prompt_attaches: [["fileId", "string"]],
+  prompt_omits_attachment: [["fileId", "string"]],
   tool_called: [["name", "string"]],
   tool_not_called: [["name", "string"]],
   tool_call_order: [["names", "strings"]],
@@ -231,6 +233,7 @@ function validate(raw: unknown, file: string): EvalCase {
       `"${guard?.kind}" — a harness defence. A Case may assert one ending or the other, never ` +
       `both, or the guard could stop firing and the Case stay green because the model refused anyway.`);
   }
+  validateAttachments(c, file);
   const parsed = raw as EvalCase;
   return {
     ...parsed,
@@ -241,6 +244,60 @@ function validate(raw: unknown, file: string): EvalCase {
           journey: parsed.journey.map((turn) => ({ ...turn, input: normalizeInput(turn.input) })),
         }),
   };
+}
+
+/**
+ * Check a Case's Files, and that every attachment Expectation is grounded in one.
+ *
+ * The rule worth the code is the last one. `prompt_omits_attachment` naming a File no message
+ * ever references passes for a reason that has nothing to do with the harness — nothing was there
+ * to omit — so it would go on passing after the confinement it claims to test was removed.
+ */
+function validateAttachments(c: Record<string, unknown>, file: string): void {
+  const declared = new Set<string>();
+  if (c.attachments !== undefined) {
+    require(Array.isArray(c.attachments), `${file}: "attachments" must be an array`);
+    for (const raw of c.attachments as unknown[]) {
+      require(typeof raw === "object" &&
+        raw !== null, `${file}: each attachment must be an object`);
+      const a = raw as Record<string, unknown>;
+      for (const field of ["fileId", "mediaType", "name"]) {
+        require(typeof a[field] === "string" &&
+          (a[field] as string).length > 0, `${file}: each attachment needs a non-empty "${field}"`);
+      }
+      declared.add(a.fileId as string);
+    }
+  }
+
+  const referenced = new Set<string>();
+  for (const message of (c.input ?? []) as ModelMessage[]) {
+    if (!Array.isArray(message.content)) continue;
+    for (const part of message.content) {
+      if (part.type === "file") referenced.add(part.fileId);
+    }
+  }
+
+  for (const id of declared) {
+    require(referenced.has(
+      id
+    ), `${file}: attachment "${id}" is declared but no message references it, so it would ` +
+      `never reach the prompt however the harness behaved`);
+  }
+
+  for (const a of (c.expect ?? []) as { kind: string; fileId?: string }[]) {
+    if (a.kind === "prompt_attaches") {
+      require(declared.has(
+        a.fileId ?? ""
+      ), `${file}: "prompt_attaches" names "${a.fileId}", which the Case does not declare in ` +
+        `"attachments" — no harness could make it reach the prompt`);
+    }
+    if (a.kind === "prompt_omits_attachment") {
+      require(referenced.has(
+        a.fileId ?? ""
+      ), `${file}: "prompt_omits_attachment" names "${a.fileId}", which no message references. ` +
+        `Nothing was there to omit, so the Case would pass with the confinement removed.`);
+    }
+  }
 }
 
 /**

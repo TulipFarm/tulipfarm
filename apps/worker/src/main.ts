@@ -321,6 +321,7 @@ export async function main(): Promise<void> {
     host: turnHost,
     tools: toolDispatch,
     context: turnHost,
+    attachments: turnHost,
     runs: runStore,
     events: runEventStore,
     budgets: budgetStore,

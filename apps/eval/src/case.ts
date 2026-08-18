@@ -16,6 +16,8 @@ export type Expectation =
   /** The assembled system prompt contains this text — the only check that proves the real Context
    *  assembler ran, rather than a hand-written prompt being fed to the loop. */
   | { readonly kind: "prompt_contains"; readonly text: string }
+  | { readonly kind: "prompt_attaches"; readonly fileId: string }
+  | { readonly kind: "prompt_omits_attachment"; readonly fileId: string }
   | { readonly kind: "prompt_omits"; readonly text: string }
   | { readonly kind: "tool_called"; readonly name: string }
   | { readonly kind: "tool_not_called"; readonly name: string }
@@ -114,6 +116,30 @@ export interface JourneyTurn {
   readonly script?: readonly ModelOutput[];
 }
 
+/**
+ * A File a Case makes available to its Turn.
+ *
+ * Carries no bytes: the runner synthesises them, because what a Case is asserting is whether a
+ * File *reached* the prompt, and a base64 blob in the Corpus would make every such Case expensive
+ * to read and review without making the assertion any stronger.
+ */
+export interface CaseAttachment {
+  readonly fileId: string;
+  readonly mediaType: string;
+  readonly name: string;
+}
+
+/**
+ * Deterministic stand-in bytes for a Case's File.
+ *
+ * A Case asserts whether a File *reached* the prompt, which no scripted model ever looks at, so
+ * the content is irrelevant and real bytes in the Corpus would cost review effort for no signal.
+ * Derived from the id so a Sweep is reproducible.
+ */
+export function synthesizeAttachment(file: CaseAttachment): CaseAttachment & { data: Uint8Array } {
+  return { ...file, data: new TextEncoder().encode(`eval-bytes:${file.fileId}`) };
+}
+
 export interface EvalCase {
   readonly id: string;
   /**
@@ -126,6 +152,13 @@ export interface EvalCase {
   /** What feeds the real Context assembler. The assembler's output is what the model sees. */
   readonly context: AssembleContext;
   readonly input: readonly ModelMessage[];
+  /**
+   * The Files resolved for *this* Turn, as the Context assembler would resolve them.
+   *
+   * A file part in `input` that no entry here names carries no bytes and reaches no provider —
+   * which is exactly how a File stays confined to the Turn it was attached to.
+   */
+  readonly attachments?: readonly CaseAttachment[];
   readonly tools?: readonly ExposedTool[];
   readonly toolResults?: readonly ScriptedToolResult[];
   /**

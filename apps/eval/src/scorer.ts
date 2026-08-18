@@ -6,6 +6,13 @@ import type { GuardrailDecision } from "./guardrails.ts";
 export interface Observation {
   /** The prompt the real Context assembler produced for this Trial. */
   readonly systemPrompt: string;
+  /**
+   * The Files whose bytes reached the model, as the prompt splitter reported emitting them.
+   *
+   * Absent rather than empty on a tier that does not collect it, so an attachment Expectation
+   * fails with a reason instead of quietly reading nothing and calling that an omission.
+   */
+  readonly attachedFileIds?: readonly string[];
   readonly toolCalls: readonly { readonly name: string; readonly arguments: unknown }[];
   readonly output: ModelOutput | undefined;
   readonly status: string;
@@ -228,6 +235,29 @@ function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: 
       return obs.systemPrompt.includes(a.text)
         ? { passed: false, detail: `assembled prompt contains ${show(a.text)} but should not` }
         : { passed: true, detail: "absent from the assembled prompt" };
+
+    case "prompt_attaches":
+    case "prompt_omits_attachment": {
+      if (obs.attachedFileIds === undefined) {
+        return { passed: false, detail: "this tier does not observe what the prompt attached" };
+      }
+      const present = obs.attachedFileIds.includes(a.fileId);
+      const want = a.kind === "prompt_attaches";
+      if (present === want) {
+        return {
+          passed: true,
+          detail: want ? "the prompt carried its bytes" : "no bytes were sent",
+        };
+      }
+      return {
+        passed: false,
+        detail: want
+          ? `the prompt carried no bytes for ${show(a.fileId)}; it sent ${
+              obs.attachedFileIds.length === 0 ? "none" : obs.attachedFileIds.join(", ")
+            }`
+          : `the prompt carried bytes for ${show(a.fileId)} but should not have`,
+      };
+    }
 
     case "tool_called":
       return obs.toolCalls.some((c) => c.name === a.name)

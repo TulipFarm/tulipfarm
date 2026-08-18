@@ -56,7 +56,10 @@ export interface DerivedModelProfile extends ModelProfileSpec {
 
 function modalitiesFor(spec: ModelSpec | undefined): ModelModality[] {
   // Absent spec means text-only; do not claim vision we cannot prove.
-  return spec?.supports_vision === true ? ["text", "image"] : ["text"];
+  const modalities: ModelModality[] = ["text"];
+  if (spec?.supports_vision === true) modalities.push("image");
+  if (spec?.supports_pdf_input === true) modalities.push("document");
+  return modalities;
 }
 
 function profileFrom(

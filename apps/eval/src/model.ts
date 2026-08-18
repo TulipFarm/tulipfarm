@@ -307,7 +307,7 @@ async function invokeOnce(
   request: ModelInvocationRequest,
   onVersion: (version: string) => void
 ): Promise<ModelInvocationResult> {
-  const { instructions, messages } = splitPrompt(request.messages);
+  const { instructions, messages } = splitPrompt(request.messages, request.attachments);
   const prompt = withCacheBreakpoint(
     instructions,
     decidePromptCache({

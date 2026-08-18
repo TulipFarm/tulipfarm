@@ -1,5 +1,10 @@
 import type { ModelRequirementsPolicy } from "../models/requirements";
-import type { ModelInvocationFailureReason, ModelMessage, ModelPort } from "../ports";
+import type {
+  ModelInvocationFailureReason,
+  ModelMessage,
+  ModelPort,
+  ResolvedAttachment,
+} from "../ports";
 import type { LoopCheckpointStore } from "./checkpoint";
 
 /** What a caller of the bounded Tool loop supplies, implements, and receives back. */
@@ -33,6 +38,13 @@ export interface AgentLoopInput {
   readonly contextDigest: string;
   readonly guardrailDigest: string;
   readonly messages: readonly ModelMessage[];
+  /**
+   * Bytes for the Files this Turn attached; see {@link ResolvedAttachment}.
+   *
+   * Resolved once by the caller and reused across iterations, because the caller is where the
+   * authorization to read them lives and the loop must not be able to fetch a File on its own.
+   */
+  readonly attachments?: readonly ResolvedAttachment[];
   readonly tools: readonly ExposedTool[];
   readonly limits: AgentLoopLimits;
   readonly outputSchema?: Readonly<Record<string, unknown>>;

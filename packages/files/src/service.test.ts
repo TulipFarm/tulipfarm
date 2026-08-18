@@ -3,7 +3,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FileSystemBlobPort } from "@tulipfarm/storage";
+import { Jimp } from "jimp";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { DEFAULT_MAX_IMAGE_DIMENSION } from "./bound";
+import { imageSize } from "./dimensions";
 import { MAX_FILE_BYTES } from "./limits";
 import type { FileRecord, FileRepo, NewFile } from "./repo";
 import { FileError, FileService } from "./service";
@@ -243,5 +246,144 @@ describe("FileService.read", () => {
     const chunks: Uint8Array[] = [];
     for await (const chunk of body) chunks.push(chunk);
     expect(Buffer.concat(chunks).equals(Buffer.from(PNG))).toBe(true);
+  });
+});
+
+describe("FileService.upload — image bounding", () => {
+  let root: string;
+  let blobs: FileSystemBlobPort;
+  let repo: MemoryFileRepo;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "tulip-bound-"));
+    blobs = new FileSystemBlobPort(root);
+    repo = new MemoryFileRepo();
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  async function realPng(width: number, height: number): Promise<Uint8Array> {
+    const image = new Jimp({ width, height, color: 0x336699ff });
+    return new Uint8Array(await image.getBuffer("image/png"));
+  }
+
+  function serviceWith(policy?: () => { maxImageDimension?: number; downscaleImages?: boolean }) {
+    return new FileService({
+      repo,
+      blobs,
+      newId: () => randomUUID(),
+      ...(policy === undefined ? {} : { imagePolicy: policy }),
+    });
+  }
+
+  function put(service: FileService, bytes: Uint8Array) {
+    return service.upload({
+      businessId: BUSINESS,
+      ownerPrincipalId: OWNER,
+      filename: "shot.png",
+      claimedMediaType: "image/png",
+      declaredBytes: bytes.byteLength,
+      body: once(bytes),
+    });
+  }
+
+  it("accepts an image inside the pixel limit", async () => {
+    const file = await put(serviceWith(), await realPng(320, 200));
+
+    expect(file.mediaType).toBe("image/png");
+  });
+
+  it("refuses an oversized image at upload, when the person is present to be told", async () => {
+    const service = serviceWith();
+
+    await expect(put(service, await realPng(2_400, 400))).rejects.toMatchObject({
+      reason: "image_too_large",
+    });
+  });
+
+  it("leaves no row behind for a refused image", async () => {
+    await expect(put(serviceWith(), await realPng(2_400, 400))).rejects.toThrow(FileError);
+
+    expect(repo.rows).toHaveLength(0);
+  });
+
+  it("names the actual size in the refusal, so the person knows what to change", async () => {
+    await expect(put(serviceWith(), await realPng(2_400, 400))).rejects.toThrow(/2400×400/);
+  });
+
+  it("downscales instead of refusing when the operator turned it on", async () => {
+    const service = serviceWith(() => ({ downscaleImages: true }));
+
+    const file = await put(service, await realPng(2_400, 1_200));
+
+    expect(file.mediaType).toBe("image/png");
+    expect(file.sizeBytes).toBeGreaterThan(0);
+  });
+
+  it("stores the downscaled bytes, so what is served back is what the model was given", async () => {
+    const service = serviceWith(() => ({ downscaleImages: true }));
+
+    const file = await put(service, await realPng(2_400, 1_200));
+    const { body } = await service.content(BUSINESS, file.id, OWNER);
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of body) chunks.push(chunk);
+
+    expect(imageSize(new Uint8Array(Buffer.concat(chunks)), "image/png")).toEqual({
+      width: DEFAULT_MAX_IMAGE_DIMENSION,
+      height: DEFAULT_MAX_IMAGE_DIMENSION / 2,
+    });
+  });
+
+  it("records the downscaled byte length, not the length that was uploaded", async () => {
+    const original = await realPng(2_400, 1_200);
+    const service = serviceWith(() => ({ downscaleImages: true }));
+
+    const file = await put(service, original);
+
+    expect(file.sizeBytes).not.toBe(original.byteLength);
+  });
+
+  it("honours the business's own pixel limit over the default", async () => {
+    const service = serviceWith(() => ({ maxImageDimension: 100 }));
+
+    await expect(put(service, await realPng(320, 200))).rejects.toMatchObject({
+      reason: "image_too_large",
+    });
+  });
+
+  it("does not bound a PDF, whose cost the byte cap already governs", async () => {
+    const pdf = new Uint8Array(64);
+    pdf.set([0x25, 0x50, 0x44, 0x46, 0x2d], 0);
+    const service = serviceWith(() => ({ maxImageDimension: 1 }));
+
+    const file = await service.upload({
+      businessId: BUSINESS,
+      ownerPrincipalId: OWNER,
+      filename: "doc.pdf",
+      claimedMediaType: "application/pdf",
+      declaredBytes: pdf.byteLength,
+      body: once(pdf),
+    });
+
+    expect(file.mediaType).toBe("application/pdf");
+  });
+
+  it("reads a JPEG's dimensions from behind its metadata, not just its first bytes", async () => {
+    const image = new Jimp({ width: 2_000, height: 600, color: 0x336699ff });
+    const jpeg = new Uint8Array(await image.getBuffer("image/jpeg"));
+    const service = serviceWith();
+
+    await expect(
+      service.upload({
+        businessId: BUSINESS,
+        ownerPrincipalId: OWNER,
+        filename: "photo.jpg",
+        claimedMediaType: "image/jpeg",
+        declaredBytes: jpeg.byteLength,
+        body: once(jpeg),
+      })
+    ).rejects.toMatchObject({ reason: "image_too_large" });
   });
 });

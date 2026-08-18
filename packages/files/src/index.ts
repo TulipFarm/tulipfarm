@@ -3,6 +3,13 @@ export {
   isAttachmentRefusal,
   resolveAttachments,
 } from "./attachments";
+export {
+  boundImage,
+  DEFAULT_MAX_IMAGE_DIMENSION,
+  type ImageBoundOutcome,
+  type ImageBoundPolicy,
+} from "./bound";
+export { type ImageSize, imageSize } from "./dimensions";
 export { normalizeFilename } from "./filename";
 export {
   contentDisposition,
@@ -35,3 +42,11 @@ export {
   type UploadRequest,
 } from "./service";
 export { resolveMediaType, SNIFF_BYTES, sniffMediaType } from "./sniff";
+export type {
+  AttachedMessage,
+  AttachmentOmitted,
+  TurnAttachmentReader,
+  TurnAttachmentRef,
+  TurnAttachmentStore,
+} from "./turn-attachments";
+export { readTurnAttachment, resolveTurnAttachments } from "./turn-attachments";

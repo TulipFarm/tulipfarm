@@ -452,6 +452,9 @@ export class AgentLoop {
         modelProfileId: input.modelProfileId,
         messages,
         tools: toolsForIteration(),
+        ...(input.attachments === undefined || input.attachments.length === 0
+          ? {}
+          : { attachments: input.attachments }),
         ...(input.modelPolicy === undefined ? {} : { policy: input.modelPolicy }),
         ...(input.principal === undefined ? {} : { principal: input.principal }),
         ...(input.agentId === undefined ? {} : { agentId: input.agentId }),

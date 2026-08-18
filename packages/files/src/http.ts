@@ -37,6 +37,9 @@ export const FILE_ERROR_STATUS: Record<FileError["reason"], 400 | 403 | 404 | 41
   too_large: 413,
   empty: 400,
   disallowed_type: 415,
+  // An image over the pixel limit is a payload the instance refuses to carry, same as one over
+  // the byte limit — the person's remedy is to make it smaller either way.
+  image_too_large: 413,
   not_authorized: 403,
   not_found: 404,
 };

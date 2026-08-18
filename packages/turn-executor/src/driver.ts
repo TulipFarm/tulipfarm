@@ -4,6 +4,7 @@ import type {
   ExposedTool,
   ModelMessage,
   ModelRequirementsPolicy,
+  ResolvedAttachment,
 } from "@tulipfarm/agent-runtime";
 import type { StateStatus } from "@tulipfarm/run-kernel";
 import type { AgentStateRequest, AgentStateResult, AgentStateRunner } from "./agent-state";
@@ -47,6 +48,17 @@ export interface ResolvedTurnContext {
   /** The validated guardrail policy `guardrailDigest` names, rebuilt into guards here. */
   readonly guardrailPolicy: Record<string, unknown>;
   readonly messages: readonly ModelMessage[];
+  /**
+   * The Files this Turn attached, named rather than carried.
+   *
+   * Names only: this context crosses an HTTP boundary as JSON, so bytes are fetched separately
+   * through {@link TurnAttachmentPort}.
+   */
+  readonly attachments?: readonly {
+    readonly fileId: string;
+    readonly mediaType: string;
+    readonly name: string;
+  }[];
   /** Tools plus guard tier; the loop/model see only `ExposedTool`. */
   readonly tools: readonly (ExposedTool & { readonly tier: string })[];
   readonly limits: AgentLoopLimits;
@@ -58,6 +70,16 @@ export interface ResolvedTurnContext {
 
 export interface TurnContextPort {
   resolve(request: TurnRequest): Promise<ResolvedTurnContext>;
+}
+
+/**
+ * Fetches the bytes of one File the resolved Context named.
+ *
+ * Separate from `TurnContextPort` because the far side re-authorizes per File at the moment the
+ * bytes are read, rather than handing out everything a Turn might want up front.
+ */
+export interface TurnAttachmentPort {
+  read(runId: string, fileId: string): Promise<Uint8Array | undefined>;
 }
 
 export interface TurnDriverOptions {
@@ -72,6 +94,8 @@ export interface TurnDriverOptions {
   modelReceipt?(): ModelCallReceipt | undefined;
   /** Where finished turns are reported as spend. Best-effort; never blocks the turn. */
   readonly spend?: SpendSink;
+  /** Fetches attached File bytes. Absent leaves every Turn attachment-free. */
+  readonly attachments?: TurnAttachmentPort;
 }
 
 /** What a finished turn is attributed to, carried rather than held so no state outlives a run. */
@@ -151,6 +175,8 @@ export class TurnDriver {
       );
     }
 
+    const attachments = await this.resolveAttachments(request.runId, context);
+
     const input: AgentLoopInput = {
       businessId: request.businessId,
       runId: request.runId,
@@ -162,6 +188,7 @@ export class TurnDriver {
       contextDigest: context.contextDigest,
       guardrailDigest: context.guardrailDigest,
       messages: guarded.messages,
+      ...(attachments.length === 0 ? {} : { attachments }),
       tools: context.tools,
       limits: context.limits,
       ...(context.skillToolScopes === undefined
@@ -198,6 +225,31 @@ export class TurnDriver {
   }
 
   /** Guard only the latest user message; transforms affect the model, not persisted history. */
+  /**
+   * Fetches bytes for the Files the Context named, dropping any the far side refuses.
+   *
+   * A refusal is dropped rather than failing the Turn because the far side answers the same way
+   * for a File this Turn never attached and one whose authority was revoked since. Failing on it
+   * would let a revoked File break a Turn that has other content to work with, and the Agent
+   * still has the person's text.
+   */
+  private async resolveAttachments(
+    runId: string,
+    context: ResolvedTurnContext
+  ): Promise<ResolvedAttachment[]> {
+    const port = this.options.attachments;
+    const refs = context.attachments ?? [];
+    if (port === undefined || refs.length === 0) return [];
+
+    const fetched = await Promise.all(
+      refs.map(async (ref) => {
+        const data = await port.read(runId, ref.fileId);
+        return data === undefined ? undefined : { ...ref, data };
+      })
+    );
+    return fetched.filter((file) => file !== undefined);
+  }
+
   private async guardInput(
     context: ResolvedTurnContext,
     events: TurnEventWriter

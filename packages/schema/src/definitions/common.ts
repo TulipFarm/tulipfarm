@@ -95,7 +95,7 @@ export const modelPolicySchema = Type.Object(
 );
 
 /** Model modalities are dimensions; unsupported modality is a denial, never silent dropping. */
-export const MODEL_MODALITIES = ["text", "image", "audio", "video"] as const;
+export const MODEL_MODALITIES = ["text", "image", "audio", "video", "document"] as const;
 export type ModelModality = (typeof MODEL_MODALITIES)[number];
 
 /** ULID (Crockford base32) or canonical UUID. */

@@ -22,6 +22,7 @@ export type {
 export { ConversationTurnCompleter } from "./conversation-turn";
 export type {
   ResolvedTurnContext,
+  TurnAttachmentPort,
   TurnContextPort,
   TurnDriverOptions,
   TurnRequest,

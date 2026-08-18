@@ -84,6 +84,22 @@ export class TurnGuardrails {
       await this.record(events, "input", result.guard, result.reason, "input");
       return { blocked: true, message: result.message ?? DEFAULT_BLOCK_MESSAGE };
     }
+
+    const names = contentFiles(content)
+      .map((part) => part.name)
+      .join("\n");
+    if (names.length > 0) {
+      // A filename is attacker-chosen text that reaches the model verbatim, so it is screened
+      // like any other input. Screened separately and for blocking only: a redaction cannot be
+      // applied to a name without changing which File the part refers to, and an attachment
+      // named to carry an instruction is not a message worth partially admitting.
+      const named = await service.runInput(names, ctx);
+      if (named.blocked) {
+        await this.record(events, "input", named.guard, named.reason, "input");
+        return { blocked: true, message: named.message ?? DEFAULT_BLOCK_MESSAGE };
+      }
+    }
+
     if (result.value === text) return { blocked: false, content };
     // A guard rewrote the text — redaction. The rewrite covers the message's text as a whole, so
     // it is carried as one part; keeping the original text parts would re-admit what was removed.

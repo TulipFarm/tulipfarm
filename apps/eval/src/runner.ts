@@ -8,9 +8,10 @@ import {
   type ModelOutput,
   type ModelPort,
 } from "@tulipfarm/agent-runtime";
+import { splitPrompt } from "@tulipfarm/model-adapter";
 import { textContent } from "@tulipfarm/schema";
 import { autonomyBoundedDispatch, capabilityBoundedDispatch } from "./autonomy.ts";
-import { type EvalCase, LOOP_LIMITS } from "./case.ts";
+import { type EvalCase, LOOP_LIMITS, synthesizeAttachment } from "./case.ts";
 import type { Corpus } from "./corpus.ts";
 import { toolDispatcher } from "./dispatch.ts";
 import { type EvalSoul, soulContext } from "./eval-soul.ts";
@@ -355,8 +356,14 @@ async function runTrial(
       retries += 1;
     },
   });
+  // What the production prompt splitter actually emitted, not a second opinion about what it
+  // should have. A Case asserting confinement has to read the same traversal that sends the bytes.
+  const attachedFileIds = new Set<string>();
   const model: ModelPort = {
     invoke: async (request) => {
+      for (const id of splitPrompt(request.messages, request.attachments).attached) {
+        attachedFileIds.add(id);
+      }
       const result = await port.invoke(request);
       lastOutput = result.output;
       spend = addSpend(spend, result.usage);
@@ -400,6 +407,7 @@ async function runTrial(
         toolCalls: [],
         output: { kind: "text", text: guarded.message },
         status: "completed",
+        attachedFileIds: [...attachedFileIds],
       });
     }
 
@@ -413,6 +421,9 @@ async function runTrial(
       messages: [{ role: "system", content: textContent(systemPrompt) }, ...guarded.messages],
       tools: evalCase.tools ?? [],
       limits: LOOP_LIMITS,
+      ...(evalCase.attachments === undefined
+        ? {}
+        : { attachments: evalCase.attachments.map(synthesizeAttachment) }),
     };
 
     const outcome = await loop.run(input);
@@ -427,6 +438,7 @@ async function runTrial(
       outcome.status === "completed" ? asOutput(outcome.output, lastOutput) : lastOutput;
     return await scored(evalCase, trial, vacuous, spend, retries, guards.decisions, judge, {
       systemPrompt,
+      attachedFileIds: [...attachedFileIds],
       toolCalls: tools.calls,
       // The output guard is the last thing production runs before an answer becomes durable, so a
       // Case scores the text a participant would actually have received.

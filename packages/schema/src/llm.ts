@@ -50,6 +50,8 @@ const ModelSpecSchema = Type.Object(
     mode: Type.Optional(Type.String()),
     supports_function_calling: Type.Optional(Type.Boolean()),
     supports_vision: Type.Optional(Type.Boolean()),
+    /** LiteLLM's flag for native document (PDF) input, distinct from vision. */
+    supports_pdf_input: Type.Optional(Type.Boolean()),
     supports_prompt_caching: Type.Optional(Type.Boolean()),
     supports_reasoning: Type.Optional(Type.Boolean()),
     deprecation_date: Type.Optional(Type.Union([Type.String(), Type.Null()])),

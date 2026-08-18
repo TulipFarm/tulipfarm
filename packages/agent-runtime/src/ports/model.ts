@@ -6,10 +6,29 @@ export interface ModelMessage {
   readonly content: MessageContent;
 }
 
+/**
+ * One File's bytes, resolved and re-authorized for this invocation.
+ *
+ * Bytes ride beside the transcript rather than inside it because `MessageContent` is persisted:
+ * a part naming a File stays a name forever, and inlining base64 would both bloat every row and
+ * freeze a copy of content the File store is supposed to own.
+ *
+ * Only Files the current Turn attached appear here. A part in an older message keeps its name and
+ * resolves to nothing, so a File is sent once rather than re-sent on every later Turn.
+ */
+export interface ResolvedAttachment {
+  readonly fileId: string;
+  readonly mediaType: string;
+  readonly name: string;
+  readonly data: Uint8Array;
+}
+
 export interface ModelInvocationRequest {
   readonly requestId: string;
   readonly modelProfileId: string;
   readonly messages: readonly ModelMessage[];
+  /** Bytes for the file parts this Turn attached, keyed by `fileId`; see {@link ResolvedAttachment}. */
+  readonly attachments?: readonly ResolvedAttachment[];
   readonly tools?: readonly {
     readonly name: string;
     readonly description?: string;

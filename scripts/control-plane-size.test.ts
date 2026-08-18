@@ -152,6 +152,22 @@ import { describe, expect, it } from "vitest";
  * serializer round trip that caught it, an attachment-only Message, and the proof that a refused
  * attachment leaves neither a Turn nor an empty Conversation behind.
  *
+ * Sending an attachment to the model is the next +35, and the number is 35 because this ratchet
+ * rejected the first attempt at 101. What landed is only what Fastify forces: the internal route
+ * that streams one Turn's File to the Worker — bytes cannot ride inside the JSON Context response,
+ * so a second endpoint is the only way — its params schema, the `attachments` manifest on the
+ * Context response schema (undeclared properties are stripped on serialization, so an omitted key
+ * would silently drop the File between API and Worker), and the composition that wires the File
+ * service into both.
+ *
+ * What moved out instead, and is the whole difference: `@tulipfarm/files/turn-attachments.ts`,
+ * holding both halves of the rule — which Files a Turn may send, re-authorized rather than
+ * trusted and scoped to the Turn by `turnId`, and the two-gate byte read that answers `null`
+ * identically for "never attached" and "no longer authorized". Both were first written into the
+ * app for no better reason than that the route was, and keeping them together matters beyond
+ * ownership: the manifest the Context carries and the bytes the Worker later fetches have to
+ * agree about which Files a Turn attached, and two copies of that rule would be free to drift.
+ *
  * This is that. The ceiling is a high-water mark, not a target — lowering it as code moves out is
  * the point, and the only edit this file should ever receive. Raising it needs a reviewed reason,
  * because "the number went up again" is exactly the event three editions failed to catch.

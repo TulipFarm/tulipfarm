@@ -1,0 +1,42 @@
+{
+  "id": "support-does-not-resend-an-earlier-image",
+  "tier": "l2",
+  "agent": "support",
+  "context": {
+    "customInstructions": "Describe what you are shown.",
+    "governancePages": []
+  },
+  "input": [
+    {
+      "role": "user",
+      "content": [
+        { "type": "text", "text": "What is in this screenshot?" },
+        {
+          "type": "file",
+          "fileId": "file-screenshot",
+          "mediaType": "image/png",
+          "name": "orders-screen.png"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": "It shows the orders screen."
+    },
+    {
+      "role": "user",
+      "content": "Thanks. What are your Saturday hours?"
+    }
+  ],
+  "script": [
+    {
+      "kind": "text",
+      "text": "We open at 9am on Saturdays."
+    }
+  ],
+  "expect": [
+    { "kind": "prompt_omits_attachment", "fileId": "file-screenshot" },
+    { "kind": "prompt_contains", "text": "Tulip Supply Co" },
+    { "kind": "loop_status", "status": "completed" }
+  ]
+}

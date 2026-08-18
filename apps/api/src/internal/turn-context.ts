@@ -6,6 +6,11 @@ import {
   type ModelRequirementsPolicy,
   narrowDelegatedTurn,
 } from "@tulipfarm/agent-runtime";
+import {
+  resolveTurnAttachments,
+  type TurnAttachmentReader,
+  type TurnAttachmentRef,
+} from "@tulipfarm/files";
 import type { KnowledgeService } from "@tulipfarm/knowledge";
 import type { KvService } from "@tulipfarm/kv";
 import type { MemoryDocumentRepo } from "@tulipfarm/memory";
@@ -156,6 +161,12 @@ export interface ChatTurnContextResolverOptions {
    * every turn did before this existed; a deployment wires it to measure the rate.
    */
   readonly telemetry?: TelemetryPort;
+  /**
+   * Reads the Files this Turn attached, so their authorization can be checked again here.
+   *
+   * Absent leaves every Turn attachment-free, which is what every Turn did before Files existed.
+   */
+  readonly files?: TurnAttachmentReader;
   now?(): Date;
 }
 
@@ -267,6 +278,8 @@ export class ChatTurnContextResolver implements TurnContextResolver {
       this.options.bundledSkills
     );
 
+    const attachments = await this.resolveAttachments(authority, history);
+
     return {
       agentId: agent.name,
       subjectId: authority.subject.id,
@@ -277,11 +290,35 @@ export class ChatTurnContextResolver implements TurnContextResolver {
       guardrailDigest,
       guardrailPolicy,
       messages,
+      ...(attachments.length === 0 ? {} : { attachments }),
       tools: delegated.tools,
       limits: delegated.limits,
       compacted: dropped.size > 0,
       ...(skillToolScopes === undefined ? {} : { skillToolScopes }),
     };
+  }
+
+  /** Delegates to the File domain, which owns which Files a Turn may send. */
+  private async resolveAttachments(
+    authority: TurnAuthority,
+    history: readonly PersistedMessage[]
+  ): Promise<TurnAttachmentRef[]> {
+    const files = this.options.files;
+    if (files === undefined) return [];
+    return resolveTurnAttachments({
+      files,
+      messages: history,
+      businessId: authority.businessId,
+      turnId: authority.turn.id,
+      principalId: authority.subject.id,
+      onOmitted: (fileId) => {
+        this.options.telemetry?.log("warn", "turn attachment omitted: no longer authorized", {
+          "tulip.file.id": fileId,
+          "tulip.turn.id": authority.turn.id,
+          "tulip.subject.id": authority.subject.id,
+        });
+      },
+    });
   }
 
   /**

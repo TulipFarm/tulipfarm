@@ -1,4 +1,5 @@
 import { type Static, Type } from "@sinclair/typebox";
+import type { ModelModality } from "./definitions/common";
 
 /**
  * The content of one Message, as an ordered list of parts.
@@ -55,6 +56,21 @@ export function contentText(content: MessageContent): string {
 
 export function contentFiles(content: MessageContent): readonly MessageFilePart[] {
   return content.filter((part) => part.type === "file");
+}
+
+/**
+ * The model input modality a media type demands.
+ *
+ * Anything unrecognised answers `document` rather than `text`: a model that cannot take a file at
+ * all must be denied, and calling an unknown type text would smuggle it past the modality check
+ * as if it were prose the provider could read.
+ */
+export function modalityForMediaType(mediaType: string): ModelModality {
+  const type = mediaType.split("/")[0]?.toLowerCase();
+  if (type === "image") return "image";
+  if (type === "audio") return "audio";
+  if (type === "video") return "video";
+  return "document";
 }
 
 /**

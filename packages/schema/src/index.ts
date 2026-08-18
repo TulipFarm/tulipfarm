@@ -137,6 +137,7 @@ export {
   contentText,
   MessageContentPartSchema,
   MessageContentSchema,
+  modalityForMediaType,
   normalizeMessageContent,
   textContent,
 } from "./message-content";
@@ -223,8 +224,8 @@ export {
   SKILL_LIST_SCHEMA,
   SKILL_UPDATE_SCHEMA,
 } from "./skill-tool-schemas";
-export type { SoulConfig } from "./soul-config";
-export { SoulConfigSchema, validateSoulConfig } from "./soul-config";
+export type { FilesConfig, SoulConfig } from "./soul-config";
+export { FilesConfigSchema, SoulConfigSchema, validateSoulConfig } from "./soul-config";
 export type { CounterFn } from "./transforms";
 export {
   applyTransforms,

@@ -531,6 +531,9 @@ async function boot() {
       repo: new PgFileRepo(pool),
       blobs: new FileSystemBlobPort(join(resolveDataDir() ?? process.cwd(), "blobs")),
       newId: () => randomUUID(),
+      // Read per upload from the Soul, so an operator turning downscaling on takes effect on the
+      // next upload rather than on the next restart.
+      imagePolicy: async () => (await readSoulConfig(soulPath)).files ?? {},
     });
     const activityService = new ActivityService(new PgActivityRepo(pool));
     // Audit is separate from activity by design: activity is a UI feed, audit is evidence.
@@ -790,7 +793,9 @@ async function boot() {
             log: (event, message) => console.warn(JSON.stringify({ ...event, msg: message })),
           }),
           telemetry: memoryTelemetry,
+          files: fileService,
         }),
+        files: fileService,
         tools: buildDelegatedToolDispatch({
           links: childLinks,
           catalog: delegationCatalog,

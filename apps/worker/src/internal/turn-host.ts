@@ -8,6 +8,7 @@ import type { TurnAuthority } from "@tulipfarm/tool-host";
 import type {
   ApprovalWaitPort,
   ResolvedTurnContext,
+  TurnAttachmentPort,
   TurnCompletionRecord,
   TurnCompletionRef,
   TurnCompletionStatus,
@@ -59,7 +60,12 @@ function turnPath(runId: string, suffix = ""): string {
 }
 
 export class HttpTurnHost
-  implements TurnContextPort, TurnCompletionStore, ToolDispatchPort, ApprovalWaitPort
+  implements
+    TurnContextPort,
+    TurnAttachmentPort,
+    TurnCompletionStore,
+    ToolDispatchPort,
+    ApprovalWaitPort
 {
   constructor(private readonly client: InternalApiClient) {}
 
@@ -95,6 +101,20 @@ export class HttpTurnHost
   /** `TurnContextPort`. */
   async resolve(request: TurnRequest): Promise<ResolvedTurnContext> {
     return this.client.require<ResolvedTurnContext>("POST", turnPath(request.runId, "/context"));
+  }
+
+  /**
+   * `TurnAttachmentPort`. The far side re-authorizes the File against the Run's own subject.
+   *
+   * A `404` means this Run may not have these bytes — either its Turn never attached the File or
+   * the subject may no longer read it. The two are deliberately indistinguishable, so that a
+   * Worker cannot use this route to learn which File ids exist.
+   */
+  async read(runId: string, fileId: string): Promise<Uint8Array | undefined> {
+    return this.client.bytes(
+      turnPath(runId, `/attachments/${encodeURIComponent(fileId)}`),
+      [404, 409]
+    );
   }
 
   /** `ToolDispatchPort`. The far side re-derives the callId's authority from the Run. */
