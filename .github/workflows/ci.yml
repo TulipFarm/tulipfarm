@@ -322,6 +322,55 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  eval-corpus:
+    name: Eval Corpus
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: changes
+    if: ${{ needs.changes.outputs.non_docs == 'true' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      # The scripted tier only — free, deterministic, no credential, ~8s. It cannot tell whether a
+      # real model still behaves, which is what the manual `Eval` workflow is for. What it does
+      # prove is that the Corpus still loads, every Case still scores, and no Case has rotted into
+      # a vacuous pass. Without it that rot surfaces on release day, when re-running the Corpus
+      # costs the finite seat quota a maintainer was about to spend clearing the release.
+      - name: Sweep the Corpus with the scripted binding
+        run: |
+          set -o pipefail
+          pnpm eval 2>&1 | tee eval-corpus.log
+          pnpm eval:redteam 2>&1 | tee -a eval-corpus.log
+      - name: Job summary
+        if: always()
+        env:
+          STATUS: ${{ job.status }}
+        run: |
+          {
+            echo "## Eval Corpus"
+            if [ "$STATUS" = "success" ]; then
+              echo "✅ **Corpus swept clean on the scripted tier**"
+            else
+              echo "❌ **Corpus sweep failed** — last 100 lines:"
+              echo ""
+              echo '<details><summary>Log tail</summary>'
+              echo ""
+              echo '```'
+              tail -n 100 eval-corpus.log 2>/dev/null || echo "(no log captured)"
+              echo '```'
+              echo ""
+              echo '</details>'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: log-eval-corpus
+          path: eval-corpus.log
+          if-no-files-found: ignore
+          retention-days: 7
+
   docs-build:
     name: Docs checks
     runs-on: ubuntu-latest
@@ -643,6 +692,7 @@ jobs:
         build,
         architecture,
         schema-fixtures,
+        eval-corpus,
         docs-build,
         test-api,
         test-packages,
@@ -680,6 +730,7 @@ jobs:
           BUILD_RESULT: ${{ needs.build.result }}
           ARCHITECTURE_RESULT: ${{ needs.architecture.result }}
           SCHEMA_FIXTURES_RESULT: ${{ needs['schema-fixtures'].result }}
+          EVAL_CORPUS_RESULT: ${{ needs['eval-corpus'].result }}
           DOCS_BUILD_RESULT: ${{ needs['docs-build'].result }}
           TEST_API_RESULT: ${{ needs['test-api'].result }}
           TEST_PACKAGES_RESULT: ${{ needs['test-packages'].result }}
@@ -709,6 +760,7 @@ jobs:
                 process.env.SCHEMA_FIXTURES_RESULT,
                 nonDocsChanged,
               ],
+              ["Eval Corpus", "eval-corpus", process.env.EVAL_CORPUS_RESULT, nonDocsChanged],
               ["Docs checks", "docs-build", process.env.DOCS_BUILD_RESULT, docsChanged],
               ["Test API (4 shards)", "test-api", process.env.TEST_API_RESULT, codeChanged],
               ["Test packages", "test-packages", process.env.TEST_PACKAGES_RESULT, codeChanged],
