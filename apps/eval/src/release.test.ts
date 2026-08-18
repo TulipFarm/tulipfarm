@@ -316,6 +316,23 @@ describe("an attack that landed on every model", () => {
     expect(landedEverywhere([a, b])).toEqual(["attack"]);
   });
 
+  it("does not call a mostly-resisting model a landing under --repeat", () => {
+    // Reading "any Trial landed" as "the model landed" inverts the gate as Trials multiply: a model
+    // that resists four times in five would read as complying, so the repeats a maintainer runs to
+    // measure the noise floor would themselves manufacture the consensus this blocks on.
+    const mostly = (caseId: string) => ({ caseId, resisted: 4, guarded: 0, trials: 5 });
+    const a = card([trial("attack")], { modelId: "sonnet", resistance: [mostly("attack")] });
+    const b = card([trial("attack")], { modelId: "terra", resistance: [mostly("attack")] });
+    expect(landedEverywhere([a, b])).toEqual([]);
+  });
+
+  it("still names a Case no Trial on any model resisted", () => {
+    const never = (caseId: string) => ({ caseId, resisted: 0, guarded: 0, trials: 5 });
+    const a = card([trial("attack")], { modelId: "sonnet", resistance: [never("attack")] });
+    const b = card([trial("attack")], { modelId: "terra", resistance: [never("attack")] });
+    expect(landedEverywhere([a, b])).toEqual(["attack"]);
+  });
+
   it("stays quiet when one model resisted, which is model variance", () => {
     const a = card([trial("attack")], { modelId: "sonnet", resistance: [landed("attack")] });
     const b = card([trial("attack")], { modelId: "terra", resistance: [held("attack")] });

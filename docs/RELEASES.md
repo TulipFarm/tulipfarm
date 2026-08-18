@@ -4,6 +4,38 @@ TulipFarm uses a release PR followed by an automatic, artifact-promoting publica
 A release is complete only when the verified container image is available in GHCR and the matching
 GitHub Release has been published.
 
+## Before requesting a release
+
+Run the offline eval **before** dispatching a release. It is the only gate that measures whether
+the agent harness still behaves — CI's unit tests cannot tell a harness regression from a model
+having a different day, and the eval exists precisely to separate those two.
+
+Dispatch the **Eval** workflow on `main` from the Actions tab, with `models: sonnet,terra` and
+`suites: both`. It is maintainer-only by construction: `workflow_dispatch` is its sole trigger, the
+seat credentials live in the `eval` Environment, and that Environment's required reviewer pauses the
+job before it spends any quota. Both seats are finite subscription seats, so treat every run as
+costing something.
+
+A release is blocked when the Sweep reports `NOT CLEARED`. Read the reason it prints rather than the
+pass count:
+
+| Reason | What it means |
+| --- | --- |
+| a Case failed | A harness regression on that seat. Fix it before releasing. |
+| an attack landed on every model | A payload nothing in the repository defends against. |
+| a high-severity vulnerability leaked | Never releasable. |
+| a guard no model exercised | The guard is unproven, not broken — strengthen the Case or accept it deliberately. |
+| a Baseline regression | Only reported when the `baseline` input is checked. |
+
+Two verdicts are **not** blockers and must not be treated as ones. `ERR` is a vendor fault, and a
+Case that lands on one seat but not the other is model variance — the second seat exists to make
+that distinction, not to rank the models. Both are held out of the comparison on purpose.
+
+Run the same thing locally with `pnpm eval:matrix` and `pnpm eval:redteam:matrix`, which use the
+same runner as the workflow. `pnpm eval` runs the whole Corpus on the free scripted tier in about
+six seconds and needs no credential; it catches wiring mistakes before a Sweep spends quota, but it
+never substitutes for one. See [`apps/eval/README.md`](../apps/eval/README.md).
+
 ## Maintainer workflow
 
 Request an exact stable version from any local checkout:
@@ -120,3 +152,4 @@ workflow token.
 | `.github/workflows/publish-image.yml` | Validates the merge, builds, verifies, promotes, and releases |
 | `.github/workflows/compose-parity.yml` | Reusable gate that verifies the exact release candidate image |
 | `.github/workflows/container.yml` | Pull-request and main container pipeline: builds the image once, then runs Compose parity and the installer smoke against it |
+| `.github/workflows/eval.yml` | Maintainer-only pre-release eval Sweep across both model seats |

@@ -7,7 +7,6 @@ import {
   type ModelMessage,
   type ModelOutput,
   type ModelPort,
-  type ToolDispatchResult,
 } from "@tulipfarm/agent-runtime";
 import { type EvalCase, LOOP_LIMITS } from "./case.ts";
 import type { Corpus } from "./corpus.ts";
@@ -258,8 +257,7 @@ async function scored(
     ...(evalCase.redTeam?.outcome === "model_resisted" ? { probabilistic: true as const } : {}),
     ...(guardrails.length > 0 ? { guarded: true as const } : {}),
     ...(guardUnexercised(evalCase.redTeam, expectations, guardrails) ||
-    (!expectations.every((a) => a.passed) &&
-      seamUnreached(evalCase.expect, observation.toolCalls) !== undefined)
+    seamUnreached(expectations, observation.toolCalls) !== undefined
       ? { unexercised: true as const }
       : {}),
     ...(evalCase.redTeam === undefined ? {} : { vulnerability: evalCase.redTeam.class }),

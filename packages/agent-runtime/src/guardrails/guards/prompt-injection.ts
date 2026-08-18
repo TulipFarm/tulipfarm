@@ -58,38 +58,52 @@ const LEET_DIGITS: Readonly<Record<string, string>> = {
 /** A base64-looking run long enough to hide an instruction in. */
 const BASE64_RUN = /[A-Za-z0-9+/]{16,}={0,2}/g;
 
-/** Bounds on decoding, so a large message cannot turn one guard call into arbitrary work. */
-const MAX_DECODES = 12;
+/**
+ * Bounds on decoding, so a large message cannot turn one guard call into arbitrary work.
+ *
+ * The budget counts decoded *bytes* rather than runs, and an over-long run is truncated rather than
+ * skipped. A per-run count would hand an attacker two bypasses — pad the payload past the limit, or
+ * lead with a dozen decoys — and a defence with a documented escape hatch is worse than none,
+ * because the Corpus would then report the strategy as covered.
+ */
 const MAX_RUN_LENGTH = 8192;
+const MAX_DECODED_BYTES = 262144;
 
 function deleet(text: string): string {
   return text.replace(/[013457]/g, (digit) => LEET_DIGITS[digit] ?? digit);
 }
 
+/** Shortest printable stretch worth scanning. No pattern here is a phrase shorter than this. */
+const MIN_SEGMENT = 16;
+
+/** Printable stretches of a decode, which random bytes rarely produce and a sentence always does. */
+const PRINTABLE_RUN = /[\t\n\r\x20-\x7e]{16,}/g;
+
 /**
- * Mostly-printable text, which random bytes are not.
+ * The parts of a decode that read as text, rather than the whole of it.
  *
- * An arbitrary run of characters is valid base64, so most decodes are binary noise. Scanning that
- * noise risks a pattern matching by coincidence — `\bDAN\b` is three characters — and a guard that
- * blocks at random teaches operators to lower its sensitivity.
+ * An arbitrary run of characters is valid base64, so most decodes are binary noise, and scanning
+ * noise risks a pattern matching by coincidence — `\bDAN\b` is three characters, and a guard that
+ * blocks at random teaches operators to lower its sensitivity. Judging the decode as a whole would
+ * be the simpler test, but it is one an attacker controls: padding a payload with a kilobyte of
+ * `AAAA` drags the printable *ratio* below any threshold while leaving the sentence intact. Reading
+ * the printable stretches instead cannot be diluted, and a stretch long enough to hold one of these
+ * phrases is not something random bytes produce.
  */
-function readable(text: string): boolean {
-  if (text.length === 0) return false;
-  let printable = 0;
-  for (const ch of text) {
-    const code = ch.codePointAt(0) ?? 0;
-    if (code === 9 || code === 10 || code === 13 || (code >= 32 && code <= 126)) printable += 1;
-  }
-  return printable / text.length > 0.9;
+function readableSegments(text: string): string[] {
+  if (text.length < MIN_SEGMENT) return [];
+  return [...text.matchAll(PRINTABLE_RUN)].map(([segment]) => segment);
 }
 
 function decodedRuns(text: string): string[] {
   const out: string[] = [];
+  let budget = MAX_DECODED_BYTES;
   for (const [run] of text.matchAll(BASE64_RUN)) {
-    if (out.length >= MAX_DECODES) break;
-    if (run.length > MAX_RUN_LENGTH) continue;
-    const decoded = Buffer.from(run, "base64").toString("utf8");
-    if (readable(decoded)) out.push(decoded);
+    if (budget <= 0) break;
+    const considered = run.slice(0, Math.min(MAX_RUN_LENGTH, budget));
+    budget -= considered.length;
+    const decoded = Buffer.from(considered, "base64").toString("utf8");
+    out.push(...readableSegments(decoded));
   }
   return out;
 }

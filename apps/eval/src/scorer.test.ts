@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Expectation } from "./case.ts";
-import { type Observation, scoreCase, seamUnreached } from "./scorer.ts";
+import { type ExpectationResult, type Observation, scoreCase, seamUnreached } from "./scorer.ts";
 
 const base: Observation = {
   systemPrompt: "<agent-identity>\nagentId: triage\n</agent-identity>",
@@ -420,24 +420,47 @@ describe("output_omits", () => {
 });
 
 describe("an Expectation whose seam a Tool call has to open", () => {
+  const fail = (expectation: Expectation): ExpectationResult => ({
+    expectation,
+    passed: false,
+    detail: "did not hold",
+  });
+  const pass = (expectation: Expectation): ExpectationResult => ({
+    expectation,
+    passed: true,
+    detail: "held",
+  });
+  const commit: Expectation = { kind: "soul_committed", path: "agents/billing/AGENT.md" };
+
   it("names the Tool when the model never called it", () => {
-    expect(seamUnreached([{ kind: "soul_committed", path: "agents/billing/AGENT.md" }], [])).toBe(
-      "soul_write"
-    );
+    expect(seamUnreached([fail(commit)], [])).toBe("soul_write");
   });
 
   it("stays silent once the Tool was called, so a broken commit path still fails", () => {
     // The whole point of the hold-out is to tell "the model declined" from "the harness stopped
     // persisting". Once the call happened, a missing artifact is the second, and must fail loudly.
-    expect(
-      seamUnreached(
-        [{ kind: "soul_committed", path: "agents/billing/AGENT.md" }],
-        [{ name: "soul_write" }]
-      )
-    ).toBeUndefined();
+    expect(seamUnreached([fail(commit)], [{ name: "soul_write" }])).toBeUndefined();
   });
 
   it("has nothing to say about a Case that asserts no seam", () => {
-    expect(seamUnreached([{ kind: "output_contains", text: "hello" }], [])).toBeUndefined();
+    expect(seamUnreached([fail({ kind: "output_contains", text: "hello" })], [])).toBeUndefined();
+  });
+
+  it("holds out the Expectations downstream of the write, seam Tool or not", () => {
+    // `prompt_contains` asks whether the *next* Turn saw the Agent. With nothing written there is
+    // nothing to see, so it fails for the model's reason, not the harness's.
+    const scored = [fail(commit), fail({ kind: "prompt_contains", text: "billing" })];
+    expect(seamUnreached(scored, [])).toBe("soul_write");
+  });
+
+  it("stays silent when a lifecycle Expectation failed, whatever else did", () => {
+    // A Turn has to complete whether or not the model volunteered a Tool. Laundering that into
+    // `unexercised` would let a Matrix leg where another model passed hide a real Run failure.
+    const scored = [fail(commit), fail({ kind: "run_status", status: "succeeded" })];
+    expect(seamUnreached(scored, [])).toBeUndefined();
+  });
+
+  it("stays silent when nothing failed", () => {
+    expect(seamUnreached([pass(commit)], [])).toBeUndefined();
   });
 });
