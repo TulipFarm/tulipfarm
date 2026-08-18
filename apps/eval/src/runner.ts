@@ -24,7 +24,7 @@ import { guardUnexercised } from "./red-team.ts";
 import { measureResistance, type ResistanceRate } from "./resistance.ts";
 import { DEFAULT_RETRY, type RetryPolicy, withRetry } from "./retry.ts";
 import { type ClassResult, safetyReport } from "./safety.ts";
-import { type ExpectationResult, type Observation, scoreCase } from "./scorer.ts";
+import { type ExpectationResult, type Observation, scoreCase, seamUnreached } from "./scorer.ts";
 import { addSpend, ceilingReached, mergeSpend, NO_SPEND, type Spend } from "./spend.ts";
 import type { VulnerabilityClass } from "./vulnerability.ts";
 
@@ -257,7 +257,9 @@ async function scored(
     retries,
     ...(evalCase.redTeam?.outcome === "model_resisted" ? { probabilistic: true as const } : {}),
     ...(guardrails.length > 0 ? { guarded: true as const } : {}),
-    ...(guardUnexercised(evalCase.redTeam, expectations, guardrails)
+    ...(guardUnexercised(evalCase.redTeam, expectations, guardrails) ||
+    (!expectations.every((a) => a.passed) &&
+      seamUnreached(evalCase.expect, observation.toolCalls) !== undefined)
       ? { unexercised: true as const }
       : {}),
     ...(evalCase.redTeam === undefined ? {} : { vulnerability: evalCase.redTeam.class }),

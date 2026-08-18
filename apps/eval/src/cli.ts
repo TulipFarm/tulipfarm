@@ -8,7 +8,7 @@ import { createJudge, judgeIdentity, judgeVersion } from "./judge.ts";
 import { runMatrix } from "./matrix.ts";
 import { defaultCreateModel, PINNED_MODELS } from "./model.ts";
 import { progressReporter } from "./progress.ts";
-import { applyBaseline, guardsCovered, unclean, whyUnclean } from "./release.ts";
+import { applyBaseline, guardsCovered, landedEverywhere, unclean, whyUnclean } from "./release.ts";
 import { plannedTrials, selectCases } from "./runner.ts";
 import { renderMatrix, renderScorecard } from "./scorecard.ts";
 
@@ -185,10 +185,17 @@ async function main(): Promise<number> {
     (n, r) => n + (r.card === undefined ? 0 : unclean(r.card, covered)),
     0
   );
-  if (unmeasured.length + dirty === 0 && !baselineFailed) return 0;
+  // A resistance Case is not gating on one leg, because one model complying is the vendor's
+  // property. Every leg landing the same attack is not that — it is a payload nothing here defends
+  // against, and the Matrix is the only place with the evidence to say so.
+  const landed = landedEverywhere(
+    matrix.runs.flatMap((r) => (r.card === undefined ? [] : [r.card]))
+  );
+  if (unmeasured.length + dirty + landed.length === 0 && !baselineFailed) return 0;
 
   const why = [
     ...unmeasured.map((run) => `${run.modelId}: never measured`),
+    ...landed.map((id) => `the attack landed on every model: ${id}`),
     ...matrix.runs.flatMap((run) =>
       run.card === undefined
         ? []

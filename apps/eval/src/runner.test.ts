@@ -735,3 +735,47 @@ describe("what a failing L3 Trial reports as spent", () => {
     expect(card.trials.length).toBeLessThan(3);
   });
 });
+
+describe("an L3 Case whose seam the model never opened", () => {
+  const soulCase = (): EvalCase => ({
+    id: "l3-seam",
+    tier: "l2",
+    agent: "support",
+    context: { governancePages: [] },
+    input: [{ role: "user", content: "add a billing agent" }],
+    tools: [
+      {
+        name: "soul_write",
+        description: "Commit a Soul artifact.",
+        inputSchema: { type: "object", properties: {} },
+      },
+    ],
+    expect: [{ kind: "soul_committed", path: "agents/billing/AGENT.md" }],
+    script: [{ kind: "text", text: "I would need you to confirm first." }],
+  });
+
+  it("is held out rather than failed when the model answered in prose", async () => {
+    const card = await runSweep({ corpus: corpusOf([soulCase()]), model: scriptedBinding() });
+    expect(card.trials[0].unexercised).toBe(true);
+    expect(card.failed).toBe(0);
+  });
+
+  it("still fails when the model did call the Tool and nothing persisted", async () => {
+    // The load-bearing half. If this ever reads as unexercised, a harness that silently stopped
+    // persisting Souls would clear every release.
+    const called = soulCase();
+    const withCall: EvalCase = {
+      ...called,
+      script: [
+        {
+          kind: "tool_calls",
+          calls: [{ callId: "c1", name: "soul_write", arguments: { kind: "Agent", slug: "x" } }],
+        },
+        { kind: "text", text: "done" },
+      ],
+    };
+    const card = await runSweep({ corpus: corpusOf([withCall]), model: scriptedBinding() });
+    expect(card.trials[0].unexercised).toBeUndefined();
+    expect(card.failed).toBe(1);
+  });
+});

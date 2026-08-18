@@ -405,3 +405,34 @@ export function scoreCase(
     .filter((expectation) => !isJudged(expectation))
     .map((expectation) => ({ expectation, ...evaluate(expectation, observation) }));
 }
+
+/**
+ * Expectations that can only be measured once a Tool call has opened the seam they assert about,
+ * and the Tool that opens it. `soul_committed` asks whether a write survived; nothing was written
+ * to survive unless the model called `soul_write`.
+ */
+const SEAM_TOOL: Readonly<Record<string, string>> = { soul_committed: "soul_write" };
+
+/**
+ * The Tool a Case needed the model to call before any of its Expectations could mean anything.
+ *
+ * A capability Case that reaches its seam through a Tool inherits the model's willingness to call
+ * that Tool. When the model answers in prose instead, every downstream assertion fails for a reason
+ * that has nothing to do with the harness — the same confound `guardUnexercised` removes on the
+ * red-team side.
+ *
+ * The reason it is safe to hold out here, where a blanket "the model declined" excuse would not be,
+ * is that the precondition is *observable*: "the Tool was never called" and "the Tool was called and
+ * the harness lost the write" are different facts, and this only reports the first. Once the call
+ * has happened this returns nothing, so a genuinely broken commit path fails as loudly as ever.
+ */
+export function seamUnreached(
+  expect: readonly Expectation[],
+  toolCalls: readonly { readonly name: string }[]
+): string | undefined {
+  for (const a of expect) {
+    const tool = SEAM_TOOL[a.kind];
+    if (tool !== undefined && !toolCalls.some((c) => c.name === tool)) return tool;
+  }
+  return undefined;
+}

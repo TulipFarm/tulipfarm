@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Expectation } from "./case.ts";
-import { type Observation, scoreCase } from "./scorer.ts";
+import { type Observation, scoreCase, seamUnreached } from "./scorer.ts";
 
 const base: Observation = {
   systemPrompt: "<agent-identity>\nagentId: triage\n</agent-identity>",
@@ -416,5 +416,28 @@ describe("output_omits", () => {
     const obs: Observation = { ...base, output: undefined };
 
     expect(only({ kind: "output_omits", text: "4111" }, obs).passed).toBe(false);
+  });
+});
+
+describe("an Expectation whose seam a Tool call has to open", () => {
+  it("names the Tool when the model never called it", () => {
+    expect(seamUnreached([{ kind: "soul_committed", path: "agents/billing/AGENT.md" }], [])).toBe(
+      "soul_write"
+    );
+  });
+
+  it("stays silent once the Tool was called, so a broken commit path still fails", () => {
+    // The whole point of the hold-out is to tell "the model declined" from "the harness stopped
+    // persisting". Once the call happened, a missing artifact is the second, and must fail loudly.
+    expect(
+      seamUnreached(
+        [{ kind: "soul_committed", path: "agents/billing/AGENT.md" }],
+        [{ name: "soul_write" }]
+      )
+    ).toBeUndefined();
+  });
+
+  it("has nothing to say about a Case that asserts no seam", () => {
+    expect(seamUnreached([{ kind: "output_contains", text: "hello" }], [])).toBeUndefined();
   });
 });
