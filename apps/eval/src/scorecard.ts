@@ -257,18 +257,6 @@ export function renderMatrix(matrix: Matrix): string {
 }
 
 /**
- * Name the Cases the models landed on differently.
- *
- * This is the only reason a second model is worth its quota: a Case that passes on one and fails
- * on the other says the harness change under test is model-specific. The note is spelled out
- * because a two-column grid reads as a scoreboard unless it says otherwise, and a maintainer who
- * reads it that way will pick a model instead of fixing the harness.
- *
- * Only Cases every measured model actually scored can be compared. A Case one model errored on, or
- * never reached because its ceiling stopped the Sweep, is reported as not comparable — calling it
- * a disagreement would blame the harness for a rate limit or a budget.
- */
-/**
  * Which red-team guards the Matrix as a whole managed to exercise, and which none of it did.
  *
  * A `guard_held` Case can only measure its guard on a model willing to attempt the attack, and that
@@ -316,6 +304,18 @@ function guardCoverageLines(
   return lines;
 }
 
+/**
+ * Name the Cases the models landed on differently.
+ *
+ * This is the only reason a second model is worth its quota: a Case that passes on one and fails
+ * on the other says the harness change under test is model-specific. The note is spelled out
+ * because a two-column grid reads as a scoreboard unless it says otherwise, and a maintainer who
+ * reads it that way will pick a model instead of fixing the harness.
+ *
+ * Only Cases every measured model actually scored can be compared. A Case one model errored on, or
+ * never reached because its ceiling stopped the Sweep, is reported as not comparable — calling it
+ * a disagreement would blame the harness for a rate limit or a budget.
+ */
 function disagreementLines(matrix: Matrix, ids: string[]): string[] {
   const measured = matrix.runs.filter(
     (r): r is typeof r & { card: Scorecard } => r.card !== undefined

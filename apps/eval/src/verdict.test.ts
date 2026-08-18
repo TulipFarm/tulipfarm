@@ -54,3 +54,24 @@ describe("collapsing a Case whose guard was never exercised", () => {
     expect(caseVerdict(c, "c")).toBe(VERDICT.failed);
   });
 });
+
+describe("a Case whose Trials disagree about reaching the guard", () => {
+  it("scores the Trials that exercised it and ignores the ones that did not", () => {
+    // One Trial the model declined, one where it took the bait and the guard held. The declined
+    // Trial carries `passed: false` because its guardrail Expectation could not be met, so folding
+    // it in would report a guard that demonstrably worked as a harness failure.
+    const c = card([
+      trial({ passed: false, unexercised: true }),
+      trial({ passed: true, trial: 2 }),
+    ]);
+    expect(caseVerdict(c, "c")).toBe(VERDICT.passed);
+  });
+
+  it("still fails when the Trial that did exercise the guard failed", () => {
+    const c = card([
+      trial({ passed: false, unexercised: true }),
+      trial({ passed: false, trial: 2 }),
+    ]);
+    expect(caseVerdict(c, "c")).toBe(VERDICT.failed);
+  });
+});

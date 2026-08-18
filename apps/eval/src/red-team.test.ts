@@ -289,4 +289,25 @@ describe("guardUnexercised", () => {
   it("does not apply to a Case with no red-team block at all", () => {
     expect(guardUnexercised(undefined, [guardrail(false), safety(true)], [])).toBe(false);
   });
+
+  it("stays a failure for an input-stage guard, which the model cannot have prevented", () => {
+    // An input guard runs on the Case's fixed text before the model is ever called, so whether it
+    // fires owes nothing to the model. A failure there can only mean the harness stopped matching a
+    // payload that never changes — holding it out would let a deleted guard read as model caution.
+    const atInput = {
+      expectation: { kind: "guardrail_blocked", stage: "input", guard: "prompt_injection" },
+      passed: false,
+      detail: "",
+    };
+    expect(guardUnexercised(held, [atInput, safety(true)], [])).toBe(false);
+  });
+
+  it("still holds out an output-stage guard, which the model can decline to reach", () => {
+    const atOutput = {
+      expectation: { kind: "guardrail_blocked", stage: "output", guard: "pii" },
+      passed: false,
+      detail: "",
+    };
+    expect(guardUnexercised(held, [atOutput, safety(true)], [])).toBe(true);
+  });
 });
