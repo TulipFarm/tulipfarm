@@ -4,7 +4,7 @@ import {
   type ToolDispatchRequest,
   type ToolDispatchResult,
 } from "@tulipfarm/agent-runtime";
-import { canonicalHash } from "@tulipfarm/schema";
+import { canonicalHash, textContent } from "@tulipfarm/schema";
 import { describe, expect, it } from "vitest";
 import { GuardrailDigestMismatchError, TurnGuardrails } from "./guardrails";
 import { type RunEventAppendPort, TurnEventWriter } from "./run-events";
@@ -83,16 +83,20 @@ describe("TurnGuardrails", () => {
     const guards = new TurnGuardrails({ warn: () => {} });
     const events = writer(new FakeAppendPort());
 
-    await expect(guards.input("hello", events)).rejects.toThrow(/before the turn's policy/);
+    await expect(guards.input(textContent("hello"), events)).rejects.toThrow(
+      /before the turn's policy/
+    );
     await expect(guards.output("hello", events)).rejects.toThrow(/before the turn's policy/);
   });
 
   it("passes text no guard objects to, unchanged", async () => {
     const events = new FakeAppendPort();
 
-    await expect(guardrails().input("how many tasks are open?", writer(events))).resolves.toEqual({
+    await expect(
+      guardrails().input(textContent("how many tasks are open?"), writer(events))
+    ).resolves.toEqual({
       blocked: false,
-      text: "how many tasks are open?",
+      content: textContent("how many tasks are open?"),
     });
     expect(events.appended).toEqual([]);
   });

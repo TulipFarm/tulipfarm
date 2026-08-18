@@ -11,7 +11,7 @@ import {
   ModelInvocationError,
 } from "@tulipfarm/agent-runtime";
 import { type CostBasis, LlmProviderError } from "@tulipfarm/llm";
-import type { EffortRung, RunEventEffortInference } from "@tulipfarm/schema";
+import { type EffortRung, type RunEventEffortInference, textContent } from "@tulipfarm/schema";
 import { APICallError, type LanguageModel } from "ai";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
@@ -69,7 +69,7 @@ const FINISH: StreamPart = {
 const request = (overrides: Partial<ModelInvocationRequest> = {}): ModelInvocationRequest => ({
   requestId: "request-1",
   modelProfileId: "claude-opus-5",
-  messages: [{ role: "user", content: "hello" }],
+  messages: [{ role: "user", content: textContent("hello") }],
   tools: [],
   ...overrides,
 });
@@ -527,11 +527,11 @@ describe("LlmModelPort", () => {
     await port.invoke(
       request({
         messages: [
-          { role: "system", content: "be brief" },
-          { role: "user", content: "hi" },
-          { role: "assistant", content: "one moment" },
+          { role: "system", content: textContent("be brief") },
+          { role: "user", content: textContent("hi") },
+          { role: "assistant", content: textContent("one moment") },
           // Already rendered to text by the loop, and no longer naming the call it answered.
-          { role: "tool", content: "3 tasks" },
+          { role: "tool", content: textContent("3 tasks") },
         ],
       })
     );
@@ -554,22 +554,26 @@ describe("LlmModelPort", () => {
     await port.invoke(
       request({
         messages: [
-          { role: "user", content: "create a ticket called first ticket" },
+          { role: "user", content: textContent("create a ticket called first ticket") },
           {
             role: "assistant",
-            content: JSON.stringify({
-              toolCalls: [
-                { callId: "call-1", name: "record_create", arguments: { type: "ticket" } },
-              ],
-            }),
+            content: textContent(
+              JSON.stringify({
+                toolCalls: [
+                  { callId: "call-1", name: "record_create", arguments: { type: "ticket" } },
+                ],
+              })
+            ),
           },
           {
             role: "tool",
-            content: JSON.stringify({
-              callId: "call-1",
-              error: "invalid_arguments",
-              detail: "must have required property 'status'",
-            }),
+            content: textContent(
+              JSON.stringify({
+                callId: "call-1",
+                error: "invalid_arguments",
+                detail: "must have required property 'status'",
+              })
+            ),
           },
         ],
       })
@@ -692,10 +696,13 @@ describe("LlmModelPort effort inference", () => {
       request({
         modelProfileId: "auto",
         messages: [
-          { role: "system", content: "You are a careful assistant." },
-          { role: "user", content: "first question" },
-          { role: "assistant", content: "a long architectural essay about trade-offs" },
-          { role: "user", content: "and the follow-up" },
+          { role: "system", content: textContent("You are a careful assistant.") },
+          { role: "user", content: textContent("first question") },
+          {
+            role: "assistant",
+            content: textContent("a long architectural essay about trade-offs"),
+          },
+          { role: "user", content: textContent("and the follow-up") },
         ],
       })
     );
@@ -726,8 +733,8 @@ describe("LlmModelPort effort inference", () => {
     const port = inferringPort(effort, () => {});
     const blank = {
       messages: [
-        { role: "assistant" as const, content: "Anything else?" },
-        { role: "user" as const, content: "   " },
+        { role: "assistant" as const, content: textContent("Anything else?") },
+        { role: "user" as const, content: textContent("   ") },
       ],
     };
 
@@ -1056,9 +1063,9 @@ describe("LlmModelPort — the zero-output diagnostic is not a content leak", ()
       for await (const _ of port.stream(
         request({
           messages: [
-            { role: "user", content: SECRET },
-            { role: "assistant", content: "acknowledged" },
-            { role: "user", content: `${SECRET} again` },
+            { role: "user", content: textContent(SECRET) },
+            { role: "assistant", content: textContent("acknowledged") },
+            { role: "user", content: textContent(`${SECRET} again`) },
           ],
         })
       )) {
@@ -1139,8 +1146,8 @@ describe("LlmModelPort prompt caching", () => {
     await port.invoke(
       request({
         messages: [
-          { role: "system", content: overrides.system ?? LONG_SYSTEM },
-          { role: "user", content: "hello" },
+          { role: "system", content: textContent(overrides.system ?? LONG_SYSTEM) },
+          { role: "user", content: textContent("hello") },
         ],
       })
     );
@@ -1283,7 +1290,7 @@ describe("LlmModelPort — a call the provider gate refused", () => {
       modelProfileId: "balanced",
       contextDigest: "sha256:context",
       guardrailDigest: "sha256:guardrail",
-      messages: [{ role: "user", content: "hello" }],
+      messages: [{ role: "user", content: textContent("hello") }],
       tools: [],
       limits: { maxIterations: 1, maxToolCalls: 1, maxRepairAttempts: 1 },
     };

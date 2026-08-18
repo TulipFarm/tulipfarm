@@ -127,6 +127,20 @@ export {
   type MemorySections,
 } from "./memory-document";
 export type {
+  MessageContent,
+  MessageContentPart,
+  MessageFilePart,
+} from "./message-content";
+export {
+  collapseToText,
+  contentFiles,
+  contentText,
+  MessageContentPartSchema,
+  MessageContentSchema,
+  normalizeMessageContent,
+  textContent,
+} from "./message-content";
+export type {
   DerivedModelProfile,
   EffortPreset,
   EffortRung,

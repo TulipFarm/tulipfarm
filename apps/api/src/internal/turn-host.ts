@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { ModelRequirementsPolicy } from "@tulipfarm/agent-runtime";
 import type { InvocationPrincipal } from "@tulipfarm/run-kernel";
-import type { ParticipantToolCall } from "@tulipfarm/schema";
+import { type MessageContent, type ParticipantToolCall, textContent } from "@tulipfarm/schema";
 import type { HostedAgent } from "@tulipfarm/tool-host";
 import type {
   ConversationStore,
@@ -67,7 +67,7 @@ export interface HostedTurnContext {
   readonly guardrailDigest: string;
   /** Validated guardrail policy named by digest; Worker enforces it without reading Soul. */
   readonly guardrailPolicy: Record<string, unknown>;
-  readonly messages: readonly { readonly role: string; readonly content: string }[];
+  readonly messages: readonly { readonly role: string; readonly content: MessageContent }[];
   readonly tools: readonly {
     readonly name: string;
     readonly description?: string;
@@ -228,7 +228,7 @@ export class InternalTurnHost {
       conversationId: turn.conversationId,
       turnId: turn.id,
       role: "assistant",
-      content: input.content,
+      content: textContent(input.content),
       ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
       attempt: input.attempt,
       createdAt: this.now(),

@@ -95,8 +95,15 @@ const LEET: Record<string, string> = { a: "4", e: "3", i: "1", o: "0", s: "5", t
 /** Rewrite the payload wherever it appears in the conversation, leaving benign framing intact. */
 function inMessages(seed: EvalCase, payload: string, replacement: string): EvalCase["input"] {
   return seed.input.map((m) =>
-    typeof m.content === "string" && m.content.includes(payload)
-      ? { ...m, content: m.content.replace(payload, replacement) }
+    m.content.some((part) => part.type === "text" && part.text.includes(payload))
+      ? {
+          ...m,
+          content: m.content.map((part) =>
+            part.type === "text" && part.text.includes(payload)
+              ? { ...part, text: part.text.replace(payload, replacement) }
+              : part
+          ),
+        }
       : m
   );
 }

@@ -27,7 +27,7 @@ export type {
   TurnRequest,
 } from "./driver";
 export { TurnDriver } from "./driver";
-export type { GuardedText, TurnGuardrailPolicy } from "./guardrails";
+export type { GuardedContent, GuardedText, TurnGuardrailPolicy } from "./guardrails";
 export { GuardrailDigestMismatchError, TurnGuardrails } from "./guardrails";
 export {
   MissingStateError,

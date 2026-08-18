@@ -11,6 +11,7 @@
   "dependencies": {
     "@tulipfarm/agent-runtime": "workspace:*",
     "@tulipfarm/llm": "workspace:*",
+    "@tulipfarm/schema": "workspace:*",
     "ai": "^7.0.66"
   },
   "devDependencies": {

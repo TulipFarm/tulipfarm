@@ -5,7 +5,12 @@ import {
   type ToolDispatchRequest,
   type ToolDispatchResult,
 } from "@tulipfarm/agent-runtime";
-import type { RunEventGuardrailStage } from "@tulipfarm/schema";
+import {
+  contentFiles,
+  contentText,
+  type MessageContent,
+  type RunEventGuardrailStage,
+} from "@tulipfarm/schema";
 import type { TurnEventWriter } from "./run-events";
 
 /** Enforces the Context's guardrail policy and refuses digest mismatches before execution. */
@@ -16,6 +21,10 @@ const DEFAULT_BLOCK_MESSAGE = "I can't help with that request.";
 /** A guard's verdict, as the caller needs to act on it. */
 export type GuardedText =
   | { readonly blocked: false; readonly text: string }
+  | { readonly blocked: true; readonly message: string };
+
+export type GuardedContent =
+  | { readonly blocked: false; readonly content: MessageContent }
   | { readonly blocked: true; readonly message: string };
 
 export class GuardrailDigestMismatchError extends Error {
@@ -60,13 +69,28 @@ export class TurnGuardrails {
     this.settings = settings;
   }
 
-  /** The user's request, before any of it reaches the model. */
-  async input(text: string, events: TurnEventWriter): Promise<GuardedText> {
+  /**
+   * The user's request, before any of it reaches the model.
+   *
+   * The guards read text, so the screenable text is derived here rather than at the call site:
+   * when a File part starts contributing text of its own, this is the one place that has to learn
+   * about it, instead of every caller silently screening less than it thinks it does.
+   */
+  async input(content: MessageContent, events: TurnEventWriter): Promise<GuardedContent> {
     const { service, ctx } = this.require();
+    const text = contentText(content);
     const result = await service.runInput(text, ctx);
-    if (!result.blocked) return { blocked: false, text: result.value };
-    await this.record(events, "input", result.guard, result.reason, "input");
-    return { blocked: true, message: result.message ?? DEFAULT_BLOCK_MESSAGE };
+    if (result.blocked) {
+      await this.record(events, "input", result.guard, result.reason, "input");
+      return { blocked: true, message: result.message ?? DEFAULT_BLOCK_MESSAGE };
+    }
+    if (result.value === text) return { blocked: false, content };
+    // A guard rewrote the text — redaction. The rewrite covers the message's text as a whole, so
+    // it is carried as one part; keeping the original text parts would re-admit what was removed.
+    return {
+      blocked: false,
+      content: [{ type: "text", text: result.value }, ...contentFiles(content)],
+    };
   }
 
   /** The answer, before it is persisted as a Message any channel will read. */

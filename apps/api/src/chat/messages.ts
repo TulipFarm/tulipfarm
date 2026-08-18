@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { collapseToText } from "@tulipfarm/schema";
 import { type PaginatedResult, toPage } from "@tulipfarm/storage";
 import type { ModelMessage, TextPart, ToolCallPart, ToolResultPart } from "ai";
 import type { Queryable } from "../db";
@@ -193,7 +194,10 @@ export interface MessageRepo {
 }
 
 function rowToMessage(row: Record<string, unknown>): MessageDoc {
-  const rawContent = row.content as string | Array<Record<string, unknown>>;
+  const raw = row.content as string | Array<Record<string, unknown>>;
+  // The Turn store writes this table as `MessageContent`, so a text-only row it wrote has to reach
+  // the wire as the string every reader downstream of here still expects.
+  const rawContent = typeof raw === "string" ? raw : (collapseToText(raw) ?? raw);
   const content =
     typeof rawContent === "string"
       ? rawContent

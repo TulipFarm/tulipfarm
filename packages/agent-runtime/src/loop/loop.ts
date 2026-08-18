@@ -1,5 +1,5 @@
 import { usdToCostMicros } from "@tulipfarm/run-kernel";
-import { ajv } from "@tulipfarm/schema";
+import { ajv, textContent } from "@tulipfarm/schema";
 import type {
   ModelInvocationRequest,
   ModelInvocationResult,
@@ -524,10 +524,12 @@ export class AgentLoop {
         }
         messages.push({
           role: "user",
-          content: JSON.stringify({
-            error: "structured_output_invalid",
-            detail: errorText(validate),
-          }),
+          content: textContent(
+            JSON.stringify({
+              error: "structured_output_invalid",
+              detail: errorText(validate),
+            })
+          ),
         });
         await checkpoint();
         continue;
@@ -554,10 +556,12 @@ export class AgentLoop {
         }
         messages.push({
           role: "user",
-          content: JSON.stringify({
-            error: "empty_output",
-            detail: "Your last response had no content. Provide a final answer for the user.",
-          }),
+          content: textContent(
+            JSON.stringify({
+              error: "empty_output",
+              detail: "Your last response had no content. Provide a final answer for the user.",
+            })
+          ),
         });
         await checkpoint();
         continue;

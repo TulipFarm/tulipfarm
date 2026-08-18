@@ -1,3 +1,4 @@
+import { textContent } from "@tulipfarm/schema";
 import { describe, expect, it } from "vitest";
 import type { ModelInvocationRequest } from "../ports/model";
 import { deriveModelRequirements, estimateContextTokens } from "./requirements";
@@ -6,7 +7,7 @@ function request(overrides: Partial<ModelInvocationRequest> = {}): ModelInvocati
   return {
     requestId: "req-1",
     modelProfileId: "balanced",
-    messages: [{ role: "user", content: "hello" }],
+    messages: [{ role: "user", content: textContent("hello") }],
     ...overrides,
   };
 }
@@ -62,7 +63,7 @@ describe("estimateContextTokens", () => {
   it("grows with the transcript", () => {
     const small = estimateContextTokens(request());
     const large = estimateContextTokens(
-      request({ messages: [{ role: "user", content: "x".repeat(4_000) }] })
+      request({ messages: [{ role: "user", content: textContent("x".repeat(4_000)) }] })
     );
 
     expect(large).toBeGreaterThan(small);

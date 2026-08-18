@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { textContent } from "@tulipfarm/schema";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { EvalCase } from "./case.ts";
 import { CorpusError, corpusHash, loadCorpus, RED_TEAM_DIR } from "./corpus.ts";
@@ -34,7 +35,7 @@ const valid = (id: string): EvalCase => ({
   tier: "l2",
   agent: "triage",
   context: { governancePages: [] },
-  input: [{ role: "user", content: "hello" }],
+  input: [{ role: "user", content: textContent("hello") }],
   expect: [{ kind: "loop_status", status: "completed" }],
 });
 

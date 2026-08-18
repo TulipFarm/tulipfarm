@@ -1,4 +1,5 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import { normalizeMessageContent } from "@tulipfarm/schema";
 import { recordCuratorWork } from "@tulipfarm/storage";
 import type { Queryable } from "../db";
 import { withTransaction } from "../db";
@@ -42,7 +43,7 @@ interface MessageRow {
   conversation_id: string;
   turn_id: string;
   role: string;
-  content: string;
+  content: unknown;
   metadata: Record<string, unknown> | null;
   attempt: number | null;
   created_at: Date;
@@ -113,7 +114,7 @@ function toMessage(row: MessageRow): PersistedMessage {
     conversationId: row.conversation_id,
     turnId: row.turn_id,
     role: row.role as PersistedMessage["role"],
-    content: row.content,
+    content: normalizeMessageContent(row.content),
     ...(row.metadata === null ? {} : { metadata: row.metadata }),
     ...(row.attempt === null ? {} : { attempt: row.attempt }),
     createdAt: row.created_at,
@@ -202,15 +203,15 @@ export class PgConversationStore implements ConversationStore {
     conversationId: string
   ): Promise<readonly PersistedMessage[]> {
     assertDeploymentBusiness(businessId);
-    // Only Turn messages, and only the text ones: rows predating migration 16 have a NULL
-    // Worker killed after writing its reply leaves that reply behind, and the retry writes its own
+    // Only Turn messages: rows predating migration 16 have a NULL turn_id. `content` stays raw
+    // jsonb because a row may hold a bare string or parts; filtering to one shape here would
+    // silently drop every Message carrying a File.
     const { rows } = await this.q.query(
       `SELECT m.id, m.conversation_id, m.turn_id, m.role,
-              m.content #>> '{}' AS content, m.metadata, m.attempt, m.created_at
+              m.content, m.metadata, m.attempt, m.created_at
          FROM messages m
         WHERE m.conversation_id = $1
           AND m.turn_id IS NOT NULL
-          AND jsonb_typeof(m.content) = 'string'
           AND (
             m.role = 'user'
             OR (m.role = 'assistant' AND EXISTS (

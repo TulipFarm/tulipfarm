@@ -24,6 +24,7 @@ import {
 import type { ResolvedLimits } from "@tulipfarm/run-kernel";
 import {
   asEffortPreset,
+  contentText,
   type EffortPreset,
   type EffortRung,
   isEffortRung,
@@ -421,8 +422,9 @@ function latestUserPrompt(messages: readonly ModelMessage[]): string | undefined
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message?.role !== "user") continue;
-    if (message.content.trim().length === 0) continue;
-    return message.content;
+    const text = contentText(message.content);
+    if (text.trim().length === 0) continue;
+    return text;
   }
   return undefined;
 }

@@ -1,3 +1,4 @@
+import { contentText, textContent } from "@tulipfarm/schema";
 import { describe, expect, it, vi } from "vitest";
 import type {
   ModelInvocationRequest,
@@ -116,7 +117,7 @@ function input(overrides: Partial<AgentLoopInput> = {}): AgentLoopInput {
     modelProfileId: "primary",
     contextDigest: "sha256:context",
     guardrailDigest: "sha256:guardrail",
-    messages: [{ role: "user", content: "triage the issue" }],
+    messages: [{ role: "user", content: textContent("triage the issue") }],
     tools: [{ name: "github.issue.comment", inputSchema: { type: "object", required: ["body"] } }],
     limits: { maxIterations: 5, maxToolCalls: 3, maxRepairAttempts: 2 },
     ...overrides,
@@ -1090,7 +1091,9 @@ describe("AgentLoop resume after an approval park", () => {
     const { resumed, model } = await parkThenResume(tools);
 
     expect(resumed).toMatchObject({ status: "completed" });
-    const transcript = (model.prompts.at(0) ?? []).map((message) => message.content).join("\n");
+    const transcript = (model.prompts.at(0) ?? [])
+      .map((message) => contentText(message.content))
+      .join("\n");
     expect(transcript).toContain("denied by operator");
   });
 });

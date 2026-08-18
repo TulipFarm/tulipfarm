@@ -1,5 +1,6 @@
 import type { ChildAuthority, ChildLinkAncestry, ChildLinkStore } from "@tulipfarm/run-kernel";
 import { ChildRunManager } from "@tulipfarm/run-kernel";
+import { contentText, type MessageContent } from "@tulipfarm/schema";
 import {
   type ChildRunStarter,
   DELEGATION_DEADLINE_LIMIT_KEY,
@@ -43,7 +44,7 @@ export interface DelegationConversationReader {
   listMessages(
     businessId: string,
     conversationId: string
-  ): Promise<readonly { role: string; content: string }[]>;
+  ): Promise<readonly { role: string; content: MessageContent }[]>;
 }
 
 /** One Tool as delegation reads it: its name, whether it has effects, and what data it touches. */
@@ -93,7 +94,7 @@ async function lastAssistantMessage(
   const messages = await conversations.listMessages(businessId, conversationId);
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
-    if (message?.role === "assistant") return message.content;
+    if (message?.role === "assistant") return contentText(message.content);
   }
   return null;
 }

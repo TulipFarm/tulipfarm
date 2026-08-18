@@ -1,5 +1,6 @@
 import type { ModelInvocationRequest, ModelOutput } from "@tulipfarm/agent-runtime";
 import type { PromptCacheDecision } from "@tulipfarm/llm";
+import { contentText, type MessageContent } from "@tulipfarm/schema";
 import {
   jsonSchema,
   type ModelMessage as SdkMessage,
@@ -75,8 +76,14 @@ export function withCacheBreakpoint(
   );
 }
 
-/** Convert loop transcript to SDK prompt; tool results stay attributed to their tool calls. */
-export function splitPrompt(transcript: readonly { role: string; content: string }[]): {
+/**
+ * Convert loop transcript to SDK prompt; tool results stay attributed to their tool calls.
+ *
+ * Parts are flattened to text here. Sending a File to a provider is a separate concern from
+ * carrying one through the transcript, so until the adapter knows how each provider wants a File
+ * it renders what it can rather than guessing a shape.
+ */
+export function splitPrompt(transcript: readonly { role: string; content: MessageContent }[]): {
   instructions: SystemModelMessage[];
   messages: SdkMessage[];
 } {
@@ -93,17 +100,18 @@ export function splitPrompt(transcript: readonly { role: string; content: string
   };
 
   for (const message of transcript) {
+    const content = contentText(message.content);
     if (message.role === "system") {
       flushResults();
-      instructions.push({ role: "system", content: message.content });
+      instructions.push({ role: "system", content });
       continue;
     }
 
     if (message.role === "assistant") {
-      const calls = parseToolCalls(message.content);
+      const calls = parseToolCalls(content);
       if (calls === undefined) {
         flushResults();
-        messages.push({ role: "assistant", content: message.content });
+        messages.push({ role: "assistant", content });
         continue;
       }
       flushResults();
@@ -119,7 +127,7 @@ export function splitPrompt(transcript: readonly { role: string; content: string
     }
 
     if (message.role === "tool") {
-      const result = parseToolResult(message.content);
+      const result = parseToolResult(content);
       if (result !== undefined) {
         pendingResults.push({
           type: "tool-result",
@@ -132,7 +140,7 @@ export function splitPrompt(transcript: readonly { role: string; content: string
     }
 
     flushResults();
-    messages.push({ role: "user", content: message.content });
+    messages.push({ role: "user", content });
   }
   flushResults();
   return { instructions, messages };

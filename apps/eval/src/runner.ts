@@ -8,6 +8,7 @@ import {
   type ModelOutput,
   type ModelPort,
 } from "@tulipfarm/agent-runtime";
+import { textContent } from "@tulipfarm/schema";
 import { autonomyBoundedDispatch, capabilityBoundedDispatch } from "./autonomy.ts";
 import { type EvalCase, LOOP_LIMITS } from "./case.ts";
 import type { Corpus } from "./corpus.ts";
@@ -215,7 +216,7 @@ async function guardInput(
   if (guarded.blocked) return guarded;
 
   const messages = [...input];
-  messages[index] = { role: current.role, content: guarded.text };
+  messages[index] = { role: current.role, content: guarded.content };
   return { blocked: false, messages };
 }
 
@@ -409,7 +410,7 @@ async function runTrial(
       modelProfileId: "eval",
       contextDigest: "sha256:eval",
       guardrailDigest: guards.digest,
-      messages: [{ role: "system", content: systemPrompt }, ...guarded.messages],
+      messages: [{ role: "system", content: textContent(systemPrompt) }, ...guarded.messages],
       tools: evalCase.tools ?? [],
       limits: LOOP_LIMITS,
     };

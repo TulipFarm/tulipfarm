@@ -195,7 +195,7 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
     // shapes. Extracted from the Worker so the offline eval harness converts a request and reads a
     // result exactly as production does — a second copy would let the eval score a tool call the
     // product would never make. Pure functions only: no provider, no credential, no I/O.
-    "model-adapter": ["agent-runtime", "llm"],
+    "model-adapter": ["schema", "agent-runtime", "llm"],
     // How one Chat Turn executes, extracted from the Worker so a second host — the offline eval
     // harness — can drive a real Turn without importing an app. It declares the ports it needs
     // (`RunExecutor`, `SpendSink`, `ModelCallReceiptSource`) rather than importing the Worker's

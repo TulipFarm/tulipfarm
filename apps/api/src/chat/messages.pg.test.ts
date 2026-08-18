@@ -58,6 +58,34 @@ describe("PgMessageRepo", () => {
     expect(items[0].metadata).toEqual({ tokens: 42 });
   });
 
+  // The Turn store writes this same table as `MessageContent` parts. A user row it wrote must still
+  // reach the Chat wire as the bare string every reader downstream of here expects.
+  it("collapses a text-only part array written by the Turn store back to a string", async () => {
+    await db.query(
+      "INSERT INTO messages (id, conversation_id, role, content, created_at) VALUES ($1, $2, $3, $4::jsonb, now())",
+      [randomUUID(), CONV_ID, "user", JSON.stringify([{ type: "text", text: "analyse this" }])]
+    );
+    const { items } = await repo.listByConversation(CONV_ID, 10);
+    expect(items[0].content).toBe("analyse this");
+  });
+
+  it("keeps a part array that carries more than text", async () => {
+    await db.query(
+      "INSERT INTO messages (id, conversation_id, role, content, created_at) VALUES ($1, $2, $3, $4::jsonb, now())",
+      [
+        randomUUID(),
+        CONV_ID,
+        "user",
+        JSON.stringify([
+          { type: "text", text: "analyse this" },
+          { type: "file", fileId: "f1", mediaType: "image/png" },
+        ]),
+      ]
+    );
+    const { items } = await repo.listByConversation(CONV_ID, 10);
+    expect(Array.isArray(items[0].content)).toBe(true);
+  });
+
   it("round-trips assistant parts (text + tool-call) through jsonb", async () => {
     const parts: MessagePart[] = [
       { type: "text", text: "let me check" },

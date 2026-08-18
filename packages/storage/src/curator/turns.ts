@@ -1,3 +1,4 @@
+import { contentText, normalizeMessageContent } from "@tulipfarm/schema";
 import type { Queryable } from "../ports";
 
 /** One pinned Turn as the Curator prompt renders it. */
@@ -10,7 +11,7 @@ export interface CuratorPromptTurn {
 interface Row {
   turn_id: string;
   role: string;
-  content: string;
+  content: unknown;
 }
 
 /**
@@ -19,6 +20,9 @@ interface Row {
  * Only `user` and completed `assistant` text, mirroring {@link listMessages}: a Tool result or an
  * Integration payload can never become a citation, because content that arrived from outside the
  * person is content an attacker can choose.
+ *
+ * A File part contributes no text, so it can never be cited — the Curator may only quote what a
+ * person typed, and a placeholder naming a File says nothing about its bytes.
  */
 export class PgCuratorTurnReader {
   constructor(private readonly db: Queryable) {}
@@ -26,10 +30,9 @@ export class PgCuratorTurnReader {
   async read(_businessId: string, turnIds: readonly string[]): Promise<CuratorPromptTurn[]> {
     if (turnIds.length === 0) return [];
     const { rows } = await this.db.query<Row>(
-      `SELECT m.turn_id, m.role, m.content #>> '{}' AS content
+      `SELECT m.turn_id, m.role, m.content
          FROM messages m
         WHERE m.turn_id = ANY($1::text[])
-          AND jsonb_typeof(m.content) = 'string'
           AND (
             m.role = 'user'
             OR (m.role = 'assistant' AND EXISTS (
@@ -42,7 +45,9 @@ export class PgCuratorTurnReader {
     const byTurn = new Map<string, { user: string[]; assistant: string[] }>();
     for (const row of rows) {
       const entry = byTurn.get(row.turn_id) ?? { user: [], assistant: [] };
-      (row.role === "user" ? entry.user : entry.assistant).push(row.content);
+      const text = contentText(normalizeMessageContent(row.content));
+      if (text.length === 0) continue;
+      (row.role === "user" ? entry.user : entry.assistant).push(text);
       byTurn.set(row.turn_id, entry);
     }
     // Ordered by the manifest, not by the database, so the prompt a Worker builds from one job is

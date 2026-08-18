@@ -1,3 +1,4 @@
+import { contentText } from "@tulipfarm/schema";
 import type { ModelInvocationRequest } from "../ports/model";
 import type { ModelRequirements } from "./profile";
 
@@ -16,7 +17,10 @@ export type ModelRequirementsPolicy = Omit<
 };
 
 export function estimateContextTokens(request: ModelInvocationRequest): number {
-  const transcript = request.messages.reduce((total, m) => total + m.content.length, 0);
+  const transcript = request.messages.reduce(
+    (total, m) => total + contentText(m.content).length,
+    0
+  );
   const tools = (request.tools ?? []).reduce(
     (total, t) =>
       total + t.name.length + (t.description?.length ?? 0) + JSON.stringify(t.inputSchema).length,

@@ -7,7 +7,7 @@ import {
   RUN_EXECUTOR_PRINCIPAL_REF,
   requestArtifactId,
 } from "@tulipfarm/run-kernel";
-import { CHAT_REQUEST_SCHEMA_REF } from "@tulipfarm/schema";
+import { CHAT_REQUEST_SCHEMA_REF, contentText, textContent } from "@tulipfarm/schema";
 import { type ChatIngressConfig, resolveAgent, type SoulLoader } from "@tulipfarm/soul";
 import { DOMAIN_EVENTS, type IntegrationEventPayload } from "@tulipfarm/storage";
 import { asChatAutonomy, type ChatAutonomy } from "@tulipfarm/tool-host";
@@ -232,7 +232,7 @@ export class IngressDeliveryHost {
       conversationId,
       turnId,
       role: "user",
-      content: decision.text,
+      content: textContent(decision.text),
       createdAt: now,
     });
     const turn: PersistedTurn = {
@@ -368,7 +368,7 @@ export class IngressDeliveryHost {
     if (completion?.status !== "succeeded" || completion.messageId === null) return ERROR_REPLY;
     const messages = await this.options.store.listMessages(businessId, turn.conversationId);
     const answer = messages.find((message) => message.id === completion.messageId);
-    return answer?.content.trim() || ERROR_REPLY;
+    return (answer === undefined ? "" : contentText(answer.content).trim()) || ERROR_REPLY;
   }
 
   /** Sends single-use bind links from this process only; the Worker never receives them. */

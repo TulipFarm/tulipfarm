@@ -1,8 +1,9 @@
+import type { MessageContent } from "@tulipfarm/schema";
 import type { ModelRequirementsPolicy } from "../models/requirements";
 
 export interface ModelMessage {
   readonly role: "system" | "user" | "assistant" | "tool";
-  readonly content: string;
+  readonly content: MessageContent;
 }
 
 export interface ModelInvocationRequest {

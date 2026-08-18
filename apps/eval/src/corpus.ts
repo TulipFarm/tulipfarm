@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import type { AssembleContext } from "@tulipfarm/agent-runtime";
+import type { AssembleContext, ModelMessage } from "@tulipfarm/agent-runtime";
+import { normalizeMessageContent } from "@tulipfarm/schema";
 import { type EvalCase, type Expectation, isGuardrail, isPersisted } from "./case.ts";
 import { type EvalSoul, SOUL_OWNED_CONTEXT_KEYS, soulContext } from "./eval-soul.ts";
 import { expandRedTeam, type RedTeamOutcome } from "./red-team.ts";
@@ -230,7 +231,29 @@ function validate(raw: unknown, file: string): EvalCase {
       `"${guard?.kind}" — a harness defence. A Case may assert one ending or the other, never ` +
       `both, or the guard could stop firing and the Case stay green because the model refused anyway.`);
   }
-  return raw as EvalCase;
+  const parsed = raw as EvalCase;
+  return {
+    ...parsed,
+    input: normalizeInput(parsed.input),
+    ...(parsed.journey === undefined
+      ? {}
+      : {
+          journey: parsed.journey.map((turn) => ({ ...turn, input: normalizeInput(turn.input) })),
+        }),
+  };
+}
+
+/**
+ * Accepts a Case that authors `content` as a bare string as well as one that authors parts.
+ *
+ * Normalising here rather than at use means the red-team generator and the scorer see one shape;
+ * a string-only reader downstream would silently no-op on a Case carrying a File.
+ */
+function normalizeInput(input: readonly ModelMessage[]): readonly ModelMessage[] {
+  return input.map((message) => ({
+    role: message.role,
+    content: normalizeMessageContent(message.content),
+  }));
 }
 
 /**

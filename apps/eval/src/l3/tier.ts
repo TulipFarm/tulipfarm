@@ -1,3 +1,4 @@
+import { contentText, type MessageContent, normalizeMessageContent } from "@tulipfarm/schema";
 /**
  * The L3 tier: one Chat Turn, executed by the product's own Chat executor.
  *
@@ -183,7 +184,8 @@ async function readBack(
     stateStatus: state?.status ?? "missing",
     turnStatus:
       turnRow?.status === undefined || turnRow.status === null ? null : String(turnRow.status),
-    answer: message.rows[0] === undefined ? null : String(message.rows[0].content),
+    answer:
+      message.rows[0] === undefined ? null : contentText(decodeContent(message.rows[0].content)),
     events: events.rows.map((row) => String(row.event_type)),
     spend: observed.spend,
     toolCalls: observed.toolCalls,
@@ -233,7 +235,7 @@ async function runOneTurn(
           conversationId,
           turnId,
           message.role,
-          typeof message.content === "string" ? message.content : JSON.stringify(message.content),
+          JSON.stringify(message.content),
         ]
       );
     }
@@ -312,8 +314,18 @@ async function priorMessages(
   );
   return rows.rows.map((row) => ({
     role: String(row.role) as ModelMessage["role"],
-    content: String(row.content),
+    content: decodeContent(row.content),
   }));
+}
+
+/**
+ * Reads a stored Message back into parts.
+ *
+ * Both writers store the part array, so this never has to guess from the payload's shape — a reply
+ * whose text is itself a JSON array would otherwise decode as parts and lose its content.
+ */
+function decodeContent(raw: unknown): MessageContent {
+  return normalizeMessageContent(JSON.parse(String(raw)));
 }
 
 /**

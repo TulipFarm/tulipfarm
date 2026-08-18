@@ -214,7 +214,7 @@ export class TurnDriver {
     if (guarded.blocked) return guarded;
 
     const messages = [...context.messages];
-    messages[index] = { role: current.role, content: guarded.text };
+    messages[index] = { role: current.role, content: guarded.content };
     return { blocked: false, messages };
   }
 

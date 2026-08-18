@@ -123,6 +123,13 @@ import { describe, expect, it } from "vitest";
  * is 1,015 lines below the last: `memory/routes.ts`, the extraction service, the engine repository
  * and thirteen of their pg tests went with it.
  *
+ * Message content became an ordered list of parts, and that is the next +7: four files in
+ * `apps/api/src` now import `@tulipfarm/schema` to build, flatten or collapse them, and the
+ * message repo carries two pg tests pinning that a text-only row still reaches the Chat wire as a
+ * string. The logic itself —
+ * the part union, the legacy-row normaliser, the text projection — lives in `@tulipfarm/schema`,
+ * so what landed here is three import statements and no new branch.
+ *
  * This is that. The ceiling is a high-water mark, not a target — lowering it as code moves out is
  * the point, and the only edit this file should ever receive. Raising it needs a reviewed reason,
  * because "the number went up again" is exactly the event three editions failed to catch.

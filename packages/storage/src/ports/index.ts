@@ -1,4 +1,11 @@
-export type { BlobPort, BlobRef } from "./blob";
+export {
+  type BlobBody,
+  type BlobMetadata,
+  type BlobPort,
+  type BlobRange,
+  type BlobRef,
+  collectBlobBytes,
+} from "./blob";
 export type { CachePort } from "./cache";
 export {
   FileSystemBlobError,

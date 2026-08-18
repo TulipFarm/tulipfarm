@@ -1,5 +1,6 @@
 /** SPEC §10/§18: persist the Turn before dispatch; stream resumes from its durable cursor. */
 
+import { contentText, type MessageContent, textContent } from "@tulipfarm/schema";
 import type { CuratorWorkRef } from "@tulipfarm/storage";
 
 export type TurnStatus = "pending" | "running" | "start_failed" | "succeeded" | "failed";
@@ -10,7 +11,7 @@ export interface PersistedMessage {
   readonly conversationId: string;
   readonly turnId: string;
   readonly role: "user" | "assistant";
-  readonly content: string;
+  readonly content: MessageContent;
   readonly metadata?: Record<string, unknown>;
   /** Worker attempt that wrote this Message; absent for user Messages and old rows. */
   readonly attempt?: number;
@@ -162,7 +163,7 @@ export class ConversationService {
       conversationId: input.conversationId,
       turnId,
       role: "user",
-      content: input.content,
+      content: textContent(input.content),
       createdAt: now,
     });
 
@@ -212,7 +213,7 @@ export class ConversationService {
     return this.startTurn({
       businessId: turn.businessId,
       conversationId: turn.conversationId,
-      content: request.content,
+      content: contentText(request.content),
       idempotencyKey: `${turn.idempotencyKey}:retry:${this.deps.newId()}`,
     });
   }

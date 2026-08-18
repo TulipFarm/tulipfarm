@@ -24,7 +24,7 @@ import {
   RUN_EXECUTOR_PRINCIPAL_REF,
   requestArtifactId,
 } from "@tulipfarm/run-kernel";
-import { canonicalHash } from "@tulipfarm/schema";
+import { canonicalHash, contentText, type MessageContent, textContent } from "@tulipfarm/schema";
 import type { BundledSkill, SoulAgent, SoulLoader } from "@tulipfarm/soul";
 import {
   buildSoulCatalogue,
@@ -92,10 +92,10 @@ export interface ChatRequestPayload {
 }
 
 /** Recall scores against the newest user message, never the assistant's own words. */
-function latestUserMessage(history: readonly { role: string; content: string }[]): string {
+function latestUserMessage(history: readonly { role: string; content: MessageContent }[]): string {
   for (let i = history.length - 1; i >= 0; i--) {
     const message = history[i];
-    if (message !== undefined && message.role === "user") return message.content;
+    if (message !== undefined && message.role === "user") return contentText(message.content);
   }
   return "";
 }
@@ -245,7 +245,7 @@ export class ChatTurnContextResolver implements TurnContextResolver {
 
     const messages = [
       ...(system.length > 0 && !dropped.has(SYSTEM_SOURCE_ID)
-        ? [{ role: "system", content: system }]
+        ? [{ role: "system", content: textContent(system) }]
         : []),
       ...history
         .filter((message) => !dropped.has(message.id))
@@ -473,7 +473,7 @@ function candidatesFor(
         classification: "internal",
         taint: "trusted",
         authorization: allow,
-        tokens: estimateTokens(message.content),
+        tokens: estimateTokens(contentText(message.content)),
         digest: canonicalHash({ content: message.content }),
       })
     ),

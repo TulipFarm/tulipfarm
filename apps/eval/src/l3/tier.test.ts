@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { contentText, textContent } from "@tulipfarm/schema";
 import { describe, expect, it } from "vitest";
 import type { EvalCase } from "../case.ts";
 import { type EvalSoul, loadEvalSoul } from "../eval-soul.ts";
@@ -17,7 +18,7 @@ const answering = (text: string): EvalCase => ({
   tier: "l3",
   agent: "support",
   context: { governancePages: [] },
-  input: [{ role: "user", content: "When do you open?" }],
+  input: [{ role: "user", content: textContent("When do you open?") }],
   expect: [],
   script: [{ kind: "text", text }],
 });
@@ -100,7 +101,7 @@ const writing = (content: string): EvalCase => ({
   tier: "l3",
   agent: "support",
   context: { governancePages: [] },
-  input: [{ role: "user", content: "Add an agent called billing." }],
+  input: [{ role: "user", content: textContent("Add an agent called billing.") }],
   tools: [
     {
       name: SOUL_WRITE_TOOL,
@@ -237,7 +238,7 @@ describe("a journey", () => {
           ),
           journey: [
             {
-              input: [{ role: "user", content: "Which agents exist now?" }],
+              input: [{ role: "user", content: textContent("Which agents exist now?") }],
               script: [{ kind: "text", text: "Support and billing." }],
             },
           ],
@@ -267,7 +268,7 @@ describe("a journey", () => {
           const port = inner.create(evalCase);
           return {
             invoke: async (request) => {
-              seen.push(request.messages.map((m) => `${m.role}:${String(m.content)}`));
+              seen.push(request.messages.map((m) => `${m.role}:${contentText(m.content)}`));
               return port.invoke(request);
             },
           };
@@ -279,7 +280,7 @@ describe("a journey", () => {
           ...answering("We open at 9am."),
           journey: [
             {
-              input: [{ role: "user", content: "And on Sundays?" }],
+              input: [{ role: "user", content: textContent("And on Sundays?") }],
               script: [{ kind: "text", text: "Closed on Sundays." }],
             },
           ],
@@ -308,7 +309,7 @@ describe("a journey", () => {
           ...answering("We open at 9am."),
           journey: [
             {
-              input: [{ role: "user", content: "And on Sundays?" }],
+              input: [{ role: "user", content: textContent("And on Sundays?") }],
               script: [{ kind: "text", text: "Closed on Sundays." }],
             },
           ],
@@ -404,7 +405,7 @@ describe("what an L3 Turn costs", () => {
       soul ??= await loadEvalSoul();
       const journey: EvalCase = {
         ...answering("ignored"),
-        journey: [{ input: [{ role: "user", content: "again" }], script: [] }],
+        journey: [{ input: [{ role: "user", content: textContent("again") }], script: [] }],
       };
       const turn = await runPersistedTurn({ evalCase: journey, soul, binding: billing() });
 

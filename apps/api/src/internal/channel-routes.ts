@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { DurableInvocationGateway } from "@tulipfarm/run-kernel";
+import { contentText } from "@tulipfarm/schema";
 import type { SoulLoader } from "@tulipfarm/soul";
 import { getAgent, getDefaultAssistant } from "@tulipfarm/soul";
 import type { ChannelRunDeliveryStore } from "@tulipfarm/storage";
@@ -423,7 +424,7 @@ export function registerChannelInternalRoutes(
       const agentDisplayName = await agentDisplayNameFor(deps, turn.conversationId);
       return reply.send({
         status: "succeeded",
-        text: answer?.content.trim() ?? "",
+        text: answer === undefined ? "" : contentText(answer.content).trim(),
         ...(agentDisplayName ? { agentDisplayName } : {}),
         ...(rendered.outcome === "rendered" ? { blocks: rendered.blocks } : {}),
       });

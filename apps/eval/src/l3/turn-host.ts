@@ -8,6 +8,7 @@
  * regression in it would break. The tables behind it are the eval's own.
  */
 
+import { textContent } from "@tulipfarm/schema";
 import type { TurnCompletionRecord, TurnCompletionRef } from "@tulipfarm/turn-executor";
 import type { EvalDatabase } from "./database.ts";
 
@@ -86,7 +87,7 @@ export function evalTurnHost(database: EvalDatabase): EvalTurnHost {
           input.conversationId,
           input.turnId,
           input.attempt,
-          input.content,
+          JSON.stringify(textContent(input.content)),
           JSON.stringify(input.metadata?.toolCalls ?? []),
         ]
       );

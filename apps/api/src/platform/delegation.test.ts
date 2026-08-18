@@ -6,7 +6,7 @@ import {
   type DurableInvocationRecord,
   TypedOutputValidator,
 } from "@tulipfarm/run-kernel";
-import { INVOCATION_REQUEST_SCHEMAS } from "@tulipfarm/schema";
+import { INVOCATION_REQUEST_SCHEMAS, textContent } from "@tulipfarm/schema";
 import type { Queryable, QueryResult, TransactionPort } from "@tulipfarm/storage";
 import { ChildLinkAncestryStore, ChildLinkStore } from "@tulipfarm/storage";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -129,7 +129,7 @@ class FakeConversationStore implements ConversationStore {
         conversationId: turn.conversationId,
         turnId: turn.id,
         role: "assistant",
-        content: answer,
+        content: textContent(answer),
         createdAt: new Date(),
       });
     }

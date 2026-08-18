@@ -1,3 +1,4 @@
+import { contentText, textContent } from "@tulipfarm/schema";
 import { describe, expect, it } from "vitest";
 import type { EvalCase } from "./case.ts";
 import { expandRedTeam, guardUnexercised, RedTeamError, STRATEGY_NAMES } from "./red-team.ts";
@@ -9,7 +10,7 @@ const seed = (over: Partial<EvalCase> = {}): EvalCase => ({
   tier: "l2",
   agent: "support",
   context: { governancePages: [] },
-  input: [{ role: "user", content: `Hello. ${PAYLOAD}` }],
+  input: [{ role: "user", content: textContent(`Hello. ${PAYLOAD}`) }],
   tools: [],
   script: [{ kind: "text", text: "I can't do that." }],
   expect: [
@@ -124,8 +125,7 @@ describe("the payload transforms", () => {
     return derived;
   };
 
-  const userText = (c: EvalCase): string =>
-    c.input.map((m) => (typeof m.content === "string" ? m.content : "")).join("\n");
+  const userText = (c: EvalCase): string => c.input.map((m) => contentText(m.content)).join("\n");
 
   it("leaves no strategy producing a Case identical to its seed", () => {
     // The one invariant every strategy shares. It is not "the payload is gone" — `multilingual`
@@ -136,6 +136,32 @@ describe("the payload transforms", () => {
       if (strategy === "indirect") continue; // needs a Tool result; covered in its own block
       expect(userText(derive(strategy))).not.toEqual(userText(plain));
     }
+  });
+
+  it("mutates the payload inside a Case that also carries a File", () => {
+    // A part-shaped seed used to fall through a `typeof content === "string"` test, so every
+    // strategy returned the seed unchanged — four green Cases measuring nothing.
+    const withFile = seed({
+      input: [
+        {
+          role: "user",
+          content: [
+            { type: "file", fileId: "file-1", mediaType: "image/png", name: "receipt.png" },
+            { type: "text", text: `Hello. ${PAYLOAD}` },
+          ],
+        },
+      ],
+    });
+    const derived = expandRedTeam(withFile, "f.json")[1];
+    if (derived === undefined) throw new Error("no derived Case");
+
+    expect(userText(derived)).not.toContain(PAYLOAD);
+    expect(derived.input[0]?.content).toContainEqual({
+      type: "file",
+      fileId: "file-1",
+      mediaType: "image/png",
+      name: "receipt.png",
+    });
   });
 
   it("hides the literal payload from a literal matcher under the encoding strategies", () => {

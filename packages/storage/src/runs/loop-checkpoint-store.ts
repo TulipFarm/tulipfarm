@@ -1,3 +1,4 @@
+import { type MessageContent, normalizeMessageContent } from "@tulipfarm/schema";
 import type { TransactionPort } from "../ports";
 
 /** Durable Agent-loop counters for one State occurrence, so limits survive an approval park. */
@@ -24,7 +25,7 @@ export interface LoopCheckpoint {
 export interface LoopResumeState {
   readonly messages: readonly {
     readonly role: "system" | "user" | "assistant" | "tool";
-    readonly content: string;
+    readonly content: MessageContent;
   }[];
   readonly pendingCall?: {
     readonly callId: string;
@@ -56,11 +57,32 @@ export const LOOP_CHECKPOINT_STORAGE_STATEMENTS: readonly string[] = [
   `ALTER TABLE agent_loop_checkpoints ADD COLUMN IF NOT EXISTS resume_state jsonb`,
 ];
 
+interface RawResumeState extends Omit<LoopResumeState, "messages"> {
+  messages: readonly {
+    readonly role: "system" | "user" | "assistant" | "tool";
+    readonly content: unknown;
+  }[];
+}
+
 interface LoopCheckpointRow {
   iterations: string | number;
   tool_calls: string | number;
   repairs: string | number;
-  resume_state: LoopResumeState | null;
+  resume_state: RawResumeState | null;
+}
+
+/**
+ * Rows written before message content became parts hold a bare string. Normalising on read is
+ * permanent, not a migration window: those rows are never rewritten.
+ */
+function decodeResume(raw: RawResumeState): LoopResumeState {
+  return {
+    ...raw,
+    messages: raw.messages.map((message) => ({
+      role: message.role,
+      content: normalizeMessageContent(message.content),
+    })),
+  };
 }
 
 /**
@@ -97,7 +119,7 @@ export class RunLoopCheckpointStore {
         repairs: Number(row.repairs),
         ...(row.resume_state === null || row.resume_state === undefined
           ? {}
-          : { resume: row.resume_state }),
+          : { resume: decodeResume(row.resume_state) }),
       };
     });
   }

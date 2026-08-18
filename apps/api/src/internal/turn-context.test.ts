@@ -3,7 +3,7 @@ import type { MemoryDocumentRepo } from "@tulipfarm/memory";
 import { MAX_HISTORY_TOKENS, MAX_TOOL_STEPS, MEMORY_METRICS } from "@tulipfarm/memory";
 import type { Attributes, LogLevel, TelemetryPort } from "@tulipfarm/observability";
 import type { ArtifactService, ChildLinkAncestry } from "@tulipfarm/run-kernel";
-import { canonicalHash } from "@tulipfarm/schema";
+import { canonicalHash, contentText, textContent } from "@tulipfarm/schema";
 import type { BundledSkill, SoulLoader, SoulSkill } from "@tulipfarm/soul";
 import { DEFAULT_ASSISTANT_NAME } from "@tulipfarm/soul";
 import type { ToolAvailability } from "@tulipfarm/tool-broker";
@@ -32,16 +32,20 @@ const AUTHORITY: TurnAuthority = {
   bundleDigest: "bundle-digest",
 };
 
-function message(overrides: Partial<PersistedMessage> = {}): PersistedMessage {
+function message(
+  overrides: Partial<Omit<PersistedMessage, "content">> & { content?: string } = {}
+): PersistedMessage {
+  const { content, ...rest } = overrides;
   return {
     id: "message-1",
     businessId: BUSINESS_ID,
     conversationId: CONVERSATION_ID,
     turnId: TURN_ID,
     role: "user",
-    content: "hello",
+    content: textContent("hello"),
     createdAt: CREATED_AT,
-    ...overrides,
+    ...rest,
+    ...(content === undefined ? {} : { content: textContent(content) }),
   };
 }
 
@@ -141,8 +145,8 @@ describe("ChatTurnContextResolver", () => {
 
     expect(context.messages[0]?.role).toBe("system");
     expect(context.messages.slice(1)).toEqual([
-      { role: "user", content: "hello" },
-      { role: "assistant", content: "hi" },
+      { role: "user", content: textContent("hello") },
+      { role: "assistant", content: textContent("hi") },
     ]);
     expect(context.compacted).toBe(false);
     expect(context.agentId).toBe(DEFAULT_ASSISTANT_NAME);
@@ -157,7 +161,7 @@ describe("ChatTurnContextResolver", () => {
 
     const context = await resolver.resolve(AUTHORITY);
 
-    const system = context.messages[0]?.content ?? "";
+    const system = contentText(context.messages[0]?.content ?? []);
     expect(system).toContain("<current-context>");
     expect(system).toContain("date: Saturday, 08 August 2026");
     expect(system).toContain("time: 16:42 (Asia/Kolkata, UTC+05:30)");
@@ -168,7 +172,9 @@ describe("ChatTurnContextResolver", () => {
 
     const context = await resolver.resolve(AUTHORITY);
 
-    expect(context.messages[0]?.content).toContain("time: 11:12 (UTC, UTC+00:00)");
+    expect(contentText(context.messages[0]?.content ?? [])).toContain(
+      "time: 11:12 (UTC, UTC+00:00)"
+    );
   });
 
   it("forwards the Artifact's model selector for the router to resolve", async () => {
@@ -260,7 +266,7 @@ describe("ChatTurnContextResolver", () => {
     // The Agent's instructions outrank the transcript, so they are never what gets dropped; of the
     // history, the message the user just sent survives and the start of the conversation goes.
     expect(context.messages.map((entry) => entry.role)).toEqual(["system", "user"]);
-    expect(context.messages[1]?.content.startsWith("new")).toBe(true);
+    expect(contentText(context.messages[1]?.content ?? []).startsWith("new")).toBe(true);
     expect(context.compacted).toBe(true);
   });
 
@@ -382,7 +388,7 @@ describe("ChatTurnContextResolver — the Memory Document read selector", () => 
       now: () => new Date("2026-08-08T11:12:00Z"),
     });
 
-    const system = (await resolver.resolve(AUTHORITY)).messages[0]?.content ?? "";
+    const system = contentText((await resolver.resolve(AUTHORITY)).messages[0]?.content ?? []);
 
     expect(system).toContain("<memory>");
     expect(system).toContain("Timezone: Asia/Kolkata");
@@ -392,7 +398,7 @@ describe("ChatTurnContextResolver — the Memory Document read selector", () => 
   it("tells the model to write memory, not only to apply it", async () => {
     const { resolver } = makeResolver({ memoryDocument: DOCUMENT });
 
-    const system = (await resolver.resolve(AUTHORITY)).messages[0]?.content ?? "";
+    const system = contentText((await resolver.resolve(AUTHORITY)).messages[0]?.content ?? []);
 
     expect(system).toContain("call update_memory in the same turn");
   });
@@ -400,13 +406,14 @@ describe("ChatTurnContextResolver — the Memory Document read selector", () => 
   it("reads no memory for a subject that is not a person", async () => {
     const { resolver, documentRender } = makeResolver({ memoryDocument: DOCUMENT });
 
-    const system =
+    const system = contentText(
       (
         await resolver.resolve({
           ...AUTHORITY,
           subject: { kind: "agent", id: "triage-agent" },
         })
-      ).messages[0]?.content ?? "";
+      ).messages[0]?.content ?? []
+    );
 
     expect(system).not.toContain("<memory>");
     expect(documentRender).not.toHaveBeenCalled();

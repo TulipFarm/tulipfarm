@@ -1,5 +1,6 @@
 import type { PGlite } from "@electric-sql/pglite";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import { textContent } from "@tulipfarm/schema";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Queryable } from "../db";
 import { makeMigratedPglite } from "../test/pglite";
@@ -57,7 +58,7 @@ describe("PgConversationStore", () => {
       conversationId: CONVERSATION_ID,
       turnId: TURN_ID,
       role: "user",
-      content: "hello",
+      content: textContent("hello"),
       createdAt: CREATED_AT,
     });
     await store.saveTurn(turn());
@@ -73,7 +74,7 @@ describe("PgConversationStore", () => {
         conversationId: CONVERSATION_ID,
         turnId: TURN_ID,
         role: "user",
-        content: "hello",
+        content: textContent("hello"),
         createdAt: CREATED_AT,
       },
     ]);
@@ -158,7 +159,7 @@ describe("PgConversationStore", () => {
       conversationId: CONVERSATION_ID,
       turnId: TURN_ID,
       role: "assistant",
-      content: "abandoned",
+      content: textContent("abandoned"),
       attempt: 1,
       createdAt: CREATED_AT,
     });
@@ -168,7 +169,7 @@ describe("PgConversationStore", () => {
       conversationId: CONVERSATION_ID,
       turnId: TURN_ID,
       role: "assistant",
-      content: "the answer",
+      content: textContent("the answer"),
       attempt: 2,
       createdAt: new Date("2026-07-26T00:00:05.000Z"),
     });
@@ -192,7 +193,7 @@ describe("PgConversationStore", () => {
         conversationId: CONVERSATION_ID,
         turnId: TURN_ID,
         role: "assistant",
-        content: "the answer",
+        content: textContent("the answer"),
         attempt: 2,
         createdAt: new Date("2026-07-26T00:00:05.000Z"),
       },
@@ -207,7 +208,7 @@ describe("PgConversationStore", () => {
       conversationId: CONVERSATION_ID,
       turnId: TURN_ID,
       role: "assistant",
-      content: "the answer",
+      content: textContent("the answer"),
       metadata: {
         toolCalls: [
           {
@@ -241,7 +242,7 @@ describe("PgConversationStore", () => {
         conversationId: CONVERSATION_ID,
         turnId: TURN_ID,
         role: "assistant",
-        content: "the answer",
+        content: textContent("the answer"),
         metadata: {
           toolCalls: [
             {
