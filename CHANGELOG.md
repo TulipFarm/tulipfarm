@@ -1,5 +1,53 @@
 # Changelog
 
+## [0.11.0](https://github.com/TulipFarm/tulipfarm/compare/v0.10.0...v0.11.0) (2026-08-18)
+
+### Features
+
+* **agent-runtime:** infer the auto effort preset from the prompt ([#369](https://github.com/TulipFarm/tulipfarm/issues/369)) ([c9f9d83](https://github.com/TulipFarm/tulipfarm/commit/c9f9d83f75e0652c7dc507ed1137333e410ebb7a))
+* **architecture:** gate production reachability and ratchet L0 debt ([#386](https://github.com/TulipFarm/tulipfarm/issues/386)) ([27d3217](https://github.com/TulipFarm/tulipfarm/commit/27d32178f8170969501bdebac11c41488ea3e5da))
+* evals ([#395](https://github.com/TulipFarm/tulipfarm/issues/395)) ([4a11c0a](https://github.com/TulipFarm/tulipfarm/commit/4a11c0a07123b7ede4f7f740302a52698afc5bd1))
+* evals baseline ([#399](https://github.com/TulipFarm/tulipfarm/issues/399)) ([3c6e185](https://github.com/TulipFarm/tulipfarm/commit/3c6e185c1c1bbb346b612487ec2b782351ad93ab))
+* evals matrix ([#396](https://github.com/TulipFarm/tulipfarm/issues/396)) ([e064b6a](https://github.com/TulipFarm/tulipfarm/commit/e064b6abf28fafcce36f8a92bf6c342eb7f84104))
+* **llm:** close the L5 foundation-model hardening campaign ([#382](https://github.com/TulipFarm/tulipfarm/issues/382)) ([8261691](https://github.com/TulipFarm/tulipfarm/commit/82616913ee6880c5641d7e793314772f8d5b31e5))
+* **llm:** request the prompt caching the model path already meters ([#383](https://github.com/TulipFarm/tulipfarm/issues/383)) ([909b2ca](https://github.com/TulipFarm/tulipfarm/commit/909b2ca70fe6b118ef17c7300c0e321e9493a3a2))
+* **onboarding:** replace step-wizard setup with growing tulip + Companion quests ([#377](https://github.com/TulipFarm/tulipfarm/issues/377)) ([d6b0ca5](https://github.com/TulipFarm/tulipfarm/commit/d6b0ca5629c380ed1f56d8630d5da22b28cec9a2))
+* **soul:** make the write gateway the only door to the authored tree ([#373](https://github.com/TulipFarm/tulipfarm/issues/373)) ([fdf9e19](https://github.com/TulipFarm/tulipfarm/commit/fdf9e19d55aecbf2c0848eeb155929f58061c074))
+* **tasks:** setup Task system with auto-connect and reconcile kicks ([#384](https://github.com/TulipFarm/tulipfarm/issues/384)) ([ea5a4c9](https://github.com/TulipFarm/tulipfarm/commit/ea5a4c96e124bf5b165fc704ffd249e22e5c7b7d))
+* **tool-broker:** make the mutation kill switch durable, installed and operable ([#376](https://github.com/TulipFarm/tulipfarm/issues/376)) ([d16ea50](https://github.com/TulipFarm/tulipfarm/commit/d16ea508a09c1d3605fc85ec3b01beaa11c1dbb0))
+* upgrade memory and concile jobs ([#394](https://github.com/TulipFarm/tulipfarm/issues/394)) ([3d5d5d0](https://github.com/TulipFarm/tulipfarm/commit/3d5d5d00d44e7440f994797827b33cf454e3b9ac))
+* **web:** add the Farm page as a living ASCII tulip field ([#391](https://github.com/TulipFarm/tulipfarm/issues/391)) ([695b04f](https://github.com/TulipFarm/tulipfarm/commit/695b04f8b9b79f03c5e7a9d1df11d193d175f449))
+* **worker:** co-locate eligible Tools with the durable runtime ([#380](https://github.com/TulipFarm/tulipfarm/issues/380)) ([dd0e0e1](https://github.com/TulipFarm/tulipfarm/commit/dd0e0e1779a01b77d6897afc3c1b0e347cec1443))
+
+### Bug Fixes
+
+* **authz:** drop the dead member grant and pin the live role gate ([#388](https://github.com/TulipFarm/tulipfarm/issues/388)) ([171977d](https://github.com/TulipFarm/tulipfarm/commit/171977d134b17a919ce74710c1513c21789ea862))
+* **ci:** cut queueing, kill the QEMU build hang, and drop duplicate work ([#370](https://github.com/TulipFarm/tulipfarm/issues/370)) ([83469d5](https://github.com/TulipFarm/tulipfarm/commit/83469d50d24b4b03ae01c52eaf1f1b58fd3c85d7))
+* eval GHA run ([#397](https://github.com/TulipFarm/tulipfarm/issues/397)) ([abffaad](https://github.com/TulipFarm/tulipfarm/commit/abffaadb6583216021bc624cbddd18a589eaee4a))
+* **eval:** count Cases not Trials in the Baseline delta summary ([#400](https://github.com/TulipFarm/tulipfarm/issues/400)) ([0966e37](https://github.com/TulipFarm/tulipfarm/commit/0966e37201d1f644d9e96d9942ed3e3a5cee9be8))
+* **eval:** let a guard the model never reached be uncovered, not failed ([#398](https://github.com/TulipFarm/tulipfarm/issues/398)) ([929226c](https://github.com/TulipFarm/tulipfarm/commit/929226c9f28f96a6062b7f14f89ae0e58712bcca))
+* **llm:** classify shed provider calls as unavailable  ([#387](https://github.com/TulipFarm/tulipfarm/issues/387)) ([f2e9a36](https://github.com/TulipFarm/tulipfarm/commit/f2e9a36040c0ee85cd21ea01a01daab49b898277))
+* **runtime:** honor Routine retry and signal Surface render failures ([#390](https://github.com/TulipFarm/tulipfarm/issues/390)) ([c4e17f2](https://github.com/TulipFarm/tulipfarm/commit/c4e17f2f8cbbb00122b459e2def976206d5c0169))
+* **runtime:** pin thread mappings and Agent-loop counters under concurrenc ([#389](https://github.com/TulipFarm/tulipfarm/issues/389)) ([5b98612](https://github.com/TulipFarm/tulipfarm/commit/5b98612601247277a7665c0dde1d20210ce32fe1))
+* **tool-broker:** honour the declared adapter kind and cage egress destinations ([#385](https://github.com/TulipFarm/tulipfarm/issues/385)) ([189f53d](https://github.com/TulipFarm/tulipfarm/commit/189f53dcdfe866e514e3e4c13eb834c69397c273))
+
+### Performance Improvements
+
+* **api:** restore a migrated PGlite snapshot instead of replaying migrations ([#379](https://github.com/TulipFarm/tulipfarm/issues/379)) ([fe2c100](https://github.com/TulipFarm/tulipfarm/commit/fe2c1000b3bc5eb01e0573bd524023e7857fc7cc))
+* **web:** fix blank first paint and cut critical path to 113 kB ([#374](https://github.com/TulipFarm/tulipfarm/issues/374)) ([68b74c0](https://github.com/TulipFarm/tulipfarm/commit/68b74c0c97c03eb28ffeb378e54e5047e6004b97))
+
+### Documentation
+
+* **agents:** make AGENTS.md navigation entry points and set comment policy ([#372](https://github.com/TulipFarm/tulipfarm/issues/372)) ([c36e90f](https://github.com/TulipFarm/tulipfarm/commit/c36e90fd279e3c343fa4f5280dd0ad93992cc1bd))
+* turn README into a landing page, add contributor docs ([#371](https://github.com/TulipFarm/tulipfarm/issues/371)) ([7508c69](https://github.com/TulipFarm/tulipfarm/commit/7508c6973a9eb840bb8717203c598cfc0f63c3a8))
+
+### Code Refactoring
+
+* **integrations:** retire the unreachable Postgres Tool adapter ([#378](https://github.com/TulipFarm/tulipfarm/issues/378)) ([277ff6a](https://github.com/TulipFarm/tulipfarm/commit/277ff6aa9cac7c315ad2874a3d4c205af099f670))
+* **runtime:** drop unread bounds and bind approvals to evidence ([#393](https://github.com/TulipFarm/tulipfarm/issues/393)) ([2bde301](https://github.com/TulipFarm/tulipfarm/commit/2bde301a63597e447832c20319226053860fa8f0))
+* **runtime:** enforce controls that validated but never ran ([#392](https://github.com/TulipFarm/tulipfarm/issues/392)) ([5a36b0d](https://github.com/TulipFarm/tulipfarm/commit/5a36b0d43c557d91d33b6ac948c47f033ca45377))
+* **soul:** move the soul domain into its package ([#381](https://github.com/TulipFarm/tulipfarm/issues/381)) ([ca1df03](https://github.com/TulipFarm/tulipfarm/commit/ca1df03267d532267f257da676f03e6f3f1151bb))
+
 ## [0.10.0](https://github.com/TulipFarm/tulipfarm/compare/v0.9.0...v0.10.0) (2026-08-14)
 
 ### Features
