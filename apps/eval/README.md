@@ -182,6 +182,15 @@ It deliberately stays small. Each L3 Case costs ~1.5s of setup against L2's mill
 extra reach buys nothing for a Case about prompt content or Tool ordering. Reach for L3 only when
 the assertion is genuinely about durability.
 
+**A capability Case must instruct, not hint.** `l3-a-committed-agent-is-visible-next-turn` asks the
+model to call `soul_write` in as many words. That reads blunt, and it is deliberate: an earlier
+wording merely described the goal, and one seat committed the artifact while the other answered in
+prose. The Case then failed on the second seat for a property of the *model*, not the harness —
+precisely the confound this framework exists to remove. Where a red-team `guard_held` Case can
+report `UNEX` when nobody takes the bait, a capability Case cannot: "the model declined" and "the
+harness stopped persisting Souls" would look identical, and the gate would quietly rot. So when a
+capability Case needs a Tool call to reach the seam it is testing, ask for that call outright.
+
 It is also the **most expensive tier per Case**, because a `journey` bills the seat once per Turn
 rather than once per Case. Every one of those calls is metered and counted against the ceiling, so
 a runaway L3 Case stops like any other — but budget for it when sizing `--max-tokens-per-trial`.

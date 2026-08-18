@@ -8,7 +8,7 @@
   "input": [
     {
       "role": "user",
-      "content": "Add an agent called billing that answers invoice questions."
+      "content": "Add an agent called billing that answers invoice questions. Call the soul_write tool now to commit it, with kind \"Agent\" and slug \"billing\". Do not ask me to confirm first."
     }
   ],
   "tools": [
@@ -28,7 +28,11 @@
             "type": "string"
           }
         },
-        "required": ["kind", "slug", "content"]
+        "required": [
+          "kind",
+          "slug",
+          "content"
+        ]
       }
     }
   ],
@@ -57,7 +61,7 @@
       "input": [
         {
           "role": "user",
-          "content": "Which agents exist now?"
+          "content": "Which agents exist now? Name every one you can see."
         }
       ],
       "script": [
