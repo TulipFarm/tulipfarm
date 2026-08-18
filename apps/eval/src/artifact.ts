@@ -10,7 +10,7 @@ import type { Scorecard } from "./runner.ts";
  * artifact from a newer schema is refused rather than parsed optimistically, because a field this
  * version does not understand is exactly how a delta becomes confidently wrong.
  */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export interface ScorecardArtifact {
   readonly schemaVersion: number;
@@ -111,7 +111,17 @@ export function scorecardPath(dir: string, modelId: string): string {
   return join(dir, `${modelId}.json`);
 }
 
-/** Where the promoted Baseline for one model lives. One file per model, committed to the repo. */
-export function baselinePath(root: string, modelId: string): string {
-  return scorecardPath(join(root, "baselines"), modelId);
+/**
+ * Where the promoted Baseline for one model lives. One file per model, committed to the repo.
+ *
+ * A non-default suite gets its own subdirectory. The red-team Corpus has its own hash, so adding
+ * an attack must not invalidate the capability Baseline — and it would, were both suites promoting
+ * over the same file.
+ */
+export function baselinePath(root: string, modelId: string, suite?: string): string {
+  const dir = suite === undefined ? join(root, "baselines") : join(root, "baselines", suite);
+  if (suite !== undefined && !SAFE_ID.test(suite)) {
+    throw new ArtifactError(`suite "${suite}" cannot be used as a Baseline directory name`);
+  }
+  return scorecardPath(dir, modelId);
 }

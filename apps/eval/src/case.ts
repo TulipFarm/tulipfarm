@@ -4,6 +4,7 @@ import type {
   ModelMessage,
   ModelOutput,
 } from "@tulipfarm/agent-runtime";
+import type { RedTeam } from "./red-team.ts";
 
 /**
  * One deterministic, model-free check against a Trial's observation.
@@ -42,9 +43,56 @@ export type Expectation =
    *  did — a Case that only asserted "something blocked" would go on passing after the policy was
    *  replaced by a stricter unrelated rule. */
   | { readonly kind: "guardrail_blocked"; readonly stage: string; readonly guard: string }
+  /** Prose quality the deterministic Expectations cannot reach, scored by a pinned third-vendor
+   *  Judge against explicit criteria. Use only where `===` genuinely cannot do the job — a rubric
+   *  is slower, costs money and is less reproducible than a string check. */
+  | {
+      readonly kind: "rubric_score";
+      readonly criteria: readonly string[];
+      /** The lowest score on the fixed 1–5 scale that still passes. */
+      readonly min: number;
+    }
+  /** The safety variant: one question, answered, rather than a quality rating. */
+  | { readonly kind: "rubric_denies"; readonly question: string }
   /** No guard refused at this stage. This is what catches an over-eager guardrail: the Case fails
    *  when a stage that should have let a benign turn through starts refusing it. */
-  | { readonly kind: "guardrail_allowed"; readonly stage: string };
+  | { readonly kind: "guardrail_allowed"; readonly stage: string }
+  /** L3 only. The Run's terminal status, as the Run kernel recorded it. */
+  | { readonly kind: "run_status"; readonly status: string }
+  /** L3 only. The `invoke` State's terminal status — a Turn that answered but left its State
+   *  parked is a Run the reconciler will pick up, not a finished turn. */
+  | { readonly kind: "state_status"; readonly status: string }
+  /** L3 only. The Turn was completed, and with this verdict. */
+  | { readonly kind: "turn_status"; readonly status: string }
+  /** L3 only. This Run event type was appended durably. L2 stubs the event port, so this is the
+   *  only place a Turn that stopped emitting its events can be caught. */
+  | { readonly kind: "run_event_emitted"; readonly eventType: string }
+  /** L3 only. A Soul artifact was committed to the Eval Soul's real git repository. */
+  | { readonly kind: "soul_committed"; readonly path: string };
+
+/** Expectations that read persisted state, which only the L3 tier can observe. */
+const PERSISTED_KINDS: ReadonlySet<string> = new Set([
+  "run_status",
+  "state_status",
+  "turn_status",
+  "run_event_emitted",
+  "soul_committed",
+]);
+
+export function isPersisted(expectation: Expectation): boolean {
+  return PERSISTED_KINDS.has(expectation.kind);
+}
+
+/**
+ * Expectations that read guardrail decisions, which only the L2 tier collects.
+ *
+ * L3 really does run the guards — the executor calls them — but it does not surface their
+ * decisions, so `guardrail_allowed` would pass by finding nothing rather than by the guard having
+ * allowed anything.
+ */
+export function isGuardrail(expectation: Expectation): boolean {
+  return expectation.kind.startsWith("guardrail_");
+}
 
 /** A faked Tool dispatch, matched to a call by Tool name and consumed in order. */
 export interface ScriptedToolResult {
@@ -54,9 +102,26 @@ export interface ScriptedToolResult {
   readonly error?: string;
 }
 
+/**
+ * One Turn of a multi-Turn journey, in the same vocabulary a single-Turn Case already uses.
+ *
+ * Reusing `input`, `script` and `toolResults` rather than inventing journey-specific names keeps
+ * the Case format one format: a journey Turn is a Case's Turn, not a new kind of thing.
+ */
+export interface JourneyTurn {
+  readonly input: readonly ModelMessage[];
+  readonly toolResults?: readonly ScriptedToolResult[];
+  readonly script?: readonly ModelOutput[];
+}
+
 export interface EvalCase {
   readonly id: string;
-  readonly tier: "l2";
+  /**
+   * `l2` drives the Agent loop directly; `l3` drives the product's own Chat executor against a real
+   * database. Nearly all the signal is at L2, and L3 is deliberately small — it exists to prove the
+   * Run lifecycle around the loop, which L2 stubs and therefore cannot notice breaking.
+   */
+  readonly tier: "l2" | "l3";
   readonly agent: string;
   /** What feeds the real Context assembler. The assembler's output is what the model sees. */
   readonly context: AssembleContext;
@@ -71,9 +136,20 @@ export interface EvalCase {
    * credentials develop the framework.
    */
   readonly script?: readonly ModelOutput[];
+  /**
+   * L3 only. Further Turns run against the same Conversation, database and Soul as `input`.
+   *
+   * This exists for one seam a single Turn cannot reach: whether what a Turn *committed* is what
+   * the next Turn can *see*. Everything else a journey appears to test — history, ordering — is
+   * carried more cheaply by an L2 Case, so keep journeys rare.
+   */
+  readonly journey?: readonly JourneyTurn[];
   readonly expect: readonly Expectation[];
   /** Raised above 1 only for Cases used to measure the Noise Floor. */
   readonly trials?: number;
+  /** Present only on Cases in `corpus/red-team/`. Declares which of the two good endings this
+   *  Case asserts, which decides whether it gates the release or is reported as a rate. */
+  readonly redTeam?: RedTeam;
 }
 
 export const LOOP_LIMITS = {
@@ -81,3 +157,12 @@ export const LOOP_LIMITS = {
   maxToolCalls: 16,
   maxRepairAttempts: 2,
 } as const;
+
+/**
+ * Expectation kinds a Judge answers rather than the deterministic scorer.
+ *
+ * Lives here rather than beside either scorer so both can import it without a cycle.
+ */
+export function isJudged(a: Expectation): boolean {
+  return a.kind === "rubric_score" || a.kind === "rubric_denies";
+}

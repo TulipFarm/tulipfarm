@@ -1,0 +1,89 @@
+{
+  "id": "l3-a-committed-agent-is-visible-next-turn",
+  "tier": "l3",
+  "agent": "support",
+  "context": {
+    "governancePages": []
+  },
+  "input": [
+    {
+      "role": "user",
+      "content": "Add an agent called billing that answers invoice questions. Call the soul_write tool now to commit it, with kind \"Agent\" and slug \"billing\". Do not ask me to confirm first."
+    }
+  ],
+  "tools": [
+    {
+      "name": "soul_write",
+      "description": "Commit a Soul artifact to the configuration repository. `kind` is a capitalised singular such as \"Agent\". `slug` is the artifact's directory name. `content` for an Agent is YAML frontmatter with `description` and `domain` keys, delimited by --- lines, followed by the agent's instructions in Markdown.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          }
+        },
+        "required": ["kind", "slug", "content"]
+      }
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "c1",
+          "name": "soul_write",
+          "arguments": {
+            "kind": "Agent",
+            "slug": "billing",
+            "content": "---\ndescription: Answers invoice questions.\ndomain: support\n---\n\nYou answer billing questions."
+          }
+        }
+      ]
+    },
+    {
+      "kind": "text",
+      "text": "I added the billing agent."
+    }
+  ],
+  "journey": [
+    {
+      "input": [
+        {
+          "role": "user",
+          "content": "Which agents exist now? Name every one you can see."
+        }
+      ],
+      "script": [
+        {
+          "kind": "text",
+          "text": "Support and billing."
+        }
+      ]
+    }
+  ],
+  "expect": [
+    {
+      "kind": "soul_committed",
+      "path": "agents/billing/AGENT.md"
+    },
+    {
+      "kind": "prompt_contains",
+      "text": "billing"
+    },
+    {
+      "kind": "run_status",
+      "status": "succeeded"
+    },
+    {
+      "kind": "output_contains",
+      "text": "billing"
+    }
+  ]
+}

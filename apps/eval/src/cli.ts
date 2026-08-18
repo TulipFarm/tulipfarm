@@ -4,11 +4,12 @@ import { harnessVersion, scorecardPath } from "./artifact.ts";
 import { resolveBindings } from "./bindings.ts";
 import { loadCorpus } from "./corpus.ts";
 import { loadEvalSoul } from "./eval-soul.ts";
+import { createJudge, judgeIdentity, judgeVersion } from "./judge.ts";
 import { runMatrix } from "./matrix.ts";
-import { PINNED_MODELS } from "./model.ts";
+import { defaultCreateModel, PINNED_MODELS } from "./model.ts";
 import { progressReporter } from "./progress.ts";
-import { applyBaseline } from "./release.ts";
-import { plannedTrials, type Scorecard, selectCases } from "./runner.ts";
+import { applyBaseline, guardsCovered, unclean, whyUnclean } from "./release.ts";
+import { plannedTrials, selectCases } from "./runner.ts";
 import { renderMatrix, renderScorecard } from "./scorecard.ts";
 
 const MODELS = Object.keys(PINNED_MODELS).join(", ");
@@ -18,8 +19,10 @@ Usage: pnpm eval [options]
 
   --case <id>        Run only the Eval Case with this id.
   --corpus <dir>     Corpus directory (default: apps/eval/corpus).
+                     Point at corpus/red-team for the safety suite; it keeps its own
+                     hash and its own Baseline folder.
   --model <names>    Run against real vendor models (${MODELS}). Costs money.
-                     Comma-separate to run the matrix: --model sonnet,luna. Each model
+                     Comma-separate to run the matrix: --model sonnet,terra. Each model
                      gets the full ceiling, because a shared one would starve the last.
   --max-spend <usd>  Stop launching Trials once this much has been spent.
   --max-tokens <n>   Stop launching Trials once this many tokens are used. The only
@@ -32,22 +35,25 @@ Usage: pnpm eval [options]
                      model (apps/eval/baselines/<model>.json), and fail on a regression.
   --promote          Make this Sweep the Baseline for each model it measured. Never
                      automatic: a Baseline is a reference, so promoting is a decision.
+  --repeat <n>       Run every Case n times to measure the noise floor. Promote with it,
+                     so the Baseline records how much this Corpus moves on its own.
   --save <path>      Archive this Scorecard as JSON. One model only, since one path
                      cannot hold two.
   --save-dir <dir>   Archive every Scorecard this Sweep produced, as <dir>/<model>.json.
                      The Matrix form of --save, and what CI uploads.
   --help             Show this message.
 
+A Case carrying a rubric is scored by a Judge, configured with EVAL_JUDGE_BASE_URL,
+EVAL_JUDGE_MODEL and EVAL_JUDGE_API_KEY. It must be a third vendor: pointing it at one
+already under test is refused, because a model grading its own homework scores itself
+generously and nothing on the Scorecard would show it. Its identity is part of the Corpus
+hash, so swapping Judges invalidates the Baseline rather than quietly re-scoring history.
+
 Without --model the Corpus runs against the scripted binding: free, deterministic, no
 credentials. --model drives a real vendor CLI on your own subscription seat, which needs
 that seat's credential in the environment and consumes your quota. Always bound it with
 --max-tokens-per-trial: a seat's dollar cost is zero, so --max-spend can never stop one.
 `;
-
-/** A Sweep clears a release only when it measured everything it set out to measure. */
-function unclean(card: Scorecard): number {
-  return card.failed + card.errored + card.skipped + card.trials.filter((t) => t.vacuous).length;
-}
 
 async function main(): Promise<number> {
   const argv = process.argv.slice(2);
@@ -59,7 +65,11 @@ async function main(): Promise<number> {
   assertKnownFlags(argv);
 
   const dir = resolve(flag(argv, "--corpus") ?? resolve(__dirname, "..", "corpus"));
-  const corpus = await loadCorpus(dir, await loadEvalSoul());
+  // Read before the Corpus, because the Judge's identity is part of the Corpus hash: a Sweep with
+  // a different Judge is measuring something else and must not compare against the old Baseline.
+  const identity = judgeIdentity();
+  const judge = identity === undefined ? undefined : createJudge(identity, defaultCreateModel);
+  const corpus = await loadCorpus(dir, await loadEvalSoul(), judgeVersion(identity));
 
   const caseFilter = flag(argv, "--case");
   const selected = selectCases(corpus.cases, caseFilter);
@@ -68,13 +78,15 @@ async function main(): Promise<number> {
   const maxSpendUsd = positive(flag(argv, "--max-spend"), "--max-spend");
   const fixedTokens = positive(flag(argv, "--max-tokens"), "--max-tokens");
   const perTrial = positive(flag(argv, "--max-tokens-per-trial"), "--max-tokens-per-trial");
+  const repeat = positive(flag(argv, "--repeat"), "--repeat");
   if (fixedTokens !== undefined && perTrial !== undefined) {
     throw new Error("--max-tokens and --max-tokens-per-trial set the same ceiling; pass one");
   }
   // Resolved against the Trials this Sweep will actually launch, so a `--case` run is bounded for
   // the one Case it measures rather than for a Corpus it is not going to touch.
   const maxTokens =
-    fixedTokens ?? (perTrial === undefined ? undefined : perTrial * plannedTrials(selected));
+    fixedTokens ??
+    (perTrial === undefined ? undefined : perTrial * plannedTrials(selected, repeat));
   const compare = present(argv, "--baseline");
   const promote = present(argv, "--promote");
   const baselineFile = flag(argv, "--baseline");
@@ -136,6 +148,8 @@ async function main(): Promise<number> {
     ...(caseFilter === undefined ? {} : { caseFilter }),
     ...(maxSpendUsd === undefined ? {} : { maxSpendUsd }),
     ...(maxTokens === undefined ? {} : { maxTokens }),
+    ...(judge === undefined ? {} : { judge }),
+    ...(repeat === undefined ? {} : { repeat }),
   });
 
   // One model is not a matrix, and a grid of one column reads as if a comparison were made.
@@ -153,6 +167,7 @@ async function main(): Promise<number> {
       harnessVersion: version,
       compare,
       promote,
+      ...(corpus.suite === undefined ? {} : { suite: corpus.suite }),
       ...(baselineFile === undefined ? {} : { baseline: baselineFile }),
       ...(archive === undefined ? {} : { save: archive }),
     });
@@ -162,9 +177,27 @@ async function main(): Promise<number> {
 
   // A model that could not be measured fails the command as surely as a failing Case: a Matrix
   // missing a leg has not cleared a release, whatever the leg that ran says.
-  const unmeasured = matrix.runs.filter((r) => r.card === undefined).length;
-  const dirty = matrix.runs.reduce((n, r) => n + (r.card === undefined ? 0 : unclean(r.card)), 0);
-  return unmeasured + dirty > 0 || baselineFailed ? 1 : 0;
+  const unmeasured = matrix.runs.filter((r) => r.card === undefined);
+  // Computed across every leg, not per leg: a guard one model declined and another attempted has
+  // been measured, and failing the declining leg for it would punish the safer model.
+  const covered = guardsCovered(matrix.runs.flatMap((r) => (r.card === undefined ? [] : [r.card])));
+  const dirty = matrix.runs.reduce(
+    (n, r) => n + (r.card === undefined ? 0 : unclean(r.card, covered)),
+    0
+  );
+  if (unmeasured.length + dirty === 0 && !baselineFailed) return 0;
+
+  const why = [
+    ...unmeasured.map((run) => `${run.modelId}: never measured`),
+    ...matrix.runs.flatMap((run) =>
+      run.card === undefined
+        ? []
+        : whyUnclean(run.card, covered).map((reason) => `${run.card?.modelId}: ${reason}`)
+    ),
+    ...(baselineFailed ? ["the Baseline comparison refused this Sweep"] : []),
+  ];
+  process.stdout.write(`\nNOT CLEARED\n${why.map((line) => `  ${line}`).join("\n")}\n`);
+  return 1;
 }
 
 main().then(

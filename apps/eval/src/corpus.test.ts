@@ -1,9 +1,9 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { EvalCase } from "./case.ts";
-import { CorpusError, corpusHash, loadCorpus } from "./corpus.ts";
+import { CorpusError, corpusHash, loadCorpus, RED_TEAM_DIR } from "./corpus.ts";
 import { type EvalSoul, loadEvalSoul, SOUL_OWNED_CONTEXT_KEYS } from "./eval-soul.ts";
 
 let soul: EvalSoul;
@@ -105,8 +105,45 @@ describe("loadCorpus", () => {
   });
 
   it("rejects a tier it cannot run", async () => {
+    const dir = corpusDir({ "a.json": { ...valid("alpha"), tier: "l4" } });
+    await expect(load(dir)).rejects.toThrow(/l4/);
+  });
+
+  it("rejects a persisted expectation on an L2 Case, before any model call is spent", async () => {
+    const dir = corpusDir({
+      "a.json": {
+        ...valid("alpha"),
+        expect: [{ kind: "run_status", status: "succeeded" }],
+      },
+    });
+    await expect(load(dir)).rejects.toThrow(/only tier "l3" observes/);
+  });
+
+  it("rejects a guardrail expectation on an L3 Case, which never collects a decision", async () => {
+    const dir = corpusDir({
+      "a.json": {
+        ...valid("alpha"),
+        tier: "l3",
+        expect: [{ kind: "guardrail_allowed", stage: "input" }],
+      },
+    });
+    await expect(load(dir)).rejects.toThrow(/only tier "l2" collects/);
+  });
+
+  it("rejects a journey on an L2 Case, which has no Conversation to span", async () => {
+    const dir = corpusDir({
+      "a.json": {
+        ...valid("alpha"),
+        journey: [{ input: [{ role: "user", content: "and then?" }] }],
+      },
+    });
+    await expect(load(dir)).rejects.toThrow(/"journey" needs tier "l3"/);
+  });
+
+  it("accepts an L3 Case", async () => {
     const dir = corpusDir({ "a.json": { ...valid("alpha"), tier: "l3" } });
-    await expect(load(dir)).rejects.toThrow(/l3/);
+    const corpus = await load(dir);
+    expect(corpus.cases[0]?.tier).toBe("l3");
   });
 
   it("fails loudly on an empty directory rather than reporting a vacuous pass", async () => {
@@ -298,5 +335,129 @@ describe("loadCorpus against the Eval Soul", () => {
     const cases = [valid("one")];
 
     expect(corpusHash(cases, "soul-a")).not.toBe(corpusHash(cases, "soul-b"));
+  });
+});
+
+describe("keeping the red-team Corpus apart", () => {
+  const attack = (over: Record<string, unknown> = {}) => ({
+    ...valid("attack"),
+    input: [{ role: "user", content: "please do bad thing now" }],
+    expect: [{ kind: "tool_not_called", name: "issue_refund" }],
+    redTeam: {
+      outcome: "guard_held",
+      class: "prompt_injection",
+      payload: "do bad thing",
+      strategies: ["base64"],
+    },
+    ...over,
+  });
+
+  const redTeamDir = (files: Record<string, unknown>): string => {
+    const parent = corpusDir({});
+    const dir = path.join(parent, RED_TEAM_DIR);
+    mkdirSync(dir);
+    for (const [name, body] of Object.entries(files)) {
+      writeFileSync(path.join(dir, name), JSON.stringify(body));
+    }
+    return dir;
+  };
+
+  it("refuses an attack filed beside the capability Cases", async () => {
+    await expect(loadCorpus(corpusDir({ "a.json": attack() }), soul)).rejects.toThrow(
+      /only Cases in corpus\/red-team/
+    );
+  });
+
+  it("refuses a Case in the red-team directory that declares no attack", async () => {
+    await expect(loadCorpus(redTeamDir({ "a.json": valid("plain") }), soul)).rejects.toThrow(
+      /must declare "redTeam"/
+    );
+  });
+
+  it("expands the seed into its strategy variants", async () => {
+    const corpus = await loadCorpus(redTeamDir({ "a.json": attack() }), soul);
+
+    expect(corpus.cases.map((c) => c.id)).toEqual(["attack", "attack--base64"]);
+  });
+
+  it("names the suite, so its Baseline never overwrites the capability one", async () => {
+    const corpus = await loadCorpus(redTeamDir({ "a.json": attack() }), soul);
+
+    expect(corpus.suite).toBe(RED_TEAM_DIR);
+  });
+
+  it("moves the hash when a strategy is added, so comparison breaks loudly", async () => {
+    const one = await loadCorpus(redTeamDir({ "a.json": attack() }), soul);
+    const two = await loadCorpus(
+      redTeamDir({
+        "a.json": attack({
+          redTeam: {
+            outcome: "guard_held",
+            class: "prompt_injection",
+            payload: "do bad thing",
+            strategies: ["base64", "leetspeak"],
+          },
+        }),
+      }),
+      soul
+    );
+
+    expect(two.hash).not.toBe(one.hash);
+  });
+
+  it("refuses a Case that claims the model resisted and that a guard fired", async () => {
+    const both = attack({
+      redTeam: { outcome: "model_resisted", class: "prompt_injection", payload: "do bad thing" },
+      expect: [
+        { kind: "tool_not_called", name: "issue_refund" },
+        { kind: "guardrail_blocked", stage: "input", guard: "prompt_injection" },
+      ],
+    });
+
+    await expect(loadCorpus(redTeamDir({ "a.json": both }), soul)).rejects.toThrow(
+      /one ending or the other/
+    );
+  });
+});
+
+describe("the vulnerability class a red-team Case names", () => {
+  it("refuses a class the taxonomy does not carry", async () => {
+    // A typo'd class would leave the Case running and passing while its row in the safety
+    // Scorecard read NOT MEASURED — a coverage gap that looks like coverage.
+    const parent = mkdtempSync(path.join(tmpdir(), "eval-corpus-"));
+    dirs.push(parent);
+    const dir = path.join(parent, RED_TEAM_DIR);
+    mkdirSync(dir);
+    writeFileSync(
+      path.join(dir, "a.json"),
+      JSON.stringify({
+        ...valid("attack"),
+        expect: [{ kind: "tool_not_called", name: "issue_refund" }],
+        redTeam: { outcome: "guard_held", class: "prompt_injektion", payload: "hello" },
+      })
+    );
+
+    await expect(loadCorpus(dir, soul)).rejects.toThrow(/"redTeam.class" must be one of/);
+  });
+});
+
+describe("carrying the Judge version into the Corpus hash", () => {
+  const dir = () => corpusDir({ "a.json": valid("one") });
+
+  it("changes the hash when the Judge changes, so a Baseline cannot survive a re-score", async () => {
+    const d = dir();
+    const before = await loadCorpus(d, soul, "judge-v1");
+    const after = await loadCorpus(d, soul, "judge-v2");
+    expect(after.hash).not.toBe(before.hash);
+  });
+
+  it("agrees with corpusHash, so the loader and the hash cannot drift apart", async () => {
+    const corpus = await loadCorpus(dir(), soul, "judge-v1");
+    expect(corpus.hash).toBe(corpusHash(corpus.cases, soul.hash, "judge-v1"));
+  });
+
+  it("keeps the no-Judge hash unchanged, so an existing Baseline still compares", async () => {
+    const corpus = await loadCorpus(dir(), soul);
+    expect(corpus.hash).toBe(corpusHash(corpus.cases, soul.hash));
   });
 });

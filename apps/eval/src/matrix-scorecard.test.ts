@@ -30,6 +30,7 @@ const card = (
   passed: trials.filter((t) => t.passed).length,
   failed: trials.filter((t) => !t.passed).length,
   errored: 0,
+  unexercised: 0,
   skipped: 0,
   corpusCases: 1,
   spend: NO_SPEND,
@@ -48,12 +49,12 @@ describe("renderMatrix", () => {
     const out = renderMatrix(
       matrix([
         { modelId: "sonnet", card: card("sonnet", [trial("a"), trial("b")]) },
-        { modelId: "luna", card: card("luna", [trial("a"), trial("b")]) },
+        { modelId: "terra", card: card("terra", [trial("a"), trial("b")]) },
       ])
     );
 
     expect(out).toContain("corpus=abcdef0123456789");
-    expect(out).toMatch(/Case\s+sonnet\s+luna/);
+    expect(out).toMatch(/Case\s+sonnet\s+terra/);
     expect(out).toMatch(/a\s+PASS\s+PASS/);
   });
 
@@ -62,14 +63,14 @@ describe("renderMatrix", () => {
       matrix([
         { modelId: "sonnet", card: card("sonnet", [trial("a"), trial("b")]) },
         {
-          modelId: "luna",
-          card: card("luna", [trial("a"), trial("b", { passed: false })]),
+          modelId: "terra",
+          card: card("terra", [trial("a"), trial("b", { passed: false })]),
         },
       ])
     );
 
     expect(out).toContain("DISAGREEMENT");
-    expect(out).toMatch(/b\s+sonnet=PASS\s+luna=FAIL/);
+    expect(out).toMatch(/b\s+sonnet=PASS\s+terra=FAIL/);
   });
 
   it("refuses the ranking reading in words, not only by omission", () => {
@@ -78,7 +79,7 @@ describe("renderMatrix", () => {
     const out = renderMatrix(
       matrix([
         { modelId: "sonnet", card: card("sonnet", [trial("a")]) },
-        { modelId: "luna", card: card("luna", [trial("a", { passed: false })]) },
+        { modelId: "terra", card: card("terra", [trial("a", { passed: false })]) },
       ])
     );
 
@@ -90,7 +91,7 @@ describe("renderMatrix", () => {
     const out = renderMatrix(
       matrix([
         { modelId: "sonnet", card: card("sonnet", [trial("a")]) },
-        { modelId: "luna", card: card("luna", [trial("a")]) },
+        { modelId: "terra", card: card("terra", [trial("a")]) },
       ])
     );
 
@@ -102,7 +103,7 @@ describe("renderMatrix", () => {
     const out = renderMatrix(
       matrix([
         { modelId: "sonnet", card: card("sonnet", [trial("a")]) },
-        { modelId: "luna", unavailable: "CODEX_AUTH_JSON is not set" },
+        { modelId: "terra", unavailable: "CODEX_AUTH_JSON is not set" },
       ])
     );
 
@@ -118,6 +119,7 @@ describe("renderMatrix", () => {
           modelId: "sonnet",
           card: card("sonnet", [trial("a", { passed: false, error: "vendor died" })], {
             errored: 1,
+            unexercised: 0,
             failed: 0,
             passed: 0,
           }),
@@ -170,8 +172,8 @@ describe("renderMatrix", () => {
           }),
         },
         {
-          modelId: "luna",
-          card: card("luna", [trial("a")], {
+          modelId: "terra",
+          card: card("terra", [trial("a")], {
             spend: { ...NO_SPEND, calls: 1, inputTokens: 700, outputTokens: 70 },
           }),
         },
@@ -188,9 +190,10 @@ describe("renderMatrix", () => {
       matrix([
         { modelId: "sonnet", card: card("sonnet", [trial("a"), trial("b")]) },
         {
-          modelId: "luna",
-          card: card("luna", [trial("a"), trial("b", { passed: false, error: "rate limited" })], {
+          modelId: "terra",
+          card: card("terra", [trial("a"), trial("b", { passed: false, error: "rate limited" })], {
             errored: 1,
+            unexercised: 0,
             failed: 0,
           }),
         },
@@ -199,20 +202,20 @@ describe("renderMatrix", () => {
 
     expect(out).not.toContain("DISAGREEMENT");
     expect(out).toContain("NOT COMPARABLE");
-    expect(out).toMatch(/b\s+sonnet=PASS\s+luna=ERR/);
+    expect(out).toMatch(/b\s+sonnet=PASS\s+terra=ERR/);
   });
 
   it("does not call a Case one model never reached a disagreement", () => {
     const out = renderMatrix(
       matrix([
         { modelId: "sonnet", card: card("sonnet", [trial("a"), trial("b")]) },
-        { modelId: "luna", card: card("luna", [trial("a")], { skipped: 1 }) },
+        { modelId: "terra", card: card("terra", [trial("a")], { skipped: 1 }) },
       ])
     );
 
     expect(out).not.toContain("DISAGREEMENT");
     expect(out).toContain("NOT COMPARABLE");
-    expect(out).toMatch(/b\s+sonnet=PASS\s+luna=-/);
+    expect(out).toMatch(/b\s+sonnet=PASS\s+terra=-/);
   });
 
   it("counts the agreement over the Cases that were comparable, not over the whole Corpus", () => {
@@ -220,9 +223,10 @@ describe("renderMatrix", () => {
       matrix([
         { modelId: "sonnet", card: card("sonnet", [trial("a"), trial("b"), trial("c")]) },
         {
-          modelId: "luna",
-          card: card("luna", [trial("a"), trial("b", { passed: false, error: "vendor died" })], {
+          modelId: "terra",
+          card: card("terra", [trial("a"), trial("b", { passed: false, error: "vendor died" })], {
             errored: 1,
+            unexercised: 0,
             failed: 0,
             skipped: 1,
             corpusCases: 2,
@@ -240,9 +244,10 @@ describe("renderMatrix", () => {
       matrix([
         { modelId: "sonnet", card: card("sonnet", [trial("a"), trial("b")]) },
         {
-          modelId: "luna",
-          card: card("luna", [trial("a", { passed: false }), trial("b", { error: "boom" })], {
+          modelId: "terra",
+          card: card("terra", [trial("a", { passed: false }), trial("b", { error: "boom" })], {
             errored: 1,
+            unexercised: 0,
             failed: 1,
           }),
         },
@@ -250,16 +255,55 @@ describe("renderMatrix", () => {
     );
 
     expect(out).toContain("DISAGREEMENT  1 of 1 comparable Case");
-    expect(out).toMatch(/a\s+sonnet=PASS\s+luna=FAIL/);
+    expect(out).toMatch(/a\s+sonnet=PASS\s+terra=FAIL/);
     expect(out).toContain("NOT COMPARABLE  1 of 2 Cases");
   });
 
   it("does not print a header over an empty grid when nothing was measured", () => {
-    const out = renderMatrix(matrix([{ modelId: "luna", unavailable: "codex login required" }]));
+    const out = renderMatrix(matrix([{ modelId: "terra", unavailable: "codex login required" }]));
 
     expect(out).toContain("1 model  ");
     expect(out).toContain("No Case was measured");
-    expect(out).not.toMatch(/Case\s+luna\n/);
+    expect(out).not.toMatch(/Case\s+terra\n/);
     expect(out).toContain("codex login required");
+  });
+});
+
+describe("a guard one model exercised and another did not", () => {
+  const unex = (id: string) => trial(id, { passed: false, unexercised: true });
+
+  it("reports the guard as covered by the Matrix, because some model did attempt it", () => {
+    const out = renderMatrix(
+      matrix([
+        { modelId: "sonnet", card: card("sonnet", [unex("refund")], { unexercised: 1 }) },
+        { modelId: "terra", card: card("terra", [trial("refund")]) },
+      ])
+    );
+
+    expect(out).toContain("GUARD COVERED");
+    expect(out).toMatch(/refund\s+exercised on terra/);
+  });
+
+  it("does not call that a disagreement, because UNEX is not a verdict", () => {
+    const out = renderMatrix(
+      matrix([
+        { modelId: "sonnet", card: card("sonnet", [unex("refund")], { unexercised: 1 }) },
+        { modelId: "terra", card: card("terra", [trial("refund")]) },
+      ])
+    );
+
+    expect(out).not.toContain("DISAGREEMENT");
+  });
+
+  it("reports a guard no model exercised as an uncovered gap instead", () => {
+    const out = renderMatrix(
+      matrix([
+        { modelId: "sonnet", card: card("sonnet", [unex("refund")], { unexercised: 1 }) },
+        { modelId: "terra", card: card("terra", [unex("refund")], { unexercised: 1 }) },
+      ])
+    );
+
+    expect(out).toContain("GUARD UNCOVERED");
+    expect(out).not.toContain("GUARD COVERED");
   });
 });

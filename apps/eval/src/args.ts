@@ -15,6 +15,7 @@ export const FLAGS = [
   "--max-tokens-per-trial",
   "--baseline",
   "--promote",
+  "--repeat",
   "--save",
   "--save-dir",
 ] as const;
@@ -22,7 +23,7 @@ export const FLAGS = [
 /**
  * Accepts both `--name value` and `--name=value`; the second form used to be dropped silently.
  *
- * A following `--option` is never taken as the value. `--max-tokens --model luna` would otherwise
+ * A following `--option` is never taken as the value. `--max-tokens --model terra` would otherwise
  * read as a ceiling of "--model", which fails a number check loudly only by luck.
  */
 export function flag(argv: string[], name: string): string | undefined {

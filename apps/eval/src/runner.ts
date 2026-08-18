@@ -11,13 +11,22 @@ import {
 } from "@tulipfarm/agent-runtime";
 import { type EvalCase, LOOP_LIMITS } from "./case.ts";
 import type { Corpus } from "./corpus.ts";
+import { toolDispatcher } from "./dispatch.ts";
 import { type EvalSoul, soulContext } from "./eval-soul.ts";
 import type { EvalGuardrails, GuardrailDecision } from "./guardrails.ts";
 import { turnGuardrails } from "./guardrails.ts";
+import type { Judge } from "./judge.ts";
+import { scoreJudged } from "./judged.ts";
+import { runPersistedTurn } from "./l3/tier.ts";
+import { measureNoise, type NoiseFloor } from "./noise.ts";
 import type { SweepProgress } from "./progress.ts";
+import { guardUnexercised } from "./red-team.ts";
+import { measureResistance, type ResistanceRate } from "./resistance.ts";
 import { DEFAULT_RETRY, type RetryPolicy, withRetry } from "./retry.ts";
+import { type ClassResult, safetyReport } from "./safety.ts";
 import { type ExpectationResult, type Observation, scoreCase } from "./scorer.ts";
-import { addSpend, mergeSpend, NO_SPEND, type Spend } from "./spend.ts";
+import { addSpend, ceilingReached, mergeSpend, NO_SPEND, type Spend } from "./spend.ts";
+import type { VulnerabilityClass } from "./vulnerability.ts";
 
 /**
  * How a Sweep obtains a model for one Case.
@@ -69,6 +78,21 @@ export interface TrialResult {
   readonly spend: Spend;
   /** Transient vendor failures this Trial survived. A green Trial that needed three is evidence. */
   readonly retries: number;
+  /** True when some harness guard refused during this Trial. Only meaningful on a probabilistic
+   *  Trial, where it separates "our defence held" from "the model happened to decline". */
+  readonly guarded?: true;
+  /** The weakness this Trial probed, carried so the safety Scorecard can group by class without
+   *  reaching back into the Corpus. */
+  readonly vulnerability?: VulnerabilityClass;
+  /** Set on a red-team Case asserting `model_resisted`. Such a Trial is aggregated into a rate and
+   *  held out of `passed`/`failed`, so a model's mood can never fail a release. */
+  readonly probabilistic?: true;
+  /**
+   * Set when a `guard_held` Case's guard was never asked to refuse, because the model declined the
+   * dangerous action first. Held out of `passed`/`failed` and of the safety verdict, and reported
+   * as a coverage gap. See `guardUnexercised`.
+   */
+  readonly unexercised?: true;
 }
 
 export interface Scorecard {
@@ -83,9 +107,17 @@ export interface Scorecard {
   readonly startedAt: string;
   readonly durationMs: number;
   readonly trials: readonly TrialResult[];
+  /** Gating Trials only. Probabilistic red-team Trials are counted in `resistance` instead. */
   readonly passed: number;
   readonly failed: number;
   readonly errored: number;
+  /** Gating red-team Trials whose guard the model defused before it could be asked. Never gating,
+   *  always reported: an unexercised guard is a coverage gap, not a pass. */
+  readonly unexercised: number;
+  /** Present only when the Corpus held `model_resisted` Cases. Reported, never gating. */
+  readonly resistance?: readonly ResistanceRate[];
+  /** Present only for a red-team Sweep. One row per vulnerability class, measured or not. */
+  readonly safety?: readonly ClassResult[];
   readonly spend: Spend;
   /** Set when the Sweep stopped early; the Scorecard is then partial and never a release gate. */
   readonly abortedReason?: string;
@@ -100,6 +132,8 @@ export interface Scorecard {
    * it omitted behind a permanent "not comparable".
    */
   readonly corpusCases: number;
+  /** Run-to-run variance, when this Sweep repeated its Corpus enough to measure any. */
+  readonly noise?: NoiseFloor;
 }
 
 export interface SweepOptions {
@@ -124,6 +158,21 @@ export interface SweepOptions {
   readonly maxTokens?: number;
   readonly retry?: RetryPolicy;
   /**
+   * Scores the Cases that carry a rubric.
+   *
+   * Absent is fine for a Corpus with none. A Corpus that has one and no Judge errors every such
+   * Trial rather than skipping it: a quality check that passes because nothing measured it is
+   * worse than no check at all.
+   */
+  readonly judge?: Judge;
+  /**
+   * Run every Case this many extra times over what it declares, to measure the noise floor.
+   *
+   * Multiplies rather than replaces, so a Case that already declares Trials for its own reasons
+   * keeps them. A repeat of 1 is the ordinary Sweep.
+   */
+  readonly repeat?: number;
+  /**
    * Called as the Sweep advances, so a run against a real seat is not several silent minutes.
    *
    * Optional and side-effect-only: the Scorecard is unchanged whether anything listens.
@@ -142,56 +191,6 @@ export interface SweepOptions {
  */
 function isVendorFault(reason: AgentLoopFailureReason): boolean {
   return reason.startsWith("model_") || reason === "empty_model_output";
-}
-
-/**
- * Faked dispatch: results are matched by Tool name and consumed in call order.
- *
- * A call with nothing left to consume must never be answered with an empty success. That is a
- * result the Case author never wrote, and the model's whole subsequent turn is then driven by a
- * fiction — an empty payload reads to a model as "the Tool returned nothing", which is itself a
- * reason to call it again. Two honest answers instead:
- *
- * - A Tool whose scripted results are used up **repeats its last one**. A model may call a read
- *   twice, and a real read is idempotent, so repeating is what actually would have happened.
- * - A Tool the Case never scripted at all **fails**, naming itself. That is an authoring gap, and
- *   a gap has to be visible to the model as a failure it must recover from rather than be papered
- *   over with a success.
- */
-function toolDispatcher(evalCase: EvalCase) {
-  type Scripted = NonNullable<EvalCase["toolResults"]>[number];
-  const pending: Scripted[] = [...(evalCase.toolResults ?? [])];
-  const served = new Map<string, Scripted>();
-  const calls: { name: string; arguments: unknown }[] = [];
-  return {
-    calls,
-    port: {
-      dispatch: async (request: {
-        callId: string;
-        name: string;
-        arguments: unknown;
-      }): Promise<ToolDispatchResult> => {
-        calls.push({ name: request.name, arguments: request.arguments });
-        const at = pending.findIndex((r) => r.name === request.name);
-        let result: Scripted | undefined;
-        if (at === -1) result = served.get(request.name);
-        else {
-          [result] = pending.splice(at, 1);
-          if (result !== undefined) served.set(request.name, result);
-        }
-        if (result === undefined) {
-          return {
-            status: "failed",
-            callId: request.callId,
-            reason: `the Eval Case scripts no result for Tool "${request.name}"`,
-          };
-        }
-        return result.error === undefined
-          ? { status: "succeeded", callId: request.callId, output: result.output ?? {} }
-          : { status: "failed", callId: request.callId, reason: result.error };
-      },
-    },
-  };
 }
 
 /**
@@ -230,17 +229,23 @@ async function guardOutput(
   return guarded.blocked ? { kind: "text", text: guarded.message } : output;
 }
 
-function scored(
+async function scored(
   evalCase: EvalCase,
   trial: number,
   vacuous: boolean,
   spend: Spend,
   retries: number,
   guardrails: readonly GuardrailDecision[],
+  judge: Judge | undefined,
   observation: Omit<Observation, "guardrails">
-): TrialResult {
+): Promise<TrialResult> {
   const full: Observation = { ...observation, guardrails };
-  const expectations = scoreCase(evalCase.expect, full);
+  // Judged results are appended rather than interleaved. A rubric is the slowest and least
+  // reproducible check in the framework, so it reads last on the Scorecard too.
+  const expectations = [
+    ...scoreCase(evalCase.expect, full),
+    ...(await scoreJudged(evalCase.expect, full, judge)),
+  ];
   return {
     caseId: evalCase.id,
     trial,
@@ -250,7 +255,65 @@ function scored(
     vacuous,
     spend,
     retries,
+    ...(evalCase.redTeam?.outcome === "model_resisted" ? { probabilistic: true as const } : {}),
+    ...(guardrails.length > 0 ? { guarded: true as const } : {}),
+    ...(guardUnexercised(evalCase.redTeam, expectations, guardrails)
+      ? { unexercised: true as const }
+      : {}),
+    ...(evalCase.redTeam === undefined ? {} : { vulnerability: evalCase.redTeam.class }),
   };
+}
+
+/**
+ * One Turn through the product's own Chat executor, against a real database.
+ *
+ * The Observation is built from what the Turn *persisted* rather than from what the loop returned,
+ * because that is the whole point of the tier: an answer the model produced but the product failed
+ * to store is not an answer a participant ever received.
+ */
+async function runL3Trial(
+  evalCase: EvalCase,
+  soul: EvalSoul,
+  binding: ModelBinding,
+  trial: number,
+  judge: Judge | undefined
+): Promise<TrialResult> {
+  const vacuous = evalCase.expect.length === 0;
+  // Accumulated out here, not read off the result: a Turn that throws after two paid calls must
+  // still report what it billed, exactly as an L2 Trial does.
+  let spend = NO_SPEND;
+  try {
+    const turn = await runPersistedTurn({
+      evalCase,
+      soul,
+      binding,
+      onUsage: (usage) => {
+        spend = addSpend(spend, usage);
+      },
+    });
+    return await scored(evalCase, trial, vacuous, turn.spend, 0, [], judge, {
+      systemPrompt: turn.systemPrompt,
+      toolCalls: turn.toolCalls,
+      output: turn.answer === null ? undefined : { kind: "text", text: turn.answer },
+      status: turn.runStatus === "succeeded" ? "completed" : turn.runStatus,
+      persisted: {
+        runStatus: turn.runStatus,
+        stateStatus: turn.stateStatus,
+        turnStatus: turn.turnStatus,
+        events: turn.events,
+        soulCommits: turn.soulCommits,
+      },
+    });
+  } catch (cause) {
+    return errored(
+      evalCase,
+      trial,
+      vacuous,
+      cause instanceof Error ? cause.message : String(cause),
+      spend,
+      0
+    );
+  }
 }
 
 async function runTrial(
@@ -258,8 +321,10 @@ async function runTrial(
   soul: EvalSoul,
   binding: ModelBinding,
   trial: number,
-  retryPolicy: RetryPolicy
+  retryPolicy: RetryPolicy,
+  judge: Judge | undefined
 ): Promise<TrialResult> {
+  if (evalCase.tier === "l3") return await runL3Trial(evalCase, soul, binding, trial, judge);
   const vacuous = evalCase.expect.length === 0;
   const tools = toolDispatcher(evalCase);
   const guards = turnGuardrails(soul, `${evalCase.id}#${trial}`);
@@ -324,7 +389,7 @@ async function runTrial(
     // so a refused request must cost nothing and must never reach the vendor.
     const guarded = await guardInput(guards, evalCase.input);
     if (guarded.blocked) {
-      return scored(evalCase, trial, vacuous, spend, retries, guards.decisions, {
+      return await scored(evalCase, trial, vacuous, spend, retries, guards.decisions, judge, {
         systemPrompt,
         toolCalls: [],
         output: { kind: "text", text: guarded.message },
@@ -354,7 +419,7 @@ async function runTrial(
 
     const answered =
       outcome.status === "completed" ? asOutput(outcome.output, lastOutput) : lastOutput;
-    return scored(evalCase, trial, vacuous, spend, retries, guards.decisions, {
+    return await scored(evalCase, trial, vacuous, spend, retries, guards.decisions, judge, {
       systemPrompt,
       toolCalls: tools.calls,
       // The output guard is the last thing production runs before an answer becomes durable, so a
@@ -393,35 +458,9 @@ function errored(
     error,
     spend,
     retries,
+    ...(evalCase.redTeam?.outcome === "model_resisted" ? { probabilistic: true as const } : {}),
+    ...(evalCase.redTeam === undefined ? {} : { vulnerability: evalCase.redTeam.class }),
   };
-}
-
-/**
- * Whether the Sweep has run out of budget, checked before launching rather than after.
- *
- * Cost is only knowable once a call has been made, so no ceiling can be exact. Checking at the
- * Trial boundary bounds the overrun to one Trial instead of to the whole remaining Corpus.
- */
-function ceilingReached(
-  spend: Spend,
-  options: SweepOptions,
-  done: number,
-  planned: number
-): string | undefined {
-  const suffix = `after ${done} of ${planned} Trials`;
-  if (options.maxSpendUsd !== undefined && spend.costUsd >= options.maxSpendUsd) {
-    return `spend ceiling reached: $${spend.costUsd.toFixed(4)} of $${options.maxSpendUsd} ${suffix}`;
-  }
-  // A dollar ceiling cannot bound a total it is known to understate. Continuing would let the
-  // Sweep run to the end of the Corpus while reporting it had budget left.
-  if (options.maxSpendUsd !== undefined && options.maxTokens === undefined && spend.unpriced > 0) {
-    return `${spend.unpriced} call(s) could not be priced, so a dollar ceiling cannot bound this Sweep — pass --max-tokens ${suffix}`;
-  }
-  const tokens = spend.inputTokens + spend.outputTokens;
-  if (options.maxTokens !== undefined && tokens >= options.maxTokens) {
-    return `token ceiling reached: ${tokens} of ${options.maxTokens} tokens ${suffix}`;
-  }
-  return undefined;
 }
 
 /** A completed loop returns its own output; fall back to the last model output for tool-only runs. */
@@ -431,12 +470,6 @@ function asOutput(output: unknown, last: ModelOutput | undefined): ModelOutput |
   return last;
 }
 
-/**
- * Execute a Corpus against one model binding and return a Scorecard.
- *
- * The single seam the eval framework adds. One Case failing never aborts the Sweep — one bad Case
- * must not cost the whole run's information.
- */
 /**
  * Cases a filter selects, and how many Trials they plan.
  *
@@ -451,10 +484,21 @@ export function selectCases(
   return caseFilter === undefined ? cases : cases.filter((c) => c.id === caseFilter);
 }
 
-export function plannedTrials(cases: readonly EvalCase[]): number {
-  return cases.reduce((n, c) => n + Math.max(1, c.trials ?? 1), 0);
+export function plannedTrials(cases: readonly EvalCase[], repeat = 1): number {
+  return cases.reduce((n, c) => n + trialCount(c, repeat), 0);
 }
 
+/** How many Trials one Case runs, once its own declaration and the Sweep's repeat are combined. */
+export function trialCount(evalCase: EvalCase, repeat = 1): number {
+  return Math.max(1, evalCase.trials ?? 1) * Math.max(1, repeat);
+}
+
+/**
+ * Execute a Corpus against one model binding and return a Scorecard.
+ *
+ * The single seam the eval framework adds. One Case failing never aborts the Sweep — one bad Case
+ * must not cost the whole run's information.
+ */
 export async function runSweep(options: SweepOptions): Promise<Scorecard> {
   const now = options.now ?? (() => new Date());
   const started = now();
@@ -464,7 +508,7 @@ export async function runSweep(options: SweepOptions): Promise<Scorecard> {
     throw new Error(`no Eval Case matches "${options.caseFilter}"`);
   }
 
-  const planned = plannedTrials(selected);
+  const planned = plannedTrials(selected, options.repeat);
   const retryPolicy = options.retry ?? DEFAULT_RETRY;
   const trials: TrialResult[] = [];
   let spend = NO_SPEND;
@@ -474,7 +518,7 @@ export async function runSweep(options: SweepOptions): Promise<Scorecard> {
   report({ kind: "sweep-start", modelId: options.model.id, cases: selected.length, planned });
 
   outer: for (const evalCase of selected) {
-    const count = Math.max(1, evalCase.trials ?? 1);
+    const count = trialCount(evalCase, options.repeat);
     for (let trial = 1; trial <= count; trial += 1) {
       // Checked before launching rather than after: cost is only knowable once a call is made,
       // so the last Trial before the ceiling is allowed to exceed it and the next is not started.
@@ -496,7 +540,8 @@ export async function runSweep(options: SweepOptions): Promise<Scorecard> {
         options.corpus.soul,
         options.model,
         trial,
-        retryPolicy
+        retryPolicy,
+        options.judge
       );
       report({ kind: "trial-end", result });
       trials.push(result);
@@ -505,8 +550,10 @@ export async function runSweep(options: SweepOptions): Promise<Scorecard> {
   }
 
   const version = options.model.reportedVersion?.();
+  const gating = trials.filter((t) => t.probabilistic !== true);
+  const resistance = measureResistance(trials);
 
-  return {
+  const card: Scorecard = {
     corpusHash: options.corpus.hash,
     modelId: options.model.id,
     ...(version === undefined ? {} : { modelVersion: version }),
@@ -515,12 +562,18 @@ export async function runSweep(options: SweepOptions): Promise<Scorecard> {
     startedAt: started.toISOString(),
     durationMs: now().getTime() - started.getTime(),
     trials,
-    passed: trials.filter((t) => t.passed && t.error === undefined).length,
-    failed: trials.filter((t) => !t.passed && t.error === undefined).length,
-    errored: trials.filter((t) => t.error !== undefined).length,
+    passed: gating.filter((t) => t.passed && t.error === undefined && !t.unexercised).length,
+    failed: gating.filter((t) => !t.passed && t.error === undefined && !t.unexercised).length,
+    errored: gating.filter((t) => t.error !== undefined).length,
+    unexercised: gating.filter((t) => t.unexercised === true).length,
     spend,
     ...(abortedReason === undefined ? {} : { abortedReason }),
     skipped: planned - trials.length,
     corpusCases: options.corpus.cases.length,
+    ...(resistance.length === 0 ? {} : { resistance }),
+    ...(trials.some((t) => t.vulnerability !== undefined) ? { safety: safetyReport(trials) } : {}),
   };
+
+  const noise = measureNoise(card);
+  return noise === undefined ? card : { ...card, noise };
 }

@@ -291,7 +291,22 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
     // a `ProviderEntry` to describe the model and a `SecretsService` to resolve its key. Building
     // the client any other way would diverge from production in the one layer the eval must hold
     // constant.
-    eval: ["agent-runtime", "turn-executor", "model-adapter", "llm", "schema", "secrets", "soul"],
+    //
+    // `storage` and `run-kernel` are the L3 tier's edges. That tier runs a Turn through the real
+    // `createChatExecutor`, which requires a real `RunStore`, `RunEventStore`, `BudgetStore` and
+    // State machine. Substituting in-memory doubles would leave L3 measuring the eval's own
+    // reimplementation of the Run lifecycle — the one thing L3 exists to prove L2 cannot.
+    eval: [
+      "agent-runtime",
+      "turn-executor",
+      "model-adapter",
+      "llm",
+      "schema",
+      "secrets",
+      "soul",
+      "storage",
+      "run-kernel",
+    ],
   },
   // Legacy v1 edges that still exist during cutover. Each is a target package
   // importing a not-yet-replaced legacy package; removed when its owner passes

@@ -15,11 +15,11 @@ on:
       models:
         description: "Seats to sweep"
         type: choice
-        default: sonnet,luna
+        default: sonnet,terra
         options:
-          - sonnet,luna
+          - sonnet,terra
           - sonnet
-          - luna
+          - terra
       max_tokens_per_trial:
         description: "Token ceiling per Trial, per model"
         type: string
@@ -32,6 +32,14 @@ on:
         description: "Compare against the promoted Baseline and fail on a regression"
         type: boolean
         default: false
+      suites:
+        description: "Which Corpus to sweep"
+        type: choice
+        default: both
+        options:
+          - both
+          - capability
+          - red-team
 
 # A Sweep spends a finite subscription quota, so a second run never cancels a first: the cancelled
 # one would have spent its tokens for a Scorecard nobody reads.
@@ -65,21 +73,41 @@ jobs:
           PER_TRIAL: ${{ inputs.max_tokens_per_trial }}
           CASE: ${{ inputs.case }}
           COMPARE: ${{ inputs.baseline }}
+          SUITES: ${{ inputs.suites }}
         run: |
-          set -euo pipefail
-          args=(--save-dir scorecards --max-tokens-per-trial "$PER_TRIAL")
-          [ -z "$CASE" ] || args+=(--case "$CASE")
-          [ "$COMPARE" != "true" ] || args+=(--baseline)
-          # Progress is on stderr and streams straight to the log, so a watching maintainer sees
-          # each Trial land. The Scorecard is on stdout and only prints once the Sweep is over, so
-          # capturing it costs no liveness and gives the summary step an exact copy to quote.
-          # `pnpm exec` rather than a bare `sh`: `tsx` is a local devDependency, and a CI step's
-          # PATH does not carry `node_modules/.bin` the way a `pnpm run` script's does.
+          # `+e` is deliberate and load-bearing. GitHub runs `run:` under `bash -e` by default, and
+          # `set -uo pipefail` does not clear it — so without this the first failing Sweep would
+          # abort the step and silently skip the red-team suite, which is the one a maintainer is
+          # most tempted to skip and least able to afford skipping.
           set +e
-          pnpm exec sh scripts/seat.sh "$MODELS" "${args[@]}" > scorecard.txt
-          status=$?
-          cat scorecard.txt
-          exit $status
+          set -uo pipefail
+          # The two suites are swept in separate blocks with separate Scorecards, because they have
+          # separate Corpus hashes and separate Baselines. Running them as one Sweep would make
+          # adding an attack invalidate the capability Baseline.
+          #
+          # A failing capability Sweep must not skip the red-team one. A maintainer clearing a
+          # release wants both answers in one run, and the safety answer is the one they would
+          # otherwise be tempted to skip.
+          overall=0
+          for suite in capability red-team; do
+            [ "$SUITES" = both ] || [ "$SUITES" = "$suite" ] || continue
+            args=(--save-dir "scorecards/$suite" --max-tokens-per-trial "$PER_TRIAL")
+            [ "$suite" != red-team ] || args+=(--corpus corpus/red-team)
+            [ -z "$CASE" ] || args+=(--case "$CASE")
+            [ "$COMPARE" != "true" ] || args+=(--baseline)
+            echo "::group::Sweep $suite"
+            # Progress is on stderr and streams straight to the log, so a watching maintainer sees
+            # each Trial land. The Scorecard is on stdout and only prints once the Sweep is over, so
+            # capturing it costs no liveness and gives the summary step an exact copy to quote.
+            # `pnpm exec` rather than a bare `sh`: `tsx` is a local devDependency, and a CI step's
+            # PATH does not carry `node_modules/.bin` the way a `pnpm run` script's does.
+            pnpm exec sh scripts/seat.sh "$MODELS" "${args[@]}" > "scorecard-$suite.txt"
+            status=$?
+            cat "scorecard-$suite.txt"
+            echo "::endgroup::"
+            [ "$status" -eq 0 ] || overall=$status
+          done
+          exit $overall
       - name: Summarise
         if: always()
         working-directory: apps/eval
@@ -87,10 +115,15 @@ jobs:
           set -euo pipefail
           {
             echo "## Eval — \`${{ inputs.models }}\`"
-            echo
-            echo '```text'
-            cat scorecard.txt 2>/dev/null || echo "the Sweep produced no Scorecard"
-            echo '```'
+            for suite in capability red-team; do
+              [ -f "scorecard-$suite.txt" ] || continue
+              echo
+              echo "### $suite"
+              echo
+              echo '```text'
+              cat "scorecard-$suite.txt"
+              echo '```'
+            done
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload Scorecards
         if: always()
@@ -99,6 +132,6 @@ jobs:
           name: eval-${{ github.run_id }}
           path: |
             apps/eval/scorecards/
-            apps/eval/scorecard.txt
+            apps/eval/scorecard-*.txt
           if-no-files-found: warn
           retention-days: 90

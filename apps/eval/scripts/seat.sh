@@ -100,7 +100,7 @@ collect() {
       fi
       export CLAUDE_CODE_OAUTH_TOKEN
       ;;
-    luna)
+    terra)
       # A file is the only route that cannot be defeated by the terminal: see prompt_secret.
       if [ -z "${CODEX_AUTH_JSON:-}" ] && [ -n "${CODEX_AUTH_FILE:-}" ]; then
         if [ ! -r "$CODEX_AUTH_FILE" ]; then
@@ -122,7 +122,7 @@ If the paste does not land, save it to a file and use: CODEX_AUTH_FILE=/path/to/
       export CODEX_AUTH_JSON
       ;;
     *)
-      printf 'unknown model "%s" — expected: sonnet, luna\n' "$1" >&2
+      printf 'unknown model "%s" — expected: sonnet, terra\n' "$1" >&2
       exit 1
       ;;
   esac
@@ -149,6 +149,25 @@ for arg in "$@"; do
 done
 if [ -z "$ceiling" ]; then
   set -- "$@" --max-tokens-per-trial 15000
+fi
+
+# Every seat Sweep keeps its Scorecard. A Matrix prints each leg in turn, so a failing early leg
+# scrolls away behind the ones after it — and without an artifact the only way to read it back is
+# to sweep again, which spends quota a subscription seat has a finite amount of. Same rule as the
+# ceiling above: supply a default, never override a directory the caller chose.
+# Split by suite, for the same reason the Baselines are: a Scorecard is named for its model, so
+# a red-team Sweep and a capability Sweep sharing one directory would have the second silently
+# overwrite the first. This mirrors the `--save-dir scorecards/$suite` the CI workflow passes.
+saving=""
+suite=capability
+for arg in "$@"; do
+  case "$arg" in
+    --save-dir | --save-dir=* | --save | --save=*) saving=1 ;;
+    */red-team | */red-team/) suite=red-team ;;
+  esac
+done
+if [ -z "$saving" ]; then
+  set -- "$@" --save-dir "scorecards/$suite"
 fi
 
 exec tsx src/cli.ts --model "$models" "$@"

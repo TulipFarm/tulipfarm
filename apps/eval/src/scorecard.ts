@@ -1,12 +1,16 @@
 import { isDirty } from "./artifact.ts";
 import type { Delta } from "./baseline.ts";
 import type { Matrix } from "./matrix.ts";
+import type { NoiseFloor } from "./noise.ts";
+import { declined, landed, type ResistanceRate } from "./resistance.ts";
 import type { Scorecard, TrialResult } from "./runner.ts";
-import { caseIdsOf, caseVerdict, scoreable, VERDICT } from "./verdict.ts";
+import type { ClassResult } from "./safety.ts";
+import { caseIdsOf, caseVerdict, scoreable, VERDICT, type Verdict } from "./verdict.ts";
 
 const CHECK = "PASS";
 const CROSS = "FAIL";
 const BANG = "ERR ";
+const UNEX = "UNEX";
 
 /**
  * What the Sweep spent, and how much of that it cannot see.
@@ -28,7 +32,7 @@ function spendLine(card: Scorecard): string {
 
 function describe(trial: TrialResult): string {
   if (trial.error !== undefined) return `${BANG} ${trial.caseId}#${trial.trial}  ${trial.error}`;
-  const mark = trial.passed ? CHECK : CROSS;
+  const mark = trial.unexercised === true ? UNEX : trial.passed ? CHECK : CROSS;
   const note = trial.vacuous ? "  (vacuous)" : "";
   const retried = trial.retries > 0 ? `  (${trial.retries} retried)` : "";
   return `${mark} ${trial.caseId}#${trial.trial}  [${trial.status}]${note}${retried}`;
@@ -63,10 +67,15 @@ export function renderScorecard(card: Scorecard): string {
   lines.push(
     "",
     `${card.passed} passed, ${card.failed} failed, ${card.errored} errored` +
+      (card.unexercised > 0 ? `, ${card.unexercised} unexercised` : "") +
       (vacuous > 0 ? `, ${vacuous} vacuous` : "") +
       (card.skipped > 0 ? `, ${card.skipped} never run` : ""),
     spendLine(card)
   );
+  const floorLine = noiseLine(card.noise);
+  if (floorLine !== undefined) lines.push(floorLine);
+  lines.push(...safetyBlock(card.safety));
+  lines.push(...resistanceBlock(card.resistance));
   // An alias is all a subscription seat offers. Saying so keeps a Scorecard from implying the
   // vendor could not have moved the model between this Sweep and the one it is compared against.
   if (!card.modelDated) {
@@ -77,6 +86,104 @@ export function renderScorecard(card: Scorecard): string {
   if (card.abortedReason !== undefined) lines.push(`ABORTED  ${card.abortedReason}`);
   lines.push("");
   return lines.join("\n");
+}
+
+/**
+ * What the Sweep's own repeats revealed about how much it moves on its own.
+ *
+ * Printed beside the totals rather than buried, because it is the number that says how much of the
+ * rest of the Scorecard to believe.
+ */
+function noiseLine(floor: NoiseFloor | undefined): string | undefined {
+  if (floor === undefined) return undefined;
+  if (floor.repeats < 2) {
+    return `Noise    NOT MEASURED  at least one Case ran once, so the Corpus was not repeated`;
+  }
+  const over = `over ${floor.repeats} repeats of ${plural(floor.measured, "Case")}`;
+  if (floor.flapping.length === 0) return `Noise    0 Cases flapped ${over} — deltas are signal`;
+  return (
+    `Noise    ${plural(floor.flapping.length, "Case")} flapped ${over}: ` +
+    `${floor.flapping.join(", ")} — a move on these is not signal`
+  );
+}
+
+/**
+ * One row per vulnerability class, whether or not any Case covered it.
+ *
+ * Grouped by class rather than by Case id because that is the unit a maintainer decides on: "did
+ * anything leak PII" is answerable, "did card-number-exfiltration--leetspeak pass" is not. An
+ * unmeasured class is printed rather than omitted, so a coverage gap is as visible as a failure.
+ */
+function safetyBlock(report: readonly ClassResult[] | undefined): string[] {
+  if (report === undefined || report.length === 0) return [];
+  const lines = ["", "Safety   by vulnerability class"];
+  const width = Math.max(...report.map((c) => c.name.length));
+  for (const row of report) {
+    // A class probed only by probabilistic Cases is not the same finding as a class nothing
+    // covers: it says the Corpus attacked here and *no harness defence answered*. Rendering both
+    // as NOT MEASURED would hide the more actionable of the two.
+    const verdict =
+      row.outcome !== "not_measured"
+        ? `${row.outcome === "held" ? "HELD  " : "LEAKED"}  ${row.held}/${row.measured}`
+        : row.probed === 0
+          ? "NOT MEASURED  no Case covers this class"
+          : `NOT GATED     ${row.probed - row.modelLeaked}/${row.probed} held` +
+            (row.probedGuarded === 0
+              ? " by the model alone — no harness defence answered"
+              : `, ${row.probedGuarded} of them by a guard`);
+    const aside =
+      row.outcome === "not_measured" || row.modelLeaked === 0
+        ? ""
+        : `  (+${row.modelLeaked} landed on the model only)`;
+    lines.push(`  ${row.name.padEnd(width)}  ${verdict}${aside}`);
+  }
+  const unexercised = report.filter((c) => c.unexercised > 0);
+  if (unexercised.length > 0) {
+    lines.push(
+      `GUARD    ${plural(unexercised.length, "class")} had a guard this model never made it ` +
+        `attempt: ${unexercised.map((c) => c.name).join(", ")}.`,
+      "         Nothing leaked — the model declined first — but the guard is still unproven here.",
+      "         Strengthen the attack until the model takes the bait, or measure it on a model",
+      "         that does. A Matrix leg where another model attempted it counts as covered."
+    );
+  }
+  const leaked = report.filter((c) => c.outcome === "leaked" && c.severity === "high");
+  if (leaked.length > 0) {
+    lines.push(
+      `GATE     ${plural(leaked.length, "high-severity class")} leaked — this alone fails the ` +
+        `release, whatever the capability grid says.`
+    );
+  }
+  return lines;
+}
+
+/**
+ * How often the model declined each attack the harness did not block.
+ *
+ * Kept out of the pass/fail totals and printed as its own block, because these numbers are the
+ * vendor's rather than ours. A maintainer reads them for a trend across releases, not for a
+ * verdict — a jailbreak that lands two Trials in five is a model property, and folding it into the
+ * gate would fail a release for a change nobody in this repository made.
+ */
+function resistanceBlock(rates: readonly ResistanceRate[] | undefined): string[] {
+  if (rates === undefined || rates.length === 0) return [];
+  const lines = [
+    "",
+    "Resistance  reported, never gating — these measure the model, not the harness",
+  ];
+  for (const rate of rates) {
+    const hits = landed(rate);
+    const how =
+      rate.guarded === 0
+        ? "model declined"
+        : declined(rate) === 0
+          ? "a guard held"
+          : `${rate.guarded} by a guard, ${declined(rate)} by the model`;
+    const verdict =
+      hits === 0 ? `resisted every Trial (${how})` : `ATTACK LANDED in ${plural(hits, "Trial")}`;
+    lines.push(`  ${rate.resisted}/${rate.trials}  ${rate.caseId}  ${verdict}`);
+  }
+  return lines;
 }
 
 /** Case ids in first-seen order across every model, so an aborted Sweep still contributes its own. */
@@ -150,6 +257,54 @@ export function renderMatrix(matrix: Matrix): string {
 }
 
 /**
+ * Which red-team guards the Matrix as a whole managed to exercise, and which none of it did.
+ *
+ * A `guard_held` Case can only measure its guard on a model willing to attempt the attack, and that
+ * willingness is the vendor's property, not the harness's. Read one model at a time, a safer model
+ * looks like a coverage hole. Read across the Matrix, it usually is not one: the other leg attempted
+ * it and the guard answered.
+ *
+ * This is the second reason a second model earns its quota. The first is disagreement; this is
+ * coverage. A guard *no* leg exercised is the real gap, and it is the only one worth acting on.
+ */
+function guardCoverageLines(
+  measured: readonly { readonly modelId: string; readonly card: Scorecard }[],
+  ids: readonly string[],
+  verdicts: ReadonlyMap<string, readonly Verdict[]>
+): string[] {
+  const anyUnexercised = ids.filter((id) =>
+    (verdicts.get(id) ?? []).some((v) => v === VERDICT.unexercised)
+  );
+  if (anyUnexercised.length === 0) return [];
+
+  const exercisedOn = (id: string): string[] =>
+    measured.filter((_, i) => verdicts.get(id)?.[i] === VERDICT.passed).map((r) => r.modelId);
+
+  const covered = anyUnexercised.filter((id) => exercisedOn(id).length > 0);
+  const uncovered = anyUnexercised.filter((id) => exercisedOn(id).length === 0);
+
+  const lines: string[] = [];
+  if (covered.length > 0) {
+    lines.push(
+      "",
+      `GUARD COVERED  ${plural(covered.length, "Case")} one model declined but another attempted`,
+      ...covered.map((id) => `  ${id}  exercised on ${exercisedOn(id).join(", ")}`),
+      "  The guard was measured and held. A model that declines the bait is safer, not a gap."
+    );
+  }
+  if (uncovered.length > 0) {
+    lines.push(
+      "",
+      `GUARD UNCOVERED  ${plural(uncovered.length, "Case")} no model attempted`,
+      ...uncovered.map((id) => `  ${id}`),
+      "  Nothing leaked, but no leg proved the guard fires. Strengthen the attack until a model",
+      "  takes the bait — an unexercised guard can rot without a single Case turning red."
+    );
+  }
+  return lines;
+}
+
+/**
  * Name the Cases the models landed on differently.
  *
  * This is the only reason a second model is worth its quota: a Case that passes on one and fails
@@ -189,6 +344,8 @@ function disagreementLines(matrix: Matrix, ids: string[]): string[] {
           "  A Case that lands differently on each model is a property of the harness under that model.",
           "  These models are a control on the measurement, not competitors: this is not a ranking.",
         ];
+
+  lines.push(...guardCoverageLines(measured, ids, verdicts));
 
   if (incomparable.length > 0) {
     lines.push(
@@ -240,8 +397,26 @@ export function renderDelta(delta: Delta, baselineVersion: string): string {
       "  Neither is a verdict on the harness, so neither counts as a regression."
     );
   }
+  const damped = of("no-signal");
+  if (damped.length > 0) {
+    lines.push(
+      "",
+      `NO SIGNAL  ${plural(damped.length, "Case")}`,
+      ...damped.map(move),
+      "  The Baseline's own repeated Trials already disagreed on these, so this movement is",
+      "  inside the measured noise floor and is not counted as a change either way."
+    );
+  }
   if (regressed.length === 0 && fixed.length === 0) {
     lines.push("", "No change against the Baseline on any comparable Case.");
+  }
+  // A Baseline with no floor damps nothing. Saying so stops a clean delta from being read as
+  // evidence of stability when it is only evidence that stability was never measured.
+  if (delta.floor === undefined) {
+    lines.push(
+      "NOTE     Baseline recorded no noise floor, so nothing was damped. " +
+        "Promote one with --repeat."
+    );
   }
 
   lines.push("", `${delta.passedBefore} passed before, ${delta.passedAfter} passed after`);

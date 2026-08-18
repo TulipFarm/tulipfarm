@@ -2,9 +2,11 @@ import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import type { AssembleContext } from "@tulipfarm/agent-runtime";
-import type { EvalCase } from "./case.ts";
+import { type EvalCase, type Expectation, isGuardrail, isPersisted } from "./case.ts";
 import { type EvalSoul, SOUL_OWNED_CONTEXT_KEYS, soulContext } from "./eval-soul.ts";
+import { expandRedTeam, type RedTeamOutcome } from "./red-team.ts";
 import { OUTPUT_FLAGS } from "./scorer.ts";
+import { CLASS_NAMES, isVulnerabilityClass } from "./vulnerability.ts";
 
 export class CorpusError extends Error {
   constructor(message: string) {
@@ -19,6 +21,8 @@ export interface Corpus {
   readonly hash: string;
   /** The Eval Soul every Case in this Corpus is measured against. */
   readonly soul: EvalSoul;
+  /** Which Corpus this is, when it is not the default capability one. Names its Baseline folder. */
+  readonly suite?: string;
 }
 
 /**
@@ -61,6 +65,17 @@ const GUARD_STAGES = ["input", "tool_call", "output"] as const;
  */
 const GUARD_NAMES = ["prompt_injection", "tool_blocklist", "content_filter"] as const;
 
+/**
+ * The directory whose Cases may carry `redTeam`, and only whose Cases may.
+ *
+ * Separation is by directory rather than by convention because the two corpora have separate
+ * hashes and separate Baselines: an attack added beside the capability Cases would invalidate the
+ * capability Baseline, and a safety regression would have to be found inside the capability grid.
+ */
+export const RED_TEAM_DIR = "red-team";
+
+const RED_TEAM_OUTCOMES: readonly RedTeamOutcome[] = ["guard_held", "model_resisted"];
+
 /** A required field's type, or the closed set of values it may take. */
 type FieldType = "string" | "number" | "strings" | "any" | readonly string[];
 
@@ -89,6 +104,16 @@ const EXPECTATION_FIELDS: Record<string, readonly [string, FieldType][]> = {
     ["guard", GUARD_NAMES],
   ],
   guardrail_allowed: [["stage", GUARD_STAGES]],
+  rubric_score: [
+    ["criteria", "strings"],
+    ["min", "number"],
+  ],
+  rubric_denies: [["question", "string"]],
+  run_status: [["status", "string"]],
+  state_status: [["status", "string"]],
+  turn_status: [["status", "string"]],
+  run_event_emitted: [["eventType", "string"]],
+  soul_committed: [["path", "string"]],
 };
 
 /**
@@ -113,13 +138,23 @@ function canonical(value: unknown): string {
  * the Agent, the business and the catalogue. A fixture edit that left this hash alone would let a
  * Sweep be compared against a Baseline that measured a different Context entirely.
  */
-export function corpusHash(cases: readonly EvalCase[], soulHash: string): string {
+export function corpusHash(
+  cases: readonly EvalCase[],
+  soulHash: string,
+  judgeVersion = "no-judge"
+): string {
   const sorted = [...cases].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-  return createHash("sha256")
-    .update(canonical(sorted))
-    .update("\0soul\0")
-    .update(soulHash)
-    .digest("hex");
+  return (
+    createHash("sha256")
+      .update(canonical(sorted))
+      .update("\0soul\0")
+      .update(soulHash)
+      // Swapping the Judge re-scores every rubric Case, so it must break comparison as loudly as
+      // editing a Case does. Left out of the hash, a Judge change would silently rewrite history.
+      .update("\0judge\0")
+      .update(judgeVersion)
+      .digest("hex")
+  );
 }
 
 function require(condition: boolean, message: string): asserts condition {
@@ -133,8 +168,9 @@ function validate(raw: unknown, file: string): EvalCase {
     require(typeof c[field] === "string" &&
       (c[field] as string).length > 0, `${file}: missing required field "${field}"`);
   }
-  require(c.tier ===
-    "l2", `${file}: tier ${JSON.stringify(c.tier)} is not runnable; expected "l2"`);
+  require(c.tier === "l2" ||
+    c.tier ===
+      "l3", `${file}: tier ${JSON.stringify(c.tier)} is not runnable; expected "l2" or "l3"`);
   require(typeof c.context === "object" && c.context !== null, `${file}: missing "context"`);
   require(Array.isArray(c.input) &&
     c.input.length > 0, `${file}: "input" must be a non-empty array`);
@@ -154,8 +190,67 @@ function validate(raw: unknown, file: string): EvalCase {
         type
       ), `${file}: expectation "${kind}" needs a ${describeField(type)} field "${field}"`);
     }
+    // Caught here rather than at scoring time: an L2 Sweep has no persisted state to read, so
+    // this Case could only ever error — and it would do so after the model calls were paid for.
+    require(c.tier === "l3" ||
+      !isPersisted(a as Expectation), `${file}: expectation "${kind}" reads persisted state, ` +
+      `which only tier "l3" observes; this Case is tier ${JSON.stringify(c.tier)}`);
+    // The mirror of the rule above. L3 runs the guards but does not collect their decisions, so
+    // this would pass by finding nothing — the vacuous pass this framework exists to prevent.
+    require(c.tier !== "l3" ||
+      !isGuardrail(a as Expectation), `${file}: expectation "${kind}" reads guardrail decisions, ` +
+      `which only tier "l2" collects; move this Case to tier "l2"`);
+  }
+  if (c.journey !== undefined) {
+    require(Array.isArray(c.journey) &&
+      c.journey.length > 0, `${file}: "journey" must be a non-empty array of further Turns`);
+    // A journey needs a database and a Conversation to span, and only L3 has either. On an L2
+    // Case the field would be read by nothing and the Case would quietly measure one Turn.
+    require(c.tier ===
+      "l3", `${file}: "journey" needs tier "l3"; this Case is tier ${JSON.stringify(c.tier)}`);
+    for (const turn of c.journey as unknown[]) {
+      const t = turn as { input?: unknown };
+      require(Array.isArray(t.input) &&
+        t.input.length > 0, `${file}: every "journey" Turn needs a non-empty "input"`);
+    }
+  }
+  if (c.redTeam !== undefined) {
+    validateRedTeam(c.redTeam, file);
+    const guard = (c.expect as { kind: string }[]).find((e) => e.kind.startsWith("guardrail_"));
+    require((c.redTeam as { outcome?: unknown }).outcome !== "model_resisted" ||
+      guard ===
+        undefined, `${file}: a "model_resisted" Case asserts the model declined, but it also asserts ` +
+      `"${guard?.kind}" — a harness defence. A Case may assert one ending or the other, never ` +
+      `both, or the guard could stop firing and the Case stay green because the model refused anyway.`);
   }
   return raw as EvalCase;
+}
+
+/**
+ * Check the red-team declaration a Case carries.
+ *
+ * The rule worth the code is the last one. A Case that asserted both endings would let a harness
+ * regression hide behind a model that happened to decline anyway: the guard stops firing, the
+ * model still refuses, and the Case stays green while the defence is gone.
+ */
+function validateRedTeam(raw: unknown, file: string): void {
+  require(typeof raw === "object" && raw !== null, `${file}: "redTeam" must be an object`);
+  const rt = raw as Record<string, unknown>;
+  require(RED_TEAM_OUTCOMES.includes(
+    rt.outcome as RedTeamOutcome
+  ), `${file}: "redTeam.outcome" must be one of ${RED_TEAM_OUTCOMES.join(", ")}`);
+  require(isVulnerabilityClass(
+    rt.class
+  ), `${file}: "redTeam.class" must be one of ${CLASS_NAMES.join(", ")}; a typo'd class would ` +
+    `leave the Case silently uncounted in the safety Scorecard`);
+  require(typeof rt.payload === "string" &&
+    rt.payload.length >
+      0, `${file}: "redTeam.payload" must be the attack text, so a strategy has something to rewrite`);
+  require(rt.strategies === undefined ||
+    (Array.isArray(rt.strategies) &&
+      rt.strategies.every(
+        (v) => typeof v === "string"
+      )), `${file}: "redTeam.strategies" must be an array of strategy names`);
 }
 
 /**
@@ -176,6 +271,11 @@ function givenToModel(c: EvalCase, fromSoul: Partial<AssembleContext>): string {
   walk(c.context);
   walk(c.input);
   walk(c.toolResults ?? []);
+  // A journey's later Turns are handed to the model too, so a fact stated only there is grounded.
+  for (const turn of c.journey ?? []) {
+    walk(turn.input);
+    walk(turn.toolResults ?? []);
+  }
   return found.join("\n");
 }
 
@@ -255,7 +355,11 @@ function fieldOk(value: unknown, type: FieldType): boolean {
  * Throws rather than skipping on any malformed Case: a Corpus that quietly drops a Case reports a
  * pass rate over a smaller denominator than the maintainer believes they are reading.
  */
-export async function loadCorpus(dir: string, soul: EvalSoul): Promise<Corpus> {
+export async function loadCorpus(
+  dir: string,
+  soul: EvalSoul,
+  judgeVersion?: string
+): Promise<Corpus> {
   let names: string[];
   try {
     names = (await readdir(dir)).filter((n) => n.endsWith(".json")).sort();
@@ -294,11 +398,33 @@ export async function loadCorpus(dir: string, soul: EvalSoul): Promise<Corpus> {
     if (previous !== undefined) {
       throw new CorpusError(`duplicate Case id "${evalCase.id}" in ${previous} and ${name}`);
     }
+    const isRedTeamDir = path.basename(dir) === RED_TEAM_DIR;
+    require(evalCase.redTeam === undefined ||
+      isRedTeamDir, `${name}: only Cases in corpus/${RED_TEAM_DIR}/ may declare "redTeam"; an attack here would ` +
+      `invalidate the capability Baseline every time one was added.`);
+    require(evalCase.redTeam !== undefined ||
+      !isRedTeamDir, `${name}: every Case in corpus/${RED_TEAM_DIR}/ must declare "redTeam", so it is explicit ` +
+      `whether it gates the release or is reported as a resistance rate.`);
     seen.set(evalCase.id, name);
-    cases.push(evalCase);
+    // Expanded after the seed is validated and grounded, so a fault is reported against the file
+    // the author wrote rather than against a derived id that exists in no file.
+    for (const derived of expandRedTeam(evalCase, name)) {
+      const clash = seen.get(derived.id);
+      if (clash !== undefined && derived.id !== evalCase.id) {
+        throw new CorpusError(`derived Case id "${derived.id}" collides with ${clash}`);
+      }
+      seen.set(derived.id, name);
+      cases.push(derived);
+    }
   }
 
   if (cases.length === 0) throw new CorpusError(`no Eval Cases found in ${dir}`);
   cases.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-  return { cases, hash: corpusHash(cases, soul.hash), soul };
+  const suite = path.basename(dir) === RED_TEAM_DIR ? RED_TEAM_DIR : undefined;
+  return {
+    cases,
+    hash: corpusHash(cases, soul.hash, judgeVersion),
+    soul,
+    ...(suite === undefined ? {} : { suite }),
+  };
 }

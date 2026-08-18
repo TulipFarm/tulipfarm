@@ -50,7 +50,7 @@ export interface PinnedModel {
   /**
    * Whether `model` is a dated identifier the vendor cannot move.
    *
-   * `false` for the subscription CLIs, whose ids are aliases (`sonnet`, `gpt-5.6-luna`). A Sweep
+   * `false` for the subscription CLIs, whose ids are aliases (`sonnet`, `gpt-5.6-terra`). A Sweep
    * against an alias cannot prove the model did not change under it, so the Scorecard says so
    * rather than implying a rigour it does not have.
    */
@@ -101,10 +101,10 @@ export const PINNED_MODELS = {
     effort: "balanced",
     forbiddenEnv: ["ANTHROPIC_BASE_URL"],
   },
-  luna: {
-    id: "luna",
+  terra: {
+    id: "terra",
     provider: "codex",
-    model: "gpt-5.6-luna",
+    model: "gpt-5.6-terra",
     credentialEnv: "CODEX_AUTH_JSON",
     credentialHint: 'codex login, then: export CODEX_AUTH_JSON="$(cat ~/.codex/auth.json)"',
     dated: false,
@@ -245,7 +245,7 @@ export function pinnedBinding(
   };
 }
 
-async function defaultCreateModel(
+export async function defaultCreateModel(
   entry: ProviderEntry,
   secrets: SecretsService,
   options?: { timeoutMs?: number }

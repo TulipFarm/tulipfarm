@@ -21,7 +21,7 @@ const workflow = parse(
     {
       readonly environment?: string;
       readonly "timeout-minutes"?: number;
-      readonly steps: readonly { readonly env?: Record<string, string> }[];
+      readonly steps: readonly { readonly env?: Record<string, string>; readonly run?: string }[];
     }
   >;
 };
@@ -47,5 +47,22 @@ describe("the eval workflow", () => {
       const bound = seats.find(([key]) => key === name);
       expect(bound?.[1]).toBe(`\${{ secrets.${name} }}`);
     }
+  });
+});
+
+describe("what a release Sweep covers", () => {
+  const sweep = workflow.jobs.sweep?.steps.find((step) => step.run?.includes("seat.sh"));
+
+  it("sweeps the red-team Corpus as well as the capability one", () => {
+    // Two separate Sweeps rather than one: the corpora carry separate hashes and separate
+    // Baselines, so merging them would make adding an attack invalidate the capability Baseline.
+    expect(sweep?.run).toContain("corpus/red-team");
+  });
+
+  it("does not let a failing capability Sweep skip the safety one", () => {
+    // `set -e` here would abandon the red-team Sweep the moment a capability Case failed — and the
+    // safety answer is the one a maintainer under release pressure would otherwise skip.
+    expect(sweep?.run).not.toContain("set -euo pipefail");
+    expect(sweep?.run).toContain("overall=$status");
   });
 });

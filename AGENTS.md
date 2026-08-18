@@ -66,7 +66,7 @@ sibling `AGENTS.md`.
 | [`apps/worker`](apps/worker/AGENTS.md) | Run dispatch, Agent/Tool States, timers, reconciliation, projections |
 | [`apps/integration-worker`](apps/integration-worker/AGENTS.md) | Integration ingress, sync, delivery, retries |
 | [`apps/docs`](apps/docs/AGENTS.md) | Public Fumadocs site content and conventions |
-| [`apps/eval`](apps/eval/AGENTS.md) | Offline eval Corpus, Assertions, Sweeps, Scorecards |
+| [`apps/eval`](apps/eval/AGENTS.md) | Offline eval Corpus, Expectations, Sweeps, Scorecards, red team |
 | [`packages/agent-runtime`](packages/agent-runtime/AGENTS.md) | Context assembly, bounded Tool loop, model profiles, delegation |
 | [`packages/run-kernel`](packages/run-kernel/AGENTS.md) | Run/State machines, waits, retries, child Runs |
 | [`packages/curator`](packages/curator/AGENTS.md) | Curator prompt, output schema, citation and injection validation, proposal templating |
@@ -177,6 +177,7 @@ Run bare `pnpm test` **only** for genuinely repo-wide changes: a shared `package
 | --- | --- | --- |
 | `pnpm exec biome check <dir>` | changed dir | 0.7s |
 | `pnpm lint` / `pnpm typecheck` (cache hit) | 31 workspaces | 0.1s / 1.7s |
+| `pnpm eval` (scripted tier, whole Corpus) | 11 Cases | 5.5s |
 | `pnpm --filter @tulipfarm/web test <path>` | 13 files | 2.1s |
 | `pnpm --filter @tulipfarm/web test` | 90 files | 8.0s |
 | `pnpm typecheck` (cold) | 31 workspaces | 13s |
@@ -216,6 +217,35 @@ minutes, and for most shared-package edits it proves nothing `typecheck` did not
 
 Only the third row earns a consumer suite. Name the behaviour you changed before you run one; if
 you cannot, `typecheck` is the check you wanted.
+
+### Changing the harness means changing the eval Corpus
+
+`apps/eval` is the pre-release gate. It exists to tell a real harness regression apart from a model
+having a different day, and it can only do that for behaviour some Case actually asserts. A change
+to what an Agent turn *does*, landed without a Case, is a change the gate is blind to forever.
+
+| If your diff changes | Add or update a Case that asserts |
+| --- | --- |
+| Context assembly, the system prompt, what a Soul contributes | `prompt_contains` / `prompt_omits` |
+| The Tool loop — ordering, limits, arguments, refusals | `tool_called`, `tool_call_count`, `tool_argument_equals` |
+| Guardrails, redaction, or a refusal path | an L2 `guardrail_*` Case, plus a `corpus/red-team/` Case if it is an attack surface |
+| Run lifecycle, States, Run events, Turn completion | an L3 Case (`run_status`, `state_status`, `run_event_emitted`) |
+| Soul writing or loading | an L3 `journey` Case — the writer and the loader must be on opposite sides of it |
+| Anything a Turn never reaches — UI, integrations, unrelated migrations | nothing |
+
+Three rules about the Case itself:
+
+- **It must fail before your change and pass after.** A Case added green proves nothing and costs
+  seat quota forever. Check it by reverting your change, or by breaking the Case on purpose.
+- **Ground every fact you assert.** `loadCorpus` refuses an `output_*` Expectation whose text the
+  model was never given, because such a Case passes by invention rather than by behaviour.
+- **Editing `corpus/` moves `corpusHash`, which retires every Baseline.** Say so in the PR; a
+  maintainer has to re-promote against the new Corpus before the gate compares anything again.
+
+`pnpm eval` runs the whole Corpus on the scripted tier — free, deterministic, no credential, ~6s —
+and CI runs it on every non-docs PR. The real-model Sweep (`pnpm eval:matrix`) is manual, costs a
+finite subscription seat, and only a maintainer with the Environment secrets can trigger it, so
+never assume it ran. See [`apps/eval/README.md`](apps/eval/README.md).
 
 ### Do not
 

@@ -24,6 +24,15 @@ export interface EvalSoul {
   readonly catalogue: SoulCatalogue;
   /** sha256 over the fixture's contents. Folded into the Corpus version. */
   readonly hash: string;
+  /**
+   * Re-reads the checkout with a fresh `SoulLoader`, as the product does between Turns.
+   *
+   * A journey's later Turn must see what its earlier Turn committed, and the loader caches at
+   * construction. Reloading here is what puts the real writer and the real loader on opposite
+   * sides of one assertion — the seam where a Tool that commits a path the loader cannot read
+   * looks like a success.
+   */
+  reload(): Promise<EvalSoul>;
   /** Removes the throwaway checkout. Safe to call twice. */
   dispose(): void;
 }
@@ -99,12 +108,27 @@ export async function loadEvalSoul(source = EVAL_SOUL_DIR): Promise<EvalSoul> {
   const loader = new SoulLoader(path, SILENT);
   await loader.load();
 
+  const hash = await evalSoulHash(source);
+  const view = async (): Promise<EvalSoul> => {
+    const reloaded = new SoulLoader(path, SILENT);
+    await reloaded.load();
+    return {
+      path,
+      loader: reloaded,
+      catalogue: buildSoulCatalogue(reloaded),
+      hash,
+      dispose,
+      reload: view,
+    };
+  };
+
   return {
     path,
     loader,
     catalogue: buildSoulCatalogue(loader),
-    hash: await evalSoulHash(source),
+    hash,
     dispose,
+    reload: view,
   };
 }
 
