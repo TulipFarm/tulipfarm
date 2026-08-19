@@ -264,9 +264,44 @@ jobs:
       # The browser smoke (step 6 of the script) drives the shipped SPA in real Chromium — the only
       # place CI runs a browser. It also guards the Knowledge access-control denial spine, ported
       # from the local-only Playwright suite (scripts/test/browser/knowledge-denial.spec.ts).
-      - name: Install Chromium for the browser smoke
+      #
+      # The download used to be a single `playwright install --with-deps chromium`, which is what
+      # made this job the pipeline's worst bottleneck: the CDN fetch is ~170MB and its observed
+      # duration ranged from 24s to over 25 minutes, so the job hit its own timeout and was
+      # cancelled — reported to the branch as `Docker build` failing, several PRs at a time. The
+      # three steps below split that into a cacheable part and a bounded one.
+      - name: Resolve the installed Playwright version
         if: ${{ env.RUN_SMOKE == 'true' }}
-        run: pnpm exec playwright install --with-deps chromium
+        id: playwright-version
+        run: |
+          version="$(node -p "require('playwright/package.json').version")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      # Browser binaries are immutable per Playwright version, so the version alone is a complete
+      # key — no lockfile hash needed, and a bump misses cleanly instead of restoring stale bytes.
+      - name: Restore the Chromium download
+        if: ${{ env.RUN_SMOKE == 'true' }}
+        id: playwright-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
+      # apt state is not under ~/.cache, so this cannot be cached with the binaries and always runs.
+      # It is the cheap half; only the CDN fetch above was ever the problem.
+      - name: Install Chromium system dependencies
+        if: ${{ env.RUN_SMOKE == 'true' }}
+        run: pnpm exec playwright install-deps chromium
+      # A stall costs 6 minutes and a retry rather than the job's whole 25-minute budget.
+      - name: Download Chromium
+        if: ${{ env.RUN_SMOKE == 'true' && steps.playwright-cache.outputs.cache-hit != 'true' }}
+        run: |
+          for attempt in 1 2 3; do
+            if timeout 6m pnpm exec playwright install chromium; then
+              exit 0
+            fi
+            echo "::warning::Chromium download stalled or failed (attempt $attempt of 3); retrying."
+          done
+          echo "::error::Chromium download failed three times."
+          exit 1
       - name: Download image archive
         if: ${{ env.RUN_SMOKE == 'true' }}
         uses: actions/download-artifact@v8
