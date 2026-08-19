@@ -186,8 +186,9 @@ function renderEagerSkills(ctx: AssembleContext): string {
 const MAX_AVAILABLE_SKILLS_CHARS = 8000;
 
 const AVAILABLE_SKILLS_GUIDANCE = [
-  "Before replying, scan this list and load any Skill that is even partially relevant with",
-  "load_skill. If a loaded Skill is wrong, outdated, or incomplete, patch it immediately with",
+  "Before replying, scan the named Skills in this list and load any that are even partially",
+  "relevant with load_skill. Category headings only group Skills; they are not Skill names and",
+  "cannot be loaded. If a loaded Skill is wrong, outdated, or incomplete, patch it immediately with",
   "skill_update using old_string and new_string; do not wait to be asked. After a hard multi-step",
   "task, offer to save the reusable approach as a new Skill.",
 ].join(" ");
@@ -225,7 +226,7 @@ function renderAvailableSkills(ctx: AssembleContext): string {
     const categorySkills = categories.get(category) ?? [];
     const description =
       categorySkills.find((skill) => skill.categoryDescription)?.categoryDescription ?? "";
-    lines.push(description ? `${category}: ${description}` : `${category}:`);
+    lines.push(description ? `## Skill category: ${description}` : "## Skill category");
     for (const skill of categorySkills) {
       lines.push(
         skill.description ? `  - ${skill.name}: ${skill.description}` : `  - ${skill.name}`
