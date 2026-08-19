@@ -432,8 +432,8 @@ describe("GitHubAdapter effects", () => {
     });
     const output = await dispatch(commentIntent);
     const posted = http.calls.find((call) => call.method === "POST");
-    expect(String((posted?.body as { body: string }).body)).toContain(marker);
-    expect(String((posted?.body as { body: string }).body)).toContain("duplicate of #12");
+    expect(String((posted?.body as { body: string })?.body)).toContain(marker);
+    expect(String((posted?.body as { body: string })?.body)).toContain("duplicate of #12");
     expect(output).toEqual({
       commentId: "900",
       htmlUrl: "https://github.com/tulip/farm/issues/41#issuecomment-900",
@@ -712,7 +712,9 @@ describe("GitHubAdapter pull requests", () => {
       })
     );
     const posted = http.calls.find((call) => call.method === "POST");
-    expect(String((posted?.body as { body: string }).body)).toContain(githubEffectMarker("idem-1"));
+    expect(String((posted?.body as { body: string })?.body)).toContain(
+      githubEffectMarker("idem-1")
+    );
     expect(output).toMatchObject({ number: 12, headRef: "fix-crash", baseRef: "main" });
   });
 
@@ -782,7 +784,9 @@ describe("GitHubAdapter pull requests", () => {
       })
     );
     const posted = http.calls.find((call) => call.method === "POST");
-    expect(String((posted?.body as { body: string }).body)).toContain(githubEffectMarker("idem-1"));
+    expect(String((posted?.body as { body: string })?.body)).toContain(
+      githubEffectMarker("idem-1")
+    );
     expect(output).toEqual({
       reviewId: "55",
       state: "APPROVED",
@@ -1002,7 +1006,7 @@ describe("GitHubAdapter repo push", () => {
     const commitCall = http.calls.find(
       (call) => call.method === "POST" && call.path === "/repos/tulip/farm/git/commits"
     );
-    expect(String((commitCall?.body as { message: string }).message)).toContain(marker);
+    expect(String((commitCall?.body as { message: string })?.message)).toContain(marker);
     const refCall = http.calls.find((call) => call.method === "PATCH");
     expect(refCall?.body).toEqual({ sha: "new-commit-sha", force: false });
     expect(output).toEqual({
@@ -1194,8 +1198,8 @@ describe("GitHubAdapter issue create", () => {
     http.route("POST", "/repos/tulip/farm/issues", { status: 201, headers: {}, body: ISSUE_BODY });
     const output = await dispatch(createIntent);
     const posted = http.calls.find((call) => call.method === "POST");
-    expect(String((posted?.body as { body: string }).body)).toContain(marker);
-    expect(String((posted?.body as { body: string }).body)).toContain("steps to repro");
+    expect(String((posted?.body as { body: string })?.body)).toContain(marker);
+    expect(String((posted?.body as { body: string })?.body)).toContain("steps to repro");
     expect(output).toMatchObject({ number: 41, title: "Crash on save" });
   });
 

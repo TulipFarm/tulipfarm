@@ -502,26 +502,22 @@ describe("deleteLevel refuses to leave the roles directory", () => {
     await rm(soulPath, { recursive: true, force: true });
   });
 
-  it.each([
-    "../..",
-    "../../etc",
-    "..",
-    "a/../../b",
-    "/etc",
-    "sub/dir",
-  ])("refuses %s without touching the filesystem", async (slug) => {
-    const outside = join(soulPath, "keep-me.txt");
-    await writeFile(outside, "important", "utf8");
+  it.each(["../..", "../../etc", "..", "a/../../b", "/etc", "sub/dir"])(
+    "refuses %s without touching the filesystem",
+    async (slug) => {
+      const outside = join(soulPath, "keep-me.txt");
+      await writeFile(outside, "important", "utf8");
 
-    await expect(
-      deleteLevel(slug, {
-        soulWriter,
-        catalog: () => CATALOG,
-        reconcile: async () => undefined,
-      })
-    ).rejects.toThrowError(expect.objectContaining({ code: "not_found" }));
+      await expect(
+        deleteLevel(slug, {
+          soulWriter,
+          catalog: () => CATALOG,
+          reconcile: async () => undefined,
+        })
+      ).rejects.toThrowError(expect.objectContaining({ code: "not_found" }));
 
-    await expect(readFile(outside, "utf8")).resolves.toBe("important");
-    expect(committed).not.toHaveBeenCalled();
-  });
+      await expect(readFile(outside, "utf8")).resolves.toBe("important");
+      expect(committed).not.toHaveBeenCalled();
+    }
+  );
 });

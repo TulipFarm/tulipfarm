@@ -40,7 +40,7 @@ describe("SHIPPED_SURFACE_COMPONENTS", () => {
           fields: { items: { properties: { input: { anyOf: { const: string }[] } } } };
         };
       }
-    ).properties.fields.items.properties.input.anyOf.map((literal) => literal.const);
+    )?.properties.fields.items.properties.input.anyOf.map((literal) => literal.const);
     expect(inputEnum).toEqual(expect.arrayContaining(["multiselect", "radio"]));
   });
 

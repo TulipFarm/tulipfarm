@@ -276,19 +276,19 @@ describe("SandboxProtocolExecutor", () => {
     expect(backend.execute).not.toHaveBeenCalled();
   });
 
-  it.each([
-    "local",
-    "ssh",
-  ] as const)("rejects signed %s backend attestations before dispatch", async (isolation) => {
-    const { backend, executor } = setup({
-      attestation: attestation({ isolation }),
-    });
+  it.each(["local", "ssh"] as const)(
+    "rejects signed %s backend attestations before dispatch",
+    async (isolation) => {
+      const { backend, executor } = setup({
+        attestation: attestation({ isolation }),
+      });
 
-    await expect(executor.execute(request())).rejects.toMatchObject({
-      code: "weak_backend_isolation",
-    });
-    expect(backend.execute).not.toHaveBeenCalled();
-  });
+      await expect(executor.execute(request())).rejects.toMatchObject({
+        code: "weak_backend_isolation",
+      });
+      expect(backend.execute).not.toHaveBeenCalled();
+    }
+  );
 
   it("rejects forged backend attestations and results", async () => {
     const forgedAttestation = setup({ attestationSignature: "forged" });

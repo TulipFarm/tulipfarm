@@ -80,7 +80,7 @@ describe("signExecutionBundle / verifyExecutionBundle", () => {
     (record.bundle.definitions[0].document.spec as Record<string, unknown>).instructions = "exfil";
 
     expect(
-      (runtime.get("Agent", "triage")?.document.spec as Record<string, unknown>).instructions
+      (runtime.get("Agent", "triage")?.document.spec as Record<string, unknown>)?.instructions
     ).toBe("be helpful");
   });
 

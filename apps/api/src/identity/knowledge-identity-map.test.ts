@@ -100,12 +100,12 @@ describe("ExternalLinkKnowledgeIdentityMap", () => {
       });
     };
 
-    it.each([
-      "link_token",
-      "bind_link",
-    ] as const)("grants Knowledge access for %s, which proves control of both accounts", async (method) => {
-      expect(await resolveVia(method)).toEqual([{ kind: "user", id: "u1" }]);
-    });
+    it.each(["link_token", "bind_link"] as const)(
+      "grants Knowledge access for %s, which proves control of both accounts",
+      async (method) => {
+        expect(await resolveVia(method)).toEqual([{ kind: "user", id: "u1" }]);
+      }
+    );
 
     // A Slack Connect counterparty controls their own users' email addresses. If a
     // provider-asserted email were enough, they could set one to our CEO's and inherit every
@@ -114,12 +114,12 @@ describe("ExternalLinkKnowledgeIdentityMap", () => {
       expect(await resolveVia("manifest_email")).toBeUndefined();
     });
 
-    it.each([
-      null,
-      undefined,
-    ])("grants no Knowledge access when provenance is %s, because unknown is not trusted", async (method) => {
-      expect(await resolveVia(method)).toBeUndefined();
-    });
+    it.each([null, undefined])(
+      "grants no Knowledge access when provenance is %s, because unknown is not trusted",
+      async (method) => {
+        expect(await resolveVia(method)).toBeUndefined();
+      }
+    );
 
     it("keeps every knowledge-grade method out of the chat-only set", () => {
       expect(PROVEN_LINK_VERIFICATION).not.toContain("manifest_email");

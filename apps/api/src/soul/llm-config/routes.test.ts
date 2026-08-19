@@ -520,7 +520,7 @@ describe("llm-config routes", () => {
         "fetch",
         vi.fn(async (url: string, init?: RequestInit) => {
           if (url === "http://localhost:11434/v1/models") {
-            expect((init?.headers as Record<string, string>).Authorization).toBe("Bearer sk-test");
+            expect((init?.headers as Record<string, string>)?.Authorization).toBe("Bearer sk-test");
             return {
               ok: true,
               json: async () => ({ data: [{ id: "llama3" }, { id: "mixtral" }] }),

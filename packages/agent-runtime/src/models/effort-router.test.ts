@@ -72,18 +72,17 @@ describe("classifyWithQuickModel", () => {
     expect(await classifyWithQuickModel("p", answering(label))).toBe(label);
   });
 
-  it.each([
-    " Thorough.\n",
-    "FAST",
-    '"balanced"',
-  ])("tolerates casing and punctuation in %j", async (answer) => {
-    expect(await classifyWithQuickModel("p", answering(answer))).toBe(
-      answer
-        .trim()
-        .toLowerCase()
-        .replace(/[.!,'"`]/g, "")
-    );
-  });
+  it.each([" Thorough.\n", "FAST", '"balanced"'])(
+    "tolerates casing and punctuation in %j",
+    async (answer) => {
+      expect(await classifyWithQuickModel("p", answering(answer))).toBe(
+        answer
+          .trim()
+          .toLowerCase()
+          .replace(/[.!,'"`]/g, "")
+      );
+    }
+  );
 
   it.each([
     ["an unknown label", "complicated"],

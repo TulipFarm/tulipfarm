@@ -97,7 +97,7 @@ describe("compileOpenApiEgress", () => {
     expect(JSON.stringify(tool?.contract.spec.inputSchema)).not.toContain("$ref");
     const body = (
       tool?.contract.spec.inputSchema.properties as Record<string, { required?: string[] }>
-    ).body;
+    )?.body;
     expect(body?.required).toEqual(["query"]);
   });
 

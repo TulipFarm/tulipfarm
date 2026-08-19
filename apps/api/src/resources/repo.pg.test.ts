@@ -50,7 +50,7 @@ describe("PgResourceRepo", () => {
     expect(found).not.toBeNull();
     expect(found?._id).toBe(d._id);
     expect(found?.version).toBe(1);
-    expect((found?.createdAt as Date).getTime()).toBe(created.getTime());
+    expect((found?.createdAt as Date)?.getTime()).toBe(created.getTime());
     expect(found?.title).toBe("Bug");
     expect(found?.priority).toBe("high");
     expect(found?.meta).toEqual({ tags: ["a", "b"], n: 3 });
