@@ -2,6 +2,7 @@ import { ajv } from "@tulipfarm/schema";
 import type { ToolAvailability } from "@tulipfarm/tool-broker";
 import {
   type ApprovalGate,
+  autonomyDemandsApproval,
   err,
   executeToolWithTimeout,
   type RequestContext,
@@ -138,13 +139,10 @@ export class ToolRegistry {
               }
               effectiveArgs = g.args;
             }
-            // Approval waits outside timeouts: minutes are allowed, siblings do not block.
-            if (
-              ctx.autonomy === "approval-required" &&
-              t.mutating &&
-              t.requiresApproval !== false &&
-              approvalGate
-            ) {
+            // Approval waits outside timeouts: minutes are allowed, siblings do not block. The
+            // predicate is the dispatcher's own, so a Tool the gate would have parked cannot slip
+            // through here because the two copies of the rule drifted.
+            if (approvalGate && autonomyDemandsApproval(t, ctx.autonomy)) {
               const decision = await approvalGate.request({
                 toolCallId: opts.toolCallId,
                 toolName: t.name,

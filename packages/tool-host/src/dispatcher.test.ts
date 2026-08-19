@@ -15,7 +15,7 @@ import { CredentialResolver } from "./credential-mode";
 import { defineApiTool, toToolDef } from "./define";
 import { RegistryToolDispatcher, type RegistryToolDispatcherOptions } from "./dispatcher";
 import { agentAuthorityLayer, gateAutonomyOf, LiveToolGate } from "./gate";
-import type { ToolApprovalDecision, ToolApprovalPort } from "./ports";
+import type { AgentResolver, ToolApprovalDecision, ToolApprovalPort } from "./ports";
 import {
   BUSINESS_ID,
   CONVERSATION_ID,
@@ -24,7 +24,7 @@ import {
   RUN_ID,
   turnRef,
 } from "./test-doubles";
-import { err, ok, type RequestContext, type ToolDef } from "./types";
+import { type ChatAutonomy, err, ok, type RequestContext, type ToolDef } from "./types";
 
 const AUTHORITY: TurnAuthority = {
   businessId: BUSINESS_ID,
@@ -66,7 +66,8 @@ const DEFAULT_AGENT_NAME = "assistant";
 function makeDispatcher(
   tools: readonly ToolDef[],
   artifacts = fakeArtifacts(),
-  approvals?: ToolApprovalPort
+  approvals?: ToolApprovalPort,
+  agents?: AgentResolver
 ) {
   const registry = new InMemoryToolCatalog();
   for (const tool of tools) registry.register(tool);
@@ -78,8 +79,14 @@ function makeDispatcher(
       artifacts: artifacts as unknown as ArtifactService,
       surfaces: SURFACES,
       ...(approvals === undefined ? {} : { approvals }),
+      ...(agents === undefined ? {} : { agents }),
     }),
   };
+}
+
+/** An `AgentResolver` that answers with one authored Agent, ceiling included. */
+function agentWithAutonomy(autonomy: ChatAutonomy | undefined): AgentResolver {
+  return { resolve: () => ({ name: "mutator", ...(autonomy === undefined ? {} : { autonomy }) }) };
 }
 
 const WEB_PRESENTATION_CONTEXT = SURFACES.contextFor(
@@ -172,6 +179,77 @@ describe("RegistryToolDispatcher", () => {
     expect(approvals.decide).toHaveBeenCalledWith(
       expect.objectContaining({ runId: RUN_ID, toolName: "wipe", args: { text: "hi" } })
     );
+  });
+
+  // #424/#431: the Agent's own ceiling is what bounds the turn. A permissive per-turn value —
+  // the composer default on web, the literal `full` the Channel path used to write — must not
+  // raise it, or the ceiling shown on `/agents/:name` is decoration.
+  it("gates a mutating call at the routed Agent's ceiling even when the turn asked for full", async () => {
+    const execute = vi.fn(async () => ok({}));
+    const approvals = fakeApprovals({ status: "pending", approvalId: "approval-1" });
+    const { dispatcher } = makeDispatcher(
+      [toolDef({ name: "wipe", mutating: true, execute })],
+      fakeArtifacts({ agentId: "mutator", autonomy: "full" }),
+      approvals.service,
+      agentWithAutonomy("approval-required")
+    );
+
+    await expect(
+      dispatcher.dispatch(AUTHORITY, { callId: "c1", name: "wipe", arguments: { text: "hi" } })
+    ).resolves.toEqual({ status: "awaiting_approval", approvalId: "approval-1" });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("passes the ceiling, not the requested autonomy, to the Tool it runs", async () => {
+    const seen: RequestContext[] = [];
+    const { dispatcher } = makeDispatcher(
+      [
+        toolDef({
+          execute: async (args, context) => {
+            seen.push(context);
+            return ok(args);
+          },
+        }),
+      ],
+      fakeArtifacts({ agentId: "mutator", autonomy: "full" }),
+      undefined,
+      agentWithAutonomy("supervised")
+    );
+
+    await dispatcher.dispatch(AUTHORITY, { callId: "c1", name: "echo", arguments: { text: "hi" } });
+    expect(seen[0]?.autonomy).toBe("supervised");
+  });
+
+  it("still lets a per-turn value lower an Agent that is configured for full", async () => {
+    const execute = vi.fn(async () => ok({}));
+    const approvals = fakeApprovals({ status: "pending", approvalId: "approval-2" });
+    const { dispatcher } = makeDispatcher(
+      [toolDef({ name: "wipe", mutating: true, execute })],
+      fakeArtifacts({ agentId: "mutator", autonomy: "approval-required" }),
+      approvals.service,
+      agentWithAutonomy("full")
+    );
+
+    await expect(
+      dispatcher.dispatch(AUTHORITY, { callId: "c1", name: "wipe", arguments: { text: "hi" } })
+    ).resolves.toEqual({ status: "awaiting_approval", approvalId: "approval-2" });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("gates a request that names its Agent but states no autonomy of its own", async () => {
+    const execute = vi.fn(async () => ok({}));
+    const approvals = fakeApprovals({ status: "pending", approvalId: "approval-3" });
+    const { dispatcher } = makeDispatcher(
+      [toolDef({ name: "wipe", mutating: true, execute })],
+      fakeArtifacts({ agentId: "mutator" }),
+      approvals.service,
+      agentWithAutonomy("approval-required")
+    );
+
+    await expect(
+      dispatcher.dispatch(AUTHORITY, { callId: "c1", name: "wipe", arguments: { text: "hi" } })
+    ).resolves.toEqual({ status: "awaiting_approval", approvalId: "approval-3" });
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it("runs the call the human already approved, and refuses the one they refused", async () => {

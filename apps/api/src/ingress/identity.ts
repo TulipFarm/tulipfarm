@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { PrincipalDeniedError } from "@tulipfarm/authz";
 import type { ChatIngressConfig } from "@tulipfarm/soul";
+import type { ChatAutonomy } from "@tulipfarm/tool-host";
 import type { FastifyBaseLogger } from "fastify";
 import type { IngressUserLookup, UserDoc } from "../auth/users";
 import type { ToolRegistry } from "../broker/tool-adapter";
@@ -83,6 +84,8 @@ export class IngressIdentityResolver {
     sender: string;
     identity?: ChatIngressConfig["identity"];
     registry?: ToolRegistry;
+    /** The routed Agent's autonomy ceiling; the identity binding runs no higher than it. */
+    autonomy?: ChatAutonomy;
   }): Promise<ChannelSenderResolution> {
     const linked = await this.findLinkedUser(opts.slug, opts.sender);
     if (linked) return senderAuthority(linked.user, opts.slug, opts.sender, linked.verifiedVia);
@@ -137,6 +140,7 @@ export class IngressIdentityResolver {
     sender: string;
     identity?: ChatIngressConfig["identity"];
     registry?: ToolRegistry;
+    autonomy?: ChatAutonomy;
   }): Promise<UserDoc | null> {
     const { slug, sender, identity, registry } = opts;
     if (!identity || !registry) return null;
@@ -151,7 +155,7 @@ export class IngressIdentityResolver {
         slug,
         identity,
         { sender },
-        { runId: `ingress-identity:${slug}`, toolCallId: randomUUID() }
+        { runId: `ingress-identity:${slug}`, toolCallId: randomUUID(), autonomy: opts.autonomy }
       );
       if (result.success) {
         const email = extractFromToolResult(result.data, identity.email_path);

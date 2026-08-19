@@ -296,6 +296,11 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
     // `createChatExecutor`, which requires a real `RunStore`, `RunEventStore`, `BudgetStore` and
     // State machine. Substituting in-memory doubles would leave L3 measuring the eval's own
     // reimplementation of the Run lifecycle — the one thing L3 exists to prove L2 cannot.
+    //
+    // `tool-host` is the autonomy ceiling. A Case measuring whether an Agent's configured autonomy
+    // still bounds its Tool loop has to ask production's own predicate; a copy here would go on
+    // passing after the product's ceiling was loosened, which is the regression the Case exists
+    // to catch.
     eval: [
       "agent-runtime",
       "turn-executor",
@@ -306,6 +311,7 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
       "soul",
       "storage",
       "run-kernel",
+      "tool-host",
     ],
   },
   // Legacy v1 edges that still exist during cutover. Each is a target package

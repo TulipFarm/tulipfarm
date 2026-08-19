@@ -1,5 +1,6 @@
 import type { ToolBinding } from "@tulipfarm/soul";
-import type { ToolCallResult } from "@tulipfarm/tool-host";
+import type { ChatAutonomy, ToolCallResult } from "@tulipfarm/tool-host";
+import { autonomyDemandsApproval } from "@tulipfarm/tool-host";
 import type { ToolRegistry } from "../broker/tool-adapter";
 import { declarativeToolName } from "../tools/declarative/tools";
 import { dotPath, renderVarTemplate } from "./template";
@@ -11,6 +12,8 @@ export const INGRESS_ACTOR = "integration-ingress";
 export interface IngressRunContext {
   runId: string;
   toolCallId: string;
+  /** The routed Agent's ceiling. Required, so no call site can quietly fall back to `full`. */
+  autonomy: ChatAutonomy | undefined;
 }
 
 /** Executes through this integration's egress tools; `slug` is installed state, never inbound. */
@@ -29,10 +32,16 @@ export async function executeToolBinding(
       error: { code: "not_found", message: `ingress binding tool "${name}" is not registered` },
     };
   }
+  // Ingress has no operator and no parkable Run, so an approval the ceiling demands is one this
+  // path can never obtain. Refusing is the only way left to respect it.
+  if (autonomyDemandsApproval(tool, context.autonomy)) {
+    const message = `ingress cannot obtain the approval binding tool "${name}" needs`;
+    return { success: false, error: { code: "write_denied", message } };
+  }
   const args = renderArgs(binding.args, vars) as Record<string, unknown>;
   return tool.execute(args, {
     userId: INGRESS_ACTOR,
-    autonomy: "full",
+    ...(context.autonomy === undefined ? {} : { autonomy: context.autonomy }),
     runId: context.runId,
     toolCallId: context.toolCallId,
   });

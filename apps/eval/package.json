@@ -23,6 +23,7 @@
     "@tulipfarm/secrets": "workspace:*",
     "@tulipfarm/soul": "workspace:*",
     "@tulipfarm/storage": "workspace:*",
+    "@tulipfarm/tool-host": "workspace:*",
     "@tulipfarm/turn-executor": "workspace:*",
     "ai": "^7.0.2"
   },

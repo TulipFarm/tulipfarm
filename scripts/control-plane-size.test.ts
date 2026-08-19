@@ -156,6 +156,16 @@ import { describe, expect, it } from "vitest";
  * worse outcome than a higher number. The ACL logic they call is already in the package — 9,531
  * lines of it against 2,016 here, which is the ratio this gate exists to protect.
  *
+ * It then moved to 51,149 for the Agent autonomy ceiling. The rule itself did not land here — the
+ * ladder, the min and the approval predicate are 47 lines in `packages/tool-host/src/autonomy.ts`,
+ * which is where every host already reads its gate from. What stayed is the +42 of per-path wiring
+ * that has no owning package: `delivery-host.ts` resolving a Channel thread's Conversation to its
+ * Agent (`ConversationRepo` and `SoulLoader` are both this app's), the ingress binding's refusal in
+ * `bindings.ts`, and the `autonomy` field on the resolver that turns a Soul Agent into a
+ * `HostedAgent` — a file whose own comment already records why it cannot move. The wave paid back
+ * 7 lines by collapsing the approval predicate `tool-adapter.ts` kept its own copy of onto the
+ * shared one, which is also why the raise is 42 rather than 49.
+ *
  * Line count is a crude proxy for ownership, deliberately. A precise measure would need to model
  * what each domain ought to own, which is the argument the refactor itself has to settle; a crude
  * measure that cannot be gamed without noticing is worth more here than a subtle one.
@@ -177,7 +187,7 @@ import { describe, expect, it } from "vitest";
  * the answer. Only the HTTP reply for it is here.
  */
 
-const CEILING = 51_130;
+const CEILING = 51_172;
 
 /**
  * Domains inside `apps/api/src` that already have a package of the same name. Everything here that

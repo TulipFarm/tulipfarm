@@ -8,7 +8,7 @@ function makeRegistry(tools: Partial<ToolDef>[]): ToolRegistry {
   return { getAll: () => tools as ToolDef[] } as unknown as ToolRegistry;
 }
 
-const RUN = { runId: "run-1", toolCallId: "call-1" };
+const RUN = { runId: "run-1", toolCallId: "call-1", autonomy: undefined };
 
 describe("executeToolBinding", () => {
   it("resolves the slug-namespaced tool and passes templated args", async () => {
@@ -27,7 +27,54 @@ describe("executeToolBinding", () => {
     expect(result.success).toBe(true);
     expect(execute).toHaveBeenCalledWith(
       { channel_id: "C1", text: "hello" },
-      { userId: INGRESS_ACTOR, autonomy: "full", ...RUN }
+      { userId: INGRESS_ACTOR, runId: RUN.runId, toolCallId: RUN.toolCallId }
+    );
+  });
+
+  // #431: ingress used to claim `autonomy: "full"` on every binding, so an Agent configured for
+  // `approval-required` had its ceiling bypassed by anything arriving through an Integration.
+  it("refuses a mutating binding whose ceiling demands an approval nobody can give", async () => {
+    const execute = vi.fn(async () => ({ success: true as const, data: {} }));
+    const registry = makeRegistry([
+      {
+        name: declarativeToolName("chatapp", "send_message"),
+        tier: "integration",
+        mutating: true,
+        execute,
+      },
+    ]);
+    const result = await executeToolBinding(
+      registry,
+      "chatapp",
+      { tool: "send_message", args: {} },
+      {},
+      { ...RUN, autonomy: "approval-required" }
+    );
+    expect(result).toMatchObject({ success: false, error: { code: "write_denied" } });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("still runs a read-only binding under the same ceiling", async () => {
+    const execute = vi.fn(async () => ({ success: true as const, data: { ok: 1 } }));
+    const registry = makeRegistry([
+      {
+        name: declarativeToolName("chatapp", "lookup"),
+        tier: "integration",
+        mutating: false,
+        execute,
+      },
+    ]);
+    const result = await executeToolBinding(
+      registry,
+      "chatapp",
+      { tool: "lookup", args: {} },
+      {},
+      { ...RUN, autonomy: "approval-required" }
+    );
+    expect(result.success).toBe(true);
+    expect(execute).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({ autonomy: "approval-required" })
     );
   });
 

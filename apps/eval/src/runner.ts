@@ -8,6 +8,7 @@ import {
   type ModelOutput,
   type ModelPort,
 } from "@tulipfarm/agent-runtime";
+import { autonomyBoundedDispatch } from "./autonomy.ts";
 import { type EvalCase, LOOP_LIMITS } from "./case.ts";
 import type { Corpus } from "./corpus.ts";
 import { toolDispatcher } from "./dispatch.ts";
@@ -375,8 +376,10 @@ async function runTrial(
   const loop = new AgentLoop({
     model,
     // Guards wrap the dispatcher exactly as `TurnDriver` wraps it, so a blocked Tool reaches the
-    // model as a denial it must recover from — not as a call that silently never happened.
-    tools: guards.guard(tools.port),
+    // model as a denial it must recover from — not as a call that silently never happened. The
+    // Agent's autonomy ceiling sits inside the guards, matching production's order: policy decides
+    // before the ceiling is consulted about what is left.
+    tools: guards.guard(autonomyBoundedDispatch(soul, evalCase, tools.port)),
     checkpoints: new InMemoryLoopCheckpointStore(),
     events: { append: async () => {} },
     budget: { consume: async () => ({ outcome: "allowed" }) },

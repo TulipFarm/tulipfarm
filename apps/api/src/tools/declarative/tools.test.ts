@@ -468,7 +468,7 @@ describe("egress tools resolve through ingress reply bindings", () => {
       "acme",
       { tool: "read_page", args: { page_id: "{page}" } },
       { page: "p-42" },
-      { runId: "run-1", toolCallId: "ingress-reply:1:default" }
+      { runId: "run-1", toolCallId: "ingress-reply:1:default", autonomy: undefined }
     );
 
     expect("error" in result ? result.error : undefined).toBeUndefined();
@@ -491,7 +491,7 @@ describe("egress tools resolve through ingress reply bindings", () => {
       "google-docs",
       { tool: "read_page", args: { page_id: "{page}" } },
       { page: "doc-1" },
-      { runId: "run-1", toolCallId: "ingress-reply:google-docs:1" }
+      { runId: "run-1", toolCallId: "ingress-reply:google-docs:1", autonomy: undefined }
     );
 
     expect(tools.map((tool) => tool.name)).toEqual(["google_docs_read_page"]);

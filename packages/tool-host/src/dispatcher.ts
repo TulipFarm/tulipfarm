@@ -23,6 +23,7 @@ import type {
   TurnAuthority,
   TurnToolDispatcher,
 } from "./authority";
+import { autonomyCeiling, autonomyDemandsApproval } from "./autonomy";
 import { availableToolsFor, type ToolCatalog } from "./catalog";
 import type { CredentialResolution, CredentialResolver } from "./credential-mode";
 import { ChatEffectLedger, ledgerOwnsCall } from "./effect-ledger";
@@ -92,13 +93,6 @@ type AuthorizeVerdict =
   | { readonly decision: "proceed" }
   | { readonly decision: "approval"; readonly demand: ApprovalDemand }
   | { readonly decision: "denied"; readonly result: HostedToolResult };
-
-/** Worker approvals mirror the web path: mutating, `approval-required`, and not opted out. */
-function needsApproval(definition: ToolDef, autonomy: string | undefined): boolean {
-  return (
-    autonomy === "approval-required" && definition.mutating && definition.requiresApproval !== false
-  );
-}
 
 /**
  * Spends the one-use approval this dispatch is about to act on. Fails closed: a decision that
@@ -300,6 +294,11 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
   async dispatch(authority: TurnAuthority, call: HostedToolCall): Promise<HostedToolResult> {
     const request = await readChatRequest(this.options.artifacts, authority, this.now());
     const agent = this.options.agents?.resolve(request.agentId) ?? DEFAULT_AGENT;
+    // The routed Agent's configured autonomy is an authority ceiling, so the turn runs at the more
+    // restrictive of it and whatever this request asked for. Reading `request.autonomy` alone made
+    // the ceiling shown on the Agent advisory: any caller that supplied a permissive per-turn value
+    // — or hardcoded one, as the Channel path did — dispatched above it.
+    const autonomy = autonomyCeiling(agent.autonomy, request.autonomy);
     const presentationContext = await presentationContextForAuthority(
       authority,
       this.options.surfaces,
@@ -346,7 +345,7 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
       definition,
       availableTools,
       call,
-      request.autonomy
+      autonomy
     );
     if (verdict.decision === "denied") return verdict.result;
 
@@ -361,7 +360,7 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
 
     // Ask after validation and before `execute`, so no invalid call or effect reaches approval.
     const approvalRequired =
-      verdict.decision === "approval" || needsApproval(definition, request.autonomy);
+      verdict.decision === "approval" || autonomyDemandsApproval(definition, autonomy);
     if (approvalRequired && this.options.approvals === undefined) {
       // Missing approval plumbing must deny, not convert "not yet" into "yes".
       return {
@@ -434,7 +433,7 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
       runId: authority.runId,
       toolCallId: call.callId,
       agentId: agent.name,
-      autonomy: request.autonomy as RequestContext["autonomy"],
+      autonomy,
       guardrailRevision: this.options.guardrails?.revision ?? "none",
       surfaceStore: this.options.surfaceStore,
       surfaceActionStore: this.options.surfaceActionStore,

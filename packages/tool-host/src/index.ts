@@ -47,6 +47,11 @@ export {
   LiveAuthorityLayerResolver,
 } from "./authority-layers";
 export {
+  asChatAutonomy,
+  autonomyCeiling,
+  autonomyDemandsApproval,
+} from "./autonomy";
+export {
   allowedToolNamesFor,
   availableToolsFor,
   InMemoryToolCatalog,
