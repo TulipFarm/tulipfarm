@@ -1,0 +1,122 @@
+---
+title: Model specs
+description: Every field in a model profile — capabilities, constraints, budgets, fallbacks — and every reason routing can refuse one.
+---
+
+A **model profile** is TulipFarm's record of one model: which provider serves it, what it can do,
+and what it is allowed to cost. Routing reads these to decide which model answers a turn.
+
+You do not normally write one by hand. Adding a model in **Operate → Business → Models** creates
+it, and TulipFarm fills in the capabilities for you. This page is for checking what it wrote.
+
+## Where the capabilities come from
+
+When a model is added or refreshed, TulipFarm looks up its pricing and capabilities in the LiteLLM
+catalog and pins the answer into your soul. Only models that are **priced** and **chat-capable**
+are accepted.
+
+If you point at an OpenAI-compatible endpoint with a `base_url`, the model picker can list that
+endpoint's live models instead.
+
+Subscription providers are the exception. There is no catalog price for a turn you bought through
+a Claude or ChatGPT plan, so their capabilities come from a static table shipped with TulipFarm and
+their cost fields stay empty on purpose.
+
+<Callout type="info">
+  Routing refuses any model whose context window it cannot verify. A subscription model is never
+  routed to on a guess.
+</Callout>
+
+## Identity
+
+| Field | Required | What it is |
+| --- | --- | --- |
+| `provider` | Yes | The provider serving the model. |
+| `model` | Yes | The model name as that provider spells it. |
+| `connection` | No | Which named provider connection supplies the credentials. Leave it out and TulipFarm uses the connection named after the provider, which is what a single-account instance always wants. |
+| `capabilityClass` | No | A label you can require a model to match. |
+| `reasoning` | Yes | How much reasoning the model does: `low`, `medium`, `high`, `xhigh`, or `max`. |
+| `allowCaching` | Yes | Whether prompt caching is permitted. There is no default — you must state it. |
+
+## Capabilities
+
+Everything under `supports` describes what the model can actually do. Routing checks these before
+it sends anything.
+
+| Field | Required | What it is |
+| --- | --- | --- |
+| `tools` | Yes | Whether the model can call tools. |
+| `structuredOutput` | Yes | Whether it can return structured data reliably. |
+| `contextWindowTokens` | Yes | How much it can read at once, in tokens. At least 1. |
+| `inputModalities` | No | What it can accept: `text`, `image`, `audio`, `video`. Leave it out and it is text-only. |
+| `outputModalities` | No | What it can produce, from the same four. |
+
+## Constraints
+
+Constraints are requirements the model must meet. A model that fails one is not used.
+
+| Field | What it requires |
+| --- | --- |
+| `maxCostUsd` | A cost ceiling for the call. |
+| `maxTokens` | A token ceiling. |
+| `maxLatencyMs` | A time ceiling. |
+| `dataRetention` | The provider's retention posture: `none`, `zero_retention`, or `provider_default`. |
+| `allowTraining` | Whether the provider may train on your data. |
+| `residency` | Where the data may be processed. |
+
+## Budgets
+
+| Field | What it caps |
+| --- | --- |
+| `maxCostUsd` | Total spend. |
+| `maxTokens` | Total tokens. |
+
+## Fallbacks
+
+`fallbacks` lists models to try if this one fails.
+
+A fallback must satisfy **the same tool, data, residency, and budget constraints** as the profile
+that names it. A cheaper model is not an acceptable fallback if it would breach a rule the original
+was written to keep.
+
+## Why routing refuses a model
+
+When routing declines a model, it says which of these it was. Each one is a specific, checkable
+reason rather than a general failure.
+
+| Reason | What went wrong |
+| --- | --- |
+| `unknown_profile` | No such profile. |
+| `tools_unsupported` | The turn needs tools; the model cannot call them. |
+| `structured_output_unsupported` | The turn needs structured output; the model cannot produce it. |
+| `modality_unsupported` | The turn involves a modality the model does not handle. |
+| `context_window_exceeded` | The input does not fit. |
+| `residency_violation` | The provider processes data somewhere the profile forbids. |
+| `data_retention_violation` | The provider retains data the profile said it must not. |
+| `training_not_permitted` | The provider may train on the data; the profile forbids it. |
+| `cost_budget_exceeded` | The call would cost more than allowed. |
+| `cost_unpriceable` | A cost ceiling exists but cannot be enforced, because a model in the chain has no price. Nothing was overspent — the limit simply cannot be checked. |
+| `token_budget_exceeded` | The call would use more tokens than allowed. |
+| `latency_budget_exceeded` | The call would take longer than allowed. |
+| `capability_class_mismatch` | The model is not in the required capability class. |
+
+<Callout type="warn">
+  `cost_unpriceable` is the one people misread. It does **not** mean you overspent. It means you
+  asked for a spend limit on a chain containing a model with no published price — usually a
+  subscription model — so the limit cannot be enforced either way.
+</Callout>
+
+## Where to go next
+
+<Cards>
+  <Card
+    title="How model routing works"
+    href="/docs/administration/how-model-routing-works"
+    description="Effort presets, fallback chains, budgets, and receipts."
+  />
+  <Card
+    title="Configure LLM providers"
+    href="/docs/administration/configure-llm-providers"
+    description="Adding a provider and assigning models to the three chains."
+  />
+</Cards>

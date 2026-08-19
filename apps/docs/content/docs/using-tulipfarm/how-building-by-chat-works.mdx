@@ -1,0 +1,56 @@
+---
+title: Building by chat
+description: How TulipFarm turns plain-language requests into live Soul-backed system changes.
+---
+
+{/* tf-page: track: using-tulipfarm  requires: ["chat:*", "soul:*"] */}
+
+TulipFarm is built by chatting. You describe the business object, agent, skill, routine, or surface
+you need; the assistant gathers the missing details, writes the right definition into
+[the soul](/docs/using-tulipfarm/what-a-soul-is), records the change, and reloads the running
+system. The files are the result of the chat, not the interface most users edit.
+
+## The front-desk assistant
+
+Normal chat runs through a built-in assistant. It is not one of the named agents in **agents**, and
+you never create or configure it — it is simply always there. It is the front desk for the product:
+it answers questions, reads and creates [records](/docs/using-tulipfarm/resources), and reads and
+creates [knowledge](/docs/using-tulipfarm/knowledge) directly.
+
+When the request changes what the business system is, the default harness loads a forge skill rather
+than improvising the build. The handoff appears in the transcript, so the user can see that a
+specialized build workflow is now guiding the turn.
+
+## Forges are the build paths
+
+A forge is a bundled skill with a focused authoring workflow. The shipped forge skills are:
+
+| Forge skill | Builds |
+| --- | --- |
+| `resource-forge` | Resource type schemas and optional Resource hooks |
+| `agent-forge` | User-created agents |
+| `skill-forge` | skills and their references |
+| `routine-forge` | routines and their states |
+| `surface-component-forge` | Business surface components |
+| `onboarding` | Guided first-run business setup |
+
+Forges build one thing at a time and in dependency order: resource types before agents that use
+them, skills before agents that load them, and agents before routines that call them.
+
+## Soul writes go live immediately
+
+A completed build writes to the [soul](/docs/using-tulipfarm/what-a-soul-is), commits immediately, reloads the soul,
+and reconciles live. A new resource type is ready to hold records without restarting; a new agent is
+selectable as soon as it is created; a skill is visible to the runtime after it is activated.
+
+Soul changes are direct writes, not Approval-gated work. Runtime actions on data or external systems
+can still pause for [approvals](/docs/using-tulipfarm/approvals), but changing the definition store uses git
+history as its review record.
+
+## What stays outside chat
+
+Secrets and model provider configuration are business settings. Admins configure them under
+**Operate → Business** so API keys, provider endpoints, and model assignments are handled by
+purpose-built forms instead of by model-generated text. See
+[Configure LLM providers](/docs/administration/configure-llm-providers) and
+[Store a secret](/docs/administration/manage-credentials).

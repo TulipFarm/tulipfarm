@@ -1,0 +1,78 @@
+---
+title: Connect Google Docs
+description: Connect Google Docs so agents can read document bodies and index docs into knowledge with Drive-backed permissions.
+---
+
+Connecting Google Docs lets your agents read a document's title and body. It is read-only —
+agents cannot edit your documents.
+
+Add a Google Workspace ID as well and TulipFarm indexes your documents into
+[knowledge](/docs/using-tulipfarm/knowledge), so agents can cite them in chat. Drive's own
+permissions are respected: nobody sees a document through TulipFarm that they could not open
+themselves.
+
+For the shared catalog flow, see [Connect an integration](/docs/administration/connect-an-integration).
+This page covers only the Google fields.
+
+## Outcome
+
+At the end, Google Docs shows as connected. Agents can read a document's title and body by id.
+
+Google Docs is read-only by design. Agents cannot edit documents through this integration.
+
+## Create Google access
+
+<Steps>
+  <Step>
+    In [Google Cloud Console](https://console.cloud.google.com/apis/credentials), open the project
+    serving this deployment and enable both the Google Docs API and the Google Drive API.
+  </Step>
+  <Step>
+    Create an OAuth client. To cover a whole workspace, create a service account with domain-wide
+    delegation instead; that is a Google account type that can act across the workspace.
+  </Step>
+  <Step>
+    Grant the `documents.readonly` and `drive.metadata.readonly` scopes. Docs has no permissions
+    API of its own, so knowledge reads access from Drive.
+  </Step>
+  <Step>
+    Copy a current access token. You will paste it into TulipFarm in the next step.
+  </Step>
+</Steps>
+
+## Connect Google Docs
+
+<Steps>
+  <Step>
+    Open **Integrations → google-docs**.
+  </Step>
+  <Step>
+    Paste your workspace or customer identifier into **Google Workspace ID**
+    (`GOOGLE_WORKSPACE_ID`) only if you want documents indexed into knowledge. The agent tool works
+    without it.
+  </Step>
+  <Step>
+    Paste the token into **Google Docs OAuth Access Token** (`GOOGLE_DOCS_ACCESS_TOKEN`) and save.
+    It is encrypted in secrets, the encrypted store for provider credentials.
+  </Step>
+</Steps>
+
+## Verify
+
+Copy the document id from a Google Docs URL. It is the long segment in
+`/document/d/<id>/edit`. Then ask in chat:
+
+```prompt
+Read the Google Doc with this id and summarize it: DOC_ID
+```
+
+Replace `DOC_ID` with the real id before you send the message.
+
+## If Google Docs cannot find the document
+
+- **You only know the name** — connect [Google Drive](/docs/administration/connect-google-drive)
+  too. Drive search turns a filename into the id Google Docs needs.
+- **The read fails by id** — check that the token covers that document and has both read scopes
+  from the setup step.
+- **Knowledge has no Google Docs pages** — check that **Google Workspace ID** is filled in. It is
+  only needed for knowledge indexing.

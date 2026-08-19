@@ -1,0 +1,52 @@
+---
+title: Create an agent
+description: Ask the assistant to author an agent and publish it into the soul.
+---
+
+{/* tf-page: track: using-tulipfarm  requires: ["chat:*", "soul.agent:*"] */}
+
+This guide creates a custom [agent](/docs/using-tulipfarm/agents) by chatting with the default
+assistant. Agents are soul artifacts; `agent-forge` writes their `AGENT.md` files for you.
+
+## Outcome
+
+At the end, the agent appears in **agents** and can be selected in chat.
+
+## Ask the assistant
+
+Open **Chat** and describe the job, boundaries, and autonomy you want:
+
+```prompt
+Create a support Agent that answers customer questions from Knowledge pages,
+checks customer Records when needed, and files a ticket when follow-up is
+required. It should ask for Approval before making customer-visible changes.
+```
+
+The assistant loads `agent-forge`, asks follow-up questions, writes `AGENT.md` in the
+soul, commits it, and reconciles live.
+
+## Choose autonomy
+
+When the forge asks, choose the level that matches the risk:
+
+- `full` acts without pausing.
+- `supervised` acts and surfaces what it did.
+- `approval-required` pauses before gated actions.
+- `manual` is driven step by step.
+
+## Verify and use it
+
+<Steps>
+  <Step>
+    Open **Agents** and select the new agent.
+  </Step>
+  <Step>
+    Review its purpose and governance card.
+  </Step>
+  <Step>
+    Start a chat with that agent from the agent picker, or mention it from the composer.
+  </Step>
+</Steps>
+
+To change it later, ask the assistant to edit the agent. You do not edit `AGENT.md` by
+hand in normal use.

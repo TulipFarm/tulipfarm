@@ -1,0 +1,63 @@
+---
+title: Build and run a routine
+description: Ask routine-forge to create an automation, then run and inspect it.
+---
+
+{/* tf-page: track: using-tulipfarm  requires: ["chat:*", "soul.routine:*"] */}
+
+This guide builds a [routine](/docs/using-tulipfarm/routines) by chatting, then runs it and
+watches the resulting [run](/docs/using-tulipfarm/runs). Routines are made of states and can
+pause for approvals.
+
+## Outcome
+
+At the end, the routine is live, visible in the routines list, editable in the canvas
+authoring studio, and runnable from chat or the UI.
+
+## Ask the assistant
+
+Open **Chat** and describe the automation:
+
+```prompt
+Create a Routine that files each expense report as a Record, asks for Approval
+when the amount is over 500, and sends a summary when the report is accepted. I
+want to trigger it manually.
+```
+
+The assistant loads `routine-forge`, asks for missing inputs, writes the routine into the
+soul, commits it, and reconciles live.
+
+## Review it on the canvas
+
+<Steps>
+  <Step>
+    Open **Routines** and select the new routine.
+  </Step>
+  <Step>
+    Choose **Edit** to open the canvas authoring studio at `/routines/:slug/edit`.
+  </Step>
+  <Step>
+    Review the states, edges, inputs, and any approval waits. Make small edits in the
+    studio when you want a visual pass instead of another chat turn.
+  </Step>
+</Steps>
+
+## Start a run
+
+Use chat:
+
+```prompt
+Run the expense report Routine for a 220 dollar team lunch.
+```
+
+Or open the routine and use its manual trigger form. The form is generated from the
+routine input schema and rejects invalid payloads before a run starts.
+
+## Watch the run canvas
+
+Open the run from the routine page. The run canvas shows each state as it enters,
+completes, retries, waits, or fails. If a state opens an approval, the run pauses until a
+human decides in the Inbox.
+
+Closing the browser does not lose progress. Run events are durable and the inspector can
+reattach later.

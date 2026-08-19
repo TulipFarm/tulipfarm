@@ -1,0 +1,90 @@
+---
+title: Identity
+description: Users, sessions, API tokens, machine clients, roles, grants, and channel account links.
+---
+
+Identity in TulipFarm covers people, machines, and external chat accounts. The goal is to preserve
+who asked for work, who approved it, and which authority a run may use.
+
+## People and sessions
+
+A fresh instance creates its first admin through the setup wizard or headless bootstrap. Admins can
+create users and issue invite links; invitees open `/accept-invite`, preview the single-use token,
+and set their own password. Invites replaced temporary passwords, so admins do not relay initial
+credentials.
+
+Browser sessions use a session cookie plus CSRF protection. Write requests echo the `csrf_token`
+cookie as the `x-csrf-token` header.
+
+## Personal API tokens
+
+Users can create personal bearer tokens through `POST /api/v1/auth/tokens` and manage them through
+`GET /api/v1/auth/tokens` and `DELETE /api/v1/auth/tokens/{id}`. Token values have the `tulip_`
+prefix and are returned only at creation time. They act as the user who created them.
+
+See [Issue an API token](/docs/using-tulipfarm/issue-an-api-token) for the task flow.
+
+## Machine identities
+
+API clients are machine identities, separate from users. `POST /api/v1/identity/api-clients`
+creates one and returns its secret once. Existing clients can be listed, rotated, or disabled with
+the API client routes under `/api/v1/identity/api-clients`. Rotation invalidates the previous secret
+immediately; disabling refuses the credential on the next request.
+
+## Roles, principals, and grants
+
+A **principal** is whoever is acting — a person, an agent, a routine, an integration, an API
+client, or internal machinery. A **role** bundles permissions. A **grant** is one permission,
+optionally with conditions and an expiry.
+
+You manage all of it on **Operate → Business → People & access** at `/business/access`.
+
+Role edits go through `POST /api/v1/roles/changesets`, which proposes a change rather than
+broadening access directly. The proposal is the record.
+
+### Authority only ever narrows
+
+This is the rule that makes the rest safe to reason about.
+
+A request is allowed only when **every** layer allows it. Any layer that denies, or simply has no
+rule permitting it, ends the question. Nothing you add anywhere widens access granted somewhere
+else.
+
+The consequence worth stating plainly: an agent can never do more than the person who set it
+going, no matter what its own role says.
+
+### Teams
+
+A team is a named group of people. Assign a role to the team and every member gets it, so the rule
+lives in one place instead of being copied onto each person. Removing someone from the team removes
+what the team gave them.
+
+### Grants can expire
+
+A grant may carry an expiry. Once that moment passes the grant stops counting — nobody has to
+remember to remove it.
+
+This is how you give temporary access without leaving a permanent hole behind.
+
+## Guests
+
+A guest is not a separate kind of principal. It is a relationship: a **sponsor** plus an **expiry**
+plus explicit grants.
+
+Three things follow, and all three are enforced:
+
+- A guest **never inherits its sponsor's authority**. Being sponsored by an admin does not make a
+  guest an admin. Everything a guest can do was granted to it explicitly.
+- A guest is refused once it is `revoked` or `expired`.
+- A guest is also refused if its **sponsor** is no longer active. When someone leaves, the guests
+  they vouched for stop working — you do not have to hunt them down.
+
+See [roles and permissions](/docs/reference/roles-and-permissions) for the neutral reference.
+
+## Linking Slack identities
+
+Slack messages are only allowed to act as a TulipFarm user after the external Slack account is
+linked. The single-use channel-link flow sends the user to `/link-channel`, previews the binding,
+and confirms it with `/api/v1/identity/channel-links/confirm`. Unlinked Slack senders receive a
+bind offer rather than a model answer, so a channel identity is never silently substituted for a
+TulipFarm user.

@@ -3,13 +3,18 @@ import Link from "next/link";
 import { InstallCommand } from "@/components/home/install-command";
 import { Reveal } from "@/components/home/reveal";
 import { TulipField } from "@/components/home/tulip-field";
-import { gitConfig } from "@/lib/shared";
+import { appName, gitConfig } from "@/lib/shared";
 
 export const metadata: Metadata = {
   title: "TulipFarm — Build your business operating system by chatting",
+  alternates: { canonical: "/" },
   description:
     "Self-host the workspace where Chat turns your business operations into Resources, Agents, Routines, and Knowledge.",
   openGraph: {
+    type: "website",
+    siteName: appName,
+    locale: "en_US",
+    url: "/",
     title: "TulipFarm — Give your business a Soul. Put it to work.",
     description:
       "Build business operations by chatting, keep them in a git-backed Soul, and run them on your infrastructure.",
@@ -23,28 +28,28 @@ const businessSystem = [
     title: "Resources",
     description:
       "Describe customers, tickets, assets, or any other part of your business. TulipFarm creates the Resource types; your team and Agents create the Records.",
-    href: "/docs/concepts/resources",
+    href: "/docs/using-tulipfarm/resources",
   },
   {
     label: "work",
     title: "Agents + Skills",
     description:
       "Create named Agents for specific jobs, then give them reusable Skills for the work only they need to know.",
-    href: "/docs/concepts/agents",
+    href: "/docs/using-tulipfarm/agents",
   },
   {
     label: "know",
     title: "Knowledge",
     description:
       "Keep operational context in searchable Spaces and Pages, with links and provenance your Agents can use.",
-    href: "/docs/concepts/knowledge",
+    href: "/docs/using-tulipfarm/knowledge",
   },
   {
     label: "run",
     title: "Routines + Integrations",
     description:
       "Schedule repeatable operations and connect the third-party systems where the rest of your business already happens.",
-    href: "/docs/guides/routines",
+    href: "/docs/using-tulipfarm/build-a-routine",
   },
 ];
 
@@ -52,18 +57,18 @@ const controlPoints = [
   {
     name: "your infrastructure",
     detail: "Run the published container with Docker or Podman, from a laptop to your own server.",
-    href: "/docs/deploy",
+    href: "/docs/self-hosting",
   },
   {
     name: "readable history",
     detail:
       "Every definition lives in the git-backed Soul, so changes stay inspectable and portable.",
-    href: "/docs/concepts/soul",
+    href: "/docs/using-tulipfarm/what-a-soul-is",
   },
   {
     name: "your model providers",
     detail: "Configure Anthropic, OpenAI, Azure Foundry, or an OpenAI-compatible endpoint.",
-    href: "/docs/concepts/llm",
+    href: "/docs/administration/how-model-routing-works",
   },
   {
     name: "encrypted credentials",
@@ -73,9 +78,9 @@ const controlPoints = [
 ];
 
 const footerLinks = [
-  { label: "install", href: "/docs/installation" },
-  { label: "get started", href: "/docs/getting-started" },
-  { label: "deploy", href: "/docs/deploy" },
+  { label: "install", href: "/docs/self-hosting/install" },
+  { label: "get started", href: "/docs/using-tulipfarm/build-your-first-thing" },
+  { label: "deploy", href: "/docs/self-hosting" },
   { label: "security", href: "/docs/security/encryption" },
   { label: "docs", href: "/docs" },
 ];
@@ -325,7 +330,7 @@ export default function HomePage() {
                     [+] install tulipfarm ↑
                   </a>
                   <Link
-                    href="/docs/getting-started"
+                    href="/docs/using-tulipfarm/build-your-first-thing"
                     className="flex min-h-11 items-center text-xs text-fd-muted-foreground transition-colors duration-150 hover:text-fd-foreground"
                   >
                     see the first ten minutes →

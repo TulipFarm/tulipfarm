@@ -1,0 +1,60 @@
+---
+title: Use the knowledge wiki
+description: Create spaces and pages, link them, and find them through search and graph views.
+---
+
+{/* tf-page: track: using-tulipfarm  requires: ["platform.knowledge:*"] */}
+
+This guide builds a small [knowledge](/docs/using-tulipfarm/knowledge) wiki by hand in the web
+UI. The assistant can also create spaces and pages from chat, but this guide covers the
+manual editor.
+
+## Outcome
+
+At the end, you have a space with pages, backlinks, tags, revisions, and a graph you can
+use for navigation.
+
+## Create a space
+
+<Steps>
+  <Step>
+    Open **Knowledge**.
+  </Step>
+  <Step>
+    Choose **New space**.
+  </Step>
+  <Step>
+    Add a name and optional description, then save.
+  </Step>
+</Steps>
+
+## Add and edit pages
+
+Open the space and choose **New page**. Give the page a path, title, tags, and markdown
+body. Paths organize pages inside the space, such as `policies/refunds` or
+`ops/on-call`.
+
+Every edit creates a revision. Use the page history when you need to inspect or restore a
+previous version.
+
+## Link and tag pages
+
+Use `@` in the editor to insert links to pages, agents, and resource types. When another
+page links to the current page, it appears in **Linked from** as a backlink. Use `#` to
+add tags; tag pages are reachable at `/knowledge/tags/:tag`.
+
+## Browse the graph
+
+Open the space graph to see pages as nodes and links as edges. Use it to find pages that
+have no backlinks or to understand how a policy area is connected.
+
+## Search
+
+Search finds pages by title and body. When an embedding model is configured, knowledge
+search can use pgvector embeddings. If no embedding model is configured, TulipFarm logs a
+lexical fallback and uses lexical search instead, so search still works.
+
+<Callout type="info">
+Knowledge data lives in PostgreSQL, not in the soul. Back up the database when you back
+up the soul.
+</Callout>

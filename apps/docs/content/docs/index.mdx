@@ -1,25 +1,95 @@
 ---
-title: TulipFarm
-description: The AI-native business operating system — install it, give it a soul, put it to work.
+title: TulipFarm documentation
+description: Run your business operations with AI agents you host yourself. Install TulipFarm, connect a model, then build what you need by describing it in chat.
 ---
 
-TulipFarm is a self-hosted control panel where autonomous agents run your business
-operations. You **describe what you want in chat** — "track our customers", "create a
-support agent", "review this pull request" — and agents build and run it for you. You do
-not configure it by editing files.
+TulipFarm is a control panel for your business that you run on your own computers. Inside it,
+AI agents do real work: tracking customers, answering support tickets, chasing invoices,
+reviewing code.
 
-It runs entirely on your own infrastructure, against your own model provider keys.
+You do not configure TulipFarm by editing files or writing code. You describe what you want in
+chat — "track our customers", "create a support agent" — and an agent builds it.
 
-## Install it
+## Pick where to start
 
-One command on any Linux or macOS machine with a shell. It detects a container engine,
-generates every secret, brings the stack up, and prints the URL to open:
+<Cards>
+  <Card
+    title="Self-hosting"
+    href="/docs/self-hosting"
+    description="Put TulipFarm on a server and keep it healthy. Install, deploy, back up, upgrade. Involves a terminal."
+  />
+  <Card
+    title="Administration"
+    href="/docs/administration"
+    description="Set up the instance for everyone else. Connect a model, add your team, connect Slack or GitHub, watch what agents do."
+  />
+  <Card
+    title="Using TulipFarm"
+    href="/docs/using-tulipfarm"
+    description="Build and run things by chatting. No terminal, no code, no admin access needed."
+  />
+</Cards>
+
+## The two halves of an instance
+
+Every TulipFarm instance is made of two parts, and almost everything in these docs sits in one
+or the other.
+
+- **The soul** — the definitions. Your record shapes, agents, skills, routines, and connections
+  live here as files in a git repository. When you ask an agent to build something, it writes
+  to the soul, so the git history becomes your audit trail.
+- **The runtime** — the working parts. The service and background workers that load the soul,
+  store your data, index your knowledge, and run agent turns against the AI models you
+  configured.
+
+The soul is what your business *is*. The runtime is what your business *does*.
+[Building by chat](/docs/using-tulipfarm/how-building-by-chat-works) is where the two meet.
+
+## What you can build
+
+Once a model is connected, everything below is created by asking for it in chat.
+
+<Cards>
+  <Card
+    title="Resource types"
+    href="/docs/using-tulipfarm/resources"
+    description="The shapes of things your business tracks — a Customer, a Ticket. Describe one and its tables, forms, and list screens appear."
+  />
+  <Card
+    title="agents"
+    href="/docs/using-tulipfarm/agents"
+    description="Named owners for a job, each with its own instructions, tools, and limits on what it may do."
+  />
+  <Card
+    title="routines"
+    href="/docs/using-tulipfarm/routines"
+    description="Repeatable work that runs on a schedule, when something happens, or on request."
+  />
+  <Card
+    title="knowledge"
+    href="/docs/using-tulipfarm/knowledge"
+    description="A wiki your agents read from and cite, so every answer shows where it came from."
+  />
+  <Card
+    title="skills"
+    href="/docs/using-tulipfarm/skills"
+    description="Installable capability packages from a git repository, reviewed before they run."
+  />
+  <Card
+    title="integrations"
+    href="/docs/administration/how-integrations-work"
+    description="Reach your agents where work already happens — GitHub, Slack, Telegram, Notion, Confluence, and Google Workspace ship in the box."
+  />
+</Cards>
+
+## Install it now
+
+One command, on any Linux or macOS machine with a terminal. It finds a container engine,
+generates every password and key for you, starts everything, and prints the address to open:
 
 ```bash
 curl -fsSL {{SITE_URL}}/install.sh | sudo bash
 ```
-
-Then open the printed URL and create your admin account. That is the whole install.
 
 Windows, from PowerShell:
 
@@ -27,111 +97,11 @@ Windows, from PowerShell:
 irm {{SITE_URL}}/install.ps1 | iex
 ```
 
-Prefer to see the file first, or deploying through Coolify, Portainer, Dokploy, or Unraid?
-[Docker Compose](/docs/deploy/docker-compose) runs with no `.env` and no key generation:
-
-```bash
-curl -fsSLO {{SITE_URL}}/docker-compose.yml
-docker compose up -d
-```
+Open the printed address and create your admin account. That is the whole install.
+[Full install instructions](/docs/self-hosting/install) cover what each step does and what to do
+when one fails.
 
 <Callout type="info">
-  You never clone the repository to run TulipFarm — every path above pulls a published
-  image. The source tree is for [contributors](/docs/development).
+  You never download the source code to run TulipFarm. Every path above pulls a ready-made,
+  published image.
 </Callout>
-
-## The mental model
-
-A TulipFarm instance has two halves:
-
-- **The soul** — a git-backed configuration store. Your resource schemas, agents, skills,
-  routines, and integrations live here as files. Agents write to the soul when you ask them
-  to build something; the git history is your audit trail.
-- **The runtime** — the API and workers that load the soul, store your records, index your
-  knowledge, and run agent turns against your configured LLM providers.
-
-Everything you build, an agent writes to the soul; everything your business produces is a
-record in the datastore. [Building by chat](/docs/concepts/building) is how the two come
-together.
-
-## What you can build
-
-Once a model is configured, everything below is created by asking for it in chat:
-
-<Cards>
-  <Card
-    title="Resource types"
-    href="/docs/concepts/resources"
-    description="The things your business tracks. Describe one and its tables, forms, and list screens appear."
-  />
-  <Card
-    title="Agents"
-    href="/docs/concepts/agents"
-    description="Named owners for a job, each with its own instructions, tools, and bounded authority."
-  />
-  <Card
-    title="Routines"
-    href="/docs/concepts/routines"
-    description="Repeatable operations that run on a schedule, on an event, or on request."
-  />
-  <Card
-    title="Knowledge"
-    href="/docs/concepts/knowledge"
-    description="A wiki your agents read from and cite, with provenance attached to the answer."
-  />
-  <Card
-    title="Skills"
-    href="/docs/concepts/skills"
-    description="Installable capability packages from a git repository, audited before they run."
-  />
-  <Card
-    title="Integrations"
-    href="/docs/concepts/integrations"
-    description="Reach your agents where work already happens — GitHub, Slack, Telegram, Notion, Confluence, and Google Workspace ship in the box, and any provider can be added as a manifest."
-  />
-</Cards>
-
-## Where to start
-
-<Cards>
-  <Card
-    title="Install"
-    href="/docs/installation"
-    description="The one-line installer in detail — Linux, macOS, and Windows."
-  />
-  <Card
-    title="Get started"
-    href="/docs/getting-started"
-    description="First sign-in, configure a model, and build your first resource type by chatting."
-  />
-  <Card
-    title="Concepts"
-    href="/docs/concepts"
-    description="How the soul, agents, runs, approvals, guardrails, and knowledge fit together."
-  />
-  <Card
-    title="Guides"
-    href="/docs/guides"
-    description="Task recipes: define a resource, install a skill, connect Slack, approve agent work."
-  />
-  <Card
-    title="Deploy"
-    href="/docs/deploy"
-    description="Every supported deployment: Compose, Coolify, Portainer, Unraid, managed databases, TLS."
-  />
-  <Card
-    title="Reference"
-    href="/docs/reference"
-    description="Environment variables, commands, the REST API, and the agent tool catalog."
-  />
-  <Card
-    title="Security"
-    href="/docs/security"
-    description="How secrets are encrypted and hashed, privacy operations, and control evidence."
-  />
-  <Card
-    title="Troubleshooting"
-    href="/docs/troubleshooting"
-    description="The failures people actually hit, and the fix for each."
-  />
-</Cards>

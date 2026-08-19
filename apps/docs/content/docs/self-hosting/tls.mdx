@@ -1,0 +1,41 @@
+---
+title: Put TLS in front
+description: Terminate HTTPS with a reverse proxy you already run.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+A fresh install serves plain HTTP on port 8080. That is fine on `localhost` and unacceptable
+on anything else: sign-in credentials, session cookies, and every chat message cross the
+network in the clear.
+
+<Callout type="warn">
+  Until TLS is in front, anyone who can reach the port can read the traffic — and on a
+  brand-new instance, the first visitor to reach `/setup` becomes the admin. If the
+  installer detected a public IP, finish setup immediately and add TLS before doing
+  anything else.
+</Callout>
+
+## Configure a reverse proxy
+
+nginx, Traefik, a cloud load balancer, or a tunnel (Cloudflare Tunnel, Tailscale Funnel)
+all work. Configure it to forward to the app's published port. Two rules:
+
+- Set `PUBLIC_URL` to the `https://` URL users type, or save that URL under **Business → About**
+  once the instance is up. Until one of those says `https://`, the app assumes it is not behind
+  TLS.
+- Do not buffer responses. Chat streams over Server-Sent Events; a proxy that buffers holds
+  every token until the turn finishes. In nginx that is `proxy_buffering off;`.
+
+Bind the app to loopback (`HOST_BIND=127.0.0.1`) when the proxy runs on the same host, so
+the plain-HTTP port is not independently reachable.
+
+## Verify
+
+```bash
+curl -fsS https://your-domain/readyz
+```
+
+Then sign in and confirm the session sticks across a page reload — a session that vanishes
+immediately after login is the signature of a `Secure`/origin mismatch between the public
+address and the URL you actually browsed to. Correct it under **Business → About**.

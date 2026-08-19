@@ -1,0 +1,136 @@
+---
+title: Make it team-ready
+description: Take a fresh instance from empty to safe to hand to your team — a model, a business description, a colleague, and an emergency stop.
+---
+
+A fresh instance is signed in and empty. It cannot answer anything yet, it knows nothing about your
+business, and you are the only person in it.
+
+By the end of this it will be ready for other people: it can think, it knows what you do, a
+colleague can sign in, and you will know exactly how to stop everything if you ever need to.
+
+About fifteen minutes, all of it in the browser.
+
+<Callout type="info">
+  No instance yet? [Install one first](/docs/self-hosting/install).
+</Callout>
+
+## Before you start
+
+You need an admin account, which is the account you created during setup.
+
+<Steps>
+
+<Step>
+
+### Give it a model
+
+Nothing works until the assistant can think. This is the one step everything else waits on.
+
+Open **Operate → Business → Secrets** and add an API key for a provider. Then open
+**Operate → Business → Models** and assign models to the three chains — **Fast**, **Balanced**, and
+**Thorough**. Under **What each effort means**, choose which of them **Auto** should use when
+nobody picks.
+
+Now open **Chat** and say hello. If it replies, this step is done.
+
+Full walkthrough: [configure LLM providers](/docs/administration/configure-llm-providers). No API
+key? A Claude or ChatGPT plan you already pay for works instead — see
+[run on a subscription](/docs/administration/run-on-a-subscription).
+
+</Step>
+
+<Step>
+
+### Tell it what your business does
+
+Agents read your business description before they answer anything. An instance that knows you run a
+café gives different answers from one that knows you run a law firm.
+
+The **Companion** — the tulip icon in the corner — asks for this. Answer it there, or open
+**Operate → Business → About** and write two or three sentences: what you do, who for, and anything
+an agent would be embarrassed not to know.
+
+This takes a minute and improves every answer the instance ever gives.
+
+</Step>
+
+<Step>
+
+### Invite a colleague
+
+Open **Operate → Business → People**, choose to invite someone, and enter their email.
+
+They arrive as a **member**, which is the right default. Members can build things, chat, and work
+with records, but they cannot reach secrets, model configuration, or operations.
+
+See [invite your team](/docs/administration/invite-your-team) for what an invite contains and how
+long it lasts.
+
+</Step>
+
+<Step>
+
+### Check what they can actually do
+
+Do not assume. Ask.
+
+Open **Operate → Business → People & access** and choose the **Check** tab. Pick the person you
+just invited, pick an action, and it tells you yes or no.
+
+This is worth doing once so you trust the boundary. Permission in TulipFarm only ever narrows: an
+agent can never do more than the person who set it going, and a member cannot gain admin powers by
+asking an agent nicely.
+
+More: [manage access](/docs/administration/manage-access).
+
+</Step>
+
+<Step>
+
+### Find the emergency stop before you need it
+
+Open **Operate → Health → Operations** and look at the **Kill switches** panel. Do not arm one —
+just find it, and notice that you could stop **every mutating effect** with one button.
+
+That is the whole point of this step. The moment to learn where the stop is, is not the moment you
+need it.
+
+Read [emergency stop](/docs/administration/emergency-stop) so you know what arming one does and
+does not do.
+
+</Step>
+
+</Steps>
+
+## What you have now
+
+An instance that can think, knows what your business does, has a second person in it, and has a
+stop you know how to reach.
+
+That is what *safe to hand to a team* means here.
+
+## Where to go next
+
+<Cards>
+  <Card
+    title="Build your first thing"
+    href="/docs/using-tulipfarm/build-your-first-thing"
+    description="Now make it do work — a resource type, an agent, and a schedule, all by chatting."
+  />
+  <Card
+    title="Connect an integration"
+    href="/docs/administration/connect-an-integration"
+    description="Bring in Slack, GitHub, Notion, or Google Drive."
+  />
+  <Card
+    title="Production checklist"
+    href="/docs/self-hosting/production-checklist"
+    description="Walk this before the instance holds anything real."
+  />
+  <Card
+    title="Watch what it costs"
+    href="/docs/administration/observability"
+    description="Traces, spend, and what is actually being sent to your provider."
+  />
+</Cards>

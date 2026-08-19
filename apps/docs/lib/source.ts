@@ -27,8 +27,14 @@ export function getPageMarkdownUrl(page: (typeof source)["$inferPage"]) {
   };
 }
 
+/**
+ * MDX comments survive `getText("processed")`, so build-time annotations such as `tf-page` and
+ * `tf-claim` would otherwise reach every LLM consumer of /llms.mdx and /llms-full.txt.
+ */
+const MDX_COMMENT = /^[ \t]*\{\/\*[\s\S]*?\*\/\}[ \t]*\r?\n?/gm;
+
 export async function getLLMText(page: (typeof source)["$inferPage"]) {
-  const processed = await page.data.getText("processed");
+  const processed = (await page.data.getText("processed")).replace(MDX_COMMENT, "");
 
   return `# ${page.data.title} (${page.url})
 

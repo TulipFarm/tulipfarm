@@ -1,12 +1,24 @@
 import type { Metadata } from "next";
 import { Provider } from "@/components/provider";
-import { SITE_URL } from "@/lib/shared";
+import { appName, SITE_URL, siteDescription } from "@/lib/shared";
 import "@fontsource-variable/jetbrains-mono";
 import "./global.css";
 
-// Resolves the relative OG image URLs that generateMetadata emits into absolute ones.
+// metadataBase resolves the relative OG image URLs that generateMetadata emits into absolute
+// ones. `alternates.canonical` is deliberately NOT set here — metadata is inherited, so a root
+// canonical would point every page at the home page. Each route sets its own.
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
+  title: appName,
+  description: siteDescription,
+  openGraph: {
+    type: "website",
+    siteName: appName,
+    locale: "en_US",
+  },
+  twitter: {
+    card: "summary_large_image",
+  },
 };
 
 export default function Layout({ children }: LayoutProps<"/">) {

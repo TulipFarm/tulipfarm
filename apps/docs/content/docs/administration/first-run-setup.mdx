@@ -1,0 +1,78 @@
+---
+title: First-run setup
+description: What to do the first time you open a fresh TulipFarm instance — create the admin, add a model, and answer the Companion.
+---
+
+A fresh instance needs one thing before it is useful: an admin account. Everything else is
+gathered afterwards, inside the app, a little at a time.
+
+This page is what you click. For *why* the instance behaves this way, see
+[how boot modes work](/docs/self-hosting/how-boot-modes-work).
+
+## Create the first admin
+
+Open the URL the installer printed. Because no admin exists yet, the app sends you to `/setup`.
+
+It asks one question at a time — your name, your email, then a password. There is no step counter,
+because there are only three.
+
+<Callout type="warn">
+  Do this immediately. Until an admin exists, `/setup` is open to anyone who can reach the
+  instance, and the first person through the door claims it.
+</Callout>
+
+When you finish, the wizard closes for good and hands you the main workspace.
+
+## Meet the Companion
+
+The setup wizard deliberately asks for very little. The rest arrives as small tasks from the
+**Companion** — a tulip icon, bottom-right on desktop and in the top bar on mobile.
+
+### Its first task: a model
+
+The companion opens **Operate → Business → Secrets** so you can add a provider key. The key is
+validated with one real model call before it is stored, so you find out immediately if it is wrong.
+
+Already paying for Claude or ChatGPT? Use that instead of an API key — see
+[run on a subscription](/docs/administration/run-on-a-subscription).
+
+### Its second task: what your business does
+
+The companion asks for your business name and a short description. You answer inline.
+
+This is worth taking seriously. The description is written into `soul.yaml` and read by every agent
+before it answers anything, so it shapes every reply the instance ever gives. It is static context,
+not [memory](/docs/using-tulipfarm/memory) — agents do not edit it.
+
+## Assign your models
+
+The companion does **not** do this part for you.
+
+Open **Operate → Business → Models** and assign models to the three chains — **Fast**,
+**Balanced**, and **Thorough** — then choose which of them **Auto** resolves to when nobody picks.
+
+Full walkthrough: [configure LLM providers](/docs/administration/configure-llm-providers).
+
+## Set up soul backup
+
+Git backup for your soul is not part of the wizard either.
+
+Configure the remote afterwards in **Operate → Business → Soul**, or seed it at boot with
+`SOUL_GIT_REMOTE_URL` and `SOUL_GIT_CREDENTIAL`.
+
+Without it, your configuration history lives only on this machine.
+
+## Where to go next
+
+<Cards>
+  <Card
+    title="Make it team-ready"
+    href="/docs/administration/make-it-team-ready"
+    description="The guided version of everything above, plus inviting someone and finding the emergency stop."
+  />
+  <Card
+    title="How boot modes work"
+    href="/docs/self-hosting/how-boot-modes-work"
+    description="Why the wizard opened, and how headless instances skip it."
+  />
+</Cards>

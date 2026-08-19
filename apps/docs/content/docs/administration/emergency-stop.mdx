@@ -1,0 +1,93 @@
+---
+title: Stop agents in an emergency
+description: Arm a kill switch to stop TulipFarm agents changing anything, instantly. Covers scopes, what keeps running, standing down, and the audit trail.
+---
+
+A kill switch stops agents making changes. Arm one when something is going wrong and you need it
+to stop now — a bad integration, a runaway cost, a tool doing the wrong thing.
+
+Kill switches block **mutating effects**: the actions that change something outside TulipFarm, or
+change your data. Agents can still think and read. Nothing is deleted.
+
+<Callout type="warn">
+  A kill switch is stored in the database, so it survives a restart. Restarting the server does
+  **not** clear one. Stand it down deliberately, from the screen.
+</Callout>
+
+## Arm a kill switch
+
+<Steps>
+  <Step>
+    Go to **Operate → Health → Operations**.
+  </Step>
+  <Step>
+    Find the **Kill switches** panel. When nothing is armed it reads *No kill switch is armed.
+    Mutating effects run normally.*
+  </Step>
+  <Step>
+    Pick a **Scope**. This decides how much you are stopping — see the table below.
+  </Step>
+  <Step>
+    If the scope is anything other than *Every mutating effect*, type the exact identifier into
+    **Which one**. A scope with no identifier is rejected.
+  </Step>
+  <Step>
+    Write a **Reason**. It is stored with the switch and with the audit event, so the next person
+    knows why.
+  </Step>
+  <Step>
+    Choose **Arm kill switch**. It takes effect on the very next action an agent attempts.
+  </Step>
+</Steps>
+
+## What each scope stops
+
+| Scope | Stops |
+| --- | --- |
+| Every mutating effect | Every change, everywhere. The biggest hammer. Takes no identifier. |
+| One tool | Every call to one named tool. |
+| One provider | Everything going to one model or service provider. |
+| One integration | Everything going to one connected provider, such as Slack. |
+| One destination | Everything going to one destination address. |
+| One data class | Every action touching one class of data. |
+
+Those six are the scopes that are actually enforced. The API also accepts `agent`, `routine` and
+`model`, but it rejects them as unenforceable, so they do nothing.
+
+## What keeps running
+
+Arming a switch is not a full stop. It is precise, so that you can leave the rest of the business
+working while you deal with one problem.
+
+- **Work already in flight is never interrupted.** An action that has already been dispatched
+  finishes.
+- **New actions are refused** from the next dispatch onward.
+- **Reading is unaffected.** agents can still answer questions and search knowledge.
+- Refused actions fail with a clear reason rather than silently doing nothing.
+
+## Stand it down
+
+<Steps>
+  <Step>
+    Go back to **Operate → Health → Operations**.
+  </Step>
+  <Step>
+    Find the switch in the **Kill switches** panel and choose **Stand down**.
+  </Step>
+</Steps>
+
+A switch that has been stood down cannot be armed again. The database refuses it. To stop the same
+thing a second time, arm a **new** switch with the same scope. This is deliberate: it keeps the
+history of every stop honest, rather than letting one row flip on and off.
+
+## What gets recorded
+
+Arming and standing down each write an audit event — `kill_switch.enabled` and
+`kill_switch.disabled` — with who did it and the reason given. Stood-down switches stay in the
+database rather than being deleted, so the record of a past emergency survives.
+
+## Before you need it
+
+Arming a kill switch is the fast half of an incident. The slower half is working out what went
+wrong and what to tell people. Read
+[Respond to an incident](/docs/administration/respond-to-an-incident) before you are in one.

@@ -1,0 +1,208 @@
+---
+title: Troubleshooting in the app
+description: Find what you can fix in the browser when sign-in, chat, agent, approval, run, or integration behavior looks wrong.
+---
+
+{/* tf-page: track: using-tulipfarm  requires: ["activity:*", "approval:*"] */}
+
+Use this page when TulipFarm opens in your browser, but something you tried did not work.
+It only covers checks you can make in the app.
+
+If the fix needs containers, logs, volumes, or database access, send the symptom to the
+person who manages the instance and include a link to
+[deployment troubleshooting](/docs/self-hosting/when-install-fails).
+
+## Signing in
+
+<Accordions>
+
+<Accordion title="The setup wizard never appears — I land on a login page">
+
+The setup wizard only appears while the instance has no users. After the first account is
+created, `/setup` locks and the login page opens instead. That keeps a second visitor from
+claiming the instance.
+
+If the instance was created with [headless seeding](/docs/self-hosting/headless), the setup
+wizard is skipped. Use the email address that was seeded at boot.
+
+</Accordion>
+
+<Accordion title="I sign in, then land back on the login page">
+
+The browser accepted the password, but did not keep the Session cookie. A Session cookie is
+the browser cookie that keeps you signed in.
+
+This usually means the instance URL and cookie settings do not match. Send
+[Login succeeds, then immediately disappears](/docs/self-hosting/when-install-fails#login-succeeds-then-immediately-disappears)
+to the person who manages the instance.
+
+</Accordion>
+
+<Accordion title="I forgot the password for the first account">
+
+A fresh instance has no email reset flow. Ask another person with account-management access to send an invite or reset your access.
+
+If no one with that access can sign in, restore from a backup. See
+[Back up and restore](/docs/self-hosting/back-up-and-restore).
+
+</Accordion>
+
+</Accordions>
+
+## Chat does not answer
+
+<Accordions>
+
+<Accordion title="The app says LLM features are disabled">
+
+LLM means large language model: the model that writes answers. No provider model is
+configured, so TulipFarm cannot produce a chat answer.
+
+Ask the person who manages model settings to add a provider key and assign the
+Auto/Fast/Balanced/Thorough effort choices.
+
+Send them [Configure LLM providers](/docs/administration/configure-llm-providers).
+
+</Accordion>
+
+<Accordion title="My message is accepted, but no answer appears">
+
+A run is one durable unit of work, such as a chat reply. If a message creates a run but
+no answer appears, open the run timeline and look for a waiting reason.
+
+If every new message stalls, the worker service may be down or blocked by a database
+migration. The worker service is the background process that produces chat answers.
+Send [A chat message never produces an answer](/docs/self-hosting/when-install-fails#a-chat-message-never-produces-an-answer)
+to the person who manages the instance.
+
+</Accordion>
+
+<Accordion title="The answer fails with an authentication or quota error">
+
+The provider rejected the model request. You cannot read a saved secret value after it is
+stored; a secret is an encrypted value such as a provider API key.
+
+Ask the person who manages model settings to replace a rejected key or check provider quota.
+A quota error can fall through to the next provider. An authentication error stops the turn,
+because another provider cannot fix a bad key.
+
+</Accordion>
+
+<Accordion title="Knowledge search only finds exact words">
+
+Knowledge is TulipFarm's shared wiki. Without an embedding model, knowledge search
+falls back to lexical matching. Lexical means keyword-based: TulipFarm still returns
+results, but it does not search by meaning.
+
+Ask the person who manages model settings to configure an embedding model. If they later
+change the embedding model, existing knowledge content may need re-indexing before
+semantic results improve. Semantic means by meaning.
+
+</Accordion>
+
+</Accordions>
+
+## Agents, approvals, and runs
+
+<Accordions>
+
+<Accordion title="An Agent says it is not allowed to do something">
+
+An agent is a configured persona with its own instructions and authority. Two things can
+look like a refusal:
+
+- A guardrail is a hard limit. The agent cannot negotiate past it, and no approval unlocks it.
+- An approval is a pause that waits for a human decision before work continues.
+
+Check **Operate → Work → Inbox** first. If nothing is waiting there, the action is probably
+blocked by a guardrail. See [How guardrails work](/docs/administration/how-guardrails-work)
+and [approvals](/docs/using-tulipfarm/approvals).
+
+</Accordion>
+
+<Accordion title="An Agent cannot see a Record a teammate can">
+
+A record is one entry of a Resource type, the schema for one kind of business data, such
+as Customer or Ticket. An agent can only use authority it has and authority you have. It can never exceed the person who started
+it.
+
+See [Roles and permissions](/docs/reference/roles-and-permissions).
+
+</Accordion>
+
+<Accordion title="A Run is stuck">
+
+Open the run timeline. A waiting run is usually waiting for something named there: an
+approval, a timer, or a child run.
+
+If the page offers a button, you can cancel, pause, resume, or retry the run. See
+[Watch a run](/docs/using-tulipfarm/watch-a-run).
+
+</Accordion>
+
+</Accordions>
+
+## Integrations
+
+<Accordions>
+
+<Accordion title="Slack or GitHub events never arrive">
+
+An integration is a connected third party, such as Slack or GitHub. The integration can look
+connected in the app while event delivery is stopped outside the browser.
+
+Ask the person who manages the instance to check integration event delivery and the public
+callback URL. Send them
+[Slack or GitHub events never arrive](/docs/self-hosting/when-install-fails#slack-or-github-events-never-arrive).
+
+</Accordion>
+
+<Accordion title="GitHub App is not configured">
+
+The GitHub integration needs GitHub App credentials before it can install on repositories.
+The error means that setup has not finished on this instance.
+
+Send [Connect GitHub](/docs/administration/connect-github) to the person who connects shared
+integrations.
+
+</Accordion>
+
+<Accordion title="I want an Integration that is not listed">
+
+TulipFarm ships seven bundled providers. See [Bundled integrations](/docs/reference/bundled-integrations)
+for the list and what each one can do.
+
+Other integrations come from an integration manifest, a data file that declares how to
+connect and which provider API calls agents may make. They can be installed from a git
+repository; see [Connect an integration](/docs/administration/connect-an-integration). If no
+manifest exists yet, writing one needs no TypeScript. The authoring reference is
+`docs/architecture/building-an-integration.md` in the repository.
+
+</Accordion>
+
+</Accordions>
+
+## Still stuck
+
+<Cards>
+  <Card
+    title="Deployment troubleshooting"
+    href="/docs/self-hosting/when-install-fails"
+    description="Use this when the fix needs logs, containers, volumes, or the database."
+  />
+  <Card
+    title="Configure LLM providers"
+    href="/docs/administration/configure-llm-providers"
+    description="Use this when chat cannot answer because no model or provider key works."
+  />
+  <Card
+    title="Roles and permissions"
+    href="/docs/reference/roles-and-permissions"
+    description="Check why a person, agent, or API token can or cannot do something."
+  />
+  <Card
+    title="Report an issue"
+    href="https://github.com/tulipfarm/tulipfarm/issues"
+    description="Include the exact error text, what you clicked, and a screenshot if you can."
+  />
+</Cards>

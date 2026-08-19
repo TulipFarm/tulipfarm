@@ -1,0 +1,64 @@
+---
+title: Bundled integrations
+description: The seven providers TulipFarm ships manifests for, what agents can do with each, and how you connect them.
+---
+
+An integration is a connected third party. Seven arrive with every instance, ready to connect. You
+do not install them — you connect them, which means giving TulipFarm the credentials it needs.
+
+None of them are connected by default. Nothing leaves your instance until you connect one.
+
+{/* tf-claim kind=integration-slugs value="confluence,github,google-docs,google-drive,notion,slack,telegram" */}
+{/* tf-claim kind=integration-count value="7" */}
+
+## What each one is for
+
+| Integration | What agents can do with it |
+| --- | --- |
+| `github` | Triage issues, review and merge pull requests, commit code, and read repositories. |
+| `slack` | Talk to your agents from Slack — direct message them, or mention them in a channel. |
+| `telegram` | Talk to your agents from Telegram — direct message the bot, or mention it in a group. |
+| `notion` | Search your workspace, read and write pages, and query databases. |
+| `confluence` | Search Confluence, read pages, list spaces, and index pages into knowledge. |
+| `google-drive` | Search Drive, read file details, and index files into knowledge. |
+| `google-docs` | Read documents, and index them into knowledge. |
+
+## Two different jobs
+
+The list above mixes two things that are worth separating, because they answer different questions.
+
+**Places you talk to agents.** Slack and Telegram are surfaces. Connecting one means your agents
+become reachable somewhere other than the TulipFarm web app. Your team can ask a question without
+opening a new tab.
+
+**Places agents reach into.** GitHub, Notion, Confluence, Google Drive, and Google Docs are
+sources and destinations. Connecting one means agents can read from it, and in some cases write
+back to it.
+
+GitHub is both — you can work pull requests from it, and agents can act on them.
+
+## How you connect them
+
+The steps differ because the providers differ, and the setup screen walks you through whichever one
+applies.
+
+| How it works | integrations | What you do |
+| --- | --- | --- |
+| Guided app creation | `github`, `slack` | TulipFarm hands the provider a pre-filled form. You approve it, and the credentials come back automatically. |
+| Copy two values | `telegram` | You create a bot with BotFather and paste what it gives you. |
+| Paste credentials | `notion`, `confluence`, `google-drive`, `google-docs` | You create a token or internal integration on the provider's side and paste it in. |
+
+Whichever path you take, credentials are stored encrypted in your instance's secret store, not in
+the soul and not in environment variables.
+
+## What an integration is allowed to do
+
+Every integration is defined by a manifest, and the manifest is the whole story. It declares
+**egress** — what your agents may do to the provider — and **ingress** — what the provider may send
+you. An agent cannot call something the manifest does not declare, so the manifest is a boundary
+rather than a suggestion.
+
+<Cards>
+  <Card title="Connect an integration" href="/docs/administration/connect-an-integration" description="The step-by-step for connecting one." />
+  <Card title="How integrations work" href="/docs/administration/how-integrations-work" description="Manifests, egress, ingress, and identity." />
+</Cards>

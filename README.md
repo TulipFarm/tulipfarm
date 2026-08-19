@@ -53,7 +53,7 @@ Once a model is configured, everything below is created by asking for it in chat
   a manifest.
 
 See the [full documentation](https://tulipfarm.site/docs) for a guided tour, or
-[docs/concepts](https://tulipfarm.site/docs/concepts) for how these fit together.
+[Using TulipFarm](https://tulipfarm.site/docs/using-tulipfarm) for how these fit together.
 
 ## Architecture
 
@@ -101,7 +101,7 @@ Verifies WSL2 + a distro, then runs the Linux installer inside WSL.
 Overrides (env vars): `TF_VERSION` (image tag, default `latest`), `TF_PORT` (default
 `8080`), `TF_INSTALL_DIR` (default `/opt/tulipfarm`), `TF_RUNTIME` (`docker`|`podman`),
 `TF_BASE_URL`/`TF_REF`. See the
-[installation guide](https://tulipfarm.site/docs/installation) for every option.
+[installation guide](https://tulipfarm.site/docs/self-hosting/install) for every option.
 An explicit `TF_PORT` also moves an existing install to that host port without rotating
 its generated secrets.
 
@@ -119,7 +119,7 @@ for every knob (TLS, `POSTGRES_PASSWORD`, `PUBLIC_URL`).
 stable). Updates are always **manual** (no auto-update by design) — re-run the install
 command, or `docker compose pull && docker compose up -d`. Database migrations run
 automatically on boot; there are **no down-migrations**, so back up before updating. See
-the [update guide](https://tulipfarm.site/docs/deploy/updating) for the full procedure and
+the [update guide](https://tulipfarm.site/docs/self-hosting/updating) for the full procedure and
 every deployment target.
 
 **Uninstall permanently** (deletes the database, soul, secrets, backups, volumes, and
@@ -127,7 +127,7 @@ TulipFarm images after a typed confirmation):
 ```bash
 curl -fsSL https://tulipfarm.site/uninstall.sh | bash
 ```
-See the [uninstall guide](https://tulipfarm.site/docs/uninstall) before running it.
+See the [uninstall guide](https://tulipfarm.site/docs/self-hosting/uninstall) before running it.
 
 > You never need to clone this repository to run TulipFarm — every path above pulls a
 > published image. The source tree here is for contributors — see

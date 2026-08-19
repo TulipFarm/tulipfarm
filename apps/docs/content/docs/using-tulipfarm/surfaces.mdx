@@ -1,0 +1,64 @@
+---
+title: Surfaces
+description: How the same agent output renders natively in the web app, Slack, GitHub, or Telegram, and why buttons still work wherever you press them.
+---
+
+{/* tf-page: track: using-tulipfarm  requires: ["surface:*"] */}
+
+An agent does not write a Slack message, a web page, and a Telegram message separately. It produces
+one **artifact** — a single thing it made, such as a table, a form, a chart, or a message — and
+describes what that thing *is* and what you can do with it.
+
+TulipFarm then renders that artifact natively wherever it is delivered. This is what a **surface**
+means: a place your agents' output can appear.
+
+## The same answer, four native forms
+
+| Where it appears | What you see |
+| --- | --- |
+| The web app | Real components in the TulipFarm interface |
+| Slack | A native Slack message with real Slack buttons |
+| GitHub | A pull request comment or a check result |
+| Telegram | A native Telegram message |
+
+Nobody gets a worse version. A Slack user is not reading a link back to the web app; they are
+reading Slack.
+
+<Callout>
+A surface decides how output **looks** on a channel. Actually reaching that channel is a separate
+thing — an [integration](/docs/administration/how-integrations-work). Telegram ships with both, so
+you can [connect Telegram](/docs/administration/connect-telegram) today.
+</Callout>
+
+## Buttons work wherever you press them
+
+If an agent shows you a button, a dropdown, or a form, pressing it does the same thing in every
+channel.
+
+Press **Approve** in Slack and the answer travels back the same way it would from the web app: it
+is recorded, the waiting work continues, and the reply lands back in the same Slack thread you were
+already reading.
+
+That matters because a decision made in Slack is a real decision. It is not a shortcut that skips
+the record — it appears in the [run](/docs/using-tulipfarm/runs) and the audit trail exactly like
+one made in the app.
+
+## Your own components
+
+The list of things an agent can show is not fixed. If your business needs a component nobody
+shipped — an invoice summary, a table shaped like your rota — you can ask for it in chat, and it is
+stored in [the soul](/docs/using-tulipfarm/what-a-soul-is) with everything else your agents use.
+
+Surfaces are not a second automation system. They are how the work your agents already do gets
+shown to you.
+
+## Where to go next
+
+<Cards>
+  <Card title="Approve agent work" href="/docs/using-tulipfarm/approve-agent-work">
+    Act on the buttons an agent sends you, from wherever you read them.
+  </Card>
+  <Card title="Chat from Slack" href="/docs/administration/connect-slack">
+    Set your instance up so agents answer in Slack too.
+  </Card>
+</Cards>

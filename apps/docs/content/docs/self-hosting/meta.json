@@ -1,0 +1,25 @@
+{
+  "title": "Self-hosting",
+  "pages": [
+    "index",
+    "---Get it running---",
+    "install",
+    "docker-compose",
+    "coolify",
+    "portainer",
+    "other-platforms",
+    "kubernetes",
+    "---Make it production-ready---",
+    "production-checklist",
+    "tls",
+    "managed-database",
+    "headless",
+    "---Keep it running---",
+    "updating",
+    "back-up-and-restore",
+    "when-install-fails",
+    "uninstall",
+    "---Understand it---",
+    "how-boot-modes-work"
+  ]
+}

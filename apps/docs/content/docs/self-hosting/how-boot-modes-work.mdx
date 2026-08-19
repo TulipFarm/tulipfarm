@@ -1,0 +1,104 @@
+---
+title: How boot modes work
+description: How a fresh TulipFarm instance decides whether to open the setup wizard, seed itself from the environment, or do neither.
+---
+
+When TulipFarm starts for the very first time, it has to answer one question: **does an admin
+already exist?**
+
+Everything on this page follows from that. There are two ways an instance gets its first admin, and
+the instance chooses between them by itself.
+
+## The decision
+
+```text
+        instance starts
+              │
+              ▼
+      does any user exist? ──── yes ──► normal boot, nothing special
+              │
+              no
+              │
+              ▼
+   are ADMIN_EMAIL and ADMIN_PASSWORD set?
+              │
+      ┌───────┴───────┐
+     yes              no
+      │                │
+      ▼                ▼
+  headless seed    wizard mode
+  (no browser)     (/setup opens)
+```
+
+## Wizard mode
+
+This is the default, and it is what a `curl | bash` install and local development both land in,
+because neither sets any environment variables.
+
+`GET /api/v1/setup/status` reports `needsSetup: true`, so the web app sends every visitor to
+`/setup` until an admin exists.
+
+The wizard only ever creates the **first** admin. The moment one exists it closes, and its step
+routes return `403` from then on. It cannot be used to mint a second.
+
+<Callout type="warn">
+  Until that first admin exists, `/setup` is unauthenticated. On an instance reachable from the
+  internet, **whoever arrives first becomes the admin**. This is why the installer tells you to
+  finish setup immediately.
+</Callout>
+
+Finishing writes `setupComplete: true` into `soul.yaml`. That marker lives in your soul, which
+means it is in git history rather than only in the database.
+
+## Headless mode
+
+This is for deployments where configuration is injected before anything boots — a Kubernetes
+manifest, a CI pipeline, a managed platform.
+
+Setting `ADMIN_EMAIL` and `ADMIN_PASSWORD` seeds the first admin without a browser. Adding
+`LLM_API_KEY` seeds the model provider too, which produces an instance that is genuinely ready
+rather than merely reachable.
+
+In production, admin credentials **without** `LLM_API_KEY` are refused. That refusal is
+deliberate: an instance that boots with an admin but no model is one that looks fine and answers
+nothing.
+
+Seeding is idempotent. Once any user exists it does nothing, so re-running your deployment is safe.
+
+<Callout type="info">
+  Headless seeding handles API-key providers only. A Claude or ChatGPT subscription needs an
+  interactive browser sign-in, so those are configured afterwards — see
+  [run on a subscription](/docs/administration/run-on-a-subscription).
+</Callout>
+
+The step-by-step is in [headless setup](/docs/self-hosting/headless).
+
+## Why the marker lives in two places
+
+Setup state depends on **both** the soul and the database, and they can disagree.
+
+If you restore an old `soul.yaml` that has no `setupComplete` marker, but users already exist in
+the database, the instance treats setup as complete. It trusts the users over the marker, because
+reopening first-admin creation on a live instance would be a security hole.
+
+The reverse is not survivable. If the database is lost, then users, records, knowledge, runs,
+secrets, and identity are all lost — **even if the soul survives perfectly**. The soul holds your
+configuration, not your data.
+
+This is the single most important thing to understand before you design a backup:
+[back up and restore](/docs/self-hosting/back-up-and-restore) covers what to actually copy.
+
+## Where to go next
+
+<Cards>
+  <Card
+    title="First-run setup"
+    href="/docs/administration/first-run-setup"
+    description="What you actually click through on a fresh instance."
+  />
+  <Card
+    title="Headless setup"
+    href="/docs/self-hosting/headless"
+    description="The environment variables, and what a full seed needs."
+  />
+</Cards>

@@ -1,0 +1,78 @@
+---
+title: Back up and restore
+description: Back up the soul git repo and the PostgreSQL data it does not contain.
+---
+
+This guide backs up TulipFarm's [soul](/docs/using-tulipfarm/what-a-soul-is) and explains what else must
+be backed up. The soul is a git repo, so backing it up means pushing it to a remote.
+
+## Outcome
+
+At the end, the soul has a remote backup and you know which data still requires a
+PostgreSQL backup.
+
+## What is in the soul
+
+The soul contains resource type schemas, agents, skills, routines, integrations, surface
+components, `soul.yaml` (including its `llm` configuration), `guardrails.yaml`, and lock/config
+files.
+Soul writes commit immediately and reconcile live.
+
+## What is not in the soul
+
+Records, knowledge pages and embeddings, chats, runs and run events, approvals, memory,
+secrets, audit data, and identity data live in PostgreSQL. Back up the database too, or a
+soul restore will recover configuration without the operational data.
+
+## Configure a git remote
+
+<Steps>
+  <Step>
+    Open **Operate → Business → Soul**.
+  </Step>
+  <Step>
+    In **Git remote**, enter the remote URL, such as
+    `https://github.com/acme/tulipfarm-soul.git`.
+  </Step>
+  <Step>
+    Enter a personal access token when the remote needs one. The credential is
+    write-only; leaving it blank later keeps the existing one.
+  </Step>
+  <Step>
+    Save. TulipFarm writes the remote config and syncs immediately.
+  </Step>
+  <Step>
+    Use **Sync now** to push and pull after later changes.
+  </Step>
+</Steps>
+
+## Use GitHub App-backed soul backup
+
+If GitHub is connected, use the GitHub soul repo flow at
+`/integrations/github/soul-repo`. You can connect an already-granted repository as the
+soul repo, or use `/integrations/github/soul-repo/create` to create one when the GitHub
+App installation has the required administration permission.
+
+## Restore
+
+<Steps>
+  <Step>
+    Restore PostgreSQL from your database backup first.
+  </Step>
+  <Step>
+    Put the soul git repo at the configured `SOUL_PATH`, or configure
+    **Operate → Business → Soul** to pull from the remote.
+  </Step>
+  <Step>
+    Use **Sync now** or the soul sync endpoint to pull the remote and emit a soul reload.
+  </Step>
+  <Step>
+    Open **Resources**, **Agents**, **Skills**, **Routines**, and **Integrations** to
+    confirm the registries loaded.
+  </Step>
+</Steps>
+
+<Callout type="warn">
+Do not treat the soul remote as a full system backup. It does not contain secrets or
+business records.
+</Callout>

@@ -1,0 +1,110 @@
+---
+title: Routine triggers
+description: Every way a routine can start — schedules, webhooks, and manual runs — with the settings each one accepts.
+---
+
+A routine is an automation. A trigger is what starts it. This page lists every trigger a routine can
+use and the settings each one accepts.
+
+You do not normally write these by hand. You describe what you want in chat and an agent writes the
+routine for you. This page is here for when you want to check what it wrote, or say precisely what
+you want.
+
+## The triggers you can use
+
+| Trigger | Starts the routine when | You must give it |
+| --- | --- | --- |
+| `manual` | Someone asks for it, from the app or the API. | Nothing. |
+| `internal_api` | Another part of your instance calls for it. | Nothing. |
+| `datetime` | A single moment arrives. | `at` — the date and time. |
+| `interval` | A fixed amount of time has passed. | `everyMs` — the gap in milliseconds, at least 1. |
+| `cron` | A schedule matches. | `expression`, and optionally `timezone`. |
+| `webhook` | An outside system posts to your instance. | `provider`, and `verification`. |
+
+A routine can have more than one trigger. A nightly report that you also want to run on demand takes
+a `cron` trigger and a `manual` one.
+
+## Writing a cron expression
+
+TulipFarm uses **five fields**, in this order:
+
+```text
+minute  hour  day-of-month  month  day-of-week
+```
+
+Each field takes `*` for *every*, a number, a list (`1,15`), a range (`9-17`), or a step (`*/15`).
+
+| Expression | Means |
+| --- | --- |
+| `0 9 * * *` | Every day at 09:00. |
+| `*/15 * * * *` | Every fifteen minutes. |
+| `0 9 * * 1-5` | 09:00, Monday to Friday. |
+| `0 0 1 * *` | Midnight on the first of every month. |
+
+Times are in `UTC` unless you set `timezone`.
+
+## When a scheduled run is missed
+
+An instance that was switched off does not silently swallow the runs it slept through — you choose
+what happens.
+
+| `missedRunPolicy` | What happens after downtime |
+| --- | --- |
+| `skip` | Nothing catches up. This is the default. |
+| `run_once` | One run happens, no matter how many were missed. |
+| `catch_up_bounded` | Missed runs happen, up to a limit you set. |
+
+`catch_up_bounded` **requires** `catchUpCap`. Without it there is no ceiling, and a long outage
+would produce a flood of runs.
+
+## When a run is still going
+
+`overlapPolicy` decides what a new trigger does while the previous run is still working.
+
+| `overlapPolicy` | What the new trigger does |
+| --- | --- |
+| `skip` | Gives up. The running one continues. This is the default. |
+| `allow` | Starts anyway, alongside the running one. |
+| `supersede` | Replaces the running one. |
+
+For finer control, a routine can also declare `concurrency`, which groups runs by a `key` you choose
+and applies a `policy` to that group: `serialize`, `parallel`, `queue`, `coalesce`, `reject`, or
+`supersede`. An optional `max` caps how many run at once. Both `key` and `policy` are required when
+you use it.
+
+## Verifying a webhook
+
+A webhook trigger is a door into your instance, so TulipFarm will not open it for an unsigned
+request. Every `webhook` trigger must declare how to check the signature.
+
+| Setting | Required | What it is |
+| --- | --- | --- |
+| `method` | Yes | `hmac_sha256`, `hmac_sha1`, or `ed25519`. |
+| `signatureHeader` | Yes | The header the provider puts the signature in. |
+| `secretRef` | Yes | The name of the stored secret to check against. |
+| `signingTemplate` | No | How to rebuild the string the provider signed. |
+| `signatureFormat` | No | The encoding of the signature. |
+| `timestampHeader` | No | The header carrying the request time. |
+| `toleranceMs` | No | How old a request may be before it is rejected. |
+
+## Defaults
+
+| Setting | Default |
+| --- | --- |
+| `timezone` | `UTC` |
+| `dstPolicy` | `forward_only` |
+| `missedRunPolicy` | `skip` |
+| `overlapPolicy` | `skip` |
+
+## Not wired up yet
+
+<Callout type="warn">
+  Three more trigger types exist in the configuration format but **nothing starts a routine from
+  them yet**: `form`, `integration_event`, and `internal_event`. A routine using one will save
+  without complaint and then never run. Use `webhook` or `manual` instead until they ship.
+</Callout>
+
+<Cards>
+  <Card title="What routines are" href="/docs/using-tulipfarm/routines" description="The idea behind routines, states, and runs." />
+  <Card title="Watch a run" href="/docs/using-tulipfarm/watch-a-run" description="Following a routine while it works." />
+</Cards>
