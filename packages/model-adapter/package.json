@@ -11,7 +11,7 @@
   "dependencies": {
     "@tulipfarm/agent-runtime": "workspace:*",
     "@tulipfarm/llm": "workspace:*",
-    "ai": "^7.0.2"
+    "ai": "^7.0.66"
   },
   "devDependencies": {
     "@tulipfarm/tsconfig": "workspace:*",
