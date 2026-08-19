@@ -1,6 +1,11 @@
 import { decideEffectivePermission } from "@tulipfarm/authz";
 import { describe, expect, it } from "vitest";
-import { DEPLOYMENT_ROLES, describeDeploymentRoles } from "./roles";
+import {
+  ADMIN_ONLY_SURFACES,
+  DEPLOYMENT_ROLES,
+  describeDeploymentRoles,
+  MEMBER_UNDOMAINED_RECORD_ACTIONS,
+} from "./roles";
 
 function member() {
   const role = describeDeploymentRoles().find((r) => r.id === "member");
@@ -17,22 +22,54 @@ describe("describeDeploymentRoles", () => {
     ]);
   });
 
-  it("keeps each admin-only surface denied to a member", () => {
+  /**
+   * Asserted as decisions rather than as deny labels: a member is refused an admin-only action by
+   * default deny, and spelling that out as an explicit deny instead is what made every granted
+   * Role — `Owner` included — inert on top of the member baseline (#408).
+   */
+  it("refuses a member every action the admin-only catalog names", () => {
+    const memberRole = DEPLOYMENT_ROLES.find((role) => role.id === "member");
+    if (!memberRole) throw new Error("member role missing from the deployment catalog");
+    const layers = [{ name: "member", grants: memberRole.grants }];
+
+    const allowed = ADMIN_ONLY_SURFACES.flatMap((surface) =>
+      (surface.actions.includes("*")
+        ? [`${surface.type}.probe`, ...MEMBER_UNDOMAINED_RECORD_ACTIONS]
+        : surface.actions
+      )
+        .filter(
+          (action) =>
+            decideEffectivePermission(layers, { action, resourceType: surface.type }).allowed
+        )
+        .map((action) => `${surface.type}: ${action}`)
+    );
+
+    expect(allowed).toEqual([]);
+  });
+
+  /** The residual `resourceType: "*"` allow must not reach a Resource type named after one. */
+  it("keeps the member record wildcard off admin-only resource types", () => {
     const grants = member().grants;
-    expect(grants).toContain("deny secret.write on secret");
-    expect(grants).toContain("deny secret.delete on secret");
-    expect(grants).toContain("deny identity.api_client.create on identity");
-    expect(grants).toContain("deny any action on user");
-    expect(grants).toContain("deny any action on observability");
-    expect(grants).toContain("deny llm_config.resolve on llm_config");
-    expect(grants).toContain("deny llm_config.write on llm_config");
-    expect(grants).toContain("deny any action on knowledge_source");
-    expect(grants).toContain("deny any action on kv_system");
-    expect(grants).toContain("deny any action on setup");
-    expect(grants).toContain("deny any action on operations");
-    expect(grants).toContain("deny any action on audit");
-    expect(grants).toContain("deny any action on soul.business_profile");
-    expect(grants).toContain("deny any action on soul.publication");
+    expect(grants).toContain("deny record.read on user");
+    expect(grants).toContain("deny record.delete on secret");
+  });
+
+  it("lets a Role granted on top of the member baseline actually take effect", () => {
+    const memberRole = DEPLOYMENT_ROLES.find((role) => role.id === "member");
+    const ownerRole = DEPLOYMENT_ROLES.find((role) => role.id === "owner");
+    if (!memberRole || !ownerRole) throw new Error("built-in role missing from the catalog");
+
+    const promoted = decideEffectivePermission(
+      [{ name: "user", grants: [...memberRole.grants, ...ownerRole.grants] }],
+      { action: "user.manage", resourceType: "user" }
+    );
+    const everyday = decideEffectivePermission([{ name: "user", grants: memberRole.grants }], {
+      action: "user.manage",
+      resourceType: "user",
+    });
+
+    expect(promoted.allowed).toBe(true);
+    expect(everyday.allowed).toBe(false);
   });
 
   it("allows only the member surfaces that are actually available today", () => {
@@ -47,7 +84,13 @@ describe("describeDeploymentRoles", () => {
 
   /* Reading the LLM config names every provider, model and api_key_ref, so it is operator-only. */
   it("denies a member the LLM configuration", () => {
-    expect(member().grants).toContain("deny llm_config.read on llm_config");
+    const memberRole = DEPLOYMENT_ROLES.find((role) => role.id === "member");
+    if (!memberRole) throw new Error("member role missing from the deployment catalog");
+    const decision = decideEffectivePermission([{ name: "member", grants: memberRole.grants }], {
+      action: "llm_config.read",
+      resourceType: "llm_config",
+    });
+    expect(decision.allowed).toBe(false);
   });
 
   /* Members manage their own tokens; the Roles view must not deny all api_token actions. */

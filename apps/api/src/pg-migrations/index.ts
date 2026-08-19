@@ -769,13 +769,11 @@ async function seedAuthorizationBootstrap(q: Queryable): Promise<void> {
       ON users (setup_bootstrap) WHERE setup_bootstrap AND role = 'admin'`);
   }
 
+  // Kept in step with `DEPLOYMENT_ROLES`: the boot sync rewrites both rows anyway, but a seed that
+  // disagrees with the catalog is how `owner` came to grant nothing at all (#408).
   await seedBootstrapRole(q, "owner", [
-    { action: "*", resourceType: "authz.role", effect: "allow" },
-    { action: "*", resourceType: "authz.role", domain: "*", effect: "allow" },
-    { action: "*", resourceType: "authz.assignment", effect: "allow" },
-    { action: "*", resourceType: "authz.assignment", domain: "*", effect: "allow" },
-    { action: "*", resourceType: "authz.relation", effect: "allow" },
-    { action: "*", resourceType: "authz.relation", domain: "*", effect: "allow" },
+    { action: "*", resourceType: "*", effect: "allow" },
+    { action: "*", resourceType: "*", domain: "*", effect: "allow" },
   ]);
   await seedBootstrapRole(q, "admin", [
     { action: "*", resourceType: "*", effect: "allow" },

@@ -156,16 +156,16 @@ describe("runtime operational API", () => {
     expect(await api.getRun(grant, "missing")).toBeNull();
 
     const roles = await api.getRoles(grant);
-    expect(roles.items.map((role) => role.id)).toEqual(["admin", "member"]);
+    expect(roles.items.map((role) => role.id)).toEqual(["owner", "admin", "member"]);
     expect(roles.revision).toMatch(/^[a-f0-9]{64}$/);
     // Per-action, not a blanket `deny any action on secret`. `GET /api/v1/secrets/status` is
     // guarded by `requireAuth` alone (only PUT and DELETE check `role !== "admin"`), so a member
-    // really can list secret metadata. The old blanket deny made this view claim otherwise — the
-    // exact way the Roles page "starts lying about who can do what" that `identity/roles.ts` warns
-    // about.
-    expect(roles.items[1]?.grants).toContain("allow secret.read on secret");
-    expect(roles.items[1]?.grants).toContain("deny secret.write on secret");
-    expect(roles.items[1]?.grants).toContain("deny secret.delete on secret");
+    // really can list secret metadata. Writing is simply absent from the allow-list rather than
+    // spelled as a deny, because a deny would also veto any Role granted on top of member.
+    const member = roles.items.find((role) => role.id === "member");
+    expect(member?.grants).toContain("allow secret.read on secret");
+    expect(member?.grants).not.toContain("allow secret.write on secret");
+    expect(member?.grants).not.toContain("allow secret.delete on secret");
   });
 
   it("reports an absent capability as not implemented rather than as a failure", async () => {
