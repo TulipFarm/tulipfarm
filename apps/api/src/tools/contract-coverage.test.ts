@@ -122,6 +122,7 @@ const EXPECTED_FAMILY_TOOL_NAMES = [
       "get_current_time",
       "load_skill",
       "load_skill_reference",
+      "guardrail_forge",
       "routine_forge",
       "routine_picker",
       "soul_repo_push",

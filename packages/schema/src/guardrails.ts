@@ -59,6 +59,30 @@ export type PromptInjectionConfig = Static<typeof PromptInjectionGuard>;
 export type ToolBlocklistConfig = Static<typeof ToolBlocklistGuard>;
 export type ContentFilterConfig = Static<typeof ContentFilterGuard>;
 
+export type GuardrailStage = keyof GuardrailsConfig;
+
+/**
+ * The one stage each guard is valid in.
+ *
+ * The stage unions above are strict, so a guard filed under the wrong stage fails validation
+ * rather than silently never running. An author names the guard; the stage follows from it and is
+ * never a second thing to get wrong.
+ */
+export const GUARDRAIL_STAGE_BY_GUARD = {
+  prompt_injection: "input",
+  tool_blocklist: "tool-call",
+  content_filter: "output",
+} as const satisfies Record<string, GuardrailStage>;
+
+export type GuardrailGuardName = keyof typeof GUARDRAIL_STAGE_BY_GUARD;
+
+/** The stage a guard belongs to, or `undefined` for a name no stage union admits. */
+export function guardrailStageFor(guard: string): GuardrailStage | undefined {
+  return Object.hasOwn(GUARDRAIL_STAGE_BY_GUARD, guard)
+    ? GUARDRAIL_STAGE_BY_GUARD[guard as GuardrailGuardName]
+    : undefined;
+}
+
 const check = ajv.compile(GuardrailsConfigSchema);
 
 /** Validate guardrails config; throws `TulipFarmValidationError` on the first failure. */

@@ -585,6 +585,7 @@ describe("PLATFORM_TOOLS registry", () => {
       "trigger_routine",
       "routine_forge",
       "routine_picker",
+      "guardrail_forge",
       "soul_repo_push",
       "call_skill",
       "validate_artifact",

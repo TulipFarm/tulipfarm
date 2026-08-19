@@ -1,3 +1,4 @@
+import type { SoulWriteError } from "@tulipfarm/soul";
 import { err, type ToolCallResult, type ToolErrorCode } from "@tulipfarm/tool-host";
 
 /**
@@ -33,4 +34,21 @@ export function soulCommitFaultCode(error: unknown): ToolErrorCode {
 /** `err()` for a Soul commit failure, carrying the right fault class. */
 export function soulCommitError(error: unknown, message: string): ToolCallResult {
   return err(soulCommitFaultCode(error), message);
+}
+
+/**
+ * Map a Soul write-gateway rejection onto a forge Tool's error vocabulary. A rejected changeset is
+ * deterministic and the model can act on it; only a losing race is worth retrying.
+ */
+export function mapSoulWriteError(e: SoulWriteError): ToolCallResult {
+  switch (e.code) {
+    case "VALIDATION_FAILED":
+    case "INVALID_TARGET":
+    case "PRECONDITION_FAILED":
+      return err("validation_error", e.message);
+    case "CONFLICT":
+      return err("unavailable", e.message);
+    default:
+      return soulCommitError(e, e.message);
+  }
 }

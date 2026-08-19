@@ -217,7 +217,7 @@ Two levels, exact match — no prefix matching, so `grantMatches` needs no chang
 | Namespace | Membership | Examples |
 | --- | --- | --- |
 | `platform.*` | closed | `platform.secret`, `platform.setting`, `platform.user`, `platform.integration`, `platform.model` |
-| `soul.*` | closed | `soul.agent`, `soul.skill`, `soul.routine`, `soul.resource_type` |
+| `soul.*` | closed | `soul.agent`, `soul.skill`, `soul.routine`, `soul.resource_type`, `soul.guardrails` |
 | `record.<resource_type_id>` | **open** — business-defined | `record.leave_request` |
 | `authz.*` | closed | `authz.role`, `authz.assignment`, `authz.relation` |
 

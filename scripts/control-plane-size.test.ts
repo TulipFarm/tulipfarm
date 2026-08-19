@@ -226,9 +226,34 @@ import { describe, expect, it } from "vitest";
  *
  * The catalog is the authority the route gate reads, so it stays here; nothing in it is a decision
  * a package below could own.
+ *
+ * It moves to 51,473 for `guardrail_forge`, the +168 itemised because a safety surface is the last
+ * place a number should be widened without showing the work:
+ *
+ *   +150 `platform/guardrail-tool.ts`. A Guardrail had a schema, a loader and a live enforcement
+ *        pipeline, and no way for an operator to author one — the Guardrails page could only ever
+ *        list what a deployment shipped with. This is the missing writer: it merges one guard into
+ *        `guardrails.yaml` through `SoulWriter` and re-inits `GuardrailsService`. It stays here for
+ *        the same reason `tools/github/` and `tools/slack/` do — a bespoke, non-manifest platform
+ *        Tool has no owning package to move to, and it composes `SoulWriter`, the request actor and
+ *        the reload hook, all of which are this app's.
+ *    +18 `mapSoulWriteError` in `tools/soul-faults.ts`, lifted from `platform/tools.ts` where it
+ *        was `routine_forge`'s private copy. Both forge Tools now share one classification of a
+ *        rejected changeset, beside `soulCommitFaultCode`, which already owned the question.
+ *     -6 net in `platform/tools.ts`: the 13-line private mapper left, and the registration plus
+ *        the `onGuardrailsChanged` contract came in.
+ *     +5 the `onGuardrailsChanged` composition in `index.ts`. A Turn's Context reads the in-process
+ *        `GuardrailsService`, never the published bundle, so the write gateway's own catalog reload
+ *        does not reach it. Wiring is the one thing that has to be here.
+ *     +1 the `soul.guardrails` row in `identity/roles.ts`, which the role-catalog fitness test
+ *        requires for any Tool-enforced resource type.
+ *
+ * The knowledge that did not stay here: which stage each guard is valid in is
+ * `GUARDRAIL_STAGE_BY_GUARD` in `packages/schema/src/guardrails.ts`, beside the stage unions that
+ * decide it, so the Tool derives the stage rather than restating the mapping.
  */
 
-const CEILING = 51_305;
+const CEILING = 51_473;
 
 /**
  * Domains inside `apps/api/src` that already have a package of the same name. Everything here that
