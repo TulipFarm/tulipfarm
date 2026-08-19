@@ -49,6 +49,13 @@ export type RunBudget = {
   exhaustionPolicy: "failure_path" | "attention_required";
 };
 
+export type OperationalHealth = {
+  component: string;
+  status: "ok" | "degraded" | "down";
+  detail?: string;
+  checkedAt: string;
+};
+
 /** Reads the enforced write-once `run_budgets` ledger for one Run — not a recomputation. */
 export function getRunBudgets(id: string): Promise<{ runId: string; budgets: RunBudget[] }> {
   return apiGet<{ runId: string; budgets: RunBudget[] }>(
@@ -69,7 +76,7 @@ export function commandRun(
 }
 
 export type OperationsModel = {
-  health: Array<Record<string, unknown>>;
+  health: OperationalHealth[];
   incidents: Array<Record<string, unknown>>;
   quarantine: Array<Record<string, unknown>>;
   killSwitches: Array<Record<string, unknown>>;
