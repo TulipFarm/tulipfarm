@@ -64,17 +64,16 @@ describe("shadow review disclosure", () => {
     expect(JSON.stringify(shape)).not.toContain("triaging");
   });
 
-  it.each([
-    "knowledge_promotion",
-    "knowledge_page",
-    "proposal_seed",
-  ])("shows %s in full — it is business-bound content, not one person's", (kind) => {
-    const effect = { kind, payload: { statement: "The team ships on Fridays" } };
-    expect(redactShadowEffect(effect, false)).toEqual({
-      disclosure: "full",
-      payload: effect.payload,
-    });
-  });
+  it.each(["knowledge_promotion", "knowledge_page", "proposal_seed"])(
+    "shows %s in full — it is business-bound content, not one person's",
+    (kind) => {
+      const effect = { kind, payload: { statement: "The team ships on Fridays" } };
+      expect(redactShadowEffect(effect, false)).toEqual({
+        disclosure: "full",
+        payload: effect.payload,
+      });
+    }
+  );
 
   it("classifies exactly the two person-scoped kinds as private", () => {
     expect(["memory_patch", "proposal"].every(isPrivateEffectKind)).toBe(true);

@@ -326,7 +326,7 @@ describe("JiraAdapter effects", () => {
 
     const output = await dispatch(createIntent);
     const posted = http.calls.find((call) => call.method === "POST");
-    expect((posted?.body as { fields: { labels: string[] } }).fields.labels).toContain(label);
+    expect((posted?.body as { fields: { labels: string[] } })?.fields.labels).toContain(label);
     expect(output).toEqual({
       issueKey: "FARM-13",
       issueId: "10001",

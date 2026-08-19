@@ -2,28 +2,20 @@ import { describe, expect, it } from "vitest";
 import { formatDispatchError, isReleaseVersion, parseReleaseVersion } from "./request-release";
 
 describe("release request", () => {
-  it.each([
-    "0.5.0",
-    "1.0.0",
-    "0.5.0-alpha.0",
-    "12.34.56-rc.1",
-  ])("accepts a release version: %s", (version) => {
-    expect(isReleaseVersion(version)).toBe(true);
-    expect(parseReleaseVersion([version])).toBe(version);
-  });
+  it.each(["0.5.0", "1.0.0", "0.5.0-alpha.0", "12.34.56-rc.1"])(
+    "accepts a release version: %s",
+    (version) => {
+      expect(isReleaseVersion(version)).toBe(true);
+      expect(parseReleaseVersion([version])).toBe(version);
+    }
+  );
 
-  it.each([
-    "",
-    "v0.5.0",
-    "0.5",
-    "01.5.0",
-    "0.5.0-",
-    "0.5.0-01",
-    "0.5.0+build.1",
-    "minor",
-  ])("rejects an invalid or ambiguous version: %s", (version) => {
-    expect(isReleaseVersion(version)).toBe(false);
-  });
+  it.each(["", "v0.5.0", "0.5", "01.5.0", "0.5.0-", "0.5.0-01", "0.5.0+build.1", "minor"])(
+    "rejects an invalid or ambiguous version: %s",
+    (version) => {
+      expect(isReleaseVersion(version)).toBe(false);
+    }
+  );
 
   it("requires exactly one version argument", () => {
     expect(() => parseReleaseVersion([])).toThrow("Usage: pnpm release <version>");

@@ -179,20 +179,19 @@ describe("SkillExecutionCoordinator", () => {
     expect(outputPublisher.publish).toHaveBeenCalledOnce();
   });
 
-  it.each([
-    "../secret",
-    "/host/secret",
-    "assets/../../secret",
-  ])("rejects traversal path %s before resolving an Artifact", async (path) => {
-    const { assets, coordinator, sandbox } = setup();
+  it.each(["../secret", "/host/secret", "assets/../../secret"])(
+    "rejects traversal path %s before resolving an Artifact",
+    async (path) => {
+      const { assets, coordinator, sandbox } = setup();
 
-    await expectCode(
-      coordinator.execute(input({ requestedAssetPaths: [path] })),
-      "unsafe_asset_path"
-    );
-    expect(assets.resolve).not.toHaveBeenCalled();
-    expect(sandbox.execute).not.toHaveBeenCalled();
-  });
+      await expectCode(
+        coordinator.execute(input({ requestedAssetPaths: [path] })),
+        "unsafe_asset_path"
+      );
+      expect(assets.resolve).not.toHaveBeenCalled();
+      expect(sandbox.execute).not.toHaveBeenCalled();
+    }
+  );
 
   it("rejects undeclared assets and unmediated web destinations", async () => {
     const undeclared = setup();

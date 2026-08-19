@@ -59,7 +59,7 @@ describe("registerScheduleDispatch", () => {
       fakeDispatcher(async () => {})
     );
 
-    expect((created[0]?.options as { policy: string }).policy).toBe("exclusive");
+    expect((created[0]?.options as { policy: string })?.policy).toBe("exclusive");
   });
 
   it("registers no process-local timer, so replicas cannot each fire the same Routine", async () => {

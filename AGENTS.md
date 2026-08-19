@@ -256,7 +256,7 @@ never assume it ran. See [`apps/eval/README.md`](apps/eval/README.md).
 
 ## Lint / format — Biome
 
-`biome.json` (Biome 2.4.16) is the single source of truth. **No ESLint, no Prettier.**
+`biome.json` (Biome 2.5.9) is the single source of truth. **No ESLint, no Prettier.**
 
 ```bash
 pnpm exec biome check --write .   # lint + format + organize imports

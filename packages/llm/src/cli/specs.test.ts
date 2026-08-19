@@ -72,14 +72,12 @@ describe("isSubscriptionProvider", () => {
     expect(isSubscriptionProvider("codex")).toBe(true);
   });
 
-  it.each([
-    "anthropic",
-    "openai",
-    "azure",
-    "openai-compatible",
-  ])("does not treat %s as one", (provider) => {
-    expect(isSubscriptionProvider(provider)).toBe(false);
-  });
+  it.each(["anthropic", "openai", "azure", "openai-compatible"])(
+    "does not treat %s as one",
+    (provider) => {
+      expect(isSubscriptionProvider(provider)).toBe(false);
+    }
+  );
 
   it("stays in step with the spec table, so a new provider is unpriced by construction", () => {
     for (const provider of SUBSCRIPTION_PROVIDERS) {

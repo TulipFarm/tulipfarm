@@ -8,12 +8,10 @@ test("renders status text with a non-color icon cue", () => {
   expect(container.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
 });
 
-test.each([
-  "low",
-  "medium",
-  "high",
-  "critical",
-] as const)("renders the closed %s priority", (priority) => {
-  render(<PriorityBadge priority={priority} />);
-  expect(screen.getByText(priority)).toBeInTheDocument();
-});
+test.each(["low", "medium", "high", "critical"] as const)(
+  "renders the closed %s priority",
+  (priority) => {
+    render(<PriorityBadge priority={priority} />);
+    expect(screen.getByText(priority)).toBeInTheDocument();
+  }
+);

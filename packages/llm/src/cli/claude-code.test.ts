@@ -400,8 +400,8 @@ describe("ClaudeCodeModel — failure classification", () => {
     } catch (err) {
       error = err as LlmProviderError;
     }
-    expect((error?.cause as Error).message).toContain("claude setup-token");
-    expect((error?.cause as Error).message).toContain("Please run /login");
+    expect((error?.cause as Error)?.message).toContain("claude setup-token");
+    expect((error?.cause as Error)?.message).toContain("Please run /login");
   });
 
   it("raises a plain error for a non-auth failure so the fallback chain may retry", async () => {

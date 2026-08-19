@@ -252,16 +252,16 @@ describe("IngressIdentityResolver sender authority", () => {
     return result;
   }
 
-  it.each([
-    "link_token",
-    "bind_link",
-  ] as const)("lets a %s sender wield the user's own authority", async (verifiedVia) => {
-    const result = await linkedAs(verifiedVia);
+  it.each(["link_token", "bind_link"] as const)(
+    "lets a %s sender wield the user's own authority",
+    async (verifiedVia) => {
+      const result = await linkedAs(verifiedVia);
 
-    expect(result.user).toBe(alice);
-    expect(result.principalId).toBe(alice._id);
-    expect(result.principalRef).toBe(`user:${alice._id}`);
-  });
+      expect(result.user).toBe(alice);
+      expect(result.principalId).toBe(alice._id);
+      expect(result.principalRef).toBe(`user:${alice._id}`);
+    }
+  );
 
   it.each([
     ["manifest_email", "manifest_email" as const],

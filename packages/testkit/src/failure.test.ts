@@ -2,29 +2,29 @@ import { describe, expect, it } from "vitest";
 import { FailureInjector, InjectedFailure } from "./failure";
 
 describe("FailureInjector", () => {
-  it.each([
-    "before",
-    "after",
-  ] as const)("crashes %s a declared durable boundary without exposing payloads", async (phase) => {
-    const injector = new FailureInjector(["effect.persist"] as const);
-    injector.failAt("effect.persist", phase);
-    let operationCalls = 0;
+  it.each(["before", "after"] as const)(
+    "crashes %s a declared durable boundary without exposing payloads",
+    async (phase) => {
+      const injector = new FailureInjector(["effect.persist"] as const);
+      injector.failAt("effect.persist", phase);
+      let operationCalls = 0;
 
-    const operation = injector.runAround("effect.persist", async () => {
-      operationCalls += 1;
-      return { secret: "do-not-copy-to-error" };
-    });
+      const operation = injector.runAround("effect.persist", async () => {
+        operationCalls += 1;
+        return { secret: "do-not-copy-to-error" };
+      });
 
-    await expect(operation).rejects.toMatchObject({
-      name: "InjectedFailure",
-      code: "TESTKIT_INJECTED_FAILURE",
-      boundary: "effect.persist",
-      phase,
-      occurrence: 1,
-    });
-    await expect(operation).rejects.not.toThrow("do-not-copy-to-error");
-    expect(operationCalls).toBe(phase === "before" ? 0 : 1);
-  });
+      await expect(operation).rejects.toMatchObject({
+        name: "InjectedFailure",
+        code: "TESTKIT_INJECTED_FAILURE",
+        boundary: "effect.persist",
+        phase,
+        occurrence: 1,
+      });
+      await expect(operation).rejects.not.toThrow("do-not-copy-to-error");
+      expect(operationCalls).toBe(phase === "before" ? 0 : 1);
+    }
+  );
 
   it("can target a later occurrence for crash/retry tests", async () => {
     const injector = new FailureInjector(["outbox.commit"] as const);

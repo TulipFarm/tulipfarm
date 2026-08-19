@@ -52,38 +52,34 @@ function changeset(overrides: Partial<SoulChangeset> = {}): SoulChangeset {
 }
 
 describe("validateSoulChangeset", () => {
-  it.each<SoulChangesetSource>([
-    "ui",
-    "api",
-    "import",
-    "migration",
-    "agent",
-    "discovery",
-  ])("accepts a valid %s changeset through the same public validator", (source) => {
-    const result = validateSoulChangeset(changeset({ source }), baseCommit);
+  it.each<SoulChangesetSource>(["ui", "api", "import", "migration", "agent", "discovery"])(
+    "accepts a valid %s changeset through the same public validator",
+    (source) => {
+      const result = validateSoulChangeset(changeset({ source }), baseCommit);
 
-    expect(result).toMatchObject({
-      id: "changeset_01",
-      businessId: "business_01",
-      principalId: "user_01",
-      source,
-      expectedBaseCommit: baseCommit,
-      evidence: { outcome: "validated", fileCount: 2 },
-    });
-    expect(result.files).toEqual([
-      expect.objectContaining({
-        operation: "upsert",
-        path: "agents/general-assistant/agent.yaml",
-        kind: "Agent",
-      }),
-      expect.objectContaining({
-        operation: "upsert",
-        path: "agents/general-assistant/instructions.md",
-      }),
-    ]);
-    expect(result.files.every((file) => /^[a-f0-9]{64}$/.test(file.hash))).toBe(true);
-    expect(JSON.stringify(result)).not.toContain("Be helpful and precise");
-  });
+      expect(result).toMatchObject({
+        id: "changeset_01",
+        businessId: "business_01",
+        principalId: "user_01",
+        source,
+        expectedBaseCommit: baseCommit,
+        evidence: { outcome: "validated", fileCount: 2 },
+      });
+      expect(result.files).toEqual([
+        expect.objectContaining({
+          operation: "upsert",
+          path: "agents/general-assistant/agent.yaml",
+          kind: "Agent",
+        }),
+        expect.objectContaining({
+          operation: "upsert",
+          path: "agents/general-assistant/instructions.md",
+        }),
+      ]);
+      expect(result.files.every((file) => /^[a-f0-9]{64}$/.test(file.hash))).toBe(true);
+      expect(JSON.stringify(result)).not.toContain("Be helpful and precise");
+    }
+  );
 
   it("rejects the whole set when one file fails strict schema validation", () => {
     const invalid = { ...agent, spec: { ...agent.spec, authority: "superuser" } };

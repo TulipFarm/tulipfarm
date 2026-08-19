@@ -229,16 +229,16 @@ describe("authored Page authorization through retrieve()", () => {
     expectNoDisclosure(result, audit.events);
   });
 
-  it.each([
-    "revoked",
-    "deleted",
-  ] as const)("withholds a %s Page even where the ACL would allow it", async (status) => {
-    const { deps } = await harness([
-      openPage([entry("space", SPACE_OPEN, everyone, "grant")]),
-      boardPage([entry("space", SPACE_BOARD, everyone, "grant")], status),
-    ]);
-    expect(ids(await ask(deps, [alice, everyone]))).toEqual([PAGE_OPEN]);
-  });
+  it.each(["revoked", "deleted"] as const)(
+    "withholds a %s Page even where the ACL would allow it",
+    async (status) => {
+      const { deps } = await harness([
+        openPage([entry("space", SPACE_OPEN, everyone, "grant")]),
+        boardPage([entry("space", SPACE_BOARD, everyone, "grant")], status),
+      ]);
+      expect(ids(await ask(deps, [alice, everyone]))).toEqual([PAGE_OPEN]);
+    }
+  );
 });
 
 describe("group membership resolved at query time", () => {

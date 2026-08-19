@@ -106,18 +106,17 @@ function setup(
 }
 
 describe("Skill sandbox threat boundary", () => {
-  it.each([
-    "file:///etc/passwd",
-    "/host/root",
-    "https://attacker.invalid/payload",
-  ])("rejects resolver escape Artifact reference %s", async (artifactRef) => {
-    const { coordinator, sandbox } = setup({ artifactRef });
+  it.each(["file:///etc/passwd", "/host/root", "https://attacker.invalid/payload"])(
+    "rejects resolver escape Artifact reference %s",
+    async (artifactRef) => {
+      const { coordinator, sandbox } = setup({ artifactRef });
 
-    await expect(coordinator.execute(execution())).rejects.toEqual(
-      new SkillExecutionError("unsafe_artifact_ref")
-    );
-    expect(sandbox.execute).not.toHaveBeenCalled();
-  });
+      await expect(coordinator.execute(execution())).rejects.toEqual(
+        new SkillExecutionError("unsafe_artifact_ref")
+      );
+      expect(sandbox.execute).not.toHaveBeenCalled();
+    }
+  );
 
   it("denies SSRF destinations before dispatch", async () => {
     const { coordinator, sandbox } = setup();

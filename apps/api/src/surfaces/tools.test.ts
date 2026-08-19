@@ -43,7 +43,7 @@ describe("Surface presentation Tool schema", () => {
       },
       surfaceCatalog: [recordTable],
     });
-    const component = (schema?.properties as Record<string, unknown>).component as {
+    const component = (schema?.properties as Record<string, unknown>)?.component as {
       description: string;
       oneOf: Array<{
         examples: unknown[];
@@ -111,10 +111,10 @@ describe("Surface presentation Tool schema", () => {
     };
     const presentSchema = presentTool.inputSchemaFor?.(ctx);
     const requestSchema = requestInputTool.inputSchemaFor?.(ctx);
-    const presentComponent = (presentSchema?.properties as Record<string, unknown>).component as {
+    const presentComponent = (presentSchema?.properties as Record<string, unknown>)?.component as {
       oneOf: Array<{ properties: { name: { const: string } } }>;
     };
-    const requestComponent = (requestSchema?.properties as Record<string, unknown>).component as {
+    const requestComponent = (requestSchema?.properties as Record<string, unknown>)?.component as {
       oneOf: Array<{ properties: { name: { const: string } } }>;
     };
 
