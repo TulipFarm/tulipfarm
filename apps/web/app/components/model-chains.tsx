@@ -101,6 +101,9 @@ export function ModelChains({
   const [chains, setChains] = useState<Chains>(() => cloneChains(initial));
   const [presets, setPresets] = useState<Presets>(() => clonePresets(initial));
   const [editing, setEditing] = useState<{ tier: WireTier; uid: number } | null>(null);
+  // An "Add fallback" row lives here until the sheet is completed. Inserting it into the chain up
+  // front is what let a dismissed sheet leave a "no model set" entry behind, ready to be saved.
+  const [draft, setDraft] = useState<{ tier: WireTier; row: Row } | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
 
   const configured = useMemo(
@@ -131,7 +134,11 @@ export function ModelChains({
     return ids;
   }, [chains, presets, providers]);
 
-  const editingRow = editing ? chains[editing.tier].find((r) => r.uid === editing.uid) : undefined;
+  const editingRow = draft
+    ? draft.row
+    : editing
+      ? chains[editing.tier].find((r) => r.uid === editing.uid)
+      : undefined;
 
   function mutate(tier: WireTier, fn: (rows: Row[]) => Row[]) {
     setChains((prev) => ({ ...prev, [tier]: fn(prev[tier]) }));
@@ -143,12 +150,26 @@ export function ModelChains({
   }
 
   function addRow(tier: WireTier) {
-    const uid = nextUid++;
-    mutate(tier, (rows) => [
-      ...rows,
-      { uid, provider: configured[0]?.id ?? providers[0]?.id ?? "", model: "" },
-    ]);
-    setEditing({ tier, uid });
+    setLocalError(null);
+    setDraft({
+      tier,
+      row: { uid: nextUid++, provider: configured[0]?.id ?? providers[0]?.id ?? "", model: "" },
+    });
+  }
+
+  function commitSheet() {
+    if (draft) {
+      const { tier, row } = draft;
+      mutate(tier, (rows) => [...rows, row]);
+      setDraft(null);
+      return;
+    }
+    setEditing(null);
+  }
+
+  function cancelSheet() {
+    setDraft(null);
+    setEditing(null);
   }
 
   function move(tier: WireTier, index: number, delta: number) {
@@ -338,8 +359,13 @@ export function ModelChains({
         row={editingRow}
         providers={providers}
         secretKeys={secretKeys}
-        onClose={() => setEditing(null)}
+        onCancel={cancelSheet}
+        onDone={commitSheet}
         onChange={(patch) => {
+          if (draft) {
+            setDraft({ tier: draft.tier, row: { ...draft.row, ...patch } });
+            return;
+          }
           if (editing) updateRow(editing.tier, editing.uid, patch);
         }}
       />

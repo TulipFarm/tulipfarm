@@ -21,21 +21,26 @@ export function ModelSheet({
   row,
   providers,
   secretKeys,
-  onClose,
+  onCancel,
+  onDone,
   onChange,
 }: {
   open: boolean;
   row: Row | undefined;
   providers: LlmProviderInfo[];
   secretKeys: string[];
-  onClose: () => void;
+  onCancel: () => void;
+  onDone: () => void;
   onChange: (patch: Partial<Row>) => void;
 }) {
   const [options, setOptions] = useState<ModelOptions | null>(null);
   const [resolving, setResolving] = useState(false);
   const [candidates, setCandidates] = useState<string[]>([]);
   const [unmatched, setUnmatched] = useState(false);
-  const [modelError, setModelError] = useState<string | null>(null);
+  // Scoped to the row it was raised for, so a newly opened row never inherits it.
+  const [errors, setErrors] = useState<{ uid: number; provider?: string; model?: string } | null>(
+    null
+  );
   const provider = row?.provider;
   const model = row?.model;
 
@@ -100,21 +105,36 @@ export function ModelSheet({
   const modelHelpId = `${modelFieldId}-help`;
 
   function finish() {
-    if (!row?.model.trim()) {
-      setModelError("Enter a Model ID.");
+    if (!row) return;
+    if (!row.provider.trim()) {
+      setErrors({ uid: row.uid, provider: "Select a provider." });
       return;
     }
-    onClose();
+    if (!row.model.trim()) {
+      setErrors({ uid: row.uid, model: "Enter a Model ID." });
+      return;
+    }
+    setErrors(null);
+    onDone();
   }
 
+  const shownErrors = errors?.uid === row?.uid ? errors : undefined;
+
   return (
-    <Sheet open={open} onClose={onClose} title="Model">
+    <Sheet open={open} onClose={onCancel} title="Model">
       {row ? (
         <div className="space-y-4 p-4">
-          <Field label="Provider" help={ready ? undefined : "This provider has no credential yet."}>
+          <Field
+            label="Provider"
+            error={shownErrors?.provider}
+            help={ready ? undefined : "This provider has no credential yet."}
+          >
             <Select
               value={row.provider}
-              onChange={(e) => onChange({ provider: e.target.value, model: "", spec: undefined })}
+              onChange={(e) => {
+                setErrors(null);
+                onChange({ provider: e.target.value, model: "", spec: undefined });
+              }}
             >
               <option value="">Select a provider…</option>
               {providers.map((p) => (
@@ -129,7 +149,7 @@ export function ModelSheet({
           <Field
             label="Model ID"
             htmlFor={modelFieldId}
-            error={modelError}
+            error={shownErrors?.model}
             help={
               options?.source === "live"
                 ? "Listed from your configured endpoint."
@@ -146,7 +166,7 @@ export function ModelSheet({
                 value={isSuggested ? row.model : CUSTOM_MODEL}
                 onChange={(e) => {
                   const value = e.target.value;
-                  setModelError(null);
+                  setErrors(null);
                   setCandidates([]);
                   setUnmatched(false);
                   if (value === CUSTOM_MODEL) {
@@ -172,7 +192,7 @@ export function ModelSheet({
                 value={row.model}
                 onChange={(e) => {
                   onChange({ model: e.target.value, spec: undefined });
-                  setModelError(null);
+                  setErrors(null);
                   setCandidates([]);
                   setUnmatched(false);
                 }}
