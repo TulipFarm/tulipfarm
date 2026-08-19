@@ -8,7 +8,7 @@ import {
   type ModelOutput,
   type ModelPort,
 } from "@tulipfarm/agent-runtime";
-import { autonomyBoundedDispatch } from "./autonomy.ts";
+import { autonomyBoundedDispatch, capabilityBoundedDispatch } from "./autonomy.ts";
 import { type EvalCase, LOOP_LIMITS } from "./case.ts";
 import type { Corpus } from "./corpus.ts";
 import { toolDispatcher } from "./dispatch.ts";
@@ -379,7 +379,9 @@ async function runTrial(
     // model as a denial it must recover from — not as a call that silently never happened. The
     // Agent's autonomy ceiling sits inside the guards, matching production's order: policy decides
     // before the ceiling is consulted about what is left.
-    tools: guards.guard(autonomyBoundedDispatch(soul, evalCase, tools.port)),
+    tools: guards.guard(
+      capabilityBoundedDispatch(soul, evalCase, autonomyBoundedDispatch(soul, evalCase, tools.port))
+    ),
     checkpoints: new InMemoryLoopCheckpointStore(),
     events: { append: async () => {} },
     budget: { consume: async () => ({ outcome: "allowed" }) },

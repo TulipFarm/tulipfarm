@@ -1,9 +1,10 @@
 import type { KnowledgeService } from "@tulipfarm/knowledge";
 import { CITE_SOURCES_TOOL } from "@tulipfarm/knowledge";
-import { CHAT_REQUEST_SCHEMA } from "@tulipfarm/schema";
+import { type AgentCapabilityRestrictions, CHAT_REQUEST_SCHEMA } from "@tulipfarm/schema";
 import type { PlatformAgent } from "@tulipfarm/soul";
 import type { PresentationContext } from "@tulipfarm/surface";
 import type { ToolAvailability } from "@tulipfarm/tool-broker";
+import { agentCanBeOfferedTool } from "@tulipfarm/tool-host";
 import type { FastifyReply } from "fastify";
 import type { ToolRegistry } from "../broker/tool-adapter";
 
@@ -62,10 +63,32 @@ export function corsPassthrough(reply: FastifyReply): Record<string, string> {
   return out;
 }
 
+/**
+ * The Agent as Tool visibility reads it: the platform harness plus whatever the Soul authored as
+ * capability restrictions. A live Turn and the prompt preview must resolve the same Tool set, or
+ * the preview describes a turn that cannot happen.
+ */
+export type RestrictedPlatformAgent = PlatformAgent & {
+  readonly capabilityRestrictions?: AgentCapabilityRestrictions;
+};
+
+export function toolAgentFor(
+  platformAgent: PlatformAgent | undefined,
+  agent: { readonly frontmatter: Record<string, unknown> }
+): RestrictedPlatformAgent | undefined {
+  if (platformAgent === undefined) return undefined;
+  const capabilityRestrictions = agent.frontmatter.capabilityRestrictions as
+    | AgentCapabilityRestrictions
+    | undefined;
+  return capabilityRestrictions === undefined
+    ? platformAgent
+    : { ...platformAgent, capabilityRestrictions };
+}
+
 // Per-agent tool scoping: built-in assistant gets an explicit registry snapshot, never undefined.
 export function allowedToolNamesFor(
   toolRegistry: ToolRegistry | undefined,
-  pa: PlatformAgent | undefined,
+  pa: RestrictedPlatformAgent | undefined,
   presentationContext?: PresentationContext,
   excluded?: ReadonlySet<string>
 ): ReadonlySet<string> | undefined {
@@ -79,7 +102,12 @@ export function allowedToolNamesFor(
   return new Set(
     [...agentAllowed].filter((name) => {
       if (excluded?.has(name)) return false;
-      return offerable(availability.get(name), presentationContext);
+      const tool = toolRegistry.getAll().find((entry) => entry.name === name);
+      return (
+        tool !== undefined &&
+        offerable(availability.get(name), presentationContext) &&
+        agentCanBeOfferedTool(pa?.capabilityRestrictions, tool)
+      );
     })
   );
 }
@@ -111,7 +139,7 @@ export function canGroundKnowledge(
 // for a byte-stable prompt prefix. `[]` when no registry → the block is omitted.
 export function availableToolsFor(
   toolRegistry: ToolRegistry | undefined,
-  pa: PlatformAgent | undefined,
+  pa: RestrictedPlatformAgent | undefined,
   presentationContext?: PresentationContext,
   excluded?: ReadonlySet<string>
 ): { name: string; description: string }[] {

@@ -1,3 +1,4 @@
+import type { AgentCapabilityRestrictions } from "@tulipfarm/schema";
 import type {
   PresentationContext,
   SoulSurfaceComponent,
@@ -47,6 +48,7 @@ export interface HostedAgent {
    * declares no ceiling and the request's own autonomy stands alone.
    */
   readonly autonomy?: ChatAutonomy;
+  readonly capabilityRestrictions?: AgentCapabilityRestrictions;
 }
 
 /** Resolves the Agent named by a chat request. Absence collapses to the deployment default. */

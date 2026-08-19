@@ -126,6 +126,17 @@ describe("loadBundledSkills", () => {
     }
   });
 
+  it("ships Agent Forge with the guidance that makes capability restrictions reachable", async () => {
+    const agentForge = (await loadBundledSkills(makeLogger())).get("agent-forge");
+    const body = agentForge?.body ?? "";
+
+    expect(body).toContain("capabilityRestrictions");
+    for (const key of ["allowMutating", "deny", "resourceTypes"]) {
+      expect(body, `agent-forge must teach ${key}`).toContain(key);
+    }
+    expect(body).toMatch(/never|must not|read-only/i);
+  });
+
   it("ships Skill Forge with the compact description and mandatory authoring section order", async () => {
     const skills = await loadBundledSkills(makeLogger());
     const skillForge = skills.get("skill-forge");

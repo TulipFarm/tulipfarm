@@ -56,6 +56,9 @@ export const delegateToAgentTool = defineApiTool<PlatformToolContext>({
     try {
       const outcome = await ctx.delegateToAgent({
         parentRunId,
+        ...(ctx.requestContext?.agentId === undefined
+          ? {}
+          : { parentAgentId: ctx.requestContext.agentId }),
         agentId,
         task,
         ...(context === undefined ? {} : { context }),

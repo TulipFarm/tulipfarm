@@ -51,6 +51,7 @@ export {
   autonomyCeiling,
   autonomyDemandsApproval,
 } from "./autonomy";
+export { agentCanBeOfferedTool, agentCapabilityDenial } from "./capability-restrictions";
 export {
   allowedToolNamesFor,
   availableToolsFor,

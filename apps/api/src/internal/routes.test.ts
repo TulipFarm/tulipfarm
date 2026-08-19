@@ -1,4 +1,5 @@
 import type { PaginatedResult } from "@tulipfarm/storage";
+import type { HostedAgent } from "@tulipfarm/tool-host";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../app";
@@ -84,6 +85,7 @@ describe("/api/v1/internal/turns", () => {
   let pricingOverrides: Record<string, { in: number; out: number }> = {};
   let dispatched: { authority: TurnAuthority; call: HostedToolCall }[];
   let parked: { authority: TurnAuthority; stateKey: string; approvalId: string }[];
+  let hostedAgent: HostedAgent | undefined;
 
   beforeEach(async () => {
     const sessions = new MemorySessionStore();
@@ -104,6 +106,7 @@ describe("/api/v1/internal/turns", () => {
     llmConfig = undefined;
     dispatched = [];
     parked = [];
+    hostedAgent = undefined;
 
     app = await buildApp({
       sessionStore: sessions,
@@ -146,6 +149,7 @@ describe("/api/v1/internal/turns", () => {
               return { waitId: "wait-1" };
             },
           },
+          agentForRun: async () => hostedAgent,
           newId: () => "message-1",
           now: () => CREATED_AT,
         }),
@@ -400,6 +404,37 @@ describe("/api/v1/internal/turns", () => {
       cursor: 12,
     });
     expect(store.turns[0]).toMatchObject({ businessId: BUSINESS_ID, status: "succeeded" });
+  });
+
+  it("hands the Worker the Agent's capability restrictions with the Run's authority", async () => {
+    hostedAgent = {
+      name: "reporter",
+      autonomy: "approval-required",
+      capabilityRestrictions: {
+        tools: { allowMutating: false },
+        records: { actions: { allow: ["list", "read"] } },
+      },
+    };
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v1/internal/turns/${RUN_ID}/authority`,
+      headers: asWorker(),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().agent).toEqual(hostedAgent);
+  });
+
+  it("omits the Agent when the control plane cannot name one", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v1/internal/turns/${RUN_ID}/authority`,
+      headers: asWorker(),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().agent).toBeUndefined();
   });
 });
 

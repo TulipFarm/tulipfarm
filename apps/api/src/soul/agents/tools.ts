@@ -112,7 +112,7 @@ const CREATE_SCHEMA = {
     frontmatter: {
       type: "object",
       description:
-        "Optional frontmatter. Allowed keys: label, domain, description, model, autonomy (full|supervised|approval-required|manual), placeholder (string[]), suggestions (string[]). Unknown keys are rejected.",
+        "Optional frontmatter. Allowed keys: label, domain, description, model, autonomy (full|supervised|approval-required|manual), modelPolicy, capabilityRestrictions, placeholder (string[]), suggestions (string[]). Use capabilityRestrictions to set server-enforced Tool, Record, and Resource type limits such as read-only access.",
     },
   },
 } as const;
@@ -190,7 +190,7 @@ const UPDATE_SCHEMA = {
     frontmatter: {
       type: "object",
       description:
-        "New frontmatter (replaces existing; omit to keep current). Same allowed keys as agent_create; unknown keys are rejected. At least one of body or frontmatter must be provided.",
+        "New frontmatter (replaces existing; omit to keep current). Same allowed keys as agent_create, including capabilityRestrictions for server-enforced Tool, Record, and Resource type limits. Unknown keys are rejected. At least one of body or frontmatter must be provided.",
     },
   },
 } as const;

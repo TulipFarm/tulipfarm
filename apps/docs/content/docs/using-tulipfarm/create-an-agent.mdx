@@ -34,6 +34,21 @@ When the forge asks, choose the level that matches the risk:
 - `approval-required` pauses before gated actions.
 - `manual` is driven step by step.
 
+## State the hard limits
+
+Anything you phrase as "must never" becomes an enforced restriction, not just wording in the
+agent's instructions. Say it plainly and the forge writes it into the agent's frontmatter:
+
+```prompt
+Create a reporting agent that may only list and view records of any resource
+type, and must never create, update, or delete a record.
+```
+
+The server then refuses those tool calls even if the agent is talked into making one, and the agent
+cannot hand the work to a less restricted agent instead. Ask the forge to read the restriction back
+to you before it commits, so you can correct it. See
+[Agents](/docs/using-tulipfarm/agents#tools-and-current-limits).
+
 ## Verify and use it
 
 <Steps>

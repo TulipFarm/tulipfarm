@@ -38,7 +38,11 @@ import type { PresentationContext } from "@tulipfarm/surface";
 import type { ToolRegistry } from "../broker/tool-adapter";
 import { estimateTokens } from "../chat/compaction";
 import { assembleAgentSystemPrompt } from "../chat/system-prompt";
-import { availableToolsFor } from "../chat/turn-helpers";
+import {
+  availableToolsFor,
+  type RestrictedPlatformAgent,
+  toolAgentFor,
+} from "../chat/turn-helpers";
 import type { ConversationStore, PersistedMessage } from "../conversations/service";
 import { readCustomInstructions } from "../preferences/custom-instructions";
 import { presentationContextFor, surfaceCatalogPromptFor } from "../surfaces/renderer-registry";
@@ -169,6 +173,7 @@ export class ChatTurnContextResolver implements TurnContextResolver {
     const request = await readChatRequest(this.options.artifacts, authority, this.now());
     const agent = resolveAgent(this.options.soulLoader, request.agentId);
     const platformAgent = getDefaultAssistant(agent.name);
+    const toolAgent = toolAgentFor(platformAgent, agent);
     const presentationContext = await presentationContextForAuthority(
       authority,
       this.options.channelDeliveries
@@ -191,7 +196,7 @@ export class ChatTurnContextResolver implements TurnContextResolver {
     const system = await this.buildSystemPrompt(
       authority,
       agent,
-      platformAgent,
+      toolAgent,
       presentationContext,
       excludedTools,
       disabledSkills,
@@ -202,7 +207,7 @@ export class ChatTurnContextResolver implements TurnContextResolver {
     // keyed by conversation), so the presentation Tools are offered for every channel alike.
     const allowed = availableToolsFor(
       this.options.toolRegistry,
-      platformAgent,
+      toolAgent,
       presentationContext,
       excludedTools
     );
@@ -336,7 +341,7 @@ export class ChatTurnContextResolver implements TurnContextResolver {
   private async buildSystemPrompt(
     authority: TurnAuthority,
     agent: ReturnType<typeof resolveAgent>,
-    platformAgent: ReturnType<typeof getDefaultAssistant>,
+    platformAgent: RestrictedPlatformAgent | undefined,
     presentationContext: PresentationContext,
     excludedTools?: ReadonlySet<string>,
     disabledSkills?: ReadonlySet<string>,

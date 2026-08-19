@@ -1,4 +1,5 @@
 import type { InvocationPrincipal } from "@tulipfarm/run-kernel";
+import type { HostedAgent } from "./ports";
 
 /**
  * The Run-derived authority a Tool call executes under. It names only what the Run itself
@@ -24,6 +25,16 @@ export interface TurnAuthority {
   readonly source: string;
   /** The Run's bundle digest, recorded on the Context manifest as what produced this Context. */
   readonly bundleDigest: string;
+  /**
+   * The Agent this Run routes to, as the control plane resolved it from the Soul.
+   *
+   * A process that hosts Tools without a Soul cannot answer "what may this Agent do" for itself,
+   * and a bound it cannot read is a bound it does not enforce. Carrying the resolved Agent on the
+   * Run-derived authority is what lets the durable runtime apply the same autonomy ceiling and the
+   * same capability restrictions the control plane would, rather than falling back to an
+   * unrestricted default. A process that resolves the Agent locally ignores this and uses its own.
+   */
+  readonly agent?: HostedAgent;
 }
 
 export interface HostedToolCall {

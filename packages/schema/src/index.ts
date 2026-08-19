@@ -1,5 +1,10 @@
-export type { AgentFrontmatter } from "./agent";
-export { AUTONOMY_VALUES, validateAgentFrontmatter } from "./agent";
+export type { AgentCapabilityRestrictions, AgentFrontmatter } from "./agent";
+export {
+  AGENT_RECORD_ACTIONS,
+  AGENT_RESOURCE_TYPE_ACTIONS,
+  AUTONOMY_VALUES,
+  validateAgentFrontmatter,
+} from "./agent";
 export { ajv } from "./ajv";
 export type {
   ArtifactCompanion,
