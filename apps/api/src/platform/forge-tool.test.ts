@@ -52,6 +52,7 @@ function makeSoulWriter(): SoulWriter & { apply: ReturnType<typeof vi.fn> } {
       filesChanged: 2,
       paths: [],
       pushed: false,
+      published: true,
     }),
   } as unknown as SoulWriter & { apply: ReturnType<typeof vi.fn> };
 }
@@ -142,6 +143,24 @@ describe("routine_forge", () => {
       ctx()
     );
     expect(result).toMatchObject({ success: false, error: { code: "unavailable" } });
+    expect(onRoutinesChanged).not.toHaveBeenCalled();
+  });
+
+  it("refuses to report a committed but unpublished Routine as forged", async () => {
+    soulWriter.apply.mockResolvedValueOnce({
+      commitSha: "abc1234",
+      filesChanged: 2,
+      paths: [],
+      pushed: false,
+      published: false,
+      publicationError: "bundle storage unavailable",
+    });
+    const result = await routineForgeTool.handler(
+      { name: "daily-report", definition: VALID_ROUTINE, triggers: [trigger()] },
+      ctx()
+    );
+    expect(result).toMatchObject({ success: false, error: { code: "internal_error" } });
+    expect(JSON.stringify(result)).toContain("bundle storage unavailable");
     expect(onRoutinesChanged).not.toHaveBeenCalled();
   });
 

@@ -73,6 +73,20 @@ export interface SoulWriteResult {
   readonly paths: readonly string[];
   /** False when the commit landed locally but the remote push failed — the write is durable. */
   readonly pushed: boolean;
+  /**
+   * Whether the committed tree became the published runtime bundle. The commit is durable either
+   * way, but while this is false the Runtime keeps serving the previous bundle, so a caller must
+   * not report the artifact as live.
+   */
+  readonly published: boolean;
+  /** Why publication did not land, when `published` is false. Carries no file content. */
+  readonly publicationError?: string;
+}
+
+/** Outcome of the post-commit publication attempt, as {@link SoulWriteResult} reports it. */
+interface BundlePublicationOutcome {
+  readonly published: boolean;
+  readonly publicationError?: string;
 }
 
 export interface SoulReadResult {
@@ -225,13 +239,14 @@ export class SoulWriter {
     }
 
     const pushed = await this.publish(changeset.id);
-    await this.publishBundle(result, request.actor, changeset.id);
+    const publication = await this.publishBundle(result, request.actor, changeset.id);
     await this.refresh(changeset.id);
     return {
       commitSha: result.commitSha,
       filesChanged: result.filesChanged,
       paths: files.map((file) => file.path),
       pushed,
+      ...publication,
     };
   }
 
@@ -391,19 +406,33 @@ export class SoulWriter {
     }
   }
 
-  /** Publication failures are logged because the write is already durable. */
+  /**
+   * Publication failures never fail the write — the commit is already durable — but they are
+   * reported, because an artifact that is committed and unpublished is invisible to every surface
+   * that reads the active bundle. A caller that announced success on the commit alone would be
+   * claiming an outcome the Runtime never reached.
+   */
   private async publishBundle(
     result: SoulCommitResult,
     actor: CommitActor,
     changesetId: string
-  ): Promise<void> {
-    if (this.publisher === undefined || result.filesChanged === 0) return;
+  ): Promise<BundlePublicationOutcome> {
+    if (result.filesChanged === 0) return { published: true };
+    if (this.publisher === undefined) {
+      return {
+        published: false,
+        publicationError: "this Soul write gateway has no bundle publisher configured",
+      };
+    }
     try {
       await this.publisher.publishCommittedTree({ commitSha: result.commitSha, actor });
+      return { published: true };
     } catch (error) {
+      const reason = errText(error);
       this.logger.error(
-        `Soul: committed ${result.commitSha} for changeset ${changesetId} but bundle publication failed; the Runtime keeps serving the previous bundle — ${errText(error)}`
+        `Soul: committed ${result.commitSha} for changeset ${changesetId} but bundle publication failed; the Runtime keeps serving the previous bundle — ${reason}`
       );
+      return { published: false, publicationError: reason };
     }
   }
 

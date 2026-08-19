@@ -317,8 +317,9 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
       }
     }
 
+    let write: Awaited<ReturnType<SoulWriter["apply"]>>;
     try {
-      await ctx.soulWriter.apply({
+      write = await ctx.soulWriter.apply({
         subject: `soul: forge routine ${name}`,
         source: "agent",
         actor: ctx.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
@@ -339,6 +340,18 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
     } catch (e) {
       if (e instanceof SoulWriteError) return mapRoutineWriteError(e);
       return soulCommitError(e, e instanceof Error ? e.message : String(e));
+    }
+
+    // Committed is not published: the Routines surface and every Run read the active bundle, so a
+    // Routine whose publication failed is invisible and cannot be triggered. Reporting success here
+    // is what makes the Tool claim an outcome the Runtime never reached.
+    if (!write.published) {
+      return err(
+        "internal_error",
+        `Routine ${name} was committed to the Soul but its runtime bundle publication failed, so it is not published and will not appear in Routines${
+          write.publicationError === undefined ? "" : ` — ${write.publicationError}`
+        }`
+      );
     }
 
     // The gateway reloads the catalog but does not reschedule cron triggers.

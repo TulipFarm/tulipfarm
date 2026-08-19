@@ -94,10 +94,14 @@ export class GitSoulTreeReader implements SoulTreeReader {
       }
     }
     if (paths.includes("soul.yaml")) {
+      // An empty or comment-only `soul.yaml` — what a scaffolded Soul ships — parses to `null`,
+      // which is no configuration rather than invalid configuration. Validating it would fail every
+      // publication of the whole tree.
       const manifest = parseYaml(await this.content(commitSha, "soul.yaml")) as
         | Record<string, unknown>
+        | null
         | undefined;
-      if (manifest !== undefined) {
+      if (manifest !== undefined && manifest !== null) {
         const config = validateSoulConfig(manifest);
         if (config.llm !== undefined) {
           definitions.push(...modelProfileDocuments(config.llm));

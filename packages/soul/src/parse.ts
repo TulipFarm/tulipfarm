@@ -74,6 +74,17 @@ function hasFrontmatterBlock(content: string): boolean {
   return /^---\r?\n[\s\S]*?\r?\n---\r?\n?/.test(content);
 }
 
+/** True for a file that is blank or holds only comments, which YAML resolves to no document. */
+function isEmptyYamlDocument(content: string): boolean {
+  try {
+    const parsed = parseYaml(content) as unknown;
+    return parsed === null || parsed === undefined;
+  } catch {
+    // Unparseable YAML is not an empty document; the caller's own parse will surface the error.
+    return false;
+  }
+}
+
 /** Validate `apiVersion`/`kind` and ensure the kind matches the artifact path. */
 function parseDefinition(
   content: string,
@@ -137,7 +148,11 @@ function parseLegacy(content: string, location: ClassifiedSoulPath, path: string
         return admitted(content, location, "legacy");
       }
       case "Settings": {
-        const parsed = parseYamlObject(content);
+        // A Soul scaffolded by `scaffoldSoul` ships a `soul.yaml` holding only a comment, and every
+        // publication re-parses the whole committed tree: refusing an empty document there wedges
+        // bundle publication for the entire business permanently, so nothing an agent authors ever
+        // reaches the Runtime. An empty configuration file is empty configuration, not a fault.
+        const parsed = parseYamlObject(content) ?? (isEmptyYamlDocument(content) ? {} : undefined);
         if (!parsed) return rejected("FILE_PARSE_FAILED", path);
         validateSoulConfig(parsed);
         return admitted(content, location, "legacy");

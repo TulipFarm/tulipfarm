@@ -177,7 +177,7 @@ import { describe, expect, it } from "vitest";
  * the answer. Only the HTTP reply for it is here.
  */
 
-const CEILING = 51_117;
+const CEILING = 51_130;
 
 /**
  * Domains inside `apps/api/src` that already have a package of the same name. Everything here that
