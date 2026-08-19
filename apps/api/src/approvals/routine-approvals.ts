@@ -2,19 +2,11 @@ import { randomUUID } from "node:crypto";
 import { DurableWaitError, type DurableWaitManager } from "@tulipfarm/run-kernel";
 import { canonicalHash } from "@tulipfarm/schema";
 import {
-  type ApprovalRow,
   type ApprovalSignalOutcome,
   type ApprovalsRepo,
   listPendingRoutineApprovals,
 } from "@tulipfarm/tool-host";
 import type { RoutineApprovalPayload } from "../internal/routine-approval-host";
-
-/** SPEC §7.2 approval decisions are durable wait signals; roles are user-role grants only. */
-
-/** The roles a deciding principal actually holds, canonicalized to the wait's principal form. */
-export function rolePrincipals(roles: readonly string[]): readonly string[] {
-  return roles.map((role) => `role:${role}`);
-}
 
 export interface RoutineApprovalServiceOptions {
   readonly repo: ApprovalsRepo;
@@ -38,15 +30,10 @@ export class RoutineApprovalService {
     this.now = options.now ?? (() => new Date());
   }
 
-  /** Pending approvals the caller's roles are allowed to decide. */
-  async listPendingFor(input: {
-    businessId: string;
-    roles: readonly string[];
-  }): Promise<ApprovalRow[]> {
-    return await listPendingRoutineApprovals(this.options.repo, this.options.waits, input);
+  async listPendingFor(input: { businessId: string; roles: readonly string[] }) {
+    return listPendingRoutineApprovals(this.options.repo, this.options.waits, input);
   }
 
-  /** Write the decision before resuming; check the role before settling the row. */
   async signal(input: {
     businessId: string;
     approvalId: string;
@@ -65,7 +52,7 @@ export class RoutineApprovalService {
 
     const wait = await this.options.waits.find(input.businessId, waitId);
     if (wait === null) return "not_found";
-    const held = new Set(rolePrincipals(input.roles));
+    const held = new Set(input.roles.map((role) => `role:${role}`));
     const asRole = wait.allowedPrincipals.find((allowed) => held.has(allowed));
     if (asRole === undefined) return "forbidden";
 
