@@ -3,6 +3,7 @@ import {
   asEffortPreset,
   type DerivedModelProfile,
   deriveModelProfiles,
+  dropUnusableProviderEntries,
   type EffortPreset,
   isDeprecatedTierAlias,
   type LlmConfig,
@@ -75,7 +76,15 @@ export class LlmService {
       return;
     }
 
-    const config = validateLlmConfig(rawConfig);
+    const { config: usable, dropped } = dropUnusableProviderEntries(rawConfig);
+    for (const entry of dropped) {
+      logger.warn(
+        `[llm] tier=${entry.tier} entry ${entry.index + 1} names no provider or model ` +
+          `(provider="${entry.provider}" model="${entry.model}") — dropped from the fallback chain`
+      );
+    }
+
+    const config = validateLlmConfig(usable);
     // The same derivation the worker's router uses, so an effort preset means one thing on two
     // sides of the process boundary rather than two that drift.
     //

@@ -25,6 +25,9 @@ subscription-CLI model adapters.
 - `tiers` remains only as authored LLM config shape; `@tulipfarm/schema` derives ModelProfiles.
 - Import config schemas, validators, and LLM config/runtime error classes from `@tulipfarm/schema`.
 - Config is validated at `LlmService.init`; never read partial or unvalidated config.
+- Chain entries naming no provider or model are dropped at `init` with a warning, never fatal: an
+  instance may still hold one from before the write gate rejected it, and failing the whole `llm:`
+  block would take every working chain down with it and leave no page from which to delete it.
 - `chainModel(ids)` must execute the whole selected chain; do not collapse fallback to the head.
 - API-keyed providers read `entry.api_key_ref`: `env://VAR` from env, else `secrets.get(ref)`.
 - Fallback hard failures propagate: auth, `404`, abort. `429`, `5xx`, timeout fall through.

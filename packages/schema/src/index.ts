@@ -93,8 +93,10 @@ export type {
   ProviderConnection,
   ProviderEntry,
   TierConfig,
+  UnusableProviderEntry,
 } from "./llm";
 export {
+  dropUnusableProviderEntries,
   EmbeddingUnavailableError,
   LlmConfigSchema,
   LlmConfigValidationError,

@@ -76,6 +76,30 @@ describe("LlmService", () => {
     await expect(svc.init({ tiers: {} }, fakeSecrets)).rejects.toThrow(LlmConfigValidationError);
   });
 
+  it("a persisted fallback entry with no model id is dropped, not fatal to the whole config", async () => {
+    const svc = new LlmService();
+    const logger = { warn: vi.fn(), info: vi.fn(), error: vi.fn() };
+    const persisted = {
+      ...validConfig,
+      tiers: {
+        ...validConfig.tiers,
+        quick: {
+          providers: [
+            { provider: "anthropic", model: "claude-haiku-4-5", api_key_ref: "key" },
+            { provider: "anthropic", model: "" },
+          ],
+        },
+      },
+    };
+
+    await expect(svc.init(persisted, fakeSecrets, logger)).resolves.toBeUndefined();
+
+    expect(svc.isConfigured).toBe(true);
+    expect(svc.effortModel("fast")).toBeDefined();
+    expect(svc.hasModelId("")).toBe(false);
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("dropped from the fallback"));
+  });
+
   it("LlmCredentialError on a provider skips it and keeps the tier if another provider succeeds", async () => {
     const okModel = (entry: { provider: string; model: string }) =>
       Promise.resolve({
