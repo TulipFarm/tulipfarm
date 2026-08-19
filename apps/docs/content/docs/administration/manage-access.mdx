@@ -1,0 +1,143 @@
+---
+title: Decide who can do what
+description: Manage people, teams, and access levels in TulipFarm. Invite someone, group people into teams, and check exactly why an action is allowed or denied.
+---
+
+Access in TulipFarm answers one question: when someone — or something — tries to do a thing, is
+it allowed?
+
+Three ideas do all the work.
+
+- **People and apps** are the things that act. A person signing in is one. So is an agent, a
+  routine, an integration, or an API token.
+- **Levels** say what an actor may do. Every actor holds one or more.
+- **Teams** are groups of people that hold a level together, so you set it once instead of per
+  person.
+
+Everything below is on **Operate → Business → People & access**, which admin accounts can reach.
+
+## The three built-in levels
+
+| Level | What it means |
+| --- | --- |
+| Owner | The account that set the instance up. Reserved, and never removed by a config sync. |
+| Admin | Allowed everything, everywhere. |
+| Member | The default for an invited person. Can build and run things; cannot touch admin settings. |
+
+A member can chat, build resource types, agents, skills and routines, work with records and
+knowledge, approve work, and issue their own API tokens. A member cannot manage secrets, arm kill
+switches, read observability, or change who can do what.
+
+<Callout type="info">
+  Members are not second-class. Almost everything in
+  [Using TulipFarm](/docs/using-tulipfarm) works on a plain member account — that is the point of
+  the split.
+</Callout>
+
+## Invite someone
+
+<Steps>
+  <Step>
+    Go to **Operate → Business → People & access**. The **People** tab is shown first, under the
+    heading *Who can do what*.
+  </Step>
+  <Step>
+    Choose **Invite someone** and enter their details.
+  </Step>
+  <Step>
+    Pick the level they should hold. Choose **Member** unless they need to administer the
+    instance.
+  </Step>
+  <Step>
+    Use **Manage** next to any person later to change their level or turn the account off.
+  </Step>
+</Steps>
+
+Full walk-through: [Invite your team](/docs/administration/invite-your-team).
+
+## Put people in a team
+
+A team is worth making as soon as two people need the same access. Change the team, and everyone
+in it changes with it.
+
+<Steps>
+  <Step>
+    Open the **Teams** tab and choose **Start a team**.
+  </Step>
+  <Step>
+    Name it and choose **Create team**.
+  </Step>
+  <Step>
+    Choose **Open team**, then **Add** to put people in it.
+  </Step>
+  <Step>
+    Choose **Give this team more access** and pick a level. If none of the levels fit, use
+    **None of these fit — make a new level**.
+  </Step>
+</Steps>
+
+A team holds people and levels. Teams do not go inside other teams. A team can be given an expiry,
+which is useful for contractors and for temporary access during an incident.
+
+## Check why something is allowed
+
+When access does not behave as expected, do not guess. Ask.
+
+<Steps>
+  <Step>
+    Open the **Check** tab, headed *Check what someone can do*.
+  </Step>
+  <Step>
+    Fill in **Who**, **Trying to**, and **What**. Use **More precise** to narrow it to one record,
+    one field, or one destination.
+  </Step>
+</Steps>
+
+The answer comes back as allowed or denied, plus the reason: no levels applied, an explicit denial
+matched, or nothing granted the action in the first place.
+
+## Why an agent can do less than you
+
+When an agent acts for someone, its access is the **overlap** of two sets of limits: yours, and
+the agent's own. Permissions never add up. They only narrow.
+
+```text
+    what you may do        what the agent may do
+   ┌───────────────┐      ┌───────────────┐
+   │               │██████│               │
+   │               │██████│               │
+   └───────────────┘      └───────────────┘
+                     ▲
+              only this overlap runs
+```
+
+So an agent acting for an admin is still bound by its own limits, and a generous agent acting for
+a member is still bound by the member's. If either side denies, the answer is no.
+
+This is why an agent cannot be used as a way around access rules, and why widening an agent does
+nothing for a person who was not allowed anyway.
+
+## Things that have no screen yet
+
+Registering a non-human actor — an agent, routine, integration, API client, or service — is done
+through `POST /api/v1/authz/principals`. There is no screen for it today.
+
+## Where to go next
+
+<Cards>
+  <Card
+    title="Invite your team"
+    href="/docs/administration/invite-your-team"
+    description="The full invitation flow, step by step."
+  />
+  <Card
+    title="How identity works"
+    href="/docs/administration/how-identity-works"
+    description="Accounts, sessions, and tokens underneath all of this."
+  />
+  <Card
+    title="Roles and permissions"
+    href="/docs/reference/roles-and-permissions"
+    description="The complete list of surfaces and actions, for looking things up."
+  />
+</Cards>

@@ -46,7 +46,7 @@ to re-issue tokens.
 
 These three are easy to confuse. Each breaks predictability for a different operation:
 
-| Tool | Used by | Purpose | Secret? |
+| Tool | Used by | Purpose | secret? |
 |---|---|---|---|
 | **IV** | encryption (AES-GCM) | makes identical plaintext encrypt differently | No — stored with the ciphertext |
 | **Salt** | password hashing (Argon2id) | makes identical passwords hash differently | No — stored inside the hash |
@@ -54,6 +54,6 @@ These three are easy to confuse. Each breaks predictability for a different oper
 
 TulipFarm applies the IV and the salt automatically. The pepper is the one you opt into.
 
-To create or revoke a token, see [Issue an API token](/docs/guides/issue-an-api-token). For
+To create or revoke a token, see [Issue an API token](/docs/using-tulipfarm/issue-an-api-token). For
 the variables TulipFarm reads, including `API_TOKEN_PEPPER`, see
 [Environment variables](/docs/reference/environment-variables).

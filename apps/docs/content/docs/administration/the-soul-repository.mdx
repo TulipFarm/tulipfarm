@@ -1,0 +1,107 @@
+---
+title: The soul repository
+description: For admins — where the soul lives on disk, how to back it up to a git remote, what is inside it, and when to reload it by hand.
+---
+
+Your instance's [soul](/docs/using-tulipfarm/what-a-soul-is) is a git repository. This page is the
+operator's view of it: where it is, how to back it up, and what is actually inside.
+
+You need an admin account for everything here.
+
+## Where it lives
+
+By default, `~/.tulipfarm/soul`. Set `SOUL_PATH` to put it somewhere else.
+
+Hosting several businesses on one runtime? Use `SOUL_ROOT` instead, which resolves to
+`<root>/<businessId>/soul`. The two are mutually exclusive — set one or the other, never both.
+
+## Back it up to a git remote
+
+Without a remote, your configuration history exists on exactly one machine. Fixing that is the
+single highest-value thing on this page.
+
+<Steps>
+  <Step>
+    Open **Operate → Business → Soul**.
+  </Step>
+  <Step>
+    Set the remote URL and the credential it should use.
+  </Step>
+  <Step>
+    Save. TulipFarm syncs immediately — you do not have to wait for the next change.
+  </Step>
+</Steps>
+
+You can also seed this at boot with `SOUL_GIT_REMOTE_URL` and `SOUL_GIT_CREDENTIAL`, which is what
+a scripted deployment should do.
+
+<Callout type="warn">
+  A backed-up soul is **not** a backup of your instance. Records, knowledge, chats, runs,
+  approvals, memory, secrets, audit, and identity are all in PostgreSQL. Losing the database loses
+  all of it, however perfect the soul backup is. See
+  [back up and restore](/docs/self-hosting/back-up-and-restore).
+</Callout>
+
+## What is inside
+
+<Files>
+  <Folder name="soul" defaultOpen>
+    <Folder name="resources/{name}">
+      <File name="schema.yml" />
+      <File name="hooks.ts" />
+    </Folder>
+    <Folder name="agents/{name}">
+      <File name="AGENT.md" />
+    </Folder>
+    <Folder name="skills/{name}">
+      <File name="SKILL.md" />
+      <Folder name="references" />
+    </Folder>
+    <Folder name="routines/{name}" />
+    <Folder name="integrations/{name}" />
+    <Folder name="surface-components/{name}" />
+    <File name="soul.yaml" />
+    <File name="guardrails.yaml" />
+    <File name="skills-lock.json" />
+  </Folder>
+</Files>
+
+Provider chains, effort presets, and model specifications all live under `llm` in `soul.yaml`.
+There is no separate model configuration file and no `models/` directory — if you are looking for
+one, that is why you cannot find it.
+
+## How changes reach the running instance
+
+Soul writes commit immediately and reconcile live.
+
+When a tool such as `create_resource_type` writes `resources/{name}/schema.yml`, the API reloads
+the soul and reconciles the datastore **without a restart**. Guardrails, model configuration,
+routines, resource types, and the other registries all reload through the same path.
+
+## Reloading by hand
+
+`POST /api/v1/soul/reload` re-reads the soul from disk.
+
+You should almost never need it. It exists for development against a remote-less soul, where files
+have been hand-edited outside the product and nothing triggered a reconcile.
+
+<Callout type="warn">
+  Hand-editing the soul of a real instance is not a supported way to configure TulipFarm. Anything
+  you can configure, you can ask for in chat — and doing it that way keeps the history honest about
+  who changed what.
+</Callout>
+
+## Where to go next
+
+<Cards>
+  <Card
+    title="How soul publication works"
+    href="/docs/administration/how-soul-publication-works"
+    description="Signed bundles, changesets, dead letters, and rollback."
+  />
+  <Card
+    title="What a soul is"
+    href="/docs/using-tulipfarm/what-a-soul-is"
+    description="The plain-language version, for everyone else on your team."
+  />
+</Cards>

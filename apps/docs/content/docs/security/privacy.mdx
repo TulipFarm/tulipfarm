@@ -4,7 +4,7 @@ description: Product privacy controls and the deployment decisions that remain w
 ---
 
 TulipFarm separates private content from operational evidence. Audit events contain safe metadata
-and protected Artifact references rather than prompts, Secret plaintext, or Tool payloads.
+and protected artifact references rather than prompts, secret plaintext, or tool payloads.
 Knowledge retrieval checks source ACLs before candidate ranking, and cached results are
 reauthorized before reuse.
 
@@ -31,7 +31,7 @@ Evidence: `packages/audit/src/erase.test.ts`
 
 ## Access review
 
-Access review is an operator process. Review active principals, roles, AccessGrants, Credentials,
+Access review is an operator process. Review active principals, roles, access grants, credentials,
 external identity mappings, and administrative access on the organization's chosen schedule.
 TulipFarm rejects self-review and cross-business recertification.
 

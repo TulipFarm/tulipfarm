@@ -1,0 +1,78 @@
+---
+title: Issue an API token
+description: Create, copy, and revoke a personal API token from your settings screen, so another program can act as you.
+---
+
+{/* tf-page: track: using-tulipfarm  requires: ["api_token:*"] */}
+
+An API token lets another program act as you. You give the program a token instead of your
+password, and TulipFarm treats its requests as if you had made them.
+
+You do this on a settings screen. No terminal needed.
+
+<Callout type="warn">
+A token carries **your full access**. Anything you can do, the program holding it can do. Create
+one per place it will run, and revoke it the moment it is no longer needed.
+</Callout>
+
+## Create a token
+
+<Steps>
+
+<Step>
+### Open your token settings
+
+Go to **Settings → Auth** and find the **API tokens** panel.
+</Step>
+
+<Step>
+### Name it after where it will run
+
+Type a name in **New token name**. Name it for the place that will use it —
+`nightly-invoice-sync`, not `token1` — because that name is the only thing you will have to
+recognise it by later.
+
+Choose **Create**.
+</Step>
+
+<Step>
+### Copy it now
+
+The full token appears once, in a highlighted box. Copy it and paste it wherever the program
+expects it.
+
+TulipFarm stores only a scrambled version, so it can never show you the full token again. If you
+lose it, revoke it and create another. That is normal and costs nothing.
+</Step>
+
+</Steps>
+
+## What you have now
+
+A token beginning with `tulip_`, listed in the **API tokens** panel by name, its first few
+characters, and the date you created it. The program you gave it to can now act as you.
+
+## Revoke a token
+
+In the same panel, choose **Revoke** next to the token's name.
+
+Revoking takes effect immediately, so any program still using that token stops working at once.
+Revoke when:
+
+- the program that used it is switched off
+- you pasted it somewhere you should not have
+- you are not certain who holds a copy
+- the person who set it up has left
+
+There is no undo, and no cost to revoking. When in doubt, revoke and create a new one.
+
+## Where to go next
+
+<Cards>
+  <Card title="Who can do what" href="/docs/reference/roles-and-permissions">
+    A token carries your access, so it is worth knowing what that covers.
+  </Card>
+  <Card title="Connect an app instead" href="/docs/administration/connect-slack">
+    To let TulipFarm talk to Slack, GitHub, or Google, use an integration rather than a token.
+  </Card>
+</Cards>

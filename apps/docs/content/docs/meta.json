@@ -1,19 +1,11 @@
 {
   "pages": [
     "index",
-    "---Self-host---",
-    "installation",
-    "uninstall",
-    "deploy",
-    "---Use TulipFarm---",
-    "getting-started",
-    "concepts",
-    "guides",
-    "troubleshooting",
-    "---Reference---",
+    "self-hosting",
+    "administration",
+    "using-tulipfarm",
+    "---Look things up---",
     "reference",
-    "security",
-    "---Contribute---",
-    "development"
+    "security"
   ]
 }

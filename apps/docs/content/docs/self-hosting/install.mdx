@@ -1,0 +1,205 @@
+---
+title: Install
+description: Stand up a working TulipFarm instance with one command on Linux, macOS, or Windows — nothing to clone, nothing to compile.
+---
+
+By the end of this you will have TulipFarm running on your own machine or server, with an admin
+account you can sign in to.
+
+One command. About five minutes, most of it waiting for the image to download.
+
+<Callout type="info">
+  There is nothing to clone, build, or compile. The installer pulls a published container image.
+  Node, pnpm, and the source tree are only needed to
+  [work on TulipFarm](https://github.com/maddhruv/tulipfarm), not to run it.
+</Callout>
+
+## What you need first
+
+A machine with **Docker** or **Podman**. On Linux the installer installs Podman for you if neither
+is present. On macOS and Windows, install Docker Desktop or Podman yourself first.
+
+<Steps>
+
+<Step>
+
+### Run one command
+
+**Linux or macOS:**
+
+```bash
+curl -fsSL {{SITE_URL}}/install.sh | sudo bash
+```
+
+**Windows**, from PowerShell:
+
+```powershell
+irm {{SITE_URL}}/install.ps1 | iex
+```
+
+The Windows script checks that WSL2 and a Linux distribution are present, then runs the Linux
+installer inside WSL. If WSL is missing it prints the `wsl --install` steps to run first.
+
+**Deploying through a UI** — Portainer, Coolify, Dokploy, Unraid — take the Compose file and run it
+as-is. No `.env` file, no key generation:
+
+```bash
+curl -fsSLO {{SITE_URL}}/docker-compose.yml
+docker compose up -d
+```
+
+</Step>
+
+<Step>
+
+### Let it finish
+
+The installer normally asks **zero questions**. It detects your container engine, writes
+`/opt/tulipfarm/docker-compose.yml` and `/opt/tulipfarm/.env`, generates `ENCRYPTION_KEY`,
+`JWT_SECRET`, `WEBHOOK_SIGNING_SECRET`, and `POSTGRES_PASSWORD` for you, starts the stack, waits
+for `/health` to answer, and prints a URL.
+
+The one question it may ask is about the port. If port `8080` is already taken it suggests the next
+free one — press Enter to accept.
+
+</Step>
+
+<Step>
+
+### Open the printed URL
+
+Because no admin exists yet, the app sends you to the setup wizard at `/setup`.
+
+<Callout type="warn">
+  Until an admin exists, `/setup` is unauthenticated. On an instance reachable from the internet,
+  **whoever arrives first claims it**. Do this now, not later. If the installer detected a public
+  IP it prints a TLS warning for exactly this reason — see [put TLS in front](/docs/self-hosting/tls).
+</Callout>
+
+</Step>
+
+<Step>
+
+### Create your admin account
+
+The wizard asks one thing at a time: your name, your email, then a password.
+
+That is all it collects. It locks the moment an admin exists, so nobody else can create a second
+one through it, and it hands you to the main workspace.
+
+</Step>
+
+</Steps>
+
+## What you have now
+
+A running instance, a database, and an admin account that is yours.
+
+It cannot answer questions yet — it has no model. That is the next tutorial, and it takes about
+fifteen minutes.
+
+<Cards>
+  <Card
+    title="Make it team-ready"
+    href="/docs/administration/make-it-team-ready"
+    description="Give it a model, tell it about your business, invite someone, and find the emergency stop."
+  />
+  <Card
+    title="Production checklist"
+    href="/docs/self-hosting/production-checklist"
+    description="TLS, your own keys, a pinned tag, and backups — before it holds anything real."
+  />
+</Cards>
+
+## Updating and removing
+
+Re-running the installer **is** the upgrade path. It keeps your secrets and database, pulls the
+pinned version, and restarts. See [updating and rollback](/docs/self-hosting/updating).
+
+To remove the stack and all its local data, use the [uninstaller](/docs/self-hosting/uninstall).
+
+## Before real data
+
+The defaults are tuned for *runs with no setup*, not for production. Work through the
+[production checklist](/docs/self-hosting/production-checklist) — TLS, your own `ENCRYPTION_KEY`, a
+replaced database password, a pinned image tag, and backups.
+
+## Overrides
+
+### Linux / macOS
+
+All optional, set as environment variables before running:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `TF_VERSION` | `latest` | App image tag to run (`ghcr.io/tulipfarm/tulipfarm:<tag>`). |
+| `TF_PORT` | `8080` | Host port to publish; also changes it on an existing install. |
+| `TF_INSTALL_DIR` | `/opt/tulipfarm` | Install directory. |
+| `TF_PROJECT_NAME` | `tulipfarm` | Compose project name. Set it only for a [second, separate instance](#running-a-second-instance-on-one-machine). |
+| `TF_RUNTIME` | auto | Force `docker` or `podman`. |
+| `TF_BASE_URL` / `TF_REF` | `{{SITE_URL}}` / empty | Where compose + `.env.example` are fetched from. |
+
+Example — pin a version on a custom port:
+
+```bash
+TF_VERSION=v0.1.0 TF_PORT=9000 \
+  bash -c "curl -fsSL {{SITE_URL}}/install.sh | sudo -E bash"
+```
+
+When no port override is supplied and the saved port belongs to another process, the
+installer prompts for a replacement. In a non-interactive environment, set `TF_PORT`
+before running instead.
+
+### Running a second instance on one machine
+
+A separate `TF_INSTALL_DIR` is **not** enough to separate two installs. Containers and
+volumes are namespaced by the Compose project name, not by the directory, so a second
+install left at the default `tulipfarm` attaches to the first one's database and soul
+repo. Nothing errors — the second instance simply comes up on the first's data.
+
+Give each instance its own project name, install directory, and port:
+
+```bash
+TF_PROJECT_NAME=acme TF_INSTALL_DIR=/opt/acme TF_PORT=8081 \
+  bash -c "curl -fsSL {{SITE_URL}}/install.sh | sudo -E bash"
+```
+
+The name is recorded in that install's marker file, so [uninstalling](/docs/self-hosting/uninstall)
+targets the right stack. Keep the same `TF_PROJECT_NAME` for later re-runs and updates.
+
+### Installing an exact ref
+
+`TF_VERSION` pins the **app image**, but the files above are fetched from this site, which
+serves them from the tip of `main`. That is normally what you want — `docker-compose.yml`
+is written so every variable has a default, so it stays compatible across versions.
+
+When you need the compose file from a specific tag too, fetch from GitHub instead. A
+non-empty `TF_REF` switches the installer back to the `<base>/<ref>/<path>` layout:
+
+```bash
+TF_BASE_URL=https://raw.githubusercontent.com/TulipFarm/tulipfarm \
+  TF_REF=v0.1.0 TF_VERSION=v0.1.0 \
+  bash -c "curl -fsSL {{SITE_URL}}/install.sh | sudo -E bash"
+```
+
+<Callout type="info">
+  The installer does not configure TLS. To add it afterwards, edit
+  `/opt/tulipfarm/.env` and follow [Put TLS in front](/docs/self-hosting/tls).
+</Callout>
+
+### Windows
+
+The PowerShell script accepts named parameters. Download it first, then run with the parameters you need:
+
+```powershell
+Invoke-WebRequest {{SITE_URL}}/install.ps1 -OutFile install.ps1
+.\install.ps1 -Version v0.1.0
+```
+
+| Parameter | Default | Purpose |
+| --- | --- | --- |
+| `-Version` | `latest` | App image tag (`TF_VERSION` inside WSL). |
+| `-BaseUrl` | `{{SITE_URL}}` | Base URL for fetched files. |
+| `-Ref` | empty | Git ref under `-BaseUrl`. Set it with a GitHub raw `-BaseUrl` to install an exact ref. |
+
+To set `TF_PORT`, `TF_INSTALL_DIR`, or `TF_RUNTIME`, open your WSL terminal and run the bash installer directly with those env vars instead.

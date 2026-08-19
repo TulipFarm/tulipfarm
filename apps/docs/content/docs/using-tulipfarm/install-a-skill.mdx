@@ -1,0 +1,64 @@
+---
+title: Install a skill
+description: Scan a git repository, review SkillAudit findings, and install selected skills.
+---
+
+{/* tf-page: track: using-tulipfarm  requires: ["soul.skill:*"] */}
+
+This guide installs an existing [skill](/docs/using-tulipfarm/skills) from a git repository. The
+real install flow is always **scan → SkillAudit → install**.
+
+## Outcome
+
+At the end, the skills you chose are copied into the soul, pinned to the exact version you
+reviewed, and available for agents to load on demand.
+
+## Ask where to start
+
+If you know the repository but not which skills it contains, start in chat:
+
+```prompt
+I want to install the Skills from https://github.com/example/acme-skills. Help me
+scan them and decide which ones are safe to install.
+```
+
+The assistant can explain what to expect. The actual install confirmation happens in the
+skills UI so an operator can review the audit report before anything is installed.
+
+## Scan the repository
+
+<Steps>
+  <Step>
+    Open **Skills → Marketplace** or **Skills → Install**.
+  </Step>
+  <Step>
+    Enter a git repository URL. A `#branch` suffix is supported when you need a specific
+    branch.
+  </Step>
+  <Step>
+    Choose **Scan**. TulipFarm clones the repo, finds installable `SKILL.md` files, and
+    shows the discovered skills.
+  </Step>
+</Steps>
+
+## Run SkillAudit
+
+Select the skills you want, then choose **Run SkillAudit**. SkillAudit is an LLM safety
+review that summarizes intent, risk, tool guidance, and findings for each selected skill.
+
+<Callout type="warn">
+SkillAudit is advice, not a guarantee. Read the findings — and the skill's own source — before you
+confirm. Some packaged skills are also blocked automatically for safety, and a clean audit does
+**not** override that block.
+</Callout>
+
+## Confirm the install
+
+After every selected skill has an audit report, choose **Confirm install**. TulipFarm writes the
+skills into the soul, records the change, and pins exactly which version came from where — so what
+runs later is what you reviewed now.
+
+## Verify
+
+Open **Skills**. The installed skills should appear with their descriptions and
+provenance. Ask an agent to use one only after you are comfortable with the audit result.

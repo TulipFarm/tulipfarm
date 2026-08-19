@@ -20,6 +20,11 @@ spelled per layer; they are spellings of the SAME concept, never different conce
 | **REST path** | `/api/v1/<plural-kebab>` |
 | **App URL** | `/<kebab>` |
 | **UI label** | Title Case |
+| **Docs prose** (`apps/docs`) | lowercase — `a run`, `the soul`, `an agent` |
+
+Docs prose is the one layer where the noun is an ordinary English word, not an identifier:
+"a run reaches a state" reads as English, "a Run reaches a State" reads as jargon. The exception is
+quoting the screen — a UI label keeps its own casing, so **Run SkillAudit** stays as printed.
 
 ## Cross-cutting rule: external vs internal vocabulary
 

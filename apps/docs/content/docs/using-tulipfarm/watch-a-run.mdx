@@ -1,0 +1,76 @@
+---
+title: Watch a run
+description: Use the runs list and run inspector to follow durable work and control it safely.
+---
+
+{/* tf-page: track: using-tulipfarm  requires: ["activity:*"] */}
+
+This guide follows a [run](/docs/using-tulipfarm/runs). A run is a durable execution of chat,
+integration, or routine work. A run contains states, waits, effects, guardrail decisions,
+lineage, costs, and a persisted event stream.
+
+## Outcome
+
+At the end, you can inspect a run, recover from a dropped browser connection, and use the
+available controls safely.
+
+## Open the runs list
+
+<Steps>
+  <Step>
+    Open **Runs**.
+  </Step>
+  <Step>
+    Select the run you want to inspect. Chat turns also return an `X-Run-Id`, and routine
+    pages link to their runs.
+  </Step>
+</Steps>
+
+## Read the inspector
+
+The run inspector shows:
+
+- status and run id
+- routine id/version when applicable
+- model cost and token count
+- states and attempts
+- effects and waits
+- guardrail decisions
+- lineage
+
+The event stream is durable. If the browser drops, the client reconnects by cursor using
+`?after=` or `Last-Event-ID`, so already persisted run events are not lost.
+
+## Use controls
+
+Use the smallest safe control:
+
+- **pause** stops scheduling new work at a safe boundary.
+- **resume** continues a paused run.
+- **retry** starts another attempt when the failure is safe to repeat.
+- **reconcile** resolves ambiguous external effects before retrying.
+- **cancel** requests cancellation. Stopping a chat turn cancels its run wherever it is
+  executing.
+
+<Callout type="warn">
+Reconcile before retrying when an external effect might already have happened. Retrying
+without reconciliation can duplicate work outside TulipFarm.
+</Callout>
+
+## When a turn misbehaves
+
+<Steps>
+  <Step>
+    Open the run inspector and read the failed or waiting state.
+  </Step>
+  <Step>
+    Check **Inbox** for an undecided approval or human task.
+  </Step>
+  <Step>
+    Open **Operate → Health → Observability** for recent turns, trace drill-down, and cost/usage
+    summary.
+  </Step>
+  <Step>
+    Open **Operate → Work → Activities** for the broader activity log.
+  </Step>
+</Steps>

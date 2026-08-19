@@ -1,0 +1,78 @@
+---
+title: Connect Slack
+description: Connect the bundled Slack integration so your team can talk to agents from Slack, by direct message or by mentioning the bot in a channel.
+---
+
+This guide connects the bundled `slack` integration. It lets people talk to TulipFarm
+agents from Slack by DM or by @mentioning the bot in a channel.
+
+## Outcome
+
+At the end, the Slack app is connected in Socket Mode, TulipFarm can receive
+`message.channels`, `message.im`, and `app_mention` events, and Slack users can link their
+Slack account to a TulipFarm user.
+
+## Create the Slack app
+
+<Steps>
+  <Step>
+    Open **Business → About** and confirm **Public address** is the HTTPS address you use to open
+    TulipFarm. Copy the OAuth callback shown there if you plan to create the Slack app manually.
+  </Step>
+  <Step>
+    Open **Integrations → slack** and select **Create app on Slack**. Pick your workspace and create
+    the pre-filled app.
+  </Step>
+  <Step>
+    The manifest enables Socket Mode, a bot user, the Agent messaging experience, and these bot
+    scopes: `chat:write`, `app_mentions:read`, `channels:read`, `channels:history`,
+    `groups:read`, `groups:history`, `im:read`, `im:history`, `mpim:read`,
+    `mpim:history`, `users:read`, `users:read.email`, and `assistant:write`.
+  </Step>
+  <Step>
+    Confirm the manifest subscribes to `message.channels`, `message.im`, and
+    `app_mention`.
+  </Step>
+</Steps>
+
+## Collect Slack credentials
+
+<Steps>
+  <Step>
+    On Slack's **Settings → Basic Information** page, copy the **Client ID** and **Client Secret**
+    into TulipFarm's Connect flow.
+  </Step>
+  <Step>
+    In Slack **Settings → Basic Information → App-Level Tokens**, generate a token with
+    `connections:write`. Paste the `xapp-` token into TulipFarm.
+  </Step>
+  <Step>
+    Save the fields, select **Authorize on Slack**, and approve the workspace install. TulipFarm
+    receives the bot token and Team ID from Slack automatically.
+  </Step>
+</Steps>
+
+## Manual Slack app setup
+
+If you do not use **Create app on Slack**, create the app **From a manifest** or configure the same
+scopes and events by hand. Under **OAuth & Permissions → Redirect URLs**, add the exact callback
+shown under **Business → About → Public address**. Slack requires an exact match, including the
+scheme and port. Use the public HTTPS domain when TulipFarm is behind a tunnel or reverse proxy.
+The path does not contain `slack` because TulipFarm uses one callback for every integration; its
+signed, one-use OAuth state identifies Slack when the provider returns.
+
+## Use Slack
+
+- DM the bot for private chat with TulipFarm.
+- @mention the bot in a channel to start or continue a channel thread.
+- If the sender is not linked, TulipFarm offers a single-use channel-link flow.
+
+## Link a Slack account
+
+When TulipFarm sends a bind link, open `/link-channel` while signed in to the TulipFarm
+account you want associated with that Slack user. The page previews the Slack sender
+and confirms the single-use channel link. After confirmation, future Slack messages resolve to
+that TulipFarm user.
+
+Slack approvals can also be decided from Slack when TulipFarm posts an Approve/Deny
+prompt for a parked run.

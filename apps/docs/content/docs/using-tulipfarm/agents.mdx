@@ -1,0 +1,62 @@
+---
+title: Agents
+description: User-created actors with instructions, autonomy, tools, and handoff behavior.
+---
+
+{/* tf-page: track: using-tulipfarm  requires: ["soul.agent:*"] */}
+
+An **agent** is a user-created actor that can run a chat turn with its own instructions and metadata.
+Agents are different from the built-in `__tulipfarm_default__` chat harness: the harness is the
+front desk, while agents are business-specific specialists you create, select, transfer to, or
+delegate work to.
+
+## What the assistant writes
+
+Agents live in the [soul](/docs/using-tulipfarm/what-a-soul-is) as `agents/{name}/AGENT.md`: frontmatter plus a
+markdown instruction body. This is read-only explanation of the generated artifact, not a file a
+reader needs to type.
+
+```markdown title="soul/agents/support/AGENT.md"
+---
+label: Support
+domain: customer-success
+description: Handles inbound customer questions.
+model: auto
+autonomy: supervised
+---
+
+You are the support Agent. Answer customer questions using Knowledge and create ticket Records when
+follow-up is needed.
+```
+
+The UI lists agents and shows their prompt and governance details. To create one, use chat and the
+`agent-forge` handoff; see [Create an agent](/docs/using-tulipfarm/create-an-agent).
+
+## Autonomy and approvals
+
+Autonomy describes how freely an agent may act. It decides whether runtime actions may pause for
+[Approvals](/docs/using-tulipfarm/approvals). Soul edits remain direct and ungated, but actions on records,
+external systems, or other effects can require a human decision.
+
+Autonomy does **not** influence which model an agent gets. It once did, and backwards — a `full`
+autonomy agent was routed to the *weakest* model. How much oversight an agent has and how much
+capability its work needs are independent; see [Model routing](/docs/administration/how-model-routing-works). The `model`
+field above names an effort preset (`auto`, `fast`, `balanced`, `thorough`) and is the only thing
+that decides capability.
+
+Every agent turn still goes through [guardrails](/docs/administration/how-guardrails-work), and every turn is a
+[Run](/docs/using-tulipfarm/runs).
+
+## Tools and current limits
+
+Agents use TulipFarm's built-in tools for records, knowledge, soul artifacts, memory, KV, routines,
+surfaces, and connected integrations. Today you cannot restrict tools per agent; connected
+integration tools are broadly available to agents on eligible turns. Risk is managed through
+guardrails, approvals, SkillAudit, and role-based authority, not a per-agent tool allowlist in
+the UI.
+
+## Transfer and delegation
+
+`transfer_to_agent` changes who owns the active chat. `delegate_to_agent` starts helper work as a
+child run and returns results to the current agent. Delegation is useful for scoped work; transfer is
+useful when another agent should become the main actor.

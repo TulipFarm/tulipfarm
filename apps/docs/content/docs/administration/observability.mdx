@@ -1,0 +1,108 @@
+---
+title: See what your agents are doing
+description: Track agent cost, tokens, errors, and reliability in TulipFarm. Read the observability screen, trace one conversation, and export metrics to your dashboards.
+---
+
+Agents cost money and occasionally get things wrong. Observability is where you see both.
+
+Everything here is admin-only, on **Operate → Health → Observability**.
+
+## What the screen shows
+
+| Panel | Answers |
+| --- | --- |
+| Totals | What has this cost, and how many turns and tokens produced it? |
+| Over time | Is spend or volume trending up? |
+| By agent | Which agent is the expensive one? |
+| By model | Which model is the expensive one? |
+| Reliability | How often do calls fail, retry, or fall back to another model? |
+
+Pick a range of 24 hours, 7 days, or 30 days.
+
+## Follow one conversation
+
+The recent list drills into a single chat. Choose one and you get its timeline, in order:
+
+- `turn` — the whole exchange, from the message to the reply.
+- `llm_call` — one request to a model, with its tokens and cost.
+- `tool_call` — one action the agent took.
+
+This is the fastest way to answer "why did that reply take so long" or "what did it actually do".
+
+## What is never recorded
+
+Anything that looks like a credential or a payload is replaced with `[redacted]` before it is
+stored or exported. That covers authorization headers, cookies, tokens, passwords, secrets, and
+the prompt and response content itself. Values that are not a simple string, number, or true/false
+are dropped entirely rather than risk leaking a nested object.
+
+Content capture is **off** by default. Cost and timing are always recorded; what was said is not.
+
+<Callout type="warn">
+  Turning content capture on means prompts and replies are retained. On a business instance that
+  can mean customer data. Decide deliberately.
+</Callout>
+
+## Send metrics to your own dashboards
+
+TulipFarm can push metrics and traces to any OpenTelemetry collector. Grafana Cloud is the
+supported path, and a ready-made dashboard ships with the source.
+
+<Steps>
+  <Step>
+    Store your collector token as a secret. See
+    [Manage credentials](/docs/administration/manage-credentials).
+  </Step>
+  <Step>
+    Set the `otlp` block in `soul/observability.config.yaml` with your endpoint, instance id, and
+    a reference to that token.
+  </Step>
+  <Step>
+    Restart the instance. The screen then reads *OTLP metrics export is on*, followed by the
+    endpoint it is pushing to.
+  </Step>
+</Steps>
+
+Export stays off until an endpoint **and** a token are both present. The token is never returned
+by the API and never shown on the screen.
+
+Metrics arrive under the service name `tulipfarm` and include `llm_calls_total`,
+`llm_tokens_total`, `llm_cost_usd_total`, `tool_calls_total`, `turns_total`, and `job_runs_total`.
+Traces arrive as one trace per turn.
+
+## Defaults worth knowing
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| Export | Off | Nothing leaves the instance until you configure a collector. |
+| Retention | 90 days | How long recorded activity is kept. |
+| Content capture | Off | Prompts and replies are not retained. |
+| Spend alert | Unset | No cost threshold is being watched. |
+
+## Health checks for uptime monitors
+
+Three endpoints, no authentication, for load balancers and monitoring tools.
+
+| Endpoint | Answers | Use it for |
+| --- | --- | --- |
+| `GET /livez` | Is the process alive? Always `200` while it is running. | Restart policies. |
+| `GET /readyz` | Can it serve traffic? `200`, or `503` when the database is unreachable. | Load balancer health. |
+| `GET /health` | The same as `/readyz`. | Existing monitors that expect this name. |
+
+Point a load balancer at `/readyz`, not `/livez`. A live process with a dead database should be
+taken out of rotation, and only `/readyz` reports that.
+
+## Where to go next
+
+<Cards>
+  <Card
+    title="run operational reviews"
+    href="/docs/administration/run-operational-reviews"
+    description="Turning these numbers into a regular habit."
+  />
+  <Card
+    title="Stop agents in an emergency"
+    href="/docs/administration/emergency-stop"
+    description="What to do when the numbers say something is badly wrong."
+  />
+</Cards>

@@ -1,0 +1,230 @@
+---
+title: Install and deployment troubleshooting
+description: Diagnose installer, container, readiness, worker, volume, login, and database failures from the machine that runs TulipFarm.
+---
+
+Use this page from the machine that runs TulipFarm. It assumes you can run Compose
+commands and read service logs. Compose means Docker Compose or Podman Compose.
+
+Start with the service logs. The published Compose stack has three TulipFarm processes:
+
+```bash
+docker compose logs -f app
+docker compose logs -f worker
+docker compose logs -f integration-worker
+```
+
+`app` is the API, built web UI, and only database migrator. `worker` produces chat answers
+and runs background work. `integration-worker` handles integration event delivery; an
+integration is a connected third party, such as Slack or GitHub.
+
+## Installer fails before containers start
+
+<Accordions>
+
+<Accordion title="required command not found">
+
+The installer needs a POSIX-style shell, `curl`, `openssl`, and a container engine. A
+POSIX-style shell is the `sh` or `bash` family used by Linux and macOS.
+
+On a minimal server image, `openssl` is often missing. Install it from the package manager
+for that server, then run the installer again.
+
+</Accordion>
+
+<Accordion title="no container engine found">
+
+On Linux, the installer can install Podman when it finds `apt-get`, `dnf`, `zypper`,
+`pacman`, or `apk`. If none of those package managers exists, install Docker or Podman
+manually, then run the installer again.
+
+On macOS, install Docker Desktop or Podman yourself. To force one engine when both are
+present, set `TF_RUNTIME`:
+
+```bash
+curl -fsSL {{SITE_URL}}/install.sh | sudo TF_RUNTIME=docker bash
+```
+
+</Accordion>
+
+<Accordion title="host port 8080 is already in use">
+
+Another process already owns the default host port. Pick a free one with `TF_PORT`:
+
+```bash
+curl -fsSL {{SITE_URL}}/install.sh | sudo TF_PORT=9090 bash
+```
+
+The installer writes that port into `PUBLIC_URL`, so links and cookies match the URL users
+open.
+
+</Accordion>
+
+<Accordion title="unsupported OS">
+
+The shell installer targets Linux and macOS. On Windows, use the PowerShell installer or run
+the shell installer inside WSL2:
+
+```powershell
+irm {{SITE_URL}}/install.ps1 | iex
+```
+
+</Accordion>
+
+<Accordion title="need root or sudo to write /opt/tulipfarm">
+
+The default install directory is `/opt/tulipfarm`. The installer writes `docker-compose.yml`
+and `.env` there.
+
+Run with `sudo`, or choose a directory you own:
+
+```bash
+curl -fsSL {{SITE_URL}}/install.sh | TF_INSTALL_DIR="$HOME/tulipfarm" bash
+```
+
+</Accordion>
+
+</Accordions>
+
+## The app is not ready
+
+`/readyz` on `app` checks the database. During first boot it can return `503` until
+migrations finish. After that, read the `app` logs:
+
+```bash
+docker compose logs -f app
+```
+
+| Symptom | What to check |
+| --- | --- |
+| Connection refused, timeout, or SSL error | `DATABASE_URL`, firewall rules, SSL mode, and whether bundled `postgres` is healthy. |
+| Migration error | The failing statement is in `app` logs. Fix the database problem, then recreate `app`. |
+| `vector` or `citext` failure | The database role cannot create the required extensions, or the provider has not allow-listed them. |
+
+Migrations are forward-only and run only in `app`. Neither worker applies schema changes.
+
+## Workers do not start
+
+Both workers wait for `app` to become healthy. Then each worker checks the database schema
+floor it needs. The schema floor is the oldest database migration version that worker can
+safely use.
+
+If either log says it is waiting for API migrations or refusing to start below a schema
+version, do not scale the worker or bypass the check. Fix `app` first:
+
+```bash
+docker compose logs -f app
+```
+
+Then recreate the worker that failed:
+
+```bash
+docker compose up -d worker integration-worker
+```
+
+## A chat message never produces an answer
+
+The API accepts the chat message and records a run. A run is one durable unit of work,
+such as a chat reply or integration delivery. The `worker` produces the answer.
+
+If the UI accepts a message but no answer appears:
+
+1. Confirm `worker` is running and healthy.
+2. Read `docker compose logs -f worker`.
+3. Confirm `INTERNAL_API_URL=http://app:8080`.
+4. Confirm `WORKER_API_CREDENTIAL` is set or readable from `/data/worker.env`.
+5. Confirm `tulipfarm-data` is mounted read-only at `/data` in `worker`.
+
+In the default Compose stack, `app` mints `/data/worker.env` on first boot and `worker`
+reads it back. Losing `tulipfarm-data` removes that credential and can also remove the
+encryption key.
+
+## Slack or GitHub events never arrive
+
+Ingress, sync, delivery, retries, and reconciliation run in `integration-worker`, not in
+`app`. Ingress is what outside providers send into TulipFarm.
+
+If Slack or GitHub setup looks correct but events do not arrive:
+
+1. Confirm `integration-worker` is running and healthy.
+2. Read `docker compose logs -f integration-worker`.
+3. Confirm `INTERNAL_API_URL=http://app:8080`.
+4. Confirm `INTEGRATION_WORKER_API_CREDENTIAL` is set or readable from `/data/integration-worker.env`.
+5. Confirm `tulipfarm-data` is mounted read-only at `/data`.
+6. Confirm the provider can reach the callback URL from the public internet.
+
+Integration callbacks and webhook URLs use `PUBLIC_API_URL`. Set it to the public API
+origin, with `https://`, before connecting providers that redirect back to TulipFarm or
+send webhooks.
+
+## Login succeeds, then immediately disappears
+
+The public address must be the exact origin users open, including the scheme and port. It drives
+CORS and whether session cookies, the browser cookies that keep users signed in, are
+marked `Secure`.
+
+| You browse | Set |
+| --- | --- |
+| LAN HTTP | `PUBLIC_URL=http://<host-ip>:<HOST_PORT>` |
+| Reverse proxy with TLS | `PUBLIC_URL=https://your-domain` |
+
+The quickest fix on a running instance is to save the correct address under
+**Business → About** — it applies immediately, with no restart.
+
+To change it in the environment instead, recreate `app` so it sees the new value:
+
+```bash
+docker compose up -d --force-recreate app
+```
+
+## Missing `/data` volume
+
+The `tulipfarm-data` volume is not optional. The `app` writes generated bootstrap secrets
+and auto-minted worker credentials there. Both workers read their credentials from it.
+
+If `app` cannot persist generated secrets, it refuses to boot rather than create keys that
+will disappear on the next container start.
+
+If `/data` was lost after the instance stored provider keys, restoring only PostgreSQL is
+not enough. Restore `tulipfarm-data` or set `ENCRYPTION_KEY` back to the original value.
+Without the original key, stored model keys and integration credentials are unrecoverable.
+
+## Managed Postgres extension failures
+
+TulipFarm requires both PostgreSQL extensions:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS citext;
+```
+
+The `app` runs those statements at boot. On managed providers, the extension usually must
+be enabled or allow-listed before the application role can create it.
+
+If logs mention permission denied, an unknown extension, or `vector.control`, fix the
+provider setting or use a role with permission. Then recreate `app`.
+
+## Still stuck
+
+<Cards>
+  <Card
+    title="Install TulipFarm"
+    href="/docs/self-hosting/install"
+    description="Check the supported install path and the installer options."
+  />
+  <Card
+    title="Production checklist"
+    href="/docs/self-hosting/production-checklist"
+    description="Review the TLS, secrets, database, and backup settings that prevent common failures."
+  />
+  <Card
+    title="Environment variables"
+    href="/docs/reference/environment-variables"
+    description="Check what each variable does and what breaks without it."
+  />
+  <Card
+    title="Report an issue"
+    href="https://github.com/tulipfarm/tulipfarm/issues"
+    description="Include `docker compose ps` and the failing service logs."
+  />
+</Cards>

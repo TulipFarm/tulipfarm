@@ -1,23 +1,64 @@
 ---
 title: Roles and permissions
-description: Principals, roles, grants, tokens, clients, sessions, invites, and user lifecycle.
+description: How TulipFarm decides who can do what — levels, teams, grants, principals, tokens, clients, sessions, and invites.
 ---
 
-TulipFarm has user roles in the auth database and a provider-neutral authorization vocabulary in
-`@tulipfarm/authz`. The UI exposes the current role catalog read-only in the Roles panel on
-**Operate → Business → People** at `/business/people`.
+TulipFarm decides permission in two layers. **User roles** live in the auth database and gate most
+routes directly. **Levels, teams, and grants** live in `@tulipfarm/authz` and express finer access.
+
+You manage both from **Operate → Business → People & access** at `/business/access`, which is
+admin-only and has three tabs: **People**, **Teams**, and **Check**.
+
+The interface uses plainer words than the code does. Where this page says *role* the screen says
+**level**, and where it says *group* the screen says **team**.
+
+## How permission is decided
+
+Every layer can only ever narrow what you are allowed to do. Nothing you add anywhere widens
+access granted elsewhere.
+
+A request is allowed only when **every** layer allows it. If any layer denies it, or simply has no
+rule allowing it, the answer is no. This is why granting someone a new level never quietly expands
+an agent acting on their behalf, and why an agent can never do more than the person who asked it.
+
+If you are unsure what someone can do, do not reason it out — open the **Check** tab and ask.
 
 ## User roles
 
-| Role | Principal kind | Grants shown today |
+| Role | principal kind | Grants shown today |
 | --- | --- | --- |
 | `admin` | `user` | Allows any action on any resource. The first setup account is created with this role. |
 | `member` | `user` | Starts from broad user access, then denies admin-gated surfaces such as secrets, API tokens, identity, observability, model configuration, knowledge-source administration, system KV, setup, and operations. |
 
-Routes still enforce many permissions directly from `user.role`. Custom role changes are proposed
-through `POST /api/v1/roles/changesets`, but the Roles panel on `/business/people` is read-only
-today: it shows role name, principal kinds, grants, and conditions; it does not edit assignments in
-the browser.
+Routes still enforce many permissions directly from `user.role`.
+
+## Levels and teams
+
+A **level** is a named bundle of permissions you can assign. A **team** is a named group of people
+you can assign a level to at once, so you set the rule in one place rather than per person.
+
+One level is special. The `owner` level is the only one that can hand out authorization
+permissions, and TulipFarm refuses to remove the last holder of it. That rule exists so an instance
+can never be locked into a state where nobody can grant anything.
+
+Custom levels are proposed through `POST /api/v1/roles/changesets`. Creating one directly through
+`POST /api/v1/authz/roles` is not available yet and returns `501`.
+
+## Who can be a principal
+
+A principal is whoever — or whatever — is acting. People are only one kind.
+
+| Kind | What it is |
+| --- | --- |
+| `user` | A person signed in to the app. |
+| `agent` | An agent acting on someone's behalf. |
+| `routine` | A routine, running on its schedule or trigger. |
+| `integration_adapter` | A connected provider acting through its manifest. |
+| `api` | An API client using its own credential. |
+| `service` | Internal machinery inside your instance. |
+
+Because permission narrows at every layer, an agent or routine is always bounded by both its own
+level and the authority of whoever set it running.
 
 ## Principals and grants
 

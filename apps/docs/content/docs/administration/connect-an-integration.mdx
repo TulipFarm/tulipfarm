@@ -1,0 +1,78 @@
+---
+title: Connect an integration
+description: Install one of the bundled integrations and connect its credentials.
+---
+
+This guide connects a bundled [integration](/docs/administration/how-integrations-work). TulipFarm ships seven
+bundled integrations today: `github`, `slack`, `telegram`, `notion`, `confluence`, `google-drive`,
+and `google-docs`.
+
+## Outcome
+
+At the end, the integration's credentials are stored as secrets and it shows as connected.
+
+Bundled integrations need no installation step — they ship with TulipFarm and are present the
+first time you open the page. Installing is only for integrations that come from a git
+repository.
+
+## Choose the integration
+
+<Steps>
+  <Step>
+    Open **Integrations**. The page lists everything available in one catalog, with the ones
+    you have already connected grouped first.
+  </Step>
+  <Step>
+    Choose **github**, **slack**, or **notion**.
+  </Step>
+</Steps>
+
+Use the dedicated guides for provider-specific setup:
+
+- [Connect GitHub](/docs/administration/connect-github)
+- [Connect Slack](/docs/administration/connect-slack)
+- [Connect Notion](/docs/administration/connect-notion)
+
+## Install from a git repository
+
+Integrations are not limited to the seven above. An integration is a data file — a manifest
+describing how to connect and which provider API calls agents may make — so one can be installed
+from any git repository.
+
+<Steps>
+  <Step>
+    On **integrations**, choose **Install from git**.
+  </Step>
+  <Step>
+    Enter the repository as `owner/repo` or a full URL, optionally with a branch:
+    `https://host/owner/repo#branch`.
+  </Step>
+  <Step>
+    TulipFarm inspects the repository and lists the integrations it found. Anything that would
+    run code on your host is rejected here and cannot be installed.
+  </Step>
+  <Step>
+    Choose one and select **Install**. It then appears in the catalog and connects like any
+    bundled integration.
+  </Step>
+</Steps>
+
+Only the manifest, its OpenAPI document, and the setup guide are copied into your soul. Installing
+an integration never means running someone's code.
+
+## Connect credentials
+
+After installation, open the integration detail page. TulipFarm shows the fields from the
+integration manifest. Secret fields are encrypted in the secrets store; non-secret fields
+stay as integration config in the soul.
+
+For Slack, this is the Socket Mode app token, bot token, and team id. For GitHub, the
+flow is GitHub App installation rather than a pasted OAuth token. For Notion, it is a single
+internal integration token.
+
+## Verify
+
+Return to **integrations** and confirm the integration shows connected. Then ask in chat
+for a small provider-specific action, such as listing covered GitHub issues or sending a
+message through Slack after the channel is linked.
+

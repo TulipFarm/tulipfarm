@@ -7,8 +7,8 @@ const DOCS = "apps/docs/content/docs";
 const PAGES = [
   `${DOCS}/security/control-evidence.mdx`,
   `${DOCS}/security/privacy.mdx`,
-  `${DOCS}/guides/operations.mdx`,
-  `${DOCS}/guides/incidents.mdx`,
+  `${DOCS}/administration/run-operational-reviews.mdx`,
+  `${DOCS}/administration/respond-to-an-incident.mdx`,
 ] as const;
 
 function page(path: string): string {
