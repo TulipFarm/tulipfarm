@@ -74,8 +74,17 @@ function library(files: readonly FileRecord[], bodies: Record<string, string> = 
   };
 }
 
-function context(service: FileToolContext["service"], principalId = ME): FileToolContext {
-  return { businessId: BUSINESS, principalId, service };
+function context(
+  service: FileToolContext["service"],
+  principalId = ME,
+  agentId?: string
+): FileToolContext {
+  return {
+    businessId: BUSINESS,
+    principalId,
+    service,
+    ...(agentId === undefined ? {} : { agentId }),
+  };
 }
 
 function data(result: Awaited<ReturnType<typeof fileReadTool.handler>>): Record<string, unknown> {
@@ -225,6 +234,15 @@ describe("file_read", () => {
     expect(fetched).toBe(false);
   });
 
+  it("does not let a named Agent widen what its caller may read", async () => {
+    // Writing widens; reading never does. An Agent reads attachments from untrusted sources, so a
+    // File the caller could not open has to stay closed however the Agent asks.
+    const file = record({ id: "aaaaaaaa-1111-4111-8111-111111111111" });
+    const service = library([file]);
+    const result = await fileReadTool.handler({ fileId: file.id }, context(service, OTHER, "hr"));
+    expect(result.success).toBe(false);
+  });
+
   it("answers the same for a File that does not exist and one that is not yours", async () => {
     const file = record({ id: "aaaaaaaa-1111-4111-8111-111111111111" });
     const service = library([file]);
@@ -271,6 +289,31 @@ describe("file_create", () => {
     const service = library([]);
     await fileCreateTool.handler(args, context(service, OTHER));
     expect(service.generated[0].readableBy).toEqual({ kind: "user", id: OTHER });
+  });
+
+  it("names the Agent that wrote it, so that Agent's team can read it too", async () => {
+    const service = library([]);
+    await fileCreateTool.handler(args, context(service, OTHER, "agent-hr"));
+    expect(service.generated[0]).toMatchObject({
+      readableBy: { kind: "user", id: OTHER },
+      authoredByAgentId: "agent-hr",
+    });
+  });
+
+  it("names no Agent when the call is not running as one", async () => {
+    const service = library([]);
+    await fileCreateTool.handler(args, context(service));
+    expect(service.generated[0].authoredByAgentId).toBeUndefined();
+  });
+
+  it("does not let the Agent name its own audience", async () => {
+    const service = library([]);
+    await fileCreateTool.handler(
+      { ...args, authoredByAgentId: "agent-finance" },
+      context(service, ME, "agent-hr")
+    );
+    // `additionalProperties: false` refuses the call rather than letting the model pick a team.
+    expect(service.generated).toHaveLength(0);
   });
 
   it("does not let the Agent choose an owner", async () => {

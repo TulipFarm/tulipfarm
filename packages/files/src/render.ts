@@ -24,7 +24,7 @@
  */
 
 import { marked, type Token, type Tokens } from "marked";
-import PDFDocument from "pdfkit";
+import type PDFDocument from "pdfkit";
 
 /** What an Agent may ask for. Every one of these is an allowed media type on the way back in. */
 export const RENDER_FORMATS = ["pdf", "markdown", "text", "csv"] as const;
@@ -142,8 +142,13 @@ class Budget {
 }
 
 async function renderPdf(markdown: string, title?: string): Promise<Uint8Array> {
+  // Loaded here rather than at module scope because this module is reachable from the package
+  // barrel, and the web client imports constants from that barrel. A static import makes a bundler
+  // pull pdfkit — which touches `process` — into the browser, where evaluating it kills the page.
+  // `unpdf` in extract.ts and `jimp` in bound.ts are deferred for the same reason.
+  const { default: PdfDocument } = await import("pdfkit");
   const budget = new Budget();
-  const doc = new PDFDocument({
+  const doc = new PdfDocument({
     size: "A4",
     margin: MARGIN,
     info: title === undefined ? undefined : { Title: title },

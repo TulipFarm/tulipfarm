@@ -42,6 +42,7 @@ import type { ConversationStore } from "./conversations/service";
 import type { CuratorReviewDeps } from "./curator/review-routes";
 import type { CuratorRouteDeps } from "./curator/routes";
 import type { FeedbackRepo } from "./feedback/repo";
+import type { FileKnowledgeBridge } from "./files/knowledge-bridge";
 import type { FormsRoutesDeps } from "./forms/routes";
 import type { HookIngressDeps } from "./hooks/routes";
 import type { IdentityRouteDeps } from "./identity/routes";
@@ -165,6 +166,11 @@ export interface AppOptions {
   taskStore?: TaskStore;
   /** Composed in `index.ts`, where the blob substrate lives. Absent in tests that never upload. */
   fileService?: FileService;
+  /**
+   * Lets the Files routes add a File to Knowledge and keep its readership in step. Absent leaves
+   * those routes answering 501 — a deployment with no pg-boss has nothing to run the extraction.
+   */
+  fileKnowledge?: FileKnowledgeBridge;
   kvService?: KvService;
   triggerInvoke?: TriggerInvokeDeps;
   forms?: FormsRoutesDeps;

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { extractText, isExtractableMediaType, MAX_EXTRACTED_CHARS } from "./extract";
+import { extractText, MAX_EXTRACTED_CHARS } from "./extract";
+import { isExtractableMediaType } from "./limits";
 import { renderDocument } from "./render";
 
 const utf8 = (text: string): Uint8Array => new TextEncoder().encode(text);

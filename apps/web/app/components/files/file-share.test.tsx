@@ -24,6 +24,7 @@ const FILE: LibraryFile = {
   owner: "user_1",
   origin: "uploaded",
   sourceChatId: null,
+  sourceRunId: null,
   sharedWithCount: null,
 };
 

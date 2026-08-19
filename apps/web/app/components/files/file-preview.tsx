@@ -1,4 +1,4 @@
-import { isInlineRenderable } from "@tulipfarm/files";
+import { isInlineRenderable } from "@tulipfarm/files/limits";
 import { useEffect, useState } from "react";
 import { Modal } from "~/components/ui/modal";
 import { fetchFileObjectUrl } from "~/lib/files";

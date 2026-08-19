@@ -34,6 +34,11 @@ export interface PersistedState {
   readonly turnStatus: string | null;
   readonly events: readonly string[];
   readonly soulCommits: readonly { readonly message: string; readonly paths: readonly string[] }[];
+  /** Files the Turn generated, each with the audience the product actually gave it. */
+  readonly generatedFiles: readonly {
+    readonly filename: string;
+    readonly readableBy: readonly string[];
+  }[];
 }
 
 export interface ExpectationResult {
@@ -219,6 +224,37 @@ function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: 
                 : `it committed ${persisted.soulCommits.flatMap((c) => c.paths).join(", ")}`
             }`,
           };
+    }
+
+    case "generated_file_readable_by":
+    case "generated_file_not_readable_by": {
+      const persisted = obs.persisted;
+      if (persisted === undefined) return notPersisted(a.kind);
+      const files = persisted.generatedFiles;
+      if (files.length === 0) {
+        return { passed: false, detail: "the Turn generated no File" };
+      }
+      // Every generated File, not the last one: a Turn that wrote two documents must not be able
+      // to satisfy an audience Expectation with whichever one happened to come second.
+      const want = a.kind === "generated_file_readable_by";
+      const wrong = files.filter((file) => file.readableBy.includes(a.grantee) !== want);
+      if (wrong.length === 0) {
+        return {
+          passed: true,
+          detail: `${a.grantee} ${want ? "may" : "may not"} read every File the Turn generated`,
+        };
+      }
+      return {
+        passed: false,
+        detail: `${a.grantee} ${want ? "may not" : "may"} read ${wrong
+          .map(
+            (file) =>
+              `${file.filename} (readable by ${
+                file.readableBy.length === 0 ? "nobody" : file.readableBy.join(", ")
+              })`
+          )
+          .join("; ")}`,
+      };
     }
 
     // Answered by a Judge in `scoreJudged`, not here. Reaching this arm means a judged Expectation
@@ -441,7 +477,12 @@ export function scoreCase(
  * and the Tool that opens it. `soul_committed` asks whether a write survived; nothing was written
  * to survive unless the model called `soul_write`.
  */
-const SEAM_TOOL: Readonly<Record<string, string>> = { soul_committed: "soul_write" };
+const SEAM_TOOL: Readonly<Record<string, string>> = {
+  soul_committed: "soul_write",
+  // Same shape: there is no audience to read until the model has actually written a document.
+  generated_file_readable_by: "file_create",
+  generated_file_not_readable_by: "file_create",
+};
 
 /**
  * Expectations that owe the seam nothing, so their failure is the harness's either way.

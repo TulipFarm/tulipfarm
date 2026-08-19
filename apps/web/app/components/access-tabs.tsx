@@ -5,6 +5,7 @@ import { cn } from "~/lib/utils";
 const tabs = [
   { to: "/business/access", label: "People", end: true },
   { to: "/business/access/teams", label: "Teams", end: false },
+  { to: "/business/access/agents", label: "Agents", end: false },
   { to: "/business/access/check", label: "Check", end: false },
 ];
 

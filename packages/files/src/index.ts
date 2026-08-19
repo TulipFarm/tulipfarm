@@ -16,7 +16,6 @@ export {
   type ExtractionRefused,
   type ExtractionResult,
   extractText,
-  isExtractableMediaType,
   MAX_EXTRACTED_CHARS,
 } from "./extract";
 export { normalizeFilename } from "./filename";
@@ -25,6 +24,8 @@ export {
   downloadHeaders,
   FILE_ERROR_STATUS,
   FILE_GRANTEE_SCHEMA,
+  FILE_PAGE_QUERY_SCHEMA,
+  FILE_PAGE_SCHEMA,
   FILE_SHARES_SCHEMA,
   FILE_WIRE_SCHEMA,
   fileErrorStatus,
@@ -38,6 +39,7 @@ export {
   BUSINESS_PRINCIPAL_ID,
   DEFAULT_FILE_LIST_LIMIT,
   isAllowedMediaType,
+  isExtractableMediaType,
   isInlineRenderable,
   isTextualMediaType,
   MAX_FILE_BYTES,
@@ -64,6 +66,7 @@ export {
   decodeFileCursor,
   encodeFileCursor,
   FILE_GRANTEE_KINDS,
+  FILE_KNOWLEDGE_STATEMENTS,
   FILE_ORIGIN_STATEMENTS,
   FILE_ORIGINS,
   FILE_SHARE_STATEMENTS,

@@ -8,6 +8,8 @@ import FilesIndex from "./_app.knowledge.files";
 const fetchFiles = vi.fn<() => Promise<FilePage>>();
 const fetchSharedWithMe = vi.fn<() => Promise<FilePage>>();
 const deleteFile = vi.fn<(id: string) => Promise<void>>();
+const addFileToKnowledge = vi.fn<(id: string) => Promise<void>>();
+const removeFileFromKnowledge = vi.fn<(id: string) => Promise<void>>();
 
 vi.mock("~/lib/files", async (importOriginal) => ({
   ...(await importOriginal<typeof import("~/lib/files")>()),
@@ -15,6 +17,8 @@ vi.mock("~/lib/files", async (importOriginal) => ({
   fetchSharedWithMe: (...args: unknown[]) => fetchSharedWithMe(...(args as [])),
   fetchFileObjectUrl: vi.fn(),
   deleteFile: (...args: unknown[]) => deleteFile(...(args as [string])),
+  addFileToKnowledge: (...args: unknown[]) => addFileToKnowledge(...(args as [string])),
+  removeFileFromKnowledge: (...args: unknown[]) => removeFileFromKnowledge(...(args as [string])),
 }));
 
 function file(id: string, filename: string, owner = "user_1"): LibraryFile {
@@ -27,6 +31,7 @@ function file(id: string, filename: string, owner = "user_1"): LibraryFile {
     owner,
     origin: "uploaded",
     sourceChatId: null,
+    sourceRunId: null,
     sharedWithCount: null,
   };
 }
@@ -141,5 +146,42 @@ describe("Files library", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("That file could not be deleted.");
     expect(screen.getByText("yours.pdf")).toBeInTheDocument();
+  });
+});
+
+describe("adding a file to knowledge", () => {
+  beforeEach(() => {
+    addFileToKnowledge.mockReset().mockResolvedValue(undefined);
+    removeFileFromKnowledge.mockReset().mockResolvedValue(undefined);
+    fetchFiles.mockResolvedValue({ files: [], nextCursor: null });
+    fetchSharedWithMe.mockResolvedValue({ files: [], nextCursor: null });
+  });
+
+  it("offers it as its own action, so uploading never publishes a file by itself", async () => {
+    renderRoute({ files: [{ ...file("f1", "handbook.pdf"), inKnowledge: false }] });
+    await userEvent.click(await screen.findByRole("button", { name: /add handbook.pdf/i }));
+    await waitFor(() => expect(addFileToKnowledge).toHaveBeenCalledWith("f1"));
+    expect(await screen.findByText("In knowledge")).toBeTruthy();
+  });
+
+  it("takes it back out again, and says so", async () => {
+    renderRoute({ files: [{ ...file("f1", "handbook.pdf"), inKnowledge: true }] });
+    await userEvent.click(await screen.findByRole("button", { name: /remove handbook.pdf/i }));
+    await waitFor(() => expect(removeFileFromKnowledge).toHaveBeenCalledWith("f1"));
+    expect(screen.queryByText("In knowledge")).toBeNull();
+  });
+
+  it("puts the row back when the request is refused, rather than lying about it", async () => {
+    addFileToKnowledge.mockRejectedValue(new Error("This deployment cannot add files."));
+    renderRoute({ files: [{ ...file("f1", "handbook.pdf"), inKnowledge: false }] });
+    await userEvent.click(await screen.findByRole("button", { name: /add handbook.pdf/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/cannot add files/i);
+    expect(screen.queryByText("In knowledge")).toBeNull();
+  });
+
+  it("does not offer the action on a file someone else owns", async () => {
+    renderRoute({ files: [file("f2", "theirs.pdf", "user_2")] });
+    await screen.findByText("theirs.pdf");
+    expect(screen.queryByRole("button", { name: /knowledge/i })).toBeNull();
   });
 });

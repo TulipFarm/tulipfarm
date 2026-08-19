@@ -34,6 +34,23 @@ export interface FileRecord {
    * "where did this come from", which re-attaching it elsewhere does not change.
    */
   readonly sourceConversationId: string | null;
+  /**
+   * The Run that produced this File, for a File an Agent authored.
+   *
+   * Always null for an upload: a person attaching a document is not a Run, and inventing one would
+   * make "where did this come from" answer with machinery the person never saw. Set at creation
+   * and never changed — unlike the Conversation, a generated File has exactly one author.
+   */
+  readonly sourceRunId: string | null;
+  /**
+   * When the owner last asked for this File to be in Knowledge, or null if they have not.
+   *
+   * The durable half of the opt-in. Indexing happens on a queue, so "is this File in Knowledge"
+   * cannot be answered by whether a Page exists yet — between the request and the Page there is a
+   * window in which a removal would find nothing to remove and silently succeed, and the job would
+   * then index the File anyway. This column is what both sides check instead.
+   */
+  readonly knowledgeRequestedAt: Date | null;
   readonly createdAt: Date;
 }
 
@@ -51,6 +68,8 @@ export interface NewFile {
   readonly sizeBytes: number;
   readonly blob: BlobRef;
   readonly origin?: FileOrigin;
+  /** The Run that authored this File. Only a generated File has one. */
+  readonly sourceRunId?: string;
 }
 
 /**
@@ -96,6 +115,13 @@ export interface FileRepo {
     conversationId: string
   ): Promise<void>;
   delete(businessId: string, id: string): Promise<boolean>;
+  /**
+   * Records, or withdraws, the owner's standing request that this File be in Knowledge.
+   *
+   * Written before the job is enqueued and cleared before a Page is removed, so that the worker
+   * has something to re-read that outlives the queue message.
+   */
+  setKnowledgeRequested(businessId: string, id: string, at: Date | null): Promise<void>;
   /**
    * Which of `ids` this Principal may currently read, as owner or as a share recipient.
    *
@@ -173,9 +199,18 @@ export const FILE_ORIGIN_STATEMENTS = [
   `ALTER TABLE files ALTER COLUMN created_at TYPE timestamptz(3)`,
   `ALTER TABLE files ADD COLUMN IF NOT EXISTS origin text NOT NULL DEFAULT 'uploaded'`,
   `ALTER TABLE files ADD COLUMN IF NOT EXISTS source_conversation_id uuid`,
+  // Not a foreign key: a File outlives the Run that wrote it, and a retention sweep over `runs`
+  // must not take the library's provenance with it. A dangling id reads as "made by a Run that is
+  // no longer here", which is true and useful; a cascade would read as "nobody made this".
+  `ALTER TABLE files ADD COLUMN IF NOT EXISTS source_run_id uuid`,
   `ALTER TABLE files DROP CONSTRAINT IF EXISTS files_origin_known`,
   `ALTER TABLE files ADD CONSTRAINT files_origin_known
      CHECK (origin IN (${FILE_ORIGINS.map((o) => `'${o}'`).join(", ")}))`,
+];
+
+/** Added with Files-into-Knowledge: the durable opt-in a queued index job can re-read. */
+export const FILE_KNOWLEDGE_STATEMENTS = [
+  `ALTER TABLE files ADD COLUMN IF NOT EXISTS knowledge_requested_at timestamptz(3)`,
 ];
 
 /** Added with sharing: a File is private to its owner until a row here says otherwise. */
@@ -210,6 +245,13 @@ function toRecord(row: Record<string, unknown>): FileRecord {
     origin: row.origin === "generated" ? "generated" : "uploaded",
     sourceConversationId:
       row.source_conversation_id == null ? null : String(row.source_conversation_id),
+    sourceRunId: row.source_run_id == null ? null : String(row.source_run_id),
+    knowledgeRequestedAt:
+      row.knowledge_requested_at == null
+        ? null
+        : row.knowledge_requested_at instanceof Date
+          ? row.knowledge_requested_at
+          : new Date(String(row.knowledge_requested_at)),
     createdAt: row.created_at instanceof Date ? row.created_at : new Date(String(row.created_at)),
   };
 }
@@ -244,8 +286,8 @@ export class PgFileRepo implements FileRepo {
     const result = await this.db.query(
       `INSERT INTO files
          (id, business_id, owner_principal_id, filename, media_type, claimed_media_type,
-          size_bytes, blob_key, blob_hash, origin)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+          size_bytes, blob_key, blob_hash, origin, source_run_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING *`,
       [
         file.id,
@@ -258,6 +300,7 @@ export class PgFileRepo implements FileRepo {
         file.blob.key,
         file.blob.hash,
         file.origin ?? "uploaded",
+        file.sourceRunId ?? null,
       ]
     );
     return toRecord(result.rows[0] as Record<string, unknown>);
@@ -315,6 +358,13 @@ export class PgFileRepo implements FileRepo {
       [businessId, id]
     );
     return result.rows.length > 0;
+  }
+
+  async setKnowledgeRequested(businessId: string, id: string, at: Date | null): Promise<void> {
+    await this.db.query(
+      "UPDATE files SET knowledge_requested_at = $3 WHERE business_id = $1 AND id = $2",
+      [businessId, id, at]
+    );
   }
 
   async readableIds(

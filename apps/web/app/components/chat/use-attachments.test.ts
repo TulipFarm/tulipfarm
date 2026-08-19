@@ -1,4 +1,4 @@
-import { MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE } from "@tulipfarm/files";
+import { MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE } from "@tulipfarm/files/limits";
 import { describe, expect, it } from "vitest";
 import { describeRejection } from "./use-attachments";
 

@@ -10,10 +10,12 @@ function file(overrides: Partial<FileRecord> = {}): FileRecord {
     filename: "report.pdf",
     mediaType: "application/pdf",
     claimedMediaType: "application/pdf",
+    knowledgeRequestedAt: null,
     sizeBytes: 12,
     blob: { key: "files/biz_1/file_1", hash: "abc" },
     origin: "uploaded",
     sourceConversationId: null,
+    sourceRunId: null,
     createdAt: new Date("2025-01-02T03:04:05.000Z"),
     ...overrides,
   };
@@ -29,6 +31,8 @@ describe("serializeFile", () => {
 
   it("renames the Conversation to a Chat on the way out", () => {
     expect(serializeFile(file({ sourceConversationId: "conv_9" })).sourceChatId).toBe("conv_9");
+    expect(serializeFile(file({ sourceRunId: "run_9" })).sourceRunId).toBe("run_9");
+    expect(serializeFile(file()).sourceRunId).toBeNull();
     expect(serializeFile(file()).sourceChatId).toBeNull();
   });
 });

@@ -412,6 +412,7 @@ export async function buildApp(opts: AppOptions = {}) {
         {
           files: opts.fileService,
           ...(opts.auditService === undefined ? {} : { audit: opts.auditService }),
+          ...(opts.fileKnowledge === undefined ? {} : { knowledge: opts.fileKnowledge }),
           acceptedInputModalities: () =>
             acceptedInputModalities((opts.soulLoader?.llmConfig as LlmConfig | undefined) ?? {}),
         },

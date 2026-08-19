@@ -1,4 +1,4 @@
-import { isInlineRenderable } from "@tulipfarm/files";
+import { isInlineRenderable } from "@tulipfarm/files/limits";
 import { FileX2, Paperclip } from "lucide-react";
 import { useEffect, useState } from "react";
 import { fetchFileObjectUrl } from "~/lib/files";

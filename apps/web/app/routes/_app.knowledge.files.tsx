@@ -8,7 +8,14 @@ import { ErrorState } from "~/components/states";
 import { Button } from "~/components/ui/button";
 import { ConfirmModal } from "~/components/ui/modal";
 import { ApiError, getSession } from "~/lib/api";
-import { deleteFile, fetchFiles, fetchSharedWithMe, type LibraryFile } from "~/lib/files";
+import {
+  addFileToKnowledge,
+  deleteFile,
+  fetchFiles,
+  fetchSharedWithMe,
+  type LibraryFile,
+  removeFileFromKnowledge,
+} from "~/lib/files";
 
 export const meta: MetaFunction = () => [{ title: "Files · Knowledge · tulipfarm" }];
 
@@ -37,6 +44,7 @@ export default function FilesIndex() {
   const [sharing, setSharing] = useState<LibraryFile | null>(null);
   const [deleting, setDeleting] = useState<LibraryFile | null>(null);
   const [destroying, setDestroying] = useState(false);
+  const [indexing, setIndexing] = useState<string | null>(null);
   const [tab, setTab] = useState<TabId>("yours");
   const tabRefs = useRef<Partial<Record<TabId, HTMLButtonElement>>>({});
   // Switching tabs twice in quick succession leaves two requests in flight. Without this, whichever
@@ -106,6 +114,32 @@ export default function FilesIndex() {
     }
   }
 
+  /**
+   * Adding is answered 202 — the extraction happens elsewhere — so the row is marked optimistically
+   * and put back if the request is refused. Waiting for a worker would leave the button dead for
+   * as long as the queue is deep, which reads as a broken button rather than as work in flight.
+   */
+  async function toggleKnowledge(file: LibraryFile): Promise<void> {
+    if (indexing !== null) return;
+    const adding = !file.inKnowledge;
+    setIndexing(file.id);
+    setError(null);
+    const mark = (value: boolean) =>
+      setFiles((prev) =>
+        prev.map((each) => (each.id === file.id ? { ...each, inKnowledge: value } : each))
+      );
+    mark(adding);
+    try {
+      if (adding) await addFileToKnowledge(file.id);
+      else await removeFileFromKnowledge(file.id);
+    } catch (err) {
+      mark(!adding);
+      setError(err instanceof Error ? err.message : "That file could not be changed.");
+    } finally {
+      setIndexing(null);
+    }
+  }
+
   const crumbs = [{ label: "knowledge", to: "/knowledge" }, { label: "files" }];
 
   return (
@@ -169,6 +203,7 @@ export default function FilesIndex() {
             onPreview={setPreviewing}
             onAttach={(file) => navigate(`/?attach=${encodeURIComponent(file.id)}`)}
             onShare={setSharing}
+            onKnowledge={(file) => void toggleKnowledge(file)}
             onDelete={setDeleting}
           />
           {cursor ? (

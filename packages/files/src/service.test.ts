@@ -5,11 +5,17 @@ import { join } from "node:path";
 import { FileSystemBlobPort } from "@tulipfarm/storage";
 import { Jimp } from "jimp";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { DEFAULT_MAX_IMAGE_DIMENSION } from "./bound";
 import { imageSize } from "./dimensions";
 import { BUSINESS_PRINCIPAL_ID, MAX_FILE_BYTES } from "./limits";
 import type { FileGrantee, FileRecord, FileRepo, FileShare, NewFile } from "./repo";
 import { FileError, FileService } from "./service";
+
+/**
+ * Teardown retries because a test that fails mid-upload can leave a write in flight, and a
+ * directory that grows while it is being removed raises ENOTEMPTY. Without this, a teardown crash
+ * is reported alongside the real failure and reads like a second, unrelated bug.
+ */
+const PURGE = { recursive: true, force: true, maxRetries: 3, retryDelay: 50 } as const;
 
 const BUSINESS = "biz";
 const OWNER = "principal-a";
@@ -26,6 +32,8 @@ class MemoryFileRepo implements FileRepo {
       ...file,
       origin: file.origin ?? "uploaded",
       sourceConversationId: null,
+      sourceRunId: file.sourceRunId ?? null,
+      knowledgeRequestedAt: null,
       createdAt: new Date(),
     };
     this.rows.push(record);
@@ -111,6 +119,12 @@ class MemoryFileRepo implements FileRepo {
     }
   }
 
+  async setKnowledgeRequested(businessId: string, id: string, at: Date | null): Promise<void> {
+    const i = this.rows.findIndex((r) => r.businessId === businessId && r.id === id);
+    const row = this.rows[i];
+    if (row !== undefined) this.rows[i] = { ...row, knowledgeRequestedAt: at };
+  }
+
   async delete(businessId: string, id: string): Promise<boolean> {
     const index = this.rows.findIndex((r) => r.businessId === businessId && r.id === id);
     if (index === -1) return false;
@@ -165,7 +179,7 @@ describe("FileService.upload", () => {
   });
 
   afterEach(async () => {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, PURGE);
   });
 
   function upload(overrides: Partial<Parameters<FileService["upload"]>[0]> = {}) {
@@ -299,7 +313,7 @@ describe("FileService.read", () => {
   });
 
   afterEach(async () => {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, PURGE);
   });
 
   async function seed(): Promise<FileRecord> {
@@ -373,6 +387,9 @@ describe("FileService.read", () => {
   });
 });
 
+/** A 200px ceiling, for the reason given in `bound.test.ts`. */
+const DOWNSCALE_TO = { maxImageDimension: 200, downscaleImages: true } as const;
+
 describe("FileService.upload — image bounding", () => {
   let root: string;
   let blobs: FileSystemBlobPort;
@@ -385,12 +402,21 @@ describe("FileService.upload — image bounding", () => {
   });
 
   afterEach(async () => {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, PURGE);
   });
 
-  async function realPng(width: number, height: number): Promise<Uint8Array> {
-    const image = new Jimp({ width, height, color: 0x336699ff });
-    return new Uint8Array(await image.getBuffer("image/png"));
+  const rasters = new Map<string, Promise<Uint8Array>>();
+
+  /** Real PNG bytes for a size, encoded at most once; see `bound.test.ts` for why. */
+  function realPng(width: number, height: number): Promise<Uint8Array> {
+    const key = `${width}x${height}`;
+    const cached = rasters.get(key);
+    if (cached !== undefined) return cached;
+    const encoding = new Jimp({ width, height, color: 0x336699ff })
+      .getBuffer("image/png")
+      .then((buffer) => new Uint8Array(buffer));
+    rasters.set(key, encoding);
+    return encoding;
   }
 
   function serviceWith(policy?: () => { maxImageDimension?: number; downscaleImages?: boolean }) {
@@ -422,47 +448,47 @@ describe("FileService.upload — image bounding", () => {
   it("refuses an oversized image at upload, when the person is present to be told", async () => {
     const service = serviceWith();
 
-    await expect(put(service, await realPng(2_400, 400))).rejects.toMatchObject({
+    await expect(put(service, await realPng(1_600, 8))).rejects.toMatchObject({
       reason: "image_too_large",
     });
   });
 
   it("leaves no row behind for a refused image", async () => {
-    await expect(put(serviceWith(), await realPng(2_400, 400))).rejects.toThrow(FileError);
+    await expect(put(serviceWith(), await realPng(1_600, 8))).rejects.toThrow(FileError);
 
     expect(repo.rows).toHaveLength(0);
   });
 
   it("names the actual size in the refusal, so the person knows what to change", async () => {
-    await expect(put(serviceWith(), await realPng(2_400, 400))).rejects.toThrow(/2400×400/);
+    await expect(put(serviceWith(), await realPng(1_600, 8))).rejects.toThrow(/1600×8/);
   });
 
   it("downscales instead of refusing when the operator turned it on", async () => {
-    const service = serviceWith(() => ({ downscaleImages: true }));
+    const service = serviceWith(() => DOWNSCALE_TO);
 
-    const file = await put(service, await realPng(2_400, 1_200));
+    const file = await put(service, await realPng(400, 200));
 
     expect(file.mediaType).toBe("image/png");
     expect(file.sizeBytes).toBeGreaterThan(0);
   });
 
   it("stores the downscaled bytes, so what is served back is what the model was given", async () => {
-    const service = serviceWith(() => ({ downscaleImages: true }));
+    const service = serviceWith(() => DOWNSCALE_TO);
 
-    const file = await put(service, await realPng(2_400, 1_200));
+    const file = await put(service, await realPng(400, 200));
     const { body } = await service.content(BUSINESS, file.id, OWNER);
     const chunks: Uint8Array[] = [];
     for await (const chunk of body) chunks.push(chunk);
 
     expect(imageSize(new Uint8Array(Buffer.concat(chunks)), "image/png")).toEqual({
-      width: DEFAULT_MAX_IMAGE_DIMENSION,
-      height: DEFAULT_MAX_IMAGE_DIMENSION / 2,
+      width: 200,
+      height: 100,
     });
   });
 
   it("records the downscaled byte length, not the length that was uploaded", async () => {
-    const original = await realPng(2_400, 1_200);
-    const service = serviceWith(() => ({ downscaleImages: true }));
+    const original = await realPng(400, 200);
+    const service = serviceWith(() => DOWNSCALE_TO);
 
     const file = await put(service, original);
 
@@ -495,7 +521,7 @@ describe("FileService.upload — image bounding", () => {
   });
 
   it("reads a JPEG's dimensions from behind its metadata, not just its first bytes", async () => {
-    const image = new Jimp({ width: 2_000, height: 600, color: 0x336699ff });
+    const image = new Jimp({ width: 1_600, height: 8, color: 0x336699ff });
     const jpeg = new Uint8Array(await image.getBuffer("image/jpeg"));
     const service = serviceWith();
 
@@ -532,7 +558,7 @@ describe("sharing a File", () => {
   });
 
   afterEach(async () => {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, PURGE);
   });
 
   async function uploaded() {
@@ -718,7 +744,7 @@ describe("deleting a File", () => {
   });
 
   afterEach(async () => {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, PURGE);
   });
 
   async function uploaded(owner = OWNER, filename = "shot.png") {
@@ -845,7 +871,7 @@ describe("FileService.presentFor", () => {
   });
 
   afterEach(async () => {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, PURGE);
   });
 
   async function uploaded(owner = OWNER) {
@@ -931,7 +957,7 @@ describe("FileService.generate", () => {
   });
 
   afterEach(async () => {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, PURGE);
   });
 
   const generate = (overrides: Partial<Parameters<FileService["generate"]>[0]> = {}) =>
@@ -980,6 +1006,15 @@ describe("FileService.generate", () => {
     });
   });
 
+  it("records the Run that authored it, so a generated File can be traced back", async () => {
+    const file = await generate({ sourceRunId: "run_7" });
+    expect(file.sourceRunId).toBe("run_7");
+  });
+
+  it("leaves the Run empty when the Agent was not running one", async () => {
+    expect((await generate()).sourceRunId).toBeNull();
+  });
+
   it("does not double an extension the Agent already got right", async () => {
     const file = await generate({ filename: "report.pdf" });
     expect(file.filename).toBe("report.pdf");
@@ -999,5 +1034,94 @@ describe("FileService.generate", () => {
     await expect(generate({ content: "   " })).rejects.toMatchObject({ reason: "empty" });
     // The row is what makes a File exist. Nothing reached storage, so nothing needs compensating.
     expect(repo.rows).toEqual([]);
+  });
+
+  describe("when the authoring Agent belongs to a team", () => {
+    const HR_AGENT = "agent-hr";
+    const MANAGER = "principal-manager";
+
+    // The HR Agent and the HR manager both hold `hr-team`; the stranger holds nothing.
+    const withRoles = () =>
+      new FileService({
+        repo,
+        blobs: new FileSystemBlobPort(root),
+        newId: () => randomUUID(),
+        rolesOf: async (_businessId, principalId) =>
+          principalId === HR_AGENT || principalId === MANAGER ? ["hr-team"] : [],
+      });
+
+    const byHrAgent = () =>
+      withRoles().generate({
+        businessId: BUSINESS,
+        filename: "headcount",
+        format: "pdf",
+        content: "# Headcount\n\nTwelve.",
+        readableBy: { kind: "user", id: OWNER },
+        authoredByAgentId: HR_AGENT,
+      });
+
+    it("shares what it wrote with that team as well as with whoever asked", async () => {
+      const file = await byHrAgent();
+      expect(
+        repo.shares
+          .filter((share) => share.fileId === file.id)
+          .map((share) => `${share.kind}:${share.id}`)
+          .sort()
+      ).toEqual(["role:hr-team", `user:${OWNER}`]);
+    });
+
+    it("lets the rest of that team open it, and still refuses everybody else", async () => {
+      // The whole point: an HR Agent's report reaches HR without anyone forwarding it by hand,
+      // while a stranger sees the same 404 they saw before the Agent had a team at all.
+      const service = withRoles();
+      const file = await byHrAgent();
+      await expect(service.read(BUSINESS, file.id, MANAGER)).resolves.toMatchObject({
+        id: file.id,
+      });
+      await expect(service.read(BUSINESS, file.id, OWNER)).resolves.toMatchObject({ id: file.id });
+      await expect(service.read(BUSINESS, file.id, STRANGER)).rejects.toMatchObject({
+        reason: "not_found",
+      });
+    });
+
+    it("stops sharing with the team the moment the Agent is removed from the Role", async () => {
+      // Resolved per read with no derived state, so a revoked Role is felt on the next request
+      // rather than at the next reindex.
+      const file = await byHrAgent();
+      const afterRemoval = new FileService({
+        repo,
+        blobs: new FileSystemBlobPort(root),
+        newId: () => randomUUID(),
+        rolesOf: async () => [],
+      });
+      await expect(afterRemoval.read(BUSINESS, file.id, MANAGER)).rejects.toMatchObject({
+        reason: "not_found",
+      });
+    });
+
+    it("writes nothing at all when resolving the Agent's Roles fails", async () => {
+      // The audience is resolved before the blob and the row, so a failure costs no compensating
+      // delete and can never leave a File that exists but nobody can reach.
+      const before = repo.rows.length;
+      const failing = new FileService({
+        repo,
+        blobs: new FileSystemBlobPort(root),
+        newId: () => randomUUID(),
+        rolesOf: async () => {
+          throw new Error("role store unavailable");
+        },
+      });
+      await expect(
+        failing.generate({
+          businessId: BUSINESS,
+          filename: "headcount",
+          format: "pdf",
+          content: "# Headcount",
+          readableBy: { kind: "user", id: OWNER },
+          authoredByAgentId: HR_AGENT,
+        })
+      ).rejects.toThrow("role store unavailable");
+      expect(repo.rows.length).toBe(before);
+    });
   });
 });

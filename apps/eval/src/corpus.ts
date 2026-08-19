@@ -5,6 +5,7 @@ import type { AssembleContext, ModelMessage } from "@tulipfarm/agent-runtime";
 import { normalizeMessageContent } from "@tulipfarm/schema";
 import { type EvalCase, type Expectation, everyString, isGuardrail, isPersisted } from "./case.ts";
 import { type EvalSoul, SOUL_OWNED_CONTEXT_KEYS, soulContext } from "./eval-soul.ts";
+import { expectationShapeError, isKnownExpectationKind } from "./expectation-shape.ts";
 import { platformToolNames, resolvePlatformTool } from "./platform-tools.ts";
 import { expandRedTeam, type RedTeamOutcome } from "./red-team.ts";
 import { OUTPUT_FLAGS } from "./scorer.ts";
@@ -49,25 +50,6 @@ const RETIRED_CONTEXT: Record<string, string> = {
 };
 
 /**
- * Required fields per Expectation kind.
- *
- * Checking only `kind` is not enough: `{"kind":"output_matches"}` would compile to an empty
- * regex and pass against anything, and a missing `path` would throw inside the scorer. Both turn
- * an unchecked Case into a green one, which is the failure mode this framework exists to prevent.
- */
-/** The three points a guard can refuse, mirroring `RunEventGuardrailStage`. */
-const GUARD_STAGES = ["input", "tool_call", "output"] as const;
-
-/**
- * Every guard `validateGuardrailsConfig` accepts.
- *
- * Spelled out rather than imported because the schema declares them as TypeBox literals with no
- * runtime array to read. A guard added there and not here fails Corpus load with a clear message,
- * which is the safe direction: the alternative is a Case naming a guard that can never fire.
- */
-const GUARD_NAMES = ["prompt_injection", "tool_blocklist", "content_filter"] as const;
-
-/**
  * The directory whose Cases may carry `redTeam`, and only whose Cases may.
  *
  * Separation is by directory rather than by convention because the two corpora have separate
@@ -79,47 +61,6 @@ export const RED_TEAM_DIR = "red-team";
 const RED_TEAM_OUTCOMES: readonly RedTeamOutcome[] = ["guard_held", "model_resisted"];
 
 /** A required field's type, or the closed set of values it may take. */
-type FieldType = "string" | "number" | "strings" | "any" | readonly string[];
-
-const EXPECTATION_FIELDS: Record<string, readonly [string, FieldType][]> = {
-  prompt_contains: [["text", "string"]],
-  prompt_omits: [["text", "string"]],
-  prompt_attaches: [["fileId", "string"]],
-  prompt_omits_attachment: [["fileId", "string"]],
-  tool_called: [["name", "string"]],
-  tool_not_called: [["name", "string"]],
-  tool_call_order: [["names", "strings"]],
-  tool_argument_equals: [
-    ["name", "string"],
-    ["path", "string"],
-    ["value", "any"],
-  ],
-  output_contains: [["text", "string"]],
-  output_matches: [["pattern", "string"]],
-  output_omits: [["text", "string"]],
-  output_field_equals: [
-    ["path", "string"],
-    ["value", "any"],
-  ],
-  loop_status: [["status", "string"]],
-  tool_call_count: [["count", "number"]],
-  guardrail_blocked: [
-    ["stage", GUARD_STAGES],
-    ["guard", GUARD_NAMES],
-  ],
-  guardrail_allowed: [["stage", GUARD_STAGES]],
-  rubric_score: [
-    ["criteria", "strings"],
-    ["min", "number"],
-  ],
-  rubric_denies: [["question", "string"]],
-  run_status: [["status", "string"]],
-  state_status: [["status", "string"]],
-  turn_status: [["status", "string"]],
-  run_event_emitted: [["eventType", "string"]],
-  soul_committed: [["path", "string"]],
-};
-
 /**
  * Serialise with object keys sorted at every depth.
  *
@@ -193,15 +134,11 @@ function validate(raw: unknown, file: string): EvalCase {
       0, `${file}: "expect" must be a non-empty array; a Case that expects nothing always passes`);
   for (const a of c.expect as unknown[]) {
     const kind = (a as { kind?: unknown } | null)?.kind;
-    require(typeof kind === "string" &&
-      kind in EXPECTATION_FIELDS, `${file}: unknown expectation kind ${JSON.stringify(kind)}`);
-    const record = a as Record<string, unknown>;
-    for (const [field, type] of EXPECTATION_FIELDS[kind as string]) {
-      require(fieldOk(
-        record[field],
-        type
-      ), `${file}: expectation "${kind}" needs a ${describeField(type)} field "${field}"`);
-    }
+    require(isKnownExpectationKind(
+      kind
+    ), `${file}: unknown expectation kind ${JSON.stringify(kind)}`);
+    const shape = expectationShapeError(kind, a as Record<string, unknown>);
+    require(shape === "", `${file}: ${shape}`);
     // Caught here rather than at scoring time: an L2 Sweep has no persisted state to read, so
     // this Case could only ever error — and it would do so after the model calls were paid for.
     require(c.tier === "l3" ||
@@ -212,6 +149,17 @@ function validate(raw: unknown, file: string): EvalCase {
     require(c.tier !== "l3" ||
       !isGuardrail(a as Expectation), `${file}: expectation "${kind}" reads guardrail decisions, ` +
       `which only tier "l2" collects; move this Case to tier "l2"`);
+  }
+  if (c.agentRoles !== undefined) {
+    require(Array.isArray(c.agentRoles) &&
+      c.agentRoles.every(
+        (id) => typeof id === "string" && id.length > 0
+      ), `${file}: "agentRoles" must be an array of Role ids the Agent's Principal holds`);
+    // Only L3 assigns them, because only L3 has a database to assign them in. On an L2 Case the
+    // field would be read by nothing, and any audience Expectation resting on it would be measuring
+    // a Role assignment that was never made.
+    require(c.tier ===
+      "l3", `${file}: "agentRoles" needs tier "l3"; this Case is tier ${JSON.stringify(c.tier)}`);
   }
   if (c.journey !== undefined) {
     require(Array.isArray(c.journey) &&
@@ -487,27 +435,6 @@ function requireGrounded(c: EvalCase, file: string, fromSoul: Partial<AssembleCo
           `than recall.`;
     require(grounded, `${file}: expectation "${e.kind}" looks for ${JSON.stringify(needle)}, which appears nowhere ` +
       `in the Eval Soul, the Case's context, input or tool results — ${why}`);
-  }
-}
-
-/** How a rejected field is described back to the author. */
-function describeField(type: FieldType): string {
-  if (typeof type !== "string") return `one of ${type.map((v) => JSON.stringify(v)).join(", ")}`;
-  return type === "strings" ? "non-empty string array" : type;
-}
-
-function fieldOk(value: unknown, type: FieldType): boolean {
-  if (typeof type !== "string") return typeof value === "string" && type.includes(value);
-  switch (type) {
-    case "string":
-      return typeof value === "string" && value.length > 0;
-    case "number":
-      return typeof value === "number" && Number.isFinite(value);
-    case "strings":
-      return Array.isArray(value) && value.length > 0 && value.every((v) => typeof v === "string");
-    // `value` in an equality expectation may legitimately be null, false or 0; only absence is wrong.
-    case "any":
-      return value !== undefined;
   }
 }
 

@@ -2,7 +2,7 @@ import Placeholder from "@tiptap/extension-placeholder";
 import { EditorContent, useEditor, useEditorState } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus";
 import StarterKit from "@tiptap/starter-kit";
-import { ALLOWED_MEDIA_TYPES } from "@tulipfarm/files";
+import { ALLOWED_MEDIA_TYPES } from "@tulipfarm/files/limits";
 import {
   ArrowUp,
   AtSign,

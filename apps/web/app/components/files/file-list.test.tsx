@@ -19,6 +19,7 @@ function libraryFile(overrides: Partial<LibraryFile> = {}): LibraryFile {
     owner: "user_1",
     origin: "uploaded",
     sourceChatId: null,
+    sourceRunId: null,
     sharedWithCount: null,
     ...overrides,
   };
@@ -98,6 +99,16 @@ describe("FileList", () => {
 
     renderList([libraryFile({ id: "b", sourceChatId: null })]);
     expect(screen.queryAllByRole("link", { name: /from a chat/i })).toHaveLength(1);
+  });
+
+  it("links a generated File to the Run that made it, and an upload to nothing", () => {
+    renderList([libraryFile({ id: "a", origin: "generated", sourceRunId: "run_9" })]);
+    expect(screen.getByRole("link", { name: /from a run/i }).getAttribute("href")).toBe(
+      "/runs/run_9"
+    );
+
+    renderList([libraryFile({ id: "b", sourceRunId: null })]);
+    expect(screen.queryAllByRole("link", { name: /from a run/i })).toHaveLength(1);
   });
 
   it("offers a preview for a PDF and a plain name for a type it cannot show", () => {

@@ -70,7 +70,17 @@ export type Expectation =
    *  only place a Turn that stopped emitting its events can be caught. */
   | { readonly kind: "run_event_emitted"; readonly eventType: string }
   /** L3 only. A Soul artifact was committed to the Eval Soul's real git repository. */
-  | { readonly kind: "soul_committed"; readonly path: string };
+  | { readonly kind: "soul_committed"; readonly path: string }
+  /**
+   * L3 only. A File the Turn generated is readable by this grantee, written `kind:id`.
+   *
+   * The audience is not in the Tool call — the model neither chooses it nor sees it — so this is
+   * the only Expectation that can tell "an Agent wrote a document" apart from "a team can open the
+   * document their Agent wrote".
+   */
+  | { readonly kind: "generated_file_readable_by"; readonly grantee: string }
+  /** L3 only. The counterpart: the audience widened this far and no further. */
+  | { readonly kind: "generated_file_not_readable_by"; readonly grantee: string };
 
 /** Expectations that read persisted state, which only the L3 tier can observe. */
 const PERSISTED_KINDS: ReadonlySet<string> = new Set([
@@ -79,6 +89,8 @@ const PERSISTED_KINDS: ReadonlySet<string> = new Set([
   "turn_status",
   "run_event_emitted",
   "soul_committed",
+  "generated_file_readable_by",
+  "generated_file_not_readable_by",
 ]);
 
 export function isPersisted(expectation: Expectation): boolean {
@@ -229,6 +241,15 @@ export interface EvalCase {
    * the one knob it takes to reach it. `"context"` fails Context resolution.
    */
   readonly fault?: "context";
+  /**
+   * L3 only. Roles an admin has assigned this Case's Agent, seeded as `role_assignments` rows.
+   *
+   * Deliberately not read from the Agent's Soul `roles:` list. That list is advisory metadata and
+   * creates no assignment — `reconcileSoulRoles` projects Role *definitions* only — so a fixture
+   * that read it would measure a mapping the product does not have, and would go on passing after
+   * live authority stopped reaching Files. These are the rows `/business/access/agents` writes.
+   */
+  readonly agentRoles?: readonly string[];
   readonly expect: readonly Expectation[];
   /** Raised above 1 only for Cases used to measure the Noise Floor. */
   readonly trials?: number;

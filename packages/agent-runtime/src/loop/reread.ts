@@ -1,4 +1,5 @@
 import type { ResolvedAttachment } from "../ports";
+import type { LoopAttachmentPort } from "./contract";
 
 /**
  * The Tool whose success puts a File in front of the model for the rest of this Turn.
@@ -60,4 +61,30 @@ export function mergeAttachments(
 ): readonly ResolvedAttachment[] {
   const seen = new Set(attached.map((file) => file.fileId));
   return [...attached, ...reread.filter((file) => !seen.has(file.fileId))];
+}
+
+/**
+ * The bytes one iteration sends: what the Turn attached, plus what the Agent re-read.
+ *
+ * Resolved per iteration rather than once, because the port's refusal *is* the authorization
+ * check. A share revoked between the `file_read` and the next step comes back as nothing and the
+ * File stops being sent, which no cached copy could honour.
+ */
+export async function resolveIterationAttachments(
+  attached: readonly ResolvedAttachment[],
+  reread: readonly RereadFile[],
+  port: LoopAttachmentPort | undefined,
+  runId: string
+): Promise<readonly ResolvedAttachment[]> {
+  if (port === undefined || reread.length === 0) return attached;
+  const fetched = await Promise.all(
+    reread.map(async (file) => {
+      const data = await port.read(runId, file.fileId);
+      return data === undefined ? undefined : { ...file, data };
+    })
+  );
+  return mergeAttachments(
+    attached,
+    fetched.filter((file) => file !== undefined)
+  );
 }

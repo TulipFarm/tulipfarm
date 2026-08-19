@@ -101,7 +101,14 @@ describe("writeBucketSecrets", () => {
   });
 
   it("refuses a data directory it cannot write, naming the ways out", () => {
-    expect(() => writeBucketSecrets("/proc/nonexistent-tulipfarm")).toThrow(BundledBucketError);
+    // A regular file standing where the data directory should be, so the write fails with ENOTDIR
+    // on every platform. A path under `/proc` looks like the more obvious "cannot write here", but
+    // `mkdirSync(recursive)` never returns for one on Linux, which reads as a hung suite rather
+    // than a failing assertion.
+    const notADirectory = join(tempDataDir(), "occupied");
+    writeFileSync(notADirectory, "");
+
+    expect(() => writeBucketSecrets(notADirectory)).toThrow(BundledBucketError);
   });
 });
 

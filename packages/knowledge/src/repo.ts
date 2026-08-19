@@ -77,6 +77,27 @@ export interface KnowledgePageRepo {
   /** Idempotent for resource/conversation sources; returns the canonical id + version. */
   upsertBySource(page: KnowledgePage): Promise<{ _id: string; version: number }>;
   getById(id: string): Promise<KnowledgePage | null>;
+  /**
+   * The Page a given source produced, active or not.
+   *
+   * `(source, source_id)` is unique, so this is how a caller that holds the upstream id — a File,
+   * a Record — asks whether it has been indexed without having to store the Page id beside it.
+   */
+  /**
+   * The *active* Page a source id currently owns, if any.
+   *
+   * Deliberately blind to soft-deleted rows: a removed Page must read as "not indexed" everywhere,
+   * or a File that was taken out of Knowledge still reports itself as in it and cannot be put back.
+   */
+  getBySource(source: KnowledgeSource, sourceId: string): Promise<KnowledgePage | null>;
+  /**
+   * Which of `sourceIds` currently have an active Page. The batch form of {@link getBySource}, so
+   * a listing that asks "is each of these indexed?" costs one query rather than one per row.
+   */
+  activeSourceIds(
+    source: KnowledgeSource,
+    sourceIds: readonly string[]
+  ): Promise<ReadonlySet<string>>;
   list(opts: PageListOpts): Promise<PaginatedResult<KnowledgePage>>;
   replaceOne(id: string, expectedVersion: number, page: KnowledgePage): Promise<boolean>;
   softDelete(id: string): Promise<boolean>;
@@ -155,6 +176,28 @@ export class PgKnowledgePageRepo implements KnowledgePageRepo {
       id,
     ]);
     return rows[0] ? rowToPage(rows[0]) : null;
+  }
+
+  async getBySource(source: KnowledgeSource, sourceId: string): Promise<KnowledgePage | null> {
+    const { rows } = await this.q.query(
+      `SELECT ${PAGE_COLS} FROM knowledge_pages
+        WHERE source = $1 AND source_id = $2 AND active = true`,
+      [source, sourceId]
+    );
+    return rows[0] ? rowToPage(rows[0]) : null;
+  }
+
+  async activeSourceIds(
+    source: KnowledgeSource,
+    sourceIds: readonly string[]
+  ): Promise<ReadonlySet<string>> {
+    if (sourceIds.length === 0) return new Set();
+    const { rows } = await this.q.query(
+      `SELECT source_id FROM knowledge_pages
+        WHERE source = $1 AND source_id = ANY($2::text[]) AND active = true`,
+      [source, [...sourceIds]]
+    );
+    return new Set(rows.map((row) => String((row as { source_id: unknown }).source_id)));
   }
 
   async list(opts: PageListOpts): Promise<PaginatedResult<KnowledgePage>> {

@@ -73,10 +73,19 @@ export class TurnGuardrails {
    * The user's request, before any of it reaches the model.
    *
    * The guards read text, so the screenable text is derived here rather than at the call site:
-   * when a File part starts contributing text of its own, this is the one place that has to learn
-   * about it, instead of every caller silently screening less than it thinks it does.
+   * this is the one place that has to learn when a new part starts carrying words, instead of
+   * every caller silently screening less than it thinks it does.
+   *
+   * @param attachmentText What the Files this Turn attached actually say, already extracted by the
+   * side that owns them. An uploaded document is the widest indirect-injection channel there is,
+   * because its instructions arrive looking like data; screening it here is what stops a PDF being
+   * a way around the screening a plain message gets.
    */
-  async input(content: MessageContent, events: TurnEventWriter): Promise<GuardedContent> {
+  async input(
+    content: MessageContent,
+    events: TurnEventWriter,
+    attachmentText: readonly string[]
+  ): Promise<GuardedContent> {
     const { service, ctx } = this.require();
     const text = contentText(content);
     const result = await service.runInput(text, ctx);
@@ -97,6 +106,18 @@ export class TurnGuardrails {
       if (named.blocked) {
         await this.record(events, "input", named.guard, named.reason, "input");
         return { blocked: true, message: named.message ?? DEFAULT_BLOCK_MESSAGE };
+      }
+    }
+
+    for (const extracted of attachmentText) {
+      if (extracted.length === 0) continue;
+      // Blocking only, for the same reason as a filename: a redaction cannot be applied to a
+      // File's bytes, and the model is sent the bytes. Admitting the File with its text "cleaned"
+      // would tell the operator the words were removed while the model still read them.
+      const attached = await service.runInput(extracted, ctx);
+      if (attached.blocked) {
+        await this.record(events, "input", attached.guard, attached.reason, "input");
+        return { blocked: true, message: attached.message ?? DEFAULT_BLOCK_MESSAGE };
       }
     }
 

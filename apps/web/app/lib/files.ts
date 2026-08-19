@@ -144,8 +144,17 @@ export interface LibraryFile extends UploadedFile {
   readonly owner: string;
   readonly origin: "uploaded" | "generated";
   readonly sourceChatId: string | null;
+  /** The Run that authored a generated File. `null` for anything a person uploaded. */
+  readonly sourceRunId: string | null;
   /** How many grants this File carries. `null` when the caller does not own it, never 0. */
   readonly sharedWithCount: number | null;
+  /**
+   * Whether this File's contents are retrievable by Agents.
+   *
+   * Absent on any listing that is not the owner's own, for the same reason `sharedWithCount` is:
+   * it is a fact about what the owner decided, not about the File as a reader sees it.
+   */
+  readonly inKnowledge?: boolean | null;
 }
 
 export interface FilePage {
@@ -242,6 +251,40 @@ export async function unshareFile(fileId: string, grantee: FileGrantee): Promise
     { method: "DELETE", credentials: "include", headers: mutationHeaders() }
   );
   if (!response.ok) throw new UploadFailed(response.status, "That share could not be revoked.");
+}
+
+/**
+ * Makes a File's contents retrievable by Agents, and citable in their answers.
+ *
+ * Deliberately separate from uploading. Attaching a document to one Chat and publishing it to
+ * every Agent's retrieval are different decisions, so the second one is always asked for.
+ */
+export async function addFileToKnowledge(fileId: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/api/v1/files/${encodeURIComponent(fileId)}/knowledge`, {
+    method: "POST",
+    credentials: "include",
+    headers: readHeaders(),
+  });
+  if (!response.ok) {
+    throw new UploadFailed(
+      response.status,
+      response.status === 501
+        ? "This deployment cannot add files to knowledge."
+        : "That file could not be added to knowledge."
+    );
+  }
+}
+
+/** Takes a File back out of retrieval. Its chunks go with it; the File itself is untouched. */
+export async function removeFileFromKnowledge(fileId: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/api/v1/files/${encodeURIComponent(fileId)}/knowledge`, {
+    method: "DELETE",
+    credentials: "include",
+    headers: readHeaders(),
+  });
+  if (!response.ok) {
+    throw new UploadFailed(response.status, "That file could not be removed from knowledge.");
+  }
 }
 
 /**

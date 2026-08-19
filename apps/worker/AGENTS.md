@@ -23,6 +23,7 @@ reconciliation, turn execution, delivery classification, projections, and outbox
 | `src/curator/` | Curator Run executor (resolve pinned context, reason once, submit raw output) and the `curator-sweep` fan-out. |
 | `src/internal/` | HTTP ports back to `/api/v1/internal/*`; Run identity is re-derived by API. |
 | `src/tools/` | In-process Tool host for co-locatable families, and the routing dispatcher. |
+| `src/files/`, `src/knowledge/` | The worker's own `FileService` and `KnowledgeService`, and the `file-index` job that extracts a File's text into Knowledge. |
 | `src/hooks/` | Sandbox worker bundle for Integration delivery classification. |
 | `src/recovery/` | Reconciliation helpers for abandoned or parked work. |
 | `test/process/` | Real bundled-worker process tests over PGlite socket. |
@@ -46,6 +47,12 @@ reconciliation, turn execution, delivery classification, projections, and outbox
 - `curator-sweep` (*/5, bare pg-boss, scheduled by the API) is deterministic maintenance only: it
   reconciles Tasks, then asks the API to mint one Run per user with a backlog. Its queue name is a
   plain string shared with `apps/api/src/curator/sweep-schedule.ts` — rename both or neither.
+- `file-index` runs here rather than in the API because indexing a File means running a PDF parser
+  over a stranger's bytes, which does not belong in the process terminating HTTP requests. Its
+  queue name is a plain string shared with `apps/api/src/files/knowledge-bridge.ts` — rename both
+  or neither. Every refusal is an outcome, never a throw: a File deleted while its job queued must
+  not retry forever. It reconciles after writing as well as before: until the Page exists, a
+  delete, a withdrawal or a revoke has nothing to act on, so all three are re-asked once it does.
 - Integration Runs classify delivery, then hand real turns to the same chat executor as web chat.
 - Routine execution reads only the Run's exact signed bundle and immutable request Artifact.
 - Routine replay safety depends on persisting successors first and durable occurrence keys.

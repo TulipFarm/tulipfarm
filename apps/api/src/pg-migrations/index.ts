@@ -1,5 +1,6 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import {
+  FILE_KNOWLEDGE_STATEMENTS,
   FILE_ORIGIN_STATEMENTS,
   FILE_SHARE_STATEMENTS,
   FILE_STORAGE_STATEMENTS,
@@ -2162,13 +2163,18 @@ export const PG_MIGRATIONS: PgMigration[] = [
     up: applyStatements(FILE_STORAGE_STATEMENTS),
   },
   {
-    version: 69,
+    version: 75,
     description: "files: origin and the Chat a File was first sent in, for the Files library",
     up: applyStatements(FILE_ORIGIN_STATEMENTS),
   },
   {
-    version: 70,
+    version: 76,
     description: "files: explicit share grants, so a File reaches a second reader by decision only",
     up: applyStatements(FILE_SHARE_STATEMENTS),
+  },
+  {
+    version: 77,
+    description: "files: the durable Knowledge opt-in a queued index job re-reads before it writes",
+    up: applyStatements(FILE_KNOWLEDGE_STATEMENTS),
   },
 ];

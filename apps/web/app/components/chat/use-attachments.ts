@@ -1,5 +1,5 @@
-import { isAllowedMediaType, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE } from "@tulipfarm/files";
-import { modalityForMediaType } from "@tulipfarm/schema";
+import { isAllowedMediaType, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE } from "@tulipfarm/files/limits";
+import { modalityForMediaType } from "@tulipfarm/schema/message-content";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   fetchAcceptedModalities,

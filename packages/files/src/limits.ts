@@ -57,7 +57,19 @@ export function isAllowedMediaType(mediaType: string): mediaType is AllowedMedia
  * a script context on the app's session.
  */
 export function isInlineRenderable(mediaType: string): boolean {
-  return mediaType.startsWith("image/") && isAllowedMediaType(mediaType);
+  return isImageMediaType(mediaType) && isAllowedMediaType(mediaType);
+}
+
+/**
+ * Whether a type is an image at all, before any allowlist or policy narrows it further.
+ *
+ * Four questions in this package start here and then diverge — may it be downscaled, may it be
+ * rendered inline, can text be pulled out of it, does it need bounding. Each keeps its own
+ * function; only the shared first step lives here, so a change to what counts as an image is one
+ * edit rather than four.
+ */
+export function isImageMediaType(mediaType: string): boolean {
+  return mediaType.startsWith("image/");
 }
 
 /**
@@ -95,6 +107,17 @@ export function isTextualMediaType(mediaType: string): boolean {
  * Deliberately not a Principal row: nothing authenticates as the business, so a row would be an
  * account nobody holds. It is an owner identifier and only ever compared as one.
  */
+/**
+ * Whether a type carries text an indexer could pull out of it.
+ *
+ * Lives here rather than beside the extractor because the browser has to ask it too: the Files
+ * library must not offer "add to knowledge" for a type the request would only refuse, and the two
+ * answers have to come from one rule or they will drift.
+ */
+export function isExtractableMediaType(mediaType: string): boolean {
+  return isTextualMediaType(mediaType) || mediaType === "application/pdf";
+}
+
 export const BUSINESS_PRINCIPAL_ID = "business";
 
 export const MAX_FILE_READ_CHARS = 32_000;

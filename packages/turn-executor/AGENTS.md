@@ -39,10 +39,10 @@ Run event emission, Tool-call announcement or preview, or the ports a Turn host 
   own imports still read naturally — do not redeclare them there.
 - **`model` is injected as `ModelPort | ((input) => ModelPort)`.** The factory form is what lets a
   host bind a different model per Turn; the eval harness relies on it.
-- **The input guard sees an attachment's name, never its contents.** Files reach the model
-  natively — an image as an image, a PDF as a document — so there is no extracted text to screen,
-  and the bytes are opaque to every guard we run. A filename is screened because it reaches the
-  model verbatim, and it is block-only: redacting a name would change which File the part refers
-  to. Treat instructions hidden inside a document as a model-resistance problem, not a guard one;
-  `apps/eval/corpus/red-team` asserts that ending. Extraction for Knowledge is a separate path and
-  screening belongs there when it lands.
+- **The input guard screens an attachment's text, not just its name.** `TurnAttachmentPort` carries
+  both `read` and `extract` so a host cannot supply Files without also supplying the means to screen
+  them; `run()` therefore resolves attachments *before* `guardInput`, at no vendor cost. Text is
+  extracted as the type the Context authorized, never as what the bytes claim. Both the name and the
+  extracted text are **block-only** — a redaction cannot be applied to bytes already on their way to
+  the model, and rewriting a name would change which File the part refers to. `read` keeps a
+  bytes-only shape on purpose, so the same object still satisfies `LoopAttachmentPort`.

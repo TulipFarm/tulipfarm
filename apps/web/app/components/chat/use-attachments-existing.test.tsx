@@ -1,5 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
-import { MAX_FILES_PER_MESSAGE } from "@tulipfarm/files";
+import { MAX_FILES_PER_MESSAGE } from "@tulipfarm/files/limits";
 import { describe, expect, it, vi } from "vitest";
 import { useAttachments } from "./use-attachments";
 

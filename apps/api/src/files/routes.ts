@@ -19,6 +19,8 @@ import {
   downloadHeaders,
   FILE_GRANTEE_KINDS,
   FILE_GRANTEE_SCHEMA,
+  FILE_PAGE_QUERY_SCHEMA,
+  FILE_PAGE_SCHEMA,
   FILE_SHARES_SCHEMA,
   FILE_WIRE_SCHEMA,
   type FileCursor,
@@ -27,6 +29,7 @@ import {
   type FileRecord,
   type FileService,
   fileErrorStatus,
+  isExtractableMediaType,
   serializeFile,
   serializeFilePage,
   serializeShare,
@@ -36,8 +39,10 @@ import type { AuditRecordInput } from "../audit/service";
 import { ErrorSchema } from "../auth/schemas";
 import type { RequireAuthorization } from "../authz/route-gate";
 import type { RequestPrincipal } from "../identity/principal";
+import type { FileKnowledgeBridge } from "./knowledge-bridge";
+import { registerFileKnowledgeRoutes } from "./knowledge-routes";
 
-type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
+export type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
 export interface FileRoutesDeps {
   readonly files: FileService;
@@ -51,6 +56,12 @@ export interface FileRoutesDeps {
    * someone writes a prompt around it. A function because the Soul is reloadable.
    */
   readonly acceptedInputModalities: () => readonly string[];
+  /**
+   * The Knowledge side of a File. Absent leaves the routes below answering 501 rather than
+   * pretending: a deployment with no bridge cannot index, and saying so is better than accepting
+   * a request nothing will ever act on.
+   */
+  readonly knowledge?: FileKnowledgeBridge;
 }
 
 /** The two Files listings differ only in which set they draw from, so they page identically. */
@@ -65,7 +76,8 @@ async function sendPage(
     files: readonly FileRecord[];
     nextCursor: string | null;
     shareCounts?: Map<string, number>;
-  }>
+  }>,
+  knowledge?: FileKnowledgeBridge
 ): Promise<void> {
   const { limit = 50, after } = req.query as { limit?: number; after?: string };
   const cursor = after === undefined ? undefined : decodeFileCursor(after);
@@ -73,10 +85,49 @@ async function sendPage(
     reply.code(400).send({ error: "that cursor is not one of ours" });
     return;
   }
-  reply.send(serializeFilePage(await page((req.principal as RequestPrincipal).id, limit, cursor)));
+  const result = await page((req.principal as RequestPrincipal).id, limit, cursor);
+  // Asked only for a listing that already carries share counts, which is the owner's listing.
+  // Whether a File is in Knowledge is the owner's business for the same reason its share count is.
+  const knowledgeIds =
+    knowledge && result.shareCounts
+      ? await knowledge.indexedIds(result.files.map((file) => file.id))
+      : undefined;
+  reply.send(
+    serializeFilePage({ ...result, ...(knowledgeIds === undefined ? {} : { knowledgeIds }) })
+  );
 }
 
-function reject(reply: FastifyReply, error: unknown): void {
+/**
+ * Re-point an indexed File's Page at its current readers.
+ *
+ * Called after every share and every revoke. An authored Page's ACL is read live on each question,
+ * so this write *is* the propagation — there is no cache to invalidate and no snapshot to age out.
+ * A File that is not indexed has no Page and this is a no-op.
+ */
+async function syncKnowledgeReaders(
+  deps: FileRoutesDeps,
+  fileId: string,
+  ownerPrincipalId: string,
+  widening: boolean
+): Promise<void> {
+  const knowledge = deps.knowledge;
+  if (!knowledge) return;
+  if (!(await knowledge.isIndexed(fileId))) return;
+  try {
+    const readers = await deps.files.readers(DEPLOYMENT_BUSINESS_ID, fileId, ownerPrincipalId);
+    await knowledge.syncReaders(fileId, readers);
+  } catch (error) {
+    // A share that failed to propagate is safe to surface and leave: the new reader simply cannot
+    // retrieve the File yet. A *revoke* is not. The File-level grant is already gone, so failing
+    // here would leave the revoked reader able to retrieve the text through Knowledge while the
+    // owner is looking at an error that suggests nothing happened. So the Page goes instead — the
+    // File stops being retrievable by anyone, which is always a subset of what was intended.
+    if (!widening) await knowledge.remove(fileId);
+    throw error;
+  }
+}
+
+export function reject(reply: FastifyReply, error: unknown): void {
   const status = fileErrorStatus(error);
   if (status === null) throw error;
   reply.code(status).send({ error: (error as Error).message });
@@ -88,6 +139,8 @@ export function registerFileRoutes(
   requireAuth: PreHandler,
   requireAuthorization: RequireAuthorization
 ): void {
+  registerFileKnowledgeRoutes(app, deps, requireAuth);
+
   // Scoped to a plugin so the raw-stream parsers cannot change how any other route reads a body.
   app.register(async (scope) => {
     for (const mediaType of [...ALLOWED_MEDIA_TYPES, "application/octet-stream"]) {
@@ -196,30 +249,20 @@ export function registerFileRoutes(
         description: "The Files owned by the calling Principal, newest first.",
         tags: ["files"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
-        querystring: {
-          type: "object",
-          properties: {
-            limit: { type: "integer", minimum: 1, maximum: 200, default: 50 },
-            after: { type: "string", description: "A `nextCursor` from an earlier page." },
-          },
-        },
+        querystring: FILE_PAGE_QUERY_SCHEMA,
         response: {
-          200: {
-            type: "object",
-            required: ["files"],
-            properties: {
-              files: { type: "array", items: FILE_WIRE_SCHEMA },
-              nextCursor: { type: "string", nullable: true },
-            },
-          },
+          200: FILE_PAGE_SCHEMA,
           400: ErrorSchema,
           401: ErrorSchema,
         },
       },
     },
     async (req, reply) =>
-      await sendPage(req, reply, (id, limit, cursor) =>
-        deps.files.listPage(DEPLOYMENT_BUSINESS_ID, id, limit, cursor)
+      await sendPage(
+        req,
+        reply,
+        (id, limit, cursor) => deps.files.listPage(DEPLOYMENT_BUSINESS_ID, id, limit, cursor),
+        deps.knowledge
       )
   );
 
@@ -235,22 +278,9 @@ export function registerFileRoutes(
           "Files from this list on the very next request.",
         tags: ["files"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
-        querystring: {
-          type: "object",
-          properties: {
-            limit: { type: "integer", minimum: 1, maximum: 200, default: 50 },
-            after: { type: "string", description: "A `nextCursor` from an earlier page." },
-          },
-        },
+        querystring: FILE_PAGE_QUERY_SCHEMA,
         response: {
-          200: {
-            type: "object",
-            required: ["files"],
-            properties: {
-              files: { type: "array", items: FILE_WIRE_SCHEMA },
-              nextCursor: { type: "string", nullable: true },
-            },
-          },
+          200: FILE_PAGE_SCHEMA,
           400: ErrorSchema,
           401: ErrorSchema,
         },
@@ -314,6 +344,7 @@ export function registerFileRoutes(
       const { id } = req.params as { id: string };
       try {
         await deps.files.share(DEPLOYMENT_BUSINESS_ID, id, principal.id, req.body as FileGrantee);
+        await syncKnowledgeReaders(deps, id, principal.id, true);
         reply.code(204).send();
       } catch (error) {
         reject(reply, error);
@@ -356,6 +387,7 @@ export function registerFileRoutes(
           kind,
           id: granteeId,
         });
+        await syncKnowledgeReaders(deps, id, principal.id, false);
         reply.code(204).send();
       } catch (error) {
         reject(reply, error);
@@ -382,6 +414,17 @@ export function registerFileRoutes(
       const principal = req.principal as RequestPrincipal;
       const { id } = req.params as { id: string };
       try {
+        // Authorized first, so a caller who does not own this File is told it does not exist
+        // before anything is touched. `clearKnowledgeRequest` refuses a non-owner exactly as
+        // `delete` would, and withdraws the opt-in so an index job in flight cannot outlive the
+        // File it was reading.
+        await deps.files.clearKnowledgeRequest(DEPLOYMENT_BUSINESS_ID, id, principal.id);
+        // Un-indexed *before* the File is destroyed, never after. Reversed, a failure between the
+        // two leaves a Page whose File no longer exists: retrieval would go on quoting a deleted
+        // File, and nothing could ever clean it up, because a second DELETE now answers 404. This
+        // way a failure leaves a File that exists and is merely no longer indexed, which the owner
+        // can retry or re-add.
+        await deps.knowledge?.remove(id);
         const destroyed = await deps.files.delete(DEPLOYMENT_BUSINESS_ID, id, principal.id);
         // Recorded from the returned record rather than the id alone. The chain is sealed and
         // cannot be rewritten later, and by the time anyone reads this event there is nothing
@@ -423,7 +466,13 @@ export function registerFileRoutes(
       const principal = req.principal as RequestPrincipal;
       const { id } = req.params as { id: string };
       try {
-        reply.send(serializeFile(await deps.files.read(DEPLOYMENT_BUSINESS_ID, id, principal.id)));
+        const file = await deps.files.read(DEPLOYMENT_BUSINESS_ID, id, principal.id);
+        // Whether the File is in Knowledge is the owner's own decision to see, the same as its
+        // share count, so a reader is told nothing rather than told `false`.
+        const owned = file.ownerPrincipalId === principal.id;
+        const inKnowledge =
+          deps.knowledge && owned ? await deps.knowledge.isIndexed(id) : undefined;
+        reply.send(serializeFile(file, undefined, inKnowledge));
       } catch (error) {
         reject(reply, error);
       }

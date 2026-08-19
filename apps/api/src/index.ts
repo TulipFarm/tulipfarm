@@ -138,6 +138,7 @@ import {
 } from "./db";
 import { logEnvironmentStatus, validateEnvironment } from "./env";
 import { FeedbackRepo } from "./feedback/repo";
+import { buildFileKnowledgeBridge } from "./files/knowledge-bridge";
 import { registerGuardrailsReload } from "./guardrails/reload";
 import { createHookExecutor } from "./hooks/executor";
 import { PgRawPayloadVault } from "./hooks/raw-payload-vault";
@@ -968,6 +969,7 @@ async function boot() {
       kvService,
       taskStore: taskRepo,
       fileService,
+      fileKnowledge: buildFileKnowledgeBridge(pool, boss, DEPLOYMENT_BUSINESS_ID),
       ...buildCurator({
         pool,
         documents: memoryDocuments,

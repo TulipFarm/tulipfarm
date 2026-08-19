@@ -85,13 +85,42 @@ const IGNORED_DIRS = new Set([
  * for the GraphRAG entity, edge, community and summary tables, #73 for the
  * trigger that prunes graph rows when their source chunk goes). That is 277
  * added lines, which against the old allowance would argue for 2358. The
- * measurement is 2157, because the previous allowance carried slack the file
+ * measurement is 2177, because the previous allowance carried slack the file
  * was not using. Taking the measurement banks the difference back, per the
  * paragraph above.
+ *
+ * `index.ts` moved 1340 -> 1342 for Files-into-Knowledge: one import, plus one
+ * option passed to `buildApp`. The bridge itself is a factory in
+ * `files/knowledge-bridge.ts` precisely so the composition root gained a call
+ * rather than a block — that is the extraction this ratchet asks for, done
+ * before the number was touched. One line of wiring per new subsystem is the
+ * floor for a file whose whole job is wiring.
+ *
+ * `index.ts` moved 1342 -> 1347 on rebase, and none of the five lines are this
+ * branch's. Main added the `onGuardrailsChanged` composition for
+ * `guardrail_forge`: a Turn's Context reads the in-process `GuardrailsService`
+ * rather than the published bundle, so the write gateway's own catalog reload
+ * does not reach it, and the wiring that closes that gap can only live in the
+ * composition root. The branch's own contribution to this file is unchanged at
+ * the one import and one `buildApp` option described above.
+ *
+ * `index.ts` moved 1347 -> 1350 on a later rebase, and those three are main's
+ * too: the `agentForRun` and `parentToolNames` composition lines for Agent
+ * capability restrictions, itemised as `+3 index.ts` in main's own entry in
+ * `scripts/control-plane-size.test.ts`. Main deliberately moved the resolver
+ * closure into `soul/agents/registry.ts` to keep this number down and paid only
+ * for what composition genuinely requires; the branch again added nothing here.
+ *
+ * The migration list moved 2177 -> 2183 for migration 77, the durable Knowledge
+ * opt-in on `files`. This file grows by one entry per schema change and cannot
+ * shrink: a migration already applied somewhere may never be edited or removed,
+ * so the list is append-only by definition. The statements themselves live in
+ * `packages/files/src/repo.ts` beside the table they alter; what lands here is
+ * the version, the description and the call.
  */
 const OVERSIZED: Readonly<Record<string, number>> = {
-  "apps/api/src/pg-migrations/index.ts": 2157,
-  "apps/api/src/index.ts": 1314,
+  "apps/api/src/pg-migrations/index.ts": 2183,
+  "apps/api/src/index.ts": 1350,
 };
 
 /**

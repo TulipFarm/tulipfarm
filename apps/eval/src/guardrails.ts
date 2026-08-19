@@ -22,7 +22,7 @@ export interface EvalGuardrails {
   readonly decisions: readonly GuardrailDecision[];
   /** Wraps the dispatcher so a blocked Tool becomes a model-visible denial. */
   guard(tools: ToolDispatchPort): ToolDispatchPort;
-  input(content: MessageContent): Promise<GuardedContent>;
+  input(content: MessageContent, attachmentText: readonly string[]): Promise<GuardedContent>;
   output(text: string): Promise<GuardedText>;
 }
 
@@ -79,7 +79,7 @@ export function turnGuardrails(soul: EvalSoul, conversationId: string): EvalGuar
     digest,
     decisions,
     guard: (tools) => guardrails.guard(tools, events),
-    input: (content) => guardrails.input(content, events),
+    input: (content, attachmentText) => guardrails.input(content, events, attachmentText),
     output: (text) => guardrails.output(text, events),
   };
 }

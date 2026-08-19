@@ -1,4 +1,6 @@
+import type { BlobPort, BlobRef } from "@tulipfarm/storage";
 import { type ImageSize, imageSize } from "./dimensions";
+import { isImageMediaType } from "./limits";
 
 /**
  * Bounding an image before it reaches a model.
@@ -43,10 +45,6 @@ export type ImageBoundOutcome =
 /** Formats jimp can re-encode losslessly enough to substitute for the original. */
 const DOWNSCALABLE = new Set(["image/png", "image/jpeg"]);
 
-function isImage(mediaType: string): boolean {
-  return mediaType.startsWith("image/");
-}
-
 /**
  * Bounds one attachment, given the business's policy.
  *
@@ -58,7 +56,7 @@ export async function boundImage(
   mediaType: string,
   policy: ImageBoundPolicy = {}
 ): Promise<ImageBoundOutcome> {
-  if (!isImage(mediaType)) return { kind: "accepted", data, mediaType };
+  if (!isImageMediaType(mediaType)) return { kind: "accepted", data, mediaType };
 
   const limit = policy.maxImageDimension ?? DEFAULT_MAX_IMAGE_DIMENSION;
   const size = imageSize(data, mediaType);
@@ -116,4 +114,57 @@ async function downscale(
       reason: `This image is ${from.width}×${from.height}px, over the ${limit}px limit, and could not be downscaled because its contents could not be decoded.`,
     };
   }
+}
+
+/**
+ * Applies the business's image policy to an object already in the blob store.
+ *
+ * Separate from `boundImage`, which decides about bytes: this one owns the consequences — reading
+ * the object back only when a downscale is actually going to happen, replacing it, and discarding
+ * whatever it orphaned. A refusal deletes the object it refused, so a rejected upload never leaves
+ * bytes behind for a sweeper to find later.
+ */
+export async function boundStoredImage(
+  blobs: BlobPort,
+  ref: BlobRef,
+  mediaType: string,
+  sample: { bytes: Uint8Array; size: number },
+  policy: ImageBoundPolicy,
+  discard: (ref: BlobRef) => Promise<void>
+): Promise<{ ref: BlobRef; sizeBytes: number; refused?: string }> {
+  // The head carries the dimensions, so the common cases — inside the limit, or refused — decide
+  // without reading the object back.
+  const head = await boundImage(sample.bytes, mediaType, { ...policy, downscaleImages: false });
+  if (head.kind === "accepted") return { ref, sizeBytes: sample.size };
+  if (policy.downscaleImages !== true) {
+    await discard(ref);
+    return { ref, sizeBytes: sample.size, refused: head.reason };
+  }
+
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for await (const chunk of await blobs.get(ref)) {
+    chunks.push(chunk);
+    total += chunk.byteLength;
+  }
+  const whole = new Uint8Array(total);
+  let at = 0;
+  for (const chunk of chunks) {
+    whole.set(chunk, at);
+    at += chunk.byteLength;
+  }
+
+  const outcome = await boundImage(whole, mediaType, policy);
+  if (outcome.kind === "refused") {
+    await discard(ref);
+    return { ref, sizeBytes: sample.size, refused: outcome.reason };
+  }
+  const replacement = await blobs.put(
+    (async function* () {
+      yield outcome.data;
+    })(),
+    mediaType
+  );
+  await discard(ref);
+  return { ref: replacement, sizeBytes: outcome.data.byteLength };
 }

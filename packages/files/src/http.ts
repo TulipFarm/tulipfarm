@@ -26,16 +26,38 @@ export const FILE_WIRE_SCHEMA = {
     // `chatId` on the wire, `source_conversation_id` in the table: Chat is the external word for
     // the same thing, and the boundary between them is exactly here.
     sourceChatId: { type: "string", nullable: true },
+    /** The Run that authored a generated File. Null for anything a person uploaded. */
+    sourceRunId: { type: "string", nullable: true },
     /**
      * How many grants this File carries. Present only when the caller owns it, because only an
      * owner may know — and absent, rather than 0, so "not yours to know" cannot be read as
      * "shared with nobody".
      */
     sharedWithCount: { type: "integer", nullable: true },
+    inKnowledge: { type: "boolean", nullable: true },
   },
 } as const;
 
-export function serializeFile(file: FileRecord, sharedWithCount?: number) {
+/** The querystring both listing routes take, so a page is requested the same way on each. */
+export const FILE_PAGE_QUERY_SCHEMA = {
+  type: "object",
+  properties: {
+    limit: { type: "integer", minimum: 1, maximum: 200, default: 50 },
+    after: { type: "string", description: "A `nextCursor` from an earlier page." },
+  },
+} as const;
+
+/** The envelope {@link serializeFilePage} produces, so the schema and the serializer cannot drift. */
+export const FILE_PAGE_SCHEMA = {
+  type: "object",
+  required: ["files"],
+  properties: {
+    files: { type: "array", items: FILE_WIRE_SCHEMA },
+    nextCursor: { type: "string", nullable: true },
+  },
+} as const;
+
+export function serializeFile(file: FileRecord, sharedWithCount?: number, inKnowledge?: boolean) {
   return {
     id: file.id,
     filename: file.filename,
@@ -45,7 +67,9 @@ export function serializeFile(file: FileRecord, sharedWithCount?: number) {
     owner: file.ownerPrincipalId,
     origin: file.origin,
     sourceChatId: file.sourceConversationId,
+    sourceRunId: file.sourceRunId,
     sharedWithCount: sharedWithCount ?? null,
+    inKnowledge: inKnowledge ?? null,
   };
 }
 
@@ -54,16 +78,22 @@ export function serializeFile(file: FileRecord, sharedWithCount?: number) {
  *
  * `shareCounts` absent means the caller does not own these Files, and the count is then omitted
  * rather than sent as `0` — how many others hold a File is its owner's business, and `0` would be
- * a different and false answer.
+ * a different and false answer. `knowledgeIds` is absent for the same reason: only an owner may
+ * put a File into Knowledge or take it out, so only an owner is told whether it is in.
  */
 export function serializeFilePage(page: {
   files: readonly FileRecord[];
   nextCursor: string | null;
   shareCounts?: Map<string, number>;
+  knowledgeIds?: ReadonlySet<string>;
 }) {
   return {
     files: page.files.map((file) =>
-      serializeFile(file, page.shareCounts ? (page.shareCounts.get(file.id) ?? 0) : undefined)
+      serializeFile(
+        file,
+        page.shareCounts ? (page.shareCounts.get(file.id) ?? 0) : undefined,
+        page.knowledgeIds ? page.knowledgeIds.has(file.id) : undefined
+      )
     ),
     nextCursor: page.nextCursor,
   };
@@ -109,19 +139,18 @@ export function serializeShare(share: FileShare) {
   };
 }
 
-export const FILE_ERROR_STATUS: Record<FileError["reason"], 400 | 403 | 404 | 413 | 415> = {
+export const FILE_ERROR_STATUS: Record<FileError["reason"], 400 | 404 | 413 | 415> = {
   too_large: 413,
   empty: 400,
   disallowed_type: 415,
   // An image over the pixel limit is a payload the instance refuses to carry, same as one over
   // the byte limit — the person's remedy is to make it smaller either way.
   image_too_large: 413,
-  not_authorized: 403,
   not_found: 404,
   invalid_share: 400,
 };
 
-export function fileErrorStatus(error: unknown): 400 | 403 | 404 | 413 | 415 | null {
+export function fileErrorStatus(error: unknown): 400 | 404 | 413 | 415 | null {
   return error instanceof FileError ? FILE_ERROR_STATUS[error.reason] : null;
 }
 
@@ -134,7 +163,6 @@ export function fileErrorStatus(error: unknown): 400 | 403 | 404 | 413 | 415 | n
  */
 export function contentDisposition(file: FileRecord): string {
   const disposition = isInlineRenderable(file.mediaType) ? "inline" : "attachment";
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: the range bounds printable ASCII.
   const ascii = file.filename.replace(/[^\x20-\x7e]/g, "_");
   return `${disposition}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(file.filename)}`;
 }

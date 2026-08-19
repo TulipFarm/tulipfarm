@@ -16,6 +16,7 @@ import type { ResolvedTurnContext, TurnContextPort } from "@tulipfarm/turn-execu
 import type { EvalCase } from "../case.ts";
 import { LOOP_LIMITS } from "../case.ts";
 import { type EvalSoul, soulContext } from "../eval-soul.ts";
+import { exposedToolsFor } from "../platform-tools.ts";
 
 export interface EvalTurnContextOptions {
   readonly evalCase: EvalCase;
@@ -48,7 +49,7 @@ export function evalTurnContext(options: EvalTurnContextOptions): EvalTurnContex
     messages: [{ role: "system", content: textContent(systemPrompt) }, ...evalCase.input],
     // Untiered, exactly as the L2 tier leaves them: the fixture blocks Tools by name, and inventing
     // tiers here would measure a categorisation no Soul in this repository declares.
-    tools: (evalCase.tools ?? []).map((tool) => ({ ...tool, tier: "untiered" })),
+    tools: exposedToolsFor(evalCase).map((tool) => ({ ...tool, tier: "untiered" })),
     limits: LOOP_LIMITS,
     compacted: false,
   };

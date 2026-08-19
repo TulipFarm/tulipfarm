@@ -42,6 +42,7 @@ const GUIDE_FILES = [
     owner: "user_1",
     origin: "uploaded" as const,
     sourceChatId: "conv_1",
+    sourceRunId: null,
     sharedWithCount: 2,
   },
   {
@@ -53,6 +54,7 @@ const GUIDE_FILES = [
     owner: "user_1",
     origin: "generated" as const,
     sourceChatId: null,
+    sourceRunId: "run_1",
     sharedWithCount: 0,
   },
   {
@@ -64,6 +66,7 @@ const GUIDE_FILES = [
     owner: "user_2",
     origin: "uploaded" as const,
     sourceChatId: null,
+    sourceRunId: null,
     sharedWithCount: null,
   },
 ];

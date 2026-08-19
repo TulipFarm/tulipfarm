@@ -13,7 +13,7 @@
  * was put in the Worker to begin with.
  */
 
-import { isTextualMediaType } from "./limits";
+import { isImageMediaType, isTextualMediaType } from "./limits";
 
 /**
  * Why a File yielded no text.
@@ -82,7 +82,7 @@ export async function extractText(
   if (isTextualMediaType(mediaType)) {
     return capped(new TextDecoder().decode(bytes), maxChars);
   }
-  if (mediaType.startsWith("image/")) {
+  if (isImageMediaType(mediaType)) {
     return { kind: "refused", reason: "image_not_extractable" };
   }
   if (mediaType === "application/pdf") {
@@ -92,9 +92,6 @@ export async function extractText(
 }
 
 /** Whether `extractText` could return text for a type, without reading any bytes to find out. */
-export function isExtractableMediaType(mediaType: string): boolean {
-  return isTextualMediaType(mediaType) || mediaType === "application/pdf";
-}
 
 async function extractPdf(bytes: Uint8Array, maxChars: number): Promise<ExtractionResult> {
   let text: string;

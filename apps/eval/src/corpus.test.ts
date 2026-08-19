@@ -588,3 +588,74 @@ describe("naming a platform Tool instead of copying its declaration", () => {
     expect(withTool).not.toBe(corpusHash([{ ...cased, platformTools: [] }], "soul-1"));
   });
 });
+
+describe("asserting who may read a File the Turn generated", () => {
+  const audience = (extra: Partial<EvalCase>): EvalCase => ({
+    ...valid("audience"),
+    tier: "l3",
+    platformTools: ["file_create"],
+    expect: [{ kind: "generated_file_readable_by", grantee: "role:hr-team" }],
+    ...extra,
+  });
+
+  it("loads a Case that names a well-formed grantee", async () => {
+    await expect(load(corpusDir({ "a.json": audience({}) }))).resolves.toBeDefined();
+  });
+
+  it("refuses a grantee missing its kind", async () => {
+    // `generated_file_not_readable_by: "hr-team"` would pass forever: no share is ever spelled
+    // that way, so the Case asserts nothing while reading as though it guards the boundary.
+    const cased = audience({
+      expect: [{ kind: "generated_file_not_readable_by", grantee: "hr-team" }],
+    });
+    await expect(load(corpusDir({ "a.json": cased }))).rejects.toThrow(/is not a grantee/);
+  });
+
+  it("refuses a grantee kind the File store cannot hold", async () => {
+    const cased = audience({
+      expect: [{ kind: "generated_file_readable_by", grantee: "team:hr" }],
+    });
+    await expect(load(corpusDir({ "a.json": cased }))).rejects.toThrow(/is not a grantee/);
+  });
+
+  it("refuses a grantee with an empty id", async () => {
+    const cased = audience({ expect: [{ kind: "generated_file_readable_by", grantee: "role:" }] });
+    await expect(load(corpusDir({ "a.json": cased }))).rejects.toThrow(/is not a grantee/);
+  });
+
+  it("refuses the audience Expectations on an L2 Case, which persists no share", async () => {
+    const cased = audience({ tier: "l2" });
+    await expect(load(corpusDir({ "a.json": cased }))).rejects.toThrow(/reads persisted state/);
+  });
+
+  it("loads Role assignments for the authoring Agent", async () => {
+    const cased = audience({ agentRoles: ["hr-team"] });
+    await expect(load(corpusDir({ "a.json": cased }))).resolves.toBeDefined();
+  });
+
+  it("refuses Role assignments no tier would make", async () => {
+    // L2 has no database, so the assignment would not happen and the audience it was meant to
+    // widen would stay narrow — a Case that fails for a reason nothing in it explains.
+    const cased = {
+      ...audience({ agentRoles: ["hr-team"] }),
+      tier: "l2",
+      expect: [{ kind: "tool_called", name: "file_create" }],
+    };
+    await expect(load(corpusDir({ "a.json": cased }))).rejects.toThrow(/needs tier "l3"/);
+  });
+
+  it("refuses a Role list that is not a list of ids", async () => {
+    const cased = { ...audience({}), agentRoles: [""] };
+    await expect(load(corpusDir({ "a.json": cased }))).rejects.toThrow(/must be an array of Role/);
+  });
+
+  it("moves the hash, because a Role assignment changes what the Case measures", () => {
+    const cased = audience({ agentRoles: ["hr-team"] });
+    expect(corpusHash([cased], "soul-1")).not.toBe(
+      corpusHash([{ ...cased, agentRoles: ["finance"] }], "soul-1")
+    );
+    expect(corpusHash([cased], "soul-1")).not.toBe(
+      corpusHash([{ ...cased, agentRoles: [] }], "soul-1")
+    );
+  });
+});

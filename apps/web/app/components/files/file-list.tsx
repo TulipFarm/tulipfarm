@@ -1,11 +1,14 @@
 import { Link } from "@remix-run/react";
+import { isExtractableMediaType } from "@tulipfarm/files/limits";
 import {
+  BookOpen,
   Bot,
   Download,
   FileText,
   ImageIcon,
   MessageSquare,
   Paperclip,
+  Play,
   Share2,
   Trash2,
   Upload,
@@ -29,6 +32,7 @@ export function FileList({
   onPreview,
   onAttach,
   onShare,
+  onKnowledge,
   onDelete,
 }: {
   files: readonly LibraryFile[];
@@ -36,6 +40,7 @@ export function FileList({
   onPreview: (file: LibraryFile) => void;
   onAttach?: (file: LibraryFile) => void;
   onShare?: (file: LibraryFile) => void;
+  onKnowledge?: (file: LibraryFile) => void;
   onDelete?: (file: LibraryFile) => void;
 }) {
   return (
@@ -48,6 +53,7 @@ export function FileList({
             onPreview={onPreview}
             onAttach={onAttach}
             onShare={onShare}
+            onKnowledge={onKnowledge}
             onDelete={onDelete}
           />
         </li>
@@ -62,6 +68,7 @@ function FileRow({
   onPreview,
   onAttach,
   onShare,
+  onKnowledge,
   onDelete,
 }: {
   file: LibraryFile;
@@ -69,12 +76,17 @@ function FileRow({
   onPreview: (file: LibraryFile) => void;
   onAttach?: (file: LibraryFile) => void;
   onShare?: (file: LibraryFile) => void;
+  onKnowledge?: (file: LibraryFile) => void;
   onDelete?: (file: LibraryFile) => void;
 }) {
   // Only an owner may share or delete, and the server enforces that. Showing either control to a
   // recipient would offer a power the product does not grant, which is worse than not offering it.
   const owned = file.owner === viewerId;
   const isImage = file.mediaType.startsWith("image/");
+  // Offered only where it could work. The request refuses a type with no text with 415, and an
+  // image — the commonest upload here — is exactly that, so showing the control would mostly be
+  // showing an error waiting to happen.
+  const indexable = isExtractableMediaType(file.mediaType);
   const Icon = isImage ? ImageIcon : FileText;
   const previewable = isPreviewable(file.mediaType);
 
@@ -103,6 +115,12 @@ function FileRow({
               {file.sharedWithCount === 1 ? "Shared with 1" : `Shared with ${file.sharedWithCount}`}
             </Badge>
           ) : null}
+          {file.inKnowledge ? (
+            <Badge variant="info">
+              <BookOpen className="size-3" aria-hidden />
+              In knowledge
+            </Badge>
+          ) : null}
         </div>
         <p className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-xs text-muted-foreground">
           <span>{file.mediaType}</span>
@@ -121,6 +139,18 @@ function FileRow({
               >
                 <MessageSquare className="size-3" aria-hidden />
                 from a chat
+              </Link>
+            </>
+          ) : null}
+          {file.sourceRunId ? (
+            <>
+              <span aria-hidden>·</span>
+              <Link
+                to={`/runs/${encodeURIComponent(file.sourceRunId)}`}
+                className="inline-flex items-center gap-1 text-primary underline underline-offset-2"
+              >
+                <Play className="size-3" aria-hidden />
+                from a run
               </Link>
             </>
           ) : null}
@@ -147,6 +177,21 @@ function FileRow({
           >
             <Paperclip className="size-3.5" aria-hidden />
             Attach
+          </Button>
+        ) : null}
+        {onKnowledge && owned && indexable ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onKnowledge(file)}
+            aria-label={
+              file.inKnowledge
+                ? `Remove ${file.filename} from knowledge`
+                : `Add ${file.filename} to knowledge`
+            }
+          >
+            <BookOpen className="size-3.5" aria-hidden />
+            {file.inKnowledge ? "Remove from knowledge" : "Add to knowledge"}
           </Button>
         ) : null}
         <DownloadButton file={file} />

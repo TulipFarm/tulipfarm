@@ -73,13 +73,34 @@ export interface TurnContextPort {
 }
 
 /**
- * Fetches the bytes of one File the resolved Context named.
+ * Fetches the bytes of one File the resolved Context named, and reads what it says.
  *
  * Separate from `TurnContextPort` because the far side re-authorizes per File at the moment the
  * bytes are read, rather than handing out everything a Turn might want up front.
+ *
+ * `extract` sits on this same port, rather than beside it, so that a host cannot supply Files
+ * without also supplying the means to screen them. An uploaded document is the widest
+ * indirect-injection channel this product has; an optional extractor would let any host silently
+ * turn that screening off, which is the one thing this arrangement exists to prevent.
+ *
+ * `turn-executor` cannot do the reading itself: only the side that owns the File domain can say
+ * what a PDF says, and parsing a hostile document belongs in a process that may be crashed by one.
  */
 export interface TurnAttachmentPort {
   read(runId: string, fileId: string): Promise<Uint8Array | undefined>;
+  /**
+   * The File's words, for the guards only — never for the model, which is sent the bytes.
+   *
+   * `undefined` means this File offers a text guard nothing to read, as an image or a scan does.
+   * It never means screening was skipped.
+   */
+  extract(mediaType: string, bytes: Uint8Array): Promise<string | undefined>;
+}
+
+/** A fetched File paired with the text the guards screen for it, if it offered any. */
+interface ScreenableAttachment {
+  readonly file: ResolvedAttachment;
+  readonly text?: string;
 }
 
 export interface TurnDriverOptions {
@@ -164,8 +185,13 @@ export class TurnDriver {
       from: request.stateStatus,
     };
 
+    // Bytes are fetched before the guard runs because nothing can screen text it has not read.
+    // This costs no vendor call: the Files come from this deployment, so a refused Turn still
+    // reaches no provider, which is the property the guard-first ordering exists to protect.
+    const resolved = await this.resolveAttachments(request.runId, context);
+
     // Input guard runs before model/tool work; a block settles the State with the guard reply.
-    const guarded = await this.guardInput(context, events);
+    const guarded = await this.guardInput(context, resolved, events);
     if (guarded.blocked) {
       return this.complete(
         request,
@@ -175,7 +201,7 @@ export class TurnDriver {
       );
     }
 
-    const attachments = await this.resolveAttachments(request.runId, context);
+    const attachments = resolved.map((each) => each.file);
 
     const input: AgentLoopInput = {
       businessId: request.businessId,
@@ -224,7 +250,6 @@ export class TurnDriver {
     return this.complete(request, events, result, spend);
   }
 
-  /** Guard only the latest user message; transforms affect the model, not persisted history. */
   /**
    * Fetches bytes for the Files the Context named, dropping any the far side refuses.
    *
@@ -232,11 +257,15 @@ export class TurnDriver {
    * for a File this Turn never attached and one whose authority was revoked since. Failing on it
    * would let a revoked File break a Turn that has other content to work with, and the Agent
    * still has the person's text.
+   *
+   * The File and its screenable text are kept apart because they travel to different places: the
+   * File goes to the model, the text goes only to the guards. Folding the text into
+   * `ResolvedAttachment` would send the model the same words twice.
    */
   private async resolveAttachments(
     runId: string,
     context: ResolvedTurnContext
-  ): Promise<ResolvedAttachment[]> {
+  ): Promise<ScreenableAttachment[]> {
     const port = this.options.attachments;
     const refs = context.attachments ?? [];
     if (port === undefined || refs.length === 0) return [];
@@ -244,14 +273,19 @@ export class TurnDriver {
     const fetched = await Promise.all(
       refs.map(async (ref) => {
         const data = await port.read(runId, ref.fileId);
-        return data === undefined ? undefined : { ...ref, data };
+        if (data === undefined) return undefined;
+        // Extracted as the type the Context authorized, not as whatever the bytes claim to be.
+        const text = await port.extract(ref.mediaType, data);
+        return { file: { ...ref, data }, ...(text === undefined ? {} : { text }) };
       })
     );
-    return fetched.filter((file) => file !== undefined);
+    return fetched.filter((each) => each !== undefined);
   }
 
+  /** Guard only the latest user message; transforms affect the model, not persisted history. */
   private async guardInput(
     context: ResolvedTurnContext,
+    attachments: readonly ScreenableAttachment[],
     events: TurnEventWriter
   ): Promise<
     | { readonly blocked: true; readonly message: string }
@@ -262,7 +296,11 @@ export class TurnDriver {
     const current = index < 0 ? undefined : context.messages[index];
     if (current === undefined) return { blocked: false, messages: context.messages };
 
-    const guarded = await this.options.guardrails.input(current.content, events);
+    const guarded = await this.options.guardrails.input(
+      current.content,
+      events,
+      attachments.map((each) => each.text).filter((text) => text !== undefined)
+    );
     if (guarded.blocked) return guarded;
 
     const messages = [...context.messages];

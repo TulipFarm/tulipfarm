@@ -4,7 +4,6 @@ import {
   type AgentLoopInput,
   assembleSystemPrompt,
   InMemoryLoopCheckpointStore,
-  type ModelMessage,
   type ModelOutput,
   type ModelPort,
 } from "@tulipfarm/agent-runtime";
@@ -15,7 +14,8 @@ import { type EvalCase, LOOP_LIMITS, readableLibrary, synthesizeAttachment } fro
 import type { Corpus } from "./corpus.ts";
 import { toolDispatcher } from "./dispatch.ts";
 import { type EvalSoul, soulContext } from "./eval-soul.ts";
-import type { EvalGuardrails, GuardrailDecision } from "./guardrails.ts";
+import { guardInput, guardOutput, screenableText } from "./guard-stage.ts";
+import type { GuardrailDecision } from "./guardrails.ts";
 import { turnGuardrails } from "./guardrails.ts";
 import type { Judge } from "./judge.ts";
 import { scoreJudged } from "./judged.ts";
@@ -196,42 +196,6 @@ function isVendorFault(reason: AgentLoopFailureReason): boolean {
   return reason.startsWith("model_") || reason === "empty_model_output";
 }
 
-/**
- * Guards the latest user message, as `TurnDriver.guardInput` does.
- *
- * Returns the guarded message list, not just the refusal: a guard may *transform* rather than
- * block, and discarding the transform would send the model text production would never have sent.
- */
-async function guardInput(
-  guards: EvalGuardrails,
-  input: readonly ModelMessage[]
-): Promise<
-  | { readonly blocked: true; readonly message: string }
-  | { readonly blocked: false; readonly messages: readonly ModelMessage[] }
-> {
-  let index = input.length - 1;
-  while (index >= 0 && input[index]?.role !== "user") index -= 1;
-  const current = index < 0 ? undefined : input[index];
-  if (current === undefined) return { blocked: false, messages: input };
-
-  const guarded = await guards.input(current.content);
-  if (guarded.blocked) return guarded;
-
-  const messages = [...input];
-  messages[index] = { role: current.role, content: guarded.content };
-  return { blocked: false, messages };
-}
-
-/** Blocked answers are replaced by the guard's message, never dropped. */
-async function guardOutput(
-  guards: EvalGuardrails,
-  output: ModelOutput | undefined
-): Promise<ModelOutput | undefined> {
-  if (output?.kind !== "text") return output;
-  const guarded = await guards.output(output.text);
-  return guarded.blocked ? { kind: "text", text: guarded.message } : output;
-}
-
 async function scored(
   evalCase: EvalCase,
   trial: number,
@@ -306,6 +270,7 @@ async function runL3Trial(
         turnStatus: turn.turnStatus,
         events: turn.events,
         soulCommits: turn.soulCommits,
+        generatedFiles: turn.generatedFiles,
       },
     });
   } catch (cause) {
@@ -400,9 +365,11 @@ async function runTrial(
   });
 
   try {
-    // Ordering is the driver's: the input guard settles the turn before any model or Tool work,
-    // so a refused request must cost nothing and must never reach the vendor.
-    const guarded = await guardInput(guards, evalCase.input);
+    // Ordering is the driver's: bytes are resolved first because nothing can screen text it has
+    // not read, then the input guard settles the turn before any model or Tool work — so a
+    // refused request must cost nothing and must never reach the vendor.
+    const attached = (evalCase.attachments ?? []).map(synthesizeAttachment);
+    const guarded = await guardInput(guards, evalCase.input, await screenableText(attached));
     if (guarded.blocked) {
       return await scored(evalCase, trial, vacuous, spend, retries, guards.decisions, judge, {
         systemPrompt,
@@ -423,9 +390,7 @@ async function runTrial(
       messages: [{ role: "system", content: textContent(systemPrompt) }, ...guarded.messages],
       tools: exposedToolsFor(evalCase),
       limits: LOOP_LIMITS,
-      ...(evalCase.attachments === undefined
-        ? {}
-        : { attachments: evalCase.attachments.map(synthesizeAttachment) }),
+      ...(attached.length === 0 ? {} : { attachments: attached }),
     };
 
     const outcome = await loop.run(input);

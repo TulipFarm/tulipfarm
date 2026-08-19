@@ -15,6 +15,7 @@ import { citext } from "@electric-sql/pglite/contrib/citext";
 import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
 import { vector } from "@electric-sql/pglite-pgvector";
 import {
+  FILE_KNOWLEDGE_STATEMENTS,
   FILE_ORIGIN_STATEMENTS,
   FILE_SHARE_STATEMENTS,
   FILE_STORAGE_STATEMENTS,
@@ -92,6 +93,7 @@ async function appWith(): Promise<Harness> {
     ...FILE_STORAGE_STATEMENTS,
     ...FILE_ORIGIN_STATEMENTS,
     ...FILE_SHARE_STATEMENTS,
+    ...FILE_KNOWLEDGE_STATEMENTS,
   ]) {
     await database.exec(sql);
   }

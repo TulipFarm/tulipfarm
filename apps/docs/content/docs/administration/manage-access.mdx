@@ -79,6 +79,35 @@ in it changes with it.
 A team holds people and levels. Teams do not go inside other teams. A team can be given an expiry,
 which is useful for contractors and for temporary access during an incident.
 
+## Give an agent a team
+
+An agent can be in a team too, and it decides who can open the documents that agent writes.
+
+By default, a document an agent makes can be opened only by the person who asked for it. Put the
+agent in a team, and everyone in that team can open it as well — nobody has to forward anything.
+An HR agent in the **HR** team writes reports the whole HR team can read.
+
+<Steps>
+  <Step>
+    Open the **Agents** tab.
+  </Step>
+  <Step>
+    Find the agent and pick a team, then choose **Add**.
+  </Step>
+</Steps>
+
+To let one more person in — a manager who is not in HR day to day — give that person the same team
+on the **People** tab. Access is checked fresh every time a document is opened, so removing the
+agent or the person from the team takes effect immediately.
+
+Only teams that were set up to accept agents are offered. A team authored for people only will not
+appear in the list.
+
+<Callout type="warn">
+  Being in a team does not let an agent *read* more. An agent can only open the files its caller
+  could already open. The team decides who may read what the agent **writes**.
+</Callout>
+
 ## Check why something is allowed
 
 When access does not behave as expected, do not guess. Ask.
@@ -119,8 +148,9 @@ nothing for a person who was not allowed anyway.
 
 ## Things that have no screen yet
 
-Registering a non-human actor — an agent, routine, integration, API client, or service — is done
-through `POST /api/v1/authz/principals`. There is no screen for it today.
+Registering a routine, integration, API client, or service is done through
+`POST /api/v1/authz/principals`. There is no screen for those today. Agents are the exception:
+giving one a team on the **Agents** tab registers it for you.
 
 ## Where to go next
 

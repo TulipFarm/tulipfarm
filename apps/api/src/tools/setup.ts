@@ -82,11 +82,18 @@ export function buildToolRegistry(services: {
 
   if (services.files) {
     const svc = services.files;
-    // `userId` and nothing else: an Agent's reach into the library is exactly its caller's, so the
-    // Agent's own identity must not widen it. A File the person cannot open stays closed.
-    registerFamily(FILE_TOOLS, ({ userId }) => ({
+    // `principalId` is `userId` and nothing else: an Agent's reach into the library is exactly its
+    // caller's, so the Agent's own identity must not widen it. A File the person cannot open stays
+    // closed. `agentId` is carried beside it and read only when the Agent *writes*, to share what
+    // it wrote with the Roles that Agent holds — the same audience the Worker host applies, so a
+    // File does not get a different reader set depending on which host ran the Tool.
+    registerFamily(FILE_TOOLS, ({ userId, agentId, runId }) => ({
       businessId: DEPLOYMENT_BUSINESS_ID,
       principalId: userId,
+      ...(agentId === undefined ? {} : { agentId }),
+      // Authority still comes from `userId` alone; the Run is recorded on what gets made, never
+      // consulted for what may be read.
+      ...(runId === undefined ? {} : { runId }),
       service: svc,
     }));
   }

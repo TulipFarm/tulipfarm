@@ -1,20 +1,7 @@
-import { randomUUID } from "node:crypto";
 import { delegationCatalogOf, withDelegatedAuthority } from "@tulipfarm/agent-runtime";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
-import { FILE_TOOLS, FileService, type FileToolContext, PgFileRepo } from "@tulipfarm/files";
-import {
-  KNOWLEDGE_TOOLS,
-  KnowledgeService,
-  type KnowledgeToolContext,
-  PageReadGate,
-  PgKnowledgeAclRepo,
-  PgKnowledgeChunkRepo,
-  PgKnowledgeLinksRepo,
-  PgKnowledgePageRepo,
-  PgKnowledgeRevisionRepo,
-  PgKnowledgeSpaceOverrideRepo,
-  PgKnowledgeSpaceRepo,
-} from "@tulipfarm/knowledge";
+import { FILE_TOOLS, type FileToolContext } from "@tulipfarm/files";
+import { KNOWLEDGE_TOOLS, type KnowledgeToolContext, PageReadGate } from "@tulipfarm/knowledge";
 import { KV_TOOLS, KvService, type KvToolContext, PgKvRepo } from "@tulipfarm/kv";
 import {
   MEMORY_DOCUMENT_TOOLS,
@@ -26,8 +13,6 @@ import type { ArtifactService, DurableWaitManager } from "@tulipfarm/run-kernel"
 import {
   type BlobPort,
   ChildLinkAncestryStore,
-  PgGroupRepo,
-  PgRoleRepo,
   type Queryable,
   type TransactionPort,
 } from "@tulipfarm/storage";
@@ -35,7 +20,6 @@ import {
   type ApiToolDefinition,
   ApprovalsRepo,
   buildLiveAuthorityLayerResolver,
-  collectHeldRoleIds,
   InMemoryToolCatalog,
   LiveToolGate,
   localDispatchRefusal,
@@ -45,6 +29,8 @@ import {
   type TurnToolDispatcher,
   toToolDef,
 } from "@tulipfarm/tool-host";
+import { buildWorkerFileService } from "../files/service";
+import { buildWorkerKnowledgeService } from "../knowledge/service";
 import type { SoulEmbeddings } from "./soul-embeddings";
 
 /**
@@ -124,20 +110,9 @@ function hostedFamilies(options: LocalToolHostOptions): readonly HostedFamily<ne
   };
   const embeddings = options.embeddings;
 
-  const knowledge = new KnowledgeService({
-    pages: new PgKnowledgePageRepo(options.db),
-    chunks: new PgKnowledgeChunkRepo(options.db),
-    revisions: new PgKnowledgeRevisionRepo(options.db),
-    spaces: new PgKnowledgeSpaceRepo(options.db),
-    links: new PgKnowledgeLinksRepo(options.db),
-    overrides: new PgKnowledgeSpaceOverrideRepo(options.db),
+  const knowledge = buildWorkerKnowledgeService({
+    db: options.db,
     embeddings,
-    // A Page written by a Tool is gated the same as one written through the UI; without this the
-    // write path would differ by caller and an agent-authored Page would be readable by nobody.
-    acl: new PgKnowledgeAclRepo(options.db),
-    // `sourceRetrieval` is deliberately absent: authorizing connected-source hits needs the Soul
-    // and provider credentials. `query_knowledge` declares that need and is refused below, so no
-    // hosted Tool can reach the degraded wiki-only path.
     ...(options.enqueueIndexJob === undefined ? {} : { enqueueIndex: options.enqueueIndexJob }),
   });
 
@@ -145,33 +120,18 @@ function hostedFamilies(options: LocalToolHostOptions): readonly HostedFamily<ne
   // could not read even an unrestricted Page.
   const pageGate = new PageReadGate(options.db);
 
-  // Composed without `imagePolicy`, the one dependency that would need a live Soul. That is not a
-  // degraded service here: `imagePolicy` is read by `upload`, and the hosted Tools reach only
-  // `read`, `content`, `list`, `listSharedWithMe` and `generate`. The context type is a `Pick`
-  // over exactly those, so the Soul-dependent branch is unreachable rather than merely unused.
-  const files = new FileService({
-    repo: new PgFileRepo(options.db),
-    blobs: options.blobs,
-    newId: options.newId ?? randomUUID,
-    // The same live answer the control plane uses. A second implementation of "which Roles does
-    // this person hold" is how a File stays readable to someone a Role no longer contains.
-    rolesOf: (businessId, principalId) =>
-      collectHeldRoleIds(
-        {
-          roles: new PgRoleRepo(options.transactions),
-          groups: new PgGroupRepo(options.transactions),
-        },
-        businessId,
-        principalId,
-        new Date()
-      ),
-  });
+  const files = buildWorkerFileService(options);
   const fileFamily: HostedFamily<FileToolContext> = {
     definitions: FILE_TOOLS,
-    // `userId`, never `agentId`: an Agent's reach into the library is exactly its caller's.
+    // `principalId` is `userId`, never `agentId`: an Agent's reach into the library is exactly
+    // its caller's. `agentId` rides alongside it, and is read only when the Agent *writes* a File,
+    // to share it with the Roles that Agent holds. It widens no read.
     context: (ctx) => ({
       businessId: DEPLOYMENT_BUSINESS_ID,
       principalId: ctx.userId,
+      ...(ctx.agentId === undefined ? {} : { agentId: ctx.agentId }),
+      // Recorded on a File this Run authors; it never widens what the Run may read.
+      ...(ctx.runId === undefined ? {} : { runId: ctx.runId }),
       service: files,
     }),
   };

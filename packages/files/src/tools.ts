@@ -1,8 +1,9 @@
 import { ajv } from "@tulipfarm/schema";
 import { type ApiToolDefinition, defineApiTool, err, ok } from "@tulipfarm/tool-host";
-import { extractText, isExtractableMediaType } from "./extract";
+import { extractText } from "./extract";
 import {
   DEFAULT_FILE_LIST_LIMIT,
+  isExtractableMediaType,
   MAX_FILE_BYTES,
   MAX_FILE_LIST_LIMIT,
   MAX_FILE_READ_CHARS,
@@ -16,10 +17,23 @@ import { FileError, type FileService } from "./service";
  *
  * `principalId` is the calling person, never the Agent: an Agent's reach into the library is
  * exactly its caller's, so a File the person could not open stays closed however the Agent asks.
+ * Reading and writing are asymmetric on purpose — see {@link FileToolContext.agentId}.
  */
 export interface FileToolContext {
   readonly businessId: string;
   readonly principalId: string;
+  /**
+   * The Agent making this call, used only to widen who may read a File it *writes*.
+   *
+   * This does not qualify the rule above. Reads stay bound to `principalId`, because an Agent
+   * reads attachments from untrusted sources and a File the caller cannot open must stay closed.
+   * Writing is the opposite problem: the Agent authored the bytes, so nothing is being exposed
+   * that the Agent did not just produce, and confining it to one reader is what makes a team
+   * Agent's output useless to the team.
+   */
+  readonly agentId?: string;
+  /** The Run this call belongs to; recorded on any File it creates. */
+  readonly runId?: string;
   readonly service: Pick<
     FileService,
     "read" | "content" | "list" | "listSharedWithMe" | "generate"
@@ -289,6 +303,8 @@ export const fileCreateTool = defineApiTool<FileToolContext>({
         content,
         ...(title === undefined ? {} : { title }),
         readableBy: { kind: "user", id: ctx.principalId },
+        ...(ctx.agentId === undefined ? {} : { authoredByAgentId: ctx.agentId }),
+        ...(ctx.runId === undefined ? {} : { sourceRunId: ctx.runId }),
       });
     } catch (error) {
       // A refused render is the Agent's to fix — it wrote something too long or too deep — so it

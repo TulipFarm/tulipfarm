@@ -14,9 +14,15 @@
  */
 
 import type { BlobPort, BlobRef } from "@tulipfarm/storage";
-import { boundImage, type ImageBoundPolicy } from "./bound";
+import { generatedAudience, roleGrantees } from "./audience";
+import { boundStoredImage, type ImageBoundPolicy } from "./bound";
 import { normalizeFilename } from "./filename";
-import { BUSINESS_PRINCIPAL_ID, isAllowedMediaType, MAX_FILE_BYTES } from "./limits";
+import {
+  BUSINESS_PRINCIPAL_ID,
+  isAllowedMediaType,
+  isImageMediaType,
+  MAX_FILE_BYTES,
+} from "./limits";
 import { extensionForFormat, type RenderFormat, renderDocument } from "./render";
 import {
   encodeFileCursor,
@@ -28,12 +34,18 @@ import {
 } from "./repo";
 import { resolveMediaType, SNIFF_BYTES } from "./sniff";
 
+/**
+ * Why the File domain refused.
+ *
+ * There is deliberately no "not authorized" reason. A caller who may not read a File is told
+ * `not_found`, the same answer a File that does not exist gets, so that a probe cannot use the
+ * difference to learn which File ids are real.
+ */
 export type UploadRejection =
   | "too_large"
   | "empty"
   | "disallowed_type"
   | "image_too_large"
-  | "not_authorized"
   | "not_found"
   | "invalid_share";
 
@@ -71,6 +83,10 @@ export interface GenerateRequest {
    * File that nobody can read is the same as one that was never made.
    */
   readonly readableBy?: FileGrantee;
+  /** The Agent writing this File, whose Roles join the audience. See {@link generatedAudience}. */
+  readonly authoredByAgentId?: string;
+  /** The Run authoring this File, so the library can say where a generated File came from. */
+  readonly sourceRunId?: string;
 }
 
 export interface FileServiceDeps {
@@ -90,7 +106,8 @@ export interface FileServiceDeps {
    * A port rather than a dependency because the one correct answer — direct assignments plus
    * group-held Roles, minus anything expired — already exists in the authority resolver, and a
    * second implementation of it here is precisely how a File would stay readable to someone the
-   * Role no longer contains. Absent means no Role-based sharing, never "all Roles".
+   * Role no longer contains. Absent means no Role-based sharing, never "all Roles". Asked of an
+   * authoring Agent's Principal too, since the question is the same for either kind.
    */
   readonly rolesOf?: (businessId: string, principalId: string) => Promise<readonly string[]>;
 }
@@ -193,7 +210,19 @@ export class FileService {
       );
     }
 
-    const bounded = await this.bound(ref, mediaType, sample);
+    const bounded = isImageMediaType(mediaType)
+      ? await boundStoredImage(
+          this.deps.blobs,
+          ref,
+          mediaType,
+          sample,
+          (await this.deps.imagePolicy?.()) ?? {},
+          (orphan) => this.discard(orphan)
+        )
+      : { ref, sizeBytes: sample.size };
+    if (bounded.refused !== undefined) {
+      throw new FileError("image_too_large", bounded.refused);
+    }
 
     return await this.deps.repo.create({
       id: this.deps.newId(),
@@ -229,6 +258,9 @@ export class FileService {
       throw new FileError("too_large", `rendered document exceeds ${MAX_FILE_BYTES} bytes`);
     }
 
+    // Resolved before a byte is written: a Role lookup that throws must cost no compensating delete.
+    const audience = await generatedAudience(request, this.deps.rolesOf);
+
     const filename = withExtension(normalizeFilename(request.filename), request.format);
     const ref = await this.deps.blobs.put(once(rendered.bytes), rendered.mediaType);
     const file = await this.deps.repo.create({
@@ -241,13 +273,10 @@ export class FileService {
       sizeBytes: rendered.bytes.byteLength,
       blob: ref,
       origin: "generated",
+      ...(request.sourceRunId === undefined ? {} : { sourceRunId: request.sourceRunId }),
     });
 
-    const grantee = request.readableBy;
-    if (
-      grantee !== undefined &&
-      !(grantee.kind === "user" && grantee.id === BUSINESS_PRINCIPAL_ID)
-    ) {
+    for (const grantee of audience) {
       await this.deps.repo.share(request.businessId, file.id, grantee, BUSINESS_PRINCIPAL_ID);
     }
     return file;
@@ -264,46 +293,6 @@ export class FileService {
    * The stored bytes are the bounded ones, so a File is within the limit once and stays that way
    * — and what the person sees back in the message is exactly what the model was given.
    */
-  private async bound(
-    ref: BlobRef,
-    mediaType: string,
-    sample: { bytes: Uint8Array; size: number }
-  ): Promise<{ ref: BlobRef; sizeBytes: number }> {
-    if (!mediaType.startsWith("image/")) return { ref, sizeBytes: sample.size };
-
-    const policy = (await this.deps.imagePolicy?.()) ?? {};
-    // The head carries the dimensions, so the common cases — inside the limit, or refused —
-    // decide without reading the object back.
-    const headOutcome = await boundImage(sample.bytes, mediaType, {
-      ...policy,
-      downscaleImages: false,
-    });
-    if (headOutcome.kind === "accepted") return { ref, sizeBytes: sample.size };
-    if (policy.downscaleImages !== true) {
-      await this.discard(ref);
-      throw new FileError("image_too_large", headOutcome.reason);
-    }
-
-    const outcome = await boundImage(await this.readAll(ref), mediaType, policy);
-    if (outcome.kind === "refused") {
-      await this.discard(ref);
-      throw new FileError("image_too_large", outcome.reason);
-    }
-    const replacement = await this.deps.blobs.put(once(outcome.data), mediaType);
-    await this.discard(ref);
-    return { ref: replacement, sizeBytes: outcome.data.byteLength };
-  }
-
-  private async readAll(ref: BlobRef): Promise<Uint8Array> {
-    const chunks: Uint8Array[] = [];
-    let total = 0;
-    for await (const chunk of await this.deps.blobs.get(ref)) {
-      chunks.push(chunk);
-      total += chunk.byteLength;
-    }
-    return concat(chunks, total);
-  }
-
   /**
    * The identities a read can be justified by: the reader, and every Role they hold right now.
    *
@@ -315,10 +304,8 @@ export class FileService {
     businessId: string,
     principalId: string
   ): Promise<readonly FileGrantee[]> {
-    const grantees: FileGrantee[] = [{ kind: "user", id: principalId }];
     const roles = await this.deps.rolesOf?.(businessId, principalId);
-    for (const roleId of roles ?? []) grantees.push({ kind: "role", id: roleId });
-    return grantees;
+    return [{ kind: "user", id: principalId }, ...roleGrantees(roles ?? [])];
   }
 
   /**
@@ -382,6 +369,25 @@ export class FileService {
     return await this.deps.repo.listShares(businessId, id);
   }
 
+  /**
+   * Everyone who may read this File right now: its owner, plus every grantee of a share.
+   *
+   * The list Knowledge restricts an indexed File's Page to, which is why it is derived here rather
+   * than assembled by the caller. A second answer to "who may read this File" is how a File's
+   * passage stays searchable by somebody its share no longer names.
+   */
+  async readers(
+    businessId: string,
+    id: string,
+    ownerPrincipalId: string
+  ): Promise<readonly FileGrantee[]> {
+    const file = await this.readAsOwner(businessId, id, ownerPrincipalId);
+    const shares = await this.deps.repo.listShares(businessId, id);
+    const readers: FileGrantee[] = [{ kind: "user", id: file.ownerPrincipalId }];
+    for (const share of shares) readers.push({ kind: share.kind, id: share.id });
+    return readers;
+  }
+
   /** One page of Files shared with the caller, excluding the ones they already own. */
   async listSharedWithMe(
     businessId: string,
@@ -408,6 +414,43 @@ export class FileService {
    * Every act of sharing goes through here rather than through `read`, because `read` now also
    * admits recipients — and a recipient who could re-share would make revocation meaningless.
    */
+  /**
+   * Records the owner's request that this File be in Knowledge, and reports who may read it.
+   *
+   * Owner-only, and the flag lands before the caller enqueues anything: a job that starts before
+   * the request is durable could not tell a live opt-in from one already withdrawn.
+   */
+  async requestKnowledge(
+    businessId: string,
+    id: string,
+    ownerPrincipalId: string
+  ): Promise<readonly FileGrantee[]> {
+    await this.readAsOwner(businessId, id, ownerPrincipalId);
+    await this.deps.repo.setKnowledgeRequested(businessId, id, new Date());
+    return await this.readers(businessId, id, ownerPrincipalId);
+  }
+
+  /**
+   * Withdraws that request, so an index job still in flight stops rather than finishing.
+   *
+   * Cleared *before* the caller removes the Page, never after: reversed, a job that read the flag
+   * in between would write a Page nothing is left to remove it.
+   */
+  async clearKnowledgeRequest(
+    businessId: string,
+    id: string,
+    ownerPrincipalId: string
+  ): Promise<void> {
+    await this.readAsOwner(businessId, id, ownerPrincipalId);
+    await this.deps.repo.setKnowledgeRequested(businessId, id, null);
+  }
+
+  /** Whether the owner's request to index this File still stands, for the job that acts on it. */
+  async knowledgeRequested(businessId: string, id: string): Promise<boolean> {
+    const file = await this.deps.repo.get(businessId, id);
+    return file?.knowledgeRequestedAt != null;
+  }
+
   private async readAsOwner(
     businessId: string,
     id: string,

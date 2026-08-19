@@ -57,13 +57,14 @@ import { DeliveryTargetRegistry } from "./delivery";
 import { createEffortInference, runEventEffortPin } from "./effort-inference";
 import { EventOutboxDispatcher } from "./event-dispatcher";
 import { RunExecutorRegistry } from "./executors";
+import { buildWorkerFileService } from "./files/service";
 import { createHookExecutor } from "./hooks/executor";
 import { InternalApiClient } from "./internal/client";
 import { HttpDeliveryHost } from "./internal/delivery-host";
 import { HttpTurnHost } from "./internal/turn-host";
-import { startJobConsumers } from "./job-consumers";
 import { SoulLlm } from "./llm";
 import { type LoopLogger, runLoop } from "./loop";
+import { startMaintenanceConsumers } from "./maintenance";
 import { LlmModelPort } from "./model";
 import { MODEL_BUDGET_EXHAUSTION_POLICY } from "./model-budget";
 import { ProviderGate } from "./model-gate";
@@ -192,27 +193,6 @@ export async function main(): Promise<void> {
   });
   const turnHost = new HttpTurnHost(internalApi);
 
-  let consumersReady = !config.maintenance;
-  const jobBoss = config.maintenance
-    ? await startJobConsumers({
-        databaseUrl: config.databaseUrl,
-        database: pool,
-        log: logger,
-        businessId: config.businessId,
-        taskStore: new TaskRepo(transactions),
-        taskSignals: new TaskSignalsGatherer(turnHost),
-        curatorSweep: () =>
-          sweepCurator({
-            businessId: config.businessId,
-            backlog: (input) => listUsersWithDueWork(pool, input),
-            api: internalApi,
-            log: logger,
-          }),
-        bundles: new PgBundleStore(transactions),
-      })
-    : undefined;
-  consumersReady = true;
-
   const killSwitchRepo = new KillSwitchRepo(transactions);
   // The API owns the audit ledger, so a Worker-side denial leaves its evidence in the Run's own
   // event history plus this log line; the stop itself is enforced identically either way.
@@ -279,6 +259,22 @@ export async function main(): Promise<void> {
     secrets,
     log: logger,
   });
+
+  let consumersReady = !config.maintenance;
+  const jobBoss = config.maintenance
+    ? await startMaintenanceConsumers({
+        databaseUrl: config.databaseUrl,
+        pool,
+        transactions,
+        businessId: config.businessId,
+        log: logger,
+        turnHost,
+        internalApi,
+        blobs,
+        embeddings: localEmbeddings,
+      })
+    : undefined;
+  consumersReady = true;
 
   // Tools that need no live Soul, no renderer and no provider credential run here, next to the
   // Run they belong to; everything else still dispatches over the control plane.

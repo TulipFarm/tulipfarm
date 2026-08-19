@@ -5,7 +5,6 @@ import type {
   ModelInvocationResult,
   ModelMessage,
   ModelUsage,
-  ResolvedAttachment,
 } from "../ports";
 import { ModelInvocationError } from "../ports";
 import type { AgentLoopCheckpoint } from "./checkpoint";
@@ -19,13 +18,14 @@ import type {
   ExposedTool,
   ToolDispatchResult,
 } from "./contract";
+import { deepestErrorMessage, EventSinkFailure, isInputRequired } from "./diagnostics";
 import { extractSkillName, narrowToolsToSkill } from "./narrowing";
 import {
   extractRereadFile,
   FILE_READ_TOOL,
-  mergeAttachments,
   type RereadFile,
   rememberReread,
+  resolveIterationAttachments,
 } from "./reread";
 import type { AgentLoopResumeState } from "./resume";
 import type { NormalizedToolCall } from "./transcript";
@@ -42,20 +42,6 @@ import {
 const ITERATION_BUDGET_KEY = "iterations";
 const TOKEN_BUDGET_KEY = "tokens";
 const COST_BUDGET_KEY = "costMicros";
-
-/** Event-sink failures rethrow as sink failures, not model failures. */
-class EventSinkFailure extends Error {
-  constructor(readonly cause: unknown) {
-    super("event sink failed");
-  }
-}
-
-/** Walks `.cause` to the innermost diagnostic message. */
-function deepestErrorMessage(diagnostic: unknown): string {
-  let current = diagnostic;
-  while (current instanceof Error && current.cause !== undefined) current = current.cause;
-  return current instanceof Error ? current.message : String(current);
-}
 
 export class AgentLoop {
   constructor(private readonly deps: AgentLoopDependencies) {}
@@ -428,29 +414,6 @@ export class AgentLoop {
       return undefined;
     };
 
-    /**
-     * The bytes this iteration sends: what the Turn attached, plus what the Agent re-read.
-     *
-     * Resolved per iteration rather than once, because the port's refusal *is* the authorization
-     * check. A share revoked between the `file_read` and the next step comes back as nothing and
-     * the File stops being sent, which no cached copy could honour.
-     */
-    const attachmentsForIteration = async (): Promise<readonly ResolvedAttachment[]> => {
-      const attached = input.attachments ?? [];
-      const port = this.deps.attachments;
-      if (port === undefined || reread.length === 0) return attached;
-      const fetched = await Promise.all(
-        reread.map(async (file) => {
-          const data = await port.read(input.runId, file.fileId);
-          return data === undefined ? undefined : { ...file, data };
-        })
-      );
-      return mergeAttachments(
-        attached,
-        fetched.filter((file) => file !== undefined)
-      );
-    };
-
     for (;;) {
       // Order is load-bearing for the whole iteration: cancellation is checked before any spend,
       // the iteration ceiling before the budget is charged for an iteration that cannot run, and
@@ -487,7 +450,12 @@ export class AgentLoop {
       counters.iterations += 1;
       await emit("iteration_started");
 
-      const attachments = await attachmentsForIteration();
+      const attachments = await resolveIterationAttachments(
+        input.attachments ?? [],
+        reread,
+        this.deps.attachments,
+        input.runId
+      );
       const request: ModelInvocationRequest = {
         requestId: `${input.runId}:${input.stateId}:${counters.iterations}`,
         modelProfileId: input.modelProfileId,
@@ -613,13 +581,4 @@ export class AgentLoop {
       return finish({ status: "completed", output, ...counters }, "completed");
     }
   }
-}
-
-function isInputRequired(name: string, output: unknown): boolean {
-  return (
-    name === "request_input" &&
-    typeof output === "object" &&
-    output !== null &&
-    (output as { suspendRun?: unknown }).suspendRun === true
-  );
 }

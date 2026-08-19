@@ -13,9 +13,9 @@ async function encoded(
 
 describe("imageSize", () => {
   it("reads a PNG's dimensions from its IHDR chunk", async () => {
-    expect(imageSize(await encoded(640, 480, "image/png"), "image/png")).toEqual({
-      width: 640,
-      height: 480,
+    expect(imageSize(await encoded(64, 48, "image/png"), "image/png")).toEqual({
+      width: 64,
+      height: 48,
     });
   });
 
@@ -34,10 +34,10 @@ describe("imageSize", () => {
   });
 
   it("does not confuse width with height, which a square fixture would hide", async () => {
-    const size = imageSize(await encoded(800, 200, "image/png"), "image/png");
+    const size = imageSize(await encoded(80, 20, "image/png"), "image/png");
 
-    expect(size?.width).toBe(800);
-    expect(size?.height).toBe(200);
+    expect(size?.width).toBe(80);
+    expect(size?.height).toBe(20);
   });
 
   it("reads a lossy WebP, whose size sits behind the VP8 sync code", () => {
