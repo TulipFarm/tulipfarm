@@ -7,6 +7,7 @@ export {
   UNATTRIBUTED_APPROVAL_DEMAND,
 } from "./approvals/evidence";
 export {
+  listPendingRoutineApprovals,
   listPendingToolApprovals,
   type PendingToolApproval,
 } from "./approvals/pending";
@@ -99,6 +100,7 @@ export type {
   SurfaceActionStore,
   SurfaceArtifactStore,
 } from "./surface-ports";
+export { executeToolWithTimeout, withAbortTimeout } from "./timeout";
 export {
   type ApprovalDecision,
   type ApprovalGate,

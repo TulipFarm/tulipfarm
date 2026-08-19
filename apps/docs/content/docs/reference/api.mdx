@@ -17,7 +17,7 @@ are the pre-session exceptions.
 
 Scripts can use personal API tokens as bearer credentials. Tokens are created under
 `POST /api/v1/auth/tokens`, have the `tulip_` prefix, and are shown only once. See
-[Issue an API token](/docs/guides/issue-an-api-token).
+[Issue an API token](/docs/using-tulipfarm/issue-an-api-token).
 
 ```bash
 curl -X POST https://tulipfarm.example/api/v1/auth/tokens \
@@ -43,43 +43,79 @@ Most error responses are JSON objects with an `error` string. Validation errors 
 | `409` | Concurrency or idempotency conflict, such as a stale write or replayed chat turn. |
 | `422` | Request validation failed. Resource validation includes a JSON Pointer `path` when available. |
 
-## Endpoint groups
+## Endpoint families
 
-The table is grouped by the tags in the live OpenAPI inventory. `/api/v1/internal/*` is
-service-only machinery called by the Worker and is not part of the public API. Closed auth adapter
-routes for unshipped sign-in/elevation features are deliberately omitted.
+Every route lives under `/api/v1`, apart from the three health checks. The families below are the
+OpenAPI tags, and each one is a place to look rather than a list to memorise.
 
-| Tag | Count | Public endpoints |
-| --- | ---: | --- |
-| `activity` | 1 | `GET /api/v1/activities` |
-| `admin` | 2 | `GET /api/v1/admin/operations`<br />`POST /api/v1/admin/operations/{action}` |
-| `agents` | 3 | `GET /api/v1/agents`<br />`POST /api/v1/agents/{id}/changesets`<br />`GET /api/v1/agents/{name}` |
-| `approvals` | 4 | `GET /api/v1/approvals`<br />`POST /api/v1/approvals/{approvalId}/decide`<br />`POST /api/v1/approvals/{id}/decisions`<br />`GET /api/v1/inbox` |
-| `auth` | 9 | `POST /api/v1/auth/change-password`<br />`POST /api/v1/auth/invites/accept`<br />`POST /api/v1/auth/invites/preview`<br />`POST /api/v1/auth/login`<br />`POST /api/v1/auth/logout`<br />`GET /api/v1/auth/session`<br />`POST /api/v1/auth/tokens`<br />`GET /api/v1/auth/tokens`<br />`DELETE /api/v1/auth/tokens/{id}` |
-| `chat` | 7 | `POST /api/v1/chat`<br />`POST /api/v1/chat/runs/{runId}/stop`<br />`GET /api/v1/chats`<br />`PUT /api/v1/chats/{id}`<br />`GET /api/v1/chats/{id}`<br />`GET /api/v1/chats/{id}/debug-context`<br />`GET /api/v1/chats/{id}/messages` |
-| `feedback` | 3 | `GET /api/v1/chats/{id}/feedback`<br />`POST /api/v1/messages/{messageId}/feedback`<br />`DELETE /api/v1/messages/{messageId}/feedback` |
-| `guardrails` | 2 | `GET /api/v1/guardrails`<br />`POST /api/v1/guardrails/changesets` |
-| `identity` | 10 | `GET /api/v1/identity/api-clients`<br />`POST /api/v1/identity/api-clients`<br />`POST /api/v1/identity/api-clients/{id}/disable`<br />`POST /api/v1/identity/api-clients/{id}/rotate`<br />`POST /api/v1/identity/channel-links/confirm`<br />`POST /api/v1/identity/channel-links/preview`<br />`POST /api/v1/identity/external-links`<br />`GET /api/v1/identity/external-links`<br />`POST /api/v1/identity/external-links/redeem`<br />`DELETE /api/v1/identity/external-links/{provider}/{externalSubject}` |
-| `ingress` | 1 | `POST /api/v1/hooks/integrations/{name}` |
-| `integrations` | 18 | `GET /api/v1/integrations`<br />`GET /api/v1/integrations/auth/callback`<br />`POST /api/v1/integrations/inspect`<br />`POST /api/v1/integrations/install`<br />`POST /api/v1/integrations/{name}/auth/start/{step}`<br />`POST /api/v1/integrations/github/installations/{installationId}/disconnect`<br />`GET /api/v1/integrations/github/installations/{installationId}/repos`<br />`GET /api/v1/integrations/github/soul-repo`<br />`POST /api/v1/integrations/github/soul-repo`<br />`POST /api/v1/integrations/github/soul-repo/create`<br />`GET /api/v1/integrations/github/status`<br />`POST /api/v1/integrations/slack/bind`<br />`GET /api/v1/integrations/slack/routes`<br />`DELETE /api/v1/integrations/slack/routes/{routeId}`<br />`GET /api/v1/integrations/{name}`<br />`DELETE /api/v1/integrations/{name}`<br />`POST /api/v1/integrations/{name}/connect`<br />`POST /api/v1/integrations/{name}/disconnect` |
-| `knowledge` | 23 | `POST /api/v1/knowledge/backfill`<br />`GET /api/v1/knowledge/index-status`<br />`GET /api/v1/knowledge/overview`<br />`POST /api/v1/knowledge/pages`<br />`GET /api/v1/knowledge/pages`<br />`GET /api/v1/knowledge/pages/mentions`<br />`GET /api/v1/knowledge/pages/{id}`<br />`PUT /api/v1/knowledge/pages/{id}`<br />`DELETE /api/v1/knowledge/pages/{id}`<br />`GET /api/v1/knowledge/pages/{id}/backlinks`<br />`POST /api/v1/knowledge/pages/{id}/revisions`<br />`GET /api/v1/knowledge/pages/{id}/revisions`<br />`POST /api/v1/knowledge/reindex`<br />`POST /api/v1/knowledge/search`<br />`POST /api/v1/knowledge/spaces`<br />`GET /api/v1/knowledge/spaces`<br />`GET /api/v1/knowledge/spaces/{id}`<br />`PUT /api/v1/knowledge/spaces/{id}`<br />`DELETE /api/v1/knowledge/spaces/{id}`<br />`GET /api/v1/knowledge/spaces/{id}/graph`<br />`GET /api/v1/knowledge/spaces/{id}/navigate`<br />`GET /api/v1/knowledge/spaces/{id}/pages`<br />`POST /api/v1/knowledge/spaces/{id}/pages` |
-| `kv` | 4 | `GET /api/v1/kv/{namespace}`<br />`GET /api/v1/kv/{namespace}/{key}`<br />`PUT /api/v1/kv/{namespace}/{key}`<br />`DELETE /api/v1/kv/{namespace}/{key}` |
-| `kv-admin` | 4 | `GET /api/v1/admin/kv/{namespace}`<br />`GET /api/v1/admin/kv/{namespace}/{key}`<br />`PUT /api/v1/admin/kv/{namespace}/{key}`<br />`DELETE /api/v1/admin/kv/{namespace}/{key}` |
-| `memory` | 3 | `GET /api/v1/memory`<br />`PUT /api/v1/memory/{key}`<br />`DELETE /api/v1/memory/{key}` |
-| `observability` | 4 | `GET /api/v1/observability/config`<br />`GET /api/v1/observability/recent`<br />`GET /api/v1/observability/summary`<br />`GET /api/v1/observability/trace/{conversationId}` |
-| `onboarding` | 2 | `GET /api/v1/onboarding/checklist`<br />`GET /api/v1/onboarding/suggestions` |
-| `resources` | 6 | `POST /api/v1/resources/{type}`<br />`GET /api/v1/resources/{type}`<br />`GET /api/v1/resources/{type}/{id}`<br />`PUT /api/v1/resources/{type}/{id}`<br />`PATCH /api/v1/resources/{type}/{id}`<br />`DELETE /api/v1/resources/{type}/{id}` |
-| `roles` | 2 | `GET /api/v1/roles`<br />`POST /api/v1/roles/changesets` |
-| `routines` | 0 | No public endpoints are tagged this way in the live spec yet. |
-| `runs` | 8 | `GET /api/v1/runs`<br />`GET /api/v1/runs/{id}`<br />`POST /api/v1/runs/{id}/cancel`<br />`GET /api/v1/runs/{id}/events`<br />`POST /api/v1/runs/{id}/pause`<br />`POST /api/v1/runs/{id}/reconcile`<br />`POST /api/v1/runs/{id}/resume`<br />`POST /api/v1/runs/{id}/retry` |
-| `secrets` | 3 | `GET /api/v1/secrets/status`<br />`PUT /api/v1/secrets/{key}`<br />`DELETE /api/v1/secrets/{key}` |
-| `setup` | 6 | `POST /api/v1/setup/admin`<br />`POST /api/v1/setup/business`<br />`POST /api/v1/setup/complete`<br />`POST /api/v1/setup/git`<br />`POST /api/v1/setup/llm`<br />`GET /api/v1/setup/status` |
-| `skills` | 8 | `GET /api/v1/skills`<br />`POST /api/v1/skills/audit`<br />`POST /api/v1/skills/install`<br />`GET /api/v1/skills/marketplace`<br />`POST /api/v1/skills/scan`<br />`GET /api/v1/skills/updates`<br />`GET /api/v1/skills/{name}`<br />`DELETE /api/v1/skills/{name}` |
-| `soul` | 21 | `GET /api/v1/llm-config`<br />`PUT /api/v1/llm-config`<br />`GET /api/v1/llm-config/model-options`<br />`GET /api/v1/llm-config/resolve-spec`<br />`GET /api/v1/llm-providers`<br />`GET /api/v1/provider-config`<br />`POST /api/v1/resource-types`<br />`GET /api/v1/resource-types`<br />`PUT /api/v1/resource-types/{name}`<br />`DELETE /api/v1/resource-types/{name}`<br />`GET /api/v1/resource-types/{name}/hooks`<br />`PUT /api/v1/resource-types/{name}/hooks`<br />`DELETE /api/v1/resource-types/{name}/hooks`<br />`POST /api/v1/soul/commit`<br />`GET /api/v1/soul/file`<br />`GET /api/v1/soul/git-config`<br />`PUT /api/v1/soul/git-config`<br />`POST /api/v1/soul/push`<br />`POST /api/v1/soul/reload`<br />`POST /api/v1/soul/sync`<br />`GET /api/v1/soul/tree` |
-| `surfaces` | 3 | `GET /api/v1/surfaces/catalog`<br />`POST /api/v1/surfaces/interactions`<br />`GET /api/v1/surfaces/{artifactId}` |
-| `system` | 4 | `GET /api/v1/system/update-check`<br />`GET /health`<br />`GET /livez`<br />`GET /readyz` |
-| `triggers` | 2 | `POST /api/v1/hooks/{provider}/{trigger}`<br />`POST /api/v1/triggers/{slug}/invoke` |
-| `users` | 4 | `POST /api/v1/users`<br />`GET /api/v1/users`<br />`POST /api/v1/users/{id}/invite`<br />`PATCH /api/v1/users/{id}/status` |
+This page deliberately does not list individual endpoints or count them. A hand-typed catalogue
+drifts the moment someone adds a route, and a wrong reference page is worse than no reference page.
+**For exact paths, parameters, and response shapes, read `GET /api/v1/openapi.json` on your own
+instance.** It is generated from the running server, so it is never out of date.
+
+### Talking to agents
+
+| Family | Base path | What it covers |
+| --- | --- | --- |
+| `chat` | `/chat`, `/chats` | Starting a chat turn, stopping a run, reading history. |
+| `feedback` | `/messages/{id}/feedback` | Thumbs up or down on an agent message. |
+| `surfaces` | `/surfaces` | Rendered agent output and the interactions people click. |
+| `tasks` | `/tasks` | Work an agent handed back to a person: answer, claim, snooze, dismiss. |
+| `approvals` | `/approvals`, `/inbox` | Actions an agent paused on until someone decides. |
+
+### What the business knows
+
+| Family | Base path | What it covers |
+| --- | --- | --- |
+| `resources` | `/resources/{type}` | Reading and writing records. |
+| `knowledge` | `/knowledge` | Spaces, pages, revisions, search, and reindexing. |
+| `memory` | `/memory` | Scoped agent memory entries. |
+| `kv` | `/kv` | The agent key-value store. |
+| `kv-admin` | `/admin/kv` | The same store, across every namespace, for admins. |
+
+### Configuration
+
+| Family | Base path | What it covers |
+| --- | --- | --- |
+| `soul` | `/soul`, `/resource-types`, `/llm-config` | The git-backed config store, schemas, and model routing. |
+| `agents` | `/agents` | agent definitions. |
+| `skills` | `/skills` | Installed skills, the marketplace, updates, and audits. |
+| `routines` | `/routines` | routine definitions. |
+| `triggers` | `/triggers`, `/hooks` | Invoking a routine, and inbound provider hooks. |
+| `integrations` | `/integrations` | Connecting, inspecting, and disconnecting providers. |
+| `ingress` | `/hooks/integrations/{name}` | Inbound integration webhooks. |
+| `guardrails` | `/guardrails` | guardrail configuration. |
+| `preferences` | `/preferences` | Custom instructions. |
+| `business` | `/business` | Business name, description, and profile. |
+
+### People and access
+
+| Family | Base path | What it covers |
+| --- | --- | --- |
+| `auth` | `/auth` | Sign in and out, sessions, personal API tokens, invites. |
+| `users` | `/users` | Creating people, inviting them, changing their status. |
+| `roles` | `/roles` | The three built-in levels. |
+| `authz` | `/authz` | principals, groups, grants, and permission checks. |
+| `identity` | `/identity` | API clients, and linking chat accounts to people. |
+| `secrets` | `/secrets` | Storing and removing credentials. |
+
+### Running the instance
+
+| Family | Base path | What it covers |
+| --- | --- | --- |
+| `setup` | `/setup` | First-boot wizard steps. |
+| `system` | `/system`, `/health`, `/livez`, `/readyz` | Update checks and health probes. |
+| `runs` | `/runs` | Inspecting, pausing, resuming, retrying, and cancelling runs. |
+| `activity` | `/activities` | The activity feed. |
+| `observability` | `/observability` | Traces, spend summaries, and capture settings. |
+| `audit` | `/audit` | The audit log and its tamper check. |
+| `kill-switches` | `/kill-switches` | Arming and standing down emergency stops. |
+| `admin` | `/admin/operations` | Maintenance operations. |
+| `onboarding` | `/onboarding` | The getting-started checklist and suggestions. |
+| `curator` | `/curator` | Curator shadow-mode output. |
+
+Two tags are visible in the document but are not for you to call. `internal` is machinery the
+worker calls on itself, and `forms` is not reachable on a running instance.
 
 ## OpenAPI metadata
 

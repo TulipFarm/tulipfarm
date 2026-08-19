@@ -125,7 +125,6 @@ const EXPECTED_FAMILY_TOOL_NAMES = [
       "routine_forge",
       "routine_picker",
       "soul_repo_push",
-      "transfer_to_agent",
       "trigger_routine",
       "validate_artifact",
     ],

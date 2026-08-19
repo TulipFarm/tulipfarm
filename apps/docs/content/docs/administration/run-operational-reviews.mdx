@@ -1,0 +1,74 @@
+---
+title: Run operational reviews
+description: Use Operations, runs, Inbox, activities, and observability screens for routine checks.
+---
+
+This guide is for admins running regular operational reviews. It uses shipped operator
+screens; it does not ask an agent to change its own authority.
+
+## Outcome
+
+At the end, you have checked current health, waiting work, risky runs, recent activity,
+and recovery posture.
+
+## Review the Operations console
+
+<Steps>
+  <Step>
+    Open **Operations**.
+  </Step>
+  <Step>
+    Review **Health** for degraded or failed components.
+  </Step>
+  <Step>
+    Review **Incidents**, **Quarantine**, and **Kill switches**. A non-empty panel is an
+    item to triage before allowing more mutation-heavy work.
+  </Step>
+  <Step>
+    Review **Recent operational activity**. Use the filter to narrow by actor, target,
+    event, or status, then open **Operate → Work → Activities** for the full activity log.
+  </Step>
+  <Step>
+    Review **Recovery** for last reported backup age and whether support bundle creation
+    is available.
+  </Step>
+</Steps>
+
+If support asks for diagnostics, choose **Create support bundle** only after reviewing the
+preview. Bundle creation is audited.
+
+## Clear waiting human work
+
+Open **Inbox**. It contains approvals, human tasks, form waits, and access requests. Decide
+items you own so runs can continue. For the decision procedure, see
+[Approve agent work](/docs/using-tulipfarm/approve-agent-work).
+
+A denied access request does not grant the agent anything — it stays denied and is visible in
+the activity log for later review. Use **Recent operational activity** above to confirm a
+denied-access decision was recorded correctly.
+
+## Inspect runs
+
+Open **Runs**. The list is newest-first and links to the run inspector. For runs that are
+stuck, costly, failed, or waiting unexpectedly, open the inspector and review:
+
+- states and attempts
+- effects and waits
+- guardrail decisions
+- lineage
+- model cost and token count
+
+Use server-authorized controls only when needed: **pause**, **resume**, **retry**,
+**reconcile**, or **cancel**. See [Watch a run](/docs/using-tulipfarm/watch-a-run) for the control
+flow.
+
+## Check observability
+
+Open **Operate → Health → Observability** for recent turns, trace drill-down, cost/usage summary,
+and export status. Use **Operate → Work → Activities** for the broader activity log.
+
+## Record the review
+
+Capture the date, reviewer, findings, decisions, and follow-up owners in your normal
+operations log. Do not paste prompts, credentials, cookies, tool arguments, or sensitive
+results into an incident or review note.

@@ -31,6 +31,7 @@ import { registerGitHubInstallRoutes } from "./integrations/github-install-route
 import { registerInternalRouteFamily } from "./internal/route-family";
 import { registerKillSwitchRoutes } from "./kill-switches/routes";
 import { registerKnowledgeRoutes } from "./knowledge/routes";
+import { registerSubjectRoutes } from "./knowledge/subject-directory";
 import { registerKvRoutes } from "./kv/routes";
 import { registerMemoryDocumentRoute } from "./memory/document-routes";
 import { createLogTeeStream } from "./observability/log-stream";
@@ -64,6 +65,8 @@ export async function buildApp(opts: AppOptions = {}) {
     forceCloseConnections: true,
     maxParamLength: 512,
   });
+
+  const publicOrigins = opts.publicOrigins;
 
   const webDist = process.env.WEB_DIST;
   const serveSpa = !!webDist;
@@ -120,8 +123,10 @@ export async function buildApp(opts: AppOptions = {}) {
     // independent override for split-origin setups. The localhost fallback is the dev SPA.
     origin:
       process.env.CORS_ORIGIN ??
-      process.env.PUBLIC_URL ??
-      `http://localhost:${process.env.VITE_PORT ?? 4000}`,
+      (publicOrigins
+        ? async (origin: string | undefined) =>
+            origin === undefined || origin === publicOrigins.current().webOrigin
+        : (process.env.PUBLIC_URL ?? `http://localhost:${process.env.VITE_PORT ?? 4000}`)),
     credentials: true,
     // Without explicit methods the preflight rejects PUT/DELETE — the write verbs the SPA uses for
     // secrets, resources, and config. Custom headers (CSRF echo + optimistic-concurrency If-Match).
@@ -351,7 +356,17 @@ export async function buildApp(opts: AppOptions = {}) {
       registerKvRoutes(app, opts.kvService, requireAuth, requireAuthorization);
       registerPreferenceRoutes(app, opts.kvService, requireAuth);
     }
-    registerSystemRoutes(app, { kv: opts.kvService, ...opts.systemRoutes }, requireAuth);
+    registerSystemRoutes(
+      app,
+      {
+        kv: opts.kvService,
+        publicOrigins: opts.publicOrigins,
+        audit: opts.auditService,
+        ...opts.systemRoutes,
+      },
+      requireAuth,
+      requireAuthorization
+    );
     if (opts.activityService) {
       registerActivityRoutes(app, opts.activityService, requireAuth);
     }
@@ -503,15 +518,27 @@ export async function buildApp(opts: AppOptions = {}) {
     if (opts.feedbackRepo) {
       registerFeedbackRoutes(app, opts.feedbackRepo, requireAuth);
     }
-    if (opts.knowledgeService) {
+    if (opts.knowledgeService && opts.knowledgePageGate) {
       registerKnowledgeRoutes(
         app,
         opts.knowledgeService,
         requireAuth,
         requireAuthorization,
+        opts.knowledgePageGate,
         undefined,
-        opts.activityService
+        opts.activityService,
+        opts.knowledgeAuthorLabeller,
+        opts.knowledgeReaderDirectory,
+        opts.knowledgeDenialSink
       );
+      if (opts.knowledgeSubjectDirectory) {
+        registerSubjectRoutes(
+          app,
+          requireAuth,
+          requireAuthorization,
+          opts.knowledgeSubjectDirectory
+        );
+      }
     }
   }
 

@@ -410,7 +410,9 @@ function buildToolDef(
       if (reserved.outcome === "duplicate") return replayed(reserved.effect.state);
 
       try {
-        return ok(await dispatcher.dispatch(deps.businessId, reserved.effect.effectId));
+        return ok(
+          await dispatcher.dispatch(deps.businessId, reserved.effect.effectId, ctx.abortSignal)
+        );
       } catch (error) {
         if (error instanceof ToolDispatchError) return mapDispatchError(error, slug);
         throw error;

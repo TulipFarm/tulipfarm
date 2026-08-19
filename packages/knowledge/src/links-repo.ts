@@ -39,6 +39,8 @@ export interface KnowledgeLinksRepo {
   getLinkedPageIds(sourcePageIds: string[]): Promise<string[]>;
   /** Full edge list for a space (graph view). */
   getGraphForSpace(spaceId: string): Promise<KnowledgeLink[]>;
+  /** Every resolved Page-to-Page edge in the Business, for the cross-Space graph. */
+  getResolvedLinks(): Promise<KnowledgeLink[]>;
   /** Pages that link to a page — resolved by id, or matched by path while still unresolved. */
   getBacklinks(target: BacklinkTarget): Promise<Backlink[]>;
   /** Distinct source-page ids that link to a space by name (drives the rename rewrite). */
@@ -96,6 +98,20 @@ export class PgKnowledgeLinksRepo implements KnowledgeLinksRepo {
       `SELECT id, space_id, source_id, target_path, target_id, target_space_id, target_space_name, created_at
        FROM knowledge_links WHERE space_id = $1`,
       [spaceId]
+    );
+    return rows.map(rowToLink);
+  }
+
+  async getResolvedLinks(): Promise<KnowledgeLink[]> {
+    // Only resolved edges: an unresolved link points at nothing, so it has no second endpoint to
+    // draw and would render as an arrow into empty space — the exact shape a withheld Page makes.
+    const { rows } = await this.q.query(
+      `SELECT l.id, l.space_id, l.source_id, l.target_path, l.target_id, l.target_space_id,
+              l.target_space_name, l.created_at
+       FROM knowledge_links l
+       JOIN knowledge_pages s ON s.id = l.source_id AND s.active = true
+       JOIN knowledge_pages t ON t.id = l.target_id AND t.active = true
+       WHERE l.target_id IS NOT NULL`
     );
     return rows.map(rowToLink);
   }

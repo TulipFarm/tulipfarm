@@ -1,5 +1,6 @@
 ---
 description: How Tulip Supply Co handles refund requests and who may approve one.
+category: customer-service
 ---
 
 A refund is approved by finance, never by an agent.

@@ -1,6 +1,6 @@
-import { Link } from "@remix-run/react";
+import { Link, useBlocker } from "@remix-run/react";
 import { PageEditor } from "@tulipfarm/editor";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useWikiMentionExtensions } from "~/components/knowledge/use-wiki-mention-data";
 import { Button } from "~/components/ui/button";
 import { mergeTags } from "~/lib/inline-tags";
@@ -21,6 +21,8 @@ export type PageFormProps = {
   onSubmit: (path: string, content: string) => void | Promise<void>;
   submitting: boolean;
   formError?: string | null;
+  /** Server rejections keyed by the field that caused them, so each lands where it can be fixed. */
+  fieldErrors?: Partial<Record<"path" | "title" | "resource" | "content", string>> | null;
   cancelTo: string;
 };
 
@@ -36,6 +38,7 @@ export function PageForm({
   onSubmit,
   submitting,
   formError,
+  fieldErrors,
   cancelTo,
 }: PageFormProps) {
   const [tab, setTab] = useState<Tab>(initialTab ?? "guided");
@@ -46,8 +49,31 @@ export function PageForm({
   const [raw, setRaw] = useState(() => initialContent ?? serializeOkf({ ...EMPTY_OKF_FIELDS }));
   const pathLocked = mode === "edit" || !!lockPath;
   const mentionExtensions = useWikiMentionExtensions(spaceId);
+  const [dirty, setDirty] = useState(false);
+  // A ref, not state: the unload listener must read the current value without being re-registered
+  // on every keystroke.
+  const dirtyRef = useRef(false);
+  dirtyRef.current = dirty;
+
+  useEffect(() => {
+    const warn = (e: BeforeUnloadEvent) => {
+      if (!dirtyRef.current) return;
+      // Losing a half-written post-mortem to a mis-click is the failure people remember.
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, []);
+
+  // `beforeunload` only covers leaving the document. Most navigation here is in-SPA, where the
+  // browser never fires it, so the same work would vanish on a stray sidebar click.
+  const blocker = useBlocker(({ currentLocation, nextLocation }) => {
+    return dirty && currentLocation.pathname !== nextLocation.pathname;
+  });
 
   function setField<K extends keyof OkfFields>(key: K, value: OkfFields[K]) {
+    setDirty(true);
     setFields((prev) => ({ ...prev, [key]: value }));
   }
 
@@ -62,11 +88,37 @@ export function PageForm({
     e.preventDefault();
     const content =
       tab === "raw" ? raw : serializeOkf({ ...fields, tags: mergeTags(fields.tags, fields.body) });
+    // Cleared on hand-off, not on success: a failed save leaves the work in the editor, where the
+    // author can retry it, and re-marks the form dirty the moment they touch it again.
+    setDirty(false);
     onSubmit(path.trim(), content);
   }
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-4" noValidate>
+      {blocker.state === "blocked" ? (
+        <div
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="leave-title"
+          className="flex flex-col gap-3 rounded-sm border border-border bg-card p-4"
+        >
+          <p id="leave-title" className="text-sm font-medium text-foreground">
+            Leave without saving?
+          </p>
+          <p className="text-sm text-muted-foreground">
+            This page has changes that have not been saved. Leaving now discards them.
+          </p>
+          <div className="flex items-center gap-2">
+            <Button type="button" variant="outline" onClick={() => blocker.reset?.()}>
+              Keep editing
+            </Button>
+            <Button type="button" variant="destructive" onClick={() => blocker.proceed?.()}>
+              Discard changes
+            </Button>
+          </div>
+        </div>
+      ) : null}
       {formError ? (
         <p className="rounded-sm border border-destructive/40 bg-destructive/5 px-3 py-2 text-destructive">
           error: {formError}
@@ -80,14 +132,20 @@ export function PageForm({
         </label>
         <input
           id="path"
-          className={inputClass}
+          className={fieldClass(!!fieldErrors?.path)}
           value={path}
-          onChange={(e) => setPath(e.target.value)}
+          onChange={(e) => {
+            setDirty(true);
+            setPath(e.target.value);
+          }}
           placeholder="tables/orders"
           required
           readOnly={pathLocked}
           disabled={pathLocked}
+          aria-invalid={fieldErrors?.path ? true : undefined}
+          aria-describedby={fieldErrors?.path ? "path-error" : undefined}
         />
+        <FieldError id="path-error" message={fieldErrors?.path} />
       </div>
 
       <div className="flex items-center gap-2 text-xs">
@@ -188,11 +246,17 @@ export function PageForm({
           </label>
           <textarea
             id="raw"
-            className={`${inputClass} min-h-96 font-mono`}
+            className={`${fieldClass(!!fieldErrors?.content)} min-h-96 font-mono`}
             value={raw}
-            onChange={(e) => setRaw(e.target.value)}
+            onChange={(e) => {
+              setDirty(true);
+              setRaw(e.target.value);
+            }}
             required
+            aria-invalid={fieldErrors?.content ? true : undefined}
+            aria-describedby={fieldErrors?.content ? "content-error" : undefined}
           />
+          <FieldError id="content-error" message={fieldErrors?.content} />
         </div>
       )}
 
@@ -205,6 +269,19 @@ export function PageForm({
         </Button>
       </div>
     </form>
+  );
+}
+
+function fieldClass(invalid: boolean): string {
+  return invalid ? `${inputClass} border-destructive` : inputClass;
+}
+
+function FieldError({ id, message }: { id: string; message?: string }) {
+  if (!message) return null;
+  return (
+    <p id={id} className="text-xs text-destructive">
+      {message}
+    </p>
   );
 }
 

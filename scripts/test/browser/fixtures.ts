@@ -61,6 +61,11 @@ export const test = base.extend<{ diagnostics: Diagnostics }>({
 
 export { expect };
 
+// The Business's second, ordinary (non-admin) member — see second-member.setup.ts. Shared between
+// that bootstrap and the "colleague" spec so both agree on the one account without duplicating it.
+export const COLLEAGUE_EMAIL = "colleague@tulipfarm.test";
+export const COLLEAGUE_PASSWORD = "colleague-password-123";
+
 export async function openProductionRoot(page: Page): Promise<void> {
   const response = await page.goto("/", { waitUntil: "domcontentloaded" }).catch(() => null);
   const headers = response?.headers() ?? {};

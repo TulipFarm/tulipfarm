@@ -2,7 +2,8 @@
 
 import type { EventEmitter } from "node:events";
 import type { GuardrailsService } from "@tulipfarm/agent-runtime";
-import type { KnowledgeService } from "@tulipfarm/knowledge";
+import type { PublicOriginsService } from "@tulipfarm/integrations";
+import type { KnowledgeDenialSink, KnowledgeService } from "@tulipfarm/knowledge";
 import type { KvService } from "@tulipfarm/kv";
 import type { LlmService } from "@tulipfarm/llm";
 import type { MemoryDocumentRepo } from "@tulipfarm/memory";
@@ -51,6 +52,10 @@ import type { SlackBindDeps } from "./integrations/slack-binding";
 import type { ChannelInternalRouteDeps } from "./internal/channel-routes";
 import type { InternalTurnRouteDeps } from "./internal/routes";
 import type { KillSwitchService } from "./kill-switches/service";
+import type { AuthorLabeller } from "./knowledge/author-label";
+import type { PageReadAuthorizer } from "./knowledge/page-access";
+import type { ReaderDirectory } from "./knowledge/reader-directory";
+import type { SubjectDirectory } from "./knowledge/subject-directory";
 import type { ObservabilityConfig } from "./observability/config";
 import type { LogRepo } from "./observability/log-repo";
 import type { ResourceRepo } from "./observability/resource-repo";
@@ -161,6 +166,16 @@ export interface AppOptions {
   triggerInvoke?: TriggerInvokeDeps;
   forms?: FormsRoutesDeps;
   knowledgeService?: KnowledgeService;
+  /**
+   * Read authorization for authored Pages. Required alongside `knowledgeService`: a deployment that
+   * serves Pages without a gate would serve every Page to everybody.
+   */
+  knowledgePageGate?: PageReadAuthorizer;
+  /** Records refused Knowledge writes, so path-probing leaves a trail. */
+  knowledgeDenialSink?: KnowledgeDenialSink;
+  knowledgeAuthorLabeller?: AuthorLabeller;
+  knowledgeReaderDirectory?: ReaderDirectory;
+  knowledgeSubjectDirectory?: SubjectDirectory;
   toolRegistry?: ToolRegistry;
   /**
    * Composed in `index.ts`, where the effect ledger and secrets service live; absent in tests that
@@ -190,6 +205,8 @@ export interface AppOptions {
   ingress?: IngressRoutesDeps;
   hookIngress?: HookIngressDeps;
   systemRoutes?: SystemRoutesDeps;
+  /** Durable public web/API origins with environment fallbacks. */
+  publicOrigins?: PublicOriginsService;
   operationalApi?: OperationalApiDeps;
   /** Stage 3 admin authorization surface — read/assign/group/explain over durable authority. */
   authzAdmin?: AuthzAdminService;

@@ -1,0 +1,95 @@
+---
+title: What a soul is
+description: The soul is where your instance keeps everything you have taught it — the shape of your business, saved like a document with full history.
+---
+
+{/* tf-page: track: using-tulipfarm  requires: ["soul:*"] */}
+
+Your **soul** is where TulipFarm keeps everything you have taught it.
+
+Every resource type you define, every agent you create, every routine, every skill, every connected
+integration — they all live in your soul. It is the shape of your business, written down.
+
+It is called a soul because it is what makes your instance *yours*. Two TulipFarm instances running
+the same software with different souls behave like completely different products.
+
+## You do not edit it
+
+This is the important part.
+
+You never open your soul, never edit a file, never learn its layout. You
+[build by chatting](/docs/using-tulipfarm/how-building-by-chat-works), and the assistant writes
+your soul for you.
+
+Think of it the way you think of a document's version history. You know it is there. You are glad
+it is there. You do not go and edit the history file by hand.
+
+## It keeps every version
+
+Underneath, a soul is a **git repository** — the same technology software teams use to track
+changes to their work.
+
+That choice buys you four things:
+
+| What you get | What it means for you |
+| --- | --- |
+| **History** | Every change is recorded, with what changed and when. |
+| **Comparison** | You can see exactly what a change did. |
+| **Backup** | Point it at a remote and your configuration is safely copied off the machine. |
+| **Recovery** | A change you regret can be undone. |
+
+So when an agent creates a resource type for you, that is not a silent edit. It is a recorded
+change you can go and read.
+
+## What is in it, and what is not
+
+Your soul holds **definitions** — how things are shaped and how they should behave.
+
+Your database holds **data** — what actually happened and what your business knows.
+
+| In your soul | In your database |
+| --- | --- |
+| Resource type schemas | The records themselves |
+| Agents and their instructions | Chats and turns |
+| Routines | runs and approvals |
+| Skills | knowledge pages |
+| Integration settings | memory, secrets, audit, identity |
+| Guardrails and model settings | |
+
+The distinction matters most when you think about backups. **A perfectly backed-up soul does not
+protect your data.** If you lose the database, you lose your records, your knowledge, and your
+history — even if every definition survives. See
+[back up and restore](/docs/self-hosting/back-up-and-restore).
+
+## Changes take effect immediately
+
+There is no restart, no deploy, no publish button.
+
+When an agent writes a change to your soul, the instance reloads and reconciles itself right away.
+Ask for a new resource type and it exists — with screens generated for it — by the time the
+assistant finishes replying.
+
+## What stops a bad change
+
+Soul writes are **direct**. Creating an agent changes your soul straight away, and the recorded
+history is the review record.
+
+The safety is in what happens next, not in a gate beforehand. Work an agent does can pause for
+[approval](/docs/using-tulipfarm/approvals), every turn is a durable
+[run](/docs/using-tulipfarm/runs) you can watch, and anything an agent could do is bounded by what
+you are allowed to do.
+
+## Where to go next
+
+<Cards>
+  <Card
+    title="How building by chat works"
+    href="/docs/using-tulipfarm/how-building-by-chat-works"
+    description="Why asking for something is enough to create it."
+  />
+  <Card
+    title="The soul repository"
+    href="/docs/administration/the-soul-repository"
+    description="For admins: git remotes, backup, reloading, and the layout on disk."
+  />
+</Cards>

@@ -7,6 +7,8 @@ TulipFarm runs on your own infrastructure, holds your business data, and hands a
 authority over it. These pages describe the mechanisms that make that safe to do, precisely
 enough that you can audit them rather than take them on trust.
 
+## The controls
+
 <Cards>
   <Card
     title="Encryption"
@@ -36,13 +38,13 @@ Security is not only cryptography. Three other areas carry as much weight:
 
 <Cards>
   <Card
-    title="Guardrails"
-    href="/docs/concepts/guardrails"
+    title="guardrails"
+    href="/docs/administration/how-guardrails-work"
     description="The limits an agent cannot argue its way past."
   />
   <Card
-    title="Approvals"
-    href="/docs/concepts/approvals"
+    title="approvals"
+    href="/docs/using-tulipfarm/approvals"
     description="Where a human decision is required before an action lands."
   />
   <Card
@@ -56,5 +58,5 @@ Security is not only cryptography. Three other areas carry as much weight:
   Everything here assumes you protect the deployment itself: keep the instance behind TLS, keep
   the `tulipfarm-data` volume — which holds the encryption key for every stored secret — backed
   up, and keep the database private. See the
-  [production checklist](/docs/deploy/production-checklist).
+  [production checklist](/docs/self-hosting/production-checklist).
 </Callout>

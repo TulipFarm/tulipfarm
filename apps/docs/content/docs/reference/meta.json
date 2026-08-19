@@ -2,10 +2,16 @@
   "title": "Reference",
   "pages": [
     "index",
+    "---What ships with it---",
+    "bundled-skills",
+    "bundled-integrations",
+    "---Settings---",
     "environment-variables",
+    "routine-triggers",
+    "model-specs",
+    "roles-and-permissions",
+    "---For developers---",
     "commands",
-    "api",
-    "agent-tools",
-    "roles-and-permissions"
+    "api"
   ]
 }

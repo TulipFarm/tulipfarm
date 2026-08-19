@@ -6,7 +6,14 @@ import type { OperationsModel } from "~/lib/operations";
 import { OperationsConsole } from "./operations-console";
 
 const model = {
-  health: [{ component: "worker", status: "degraded" }],
+  health: [
+    {
+      component: "worker",
+      status: "degraded" as const,
+      detail: "worker heartbeat is overdue",
+      checkedAt: "2026-07-26T00:00:00Z",
+    },
+  ],
   incidents: [
     {
       id: "incident-1",
@@ -33,11 +40,13 @@ const model = {
   recovery: { supportBundleAvailable: true, lastBackupAt: "2026-07-26T00:00:00Z" },
 };
 
-function renderConsole(consoleModel: OperationsModel, onCommand = vi.fn()) {
+function renderConsole(consoleModel: OperationsModel, onCommand = vi.fn(), onRefresh = vi.fn()) {
   const Stub = createRemixStub([
     {
       path: "/",
-      Component: () => <OperationsConsole model={consoleModel} onCommand={onCommand} />,
+      Component: () => (
+        <OperationsConsole model={consoleModel} onCommand={onCommand} onRefresh={onRefresh} />
+      ),
     },
     { path: "/business/activities", Component: () => null },
   ]);
@@ -50,6 +59,7 @@ describe("OperationsConsole", () => {
     expect(screen.getByRole("heading", { name: "Queue stalled" })).toBeInTheDocument();
     expect(screen.getByText("worker")).toBeInTheDocument();
     expect(screen.getByText("Degraded")).toBeInTheDocument();
+    expect(screen.getByText("worker heartbeat is overdue")).toBeInTheDocument();
     expect(screen.getByText("High")).toBeInTheDocument();
     expect(screen.getByRole("table", { name: "Recent operational activity" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Event" })).toBeInTheDocument();
@@ -61,6 +71,18 @@ describe("OperationsConsole", () => {
     expect(screen.getByTitle("0f5a23e8-42d7-7556-88d4-b544f361718b")).toHaveTextContent("0f5a23e8");
     expect(screen.queryByText(/"component":/)).not.toBeInTheDocument();
     expect(screen.queryByText("must-not-render")).not.toBeInTheDocument();
+  });
+
+  it("refreshes health without issuing an operational command", async () => {
+    const user = userEvent.setup();
+    const onCommand = vi.fn();
+    const onRefresh = vi.fn();
+    renderConsole(model, onCommand, onRefresh);
+
+    await user.click(screen.getByRole("button", { name: "Refresh status" }));
+
+    expect(onRefresh).toHaveBeenCalledOnce();
+    expect(onCommand).not.toHaveBeenCalled();
   });
 
   it("uses compact, descriptive empty states", () => {

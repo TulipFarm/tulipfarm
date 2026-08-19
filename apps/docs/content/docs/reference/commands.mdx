@@ -10,15 +10,15 @@ TulipFarm ships both a self-hosted Docker Compose lane and a pnpm + Turborepo so
 
 | Command | What it does |
 | --- | --- |
-| `curl -fsSL {{SITE_URL}}/install.sh \| sudo bash` | Runs the Linux installer served by the docs site. It writes `/opt/tulipfarm`, generates `.env`, and starts Docker Compose. |
-| `curl -fsSL {{SITE_URL}}/uninstall.sh \| sudo bash` | Runs the Linux uninstaller. It stops the stack and removes installed files according to the script prompts. |
-| `iwr {{SITE_URL}}/install.ps1 -UseBasicParsing \| iex` | Runs the PowerShell installer on Windows hosts with Docker available. |
+| `curl -fsSL {{SITE_URL}}/install.sh \| sudo bash` | runs the Linux installer served by the docs site. It writes `/opt/tulipfarm`, generates `.env`, and starts Docker Compose. |
+| `curl -fsSL {{SITE_URL}}/uninstall.sh \| sudo bash` | runs the Linux uninstaller. It stops the stack and removes installed files according to the script prompts. |
+| `iwr {{SITE_URL}}/install.ps1 -UseBasicParsing \| iex` | runs the PowerShell installer on Windows hosts with Docker available. |
 | `curl -fsSLO {{SITE_URL}}/docker-compose.yml` | Downloads the production Compose file without running the installer. |
 | `curl -fsSLO {{SITE_URL}}/env.example` | Downloads the documented production environment template. |
 | `docker compose up -d` | Starts or updates the self-hosted stack from the current `docker-compose.yml` and `.env`. |
-| `docker compose pull` | Pulls newer images for the stack. Run before `docker compose up -d` when updating manually. |
+| `docker compose pull` | Pulls newer images for the stack. run before `docker compose up -d` when updating manually. |
 | `docker compose logs -f app` | Follows API/app logs for a self-hosted stack. |
-| `docker compose logs -f worker` | Follows durable Run worker logs. |
+| `docker compose logs -f worker` | Follows durable run worker logs. |
 | `docker compose logs -f integration-worker` | Follows integration-worker logs. |
 | `docker compose ps` | Shows container status and published ports. |
 | `docker compose down` | Stops the stack without deleting named volumes. |
@@ -32,8 +32,8 @@ Run these from the repository root.
 | Command | What it does |
 | --- | --- |
 | `pnpm install` | Installs workspace dependencies. Use `pnpm install --frozen-lockfile` in CI. |
-| `bash scripts/setup-dev.sh` | Starts the local pgvector container, initializes the Soul checkout, and writes `.env.local`. |
-| `pnpm reset:dev` | Runs `scripts/reset-dev.sh` to wipe local dev state and re-run setup. |
+| `bash scripts/setup-dev.sh` | Starts the local pgvector container, initializes the soul checkout, and writes `.env.local`. |
+| `pnpm reset:dev` | runs `scripts/reset-dev.sh` to wipe local dev state and re-run setup. |
 | `bash scripts/generate-secrets.sh` | Generates local base64 bootstrap secrets. |
 | `bash scripts/admin-user.sh` | Admin-user helper script for local operations. |
 
@@ -41,12 +41,12 @@ Run these from the repository root.
 
 | Command | What it does |
 | --- | --- |
-| `pnpm dev` | Runs API, web, worker, and integration-worker through Turbo. |
-| `pnpm dev:api` | Runs only `@tulipfarm/api` (`tsx watch src/index.ts`, default `:4010`). |
-| `pnpm dev:web` | Runs only `@tulipfarm/web` (Remix/Vite, default `:4000`). |
-| `pnpm dev:worker` | Runs only `@tulipfarm/worker` (health probes default `:4020`). |
-| `pnpm dev:integration-worker` | Runs only `@tulipfarm/integration-worker` (health probes default `:4030`). |
-| `pnpm dev:docs` | Runs only `@tulipfarm/docs` (`next dev -p 4020`). |
+| `pnpm dev` | runs API, web, worker, and integration-worker through Turbo. |
+| `pnpm dev:api` | runs only `@tulipfarm/api` (`tsx watch src/index.ts`, default `:4010`). |
+| `pnpm dev:web` | runs only `@tulipfarm/web` (Remix/Vite, default `:4000`). |
+| `pnpm dev:worker` | runs only `@tulipfarm/worker` (health probes default `:4020`). |
+| `pnpm dev:integration-worker` | runs only `@tulipfarm/integration-worker` (health probes default `:4030`). |
+| `pnpm dev:docs` | runs only `@tulipfarm/docs` (`next dev -p 4020`). |
 
 <Callout type="warn">
 `pnpm dev:docs` and `pnpm dev:worker` both use port `4020` by default. Run only one at a time, or
@@ -57,14 +57,14 @@ change the worker's `WORKER_PORT`.
 
 | Command | What it does |
 | --- | --- |
-| `pnpm build` | Runs `turbo build` across workspaces. |
-| `pnpm lint` | Runs each workspace lint script through Turbo. |
-| `pnpm typecheck` | Runs Turbo typechecks and script/e2e TypeScript checks. |
-| `pnpm test` | Runs workspace Vitest suites through Turbo. |
-| `pnpm architecture:check` | Runs `scripts/architecture-check.ts`. |
-| `pnpm architecture:test` | Runs architecture tests under `scripts/`. |
+| `pnpm build` | runs `turbo build` across workspaces. |
+| `pnpm lint` | runs each workspace lint script through Turbo. |
+| `pnpm typecheck` | runs Turbo typechecks and script/e2e TypeScript checks. |
+| `pnpm test` | runs workspace Vitest suites through Turbo. |
+| `pnpm architecture:check` | runs `scripts/architecture-check.ts`. |
+| `pnpm architecture:test` | runs architecture tests under `scripts/`. |
 | `pnpm check:secure-context` | Checks for browser APIs unsafe on plain-HTTP deployments. |
-| `pnpm test:e2e:browser` | Runs the browser smoke test script. |
+| `pnpm test:e2e:browser` | runs the browser smoke test script. |
 
 ### Single workspace scripts
 
@@ -80,8 +80,8 @@ Use `pnpm --filter <workspace> <script>` for app and package scripts.
 | `pnpm --filter @tulipfarm/api keys backfill` | Migrates legacy secret rows onto the active DEK. |
 | `pnpm --filter @tulipfarm/docs typecheck` | Validates generated Fumadocs files, Next typegen, and TypeScript for the docs app. |
 | `pnpm --filter @tulipfarm/docs build` | Syncs public assets and builds the static docs export. |
-| `pnpm --filter @tulipfarm/worker test` | Runs worker tests. |
-| `pnpm --filter @tulipfarm/integration-worker test` | Runs integration-worker tests. |
+| `pnpm --filter @tulipfarm/worker test` | runs worker tests. |
+| `pnpm --filter @tulipfarm/integration-worker test` | runs integration-worker tests. |
 
 Most packages expose the standard `lint`, `typecheck`, and `test` scripts. Apps also expose
 `build`; `api`, `web`, `worker`, `integration-worker`, and `docs` expose `dev`.

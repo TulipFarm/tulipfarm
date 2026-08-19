@@ -209,7 +209,11 @@ function buildToolDef(
       });
 
       try {
-        const output = await dispatcher.dispatch(businessId, reserved.effect.effectId);
+        const output = await dispatcher.dispatch(
+          businessId,
+          reserved.effect.effectId,
+          ctx.abortSignal
+        );
         if (toolId === SLACK_TOOL_IDS.sendMessage && isSendMessageOutput(output)) {
           // Bot-started threads count as mentioned for the ingress mention-gate.
           await tooling.mentionedThreads.mark({

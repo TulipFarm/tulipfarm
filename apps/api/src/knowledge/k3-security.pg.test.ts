@@ -198,6 +198,7 @@ describe("K3 Knowledge security through query_knowledge", () => {
       userId: "alice",
       verifiedAt: NOW,
       expiresAt: null,
+      verifiedVia: "link_token",
     });
     repo.mappings.push({
       provider,
@@ -205,6 +206,7 @@ describe("K3 Knowledge security through query_knowledge", () => {
       userId: "bob",
       verifiedAt: NOW,
       expiresAt: null,
+      verifiedVia: "link_token",
     });
     return new ExternalLinkKnowledgeIdentityMap(repo);
   }

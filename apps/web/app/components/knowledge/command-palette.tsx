@@ -4,6 +4,7 @@ import { type ReactNode, useEffect, useState } from "react";
 import { type KnowledgeSpace, listSpaces, type PageSearchHit } from "~/lib/knowledge-api";
 import { pageHref } from "~/lib/page-href";
 import { cn } from "~/lib/utils";
+import { AgentAuthoredBadge } from "./agent-authored-badge";
 import { usePageSearch } from "./use-page-search";
 
 export const OPEN_SEARCH_EVENT = "knowledge:open-search";
@@ -165,7 +166,10 @@ export function CommandPalette({ spaceId }: { spaceId?: string | null }) {
                       onSelect={() => go(hit)}
                       className="flex cursor-pointer flex-col gap-0.5 rounded-sm px-3 py-2 text-sm data-[selected=true]:bg-accent"
                     >
-                      <span className="font-medium">{hit.title}</span>
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <span className="truncate font-medium">{hit.title}</span>
+                        <AgentAuthoredBadge authorKind={hit.authorKind} compact />
+                      </span>
                       {hit.snippet ? (
                         <span className="line-clamp-1 text-xs text-muted-foreground">
                           <HighlightedSnippet text={hit.snippet} query={query} />

@@ -1,0 +1,128 @@
+---
+title: What agents can do
+description: Understand the kinds of tools agents can use, how names and permissions work, and where your instance shows the live list.
+---
+
+{/* tf-page: track: using-tulipfarm  requires: ["soul.agent:*"] */}
+
+An **agent** is a configured persona with its own instructions and authority. It does work by asking
+TulipFarm to run a **tool**, a callable action such as reading business data, writing a page, or
+calling a connected app. It does that work in a **turn** — one back-and-forth: your message, and
+everything the agent does in response to it.
+
+This page is not a list of every tool. That list changes when your instance connects apps or changes
+the soul, TulipFarm's git-backed definition store — the versioned folder the app and agents manage
+for you. The goal here is to help you read what you see during and after work.
+
+Two places carry most of the evidence. An **approval** is a pause that waits for a human decision
+before work continues. A **run** is one durable unit of work, such as a chat reply, integration
+delivery, or routine firing.
+
+## The useful groups
+
+Most tool names fit a small set of jobs.
+
+| What the agent is doing | What that means |
+| --- | --- |
+| Working with records | Read, search, create, update, or delete a **record**, one entry of a **Resource type**, the schema for one kind of business data. |
+| Working with knowledge | Search cited **knowledge**, read pages, write pages, create spaces, and emit citations. knowledge is the cited material TulipFarm can retrieve with access checks. |
+| Remembering useful facts | Edit the **Memory Document**, one Markdown page of stable facts loaded into future turns, or use KV for short-lived saved values. |
+| Building new things | Change soul definitions for agents, skills, Resource types, routines, and surface components. A **skill** is an installable capability package. A **routine** is repeatable automation. A **surface** is structured output shown in a channel. |
+| Coordinating work | Transfer to another agent, delegate a task to another agent, trigger a routine, or mark a **state** — one step inside a routine — or delegated task complete. |
+| Showing and asking | Present structured output, update a presentation, or ask for input when the current channel can show it. |
+| Calling integrations | Use connected apps through **integrations**, which are third-party connections described by a manifest. Built-in GitHub and Slack tools also live here. |
+| Reading turn context | Read the current time, inspect what screen you are on, validate structured data, or move within the app when a tool is browser-only. |
+
+The names above are categories, not promises that every agent can do every item. Availability and
+authority are checked again for each turn.
+
+## How to read a tool name
+
+Tool names are lower snake case: small letters joined with underscores. Examples include
+`record_create`, `kv_set`, and `delegate_to_agent`. The definition layer rejects any tool name that
+is not lower snake case.
+
+Connected app tools add the app slug in front of the operation name:
+
+```text
+<normalized-integration-slug>_<egress-operation-name>
+```
+
+The slug is lowercased, punctuation becomes `_`, and the operation name is the one the connected
+app's own settings declare. You do not have to memorise this — the value of knowing it is that when
+an approval asks you about `slack_post_message`, you can read it without looking anything up.
+
+That pattern lets two connected apps publish the same operation name without colliding. When you see
+a tool name in an approval or run, the first part usually tells you the tool family, and the last
+part tells you the action.
+
+## Why being offered a tool is not enough
+
+When a turn starts, TulipFarm builds the tool list for that agent and channel. This is visibility
+only. A visible tool still has to pass authorization when the agent tries to use it.
+
+Each tool definition declares the action it needs, the resource types it can touch, and any targets,
+types of data, or destinations it can use. At call time, TulipFarm turns the request into an intent
+and checks the authority layers for the run.
+
+The important rule is overlap:
+
+```text
+what started the run     what the agent may use
+┌──────────────────┐     ┌──────────────────┐
+│                  │█████│                  │
+└──────────────────┘     └──────────────────┘
+             ▲
+       only the overlap can run
+```
+
+The run acts as the person or system that started it. The agent adds another limit. A **guardrail**
+is a policy that constrains agent and tool behavior. Guardrails, destination checks, data-boundary
+checks, provider access, and credentials can narrow it again. A tool call runs only when every
+required layer allows it.
+
+So an agent can never do more than the person who set it going. Some capabilities are reserved for
+instance administration; [Decide who can do what](/docs/administration/manage-access) explains that
+side without making this Using page depend on those controls.
+
+## What denial looks like
+
+Denied tool calls do not run. TulipFarm can deny a call because the tool is not available to the
+turn, the arguments are invalid, the authority check fails, a guardrail blocks it, a data boundary
+would be crossed, a destination is not allowed, a credential is missing, or the connected provider
+does not confirm access.
+
+TulipFarm records a mutating call as an external effect only after validation, authority,
+credentials, and any needed human decision have passed. That means a denied mutation does not leave
+a recorded external effect to reconcile.
+
+TulipFarm asks for approval only after the call is valid and allowed enough to ask about. A
+forbidden call is denied directly instead of being shown as a choice.
+
+## Where the evidence appears
+
+Chat shows tool calls inline. A row can show the tool name, whether it can write, the tier
+(`system`, `platform`, or `integration`), the call id, a digest of the arguments, and redacted input
+or output previews.
+
+Runs persist the same work as run events. Participant-visible events include `tool.call`,
+`tool.result`, and `approval.requested`. Operator evidence can also include `tool.dispatched`,
+effects, waits, guardrail decisions, and lineage.
+
+Pending tool approvals appear in the Inbox and in the related run. The approval card includes the
+tool name, and the run links the wait back to the tool call id. See
+[Approvals](/docs/using-tulipfarm/approvals) and [runs](/docs/using-tulipfarm/runs).
+
+## Where the live list is
+
+The live source of truth is the tool registry inside your own instance. It is assembled from the
+registered tool families, the platform runtime tools, built-in GitHub and Slack tools, and any
+manifest-defined integration egress tools.
+
+The grantable view of that registry is the access-level capability catalog. It is generated from
+the live registry, groups actions into plain-language areas, and keeps the tool names behind each
+capability. The Administration access screen is built on it. It is reserved for access
+administration.
+
+That is why this page explains the pattern instead of copying the list. Your instance already has
+the current list; the docs page would only become stale.

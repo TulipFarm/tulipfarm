@@ -1,0 +1,79 @@
+---
+title: Chat
+description: The primary interface for asking, building, selecting agents, delegating work, and watching runs.
+---
+
+{/* tf-page: track: using-tulipfarm  requires: ["chat:*"] */}
+
+Chat is the primary interface to TulipFarm. It is where users ask questions, create records, write
+knowledge pages, build the soul, and hand work to agents. Every submitted turn becomes a durable
+[Run](/docs/using-tulipfarm/runs), so the work continues even if the browser or channel stream drops.
+
+## The default chat harness
+
+A new chat starts with the code-defined `__tulipfarm_default__` harness. This is TulipFarm's
+front-desk assistant. It is not a user-created agent, is not shown as a selectable agent, and is not
+stored as `AGENT.md` in the soul.
+
+The default harness can answer, search knowledge, create knowledge pages, and create or update
+records directly. When the user asks to build the system itself, it loads a forge skill:
+`resource-forge`, `agent-forge`, `skill-forge`, `routine-forge`, `surface-component-forge`, or
+`onboarding`. That handoff is visible in the transcript, so a build does not look like a hidden
+side effect.
+
+## Brand, business, and agents
+
+**TulipFarm** is the product brand. The configured business is the instance-specific identity stored
+in `soul.yaml`, such as `businessName` and `businessDescription`; those facts are rendered into the
+system prompt. A user-created **agent** is a Soul-defined actor with its own instructions and
+metadata. Selecting an agent changes who runs the turn; it does not rename the product or the
+business.
+
+## Selecting or handing off to an agent
+
+The web UI can start a turn with a selected agent. A running agent can also move work:
+
+| Tool | Meaning |
+| --- | --- |
+| `transfer_to_agent` | Hands the active chat to another agent so the next work is owned by that agent. |
+| `delegate_to_agent` | Starts helper work as a child run while the current agent keeps ownership of the chat. |
+
+Delegation is for scoped help; transfer is for changing the actor responsible for the chat.
+
+## Choosing effort, not a model
+
+A participant never picks a model. The composer offers an **effort preset** — Auto, Fast, Balanced,
+or Thorough — and the deployment maps each one to a [model profile](/docs/administration/how-model-routing-works). Auto is the
+default and lets the deployment decide. Picking effort says how much care a question deserves,
+which is a judgement the person asking is well placed to make; picking a model would ask them to
+know which provider handles their question best, which they are not.
+
+Every finished reply carries a quiet **receipt**: the model that answered, the effort, and how long
+the model call took. When Auto answered, the receipt names the level it resolved to — `Auto →
+Balanced` — so the choice made on the participant's behalf is visible rather than implied. Cost is
+not shown to participants; operators read the full routing decision from the `model.routed` run
+event.
+
+When a reply falls short, **Try harder** re-runs the same message one level higher, escalating from
+the level the receipt says was actually applied. It is always the participant's choice — TulipFarm
+never silently upgrades a turn. See [Model routing](/docs/administration/how-model-routing-works) for how presets resolve,
+and [Configure LLM providers](/docs/administration/configure-llm-providers) for the admin side.
+
+## Feedback and suggestions
+
+Assistant messages support thumbs up and thumbs down feedback. Feedback is stored per user and
+rehydrated when the chat is reopened, so product operators can see which answers helped and which
+need improvement.
+
+Suggested prompts are drafts. They populate text the user may send, but they never run work on their
+own. A run starts only after a user submits a turn or a declared trigger invokes a routine.
+
+## Durable by default
+
+Sending a message creates a [run](/docs/using-tulipfarm/runs) before the agent starts thinking, and
+what you watch on screen is that recorded run playing out — not a live feed that exists only while
+you look at it.
+
+So stopping an answer really stops the work. It is not just closing the window on something that
+carries on regardless. See [Watch a run](/docs/using-tulipfarm/watch-a-run) for what that looks
+like.

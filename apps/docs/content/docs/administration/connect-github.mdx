@@ -1,0 +1,80 @@
+---
+title: Connect GitHub
+description: Create a GitHub App in two clicks, install it into repositories, and enable soul backup.
+---
+
+GitHub uses a GitHub App installation flow. After it is connected, agents can work with
+issues, pull requests, check runs, and repository contents in the repositories you grant.
+GitHub can also hold a remote backup of the soul.
+
+## Outcome
+
+At the end, TulipFarm has a GitHub App installation scoped to selected repositories, and
+optionally a GitHub repository configured as the soul remote.
+
+## Create the GitHub App
+
+TulipFarm registers the App for you through GitHub's App Manifest flow. You do not copy an
+App ID, a private key, or a webhook secret by hand.
+
+<Steps>
+  <Step>
+    Open **Integrations → github** and choose **Create the GitHub App**.
+  </Step>
+  <Step>
+    GitHub opens with the name, permissions, callback, and webhook URL already filled in.
+    Choose the account or organization that should own the App, then confirm.
+  </Step>
+  <Step>
+    GitHub redirects back. TulipFarm has stored the App ID, slug, private key, webhook
+    secret, and OAuth client credentials automatically.
+  </Step>
+</Steps>
+
+<Callout>
+  The App belongs to your deployment, not to TulipFarm. There is no shared vendor-owned App,
+  and the private key GitHub generates never leaves your installation.
+</Callout>
+
+The App requests Contents read/write, Issues read/write, Pull requests read/write, Checks
+read-only, and Metadata read-only. Repository administration is deliberately not requested
+up front — TulipFarm asks for it separately only if you choose to have it create the soul
+repository for you.
+
+## Install into repositories
+
+Creating an App grants nothing on its own. Installing it is where you choose scope.
+
+<Steps>
+  <Step>
+    Choose **Install it on your repositories**. GitHub opens its install screen.
+  </Step>
+  <Step>
+    Pick the account or organization, then choose all repositories or selected
+    repositories.
+  </Step>
+  <Step>
+    Approve the installation. GitHub redirects back to TulipFarm, where the integration
+    page lists the installation and repositories.
+  </Step>
+</Steps>
+
+To change which repositories are granted, use GitHub's installation settings, then reconnect
+from the integration page so TulipFarm picks up the new list.
+
+## Verify in chat
+
+```prompt
+List the open issues in owner/repo.
+```
+
+The repository must be included in the GitHub App installation scope.
+
+## Use GitHub for soul backup
+
+Open **Operate → Business → Soul** to configure a generic git remote, or use the GitHub-backed soul
+repo flow under `/integrations/github/soul-repo`. TulipFarm can connect an already granted
+repo as the soul remote, or create a new repo through `/integrations/github/soul-repo/create`
+when the installation has the required administration permission.
+
+For restore details, see [Back up and restore](/docs/self-hosting/back-up-and-restore).

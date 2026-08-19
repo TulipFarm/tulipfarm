@@ -1,0 +1,87 @@
+---
+title: Connect Confluence
+description: Connect Confluence so agents can search pages, read page bodies, list spaces, and index pages into knowledge with Atlassian access.
+---
+
+Connecting Confluence lets your agents search your pages, read them, and list your spaces. It is
+read-only — agents cannot edit Confluence.
+
+The same token lets TulipFarm index your pages into
+[knowledge](/docs/using-tulipfarm/knowledge), so agents can cite them in chat. Atlassian's own
+restrictions are respected: nobody sees a page through TulipFarm that they could not open in
+Confluence.
+
+For the shared catalog flow, see [Connect an integration](/docs/administration/connect-an-integration).
+This page covers only the Atlassian fields.
+
+## Outcome
+
+At the end, Confluence shows as connected. Agents can search pages and blog content with Confluence
+Query Language (CQL), read a page by id, and list the spaces the integration can see.
+
+Confluence tools are read-only by design. Agents cannot edit Confluence pages through this
+integration.
+
+## Create the OAuth access token
+
+<Steps>
+  <Step>
+    Open [Atlassian Developer Console](https://developer.atlassian.com/console/myapps/) and create
+    or open an OAuth 2.0 integration for your site.
+  </Step>
+  <Step>
+    Under **Permissions**, add the Confluence API read scopes for content, spaces, restrictions,
+    groups, and users. The restriction scopes let knowledge preserve page access instead of
+    flattening it.
+  </Step>
+  <Step>
+    Copy a current **OAuth Access Token**. You will paste it into TulipFarm after you get the Cloud
+    ID.
+  </Step>
+</Steps>
+
+## Get the Cloud ID
+
+<Steps>
+  <Step>
+    Open [Atlassian Admin](https://admin.atlassian.com) for the site and copy the **Cloud ID**.
+  </Step>
+  <Step>
+    If you cannot find it there, sign in to Confluence and visit
+    `https://<your-site>.atlassian.net/_edge/tenant_info`. Copy the `cloudId` field in that
+    response.
+  </Step>
+</Steps>
+
+## Connect your Atlassian site
+
+<Steps>
+  <Step>
+    Open **Integrations → confluence**.
+  </Step>
+  <Step>
+    Paste the site id into **Cloud ID** (`CONFLUENCE_CLOUD_ID`). Agent tools do not work without
+    it, because Atlassian uses it in the API address.
+  </Step>
+  <Step>
+    Paste the token into **OAuth Access Token** (`CONFLUENCE_ACCESS_TOKEN`) and save. It is
+    encrypted in secrets, the encrypted store for provider credentials.
+  </Step>
+</Steps>
+
+## Verify
+
+Return to **integrations** and confirm Confluence shows connected. Then ask in chat:
+
+```prompt
+Search Confluence for onboarding pages and list the spaces the results came from.
+```
+
+## If Confluence pages do not appear
+
+- **No spaces or pages appear** — check that **Cloud ID** matches the site and the token has the
+  Confluence read scopes from the setup step.
+- **Search works but Knowledge is narrow** — knowledge follows Confluence restrictions, groups,
+  and users. An unmapped Confluence account, the Atlassian user identity knowledge checks, grants no
+  knowledge access.
+- **A page cannot be read by id** — search first, then use the id from the search result.

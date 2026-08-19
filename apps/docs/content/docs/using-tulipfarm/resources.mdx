@@ -1,0 +1,66 @@
+---
+title: Resources
+description: Schema-driven Resource types, generated UIs, records, links, validation, and hooks.
+---
+
+{/* tf-page: track: using-tulipfarm  requires: ["record:*", "soul.resource_type:*"] */}
+
+A **Resource type** is a business data shape, such as customer, ticket, invoice, or asset. A
+**record** is one instance of that type. You create resource types by describing them in chat; the
+assistant writes JSON Schema into the [soul](/docs/using-tulipfarm/what-a-soul-is), and TulipFarm reconciles storage
+and UI from that schema.
+
+## Schema in the soul, records in Postgres
+
+Resource type definitions live at `soul/resources/{name}/schema.yml`. Records live in per-type
+Postgres tables. Reconciliation creates or updates the storage shape from the schema and runs live,
+so a new type is ready without restarting.
+
+Here is the kind of read-only artifact the assistant writes underneath:
+
+```yaml title="soul/resources/customer/schema.yml"
+type: object
+properties:
+  name:
+    type: string
+  email:
+    type: string
+    format: email
+required:
+  - name
+```
+
+Every create, replace, patch, and delete is validated server-side. Validation failures return a
+JSON Pointer `path`, so both the UI and agents can point to the field that failed.
+
+## Generated UI
+
+The web app generates list, detail, create, edit, and schema views from the resource type schema.
+Strings become text inputs, numbers become numeric inputs, booleans become checkboxes, enums become
+selects, `date` and `date-time` formats become date controls, and arrays or objects become JSON
+text areas. `x-links` fields render as searchable comboboxes, and `x-immutable` locks a field on
+edit.
+
+This is why resource types are more than tables: the schema is also the contract that drives a
+zero-code UI and the agent tools.
+
+## Links and extensions
+
+`x-links` declares a relationship to another resource type. TulipFarm verifies linked records exist
+on write, rejects invented ids, and shows unresolved links when a target has been soft-deleted.
+
+Common data-shaping extensions include `x-normalize` for canonical forms, `x-computed` for derived
+values, and `x-id-strategy` for human-friendly references such as `TICK-123`. The system UUID
+remains the stable primary id.
+
+## Resource hooks
+
+Sometimes a rule is too fiddly to describe as a setting — "when an order is marked paid, and the
+customer is on a monthly plan, and it is their third one, do this". For those, a resource type can
+carry a small piece of custom logic called a **hook**.
+
+You ask for a hook in chat like anything else. It runs in a locked-down space with no access to the
+rest of your instance, and TulipFarm refuses to store one that tries to do something it should not.
+
+Use [Define a resource type](/docs/using-tulipfarm/define-a-resource-type) to build a type and
+[Work with records](/docs/using-tulipfarm/work-with-records) to use records.

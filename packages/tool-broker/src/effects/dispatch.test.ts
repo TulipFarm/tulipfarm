@@ -136,6 +136,31 @@ describe("EffectDispatcher", () => {
     expect(await store.get(BUSINESS_ID, EFFECT_ID)).toMatchObject({ state: "ambiguous" });
   });
 
+  it("aborts the adapter and marks a cancelled mutation ambiguous", async () => {
+    let resolveStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      resolveStarted = resolve;
+    });
+    let abortSignal: AbortSignal | undefined;
+    const adapter: ToolAdapter = {
+      kind: "integration",
+      dispatch: (request) => {
+        abortSignal = request.abortSignal;
+        resolveStarted();
+        return new Promise(() => {});
+      },
+    };
+    const controller = new AbortController();
+    const pending = dispatcher(adapter).dispatch(BUSINESS_ID, EFFECT_ID, controller.signal);
+
+    await started;
+    controller.abort();
+
+    await expect(pending).rejects.toThrow(new ToolDispatchError("ambiguous", EFFECT_ID));
+    expect(abortSignal?.aborted).toBe(true);
+    expect(await store.get(BUSINESS_ID, EFFECT_ID)).toMatchObject({ state: "ambiguous" });
+  });
+
   it("validates provider output before confirming the effect", async () => {
     const adapter: ToolAdapter = {
       kind: "integration",

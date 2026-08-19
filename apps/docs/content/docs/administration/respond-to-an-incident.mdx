@@ -1,0 +1,70 @@
+---
+title: Respond to an incident
+description: Triage, contain, recover, and close a TulipFarm operational incident.
+---
+
+This guide covers a shipped incident response path using Operations, runs, Inbox,
+activities, and observability screens.
+
+## Outcome
+
+At the end, unsafe work is contained, evidence is preserved, ambiguous effects are
+reconciled, and the incident has an owner and closure record.
+
+## Triage
+
+<Steps>
+  <Step>
+    Open **Operations** and identify the affected health item, incident, quarantine item,
+    or kill switch.
+  </Step>
+  <Step>
+    Assign an incident owner, severity, start time, affected business area, and safe
+    reason code in your incident tracker.
+  </Step>
+  <Step>
+    Correlate identifiers from **Runs**, **Operate → Health → Observability**, and
+    **Operate → Work → Activities**: Run id, state key, effect id, integration, model, actor,
+    target, and audit event id.
+  </Step>
+</Steps>
+
+<Callout type="warn">
+Do not copy prompts, credentials, cookies, tool arguments, tool results, or secret values
+into the incident record. Store only identifiers, redacted summaries, and links.
+</Callout>
+
+## Contain
+
+Use the narrowest available control:
+
+- Pause or cancel an affected run from the run inspector.
+- Leave an approval undecided or deny it when the requested action is unsafe.
+- Keep quarantined or ambiguous effects from being retried until they are reconciled.
+- Use operational kill switches only for the smallest affected mutation scope.
+
+## Reconcile and recover
+
+<Steps>
+  <Step>
+    Open each affected run and review states, waits, effects, guardrail decisions, and
+    lineage.
+  </Step>
+  <Step>
+    Use **reconcile** for ambiguous effects before any retry. Reconciliation is what tells
+    the system whether an external mutation already happened.
+  </Step>
+  <Step>
+    After the fault is removed, use **resume** or **retry** on the specific runs that are
+    safe to continue.
+  </Step>
+  <Step>
+    Watch **Operations**, **Runs**, and **Operate → Health → Observability** for recurrence.
+  </Step>
+</Steps>
+
+## Close
+
+Close the incident with timeline, impact, evidence links, recovery actions, unresolved
+risks, and owners for corrective work. Confirm the activity log contains the operational
+decisions you made.

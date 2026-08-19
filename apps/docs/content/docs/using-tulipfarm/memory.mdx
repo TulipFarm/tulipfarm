@@ -1,0 +1,96 @@
+---
+title: Memory
+description: One Markdown page per person, written by the assistant and read on every turn.
+---
+
+{/* tf-page: track: using-tulipfarm  requires: ["platform.memory:*"] */}
+
+Memory is what an assistant durably recalls about you across chats. It is for preferences and
+recurring user-specific facts, not for static business identity or durable business records.
+
+Your memory is **one Markdown page**. Not a list of rows, not a search index — a page, and the
+assistant sees all of it on every turn. There is nothing to retrieve, so there is nothing that can
+fail to be retrieved at the moment you needed it.
+
+## What is on the page
+
+Six sections, always in this order:
+
+| Section | Holds |
+| --- | --- |
+| `## Identity` | who you are — role, team, location, timezone |
+| `## Standing instructions` | durable always/never rules you have stated |
+| `## Working context` | what you are currently working on |
+| `## Preferences` | language, tone, format |
+| `## Recent decisions` | the newest 15, dated |
+| `## Other durable facts` | anything lasting that fits nowhere above |
+
+One fact per line, and no headings inside a section — that is what keeps a correction able to
+remove exactly the line it meant.
+
+## Who writes it
+
+Three writers, one page:
+
+- **The assistant, mid-chat.** It decides something you said is durable and calls `update_memory`.
+- **You, explicitly.** "Remember that I play cricket" takes the same path; you just chose the moment.
+- **The Curator**, a background loop that reads finished chats and folds what it learns into the
+  page. You are not asked to approve each fact — a queue of small confirmations is a worse
+  experience than the occasional wrong fact, which the next correction overwrites.
+
+`update_memory` only ever adds and removes lines you name. It never restates a whole section, so
+two writers working at once merge instead of overwriting each other.
+
+## Reading and correcting it
+
+You can read it — the **memory** panel on `/settings/profile` shows the whole page — but you cannot
+edit it there, and that is deliberate: Memory is what TulipFarm concluded about you, not a list you
+curate. To change something, say so in a chat; the correction is applied by the same writer that
+made the original claim, so it leaves a trail.
+
+What you author directly is **Custom instructions** at `/settings/instructions` — standing guidance
+applied to every conversation. The two are separate on purpose: one is yours, one is the
+assistant's.
+
+## Correcting how an agent behaves
+
+Memory normally holds statements of fact, never instructions. That ban is deliberate: text that
+arrives from a document or a third party must never come back as an order the agent follows.
+
+Your own corrections are the one exception, and they land in `## Standing instructions`. When you
+tell an agent "when I ask for the weekly report, always include the churn number", it records that
+and applies it on future turns. It only accepts such a write when you stated it explicitly — an
+agent cannot infer a standing instruction from your behaviour, or lift one out of a document it
+read.
+
+## Size and erasure
+
+The page has a character budget, per section and overall. A write that would exceed it is
+**rejected** rather than truncated: a silently trimmed page would drop a fact you were told was
+remembered.
+
+Erasing a person removes the page and its whole revision history together. Deleting only the
+current page would leave every superseded copy of the same fact behind.
+
+## What belongs in the system prompt
+
+Static business facts belong in the system prompt, not memory. The configured business name and
+description from `soul.yaml` (`businessName`, `businessDescription`) identify the instance and are
+rendered into the prompt as business context. They are not user preferences and should not be
+stored as memory just because onboarding collected them.
+
+## What belongs in records or knowledge
+
+Business state belongs in [records](/docs/using-tulipfarm/resources). Policies, procedures, and narrative
+reference material belong in [knowledge](/docs/using-tulipfarm/knowledge) spaces and pages. Memory should
+not become a hidden database of customers, tickets, policies, or operating rules.
+
+## Agent scratch space is KV, not memory
+
+TulipFarm also gives agents a scratch space: a simple place to stash a value under a name and read
+it back later. It is durable, so it survives restarts, but it belongs to an agent or a workflow —
+not to you.
+
+That is the difference worth holding on to. Scratch space is where an agent keeps its working
+notes. Memory is what it knows about **you**, and only memory is offered back as context about your
+preferences.

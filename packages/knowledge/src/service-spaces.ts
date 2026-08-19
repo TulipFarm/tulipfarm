@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { PaginatedResult } from "@tulipfarm/storage";
 import type { KnowledgeLinksRepo } from "./links-repo";
 import { parseOkf, resolveLink, rewriteCrossPageSpaceName } from "./okf/parse";
@@ -7,11 +8,14 @@ import type { KnowledgeServiceDeps } from "./service";
 import { afterWrite } from "./service-indexing";
 import type { KnowledgeSpaceOverrideRepo } from "./space-overrides-repo";
 import type { KnowledgeSpaceRepo, SpacePatch } from "./spaces-repo";
+import { BLANKET_READ_PRINCIPAL } from "./subject";
 import type {
   Backlink,
   KnowledgePage,
   KnowledgeSpace,
+  PageAuthor,
   RecentPage,
+  SpacePageActivity,
   SpacePageRef,
   SpaceWithActivity,
 } from "./types";
@@ -50,6 +54,11 @@ export interface WritePageInput {
   content: string;
   /** Reason recorded on the history revision this write snapshots. */
   reason?: string | null;
+  /**
+   * Who is writing. Absent leaves the Page's authorship unchanged rather than clearing it, so a
+   * system rewrite (a Space rename rewriting bodies) does not reattribute a Page to nobody.
+   */
+  author?: PageAuthor | null;
 }
 
 export type WritePageResult =
@@ -65,6 +74,12 @@ export class SpaceNameTakenError extends Error {
   }
 }
 
+/**
+ * Narrows a set of Page ids to the ones the caller may read. The caller supplies it so the access
+ * decision stays with the request, while the filtering stays with the code that renders.
+ */
+export type PageVisibilityFilter = (pageIds: readonly string[]) => Promise<ReadonlySet<string>>;
+
 export interface SpaceGraph {
   nodes: Array<{ id: string; path: string | null; title: string }>;
   edges: Array<{
@@ -77,6 +92,23 @@ export interface SpaceGraph {
     /** The resolved id of that other space, when it exists; null while unresolved. */
     targetSpaceId: string | null;
   }>;
+  truncated: boolean;
+}
+
+/**
+ * The Business-wide Page-link graph.
+ *
+ * Deliberately narrower than {@link SpaceGraph}: it carries only edges whose two endpoints are both
+ * drawn nodes. A broken or unresolved link has no second endpoint, and an arrow into empty space is
+ * indistinguishable from an arrow into a Page the viewer was refused — so the graph would leak
+ * shape even while leaking no titles. Broken links belong in a link report, not in a picture of
+ * how the corpus is connected.
+ */
+export interface KnowledgeGraph {
+  nodes: Array<{ id: string; path: string; title: string; spaceId: string }>;
+  edges: Array<{ sourceId: string; targetId: string }>;
+  /** Only the Spaces that contributed at least one drawn node — a legend that cannot over-report. */
+  spaces: Array<{ id: string; name: string }>;
   truncated: boolean;
 }
 
@@ -198,6 +230,23 @@ export function listSpacePages(
 }
 
 /** Write an OKF page; final `index`/`log` path segments become directory overrides. */
+
+/**
+ * Every Page is readable by everyone in the Business by default. The grant names the blanket Role
+ * rather than expanding to members, so it never drifts as people join or leave.
+ */
+async function grantBlanketRead(deps: KnowledgeServiceDeps, pageId: string): Promise<void> {
+  if (!deps.acl) return;
+  await deps.acl.put({
+    businessId: DEPLOYMENT_BUSINESS_ID,
+    subjectKind: "page",
+    subjectId: pageId,
+    principal: BLANKET_READ_PRINCIPAL,
+    effect: "grant",
+    capability: "read",
+  });
+}
+
 export async function writePage(
   deps: KnowledgeServiceDeps,
   input: WritePageInput
@@ -242,10 +291,16 @@ export async function writePage(
     resource: parsed.resource,
     type: parsed.type,
     frontmatterExtra: parsed.extra,
+    authorKind: input.author?.kind ?? prior?.authorKind ?? null,
+    authorId: input.author?.id ?? prior?.authorId ?? null,
     createdAt: prior?.createdAt ?? now,
     updatedAt: parsed.timestamp ? new Date(parsed.timestamp) : now,
   };
   const { _id } = await deps.pages.upsertBySource(draft);
+
+  // Only on create. Restriction is an allowlist that *replaces* this grant, so re-adding it on
+  // every save would silently republish a restricted Page on the author's next edit.
+  if (!prior) await grantBlanketRead(deps, _id);
 
   // Snapshot history only when existing content changes; creates and no-op rewrites stay silent.
   if (prior && prior.content !== input.content) {
@@ -290,7 +345,8 @@ export async function writePage(
 export async function navigateSpace(
   deps: KnowledgeServiceDeps,
   spaceId: string,
-  dirPath: string
+  dirPath: string,
+  visible?: ReadonlySet<string>
 ): Promise<string | null> {
   const space = okf(deps);
   if (!space) return null;
@@ -298,7 +354,10 @@ export async function navigateSpace(
   const dir = normalizePagePath(dirPath);
   const override = await space.overrides.get(spaceId, dir, "index.md");
   if (override) return override.content;
-  const pages = await deps.pages.listBySpace(spaceId);
+  const all = await deps.pages.listBySpace(spaceId);
+  // Filtering happens before rendering, not after: the index is emitted as markdown, so a Page
+  // removed from the rendered string afterwards would still have contributed its title.
+  const pages = visible === undefined ? all : all.filter((p) => visible.has(p._id));
   const entries: IndexEntry[] = pages.map((p) => ({
     path: p.path ?? "",
     title: p.title,
@@ -310,15 +369,42 @@ export async function navigateSpace(
 /** Node + edge list for a space's cross-link graph (capped for payload safety). */
 export async function getSpaceGraph(
   deps: KnowledgeServiceDeps,
-  spaceId: string
+  spaceId: string,
+  authorize?: PageVisibilityFilter
 ): Promise<SpaceGraph | null> {
   const space = okf(deps);
   if (!space) return null;
   if (!(await space.spaces.getById(spaceId))) return null;
   const NODE_CAP = 500;
   const EDGE_CAP = 1000;
-  const pages = await deps.pages.listBySpace(spaceId);
-  const allEdges = await space.links.getGraphForSpace(spaceId);
+  const allPages = await deps.pages.listBySpace(spaceId);
+  const rawEdges = await space.links.getGraphForSpace(spaceId);
+
+  // Edge targets are authorized alongside this Space's own Pages because a cross-space edge points
+  // at a Page that lives elsewhere; asking only about local Pages would silently drop every valid
+  // cross-space link.
+  const visible =
+    authorize === undefined
+      ? undefined
+      : await authorize([
+          ...new Set([
+            ...allPages.map((p) => p._id),
+            ...rawEdges.map((e) => e.targetId).filter((id): id is string => id !== null),
+          ]),
+        ]);
+
+  const pages = visible === undefined ? allPages : allPages.filter((p) => visible.has(p._id));
+  // An edge is a disclosure in its own right: an arrow into a withheld Page reveals that it exists
+  // and, through `targetPath`, usually what it is called. Both ends must therefore be readable.
+  // A *broken* edge is different — its target resolves to nothing, so its path is only text the
+  // reader can already see in the source Page, and dropping it would change what an unrestricted
+  // corpus returns.
+  const allEdges =
+    visible === undefined
+      ? rawEdges
+      : rawEdges.filter(
+          (e) => visible.has(e.sourceId) && (e.targetId === null || visible.has(e.targetId))
+        );
   const nodes = pages.slice(0, NODE_CAP).map((p) => ({
     id: p._id,
     path: p.path ?? null,
@@ -337,6 +423,49 @@ export async function getSpaceGraph(
       targetSpaceId: e.targetSpaceId,
     }));
   return { nodes, edges, truncated: pages.length > NODE_CAP || allEdges.length > EDGE_CAP };
+}
+
+/** Node + edge list for the whole Business, spanning Spaces (capped for payload safety). */
+export async function getKnowledgeGraph(
+  deps: KnowledgeServiceDeps,
+  authorize?: PageVisibilityFilter
+): Promise<KnowledgeGraph> {
+  const space = okf(deps);
+  if (!space) return { nodes: [], edges: [], spaces: [], truncated: false };
+  const NODE_CAP = 600;
+  const EDGE_CAP = 2000;
+  const allPages = await deps.pages.listAllSpacePages();
+  const rawEdges = await space.links.getResolvedLinks();
+
+  const visible =
+    authorize === undefined ? undefined : await authorize(allPages.map((p) => p.pageId));
+  const readable = visible === undefined ? allPages : allPages.filter((p) => visible.has(p.pageId));
+
+  const nodes = readable.slice(0, NODE_CAP).map((p) => ({
+    id: p.pageId,
+    path: p.path,
+    title: p.title,
+    spaceId: p.spaceId,
+  }));
+  const drawn = new Set(nodes.map((n) => n.id));
+  // Both endpoints, always — including endpoints lost to the cap, not only to the gate. A viewer
+  // cannot tell the two apart, and a dangling arrow reads as a withheld Page either way.
+  const kept = rawEdges.filter(
+    (e) => drawn.has(e.sourceId) && e.targetId !== null && drawn.has(e.targetId)
+  );
+  const edges = kept.slice(0, EDGE_CAP).map((e) => ({
+    sourceId: e.sourceId,
+    targetId: e.targetId as string,
+  }));
+
+  const spaceNames = new Map<string, string>();
+  for (const p of readable.slice(0, NODE_CAP)) spaceNames.set(p.spaceId, p.spaceName);
+  return {
+    nodes,
+    edges,
+    spaces: [...spaceNames].map(([id, name]) => ({ id, name })),
+    truncated: readable.length > NODE_CAP || kept.length > EDGE_CAP,
+  };
 }
 
 /** Pages that link to a page (same- or cross-space) — the "Linked from" panel. */
@@ -363,6 +492,19 @@ export async function listAllPages(deps: KnowledgeServiceDeps): Promise<SpacePag
   const space = okf(deps);
   if (!space) return [];
   return deps.pages.listAllSpacePages();
+}
+
+/**
+ * Per-Page activity for the whole corpus, so a principal-aware caller can roll a Space up from only
+ * the Pages that principal may read. The roll-up cannot be done here: this layer holds no principal.
+ */
+export async function listSpacePageActivity(
+  deps: KnowledgeServiceDeps,
+  spaceIds: readonly string[]
+): Promise<SpacePageActivity[]> {
+  const space = okf(deps);
+  if (!space) return [];
+  return deps.pages.listSpacePageActivity(spaceIds);
 }
 
 /** Knowledge home overview: spaces with counts/activity plus recently-edited pages. */

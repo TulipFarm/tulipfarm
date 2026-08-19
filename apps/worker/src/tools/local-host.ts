@@ -4,6 +4,8 @@ import {
   KNOWLEDGE_TOOLS,
   KnowledgeService,
   type KnowledgeToolContext,
+  PageReadGate,
+  PgKnowledgeAclRepo,
   PgKnowledgeChunkRepo,
   PgKnowledgeLinksRepo,
   PgKnowledgePageRepo,
@@ -111,15 +113,22 @@ function hostedFamilies(options: LocalToolHostOptions): readonly HostedFamily<ne
     links: new PgKnowledgeLinksRepo(options.db),
     overrides: new PgKnowledgeSpaceOverrideRepo(options.db),
     embeddings,
+    // A Page written by a Tool is gated the same as one written through the UI; without this the
+    // write path would differ by caller and an agent-authored Page would be readable by nobody.
+    acl: new PgKnowledgeAclRepo(options.db),
     // `sourceRetrieval` is deliberately absent: authorizing connected-source hits needs the Soul
     // and provider credentials. `query_knowledge` declares that need and is refused below, so no
     // hosted Tool can reach the degraded wiki-only path.
     ...(options.enqueueIndexJob === undefined ? {} : { enqueueIndex: options.enqueueIndexJob }),
   });
 
+  // The same gate the API's routes use. Without it every exact-lookup Tool refuses, so a Routine
+  // could not read even an unrestricted Page.
+  const pageGate = new PageReadGate(options.db);
+
   const vectorBacked: HostedFamily<KnowledgeToolContext> = {
     definitions: KNOWLEDGE_TOOLS,
-    context: (ctx) => ({ ...principal(ctx), service: knowledge }),
+    context: (ctx) => ({ ...principal(ctx), service: knowledge, pageGate }),
   };
 
   return [

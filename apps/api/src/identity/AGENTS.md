@@ -30,6 +30,18 @@ API clients, external identity mappings, and channel bind links.
 - OIDC `state` and link tokens are consumed atomically so replay fails.
 - OIDC/link errors expose only coarse reasons; provider detail must not reach responses or logs.
 - Channel senders live in `external_identity_mappings` with the Integration slug as provider.
+- A mapping's `verifiedVia` decides whether it confers **authority**, separately from whether it
+  identifies a chat sender. `PROVEN_LINK_VERIFICATION` in `external-links.ts` is the only list;
+  `manifest_email` and `null` are excluded because a provider-asserted email is controlled by the
+  counterparty org, not by us.
+- Anything deciding what a principal may reach reads `listProvenMappingsForUser`, never
+  `listMappingsForUser`. The filter is in SQL so a new call site cannot omit it. Both
+  `knowledge-sources/live-authorization.ts` ports and `internal/github-entitlement.ts` depend on
+  this; `listMappingsForUser` is for display and identity questions only.
+- Identifying a sender and empowering them are separate questions, so `IngressIdentityResolver`
+  returns `principalKind`/`principalId`/`principalRef` alongside `user`. Anything conferring
+  authority — Surface interactions, approval decisions, the resolve route — reads those. `user` is
+  for routing only.
 - Channel bind links are HMAC credentials with `{slug, senderId, issuedAt, nonce}`, no account,
   15-minute expiry, body-only token transport, and authenticated explicit redemption.
 - Authentication and privilege elevation rotate the session id. Do not use the legacy

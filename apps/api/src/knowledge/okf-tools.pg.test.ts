@@ -14,6 +14,7 @@ import {
   PgKnowledgeSpaceRepo,
 } from "@tulipfarm/knowledge";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { allowAllPages } from "../test/page-gate";
 import { makeMigratedPglite } from "../test/pglite";
 
 type KnowledgeTool = (typeof KNOWLEDGE_TOOLS)[number];
@@ -51,7 +52,8 @@ describe("OKF agent tools", () => {
       embeddings: lexicalOnly(),
       retrieval: new PageRetrievalService(db),
     });
-    ctx = { userId: "u", service };
+    // Not the suite testing access control; `tool-page-access.pg.test.ts` is.
+    ctx = { userId: "u", service, pageGate: allowAllPages() };
   });
   afterEach(async () => {
     await db.close();

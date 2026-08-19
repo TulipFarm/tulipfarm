@@ -3,6 +3,7 @@ import type {
   KnowledgePage,
   KnowledgeRevision,
   KnowledgeSource,
+  KnowledgeSpace,
   PageHit,
   SearchFilters,
   SearchHit,
@@ -32,6 +33,8 @@ export function toApiPage(p: KnowledgePage, status?: IndexingStatus): Record<str
     path: p.path ?? null,
     resource: p.resource ?? null,
     frontmatterExtra: p.frontmatterExtra ?? {},
+    authorKind: p.authorKind ?? null,
+    authorId: p.authorId ?? null,
     createdAt: p.createdAt.toISOString(),
     updatedAt: p.updatedAt.toISOString(),
     ...(status !== undefined ? { indexingStatus: status } : {}),
@@ -68,6 +71,7 @@ export function pageHitToApi(h: PageHit): Record<string, unknown> {
     path: h.path,
     snippet: h.snippet,
     highlightRanges: h.highlightRanges,
+    authorKind: h.authorKind,
     score: h.score,
   };
 }
@@ -82,4 +86,14 @@ export function filtersFromQuery(q: Record<string, unknown>): SearchFilters {
   if (typeof q.spaceId === "string") filters.spaceId = q.spaceId;
   if (typeof q.type === "string") filters.type = q.type;
   return filters;
+}
+
+export function toApiSpace(s: KnowledgeSpace): Record<string, unknown> {
+  return {
+    id: s._id,
+    name: s.name,
+    description: s.description,
+    createdAt: s.createdAt.toISOString(),
+    updatedAt: s.updatedAt.toISOString(),
+  };
 }

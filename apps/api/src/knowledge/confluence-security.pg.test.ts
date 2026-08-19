@@ -12,6 +12,7 @@ import {
   PgKnowledgeRevisionRepo,
 } from "@tulipfarm/knowledge";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { IdentityVerificationMethod } from "../identity/external-links";
 import { MemoryExternalIdentityRepo } from "../identity/fakes";
 import { ExternalLinkKnowledgeIdentityMap } from "../identity/knowledge-identity-map";
 import { PgConfluenceKnowledgeCheckpointStore } from "../knowledge-sources/confluence-checkpoint-store";
@@ -73,7 +74,9 @@ class FakeConfluenceApi implements ConfluenceApiPort {
   }
 }
 
-function mappedIdentity(): ExternalLinkKnowledgeIdentityMap {
+function mappedIdentity(
+  verifiedVia: IdentityVerificationMethod = "link_token"
+): ExternalLinkKnowledgeIdentityMap {
   const repo = new MemoryExternalIdentityRepo();
   repo.mappings.push({
     provider: "confluence",
@@ -81,6 +84,7 @@ function mappedIdentity(): ExternalLinkKnowledgeIdentityMap {
     userId: "alice",
     verifiedAt: NOW,
     expiresAt: null,
+    verifiedVia,
   });
   repo.mappings.push({
     provider: "confluence",
@@ -88,6 +92,7 @@ function mappedIdentity(): ExternalLinkKnowledgeIdentityMap {
     userId: "bob",
     verifiedAt: NOW,
     expiresAt: null,
+    verifiedVia,
   });
   return new ExternalLinkKnowledgeIdentityMap(repo);
 }
@@ -125,21 +130,26 @@ describe("Confluence Knowledge security through query_knowledge", () => {
   });
 
   async function sync(
-    options: { revalidatePageIds?: readonly string[]; aclMaximumAgeSeconds?: number } = {}
+    options: {
+      revalidatePageIds?: readonly string[];
+      aclMaximumAgeSeconds?: number;
+      verifiedVia?: IdentityVerificationMethod;
+    } = {}
   ): Promise<void> {
+    const { verifiedVia, ...syncOptions } = options;
     await syncConfluenceKnowledge(
       {
         api,
         checkpoints: new PgConfluenceKnowledgeCheckpointStore(db),
         sink: new PgKnowledgeEmissionSink(sources, index),
-        identity: mappedIdentity(),
+        identity: mappedIdentity(verifiedVia),
         now: () => NOW,
       },
       {
         businessId: BUSINESS,
         integrationId: "confluence:test:cloud-1",
         externalTenantId: "cloud-1",
-        ...options,
+        ...syncOptions,
       }
     );
   }
@@ -196,6 +206,26 @@ describe("Confluence Knowledge security through query_knowledge", () => {
     await sync();
 
     expect(resultCount(await queryAs("alice"))).toBe(0);
+  });
+
+  // A Slack Connect or Confluence guest counterparty administers their own users' email
+  // addresses, so a provider-asserted email identifies a chat sender but must never carry a
+  // document grant. Proven end-to-end rather than at the unit, because the grant is frozen into
+  // the captured ACL at sync time and a unit test cannot show that the freeze never happened.
+  it("grants nothing when the only mapping was verified by provider-asserted email", async () => {
+    api.permissions.set("page-1", ["acct_alice"]);
+    await sync({ verifiedVia: "manifest_email" });
+
+    const data = await queryAs("alice");
+    expect(resultCount(data)).toBe(0);
+    expect(JSON.stringify(data)).not.toContain(SECRET_TEXT);
+  });
+
+  it("still grants access for the same page once the mapping is link-token verified", async () => {
+    api.permissions.set("page-1", ["acct_alice"]);
+    await sync({ verifiedVia: "link_token" });
+
+    expect(resultCount(await queryAs("alice"))).toBe(1);
   });
 
   it("excludes pages with missing or stale ACL data", async () => {

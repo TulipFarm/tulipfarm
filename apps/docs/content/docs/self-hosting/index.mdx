@@ -1,0 +1,96 @@
+---
+title: Self-hosting TulipFarm
+description: Install TulipFarm on your own server and keep it healthy. Covers Docker Compose, Coolify, Portainer, Kubernetes, TLS, backups, and upgrades.
+---
+
+TulipFarm runs on machines you control. Nothing here depends on a hosted service, and your
+business data only leaves the instance when an agent was explicitly allowed to send it.
+
+This track is about the server. It uses a terminal, and it assumes you can reach the machine
+TulipFarm will run on. If you are setting up the *product* rather than the server, go to
+[Administration](/docs/administration) instead.
+
+## Get it running
+
+<Cards>
+  <Card
+    title="Install"
+    href="/docs/self-hosting/install"
+    description="The one-line installer, step by step — Linux, macOS, and Windows."
+  />
+  <Card
+    title="Docker Compose"
+    href="/docs/self-hosting/docker-compose"
+    description="run the published Compose file yourself, with no generated .env."
+  />
+  <Card
+    title="Coolify"
+    href="/docs/self-hosting/coolify"
+    description="Deploy through Coolify's one-click app flow."
+  />
+  <Card
+    title="Portainer"
+    href="/docs/self-hosting/portainer"
+    description="Deploy as a Portainer stack."
+  />
+  <Card
+    title="Other platforms"
+    href="/docs/self-hosting/other-platforms"
+    description="Dokploy, Unraid, CasaOS, Synology, and anything else that speaks Compose."
+  />
+  <Card
+    title="Kubernetes"
+    href="/docs/self-hosting/kubernetes"
+    description="run the same images as Kubernetes workloads."
+  />
+</Cards>
+
+## Make it production-ready
+
+<Cards>
+  <Card
+    title="Production checklist"
+    href="/docs/self-hosting/production-checklist"
+    description="What to change before real business data goes in."
+  />
+  <Card
+    title="TLS and domains"
+    href="/docs/self-hosting/tls"
+    description="Put the instance behind HTTPS on a domain you own."
+  />
+  <Card
+    title="Managed database"
+    href="/docs/self-hosting/managed-database"
+    description="Point TulipFarm at a PostgreSQL server you already run."
+  />
+  <Card
+    title="Headless setup"
+    href="/docs/self-hosting/headless"
+    description="Create the first admin account without opening a browser."
+  />
+</Cards>
+
+## Keep it running
+
+<Cards>
+  <Card
+    title="Upgrading"
+    href="/docs/self-hosting/updating"
+    description="Move to a new version without losing data."
+  />
+  <Card
+    title="Backup and restore"
+    href="/docs/self-hosting/back-up-and-restore"
+    description="What to copy, how often, and how to prove a restore works."
+  />
+  <Card
+    title="When install fails"
+    href="/docs/self-hosting/when-install-fails"
+    description="The failures people actually hit while installing, and the fix for each."
+  />
+  <Card
+    title="Uninstall"
+    href="/docs/self-hosting/uninstall"
+    description="Remove TulipFarm cleanly, keeping or destroying your data."
+  />
+</Cards>

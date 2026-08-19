@@ -109,6 +109,22 @@ describe("ConversationTurnCompleter", () => {
     expect(result).toMatchObject({ status: "failed", reason: "iteration_limit" });
   });
 
+  it("completes an input-required Turn without inventing an assistant Message", async () => {
+    const store = new FakeStore();
+    const completer = new ConversationTurnCompleter({ store });
+
+    const result = await completer.complete({
+      ...request,
+      outcome: { status: "input_required" },
+    });
+
+    expect(store.appended).toEqual([]);
+    expect(store.completed).toEqual([
+      { turnId: "turn-1", attempt: 1, status: "succeeded", cursor: 12 },
+    ]);
+    expect(result).toEqual({ status: "succeeded", messageId: null });
+  });
+
   it("leaves a waiting Turn open so the Approval can resume it", async () => {
     const store = new FakeStore();
     const completer = new ConversationTurnCompleter({ store });

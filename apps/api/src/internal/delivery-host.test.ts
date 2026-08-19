@@ -214,7 +214,15 @@ async function harness(
     } as unknown as IntegrationEventsRepo,
     soulLoader: soul,
     identity: {
-      resolve: options.resolve ?? (async () => ({ outcome: "linked", user: user("user-1") })),
+      resolve:
+        options.resolve ??
+        (async () => ({
+          outcome: "linked",
+          user: user("user-1"),
+          principalKind: "user",
+          principalId: "user-1",
+          principalRef: "user:user-1",
+        })),
     },
     toolRegistry: registry,
     domainEvents: events,

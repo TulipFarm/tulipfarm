@@ -6,6 +6,7 @@ import type {
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { IntegrationStore, PersistedRoutingSnapshot } from "@tulipfarm/storage";
 import { describe, expect, it, vi } from "vitest";
+import type { IdentityVerificationMethod } from "../identity/external-links";
 import { MemoryExternalIdentityRepo } from "../identity/fakes";
 import { SlackLiveSourceAuthorization, SlackTenantLiveAuthorization } from "./live-authorization";
 
@@ -57,6 +58,7 @@ describe("SlackLiveSourceAuthorization", () => {
       userId: "user-1",
       verifiedAt: new Date(),
       expiresAt: null,
+      verifiedVia: "link_token",
     });
     const auth = new SlackLiveSourceAuthorization(stubApi(["U1", "U2"]), identity);
 
@@ -73,6 +75,7 @@ describe("SlackLiveSourceAuthorization", () => {
       userId: "user-1",
       verifiedAt: new Date(),
       expiresAt: null,
+      verifiedVia: "link_token",
     });
     const auth = new SlackLiveSourceAuthorization(stubApi(["U1", "U2"]), identity);
 
@@ -98,6 +101,7 @@ describe("SlackLiveSourceAuthorization", () => {
       userId: "user-1",
       verifiedAt: new Date(),
       expiresAt: new Date(Date.now() - 60_000),
+      verifiedVia: "link_token",
     });
     const auth = new SlackLiveSourceAuthorization(stubApi(["U1"]), identity);
 
@@ -146,6 +150,41 @@ describe("SlackLiveSourceAuthorization", () => {
     });
 
     expect(result).toBeUndefined();
+  });
+
+  // Live authorization covers exactly the sensitive Slack sources — private channels, DMs and
+  // group DMs. Public channels use a captured snapshot instead. So a verification grade enforced
+  // only on the snapshot path would secure the public content and leave the private content open,
+  // which is the wrong way round. See ticket 06.
+  describe("verification grade", () => {
+    const checkVia = async (verifiedVia: IdentityVerificationMethod | null) => {
+      const identity = new MemoryExternalIdentityRepo();
+      identity.mappings.push({
+        provider: "slack",
+        externalSubject: "U1",
+        userId: "user-1",
+        verifiedAt: new Date(),
+        expiresAt: null,
+        verifiedVia,
+      });
+      const auth = new SlackLiveSourceAuthorization(stubApi(["U1", "U2"]), identity);
+      return auth.check(baseInput([{ kind: "user", id: "user-1" }]));
+    };
+
+    it.each([
+      "link_token",
+      "bind_link",
+    ] as const)("allows a current member mapped via %s", async (method) => {
+      expect(await checkVia(method)).toEqual({ allowed: true });
+    });
+
+    it("denies a current member whose mapping came from a provider-asserted email", async () => {
+      expect(await checkVia("manifest_email")).toEqual({ allowed: false });
+    });
+
+    it("denies a current member whose mapping has no recorded provenance", async () => {
+      expect(await checkVia(null)).toEqual({ allowed: false });
+    });
   });
 });
 
@@ -248,6 +287,7 @@ describe("SlackTenantLiveAuthorization", () => {
       userId: "user-1",
       verifiedAt: new Date(),
       expiresAt: null,
+      verifiedVia: "link_token",
     });
     const auth = new SlackTenantLiveAuthorization(integrations, secrets, identity);
 

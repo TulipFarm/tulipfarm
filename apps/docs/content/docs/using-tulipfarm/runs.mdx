@@ -1,0 +1,72 @@
+---
+title: Runs
+description: The record of a piece of work from start to finish, why it survives a crash, and what you can do to one while it is going.
+---
+
+{/* tf-page: track: using-tulipfarm  requires: ["activity:*"] */}
+
+
+A **run** is one piece of work, recorded from start to finish.
+
+Every message you send an agent is a run. So is every routine that fires on a schedule, and every
+time a connected app sends TulipFarm something to deal with. If work happened, there is a run for
+it — and you can go and read it afterwards.
+
+## Written down before it starts
+
+TulipFarm records the work *before* anyone begins doing it.
+
+That ordering is the whole point. Because the request is written down first:
+
+- If the machine restarts mid-job, the work is picked back up rather than lost.
+- If you close the browser tab, the work carries on without you.
+- If you want to know what happened last Tuesday, it is still there.
+
+A run is not a progress bar that disappears when you look away. It is a record.
+
+## What a run can be doing
+
+At any moment a run is in one of a few plain situations:
+
+| Situation | What it means for you |
+| --- | --- |
+| Queued | Accepted, waiting its turn to start. |
+| Running | Being worked on now. |
+| Waiting | Parked on purpose — for a person, a timer, or another job. |
+| Succeeded | Finished, and it worked. |
+| Failed | Finished, and it did not. The run says why. |
+| Cancelled | You or someone else stopped it. |
+| Needs attention | It could not finish on its own and wants a human. |
+
+**Waiting is not stuck.** A run waiting on your approval can wait for days without consuming
+anything or timing out. It is parked, not frozen.
+
+## Watching one happen
+
+Open a run and you see events appear as they happen.
+
+If your connection drops, reopening picks up exactly where you left off — you do not miss events in
+the gap, and you do not see the same ones twice. Watching a run never changes it, so it is always
+safe to look.
+
+## What you can do to a run
+
+From the run itself you can **cancel**, **pause**, **resume**, or **retry** it.
+
+Whether you are allowed to do any of those is decided by the server, not the screen — so a button
+you can see is not automatically a button that will work. If you lack the authority, TulipFarm says
+so instead of silently doing nothing.
+
+Stopping a chat answer part-way is a cancel like any other: the agent stops, and the run closes with
+the reason recorded.
+
+## Where to go next
+
+<Cards>
+  <Card title="Watch a run" href="/docs/using-tulipfarm/watch-a-run">
+    Follow a job while it happens, and read one after it finished.
+  </Card>
+  <Card title="Approvals" href="/docs/using-tulipfarm/approvals">
+    Why a run waits for a person, and where that decision lands.
+  </Card>
+</Cards>

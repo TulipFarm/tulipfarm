@@ -12,23 +12,24 @@ export default function SpaceNew() {
   const navigate = useNavigate();
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   async function onSubmit(body: SpaceInput) {
     setSubmitting(true);
     setFormError(null);
+    setFieldErrors({});
     try {
       const b = await createSpace(body);
       window.dispatchEvent(new Event("okf:space-changed")); // surface the new space in the tree
       navigate(`/knowledge/spaces/${encodeURIComponent(b.id)}`);
     } catch (err) {
-      // 409 here means the name is taken — surface the server message as a banner.
-      const message =
-        err instanceof ApiError && err.status === 409
-          ? "a space with that name already exists"
-          : err instanceof Error
-            ? err.message
-            : "request failed";
-      setFormError(message);
+      // A taken name is a problem with the name, so it belongs against the name field rather than
+      // in a banner the reader has to map back to an input themselves.
+      if (err instanceof ApiError && err.status === 409) {
+        setFieldErrors({ name: "a space with that name already exists" });
+      } else {
+        setFormError(err instanceof Error ? err.message : "request failed");
+      }
       setSubmitting(false);
     }
   }
@@ -41,6 +42,7 @@ export default function SpaceNew() {
         mode="create"
         onSubmit={onSubmit}
         submitting={submitting}
+        fieldErrors={fieldErrors}
         formError={formError}
         cancelTo="/knowledge"
       />

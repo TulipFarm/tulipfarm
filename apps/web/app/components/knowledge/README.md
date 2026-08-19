@@ -31,7 +31,7 @@ documents/collections tabs); pages are markdown, edited with the shared `@tulipf
 - `page-detail` — read view (`MarkdownView`, callout-aware).
 - `space-form` — space name/description/domain.
 - `space-graph` — d3-force cross-link graph (content-pane route).
-- `space-list` — spaces card grid (the orphan `/knowledge/spaces` index; tree is the real nav).
+- `space-delete-dialog` — names the Space and counts its Pages before deleting it.
 
 ## Routes (`app/routes/_app.knowledge.*`)
 

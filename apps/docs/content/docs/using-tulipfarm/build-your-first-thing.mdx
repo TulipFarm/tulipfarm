@@ -1,0 +1,145 @@
+---
+title: Build your first thing
+description: Build a working resource type, agent, and routine by chatting — no code, no restarts, about fifteen minutes.
+---
+
+{/* tf-page: track: using-tulipfarm  requires: ["chat:*", "soul.resource_type:*"] */}
+
+By the end of this you will have something that actually works for you: a place to keep records, an
+agent that owns a job, and a schedule that runs it every week without being asked.
+
+You will not write any code. You will not edit a file. You will type what you want, in plain
+language, and check the result.
+
+About fifteen minutes.
+
+## Before you start
+
+You need an instance that is signed in and has a model configured. If chat replies to you, you are
+ready.
+
+<Callout type="info">
+  Not there yet? [Install one](/docs/self-hosting/install), then
+  [make it team-ready](/docs/administration/make-it-team-ready).
+</Callout>
+
+The example below tracks customers. If your work is repairs, bookings, orders, or students, use
+that word instead — nothing here depends on the example.
+
+<Steps>
+
+<Step>
+
+### Ask for a place to keep things
+
+Open **Chat** and type what you want:
+
+```prompt
+Create a customer resource type with a name, an email, and a status of active, churned, or trial.
+```
+
+The assistant confirms a couple of details and builds it. There is no schema to write and no
+restart. The moment it finishes, `customer` exists, with list and detail screens already generated
+for it.
+
+Open **Resources** in the sidebar. It is there.
+
+This is the normal way to build in TulipFarm — see
+[how building by chat works](/docs/using-tulipfarm/how-building-by-chat-works).
+
+</Step>
+
+<Step>
+
+### Put something in it
+
+Ask:
+
+```prompt
+Add a customer named Ada Lovelace, ada@example.com, status trial.
+```
+
+Or open **Resources → customer → New** and fill in the form yourself. Both write the same record —
+see [work with records](/docs/using-tulipfarm/work-with-records).
+
+</Step>
+
+<Step>
+
+### Give the job an owner
+
+A resource type stores things. An [agent](/docs/using-tulipfarm/agents) does something with them.
+Ask for one:
+
+```prompt
+Create a customer success agent that watches for customers stuck in trial and drafts a check-in note for each one.
+```
+
+You now have a named agent with its own instructions and its own bounded authority. It can never do
+more than the person who set it going is allowed to do — see
+[roles and permissions](/docs/reference/roles-and-permissions).
+
+</Step>
+
+<Step>
+
+### Make it happen without you
+
+Ask for the work to repeat:
+
+```prompt
+Run the customer success check-in every Monday at 9am and put the drafts in my inbox for approval.
+```
+
+That creates a [routine](/docs/using-tulipfarm/routines). Each time it fires you get a
+[run](/docs/using-tulipfarm/runs) you can watch, pause, or cancel, and anything it wants you to
+decide arrives as an [approval](/docs/using-tulipfarm/approvals) in your **Inbox**.
+
+</Step>
+
+<Step>
+
+### Watch it work
+
+Do not wait until Monday. Open the routine and run it now, then open **runs** and watch the steps
+appear as they happen.
+
+If it asks you something, that is the approval step doing its job. Answer it, and the run
+continues.
+
+</Step>
+
+</Steps>
+
+## What you have now
+
+A place to keep records, an agent that owns a job, a schedule that triggers it, and a human
+decision point before anything lands.
+
+That last part matters. Most TulipFarm work has this shape: the agent does the tedious part, and a
+person keeps the final say.
+
+## Where to go next
+
+<Cards>
+  <Card
+    title="Connect Slack"
+    href="/docs/administration/connect-slack"
+    description="Talk to your agents where your team already works."
+  />
+  <Card
+    title="Use the knowledge wiki"
+    href="/docs/using-tulipfarm/use-the-knowledge-wiki"
+    description="Give agents something of your own to read and cite."
+  />
+  <Card
+    title="Install a skill"
+    href="/docs/using-tulipfarm/install-a-skill"
+    description="Add capability from a git repository, audited before it runs."
+  />
+  <Card
+    title="How it all fits together"
+    href="/docs/using-tulipfarm"
+    description="souls, runs, guardrails, memory, and surfaces."
+  />
+</Cards>

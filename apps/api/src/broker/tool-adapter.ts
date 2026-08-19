@@ -3,6 +3,7 @@ import type { ToolAvailability } from "@tulipfarm/tool-broker";
 import {
   type ApprovalGate,
   err,
+  executeToolWithTimeout,
   type RequestContext,
   type ToolCallResult,
   type ToolDef,
@@ -37,15 +38,6 @@ export const MAX_PRESENTATION_CORRECTIVE_ATTEMPTS = 2;
 /** Read surface availability from Tool declarations to avoid drift. */
 function presentsToSurface(toolDefinition: { definition?: { availableTo?: ToolAvailability } }) {
   return toolDefinition.definition?.availableTo?.requiresPresentation === true;
-}
-
-function withToolTimeout(p: Promise<ToolCallResult>): Promise<ToolCallResult> {
-  return Promise.race([
-    p,
-    new Promise<ToolCallResult>((resolve) =>
-      setTimeout(() => resolve(err("internal_error", "tool execution timed out")), TOOL_TIMEOUT_MS)
-    ),
-  ]);
 }
 
 /** Default-deny adapter: callers must pass the exact authorized Tool allowlist. */
@@ -166,12 +158,11 @@ export class ToolRegistry {
             }
             let full: ToolCallResult;
             try {
+              const executeTool = () =>
+                executeToolWithTimeout(t, effectiveArgs, ctx, TOOL_TIMEOUT_MS);
               full = await (coordinator
-                ? coordinator.schedule(
-                    () => withToolTimeout(t.execute(effectiveArgs, ctx)),
-                    t.mutating
-                  )
-                : withToolTimeout(t.execute(effectiveArgs, ctx)));
+                ? coordinator.schedule(executeTool, t.mutating)
+                : executeTool());
             } catch {
               full = err(
                 "internal_error",

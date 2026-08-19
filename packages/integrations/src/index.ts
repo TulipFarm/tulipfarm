@@ -1,3 +1,29 @@
+export type { AuthBrokerDenialReason } from "./auth/errors";
+export { AuthBrokerError } from "./auth/errors";
+export type {
+  AuthEndpoints,
+  PublicOriginRepository,
+  PublicOriginSource,
+  PublicOrigins,
+  StoredPublicOrigins,
+} from "./auth/public-origins";
+export {
+  INTEGRATION_AUTH_CALLBACK_PATH,
+  ingressWebhookUrl,
+  integrationAuthEndpointVars,
+  normalizePublicOrigin,
+  PublicOriginError,
+  PublicOriginsService,
+  resolveAuthEndpoints,
+} from "./auth/public-origins";
+export type { OAuthAuthorizeUrlConfig } from "./auth/template";
+export {
+  asIntegrationEnvValue,
+  buildOAuthAuthorizeUrl,
+  readPath,
+  renderDeep,
+  renderTemplate,
+} from "./auth/template";
 export type {
   ChannelDeliveryAttempt,
   ChannelDeliveryAuthorizationPort,

@@ -99,7 +99,9 @@ export function registerSurfaceInternalRoutes(
 
       const result = await deps.actions.resolve({
         handle: body.handle,
-        principal: resolution.user._id,
+        // The sender's *authority*, not the account they were matched to. A guest holds an id no
+        // audience contains, so a provider-asserted match fails `wrong_principal` here.
+        principal: resolution.principalId,
         value: body.input,
         // is refused here rather than silently treated as satisfied.
         stepUpSatisfied: false,
@@ -118,8 +120,8 @@ export function registerSurfaceInternalRoutes(
           const delivery = await deps.runDeliveries.find(DEPLOYMENT_BUSINESS_ID, runId);
           if (delivery !== null) {
             const principal: ChatTurnPrincipal = {
-              kind: "user",
-              id: resolution.user._id,
+              kind: resolution.principalKind,
+              id: resolution.principalId,
               businessId: DEPLOYMENT_BUSINESS_ID,
             };
             const content = surfaceInteractionAnswer(result.interaction.input);
@@ -148,7 +150,7 @@ export function registerSurfaceInternalRoutes(
                 destination: delivery.destination,
                 ...(delivery.threadId === undefined ? {} : { threadId: delivery.threadId }),
                 agentId: delivery.agentId,
-                principalId: resolution.user._id,
+                principalId: resolution.principalId,
                 idempotencyKey,
               });
             }

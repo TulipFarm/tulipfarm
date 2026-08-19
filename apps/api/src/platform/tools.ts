@@ -2,11 +2,9 @@ import type { EventEmitter } from "node:events";
 import { readFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { DelegateToAgentInput, DelegationOutcome } from "@tulipfarm/agent-runtime";
-import { DelegationError } from "@tulipfarm/agent-runtime";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { PLATFORM_RUNTIME_TOOLS } from "@tulipfarm/platform-tools";
-import { ChildRunError } from "@tulipfarm/run-kernel";
-import { ajv, TulipFarmValidationError, validateRoutineDefinition } from "@tulipfarm/schema";
+import { ajv, definitions } from "@tulipfarm/schema";
 import type { BundledSkill } from "@tulipfarm/soul";
 import {
   type GitSyncService,
@@ -24,13 +22,7 @@ import { stringify as stringifyYaml } from "yaml";
 import { SYSTEM_SOUL_COMMIT_ACTOR } from "../runtime/soul-writer";
 import { soulCommitError } from "../tools/soul-faults";
 import { delegateToAgentTool } from "./delegate-tool";
-import {
-  firstError,
-  SOUL_AGENT_TARGET,
-  SOUL_ROUTINE_TARGET,
-  SOUL_SKILL_TARGET,
-  soulTarget,
-} from "./tool-args";
+import { firstError, SOUL_ROUTINE_TARGET, SOUL_SKILL_TARGET, soulTarget } from "./tool-args";
 import { err, ok, type ToolCallResult } from "./tool-result";
 
 export interface PlatformToolContext {
@@ -183,48 +175,6 @@ export const loadSkillReferenceTool = defineApiTool<PlatformToolContext>({
   },
 });
 
-const TRANSFER_TO_AGENT_SCHEMA: Record<string, unknown> = {
-  type: "object",
-  additionalProperties: false,
-  required: ["agentId"],
-  properties: {
-    agentId: { type: "string", minLength: 1, description: "Soul name of the target agent." },
-    message: {
-      type: "string",
-      description: "Optional handoff context to give the receiving agent.",
-    },
-  },
-};
-const validateTransfer = ajv.compile(TRANSFER_TO_AGENT_SCHEMA);
-
-export const transferToAgentTool = defineApiTool<PlatformToolContext>({
-  name: "transfer_to_agent",
-  requiresAmbient: ["soul"],
-  description:
-    "Hand the conversation off to another configured agent. The conversation's active agent switches and future turns are handled by the target. Validates that the target is a known platform or Soul agent.",
-  mutating: false,
-  tier: "platform",
-  inputSchema: TRANSFER_TO_AGENT_SCHEMA,
-  authorization: {
-    action: "platform.agent.transfer",
-    resources: ["platform.agent"],
-    targets: (args) => soulTarget(SOUL_AGENT_TARGET, args, "agentId"),
-    dataClasses: ["operational"],
-  },
-  handler: async (args, ctx) => {
-    if (!validateTransfer(args))
-      return err("validation_error", firstError(validateTransfer.errors));
-    const { agentId, message } = args as { agentId: string; message?: string };
-    if (ctx.platformAgentNames?.has(agentId)) {
-      return ok({ agentId, agentName: agentId, status: "transferred", message: message ?? null });
-    }
-    const agent = ctx.soulLoader?.agents.get(agentId);
-    if (!agent) return err("not_found", `Agent "${agentId}" not found.`);
-    const agentName = typeof agent.frontmatter.name === "string" ? agent.frontmatter.name : agentId;
-    return ok({ agentId, agentName, status: "transferred", message: message ?? null });
-  },
-});
-
 const TRIGGER_ROUTINE_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
@@ -278,7 +228,7 @@ const ROUTINE_NAME_RE = /^[a-z][a-z0-9-]*$/;
 const ROUTINE_FORGE_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
-  required: ["name", "definition"],
+  required: ["name", "definition", "triggers"],
   properties: {
     name: {
       type: "string",
@@ -287,41 +237,18 @@ const ROUTINE_FORGE_SCHEMA: Record<string, unknown> = {
     },
     definition: {
       type: "object",
-      description:
-        "The routine.yaml document (CNCF Serverless Workflow 0.8 subset + x- extensions). " +
-        "Validated against the V1 meta-schema; deferred constructs are rejected.",
+      description: "Canonical published Routine definition. metadata.slug must match name.",
     },
-    hooks: {
-      type: "string",
+    triggers: {
+      type: "array",
+      minItems: 1,
+      items: { type: "object" },
       description:
-        "Optional hooks.ts source: an object-literal expression like " +
-        "({ beforeHook(ctx){}, afterMyState(ctx){}, myStepFn(ctx, args){} }). No import/export.",
+        "Canonical published Trigger definitions referencing this Routine and its authored version.",
     },
   },
 };
 const validateRoutineForge = ajv.compile(ROUTINE_FORGE_SCHEMA);
-
-/** Validate Routine-forged Agent names now; the V1 meta-schema cannot prove they exist. */
-function findUnknownAgentRef(
-  definition: Record<string, unknown>,
-  ctx: PlatformToolContext
-): string | undefined {
-  // No Soul means cannot verify, not unknown; never block bare schema tests.
-  if (!ctx.soulLoader) return undefined;
-  const functions = definition.functions;
-  if (!Array.isArray(functions)) return undefined;
-  for (const fn of functions) {
-    if (typeof fn !== "object" || fn === null) continue;
-    const operation = (fn as { operation?: unknown }).operation;
-    if (typeof operation !== "string") continue;
-    const match = /^agent:(\S+)$/.exec(operation);
-    if (!match) continue;
-    const agentName = match[1];
-    const known = ctx.soulLoader?.agents.has(agentName) || ctx.platformAgentNames?.has(agentName);
-    if (!known) return agentName;
-  }
-  return undefined;
-}
 
 export const routineForgeTool = defineApiTool<PlatformToolContext>({
   name: "routine_forge",
@@ -329,24 +256,14 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
   description:
     "Create or update a ROUTINE (a scheduled/triggered automation) in the soul repo — use this, " +
     "not skill_create, whenever the user asks to 'create a routine' / 'automate X' / 'every " +
-    "morning do Y' / 'when X happens do Y'. `definition` is a CNCF Serverless Workflow 0.8 subset " +
-    'and MUST include the top-level fields `id` (matches `name`), `version` (e.g. "1.0"), ' +
-    "`start` (the first state's name), `states` (min 1), and `x-triggers` (min 1) — additional " +
-    "properties are rejected at every level. `x-triggers` entries: `{ type: 'cron', schedule: " +
-    "'0 9 * * *', timezone?: 'America/New_York' }` for a recurring cron schedule (5-field cron, " +
-    "UTC unless `timezone` given — 'every hour' is `0 * * * *`, 'Monday 8am' is `0 8 * * 1`); " +
-    "`{ type: 'datetime', at: '2026-09-01T08:00:00Z' }` for a single one-off fire at an ISO instant; " +
-    "`{ type: 'interval', everyMs: 3600000, startAt: '2026-08-08T00:00:00Z' }` for a fixed period " +
-    "anchored to `startAt`; or `{ type: 'manual' }`. `cron`/`interval`/`datetime` triggers are " +
-    "dispatched automatically (see the schedule dispatcher) — no separate activation step. " +
-    "Minimal example: " +
-    '{ id: "daily-report", version: "1.0", start: "Report", "x-triggers": [{ type: "cron", ' +
-    'schedule: "0 9 * * *" }], functions: [{ name: "send", operation: "tool:resource_search" }], ' +
-    'states: [{ name: "Report", type: "operation", actions: [{ functionRef: { refName: "send" } }], ' +
-    "end: true }] }. Load the routine-forge skill for the full authoring workflow before calling " +
-    "this. Validates the definition against the V1 meta-schema (deferred constructs rejected), " +
-    "writes soul/routines/{name}/routine.yaml (+ optional hooks.ts), and commits it atomically to " +
-    "the soul repo. No approval step (ROUT-V1-002).",
+    "morning do Y' / 'when X happens do Y'. `definition` MUST be a canonical published Routine " +
+    "document: apiVersion `tulipfarm.ai/v1`, kind `Routine`, and metadata with id, slug (matching " +
+    "name), schemaVersion, authoredVersion, and lifecycle `published`. `triggers` MUST contain " +
+    "canonical published Trigger documents with their own metadata and a spec.routineRef naming this " +
+    "Routine at its authored version. Use a `manual` Trigger when the user needs to run it from the " +
+    "Routines UI; cron, interval, and datetime Triggers schedule themselves. Load the routine-forge " +
+    "Skill for complete canonical examples before calling this. The Tool validates every document and " +
+    "commits the Routine plus all Triggers atomically to the Soul repo.",
   mutating: true,
   tier: "platform",
   inputSchema: ROUTINE_FORGE_SCHEMA,
@@ -359,25 +276,45 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
   handler: async (args, ctx) => {
     if (!validateRoutineForge(args))
       return err("validation_error", firstError(validateRoutineForge.errors));
-    const { name, definition, hooks } = args as {
+    const { name, definition, triggers } = args as {
       name: string;
       definition: Record<string, unknown>;
-      hooks?: string;
+      triggers: Record<string, unknown>[];
     };
     if (!ROUTINE_NAME_RE.test(name)) return err("validation_error", "invalid routine name");
 
+    let routine: definitions.routine.RoutineDefinition;
+    let triggerDefinitions: definitions.trigger.TriggerDefinition[];
     try {
-      validateRoutineDefinition(definition);
-    } catch (e) {
-      if (e instanceof TulipFarmValidationError) {
-        return err("validation_error", `${e.path || "/"}: ${e.message}`);
-      }
-      return err("internal_error", e instanceof Error ? e.message : String(e));
+      routine = definitions.routine.validateRoutineDefinition(definition).document;
+      triggerDefinitions = triggers.map(
+        (trigger) => definitions.trigger.validateTriggerDefinition(trigger).document
+      );
+    } catch (error) {
+      return err("validation_error", error instanceof Error ? error.message : String(error));
     }
-
-    const unknownAgentRef = findUnknownAgentRef(definition, ctx);
-    if (unknownAgentRef) {
-      return err("validation_error", `functions: agent "${unknownAgentRef}" not found`);
+    if (routine.metadata.slug !== name)
+      return err("validation_error", "definition.metadata.slug must match name");
+    if (routine.metadata.lifecycle !== "published")
+      return err("validation_error", "definition.metadata.lifecycle must be published");
+    if (
+      new Set(triggerDefinitions.map((trigger) => trigger.metadata.slug)).size !==
+      triggerDefinitions.length
+    ) {
+      return err("validation_error", "triggers must have unique metadata.slug values");
+    }
+    for (const trigger of triggerDefinitions) {
+      if (trigger.metadata.lifecycle !== "published")
+        return err("validation_error", "trigger metadata.lifecycle must be published");
+      if (
+        trigger.spec.routineRef.name !== name ||
+        trigger.spec.routineRef.version !== String(routine.metadata.authoredVersion)
+      ) {
+        return err(
+          "validation_error",
+          "trigger spec.routineRef must match the Routine name and authored version"
+        );
+      }
     }
 
     try {
@@ -390,17 +327,13 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
           {
             op: "put",
             target: { kind: "Routine", slug: name },
-            content: stringifyYaml(definition),
+            content: stringifyYaml(routine),
           },
-          ...(hooks
-            ? [
-                {
-                  op: "put" as const,
-                  target: { kind: "Routine" as const, slug: name, companion: "hooks.ts" },
-                  content: hooks,
-                },
-              ]
-            : []),
+          ...triggerDefinitions.map((trigger) => ({
+            op: "put" as const,
+            target: { kind: "Trigger" as const, slug: trigger.metadata.slug },
+            content: stringifyYaml(trigger),
+          })),
         ],
       });
     } catch (e) {
@@ -414,7 +347,11 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
     } catch (e) {
       return err("internal_error", e instanceof Error ? e.message : String(e));
     }
-    return ok({ name, committed: true, hasHooks: Boolean(hooks) });
+    return ok({
+      name,
+      committed: true,
+      triggerSlugs: triggerDefinitions.map((trigger) => trigger.metadata.slug),
+    });
   },
 });
 
@@ -542,7 +479,6 @@ export const callSkillTool = defineApiTool<PlatformToolContext>({
 export const PLATFORM_TOOLS: ApiToolDefinition<PlatformToolContext>[] = [
   loadSkillTool,
   loadSkillReferenceTool,
-  transferToAgentTool,
   delegateToAgentTool,
   triggerRoutineTool,
   routineForgeTool,

@@ -21,6 +21,7 @@ publication, approvals, integrations, events, and blob/vector/cache/queue ports.
 | `src/approvals/`, `src/events/` | Approval persistence and generic event store. |
 | `src/kill-switches/` | Durable mutation kill switches backing the effect-plane emergency stop. |
 | `src/curator/` | Curator jobs, pinned input manifests and context pins, effect ledger, per-user work queue, daily spend admission, the claim-and-reserve mint transaction, stale-job reconciliation, and the read-only shadow review queries (`review.ts`, which writes nothing by design). |
+| `src/system/` | Deployment-local public origin settings that must not travel with Soul. |
 | `src/pagination.ts`, `src/vector-search.ts` | Cursor paging and pgvector index/distance SQL shared by every repository. |
 
 ## Rules

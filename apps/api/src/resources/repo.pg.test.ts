@@ -61,6 +61,10 @@ describe("PgResourceRepo", () => {
     expect(await repo.findById(randomUUID())).toBeNull();
   });
 
+  it("returns null for a malformed id without querying the UUID column", async () => {
+    expect(await repo.findById("qa-does-not-exist-id")).toBeNull();
+  });
+
   it("list excludes soft-deleted by default and includes them on demand", async () => {
     await repo.insert(doc({ title: "live" }));
     await repo.insert(doc({ title: "gone", version: 2, deletedAt: new Date() }));
@@ -87,6 +91,13 @@ describe("PgResourceRepo", () => {
     const found = await repo.findById(d._id);
     expect(found?.version).toBe(2);
     expect(found?.title).toBe("updated");
+  });
+
+  it("replaceOne rejects a malformed id without querying the UUID column", async () => {
+    const d = doc();
+    await repo.insert(d);
+
+    expect(await repo.replaceOne("qa-does-not-exist-id", 1, d)).toBe(false);
   });
 
   it("appendHistory writes a snapshot row", async () => {

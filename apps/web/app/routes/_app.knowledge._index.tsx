@@ -1,6 +1,9 @@
 import { Link, type MetaFunction, useLoaderData, useRouteError } from "@remix-run/react";
-import { BookText, FileText, Plus } from "lucide-react";
+import { BookText, FileText, Plus, Waypoints } from "lucide-react";
+import { AgentAuthoredBadge } from "~/components/knowledge/agent-authored-badge";
+import { VisibilityBadge } from "~/components/knowledge/visibility-badge";
 import { ErrorState } from "~/components/states";
+import { Button } from "~/components/ui/button";
 import { ApiError } from "~/lib/api";
 import { getKnowledgeOverview } from "~/lib/knowledge-api";
 import { pageHref } from "~/lib/page-href";
@@ -11,6 +14,8 @@ export async function clientLoader() {
   return getKnowledgeOverview(8);
 }
 
+// Without this Remix renders nothing while the overview loads, so the first paint of Knowledge is
+// a blank pane rather than the shape of the screen that is arriving.
 // Landing pane for /knowledge — a real home: a grid of every space (page count + last activity) and
 // a "Recently edited" list across all spaces. Falls back to a quiet welcome when there are no spaces.
 export default function KnowledgeIndex() {
@@ -36,7 +41,10 @@ export default function KnowledgeIndex() {
       <section className="flex flex-col gap-3">
         <header className="flex items-center justify-between">
           <h1 className="text-base font-bold text-foreground">Spaces</h1>
-          <NewSpaceLink />
+          <div className="flex items-center gap-2">
+            <GraphLink />
+            <NewSpaceLink />
+          </div>
         </header>
         <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {spaces.map((s) => (
@@ -75,6 +83,10 @@ export default function KnowledgeIndex() {
                 >
                   <FileText className="size-4 shrink-0 text-muted-foreground" aria-hidden />
                   <span className="min-w-0 flex-1 truncate text-sm text-foreground">{p.title}</span>
+                  <AgentAuthoredBadge authorKind={p.authorKind} />
+                  {p.visibility && p.visibility !== "business" ? (
+                    <VisibilityBadge visibility={p.visibility} compact />
+                  ) : null}
                   <span className="shrink-0 text-xs text-muted-foreground">{p.spaceName}</span>
                   <span className="shrink-0 text-xs text-muted-foreground">
                     · {timeAgo(p.updatedAt)}
@@ -89,15 +101,25 @@ export default function KnowledgeIndex() {
   );
 }
 
+function GraphLink() {
+  return (
+    <Button asChild size="sm" variant="ghost">
+      <Link to="/knowledge/graph">
+        <Waypoints className="size-3.5" aria-hidden />
+        Graph
+      </Link>
+    </Button>
+  );
+}
+
 function NewSpaceLink() {
   return (
-    <Link
-      to="/knowledge/spaces/new"
-      className="inline-flex cursor-pointer items-center gap-1.5 rounded-sm bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-    >
-      <Plus className="size-3.5" aria-hidden />
-      New space
-    </Link>
+    <Button asChild size="sm">
+      <Link to="/knowledge/spaces/new">
+        <Plus className="size-3.5" aria-hidden />
+        New space
+      </Link>
+    </Button>
   );
 }
 

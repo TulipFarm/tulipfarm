@@ -4,12 +4,30 @@ import type { AuditEventInput } from "@tulipfarm/audit";
 import { canonicalHash } from "@tulipfarm/schema";
 import type { CachePort } from "@tulipfarm/storage";
 import {
-  decideSourceAccess,
+  decideKnowledgeAccess,
   type LiveSourceAuthorizationPort,
   type SourceAccessDenialReason,
 } from "./acl";
+import {
+  effectiveScore,
+  expandHops,
+  type KnowledgeLinkGraphPort,
+  scoreBounds,
+} from "./graph-expand";
 import type { KnowledgeIndexPort } from "./indexing";
+import {
+  DEFAULT_KNOWLEDGE_ACCESS,
+  type GraphExpandConfig,
+  type KnowledgeAccessConfig,
+  MAX_GRAPH_EXPAND_DEPTH,
+} from "./retrieval-config";
 import type { KnowledgePrincipalRef, KnowledgeSourceStore } from "./source";
+import {
+  type KnowledgeSubject,
+  type KnowledgeSubjectStore,
+  type PrincipalResolverPort,
+  sourceSubject,
+} from "./subject";
 
 export interface RetrievalRequest {
   readonly businessId: string;
@@ -68,6 +86,14 @@ export interface KnowledgeAuditSink {
 export interface RetrievalDeps {
   readonly sources: KnowledgeSourceStore;
   readonly index: KnowledgeIndexPort;
+  /** Authored Pages, consulted only when `access.authoredPagesInRetrieval` is on. */
+  readonly subjects?: KnowledgeSubjectStore;
+  /** Expands the actor's principals once per query so group grants resolve at query time. */
+  readonly principalResolver?: PrincipalResolverPort;
+  readonly access?: KnowledgeAccessConfig;
+  /** Page-to-page edges for `graph-expand`. Absent means the walk cannot run. */
+  readonly links?: KnowledgeLinkGraphPort;
+  readonly graph?: GraphExpandConfig;
   readonly live?: LiveSourceAuthorizationPort;
   readonly cache?: CachePort;
   readonly audit?: KnowledgeAuditSink;
@@ -80,6 +106,8 @@ interface CachedSourceVersion {
   readonly sourceId: string;
   readonly revision: string;
   readonly aclRevision: string;
+  /** Absent means `source`, so entries written before authored Pages existed still read back. */
+  readonly subjectKind?: KnowledgeSubject["subjectKind"];
 }
 
 interface CachedRetrieval {
@@ -94,16 +122,27 @@ function sortedPrincipals(principals: readonly KnowledgePrincipalRef[]): string[
   return principals.map((principal) => `${principal.kind}:${principal.id}`).sort();
 }
 
-/** Cache keys bind question, principal, Guardrail epoch, and Context epoch. */
-export function buildRetrievalCacheKey(request: RetrievalRequest): string {
+/**
+ * Cache keys bind question, principal, Guardrail epoch, and Context epoch.
+ *
+ * `resolved` binds the actor's *expanded* principals, so losing a group membership changes the key
+ * rather than replaying an answer the group grant paid for.
+ */
+export function buildRetrievalCacheKey(
+  request: RetrievalRequest,
+  resolved?: readonly KnowledgePrincipalRef[],
+  graphDepth?: number
+): string {
   return canonicalHash({
     businessId: request.businessId,
     principalId: request.principalId,
-    principals: sortedPrincipals(request.principals),
+    principals: sortedPrincipals(resolved ?? request.principals),
     query: request.query,
     limit: request.limit,
     guardrailEpoch: request.guardrailEpoch,
     contextEpoch: request.contextEpoch,
+    // Added only when the walk is on, so a deployment with it off hashes exactly as it always did.
+    ...(graphDepth === undefined ? {} : { graphDepth }),
   });
 }
 
@@ -115,20 +154,44 @@ function tally(reasons: readonly RetrievalExclusionReason[]): RetrievalExclusion
     .map(([reason, count]) => ({ reason, count }));
 }
 
+interface Authorized {
+  readonly citation: RetrievalCitation;
+  readonly provider: string;
+  readonly subjectKind: KnowledgeSubject["subjectKind"];
+}
+
+/** Every subject retrieval may return: source records always, authored Pages behind the flag. */
+async function subjectsToAuthorize(
+  deps: RetrievalDeps,
+  businessId: string
+): Promise<readonly KnowledgeSubject[]> {
+  const sources = (await deps.sources.list(businessId)).map((source) => sourceSubject(source));
+  const access = deps.access ?? DEFAULT_KNOWLEDGE_ACCESS;
+  if (!access.authoredPagesInRetrieval || deps.subjects === undefined) return sources;
+  return [...sources, ...(await deps.subjects.listAuthored(businessId))];
+}
+
 async function authorizeAll(
   deps: RetrievalDeps,
-  request: RetrievalRequest
-): Promise<{
-  allowed: Map<string, { citation: RetrievalCitation; provider: string }>;
-  reasons: RetrievalExclusionReason[];
-}> {
+  request: RetrievalRequest,
+  principals: readonly KnowledgePrincipalRef[]
+): Promise<{ allowed: Map<string, Authorized>; reasons: RetrievalExclusionReason[] }> {
   const now = deps.now();
-  const allowed = new Map<string, { citation: RetrievalCitation; provider: string }>();
+  const access = deps.access ?? DEFAULT_KNOWLEDGE_ACCESS;
+  const allowed = new Map<string, Authorized>();
   const reasons: RetrievalExclusionReason[] = [];
-  for (const source of await deps.sources.list(request.businessId)) {
-    const decision = await decideSourceAccess(
-      source,
-      { businessId: request.businessId, principals: request.principals },
+  // Keyed by bare id, which is safe only while Page chunks stay in `knowledge_chunks` behind
+  // `page-search-adapter` rather than in `KnowledgeIndexPort`. Whoever merges those two chunk
+  // namespaces must key this by `subjectKind` too, or a Source named after a Page's uuid would
+  // authorize that Page's chunks.
+  for (const subject of await subjectsToAuthorize(deps, request.businessId)) {
+    const decision = await decideKnowledgeAccess(
+      subject,
+      {
+        businessId: request.businessId,
+        principals,
+        maxEntries: access.maxAclEntriesPerSubject,
+      },
       { live: deps.live },
       now
     );
@@ -136,37 +199,115 @@ async function authorizeAll(
       reasons.push(decision.reason);
       continue;
     }
-    allowed.set(source.sourceId, {
+    allowed.set(subject.subjectId, {
       citation: {
-        sourceId: source.sourceId,
-        revision: source.revision,
+        sourceId: subject.subjectId,
+        revision: subject.revision,
         aclRevision: decision.aclRevision,
       },
-      provider: source.provider,
+      provider: subject.provider,
+      subjectKind: subject.subjectKind,
     });
   }
   return { allowed, reasons };
 }
 
-/** A cached answer is only usable if every source it was built from still authorizes identically. */
+/** A cached answer is only usable if every subject it was built from still authorizes identically. */
 async function cachedStillValid(
   deps: RetrievalDeps,
   request: RetrievalRequest,
-  cached: CachedRetrieval
+  cached: CachedRetrieval,
+  principals: readonly KnowledgePrincipalRef[]
 ): Promise<boolean> {
   const now = deps.now();
+  const access = deps.access ?? DEFAULT_KNOWLEDGE_ACCESS;
   for (const version of cached.sourceVersions) {
-    const source = await deps.sources.get(request.businessId, version.sourceId);
-    if (source === undefined || source.revision !== version.revision) return false;
-    const decision = await decideSourceAccess(
-      source,
-      { businessId: request.businessId, principals: request.principals },
+    const subject = await reloadSubject(deps, request.businessId, version);
+    if (subject === undefined || subject.revision !== version.revision) return false;
+    const decision = await decideKnowledgeAccess(
+      subject,
+      {
+        businessId: request.businessId,
+        principals,
+        maxEntries: access.maxAclEntriesPerSubject,
+      },
       { live: deps.live },
       now
     );
     if (!decision.allowed || decision.aclRevision !== version.aclRevision) return false;
   }
   return true;
+}
+
+async function reloadSubject(
+  deps: RetrievalDeps,
+  businessId: string,
+  version: CachedSourceVersion
+): Promise<KnowledgeSubject | undefined> {
+  if (version.subjectKind === "page" || version.subjectKind === "space") {
+    return deps.subjects?.getAuthored(businessId, version.sourceId);
+  }
+  const source = await deps.sources.get(businessId, version.sourceId);
+  return source === undefined ? undefined : sourceSubject(source);
+}
+
+/**
+ * Walk out from the seed pages and merge in the neighbours the actor may read.
+ *
+ * `allowed` is the result of the authorization pass that has already run over every subject, so a
+ * neighbour is admitted only if the gate passed it *before* this stage. Reusing that decision is
+ * deliberate: re-deciding here would count the same denial twice in the exclusion tally, which is
+ * itself a signal about how a withheld page is connected.
+ */
+async function expandCandidates(
+  deps: RetrievalDeps,
+  request: RetrievalRequest,
+  seeds: readonly RetrievedCandidate[],
+  allowed: ReadonlyMap<string, Authorized>,
+  reasons: RetrievalExclusionReason[]
+): Promise<readonly RetrievedCandidate[]> {
+  const graph = deps.graph;
+  const links = deps.links;
+  if (graph === undefined || !graph.enabled || links === undefined) return seeds;
+  if (deps.index.fetchBySource === undefined || seeds.length === 0) return seeds;
+
+  const hops = await expandHops(links, [...new Set(seeds.map((c) => c.sourceId))], graph, (ids) =>
+    ids.filter((id) => allowed.has(id))
+  );
+  if (hops.size === 0) return seeds;
+
+  const neighbours = await deps.index.fetchBySource({
+    businessId: request.businessId,
+    query: request.query,
+    limit: request.limit,
+    allowedSourceIds: new Set(hops.keys()),
+  });
+
+  const merged = new Map<string, { candidate: RetrievedCandidate; hop: number }>();
+  for (const seed of seeds) merged.set(seed.chunkId, { candidate: seed, hop: 0 });
+  for (const candidate of neighbours) {
+    if (merged.has(candidate.chunkId)) continue;
+    const grant = allowed.get(candidate.sourceId);
+    if (grant === undefined) {
+      reasons.push("index_filter_violation");
+      continue;
+    }
+    merged.set(candidate.chunkId, {
+      candidate: { ...candidate, provider: grant.provider, citation: grant.citation },
+      hop: hops.get(candidate.sourceId) ?? MAX_GRAPH_EXPAND_DEPTH,
+    });
+  }
+
+  // Scores are rewritten into hop bands, which is what makes "a two-hop page cannot outrank a
+  // direct hit" survive a downstream reranker that only sees the number.
+  const bounds = scoreBounds(seeds.map((candidate) => candidate.score));
+  return [...merged.values()]
+    .map(({ candidate, hop }) => ({
+      ...candidate,
+      score: effectiveScore(hop, candidate.score, bounds, graph),
+    }))
+    .sort((a, b) => b.score - a.score || a.chunkId.localeCompare(b.chunkId))
+    .slice(0, request.limit);
 }
 
 async function auditRetrieval(
@@ -203,12 +344,24 @@ export async function retrieve(
   deps: RetrievalDeps,
   request: RetrievalRequest
 ): Promise<RetrievalResult> {
-  const cacheKey = buildRetrievalCacheKey(request);
+  // Resolved once per query, never per document, so authorization stays linear in the corpus.
+  const principals =
+    deps.principalResolver === undefined
+      ? request.principals
+      : await deps.principalResolver.resolve({
+          businessId: request.businessId,
+          principals: request.principals,
+        });
+  const cacheKey = buildRetrievalCacheKey(
+    request,
+    deps.principalResolver === undefined ? undefined : principals,
+    deps.graph?.enabled === true ? deps.graph.depth : undefined
+  );
 
   if (deps.cache !== undefined) {
     const cached = await deps.cache.get<CachedRetrieval>(cacheKey);
     if (cached !== undefined) {
-      if (await cachedStillValid(deps, request, cached)) {
+      if (await cachedStillValid(deps, request, cached, principals)) {
         const hit: RetrievalResult = {
           candidates: cached.candidates,
           exclusions: cached.exclusions,
@@ -224,7 +377,7 @@ export async function retrieve(
     }
   }
 
-  const { allowed, reasons } = await authorizeAll(deps, request);
+  const { allowed, reasons } = await authorizeAll(deps, request, principals);
   const ranked = await deps.index.search({
     businessId: request.businessId,
     query: request.query,
@@ -250,7 +403,7 @@ export async function retrieve(
   }
 
   const result: RetrievalResult = {
-    candidates,
+    candidates: await expandCandidates(deps, request, candidates, allowed, reasons),
     exclusions: tally(reasons),
     cacheKey,
     fromCache: false,
@@ -260,10 +413,11 @@ export async function retrieve(
     const entry: CachedRetrieval = {
       candidates: result.candidates,
       exclusions: result.exclusions,
-      sourceVersions: [...allowed.values()].map(({ citation }) => ({
+      sourceVersions: [...allowed.values()].map(({ citation, subjectKind }) => ({
         sourceId: citation.sourceId,
         revision: citation.revision,
         aclRevision: citation.aclRevision,
+        subjectKind,
       })),
     };
     await deps.cache.set(cacheKey, entry, deps.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS);

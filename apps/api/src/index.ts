@@ -2,19 +2,21 @@ import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { delegationCatalogOf, GuardrailsService } from "@tulipfarm/agent-runtime";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
-import { FetchEgressHttp, GuardedEgressHttp } from "@tulipfarm/integrations";
+import { FetchEgressHttp, GuardedEgressHttp, PublicOriginsService } from "@tulipfarm/integrations";
 import {
   buildDefaultRegistry,
   enqueueIndex,
   KnowledgeService,
   makeIndexQueueStats,
   PgConnectorStateRepo,
+  PgKnowledgeAclRepo,
   PgKnowledgeChunkRepo,
   PgKnowledgeLinksRepo,
   PgKnowledgePageRepo,
   PgKnowledgeRevisionRepo,
   PgKnowledgeSpaceOverrideRepo,
   PgKnowledgeSpaceRepo,
+  PgKnowledgeSubjectStore,
   registerConnectorSync,
   registerEmbeddingBackfill,
   registerKnowledgeIndexing,
@@ -68,9 +70,11 @@ import {
   IntegrationStore,
   KillSwitchRepo,
   PgGroupRepo,
+  PgIntegrationAuthRequestRepo,
   PgPrincipalRepo,
   PgRoleRepo,
   PgSoulPublicationStore,
+  PublicOriginStore,
   RunEventStore,
   RunStore,
   SoulRepositoryStore,
@@ -146,7 +150,6 @@ import {
   IntegrationConversationsRepo,
   IntegrationEventsRepo,
 } from "./ingress/repo";
-import { PgIntegrationAuthRequestRepo } from "./integrations/auth-broker";
 import { resolveSecretRef } from "./integrations/connection-env";
 import { PgPrincipalProviderTokenRepo } from "./integrations/principal-tokens";
 import { IngressDeliveryHost } from "./internal/delivery-host";
@@ -156,6 +159,11 @@ import { buildDelegatedToolDispatch } from "./internal/tool-dispatch";
 import { ChatTurnContextResolver } from "./internal/turn-context";
 import { InternalTurnHost } from "./internal/turn-host";
 import { KillSwitchService } from "./kill-switches/service";
+import { AuthorLabeller } from "./knowledge/author-label";
+import { knowledgeDenialSink as makeKnowledgeDenialSink } from "./knowledge/denial-sink";
+import { PageReadGate } from "./knowledge/page-access";
+import { ReaderDirectory } from "./knowledge/reader-directory";
+import { SubjectDirectory } from "./knowledge/subject-directory";
 import { PgSlackKnowledgeCheckpointStore } from "./knowledge-sources/checkpoint-store";
 import { PgConfluenceKnowledgeCheckpointStore } from "./knowledge-sources/confluence-checkpoint-store";
 import { registerConfluenceKnowledgeSync } from "./knowledge-sources/confluence-sync-schedule";
@@ -290,6 +298,11 @@ async function boot() {
     // invalid by an interrupted build is invisible to the planner but still costs every write.
     await ensureEmbeddingIndexes(migrationPool, (msg) => console.log(msg));
     const pool = await startRuntimePool(migrationPool);
+    const publicOrigins = new PublicOriginsService(
+      new PublicOriginStore(pool),
+      DEPLOYMENT_BUSINESS_ID
+    );
+    await publicOrigins.initialize();
     /**
      * One instance, shared by the two halves of D7's personal-credential protocol: the connect
      * route that seals a credential and the resolver that decides a call needs one. They are a
@@ -458,7 +471,7 @@ async function boot() {
       routineDefinitions: new ActiveRoutineInvocationResolver(soulPublications, soulBundleVerifier),
     });
     const scheduleDispatcher = new ScheduleDispatcher({
-      soulLoader,
+      activeBundle: () => soulPublications.activeBundle(DEPLOYMENT_BUSINESS_ID, soulBundleVerifier),
       stateStore: new RoutineScheduleStateStore(pool),
       startRoutine: scheduledRoutineTrigger(invocations),
       businessId: DEPLOYMENT_BUSINESS_ID,
@@ -576,6 +589,11 @@ async function boot() {
       links: new PgKnowledgeLinksRepo(pool),
       overrides: new PgKnowledgeSpaceOverrideRepo(pool),
       embeddings: embeddingService,
+      acl: new PgKnowledgeAclRepo(pool),
+      // Without this the Page-ACL surfaces degrade silently rather than fail: `visibility` 404s,
+      // every listing badge reads "business", and a move reports no readership change — so the
+      // product offers no way to restrict a Page at all.
+      readership: new PgKnowledgeSubjectStore(pool),
       enqueueIndex: (pageId) => enqueueIndex(boss, { kind: "page", pageId }).then(() => undefined),
       indexQueueStats: makeIndexQueueStats(boss, pool),
       sourceRetrieval: {
@@ -654,10 +672,19 @@ async function boot() {
       cancelRun: runCancel.cancel,
       catalog: delegationCatalog,
     });
+    // One gate for the whole process: routes and Agent Tools must not diverge on who may read a Page.
+    const knowledgePageGate = new PageReadGate(pool);
+    // Refusing a taken path is the one bit the gate cannot hide, so every refused write is recorded.
+    const knowledgeDenialSink = makeKnowledgeDenialSink(auditService);
+    const knowledgeAuthorLabeller = new AuthorLabeller(pool);
+    const knowledgeReaderDirectory = new ReaderDirectory(pool);
+    const knowledgeSubjectDirectory = new SubjectDirectory(pool);
     const toolRegistry = buildToolRegistry({
       memoryDocuments,
       kv: kvService,
       knowledge: knowledgeService,
+      knowledgePageGate,
+      knowledgeDenialSink,
       surfaceComponents: { gitSync, soulWriter, surfaceSupport: surfaceRendererRegistry },
       resources: {
         repoFactory: resourceRepoFactory,
@@ -795,7 +822,7 @@ async function boot() {
           domainEvents: domainEventEmitter,
           // The link is redeemed inside an authenticated web session, so it must point at the
           bindLinkUrl: (token) =>
-            `${(process.env.PUBLIC_URL ?? "http://localhost:4000").replace(/\/+$/, "")}/link-channel?token=${encodeURIComponent(token)}`,
+            `${publicOrigins.current().webOrigin}/link-channel?token=${encodeURIComponent(token)}`,
           log,
         }),
       // without restarting it.
@@ -825,6 +852,7 @@ async function boot() {
     };
 
     const app = await buildApp({
+      publicOrigins,
       readiness: pool,
       logSink,
       logRepo,
@@ -901,6 +929,11 @@ async function boot() {
         events: domainEventEmitter,
       }),
       knowledgeService,
+      knowledgePageGate,
+      knowledgeDenialSink,
+      knowledgeAuthorLabeller,
+      knowledgeReaderDirectory,
+      knowledgeSubjectDirectory,
       toolRegistry,
       declarativeTools,
       activityService,
@@ -941,7 +974,7 @@ async function boot() {
         soulLoader,
         // redeemed inside an authenticated web session, so it must point at the origin users
         bindLinkUrl: (token) =>
-          `${(process.env.PUBLIC_URL ?? "http://localhost:4000").replace(/\/+$/, "")}/link-channel?token=${encodeURIComponent(token)}`,
+          `${publicOrigins.current().webOrigin}/link-channel?token=${encodeURIComponent(token)}`,
       }),
       runEvents: {
         events: runEventStore,

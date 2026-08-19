@@ -1,9 +1,5 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
-import {
-  type ApprovalsRepo,
-  listPendingToolApprovals,
-  type ToolApprovalService,
-} from "@tulipfarm/tool-host";
+import type { ApprovalsRepo, ToolApprovalService } from "@tulipfarm/tool-host";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import type { RoutineApprovalService } from "./routine-approvals";
@@ -73,10 +69,13 @@ export function registerApprovalRoutes(
         },
       },
     },
-    async (_req, reply) => {
+    async (req, reply) => {
+      if (req.principal === undefined) return reply.send({ items: [] });
+      const principal = `${req.principal.kind}:${req.principal.id}`;
+      const roles = req.principal.role ? [req.principal.role] : [];
       const [pendingToolCalls, routineRows] = await Promise.all([
-        listPendingToolApprovals(deps.approvals),
-        deps.approvals.listPending("routine_state"),
+        deps.toolApprovals?.listPendingFor({ businessId: DEPLOYMENT_BUSINESS_ID, principal }) ?? [],
+        deps.routineApprovals?.listPendingFor({ businessId: DEPLOYMENT_BUSINESS_ID, roles }) ?? [],
       ]);
       const toolCalls = pendingToolCalls.map((item) => ({ kind: "tool_call" as const, ...item }));
       const routineItems = routineRows.map((row) => {

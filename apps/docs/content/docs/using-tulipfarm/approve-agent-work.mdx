@@ -1,0 +1,54 @@
+---
+title: Approve agent work
+description: Decide approvals, human tasks, form waits, and access requests from the Inbox.
+---
+
+{/* tf-page: track: using-tulipfarm  requires: ["approval:*"] */}
+
+This guide uses the [Inbox](/docs/using-tulipfarm/approvals) to decide work that needs a human.
+A run can pause on an approval and resume after the decision is recorded.
+
+## Outcome
+
+At the end, you can approve or deny a waiting item and know where the paused run resumes.
+
+## Open the Inbox
+
+<Steps>
+  <Step>
+    Open **Inbox**.
+  </Step>
+  <Step>
+    Review each item kind: Approval, human task, form wait, or access request.
+  </Step>
+  <Step>
+    Read the title, risk, status, intent digest, guardrail revision, target, destination,
+    fields, expiry, and four-eyes decision count.
+  </Step>
+</Steps>
+
+## Decide an approval
+
+For an approval, choose **Approve** or **Deny**. TulipFarm records the server-authorized
+decision against the persisted approval binding; the browser cannot replace the intent,
+target, destination, or guardrail revision.
+
+When a chat turn or routine state parks on an approval, the owning run waits. After the
+required decision is recorded, the same run resumes from that wait. A denial returns to
+the run as a denial so the agent or routine can handle it.
+
+<Callout type="warn">
+Approve only the action shown. If the target or destination is not what you expected,
+deny it and ask for a corrected turn.
+</Callout>
+
+## Approve from Slack
+
+If the waiting run originated from Slack, TulipFarm can post an Approve/Deny prompt back
+to Slack. Clicking it resolves through TulipFarm's internal Channel link flow so the
+decision is attributed to the linked TulipFarm user.
+
+## Verify
+
+Open the related **run**. Its waits should show the approval decision, and the run should
+continue, fail, or finish according to the agent or routine logic.

@@ -10,7 +10,8 @@ Every change currently needs manual click-through. The automated layers do not c
 | Layer | Covers | Does not cover |
 | --- | --- | --- |
 | `pnpm test` (Vitest, jsdom) | Units, route modules | Real browser, real rendering, real streaming |
-| `scripts/test/browser/*.spec.ts` (Playwright) | Deterministic critical journeys against an installed instance; secure-context and CSP regressions | Product breadth, UI polish, a11y, exploratory checks |
+| `scripts/test/browser-smoke.mjs` (CI, real Chromium) | Boot, CSP and secure-context regressions, plus the Knowledge access-control denial spine, against the shipped container image | Product breadth, UI polish, a11y, exploratory checks |
+| `scripts/test/browser/*.spec.ts` (Playwright) | **Local-only — never runs in CI.** Deterministic critical journeys and the full Knowledge ACL matrix against an installed instance | Anything in CI; product breadth, UI polish, a11y, exploratory checks |
 | **This** | 13 feature areas end-to-end in the product UI, including visual and a11y issues | Anything in CI — this layer is interactive and local |
 
 Nothing here runs in CI or generates Playwright specs.

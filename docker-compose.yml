@@ -18,6 +18,8 @@ name: tulipfarm
 # Variables you may want to set (in a `.env` next to this file, or your platform's UI):
 #   HOST_PORT       host port to publish (default 8080)
 #   PUBLIC_URL      the origin users reach; drives CORS and the cookie `Secure` flag
+#   PUBLIC_API_URL  the public API origin; defaults to PUBLIC_URL for this combined image
+#   PUBLIC_ORIGINS_LOCKED  set true to keep those environment values authoritative
 #   POSTGRES_PASSWORD  password for the bundled database (default `tulipfarm`)
 #   COMPOSE_PROJECT_NAME  see "more than one business" below (default `tulipfarm`)
 #
@@ -65,6 +67,8 @@ services:
       PORT: "8080"
       NODE_ENV: production
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:${HOST_PORT:-8080}}
+      PUBLIC_API_URL: ${PUBLIC_API_URL:-${PUBLIC_URL:-http://localhost:${HOST_PORT:-8080}}}
+      PUBLIC_ORIGINS_LOCKED: ${PUBLIC_ORIGINS_LOCKED:-false}
       # Bundled mode wires this from POSTGRES_PASSWORD; override it for managed Postgres.
       DATABASE_URL: ${DATABASE_URL:-postgresql://tulipfarm:${POSTGRES_PASSWORD:-tulipfarm}@postgres:5432/tulipfarm}
       # Empty means "generate and persist to /data on first boot" — see the header.

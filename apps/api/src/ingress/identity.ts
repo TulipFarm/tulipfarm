@@ -12,15 +12,58 @@ import {
 import {
   ExternalIdentityDeniedError,
   type ExternalIdentityRepo,
-  resolveExternalIdentity,
+  type IdentityVerificationMethod,
+  isProvenLink,
+  resolveExternalSender,
 } from "../identity/external-links";
 import { assertUserAuthenticatable } from "../identity/principal";
 import { executeToolBinding, extractFromToolResult } from "./bindings";
 
 /** Resolves channel senders; unknown senders never invoke an Agent. */
 export type ChannelSenderResolution =
-  | { outcome: "linked"; user: UserDoc }
+  | LinkedChannelSender
   | { outcome: "unlinked"; bindOffer: IssuedChannelBind | null };
+
+/**
+ * A sender we can place, plus the authority that placement earns.
+ *
+ * Identifying a sender and empowering them are separate questions. A provider-asserted email match
+ * answers the first — it is enough to route the message to the right conversation — but not the
+ * second: on Slack Connect the counterparty organisation administers its own users' addresses, so
+ * it can assert any address it likes, including one of ours. Such a sender therefore resolves to a
+ * *guest* principal, which appears in no Surface audience, no approval allowlist and no Knowledge
+ * ACL, and so can spend nothing belonging to the account it matched.
+ */
+export interface LinkedChannelSender {
+  readonly outcome: "linked";
+  /** Who the sender was matched to. Routing only — never treat this as authority. */
+  readonly user: UserDoc;
+  /** `user` once the link was proven; `guest` while only the provider vouches for it. */
+  readonly principalKind: "user" | "guest";
+  /** Bare principal id, for allowlists that hold unprefixed ids. */
+  readonly principalId: string;
+  /** `kind:id`, for allowlists and grants that hold prefixed refs. */
+  readonly principalRef: string;
+}
+
+/** Verification strong enough to act *as* the matched user, not merely be routed to them. */
+function senderAuthority(
+  user: UserDoc,
+  provider: string,
+  sender: string,
+  verifiedVia: IdentityVerificationMethod | undefined
+): LinkedChannelSender {
+  const proven = isProvenLink({ verifiedVia: verifiedVia ?? null });
+  const principalKind = proven ? "user" : "guest";
+  const principalId = proven ? user._id : `${provider}:${sender}`;
+  return {
+    outcome: "linked",
+    user,
+    principalKind,
+    principalId,
+    principalRef: `${principalKind}:${principalId}`,
+  };
+}
 
 export interface ChannelIdentityDeps {
   users: IngressUserLookup;
@@ -42,29 +85,33 @@ export class IngressIdentityResolver {
     registry?: ToolRegistry;
   }): Promise<ChannelSenderResolution> {
     const linked = await this.findLinkedUser(opts.slug, opts.sender);
-    if (linked) return { outcome: "linked", user: linked };
+    if (linked) return senderAuthority(linked.user, opts.slug, opts.sender, linked.verifiedVia);
 
     const claimed = await this.claimByManifestEmail(opts);
-    if (claimed) return { outcome: "linked", user: claimed };
+    // Always guest-grade: the row this just wrote is `manifest_email` by construction.
+    if (claimed) return senderAuthority(claimed, opts.slug, opts.sender, "manifest_email");
 
     return { outcome: "unlinked", bindOffer: await this.offerBind(opts.slug, opts.sender) };
   }
 
   /** Step 1 — an existing verified mapping, checked by the same guard every other subject faces. */
-  private async findLinkedUser(slug: string, sender: string): Promise<UserDoc | null> {
+  private async findLinkedUser(
+    slug: string,
+    sender: string
+  ): Promise<{ user: UserDoc; verifiedVia?: IdentityVerificationMethod } | null> {
     const mappings = this.deps.mappings;
     if (!mappings) return null;
 
     const now = (this.deps.now ?? (() => new Date()))();
-    let userId: string;
+    let resolved: { userId: string; verifiedVia?: IdentityVerificationMethod };
     try {
-      userId = await resolveExternalIdentity(mappings, slug, sender, now);
+      resolved = await resolveExternalSender(mappings, slug, sender, now);
     } catch (err) {
       if (err instanceof ExternalIdentityDeniedError) return null;
       throw err;
     }
 
-    const user = await this.deps.users.findById(userId);
+    const user = await this.deps.users.findById(resolved.userId);
     if (!user) {
       // The account was deleted out from under the mapping. Falling through re-derives the link
       // from the manifest rather than acting for a user who no longer exists.
@@ -81,7 +128,7 @@ export class IngressIdentityResolver {
       }
       throw err;
     }
-    return user;
+    return { user, ...(resolved.verifiedVia ? { verifiedVia: resolved.verifiedVia } : {}) };
   }
 
   /** Step 2 — persist the manifest identity binding when it names a known account. */

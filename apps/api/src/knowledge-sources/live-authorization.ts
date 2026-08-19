@@ -40,7 +40,7 @@ export class SlackLiveSourceAuthorization implements LiveSourceAuthorizationPort
     const now = Date.now();
     for (const principal of input.principals) {
       if (principal.kind !== "user") continue;
-      const mappings = await this.identity.listMappingsForUser(principal.id);
+      const mappings = await this.identity.listProvenMappingsForUser(principal.id);
       for (const mapping of mappings) {
         if (mapping.provider !== SLACK_PROVIDER) continue;
         if (mapping.expiresAt && mapping.expiresAt.getTime() <= now) continue;
@@ -131,7 +131,7 @@ export class GoogleDriveTenantLiveAuthorization implements LiveSourceAuthorizati
       const now = Date.now();
       for (const principal of input.principals) {
         if (principal.kind !== "user") continue;
-        const mappings = await this.identity.listMappingsForUser(principal.id);
+        const mappings = await this.identity.listProvenMappingsForUser(principal.id);
         for (const mapping of mappings) {
           if (mapping.provider !== DRIVE_PROVIDER) continue;
           if (mapping.expiresAt && mapping.expiresAt.getTime() <= now) continue;

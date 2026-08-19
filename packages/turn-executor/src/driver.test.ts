@@ -340,6 +340,23 @@ describe("TurnDriver", () => {
     });
   });
 
+  it("settles for input without appending an assistant Message", async () => {
+    const { driver, events, store } = harness({
+      status: "input_required",
+      callId: "input-1",
+      ...counters,
+    });
+    const outcome = await driver.run(request());
+
+    expect(outcome).toBe("succeeded");
+    expect(store.messages).toEqual([]);
+    expect(store.completed).toEqual([{ status: "succeeded", cursor: 2, messageId: null }]);
+    expect(events.appended.at(-1)).toEqual({
+      eventType: "turn.finished",
+      payload: { status: "succeeded", messageId: null },
+    });
+  });
+
   it("reports a failed loop as a finished turn with no Message", async () => {
     const { driver, events, store } = harness({
       status: "failed",

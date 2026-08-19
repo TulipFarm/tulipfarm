@@ -1,6 +1,6 @@
-import { planSchedule, ScheduleError } from "@tulipfarm/run-kernel";
-import type { SoulRoutine } from "@tulipfarm/soul";
-import { parseScheduleTriggers } from "./spec";
+import { planSchedule, ScheduleError, scheduleSpecFromTrigger } from "@tulipfarm/run-kernel";
+import { definitions } from "@tulipfarm/schema";
+import type { RuntimeBundle } from "@tulipfarm/soul";
 import type { RoutineScheduleStateStore } from "./state-store";
 
 export interface ScheduleDispatcherLogger {
@@ -9,7 +9,8 @@ export interface ScheduleDispatcherLogger {
 }
 
 export interface ScheduleDispatcherDeps {
-  readonly soulLoader: { routines: Map<string, SoulRoutine> };
+  /** Schedules only execute from the same verified publication the runtime resolves. */
+  readonly activeBundle: () => Promise<RuntimeBundle | undefined>;
   readonly stateStore: RoutineScheduleStateStore;
   readonly startRoutine: (input: {
     readonly slug: string;
@@ -20,7 +21,7 @@ export interface ScheduleDispatcherDeps {
   readonly log?: ScheduleDispatcherLogger;
 }
 
-/** API-owned Routine schedule ticker reads live Soul and starts due Runs idempotently. */
+/** API-owned Routine schedule ticker reads published Trigger definitions and starts due Runs idempotently. */
 export class ScheduleDispatcher {
   private readonly now: () => number;
 
@@ -29,7 +30,7 @@ export class ScheduleDispatcher {
   }
 
   async tick(): Promise<void> {
-    const { soulLoader, stateStore, startRoutine, businessId, log } = this.deps;
+    const { activeBundle, stateStore, startRoutine, businessId, log } = this.deps;
     const nowMs = this.now();
 
     const existingRows = await stateStore.listForBusiness(businessId);
@@ -38,49 +39,67 @@ export class ScheduleDispatcher {
     );
 
     const liveTriggers: Array<{ routineSlug: string; triggerIndex: number }> = [];
+    const bundle = await activeBundle();
+    const triggerIndexByRoutine = new Map<string, number>();
 
-    for (const [slug, routine] of soulLoader.routines) {
-      for (const { triggerIndex, spec } of parseScheduleTriggers(slug, routine.config)) {
-        liveTriggers.push({ routineSlug: slug, triggerIndex });
-        const existing = existingByKey.get(`${slug}:${triggerIndex}`);
-
-        let plan: ReturnType<typeof planSchedule>;
-        try {
-          plan = planSchedule(
-            spec,
-            { lastScheduledForMs: existing?.lastScheduledForMs ?? null, activeRuns: 0 },
-            nowMs
-          );
-        } catch (error) {
-          if (error instanceof ScheduleError) {
-            log?.warn(`schedule dispatcher: invalid trigger ${slug}:${triggerIndex}`, error);
-            continue;
-          }
-          throw error;
-        }
-
-        // Only a fire that actually started may advance the watermark — otherwise a transient
-        // startRoutine failure would be recorded as delivered and, under the default 'skip'
-        // missedRunPolicy, never reconsidered on a later tick.
-        let lastScheduledForMs = existing?.lastScheduledForMs ?? null;
-        for (const fire of plan.fires) {
-          try {
-            await startRoutine({ slug, idempotencyKey: fire.deduplicationKey });
-            lastScheduledForMs = fire.scheduledForMs;
-          } catch (error) {
-            log?.error(`schedule dispatcher: failed to start ${slug}:${triggerIndex}`, error);
-            break;
-          }
-        }
-
-        await stateStore.upsert(businessId, {
-          routineSlug: slug,
-          triggerIndex,
-          dedupKey: spec.deduplicationKey,
-          lastScheduledForMs,
-          nextDueAtMs: plan.nextDueAtMs,
-        });
+    for (const definition of bundle?.definitions ?? []) {
+      if (definition.kind !== "Trigger") continue;
+      let trigger: definitions.trigger.TriggerDefinition;
+      try {
+        trigger = definitions.trigger.validateTriggerDefinition(definition.document).document;
+      } catch {
+        continue;
       }
+      if (trigger.metadata.lifecycle !== "published") continue;
+      const slug = trigger.spec.routineRef.name;
+      const triggerIndex = triggerIndexByRoutine.get(slug) ?? 0;
+      triggerIndexByRoutine.set(slug, triggerIndex + 1);
+      let spec: ReturnType<typeof scheduleSpecFromTrigger>;
+      try {
+        spec = scheduleSpecFromTrigger(trigger);
+      } catch (error) {
+        if (error instanceof ScheduleError && error.code === "not_a_schedule") continue;
+        throw error;
+      }
+      liveTriggers.push({ routineSlug: slug, triggerIndex });
+      const existing = existingByKey.get(`${slug}:${triggerIndex}`);
+
+      let plan: ReturnType<typeof planSchedule>;
+      try {
+        plan = planSchedule(
+          spec,
+          { lastScheduledForMs: existing?.lastScheduledForMs ?? null, activeRuns: 0 },
+          nowMs
+        );
+      } catch (error) {
+        if (error instanceof ScheduleError) {
+          log?.warn(`schedule dispatcher: invalid trigger ${slug}:${triggerIndex}`, error);
+          continue;
+        }
+        throw error;
+      }
+
+      // Only a fire that actually started may advance the watermark — otherwise a transient
+      // startRoutine failure would be recorded as delivered and, under the default 'skip'
+      // missedRunPolicy, never reconsidered on a later tick.
+      let lastScheduledForMs = existing?.lastScheduledForMs ?? null;
+      for (const fire of plan.fires) {
+        try {
+          await startRoutine({ slug, idempotencyKey: fire.deduplicationKey });
+          lastScheduledForMs = fire.scheduledForMs;
+        } catch (error) {
+          log?.error(`schedule dispatcher: failed to start ${slug}:${triggerIndex}`, error);
+          break;
+        }
+      }
+
+      await stateStore.upsert(businessId, {
+        routineSlug: slug,
+        triggerIndex,
+        dedupKey: spec.deduplicationKey,
+        lastScheduledForMs,
+        nextDueAtMs: plan.nextDueAtMs,
+      });
     }
 
     await stateStore.pruneMissing(businessId, liveTriggers, existingRows);

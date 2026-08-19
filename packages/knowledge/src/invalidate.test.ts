@@ -273,3 +273,40 @@ describe("source lifecycle propagation", () => {
     expect((await invalidationStatus(d, "biz-1", "hr-salaries")).jobs).toBe(0);
   });
 });
+
+describe("source deletion reaches the ACL entries", () => {
+  class RecordingPruner {
+    readonly pruned: Array<[string, string, string]> = [];
+    async removeSubject(businessId: string, kind: string, id: string): Promise<number> {
+      this.pruned.push([businessId, kind, id]);
+      return 1;
+    }
+  }
+
+  it("drops a deleted source's ACL entries so no grant outlives the source", async () => {
+    const acl = new RecordingPruner();
+    const d = { ...deps(), acl };
+
+    await deleteSource(d, { businessId: "biz-1", sourceId: "hr-salaries" });
+
+    expect(acl.pruned).toEqual([["biz-1", "source", "hr-salaries"]]);
+  });
+
+  it("keeps a revoked source's entries, because the status already denies every read", async () => {
+    const acl = new RecordingPruner();
+    const d = { ...deps(), acl };
+
+    await revokeSource(d, { businessId: "biz-1", sourceId: "hr-salaries" });
+
+    expect(acl.pruned).toEqual([]);
+  });
+
+  it("does not prune when the source was never there", async () => {
+    const acl = new RecordingPruner();
+    const d = { ...deps(), acl };
+
+    await deleteSource(d, { businessId: "biz-1", sourceId: "absent" });
+
+    expect(acl.pruned).toEqual([]);
+  });
+});

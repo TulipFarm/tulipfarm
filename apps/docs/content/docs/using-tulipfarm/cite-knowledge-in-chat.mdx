@@ -1,0 +1,47 @@
+---
+title: Cite knowledge in chat
+description: Ask an agent to answer from knowledge and inspect the cited pages.
+---
+
+{/* tf-page: track: using-tulipfarm  requires: ["chat:*", "platform.knowledge:*"] */}
+
+This guide grounds a chat answer in [knowledge](/docs/using-tulipfarm/knowledge). It assumes at
+least one knowledge space and page exist.
+
+## Outcome
+
+At the end, the answer includes citations pointing back to the pages it used, or you know
+how to pin a specific page into a turn.
+
+## Ask a question
+
+Open **Chat** and ask a question your pages can answer:
+
+```prompt
+What is our refund policy for orders older than 30 days? Cite the Knowledge
+pages you used.
+```
+
+The agent searches knowledge, answers from matching pages, and can include inline
+citations. Each citation opens the page that supported the answer.
+
+<Callout type="info">
+Search uses embeddings when an embedding model is configured. Without one, TulipFarm
+falls back to lexical search instead of failing the turn.
+</Callout>
+
+## Pin a page
+
+If you want the agent to use a specific page, mention or select that page in the chat
+composer before sending the turn. Pinning gives the agent the page content directly,
+instead of relying only on search ranking.
+
+```prompt
+Using the Refund Policy page, draft a customer-safe answer for an order that was
+delivered 45 days ago.
+```
+
+## Check provenance
+
+Open cited pages to review their tags, backlinks, graph context, and revision history. If
+an answer is wrong because a page is stale, edit the page first and ask again.

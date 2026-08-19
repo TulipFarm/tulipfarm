@@ -1,0 +1,127 @@
+---
+title: Production checklist
+description: What to change before a TulipFarm instance holds real data — TLS, secrets, database, backups, and the constraints you cannot design around.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+A default install is tuned for "it runs with no setup", not for "it holds the company's
+data". This is the gap between the two. Work down it before you put anything real in.
+
+## Before the first real login
+
+### 1. Terminate TLS
+
+A fresh install serves plain HTTP. Credentials, session cookies, and every chat message
+cross the network in the clear until you fix that.
+
+Set up [TLS](/docs/self-hosting/tls) with a reverse proxy and bind the app to loopback
+(`HOST_BIND=127.0.0.1`) so the plain-HTTP port is not independently reachable.
+
+<Callout type="warn">
+  On a brand-new instance, **the first visitor to reach `/setup` becomes the admin.** If the
+  installer warned you that it detected a public IP, finish setup immediately — before
+  anything else on this list.
+</Callout>
+
+### 2. Set the public address to the real origin
+
+```bash
+PUBLIC_URL=https://tulip.example.com
+```
+
+It drives CORS and the session cookie's `Secure` flag. Wrong or missing, and login appears
+to succeed but the session vanishes on the next request. It is the single most common
+production misconfiguration.
+
+You can also save the address under **Business → About** after first boot, which applies without
+a redeploy. Setting `PUBLIC_URL` too means a rebuilt instance comes up correct before anyone
+signs in.
+
+### 3. Supply `ENCRYPTION_KEY` yourself
+
+```bash
+openssl rand -base64 32
+```
+
+Left unset, the app generates one onto the `/data` volume — fine for a personal instance,
+wrong for production, because the key then lives on the same host as the database it
+protects. Put it in your platform's secret store instead.
+
+<Callout type="warn">
+  **Set it before the first boot.** Introducing a key after the app has generated its own
+  means the new key cannot decrypt what is already stored; the app will refuse to boot
+  rather than orphan those secrets. Recovering from that requires the original key, not a
+  config change.
+</Callout>
+
+Do the same for `JWT_SECRET` and `WEBHOOK_SIGNING_SECRET`.
+
+### 4. Replace the database password
+
+The Compose file defaults to `POSTGRES_PASSWORD=tulipfarm`. That default exists so the file
+runs with no prior setup, and it is safe **only** because port `5432` is never published.
+
+Set your own, and do not publish the Postgres port. The
+[one-line installer](/docs/self-hosting/install) already generates a strong one.
+
+### 5. Pin an image tag
+
+```bash
+TULIPFARM_VERSION=v0.1.0
+```
+
+`latest` means an unattended `docker compose pull` can move you across a breaking migration
+at a moment you did not choose.
+
+## Before you depend on it
+
+### 6. Move to a managed database
+
+Backups, point-in-time restore, and failover stop being yours to build. See
+[Use a managed database](/docs/self-hosting/managed-database).
+
+### 7. Give the soul a git remote
+
+Set `SOUL_GIT_REMOTE_URL` and `SOUL_GIT_CREDENTIAL` (an HTTPS token — SSH remotes are not
+supported). Your resource schemas, agents, and skills then live in a repository you already
+back up, and the commit history becomes a readable audit trail of every change agents made.
+
+### 8. Back up what the database does not hold
+
+Three things, and a provider snapshot only covers the first:
+
+| What | Why |
+| --- | --- |
+| The PostgreSQL database | records, chats, knowledge, runs, and queues. |
+| `tulipfarm-data` (`/data`) | Generated bootstrap secrets plus worker credentials. **The database is ciphertext without the encryption key.** |
+| `tulipfarm-soul` (`/opt/tulipfarm/soul`) | Your whole configuration — unless step 7 mirrors it to git. |
+
+TulipFarm has no built-in scheduled backups. Use your platform's snapshots or your own
+`pg_dump` cron. [Updating and rollback](/docs/self-hosting/updating) covers when to take one.
+
+### 9. Verify a restart
+
+Restart the stack once, deliberately, and confirm: you are still signed in (or can sign in),
+your resource types are still listed, and your LLM provider still answers. A deployment that
+has never been restarted has not been tested.
+
+## Constraints you cannot configure away
+
+- **Exactly one `app`, one maintenance `worker`, and one `integration-worker`.** The `app`
+  owns the soul git worktree and migrations. The `worker` owns turn execution and
+  cron/maintenance consumers via `WORKER_MAINTENANCE=true`. Scale vertically.
+- **No down-migrations.** Rolling back to an older image after a migration ran requires a
+  database restore, not a tag change.
+- **Kubernetes is untested.** CI exercises the Compose stack only. See
+  [Kubernetes](/docs/self-hosting/kubernetes).
+
+## Understood tradeoffs
+
+Two things stay true even after this whole list, and are worth stating to whoever signs off:
+
+- A generated or locally-stored `ENCRYPTION_KEY` sits on the same host as the database
+  volume, so a full host compromise yields both. Step 3 is what moves the key out of reach.
+- The setup wizard is unauthenticated until the first admin exists. That window closes the
+  moment an admin is created, and [headless seeding](/docs/self-hosting/headless) closes it before
+  the instance ever accepts a browser.

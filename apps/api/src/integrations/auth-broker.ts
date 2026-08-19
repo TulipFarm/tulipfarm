@@ -1,4 +1,15 @@
 import { createHash, randomBytes } from "node:crypto";
+import {
+  AuthBrokerError,
+  type AuthEndpoints,
+  asIntegrationEnvValue,
+  buildOAuthAuthorizeUrl,
+  ingressWebhookUrl,
+  integrationAuthEndpointVars,
+  readPath,
+  renderDeep,
+  renderTemplate,
+} from "@tulipfarm/integrations";
 import type {
   AuthOAuth2Step,
   AuthStep,
@@ -12,91 +23,28 @@ import {
   oauth2RefreshTokenEnv,
   resolveAuthSteps,
 } from "@tulipfarm/soul";
-import {
-  DEFAULT_AUTH_REQUEST_TTL_SECONDS,
-  type IntegrationAuthRequestDoc,
-  type IntegrationAuthRequestRepo,
-} from "./auth-request-repo";
+import type { IntegrationAuthRequestDoc, IntegrationAuthRequestRepo } from "@tulipfarm/storage";
+import { DEFAULT_AUTH_REQUEST_TTL_SECONDS } from "@tulipfarm/storage";
 
+export {
+  type AuthBrokerDenialReason,
+  AuthBrokerError,
+  readPath,
+  renderDeep,
+  renderTemplate,
+} from "@tulipfarm/integrations";
 export {
   DEFAULT_AUTH_REQUEST_TTL_SECONDS,
   type IntegrationAuthRequestDoc,
   type IntegrationAuthRequestRepo,
   PgIntegrationAuthRequestRepo,
-} from "./auth-request-repo";
+} from "@tulipfarm/storage";
 
-/**
- * Generic manifest-declared auth broker: one stable callback for every Integration.
- * One-use server-side state holds PKCE verifier and is consumed exactly once.
- */
-
-/**
- * Substitutes `{name}` placeholders. Unknown placeholders are left untouched rather than blanked,
- * so a manifest typo surfaces as a visibly wrong URL instead of a silently truncated one.
- */
-export function renderTemplate(template: string, vars: Record<string, string>): string {
-  return template.replace(/\{([A-Za-z0-9_.]+)\}/g, (whole, name: string) => vars[name] ?? whole);
-}
-
-export function renderDeep(value: unknown, vars: Record<string, string>): unknown {
-  if (typeof value === "string") return renderTemplate(value, vars);
-  if (Array.isArray(value)) return value.map((item) => renderDeep(item, vars));
-  if (typeof value === "object" && value !== null) {
-    const out: Record<string, unknown> = {};
-    for (const [key, item] of Object.entries(value)) out[key] = renderDeep(item, vars);
-    return out;
-  }
-  return value;
-}
-
-export function readPath(source: unknown, path: string): unknown {
-  let current = source;
-  for (const segment of path.split(".")) {
-    if (typeof current !== "object" || current === null) return undefined;
-    current = (current as Record<string, unknown>)[segment];
-  }
-  return current;
-}
-
-function asEnvValue(value: unknown): string | undefined {
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  return undefined;
-}
-
-export type AuthBrokerDenialReason =
-  | "unknown_step"
-  | "invalid_state"
-  | "missing_credentials"
-  | "exchange_failed";
-
-export class AuthBrokerError extends Error {
-  slug?: string;
-
-  constructor(
-    readonly reason: AuthBrokerDenialReason,
-    message: string,
-    slug?: string
-  ) {
-    super(message);
-    this.name = "AuthBrokerError";
-    this.slug = slug;
-  }
-}
-
-/** Browser instruction for the next auth step; `collect_fields` has no provider round trip. */
 export type AuthStartAction =
   | { action: "collect_fields"; fields: RequiredEnvVar[] }
   | { action: "redirect"; url: string }
   | { action: "form_post"; url: string; field: string; value: string }
-  /** Server-side steps return only browser action; env is sealed server-side. */
   | { action: "completed"; env: Record<string, string> };
-
-export interface AuthEndpoints {
-  callbackUrl: string;
-  webUrl: string;
-  apiUrl: string;
-}
 
 export interface StartAuthStepInput {
   slug: string;
@@ -126,6 +74,9 @@ async function issueState(input: StartAuthStepInput, codeVerifier: string | null
     integrationSlug: input.slug,
     stepIndex: input.stepIndex,
     codeVerifier,
+    callbackUrl: input.endpoints.callbackUrl,
+    webUrl: input.endpoints.webUrl,
+    apiUrl: input.endpoints.apiUrl,
     createdAt: now,
     expiresAt: new Date(
       now.getTime() + (input.ttlSeconds ?? DEFAULT_AUTH_REQUEST_TTL_SECONDS) * 1000
@@ -136,15 +87,6 @@ async function issueState(input: StartAuthStepInput, codeVerifier: string | null
   return state;
 }
 
-function endpointVars(endpoints: AuthEndpoints, env: Record<string, string>) {
-  return {
-    ...env,
-    callback_url: endpoints.callbackUrl,
-    web_url: endpoints.webUrl,
-    api_url: endpoints.apiUrl,
-  };
-}
-
 export function buildAuthorizeUrl(
   step: AuthOAuth2Step,
   input: { clientId: string; state: string; codeChallenge?: string; redirectUri: string }
@@ -152,28 +94,18 @@ export function buildAuthorizeUrl(
   if (!step.authorization_url) {
     throw new AuthBrokerError("unknown_step", "oauth2 step has no authorization_url");
   }
-  const url = new URL(step.authorization_url);
-  url.searchParams.set("response_type", "code");
-  url.searchParams.set("client_id", input.clientId);
-  url.searchParams.set("redirect_uri", input.redirectUri);
-  url.searchParams.set("state", input.state);
-  if (step.scopes && step.scopes.length > 0) {
-    url.searchParams.set("scope", step.scopes.join(step.scope_separator ?? " "));
-  }
-  if (input.codeChallenge) {
-    url.searchParams.set("code_challenge", input.codeChallenge);
-    url.searchParams.set("code_challenge_method", "S256");
-  }
-  for (const [key, value] of Object.entries(step.authorize_params ?? {})) {
-    url.searchParams.set(key, value);
-  }
-  return url.toString();
+  return buildOAuthAuthorizeUrl(
+    {
+      authorizationUrl: step.authorization_url,
+      scopes: step.scopes,
+      scopeSeparator: step.scope_separator,
+      authorizeParams: step.authorize_params,
+    },
+    input
+  );
 }
 
-/** Delivery URL is derived from the API origin so it matches the served hook route. */
-export function ingressWebhookUrl(endpoints: AuthEndpoints, slug: string): string {
-  return `${endpoints.apiUrl.replace(/\/+$/, "")}/api/v1/hooks/integrations/${slug}`;
-}
+export { ingressWebhookUrl } from "@tulipfarm/integrations";
 
 /**
  * Webhook steps mint the delivery secret, register the hook, and keep returned ids.
@@ -187,7 +119,7 @@ async function registerWebhook(
   if (step.secret_env) produced[step.secret_env] = randomBytes(32).toString("base64url");
 
   const vars = {
-    ...endpointVars(input.endpoints, input.env),
+    ...integrationAuthEndpointVars(input.endpoints, input.env),
     ...produced,
     webhook_url: ingressWebhookUrl(input.endpoints, input.slug),
   };
@@ -228,7 +160,7 @@ async function registerWebhook(
   }
 
   for (const [path, envName] of Object.entries(step.map ?? {})) {
-    const value = asEnvValue(readPath(parsed, path));
+    const value = asIntegrationEnvValue(readPath(parsed, path));
     if (value !== undefined) produced[envName] = value;
   }
   return produced;
@@ -263,7 +195,7 @@ export async function startAuthStep(input: StartAuthStepInput): Promise<AuthStar
 
     case "app_manifest": {
       const state = await issueState(input, null);
-      const vars = endpointVars(input.endpoints, input.env);
+      const vars = integrationAuthEndpointVars(input.endpoints, input.env);
       const url = renderTemplate(step.create_url, { ...vars, state });
       const value = JSON.stringify(renderDeep(step.manifest, vars));
       if (step.delivery === "query_param") {
@@ -276,7 +208,7 @@ export async function startAuthStep(input: StartAuthStepInput): Promise<AuthStar
 
     case "install": {
       const state = await issueState(input, null);
-      const vars = endpointVars(input.endpoints, input.env);
+      const vars = integrationAuthEndpointVars(input.endpoints, input.env);
       return { action: "redirect", url: renderTemplate(step.url, { ...vars, state }) };
     }
 
@@ -322,6 +254,7 @@ export interface CompleteAuthStepInput {
 export interface AuthStepOutcome {
   slug: string;
   stepIndex: number;
+  webUrl: string;
   /** Present means seal under that principal, never into shared `connection.yaml`. */
   env: Record<string, string>;
   principal?: { readonly kind: string; readonly id: string };
@@ -367,20 +300,22 @@ export function mapTokenResponse(
   now: Date
 ): Record<string, string> {
   const env: Record<string, string> = {};
-  const accessToken = asEnvValue(readPath(response, step.token_response_path ?? "access_token"));
+  const accessToken = asIntegrationEnvValue(
+    readPath(response, step.token_response_path ?? "access_token")
+  );
   if (!accessToken) {
     throw new AuthBrokerError("exchange_failed", "token endpoint returned no access token");
   }
   env[step.token_env] = accessToken;
 
   for (const [path, envName] of Object.entries(step.map ?? {})) {
-    const value = asEnvValue(readPath(response, path));
+    const value = asIntegrationEnvValue(readPath(response, path));
     if (value !== undefined) env[envName] = value;
   }
 
   // Only written when the provider actually returns them: a provider that issues non-expiring
   // tokens must not end up with a fabricated expiry that triggers pointless refreshes.
-  const refresh = asEnvValue(readPath(response, "refresh_token"));
+  const refresh = asIntegrationEnvValue(readPath(response, "refresh_token"));
   if (refresh) env[oauth2RefreshTokenEnv(step)] = refresh;
 
   const expiresIn = Number(readPath(response, "expires_in"));
@@ -409,6 +344,7 @@ export async function completeAuthStep(input: CompleteAuthStepInput): Promise<Au
   const outcome = {
     slug: request.integrationSlug,
     stepIndex: request.stepIndex,
+    webUrl: request.webUrl ?? input.endpoints.webUrl,
     ...(request.principal === null ? {} : { principal: request.principal }),
   };
 
@@ -416,7 +352,10 @@ export async function completeAuthStep(input: CompleteAuthStepInput): Promise<Au
     return await completeStep({ input, request, manifest, fetchImpl, now, outcome });
   } catch (err) {
     // After state consume, failures can be shown on the Integration page.
-    if (err instanceof AuthBrokerError) err.slug ??= request.integrationSlug;
+    if (err instanceof AuthBrokerError) {
+      err.slug ??= request.integrationSlug;
+      err.webUrl ??= request.webUrl ?? input.endpoints.webUrl;
+    }
     throw err;
   }
 }
@@ -434,11 +373,9 @@ async function completeStep(ctx: {
 
   switch (step.kind) {
     case "fields":
-      // A fields step never redirects anywhere, so it can never produce a callback.
       throw new AuthBrokerError("unknown_step", "fields steps do not use the callback");
 
     case "webhook":
-      // Server-side registration has no provider callback; such state is forged or stale.
       throw new AuthBrokerError("unknown_step", "webhook steps do not use the callback");
 
     case "install": {
@@ -467,7 +404,7 @@ async function completeStep(ctx: {
       const body = (await response.json()) as Record<string, unknown>;
       const env: Record<string, string> = {};
       for (const [path, envName] of Object.entries(step.exchange.map)) {
-        const value = asEnvValue(readPath(body, path));
+        const value = asIntegrationEnvValue(readPath(body, path));
         if (value !== undefined) env[envName] = value;
       }
       return { ...outcome, env };
@@ -485,7 +422,7 @@ async function completeStep(ctx: {
       const body: Record<string, string> = {
         grant_type: "authorization_code",
         code,
-        redirect_uri: input.endpoints.callbackUrl,
+        redirect_uri: request.callbackUrl ?? input.endpoints.callbackUrl,
         client_id: clientId,
         client_secret: clientSecret,
       };
@@ -539,14 +476,4 @@ export async function refreshOAuth2Credentials(
   // Preserve stored refresh tokens when providers do not rotate them.
   const mapped = mapTokenResponse(step, response, options.now ?? new Date());
   return mapped[refreshTokenEnv] ? mapped : { ...mapped, [refreshTokenEnv]: refreshToken };
-}
-
-/** The path every provider redirects back to. Registered with providers, so it must never vary. */
-export const INTEGRATION_AUTH_CALLBACK_PATH = "/api/v1/integrations/auth/callback";
-
-/** Redirect origin must be PUBLIC_API_URL, never web origin or spoofable request host. */
-export function resolveAuthEndpoints(env: NodeJS.ProcessEnv = process.env): AuthEndpoints {
-  const apiUrl = (env.PUBLIC_API_URL ?? `http://localhost:${env.PORT ?? 4010}`).replace(/\/+$/, "");
-  const webUrl = (env.PUBLIC_URL ?? "http://localhost:4000").replace(/\/+$/, "");
-  return { apiUrl, webUrl, callbackUrl: `${apiUrl}${INTEGRATION_AUTH_CALLBACK_PATH}` };
 }

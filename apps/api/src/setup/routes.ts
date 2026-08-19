@@ -71,10 +71,22 @@ export function registerSetupStatusRoute(
   deps: Pick<SetupDeps, "userRepo" | "soulPath"> & { rateLimiter?: RateLimiter }
 ): void {
   const { userRepo, soulPath, rateLimiter } = deps;
-  const preHandler = rateLimiter
+  // Latches once the answer can no longer change, so a settled instance costs neither a soul read
+  // nor a user count.
+  let done = false;
+  const limit = rateLimiter
     ? makeRateLimitHook(rateLimiter, (req) => `rl:setup:${req.ip}`, 30, 60_000)
     : undefined;
-  let done = false;
+  // The limit guards the *unsettled* answer, which touches disk and the database and is
+  // unauthenticated. Past the latch there is nothing left to guard, and every web-app boot calls
+  // this before it renders — a 429 here is not degraded, it is an "Application Error" screen for
+  // everyone sharing the address.
+  const preHandler = limit
+    ? async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
+        if (done) return;
+        await limit(req, reply);
+      }
+    : undefined;
 
   app.get(
     "/api/v1/setup/status",

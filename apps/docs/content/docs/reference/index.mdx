@@ -1,18 +1,52 @@
 ---
 title: Reference
-description: Complete, neutral lookup — environment variables, commands, the REST API, the tools agents can call, and who is allowed to do what.
+description: Look up what exists — bundled skills and integrations, environment variables, trigger settings, roles, commands, and the REST API.
 ---
 
-Reference pages describe what exists, exhaustively and without opinion. When you want to be
-walked through a task, use a [guide](/docs/guides); when you want to understand why something
-works the way it does, read the [concepts](/docs/concepts).
+Reference pages tell you what exists, exhaustively and without opinion. Come here when you already
+know what you are doing and need to check a name, a default, or a setting.
+
+If you want to be walked through something instead, start with
+[Using TulipFarm](/docs/using-tulipfarm) or [Administration](/docs/administration).
+
+## What ships with it
+
+<Cards>
+  <Card
+    title="Bundled skills"
+    href="/docs/reference/bundled-skills"
+    description="The ten skills every instance ships with, and what each lets agents do."
+  />
+  <Card
+    title="Bundled integrations"
+    href="/docs/reference/bundled-integrations"
+    description="The seven providers you can connect, and how you connect each one."
+  />
+</Cards>
+
+## Settings
 
 <Cards>
   <Card
     title="Environment variables"
     href="/docs/reference/environment-variables"
-    description="Every variable TulipFarm reads, what it defaults to, and what breaks without it."
+    description="Every variable, sorted by whether you should set it, leave it, or never touch it."
   />
+  <Card
+    title="routine triggers"
+    href="/docs/reference/routine-triggers"
+    description="Every way a routine can start, and the settings each trigger accepts."
+  />
+  <Card
+    title="Roles and permissions"
+    href="/docs/reference/roles-and-permissions"
+    description="Levels, teams, grants, API tokens, and machine identities."
+  />
+</Cards>
+
+## For developers
+
+<Cards>
   <Card
     title="Commands"
     href="/docs/reference/commands"
@@ -21,17 +55,7 @@ works the way it does, read the [concepts](/docs/concepts).
   <Card
     title="REST API"
     href="/docs/reference/api"
-    description="Base URL, authentication, error shapes, and every public endpoint by area."
-  />
-  <Card
-    title="Agent tools"
-    href="/docs/reference/agent-tools"
-    description="The complete catalog of tools an agent can call, and how tool calls behave."
-  />
-  <Card
-    title="Roles and permissions"
-    href="/docs/reference/roles-and-permissions"
-    description="Users, roles, grants, API tokens, and machine identities."
+    description="Base URL, authentication, error shapes, and every endpoint family."
   />
 </Cards>
 
@@ -44,11 +68,11 @@ works the way it does, read the [concepts](/docs/concepts).
     description="Encryption, hashing, privacy operations, and the control evidence map."
   />
   <Card
-    title="Deploy"
-    href="/docs/deploy"
+    title="Self-hosting"
+    href="/docs/self-hosting"
     description="What the image needs from a host, and every supported way to run it."
   />
 </Cards>
 
-Your own instance also serves a live, generated OpenAPI document at `/api/v1/openapi.json`,
-which is always exactly in step with the version you are running.
+Your own instance also serves a live, generated OpenAPI document at `/api/v1/openapi.json`, which
+is always exactly in step with the version you are running.

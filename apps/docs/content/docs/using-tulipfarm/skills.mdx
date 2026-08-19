@@ -1,0 +1,69 @@
+---
+title: Skills
+description: Reusable instruction and executable tool packages that agents load on demand.
+---
+
+{/* tf-page: track: using-tulipfarm  requires: ["soul.skill:*"] */}
+
+A **skill** is a reusable package. It gives an agent task-specific instructions and references
+without loading that material into every turn. It can also publish named tools backed by shell,
+TypeScript, or Python scripts. Skills follow the agent-skills shape: `SKILL.md` plus optional
+references, assets, schemas, and scripts.
+
+## Progressive disclosure
+
+Skills load in layers. The name and description are visible so the agent can decide whether the
+skill applies. The `SKILL.md` body is loaded with `load_skill` when needed. Reference files are
+loaded later with `load_skill_reference` only when the skill asks for them.
+
+That keeps normal turns small while still allowing deep instructions for specialized work.
+
+## Built, bundled, or installed
+
+TulipFarm ships bundled forge skills such as `resource-forge`, `agent-forge`, `skill-forge`,
+`routine-forge`, `surface-component-forge`, and `onboarding`. You can author a new skill by chat
+through `skill-forge`, or install skills from a git repository through the marketplace flow.
+
+The install flow scans a repository, runs **SkillAudit** — the product's own safety review of what
+a skill would be allowed to do — and then installs only after operator confirmation. Installed
+skills are written to `soul/skills/{name}/` and pinned in `skills-lock.json` with provenance.
+
+The complete selected skill directory is preserved. A canonical `skill.yaml` is generated for a
+compatible `SKILL.md`-only package; an executable package supplies its command declarations and
+sandbox-backed tool contracts explicitly.
+
+## Executable commands
+
+Ask the assistant to build the skill and its tool contract together:
+
+```prompt
+Create a reporting Skill with a Python command named generate_report. Give it JSON input and
+output, allow a declared CSV file output, and use only the approved shell-ts-python-v1 runtime.
+```
+
+Each published command binds a name to a tool contract, an entrypoint inside the skill package, and
+an approved runtime profile. The tool contract remains the authority boundary: it declares risk,
+mutation behavior, destinations, approvals, timeouts, and retry safety. A skill cannot grant itself
+permission.
+
+The initial `shell-ts-python-v1` profile contains Bash, Node with a `tsx` launcher, Python 3,
+`curl`, and `jq`. A run cannot install packages. If a command declares an unknown CLI, publication
+is blocked until an operator reviews a new runtime image. Google Workspace `gws` is not included.
+
+Execution receives JSON input as an immutable artifact and a fresh ephemeral workspace. Scripts
+write `result.json` plus any declared file outputs under `TULIP_OUTPUT_DIR`. Integration
+Credentials are injected only through one-use leases after tool authorization. Network access is
+denied unless the tool names an allowed destination and the sandbox backend can enforce it.
+
+The local development backend uses a digest-pinned container. Production deliberately refuses that
+backend and waits for an attested remote or microVM sandbox. Backend selection is operational
+configuration, not a setting shown to normal users.
+
+## SkillAudit is advisory
+
+SkillAudit is an LLM safety review that reports what the skill asks agents to do, suspicious
+instructions, and risk level. The audit report is not an authorization boundary. A low-risk report
+does not auto-install a skill. Executable files also pass deterministic package, runtime, tool
+Broker, approval, Credential, sandbox, and output gates when applicable.
+
+Use [Install a skill](/docs/using-tulipfarm/install-a-skill) for the install flow.

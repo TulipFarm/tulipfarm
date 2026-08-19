@@ -4,8 +4,18 @@ description: Every environment variable TulipFarm reads or ships in its self-hos
 ---
 
 TulipFarm reads configuration from the process environment. Source checkouts usually load
-`.env.local`; self-hosted installs write `/opt/tulipfarm/.env` for Docker Compose. The tables below
-separate application reads from Compose-only values that shape the container stack.
+`.env.local`; self-hosted installs write `/opt/tulipfarm/.env` for Docker Compose.
+
+Most people arrive here holding one variable name and one question: **am I allowed to change
+this?** So this page is in three zones.
+
+| Zone | Meaning |
+| --- | --- |
+| [Set these](#required-boot-configuration) | Normal configuration. Change them to suit your deployment. |
+| [The installer sets these](#the-installer-sets-these) | Overridable, but a wrong value gives you a broken or non-standard install. |
+| [Never set these](#never-set-these) | Internal plumbing. Setting them by hand breaks things. |
+
+Everything from here to *The installer sets these* is in the first zone.
 
 ## Required boot configuration
 
@@ -18,21 +28,23 @@ multi-business deployments can use `SOUL_ROOT`, which resolves to `<root>/<busin
 | `ENCRYPTION_KEY` | Yes outside managed data-dir boot | Generated into `TF_DATA_DIR/secrets.env` when a data dir exists | 32-byte base64 key-encryption key for stored secrets. |
 | `JWT_SECRET` | Yes outside managed data-dir boot | Generated into `TF_DATA_DIR/secrets.env` when a data dir exists | 32-byte base64 signing secret reserved for auth/session signing surfaces. |
 | `WEBHOOK_SIGNING_SECRET` | Yes outside managed data-dir boot | Generated into `TF_DATA_DIR/secrets.env` when a data dir exists | 32-byte base64 secret reserved for webhook signature verification. |
-| `SOUL_PATH` | Yes, unless `SOUL_ROOT` is set | — | Absolute path to the live Soul git checkout. |
-| `SOUL_ROOT` | Yes, unless `SOUL_PATH` is set | — | Root for per-business Soul checkouts. |
+| `SOUL_PATH` | Yes, unless `SOUL_ROOT` is set | — | Absolute path to the live soul git checkout. |
+| `SOUL_ROOT` | Yes, unless `SOUL_PATH` is set | — | Root for per-business soul checkouts. |
 
 ## Networking and URLs
 
 | Variable | Required | Default | What it does |
 | --- | --- | --- | --- |
 | `PORT` | No | `4010` from source, `8080` in the production image | API listen port. |
-| `PUBLIC_URL` | No | API falls back to `http://localhost:4000` for link generation and CORS | Public origin users reach. Drives CORS fallback, cookie secure behavior, and channel-link URLs. |
+| `PUBLIC_URL` | No | API falls back to `http://localhost:4000` for link generation and CORS | Public origin users reach. Drives CORS fallback, cookie secure behavior, and channel-link URLs. An address saved under Business → About overrides it unless `PUBLIC_ORIGINS_LOCKED` is `true`. |
+| `PUBLIC_API_URL` | No | `PUBLIC_URL` in Docker Compose; otherwise `http://localhost:${PORT ?? 4010}` | Public API origin used for integration OAuth callbacks and webhooks. Set it separately only when the API has a different public origin. |
+| `PUBLIC_ORIGINS_LOCKED` | No | `false` | Set `true` to make the environment origins authoritative and disable changes from Business → About. Otherwise saved in-app values override the environment fallbacks. |
 | `CORS_ORIGIN` | No | `PUBLIC_URL`, then `http://localhost:${VITE_PORT ?? 4000}` | Browser origin allowed to call the API with credentials. |
 | `VITE_PORT` | No | `4000` | Remix web dev-server port and API CORS fallback. |
 | `VITE_API_URL` | No | `http://localhost:4010` | Browser API base URL for the web app. |
 | `VITE_API_TOKEN` | No | — | Optional bearer token the web dev client adds to API calls. |
 | `WEB_DIST` | No | — | Directory of built web assets for the API to serve in combined image mode. |
-| `INTERNAL_API_URL` | Worker processes: yes | — | Base URL workers use for service-only `/api/v1/internal/*` calls. |
+| `INTERNAL_API_URL` | worker processes: yes | — | Base URL workers use for service-only `/api/v1/internal/*` calls. |
 
 ## Headless seeding
 
@@ -45,23 +57,23 @@ Production refuses to boot when `ADMIN_EMAIL` and `ADMIN_PASSWORD` are set witho
 | `ADMIN_PASSWORD` | No | — | Password for the first admin account during headless boot. |
 | `LLM_API_KEY` | Required with admin creds in production | — | Seeded into the selected provider secret during headless boot. |
 | `LLM_PROVIDER` | No | `anthropic` | Headless provider for `LLM_API_KEY`; `openai` is the other accepted value. Subscription providers cannot be seeded headlessly. |
-| `BUSINESS_NAME` | No | — | Written to Soul business metadata during headless boot. |
-| `BUSINESS_DESCRIPTION` | No | Empty string when `BUSINESS_NAME` is set | Written to Soul business metadata during headless boot. |
+| `BUSINESS_NAME` | No | — | Written to soul business metadata during headless boot. |
+| `BUSINESS_DESCRIPTION` | No | Empty string when `BUSINESS_NAME` is set | Written to soul business metadata during headless boot. |
 | `NODE_ENV` | No | Depends on process manager | Enables production-only headless validation and non-dev route behavior. |
 
 ## Soul and git
 
 | Variable | Required | Default | What it does |
 | --- | --- | --- | --- |
-| `SOUL_PATH` | See required boot configuration | — | Single live Soul checkout path. |
-| `SOUL_ROOT` | See required boot configuration | — | Root for resolved per-business Soul checkout paths. |
-| `SOUL_GIT_REMOTE_URL` | No | Persisted Soul git config, if present | Remote URL cloned on first boot or synced later. |
-| `SOUL_GIT_CREDENTIAL` | No | Persisted credential, if present | Credential used for Soul remote sync. |
-| `BOT_GIT_NAME` | No | `tulipfarm-bot` | Git author name for Soul commits. |
-| `BOT_GIT_EMAIL` | No | `tulipfarmhq@gmail.com` | Git author email for Soul commits. |
+| `SOUL_PATH` | See required boot configuration | — | Single live soul checkout path. |
+| `SOUL_ROOT` | See required boot configuration | — | Root for resolved per-business soul checkout paths. |
+| `SOUL_GIT_REMOTE_URL` | No | Persisted soul git config, if present | Remote URL cloned on first boot or synced later. |
+| `SOUL_GIT_CREDENTIAL` | No | Persisted credential, if present | Credential used for soul remote sync. |
+| `BOT_GIT_NAME` | No | `tulipfarm-bot` | Git author name for soul commits. |
+| `BOT_GIT_EMAIL` | No | `tulipfarmhq@gmail.com` | Git author email for soul commits. |
 | `GIT_TERMINAL_PROMPT` | No | Forced to `0` by `@tulipfarm/soul` | Disables interactive git credential prompts. |
-| `BUSINESS_ID` | No | `tulipfarm-local` | Deployment business id used in constants and per-business Soul paths. |
-| `SOUL_BUNDLE_RETENTION_DAYS` | No | `30` (floor `7`) | How long an unreferenced published execution bundle is kept before the nightly retention sweep may delete it. Bundles that are active, previously activated, pinned by a Run, cited by an audit event, or still publishing are never deleted at any age. |
+| `BUSINESS_ID` | No | `tulipfarm-local` | Deployment business id used in constants and per-business soul paths. |
+| `SOUL_BUNDLE_RETENTION_DAYS` | No | `30` (floor `7`) | How long an unreferenced published execution bundle is kept before the nightly retention sweep may delete it. Bundles that are active, previously activated, pinned by a run, cited by an audit event, or still publishing are never deleted at any age. |
 
 ## Workers and service credentials
 
@@ -71,17 +83,17 @@ files are only a fallback for container installs sharing the data volume.
 | Variable | Required | Default | What it does |
 | --- | --- | --- | --- |
 | `TF_DATA_DIR` | No | `/data` when that directory exists | Stores generated `secrets.env`, `worker.env`, and `integration-worker.env`. |
-| `WORKER_API_CREDENTIAL` | Worker: yes unless read from data dir | — | `tfc_<clientId>.<secret>` credential for the durable Run worker. |
-| `INTEGRATION_WORKER_API_CREDENTIAL` | Integration worker: yes unless read from data dir | — | `tfc_<clientId>.<secret>` credential for the integration worker. |
-| `WORKER_PORT` | No | `4020` | Worker health probe port. Collides with the docs dev server if both run locally. |
-| `WORKER_OWNER` | No | `<hostname>:<pid>` | Lease owner recorded on claimed Runs. |
-| `WORKER_RUN_POLL_MS` | No | `1000` | Durable Run dispatch poll interval. |
+| `WORKER_API_CREDENTIAL` | worker: yes unless read from data dir | — | `tfc_<clientId>.<secret>` credential for the durable run worker. |
+| `INTEGRATION_WORKER_API_CREDENTIAL` | integration worker: yes unless read from data dir | — | `tfc_<clientId>.<secret>` credential for the integration worker. |
+| `WORKER_PORT` | No | `4020` | worker health probe port. Collides with the docs dev server if both run locally. |
+| `WORKER_OWNER` | No | `<hostname>:<pid>` | Lease owner recorded on claimed runs. |
+| `WORKER_RUN_POLL_MS` | No | `1000` | Durable run dispatch poll interval. |
 | `WORKER_WAIT_SWEEP_MS` | No | `5000` | Wait timer sweep interval. |
 | `WORKER_OUTBOX_POLL_MS` | No | `1000` | Event outbox delivery poll interval. |
-| `WORKER_BATCH_SIZE` | No | `25` | Maximum Runs claimed per dispatch batch. |
-| `WORKER_LEASE_MS` | No | `60000` | Run lease duration; must exceed `WORKER_RUN_POLL_MS`. |
-| `WORKER_RUN_MAX_LIFETIME_MS` | No | `900000` | Longest a single Run keeps renewing its lease before the worker abandons it for reclaim; must exceed `WORKER_LEASE_MS`. |
-| `WORKER_DRAIN_TIMEOUT_MS` | No | `15000` | Worker shutdown drain budget. |
+| `WORKER_BATCH_SIZE` | No | `25` | Maximum runs claimed per dispatch batch. |
+| `WORKER_LEASE_MS` | No | `60000` | run lease duration; must exceed `WORKER_RUN_POLL_MS`. |
+| `WORKER_RUN_MAX_LIFETIME_MS` | No | `900000` | Longest a single run keeps renewing its lease before the worker abandons it for reclaim; must exceed `WORKER_LEASE_MS`. |
+| `WORKER_DRAIN_TIMEOUT_MS` | No | `15000` | worker shutdown drain budget. |
 | `WORKER_MAINTENANCE` | No | `false` | Enables singleton maintenance consumers on one worker replica. |
 | `INTEGRATION_WORKER_PORT` | No | `4030` | Integration-worker health probe port. |
 | `INTEGRATION_WORKER_DRAIN_TIMEOUT_MS` | No | `15000` | Integration-worker shutdown drain budget. |
@@ -102,10 +114,10 @@ files are only a fallback for container installs sharing the data volume.
 | --- | --- | --- | --- |
 | `KNOWLEDGE_TRGM_FALLBACK` | No | `on` | Enables pg_trgm typo-tolerance for lexical page search unless set to `0` or `false`. |
 | `KNOWLEDGE_RERANK` | No | Off | Opts into the wired rerank seam. Today the enabled stage is an honest not-implemented stub. |
-| `MARKETPLACE_SOURCE` | No | `tulipfarm/skills` | Skills marketplace source repository. |
-| `BUNDLED_SKILLS_DIR` | No | Image/repo bundled skills directory | Overrides where bundled Skills are read from. |
-| `BUNDLED_INTEGRATIONS_DIR` | No | Image/repo bundled integrations directory | Overrides where bundled Integrations are read from. |
-| `SANDBOX_RUNTIME_IMAGE` | Development only | Off | Exact `repository@sha256:...` image used for published Skill shell, TypeScript, and Python Tools. Ignored as an execution backend in production. |
+| `MARKETPLACE_SOURCE` | No | `tulipfarm/skills` | skills marketplace source repository. |
+| `BUNDLED_SKILLS_DIR` | No | Image/repo bundled skills directory | Overrides where bundled skills are read from. |
+| `BUNDLED_INTEGRATIONS_DIR` | No | Image/repo bundled integrations directory | Overrides where bundled integrations are read from. |
+| `SANDBOX_RUNTIME_IMAGE` | Development only | Off | Exact `repository@sha256:...` image used for published skill shell, TypeScript, and Python tools. Ignored as an execution backend in production. |
 | `TULIPFARM_VERSION` | No | `dev` | Version reported by the update-check endpoint. |
 | `env://<NAME>` LLM refs | Only when referenced | — | Model configuration escape hatch; the named environment variable must be set at model creation time. |
 
@@ -118,5 +130,43 @@ These values are consumed by Docker Compose or the installer rather than by the 
 | `POSTGRES_PASSWORD` | Bundled Postgres only | `tulipfarm` in Compose | Password for the bundled PostgreSQL container and generated `DATABASE_URL`. |
 | `HOST_PORT` | No | `8080` | Host port published by the self-hosted Compose stack. |
 | `HOST_BIND` | No | `0.0.0.0` | Host interface Compose binds for the app port. |
-| `COMPOSE_PROJECT_NAME` | No | `tulipfarm` | Namespaces every container and volume. Change it only to run a [second, separate instance](/docs/deploy/docker-compose#running-more-than-one-business-on-one-machine) — renaming it on an existing install orphans that install's database and soul repo. |
+| `COMPOSE_PROJECT_NAME` | No | `tulipfarm` | Namespaces every container and volume. Change it only to run a [second, separate instance](/docs/self-hosting/docker-compose#running-more-than-one-business-on-one-machine) — renaming it on an existing install orphans that install's database and soul repo. |
 | `EXTERNAL_DATASTORE` | No | `false` | Installer/Compose switch documenting that `DATABASE_URL` points at managed Postgres. |
+
+## Installer variables
+
+These are read by the install script rather than by the application. They are safe to set, and
+setting them is the supported way to change how the stack is laid out.
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `TF_VERSION` | `latest` | Pins the image tag to install, and writes it as `TULIPFARM_VERSION` in `.env`. |
+| `TF_PORT` | `8080` | The port published on the host. A re-run updates the saved port. |
+| `TF_INSTALL_DIR` | `/opt/tulipfarm` | Where the stack and its `.env` are written. |
+| `TF_PROJECT_NAME` | `tulipfarm` | The Compose project name, which prefixes containers and volumes. |
+| `TF_RUNTIME` | Auto-detected | Forces `docker` or `podman` instead of detecting one. |
+
+Two of these matter when running more than one instance on a machine. Give each install its own
+`TF_PORT` and its own `TF_PROJECT_NAME`, or the second one will collide with the first.
+
+Only `TF_VERSION` is forwarded by the Windows PowerShell installer, along with `TF_BASE_URL` and
+`TF_REF` below. The rest apply to the shell installer.
+
+## The installer sets these
+
+These work, but the default is right for almost everyone. Change one only if you know why.
+
+| Variable | Default | What it does | Why to leave it |
+| --- | --- | --- | --- |
+| `TF_BASE_URL` | The public TulipFarm download host | Where the installer fetches `docker-compose.yml` and `.env.example` from. | Pointing it elsewhere means installing software that is not TulipFarm. |
+| `TF_REF` | Empty | Fetches those files from a specific ref instead of the release path. | Used for testing an unreleased change. Mismatched files fail in confusing ways. |
+| `TF_LOCAL_SRC` | Empty | Copies installer inputs from a local checkout instead of downloading. | For developing the installer itself. |
+
+## Never set these
+
+<Callout type="warn">
+  **`TF_TTY_INPUT` and `TF_TTY_OUTPUT` are not configuration.** They exist so the uninstall script
+  can read your typed confirmation from the terminal, and both default to `/dev/tty`. Point either
+  at anything that is not a terminal and uninstall fails with *no interactive terminal available*,
+  because it can no longer ask you the question it must ask before destroying data.
+</Callout>

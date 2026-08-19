@@ -14,6 +14,7 @@ import {
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeRequireAuthorization } from "../authz/route-gate";
+import { allowAllPages } from "../test/page-gate";
 import { makeMigratedPglite } from "../test/pglite";
 import { registerKnowledgeRoutes } from "./routes";
 
@@ -45,6 +46,7 @@ async function buildApp(db: PGlite): Promise<FastifyInstance> {
     service,
     async () => {},
     makeRequireAuthorization(),
+    allowAllPages(),
     new PageRetrievalService(db)
   );
   await app.ready();

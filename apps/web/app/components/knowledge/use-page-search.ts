@@ -22,6 +22,7 @@ function recentToHit(r: RecentPage): PageSearchHit {
     path: r.path,
     snippet: "",
     highlightRanges: [],
+    authorKind: r.authorKind ?? null,
     score: 0,
   };
 }

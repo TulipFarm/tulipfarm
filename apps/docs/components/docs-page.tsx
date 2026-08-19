@@ -14,7 +14,9 @@ type DocsPageProps = ComponentProps<"article"> & {
 export function DocsPage({ children, className, full = false, toc = [], ...props }: DocsPageProps) {
   return (
     <TOCProvider toc={toc}>
-      {toc.length > 0 && <TOCPopover />}
+      {/* Upstream renders a progress ring with role="progressbar" inside the trigger, so its
+          aria-valuenow leaks a decimal into the button's accessible name. */}
+      {toc.length > 0 && <TOCPopover trigger={{ "aria-label": "On this page" }} />}
       <article
         id="nd-page"
         data-full={full}

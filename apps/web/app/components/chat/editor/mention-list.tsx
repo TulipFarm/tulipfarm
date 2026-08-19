@@ -16,8 +16,10 @@ export const MentionList = forwardRef<
     command: (item: { id: string; label: string }) => void;
     /** Trigger kind — agent rows render a glyph avatar; skill/resource rows don't. */
     kind?: MentionKind;
+    /** Async Knowledge search is pending; render feedback instead of hiding the menu. */
+    loading?: boolean;
   }
->(({ items, command, kind }, ref) => {
+>(({ items, command, kind, loading = false }, ref) => {
   const [selected, setSelected] = useState(0);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: a fresh query yields a fresh list — reset the highlight to the top.
@@ -47,7 +49,16 @@ export const MentionList = forwardRef<
     [items, selected, command]
   );
 
-  if (items.length === 0) return null;
+  if (items.length === 0) {
+    if (!loading && kind !== "knowledge") return null;
+    return (
+      <div className="w-64 rounded-sm border border-border bg-card p-2 text-sm shadow-md">
+        <p className="text-muted-foreground" role={loading ? "status" : undefined}>
+          {loading ? "Searching Knowledge…" : "No matching Knowledge."}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="max-h-64 w-64 overflow-y-auto rounded-sm border border-border bg-card p-1 text-sm shadow-md">

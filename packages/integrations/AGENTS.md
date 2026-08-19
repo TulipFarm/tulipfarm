@@ -12,6 +12,7 @@ Owns adapter contracts, event normalization, source ACLs, sync checkpoints, and 
 
 | Path | Owns |
 | --- | --- |
+| `src/auth/` | Provider-neutral public origins and callback URL resolution. |
 | `src/http.ts` | Provider-neutral HTTP port, failure classification, bounded pagination. |
 | `src/grants.ts` | Default-deny grants for concrete external targets. |
 | `src/egress/` | Manifest-to-ToolContract compiler, adapter, fetch transport, destination cage. |

@@ -1,0 +1,4 @@
+interface:
+  display_name: "TulipFarm Docs"
+  short_description: "Write and maintain the public documentation in apps/docs"
+  default_prompt: "Use $tulipfarm-docs to write or update this TulipFarm documentation page."

@@ -1,0 +1,110 @@
+---
+title: How soul publication works
+description: TulipFarm compiles each soul commit into a signed bundle and runs that, not live git. Learn about bundles, the active pointer, dead letters, and rollback.
+---
+
+When an agent builds something, it writes files to the soul — the git repository your instance is
+defined in. But the running system never reads those files directly.
+
+Instead, every successful commit is compiled into a small, signed **bundle**, and the runtime runs
+the bundle. This page explains why, and what to do when it goes wrong.
+
+## Why not just read the repository
+
+A git working tree is a moving target. It can be half-written, mid-merge, or edited by two things
+at once. Running directly from it would mean an agent's behaviour could change halfway through a
+job.
+
+A bundle fixes that. It is immutable, verified, and complete, so every turn runs against exactly
+one known version of your configuration.
+
+```text
+  agent writes    →   git commit   →   compile   →   sign   →   activate
+   to the soul         (history)       (bundle)     (Ed25519)   (pointer)
+                                                                    │
+                                              the runtime reads ────┘
+```
+
+## What a bundle contains
+
+A bundle carries the commit it came from, the business it belongs to, and every definition and
+asset compiled from that commit — Resource types, agents, skills, routines, integrations, and
+guardrails.
+
+Signing adds two things: a **digest**, which is a fingerprint of the contents, and a
+**signature** over that digest. Before a bundle is ever used, the runtime checks the version, then
+the digest, then that the signing key is one it trusts, then the signature itself. A bundle that
+fails any of those checks is not run.
+
+The signing keys live in the secret store, not in an environment variable or a file.
+
+## The active bundle
+
+Many bundles can exist. Exactly one is **active**, and the active one is what runs.
+
+Activating is only a pointer move. Nothing is copied, and no data changes. Every activation is
+appended to a history, so the record of what ran when is preserved.
+
+## When publication fails
+
+Publication is automatic and retried. A publication that keeps failing, or that fails in a way
+retrying cannot fix, is set aside as a **dead letter** with the reason recorded.
+
+Dead letters matter because they are silent. The instance keeps running the last good bundle, so
+nothing visibly breaks — but the change an agent just made is not live. Someone asked for
+something, was told it was done, and it was not.
+
+The fix is always to correct the cause and publish again. Do not try to point the active bundle at
+something that never verified.
+
+## Rolling back
+
+Rollback re-points the active bundle at an earlier one that has already been published and
+verified.
+
+It is worth being precise about what rollback does **not** do:
+
+- It does **not** revert your git history. The soul repository is untouched.
+- It does **not** change your records, knowledge, or any other data.
+- It does **not** undo actions agents have already taken in the outside world.
+
+It changes which definitions are in force, and nothing else. To undo the change in git as well,
+that is a separate act on the repository.
+
+## There is no screen for this
+
+Publication has no screen today. It is reachable only through the API, and every route is
+admin-only.
+
+| Route | Answers |
+| --- | --- |
+| `GET /api/v1/soul/publications` | What has been published, and what state is each in? |
+| `GET /api/v1/soul/publications/dead-letters` | What failed and needs attention? |
+| `GET /api/v1/soul/publications/{changesetId}` | What happened to this one change? |
+| `GET /api/v1/soul/active-bundle` | What is running right now, and what ran before? |
+| `POST /api/v1/soul/active-bundle/rollback` | Go back to a named earlier bundle. |
+
+<Callout type="info">
+  In normal running you never touch any of this. Publication happens on its own after every
+  change. These routes exist for the day it does not.
+</Callout>
+
+## Where to go next
+
+<Cards>
+  <Card
+    title="Respond to an incident"
+    href="/docs/administration/respond-to-an-incident"
+    description="The procedure to follow when something has gone wrong, including rollback."
+  />
+  <Card
+    title="The soul"
+    href="/docs/using-tulipfarm/what-a-soul-is"
+    description="What lives in the repository these bundles are compiled from."
+  />
+  <Card
+    title="Backup and restore"
+    href="/docs/self-hosting/back-up-and-restore"
+    description="Keeping the repository and the data recoverable."
+  />
+</Cards>
