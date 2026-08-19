@@ -172,7 +172,6 @@ import { describe, expect, it } from "vitest";
  * the point, and the only edit this file should ever receive. Raising it needs a reviewed reason,
  * because "the number went up again" is exactly the event three editions failed to catch.
  *
-<<<<<<< HEAD
  * This edition raises it, from 49,492 to 51,107 measured against a 49,431 base. That is +1,676, and
  * it is the largest single raise the file has taken, so it is itemised:
  *
@@ -201,7 +200,7 @@ import { describe, expect, it } from "vitest";
  * them would push identity into a package that deliberately does not know about it, which is a
  * worse outcome than a higher number. The ACL logic they call is already in the package — 9,531
  * lines of it against 2,016 here, which is the ratio this gate exists to protect.
-=======
+ *
  * Ticket 05 raised it again, to 49_943, for the same shape of reason. Refusing an attachment at
  * routing time is correct but late: the person has already chosen the file and written a prompt
  * around it. So a Turn's composer needs to know, before any of that, whether some configured model
@@ -216,7 +215,6 @@ import { describe, expect, it } from "vitest";
  * `soul/llm-config/routes.ts` was a copy of `ModelSpecSchema` maintained by hand, and adding
  * `supports_pdf_input` to both is what exposed it. It now imports the real schema, which is 21
  * lines smaller and, more to the point, cannot drift from the contract again.
->>>>>>> 30d53704 (feat(chat): accept a PDF, and refuse one no model can read)
  *
  * It then moved to 51,149 for the Agent autonomy ceiling. The rule itself did not land here — the
  * ladder, the min and the approval predicate are 47 lines in `packages/tool-host/src/autonomy.ts`,
@@ -227,6 +225,13 @@ import { describe, expect, it } from "vitest";
  * `HostedAgent` — a file whose own comment already records why it cannot move. The wave paid back
  * 7 lines by collapsing the approval predicate `tool-adapter.ts` kept its own copy of onto the
  * shared one, which is also why the raise is 42 rather than 49.
+ *
+ * Raised again, 49_943 -> 49_973, for the Files library listing: the route gained a cursor
+ * querystring, a `nextCursor` on the response, a 400 for a cursor this instance did not issue, and
+ * a provenance call after a chat submit. The paging itself is *not* here — reading one row past the
+ * page and encoding the resume key are facts about listing Files, so they live in
+ * `FileService.listPage`, and the route only translates them. What remains is schema and wiring,
+ * which is the one thing apps/api is for.
  *
  * Line count is a crude proxy for ownership, deliberately. A precise measure would need to model
  * what each domain ought to own, which is the argument the refactor itself has to settle; a crude

@@ -7,19 +7,25 @@
  */
 
 import { isInlineRenderable } from "./limits";
-import type { FileRecord } from "./repo";
+import { FILE_ORIGINS, type FileRecord } from "./repo";
 import { FileError } from "./service";
 
 /** The wire shape, shared by the route schemas and the serializer so they cannot drift. */
 export const FILE_WIRE_SCHEMA = {
   type: "object",
-  required: ["id", "filename", "mediaType", "sizeBytes", "createdAt"],
+  required: ["id", "filename", "mediaType", "sizeBytes", "createdAt", "owner", "origin"],
   properties: {
     id: { type: "string" },
     filename: { type: "string" },
     mediaType: { type: "string" },
     sizeBytes: { type: "integer" },
     createdAt: { type: "string" },
+    /** The owning Principal's id. A display name needs a lookup the File itself cannot do. */
+    owner: { type: "string" },
+    origin: { type: "string", enum: [...FILE_ORIGINS] },
+    // `chatId` on the wire, `source_conversation_id` in the table: Chat is the external word for
+    // the same thing, and the boundary between them is exactly here.
+    sourceChatId: { type: "string", nullable: true },
   },
 } as const;
 
@@ -30,6 +36,9 @@ export function serializeFile(file: FileRecord) {
     mediaType: file.mediaType,
     sizeBytes: file.sizeBytes,
     createdAt: file.createdAt.toISOString(),
+    owner: file.ownerPrincipalId,
+    origin: file.origin,
+    sourceChatId: file.sourceConversationId,
   };
 }
 

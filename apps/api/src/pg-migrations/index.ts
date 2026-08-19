@@ -1,5 +1,5 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
-import { FILE_STORAGE_STATEMENTS } from "@tulipfarm/files";
+import { FILE_ORIGIN_STATEMENTS, FILE_STORAGE_STATEMENTS } from "@tulipfarm/files";
 import { MEMORY_DOCUMENT_STORAGE_STATEMENTS } from "@tulipfarm/memory";
 import { INVOCATION_STORAGE_STATEMENTS } from "@tulipfarm/run-kernel";
 import { MEMORY_SECTION_HEADINGS, MEMORY_SECTION_KEYS } from "@tulipfarm/schema";
@@ -2156,5 +2156,10 @@ export const PG_MIGRATIONS: PgMigration[] = [
     version: 74,
     description: "files: business-scoped, Principal-owned uploads behind Chat attachments",
     up: applyStatements(FILE_STORAGE_STATEMENTS),
+  },
+  {
+    version: 69,
+    description: "files: origin and the Chat a File was first sent in, for the Files library",
+    up: applyStatements(FILE_ORIGIN_STATEMENTS),
   },
 ];

@@ -1,7 +1,12 @@
 import { isAllowedMediaType, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE } from "@tulipfarm/files";
 import { modalityForMediaType } from "@tulipfarm/schema";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchAcceptedModalities, UploadCancelled, uploadFile } from "~/lib/files";
+import {
+  fetchAcceptedModalities,
+  UploadCancelled,
+  type UploadedFile,
+  uploadFile,
+} from "~/lib/files";
 
 /**
  * The files staged on the composer for the next message.
@@ -138,6 +143,31 @@ export function useAttachments() {
     [update, accepted]
   );
 
+  /**
+   * Stages a File that is already stored, without sending its bytes again.
+   *
+   * The library hands over one of these. It arrives `ready` because there is nothing left to
+   * upload — the only thing a new message needs is the id the server already issued.
+   */
+  const addExisting = useCallback((file: UploadedFile) => {
+    setAttachments((current) => {
+      if (current.length >= MAX_FILES_PER_MESSAGE) return current;
+      if (current.some((item) => item.fileId === file.id)) return current;
+      return [
+        ...current,
+        {
+          localId: `existing-${file.id}`,
+          name: file.filename,
+          mediaType: file.mediaType,
+          sizeBytes: file.sizeBytes,
+          status: "ready",
+          progress: 1,
+          fileId: file.id,
+        },
+      ];
+    });
+  }, []);
+
   const remove = useCallback((localId: string) => {
     cancels.current.get(localId)?.();
     cancels.current.delete(localId);
@@ -153,6 +183,7 @@ export function useAttachments() {
   return {
     attachments,
     add,
+    addExisting,
     remove,
     clear,
     /** Only settled uploads can be sent; a half-sent file has no id to name. */

@@ -28,7 +28,13 @@ export {
   MAX_FILES_PER_MESSAGE,
 } from "./limits";
 export {
+  decodeFileCursor,
+  encodeFileCursor,
+  FILE_ORIGIN_STATEMENTS,
+  FILE_ORIGINS,
   FILE_STORAGE_STATEMENTS,
+  type FileCursor,
+  type FileOrigin,
   type FileRecord,
   type FileRepo,
   type NewFile,

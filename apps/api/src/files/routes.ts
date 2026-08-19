@@ -15,6 +15,7 @@ import { Readable } from "node:stream";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import {
   ALLOWED_MEDIA_TYPES,
+  decodeFileCursor,
   downloadHeaders,
   FILE_WIRE_SCHEMA,
   type FileService,
@@ -159,23 +160,35 @@ export function registerFileRoutes(
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         querystring: {
           type: "object",
-          properties: { limit: { type: "integer", minimum: 1, maximum: 200, default: 50 } },
+          properties: {
+            limit: { type: "integer", minimum: 1, maximum: 200, default: 50 },
+            after: { type: "string", description: "A `nextCursor` from an earlier page." },
+          },
         },
         response: {
           200: {
             type: "object",
             required: ["files"],
-            properties: { files: { type: "array", items: FILE_WIRE_SCHEMA } },
+            properties: {
+              files: { type: "array", items: FILE_WIRE_SCHEMA },
+              nextCursor: { type: "string", nullable: true },
+            },
           },
+          400: ErrorSchema,
           401: ErrorSchema,
         },
       },
     },
-    async (req) => {
+    async (req, reply) => {
       const principal = req.principal as RequestPrincipal;
-      const { limit = 50 } = req.query as { limit?: number };
-      const files = await deps.files.list(DEPLOYMENT_BUSINESS_ID, principal.id, limit);
-      return { files: files.map(serializeFile) };
+      const { limit = 50, after } = req.query as { limit?: number; after?: string };
+      const cursor = after === undefined ? undefined : decodeFileCursor(after);
+      if (cursor === null) {
+        reply.code(400).send({ error: "that cursor is not one of ours" });
+        return;
+      }
+      const page = await deps.files.listPage(DEPLOYMENT_BUSINESS_ID, principal.id, limit, cursor);
+      reply.send({ files: page.files.map(serializeFile), nextCursor: page.nextCursor });
     }
   );
 

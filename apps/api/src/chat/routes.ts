@@ -189,6 +189,18 @@ export function registerChatRoutes(
         return reply.code(503).send({ error: "chat turn could not be dispatched" });
       }
 
+      if (attachments.length > 0) {
+        // Provenance for the Files library, not part of the send contract: the message is already
+        // accepted, so a failure here must not turn a delivered turn into an error.
+        await options.fileService
+          ?.noteSentIn(
+            principal.businessId,
+            attachments.map((file) => file.fileId),
+            entry.conversation._id
+          )
+          .catch((error: unknown) => req.log.warn({ err: error }, "file provenance not recorded"));
+      }
+
       const grant = await stream.authorize(req, runId);
       if (!grant) return reply.code(403).send({ error: "run stream not authorized" });
 

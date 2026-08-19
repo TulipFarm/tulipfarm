@@ -22,6 +22,7 @@ import { AgentGlyph } from "~/components/agent-glyph";
 import { Tooltip } from "~/components/ui/tooltip";
 import type { Autonomy } from "~/lib/agents";
 import type { AttachedFile, ChatModelSelector } from "~/lib/chat/types";
+import { fetchFile } from "~/lib/files";
 import type { Suggestion } from "~/lib/onboarding";
 import { AttachmentStrip } from "./attachment-strip";
 import { buildMentionExtensions, MENTION_PLUGIN_KEYS } from "./editor/mentions";
@@ -62,6 +63,7 @@ export function Composer({
   activeAgent,
   suggestions = [],
   initialDraft,
+  attachFileId,
 }: {
   onSend: (text: string, opts: ComposerSendOptions) => void;
   onStop?: () => void;
@@ -73,6 +75,8 @@ export function Composer({
   suggestions?: Suggestion[];
   /** A prompt to draft into the box once, e.g. seeded by the onboarding Companion. Never sent. */
   initialDraft?: string;
+  /** An already-stored File to stage, handed over by the Files library. */
+  attachFileId?: string | null;
 }) {
   const [model, setModel] = useState<ChatModelSelector>(defaultModel);
   const getItems = useMentionData();
@@ -151,7 +155,21 @@ export function Composer({
   }, [preset]);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const { attachments, add, remove, clear, readyFiles, uploading } = useAttachments();
+  const { attachments, add, addExisting, remove, clear, readyFiles, uploading } = useAttachments();
+
+  // A File the Files library handed over, staged without re-uploading its bytes. The id arrives as
+  // a prop rather than being read from the URL here: the composer is rendered outside a router in
+  // the design guide, and a hook that requires one would make it unrenderable there.
+  useEffect(() => {
+    if (!attachFileId) return;
+    const controller = new AbortController();
+    fetchFile(attachFileId, controller.signal)
+      .then(addExisting)
+      .catch(() => {
+        // A File that is gone, or was never the caller's, simply does not appear on the composer.
+      });
+    return () => controller.abort();
+  }, [attachFileId, addExisting]);
 
   pasteRef.current = add;
 

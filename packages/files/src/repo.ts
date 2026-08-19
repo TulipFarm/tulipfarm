@@ -24,8 +24,22 @@ export interface FileRecord {
   readonly claimedMediaType: string;
   readonly sizeBytes: number;
   readonly blob: BlobRef;
+  /** Whether a person uploaded this File or an Agent produced it. */
+  readonly origin: FileOrigin;
+  /**
+   * The Conversation this File was first sent in, if it has ever been sent in one.
+   *
+   * A File is uploaded before any Chat is chosen, so this is null at creation and set once, by the
+   * first message that carries it. First rather than latest because the question it answers is
+   * "where did this come from", which re-attaching it elsewhere does not change.
+   */
+  readonly sourceConversationId: string | null;
   readonly createdAt: Date;
 }
+
+/** Who made a File. Nothing produces `generated` until Agents can create Files. */
+export const FILE_ORIGINS = ["uploaded", "generated"] as const;
+export type FileOrigin = (typeof FILE_ORIGINS)[number];
 
 export interface NewFile {
   readonly id: string;
@@ -36,12 +50,29 @@ export interface NewFile {
   readonly claimedMediaType: string;
   readonly sizeBytes: number;
   readonly blob: BlobRef;
+  readonly origin?: FileOrigin;
 }
 
 export interface FileRepo {
   create(file: NewFile): Promise<FileRecord>;
   get(businessId: string, id: string): Promise<FileRecord | null>;
-  listByOwner(businessId: string, ownerPrincipalId: string, limit: number): Promise<FileRecord[]>;
+  listByOwner(
+    businessId: string,
+    ownerPrincipalId: string,
+    limit: number,
+    after?: FileCursor
+  ): Promise<FileRecord[]>;
+  /**
+   * Record the Conversation a File was first sent in, leaving an already-recorded one alone.
+   *
+   * Idempotent by design: a retried send, or the same File attached to a second Chat, must not
+   * rewrite where it came from.
+   */
+  recordFirstConversation(
+    businessId: string,
+    fileIds: readonly string[],
+    conversationId: string
+  ): Promise<void>;
   delete(businessId: string, id: string): Promise<boolean>;
   /**
    * Whether any File anywhere still points at these bytes.
@@ -65,13 +96,26 @@ export const FILE_STORAGE_STATEMENTS = [
      size_bytes          bigint NOT NULL,
      blob_key            text NOT NULL,
      blob_hash           text NOT NULL,
-     created_at          timestamptz NOT NULL DEFAULT now()
+     created_at          timestamptz(3) NOT NULL DEFAULT now()
    )`,
   `CREATE INDEX IF NOT EXISTS files_owner
      ON files (business_id, owner_principal_id, created_at DESC)`,
   // Content-addressed storage means two Files can share one object, so every delete has to ask
   // whether it is the last reference before removing the bytes.
   `CREATE INDEX IF NOT EXISTS files_blob_hash ON files (blob_hash)`,
+];
+
+/** Added after the table shipped: where a File came from, for the library to show. */
+export const FILE_ORIGIN_STATEMENTS = [
+  // Keyset paging resumes from `(created_at, id)`, and a cursor carries `created_at` as a JS Date,
+  // which has no microseconds. Storing more precision than the cursor can express would silently
+  // skip rows at a page boundary, so the column is narrowed to what round-trips exactly.
+  `ALTER TABLE files ALTER COLUMN created_at TYPE timestamptz(3)`,
+  `ALTER TABLE files ADD COLUMN IF NOT EXISTS origin text NOT NULL DEFAULT 'uploaded'`,
+  `ALTER TABLE files ADD COLUMN IF NOT EXISTS source_conversation_id uuid`,
+  `ALTER TABLE files DROP CONSTRAINT IF EXISTS files_origin_known`,
+  `ALTER TABLE files ADD CONSTRAINT files_origin_known
+     CHECK (origin IN (${FILE_ORIGINS.map((o) => `'${o}'`).join(", ")}))`,
 ];
 
 function toRecord(row: Record<string, unknown>): FileRecord {
@@ -84,8 +128,34 @@ function toRecord(row: Record<string, unknown>): FileRecord {
     claimedMediaType: String(row.claimed_media_type),
     sizeBytes: Number(row.size_bytes),
     blob: { key: String(row.blob_key), hash: String(row.blob_hash) },
-    createdAt: new Date(String(row.created_at)),
+    origin: row.origin === "generated" ? "generated" : "uploaded",
+    sourceConversationId:
+      row.source_conversation_id == null ? null : String(row.source_conversation_id),
+    createdAt: row.created_at instanceof Date ? row.created_at : new Date(String(row.created_at)),
   };
+}
+
+/** Where a page of Files resumes: the sort key of the last row already returned. */
+export interface FileCursor {
+  readonly createdAt: string;
+  readonly id: string;
+}
+/**
+ * The opaque cursor that resumes a listing after `file`.
+ *
+ * Opaque because it is a sort key, not an identifier: encoding it keeps a client from constructing
+ * one by hand and depending on a sort order we would then be unable to change.
+ */
+export function encodeFileCursor(file: FileRecord): string {
+  return Buffer.from(`${file.createdAt.toISOString()}|${file.id}`, "utf8").toString("base64url");
+}
+
+/** The cursor `raw` encodes, or `null` if it is not one this instance issued. */
+export function decodeFileCursor(raw: string): FileCursor | null {
+  const [createdAt, id, ...rest] = Buffer.from(raw, "base64url").toString("utf8").split("|");
+  if (createdAt === undefined || id === undefined || rest.length > 0) return null;
+  if (Number.isNaN(Date.parse(createdAt)) || id.length === 0) return null;
+  return { createdAt, id };
 }
 
 export class PgFileRepo implements FileRepo {
@@ -95,8 +165,8 @@ export class PgFileRepo implements FileRepo {
     const result = await this.db.query(
       `INSERT INTO files
          (id, business_id, owner_principal_id, filename, media_type, claimed_media_type,
-          size_bytes, blob_key, blob_hash)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          size_bytes, blob_key, blob_hash, origin)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING *`,
       [
         file.id,
@@ -108,6 +178,7 @@ export class PgFileRepo implements FileRepo {
         file.sizeBytes,
         file.blob.key,
         file.blob.hash,
+        file.origin ?? "uploaded",
       ]
     );
     return toRecord(result.rows[0] as Record<string, unknown>);
@@ -125,16 +196,33 @@ export class PgFileRepo implements FileRepo {
   async listByOwner(
     businessId: string,
     ownerPrincipalId: string,
-    limit: number
+    limit: number,
+    after?: FileCursor
   ): Promise<FileRecord[]> {
+    // Keyset, not OFFSET: a File uploaded while someone is paging would shift every later row and
+    // duplicate one across pages. `(created_at, id)` is the sort, so it is also the key.
     const result = await this.db.query(
       `SELECT * FROM files
        WHERE business_id = $1 AND owner_principal_id = $2
+         AND ($4::timestamptz IS NULL OR (created_at, id) < ($4::timestamptz, $5::uuid))
        ORDER BY created_at DESC, id DESC
        LIMIT $3`,
-      [businessId, ownerPrincipalId, limit]
+      [businessId, ownerPrincipalId, limit, after?.createdAt ?? null, after?.id ?? null]
     );
     return (result.rows as Array<Record<string, unknown>>).map(toRecord);
+  }
+
+  async recordFirstConversation(
+    businessId: string,
+    fileIds: readonly string[],
+    conversationId: string
+  ): Promise<void> {
+    if (fileIds.length === 0) return;
+    await this.db.query(
+      `UPDATE files SET source_conversation_id = $3
+       WHERE business_id = $1 AND id = ANY($2::uuid[]) AND source_conversation_id IS NULL`,
+      [businessId, [...fileIds], conversationId]
+    );
   }
 
   async anyReferencesBlob(hash: string): Promise<boolean> {

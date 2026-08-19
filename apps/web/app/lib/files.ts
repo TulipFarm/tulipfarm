@@ -138,3 +138,72 @@ export async function fetchAcceptedModalities(signal?: AbortSignal): Promise<rea
   const body = (await response.json()) as { acceptedInputModalities?: readonly string[] };
   return body.acceptedInputModalities ?? [];
 }
+
+/** A File as the library lists it: everything a row can show without fetching its bytes. */
+export interface LibraryFile extends UploadedFile {
+  readonly owner: string;
+  readonly origin: "uploaded" | "generated";
+  readonly sourceChatId: string | null;
+}
+
+export interface FilePage {
+  readonly files: readonly LibraryFile[];
+  /** `null` once the last page has been read. */
+  readonly nextCursor: string | null;
+}
+
+/**
+ * One page of the caller's own Files, newest first.
+ *
+ * Cursor rather than page number: someone uploading while the library is open shifts every later
+ * row, and an offset would show one File twice and hide another entirely.
+ */
+export async function fetchFiles(
+  options: { limit?: number; after?: string | null; signal?: AbortSignal } = {}
+): Promise<FilePage> {
+  const query = new URLSearchParams({ limit: String(options.limit ?? 50) });
+  if (options.after) query.set("after", options.after);
+
+  const headers: Record<string, string> = {};
+  for (const [name, value] of Object.entries(mutationHeaders())) {
+    if (name === "Content-Type") continue;
+    headers[name] = value;
+  }
+  const response = await fetch(`${API_BASE}/api/v1/files?${query}`, {
+    credentials: "include",
+    headers,
+    ...(options.signal ? { signal: options.signal } : {}),
+  });
+  if (!response.ok) throw new UploadFailed(response.status, "Your files could not be loaded.");
+  const body = (await response.json()) as { files?: LibraryFile[]; nextCursor?: string | null };
+  return { files: body.files ?? [], nextCursor: body.nextCursor ?? null };
+}
+
+/** A size a person can read. Binary units, because that is what the byte limits are stated in. */
+export function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB"];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
+}
+
+/** One File's metadata. Answers 404 for a File the caller does not own, same as a missing one. */
+export async function fetchFile(fileId: string, signal?: AbortSignal): Promise<UploadedFile> {
+  const headers: Record<string, string> = {};
+  for (const [name, value] of Object.entries(mutationHeaders())) {
+    if (name === "Content-Type") continue;
+    headers[name] = value;
+  }
+  const response = await fetch(`${API_BASE}/api/v1/files/${encodeURIComponent(fileId)}`, {
+    credentials: "include",
+    headers,
+    ...(signal ? { signal } : {}),
+  });
+  if (!response.ok) throw new UploadFailed(response.status, "That file could not be found.");
+  return (await response.json()) as UploadedFile;
+}

@@ -17,7 +17,7 @@ import type { BlobPort, BlobRef } from "@tulipfarm/storage";
 import { boundImage, type ImageBoundPolicy } from "./bound";
 import { normalizeFilename } from "./filename";
 import { isAllowedMediaType, MAX_FILE_BYTES } from "./limits";
-import type { FileRecord, FileRepo } from "./repo";
+import { encodeFileCursor, type FileCursor, type FileRecord, type FileRepo } from "./repo";
 import { resolveMediaType, SNIFF_BYTES } from "./sniff";
 
 export type UploadRejection =
@@ -246,8 +246,48 @@ export class FileService {
     return { file, body };
   }
 
-  async list(businessId: string, principalId: string, limit: number): Promise<FileRecord[]> {
-    return await this.deps.repo.listByOwner(businessId, principalId, limit);
+  async list(
+    businessId: string,
+    principalId: string,
+    limit: number,
+    after?: FileCursor
+  ): Promise<FileRecord[]> {
+    return await this.deps.repo.listByOwner(businessId, principalId, limit, after);
+  }
+
+  /**
+   * One page of the caller's own Files, with the cursor that resumes after it.
+   *
+   * Reads one row past the page so "is there more" costs nothing extra, and hands back the cursor
+   * already encoded — a caller should never have to know that the sort key is `(created_at, id)`.
+   */
+  async listPage(
+    businessId: string,
+    principalId: string,
+    limit: number,
+    after?: FileCursor
+  ): Promise<{ files: FileRecord[]; nextCursor: string | null }> {
+    const page = await this.list(businessId, principalId, limit + 1, after);
+    const files = page.slice(0, limit);
+    const last = files.at(-1);
+    return {
+      files,
+      nextCursor: page.length > limit && last ? encodeFileCursor(last) : null,
+    };
+  }
+
+  /**
+   * Note that these Files were sent in a Conversation, so the library can say where one came from.
+   *
+   * Best-effort and deliberately not awaited into the send path's success: a message that was
+   * accepted must not be reported as failed because a provenance note could not be written.
+   */
+  async noteSentIn(
+    businessId: string,
+    fileIds: readonly string[],
+    conversationId: string
+  ): Promise<void> {
+    await this.deps.repo.recordFirstConversation(businessId, fileIds, conversationId);
   }
 
   /**

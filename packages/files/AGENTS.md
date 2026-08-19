@@ -20,8 +20,9 @@ an **Artifact** is a Run output and is a different entity that lives in `package
 | `src/dimensions.ts` | Header-only pixel size for PNG/GIF/JPEG/WebP — no decode |
 | `src/bound.ts` | `boundImage` — the refuse-or-downscale policy and `DEFAULT_MAX_IMAGE_DIMENSION` |
 | `src/turn-attachments.ts` | Which Files a Turn may send, and the two-gate read of their bytes |
-| `src/repo.ts` | `FileRecord`, `FileRepo`, `PgFileRepo`, `FILE_STORAGE_STATEMENTS` |
-| `src/service.ts` | The ordered upload pipeline and the authorized read |
+| `src/repo.ts` | `FileRecord`, `FileRepo`, `PgFileRepo`, the table statements, the paging cursor |
+| `src/service.ts` | The ordered upload pipeline, the authorized read, `listPage`, `noteSentIn` |
+| `src/http.ts` | `FILE_WIRE_SCHEMA`, `serializeFile`, refusal statuses, download headers |
 
 ## Rules
 
@@ -44,4 +45,9 @@ an **Artifact** is a Run output and is a different entity that lives in `package
 - **The allowlist is an allowlist.** Do not add a blocklist branch beside it. SVG stays out.
 - **Storage is content-addressed**, so identical bytes share one object. Ask
   `anyReferencesBlob` before deleting any object.
+- **Paging is keyset on `(created_at, id)`, never OFFSET** — an upload mid-paging would shift rows.
+  `created_at` is `timestamptz(3)` because a cursor carries a JS `Date`, and precision the cursor
+  cannot express silently skips rows at a page boundary.
+- **`sourceConversationId` is the *first* Chat a File was sent in**, not the latest; and the wire
+  calls it `sourceChatId`, which is the one place that rename happens.
 - Serve the sniffed type, never the claimed one, and inline only for images.

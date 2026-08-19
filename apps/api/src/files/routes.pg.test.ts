@@ -14,7 +14,13 @@ import { PGlite } from "@electric-sql/pglite";
 import { citext } from "@electric-sql/pglite/contrib/citext";
 import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
 import { vector } from "@electric-sql/pglite-pgvector";
-import { FILE_STORAGE_STATEMENTS, FileService, MAX_FILE_BYTES, PgFileRepo } from "@tulipfarm/files";
+import {
+  FILE_ORIGIN_STATEMENTS,
+  FILE_STORAGE_STATEMENTS,
+  FileService,
+  MAX_FILE_BYTES,
+  PgFileRepo,
+} from "@tulipfarm/files";
 import { FileSystemBlobPort } from "@tulipfarm/storage";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -73,12 +79,15 @@ interface Harness {
   blobRoot: string;
   blobs: FileSystemBlobPort;
   ownerSid: string;
+  ownerId: string;
   strangerSid: string;
 }
 
 async function appWith(): Promise<Harness> {
   const database = await PGlite.create({ extensions: { vector, citext, pg_trgm } });
-  for (const sql of FILE_STORAGE_STATEMENTS) await database.exec(sql);
+  for (const sql of [...FILE_STORAGE_STATEMENTS, ...FILE_ORIGIN_STATEMENTS]) {
+    await database.exec(sql);
+  }
 
   const blobRoot = await mkdtemp(join(tmpdir(), "tulip-files-routes-"));
   const blobs = new FileSystemBlobPort(blobRoot);
@@ -104,6 +113,7 @@ async function appWith(): Promise<Harness> {
     blobRoot,
     blobs,
     ownerSid: await sessionStore.create(owner._id),
+    ownerId: owner._id,
     strangerSid: await sessionStore.create(stranger._id),
   };
 }
@@ -274,6 +284,52 @@ describe("file routes", () => {
 
     expect(mine.json().files).toHaveLength(1);
     expect(theirs.json().files).toHaveLength(0);
+  });
+
+  it("says who owns a File and where it came from, so the library can label it", async () => {
+    await upload(h, h.ownerSid, PNG);
+    const response = await h.app.inject({
+      method: "GET",
+      url: "/api/v1/files",
+      ...auth(h.ownerSid),
+    });
+
+    expect(response.json().files[0]).toMatchObject({ owner: h.ownerId, origin: "uploaded" });
+    expect(response.json().files[0].sourceChatId).toBeNull();
+  });
+
+  it("pages with a cursor rather than an offset, so a new upload cannot duplicate a row", async () => {
+    for (let i = 0; i < 3; i += 1) await upload(h, h.ownerSid, PNG, { filename: `p${i}.png` });
+
+    const first = await h.app.inject({
+      method: "GET",
+      url: "/api/v1/files?limit=2",
+      ...auth(h.ownerSid),
+    });
+    expect(first.json().files).toHaveLength(2);
+    expect(first.json().nextCursor).toBeTruthy();
+
+    // A File arriving between pages sorts ahead of the cursor, so it cannot reshuffle page two.
+    await upload(h, h.ownerSid, PNG, { filename: "late.png" });
+
+    const second = await h.app.inject({
+      method: "GET",
+      url: `/api/v1/files?limit=2&after=${encodeURIComponent(first.json().nextCursor)}`,
+      ...auth(h.ownerSid),
+    });
+    const seen = [...first.json().files, ...second.json().files].map((f: { id: string }) => f.id);
+    expect(new Set(seen).size).toBe(seen.length);
+    expect(second.json().files).toHaveLength(1);
+    expect(second.json().nextCursor).toBeNull();
+  });
+
+  it("refuses a cursor it did not issue instead of silently paging from the top", async () => {
+    const response = await h.app.inject({
+      method: "GET",
+      url: "/api/v1/files?after=not-a-real-cursor",
+      ...auth(h.ownerSid),
+    });
+    expect(response.statusCode).toBe(400);
   });
 
   // A route with no schema is absent from the generated document, which is how one ships unnoticed.

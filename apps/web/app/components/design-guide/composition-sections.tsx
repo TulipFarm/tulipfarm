@@ -2,6 +2,7 @@ import { Check, Search, Settings } from "lucide-react";
 import { Composer } from "~/components/chat/composer";
 import { Transcript } from "~/components/chat/transcript";
 import { GuideSection } from "~/components/design-guide/guide-section";
+import { FileList } from "~/components/files/file-list";
 import type { ChatMessage } from "~/lib/chat/types";
 
 /**
@@ -27,6 +28,29 @@ const TRANSCRIPT_MESSAGES: ChatMessage[] = [
       modelCallLatencyMs: 1240,
     },
     sourceTurn: { text: "Which invoices are overdue?", options: { model: "auto" } },
+  },
+];
+
+const GUIDE_FILES = [
+  {
+    id: "file_1",
+    filename: "storefront.png",
+    mediaType: "image/png",
+    sizeBytes: 184_320,
+    createdAt: "2026-01-02T09:00:00.000Z",
+    owner: "user_1",
+    origin: "uploaded" as const,
+    sourceChatId: "conv_1",
+  },
+  {
+    id: "file_2",
+    filename: "q1-summary.pdf",
+    mediaType: "application/pdf",
+    sizeBytes: 51_200,
+    createdAt: "2026-01-03T09:00:00.000Z",
+    owner: "user_1",
+    origin: "generated" as const,
+    sourceChatId: null,
   },
 ];
 
@@ -63,6 +87,14 @@ export function CompositionSections() {
               },
             ]}
           />
+        </div>
+        <div className="mb-6">
+          <h3 className="mb-2 text-sm font-semibold">Files library rows</h3>
+          <p className="mb-3 text-sm text-muted-foreground">
+            One row shape carries both a screenshot and a document. Origin is an icon plus a word,
+            never a tint alone, so who made a File survives a greyscale screen.
+          </p>
+          <FileList files={GUIDE_FILES} viewerId="user_1" onPreview={() => undefined} />
         </div>
         <div className="grid gap-4 lg:grid-cols-3">
           <article className="rounded-md border border-border bg-card">

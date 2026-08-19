@@ -22,7 +22,12 @@ class MemoryFileRepo implements FileRepo {
   readonly rows: FileRecord[] = [];
 
   async create(file: NewFile): Promise<FileRecord> {
-    const record: FileRecord = { ...file, createdAt: new Date() };
+    const record: FileRecord = {
+      ...file,
+      origin: file.origin ?? "uploaded",
+      sourceConversationId: null,
+      createdAt: new Date(),
+    };
     this.rows.push(record);
     return record;
   }
@@ -35,6 +40,18 @@ class MemoryFileRepo implements FileRepo {
     return this.rows
       .filter((r) => r.businessId === businessId && r.ownerPrincipalId === owner)
       .slice(0, limit);
+  }
+
+  async recordFirstConversation(
+    businessId: string,
+    fileIds: readonly string[],
+    conversationId: string
+  ): Promise<void> {
+    for (const [index, row] of this.rows.entries()) {
+      if (row.businessId !== businessId) continue;
+      if (!fileIds.includes(row.id) || row.sourceConversationId !== null) continue;
+      this.rows[index] = { ...row, sourceConversationId: conversationId };
+    }
   }
 
   async delete(businessId: string, id: string): Promise<boolean> {
