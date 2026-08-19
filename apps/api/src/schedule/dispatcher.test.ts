@@ -9,7 +9,6 @@ const DUE_AT = new Date(NOW_MS - 3_600_000).toISOString();
 /** One published datetime Trigger, already due, so `planSchedule` always returns exactly one fire. */
 function activeBundleWithDueTrigger(): RuntimeBundle {
   return {
-    bundleVersion: 1,
     businessId: "biz-1",
     changesetId: "changeset-1",
     commitSha: "commit-1",
