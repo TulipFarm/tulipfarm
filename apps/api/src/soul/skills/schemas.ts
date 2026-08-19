@@ -10,6 +10,7 @@ const SkillSummaryPropertiesSchema = {
 
 const MarketplaceSkillPropertiesSchema = {
   name: { type: "string" },
+  skillPath: { type: "string" },
   skillId: { type: "string" },
   description: { type: "string" },
   category: { type: "string" },
@@ -35,6 +36,8 @@ const SkillCommandPropertiesSchema = {
 
 const ScannedSkillPropertiesSchema = {
   name: { type: "string" },
+  /** Unique within one scan; `name` is not, so this is what a client keys a selection by. */
+  skillPath: { type: "string" },
   description: { type: "string" },
   installed: { type: "boolean" },
   updateAvailable: { type: "boolean" },

@@ -113,7 +113,13 @@ function parseLegacy(content: string, location: ClassifiedSoulPath, path: string
         // No frontmatter means this is the prose body a canonical `skill.yaml` points at, not a
         // legacy definition. Only the definition form carries configuration worth validating.
         if (Object.keys(frontmatter).length === 0) return admitted(content, location, "prose");
-        const result = validateSkill({ name: location.slug ?? "", frontmatter, body, content });
+        const result = validateSkill({
+          name: location.slug ?? "",
+          frontmatter,
+          body,
+          content,
+          origin: "stored",
+        });
         return result.valid
           ? admitted(content, location, "legacy")
           : rejected("SCHEMA_VALIDATION_FAILED", path);

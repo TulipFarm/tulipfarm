@@ -84,6 +84,34 @@ describe("validateSkill", () => {
     });
   });
 
+  // The server writes `_pendingAudit` itself, so re-reading a stored SKILL.md as author input
+  // rejected the exact file the write gateway had just been handed.
+  it("accepts the runtime's own _pendingAudit when the frontmatter came from the Soul", () => {
+    const frontmatter = { ...VALID_FRONTMATTER, _pendingAudit: true };
+    expect(
+      validateSkill({
+        name: "code-review",
+        frontmatter,
+        body: "Follow the review procedure.",
+        content: serializeSkill(frontmatter, "Follow the review procedure."),
+        origin: "stored",
+      })
+    ).toMatchObject({ valid: true });
+  });
+
+  it("still rejects other reserved keys in stored frontmatter", () => {
+    const frontmatter = { ...VALID_FRONTMATTER, _grants: ["tool"] };
+    expect(
+      validateSkill({
+        name: "code-review",
+        frontmatter,
+        body: "Follow the review procedure.",
+        content: serializeSkill(frontmatter, "Follow the review procedure."),
+        origin: "stored",
+      })
+    ).toMatchObject({ valid: false });
+  });
+
   it.each(SKILL_FORBIDDEN_GRANT_KEYS)("rejects grant-shaped key %s", (key) => {
     expect(validate({ ...VALID_FRONTMATTER, [key]: ["tool"] })).toMatchObject({
       valid: false,

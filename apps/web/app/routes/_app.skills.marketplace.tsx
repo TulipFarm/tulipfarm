@@ -14,6 +14,7 @@ import {
   type SkillAuditReport,
   type SkillInstallStatus,
   scanSkills,
+  skillRowKey,
 } from "~/lib/skills";
 
 export const meta: MetaFunction = () => [{ title: "Marketplace · tulipfarm" }];
@@ -180,10 +181,13 @@ export default function SkillsMarketplace() {
   const [reports, setReports] = useState<Record<string, SkillAuditReport>>({});
   const [busy, setBusy] = useState<null | "scan" | "audit" | "install">(null);
   const [error, setError] = useState<string | null>(null);
+  const [installError, setInstallError] = useState<string | null>(null);
   const [installed, setInstalled] = useState<string[] | null>(null);
 
-  const selectedNames = [...selected];
-  const allAudited = selectedNames.length > 0 && selectedNames.every((n) => reports[n]);
+  // Selection is keyed by row, not by name: a source may define two skills with the same name.
+  const selectedSkills = (scan?.skills ?? []).filter((s) => selected.has(skillRowKey(s)));
+  const selectedNames = selectedSkills.map((s) => s.name);
+  const allAudited = selectedSkills.length > 0 && selectedSkills.every((s) => reports[s.name]);
   const catalogGroups = new Map<string, MarketplaceCatalog["skills"]>();
   for (const skill of catalog?.skills ?? []) {
     const category = skill.category ?? "other";
@@ -197,16 +201,18 @@ export default function SkillsMarketplace() {
   // unchanged). Used by the per-row Install/Update buttons and the "Review all" button.
   function loadIntoPipeline(scanId: string, skills: ScannedSkill[]) {
     setError(null);
+    setInstallError(null);
     setReports({});
     setInstalled(null);
     setScan({ scanId, skills });
-    setSelected(new Set(skills.map((s) => s.name)));
+    setSelected(new Set(skills.map(skillRowKey)));
   }
 
   async function onScan() {
     if (!source.trim()) return;
     setBusy("scan");
     setError(null);
+    setInstallError(null);
     setReports({});
     setInstalled(null);
     // Clear any prior scan so stale results aren't shown/interactive during the new scan.
@@ -215,7 +221,7 @@ export default function SkillsMarketplace() {
     try {
       const result = await scanSkills(source.trim());
       setScan(result);
-      setSelected(new Set(result.skills.map((s) => s.name)));
+      setSelected(new Set(result.skills.map(skillRowKey)));
     } catch (e) {
       setScan(null);
       setError(errMessage(e));
@@ -224,11 +230,11 @@ export default function SkillsMarketplace() {
     }
   }
 
-  function toggle(name: string) {
+  function toggle(key: string) {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
   }
@@ -237,6 +243,7 @@ export default function SkillsMarketplace() {
     if (!scan || selectedNames.length === 0) return;
     setBusy("audit");
     setError(null);
+    setInstallError(null);
     // Audit each selected skill independently so one failure does not discard the others' reports.
     const settled = await Promise.allSettled(
       selectedNames.map((name) => auditSkill(scan.scanId, name))
@@ -256,11 +263,14 @@ export default function SkillsMarketplace() {
     if (!scan || !allAudited) return;
     setBusy("install");
     setError(null);
+    setInstallError(null);
     try {
       const res = await installSkills(scan.scanId, selectedNames);
       setInstalled(res.installed);
     } catch (e) {
-      setError(errMessage(e));
+      // Kept beside the confirm button as well as in the page banner: the banner sits above a long
+      // scrolled report list, so on its own the failure reads as nothing having happened.
+      setInstallError(errMessage(e));
     } finally {
       setBusy(null);
     }
@@ -325,7 +335,7 @@ export default function SkillsMarketplace() {
                     </h2>
                     <ul className="flex flex-col divide-y divide-border rounded-sm border border-border">
                       {skills.map((s) => (
-                        <li key={s.name} className="flex items-center gap-3 px-3 py-2">
+                        <li key={skillRowKey(s)} className="flex items-center gap-3 px-3 py-2">
                           <span className="font-medium text-foreground">{s.name}</span>
                           {s.description ? (
                             <span className="min-w-0 flex-1 truncate text-muted-foreground">
@@ -408,6 +418,7 @@ export default function SkillsMarketplace() {
                     setScan(null);
                     setSelected(new Set());
                     setReports({});
+                    setInstallError(null);
                   }}
                 >
                   ← Back
@@ -415,13 +426,13 @@ export default function SkillsMarketplace() {
               </div>
               <ul className="flex max-h-96 flex-col divide-y divide-border overflow-y-auto rounded-sm border border-border">
                 {scan.skills.map((s) => (
-                  <li key={s.name}>
+                  <li key={skillRowKey(s)}>
                     <label className="flex cursor-pointer items-baseline gap-2 px-3 py-2 hover:bg-accent">
                       <input
                         type="checkbox"
                         className="accent-primary"
-                        checked={selected.has(s.name)}
-                        onChange={() => toggle(s.name)}
+                        checked={selected.has(skillRowKey(s))}
+                        onChange={() => toggle(skillRowKey(s))}
                         disabled={busy !== null}
                       />
                       <span className="font-medium text-foreground">{s.name}</span>
@@ -461,8 +472,8 @@ export default function SkillsMarketplace() {
           {/* Step 3 — advisory reports + explicit operator confirm. */}
           {allAudited ? (
             <div className="flex flex-col gap-3 border-t border-border pt-4">
-              {selectedNames.map((name) => (
-                <AuditReportCard key={name} name={name} report={reports[name]} />
+              {selectedSkills.map((s) => (
+                <AuditReportCard key={skillRowKey(s)} name={s.name} report={reports[s.name]} />
               ))}
               <p className="rounded-sm border border-border bg-muted px-3 py-2 text-xs text-muted-foreground">
                 SkillAudit is <span className="text-foreground">advisory, not a guarantee</span>. A
@@ -471,6 +482,14 @@ export default function SkillsMarketplace() {
                 with full tool access (no per-skill ACL in V1). Confirming installs these skills
                 into your soul repo.
               </p>
+              {installError ? (
+                <p
+                  role="alert"
+                  className="rounded-sm border border-destructive bg-destructive/10 px-3 py-2 text-destructive"
+                >
+                  install failed: {installError}
+                </p>
+              ) : null}
               <Button
                 size="sm"
                 className="self-start"

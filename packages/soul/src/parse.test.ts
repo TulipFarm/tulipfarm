@@ -187,4 +187,34 @@ describe("parseSoulFile still enforces content", () => {
     const result = parseSoulFile({ operation: "delete", path: "../escape.yaml" });
     expect(result.issue?.code).toBe("UNSUPPORTED_SOUL_PATH");
   });
+
+  // The server writes `_pendingAudit` itself so a newly created Skill lands committed but inactive.
+  // Re-checking stored frontmatter as if an author had written it rejected the very file the write
+  // gateway was being asked to commit, which made every Agent-authored Skill uncommittable.
+  it("admits a stored SKILL.md carrying the runtime's own pending-audit marker", () => {
+    const content = `---\n${stringify({ name: "triage", description: "d", _pendingAudit: true })}---\nbody`;
+    const result = parseSoulFile(upsert("skills/triage/SKILL.md", content));
+
+    expect(result.issue).toBeUndefined();
+    expect(result.parsed?.mode).toBe("legacy");
+  });
+
+  it("still refuses other reserved frontmatter keys in a stored SKILL.md", () => {
+    const content = `---\n${stringify({ name: "triage", description: "d", _grants: ["admin"] })}---\nbody`;
+    const result = parseSoulFile(upsert("skills/triage/SKILL.md", content));
+
+    expect(result.issue?.code).toBe("SCHEMA_VALIDATION_FAILED");
+  });
+
+  it("admits the companion files a real Skill package ships beside SKILL.md", () => {
+    for (const path of [
+      "skills/triage/references/playbook.md",
+      "skills/triage/scripts/convert.py",
+      "skills/triage/LICENSE.txt",
+      "skills/triage/requirements.txt",
+      "skills/triage/README.md",
+    ]) {
+      expect(parseSoulFile(upsert(path, "content\n")).issue, path).toBeUndefined();
+    }
+  });
 });

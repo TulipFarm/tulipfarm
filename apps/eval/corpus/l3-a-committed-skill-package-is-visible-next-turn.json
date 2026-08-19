@@ -1,0 +1,107 @@
+{
+  "id": "l3-a-committed-skill-package-is-visible-next-turn",
+  "tier": "l3",
+  "agent": "support",
+  "context": {
+    "governancePages": []
+  },
+  "input": [
+    {
+      "role": "user",
+      "content": "Add a skill called packing-notes that says how we pack bulbs, and keep the supplier licence beside it as LICENSE.txt. Call the soul_write tool now for each file, with kind \"Skill\" and slug \"packing-notes\". Do not ask me to confirm first."
+    }
+  ],
+  "tools": [
+    {
+      "name": "soul_write",
+      "description": "Commit a Soul artifact to the configuration repository. `kind` is a capitalised singular such as \"Skill\". `slug` is the artifact's directory name. `companion` names a file beside the definition, such as \"SKILL.md\", \"LICENSE.txt\" or \"references/notes.md\"; omit it to write the definition itself. `content` for a Skill's SKILL.md is YAML frontmatter with `name` and `description` keys, delimited by --- lines, followed by the skill's instructions in Markdown.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "companion": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          }
+        },
+        "required": ["kind", "slug", "content"]
+      }
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "c1",
+          "name": "soul_write",
+          "arguments": {
+            "kind": "Skill",
+            "slug": "packing-notes",
+            "companion": "SKILL.md",
+            "content": "---\nname: packing-notes\ndescription: How Tulip Supply Co packs bulbs for shipping.\n---\n\nPack bulbs in breathable paper, never in sealed plastic."
+          }
+        },
+        {
+          "callId": "c2",
+          "name": "soul_write",
+          "arguments": {
+            "kind": "Skill",
+            "slug": "packing-notes",
+            "companion": "LICENSE.txt",
+            "content": "Supplier packing guidance, reproduced with permission."
+          }
+        }
+      ]
+    },
+    {
+      "kind": "text",
+      "text": "I added the packing-notes skill and its licence."
+    }
+  ],
+  "journey": [
+    {
+      "input": [
+        {
+          "role": "user",
+          "content": "Which skills can you see now? Name every one."
+        }
+      ],
+      "script": [
+        {
+          "kind": "text",
+          "text": "Refund policy, ticket hygiene and packing-notes."
+        }
+      ]
+    }
+  ],
+  "expect": [
+    {
+      "kind": "soul_committed",
+      "path": "skills/packing-notes/SKILL.md"
+    },
+    {
+      "kind": "soul_committed",
+      "path": "skills/packing-notes/LICENSE.txt"
+    },
+    {
+      "kind": "prompt_contains",
+      "text": "packing-notes"
+    },
+    {
+      "kind": "run_status",
+      "status": "succeeded"
+    },
+    {
+      "kind": "output_contains",
+      "text": "packing-notes"
+    }
+  ]
+}

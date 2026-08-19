@@ -9,6 +9,7 @@ vi.mock("~/lib/skills", () => ({
   auditSkill: vi.fn(),
   installSkills: vi.fn(),
   marketplaceSkills: vi.fn(),
+  skillRowKey: (skill: { name: string; skillPath?: string }) => skill.skillPath ?? skill.name,
 }));
 
 import { auditSkill, installSkills, type MarketplaceCatalog, scanSkills } from "~/lib/skills";
@@ -196,4 +197,80 @@ test("a scan failure surfaces an error banner", async () => {
   await user.click(screen.getByRole("button", { name: /^Scan$/ }));
 
   expect(await screen.findByText(/scan failed: no SKILL\.md files found/i)).toBeInTheDocument();
+});
+
+// A source may define two different skills under the same directory name. Keying rows by name
+// merged them into one selection, so the operator saw a checkbox they could not clear and the
+// install request carried a different set of names from the one on screen.
+test("two scanned skills sharing a name stay separately selectable", async () => {
+  const user = userEvent.setup();
+  vi.mocked(scanSkills).mockResolvedValue({
+    scanId: "s2",
+    skills: [
+      {
+        name: "review-contract",
+        skillPath: "legal/review-contract/SKILL.md",
+        description: "Legal review.",
+        installed: false,
+        updateAvailable: false,
+      },
+      {
+        name: "review-contract",
+        skillPath: "sales/review-contract/SKILL.md",
+        description: "Sales review.",
+        installed: false,
+        updateAvailable: false,
+      },
+    ],
+  });
+
+  renderInstall();
+  await user.type(await screen.findByLabelText(/git url/i), "owner/repo");
+  await user.click(screen.getByRole("button", { name: /^Scan$/ }));
+
+  const boxes = await screen.findAllByRole("checkbox");
+  expect(boxes).toHaveLength(2);
+  expect(screen.getByRole("button", { name: /Run SkillAudit \(2\)/ })).toBeInTheDocument();
+
+  await user.click(boxes[0]);
+
+  expect(boxes[0]).not.toBeChecked();
+  expect(boxes[1]).toBeChecked();
+  expect(screen.getByRole("button", { name: /Run SkillAudit \(1\)/ })).toBeInTheDocument();
+});
+
+test("an install failure is reported beside the confirm button, not only in the page banner", async () => {
+  const user = userEvent.setup();
+  vi.mocked(scanSkills).mockResolvedValue({
+    scanId: "s3",
+    skills: [
+      {
+        name: "demo-skill",
+        skillPath: "skills/demo-skill/SKILL.md",
+        description: "A demo.",
+        installed: false,
+        updateAvailable: false,
+      },
+    ],
+  });
+  vi.mocked(auditSkill).mockResolvedValue({
+    riskRating: "low",
+    summary: "Benign.",
+    toolsReach: [],
+    findings: [],
+    deterministicScan: { verdict: "safe", trustLevel: "trusted", findings: [] },
+  });
+  vi.mocked(installSkills).mockRejectedValue(new Error("invalid soul write target"));
+
+  renderInstall();
+  await user.type(await screen.findByLabelText(/git url/i), "owner/repo");
+  await user.click(screen.getByRole("button", { name: /^Scan$/ }));
+  await user.click(await screen.findByRole("button", { name: /Run SkillAudit/ }));
+  await user.click(await screen.findByRole("button", { name: /confirm install/i }));
+
+  const alert = await screen.findByRole("alert");
+  expect(alert).toHaveTextContent(/install failed: invalid soul write target/i);
+  // The confirm button is still there to retry, and nothing claims a successful install.
+  expect(screen.getByRole("button", { name: /confirm install/i })).toBeInTheDocument();
+  expect(screen.queryByText(/^Installed /)).not.toBeInTheDocument();
 });

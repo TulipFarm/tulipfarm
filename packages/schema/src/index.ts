@@ -30,6 +30,7 @@ export {
   legacyDefinitionPaths,
   TEMPORAL_CLASSES,
   temporalClassOf,
+  unstorableArtifactPaths,
   withinArtifactTree,
 } from "./artifacts";
 export type { ValidationBoundary } from "./boundaries";
@@ -182,6 +183,7 @@ export type {
   SkillValidationResult,
 } from "./skill-frontmatter";
 export {
+  SKILL_RUNTIME_FRONTMATTER_KEYS,
   SkillFrontmatterSchema,
   serializeSkill,
   validateSkill,
