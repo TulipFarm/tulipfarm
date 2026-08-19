@@ -56,11 +56,17 @@ export type { ParsedFrontmatter } from "./frontmatter";
 export { parseFrontmatter } from "./frontmatter";
 export type {
   ContentFilterConfig,
+  GuardrailGuardName,
+  GuardrailStage,
   GuardrailsConfig,
   PromptInjectionConfig,
   ToolBlocklistConfig,
 } from "./guardrails";
-export { validateGuardrailsConfig } from "./guardrails";
+export {
+  GUARDRAIL_STAGE_BY_GUARD,
+  guardrailStageFor,
+  validateGuardrailsConfig,
+} from "./guardrails";
 export type { LegacyIntegrationManifest } from "./integration-manifest";
 export {
   LegacyIntegrationManifestSchema,

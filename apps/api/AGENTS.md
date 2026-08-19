@@ -81,6 +81,10 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
   site supplies the matching identity, never to make the picker look complete.
 - Guardrail enforcement lives in `@tulipfarm/agent-runtime` and the Worker. API owns config loading
   and must ship `guardrailPolicy`; missing or invalid config falls back to `DEFAULT_GUARDRAILS`.
+  `guardrail_forge` (`platform/guardrail-tool.ts`) is the only authoring surface: it merges one
+  guard into `guardrails.yaml` through `SoulWriter`, then re-inits `GuardrailsService`. A Turn's
+  Context reads that service, never the published bundle, so skipping the re-init would commit a
+  Guardrail that guards nothing until the next restart.
 - A Run-minting request must go through `DurableInvocationGateway.start()` with a real request
   Artifact. Never pass a `payloadRef` that names nothing.
 - The Curator's model call belongs to the Worker, never this process. `POST /internal/curator/*/effects`

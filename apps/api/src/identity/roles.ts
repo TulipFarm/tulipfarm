@@ -168,6 +168,7 @@ export const MEMBER_ALLOWED_SURFACES: readonly {
   { type: "secret", actions: ["secret.read"], enforcedIn: "secrets/routes.ts" },
   { type: "soul", actions: ["*"], enforcedIn: "soul/routes.ts" },
   { type: "soul.agent", actions: ["*"], enforcedIn: "soul/agents/routes.ts; soul/agents/tools.ts" },
+  { type: "soul.guardrails", actions: ["*"], enforcedIn: "platform/guardrail-tool.ts" },
   { type: "soul.repo", actions: ["*"], enforcedIn: "platform/tools.ts" },
   {
     type: "soul.resource_type",

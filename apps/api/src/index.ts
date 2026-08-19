@@ -721,6 +721,11 @@ async function boot() {
           // Ticks immediately so a newly-authored/edited schedule is reconciled without waiting up
           await scheduleDispatcher.tick();
         },
+        // The Soul write gateway reloads the catalog; the guard pipeline is rebuilt separately
+        // because every Turn's Context reads this service, not the published bundle.
+        onGuardrailsChanged: async () => {
+          guardrailsService.init(soulLoader.guardrailsConfig, app.log);
+        },
       },
     });
 

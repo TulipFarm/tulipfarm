@@ -20,10 +20,11 @@ import type { RequestContext } from "@tulipfarm/tool-host";
 import { type ApiToolDefinition, defineApiTool } from "@tulipfarm/tool-host";
 import { stringify as stringifyYaml } from "yaml";
 import { SYSTEM_SOUL_COMMIT_ACTOR } from "../runtime/soul-writer";
-import { soulCommitError } from "../tools/soul-faults";
+import { mapSoulWriteError, soulCommitError } from "../tools/soul-faults";
 import { delegateToAgentTool } from "./delegate-tool";
+import { guardrailForgeTool } from "./guardrail-tool";
 import { firstError, SOUL_ROUTINE_TARGET, SOUL_SKILL_TARGET, soulTarget } from "./tool-args";
-import { err, ok, type ToolCallResult } from "./tool-result";
+import { err, ok } from "./tool-result";
 
 export interface PlatformToolContext {
   soulLoader?: {
@@ -40,25 +41,17 @@ export interface PlatformToolContext {
   /** The one guarded path that starts a delegated child Run; see `./delegation.ts`. */
   delegateToAgent?: (input: DelegateToAgentInput) => Promise<DelegationOutcome>;
   onRoutinesChanged?: () => Promise<void>;
+  /**
+   * Re-reads `guardrails.yaml` into the live {@link GuardrailsService}. Every Turn's Context
+   * carries the in-process policy, not the published bundle, so without this a committed
+   * Guardrail is not enforced until the next Soul sync or restart.
+   */
+  onGuardrailsChanged?: () => Promise<void>;
   bundledSkills?: ReadonlyMap<string, BundledSkill>;
   disabledBundledSkills?: ReadonlySet<string>;
   platformAgentNames?: ReadonlySet<string>;
   requestContext?: RequestContext;
   events?: EventEmitter;
-}
-
-/** Map a Soul write-gateway rejection onto `routine_forge`'s error vocabulary. */
-function mapRoutineWriteError(e: SoulWriteError): ToolCallResult {
-  switch (e.code) {
-    case "VALIDATION_FAILED":
-    case "INVALID_TARGET":
-    case "PRECONDITION_FAILED":
-      return err("validation_error", e.message);
-    case "CONFLICT":
-      return err("unavailable", e.message);
-    default:
-      return soulCommitError(e, e.message);
-  }
 }
 
 const SOUL_REPO_TARGET = "soul.repo";
@@ -338,7 +331,7 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
         ],
       });
     } catch (e) {
-      if (e instanceof SoulWriteError) return mapRoutineWriteError(e);
+      if (e instanceof SoulWriteError) return mapSoulWriteError(e);
       return soulCommitError(e, e instanceof Error ? e.message : String(e));
     }
 
@@ -496,6 +489,7 @@ export const PLATFORM_TOOLS: ApiToolDefinition<PlatformToolContext>[] = [
   triggerRoutineTool,
   routineForgeTool,
   routinePickerTool,
+  guardrailForgeTool,
   soulRepoPushTool,
   callSkillTool,
   // Context-free Tools the durable runtime also hosts; `PlatformRuntimeContext` is a subset of
