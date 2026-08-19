@@ -26,10 +26,15 @@ export {
 export {
   ALLOWED_MEDIA_TYPES,
   type AllowedMediaType,
+  DEFAULT_FILE_LIST_LIMIT,
   isAllowedMediaType,
   isInlineRenderable,
+  isTextualMediaType,
   MAX_FILE_BYTES,
+  MAX_FILE_LIST_LIMIT,
+  MAX_FILE_READ_CHARS,
   MAX_FILES_PER_MESSAGE,
+  TEXTUAL_MEDIA_TYPES,
 } from "./limits";
 export {
   decodeFileCursor,
@@ -57,6 +62,7 @@ export {
   type UploadRequest,
 } from "./service";
 export { resolveMediaType, SNIFF_BYTES, sniffMediaType } from "./sniff";
+export { FILE_TOOLS, type FileToolContext, fileListTool, fileReadTool } from "./tools";
 export type {
   AttachedMessage,
   AttachmentOmitted,

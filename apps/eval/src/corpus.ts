@@ -254,23 +254,35 @@ function validate(raw: unknown, file: string): EvalCase {
  * to omit — so it would go on passing after the confinement it claims to test was removed.
  */
 function validateAttachments(c: Record<string, unknown>, file: string): void {
-  const declared = new Set<string>();
-  if (c.attachments !== undefined) {
-    require(Array.isArray(c.attachments), `${file}: "attachments" must be an array`);
-    for (const raw of c.attachments as unknown[]) {
+  const validateFiles = (key: string): Set<string> => {
+    const ids = new Set<string>();
+    if (c[key] === undefined) return ids;
+    require(Array.isArray(c[key]), `${file}: "${key}" must be an array`);
+    for (const raw of c[key] as unknown[]) {
       require(typeof raw === "object" &&
-        raw !== null, `${file}: each attachment must be an object`);
+        raw !== null, `${file}: each ${key} entry must be an object`);
       const a = raw as Record<string, unknown>;
       for (const field of ["fileId", "mediaType", "name"]) {
         require(typeof a[field] === "string" &&
-          (a[field] as string).length > 0, `${file}: each attachment needs a non-empty "${field}"`);
+          (a[field] as string).length >
+            0, `${file}: each ${key} entry needs a non-empty "${field}"`);
       }
       require(a.content === undefined ||
         (typeof a.content === "string" &&
           a.content.length >
-            0), `${file}: an attachment's "content" must be a non-empty string when declared`);
-      declared.add(a.fileId as string);
+            0), `${file}: a ${key} entry's "content" must be a non-empty string when declared`);
+      ids.add(a.fileId as string);
     }
+    return ids;
+  };
+
+  const declared = validateFiles("attachments");
+  const readable = validateFiles("readable");
+  for (const id of readable) {
+    require(!declared.has(
+      id
+    ), `${file}: "${id}" is both attached and readable. A File this Turn already sent proves ` +
+      `nothing about re-reading, because its bytes were in the prompt from the first step.`);
   }
 
   const referenced = new Set<string>();
@@ -306,10 +318,11 @@ function validateAttachments(c: Record<string, unknown>, file: string): void {
 
   for (const a of (c.expect ?? []) as { kind: string; fileId?: string }[]) {
     if (a.kind === "prompt_attaches") {
-      require(declared.has(
-        a.fileId ?? ""
-      ), `${file}: "prompt_attaches" names "${a.fileId}", which the Case does not declare in ` +
-        `"attachments" — no harness could make it reach the prompt`);
+      require(declared.has(a.fileId ?? "") ||
+        readable.has(
+          a.fileId ?? ""
+        ), `${file}: "prompt_attaches" names "${a.fileId}", which the Case declares in neither ` +
+        `"attachments" nor "readable" — no harness could make it reach the prompt`);
     }
     if (a.kind === "prompt_omits_attachment") {
       require(referenced.has(
@@ -378,6 +391,10 @@ function givenToModel(c: EvalCase, fromSoul: Partial<AssembleContext>): string {
   walk(c.context);
   walk(c.input);
   walk(c.toolResults ?? []);
+  // A File's bytes are handed to the model as surely as a Tool result is, so a fact stated only
+  // inside one is grounded. Only `content`: an id or a filename is metadata, not something the
+  // model could have read the answer out of.
+  for (const each of [...(c.attachments ?? []), ...(c.readable ?? [])]) walk(each.content);
   // A journey's later Turns are handed to the model too, so a fact stated only there is grounded.
   for (const turn of c.journey ?? []) {
     walk(turn.input);

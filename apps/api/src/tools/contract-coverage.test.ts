@@ -49,6 +49,7 @@ const ALWAYS_ON_TOOL_NAMES = [
 const EXPECTED_FAMILY_TOOL_NAMES = [
   { family: "memory", names: ["update_memory"] },
   { family: "kv", names: ["kv_delete", "kv_get", "kv_list", "kv_set"] },
+  { family: "files", names: ["file_list", "file_read"] },
   {
     family: "knowledge",
     names: [
@@ -202,6 +203,7 @@ function stubbedCoreServices(): RegistryServices {
   return {
     memoryDocuments: stub,
     kv: stub,
+    files: stub,
     knowledge: stub,
     resources: stub,
     resourceTypes: stub,
@@ -500,6 +502,23 @@ describe("tool contract coverage", () => {
       );
     });
     expect(reachesDeletion.map((tool) => tool.name)).toEqual([]);
+  });
+
+  // A Turn sends a File only on the Turn it was attached to, so an Agent needs a way back to it —
+  // and that way must not be a way to anything else. Read and list are the whole surface: no
+  // upload, no share, no delete, and nothing that mutates. The two ratchets above prove the
+  // negative across every Tool; this proves the positive about the family that exists to touch
+  // Files, so adding a third `file_*` verb has to be an argued decision rather than a slip.
+  it("gives Agents Files to read and nothing else to do with them", () => {
+    const fileTools = tools.filter((tool) => tool.name.startsWith("file_"));
+    expect(fileTools.map((tool) => tool.name).sort()).toEqual(["file_list", "file_read"]);
+    expect(fileTools.filter((tool) => tool.mutating !== false).map((tool) => tool.name)).toEqual(
+      []
+    );
+    expect(fileTools.map((tool) => tool.definition?.authorization.action).sort()).toEqual([
+      "file.list",
+      "file.read",
+    ]);
   });
 
   it("keeps every declared resource inside the two-level grammar", () => {

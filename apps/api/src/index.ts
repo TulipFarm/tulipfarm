@@ -707,6 +707,7 @@ async function boot() {
     const toolRegistry = buildToolRegistry({
       memoryDocuments,
       kv: kvService,
+      files: fileService,
       knowledge: knowledgeService,
       knowledgePageGate,
       knowledgeDenialSink,

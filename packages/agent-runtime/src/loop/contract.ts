@@ -158,9 +158,23 @@ export type AgentLoopOutcome =
       readonly repairs: number;
     };
 
+/**
+ * Fetches the bytes of one File an Agent asked to see again, re-authorizing as it goes.
+ *
+ * A separate port rather than a bigger `AgentLoopInput` because the set is not known when the Turn
+ * starts: it grows mid-loop, one `file_read` at a time. Answering `undefined` is how the far side
+ * refuses — a File deleted or unshared since it was read comes back as nothing and simply stops
+ * being sent, which is why a revocation lands on the very next step rather than at the next Turn.
+ */
+export interface LoopAttachmentPort {
+  read(runId: string, fileId: string): Promise<Uint8Array | undefined>;
+}
+
 export interface AgentLoopDependencies {
   readonly model: ModelPort;
   readonly tools: ToolDispatchPort;
+  /** Bytes for Files re-read mid-Turn; absent leaves `file_read` able to return text only. */
+  readonly attachments?: LoopAttachmentPort;
   readonly checkpoints: LoopCheckpointStore;
   readonly events: AgentLoopEventSink;
   readonly budget: AgentLoopBudgetPort;

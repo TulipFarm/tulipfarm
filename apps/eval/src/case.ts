@@ -184,6 +184,15 @@ export interface EvalCase {
    * which is exactly how a File stays confined to the Turn it was attached to.
    */
   readonly attachments?: readonly CaseAttachment[];
+  /**
+   * Files the library holds that this Turn did *not* send — what `file_read` can go and fetch.
+   *
+   * The counterpart to `attachments`, and the reason confinement is a saving rather than data
+   * loss: a document from three Turns ago is here, reachable by a Tool call, without riding every
+   * prompt in between. A Case that asserts re-reading must put its File here and not in
+   * `attachments`, or the bytes were present from the first step and the Case proves nothing.
+   */
+  readonly readable?: readonly CaseAttachment[];
   readonly tools?: readonly ExposedTool[];
   readonly toolResults?: readonly ScriptedToolResult[];
   /**

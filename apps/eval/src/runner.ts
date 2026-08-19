@@ -381,6 +381,13 @@ async function runTrial(
     },
   };
 
+  // The File library this Case's Agent can reach with `file_read`, standing in for the store the
+  // control plane would serve. Absent leaves the loop unable to re-attach anything, which is what
+  // every Case that asserts confinement depends on.
+  const library = new Map(
+    (evalCase.readable ?? []).map((file) => [file.fileId, synthesizeAttachment(file).data])
+  );
+
   const loop = new AgentLoop({
     model,
     // Guards wrap the dispatcher exactly as `TurnDriver` wraps it, so a blocked Tool reaches the
@@ -390,6 +397,9 @@ async function runTrial(
     tools: guards.guard(
       capabilityBoundedDispatch(soul, evalCase, autonomyBoundedDispatch(soul, evalCase, tools.port))
     ),
+    ...(library.size === 0
+      ? {}
+      : { attachments: { read: async (_runId: string, fileId: string) => library.get(fileId) } }),
     checkpoints: new InMemoryLoopCheckpointStore(),
     events: { append: async () => {} },
     budget: { consume: async () => ({ outcome: "allowed" }) },

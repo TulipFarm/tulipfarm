@@ -1,4 +1,6 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import type { FileToolContext } from "@tulipfarm/files";
+import { FILE_TOOLS } from "@tulipfarm/files";
 import type {
   KnowledgeDenialSink,
   KnowledgeService,
@@ -30,6 +32,8 @@ export function buildToolRegistry(services: {
   /** The user's Memory Document. Absent leaves `update_memory` unregistered. */
   memoryDocuments?: MemoryDocumentRepo;
   kv?: KvService;
+  /** The File library. Absent leaves `file_list`/`file_read` unregistered. */
+  files?: FileToolContext["service"];
   knowledge?: KnowledgeService;
   /** Authorizes the exact-lookup Knowledge Tools; without it they refuse rather than serve. */
   knowledgePageGate?: PageReadAuthorizer;
@@ -74,6 +78,17 @@ export function buildToolRegistry(services: {
   if (services.kv) {
     const svc = services.kv;
     registerFamily(KV_TOOLS, ({ userId, agentId }) => ({ userId, agentId, service: svc }));
+  }
+
+  if (services.files) {
+    const svc = services.files;
+    // `userId` and nothing else: an Agent's reach into the library is exactly its caller's, so the
+    // Agent's own identity must not widen it. A File the person cannot open stays closed.
+    registerFamily(FILE_TOOLS, ({ userId }) => ({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      principalId: userId,
+      service: svc,
+    }));
   }
 
   if (services.knowledge) {

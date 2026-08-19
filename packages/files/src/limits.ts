@@ -59,3 +59,34 @@ export function isAllowedMediaType(mediaType: string): mediaType is AllowedMedia
 export function isInlineRenderable(mediaType: string): boolean {
   return mediaType.startsWith("image/") && isAllowedMediaType(mediaType);
 }
+
+/**
+ * Which allowed types an Agent can be handed as text rather than as bytes.
+ *
+ * A Tool result is JSON with no binary channel, so this is the line between the two answers
+ * `file_read` can give: a textual File comes back inline as characters, and everything else — an
+ * image, a PDF — is re-attached to the Turn so the model reads the object itself. Deriving the
+ * split from the type rather than from the caller is what stops an image being described as
+ * mojibake.
+ */
+export const TEXTUAL_MEDIA_TYPES = ["text/plain", "text/markdown", "text/csv"] as const;
+
+const TEXTUAL = new Set<string>(TEXTUAL_MEDIA_TYPES);
+
+export function isTextualMediaType(mediaType: string): boolean {
+  return TEXTUAL.has(mediaType);
+}
+
+/**
+ * The most characters `file_read` returns from a textual File.
+ *
+ * Matches the largest block cap context assembly already applies (pinned knowledge, eager Skills),
+ * so a re-read document cannot claim more of the window than any other single source. An
+ * unbounded read is the failure this exists to prevent: a 25 MiB text File would exhaust both the
+ * window and the Run's token budget in one call.
+ */
+export const MAX_FILE_READ_CHARS = 32_000;
+
+/** How many Files `file_list` returns at once, and the most a caller may ask for. */
+export const DEFAULT_FILE_LIST_LIMIT = 20;
+export const MAX_FILE_LIST_LIMIT = 50;

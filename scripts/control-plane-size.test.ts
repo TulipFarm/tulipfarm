@@ -257,6 +257,13 @@ import { describe, expect, it } from "vitest";
  * buy nothing. Who may delete, what deletion does to shares, and whether the bytes may go are all
  * decided in `FileService`.
  *
+ * Raised again, 50_280 -> 50_292, for letting an Agent re-read a File. Twelve lines, and all of
+ * them registration: `buildToolRegistry` binds the `file_*` family to the calling person's
+ * `userId` rather than to the Agent, which is the decision that keeps an Agent's reach into the
+ * library exactly its caller's. The Tools themselves, their caps and what a read returns are in
+ * `packages/files/src/tools.ts`; the loop that puts a re-read File back in front of the model is
+ * in `packages/agent-runtime`. Neither touches Fastify and neither is here.
+ *
  * Line count is a crude proxy for ownership, deliberately. A precise measure would need to model
  * what each domain ought to own, which is the argument the refactor itself has to settle; a crude
  * measure that cannot be gamed without noticing is worth more here than a subtle one.

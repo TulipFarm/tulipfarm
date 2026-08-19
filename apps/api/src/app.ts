@@ -464,6 +464,7 @@ export async function buildApp(opts: AppOptions = {}) {
         buildToolRegistry({
           ...(opts.memoryDocuments === undefined ? {} : { memoryDocuments: opts.memoryDocuments }),
           kv: opts.kvService,
+          ...(opts.fileService === undefined ? {} : { files: opts.fileService }),
           knowledge: opts.knowledgeService,
         });
       registerConversationRoutes(

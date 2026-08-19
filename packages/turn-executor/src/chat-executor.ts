@@ -183,6 +183,9 @@ async function executeTurn(
       return current !== null && CANCELLING_STATUSES.has(current.status);
     },
     log: options.log,
+    // The same port the Context's own attachments come from: a File re-read mid-Turn is fetched
+    // and re-authorized exactly as one the person attached, through one gate rather than two.
+    ...(options.attachments === undefined ? {} : { attachments: options.attachments }),
     ...(options.now === undefined ? {} : { now: options.now }),
   });
 

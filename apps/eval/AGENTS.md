@@ -61,6 +61,11 @@ before changing how a Case is scored, run or compared.** These are the ones that
 - **Nothing becomes the Baseline on its own.** Promotion is `--promote`, from a clean tree, from a
   complete and unregressed Sweep only.
 - **A content Expectation must be grounded** in what the model was given, or declare `ungrounded`.
+  A File's declared `content` counts as given; its id and filename do not.
+- **`attachments` is what this Turn sent; `readable` is what `file_read` can go and get.** A File
+  in both would be in the prompt from the first step, so a re-read Case asserting `prompt_attaches`
+  would pass with the whole mechanism removed. Declaring it in neither is refused for the same
+  reason.
 - **Every Case carries a `script`,** so the whole Corpus runs free in ordinary CI.
 - **Two models are a control, not a contest,** and they never run at once.
 - **A Judge failure errors the Trial; it never scores low.**

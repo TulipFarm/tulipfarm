@@ -20,6 +20,17 @@ export interface AgentLoopResumeState {
   };
   /** Last loaded Skill, so narrowing does not silently re-widen the catalog on resume. */
   readonly activeSkillName?: string;
+  /**
+   * Files an Agent re-read into this Turn, so a resumed attempt still has what it went and got.
+   *
+   * Named, never carried: the bytes are fetched again — and authorized again — on the resumed
+   * attempt, so a park that outlives a revocation does not smuggle a stale copy past it.
+   */
+  readonly rereadFiles?: readonly {
+    readonly fileId: string;
+    readonly mediaType: string;
+    readonly name: string;
+  }[];
   /** Loop event sequence already emitted, so resumed events do not collide on idempotency keys. */
   readonly sequence: number;
   /** Text delta index already released, so a reader's ordering stays monotonic across a park. */

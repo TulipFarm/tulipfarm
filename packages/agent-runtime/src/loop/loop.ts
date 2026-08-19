@@ -5,6 +5,7 @@ import type {
   ModelInvocationResult,
   ModelMessage,
   ModelUsage,
+  ResolvedAttachment,
 } from "../ports";
 import { ModelInvocationError } from "../ports";
 import type { AgentLoopCheckpoint } from "./checkpoint";
@@ -19,6 +20,13 @@ import type {
   ToolDispatchResult,
 } from "./contract";
 import { extractSkillName, narrowToolsToSkill } from "./narrowing";
+import {
+  extractRereadFile,
+  FILE_READ_TOOL,
+  mergeAttachments,
+  type RereadFile,
+  rememberReread,
+} from "./reread";
 import type { AgentLoopResumeState } from "./resume";
 import type { NormalizedToolCall } from "./transcript";
 import {
@@ -75,6 +83,10 @@ export class AgentLoop {
     // The approved-but-never-executed call this Turn parked on, replayed before the model runs
     // again so the user's one approval performs the work once, with no re-planning round trip.
     let replay = recovered?.pendingCall;
+    // Files the Agent went back for mid-Turn. Held as names, not bytes: what the model is sent is
+    // re-fetched every iteration, so authority is re-checked at assembly time rather than trusted
+    // from the moment the Tool ran.
+    let reread: readonly RereadFile[] = recovered?.rereadFiles ?? [];
 
     const toolsForIteration = (): readonly ExposedTool[] =>
       narrowToolsToSkill(input.tools, activeSkillName, input.skillToolScopes);
@@ -108,6 +120,7 @@ export class AgentLoop {
           messages: messages.slice(input.messages.length),
           ...(pendingCall === undefined ? {} : { pendingCall }),
           ...(activeSkillName === undefined ? {} : { activeSkillName }),
+          ...(reread.length === 0 ? {} : { rereadFiles: reread }),
           sequence,
           textIndex,
         },
@@ -232,6 +245,10 @@ export class AgentLoop {
           if (call.name === "load_skill") {
             const loaded = extractSkillName(call.arguments);
             if (loaded !== undefined) activeSkillName = loaded;
+          }
+          if (call.name === FILE_READ_TOOL) {
+            const file = extractRereadFile(dispatched.output);
+            if (file !== undefined) reread = rememberReread(reread, file);
           }
           return { kind: "continue" };
         }
@@ -411,6 +428,29 @@ export class AgentLoop {
       return undefined;
     };
 
+    /**
+     * The bytes this iteration sends: what the Turn attached, plus what the Agent re-read.
+     *
+     * Resolved per iteration rather than once, because the port's refusal *is* the authorization
+     * check. A share revoked between the `file_read` and the next step comes back as nothing and
+     * the File stops being sent, which no cached copy could honour.
+     */
+    const attachmentsForIteration = async (): Promise<readonly ResolvedAttachment[]> => {
+      const attached = input.attachments ?? [];
+      const port = this.deps.attachments;
+      if (port === undefined || reread.length === 0) return attached;
+      const fetched = await Promise.all(
+        reread.map(async (file) => {
+          const data = await port.read(input.runId, file.fileId);
+          return data === undefined ? undefined : { ...file, data };
+        })
+      );
+      return mergeAttachments(
+        attached,
+        fetched.filter((file) => file !== undefined)
+      );
+    };
+
     for (;;) {
       // Order is load-bearing for the whole iteration: cancellation is checked before any spend,
       // the iteration ceiling before the budget is charged for an iteration that cannot run, and
@@ -447,14 +487,13 @@ export class AgentLoop {
       counters.iterations += 1;
       await emit("iteration_started");
 
+      const attachments = await attachmentsForIteration();
       const request: ModelInvocationRequest = {
         requestId: `${input.runId}:${input.stateId}:${counters.iterations}`,
         modelProfileId: input.modelProfileId,
         messages,
         tools: toolsForIteration(),
-        ...(input.attachments === undefined || input.attachments.length === 0
-          ? {}
-          : { attachments: input.attachments }),
+        ...(attachments.length === 0 ? {} : { attachments }),
         ...(input.modelPolicy === undefined ? {} : { policy: input.modelPolicy }),
         ...(input.principal === undefined ? {} : { principal: input.principal }),
         ...(input.agentId === undefined ? {} : { agentId: input.agentId }),
