@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { Worker } from "node:worker_threads";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 // isolated-vm 7.x ships prebuilds for Node 24 (abi137) and Node 26 (abi147) but not Node 25 (abi141).
 // Tests that require the isolate to actually execute and return a successful result must be
@@ -169,6 +169,24 @@ describe("HookExecutor", () => {
       // Structural verification: executor spawns a Worker
       // biome-ignore lint/complexity/useLiteralKeys: accessing private property in test
       expect(executor["worker"]).toBeInstanceOf(Worker);
+    });
+  });
+
+  describe("close()", () => {
+    it("asks the worker to shut down gracefully instead of hard-terminating it", async () => {
+      const postSpy = vi.spyOn(Worker.prototype, "postMessage");
+      const terminateSpy = vi.spyOn(Worker.prototype, "terminate");
+      const closingExecutor = new HookExecutor({ workerPath: WORKER_PATH });
+
+      await closingExecutor.close();
+
+      expect(
+        postSpy.mock.calls.some(([message]) => (message as { type?: string })?.type === "shutdown")
+      ).toBe(true);
+      expect(terminateSpy).not.toHaveBeenCalled();
+
+      postSpy.mockRestore();
+      terminateSpy.mockRestore();
     });
   });
 
