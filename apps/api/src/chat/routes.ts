@@ -144,7 +144,16 @@ export function registerChatRoutes(
         return reply.code(entry.status).send({ error: entry.error });
       }
 
-      const submission = await submitter.submit({
+      const resolvedSubmitter = durableTurnSubmitter({
+        store: options.conversationStore,
+        invocations: options.invocations,
+        principal: { kind: principal.kind, id: principal.id, businessId: principal.businessId },
+        payload: { ...body, agentId: entry.agentId },
+        agentId: entry.agentId,
+        idempotencyKey: `${principal.kind}:${principal.id}:${clientKey}`,
+        log: req.log,
+      });
+      const submission = await resolvedSubmitter.submit({
         conversationId: entry.conversation._id,
         content: body.message.content,
       });

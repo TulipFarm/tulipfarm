@@ -2,10 +2,8 @@ import type { EventEmitter } from "node:events";
 import { readFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { DelegateToAgentInput, DelegationOutcome } from "@tulipfarm/agent-runtime";
-import { DelegationError } from "@tulipfarm/agent-runtime";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { PLATFORM_RUNTIME_TOOLS } from "@tulipfarm/platform-tools";
-import { ChildRunError } from "@tulipfarm/run-kernel";
 import { ajv, TulipFarmValidationError, validateRoutineDefinition } from "@tulipfarm/schema";
 import type { BundledSkill } from "@tulipfarm/soul";
 import {
@@ -542,7 +540,6 @@ export const callSkillTool = defineApiTool<PlatformToolContext>({
 export const PLATFORM_TOOLS: ApiToolDefinition<PlatformToolContext>[] = [
   loadSkillTool,
   loadSkillReferenceTool,
-  transferToAgentTool,
   delegateToAgentTool,
   triggerRoutineTool,
   routineForgeTool,

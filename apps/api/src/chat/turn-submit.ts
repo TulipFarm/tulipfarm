@@ -30,7 +30,7 @@ export interface DurableTurnSubmitterDeps {
   readonly store: ConversationStore;
   readonly invocations: DurableInvocationGateway;
   readonly principal: ChatTurnPrincipal;
-  /** The request body verbatim; published as the Run's immutable request Artifact. */
+  /** The request body normalized with the resolved Agent; published as the immutable request Artifact. */
   readonly payload: unknown;
   readonly agentId: string;
   readonly idempotencyKey: string;

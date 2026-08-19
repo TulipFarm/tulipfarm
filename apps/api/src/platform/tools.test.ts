@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assembleSystemPrompt, DelegationError } from "@tulipfarm/agent-runtime";
+import { DelegationError } from "@tulipfarm/agent-runtime";
 import type { BundledSkill, SoulAgent, SoulRoutine, SoulSkill, SoulWriter } from "@tulipfarm/soul";
 import { describe, expect, it, vi } from "vitest";
 import { delegateToAgentTool } from "./delegate-tool";
@@ -633,7 +633,6 @@ describe("PLATFORM_TOOLS registry", () => {
     expect(names).toEqual([
       "load_skill",
       "load_skill_reference",
-      "transfer_to_agent",
       "delegate_to_agent",
       "trigger_routine",
       "routine_forge",
