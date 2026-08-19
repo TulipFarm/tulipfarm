@@ -57,7 +57,7 @@
     "semver": "^7.7.4",
     "turbo": "^2.10.10",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.10"
   },
   "resolutions": {
     "dompurify": "^3.4.12",

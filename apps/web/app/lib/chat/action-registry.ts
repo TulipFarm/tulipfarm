@@ -24,8 +24,11 @@ export function invokeClientAction(name: string, payload: unknown): boolean {
 }
 
 function cssEscape(value: string): string {
-  const esc = (globalThis as { CSS?: { escape?: (v: string) => string } }).CSS?.escape;
-  return esc ? esc(value) : value.replace(/["\\]/g, "\\$&");
+  // Must be invoked on the CSS namespace object, not through a detached reference: jsdom
+  // brand-checks `escape` and throws when `this` is lost. Browsers permit detaching, so the
+  // bound call is the behaviour production already had.
+  const css = (globalThis as { CSS?: { escape?: (v: string) => string } }).CSS;
+  return typeof css?.escape === "function" ? css.escape(value) : value.replace(/["\\]/g, "\\$&");
 }
 
 function setFieldValue(
