@@ -4,8 +4,12 @@ import type { ModelReachability } from "./health";
 
 /** Verifies the deployment's model credential is still accepted, without failing on an outage. */
 
-/** Long enough for a cold provider connection, short enough to stay inside the probe budget. */
-const REACHABILITY_TIMEOUT_MS = 1_500;
+/**
+ * Long enough for a cold subscription-CLI provider to spawn, hand-shake and answer. This call no
+ * longer runs inside the probe's response budget, so cutting it short only loses the verdict —
+ * an abort is indistinguishable from a healthy provider here, and a revoked key would read `ok`.
+ */
+const REACHABILITY_TIMEOUT_MS = 30_000;
 
 /** Provider verdicts that mean *this deployment's credential* is the problem, not the provider. */
 const CREDENTIAL_REASONS = new Set(["model_authentication_failed", "model_billing_inactive"]);
