@@ -98,7 +98,8 @@ docker volume rm "${COMPOSE_PROJECT_NAME}_tulipfarm-data" >/dev/null
 if compose up -d --wait --wait-timeout 90 --pull missing; then
   fail "app booted with a regenerated ENCRYPTION_KEY over existing wrapped DEKs"
 fi
-compose logs --no-color app | grep -q "already holds encrypted secrets" \
+key_loss_logs="$(compose logs --no-color app 2>&1 || true)"
+grep -Fq "already holds encrypted secrets" <<<"$key_loss_logs" \
   || fail "app did not report the encrypted-secret key-loss guard"
 compose down -v
 
