@@ -31,7 +31,9 @@ describe("shipped corpus", () => {
     const bad = card.trials.filter((t) => !t.passed);
     expect(bad.map((t) => `${t.caseId}: ${t.error ?? JSON.stringify(t.expectations)}`)).toEqual([]);
     expect(card.errored).toBe(0);
-  });
+    // Each L3 Case drives a real Run against a real git-backed Soul, so the whole sweep outgrew
+    // the 5s default as soon as the Corpus did.
+  }, 60_000);
 
   it("has no vacuous Case, because one would pass without checking anything", async () => {
     const corpus = await loadCorpus(CORPUS_DIR, soul);

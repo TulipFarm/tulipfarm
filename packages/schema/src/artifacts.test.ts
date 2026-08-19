@@ -11,6 +11,7 @@ import {
   isLiveKind,
   isPinnedKind,
   temporalClassOf,
+  unstorableArtifactPaths,
   withinArtifactTree,
 } from "./artifacts";
 import { DEFINITION_KINDS } from "./definitions";
@@ -219,6 +220,57 @@ describe("path builders", () => {
     expect(() => definitionPath("Agent", "Not A Slug")).toThrow();
     expect(() => artifactDirectory("Agent", "../escape")).toThrow();
     expect(() => definitionPath("Settings", "slug")).not.toThrow();
+  });
+
+  // A Skill ships as a package, so every shape it ships has to be addressable — otherwise the
+  // installer cannot name the files it must write and the whole install is rejected.
+  it("addresses every file shape a Skill package ships", () => {
+    for (const companion of [
+      "SKILL.md",
+      "references/checklist.md",
+      "scripts/convert.py",
+      "assets/logo.png",
+      "schemas/output.json",
+      "LICENSE.txt",
+      "requirements.txt",
+      "README.md",
+    ]) {
+      expect(companionPath("Skill", "triage", companion), companion).toBe(
+        `skills/triage/${companion}`
+      );
+    }
+  });
+
+  // An installer has to know which files it cannot write before it writes any of them: the gateway
+  // rejects the whole changeset on the first unaddressable path, so a per-file answer is the only
+  // way the operator can be told which file is the problem.
+  it("reports which of a package's own files the layout cannot address", () => {
+    expect(
+      unstorableArtifactPaths("Skill", "triage", [
+        "SKILL.md",
+        "references/checklist.md",
+        "LICENSE.txt",
+        "notes.rst",
+        "src/index.ts",
+      ])
+    ).toEqual(["notes.rst", "src/index.ts"]);
+  });
+
+  it("treats every path as unstorable when the slug or kind cannot hold one", () => {
+    expect(unstorableArtifactPaths("Skill", "../escape", ["SKILL.md"])).toEqual(["SKILL.md"]);
+    expect(unstorableArtifactPaths("Settings", "any", ["notes.md"])).toEqual(["notes.md"]);
+  });
+
+  it("keeps refusing a Skill companion that leaves the Skill's own directory", () => {
+    for (const companion of [
+      "../escape.md",
+      "references/../../escape.md",
+      "/etc/passwd",
+      "..\\escape.txt",
+      "./LICENSE.txt",
+    ]) {
+      expect(() => companionPath("Skill", "triage", companion), companion).toThrow();
+    }
   });
 
   it("exposes layouts by kind", () => {

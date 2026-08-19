@@ -159,9 +159,25 @@ import { describe, expect, it } from "vitest";
  * Line count is a crude proxy for ownership, deliberately. A precise measure would need to model
  * what each domain ought to own, which is the argument the refactor itself has to settle; a crude
  * measure that cannot be gamed without noticing is worth more here than a subtle one.
+ *
+ * It moves to 51,117 for the Skill-package install fix, and the +10 is itemised because it is small
+ * enough to be worth showing what stayed:
+ *
+ *   +3  `skillPath` on the scanned and marketplace response shapes, and its OpenAPI property. A
+ *       Skill name is unique only within one directory, so a client had no stable key for a row and
+ *       two same-named Skills collapsed into one selection.
+ *   +6  two `reply.code(400)` guards on install — one naming the package files the Soul cannot
+ *       store, one refusing a same-name selection the scan cannot disambiguate. Both exist so the
+ *       operator is told which file or which package failed instead of receiving the write
+ *       gateway's `invalid soul write target`.
+ *   +1  one import.
+ *
+ * The decision behind the first guard — which files a layout can address — did not stay: it is
+ * `unstorableArtifactPaths` in `packages/schema/src/artifacts.ts`, beside the registry that owns
+ * the answer. Only the HTTP reply for it is here.
  */
 
-const CEILING = 51_107;
+const CEILING = 51_117;
 
 /**
  * Domains inside `apps/api/src` that already have a package of the same name. Everything here that

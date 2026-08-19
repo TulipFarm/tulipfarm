@@ -32,16 +32,32 @@ export type SkillDetail = SkillSummary & {
 // against the soul repo + skills-lock hash, so the UI can badge already-installed and stale skills.
 export type SkillInstallStatus = { installed: boolean; updateAvailable: boolean };
 
-export type ScannedSkill = { name: string; description?: string } & SkillInstallStatus;
+export type ScannedSkill = {
+  name: string;
+  skillPath?: string;
+  description?: string;
+} & SkillInstallStatus;
 export type ScanResult = { scanId: string; skills: ScannedSkill[] };
 
 export type MarketplaceSkill = {
   name: string;
+  skillPath?: string;
   skillId?: string;
   description?: string;
   category?: string;
   installs?: number;
 } & SkillInstallStatus;
+
+/**
+ * A stable identity for one scanned row.
+ *
+ * `name` is not unique within a source — one repo can define two different skills with the same
+ * directory name under different parents — so keying a React list or a selection by it merges two
+ * distinct rows into one.
+ */
+export function skillRowKey(skill: { name: string; skillPath?: string }): string {
+  return skill.skillPath ?? skill.name;
+}
 
 // The official curated catalog (SKL-V1-005). The scanId plugs into the same audit/install flow as a
 // manual git-URL scan, so the operator-confirm gate applies unchanged.

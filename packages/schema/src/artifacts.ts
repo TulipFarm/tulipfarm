@@ -130,6 +130,11 @@ const ARTIFACT_LAYOUT_ENTRIES = [
       { match: "references/", modes: ["prose"] },
       { match: "schemas/", modes: ["prose"] },
       { match: "scripts/", modes: ["executable"] },
+      // Real Skill packages ship provenance and dependency notes beside `SKILL.md` (`LICENSE.txt`,
+      // `requirements.txt`, `README.md`). Without these the package is only partly addressable, and
+      // a writer that must name every file it installs cannot install it at all.
+      { match: "*.md", modes: ["prose"] },
+      { match: "*.txt", modes: ["prose"] },
     ],
   },
   {
@@ -413,6 +418,26 @@ export function classifySoulPath(path: string): ClassifiedSoulPath | null {
     }
   }
   return null;
+}
+
+/**
+ * Which of an artifact package's own files the layout cannot address.
+ *
+ * A caller installing a package has to know this before it writes: the write gateway rejects the
+ * whole changeset on the first unaddressable path, and the layout registry — not the caller — is
+ * what decides which shapes may live beside a definition. `relativePaths` are POSIX paths relative
+ * to the artifact's own directory.
+ */
+export function unstorableArtifactPaths(
+  kind: ArtifactKind,
+  slug: string,
+  relativePaths: readonly string[]
+): string[] {
+  const layout = BY_KIND.get(kind);
+  if (!layout || layout.scope === "singleton" || !isArtifactSlug(slug)) return [...relativePaths];
+  return relativePaths.filter(
+    (relative) => classifySoulPath(`${layout.directory}/${slug}/${relative}`) === null
+  );
 }
 
 /** Build the canonical definition path for an artifact. */

@@ -10,6 +10,7 @@ import {
   LlmNotConfiguredError,
   SchemaRegistry,
   type SkillDefinition,
+  unstorableArtifactPaths,
   validateSkill,
 } from "@tulipfarm/schema";
 import {
@@ -323,6 +324,7 @@ async function loadMarketplace(gitSync: GitSyncService, soulLoader: SoulLoader, 
         const status = installStatus(skill, lock, soulLoader, bundledSkills, disabledBundledSkills);
         return {
           name: skill.name,
+          skillPath: skill.skillPath,
           skillId: asString(meta?.skillId),
           description: skill.description ?? asString(meta?.description),
           category: skill.category ?? asString(meta?.category),
@@ -469,7 +471,7 @@ export function registerSkillRoutes(app: FastifyInstance, soulLoader: SoulLoader
       const scanId = randomUUID();
       pruneScans(Date.now());
       scans.set(scanId, { source, ref: clone.ref, skills: discovered, audited: new Set(), expires: Date.now() + SCAN_TTL_MS });
-      return { scanId, skills: discovered.map((skill) => ({ name: skill.name, description: skill.description, ...installStatus(skill, lock, soulLoader, bundledSkills, disabledBundledSkills) })) };
+      return { scanId, skills: discovered.map((skill) => ({ name: skill.name, skillPath: skill.skillPath, description: skill.description, ...installStatus(skill, lock, soulLoader, bundledSkills, disabledBundledSkills) })) };
     } catch (error) {
       return reply.code(400).send({ error: `scan failed: ${error instanceof Error ? error.message : String(error)}` });
     } finally {
@@ -520,10 +522,15 @@ export function registerSkillRoutes(app: FastifyInstance, soulLoader: SoulLoader
     if (missing.length > 0) return reply.code(400).send({ error: `not in scan: ${missing.join(", ")}` });
     const unaudited = unique.filter((name) => !entry.audited.has(name));
     if (unaudited.length > 0) return reply.code(409).send({ error: `audit required before install: ${unaudited.join(", ")}` });
+    // A Skill name is its soul directory, so two discovered Skills sharing one name cannot both be installed. Refuse rather than install whichever the scan listed first: the operator reviewed two packages and would be given one.
+    const ambiguous = unique.map((name) => entry.skills.filter((skill) => skill.name === name)).filter((matches) => matches.length > 1);
+    if (ambiguous.length > 0) return reply.code(400).send({ error: `this source defines more than one skill with the same name, so the selection is ambiguous: ${ambiguous.map((matches) => `${matches[0].name} (${matches.map((skill) => skill.skillPath).join(", ")})`).join("; ")}` });
     for (const skill of chosen as DiscoveredSkill[]) {
       const { frontmatter, body } = parseFrontmatter(skill.content);
       const validation = validateSkill({ name: skill.name, frontmatter, body, content: skill.content });
       if (!validation.valid) return reply.code(400).send({ error: `invalid Skill "${skill.name}": ${validation.error}` });
+      const unstorable = unstorableArtifactPaths("Skill", skill.name, skill.files.filter((file) => file.symlinkTarget === undefined).map((file) => file.path));
+      if (unstorable.length > 0) return reply.code(400).send({ error: `Skill "${skill.name}" contains files the soul cannot store: ${unstorable.join(", ")}` });
       const blockers = scanSkill(skill.files).findings.filter((finding) => STRUCTURAL_INSTALL_BLOCKERS.has(finding.patternId));
       if (blockers.length > 0) {
         return reply.code(400).send({ error: `Skill "${skill.name}" contains unsupported package files: ${[...new Set(blockers.map((finding) => finding.patternId))].join(", ")}` });

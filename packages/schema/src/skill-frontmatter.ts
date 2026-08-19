@@ -46,6 +46,15 @@ export interface SkillValidationInput {
   body: string;
   /** Exact raw or would-be-written SKILL.md content used for the character limit. */
   content: string;
+  /**
+   * Where the frontmatter came from.
+   *
+   * `authored` — the default — is the strict form every author-facing surface uses, and is what
+   * stops an Agent granting itself a runtime-owned field. `stored` validates a SKILL.md the server
+   * itself wrote, where {@link SKILL_RUNTIME_FRONTMATTER_KEYS} are expected: re-checking those as
+   * author input rejects the very file the write gateway just accepted.
+   */
+  origin?: "authored" | "stored";
 }
 
 export type SkillValidationResult =
@@ -54,6 +63,15 @@ export type SkillValidationResult =
 
 const checkFrontmatter = ajv.compile(SkillFrontmatterSchema);
 const forbiddenGrantKeys = new Set<string>(SKILL_FORBIDDEN_GRANT_KEYS);
+
+/** Top-level frontmatter keys the runtime writes for itself; an author may never set them. */
+export const SKILL_RUNTIME_FRONTMATTER_KEYS = ["_pendingAudit"] as const;
+
+function withoutRuntimeFields(frontmatter: SkillFrontmatter): Record<string, unknown> {
+  const authored: Record<string, unknown> = { ...frontmatter };
+  for (const key of SKILL_RUNTIME_FRONTMATTER_KEYS) delete authored[key];
+  return authored;
+}
 
 function firstSchemaError(): string {
   const error = checkFrontmatter.errors?.[0];
@@ -106,7 +124,9 @@ export function validateSkill(input: SkillValidationInput): SkillValidationResul
     };
   }
 
-  const keyError = reservedKeyError(frontmatter);
+  const keyError = reservedKeyError(
+    input.origin === "stored" ? withoutRuntimeFields(frontmatter) : frontmatter
+  );
   if (keyError) return { valid: false, error: keyError };
 
   if (input.body.trim().length === 0) {

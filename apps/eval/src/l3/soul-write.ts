@@ -51,6 +51,7 @@ interface WriteArguments {
   readonly kind?: unknown;
   readonly slug?: unknown;
   readonly content?: unknown;
+  readonly companion?: unknown;
   readonly definitionMode?: unknown;
   readonly subject?: unknown;
 }
@@ -58,9 +59,12 @@ interface WriteArguments {
 /**
  * The Tool the L3 tier exposes for Soul writes.
  *
- * Deliberately narrow: it puts one artifact's definition file. Reproducing the API's full Agent and
- * Skill Tool surface here would be a second implementation of the product's own Tools, and a Case
- * passing against it would prove nothing about the ones users reach.
+ * Deliberately narrow: it puts one artifact's definition file, or one companion file beside it.
+ * Reproducing the API's full Agent and Skill Tool surface here would be a second implementation of
+ * the product's own Tools, and a Case passing against it would prove nothing about the ones users
+ * reach. A companion is included because a Skill is a *package* — its prose, references and scripts
+ * are the artifact as much as its definition is, and a writer that can only address the definition
+ * cannot measure whether the rest of the package survives.
  */
 export function soulWriterTool(soul: EvalSoul): SoulWriterTool {
   const commits: SoulCommit[] = [];
@@ -95,6 +99,7 @@ export function soulWriterTool(soul: EvalSoul): SoulWriterTool {
         const kind = typeof args.kind === "string" ? args.kind : undefined;
         const slug = typeof args.slug === "string" ? args.slug : undefined;
         const content = typeof args.content === "string" ? args.content : undefined;
+        const companion = typeof args.companion === "string" ? args.companion : undefined;
         const definitionMode =
           args.definitionMode === "canonical" || args.definitionMode === "legacy"
             ? args.definitionMode
@@ -119,7 +124,10 @@ export function soulWriterTool(soul: EvalSoul): SoulWriterTool {
             changes: [
               {
                 op: "put",
-                target: { kind: kind as never, slug, definitionMode },
+                target:
+                  companion === undefined
+                    ? { kind: kind as never, slug, definitionMode }
+                    : { kind: kind as never, slug, companion },
                 content,
               },
             ],
