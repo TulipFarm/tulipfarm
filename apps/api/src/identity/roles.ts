@@ -107,10 +107,14 @@ export const ADMIN_ONLY_SURFACES: readonly {
   },
 ];
 
-/** Member allow-list; new surfaces stay unreachable until added here. */
-// Keeps today's access to legacy Resource types that declare no domain. Once a Resource type
-// declares `domain`, this grant no longer matches; that domain needs its own explicit grant.
-const MEMBER_UNDOMAINED_RECORD_ACTIONS = [
+/**
+ * Keeps today's access to legacy Resource types that declare no domain. Once a Resource type
+ * declares `domain`, this grant no longer matches; that domain needs its own explicit grant.
+ *
+ * Exported because it is the one wildcard `member` still holds, so it is also the only thing the
+ * admin-only carve-out below has to close.
+ */
+export const MEMBER_UNDOMAINED_RECORD_ACTIONS = [
   "record.create",
   "record.list",
   "record.read",
@@ -119,6 +123,7 @@ const MEMBER_UNDOMAINED_RECORD_ACTIONS = [
   "record.search",
 ] as const;
 
+/** Member allow-list; new surfaces stay unreachable until added here. */
 export const MEMBER_ALLOWED_SURFACES: readonly {
   readonly type: string;
   readonly actions: readonly string[];
@@ -224,17 +229,63 @@ function surfaceGrants(
   );
 }
 
+/**
+ * The admin-only carve-out of the allows `member` holds broadly.
+ *
+ * A blanket `deny` on every admin-only action reads safer than it is: a Role's grants all land in
+ * one authority layer and deny beats allow there, so a member carrying those denies could never be
+ * lifted by *any* Role granted on top — `Owner` included, which is the only promotion the product
+ * offers (#408). An admin-only action is already unreachable to a member by default deny, so the
+ * only denies worth keeping are the ones compensating for a member allow that would otherwise
+ * reach the action: the residual `resourceType: "*"` record grant (a business may name a Resource
+ * type after an admin-only one) and any same-type wildcard in `MEMBER_ALLOWED_SURFACES`.
+ */
+function adminOnlyCarveOut(): AccessGrant[] {
+  return ADMIN_ONLY_SURFACES.flatMap((surface) => {
+    const memberActions = MEMBER_ALLOWED_SURFACES.filter(
+      (allowed) => allowed.type === surface.type
+    ).flatMap((allowed) => allowed.actions);
+    const denied = new Set<string>(MEMBER_UNDOMAINED_RECORD_ACTIONS);
+    for (const action of surface.actions) {
+      if (memberActions.includes("*") || memberActions.includes(action)) denied.add(action);
+    }
+    return [...denied].map(
+      (action): AccessGrant => ({ action, resourceType: surface.type, effect: "deny" })
+    );
+  });
+}
+
+/**
+ * Unrestricted authority, spelled for both request shapes: a grant with no domain covers only
+ * domainless requests, so the pair is what "anything" actually means to `grantMatches`.
+ */
+const UNRESTRICTED_GRANTS: readonly AccessGrant[] = [
+  { action: "*", resourceType: "*", effect: "allow" },
+  { action: "*", resourceType: "*", domain: "*", effect: "allow" },
+];
+
 /** Built-in roles in `@tulipfarm/authz` vocabulary; member is an allow-list. */
 export const DEPLOYMENT_ROLES: readonly Role[] = [
+  /**
+   * Owner is the level the access UI describes as "can do anything, including managing access",
+   * and it is the only level a second person can be promoted to from the product. It was missing
+   * from this catalog, so the boot sync never corrected the migration's placeholder grants, which
+   * named resource types (`authz.role`, `authz.assignment`) no route declares — holding it
+   * therefore matched nothing and conferred nothing (#408).
+   */
+  {
+    id: "owner",
+    businessId: DEPLOYMENT_BUSINESS_ID,
+    assignableTo: ["user"],
+    parentRoleIds: [],
+    grants: [...UNRESTRICTED_GRANTS],
+  },
   {
     id: "admin",
     businessId: DEPLOYMENT_BUSINESS_ID,
     assignableTo: ["user"],
     parentRoleIds: [],
-    grants: [
-      { action: "*", resourceType: "*", effect: "allow" },
-      { action: "*", resourceType: "*", domain: "*", effect: "allow" },
-    ],
+    grants: [...UNRESTRICTED_GRANTS],
   },
   {
     id: "member",
@@ -246,7 +297,7 @@ export const DEPLOYMENT_ROLES: readonly Role[] = [
       ...MEMBER_UNDOMAINED_RECORD_ACTIONS.map(
         (action): AccessGrant => ({ action, resourceType: "*", effect: "allow" })
       ),
-      ...surfaceGrants(ADMIN_ONLY_SURFACES, "deny"),
+      ...adminOnlyCarveOut(),
       ...OWNER_SCOPED_SURFACES.map(
         (surface): AccessGrant => ({
           action: "*",
@@ -260,6 +311,7 @@ export const DEPLOYMENT_ROLES: readonly Role[] = [
 ];
 
 const ROLE_NAMES: Readonly<Record<string, string>> = {
+  owner: "Owner",
   admin: "Administrator",
   member: "Member",
 };

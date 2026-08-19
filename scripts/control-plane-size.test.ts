@@ -211,9 +211,24 @@ import { describe, expect, it } from "vitest";
  *
  * Both are read off the compiled schema at the point the write is already being validated, so
  * neither is a decision this layer owns rather than borrows.
+ *
+ * It moves to 51,305 for the `Owner` access-level fix, +50 net across the role catalog this app
+ * already owns:
+ *
+ *   +52 `apps/api/src/identity/roles.ts` — `adminOnlyCarveOut()`, which computes `member`'s denies
+ *       from the two existing catalogs instead of hard-coding a blanket deny per admin-only
+ *       surface, plus `UNRESTRICTED_GRANTS` and the `owner` entry. The blanket deny was the bug:
+ *       deny beats allow inside one authority layer, so a member carrying it could never be lifted
+ *       by any Role granted on top. Most of the growth is the TSDoc explaining that, because the
+ *       narrower deny set looks less safe than the broad one it replaces and is not.
+ *   -2  `apps/api/src/pg-migrations/index.ts` — migration v50's seed collapses to the same
+ *       unrestricted pair the catalog states, rather than naming resource types no route declares.
+ *
+ * The catalog is the authority the route gate reads, so it stays here; nothing in it is a decision
+ * a package below could own.
  */
 
-const CEILING = 51_255;
+const CEILING = 51_305;
 
 /**
  * Domains inside `apps/api/src` that already have a package of the same name. Everything here that

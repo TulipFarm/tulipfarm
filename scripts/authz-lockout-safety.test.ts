@@ -172,6 +172,7 @@ describe("a deployment cannot lock itself out of its own authorization", () => {
     expect((await roles.listRoles(BUSINESS)).map((role) => role.id).sort()).toEqual([
       "admin",
       "member",
+      "owner",
     ]);
     expect(await check(principal(ADMIN_ID, "admin"), LEVEL_WRITE)).toBe(true);
   });
@@ -183,7 +184,11 @@ describe("a deployment cannot lock itself out of its own authorization", () => {
     await reconcileSoulRoles(roles, { roles: new Map() }, BUSINESS);
 
     const remaining = (await roles.listRoles(BUSINESS)).map((role) => role.id).sort();
-    expect(remaining, "the reap took a bootstrap Role with it").toEqual(["admin", "member"]);
+    expect(remaining, "the reap took a bootstrap Role with it").toEqual([
+      "admin",
+      "member",
+      "owner",
+    ]);
     expect(remaining).not.toContain("extra");
   });
 
