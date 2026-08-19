@@ -532,3 +532,59 @@ describe("carrying the Judge version into the Corpus hash", () => {
     expect(corpus.hash).toBe(corpusHash(corpus.cases, soul.hash));
   });
 });
+
+describe("naming a platform Tool instead of copying its declaration", () => {
+  const withPlatform = (extra: Partial<EvalCase>): EvalCase => ({
+    ...valid("uses-file-create"),
+    platformTools: ["file_create"],
+    ...extra,
+  });
+
+  it("loads a Case that names a Tool this build ships", async () => {
+    await expect(load(corpusDir({ "a.json": withPlatform({}) }))).resolves.toBeDefined();
+  });
+
+  it("refuses a name no shipped Tool answers to", async () => {
+    // The whole reason to name rather than copy is that a rename must break the Case. Loading it
+    // anyway would leave `tool_called` asserting against a Tool the model was never offered.
+    const cased = { ...valid("a"), platformTools: ["file_invent"] };
+    await expect(load(corpusDir({ "a.json": cased }))).rejects.toThrow(
+      /is not a platform Tool this build ships/
+    );
+  });
+
+  it("refuses a Tool that is both named and hand-declared", async () => {
+    const cased = withPlatform({
+      tools: [{ name: "file_create", description: "a stale copy", inputSchema: {} }],
+    });
+    await expect(load(corpusDir({ "a.json": cased }))).rejects.toThrow(/hand-declared/);
+  });
+
+  it("treats the shipped description as text the model was given", async () => {
+    // Without this, quoting the Tool's own wording in an `output_omits` reads as ungrounded and
+    // the Case is refused for a reason that is not true.
+    const cased = withPlatform({
+      expect: [
+        { kind: "output_omits", text: "do not repeat the whole document" },
+        { kind: "loop_status", status: "completed" },
+      ],
+    });
+    await expect(load(corpusDir({ "a.json": cased }))).resolves.toBeDefined();
+  });
+
+  it("moves the Corpus hash, so a Baseline cannot outlive a changed declaration", async () => {
+    const plain = await load(corpusDir({ "a.json": valid("a") }));
+    const named = await load(
+      corpusDir({ "a.json": { ...valid("a"), platformTools: ["file_read"] } })
+    );
+    expect(named.hash).not.toBe(plain.hash);
+  });
+
+  it("folds the shipped declaration into the hash, not just the name", () => {
+    const cased = { ...valid("a"), platformTools: ["file_create"] } as EvalCase;
+    const withTool = corpusHash([cased], "soul-1");
+    // Same Case, same Soul, same Judge: only the declaration behind the name can move this.
+    expect(withTool).not.toBe(corpusHash([{ ...cased, platformTools: ["file_read"] }], "soul-1"));
+    expect(withTool).not.toBe(corpusHash([{ ...cased, platformTools: [] }], "soul-1"));
+  });
+});

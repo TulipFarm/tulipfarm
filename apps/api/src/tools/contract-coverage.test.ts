@@ -49,7 +49,7 @@ const ALWAYS_ON_TOOL_NAMES = [
 const EXPECTED_FAMILY_TOOL_NAMES = [
   { family: "memory", names: ["update_memory"] },
   { family: "kv", names: ["kv_delete", "kv_get", "kv_list", "kv_set"] },
-  { family: "files", names: ["file_list", "file_read"] },
+  { family: "files", names: ["file_list", "file_read", "file_create"] },
   {
     family: "knowledge",
     names: [
@@ -505,20 +505,40 @@ describe("tool contract coverage", () => {
   });
 
   // A Turn sends a File only on the Turn it was attached to, so an Agent needs a way back to it —
-  // and that way must not be a way to anything else. Read and list are the whole surface: no
-  // upload, no share, no delete, and nothing that mutates. The two ratchets above prove the
+  // and that way must not be a way to anything else. List, read and create are the whole surface.
+  // Creating is admitted because it makes a File nobody had a claim on yet; every verb that
+  // changes who can reach a File that already exists is not. The two ratchets above prove that
   // negative across every Tool; this proves the positive about the family that exists to touch
-  // Files, so adding a third `file_*` verb has to be an argued decision rather than a slip.
-  it("gives Agents Files to read and nothing else to do with them", () => {
+  // Files, so adding a fourth `file_*` verb has to be an argued decision rather than a slip.
+  it("gives Agents Files to list, read and create, and nothing else to do with them", () => {
     const fileTools = tools.filter((tool) => tool.name.startsWith("file_"));
-    expect(fileTools.map((tool) => tool.name).sort()).toEqual(["file_list", "file_read"]);
-    expect(fileTools.filter((tool) => tool.mutating !== false).map((tool) => tool.name)).toEqual(
-      []
-    );
+    expect(fileTools.map((tool) => tool.name).sort()).toEqual([
+      "file_create",
+      "file_list",
+      "file_read",
+    ]);
+    expect(fileTools.filter((tool) => tool.mutating === true).map((tool) => tool.name)).toEqual([
+      "file_create",
+    ]);
     expect(fileTools.map((tool) => tool.definition?.authorization.action).sort()).toEqual([
+      "file.create",
       "file.list",
       "file.read",
     ]);
+  });
+
+  // Ownership is the whole reason a Routine's monthly report survives the offboarding of whoever
+  // scheduled it. An input the Agent controls that names an owner would hand that decision back to
+  // the model, so the schema must have no way to express one.
+  it("gives the Agent no way to say who owns what it creates", () => {
+    const create = tools.find((tool) => tool.name === "file_create");
+    const schema = JSON.stringify(create?.inputSchema ?? {});
+    expect(create).toBeDefined();
+    expect(schema).not.toMatch(/owner|principal|shareWith|readableBy/i);
+    // Without this an unknown property is dropped in silence rather than refused.
+    expect((create?.inputSchema as { additionalProperties?: boolean })?.additionalProperties).toBe(
+      false
+    );
   });
 
   it("keeps every declared resource inside the two-level grammar", () => {

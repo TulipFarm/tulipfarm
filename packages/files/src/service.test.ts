@@ -7,7 +7,7 @@ import { Jimp } from "jimp";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_MAX_IMAGE_DIMENSION } from "./bound";
 import { imageSize } from "./dimensions";
-import { MAX_FILE_BYTES } from "./limits";
+import { BUSINESS_PRINCIPAL_ID, MAX_FILE_BYTES } from "./limits";
 import type { FileGrantee, FileRecord, FileRepo, FileShare, NewFile } from "./repo";
 import { FileError, FileService } from "./service";
 
@@ -912,5 +912,92 @@ describe("FileService.presentFor", () => {
 
     expect((await counting.presentFor(BUSINESS, OWNER, [])).size).toBe(0);
     expect(asked).toBe(0);
+  });
+});
+
+describe("FileService.generate", () => {
+  let root: string;
+  let repo: MemoryFileRepo;
+  let service: FileService;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "tulip-files-"));
+    repo = new MemoryFileRepo();
+    service = new FileService({
+      repo,
+      blobs: new FileSystemBlobPort(root),
+      newId: () => randomUUID(),
+    });
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  const generate = (overrides: Partial<Parameters<FileService["generate"]>[0]> = {}) =>
+    service.generate({
+      businessId: BUSINESS,
+      filename: "quarterly-summary",
+      format: "pdf",
+      content: "# Quarterly\n\nRevenue rose.",
+      readableBy: { kind: "user", id: OWNER },
+      ...overrides,
+    });
+
+  it("writes a real document and marks it machine-made", async () => {
+    const file = await generate();
+    expect(file.origin).toBe("generated");
+    expect(file.mediaType).toBe("application/pdf");
+    expect(file.filename).toBe("quarterly-summary.pdf");
+    expect(file.sizeBytes).toBeGreaterThan(0);
+    const stored = await service.content(BUSINESS, file.id, OWNER);
+    let total = 0;
+    for await (const chunk of stored.body) total += chunk.byteLength;
+    expect(total).toBe(file.sizeBytes);
+  });
+
+  it("belongs to the business, not to whoever asked for it", async () => {
+    // This is what makes a Routine's monthly report survive the offboarding of the person who
+    // scheduled it. Owning it as that person would orphan the Run's output with their account.
+    const file = await generate();
+    expect(file.ownerPrincipalId).toBe(BUSINESS_PRINCIPAL_ID);
+    expect(file.ownerPrincipalId).not.toBe(OWNER);
+  });
+
+  it("lets the person who asked read it, and nobody else", async () => {
+    const file = await generate();
+    await expect(service.read(BUSINESS, file.id, OWNER)).resolves.toMatchObject({ id: file.id });
+    await expect(service.read(BUSINESS, file.id, STRANGER)).rejects.toMatchObject({
+      reason: "not_found",
+    });
+  });
+
+  it("makes a File nobody can read when nobody is named, rather than one everybody can", async () => {
+    const file = await generate({ readableBy: undefined });
+    expect(repo.shares.filter((share) => share.fileId === file.id)).toEqual([]);
+    await expect(service.read(BUSINESS, file.id, OWNER)).rejects.toMatchObject({
+      reason: "not_found",
+    });
+  });
+
+  it("does not double an extension the Agent already got right", async () => {
+    const file = await generate({ filename: "report.pdf" });
+    expect(file.filename).toBe("report.pdf");
+  });
+
+  it("stores the plain formats byte for byte", async () => {
+    const file = await generate({ format: "csv", filename: "rows", content: "a,b\n1,2\n" });
+    expect(file.mediaType).toBe("text/csv");
+    expect(file.filename).toBe("rows.csv");
+    const { body } = await service.content(BUSINESS, file.id, OWNER);
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of body) chunks.push(chunk);
+    expect(new TextDecoder().decode(Buffer.concat(chunks))).toBe("a,b\n1,2\n");
+  });
+
+  it("refuses before writing anything when the render refuses", async () => {
+    await expect(generate({ content: "   " })).rejects.toMatchObject({ reason: "empty" });
+    // The row is what makes a File exist. Nothing reached storage, so nothing needs compensating.
+    expect(repo.rows).toEqual([]);
   });
 });

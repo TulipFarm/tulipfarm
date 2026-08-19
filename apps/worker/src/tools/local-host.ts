@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { delegationCatalogOf, withDelegatedAuthority } from "@tulipfarm/agent-runtime";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import { FILE_TOOLS, FileService, type FileToolContext, PgFileRepo } from "@tulipfarm/files";
 import {
   KNOWLEDGE_TOOLS,
   KnowledgeService,
@@ -21,11 +23,19 @@ import {
 } from "@tulipfarm/memory";
 import { PLATFORM_RUNTIME_TOOLS, type PlatformRuntimeContext } from "@tulipfarm/platform-tools";
 import type { ArtifactService, DurableWaitManager } from "@tulipfarm/run-kernel";
-import { ChildLinkAncestryStore, type Queryable, type TransactionPort } from "@tulipfarm/storage";
+import {
+  type BlobPort,
+  ChildLinkAncestryStore,
+  PgGroupRepo,
+  PgRoleRepo,
+  type Queryable,
+  type TransactionPort,
+} from "@tulipfarm/storage";
 import {
   type ApiToolDefinition,
   ApprovalsRepo,
   buildLiveAuthorityLayerResolver,
+  collectHeldRoleIds,
   InMemoryToolCatalog,
   LiveToolGate,
   localDispatchRefusal,
@@ -62,6 +72,15 @@ export interface LocalToolHostOptions {
   readonly embeddings: SoulEmbeddings;
   /** Absent only when this process runs without pg-boss; page writes then skip re-indexing. */
   readonly enqueueIndexJob?: (pageId: string) => Promise<void>;
+  /**
+   * Where File bytes live: the same store the control plane writes to, reached through the port.
+   *
+   * Present so that rendering a model-authored document — untrusted-input processing — happens
+   * here rather than in the process that terminates people's HTTP requests.
+   */
+  readonly blobs: BlobPort;
+  /** Defaults to `randomUUID`; present so a test can make an id predictable. */
+  readonly newId?: () => string;
 }
 
 export interface LocalToolHost {
@@ -126,6 +145,37 @@ function hostedFamilies(options: LocalToolHostOptions): readonly HostedFamily<ne
   // could not read even an unrestricted Page.
   const pageGate = new PageReadGate(options.db);
 
+  // Composed without `imagePolicy`, the one dependency that would need a live Soul. That is not a
+  // degraded service here: `imagePolicy` is read by `upload`, and the hosted Tools reach only
+  // `read`, `content`, `list`, `listSharedWithMe` and `generate`. The context type is a `Pick`
+  // over exactly those, so the Soul-dependent branch is unreachable rather than merely unused.
+  const files = new FileService({
+    repo: new PgFileRepo(options.db),
+    blobs: options.blobs,
+    newId: options.newId ?? randomUUID,
+    // The same live answer the control plane uses. A second implementation of "which Roles does
+    // this person hold" is how a File stays readable to someone a Role no longer contains.
+    rolesOf: (businessId, principalId) =>
+      collectHeldRoleIds(
+        {
+          roles: new PgRoleRepo(options.transactions),
+          groups: new PgGroupRepo(options.transactions),
+        },
+        businessId,
+        principalId,
+        new Date()
+      ),
+  });
+  const fileFamily: HostedFamily<FileToolContext> = {
+    definitions: FILE_TOOLS,
+    // `userId`, never `agentId`: an Agent's reach into the library is exactly its caller's.
+    context: (ctx) => ({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      principalId: ctx.userId,
+      service: files,
+    }),
+  };
+
   const vectorBacked: HostedFamily<KnowledgeToolContext> = {
     definitions: KNOWLEDGE_TOOLS,
     context: (ctx) => ({ ...principal(ctx), service: knowledge, pageGate }),
@@ -135,6 +185,7 @@ function hostedFamilies(options: LocalToolHostOptions): readonly HostedFamily<ne
     kvFamily,
     platformFamily,
     memoryFamily,
+    fileFamily,
     vectorBacked,
   ] as unknown as readonly HostedFamily<never>[];
 }

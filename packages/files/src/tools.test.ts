@@ -1,8 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { MAX_FILE_READ_CHARS } from "./limits";
+import { BUSINESS_PRINCIPAL_ID, MAX_FILE_READ_CHARS } from "./limits";
+import { MAX_RENDER_INPUT_CHARS, RenderError } from "./render";
 import type { FileRecord } from "./repo";
-import { FileError } from "./service";
-import { FILE_TOOLS, type FileToolContext, fileListTool, fileReadTool } from "./tools";
+import { FileError, type GenerateRequest } from "./service";
+import {
+  FILE_TOOLS,
+  type FileToolContext,
+  fileCreateTool,
+  fileListTool,
+  fileReadTool,
+} from "./tools";
 
 const BUSINESS = "business-1";
 const ME = "user-me";
@@ -53,6 +60,17 @@ function library(files: readonly FileRecord[], bodies: Record<string, string> = 
       files: files.filter((file) => file.ownerPrincipalId !== principalId).slice(0, limit),
       nextCursor: null,
     }),
+    generated: [] as GenerateRequest[],
+    generate: async function (this: { generated: GenerateRequest[] }, request: GenerateRequest) {
+      this.generated.push(request);
+      return record({
+        id: "cccccccc-1111-4111-8111-111111111111",
+        ownerPrincipalId: BUSINESS_PRINCIPAL_ID,
+        filename: `${request.filename}.pdf`,
+        mediaType: "application/pdf",
+        origin: "generated",
+      });
+    },
   };
 }
 
@@ -66,15 +84,21 @@ function data(result: Awaited<ReturnType<typeof fileReadTool.handler>>): Record<
 }
 
 describe("the File Tools an Agent holds", () => {
-  it("is read and list, and nothing that changes who can reach a File", () => {
-    expect(FILE_TOOLS.map((tool) => tool.name).sort()).toEqual(["file_list", "file_read"]);
-    expect(FILE_TOOLS.every((tool) => tool.mutating === false)).toBe(true);
+  it("is list, read and create, and nothing that changes who can reach an existing File", () => {
+    expect(FILE_TOOLS.map((tool) => tool.name).sort()).toEqual([
+      "file_create",
+      "file_list",
+      "file_read",
+    ]);
+    expect(FILE_TOOLS.filter((tool) => tool.mutating === true).map((tool) => tool.name)).toEqual([
+      "file_create",
+    ]);
   });
 
   it("says in its own description that an earlier Turn's File is no longer in front of it", () => {
     // The tokens saved by sending a File once are only saved if the Agent knows to come back for
     // it. Without this the model's most likely move is to ask the person to attach it again.
-    for (const tool of FILE_TOOLS) {
+    for (const tool of [fileListTool, fileReadTool]) {
       expect(tool.description).toMatch(/earlier Turn/i);
     }
   });
@@ -221,5 +245,75 @@ describe("file_read", () => {
       success: false,
       error: { code: "validation_error", message: expect.stringContaining("fileId") },
     });
+  });
+});
+
+describe("file_create", () => {
+  const args = { filename: "q3-summary", format: "pdf", content: "# Q3\n\nRevenue up." };
+
+  it("hands the document to the service and reports the File it made", async () => {
+    const service = library([]);
+    const result = await fileCreateTool.handler(args, context(service));
+    expect(service.generated).toEqual([
+      expect.objectContaining({
+        businessId: BUSINESS,
+        filename: "q3-summary",
+        format: "pdf",
+        content: "# Q3\n\nRevenue up.",
+      }),
+    ]);
+    expect(data(result)).toEqual(
+      expect.objectContaining({ mediaType: "application/pdf", origin: "generated" })
+    );
+  });
+
+  it("gives the caller read access to what it made, and nobody else", async () => {
+    const service = library([]);
+    await fileCreateTool.handler(args, context(service, OTHER));
+    expect(service.generated[0].readableBy).toEqual({ kind: "user", id: OTHER });
+  });
+
+  it("does not let the Agent choose an owner", async () => {
+    const service = library([]);
+    await fileCreateTool.handler({ ...args, ownerPrincipalId: "someone-else" }, context(service));
+    // `additionalProperties: false` refuses it outright rather than quietly dropping it.
+    expect(service.generated).toHaveLength(0);
+  });
+
+  it("refuses a format it cannot render", async () => {
+    const service = library([]);
+    const result = await fileCreateTool.handler({ ...args, format: "docx" }, context(service));
+    expect(result.success).toBe(false);
+    expect(service.generated).toHaveLength(0);
+  });
+
+  it("refuses content past the render input cap before spending a render", async () => {
+    const service = library([]);
+    const result = await fileCreateTool.handler(
+      { ...args, content: "x".repeat(MAX_RENDER_INPUT_CHARS + 1) },
+      context(service)
+    );
+    expect(result.success).toBe(false);
+    expect(service.generated).toHaveLength(0);
+  });
+
+  it("reports a refused render as the Agent's to fix, not as an internal failure", async () => {
+    const service = {
+      ...library([]),
+      generate: async () => {
+        throw new RenderError("too_many_pages", "render exceeded 200 pages");
+      },
+    };
+    const result = await fileCreateTool.handler(args, context(service));
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe("validation_error");
+    expect(result.error.message).toMatch(/200 pages/);
+  });
+
+  it("tells the Agent to describe the document rather than repeat it", () => {
+    // Without this the model writes the report twice — once into the File and once into the reply
+    // — which is the failure mode that makes the whole feature feel pointless.
+    expect(fileCreateTool.description).toMatch(/do not repeat the whole document/i);
   });
 });

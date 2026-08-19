@@ -85,6 +85,18 @@ export function isTextualMediaType(mediaType: string): boolean {
  * unbounded read is the failure this exists to prevent: a 25 MiB text File would exhaust both the
  * window and the Run's token budget in one call.
  */
+/**
+ * Who owns a File an Agent made.
+ *
+ * An Agent has no self to own anything, and pinning machine-made output to whoever happened to
+ * trigger the Run would orphan a Routine's monthly report the day that person is offboarded. So
+ * the business is the owner of record, and the person who asked is given a share.
+ *
+ * Deliberately not a Principal row: nothing authenticates as the business, so a row would be an
+ * account nobody holds. It is an owner identifier and only ever compared as one.
+ */
+export const BUSINESS_PRINCIPAL_ID = "business";
+
 export const MAX_FILE_READ_CHARS = 32_000;
 
 /** How many Files `file_list` returns at once, and the most a caller may ask for. */

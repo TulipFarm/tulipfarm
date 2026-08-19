@@ -13,12 +13,15 @@
     "@tulipfarm/schema": "workspace:*",
     "@tulipfarm/storage": "workspace:*",
     "@tulipfarm/tool-host": "workspace:*",
-    "jimp": "^1.6.1"
+    "jimp": "^1.6.1",
+    "marked": "^18.0.10",
+    "pdfkit": "^0.19.1"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.3",
     "@tulipfarm/tsconfig": "workspace:*",
     "@types/node": "^26.1.1",
+    "@types/pdfkit": "^0.17.6",
     "typescript": "^6.0.3",
     "vitest": "^4.1.9"
   }

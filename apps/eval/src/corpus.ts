@@ -5,6 +5,7 @@ import type { AssembleContext, ModelMessage } from "@tulipfarm/agent-runtime";
 import { normalizeMessageContent } from "@tulipfarm/schema";
 import { type EvalCase, type Expectation, everyString, isGuardrail, isPersisted } from "./case.ts";
 import { type EvalSoul, SOUL_OWNED_CONTEXT_KEYS, soulContext } from "./eval-soul.ts";
+import { platformToolNames, resolvePlatformTool } from "./platform-tools.ts";
 import { expandRedTeam, type RedTeamOutcome } from "./red-team.ts";
 import { OUTPUT_FLAGS } from "./scorer.ts";
 import { CLASS_NAMES, isVulnerabilityClass } from "./vulnerability.ts";
@@ -147,9 +148,17 @@ export function corpusHash(
   judgeVersion = "no-judge"
 ): string {
   const sorted = [...cases].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  // A Case that names a platform Tool carries the name, not the declaration — and the declaration
+  // is what reaches the prompt. Left out, editing `file_create`'s description would change what
+  // every such Case measures while its Baseline went on comparing against the old numbers.
+  const platform = [...new Set(sorted.flatMap((c) => c.platformTools ?? []))]
+    .sort()
+    .map((name) => resolvePlatformTool(name) ?? { name });
   return (
     createHash("sha256")
       .update(canonical(sorted))
+      .update("\0platform\0")
+      .update(canonical(platform))
       .update("\0soul\0")
       .update(soulHash)
       // Swapping the Judge re-scores every rubric Case, so it must break comparison as loudly as
@@ -234,6 +243,7 @@ function validate(raw: unknown, file: string): EvalCase {
       `both, or the guard could stop firing and the Case stay green because the model refused anyway.`);
   }
   validateAttachments(c, file);
+  validatePlatformTools(c, file);
   const parsed = raw as EvalCase;
   return {
     ...parsed,
@@ -244,6 +254,32 @@ function validate(raw: unknown, file: string): EvalCase {
           journey: parsed.journey.map((turn) => ({ ...turn, input: normalizeInput(turn.input) })),
         }),
   };
+}
+
+/**
+ * Check that every named platform Tool exists and is not also hand-declared.
+ *
+ * Loading fails rather than skipping, because the whole reason to name a shipped Tool is that the
+ * Case should stop being green the day that Tool is renamed or removed. A Case allowed to load
+ * with an unresolved name would go on asserting `tool_called` against a Tool the model was never
+ * offered, which no longer measures anything.
+ */
+function validatePlatformTools(c: Record<string, unknown>, file: string): void {
+  if (c.platformTools === undefined) return;
+  require(Array.isArray(c.platformTools), `${file}: "platformTools" must be an array of names`);
+  const declared = new Set(
+    ((c.tools ?? []) as { name?: string }[]).map((tool) => tool.name).filter(Boolean)
+  );
+  for (const name of c.platformTools as unknown[]) {
+    require(typeof name === "string", `${file}: each "platformTools" entry must be a Tool name`);
+    require(resolvePlatformTool(name as string) !==
+      undefined, `${file}: "${name}" is not a platform Tool this build ships. Available: ` +
+      `${platformToolNames().join(", ")}`);
+    require(!declared.has(
+      name as string
+    ), `${file}: "${name}" is both named in "platformTools" and hand-declared in "tools". ` +
+      `The copy would win and the Case would stop tracking the shipped declaration.`);
+  }
 }
 
 /**
@@ -395,6 +431,8 @@ function givenToModel(c: EvalCase, fromSoul: Partial<AssembleContext>): string {
   // inside one is grounded. Only `content`: an id or a filename is metadata, not something the
   // model could have read the answer out of.
   for (const each of [...(c.attachments ?? []), ...(c.readable ?? [])]) walk(each.content);
+  // A shipped Tool's description reaches the model verbatim, so text quoted from it is grounded.
+  for (const name of c.platformTools ?? []) walk(resolvePlatformTool(name)?.description);
   // A journey's later Turns are handed to the model too, so a fact stated only there is grounded.
   for (const turn of c.journey ?? []) {
     walk(turn.input);

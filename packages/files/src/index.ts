@@ -26,6 +26,7 @@ export {
 export {
   ALLOWED_MEDIA_TYPES,
   type AllowedMediaType,
+  BUSINESS_PRINCIPAL_ID,
   DEFAULT_FILE_LIST_LIMIT,
   isAllowedMediaType,
   isInlineRenderable,
@@ -36,6 +37,20 @@ export {
   MAX_FILES_PER_MESSAGE,
   TEXTUAL_MEDIA_TYPES,
 } from "./limits";
+export {
+  extensionForFormat,
+  MAX_RENDER_INPUT_CHARS,
+  MAX_RENDER_OUTPUT_BYTES,
+  MAX_RENDER_PAGES,
+  RENDER_FORMATS,
+  RENDER_TIMEOUT_MS,
+  RenderError,
+  type Rendered,
+  type RenderFormat,
+  type RenderRejection,
+  type RenderRequest,
+  renderDocument,
+} from "./render";
 export {
   decodeFileCursor,
   encodeFileCursor,
@@ -58,11 +73,18 @@ export {
   FileError,
   FileService,
   type FileServiceDeps,
+  type GenerateRequest,
   type UploadRejection,
   type UploadRequest,
 } from "./service";
 export { resolveMediaType, SNIFF_BYTES, sniffMediaType } from "./sniff";
-export { FILE_TOOLS, type FileToolContext, fileListTool, fileReadTool } from "./tools";
+export {
+  FILE_TOOLS,
+  type FileToolContext,
+  fileCreateTool,
+  fileListTool,
+  fileReadTool,
+} from "./tools";
 export type {
   AttachedMessage,
   AttachmentOmitted,

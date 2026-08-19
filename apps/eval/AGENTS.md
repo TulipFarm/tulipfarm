@@ -66,6 +66,10 @@ before changing how a Case is scored, run or compared.** These are the ones that
   in both would be in the prompt from the first step, so a re-read Case asserting `prompt_attaches`
   would pass with the whole mechanism removed. Declaring it in neither is refused for the same
   reason.
+- **Name a shipped Tool with `platformTools`; only hand-declare a Tool an operator would author.**
+  A copy measures the model against a description no deployment sends, and cannot assert the
+  properties that live in the declaration. The resolved declaration is in `corpusHash`, so
+  rewording one retires every Baseline. An unresolvable name fails the load.
 - **Every Case carries a `script`,** so the whole Corpus runs free in ordinary CI.
 - **Two models are a control, not a contest,** and they never run at once.
 - **A Judge failure errors the Trial; it never scores low.**

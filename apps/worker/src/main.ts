@@ -245,11 +245,11 @@ export async function main(): Promise<void> {
   // a counter reloaded as zero would give every resume a fresh ceiling and turn a bounded queue
   // into an unbounded one.
   const stateContentionStore = new RunStateContentionStore(transactions);
-  const blobDirectory = join(resolveDataDir() ?? ".tulipfarm", "blobs");
+  const blobs = new FileSystemBlobPort(join(resolveDataDir() ?? ".tulipfarm", "blobs"));
   const artifactService = new ArtifactService(
     new ArtifactStore(transactions),
     new TypedOutputValidator(INVOCATION_REQUEST_SCHEMAS),
-    new FileSystemBlobPort(blobDirectory)
+    blobs
   );
 
   const leases = new RunLeaseManager(runStore);
@@ -288,6 +288,8 @@ export async function main(): Promise<void> {
     artifacts: artifactService,
     waits,
     embeddings: localEmbeddings,
+    // `file_create` renders here, not in the API: model-authored content is untrusted input.
+    blobs,
   });
   const toolDispatch = new RoutingToolDispatch(localTools, turnHost, turnHost, logger);
 

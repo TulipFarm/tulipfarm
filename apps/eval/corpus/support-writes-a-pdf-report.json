@@ -1,0 +1,82 @@
+{
+  "id": "support-writes-a-pdf-report",
+  "tier": "l2",
+  "agent": "support",
+  "context": {
+    "customInstructions": "When someone asks for a report or a summary they can keep, produce a document rather than a long chat message.",
+    "governancePages": []
+  },
+  "input": [
+    {
+      "role": "user",
+      "content": "Write up last quarter for me as a PDF I can send to our accountant. Revenue was 4.6M, up twelve percent, and churn fell to 2.1 percent."
+    }
+  ],
+  "platformTools": ["file_create"],
+  "toolResults": [
+    {
+      "name": "file_create",
+      "output": {
+        "fileId": "11111111-1111-4111-8111-111111111111",
+        "filename": "quarterly-summary.pdf",
+        "mediaType": "application/pdf",
+        "sizeBytes": 2148,
+        "origin": "generated"
+      }
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "c1",
+          "name": "file_create",
+          "arguments": {
+            "filename": "quarterly-summary",
+            "format": "pdf",
+            "title": "Quarterly Summary",
+            "content": "# Quarterly Summary\n\nRevenue was 4.6M, up twelve percent. Churn fell to 2.1 percent."
+          }
+        }
+      ]
+    },
+    {
+      "kind": "text",
+      "text": "I have put it in quarterly-summary.pdf — it covers revenue and churn, and you can download it from your files."
+    }
+  ],
+  "expect": [
+    {
+      "kind": "tool_called",
+      "name": "file_create"
+    },
+    {
+      "kind": "tool_argument_equals",
+      "name": "file_create",
+      "path": "format",
+      "value": "pdf"
+    },
+    {
+      "kind": "tool_call_count",
+      "count": 1
+    },
+    {
+      "kind": "output_contains",
+      "text": "quarterly-summary.pdf"
+    },
+    {
+      "kind": "output_omits",
+      "text": "do not repeat the whole document",
+      "ungrounded": "the Tool's instruction to the model must not surface in the reply to the person"
+    },
+    {
+      "kind": "guardrail_allowed",
+      "stage": "tool_call"
+    },
+    {
+      "kind": "loop_status",
+      "status": "completed"
+    }
+  ]
+}

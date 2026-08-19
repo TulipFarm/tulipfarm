@@ -59,6 +59,9 @@ reconciliation, turn execution, delivery classification, projections, and outbox
 - Agent `instructions.md` is a Soul companion hash, not bundled prompt text; use personality.
 - Approval resume tokens never cross to the worker; replay by wait id and State occurrence.
 - Tools hosted in `src/tools/` must clear `localDispatchRefusal`; boot fails rather than weaken it.
+- The File family is hosted here so `file_create` renders model-authored content outside the
+  process serving people's requests. Omitting `imagePolicy` is unreachable, not degraded: the
+  context `Pick` cannot reach `upload`, its only reader.
 - Authority for a co-located Tool is still read from the API per Run, never derived here, and is
   cached for one dispatch attempt only; `main.ts` evicts it when the attempt settles.
 - A State's `concurrencyKey` is held by a durable expiry-bounded lease; a contender queues on a

@@ -194,7 +194,9 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
     // The File entity: what may be uploaded, what its bytes really are, and who may read them.
     // It owns its own table so the ordered upload pipeline — authorize, length, stream, sniff,
     // reject, write — stays in one place; `apps/api` only adapts it to Fastify.
-    files: ["constants", "schema", "storage"],
+    // `tool-host` because the File Tools are declared here, beside the service they call: a
+    // family split from its service is a family whose two halves can disagree about what a File is.
+    files: ["constants", "schema", "storage", "tool-host"],
     // Translation between the `ModelPort` contract and the Vercel AI SDK's prompt, tool and usage
     // shapes. Extracted from the Worker so the offline eval harness converts a request and reads a
     // result exactly as production does — a second copy would let the eval score a tool call the
@@ -264,6 +266,9 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
       "tool-host",
       "kv",
       "platform-tools",
+      // `files` renders Agent-authored documents. That is untrusted-input processing, so it runs
+      // in the durable runtime rather than the process serving people's requests.
+      "files",
       "turn-executor",
       "model-adapter",
     ],
@@ -317,6 +322,9 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
       "storage",
       "run-kernel",
       "tool-host",
+      // `files` so a Case can name a shipped platform Tool instead of copying its declaration. A
+      // copy would measure the model against a description no deployment sends.
+      "files",
     ],
   },
   // Legacy v1 edges that still exist during cutover. Each is a target package

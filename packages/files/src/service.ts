@@ -16,7 +16,8 @@
 import type { BlobPort, BlobRef } from "@tulipfarm/storage";
 import { boundImage, type ImageBoundPolicy } from "./bound";
 import { normalizeFilename } from "./filename";
-import { isAllowedMediaType, MAX_FILE_BYTES } from "./limits";
+import { BUSINESS_PRINCIPAL_ID, isAllowedMediaType, MAX_FILE_BYTES } from "./limits";
+import { extensionForFormat, type RenderFormat, renderDocument } from "./render";
 import {
   encodeFileCursor,
   type FileCursor,
@@ -54,6 +55,22 @@ export interface UploadRequest {
   /** What the client says the body weighs. Refused here before any byte is written. */
   readonly declaredBytes: number;
   readonly body: AsyncIterable<Uint8Array>;
+}
+
+export interface GenerateRequest {
+  readonly businessId: string;
+  readonly filename: string;
+  readonly format: RenderFormat;
+  /** Markdown for `pdf`, taken verbatim otherwise. Rendered before anything is written. */
+  readonly content: string;
+  readonly title?: string;
+  /**
+   * Given read access as the File lands.
+   *
+   * Passed rather than inferred because the service does not know who asked — and a machine-made
+   * File that nobody can read is the same as one that was never made.
+   */
+  readonly readableBy?: FileGrantee;
 }
 
 export interface FileServiceDeps {
@@ -135,6 +152,12 @@ function concat(chunks: readonly Uint8Array[], limit: number): Uint8Array {
   return out;
 }
 
+/** Keeps the name honest about what the bytes are, without doubling a suffix the Agent got right. */
+function withExtension(filename: string, format: RenderFormat): string {
+  const extension = extensionForFormat(format);
+  return filename.toLowerCase().endsWith(extension) ? filename : `${filename}${extension}`;
+}
+
 function once(bytes: Uint8Array): AsyncIterable<Uint8Array> {
   return {
     async *[Symbol.asyncIterator]() {
@@ -182,6 +205,52 @@ export class FileService {
       sizeBytes: bounded.sizeBytes,
       blob: bounded.ref,
     });
+  }
+
+  /**
+   * Writes a File an Agent authored: render first, then store, then share.
+   *
+   * The order matters for the same reason the upload pipeline's does. Rendering is the step that
+   * can refuse — over the input cap, over the page cap, past the deadline — and doing it before
+   * any byte reaches storage means a refusal costs nothing to compensate. The share lands last so
+   * that a File is never readable before its bytes are.
+   *
+   * The media type is not sniffed. Unlike an upload, the bytes were produced here from a format
+   * this service chose, so the claim and the content have the same author and a sniff would be
+   * asking this process to confirm its own output.
+   */
+  async generate(request: GenerateRequest): Promise<FileRecord> {
+    const rendered = await renderDocument({
+      format: request.format,
+      content: request.content,
+      ...(request.title === undefined ? {} : { title: request.title }),
+    });
+    if (rendered.bytes.byteLength > MAX_FILE_BYTES) {
+      throw new FileError("too_large", `rendered document exceeds ${MAX_FILE_BYTES} bytes`);
+    }
+
+    const filename = withExtension(normalizeFilename(request.filename), request.format);
+    const ref = await this.deps.blobs.put(once(rendered.bytes), rendered.mediaType);
+    const file = await this.deps.repo.create({
+      id: this.deps.newId(),
+      businessId: request.businessId,
+      ownerPrincipalId: BUSINESS_PRINCIPAL_ID,
+      filename,
+      mediaType: rendered.mediaType,
+      claimedMediaType: rendered.mediaType,
+      sizeBytes: rendered.bytes.byteLength,
+      blob: ref,
+      origin: "generated",
+    });
+
+    const grantee = request.readableBy;
+    if (
+      grantee !== undefined &&
+      !(grantee.kind === "user" && grantee.id === BUSINESS_PRINCIPAL_ID)
+    ) {
+      await this.deps.repo.share(request.businessId, file.id, grantee, BUSINESS_PRINCIPAL_ID);
+    }
+    return file;
   }
 
   /**

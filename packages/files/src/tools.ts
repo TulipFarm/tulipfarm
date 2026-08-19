@@ -6,6 +6,7 @@ import {
   MAX_FILE_LIST_LIMIT,
   MAX_FILE_READ_CHARS,
 } from "./limits";
+import { MAX_RENDER_INPUT_CHARS, RENDER_FORMATS, RenderError, type RenderFormat } from "./render";
 import type { FileRecord } from "./repo";
 import { FileError, type FileService } from "./service";
 
@@ -18,7 +19,10 @@ import { FileError, type FileService } from "./service";
 export interface FileToolContext {
   readonly businessId: string;
   readonly principalId: string;
-  readonly service: Pick<FileService, "read" | "content" | "list" | "listSharedWithMe">;
+  readonly service: Pick<
+    FileService,
+    "read" | "content" | "list" | "listSharedWithMe" | "generate"
+  >;
 }
 
 const GUIDANCE =
@@ -58,8 +62,41 @@ const READ_SCHEMA: Record<string, unknown> = {
   },
 };
 
+const CREATE_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["filename", "format", "content"],
+  properties: {
+    filename: {
+      type: "string",
+      minLength: 1,
+      maxLength: 200,
+      description: "What to call the File. The correct extension is added if you leave it off.",
+    },
+    format: {
+      type: "string",
+      enum: [...RENDER_FORMATS],
+      description:
+        "'pdf' renders your Markdown into a paginated document. 'markdown', 'text' and 'csv' store what you wrote, unchanged.",
+    },
+    content: {
+      type: "string",
+      minLength: 1,
+      maxLength: MAX_RENDER_INPUT_CHARS,
+      description:
+        "The document body. Markdown when format is 'pdf' — headings, lists, tables, code and emphasis all render.",
+    },
+    title: {
+      type: "string",
+      maxLength: 200,
+      description: "Document title, used as the PDF's metadata title and its opening heading.",
+    },
+  },
+};
+
 const validateList = ajv.compile(LIST_SCHEMA);
 const validateRead = ajv.compile(READ_SCHEMA);
+const validateCreate = ajv.compile(CREATE_SCHEMA);
 
 function firstError(errors: typeof validateList.errors): string {
   const problem = errors?.[0];
@@ -210,11 +247,71 @@ export const fileReadTool = defineApiTool<FileToolContext>({
   },
 });
 
+export const fileCreateTool = defineApiTool<FileToolContext>({
+  name: "file_create",
+  description:
+    "Write a document the person can open, download and forward — not another chat message. " +
+    "Use this whenever you are asked for a report, a summary, an export or 'a PDF'. Write the " +
+    "body as Markdown and pick 'pdf' to have it rendered; pick 'markdown', 'text' or 'csv' to " +
+    "store exactly what you wrote. The File lands in the person's library and you get its id " +
+    "back — say what you made and what is in it, do not repeat the whole document in your reply.",
+  tier: "platform",
+  mutating: true,
+  inputSchema: CREATE_SCHEMA,
+  authorization: {
+    action: "file.create",
+    resources: ["platform.file"],
+    dataClasses: ["operational"],
+  },
+  handler: async (args, ctx) => {
+    if (!validateCreate(args)) return err("validation_error", firstError(validateCreate.errors));
+    const { filename, format, content, title } = args as {
+      filename: string;
+      format: RenderFormat;
+      content: string;
+      title?: string;
+    };
+
+    let file: FileRecord;
+    try {
+      file = await ctx.service.generate({
+        businessId: ctx.businessId,
+        filename,
+        format,
+        content,
+        ...(title === undefined ? {} : { title }),
+        readableBy: { kind: "user", id: ctx.principalId },
+      });
+    } catch (error) {
+      // A refused render is the Agent's to fix — it wrote something too long or too deep — so it
+      // comes back as a validation error it can act on rather than an internal one it cannot.
+      if (error instanceof RenderError) return err("validation_error", error.message);
+      if (error instanceof FileError) return err("oversize_value", error.message);
+      throw error;
+    }
+
+    return ok({
+      fileId: file.id,
+      filename: file.filename,
+      mediaType: file.mediaType,
+      sizeBytes: file.sizeBytes,
+      origin: file.origin,
+      createdAt: file.createdAt.toISOString(),
+    });
+  },
+});
+
 /**
  * The File Tools an Agent may hold.
  *
- * Read and list only. Sharing and deletion are absent by construction rather than by permission:
- * both change who can reach a File, and that decision stays with the person who owns it. A ratchet
- * in `apps/api/src/tools/contract-coverage.test.ts` keeps it that way.
+ * List, read and create. Sharing and deletion are absent by construction rather than by
+ * permission: both change who can reach a File that already exists, and that decision stays with
+ * the person who owns it. Creating is different — it makes a File nobody had a claim on yet, and
+ * the only person given a claim is the caller. A ratchet in
+ * `apps/api/src/tools/contract-coverage.test.ts` keeps it that way.
  */
-export const FILE_TOOLS: ApiToolDefinition<FileToolContext>[] = [fileListTool, fileReadTool];
+export const FILE_TOOLS: ApiToolDefinition<FileToolContext>[] = [
+  fileListTool,
+  fileReadTool,
+  fileCreateTool,
+];

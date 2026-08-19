@@ -194,6 +194,14 @@ export interface EvalCase {
    */
   readonly readable?: readonly CaseAttachment[];
   readonly tools?: readonly ExposedTool[];
+  /**
+   * Platform Tools exposed as the product actually declares them, named rather than copied.
+   *
+   * Use this for any Tool the product ships. A copy in `tools` measures the model against a
+   * description no deployment sends, and cannot assert the properties that live in the
+   * declaration itself.
+   */
+  readonly platformTools?: readonly string[];
   readonly toolResults?: readonly ScriptedToolResult[];
   /**
    * Model outputs replayed in order by the scripted binding.
@@ -242,4 +250,21 @@ export const LOOP_LIMITS = {
  */
 export function isJudged(a: Expectation): boolean {
   return a.kind === "rubric_score" || a.kind === "rubric_denies";
+}
+
+/**
+ * The File library this Case's Agent can reach with `file_read`, as the loop dependency.
+ *
+ * Stands in for the store the control plane would serve. Absent — not empty — when the Case
+ * declares no `readable` File, because an empty port would let the loop believe it asked and got
+ * nothing, which is the answer a Case asserting confinement is trying to distinguish.
+ */
+export function readableLibrary(evalCase: EvalCase): {
+  attachments?: { read: (runId: string, fileId: string) => Promise<Uint8Array | undefined> };
+} {
+  const library = new Map(
+    (evalCase.readable ?? []).map((file) => [file.fileId, synthesizeAttachment(file).data])
+  );
+  if (library.size === 0) return {};
+  return { attachments: { read: async (_runId, fileId) => library.get(fileId) } };
 }

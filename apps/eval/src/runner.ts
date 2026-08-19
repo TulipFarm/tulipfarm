@@ -11,7 +11,7 @@ import {
 import { splitPrompt } from "@tulipfarm/model-adapter";
 import { textContent } from "@tulipfarm/schema";
 import { autonomyBoundedDispatch, capabilityBoundedDispatch } from "./autonomy.ts";
-import { type EvalCase, LOOP_LIMITS, synthesizeAttachment } from "./case.ts";
+import { type EvalCase, LOOP_LIMITS, readableLibrary, synthesizeAttachment } from "./case.ts";
 import type { Corpus } from "./corpus.ts";
 import { toolDispatcher } from "./dispatch.ts";
 import { type EvalSoul, soulContext } from "./eval-soul.ts";
@@ -21,6 +21,7 @@ import type { Judge } from "./judge.ts";
 import { scoreJudged } from "./judged.ts";
 import { runPersistedTurn } from "./l3/tier.ts";
 import { measureNoise, type NoiseFloor } from "./noise.ts";
+import { exposedToolsFor } from "./platform-tools.ts";
 import type { SweepProgress } from "./progress.ts";
 import { guardUnexercised } from "./red-team.ts";
 import { measureResistance, type ResistanceRate } from "./resistance.ts";
@@ -381,13 +382,6 @@ async function runTrial(
     },
   };
 
-  // The File library this Case's Agent can reach with `file_read`, standing in for the store the
-  // control plane would serve. Absent leaves the loop unable to re-attach anything, which is what
-  // every Case that asserts confinement depends on.
-  const library = new Map(
-    (evalCase.readable ?? []).map((file) => [file.fileId, synthesizeAttachment(file).data])
-  );
-
   const loop = new AgentLoop({
     model,
     // Guards wrap the dispatcher exactly as `TurnDriver` wraps it, so a blocked Tool reaches the
@@ -397,9 +391,7 @@ async function runTrial(
     tools: guards.guard(
       capabilityBoundedDispatch(soul, evalCase, autonomyBoundedDispatch(soul, evalCase, tools.port))
     ),
-    ...(library.size === 0
-      ? {}
-      : { attachments: { read: async (_runId: string, fileId: string) => library.get(fileId) } }),
+    ...readableLibrary(evalCase),
     checkpoints: new InMemoryLoopCheckpointStore(),
     events: { append: async () => {} },
     budget: { consume: async () => ({ outcome: "allowed" }) },
@@ -429,7 +421,7 @@ async function runTrial(
       contextDigest: "sha256:eval",
       guardrailDigest: guards.digest,
       messages: [{ role: "system", content: textContent(systemPrompt) }, ...guarded.messages],
-      tools: evalCase.tools ?? [],
+      tools: exposedToolsFor(evalCase),
       limits: LOOP_LIMITS,
       ...(evalCase.attachments === undefined
         ? {}
