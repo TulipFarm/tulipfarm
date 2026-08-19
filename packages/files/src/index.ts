@@ -16,7 +16,6 @@ export {
   type ExtractionRefused,
   type ExtractionResult,
   extractText,
-  IMAGES_ARE_NOT_INDEXED,
   isExtractableMediaType,
   MAX_EXTRACTED_CHARS,
 } from "./extract";

@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  extractText,
-  IMAGES_ARE_NOT_INDEXED,
-  isExtractableMediaType,
-  MAX_EXTRACTED_CHARS,
-} from "./extract";
+import { extractText, isExtractableMediaType, MAX_EXTRACTED_CHARS } from "./extract";
 import { renderDocument } from "./render";
 
 const utf8 = (text: string): Uint8Array => new TextEncoder().encode(text);
@@ -97,7 +92,6 @@ describe("extractText", () => {
         reason: "image_not_extractable",
       });
     }
-    expect(IMAGES_ARE_NOT_INDEXED).toBe(true);
   });
 
   it("refuses a type it was never meant to read", async () => {

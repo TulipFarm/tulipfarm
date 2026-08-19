@@ -2,10 +2,10 @@ import { existsSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { repoDir } from "../repo-dir";
 import type { IntegrationManifest, Logger } from "../types";
 
 const IMAGE_INTEGRATIONS_DIR = "/app/integrations";
-const REPO_INTEGRATIONS_DIR = resolve(__dirname, "../../../../integrations");
 
 export interface BundledIntegration {
   manifest: IntegrationManifest;
@@ -22,7 +22,7 @@ export function bundledIntegrationsDir(): string {
   const override = process.env.BUNDLED_INTEGRATIONS_DIR?.trim();
   if (override) return resolve(override);
   if (existsSync(IMAGE_INTEGRATIONS_DIR)) return IMAGE_INTEGRATIONS_DIR;
-  return REPO_INTEGRATIONS_DIR;
+  return repoDir("integrations");
 }
 
 function isNotFound(error: unknown): boolean {

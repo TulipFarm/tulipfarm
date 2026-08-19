@@ -25,7 +25,13 @@ import { isTextualMediaType } from "./limits";
 export type ExtractionRefusal =
   /** Not a type this extracts from at all. */
   | "unsupported_media_type"
-  /** An image. Deliberately never indexed — see `IMAGES_ARE_NOT_INDEXED`. */
+  /**
+   * An image, always. Never OCR, and that is the decision rather than an omission: OCR would
+   * assert that whatever came back is the content of the picture, and an Agent citing invented
+   * text back to a source the person can see with their own eyes is a trust failure rather than a
+   * quality one. Images already reach the model intact through vision attachment, so the
+   * capability is not lost — it is served by the path that cannot be wrong about what it read.
+   */
   | "image_not_extractable"
   /** A PDF that parsed, but carries no text layer — a scan, or pages of pure artwork. */
   | "no_text_layer"
@@ -45,17 +51,6 @@ export interface ExtractionRefused {
 }
 
 export type ExtractionResult = ExtractedText | ExtractionRefused;
-
-/**
- * Images are not indexed, and this is the decision rather than an omission.
- *
- * Running OCR would mean asserting that whatever it returned is the content of the picture, and a
- * wrong assertion is worse here than no assertion: an Agent citing hallucinated text back to a
- * source the person can see is a trust failure, not a quality one. Images already reach the model
- * intact — vision attachment shows the model the picture itself — so the capability a person
- * actually wants is not lost, it is served by the path that cannot be wrong about what it read.
- */
-export const IMAGES_ARE_NOT_INDEXED = true;
 
 /**
  * The most text one File contributes.
