@@ -97,6 +97,20 @@ export interface FileRepo {
   ): Promise<void>;
   delete(businessId: string, id: string): Promise<boolean>;
   /**
+   * Which of `ids` this Principal may currently read, as owner or as a share recipient.
+   *
+   * The batched form of the same question `read` asks one File at a time. A transcript can name a
+   * dozen Files, and asking per attachment would make rendering an old Chat cost a query per
+   * image — so this exists to keep "is this File still there for me" affordable enough that every
+   * render can ask it rather than assuming.
+   */
+  readableIds(
+    businessId: string,
+    principalId: string,
+    grantees: readonly FileGrantee[],
+    ids: readonly string[]
+  ): Promise<readonly string[]>;
+  /**
    * Whether any File anywhere still points at these bytes.
    *
    * The blob store is content-addressed, so two uploads of identical bytes share one object. Any
@@ -180,6 +194,8 @@ export const FILE_SHARE_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS file_shares_grantee
      ON file_shares (business_id, grantee_kind, grantee_id)`,
 ];
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function toRecord(row: Record<string, unknown>): FileRecord {
   return {
@@ -299,6 +315,37 @@ export class PgFileRepo implements FileRepo {
       [businessId, id]
     );
     return result.rows.length > 0;
+  }
+
+  async readableIds(
+    businessId: string,
+    principalId: string,
+    grantees: readonly FileGrantee[],
+    ids: readonly string[]
+  ): Promise<readonly string[]> {
+    // A Message part's file id is free text on the wire, and `files.id` is a uuid: handing
+    // Postgres a malformed one raises rather than returning no rows, which would turn one corrupt
+    // transcript reference into a failed render of the entire Chat. An id that cannot name a File
+    // is simply not a readable one.
+    const candidates = ids.filter((id) => UUID.test(id));
+    if (candidates.length === 0) return [];
+    const result = await this.db.query(
+      `SELECT f.id FROM files f
+       WHERE f.business_id = $1
+         AND f.id = ANY($2::uuid[])
+         AND (
+           f.owner_principal_id = $3
+           OR EXISTS (
+             SELECT 1 FROM file_shares s
+             WHERE s.file_id = f.id
+               AND (s.grantee_kind, s.grantee_id) IN (
+                 SELECT * FROM unnest($4::text[], $5::text[])
+               )
+           )
+         )`,
+      [businessId, candidates, principalId, grantees.map((g) => g.kind), grantees.map((g) => g.id)]
+    );
+    return (result.rows as Array<Record<string, unknown>>).map((row) => String(row.id));
   }
 
   async share(

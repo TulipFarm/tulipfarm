@@ -4,7 +4,7 @@ import { MarkdownView } from "~/components/markdown-view";
 import { nextEffortPreset } from "~/lib/chat/effort-escalation";
 import type { ChatMessage, ChatStatus, ModelReceipt, TimelinePart } from "~/lib/chat/types";
 import { copyText } from "~/lib/clipboard";
-import { FileAttachment } from "./file-attachment";
+import { FileAttachment, RemovedAttachment } from "./file-attachment";
 import { MessagePartView } from "./parts";
 import { groupTimelineParts } from "./timeline-groups";
 import { ToolRun } from "./tool-call";
@@ -257,20 +257,26 @@ function AssistantActions({
 // User turn: a right-aligned bubble with a copy toolbar.
 function UserMessage({ message, mentions }: { message: ChatMessage; mentions?: MentionEntry[] }) {
   const text = messageText(message);
-  const files = message.parts.filter((part) => part.kind === "file");
+  const files = message.parts.filter(
+    (part) => part.kind === "file" || part.kind === "file-unavailable"
+  );
 
   return (
     <article aria-label="Your message" className="group flex flex-col items-end gap-1">
       {files.length > 0 ? (
         <div className="flex max-w-[90%] flex-wrap justify-end gap-2 sm:max-w-[78%]">
-          {files.map((file) => (
-            <FileAttachment
-              fileId={file.fileId}
-              key={file.fileId}
-              mediaType={file.mediaType}
-              name={file.name}
-            />
-          ))}
+          {files.map((file) =>
+            file.kind === "file-unavailable" ? (
+              <RemovedAttachment key={file.fileId} name={file.name} />
+            ) : (
+              <FileAttachment
+                fileId={file.fileId}
+                key={file.fileId}
+                mediaType={file.mediaType}
+                name={file.name}
+              />
+            )
+          )}
         </div>
       ) : null}
       {text.length > 0 ? (

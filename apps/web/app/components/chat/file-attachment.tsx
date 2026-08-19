@@ -1,4 +1,5 @@
 import { isInlineRenderable } from "@tulipfarm/files";
+import { FileX2, Paperclip } from "lucide-react";
 import { useEffect, useState } from "react";
 import { fetchFileObjectUrl } from "~/lib/files";
 
@@ -98,8 +99,29 @@ const CHIP =
 function PendingChip({ name }: { name: string }) {
   return (
     <span className={CHIP}>
-      <span aria-hidden="true">📎</span>
+      <Paperclip aria-hidden="true" className="size-3.5 shrink-0" />
       <span className="max-w-[16rem] truncate">{name}</span>
+    </span>
+  );
+}
+
+/**
+ * An attachment this reader can no longer open.
+ *
+ * Messages are immutable, so a File that was destroyed — or unshared — cannot be edited out of the
+ * transcript that named it. The reference has to stay and say what happened, because the failure
+ * mode this replaces is a broken image with no explanation. The name comes from the Message, which
+ * is why it can still be named at all.
+ *
+ * Deliberately says nothing about *why*. "Deleted" and "no longer shared with you" are the same
+ * fact to this reader, and telling them apart would say whether the File still exists.
+ */
+export function RemovedAttachment({ name }: { name: string }) {
+  return (
+    <span className={`${CHIP} text-muted-foreground`} title={`${name} is no longer available`}>
+      <FileX2 aria-hidden="true" className="size-3.5 shrink-0" />
+      <span className="max-w-[16rem] truncate line-through">{name}</span>
+      <span className="shrink-0">removed</span>
     </span>
   );
 }
@@ -134,7 +156,7 @@ function DownloadChip({ fileId, name }: { fileId: string; name: string }) {
       onClick={download}
       type="button"
     >
-      <span aria-hidden="true">📎</span>
+      <Paperclip aria-hidden="true" className="size-3.5 shrink-0" />
       <span className="max-w-[16rem] truncate">{name}</span>
     </button>
   );

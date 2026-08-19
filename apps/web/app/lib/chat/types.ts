@@ -162,6 +162,9 @@ export type ModelReceipt = {
 export type TimelinePart =
   | { kind: "text"; text: string }
   | { kind: "file"; fileId: string; mediaType: string; name: string }
+  /** An attachment this reader can no longer open. Named, because the Message still says what
+   *  it was even though the File it pointed at is gone. */
+  | { kind: "file-unavailable"; fileId: string; name: string }
   | {
       kind: "tool";
       toolCallId: string;

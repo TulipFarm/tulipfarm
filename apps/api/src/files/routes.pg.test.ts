@@ -356,6 +356,11 @@ describe("file routes", () => {
         "/api/v1/files/accepted-modalities",
       ])
     );
+    // Named individually: an undocumented destructive route is the one a caller most needs the
+    // schema for, and `arrayContaining` on the path alone would not notice it missing a verb.
+    expect(Object.keys(paths["/api/v1/files/{id}"])).toEqual(
+      expect.arrayContaining(["get", "delete"])
+    );
     expect(Object.keys(paths["/api/v1/files"].post as object)).toContain("responses");
     const post = paths["/api/v1/files"].post as { responses: Record<string, unknown> };
     expect(Object.keys(post.responses)).toEqual(
@@ -578,6 +583,111 @@ describe("file routes", () => {
       const ids = JSON.parse(response.body).files.map((f: { id: string }) => f.id);
       expect(ids).toEqual([theirs]);
       expect(ids).not.toContain(mine);
+    });
+  });
+  describe("deleting", () => {
+    async function ownedFile(filename = "shot.png"): Promise<string> {
+      return JSON.parse((await upload(h, h.ownerSid, PNG, { filename })).body).id as string;
+    }
+
+    async function destroy(sid: string, id: string) {
+      const { headers, cookies } = auth(sid);
+      return await h.app.inject({ method: "DELETE", url: `/api/v1/files/${id}`, cookies, headers });
+    }
+
+    it("removes the row and the bytes, and a second attempt reads as never having existed", async () => {
+      const id = await ownedFile();
+      const hash = createHash("sha256").update(PNG).digest("hex");
+
+      expect((await destroy(h.ownerSid, id)).statusCode).toBe(204);
+
+      expect(await h.blobs.head({ key: hash, hash })).toBeNull();
+      const after = await h.app.inject({
+        method: "GET",
+        url: `/api/v1/files/${id}`,
+        ...auth(h.ownerSid),
+      });
+      expect(after.statusCode).toBe(404);
+      expect((await destroy(h.ownerSid, id)).statusCode).toBe(404);
+    });
+
+    it("refuses a stranger, and refuses a recipient the File was shared with", async () => {
+      const id = await ownedFile();
+      const { headers, cookies } = auth(h.ownerSid);
+      await h.app.inject({
+        method: "POST",
+        url: `/api/v1/files/${id}/shares`,
+        cookies,
+        headers: { ...headers, "content-type": "application/json" },
+        payload: { kind: "user", id: h.strangerId },
+      });
+
+      expect((await destroy(h.strangerSid, id)).statusCode).toBe(404);
+
+      const still = await h.app.inject({
+        method: "GET",
+        url: `/api/v1/files/${id}`,
+        ...auth(h.strangerSid),
+      });
+      expect(still.statusCode).toBe(200);
+    });
+
+    it("takes the share rows with it, so no grant outlives the File", async () => {
+      const id = await ownedFile();
+      const { headers, cookies } = auth(h.ownerSid);
+      await h.app.inject({
+        method: "POST",
+        url: `/api/v1/files/${id}/shares`,
+        cookies,
+        headers: { ...headers, "content-type": "application/json" },
+        payload: { kind: "user", id: h.strangerId },
+      });
+
+      await destroy(h.ownerSid, id);
+
+      const rows = await h.database.query("SELECT 1 FROM file_shares WHERE file_id = $1", [id]);
+      expect(rows.rows).toHaveLength(0);
+    });
+
+    it("refuses an anonymous delete", async () => {
+      const id = await ownedFile();
+      const response = await h.app.inject({ method: "DELETE", url: `/api/v1/files/${id}` });
+      expect(response.statusCode).toBe(401);
+    });
+
+    // Deduplication and deletion are the same fact seen twice: identical bytes are one object, so
+    // destroying one File must never reach into another's.
+    it("leaves a byte-identical File owned by someone else readable", async () => {
+      const mine = await ownedFile();
+      const theirs = JSON.parse((await upload(h, h.strangerSid, PNG)).body).id as string;
+
+      expect((await destroy(h.ownerSid, mine)).statusCode).toBe(204);
+
+      const response = await h.app.inject({
+        method: "GET",
+        url: `/api/v1/files/${theirs}/content`,
+        ...auth(h.strangerSid),
+      });
+      expect(response.statusCode).toBe(200);
+      expect(Buffer.from(response.rawPayload).equals(PNG)).toBe(true);
+    });
+
+    it("drops a destroyed File out of the owner's library listing", async () => {
+      const kept = await ownedFile("kept.png");
+      const gone = JSON.parse(
+        (await upload(h, h.ownerSid, Buffer.from([...PNG, 9]), { filename: "gone.png" })).body
+      ).id as string;
+
+      await destroy(h.ownerSid, gone);
+
+      const page = await h.app.inject({
+        method: "GET",
+        url: "/api/v1/files",
+        ...auth(h.ownerSid),
+      });
+      const ids = page.json().files.map((file: { id: string }) => file.id);
+      expect(ids).toContain(kept);
+      expect(ids).not.toContain(gone);
     });
   });
 });

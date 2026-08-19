@@ -174,6 +174,8 @@ function userParts(content: ConversationMessage["content"]): TimelinePart[] {
         mediaType: part.mediaType,
         name: part.name,
       });
+    } else if (part.type === "file-unavailable") {
+      parts.push({ kind: "file-unavailable", fileId: part.fileId, name: part.name });
     }
   }
   return parts.length > 0 ? parts : [{ kind: "text", text: "" }];

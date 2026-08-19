@@ -244,6 +244,18 @@ export async function unshareFile(fileId: string, grantee: FileGrantee): Promise
   if (!response.ok) throw new UploadFailed(response.status, "That share could not be revoked.");
 }
 
+/**
+ * Destroys a File permanently. There is nothing to undo this with, on either side of the wire.
+ */
+export async function deleteFile(fileId: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/api/v1/files/${encodeURIComponent(fileId)}`, {
+    method: "DELETE",
+    credentials: "include",
+    headers: readHeaders(),
+  });
+  if (!response.ok) throw new UploadFailed(response.status, "That file could not be deleted.");
+}
+
 /** `mutationHeaders` without `Content-Type`, which a GET has no body to describe. */
 function readHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};

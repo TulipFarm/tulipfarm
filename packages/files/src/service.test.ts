@@ -115,7 +115,31 @@ class MemoryFileRepo implements FileRepo {
     const index = this.rows.findIndex((r) => r.businessId === businessId && r.id === id);
     if (index === -1) return false;
     this.rows.splice(index, 1);
+    // Mirrors `file_shares.file_id ... ON DELETE CASCADE`. A memory repo that kept the shares
+    // would be a repo in which revocation-by-deletion appears to work and does not.
+    for (let i = this.shares.length - 1; i >= 0; i--) {
+      if (this.shares[i]?.fileId === id) this.shares.splice(i, 1);
+    }
     return true;
+  }
+
+  async readableIds(
+    businessId: string,
+    principalId: string,
+    grantees: readonly FileGrantee[],
+    ids: readonly string[]
+  ): Promise<readonly string[]> {
+    return this.rows
+      .filter(
+        (r) =>
+          r.businessId === businessId &&
+          ids.includes(r.id) &&
+          (r.ownerPrincipalId === principalId ||
+            this.shares.some(
+              (s) => s.fileId === r.id && grantees.some((g) => g.kind === s.kind && g.id === s.id)
+            ))
+      )
+      .map((r) => r.id);
   }
 
   async anyReferencesBlob(hash: string): Promise<boolean> {
@@ -669,5 +693,224 @@ describe("sharing a File", () => {
     await expect(withoutRoles.read(BUSINESS, file.id, STRANGER)).rejects.toMatchObject({
       reason: "not_found",
     });
+  });
+});
+
+describe("deleting a File", () => {
+  const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+  let root: string;
+  let blobs: FileSystemBlobPort;
+  let repo: MemoryFileRepo;
+  let service: FileService;
+  let roles: Map<string, string[]>;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "tulip-files-delete-"));
+    blobs = new FileSystemBlobPort(root);
+    repo = new MemoryFileRepo();
+    roles = new Map();
+    service = new FileService({
+      repo,
+      blobs,
+      newId: () => randomUUID(),
+      rolesOf: async (_business, principalId) => roles.get(principalId) ?? [],
+    });
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  async function uploaded(owner = OWNER, filename = "shot.png") {
+    return await service.upload({
+      businessId: BUSINESS,
+      ownerPrincipalId: owner,
+      filename,
+      claimedMediaType: "image/png",
+      declaredBytes: PNG_BYTES.byteLength,
+      body: (async function* () {
+        yield PNG_BYTES;
+      })(),
+    });
+  }
+
+  it("removes the row and the bytes together", async () => {
+    const file = await uploaded();
+    expect((await blobs.head(file.blob)) !== null).toBe(true);
+
+    await service.delete(BUSINESS, file.id, OWNER);
+
+    expect(await repo.get(BUSINESS, file.id)).toBeNull();
+    expect((await blobs.head(file.blob)) !== null).toBe(false);
+  });
+
+  it("hands back what was destroyed, so the deletion can be audited", async () => {
+    const file = await uploaded(OWNER, "invoice.png");
+
+    const destroyed = await service.delete(BUSINESS, file.id, OWNER);
+
+    expect(destroyed.filename).toBe("invoice.png");
+    expect(destroyed.sizeBytes).toBe(PNG_BYTES.byteLength);
+    expect(destroyed.blob.hash).toBe(file.blob.hash);
+  });
+
+  it("refuses a stranger, and leaves the File intact", async () => {
+    const file = await uploaded();
+
+    await expect(service.delete(BUSINESS, file.id, STRANGER)).rejects.toMatchObject({
+      reason: "not_found",
+    });
+    expect(await repo.get(BUSINESS, file.id)).not.toBeNull();
+  });
+
+  it("refuses someone the File was shared with", async () => {
+    const file = await uploaded();
+    await service.share(BUSINESS, file.id, OWNER, { kind: "user", id: STRANGER });
+    expect((await service.read(BUSINESS, file.id, STRANGER)).id).toBe(file.id);
+
+    await expect(service.delete(BUSINESS, file.id, STRANGER)).rejects.toMatchObject({
+      reason: "not_found",
+    });
+    expect((await blobs.head(file.blob)) !== null).toBe(true);
+  });
+
+  it("takes every share with it, so a recipient loses access immediately", async () => {
+    const file = await uploaded();
+    await service.share(BUSINESS, file.id, OWNER, { kind: "user", id: STRANGER });
+
+    await service.delete(BUSINESS, file.id, OWNER);
+
+    await expect(service.read(BUSINESS, file.id, STRANGER)).rejects.toMatchObject({
+      reason: "not_found",
+    });
+    expect(await repo.listShares(BUSINESS, file.id)).toHaveLength(0);
+  });
+
+  it("keeps the bytes of a byte-identical File someone else still owns", async () => {
+    const mine = await uploaded(OWNER);
+    const theirs = await uploaded(STRANGER);
+    expect(theirs.blob.hash).toBe(mine.blob.hash);
+
+    await service.delete(BUSINESS, mine.id, OWNER);
+
+    expect((await blobs.head(theirs.blob)) !== null).toBe(true);
+    expect((await service.read(BUSINESS, theirs.id, STRANGER)).id).toBe(theirs.id);
+  });
+
+  it("is idempotent enough to refuse a second attempt rather than delete twice", async () => {
+    const file = await uploaded();
+    await service.delete(BUSINESS, file.id, OWNER);
+
+    await expect(service.delete(BUSINESS, file.id, OWNER)).rejects.toMatchObject({
+      reason: "not_found",
+    });
+  });
+
+  it("raises when the bytes cannot be erased, rather than reporting a silent success", async () => {
+    const file = await uploaded();
+    const failing = new FileService({
+      repo,
+      blobs: {
+        put: (body, type) => blobs.put(body, type),
+        get: (ref, range) => blobs.get(ref, range),
+        head: (ref) => blobs.head(ref),
+        delete: async () => {
+          throw new Error("bucket said no");
+        },
+      },
+      newId: () => randomUUID(),
+    });
+
+    await expect(failing.delete(BUSINESS, file.id, OWNER)).rejects.toThrow("bucket said no");
+  });
+});
+
+describe("FileService.presentFor", () => {
+  const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+  let root: string;
+  let repo: MemoryFileRepo;
+  let service: FileService;
+  let roles: Map<string, string[]>;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "tulip-files-present-"));
+    repo = new MemoryFileRepo();
+    roles = new Map();
+    service = new FileService({
+      repo,
+      blobs: new FileSystemBlobPort(root),
+      newId: () => randomUUID(),
+      rolesOf: async (_business, principalId) => roles.get(principalId) ?? [],
+    });
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  async function uploaded(owner = OWNER) {
+    return await service.upload({
+      businessId: BUSINESS,
+      ownerPrincipalId: owner,
+      filename: "shot.png",
+      claimedMediaType: "image/png",
+      declaredBytes: PNG_BYTES.byteLength,
+      body: (async function* () {
+        yield PNG_BYTES;
+      })(),
+    });
+  }
+
+  it("reports the caller's own Files as present and a destroyed one as absent", async () => {
+    const kept = await uploaded();
+    const gone = await uploaded();
+    await service.delete(BUSINESS, gone.id, OWNER);
+
+    const present = await service.presentFor(BUSINESS, OWNER, [kept.id, gone.id]);
+
+    expect(present.has(kept.id)).toBe(true);
+    expect(present.has(gone.id)).toBe(false);
+  });
+
+  it("reports a File that exists but is not shared with the caller as absent", async () => {
+    const file = await uploaded();
+
+    expect((await service.presentFor(BUSINESS, STRANGER, [file.id])).has(file.id)).toBe(false);
+
+    await service.share(BUSINESS, file.id, OWNER, { kind: "user", id: STRANGER });
+
+    expect((await service.presentFor(BUSINESS, STRANGER, [file.id])).has(file.id)).toBe(true);
+  });
+
+  it("honours a Role share, so a transcript matches what the reader may open", async () => {
+    const file = await uploaded();
+    roles.set(STRANGER, ["role-support"]);
+    await service.share(BUSINESS, file.id, OWNER, { kind: "role", id: "role-support" });
+
+    expect((await service.presentFor(BUSINESS, STRANGER, [file.id])).has(file.id)).toBe(true);
+
+    roles.set(STRANGER, []);
+
+    expect((await service.presentFor(BUSINESS, STRANGER, [file.id])).has(file.id)).toBe(false);
+  });
+
+  it("asks nothing at all for an empty list", async () => {
+    let asked = 0;
+    const counting = new FileService({
+      repo: {
+        ...repo,
+        readableIds: async (
+          ...args: Parameters<MemoryFileRepo["readableIds"]>
+        ): Promise<readonly string[]> => {
+          asked += 1;
+          return await repo.readableIds(...args);
+        },
+      } as unknown as MemoryFileRepo,
+      blobs: new FileSystemBlobPort(root),
+      newId: () => randomUUID(),
+    });
+
+    expect((await counting.presentFor(BUSINESS, OWNER, [])).size).toBe(0);
+    expect(asked).toBe(0);
   });
 });

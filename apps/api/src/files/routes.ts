@@ -32,6 +32,7 @@ import {
   serializeShare,
 } from "@tulipfarm/files";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { AuditRecordInput } from "../audit/service";
 import { ErrorSchema } from "../auth/schemas";
 import type { RequireAuthorization } from "../authz/route-gate";
 import type { RequestPrincipal } from "../identity/principal";
@@ -40,6 +41,11 @@ type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
 export interface FileRoutesDeps {
   readonly files: FileService;
+  /**
+   * Where a destruction is recorded. Optional only because a deployment can run without an audit
+   * chain at all; when one exists, a File that stops existing has to leave evidence behind it.
+   */
+  readonly audit?: { recordOrWarn(input: AuditRecordInput): Promise<void> };
   /**
    * The input modalities some configured model accepts, so the composer can refuse a file before
    * someone writes a prompt around it. A function because the Soul is reloadable.
@@ -349,6 +355,48 @@ export function registerFileRoutes(
         await deps.files.unshare(DEPLOYMENT_BUSINESS_ID, id, principal.id, {
           kind,
           id: granteeId,
+        });
+        reply.code(204).send();
+      } catch (error) {
+        reject(reply, error);
+      }
+    }
+  );
+
+  app.delete(
+    "/api/v1/files/:id",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "Destroys one File: the row, every share of it, and the bytes. Permanent and " +
+          "unrecoverable — there is no soft delete and no object versioning behind it. Only the " +
+          "owner may; a File shared with the caller answers exactly as one that does not exist.",
+        tags: ["files"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+        response: { 204: { type: "null" }, 401: ErrorSchema, 404: ErrorSchema },
+      },
+    },
+    async (req, reply) => {
+      const principal = req.principal as RequestPrincipal;
+      const { id } = req.params as { id: string };
+      try {
+        const destroyed = await deps.files.delete(DEPLOYMENT_BUSINESS_ID, id, principal.id);
+        // Recorded from the returned record rather than the id alone. The chain is sealed and
+        // cannot be rewritten later, and by the time anyone reads this event there is nothing
+        // left to look the id up against — so what the File *was* has to be captured here.
+        await deps.audit?.recordOrWarn({
+          actorId: principal.id,
+          action: "file.deleted",
+          target: `file:${id}`,
+          safeMetadata: {
+            filename: destroyed.filename,
+            mediaType: destroyed.mediaType,
+            sizeBytes: destroyed.sizeBytes,
+            blobHash: destroyed.blob.hash,
+            origin: destroyed.origin,
+          },
         });
         reply.code(204).send();
       } catch (error) {

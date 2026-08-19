@@ -69,6 +69,16 @@ export const MessageSchema = {
                   message: { const: "Legacy presentation unavailable" },
                 },
               },
+              {
+                type: "object",
+                additionalProperties: false,
+                required: ["type", "fileId", "name"],
+                properties: {
+                  type: { const: "file-unavailable" },
+                  fileId: { type: "string" },
+                  name: { type: "string" },
+                },
+              },
             ],
           },
         },

@@ -361,6 +361,63 @@ export class FileService {
     return { file, body };
   }
 
+  /**
+   * Destroys a File: the row, every share of it, and the bytes themselves.
+   *
+   * Permanent by design, and that is the whole point — an instruction to erase something can only
+   * be honoured truthfully if there is no copy left to produce later. There is no soft delete, no
+   * tombstone row and no object versioning behind it to undo this.
+   *
+   * Returns what was destroyed so the caller can audit it. A sealed audit chain cannot be
+   * rewritten, so an event naming only the vanished id would be evidence of nothing; the facts
+   * that outlive the object have to be captured at the moment it stops existing.
+   *
+   * Only the owner may. A recipient of a share explicitly may not — destroying someone else's
+   * File is a strictly larger power than reading it, and `read` now admits recipients.
+   */
+  async delete(businessId: string, id: string, ownerPrincipalId: string): Promise<FileRecord> {
+    const file = await this.readAsOwner(businessId, id, ownerPrincipalId);
+    // The row goes first, and the bytes only once nothing points at them. Reversing this would
+    // leave a window where a row promises bytes that are already gone — and the dedup check would
+    // answer "yes, this one still references them" if the row were still there.
+    // Shares die with the row: `file_shares.file_id` cascades, so a recipient loses access here
+    // rather than by a sweep that might not run.
+    const deleted = await this.deps.repo.delete(businessId, id);
+    if (deleted) await this.eraseBytes(file.blob);
+    return file;
+  }
+
+  /**
+   * Removes the object a destroyed File pointed at, unless another File still points at it.
+   *
+   * Unlike `discard`, a failure here is raised rather than swallowed. The row is already gone, so
+   * the library is truthful either way and there is nothing left to retry against — but the caller
+   * asked for erasure, and silence is precisely the failure mode that would let a misconfigured
+   * bucket quietly retain everything anyone ever asked to erase.
+   */
+  private async eraseBytes(ref: BlobRef): Promise<void> {
+    if (await this.deps.repo.anyReferencesBlob(ref.hash)) return;
+    await this.deps.blobs.delete(ref);
+  }
+
+  /**
+   * Which of `ids` this Principal can still read, for a caller rendering references it did not
+   * fetch — a transcript, most of all.
+   *
+   * "Still there" and "still mine to see" are deliberately one answer. A File whose share was
+   * revoked is as absent to this reader as one that was destroyed, and reporting them differently
+   * would hand back the existence oracle the identical 404 in `read` is there to deny.
+   */
+  async presentFor(
+    businessId: string,
+    principalId: string,
+    ids: readonly string[]
+  ): Promise<ReadonlySet<string>> {
+    if (ids.length === 0) return new Set();
+    const grantees = await this.granteesFor(businessId, principalId);
+    return new Set(await this.deps.repo.readableIds(businessId, principalId, grantees, ids));
+  }
+
   async list(
     businessId: string,
     principalId: string,

@@ -158,6 +158,20 @@ describe("messagesToTimeline and user attachments", () => {
     ]);
   });
 
+  it("keeps a removed attachment in the transcript instead of dropping the reference", () => {
+    const timeline = messagesToTimeline([
+      userMessage([
+        { type: "text", text: "what is this?" },
+        { type: "file-unavailable", fileId: "f1", name: "shot.png" },
+      ]),
+    ]);
+
+    expect(timeline[0]?.parts).toEqual([
+      { kind: "text", text: "what is this?" },
+      { kind: "file-unavailable", fileId: "f1", name: "shot.png" },
+    ]);
+  });
+
   it("still restores a plain text message, which is stored as a bare string", () => {
     const timeline = messagesToTimeline([userMessage("just words")]);
     expect(timeline[0]?.parts).toEqual([{ kind: "text", text: "just words" }]);

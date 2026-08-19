@@ -411,6 +411,7 @@ export async function buildApp(opts: AppOptions = {}) {
         app,
         {
           files: opts.fileService,
+          ...(opts.auditService === undefined ? {} : { audit: opts.auditService }),
           acceptedInputModalities: () =>
             acceptedInputModalities((opts.soulLoader?.llmConfig as LlmConfig | undefined) ?? {}),
         },
@@ -476,6 +477,7 @@ export async function buildApp(opts: AppOptions = {}) {
           bundledSkills: opts.bundledSkills,
           disabledBundledSkills: opts.disabledBundledSkills,
           githubStatus: opts.githubStatus,
+          ...(opts.fileService === undefined ? {} : { files: opts.fileService }),
         },
         requireAuth
       );

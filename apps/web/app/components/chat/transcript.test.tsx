@@ -555,3 +555,46 @@ describe("Transcript folds a long run of tool calls", () => {
     expect(screen.getByText("tool_failed")).toBeInTheDocument();
   });
 });
+
+describe("an attachment the reader can no longer open", () => {
+  const withParts = (parts: ChatState["messages"][number]["parts"]): ChatState => ({
+    ...initialChatState,
+    messages: [{ id: "m1", role: "user", parts, sealed: true }],
+  });
+
+  it("names what was removed instead of leaving a broken image", () => {
+    render(
+      <Transcript
+        messages={
+          withParts([
+            { kind: "text", text: "what is this?" },
+            { kind: "file-unavailable", fileId: "f1", name: "budget.pdf" },
+          ]).messages
+        }
+        status="idle"
+        onApprove={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("budget.pdf")).toBeInTheDocument();
+    expect(screen.getByText("removed")).toBeInTheDocument();
+  });
+
+  it("renders a removed attachment alongside one that is still there", () => {
+    render(
+      <Transcript
+        messages={
+          withParts([
+            { kind: "file", fileId: "f1", mediaType: "application/pdf", name: "here.pdf" },
+            { kind: "file-unavailable", fileId: "f2", name: "gone.pdf" },
+          ]).messages
+        }
+        status="idle"
+        onApprove={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Download here.pdf" })).toBeInTheDocument();
+    expect(screen.getByText("gone.pdf")).toBeInTheDocument();
+  });
+});

@@ -6,8 +6,9 @@ import { ShareDialog } from "~/components/files/file-share";
 import { ResourcePanel } from "~/components/resource-panel";
 import { ErrorState } from "~/components/states";
 import { Button } from "~/components/ui/button";
+import { ConfirmModal } from "~/components/ui/modal";
 import { ApiError, getSession } from "~/lib/api";
-import { fetchFiles, fetchSharedWithMe, type LibraryFile } from "~/lib/files";
+import { deleteFile, fetchFiles, fetchSharedWithMe, type LibraryFile } from "~/lib/files";
 
 export const meta: MetaFunction = () => [{ title: "Files · Knowledge · tulipfarm" }];
 
@@ -34,6 +35,8 @@ export default function FilesIndex() {
   const [error, setError] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState<LibraryFile | null>(null);
   const [sharing, setSharing] = useState<LibraryFile | null>(null);
+  const [deleting, setDeleting] = useState<LibraryFile | null>(null);
+  const [destroying, setDestroying] = useState(false);
   const [tab, setTab] = useState<TabId>("yours");
   const tabRefs = useRef<Partial<Record<TabId, HTMLButtonElement>>>({});
   // Switching tabs twice in quick succession leaves two requests in flight. Without this, whichever
@@ -83,6 +86,23 @@ export default function FilesIndex() {
       setError(err instanceof Error ? err.message : "Those files could not be loaded.");
     } finally {
       if (request.current === ticket) setLoading(false);
+    }
+  }
+
+  async function confirmDelete() {
+    if (!deleting) return;
+    setDestroying(true);
+    setError(null);
+    try {
+      await deleteFile(deleting.id);
+      // Dropped from the list rather than refetched: a refetch would re-page from the top and lose
+      // however far the person had already scrolled to find the File they just destroyed.
+      setFiles((prev) => prev.filter((file) => file.id !== deleting.id));
+      setDeleting(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "That file could not be deleted.");
+    } finally {
+      setDestroying(false);
     }
   }
 
@@ -149,6 +169,7 @@ export default function FilesIndex() {
             onPreview={setPreviewing}
             onAttach={(file) => navigate(`/?attach=${encodeURIComponent(file.id)}`)}
             onShare={setSharing}
+            onDelete={setDeleting}
           />
           {cursor ? (
             <div>
@@ -162,6 +183,15 @@ export default function FilesIndex() {
 
       <FilePreview file={previewing} onClose={() => setPreviewing(null)} />
       <ShareDialog file={sharing} onClose={() => setSharing(null)} />
+      <ConfirmModal
+        open={deleting !== null}
+        onClose={() => setDeleting(null)}
+        onConfirm={() => void confirmDelete()}
+        title={`Delete ${deleting?.filename ?? "this file"}?`}
+        description="The file and its contents are erased for good. Anyone it was shared with loses it too, and any chat that used it will show the attachment as removed. This cannot be undone."
+        confirmLabel="Delete for good"
+        busy={destroying}
+      />
     </ResourcePanel>
   );
 }

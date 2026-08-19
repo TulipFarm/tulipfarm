@@ -247,6 +247,16 @@ import { describe, expect, it } from "vitest";
  * the rest of the wire shape already lives — whether a share count is omitted or sent as zero is a
  * fact about what an owner may know, not about Fastify.
  *
+ * Raised again, 50_160 -> 50_280, for destroying a File. Two things live here and belong here.
+ * One route, `DELETE /api/v1/files/:id`, which reads a param, calls one method, and records the
+ * audit event — the durable facts about a File that no longer exists have to be captured at the
+ * moment the object stops existing, and the audit writer is an apps/api concern. And the
+ * substitution that lets an old Chat render a destroyed attachment as removed rather than as a
+ * broken image: `referencedFileIds` and `withUnavailableFiles` in `chat/messages.ts`, which are
+ * pure functions over `MessageDoc` — a shape apps/api owns, so moving them would move the type and
+ * buy nothing. Who may delete, what deletion does to shares, and whether the bytes may go are all
+ * decided in `FileService`.
+ *
  * Line count is a crude proxy for ownership, deliberately. A precise measure would need to model
  * what each domain ought to own, which is the argument the refactor itself has to settle; a crude
  * measure that cannot be gamed without noticing is worth more here than a subtle one.

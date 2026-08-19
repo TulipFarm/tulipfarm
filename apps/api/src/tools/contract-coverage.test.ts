@@ -484,6 +484,24 @@ describe("tool contract coverage", () => {
     expect(firstPartyCallers.map((tool) => tool.name)).toEqual([]);
   });
 
+  // Same argument as sharing, one step further: destruction is irreversible and there is no
+  // versioning behind it. An Agent that could delete a File on instruction would turn a crafted
+  // attachment into a way to destroy the very evidence of it. Deletion stays a person's act.
+  it("gives no Tool any way to delete a File", () => {
+    const reachesDeletion = tools.filter((tool) => {
+      const authorization = tool.definition?.authorization;
+      const surface = [
+        tool.name,
+        authorization?.action ?? "",
+        ...(authorization?.resources ?? []),
+      ].join(" ");
+      return /\bfile[._-]?(delete|destroy|erase|remove)|(delete|destroy|erase|remove)[._-]?file/i.test(
+        surface
+      );
+    });
+    expect(reachesDeletion.map((tool) => tool.name)).toEqual([]);
+  });
+
   it("keeps every declared resource inside the two-level grammar", () => {
     const offenders = tools.flatMap((tool) =>
       (tool.definition?.authorization.resources ?? [])

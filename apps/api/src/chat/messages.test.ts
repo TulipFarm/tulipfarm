@@ -9,7 +9,9 @@ import {
   InvalidMessageError,
   type MessageDoc,
   type MessagePart,
+  referencedFileIds,
   toModelMessage,
+  withUnavailableFiles,
 } from "./messages";
 
 describe("assertValidMessage — legal cases", () => {
@@ -269,5 +271,79 @@ describe("fromAssistantParts / fromToolResult", () => {
         },
       ],
     });
+  });
+});
+
+describe("attachments a reader can no longer open", () => {
+  function userWithFiles(...files: Array<{ fileId: string; name: string }>): MessageDoc {
+    return {
+      _id: "m1",
+      conversationId: "c1",
+      role: "user",
+      content: [
+        { type: "text", text: "have a look" },
+        ...files.map((file) => ({
+          type: "file" as const,
+          fileId: file.fileId,
+          mediaType: "image/png",
+          name: file.name,
+        })),
+      ],
+      createdAt: new Date(),
+    };
+  }
+
+  it("collects every referenced File once, and nothing from a text-only Chat", () => {
+    const docs = [
+      userWithFiles({ fileId: "a", name: "one.png" }, { fileId: "a", name: "one.png" }),
+      userWithFiles({ fileId: "b", name: "two.png" }),
+      { ...userWithFiles(), content: "just words" } as MessageDoc,
+    ];
+
+    expect(referencedFileIds(docs).sort()).toEqual(["a", "b"]);
+  });
+
+  it("substitutes a removed attachment while keeping the name the Message recorded", () => {
+    const [rewritten] = withUnavailableFiles(
+      [userWithFiles({ fileId: "a", name: "budget.pdf" })],
+      new Set()
+    );
+
+    expect(rewritten?.content).toEqual([
+      { type: "text", text: "have a look" },
+      { type: "file-unavailable", fileId: "a", name: "budget.pdf" },
+    ]);
+  });
+
+  it("leaves an attachment the reader can still open exactly as it was", () => {
+    const doc = userWithFiles({ fileId: "a", name: "one.png" });
+
+    const [rewritten] = withUnavailableFiles([doc], new Set(["a"]));
+
+    expect(rewritten).toBe(doc);
+  });
+
+  it("rewrites only the missing attachment of a Message that carries both", () => {
+    const doc = userWithFiles({ fileId: "a", name: "here.png" }, { fileId: "b", name: "gone.png" });
+
+    const [rewritten] = withUnavailableFiles([doc], new Set(["a"]));
+
+    expect(rewritten?.content).toEqual([
+      { type: "text", text: "have a look" },
+      { type: "file", fileId: "a", mediaType: "image/png", name: "here.png" },
+      { type: "file-unavailable", fileId: "b", name: "gone.png" },
+    ]);
+  });
+
+  it("leaves a text-only Message alone rather than trying to walk it", () => {
+    const doc: MessageDoc = {
+      _id: "m2",
+      conversationId: "c1",
+      role: "user",
+      content: "no attachments here",
+      createdAt: new Date(),
+    };
+
+    expect(withUnavailableFiles([doc], new Set())[0]).toBe(doc);
   });
 });

@@ -7,12 +7,14 @@ import FilesIndex from "./_app.knowledge.files";
 
 const fetchFiles = vi.fn<() => Promise<FilePage>>();
 const fetchSharedWithMe = vi.fn<() => Promise<FilePage>>();
+const deleteFile = vi.fn<(id: string) => Promise<void>>();
 
 vi.mock("~/lib/files", async (importOriginal) => ({
   ...(await importOriginal<typeof import("~/lib/files")>()),
   fetchFiles: (...args: unknown[]) => fetchFiles(...(args as [])),
   fetchSharedWithMe: (...args: unknown[]) => fetchSharedWithMe(...(args as [])),
   fetchFileObjectUrl: vi.fn(),
+  deleteFile: (...args: unknown[]) => deleteFile(...(args as [string])),
 }));
 
 function file(id: string, filename: string, owner = "user_1"): LibraryFile {
@@ -48,6 +50,7 @@ describe("Files library", () => {
       files: [file("b", "theirs.pdf", "user_2")],
       nextCursor: null,
     });
+    deleteFile.mockResolvedValue(undefined);
   });
 
   it("swaps to Files shared with the viewer, and says so when there are none", async () => {
@@ -85,6 +88,58 @@ describe("Files library", () => {
       expect(screen.getByRole("tab", { name: "Yours" })).toHaveAttribute("aria-selected", "true")
     );
     expect(screen.queryByText("theirs.pdf")).toBeNull();
+    expect(screen.getByText("yours.pdf")).toBeInTheDocument();
+  });
+
+  it("warns that a delete is permanent before it does anything", async () => {
+    const user = userEvent.setup();
+    renderRoute({ files: [file("a", "yours.pdf")] });
+    await screen.findByText("yours.pdf");
+
+    await user.click(screen.getByRole("button", { name: "Delete yours.pdf" }));
+
+    expect(await screen.findByText(/cannot be undone/i)).toBeInTheDocument();
+    expect(screen.getByText(/erased for good/i)).toBeInTheDocument();
+    expect(deleteFile).not.toHaveBeenCalled();
+  });
+
+  it("leaves the File alone when the warning is dismissed", async () => {
+    const user = userEvent.setup();
+    renderRoute({ files: [file("a", "yours.pdf")] });
+    await screen.findByText("yours.pdf");
+
+    await user.click(screen.getByRole("button", { name: "Delete yours.pdf" }));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(deleteFile).not.toHaveBeenCalled();
+    expect(screen.getByText("yours.pdf")).toBeInTheDocument();
+  });
+
+  it("drops the row once the delete lands, without re-paging from the top", async () => {
+    const user = userEvent.setup();
+    renderRoute({ files: [file("a", "yours.pdf"), file("b", "kept.pdf")] });
+    await screen.findByText("yours.pdf");
+    fetchFiles.mockClear();
+
+    await user.click(screen.getByRole("button", { name: "Delete yours.pdf" }));
+    await user.click(screen.getByRole("button", { name: "Delete for good" }));
+
+    await waitFor(() => expect(screen.queryByText("yours.pdf")).toBeNull());
+    expect(deleteFile).toHaveBeenCalledWith("a");
+    expect(screen.getByText("kept.pdf")).toBeInTheDocument();
+    expect(fetchFiles).not.toHaveBeenCalled();
+  });
+
+  it("keeps the File on screen and says so when the delete is refused", async () => {
+    const user = userEvent.setup();
+    deleteFile.mockRejectedValue(new Error("That file could not be deleted."));
+    renderRoute({ files: [file("a", "yours.pdf")] });
+    await screen.findByText("yours.pdf");
+
+    await user.click(screen.getByRole("button", { name: "Delete yours.pdf" }));
+    await user.click(screen.getByRole("button", { name: "Delete for good" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("That file could not be deleted.");
     expect(screen.getByText("yours.pdf")).toBeInTheDocument();
   });
 });

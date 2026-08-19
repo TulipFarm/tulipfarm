@@ -27,7 +27,8 @@ function libraryFile(overrides: Partial<LibraryFile> = {}): LibraryFile {
 function renderList(
   files: readonly LibraryFile[],
   onAttach?: (f: LibraryFile) => void,
-  onShare?: (f: LibraryFile) => void
+  onShare?: (f: LibraryFile) => void,
+  onDelete?: (f: LibraryFile) => void
 ) {
   const Stub = createRemixStub([
     {
@@ -39,6 +40,7 @@ function renderList(
           onPreview={() => {}}
           {...(onAttach ? { onAttach } : {})}
           {...(onShare ? { onShare } : {})}
+          {...(onDelete ? { onDelete } : {})}
         />
       ),
     },
@@ -130,5 +132,31 @@ describe("a download that fails", () => {
     screen.getByRole("button", { name: "Download report.pdf" }).click();
 
     expect(await screen.findByRole("alert")).toHaveProperty("textContent", "Download failed");
+  });
+});
+
+describe("deleting from the library", () => {
+  it("offers Delete on a File you own and never on one shared with you", () => {
+    renderList(
+      [
+        libraryFile({ id: "mine", filename: "mine.pdf", owner: "user_1" }),
+        libraryFile({ id: "theirs", filename: "theirs.pdf", owner: "user_2" }),
+      ],
+      undefined,
+      undefined,
+      () => {}
+    );
+
+    expect(screen.getByRole("button", { name: "Delete mine.pdf" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Delete theirs.pdf" })).toBeNull();
+  });
+
+  it("asks the caller to confirm rather than destroying on the click itself", () => {
+    const onDelete = vi.fn();
+    renderList([libraryFile({ filename: "report.pdf" })], undefined, undefined, onDelete);
+
+    screen.getByRole("button", { name: "Delete report.pdf" }).click();
+
+    expect(onDelete).toHaveBeenCalledWith(expect.objectContaining({ id: "file_1" }));
   });
 });

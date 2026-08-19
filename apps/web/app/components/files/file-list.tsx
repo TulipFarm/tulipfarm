@@ -7,6 +7,7 @@ import {
   MessageSquare,
   Paperclip,
   Share2,
+  Trash2,
   Upload,
 } from "lucide-react";
 import { useState } from "react";
@@ -28,12 +29,14 @@ export function FileList({
   onPreview,
   onAttach,
   onShare,
+  onDelete,
 }: {
   files: readonly LibraryFile[];
   viewerId: string;
   onPreview: (file: LibraryFile) => void;
   onAttach?: (file: LibraryFile) => void;
   onShare?: (file: LibraryFile) => void;
+  onDelete?: (file: LibraryFile) => void;
 }) {
   return (
     <ul className="flex flex-col divide-y divide-border rounded-sm border border-border">
@@ -45,6 +48,7 @@ export function FileList({
             onPreview={onPreview}
             onAttach={onAttach}
             onShare={onShare}
+            onDelete={onDelete}
           />
         </li>
       ))}
@@ -58,15 +62,17 @@ function FileRow({
   onPreview,
   onAttach,
   onShare,
+  onDelete,
 }: {
   file: LibraryFile;
   viewerId: string;
   onPreview: (file: LibraryFile) => void;
   onAttach?: (file: LibraryFile) => void;
   onShare?: (file: LibraryFile) => void;
+  onDelete?: (file: LibraryFile) => void;
 }) {
-  // Only an owner may share, and the server enforces that. Showing the control to a recipient
-  // anyway would offer a power the product does not grant, which is worse than not offering it.
+  // Only an owner may share or delete, and the server enforces that. Showing either control to a
+  // recipient would offer a power the product does not grant, which is worse than not offering it.
   const owned = file.owner === viewerId;
   const isImage = file.mediaType.startsWith("image/");
   const Icon = isImage ? ImageIcon : FileText;
@@ -144,6 +150,18 @@ function FileRow({
           </Button>
         ) : null}
         <DownloadButton file={file} />
+        {onDelete && owned ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onDelete(file)}
+            aria-label={`Delete ${file.filename}`}
+            className="text-destructive hover:text-destructive"
+          >
+            <Trash2 className="size-3.5" aria-hidden />
+            Delete
+          </Button>
+        ) : null}
       </div>
     </div>
   );

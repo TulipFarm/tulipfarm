@@ -9,7 +9,52 @@ export type MessagePart =
   | { type: "tool-call"; toolCallId: string; toolName: string; args: unknown }
   | { type: "tool-result"; toolCallId: string; toolName: string; result: unknown }
   | { type: "surface"; artifactId: string; revision: number }
-  | { type: "surface-unavailable"; message: "Legacy presentation unavailable" };
+  | { type: "surface-unavailable"; message: "Legacy presentation unavailable" }
+  | { type: "file"; fileId: string; mediaType: string; name: string }
+  /**
+   * An attachment the reader can no longer open, substituted for the `file` part on the way out.
+   *
+   * Never persisted. Messages are immutable, so a File that is destroyed cannot be edited out of
+   * the transcript that named it — the reference has to survive and read as removed. It carries
+   * the name from the Message rather than from the File, which is the only reason a destroyed
+   * attachment can still say what it was.
+   */
+  | { type: "file-unavailable"; fileId: string; name: string };
+
+/**
+ * Rewrites the attachments a reader can no longer open, leaving every other part alone.
+ *
+ * `present` is the set of File ids the reader may currently read. Absent covers both destroyed and
+ * un-shared on purpose: telling those two apart on a transcript would hand back the existence
+ * oracle that the identical 404 on the Files routes exists to deny.
+ */
+export function withUnavailableFiles(
+  docs: readonly MessageDoc[],
+  present: ReadonlySet<string>
+): MessageDoc[] {
+  return docs.map((doc) => {
+    if (typeof doc.content === "string") return doc;
+    if (!doc.content.some((part) => part.type === "file" && !present.has(part.fileId))) return doc;
+    return {
+      ...doc,
+      content: doc.content.map((part) =>
+        part.type === "file" && !present.has(part.fileId)
+          ? ({ type: "file-unavailable", fileId: part.fileId, name: part.name } as const)
+          : part
+      ),
+    };
+  });
+}
+
+/** Every File a page of Messages refers to, deduplicated. */
+export function referencedFileIds(docs: readonly MessageDoc[]): string[] {
+  const ids = new Set<string>();
+  for (const doc of docs) {
+    if (typeof doc.content === "string") continue;
+    for (const part of doc.content) if (part.type === "file") ids.add(part.fileId);
+  }
+  return [...ids];
+}
 
 export type MessageRole = "system" | "user" | "assistant" | "tool" | "summary";
 
