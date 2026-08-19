@@ -27,6 +27,8 @@ multi-business deployments can use `SOUL_ROOT`, which resolves to `<root>/<busin
 | --- | --- | --- | --- |
 | `PORT` | No | `4010` from source, `8080` in the production image | API listen port. |
 | `PUBLIC_URL` | No | API falls back to `http://localhost:4000` for link generation and CORS | Public origin users reach. Drives CORS fallback, cookie secure behavior, and channel-link URLs. |
+| `PUBLIC_API_URL` | No | `PUBLIC_URL` in Docker Compose; otherwise `http://localhost:${PORT ?? 4010}` | Public API origin used for integration OAuth callbacks and webhooks. Set it separately only when the API has a different public origin. |
+| `PUBLIC_ORIGINS_LOCKED` | No | `false` | Set `true` to make the environment origins authoritative and disable changes from Business → About. Otherwise saved in-app values override the environment fallbacks. |
 | `CORS_ORIGIN` | No | `PUBLIC_URL`, then `http://localhost:${VITE_PORT ?? 4000}` | Browser origin allowed to call the API with credentials. |
 | `VITE_PORT` | No | `4000` | Remix web dev-server port and API CORS fallback. |
 | `VITE_API_URL` | No | `http://localhost:4010` | Browser API base URL for the web app. |

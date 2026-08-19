@@ -16,15 +16,15 @@ Slack account to a TulipFarm user.
 
 <Steps>
   <Step>
-    Open **Integrations → slack** and open its setup guide.
+    Open **Business → About** and confirm **Public address** is the HTTPS address you use to open
+    TulipFarm. Copy the OAuth callback shown there if you plan to create the Slack app manually.
   </Step>
   <Step>
-    In Slack, go to `https://api.slack.com/apps`, choose **Create New App → From a
-    manifest**, paste the manifest from TulipFarm, pick your workspace, and create the
-    app.
+    Open **Integrations → slack** and select **Create app on Slack**. Pick your workspace and create
+    the pre-filled app.
   </Step>
   <Step>
-    The manifest enables Socket Mode, a bot user, the Assistant view, and these bot
+    The manifest enables Socket Mode, a bot user, the Agent messaging experience, and these bot
     scopes: `chat:write`, `app_mentions:read`, `channels:read`, `channels:history`,
     `groups:read`, `groups:history`, `im:read`, `im:history`, `mpim:read`,
     `mpim:history`, `users:read`, `users:read.email`, and `assistant:write`.
@@ -39,25 +39,27 @@ Slack account to a TulipFarm user.
 
 <Steps>
   <Step>
+    On Slack's **Settings → Basic Information** page, copy the **Client ID** and **Client Secret**
+    into TulipFarm's Connect flow.
+  </Step>
+  <Step>
     In Slack **Settings → Basic Information → App-Level Tokens**, generate a token with
-    `connections:write`. Copy it as `SLACK_APP_TOKEN`; it starts with `xapp-`.
+    `connections:write`. Paste the `xapp-` token into TulipFarm.
   </Step>
   <Step>
-    In Slack **Settings → Install App**, install to the workspace and copy the Bot User
-    OAuth Token as `SLACK_BOT_TOKEN`; it starts with `xoxb-`.
-  </Step>
-  <Step>
-    Find the workspace Team ID by opening your Slack workspace in a browser. The URL looks
-    like `app.slack.com/client/T0XXXXXXX/...`; the `T`-prefixed segment is
-    `SLACK_TEAM_ID`.
+    Save the fields, select **Authorize on Slack**, and approve the workspace install. TulipFarm
+    receives the bot token and Team ID from Slack automatically.
   </Step>
 </Steps>
 
-## Connect in TulipFarm
+## Manual Slack app setup
 
-Return to **Integrations → slack**, paste `SLACK_APP_TOKEN`, `SLACK_BOT_TOKEN`, and
-`SLACK_TEAM_ID`, then choose **Connect**. Secret tokens are encrypted in the Secrets
-store; the team id is non-secret Integration config.
+If you do not use **Create app on Slack**, create the app **From a manifest** or configure the same
+scopes and events by hand. Under **OAuth & Permissions → Redirect URLs**, add the exact callback
+shown under **Business → About → Public address**. Slack requires an exact match, including the
+scheme and port. Use the public HTTPS domain when TulipFarm is behind a tunnel or reverse proxy.
+The path does not contain `slack` because TulipFarm uses one callback for every Integration; its
+signed, one-use OAuth state identifies Slack when the provider returns.
 
 ## Use Slack
 

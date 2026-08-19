@@ -40,7 +40,7 @@ In the resource's **Environment Variables** tab:
 
 | Variable | Value | Why |
 | --- | --- | --- |
-| `PUBLIC_URL` | `https://tulip.example.com` | The domain you will attach below. Drives CORS and the session cookie's `Secure` flag — **logins will not stick without it.** |
+| `PUBLIC_URL` | `https://tulip.example.com` | Optional environment fallback for headless/IaC setup. |
 | `POSTGRES_PASSWORD` | a generated password | Replaces the file's `tulipfarm` default. |
 | `ENCRYPTION_KEY` | `openssl rand -base64 32` | Recommended. Keeps the key in Coolify's secret storage instead of on the app's data volume. |
 | `TULIPFARM_VERSION` | e.g. `v0.1.0` | Optional. Pin a tag instead of tracking `latest`. |
@@ -62,7 +62,9 @@ Two things to get right:
 
 - **Disable response buffering** for the service if your proxy configuration offers it. Chat
   streams over Server-Sent Events; a buffering proxy holds every token until the turn ends.
-- `PUBLIC_URL` must match the domain **exactly**, scheme included.
+- After setup, open **Business → About** and save the exact public domain. TulipFarm then uses it
+  for cookies, OAuth callbacks, webhooks, and shared links without a redeploy. Set
+  `PUBLIC_ORIGINS_LOCKED=true` only if the environment should remain authoritative.
 
 </Step>
 

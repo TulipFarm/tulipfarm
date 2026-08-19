@@ -24,6 +24,7 @@ import {
   INTEGRATION_STORAGE_STATEMENTS,
   KILL_SWITCH_STORAGE_STATEMENTS,
   LOOP_CHECKPOINT_STORAGE_STATEMENTS,
+  PUBLIC_ORIGIN_STORAGE_STATEMENTS,
   RUN_BOUNDS_REMOVAL_STATEMENTS,
   RUN_BROWSE_STORAGE_STATEMENTS,
   RUN_EVENT_NOTIFY_STATEMENTS,
@@ -1863,6 +1864,16 @@ export const PG_MIGRATIONS: PgMigration[] = [
       // v66 shipped an incomplete list and already recorded itself, so it can never re-run there.
       "DROP TABLE IF EXISTS memory_chunks CASCADE",
       "DROP TABLE IF EXISTS memory_evidence CASCADE",
+    ]),
+  },
+  {
+    version: 68,
+    description: "deployment-local public web and API origins",
+    up: applyStatements([
+      ...PUBLIC_ORIGIN_STORAGE_STATEMENTS,
+      "ALTER TABLE integration_auth_requests ADD COLUMN IF NOT EXISTS callback_url text",
+      "ALTER TABLE integration_auth_requests ADD COLUMN IF NOT EXISTS web_url text",
+      "ALTER TABLE integration_auth_requests ADD COLUMN IF NOT EXISTS api_url text",
     ]),
   },
 ];

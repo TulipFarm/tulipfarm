@@ -70,6 +70,8 @@ form. All are optional.
 | --- | --- | --- |
 | `HOST_PORT` | `8080` | Publish on a different host port. |
 | `PUBLIC_URL` | `http://localhost:8080` | The URL users actually type. Drives CORS and the cookie `Secure` flag — set it to your real origin or logins will not stick. |
+| `PUBLIC_API_URL` | `PUBLIC_URL` | Public origin used for integration OAuth callbacks and webhooks. Set it separately only when the API has a different public origin. |
+| `PUBLIC_ORIGINS_LOCKED` | `false` | Make environment origins authoritative and read-only in Business → About. |
 | `POSTGRES_PASSWORD` | `tulipfarm` | Replace the default database password. |
 | `TULIPFARM_VERSION` | `latest` | Pin one image tag for `app`, `worker`, and `integration-worker` instead of tracking `latest`. |
 

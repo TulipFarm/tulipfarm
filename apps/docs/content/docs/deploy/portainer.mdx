@@ -43,7 +43,7 @@ In the stack's **Environment variables** section:
 
 | Variable | Value | Why |
 | --- | --- | --- |
-| `PUBLIC_URL` | `https://tulip.example.com` or `http://<host-ip>:8080` | The origin users reach. Drives CORS and the cookie `Secure` flag — **wrong value means login silently fails.** |
+| `PUBLIC_URL` | `https://tulip.example.com` or `http://<host-ip>:8080` | Optional environment fallback for headless/IaC setup. |
 | `POSTGRES_PASSWORD` | a generated password | Replaces the file's `tulipfarm` default. |
 | `ENCRYPTION_KEY` | `openssl rand -base64 32` | Recommended, and only effective if set before the first deploy. |
 | `HOST_PORT` | `8080` | Change if the port is taken on the host. |
@@ -57,6 +57,9 @@ In the stack's **Environment variables** section:
 **Deploy the stack**, then wait for the `app` container to report healthy — Portainer reads
 the Compose healthcheck, which polls `/readyz`. First boot runs database migrations, so
 give it a minute.
+
+After creating the admin account, open **Business → About** and save the public address. Use
+`PUBLIC_ORIGINS_LOCKED=true` only when Portainer's environment should remain authoritative.
 
 Open `http://<host>:8080` (or your domain) and create the first admin account through
 [the setup wizard](/docs/installation#finish-setup).

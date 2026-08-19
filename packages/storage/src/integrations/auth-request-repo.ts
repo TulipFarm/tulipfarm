@@ -1,12 +1,15 @@
 /** The one-use server-side auth request row: PKCE verifier custody between authorize and callback. */
 
-import type { Queryable } from "../db";
+import type { Queryable } from "../ports";
 
 export interface IntegrationAuthRequestDoc {
   state: string;
   integrationSlug: string;
   stepIndex: number;
   codeVerifier: string | null;
+  callbackUrl?: string | null;
+  webUrl?: string | null;
+  apiUrl?: string | null;
   createdAt: Date;
   expiresAt: Date;
   consumedAt: Date | null;
@@ -29,6 +32,9 @@ function rowToRequest(row: Record<string, unknown>): IntegrationAuthRequestDoc {
     integrationSlug: row.integration_slug as string,
     stepIndex: row.step_index as number,
     codeVerifier: (row.code_verifier as string | null) ?? null,
+    callbackUrl: (row.callback_url as string | null) ?? null,
+    webUrl: (row.web_url as string | null) ?? null,
+    apiUrl: (row.api_url as string | null) ?? null,
     createdAt: row.created_at as Date,
     expiresAt: row.expires_at as Date,
     consumedAt: (row.consumed_at as Date | null) ?? null,
@@ -44,8 +50,8 @@ export class PgIntegrationAuthRequestRepo implements IntegrationAuthRequestRepo 
     await this.q.query(
       `INSERT INTO integration_auth_requests
          (state, integration_slug, step_index, code_verifier, created_at, expires_at, consumed_at,
-          principal_kind, principal_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          principal_kind, principal_id, callback_url, web_url, api_url)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
       [
         request.state,
         request.integrationSlug,
@@ -56,6 +62,9 @@ export class PgIntegrationAuthRequestRepo implements IntegrationAuthRequestRepo 
         request.consumedAt,
         request.principal?.kind ?? null,
         request.principal?.id ?? null,
+        request.callbackUrl ?? null,
+        request.webUrl ?? null,
+        request.apiUrl ?? null,
       ]
     );
   }

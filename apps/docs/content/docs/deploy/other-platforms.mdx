@@ -12,9 +12,10 @@ The universal procedure, whatever the UI calls it:
 
 1. Paste or fetch
    [`docker-compose.yml`]({{SITE_URL}}/docker-compose.yml).
-2. Set `PUBLIC_URL` to the URL you will actually open, and `POSTGRES_PASSWORD` to something
-   of your own.
-3. Deploy, wait for the health check, open the URL, create the admin account.
+2. Set `POSTGRES_PASSWORD` to something of your own. `PUBLIC_URL` remains available as an
+   environment fallback for headless/IaC installs.
+3. Deploy, wait for the health check, open the URL, create the admin account, then save the public
+   address in **Business → About**. No container restart is required.
 
 Everything below is only the part that differs per platform.
 

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { resolveAuthEndpoints } from "@tulipfarm/integrations";
 import type { IntegrationManifest } from "@tulipfarm/soul";
 import { describe, expect, it } from "vitest";
 import {
@@ -13,7 +14,6 @@ import {
   refreshOAuth2Credentials,
   renderDeep,
   renderTemplate,
-  resolveAuthEndpoints,
   startAuthStep,
 } from "./auth-broker";
 
@@ -275,7 +275,11 @@ describe("completeAuthStep", () => {
       query: { state, code: "abc" },
       loadManifest,
       loadEnv,
-      endpoints,
+      endpoints: {
+        callbackUrl: "https://changed.example.com/callback",
+        webUrl: "https://changed.example.com",
+        apiUrl: "https://changed.example.com",
+      },
       repo,
       now: () => new Date("2026-01-01T00:00:00Z"),
       fetchImpl: async (_url, init) => {
@@ -286,6 +290,7 @@ describe("completeAuthStep", () => {
     expect(outcome).toMatchObject({
       slug: "notion",
       stepIndex: 0,
+      webUrl: endpoints.webUrl,
       env: {
         NOTION_ACCESS_TOKEN: "tok",
         NOTION_ACCESS_TOKEN_EXPIRES_AT: "2026-01-01T01:00:00.000Z",
@@ -376,6 +381,7 @@ describe("completeAuthStep", () => {
     }).catch((e) => e);
     expect(err).toBeInstanceOf(AuthBrokerError);
     expect(err.slug).toBe("notion");
+    expect(err.webUrl).toBe(endpoints.webUrl);
   });
 
   it("accepts a form-encoded token response", async () => {

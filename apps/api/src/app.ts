@@ -65,6 +65,8 @@ export async function buildApp(opts: AppOptions = {}) {
     maxParamLength: 512,
   });
 
+  const publicOrigins = opts.publicOrigins;
+
   const webDist = process.env.WEB_DIST;
   const serveSpa = !!webDist;
   if (serveSpa && webDist && !existsSync(webDist)) {
@@ -120,8 +122,10 @@ export async function buildApp(opts: AppOptions = {}) {
     // independent override for split-origin setups. The localhost fallback is the dev SPA.
     origin:
       process.env.CORS_ORIGIN ??
-      process.env.PUBLIC_URL ??
-      `http://localhost:${process.env.VITE_PORT ?? 4000}`,
+      (publicOrigins
+        ? async (origin: string | undefined) =>
+            origin === undefined || origin === publicOrigins.current().webOrigin
+        : (process.env.PUBLIC_URL ?? `http://localhost:${process.env.VITE_PORT ?? 4000}`)),
     credentials: true,
     // Without explicit methods the preflight rejects PUT/DELETE — the write verbs the SPA uses for
     // secrets, resources, and config. Custom headers (CSRF echo + optimistic-concurrency If-Match).
@@ -351,7 +355,17 @@ export async function buildApp(opts: AppOptions = {}) {
       registerKvRoutes(app, opts.kvService, requireAuth, requireAuthorization);
       registerPreferenceRoutes(app, opts.kvService, requireAuth);
     }
-    registerSystemRoutes(app, { kv: opts.kvService, ...opts.systemRoutes }, requireAuth);
+    registerSystemRoutes(
+      app,
+      {
+        kv: opts.kvService,
+        publicOrigins: opts.publicOrigins,
+        audit: opts.auditService,
+        ...opts.systemRoutes,
+      },
+      requireAuth,
+      requireAuthorization
+    );
     if (opts.activityService) {
       registerActivityRoutes(app, opts.activityService, requireAuth);
     }

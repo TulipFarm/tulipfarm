@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { delegationCatalogOf, GuardrailsService } from "@tulipfarm/agent-runtime";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
-import { FetchEgressHttp, GuardedEgressHttp } from "@tulipfarm/integrations";
+import { FetchEgressHttp, GuardedEgressHttp, PublicOriginsService } from "@tulipfarm/integrations";
 import {
   buildDefaultRegistry,
   enqueueIndex,
@@ -68,9 +68,11 @@ import {
   IntegrationStore,
   KillSwitchRepo,
   PgGroupRepo,
+  PgIntegrationAuthRequestRepo,
   PgPrincipalRepo,
   PgRoleRepo,
   PgSoulPublicationStore,
+  PublicOriginStore,
   RunEventStore,
   RunStore,
   SoulRepositoryStore,
@@ -146,7 +148,6 @@ import {
   IntegrationConversationsRepo,
   IntegrationEventsRepo,
 } from "./ingress/repo";
-import { PgIntegrationAuthRequestRepo } from "./integrations/auth-broker";
 import { resolveSecretRef } from "./integrations/connection-env";
 import { PgPrincipalProviderTokenRepo } from "./integrations/principal-tokens";
 import { IngressDeliveryHost } from "./internal/delivery-host";
@@ -290,6 +291,11 @@ async function boot() {
     // invalid by an interrupted build is invisible to the planner but still costs every write.
     await ensureEmbeddingIndexes(migrationPool, (msg) => console.log(msg));
     const pool = await startRuntimePool(migrationPool);
+    const publicOrigins = new PublicOriginsService(
+      new PublicOriginStore(pool),
+      DEPLOYMENT_BUSINESS_ID
+    );
+    await publicOrigins.initialize();
     /**
      * One instance, shared by the two halves of D7's personal-credential protocol: the connect
      * route that seals a credential and the resolver that decides a call needs one. They are a
@@ -795,7 +801,7 @@ async function boot() {
           domainEvents: domainEventEmitter,
           // The link is redeemed inside an authenticated web session, so it must point at the
           bindLinkUrl: (token) =>
-            `${(process.env.PUBLIC_URL ?? "http://localhost:4000").replace(/\/+$/, "")}/link-channel?token=${encodeURIComponent(token)}`,
+            `${publicOrigins.current().webOrigin}/link-channel?token=${encodeURIComponent(token)}`,
           log,
         }),
       // without restarting it.
@@ -825,6 +831,7 @@ async function boot() {
     };
 
     const app = await buildApp({
+      publicOrigins,
       readiness: pool,
       logSink,
       logRepo,
@@ -941,7 +948,7 @@ async function boot() {
         soulLoader,
         // redeemed inside an authenticated web session, so it must point at the origin users
         bindLinkUrl: (token) =>
-          `${(process.env.PUBLIC_URL ?? "http://localhost:4000").replace(/\/+$/, "")}/link-channel?token=${encodeURIComponent(token)}`,
+          `${publicOrigins.current().webOrigin}/link-channel?token=${encodeURIComponent(token)}`,
       }),
       runEvents: {
         events: runEventStore,

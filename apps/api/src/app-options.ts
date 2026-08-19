@@ -2,6 +2,7 @@
 
 import type { EventEmitter } from "node:events";
 import type { GuardrailsService } from "@tulipfarm/agent-runtime";
+import type { PublicOriginsService } from "@tulipfarm/integrations";
 import type { KnowledgeService } from "@tulipfarm/knowledge";
 import type { KvService } from "@tulipfarm/kv";
 import type { LlmService } from "@tulipfarm/llm";
@@ -190,6 +191,8 @@ export interface AppOptions {
   ingress?: IngressRoutesDeps;
   hookIngress?: HookIngressDeps;
   systemRoutes?: SystemRoutesDeps;
+  /** Durable public web/API origins with environment fallbacks. */
+  publicOrigins?: PublicOriginsService;
   operationalApi?: OperationalApiDeps;
   /** Stage 3 admin authorization surface — read/assign/group/explain over durable authority. */
   authzAdmin?: AuthzAdminService;

@@ -70,6 +70,30 @@ describe("installer host-port handling", () => {
     expect(output).toBe("8080");
   });
 
+  it("writes the public API origin from the selected host port", () => {
+    const installDirectory = temporaryDirectory();
+
+    runInstallerFunctions(
+      `
+        INSTALL_DIR="$2"
+        SUDO=""
+        PORT=8085
+        TF_VERSION=latest
+        detect_public_url() {
+          PUBLIC_URL="http://localhost:8085"
+          PUBLIC_IP_DETECTED=0
+        }
+        write_env
+      `,
+      [installDirectory]
+    );
+
+    const env = readFileSync(join(installDirectory, ".env"), "utf8");
+    expect(env).toContain("PUBLIC_URL=http://localhost:8085\n");
+    expect(env).toContain("PUBLIC_API_URL=http://localhost:8085\n");
+    expect(env).toContain("HOST_PORT=8085\n");
+  });
+
   it("repairs a failed first install whose saved port was claimed", () => {
     const installDirectory = temporaryDirectory();
     const terminal = simulatedTerminal();
@@ -101,6 +125,7 @@ describe("installer host-port handling", () => {
     );
 
     expect(readFileSync(envPath, "utf8")).toContain("HOST_PORT=8081\n");
+    expect(readFileSync(envPath, "utf8")).toContain("PUBLIC_API_URL=http://192.168.68.110:8081\n");
     expect(readFileSync(envPath, "utf8")).toContain("JWT_SECRET=keep-me\n");
   });
 
@@ -133,6 +158,7 @@ describe("installer host-port handling", () => {
     expect(readFileSync(envPath, "utf8")).toBe(
       [
         "PUBLIC_URL=http://192.168.68.110:9000",
+        "PUBLIC_API_URL=http://192.168.68.110:9000",
         "CORS_ORIGIN=http://192.168.68.110:9000",
         "HOST_PORT=9000",
         "JWT_SECRET=keep-me",
@@ -149,6 +175,7 @@ describe("installer host-port handling", () => {
       envPath,
       [
         "PUBLIC_URL=https://tulipfarm.example.com",
+        "PUBLIC_API_URL=https://api.tulipfarm.example.com",
         "CORS_ORIGIN=https://app.example.com",
         "HOST_PORT=8080",
         "JWT_SECRET=keep-me",
@@ -169,6 +196,7 @@ describe("installer host-port handling", () => {
     expect(readFileSync(envPath, "utf8")).toBe(
       [
         "PUBLIC_URL=https://tulipfarm.example.com",
+        "PUBLIC_API_URL=https://api.tulipfarm.example.com",
         "CORS_ORIGIN=https://app.example.com",
         "HOST_PORT=9000",
         "JWT_SECRET=keep-me",

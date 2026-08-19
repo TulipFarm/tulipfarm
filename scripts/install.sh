@@ -257,6 +257,8 @@ write_env() {
   $SUDO install -m 600 /dev/null "${INSTALL_DIR}/.env"
   $SUDO tee "${INSTALL_DIR}/.env" >/dev/null <<EOF
 PUBLIC_URL=${PUBLIC_URL}
+PUBLIC_API_URL=${PUBLIC_URL}
+PUBLIC_ORIGINS_LOCKED=false
 CORS_ORIGIN=${PUBLIC_URL}
 HOST_PORT=${PORT}
 TULIPFARM_VERSION=${TF_VERSION}
@@ -286,10 +288,14 @@ read_env_value() {
 }
 
 update_runtime_port() {
-  local old_port="$1" old_public old_cors new_public new_cors tmp
+  local old_port="$1" old_public old_api old_cors new_public new_api new_cors tmp
+  local had_public_api=0
   old_public="$(read_env_value PUBLIC_URL)"
+  old_api="$(read_env_value PUBLIC_API_URL)"
+  [ -n "$old_api" ] && had_public_api=1
   old_cors="$(read_env_value CORS_ORIGIN)"
   new_public="$old_public"
+  new_api="$old_api"
   new_cors="$old_cors"
 
   # Keep custom reverse-proxy origins intact. Only adjust the direct HTTP origin that
@@ -304,14 +310,21 @@ update_runtime_port() {
     [ -n "$old_cors" ] || new_cors="$new_public"
   fi
 
+  if [ -z "$old_api" ] || [ "$old_api" = "$old_public" ]; then
+    new_api="$new_public"
+  fi
+
   tmp="$($SUDO mktemp "${INSTALL_DIR}/.env.tmp.XXXXXX")"
   $SUDO awk \
     -v host_port="$PORT" \
     -v public_url="$new_public" \
+    -v public_api_url="$new_api" \
+    -v had_public_api="$had_public_api" \
     -v cors_origin="$new_cors" '
       BEGIN {
         saw_host_port = 0
         saw_public_url = 0
+        saw_public_api_url = 0
         saw_cors_origin = 0
       }
       /^HOST_PORT=/ {
@@ -322,6 +335,15 @@ update_runtime_port() {
       /^PUBLIC_URL=/ {
         print "PUBLIC_URL=" public_url
         saw_public_url = 1
+        if (!had_public_api) {
+          print "PUBLIC_API_URL=" public_api_url
+          saw_public_api_url = 1
+        }
+        next
+      }
+      /^PUBLIC_API_URL=/ {
+        print "PUBLIC_API_URL=" public_api_url
+        saw_public_api_url = 1
         next
       }
       /^CORS_ORIGIN=/ {
@@ -333,6 +355,7 @@ update_runtime_port() {
       END {
         if (!saw_host_port) print "HOST_PORT=" host_port
         if (!saw_public_url) print "PUBLIC_URL=" public_url
+        if (!saw_public_api_url) print "PUBLIC_API_URL=" public_api_url
         if (!saw_cors_origin) print "CORS_ORIGIN=" cors_origin
       }
     ' "${INSTALL_DIR}/.env" | $SUDO tee "$tmp" >/dev/null
