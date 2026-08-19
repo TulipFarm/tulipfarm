@@ -25,6 +25,8 @@ export interface ToolAdapterRequest {
   readonly idempotencyKey: string;
   readonly attempt: number;
   readonly timeoutMs?: number;
+  /** Aborts provider work when the host or contract deadline expires. */
+  readonly abortSignal?: AbortSignal;
 }
 
 export interface ToolAdapter {
@@ -92,19 +94,29 @@ function classifyError(error: unknown, mutating: boolean): AdapterDispatchError 
 }
 
 async function withTimeout(
-  operation: Promise<unknown>,
-  timeoutMs: number | undefined
+  execute: (abortSignal: AbortSignal) => Promise<unknown>,
+  timeoutMs: number | undefined,
+  outerSignal: AbortSignal | undefined
 ): Promise<unknown> {
-  if (timeoutMs === undefined || timeoutMs <= 0) return operation;
-  return Promise.race([
-    operation,
-    new Promise<never>((_resolve, reject) => {
-      setTimeout(
-        () => reject(new AdapterDispatchError("after_dispatch", "provider_timeout", true)),
-        timeoutMs
-      );
-    }),
-  ]);
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  const timedOut = new Promise<never>((_resolve, reject) => {
+    controller.signal.addEventListener(
+      "abort",
+      () => reject(new AdapterDispatchError("after_dispatch", "provider_timeout", true)),
+      { once: true }
+    );
+  });
+  if (outerSignal?.aborted) abort();
+  else outerSignal?.addEventListener("abort", abort, { once: true });
+  const timer =
+    timeoutMs === undefined || timeoutMs <= 0 ? undefined : setTimeout(abort, timeoutMs);
+  try {
+    return await Promise.race([execute(controller.signal), timedOut]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    outerSignal?.removeEventListener("abort", abort);
+  }
 }
 
 export class EffectDispatcher {
@@ -116,7 +128,11 @@ export class EffectDispatcher {
     this.now = deps.now ?? (() => new Date().toISOString());
   }
 
-  async dispatch(businessId: string, effectId: string): Promise<unknown> {
+  async dispatch(
+    businessId: string,
+    effectId: string,
+    options: { abortSignal?: AbortSignal } = {}
+  ): Promise<unknown> {
     const effect = await this.deps.store.get(businessId, effectId);
     if (effect === undefined) throw new ToolDispatchError("effect_not_found", effectId);
     const contract = this.deps.catalog.get(effect.intent.toolId, effect.intent.toolVersion);
@@ -171,10 +187,14 @@ export class EffectDispatcher {
           timeoutMs: contract.timeout?.wallClockMs,
         };
         const output = await withTimeout(
-          this.deps.credentialDispatcher === undefined
-            ? adapter.dispatch(request)
-            : this.deps.credentialDispatcher.dispatch(effect, adapter, request),
-          contract.timeout?.wallClockMs
+          (abortSignal) => {
+            const requestWithSignal = { ...request, abortSignal };
+            return this.deps.credentialDispatcher === undefined
+              ? adapter.dispatch(requestWithSignal)
+              : this.deps.credentialDispatcher.dispatch(effect, adapter, requestWithSignal);
+          },
+          contract.timeout?.wallClockMs,
+          options.abortSignal
         );
         if (!validateOutput(output)) {
           await this.deps.store.finishAttempt({

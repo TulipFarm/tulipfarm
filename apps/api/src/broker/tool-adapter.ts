@@ -39,13 +39,23 @@ function presentsToSurface(toolDefinition: { definition?: { availableTo?: ToolAv
   return toolDefinition.definition?.availableTo?.requiresPresentation === true;
 }
 
-function withToolTimeout(p: Promise<ToolCallResult>): Promise<ToolCallResult> {
-  return Promise.race([
-    p,
-    new Promise<ToolCallResult>((resolve) =>
-      setTimeout(() => resolve(err("internal_error", "tool execution timed out")), TOOL_TIMEOUT_MS)
-    ),
-  ]);
+async function withToolTimeout(
+  execute: (abortSignal: AbortSignal) => Promise<ToolCallResult>
+): Promise<ToolCallResult> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TOOL_TIMEOUT_MS);
+  const timedOut = new Promise<ToolCallResult>((resolve) => {
+    controller.signal.addEventListener(
+      "abort",
+      () => resolve(err("internal_error", "tool execution timed out")),
+      { once: true }
+    );
+  });
+  try {
+    return await Promise.race([execute(controller.signal), timedOut]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** Default-deny adapter: callers must pass the exact authorized Tool allowlist. */
@@ -168,10 +178,15 @@ export class ToolRegistry {
             try {
               full = await (coordinator
                 ? coordinator.schedule(
-                    () => withToolTimeout(t.execute(effectiveArgs, ctx)),
+                    () =>
+                      withToolTimeout((abortSignal) =>
+                        t.execute(effectiveArgs, { ...ctx, abortSignal })
+                      ),
                     t.mutating
                   )
-                : withToolTimeout(t.execute(effectiveArgs, ctx)));
+                : withToolTimeout((abortSignal) =>
+                    t.execute(effectiveArgs, { ...ctx, abortSignal })
+                  ));
             } catch {
               full = err(
                 "internal_error",
