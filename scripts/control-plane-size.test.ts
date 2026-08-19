@@ -197,9 +197,23 @@ import { describe, expect, it } from "vitest";
  *
  * Both are probe wiring for an admin route, which is what `apps/api` is for; the provider
  * behaviour they report on stays in `packages/llm`.
+ *
+ * It moves to 51,255 for the required-field fix, all of it in `resources/write-pipeline.ts`, which
+ * is where a Record write is already validated against its Resource type:
+ *
+ *   +17 `ajvErrorPath` and its `AjvError` alias. ajv reports `instancePath: ""` for a `required`
+ *       failure because the offending property is absent, so the field name lives only in
+ *       `params.missingProperty`. Without the translation the 422 carries an empty path and the
+ *       form cannot map it onto the input that caused it.
+ *   +18 `emptyRequiredField`. JSON Schema `required` asserts presence only, so `""` satisfied a
+ *       field the author marked mandatory and the Record persisted blank.
+ *   +11 the two call sites in `validateAndLink` that return those 422s.
+ *
+ * Both are read off the compiled schema at the point the write is already being validated, so
+ * neither is a decision this layer owns rather than borrows.
  */
 
-const CEILING = 51_209;
+const CEILING = 51_255;
 
 /**
  * Domains inside `apps/api/src` that already have a package of the same name. Everything here that

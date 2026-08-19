@@ -4,6 +4,7 @@ import { ResourcePanel } from "~/components/resource-panel";
 import { ErrorState } from "~/components/states";
 import { Button } from "~/components/ui/button";
 import { ApiError, createResourceType } from "~/lib/api";
+import { randomUUID } from "~/lib/uuid";
 
 export const meta: MetaFunction = () => [{ title: "New type · Resources · tulipfarm" }];
 
@@ -21,9 +22,23 @@ const FIELD_TYPES: { value: FieldType; label: string }[] = [
   { value: "enum", label: "enum (choices)" },
 ];
 
-type FieldRow = { name: string; type: FieldType; required: boolean; enumValues: string };
+// `id` is row identity: React keys and every state patch go through it, so adding or removing a row
+// can never hand one row's state to another.
+type FieldRow = {
+  id: string;
+  name: string;
+  type: FieldType;
+  required: boolean;
+  enumValues: string;
+};
 
-const newRow = (): FieldRow => ({ name: "", type: "string", required: false, enumValues: "" });
+const newRow = (): FieldRow => ({
+  id: randomUUID(),
+  name: "",
+  type: "string",
+  required: false,
+  enumValues: "",
+});
 
 // One field → its JSON Schema property. System fields (id/createdAt/updatedAt/version) are managed by
 // the platform and never declared here.
@@ -63,8 +78,8 @@ export default function ResourceTypeNew() {
   const input =
     "w-full rounded-sm border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50";
 
-  function setField(i: number, patch: Partial<FieldRow>) {
-    setFields((prev) => prev.map((f, idx) => (idx === i ? { ...f, ...patch } : f)));
+  function setField(id: string, patch: Partial<FieldRow>) {
+    setFields((prev) => prev.map((f) => (f.id === id ? { ...f, ...patch } : f)));
   }
 
   async function onSubmit(e: FormEvent) {
@@ -145,21 +160,21 @@ export default function ResourceTypeNew() {
           </p>
           {fields.map((f, i) => (
             <div
-              key={i}
+              key={f.id}
               className="flex flex-wrap items-center gap-2 rounded-sm border border-border p-2"
             >
               <input
                 aria-label={`field ${i + 1} name`}
                 className={`${input} flex-1 min-w-[8rem]`}
                 value={f.name}
-                onChange={(e) => setField(i, { name: e.target.value })}
+                onChange={(e) => setField(f.id, { name: e.target.value })}
                 placeholder="fieldName"
               />
               <select
                 aria-label={`field ${i + 1} type`}
                 className={`${input} w-32`}
                 value={f.type}
-                onChange={(e) => setField(i, { type: e.target.value as FieldType })}
+                onChange={(e) => setField(f.id, { type: e.target.value as FieldType })}
               >
                 {FIELD_TYPES.map((t) => (
                   <option key={t.value} value={t.value}>
@@ -172,15 +187,16 @@ export default function ResourceTypeNew() {
                   aria-label={`field ${i + 1} choices`}
                   className={`${input} flex-1 min-w-[10rem]`}
                   value={f.enumValues}
-                  onChange={(e) => setField(i, { enumValues: e.target.value })}
+                  onChange={(e) => setField(f.id, { enumValues: e.target.value })}
                   placeholder="open, closed, done"
                 />
               ) : null}
               <label className="flex items-center gap-1 text-xs text-muted-foreground">
                 <input
                   type="checkbox"
+                  aria-label={`field ${i + 1} required`}
                   checked={f.required}
-                  onChange={(e) => setField(i, { required: e.target.checked })}
+                  onChange={(e) => setField(f.id, { required: e.target.checked })}
                 />
                 required
               </label>
@@ -188,7 +204,7 @@ export default function ResourceTypeNew() {
                 type="button"
                 aria-label={`remove field ${i + 1}`}
                 className="text-xs text-muted-foreground hover:text-destructive"
-                onClick={() => setFields((prev) => prev.filter((_, idx) => idx !== i))}
+                onClick={() => setFields((prev) => prev.filter((row) => row.id !== f.id))}
               >
                 remove
               </button>
