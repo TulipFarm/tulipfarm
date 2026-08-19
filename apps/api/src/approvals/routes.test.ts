@@ -59,76 +59,6 @@ class FakeTokenRepo implements TokenRepo {
   }
 }
 
-/**
- * `routine_state` rows on the shared list surface. Listing needs only the approvals repo — the
- * decide path for this kind is exercised against its durable owner in the "decided by role" block.
- */
-describe("approval routes — routine_state kind", () => {
-  let app: FastifyInstance;
-  let db: PGlite;
-  let sid: string;
-  let approvals: ApprovalsRepo;
-
-  beforeEach(async () => {
-    db = await makeMigratedPglite();
-    approvals = new ApprovalsRepo(db);
-
-    const store = new MemorySessionStore();
-    const userRepo = new FakeUserRepo();
-    const user = await createUser(userRepo, "user@example.com", "pass", "member");
-    sid = await store.create(user._id);
-
-    app = await buildApp({
-      sessionStore: store,
-      userRepo,
-      tokenRepo: new FakeTokenRepo(),
-      approvalsRepo: approvals,
-      // minimal chat deps so the approvals routes register
-      llmService: { getModel: vi.fn() } as never,
-      conversationRepo: {} as never,
-      messageRepo: {} as never,
-    });
-  });
-
-  afterEach(async () => {
-    await app.close();
-    await db.close();
-  });
-
-  const authed = () => ({ [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF });
-
-  async function insertRoutineApproval(runId = randomUUID()) {
-    const id = randomUUID();
-    await approvals.insert({
-      id,
-      kind: "routine_state",
-      payload: {
-        routineSlug: "expense-report",
-        runId,
-        stateName: "Gate",
-        channels: ["ui"],
-        summary: { amount: 900 },
-      },
-      expiresAt: new Date(Date.now() + 60_000),
-    });
-    return { id, runId };
-  }
-
-  it("lists pending routine_state approvals with kind discrimination", async () => {
-    const { id } = await insertRoutineApproval();
-    const res = await app.inject({ method: "GET", url: "/api/v1/approvals", cookies: authed() });
-    expect(res.statusCode).toBe(200);
-    const { items } = res.json() as { items: Array<Record<string, unknown>> };
-    const item = items.find((i) => i.approvalId === id);
-    expect(item).toMatchObject({
-      kind: "routine_state",
-      routineSlug: "expense-report",
-      stateName: "Gate",
-      summary: { amount: 900 },
-    });
-  });
-});
-
 /** Worker-parked approvals must resume before any in-process gate can consume the decision. */
 describe("approval routes — durable tool_call kind", () => {
   let app: FastifyInstance;
@@ -447,5 +377,40 @@ describe("approval routes — routine_state kind, decided by role", () => {
     expect(await decide(session.sid, approvalId)).toBe(403);
     expect((await approvals.findById(approvalId))?.status).toBe("pending");
     expect(await runs.find(DEPLOYMENT_BUSINESS_ID, runId)).toMatchObject({ status: "waiting" });
+  });
+
+  it("hides a pending routine approval from a user without the State's approver role", async () => {
+    const { approvalId } = await parkedRun("admin");
+    const member = await signIn("member");
+    app = member.app;
+
+    const hidden = await app.inject({
+      method: "GET",
+      url: "/api/v1/approvals",
+      cookies: { [SESSION_COOKIE]: member.sid },
+    });
+
+    expect(hidden.statusCode).toBe(200);
+    expect(
+      (hidden.json() as { items: Array<{ approvalId: string }> }).items.find(
+        (item) => item.approvalId === approvalId
+      )
+    ).toBeUndefined();
+    await app.close();
+
+    const admin = await signIn("admin");
+    app = admin.app;
+    const visible = await app.inject({
+      method: "GET",
+      url: "/api/v1/approvals",
+      cookies: { [SESSION_COOKIE]: admin.sid },
+    });
+
+    expect(visible.statusCode).toBe(200);
+    expect(
+      (visible.json() as { items: Array<{ approvalId: string }> }).items.find(
+        (item) => item.approvalId === approvalId
+      )
+    ).toBeDefined();
   });
 });

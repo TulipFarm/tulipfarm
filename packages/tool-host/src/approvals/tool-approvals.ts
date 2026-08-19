@@ -9,6 +9,7 @@ import {
   approvalEvidenceDigest,
   readApprovalEvidence,
 } from "./evidence";
+import type { PendingToolApproval } from "./pending";
 import type { ApprovalRow, ApprovalsRepo } from "./repo";
 
 /** Durable Tool approvals: intent-keyed rows park the Run; one-use wait tokens resume it.
@@ -185,6 +186,20 @@ export class ToolApprovalService implements ToolApprovalPort {
     };
   }
 
+  /** Pending approvals the principal may decide, projected only after durable authorization. */
+  async listPendingFor(input: {
+    businessId: string;
+    principal: string;
+  }): Promise<PendingToolApproval[]> {
+    const rows = await this.options.repo.listPending("tool_call");
+    const authorized = await Promise.all(
+      rows.map(async (row) =>
+        (await this.authorizedWait(row, input.businessId, input.principal)) === null ? null : row
+      )
+    );
+    return authorized.flatMap((row) => (row === null ? [] : [pendingApprovalOf(row)]));
+  }
+
   /**
    * Checks evidence and approver, settles the row, then signals the wait.
    *
@@ -203,41 +218,17 @@ export class ToolApprovalService implements ToolApprovalPort {
   }): Promise<ApprovalSignalOutcome> {
     const row = await this.options.repo.findById(input.approvalId);
     if (row === null || row.kind !== "tool_call") return "not_found";
-    const payload = payloadOf(row);
-    const { waitId, runId, resumeToken } = payload as ToolApprovalPayload & {
-      resumeToken?: string;
-    };
-    if (waitId === undefined || runId === undefined || resumeToken === undefined) {
-      // Not a worker-executed approval — the caller falls through to the path that owns it.
+    const payload = payloadOf(row) as ToolApprovalPayload & { resumeToken?: string };
+    if (
+      payload.waitId === undefined ||
+      payload.runId === undefined ||
+      payload.resumeToken === undefined
+    ) {
       return "not_found";
     }
-
-    const wait = await this.options.waits.find(input.businessId, waitId);
-    if (wait === null) return "not_found";
-
-    // Evidence first: a decision on an approval whose recorded Guardrail evidence is missing or no
-    // longer matches its digest is a decision about something other than what was asked.
-    const evidence = readApprovalEvidence(row.guardrailEvidence);
-    if (
-      evidence === null ||
-      row.guardrailEvidenceDigest === null ||
-      approvalEvidenceDigest(evidence) !== row.guardrailEvidenceDigest
-    ) {
-      return "forbidden";
-    }
-
-    const requester = row.requesterPrincipalId;
-    // A row that never recorded who asked cannot be four-eyes checked, so it is not decidable.
-    if (requester === null) return "forbidden";
-
-    const principalAs = await this.approverPrincipal(wait.allowedPrincipals, input.principal);
-    if (principalAs === null) return "forbidden";
-    if (
-      input.principal === requester &&
-      (await this.options.repo.countOtherEligibleApprovers(requester)) > 0
-    ) {
-      return "forbidden";
-    }
+    const authorized = await this.authorizedWait(row, input.businessId, input.principal);
+    if (authorized === null) return "forbidden";
+    const { runId, resumeToken, principalAs } = authorized;
 
     if (
       !(await this.options.repo.settlePending(input.approvalId, input.decision, input.principal))
@@ -271,6 +262,40 @@ export class ToolApprovalService implements ToolApprovalPort {
     return "resumed";
   }
 
+  private async authorizedWait(
+    row: ApprovalRow,
+    businessId: string,
+    principal: string
+  ): Promise<{ runId: string; resumeToken: string; principalAs: string } | null> {
+    const { waitId, runId, resumeToken } = payloadOf(row) as ToolApprovalPayload & {
+      resumeToken?: string;
+    };
+    if (waitId === undefined || runId === undefined || resumeToken === undefined) return null;
+    const wait = await this.options.waits.find(businessId, waitId);
+    if (wait === null) return null;
+
+    const evidence = readApprovalEvidence(row.guardrailEvidence);
+    if (
+      evidence === null ||
+      row.guardrailEvidenceDigest === null ||
+      approvalEvidenceDigest(evidence) !== row.guardrailEvidenceDigest
+    ) {
+      return null;
+    }
+
+    const requester = row.requesterPrincipalId;
+    if (requester === null) return null;
+    const principalAs = await this.approverPrincipal(wait.allowedPrincipals, principal);
+    if (principalAs === null) return null;
+    if (
+      principal === requester &&
+      (await this.options.repo.countOtherEligibleApprovers(requester)) > 0
+    ) {
+      return null;
+    }
+    return { runId, resumeToken, principalAs };
+  }
+
   /**
    * The principal form this decider may signal as: itself when the wait names it, otherwise a Role
    * it holds that the wait allows. `null` means the wait admits nothing this decider has.
@@ -283,6 +308,18 @@ export class ToolApprovalService implements ToolApprovalPort {
     const held = await this.options.repo.rolesForPrincipal(principal);
     return allowedPrincipals.find((allowed) => held.includes(allowed)) ?? null;
   }
+}
+
+function pendingApprovalOf(row: ApprovalRow): PendingToolApproval {
+  const payload = payloadOf(row);
+  return {
+    approvalId: row.id,
+    toolCallId: payload.toolCallId ?? "unknown-tool-call",
+    toolName: payload.toolName ?? "unknown-tool",
+    args: payload.args,
+    expiresAt: row.expiresAt.toISOString(),
+    createdAt: row.createdAt.toISOString(),
+  };
 }
 
 export class UnknownApprovalError extends Error {
