@@ -96,7 +96,7 @@ export function soulWriterTool(soul: EvalSoul): SoulWriterTool {
         const slug = typeof args.slug === "string" ? args.slug : undefined;
         const content = typeof args.content === "string" ? args.content : undefined;
         const definitionMode =
-          args.definitionMode === "definition" || args.definitionMode === "legacy"
+          args.definitionMode === "canonical" || args.definitionMode === "legacy"
             ? args.definitionMode
             : "legacy";
         if (kind === undefined || slug === undefined || content === undefined) {

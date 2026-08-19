@@ -6,13 +6,13 @@
   "input": [
     {
       "role": "user",
-      "content": "Create the published daily-check Routine and its daily-check-manual Trigger now. Call soul_write twice with definitionMode definition. Do not ask me to confirm."
+      "content": "Create the published daily-check Routine and its daily-check-manual Trigger now. Call soul_write twice with definitionMode canonical. Do not ask me to confirm."
     }
   ],
   "tools": [
     {
       "name": "soul_write",
-      "description": "Commit one Soul definition. Set definitionMode to definition for canonical YAML.",
+      "description": "Commit one Soul definition. Set definitionMode to canonical for canonical YAML.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -35,7 +35,7 @@
           "arguments": {
             "kind": "Routine",
             "slug": "daily-check",
-            "definitionMode": "definition",
+            "definitionMode": "canonical",
             "content": "apiVersion: tulipfarm.ai/v1\nkind: Routine\nmetadata:\n  id: 11111111-1111-4111-8111-111111111111\n  slug: daily-check\n  schemaVersion: 1\n  authoredVersion: 1\n  lifecycle: published\nspec:\n  owner: operations\n  start: Decide\n  states:\n    - name: Decide\n      type: branch\n      conditions:\n        - condition: 'true'\n          end: true\n"
           }
         },
@@ -45,7 +45,7 @@
           "arguments": {
             "kind": "Trigger",
             "slug": "daily-check-manual",
-            "definitionMode": "definition",
+            "definitionMode": "canonical",
             "content": "apiVersion: tulipfarm.ai/v1\nkind: Trigger\nmetadata:\n  id: 22222222-2222-4222-8222-222222222222\n  slug: daily-check-manual\n  schemaVersion: 1\n  authoredVersion: 1\n  lifecycle: published\nspec:\n  type: manual\n  routineRef:\n    name: daily-check\n    version: '1'\n  eventType: routine.manual\n  eventVersion: 1\n  backgroundIdentity:\n    principalKind: service\n    principalId: routine-runner\n  deduplication:\n    key: daily-check-manual\n"
           }
         }

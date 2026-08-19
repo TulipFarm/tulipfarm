@@ -170,7 +170,6 @@
     "packages/run-kernel/src/routine/states/repeat.ts#initRepeatProgress",
     "packages/run-kernel/src/simulate.ts#simulationPorts",
     "packages/run-kernel/src/triggers/matcher.ts#matchTrigger",
-    "packages/run-kernel/src/triggers/scheduler.ts#scheduleSpecFromTrigger",
     "packages/sandbox/src/attestation.ts#signSandboxBackendAttestation",
     "packages/sandbox/src/attestation.ts#verifyProductionSandboxAttestation",
     "packages/sandbox/src/backend.ts#SandboxProtocolExecutor",
