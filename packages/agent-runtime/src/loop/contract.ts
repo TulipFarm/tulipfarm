@@ -132,6 +132,14 @@ export type AgentLoopOutcome =
       readonly repairs: number;
     }
   | {
+      /** A `request_input` Surface is durable; a later Chat Turn receives the answer. */
+      readonly status: "input_required";
+      readonly callId: string;
+      readonly iterations: number;
+      readonly toolCalls: number;
+      readonly repairs: number;
+    }
+  | {
       readonly status: "cancelled";
       readonly iterations: number;
       readonly toolCalls: number;

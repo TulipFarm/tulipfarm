@@ -52,6 +52,7 @@ export type AgentStateResult =
       /** The Tool call being held, so a reader can show the decision against that call. */
       readonly callId: string;
     }
+  | { readonly status: "input_required" }
   | { readonly status: "cancelled" }
   | { readonly status: "needs_reconciliation" };
 
@@ -98,6 +99,10 @@ export class AgentStateRunner {
           callId: outcome.callId,
         };
       }
+
+      case "input_required":
+        await this.move(request, "running", "succeeded");
+        return { status: "input_required" };
 
       case "cancelled":
         // `RunCancellationManager` is walking this State down the same two steps from the other
