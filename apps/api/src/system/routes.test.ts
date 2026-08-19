@@ -6,6 +6,7 @@ import type { TokenDoc, TokenRepo } from "../auth/api-tokens";
 import { SESSION_COOKIE } from "../auth/routes";
 import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
+import { PublicOriginsService } from "./public-origins";
 
 class FakeUserRepo implements UserRepo {
   private users: UserDoc[] = [];
@@ -116,5 +117,43 @@ describe("GET /api/v1/system/update-check", () => {
     await build("v0.5.0");
     const res = await app.inject({ method: "GET", url: "/api/v1/system/update-check" });
     expect(res.statusCode).toBe(401);
+  });
+});
+
+describe("GET /api/v1/system/public-origins", () => {
+  it("returns the exact callback URL derived from a saved public address", async () => {
+    const store = new MemorySessionStore();
+    const userRepo = new FakeUserRepo();
+    const user = await createUser(userRepo, "admin@example.com", "pass", "admin");
+    const sid = await store.create(user._id);
+    const publicOrigins = new PublicOriginsService(
+      {
+        get: async () => ({ webOrigin: "https://tulip.example.com", apiOrigin: null }),
+        put: async () => {},
+        delete: async () => {},
+      },
+      "default"
+    );
+    const app = await buildApp({
+      sessionStore: store,
+      userRepo,
+      tokenRepo: new FakeTokenRepo(),
+      publicOrigins,
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/system/public-origins",
+      cookies: { [SESSION_COOKIE]: sid },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      webOrigin: "https://tulip.example.com",
+      apiOrigin: "https://tulip.example.com",
+      callbackUrl: "https://tulip.example.com/api/v1/integrations/auth/callback",
+      source: "database",
+    });
+    await app.close();
   });
 });

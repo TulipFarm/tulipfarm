@@ -19,7 +19,7 @@ auth:
     title: Create the Slack app
     description: Slack pre-fills its "create an app from a manifest" form from a link we build, so
       there is no JSON to copy by hand.
-    create_url: https://api.slack.com/apps
+    create_url: https://api.slack.com/apps?new_app=1
     manifest_param: manifest_json
     delivery: query_param
     manifest:
@@ -29,7 +29,8 @@ auth:
         bot_user:
           display_name: TulipFarm
           always_online: true
-        assistant_view: {}
+        agent_view:
+          agent_description: Talk to TulipFarm agents from Slack.
       oauth_config:
         redirect_urls:
           - "{callback_url}"

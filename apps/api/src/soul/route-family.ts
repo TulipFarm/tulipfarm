@@ -36,6 +36,7 @@ export function registerSoulRouteFamily(
   requireAuthorization: RequireAuthorization,
   authorizationCheck: AuthorizationCheck
 ): void {
+  const publicOrigins = opts.publicOrigins;
   if (opts.gitSync && opts.soulWriter) {
     registerSoulRoutes(
       app,
@@ -146,7 +147,9 @@ export function registerSoulRouteFamily(
               secrets: opts.secretsService,
               repo: opts.integrationAuth.repo,
               bundled: opts.bundledIntegrations ?? new Map(),
-              endpoints: resolveAuthEndpoints(),
+              endpoints: publicOrigins
+                ? () => publicOrigins.authEndpoints()
+                : () => Promise.resolve(resolveAuthEndpoints()),
               fetchImpl: opts.integrationAuth.fetchImpl,
               onConnected,
               tokens: opts.integrationAuth.tokens,

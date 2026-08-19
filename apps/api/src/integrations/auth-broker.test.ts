@@ -275,7 +275,11 @@ describe("completeAuthStep", () => {
       query: { state, code: "abc" },
       loadManifest,
       loadEnv,
-      endpoints,
+      endpoints: {
+        callbackUrl: "https://changed.example.com/callback",
+        webUrl: "https://changed.example.com",
+        apiUrl: "https://changed.example.com",
+      },
       repo,
       now: () => new Date("2026-01-01T00:00:00Z"),
       fetchImpl: async (_url, init) => {
@@ -286,6 +290,7 @@ describe("completeAuthStep", () => {
     expect(outcome).toMatchObject({
       slug: "notion",
       stepIndex: 0,
+      webUrl: endpoints.webUrl,
       env: {
         NOTION_ACCESS_TOKEN: "tok",
         NOTION_ACCESS_TOKEN_EXPIRES_AT: "2026-01-01T01:00:00.000Z",

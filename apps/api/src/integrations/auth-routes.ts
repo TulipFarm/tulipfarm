@@ -31,7 +31,7 @@ export interface AuthRoutesDeps {
   secrets: SecretsService;
   repo: IntegrationAuthRequestRepo;
   bundled: ReadonlyMap<string, BundledIntegration>;
-  endpoints: AuthEndpoints;
+  endpoints: AuthEndpoints | (() => Promise<AuthEndpoints>);
   fetchImpl?: typeof globalThis.fetch;
   /** Provider redirects must trigger the same post-connect setup as pasted credentials. */
   onConnected?: (slug: string) => Promise<void>;
@@ -72,6 +72,8 @@ export function registerIntegrationAuthRoutes(
   requireAuth: PreHandler,
   authorizationCheck: AuthorizationCheck
 ): void {
+  const resolveEndpoints = () =>
+    typeof deps.endpoints === "function" ? deps.endpoints() : Promise.resolve(deps.endpoints);
   const resolveManifest = (slug: string): IntegrationManifest | undefined =>
     mergeIntegrations(deps.soulLoader, deps.bundled).get(slug)?.manifest;
 
@@ -144,12 +146,13 @@ export function registerIntegrationAuthRoutes(
       }
 
       try {
+        const endpoints = await resolveEndpoints();
         const action = await startAuthStep({
           slug: name,
           manifest,
           stepIndex: Number(step),
           env: await readConnectionEnv(deps, name),
-          endpoints: deps.endpoints,
+          endpoints,
           repo: deps.repo,
           fetchImpl: deps.fetchImpl,
           ...(scope === "user" && caller !== undefined
@@ -196,11 +199,12 @@ export function registerIntegrationAuthRoutes(
     async (req, reply) => {
       const query = req.query as Record<string, string>;
       try {
+        const endpoints = await resolveEndpoints();
         const outcome = await completeAuthStep({
           query,
           loadManifest: resolveManifest,
           loadEnv: (slug) => readConnectionEnv(deps, slug),
-          endpoints: deps.endpoints,
+          endpoints,
           repo: deps.repo,
           fetchImpl: deps.fetchImpl,
         });
@@ -230,7 +234,7 @@ export function registerIntegrationAuthRoutes(
           if (connectedNow) await deps.onConnected?.(outcome.slug);
         }
         return reply.redirect(
-          `${deps.endpoints.webUrl}/integrations/${outcome.slug}?step=${outcome.stepIndex}&status=ok`,
+          `${outcome.webUrl}/integrations/${outcome.slug}?step=${outcome.stepIndex}&status=ok`,
           302
         );
       } catch (err) {
@@ -238,7 +242,7 @@ export function registerIntegrationAuthRoutes(
           // Browser failures redirect to an Integration page; unknown slugs land on the list.
           const slug = err.slug ?? "";
           return reply.redirect(
-            `${deps.endpoints.webUrl}/integrations/${slug}?status=error&reason=${err.reason}`,
+            `${(await resolveEndpoints()).webUrl}/integrations/${slug}?status=error&reason=${err.reason}`,
             302
           );
         }

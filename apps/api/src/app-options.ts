@@ -65,6 +65,7 @@ import type { RunReplayDeps } from "./runs/replay";
 import type { SetupAdminCreator } from "./setup/first-admin";
 import type { SurfaceActionStore } from "./surfaces/action-store";
 import type { SurfaceArtifactStore } from "./surfaces/artifact-store";
+import type { PublicOriginsService } from "./system/public-origins";
 import type { SystemRoutesDeps } from "./system/routes";
 import type { TriggerInvokeDeps } from "./triggers/routes";
 
@@ -190,6 +191,8 @@ export interface AppOptions {
   ingress?: IngressRoutesDeps;
   hookIngress?: HookIngressDeps;
   systemRoutes?: SystemRoutesDeps;
+  /** Durable public web/API origins with environment fallbacks. */
+  publicOrigins?: PublicOriginsService;
   operationalApi?: OperationalApiDeps;
   /** Stage 3 admin authorization surface — read/assign/group/explain over durable authority. */
   authzAdmin?: AuthzAdminService;

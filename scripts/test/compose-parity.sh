@@ -53,7 +53,7 @@ fi
 
 # Prevent ambient developer or runner variables from weakening the zero-env phase.
 unset COMPOSE_FILE COMPOSE_PROFILES CORS_ORIGIN DATABASE_URL ENCRYPTION_KEY
-unset JWT_SECRET POSTGRES_PASSWORD PUBLIC_URL SETUP_MODE WEBHOOK_SIGNING_SECRET
+unset JWT_SECRET POSTGRES_PASSWORD PUBLIC_API_URL PUBLIC_URL SETUP_MODE WEBHOOK_SIGNING_SECRET
 unset WORKER_API_CREDENTIAL
 
 log "booting with no .env…"
@@ -64,6 +64,10 @@ log "asserting /readyz and /livez on :${PORT}…"
 curl -fsS --max-time 15 --retry 5 --retry-connrefused --retry-delay 3 \
   "http://localhost:${PORT}/readyz" >/dev/null
 curl -fsS --max-time 15 "http://localhost:${PORT}/livez" >/dev/null
+
+log "asserting the public API origin follows the published host port…"
+[ "$(compose exec -T app printenv PUBLIC_API_URL)" = "http://localhost:${PORT}" ] \
+  || fail "PUBLIC_API_URL did not follow HOST_PORT"
 
 # The worker publishes no port — reach its probes from inside its own container. The `--wait`
 # above already gated on its healthcheck; asserting it here names the failure when the worker is

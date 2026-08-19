@@ -106,10 +106,17 @@ describe("slack manifest", () => {
       repo: new MemoryRepo(),
     });
     if (action.action !== "redirect") throw new Error("expected redirect");
-    const submitted = JSON.parse(
-      new URL(action.url).searchParams.get("manifest_json") as string
-    ) as { settings: { socket_mode_enabled: boolean } };
+    const url = new URL(action.url);
+    expect(url.searchParams.get("new_app")).toBe("1");
+    const submitted = JSON.parse(url.searchParams.get("manifest_json") as string) as {
+      features: { agent_view: { agent_description: string }; assistant_view?: unknown };
+      settings: { socket_mode_enabled: boolean };
+    };
     expect(submitted.settings.socket_mode_enabled).toBe(true);
+    expect(submitted.features.agent_view.agent_description).toBe(
+      "Talk to TulipFarm agents from Slack."
+    );
+    expect(submitted.features.assistant_view).toBeUndefined();
   });
 
   it("acquires the bot token and workspace id that channel routing needs", async () => {

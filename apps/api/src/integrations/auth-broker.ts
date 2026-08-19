@@ -126,6 +126,9 @@ async function issueState(input: StartAuthStepInput, codeVerifier: string | null
     integrationSlug: input.slug,
     stepIndex: input.stepIndex,
     codeVerifier,
+    callbackUrl: input.endpoints.callbackUrl,
+    webUrl: input.endpoints.webUrl,
+    apiUrl: input.endpoints.apiUrl,
     createdAt: now,
     expiresAt: new Date(
       now.getTime() + (input.ttlSeconds ?? DEFAULT_AUTH_REQUEST_TTL_SECONDS) * 1000
@@ -322,6 +325,7 @@ export interface CompleteAuthStepInput {
 export interface AuthStepOutcome {
   slug: string;
   stepIndex: number;
+  webUrl: string;
   /** Present means seal under that principal, never into shared `connection.yaml`. */
   env: Record<string, string>;
   principal?: { readonly kind: string; readonly id: string };
@@ -409,6 +413,7 @@ export async function completeAuthStep(input: CompleteAuthStepInput): Promise<Au
   const outcome = {
     slug: request.integrationSlug,
     stepIndex: request.stepIndex,
+    webUrl: request.webUrl ?? input.endpoints.webUrl,
     ...(request.principal === null ? {} : { principal: request.principal }),
   };
 
@@ -485,7 +490,7 @@ async function completeStep(ctx: {
       const body: Record<string, string> = {
         grant_type: "authorization_code",
         code,
-        redirect_uri: input.endpoints.callbackUrl,
+        redirect_uri: request.callbackUrl ?? input.endpoints.callbackUrl,
         client_id: clientId,
         client_secret: clientSecret,
       };
