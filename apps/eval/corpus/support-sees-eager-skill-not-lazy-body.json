@@ -29,6 +29,10 @@
     },
     {
       "kind": "prompt_omits",
+      "text": "customer-service:"
+    },
+    {
+      "kind": "prompt_omits",
       "text": "A refund is approved by finance, never by an agent."
     },
     {

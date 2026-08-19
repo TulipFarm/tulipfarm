@@ -319,7 +319,7 @@ describe("assembleSystemPrompt — available-skills (lazy L1)", () => {
     expect(out).toContain("\n\n- bare\n</available-skills>");
   });
 
-  it("keeps the self-improvement directive inside a deterministic, budgeted block", () => {
+  it("keeps categories distinct from loadable Skill names in a deterministic, budgeted block", () => {
     const context = baseCtx({
       availableSkills: [
         {
@@ -343,13 +343,13 @@ describe("assembleSystemPrompt — available-skills (lazy L1)", () => {
 
     expect(first).toBe(second);
     const blockStart = first.indexOf("<available-skills>");
-    const directive = first.indexOf("Before replying, scan this list");
+    const directive = first.indexOf("Before replying, scan the named Skills");
     const list = first.indexOf("- user-skill: A Soul Skill.");
     const blockEnd = first.indexOf("</available-skills>");
     expect(blockStart).toBeLessThan(directive);
     expect(directive).toBeLessThan(list);
     expect(list).toBeLessThan(blockEnd);
-    expect(first).toContain("load any Skill that is even partially relevant with load_skill");
+    expect(first).toContain("Category headings only group Skills; they are not Skill names");
     expect(first).toContain(
       "patch it immediately with skill_update using old_string and new_string"
     );
@@ -357,13 +357,14 @@ describe("assembleSystemPrompt — available-skills (lazy L1)", () => {
     expect(first).toContain(
       [
         "- user-skill: A Soul Skill.",
-        "core: Core workflows.",
+        "## Skill category: Core workflows.",
         "  - business-records: Work with Records.",
-        "forge: Author Soul artifacts.",
+        "## Skill category: Author Soul artifacts.",
         "  - resource-forge: Forge Resource types.",
         "</available-skills>",
       ].join("\n")
     );
+    expect(first).not.toContain("\ncore:");
   });
 
   it("omits the block when there are no skills (unset or empty)", () => {
