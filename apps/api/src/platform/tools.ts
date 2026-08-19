@@ -2,10 +2,8 @@ import type { EventEmitter } from "node:events";
 import { readFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { DelegateToAgentInput, DelegationOutcome } from "@tulipfarm/agent-runtime";
-import { DelegationError } from "@tulipfarm/agent-runtime";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { PLATFORM_RUNTIME_TOOLS } from "@tulipfarm/platform-tools";
-import { ChildRunError } from "@tulipfarm/run-kernel";
 import { ajv, TulipFarmValidationError, validateRoutineDefinition } from "@tulipfarm/schema";
 import type { BundledSkill } from "@tulipfarm/soul";
 import {
@@ -24,13 +22,7 @@ import { stringify as stringifyYaml } from "yaml";
 import { SYSTEM_SOUL_COMMIT_ACTOR } from "../runtime/soul-writer";
 import { soulCommitError } from "../tools/soul-faults";
 import { delegateToAgentTool } from "./delegate-tool";
-import {
-  firstError,
-  SOUL_AGENT_TARGET,
-  SOUL_ROUTINE_TARGET,
-  SOUL_SKILL_TARGET,
-  soulTarget,
-} from "./tool-args";
+import { firstError, SOUL_ROUTINE_TARGET, SOUL_SKILL_TARGET, soulTarget } from "./tool-args";
 import { err, ok, type ToolCallResult } from "./tool-result";
 
 export interface PlatformToolContext {
@@ -180,48 +172,6 @@ export const loadSkillReferenceTool = defineApiTool<PlatformToolContext>({
     } catch {
       return err("not_found", `Reference "${reference}" not found for skill "${skill}".`);
     }
-  },
-});
-
-const TRANSFER_TO_AGENT_SCHEMA: Record<string, unknown> = {
-  type: "object",
-  additionalProperties: false,
-  required: ["agentId"],
-  properties: {
-    agentId: { type: "string", minLength: 1, description: "Soul name of the target agent." },
-    message: {
-      type: "string",
-      description: "Optional handoff context to give the receiving agent.",
-    },
-  },
-};
-const validateTransfer = ajv.compile(TRANSFER_TO_AGENT_SCHEMA);
-
-export const transferToAgentTool = defineApiTool<PlatformToolContext>({
-  name: "transfer_to_agent",
-  requiresAmbient: ["soul"],
-  description:
-    "Hand the conversation off to another configured agent. The conversation's active agent switches and future turns are handled by the target. Validates that the target is a known platform or Soul agent.",
-  mutating: false,
-  tier: "platform",
-  inputSchema: TRANSFER_TO_AGENT_SCHEMA,
-  authorization: {
-    action: "platform.agent.transfer",
-    resources: ["platform.agent"],
-    targets: (args) => soulTarget(SOUL_AGENT_TARGET, args, "agentId"),
-    dataClasses: ["operational"],
-  },
-  handler: async (args, ctx) => {
-    if (!validateTransfer(args))
-      return err("validation_error", firstError(validateTransfer.errors));
-    const { agentId, message } = args as { agentId: string; message?: string };
-    if (ctx.platformAgentNames?.has(agentId)) {
-      return ok({ agentId, agentName: agentId, status: "transferred", message: message ?? null });
-    }
-    const agent = ctx.soulLoader?.agents.get(agentId);
-    if (!agent) return err("not_found", `Agent "${agentId}" not found.`);
-    const agentName = typeof agent.frontmatter.name === "string" ? agent.frontmatter.name : agentId;
-    return ok({ agentId, agentName, status: "transferred", message: message ?? null });
   },
 });
 
@@ -542,7 +492,6 @@ export const callSkillTool = defineApiTool<PlatformToolContext>({
 export const PLATFORM_TOOLS: ApiToolDefinition<PlatformToolContext>[] = [
   loadSkillTool,
   loadSkillReferenceTool,
-  transferToAgentTool,
   delegateToAgentTool,
   triggerRoutineTool,
   routineForgeTool,

@@ -16,7 +16,7 @@ export interface ChatTurnPrincipal {
 
 export interface ChatTurnSubmission {
   readonly principal: ChatTurnPrincipal;
-  /** The request body as accepted by the route; stored verbatim as the Run's request Artifact. */
+  /** The request body normalized by the route with its resolved Agent identity. */
   readonly payload: unknown;
   readonly agentId: string;
 }

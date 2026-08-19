@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assembleSystemPrompt, DelegationError } from "@tulipfarm/agent-runtime";
+import { DelegationError } from "@tulipfarm/agent-runtime";
 import type { BundledSkill, SoulAgent, SoulRoutine, SoulSkill, SoulWriter } from "@tulipfarm/soul";
 import { describe, expect, it, vi } from "vitest";
 import { delegateToAgentTool } from "./delegate-tool";
@@ -14,7 +14,6 @@ import {
   routineForgeTool,
   routinePickerTool,
   soulRepoPushTool,
-  transferToAgentTool,
   triggerRoutineTool,
 } from "./tools";
 
@@ -112,9 +111,6 @@ describe("platform authorization declarations", () => {
     expect(callSkillTool.targetsFor({ name: "research" })).toEqual([
       { type: "soul.skill", id: "research" },
     ]);
-    expect(transferToAgentTool.targetsFor({ agentId: "planner" })).toEqual([
-      { type: "platform.agent", id: "planner" },
-    ]);
     expect(delegateToAgentTool.targetsFor({ agentId: "planner", task: "plan" })).toEqual([
       { type: "platform.agent", id: "planner" },
     ]);
@@ -149,7 +145,6 @@ describe("platform authorization declarations", () => {
       loadSkillTool,
       loadSkillReferenceTool,
       callSkillTool,
-      transferToAgentTool,
       delegateToAgentTool,
       triggerRoutineTool,
       routineForgeTool,
@@ -320,53 +315,6 @@ describe("loadSkillReferenceTool", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
-  });
-});
-
-// ── validate_artifact ─────────────────────────────────────────────────────────
-
-describe("transferToAgentTool", () => {
-  it("returns transferred status and agentName", async () => {
-    const ctx = makeCtx({}, { support: makeAgent("support", "Support Bot") });
-    const res = await transferToAgentTool.handler(
-      { agentId: "support", message: "User needs billing help" },
-      ctx
-    );
-    expect(res).toEqual({
-      success: true,
-      data: {
-        agentId: "support",
-        agentName: "Support Bot",
-        status: "transferred",
-        message: "User needs billing help",
-      },
-    });
-  });
-
-  it("sets message to null when not provided", async () => {
-    const ctx = makeCtx({}, { support: makeAgent("support") });
-    const res = await transferToAgentTool.handler({ agentId: "support" }, ctx);
-    expect(res).toMatchObject({ success: true, data: { message: null } });
-  });
-
-  it("returns not_found for unknown agent", async () => {
-    const res = await transferToAgentTool.handler({ agentId: "ghost" }, makeCtx());
-    expect(res).toMatchObject({ success: false, error: { code: "not_found" } });
-  });
-
-  it("accepts the built-in platform assistant as a transfer target", async () => {
-    const ctx: PlatformToolContext = {
-      soulWriter: makeSoulWriter(),
-      platformAgentNames: new Set(["GeneralAssistant"]),
-    };
-    const res = await transferToAgentTool.handler(
-      { agentId: "GeneralAssistant", message: "resume the default assistant" },
-      ctx
-    );
-    expect(res).toMatchObject({
-      success: true,
-      data: { agentId: "GeneralAssistant", status: "transferred" },
-    });
   });
 });
 
@@ -633,7 +581,6 @@ describe("PLATFORM_TOOLS registry", () => {
     expect(names).toEqual([
       "load_skill",
       "load_skill_reference",
-      "transfer_to_agent",
       "delegate_to_agent",
       "trigger_routine",
       "routine_forge",

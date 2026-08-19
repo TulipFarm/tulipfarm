@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { LanguageModelV3 } from "@ai-sdk/provider";
 import type { PGlite } from "@electric-sql/pglite";
 import type { LlmService } from "@tulipfarm/llm";
@@ -28,6 +29,7 @@ import { ambientTransactionPort, type Queryable, transactionPort } from "../db";
 
 import { runCanceller } from "../runs/cancel";
 import { makeMigratedPglite } from "../test/pglite";
+import type { ConversationDoc } from "./conversations";
 import { PgConversationRepo } from "./conversations";
 import { PgMessageRepo } from "./messages";
 
@@ -114,6 +116,7 @@ describe("durable chat submission over HTTP", () => {
   let sid: string;
   let otherSid: string;
   let validator: TypedOutputValidator;
+  let conversationRepo: PgConversationRepo;
   /** Flipped by the budget test; every other test runs with the budget open. */
   let withinBudget: boolean;
 
@@ -142,6 +145,7 @@ describe("durable chat submission over HTTP", () => {
 
     const runTransactions = transactionPort(queryable);
     const runStore = new RunStore(runTransactions);
+    conversationRepo = new PgConversationRepo(queryable);
 
     app = await buildApp({
       sessionStore,
@@ -155,7 +159,7 @@ describe("durable chat submission over HTTP", () => {
           chain: [{ provider: "test", modelId: "test-model" }],
         })),
       } as unknown as LlmService,
-      conversationRepo: new PgConversationRepo(queryable),
+      conversationRepo,
       messageRepo: new PgMessageRepo(queryable),
       invocations,
       conversationStore: new PgConversationStore(queryable),
@@ -283,14 +287,52 @@ describe("durable chat submission over HTTP", () => {
     );
     expect(artifact.rows).toHaveLength(1);
     expect(artifact.rows[0]?.id).toBe(`${runId}:request`);
-    // Verbatim: what the Worker replays must be the request as received, not a re-derived shape.
-    expect(artifact.rows[0]?.content).toEqual(BODY);
-    expect(artifact.rows[0]?.content_hash).toBe(canonicalHash(BODY));
+    const resolvedBody = { ...BODY, agentId: "__tulipfarm_default__" };
+    expect(artifact.rows[0]?.content).toEqual(resolvedBody);
+    expect(artifact.rows[0]?.content_hash).toBe(canonicalHash(resolvedBody));
 
     const states = await db.query<{ resolved_input: { payloadRef: string } }>(
       "SELECT resolved_input FROM run_states"
     );
     expect(states.rows[0]?.resolved_input.payloadRef).toBe(`artifact:${runId}:request`);
+  });
+
+  it("mints a Run for the Conversation's resolved Agent on a follow-up turn", async () => {
+    const conversation: ConversationDoc = {
+      _id: randomUUID(),
+      userId,
+      agentId: "support-triage",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    await conversationRepo.create(conversation);
+
+    const response = app.inject({
+      method: "POST",
+      url: "/api/v1/chat",
+      cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: CSRF },
+      headers: { "x-csrf-token": CSRF, "idempotency-key": "follow-up-agent-key" },
+      payload: { ...BODY, conversationId: conversation._id },
+    });
+    const run = await awaitRun();
+    await db.query("UPDATE runs SET status = 'succeeded' WHERE id = $1", [run.id]);
+
+    expect((await response).statusCode).toBe(200);
+    expect(
+      (
+        await db.query<{ definition_ref: string }>(
+          "SELECT definition_ref FROM run_states WHERE run_id = $1",
+          [run.id]
+        )
+      ).rows[0]?.definition_ref
+    ).toBe("published:agent:support-triage");
+    expect(
+      (
+        await db.query<{ content: unknown }>("SELECT content FROM artifacts WHERE id = $1", [
+          `${run.id}:request`,
+        ])
+      ).rows[0]?.content
+    ).toEqual({ ...BODY, conversationId: conversation._id, agentId: "support-triage" });
   });
 
   it("lets the Run executor reconstruct the request, and denies a reader outside the ACL", async () => {
