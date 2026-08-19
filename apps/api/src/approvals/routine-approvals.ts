@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { DurableWaitError, type DurableWaitManager } from "@tulipfarm/run-kernel";
 import { canonicalHash } from "@tulipfarm/schema";
 import {
+  type ApprovalRow,
   type ApprovalSignalOutcome,
   type ApprovalsRepo,
   listPendingRoutineApprovals,
