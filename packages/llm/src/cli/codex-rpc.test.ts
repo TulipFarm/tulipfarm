@@ -160,9 +160,15 @@ setTimeout(() => process.exit(2), 20);
   });
 
   it("rejects a request made after the child is gone", async () => {
-    const rpc = connect(child("process.exit(0);"));
+    // Waiting a fixed delay races the child's `close` event: until it lands the request still
+    // reaches a dead pipe and rejects with EPIPE rather than the exit cause.
+    let markClosed: () => void = () => {};
+    const isClosed = new Promise<void>((resolve) => {
+      markClosed = resolve;
+    });
+    const rpc = connect(child("process.exit(0);"), { onClose: () => markClosed() });
 
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await isClosed;
 
     await expect(rpc.request("late")).rejects.toThrow(/exited/);
   });
