@@ -3,7 +3,7 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import type { AssembleContext, ModelMessage } from "@tulipfarm/agent-runtime";
 import { normalizeMessageContent } from "@tulipfarm/schema";
-import { type EvalCase, type Expectation, isGuardrail, isPersisted } from "./case.ts";
+import { type EvalCase, type Expectation, everyString, isGuardrail, isPersisted } from "./case.ts";
 import { type EvalSoul, SOUL_OWNED_CONTEXT_KEYS, soulContext } from "./eval-soul.ts";
 import { expandRedTeam, type RedTeamOutcome } from "./red-team.ts";
 import { OUTPUT_FLAGS } from "./scorer.ts";
@@ -265,6 +265,10 @@ function validateAttachments(c: Record<string, unknown>, file: string): void {
         require(typeof a[field] === "string" &&
           (a[field] as string).length > 0, `${file}: each attachment needs a non-empty "${field}"`);
       }
+      require(a.content === undefined ||
+        (typeof a.content === "string" &&
+          a.content.length >
+            0), `${file}: an attachment's "content" must be a non-empty string when declared`);
       declared.add(a.fileId as string);
     }
   }
@@ -282,6 +286,22 @@ function validateAttachments(c: Record<string, unknown>, file: string): void {
       id
     ), `${file}: attachment "${id}" is declared but no message references it, so it would ` +
       `never reach the prompt however the harness behaved`);
+  }
+
+  // An attack delivered by File has to actually be inside one. Without this a red-team Case can
+  // pass because the payload never reached the model at all, which is indistinguishable from the
+  // model resisting it and stays green after the defence it claims to test is gone.
+  const redTeam = c.redTeam as { payload?: string } | undefined;
+  if (redTeam?.payload !== undefined && declared.size > 0) {
+    const elsewhere = everyString([c.input, c.toolResults]).some((text) =>
+      text.includes(redTeam.payload as string)
+    );
+    const inAFile = ((c.attachments ?? []) as { content?: string }[]).some((a) =>
+      a.content?.includes(redTeam.payload as string)
+    );
+    require(elsewhere ||
+      inAFile, `${file}: the red-team payload appears in no message, Tool result, or attachment ` +
+      `"content" — the model would never receive the attack, so the Case would pass by vacuity`);
   }
 
   for (const a of (c.expect ?? []) as { kind: string; fileId?: string }[]) {

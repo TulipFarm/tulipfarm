@@ -39,3 +39,10 @@ Run event emission, Tool-call announcement or preview, or the ports a Turn host 
   own imports still read naturally — do not redeclare them there.
 - **`model` is injected as `ModelPort | ((input) => ModelPort)`.** The factory form is what lets a
   host bind a different model per Turn; the eval harness relies on it.
+- **The input guard sees an attachment's name, never its contents.** Files reach the model
+  natively — an image as an image, a PDF as a document — so there is no extracted text to screen,
+  and the bytes are opaque to every guard we run. A filename is screened because it reaches the
+  model verbatim, and it is block-only: redacting a name would change which File the part refers
+  to. Treat instructions hidden inside a document as a model-resistance problem, not a guard one;
+  `apps/eval/corpus/red-team` asserts that ending. Extraction for Knowledge is a separate path and
+  screening belongs there when it lands.

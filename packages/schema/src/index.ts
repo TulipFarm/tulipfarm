@@ -113,6 +113,7 @@ export {
   LlmConfigValidationError,
   LlmCredentialError,
   LlmNotConfiguredError,
+  ModelSpecSchema,
   UnknownModelError,
   validateLlmConfig,
 } from "./llm";
@@ -148,6 +149,7 @@ export type {
   HoistedConnections,
 } from "./model-catalog";
 export {
+  acceptedInputModalities,
   asEffortPreset,
   DEPRECATED_TIER_ALIASES,
   deriveModelProfiles,

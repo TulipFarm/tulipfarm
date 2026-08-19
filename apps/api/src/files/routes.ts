@@ -30,6 +30,11 @@ type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
 export interface FileRoutesDeps {
   readonly files: FileService;
+  /**
+   * The input modalities some configured model accepts, so the composer can refuse a file before
+   * someone writes a prompt around it. A function because the Soul is reloadable.
+   */
+  readonly acceptedInputModalities: () => readonly string[];
 }
 
 function reject(reply: FastifyReply, error: unknown): void {
@@ -114,6 +119,35 @@ export function registerFileRoutes(
       }
     );
   });
+
+  app.get(
+    "/api/v1/files/accepted-modalities",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "The input modalities some configured model accepts. The composer uses this to refuse " +
+          "an attachment nothing could read, before a prompt is written around it. Advisory " +
+          "only: routing performs the authoritative check, so absence here is the sole signal " +
+          "worth acting on.",
+        tags: ["files"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        response: {
+          200: {
+            type: "object",
+            required: ["acceptedInputModalities"],
+            properties: {
+              acceptedInputModalities: { type: "array", items: { type: "string" } },
+            },
+          },
+          401: ErrorSchema,
+        },
+      },
+    },
+    async (_req, reply) => {
+      reply.send({ acceptedInputModalities: deps.acceptedInputModalities() });
+    }
+  );
 
   app.get(
     "/api/v1/files",

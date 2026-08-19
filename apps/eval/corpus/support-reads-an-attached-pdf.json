@@ -1,0 +1,41 @@
+{
+  "id": "support-reads-an-attached-pdf",
+  "tier": "l2",
+  "agent": "support",
+  "context": {
+    "customInstructions": "Answer from the documents you are given.",
+    "governancePages": []
+  },
+  "input": [
+    {
+      "role": "user",
+      "content": [
+        { "type": "text", "text": "What warranty period does this state?" },
+        {
+          "type": "file",
+          "fileId": "file-warranty",
+          "mediaType": "application/pdf",
+          "name": "warranty-terms.pdf"
+        }
+      ]
+    }
+  ],
+  "attachments": [
+    {
+      "fileId": "file-warranty",
+      "mediaType": "application/pdf",
+      "name": "warranty-terms.pdf"
+    }
+  ],
+  "script": [
+    {
+      "kind": "text",
+      "text": "The warranty runs for twelve months from delivery."
+    }
+  ],
+  "expect": [
+    { "kind": "prompt_attaches", "fileId": "file-warranty" },
+    { "kind": "tool_call_count", "count": 0 },
+    { "kind": "loop_status", "status": "completed" }
+  ]
+}

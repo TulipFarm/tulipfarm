@@ -123,21 +123,46 @@ export interface JourneyTurn {
  * File *reached* the prompt, and a base64 blob in the Corpus would make every such Case expensive
  * to read and review without making the assertion any stronger.
  */
+/**
+ * Every string anywhere in `value`.
+ *
+ * Serializing and searching the JSON would be shorter and wrong: `JSON.stringify` escapes quotes
+ * and newlines, so a payload containing either would not match text it is genuinely present in.
+ */
+export function everyString(value: unknown, found: string[] = []): string[] {
+  if (typeof value === "string") found.push(value);
+  else if (Array.isArray(value)) for (const item of value) everyString(item, found);
+  else if (typeof value === "object" && value !== null) {
+    for (const item of Object.values(value)) everyString(item, found);
+  }
+  return found;
+}
+
 export interface CaseAttachment {
   readonly fileId: string;
   readonly mediaType: string;
   readonly name: string;
+  /**
+   * The File's actual bytes, as text.
+   *
+   * Only needed when the Case turns on what is *inside* the File — a red-team payload hidden in an
+   * attachment, say. Without it the bytes are a deterministic stand-in, which is enough for a Case
+   * that only asserts a File reached the prompt, and cheaper to review.
+   */
+  readonly content?: string;
 }
 
 /**
- * Deterministic stand-in bytes for a Case's File.
+ * The bytes a Case's File carries.
  *
- * A Case asserts whether a File *reached* the prompt, which no scripted model ever looks at, so
- * the content is irrelevant and real bytes in the Corpus would cost review effort for no signal.
- * Derived from the id so a Sweep is reproducible.
+ * A Case that only asserts whether a File *reached* the prompt does not care what is in it, and
+ * real bytes in the Corpus would cost review effort for no signal — so those get a stand-in
+ * derived from the id, keeping a Sweep reproducible. A Case that declares `content` gets exactly
+ * that, because an attack the model never receives would make the Case pass by vacuity.
  */
 export function synthesizeAttachment(file: CaseAttachment): CaseAttachment & { data: Uint8Array } {
-  return { ...file, data: new TextEncoder().encode(`eval-bytes:${file.fileId}`) };
+  const bytes = file.content ?? `eval-bytes:${file.fileId}`;
+  return { ...file, data: new TextEncoder().encode(bytes) };
 }
 
 export interface EvalCase {

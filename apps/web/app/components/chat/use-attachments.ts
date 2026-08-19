@@ -1,6 +1,7 @@
 import { isAllowedMediaType, MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE } from "@tulipfarm/files";
-import { useCallback, useRef, useState } from "react";
-import { UploadCancelled, uploadFile } from "~/lib/files";
+import { modalityForMediaType } from "@tulipfarm/schema";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { fetchAcceptedModalities, UploadCancelled, uploadFile } from "~/lib/files";
 
 /**
  * The files staged on the composer for the next message.
@@ -23,7 +24,24 @@ export interface Attachment {
   readonly error?: string;
 }
 
-function describeRejection(file: File, staged: number): string | null {
+/** How to get the content in anyway, per modality, when no model can read the file itself. */
+const INSTEAD: Record<string, string> = {
+  image: "describe what it shows in your message",
+  document: "paste the relevant text into your message",
+};
+
+/**
+ * Why `file` cannot be staged, or `null` to stage it.
+ *
+ * `accepted` is the union of input modalities across configured models, or `undefined` while that
+ * is still unknown. Every check here is a courtesy that fails fast and legibly; the server
+ * enforces all of them for real, so this stays permissive whenever it cannot be certain.
+ */
+export function describeRejection(
+  file: File,
+  staged: number,
+  accepted: readonly string[] | undefined
+): string | null {
   if (staged >= MAX_FILES_PER_MESSAGE) {
     return `You can attach at most ${MAX_FILES_PER_MESSAGE} files to one message.`;
   }
@@ -35,12 +53,30 @@ function describeRejection(file: File, staged: number): string | null {
   if (file.type !== "" && !isAllowedMediaType(file.type)) {
     return `${file.name} is not a supported file type.`;
   }
+  if (file.type !== "" && accepted !== undefined) {
+    const modality = modalityForMediaType(file.type);
+    if (modality !== "text" && !accepted.includes(modality)) {
+      const plural = `${modality}s`;
+      const instead = INSTEAD[modality] ?? "include the content in your message";
+      return `No configured model can read ${plural}, so ${file.name} would be ignored. Ask an administrator to enable one, or ${instead}.`;
+    }
+  }
   return null;
 }
 
 export function useAttachments() {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const cancels = useRef(new Map<string, () => void>());
+  // Undefined until known, and left undefined if the fetch fails: see `describeRejection`.
+  const [accepted, setAccepted] = useState<readonly string[] | undefined>(undefined);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchAcceptedModalities(controller.signal)
+      .then(setAccepted)
+      .catch(() => {});
+    return () => controller.abort();
+  }, []);
 
   const update = useCallback((localId: string, patch: Partial<Attachment>) => {
     setAttachments((current) =>
@@ -54,7 +90,7 @@ export function useAttachments() {
         const next = [...current];
         for (const file of files) {
           const localId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-          const rejection = describeRejection(file, next.length);
+          const rejection = describeRejection(file, next.length, accepted);
           if (rejection !== null) {
             next.push({
               localId,
@@ -99,7 +135,7 @@ export function useAttachments() {
         return next;
       });
     },
-    [update]
+    [update, accepted]
   );
 
   const remove = useCallback((localId: string) => {

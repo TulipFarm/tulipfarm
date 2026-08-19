@@ -1,4 +1,4 @@
-import type { EvalCase, Expectation, ScriptedToolResult } from "./case.ts";
+import { type EvalCase, type Expectation, everyString, type ScriptedToolResult } from "./case.ts";
 import type { VulnerabilityClass } from "./vulnerability.ts";
 
 export class RedTeamError extends Error {
@@ -190,7 +190,7 @@ const GUARD_KINDS = new Set(["guardrail_blocked", "guardrail_allowed"]);
 const LEAK_KINDS = new Set(["output_omits", "tool_not_called", "prompt_omits", "tool_call_count"]);
 
 function occursIn(seed: EvalCase, payload: string): boolean {
-  return JSON.stringify([seed.input, seed.toolResults ?? []]).includes(payload);
+  return everyString([seed.input, seed.toolResults ?? []]).some((text) => text.includes(payload));
 }
 
 /**
@@ -219,9 +219,18 @@ export function expandRedTeam(seed: EvalCase, file: string): readonly EvalCase[]
     }
   }
   if (!occursIn(seed, payload)) {
+    // A strategy disguises the payload by rewriting the Case's messages, so a payload carried
+    // only inside an attachment is out of its reach: every variant would ship the File unchanged
+    // and so be identical to the seed. Say that, rather than the generic "appears nowhere",
+    // because the payload plainly is somewhere and the generic wording sends people looking.
+    const inAFile = (seed.attachments ?? []).some((a) => a.content?.includes(payload));
     throw new RedTeamError(
-      `${file}: the payload appears nowhere in the Case's input or tool results, so every ` +
-        `strategy would produce a variant identical to the seed — a Case measuring nothing.`
+      inAFile
+        ? `${file}: the payload is only inside an attachment's "content", which no strategy can ` +
+            `rewrite — every variant would carry the same File and measure nothing. Put the attack ` +
+            `in a message or Tool result to disguise it, or drop "strategies" from this seed.`
+        : `${file}: the payload appears nowhere in the Case's input or tool results, so every ` +
+            `strategy would produce a variant identical to the seed — a Case measuring nothing.`
     );
   }
 

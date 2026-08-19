@@ -38,7 +38,7 @@ export class EmbeddingUnavailableError extends Error {
 }
 
 // Curated LiteLLM spec pinned into Soul; costs are USD/token and future fields stay allowed.
-const ModelSpecSchema = Type.Object(
+export const ModelSpecSchema = Type.Object(
   {
     litellm_key: Type.Optional(Type.String()),
     input_cost_per_token: Type.Optional(Type.Number({ minimum: 0 })),

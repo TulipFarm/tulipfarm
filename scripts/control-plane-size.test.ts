@@ -172,6 +172,7 @@ import { describe, expect, it } from "vitest";
  * the point, and the only edit this file should ever receive. Raising it needs a reviewed reason,
  * because "the number went up again" is exactly the event three editions failed to catch.
  *
+<<<<<<< HEAD
  * This edition raises it, from 49,492 to 51,107 measured against a 49,431 base. That is +1,676, and
  * it is the largest single raise the file has taken, so it is itemised:
  *
@@ -200,6 +201,22 @@ import { describe, expect, it } from "vitest";
  * them would push identity into a package that deliberately does not know about it, which is a
  * worse outcome than a higher number. The ACL logic they call is already in the package — 9,531
  * lines of it against 2,016 here, which is the ratio this gate exists to protect.
+=======
+ * Ticket 05 raised it again, to 49_943, for the same shape of reason. Refusing an attachment at
+ * routing time is correct but late: the person has already chosen the file and written a prompt
+ * around it. So a Turn's composer needs to know, before any of that, whether some configured model
+ * could read the thing at all — which is a route (`GET /api/v1/files/accepted-modalities`), its
+ * response schema, and the composition that supplies it. All three are Fastify and can live
+ * nowhere else. The judgement they expose is not: `acceptedInputModalities` is in
+ * `@tulipfarm/schema` beside `modalitiesFor`, the one place that already decides what a pinned
+ * spec implies about modality, so the answer the composer acts on and the answer routing enforces
+ * are derived from the same rule rather than two that could disagree.
+ *
+ * That growth was paid for in the same change: the hand-written `ModelSpecRouteSchema` in
+ * `soul/llm-config/routes.ts` was a copy of `ModelSpecSchema` maintained by hand, and adding
+ * `supports_pdf_input` to both is what exposed it. It now imports the real schema, which is 21
+ * lines smaller and, more to the point, cannot drift from the contract again.
+>>>>>>> 30d53704 (feat(chat): accept a PDF, and refuse one no model can read)
  *
  * It then moved to 51,149 for the Agent autonomy ceiling. The rule itself did not land here — the
  * ladder, the min and the approval predicate are 47 lines in `packages/tool-host/src/autonomy.ts`,

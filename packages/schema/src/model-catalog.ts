@@ -1,4 +1,4 @@
-import type { ModelModality } from "./definitions/common";
+import { MODEL_MODALITIES, type ModelModality } from "./definitions/common";
 import type { ModelProfileSpec } from "./definitions/model";
 import type { LlmConfig, ModelSpec, ProviderConnection, ProviderEntry } from "./llm";
 
@@ -60,6 +60,25 @@ function modalitiesFor(spec: ModelSpec | undefined): ModelModality[] {
   if (spec?.supports_vision === true) modalities.push("image");
   if (spec?.supports_pdf_input === true) modalities.push("document");
   return modalities;
+}
+
+/**
+ * The input modalities *some* configured model can accept, across every tier.
+ *
+ * This exists so an upload surface can refuse a file before someone writes a prompt around it.
+ * It is deliberately the union rather than the intersection: an attach-time refusal is a courtesy
+ * and must never be wrong, whereas letting a file through costs only the authoritative
+ * server-side denial that routing performs anyway. So it answers "could anything here read this",
+ * and only a `false` is worth acting on.
+ */
+export function acceptedInputModalities(config: LlmConfig): ModelModality[] {
+  const seen = new Set<ModelModality>(["text"]);
+  for (const tier of Object.values(config.tiers ?? {})) {
+    for (const entry of tier.providers) {
+      for (const modality of modalitiesFor(entry.spec)) seen.add(modality);
+    }
+  }
+  return MODEL_MODALITIES.filter((modality) => seen.has(modality));
 }
 
 function profileFrom(

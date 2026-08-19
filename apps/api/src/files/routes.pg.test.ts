@@ -282,12 +282,38 @@ describe("file routes", () => {
     const paths = response.json().paths as Record<string, Record<string, unknown>>;
 
     expect(Object.keys(paths)).toEqual(
-      expect.arrayContaining(["/api/v1/files", "/api/v1/files/{id}", "/api/v1/files/{id}/content"])
+      expect.arrayContaining([
+        "/api/v1/files",
+        "/api/v1/files/{id}",
+        "/api/v1/files/{id}/content",
+        "/api/v1/files/accepted-modalities",
+      ])
     );
     expect(Object.keys(paths["/api/v1/files"].post as object)).toContain("responses");
     const post = paths["/api/v1/files"].post as { responses: Record<string, unknown> };
     expect(Object.keys(post.responses)).toEqual(
       expect.arrayContaining(["201", "400", "401", "403", "413", "415"])
     );
+  });
+  describe("accepted modalities", () => {
+    it("reports text only for an instance with no models configured", async () => {
+      const response = await h.app.inject({
+        method: "GET",
+        url: "/api/v1/files/accepted-modalities",
+        ...auth(h.ownerSid),
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json().acceptedInputModalities).toEqual(["text"]);
+    });
+
+    it("does not answer an unauthenticated caller", async () => {
+      const response = await h.app.inject({
+        method: "GET",
+        url: "/api/v1/files/accepted-modalities",
+      });
+
+      expect(response.statusCode).toBe(401);
+    });
   });
 });

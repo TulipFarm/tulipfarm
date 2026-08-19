@@ -121,3 +121,20 @@ export async function fetchFileObjectUrl(fileId: string, signal?: AbortSignal): 
   if (!response.ok) throw new UploadFailed(response.status, "That file could not be loaded.");
   return URL.createObjectURL(await response.blob());
 }
+
+/**
+ * The input modalities some configured model accepts.
+ *
+ * Advisory: the server performs the authoritative check when the turn routes. This exists so the
+ * composer can refuse a file nobody could read *before* a prompt is written around it. It answers
+ * with the union across configured models, so only an absent modality is worth acting on.
+ */
+export async function fetchAcceptedModalities(signal?: AbortSignal): Promise<readonly string[]> {
+  const response = await fetch(`${API_BASE}/api/v1/files/accepted-modalities`, {
+    credentials: "include",
+    signal,
+  });
+  if (!response.ok) throw new Error("could not read the accepted modalities");
+  const body = (await response.json()) as { acceptedInputModalities?: readonly string[] };
+  return body.acceptedInputModalities ?? [];
+}
