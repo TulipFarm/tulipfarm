@@ -1,3 +1,4 @@
+import type { AuthEndpoints } from "@tulipfarm/integrations";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type {
   BundledIntegration,
@@ -11,7 +12,6 @@ import type { AuthorizationCheck } from "../authz/route-gate";
 import { commitActorFromRequest } from "../soul/commit-actor";
 import {
   AuthBrokerError,
-  type AuthEndpoints,
   completeAuthStep,
   type IntegrationAuthRequestRepo,
   startAuthStep,
@@ -242,7 +242,7 @@ export function registerIntegrationAuthRoutes(
           // Browser failures redirect to an Integration page; unknown slugs land on the list.
           const slug = err.slug ?? "";
           return reply.redirect(
-            `${(await resolveEndpoints()).webUrl}/integrations/${slug}?status=error&reason=${err.reason}`,
+            `${err.webUrl ?? (await resolveEndpoints()).webUrl}/integrations/${slug}?status=error&reason=${err.reason}`,
             302
           );
         }

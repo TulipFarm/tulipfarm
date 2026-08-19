@@ -1,4 +1,12 @@
 export type {
+  IntegrationAuthRequestDoc,
+  IntegrationAuthRequestRepo,
+} from "./auth-request-repo";
+export {
+  DEFAULT_AUTH_REQUEST_TTL_SECONDS,
+  PgIntegrationAuthRequestRepo,
+} from "./auth-request-repo";
+export type {
   PersistedChannelDeliveryAttempt,
   PersistedChannelDeliveryFailure,
   PersistedChannelDeliveryRecord,

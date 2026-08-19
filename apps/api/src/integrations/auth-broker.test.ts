@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { resolveAuthEndpoints } from "@tulipfarm/integrations";
 import type { IntegrationManifest } from "@tulipfarm/soul";
 import { describe, expect, it } from "vitest";
 import {
@@ -13,7 +14,6 @@ import {
   refreshOAuth2Credentials,
   renderDeep,
   renderTemplate,
-  resolveAuthEndpoints,
   startAuthStep,
 } from "./auth-broker";
 
@@ -381,6 +381,7 @@ describe("completeAuthStep", () => {
     }).catch((e) => e);
     expect(err).toBeInstanceOf(AuthBrokerError);
     expect(err.slug).toBe("notion");
+    expect(err.webUrl).toBe(endpoints.webUrl);
   });
 
   it("accepts a form-encoded token response", async () => {

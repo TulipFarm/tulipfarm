@@ -2,6 +2,7 @@
 
 import type { EventEmitter } from "node:events";
 import type { GuardrailsService } from "@tulipfarm/agent-runtime";
+import type { PublicOriginsService } from "@tulipfarm/integrations";
 import type { KnowledgeService } from "@tulipfarm/knowledge";
 import type { KvService } from "@tulipfarm/kv";
 import type { LlmService } from "@tulipfarm/llm";
@@ -65,7 +66,6 @@ import type { RunReplayDeps } from "./runs/replay";
 import type { SetupAdminCreator } from "./setup/first-admin";
 import type { SurfaceActionStore } from "./surfaces/action-store";
 import type { SurfaceArtifactStore } from "./surfaces/artifact-store";
-import type { PublicOriginsService } from "./system/public-origins";
 import type { SystemRoutesDeps } from "./system/routes";
 import type { TriggerInvokeDeps } from "./triggers/routes";
 

@@ -1,3 +1,4 @@
+import { PublicOriginsService } from "@tulipfarm/integrations";
 import type { PaginatedResult } from "@tulipfarm/storage";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -6,7 +7,6 @@ import type { TokenDoc, TokenRepo } from "../auth/api-tokens";
 import { SESSION_COOKIE } from "../auth/routes";
 import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
-import { PublicOriginsService } from "./public-origins";
 
 class FakeUserRepo implements UserRepo {
   private users: UserDoc[] = [];

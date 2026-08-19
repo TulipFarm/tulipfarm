@@ -1,9 +1,9 @@
+import { resolveAuthEndpoints } from "@tulipfarm/integrations";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AppOptions } from "../app";
 import { makeSoulAuditWriter } from "../audit/soul-write";
 import { buildCapabilityCatalog } from "../authz/capabilities";
 import type { AuthorizationCheck, RequireAuthorization } from "../authz/route-gate";
-import { resolveAuthEndpoints } from "../integrations/auth-broker";
 import { registerIntegrationAuthRoutes } from "../integrations/auth-routes";
 import { ensureGitHubInstallation } from "../integrations/github-install";
 import { registerIntegrationMarketplaceRoutes } from "../integrations/marketplace-routes";

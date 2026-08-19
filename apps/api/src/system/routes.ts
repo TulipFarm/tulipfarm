@@ -1,10 +1,10 @@
+import { PublicOriginError, type PublicOriginsService } from "@tulipfarm/integrations";
 import type { KvService } from "@tulipfarm/kv";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AuditService } from "../audit/service";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
 import type { RequireAuthorization } from "../authz/route-gate";
-import { PublicOriginError, type PublicOriginsService } from "./public-origins";
 import { isNewerVersion, runningVersion } from "./version";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;

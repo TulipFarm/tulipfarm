@@ -1,10 +1,10 @@
-import type { StoredPublicOrigins } from "@tulipfarm/storage";
 import { describe, expect, it } from "vitest";
 import {
   normalizePublicOrigin,
   PublicOriginError,
   type PublicOriginRepository,
   PublicOriginsService,
+  type StoredPublicOrigins,
 } from "./public-origins";
 
 class MemoryPublicOrigins implements PublicOriginRepository {

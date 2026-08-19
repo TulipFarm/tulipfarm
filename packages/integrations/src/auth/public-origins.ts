@@ -1,5 +1,37 @@
-import type { StoredPublicOrigins } from "@tulipfarm/storage";
-import { INTEGRATION_AUTH_CALLBACK_PATH } from "../integrations/auth-broker";
+export const INTEGRATION_AUTH_CALLBACK_PATH = "/api/v1/integrations/auth/callback";
+
+export interface AuthEndpoints {
+  readonly callbackUrl: string;
+  readonly webUrl: string;
+  readonly apiUrl: string;
+}
+
+export function resolveAuthEndpoints(env: NodeJS.ProcessEnv = process.env): AuthEndpoints {
+  const apiUrl = (env.PUBLIC_API_URL ?? `http://localhost:${env.PORT ?? 4010}`).replace(/\/+$/, "");
+  const webUrl = (env.PUBLIC_URL ?? "http://localhost:4000").replace(/\/+$/, "");
+  return { apiUrl, webUrl, callbackUrl: `${apiUrl}${INTEGRATION_AUTH_CALLBACK_PATH}` };
+}
+
+export function integrationAuthEndpointVars(
+  endpoints: AuthEndpoints,
+  env: Record<string, string>
+): Record<string, string> {
+  return {
+    ...env,
+    callback_url: endpoints.callbackUrl,
+    web_url: endpoints.webUrl,
+    api_url: endpoints.apiUrl,
+  };
+}
+
+export function ingressWebhookUrl(endpoints: AuthEndpoints, slug: string): string {
+  return `${endpoints.apiUrl.replace(/\/+$/, "")}/api/v1/hooks/integrations/${slug}`;
+}
+
+export interface StoredPublicOrigins {
+  readonly webOrigin: string;
+  readonly apiOrigin: string | null;
+}
 
 export type PublicOriginSource = "database" | "environment" | "default";
 

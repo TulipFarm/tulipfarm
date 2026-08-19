@@ -1,6 +1,6 @@
 /** The one-use server-side auth request row: PKCE verifier custody between authorize and callback. */
 
-import type { Queryable } from "../db";
+import type { Queryable } from "../ports";
 
 export interface IntegrationAuthRequestDoc {
   state: string;

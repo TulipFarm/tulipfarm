@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { delegationCatalogOf, GuardrailsService } from "@tulipfarm/agent-runtime";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
-import { FetchEgressHttp, GuardedEgressHttp } from "@tulipfarm/integrations";
+import { FetchEgressHttp, GuardedEgressHttp, PublicOriginsService } from "@tulipfarm/integrations";
 import {
   buildDefaultRegistry,
   enqueueIndex,
@@ -68,6 +68,7 @@ import {
   IntegrationStore,
   KillSwitchRepo,
   PgGroupRepo,
+  PgIntegrationAuthRequestRepo,
   PgPrincipalRepo,
   PgRoleRepo,
   PgSoulPublicationStore,
@@ -147,7 +148,6 @@ import {
   IntegrationConversationsRepo,
   IntegrationEventsRepo,
 } from "./ingress/repo";
-import { PgIntegrationAuthRequestRepo } from "./integrations/auth-broker";
 import { resolveSecretRef } from "./integrations/connection-env";
 import { PgPrincipalProviderTokenRepo } from "./integrations/principal-tokens";
 import { IngressDeliveryHost } from "./internal/delivery-host";
@@ -236,7 +236,6 @@ import { registerSoulSync } from "./soul-sync";
 import { PgSurfaceActionStore } from "./surfaces/action-store";
 import { PgSurfaceArtifactStore } from "./surfaces/artifact-store";
 import { apiSurfacePresentation, surfaceRendererRegistry } from "./surfaces/renderer-registry";
-import { PublicOriginsService } from "./system/public-origins";
 import { DeclarativeToolSync } from "./tools/declarative/sync";
 import { buildGitHubTooling } from "./tools/github/compose";
 import { buildGitHubTools } from "./tools/github/tools";
