@@ -40,6 +40,7 @@ export interface TurnCompletionStore {
 export type TurnOutcome =
   | { readonly status: "succeeded"; readonly text: string }
   | { readonly status: "failed"; readonly reason: string }
+  | { readonly status: "input_required" }
   | { readonly status: "waiting"; readonly waitId: string };
 
 export interface CompleteTurnInput {
@@ -57,7 +58,7 @@ export interface CompleteTurnInput {
 }
 
 export type CompleteTurnResult =
-  | { readonly status: "succeeded"; readonly messageId: string }
+  | { readonly status: "succeeded"; readonly messageId: string | null }
   | { readonly status: "failed"; readonly reason: string }
   | { readonly status: "waiting"; readonly waitId: string }
   | { readonly status: "stale" };
@@ -92,7 +93,7 @@ export class ConversationTurnCompleter {
     const existing = await this.options.store.findCompletion(ref);
     if (existing !== undefined) {
       return existing.status === "succeeded"
-        ? { status: "succeeded", messageId: existing.messageId ?? "" }
+        ? { status: "succeeded", messageId: existing.messageId }
         : {
             status: "failed",
             reason: input.outcome.status === "failed" ? input.outcome.reason : "",
@@ -107,6 +108,16 @@ export class ConversationTurnCompleter {
         messageId: null,
       });
       return { status: "failed", reason: input.outcome.reason };
+    }
+
+    if (input.outcome.status === "input_required") {
+      await this.options.store.completeTurn({
+        ...ref,
+        status: "succeeded",
+        cursor: input.cursor,
+        messageId: null,
+      });
+      return { status: "succeeded", messageId: null };
     }
 
     const { messageId } = await this.options.store.appendAssistantMessage({

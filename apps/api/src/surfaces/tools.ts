@@ -340,9 +340,10 @@ export const updatePresentationTool: ToolDef = toToolDef(
 const requestInputToolDefinition = defineApiTool<RequestContext>({
   name: "request_input",
   tier: "platform",
-  mutating: false,
+  // It makes no external change, but it is a control-flow barrier for the Tool loop.
+  mutating: true,
   description:
-    "Ask the user for a choice or typed response. This is the only Tool to use when the response must wait for user input; it presents the interactive component and suspends the same Run.",
+    "Ask the user for a choice or typed response. This is the only Tool to use when the response must wait for user input; it presents the interactive component and pauses agent work until the response starts a later Chat Turn.",
   inputSchema: {
     ...PRESENT_SCHEMA,
   },

@@ -221,7 +221,7 @@ export class TurnDriver {
   private async complete(
     request: TurnRequest,
     events: TurnEventWriter,
-    result: Extract<AgentStateResult, { status: "succeeded" | "failed" }>,
+    result: Extract<AgentStateResult, { status: "succeeded" | "failed" | "input_required" }>,
     spend: TurnSpendScope
   ): Promise<RunOutcome> {
     const completion = await this.options.completer.complete({
@@ -294,9 +294,10 @@ export class TurnDriver {
 
 /** Serialize structured output; empty output fails instead of writing a blank Message. */
 function turnOutcome(
-  result: Extract<AgentStateResult, { status: "succeeded" | "failed" }>
+  result: Extract<AgentStateResult, { status: "succeeded" | "failed" | "input_required" }>
 ): TurnOutcome {
   if (result.status === "failed") return { status: "failed", reason: result.reason };
+  if (result.status === "input_required") return { status: "input_required" };
   const text = renderAnswer(result.output);
   if (text.length === 0) return { status: "failed", reason: "empty_model_output" };
   return { status: "succeeded", text };

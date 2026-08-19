@@ -439,6 +439,31 @@ describe("AgentLoop", () => {
     expect(outcome).toMatchObject({ status: "awaiting_approval", approvalId: "appr-1" });
   });
 
+  it("stops after request_input before asking the model to continue", async () => {
+    const model = scriptedModel(
+      toolCallResult([{ callId: "input-1", name: "request_input", arguments: { component: {} } }]),
+      toolCallResult([{ callId: "create-1", name: "agent_create", arguments: {} }])
+    );
+    const tools = dispatcher({
+      status: "succeeded",
+      callId: "input-1",
+      output: { suspendRun: true },
+    });
+
+    const outcome = await loop({ model, tools }).run(
+      input({
+        tools: [
+          { name: "request_input", inputSchema: {}, mutating: true },
+          { name: "agent_create", inputSchema: {}, mutating: true },
+        ],
+      })
+    );
+
+    expect(outcome).toMatchObject({ status: "input_required", callId: "input-1" });
+    expect(model.requests).toBe(1);
+    expect(tools.calls).toEqual([{ name: "request_input", arguments: { component: {} } }]);
+  });
+
   it("AJV-validates structured output and repairs an invalid one", async () => {
     const outcome = await loop({
       model: scriptedModel(

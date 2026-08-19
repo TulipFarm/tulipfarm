@@ -200,6 +200,7 @@ export class AgentLoop {
       ): Promise<
         | { kind: "continue" }
         | { kind: "approval"; approvalId: string; call: NormalizedToolCall }
+        | { kind: "input_required"; call: NormalizedToolCall }
         | { kind: "fail"; reason: AgentLoopFailureReason }
       > => {
         await emit("tool_call_dispatched", {
@@ -225,6 +226,9 @@ export class AgentLoop {
 
         if (dispatched.status === "succeeded") {
           messages.push(toolMessage(call.callId, { output: dispatched.output }));
+          if (isInputRequired(call.name, dispatched.output)) {
+            return { kind: "input_required", call };
+          }
           if (call.name === "load_skill") {
             const loaded = extractSkillName(call.arguments);
             if (loaded !== undefined) activeSkillName = loaded;
@@ -280,6 +284,12 @@ export class AgentLoop {
             approval = { approvalId: outcome.approvalId, call: outcome.call };
             break;
           }
+          if (outcome.kind === "input_required") {
+            return finish(
+              { status: "input_required", callId: outcome.call.callId, ...counters },
+              "completed"
+            );
+          }
           index += 1;
           continue;
         }
@@ -326,6 +336,7 @@ export class AgentLoop {
         // in call order wins, matching what a sequential batch would have produced.
         let decision:
           | { kind: "approval"; approvalId: string; call: NormalizedToolCall }
+          | { kind: "input_required"; call: NormalizedToolCall }
           | { kind: "fail"; reason: AgentLoopFailureReason }
           | undefined;
         for (let i = 0; i < runBatch.length; i += 1) {
@@ -359,6 +370,12 @@ export class AgentLoop {
         }
         if (decision?.kind === "fail") {
           return finish({ status: "failed", reason: decision.reason, ...counters }, "failed");
+        }
+        if (decision?.kind === "input_required") {
+          return finish(
+            { status: "input_required", callId: decision.call.callId, ...counters },
+            "completed"
+          );
         }
         if (decision !== undefined) {
           approval = { approvalId: decision.approvalId, call: decision.call };
@@ -550,4 +567,13 @@ export class AgentLoop {
       return finish({ status: "completed", output, ...counters }, "completed");
     }
   }
+}
+
+function isInputRequired(name: string, output: unknown): boolean {
+  return (
+    name === "request_input" &&
+    typeof output === "object" &&
+    output !== null &&
+    (output as { suspendRun?: unknown }).suspendRun === true
+  );
 }
