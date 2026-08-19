@@ -1,8 +1,9 @@
 import { ajv } from "@tulipfarm/schema";
 import { type ApiToolDefinition, defineApiTool, err, ok } from "@tulipfarm/tool-host";
+import { extractText, isExtractableMediaType } from "./extract";
 import {
   DEFAULT_FILE_LIST_LIMIT,
-  isTextualMediaType,
+  MAX_FILE_BYTES,
   MAX_FILE_LIST_LIMIT,
   MAX_FILE_READ_CHARS,
 } from "./limits";
@@ -132,8 +133,7 @@ function describe(file: FileRecord, source: "mine" | "shared"): Record<string, u
  * exists to prevent. Four bytes per character is UTF-8's worst case, so this can only ever
  * over-read, never truncate something the cap would have kept.
  */
-async function readCapped(body: AsyncIterable<Uint8Array>): Promise<Uint8Array> {
-  const ceiling = MAX_FILE_READ_CHARS * 4;
+async function readCapped(body: AsyncIterable<Uint8Array>, ceiling: number): Promise<Uint8Array> {
   const chunks: Uint8Array[] = [];
   let total = 0;
   for await (const chunk of body) {
@@ -218,30 +218,38 @@ export const fileReadTool = defineApiTool<FileToolContext>({
       throw error;
     }
 
-    if (!isTextualMediaType(file.mediaType)) {
-      return ok({
-        fileId: file.id,
-        filename: file.filename,
-        mediaType: file.mediaType,
-        sizeBytes: file.sizeBytes,
-        kind: "attached",
-        attached: true,
-        note: "This File is attached to the Turn; you will see it on your next step.",
-      });
-    }
-
-    const { body } = await ctx.service.content(ctx.businessId, fileId, ctx.principalId);
-    const decoded = new TextDecoder().decode(await readCapped(body));
-    const text = decoded.slice(0, MAX_FILE_READ_CHARS);
-
-    return ok({
+    const identity = {
       fileId: file.id,
       filename: file.filename,
       mediaType: file.mediaType,
       sizeBytes: file.sizeBytes,
+    };
+    const attached = {
+      ...identity,
+      kind: "attached",
+      attached: true,
+      note: "This File is attached to the Turn; you will see it on your next step.",
+    };
+
+    if (!isExtractableMediaType(file.mediaType)) return ok(attached);
+
+    // A PDF is only worth reading whole because its cross-reference table is at the end; a
+    // text File is not, so it keeps the smaller ceiling it always had.
+    const ceiling = file.mediaType === "application/pdf" ? MAX_FILE_BYTES : MAX_FILE_READ_CHARS * 4;
+    const { body } = await ctx.service.content(ctx.businessId, fileId, ctx.principalId);
+    const extracted = await extractText(file.mediaType, await readCapped(body, ceiling), {
+      maxChars: MAX_FILE_READ_CHARS,
+    });
+
+    // A scan carries no text layer, so falling back to the attachment is what lets the model see
+    // the pages instead of being told the document is empty.
+    if (extracted.kind === "refused") return ok(attached);
+
+    return ok({
+      ...identity,
       kind: "text",
-      text,
-      truncated: decoded.length > text.length || file.sizeBytes > text.length,
+      text: extracted.text,
+      truncated: extracted.truncated,
       maxChars: MAX_FILE_READ_CHARS,
     });
   },

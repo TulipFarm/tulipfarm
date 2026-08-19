@@ -18,6 +18,7 @@ an **Artifact** is a different entity, in `packages/storage`.
 | `src/limits.ts` | Byte/count caps, type allowlist, textual split, read caps, `BUSINESS_PRINCIPAL_ID` |
 | `src/sniff.ts` · `src/filename.ts` | Magic-byte `resolveMediaType`; safe-to-store filenames |
 | `src/dimensions.ts` · `src/bound.ts` | Header-only pixel size; `boundImage` refuse-or-downscale |
+| `src/extract.ts` | The one answer to "what is the text of this File". Lazy-loads the PDF parser. |
 | `src/render.ts` | Markdown → PDF, the pass-through formats, and the four render bounds |
 | `src/turn-attachments.ts` | Which Files a Turn may send, and the two-gate read of their bytes |
 | `src/tools.ts` | `file_list` / `file_read` / `file_create` — the whole Agent-facing surface |
@@ -26,6 +27,10 @@ an **Artifact** is a different entity, in `packages/storage`.
 | `src/http.ts` | `FILE_WIRE_SCHEMA`, `serializeFile`, refusal statuses, download headers |
 
 ## Rules
+
+- `extract.ts` is the only place that decides what a File's text is. `file_read` and Knowledge
+  indexing both go through it, because a passage shown in chat that search cannot find looks like
+  a bug from neither side. Images are refused there on purpose, not by omission.
 
 - **Upload order is load-bearing**: authorize → reject on declared length → stream → sniff → reject
   → bound → write the row. Reordering costs a storage write per rejected upload, or admits a

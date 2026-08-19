@@ -15,7 +15,8 @@
     "@tulipfarm/tool-host": "workspace:*",
     "jimp": "^1.6.1",
     "marked": "^18.0.10",
-    "pdfkit": "^0.19.1"
+    "pdfkit": "^0.19.1",
+    "unpdf": "^1.8.1"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.3",
