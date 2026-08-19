@@ -36,7 +36,12 @@ export default function OperationsRoute() {
       {killSwitches ? (
         <KillSwitchPanel model={killSwitches} onChanged={() => revalidator.revalidate()} />
       ) : null}
-      <OperationsConsole model={model} busy={busy} onCommand={command} />
+      <OperationsConsole
+        model={model}
+        busy={busy}
+        onCommand={command}
+        onRefresh={() => revalidator.revalidate()}
+      />
     </div>
   );
 }

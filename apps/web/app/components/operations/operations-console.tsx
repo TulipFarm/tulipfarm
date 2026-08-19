@@ -5,6 +5,7 @@ import {
   Ban,
   CheckCircle2,
   DatabaseBackup,
+  RefreshCw,
   Search,
   ShieldAlert,
 } from "lucide-react";
@@ -96,7 +97,7 @@ function EmptyPanel({ children }: { children: ReactNode }) {
   );
 }
 
-function HealthPanel({ items }: { items: readonly OperationalItem[] }) {
+function HealthPanel({ items }: { items: OperationsModel["health"] }) {
   return (
     <Section
       title="Health"
@@ -110,14 +111,25 @@ function HealthPanel({ items }: { items: readonly OperationalItem[] }) {
           {items.map((item, index) => {
             const component = text(item, "component", "name", "id") ?? "Unknown component";
             const status = statusValue(item, "unknown");
+            const detail = text(item, "detail");
             return (
               <li
                 key={itemKey(item, index)}
-                className="flex min-h-12 items-center gap-3 px-3 py-2 text-xs"
+                className="flex min-h-12 items-start gap-3 px-3 py-2 text-xs"
               >
-                <span className="min-w-0 flex-1 truncate font-medium" title={component}>
-                  {component}
-                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-medium" title={component}>
+                    {component}
+                  </p>
+                  {status !== "ok" && detail ? (
+                    <p className="mt-0.5 text-muted-foreground">{detail}</p>
+                  ) : null}
+                  {status !== "ok" ? (
+                    <p className="mt-0.5 text-[0.625rem] text-muted-foreground">
+                      Last checked {formatIso(item.checkedAt)}
+                    </p>
+                  ) : null}
+                </div>
                 <StatusBadge status={status} />
               </li>
             );
@@ -405,10 +417,12 @@ export function OperationsConsole({
   model,
   busy = false,
   onCommand,
+  onRefresh,
 }: {
   model: OperationsModel;
   busy?: boolean;
   onCommand: (action: OperationAction, input: Record<string, unknown>) => void;
+  onRefresh?: () => void;
 }) {
   const [previewSupport, setPreviewSupport] = useState(false);
   const attentionCount = attentionItems(model);
@@ -448,6 +462,14 @@ export function OperationsConsole({
             Create support bundle
           </button>
         ) : null}
+        <button
+          type="button"
+          onClick={onRefresh}
+          className="inline-flex items-center gap-1.5 rounded-sm border border-border px-2.5 py-1.5 text-xs hover:bg-muted disabled:opacity-60"
+        >
+          <RefreshCw aria-hidden="true" className="size-3.5" />
+          Refresh status
+        </button>
       </header>
 
       {previewSupport ? (
