@@ -386,6 +386,10 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
     if (outcome.status === "awaiting_approval") {
       return { kind: "awaiting_approval", reason: "approval_required" };
     }
+    if (outcome.status === "input_required") {
+      // Routine Agents expose no Surface-capable Tools, so this outcome cannot be resumed here.
+      return { kind: "failed", reason: "input_required_without_surface", retryable: false };
+    }
 
     // Last zero-cost refusal point: no State is settled and no downstream effect has run.
     const guardedOutput = await guardrails.runOutput(answerText(outcome.output), guardContext);
