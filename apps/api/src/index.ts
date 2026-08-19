@@ -67,9 +67,9 @@ import {
   ChannelRunDeliveryStore,
   ChildLinkAncestryStore,
   ChildLinkStore,
+  createBlobPort,
   EventStore,
   ensureEmbeddingIndexes,
-  FileSystemBlobPort,
   IntegrationStore,
   KillSwitchRepo,
   PgGroupRepo,
@@ -538,7 +538,7 @@ async function boot() {
       repo: new PgFileRepo(pool),
       rolesOf: (businessId, principalId) =>
         collectHeldRoleIds(fileAuthorityRepos, businessId, principalId, new Date()),
-      blobs: new FileSystemBlobPort(join(resolveDataDir() ?? process.cwd(), "blobs")),
+      blobs: createBlobPort(join(resolveDataDir() ?? process.cwd(), "blobs")),
       newId: () => randomUUID(),
       // Read per upload from the Soul, so an operator turning downscaling on takes effect on the
       // next upload rather than on the next restart.

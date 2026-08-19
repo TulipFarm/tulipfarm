@@ -13,6 +13,9 @@ publication, approvals, integrations, events, and blob/vector/cache/queue ports.
 | --- | --- |
 | `src/index.ts` | Public exports; do not mirror the list here. |
 | `src/ports/` | Transaction/query (incl. `withTransaction`), blob, vector, cache, queue ports. |
+| `src/ports/blob-conformance.ts` | What *any* blob implementation must do; every one runs it. |
+| `src/ports/s3-blob.ts`, `s3-api.ts`, `aws-s3-api.ts` | S3 driver, its narrow API port, the SDK adapter. |
+| `src/ports/blob-config.ts` | Which blob store this deployment runs on, read from the environment. |
 | `src/soul/` | Soul publication records, projection, outbox, activation history. |
 | `src/artifacts/` | Append-only Artifacts, State Output Bindings, lineage. |
 | `src/runs/` | Runs, States, Attempts, waits/signals, budgets, concurrency, children, events. |
@@ -29,6 +32,15 @@ publication, approvals, integrations, events, and blob/vector/cache/queue ports.
 - May import only allowed dependencies, currently `@tulipfarm/schema` and
   `@tulipfarm/observability`; see [dependency rules](../../docs/architecture/dependency-rules.md).
 - No `pg` or provider SDK types may leak through `src/ports/` contracts.
+- A new blob implementation runs `BLOB_CONFORMANCE` and `TAMPER_CONFORMANCE` or it does not ship.
+  Two stores described by two test files that share no assertion do not prove "swap the connection
+  string and nothing changes", which is the actual product claim.
+- Keep `S3Config` to the S3 protocol's own surface. A vendor-specific field is the first crack in
+  that claim; Azure and GCS are reached through their S3 front doors, not through a driver here.
+- The AWS SDK stays behind `AwsS3Api`, which holds no branch of its own. Every decision worth
+  testing belongs in `S3BlobPort`, where the conformance suite can reach it without a network.
+- Never import `@tulipfarm/testkit` from this package, tests included: the fake runs the
+  conformance suite from its own side, so production code can never reach a test double.
 - Domain packages use repository/transaction ports; they never read another owner's tables directly.
 - If a storage rule repeats schema/Soul contracts, derive or reference the owner instead of copying.
 - `actor_principal_id` is required for every Soul publication; no anonymous publish paths except

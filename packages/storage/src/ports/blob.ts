@@ -42,6 +42,7 @@ export interface BlobPort {
   get(ref: BlobRef, range?: BlobRange): Promise<AsyncIterable<Uint8Array>>;
   /** Size and content type without reading the body. `null` when the object is absent. */
   head(ref: BlobRef): Promise<BlobMetadata | null>;
+  /** Idempotent: an object that is not there is the state the caller asked for. */
   delete(ref: BlobRef): Promise<void>;
 }
 

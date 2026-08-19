@@ -31,8 +31,8 @@ import { PgBundleStore } from "@tulipfarm/soul";
 import {
   ArtifactStore,
   BudgetStore,
+  createBlobPort,
   EventStore,
-  FileSystemBlobPort,
   IntegrationStore,
   KillSwitchRepo,
   listUsersWithDueWork,
@@ -245,7 +245,7 @@ export async function main(): Promise<void> {
   // a counter reloaded as zero would give every resume a fresh ceiling and turn a bounded queue
   // into an unbounded one.
   const stateContentionStore = new RunStateContentionStore(transactions);
-  const blobs = new FileSystemBlobPort(join(resolveDataDir() ?? ".tulipfarm", "blobs"));
+  const blobs = createBlobPort(join(resolveDataDir() ?? ".tulipfarm", "blobs"));
   const artifactService = new ArtifactService(
     new ArtifactStore(transactions),
     new TypedOutputValidator(INVOCATION_REQUEST_SCHEMAS),

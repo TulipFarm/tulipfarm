@@ -72,7 +72,11 @@ export class FileSystemBlobPort implements BlobPort {
   }
 
   async delete(ref: BlobRef): Promise<void> {
-    await unlink(this.resolve(ref));
+    try {
+      await unlink(this.resolve(ref));
+    } catch (error) {
+      if (!isCode(error, "ENOENT")) throw error;
+    }
   }
 }
 
