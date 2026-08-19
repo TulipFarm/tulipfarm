@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "0.3.211",
+    "@anthropic-ai/claude-agent-sdk": "0.3.234",
     "@fastify/compress": "^9.2.0",
     "@fastify/cookie": "^11.0.2",
     "@fastify/cors": "^11.2.0",
@@ -48,7 +48,7 @@
     "@tulipfarm/surface-web": "workspace:*",
     "@tulipfarm/tool-broker": "workspace:*",
     "@tulipfarm/tool-host": "workspace:*",
-    "ai": "^7.0.2",
+    "ai": "^7.0.66",
     "dotenv": "^17.4.2",
     "fastify": "^5.8.5",
     "isolated-vm": "^7.0.0",
@@ -58,7 +58,7 @@
     "yaml": "^2.9.0"
   },
   "devDependencies": {
-    "@ai-sdk/provider": "^4.0.0",
+    "@ai-sdk/provider": "^4.0.7",
     "@electric-sql/pglite": "^0.5.3",
     "@electric-sql/pglite-pgvector": "^0.0.4",
     "@tulipfarm/tsconfig": "workspace:*",

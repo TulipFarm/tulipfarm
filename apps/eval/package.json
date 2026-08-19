@@ -25,7 +25,7 @@
     "@tulipfarm/storage": "workspace:*",
     "@tulipfarm/tool-host": "workspace:*",
     "@tulipfarm/turn-executor": "workspace:*",
-    "ai": "^7.0.2"
+    "ai": "^7.0.66"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.3",
