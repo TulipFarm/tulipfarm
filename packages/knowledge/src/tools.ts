@@ -1,73 +1,26 @@
 import { randomUUID } from "node:crypto";
 import { ajv } from "@tulipfarm/schema";
 import { type ApiToolDefinition, defineApiTool, err, ok } from "@tulipfarm/tool-host";
-import type { KnowledgeService } from "./service";
+import { recordWriteDenial } from "./denial-audit";
+import { isKnowledgeId } from "./ids";
+import { getBacklinks, getPage, getPageByPath, getSpaceGraph } from "./precision-tools";
+import {
+  CITE_SOURCES_TOOL,
+  firstError,
+  KNOWLEDGE_RESOURCE,
+  type KnowledgeToolContext,
+  knowledgeSpaceTarget,
+  mayReadPage,
+  objectArg,
+  pagePathTargets,
+  pageUrl,
+  readablePages,
+  readableSpace,
+  reason,
+  stringArg,
+} from "./tool-support";
 
-/** Per-request context a knowledge tool runs against (KN-V1-006). No ACL (KN-V1-001). */
-export interface KnowledgeToolContext {
-  userId: string;
-  service: KnowledgeService;
-  agentId?: string;
-  guardrailRevision?: string;
-  runId?: string;
-  conversationId?: string;
-}
-
-/** `resourceType` must match the grant grammar exactly; kind belongs in the target id. */
-const KNOWLEDGE_RESOURCE = "platform.knowledge";
-
-function firstError(validate: ReturnType<typeof ajv.compile>): string {
-  return validate.errors?.[0]?.message ?? "invalid input";
-}
-
-function reason(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
-}
-
-type TargetRef = { type: string; id: string };
-
-function objectArg(args: unknown): Record<string, unknown> {
-  return typeof args === "object" && args !== null ? (args as Record<string, unknown>) : {};
-}
-
-function stringArg(args: unknown, key: string): string | undefined {
-  const value = objectArg(args)[key];
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function pagePathTargets(args: unknown): TargetRef[] {
-  const spaceId = stringArg(args, "spaceId");
-  const path = stringArg(args, "path");
-  const targets: TargetRef[] = [];
-  if (spaceId !== undefined) targets.push({ type: KNOWLEDGE_RESOURCE, id: `space:${spaceId}` });
-  if (spaceId !== undefined && path !== undefined) {
-    targets.push({ type: KNOWLEDGE_RESOURCE, id: `path:${spaceId}:${path}` });
-  }
-  return targets;
-}
-
-function knowledgeSpaceTarget(args: unknown): TargetRef[] {
-  const spaceId = stringArg(args, "spaceId");
-  return spaceId === undefined ? [] : [{ type: KNOWLEDGE_RESOURCE, id: `space:${spaceId}` }];
-}
-
-function knowledgePageTarget(args: unknown): TargetRef[] {
-  const pageId = stringArg(args, "pageId");
-  return pageId === undefined ? [] : [{ type: KNOWLEDGE_RESOURCE, id: `page:${pageId}` }];
-}
-
-/**
- * Tool name shared with the producer (`sources` SSE event) and chat turn (grounding/citation
- * only when this tool is scoped to the agent).
- */
-export const CITE_SOURCES_TOOL = "cite_sources";
-
-/** Wiki page url for a page — only OKF pages (which carry a spaceId) have one; a flat page
- *  returns undefined and renders unlinked. Source of truth for `/knowledge/pages/:id`.
- */
-function pageUrl(page: { _id: string; spaceId?: string | null }): string | undefined {
-  return page.spaceId ? `/knowledge/pages/${page._id}` : undefined;
-}
+export { CITE_SOURCES_TOOL, type KnowledgeToolContext };
 
 const QUERY_SCHEMA = {
   type: "object",
@@ -84,8 +37,8 @@ const QUERY_SCHEMA = {
   },
 } as const;
 
-/** Canonical UUID shape — a `spaceId` that isn't one is ignored (treated as no space filter). */
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Headroom so authorizing a search result set still fills the caller's window. Matches `/search`. */
+const SEARCH_OVERFETCH = 4;
 const validateQuery = ajv.compile(QUERY_SCHEMA);
 
 const CITE_SOURCES_SCHEMA = {
@@ -144,7 +97,7 @@ const queryKnowledge = defineApiTool<KnowledgeToolContext>({
       const rawSpaceId = stringArg(args, "spaceId")?.trim();
       // Omitted or invalid spaceId intentionally means corpus-wide search; keep [] so the coarse
       // platform.knowledge search grant is checked instead of fabricating a fake space target.
-      return rawSpaceId && UUID_RE.test(rawSpaceId)
+      return rawSpaceId && isKnowledgeId(rawSpaceId)
         ? [{ type: KNOWLEDGE_RESOURCE, id: `space:${rawSpaceId}` }]
         : [];
     },
@@ -164,13 +117,14 @@ const queryKnowledge = defineApiTool<KnowledgeToolContext>({
     const domain = a.domain?.trim() ? a.domain.trim() : undefined;
     const tags = a.tags && a.tags.length > 0 ? a.tags : undefined;
     const rawSpaceId = a.spaceId?.trim();
-    const spaceId = rawSpaceId && UUID_RE.test(rawSpaceId) ? rawSpaceId : undefined;
+    const spaceId = rawSpaceId && isKnowledgeId(rawSpaceId) ? rawSpaceId : undefined;
     const filterWarnings = rawSpaceId && !spaceId ? ["ignored-invalid-spaceId"] : [];
+    const limit = Math.min(Math.max(a.limit ?? 10, 1), 50);
     try {
       const res = await ctx.service.hybridSearchPages(
         a.query,
         { domain, tags, spaceId },
-        Math.min(Math.max(a.limit ?? 10, 1), 50),
+        limit * SEARCH_OVERFETCH,
         {
           principalId: ctx.userId,
           principals: [{ kind: "user", id: ctx.userId }],
@@ -181,7 +135,16 @@ const queryKnowledge = defineApiTool<KnowledgeToolContext>({
           ...(ctx.runId === undefined ? {} : { runId: ctx.runId }),
         }
       );
-      return ok({ results: res.results, warnings: [...filterWarnings, ...res.warnings] });
+      // Source hits were already authorized against their provider by `retrieve`; OKF hits come
+      // straight off the corpus, so they are the ones the Page gate has to see. Over-fetched
+      // above, filtered here, truncated after — filtering the requested window would return a
+      // short list exactly when something was withheld, which is the disclosure itself.
+      const okfIds = res.results.filter((r) => r.origin === "okf").map((r) => r.pageId);
+      const visible = await readablePages(ctx, okfIds);
+      const results = res.results
+        .filter((r) => r.origin !== "okf" || visible.has(r.pageId))
+        .slice(0, limit);
+      return ok({ results, warnings: [...filterWarnings, ...res.warnings] });
     } catch (e) {
       return err("internal_error", reason(e));
     }
@@ -216,11 +179,15 @@ const citeSources = defineApiTool<KnowledgeToolContext>({
     try {
       const sources: { ref: number; id: string; title: string; url?: string; path?: string }[] = [];
       const seen = new Set<string>();
+      const visible = await readablePages(ctx, [...new Set(a.citations.map((c) => c.pageId))]);
       for (const c of a.citations) {
         // Dedup by pageId — a page cited under several [n] refs lists once in the footer (keep the
         // first/lowest ref, matching "numbered in order of first use"; skips a redundant fetch.
         if (seen.has(c.pageId)) continue;
         seen.add(c.pageId);
+        // A restricted Page drops out here rather than at the fetch, so it answers exactly as an
+        // unknown id: title and URL alone would otherwise make this an existence oracle.
+        if (!visible.has(c.pageId)) continue;
         // Drop unknown OR soft-deleted pages — the agent can't cite a page the user can't open.
         const page = await ctx.service.getActivePage(c.pageId);
         if (!page) continue;
@@ -376,7 +343,31 @@ const writePage = defineApiTool<KnowledgeToolContext>({
     }
     const a = args as { spaceId: string; path: string; content: string };
     try {
-      const res = await ctx.service.writePage(a);
+      // The Tool twin of POST /spaces/:id/pages, and it upserts by (spaceId, path) the same way, so
+      // it needs the same two guards: a Space the caller cannot read is not authorable, and a taken
+      // path holding a Page they cannot read is not overwritable — otherwise naming a path is
+      // enough to replace a restricted Page's body and take over its authorship. Both denials wear
+      // `space_not_found` so a refusal is indistinguishable from a Space that was never there, and
+      // both are recorded, since refusing a taken path is the one bit this gate cannot hide.
+      const refuse = async (subjectKind: "page" | "space") => {
+        await recordWriteDenial(ctx.denials, {
+          actorId: ctx.userId,
+          action: "knowledge.page.write",
+          subjectKind,
+          ...(ctx.agentId === undefined ? {} : { agentId: ctx.agentId }),
+          ...(ctx.runId === undefined ? {} : { correlationId: ctx.runId }),
+        });
+        return err("not_found", "space_not_found");
+      };
+      if (!ctx.pageGate) return refuse("space");
+      if (!(await ctx.pageGate.canReadSpace(ctx.userId, a.spaceId))) return refuse("space");
+      const existing = await ctx.service.getPageByPath(a.spaceId, a.path);
+      if (existing && !(await mayReadPage(ctx, existing._id))) return refuse("page");
+      // An Agent-written Page is weighed differently by a reader, so the write records which.
+      const res = await ctx.service.writePage({
+        ...a,
+        author: ctx.agentId ? { kind: "agent", id: ctx.agentId } : { kind: "user", id: ctx.userId },
+      });
       if (!res.ok) {
         const code =
           res.reason === "space_not_found"
@@ -410,155 +401,20 @@ const navigateSpace = defineApiTool<KnowledgeToolContext>({
   handler: async (args, ctx) => {
     if (!validateNavigate(args)) return err("validation_error", firstError(validateNavigate));
     const a = args as { spaceId: string; dirPath?: string };
+    // Before any `uuid`-column call: a Space the actor cannot read must answer as one that is not
+    // there, and a malformed id must not reach Postgres and come back as an error-channel tell.
+    if (!(await readableSpace(ctx, a.spaceId))) return err("not_found", "space not found");
     try {
-      const listing = await ctx.service.navigateSpace(a.spaceId, a.dirPath ?? "");
+      const pages = await ctx.service.listSpacePages(a.spaceId);
+      const visible = await readablePages(
+        ctx,
+        pages.map((p) => p._id)
+      );
+      // Filter before rendering: the listing is markdown, so a Page removed after the fact would
+      // already have leaked its title.
+      const listing = await ctx.service.navigateSpace(a.spaceId, a.dirPath ?? "", visible);
       if (listing === null) return err("not_found", "space not found");
       return ok({ listing });
-    } catch (e) {
-      return err("internal_error", reason(e));
-    }
-  },
-});
-
-// ── Precision retrieval (exact lookups, not search) ─────────────────────────────
-
-const GET_PAGE_BY_PATH_SCHEMA = {
-  type: "object",
-  required: ["spaceId", "path"],
-  additionalProperties: false,
-  properties: {
-    spaceId: { type: "string", minLength: 1 },
-    path: { type: "string", minLength: 1 },
-  },
-} as const;
-const validateGetPageByPath = ajv.compile(GET_PAGE_BY_PATH_SCHEMA);
-
-const GET_PAGE_SCHEMA = {
-  type: "object",
-  required: ["pageId"],
-  additionalProperties: false,
-  properties: { pageId: { type: "string", minLength: 1 } },
-} as const;
-const validateGetPage = ajv.compile(GET_PAGE_SCHEMA);
-
-const GET_SPACE_SCHEMA = {
-  type: "object",
-  required: ["spaceId"],
-  additionalProperties: false,
-  properties: { spaceId: { type: "string", minLength: 1 } },
-} as const;
-const validateGetSpace = ajv.compile(GET_SPACE_SCHEMA);
-
-const getPageByPath = defineApiTool<KnowledgeToolContext>({
-  name: "get_page_by_path",
-  description:
-    "Fetch one exact knowledge page by its space id and path (e.g. 'policies/refunds') — a direct lookup with no search/ranking. Use when you know the page's location. Returns its full markdown content.",
-  tier: "platform",
-  mutating: false,
-  inputSchema: GET_PAGE_BY_PATH_SCHEMA,
-  authorization: {
-    action: "knowledge.page.read",
-    resources: ["platform.knowledge"],
-    targets: pagePathTargets,
-    dataClasses: ["source_content"],
-  },
-  handler: async (args, ctx) => {
-    if (!validateGetPageByPath(args))
-      return err("validation_error", firstError(validateGetPageByPath));
-    const a = args as { spaceId: string; path: string };
-    try {
-      const page = await ctx.service.getPageByPath(a.spaceId, a.path);
-      // Skip soft-deleted pages — `getBySpacePath` still returns them (cross-link resolution
-      // needs that), but the agent must not read deleted content.
-      if (!page?.active) return err("not_found", "page not found");
-      return ok({ id: page._id, title: page.title, path: page.path, content: page.content });
-    } catch (e) {
-      return err("internal_error", reason(e));
-    }
-  },
-});
-
-const getPage = defineApiTool<KnowledgeToolContext>({
-  name: "get_page",
-  description:
-    "Fetch a knowledge page's full content by its pageId. Use after query_knowledge (which returns only a matching chunk) to read the whole page. Returns the full markdown plus a wiki url when the page lives in a space.",
-  tier: "platform",
-  mutating: false,
-  inputSchema: GET_PAGE_SCHEMA,
-  authorization: {
-    action: "knowledge.page.read",
-    resources: ["platform.knowledge"],
-    targets: knowledgePageTarget,
-    dataClasses: ["source_content"],
-  },
-  handler: async (args, ctx) => {
-    if (!validateGetPage(args)) return err("validation_error", firstError(validateGetPage));
-    const a = args as { pageId: string };
-    try {
-      // Mirror cite_sources: never hand the agent a soft-deleted/missing page; its URL would 404.
-      const page = await ctx.service.getActivePage(a.pageId);
-      if (!page) return err("not_found", "page not found");
-      const url = pageUrl(page);
-      return ok({
-        id: page._id,
-        title: page.title,
-        content: page.content,
-        spaceId: page.spaceId ?? null,
-        path: page.path ?? null,
-        ...(url ? { url } : {}),
-      });
-    } catch (e) {
-      return err("internal_error", reason(e));
-    }
-  },
-});
-
-const getBacklinks = defineApiTool<KnowledgeToolContext>({
-  name: "get_backlinks",
-  description:
-    "List the pages that link to a page (its inbound 'linked from' references, same- or cross-space). Use to discover related pages. Returns null/not_found for a non-OKF page.",
-  tier: "platform",
-  mutating: false,
-  inputSchema: GET_PAGE_SCHEMA,
-  authorization: {
-    action: "knowledge.page.backlinks.read",
-    resources: ["platform.knowledge"],
-    targets: knowledgePageTarget,
-    dataClasses: ["source_content"],
-  },
-  handler: async (args, ctx) => {
-    if (!validateGetPage(args)) return err("validation_error", firstError(validateGetPage));
-    const a = args as { pageId: string };
-    try {
-      const backlinks = await ctx.service.getBacklinks(a.pageId);
-      if (backlinks === null) return err("not_found", "no backlinks (page is not in a space)");
-      return ok({ backlinks });
-    } catch (e) {
-      return err("internal_error", reason(e));
-    }
-  },
-});
-
-const getSpaceGraph = defineApiTool<KnowledgeToolContext>({
-  name: "get_space_graph",
-  description:
-    "Get a space's cross-link graph — its page nodes and the links between them — to understand how a space's pages relate. Returns not_found when the space does not exist.",
-  tier: "platform",
-  mutating: false,
-  inputSchema: GET_SPACE_SCHEMA,
-  authorization: {
-    action: "knowledge.space.graph.read",
-    resources: ["platform.knowledge"],
-    targets: knowledgeSpaceTarget,
-    dataClasses: ["source_content"],
-  },
-  handler: async (args, ctx) => {
-    if (!validateGetSpace(args)) return err("validation_error", firstError(validateGetSpace));
-    const a = args as { spaceId: string };
-    try {
-      const graph = await ctx.service.getSpaceGraph(a.spaceId);
-      if (graph === null) return err("not_found", "space not found");
-      return ok({ graph });
     } catch (e) {
       return err("internal_error", reason(e));
     }

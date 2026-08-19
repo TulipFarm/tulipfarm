@@ -12,6 +12,7 @@ import { ErrorState, NotFoundState } from "~/components/states";
 import { ApiError } from "~/lib/api";
 import { getSpace, navigateSpace, writePage } from "~/lib/knowledge-api";
 import { isSynthesizedIndex } from "~/lib/okf-listing";
+import { pageFormErrors } from "~/lib/page-form-errors";
 import { pageHref } from "~/lib/page-href";
 
 export const meta: MetaFunction = () => [{ title: "New page · Knowledge · tulipfarm" }];
@@ -48,12 +49,14 @@ export default function PageNew() {
   const navigate = useNavigate();
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<"path" | "content", string>>>({});
 
   const detailPath = `/knowledge/spaces/${encodeURIComponent(space.id)}`;
 
   async function onSubmit(path: string, content: string) {
     setSubmitting(true);
     setFormError(null);
+    setFieldErrors({});
     try {
       const result = await writePage(space.id, path, content);
       window.dispatchEvent(new Event("okf:space-changed")); // refresh the tree
@@ -63,7 +66,9 @@ export default function PageNew() {
         navigate(pageHref(result.id, path)); // canonical uuid URL of the new page
       }
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : "request failed");
+      const mapped = pageFormErrors(err);
+      setFormError(mapped.formError);
+      setFieldErrors(mapped.fieldErrors);
       setSubmitting(false);
     }
   }
@@ -86,6 +91,7 @@ export default function PageNew() {
         onSubmit={onSubmit}
         submitting={submitting}
         formError={formError}
+        fieldErrors={fieldErrors}
         cancelTo={detailPath}
       />
     </ResourcePanel>

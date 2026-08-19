@@ -19,6 +19,9 @@ test("sign-in survives a full reload", async ({ page }) => {
 
 test("renders TSP Artifacts under the production CSP", async ({ page }) => {
   await openProductionRoot(page);
+  // Firefox loses a goto issued while the SPA is still resolving its own first client-side
+  // navigation — the redirect to "/" wins and the request is dropped. Wait for the shell first.
+  await expect(page.getByLabel("Message")).toBeVisible();
   const response = await page
     .goto("/dev/surfaces", { waitUntil: "domcontentloaded" })
     .catch(() => null);
@@ -32,14 +35,19 @@ test("renders TSP Artifacts under the production CSP", async ({ page }) => {
 });
 
 test("persists a sent Chat Message across a deep-link reload", async ({ page }) => {
+  // `POST /api/v1/chat` is an SSE stream and the server flushes nothing until the model answers,
+  // so with no provider configured there is no bubble, no navigation, and no sidebar refresh to
+  // wait on — the Message is persisted, but nothing about it is observable in the browser. Gated
+  // like the other two provider-dependent journeys rather than asserted around.
+  test.skip(process.env.E2E_AGENTIC !== "1", "agentic provider harness is opt-in");
   await openProductionRoot(page);
   await completeOrSignIn(page);
   const message = `browser smoke test message ${Date.now()}`;
   const composer = page.getByLabel("Message");
   await composer.click();
   await page.keyboard.type(message);
-  await page.getByRole("button", { name: "send", exact: true }).click();
-  await expect(page.getByText(message).first()).toBeVisible();
+  await page.getByRole("button", { name: "Send prompt", exact: true }).click();
+  await expect(page.getByRole("main").getByText(message).first()).toBeVisible();
   await page.reload({ waitUntil: "domcontentloaded" });
-  await expect(page.getByText(message).first()).toBeVisible();
+  await expect(page.getByRole("main").getByText(message).first()).toBeVisible();
 });

@@ -36,6 +36,7 @@ export default defineConfig({
       name: "chromium",
       dependencies: ["bootstrap"],
       testMatch: /.*\.spec\.ts/,
+      testIgnore: /\.colleague\.spec\.ts$/,
       use: {
         ...devices["Desktop Chrome"],
         storageState: resolve(repoRoot, "scripts/test/.auth/user.json"),
@@ -45,6 +46,7 @@ export default defineConfig({
       name: "firefox",
       dependencies: ["bootstrap"],
       testMatch: /.*\.spec\.ts/,
+      testIgnore: /\.colleague\.spec\.ts$/,
       use: {
         ...devices["Desktop Firefox"],
         storageState: resolve(repoRoot, "scripts/test/.auth/user.json"),
@@ -54,9 +56,23 @@ export default defineConfig({
       name: "mobile-chromium",
       dependencies: ["bootstrap"],
       testMatch: /.*\.spec\.ts/,
+      testIgnore: /\.colleague\.spec\.ts$/,
       use: {
         ...devices["Pixel 5"],
         storageState: resolve(repoRoot, "scripts/test/.auth/user.json"),
+      },
+    },
+    {
+      // Selects the second-member identity: any `*.colleague.spec.ts` file runs already signed
+      // in as the Business's ordinary (non-admin) colleague, via the session
+      // second-member.setup.ts stored. The three projects above explicitly ignore these files so
+      // a colleague spec never also runs as the original member.
+      name: "colleague",
+      dependencies: ["bootstrap"],
+      testMatch: /\.colleague\.spec\.ts$/,
+      use: {
+        ...devices["Desktop Chrome"],
+        storageState: resolve(repoRoot, "scripts/test/.auth/colleague.json"),
       },
     },
   ],

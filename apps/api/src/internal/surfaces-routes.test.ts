@@ -101,6 +101,15 @@ describe("POST /api/v1/internal/surfaces/interactions", () => {
       userId: slackUser._id,
       verifiedAt: new Date(),
       expiresAt: null,
+      verifiedVia: "bind_link",
+    });
+    // Matched only because the provider asserted an email. Identified, but not empowered.
+    await mappings.upsertMapping({
+      provider: "slack",
+      externalSubject: "U-GUEST",
+      userId: slackUser._id,
+      verifiedAt: new Date(),
+      expiresAt: null,
       verifiedVia: "manifest_email",
     });
 
@@ -206,6 +215,26 @@ describe("POST /api/v1/internal/surfaces/interactions", () => {
     const body = res.json();
     expect(body.artifactId).toBe("artifact-1");
     expect(body.principal).toBe(slackUser._id);
+  });
+
+  it("refuses a sender the provider merely vouched for, who is in no audience", async () => {
+    // U-GUEST and U-LINKED name the same account, and the audience names that account. Only the
+    // sender who proved the link is that account for authorization; a provider-asserted email
+    // match must not let the far side of a Slack Connect channel press a button as them.
+    const handle = await mintHandle();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/internal/surfaces/interactions",
+      headers: asWorker(),
+      payload: {
+        handle: handle.handle,
+        provider: "slack",
+        externalSubject: "U-GUEST",
+        input: {},
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe("wrong_principal");
   });
 
   it("submits a follow-up turn and a new channel delivery so the reply reaches Slack", async () => {

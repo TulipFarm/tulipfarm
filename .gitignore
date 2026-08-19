@@ -37,3 +37,7 @@ apps/eval/scorecard-*.txt
 # Planning notes for work in progress — the spec and tickets behind a change, not the change.
 # They are written for whoever is building it and go stale the moment it lands.
 .scratch/
+
+# Failure screenshot from the browser smoke run (scripts/test/browser-smoke.mjs). Diagnostic
+# output from a local run; an untracked one at the root marks the tree dirty for every later check.
+/browser-smoke-failure.png

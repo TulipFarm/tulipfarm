@@ -105,6 +105,15 @@ describe("/api/v1/internal/channels", () => {
       userId: slackUser._id,
       verifiedAt: new Date(),
       expiresAt: null,
+      verifiedVia: "bind_link",
+    });
+    // Matched only because the provider asserted an email. Identified, but not empowered.
+    await mappings.upsertMapping({
+      provider: "slack",
+      externalSubject: "U-GUEST",
+      userId: slackUser._id,
+      verifiedAt: new Date(),
+      expiresAt: null,
       verifiedVia: "manifest_email",
     });
 
@@ -167,6 +176,22 @@ describe("/api/v1/internal/channels", () => {
       expect(res.json()).toEqual({
         linked: true,
         principal: { kind: "user", id: slackUser._id },
+      });
+    });
+
+    it("reports a guest principal for a sender the provider merely vouched for", async () => {
+      // The caller refuses any kind but `user`, so reporting the guest kind is what stops a Run
+      // being started as the account this sender was matched to.
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/internal/channels/identity/resolve",
+        headers: asWorker(),
+        payload: { provider: "slack", externalSubject: "U-GUEST" },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({
+        linked: true,
+        principal: { kind: "guest", id: "slack:U-GUEST" },
       });
     });
 
@@ -715,18 +740,8 @@ describe("/api/v1/internal/channels", () => {
   });
 
   describe("POST /approvals/:approvalId/decide", () => {
-    it("reports unlinked without exposing a bind offer", async () => {
-      const res = await app.inject({
-        method: "POST",
-        url: "/api/v1/internal/channels/approvals/approval-1/decide",
-        headers: asWorker(),
-        payload: { provider: "slack", externalSubject: "U-UNKNOWN", decision: "approved" },
-      });
-      expect(res.statusCode).toBe(200);
-      expect(res.json()).toEqual({ outcome: "unlinked" });
-    });
-
-    it("resolves the clicking sender's own identity and signals the parked wait", async () => {
+    /** Parks a Tool approval owned by `slackUser` and returns its id. */
+    async function parkApproval(): Promise<string> {
       const runId = randomUUID();
       await runs.start({
         id: runId,
@@ -769,15 +784,47 @@ describe("/api/v1/internal/channels", () => {
         approvalId: decision.approvalId,
         subject: { kind: "user", id: slackUser._id },
       });
+      return decision.approvalId;
+    }
+
+    it("reports unlinked without exposing a bind offer", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/internal/channels/approvals/approval-1/decide",
+        headers: asWorker(),
+        payload: { provider: "slack", externalSubject: "U-UNKNOWN", decision: "approved" },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ outcome: "unlinked" });
+    });
+
+    it("resolves the clicking sender's own identity and signals the parked wait", async () => {
+      const approvalId = await parkApproval();
 
       const res = await app.inject({
         method: "POST",
-        url: `/api/v1/internal/channels/approvals/${decision.approvalId}/decide`,
+        url: `/api/v1/internal/channels/approvals/${approvalId}/decide`,
         headers: asWorker(),
         payload: { provider: "slack", externalSubject: "U-LINKED", decision: "approved" },
       });
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual({ outcome: "resumed" });
+    });
+
+    it("refuses a sender the provider merely vouched for, who may not decide as that user", async () => {
+      // U-GUEST and U-LINKED name the same account. Only the sender who proved the link may
+      // spend its authority; otherwise anyone who can set an email address on the far side of a
+      // Slack Connect channel could approve a Tool call as the person they impersonated.
+      const approvalId = await parkApproval();
+
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/v1/internal/channels/approvals/${approvalId}/decide`,
+        headers: asWorker(),
+        payload: { provider: "slack", externalSubject: "U-GUEST", decision: "approved" },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ outcome: "forbidden" });
     });
   });
 

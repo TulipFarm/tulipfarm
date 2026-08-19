@@ -30,6 +30,12 @@ export interface KnowledgeIndexQuery {
 
 export interface KnowledgeIndexPort {
   search(query: KnowledgeIndexQuery): Promise<readonly KnowledgeCandidate[]>;
+  /**
+   * Chunks for an explicit source set, scored against the query but *not* dropped when the query
+   * misses. Graph expansion needs this: a linked page earns its place from the edge, not from
+   * matching the words. Optional so an index that cannot serve the walk simply disables it.
+   */
+  fetchBySource?(query: KnowledgeIndexQuery): Promise<readonly KnowledgeCandidate[]>;
 }
 
 /** Write side. Invalidation removes entries through the same port. */
@@ -69,6 +75,17 @@ export class InMemoryKnowledgeIndex implements MutableKnowledgeIndexPort {
   }
 
   async search(query: KnowledgeIndexQuery): Promise<readonly KnowledgeCandidate[]> {
+    return this.collect(query, true);
+  }
+
+  async fetchBySource(query: KnowledgeIndexQuery): Promise<readonly KnowledgeCandidate[]> {
+    return this.collect(query, false);
+  }
+
+  private collect(
+    query: KnowledgeIndexQuery,
+    dropUnmatched: boolean
+  ): readonly KnowledgeCandidate[] {
     const wanted = terms(query.query);
     const scored: KnowledgeCandidate[] = [];
     for (const entry of this.byChunk.values()) {
@@ -79,7 +96,7 @@ export class InMemoryKnowledgeIndex implements MutableKnowledgeIndexPort {
       if (!query.allowedSourceIds.has(entry.sourceId)) continue;
       const haystack = terms(entry.text);
       const score = wanted.filter((term) => haystack.includes(term)).length;
-      if (score === 0) continue;
+      if (score === 0 && dropUnmatched) continue;
       scored.push({
         sourceId: entry.sourceId,
         chunkId: entry.chunkId,

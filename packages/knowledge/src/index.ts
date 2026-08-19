@@ -1,11 +1,23 @@
 export type {
+  KnowledgeAccessDecision,
+  KnowledgeAccessRequest,
   LiveSourceAuthorizationPort,
   SourceAccessDecision,
   SourceAccessDenialReason,
   SourceAccessPorts,
   SourceAccessRequest,
 } from "./acl";
-export { decideSourceAccess } from "./acl";
+export { decideKnowledgeAccess, decideSourceAccess, isBroadlyReadable } from "./acl";
+export {
+  type AclLevelRef,
+  type KnowledgeAclEntryInput,
+  type KnowledgeAclRepo,
+  type PageVisibilityScope,
+  type PageVisibilitySource,
+  PgKnowledgeAclRepo,
+  PgKnowledgeSubjectStore,
+  PgPrincipalResolver,
+} from "./acl-repo";
 export { type ChunkOptions, chunkText, type TextChunk } from "./chunk";
 export { type KnowledgeChunkRepo, PgKnowledgeChunkRepo, pageFilterConditions } from "./chunks-repo";
 export { buildDefaultRegistry } from "./connectors/registry";
@@ -41,6 +53,11 @@ export type {
 } from "./delete";
 export { deleteSource, revokeSource, syncSourceRevision } from "./delete";
 export {
+  type KnowledgeDenialSink,
+  type KnowledgeWriteDenial,
+  recordWriteDenial,
+} from "./denial-audit";
+export {
   BACKFILL_TARGETS,
   type BackfillEmbedder,
   type BackfillOptions,
@@ -55,6 +72,73 @@ export {
   registerEmbeddingBackfill,
 } from "./embedding-backfill";
 export { subscribeKnowledgeIndexing } from "./events";
+export {
+  type ExpansionLimits,
+  effectiveScore,
+  expandHops,
+  type HopAdmission,
+  type KnowledgeLinkGraphPort,
+  scoreBounds,
+} from "./graph-expand";
+export {
+  type ClusterEdge,
+  type ClusterOptions,
+  type DetectedCommunity,
+  detectCommunities,
+} from "./graphrag/cluster";
+export {
+  type ExtractionDeps,
+  type ExtractionReport,
+  type ExtractionStore,
+  runExtraction,
+} from "./graphrag/extract";
+export {
+  type GraphInvalidationPort,
+  type GraphInvalidationReport,
+  invalidateGraphForChunks,
+  invalidateGraphForSubject,
+} from "./graphrag/invalidate";
+export { PgGraphRagRepo } from "./graphrag/repo";
+export {
+  type ChunkAuthorization,
+  type GlobalAnswerPort,
+  type GlobalSearchDeps,
+  type GlobalSearchResult,
+  type GraphAuthorizationPort,
+  type GraphSearchRequest,
+  type GraphSearchStore,
+  globalSearch,
+  type LocalSearchDeps,
+  type LocalSearchResult,
+  localSearch,
+} from "./graphrag/search";
+export {
+  buildCommunitySummaries,
+  type SummaryBuildResult,
+  type SummaryDeps,
+} from "./graphrag/summarize";
+export {
+  addTokens,
+  type ChildSummary,
+  type CommunitySummaryInput,
+  type ExtractedClaim,
+  type ExtractedEntity,
+  type ExtractedRelationship,
+  type ExtractionOutput,
+  edgeKey,
+  entityKey,
+  type GraphChunk,
+  type GraphCommunityRecord,
+  type GraphCommunitySummaryRecord,
+  type GraphEdgeRecord,
+  type GraphEntityRecord,
+  type GraphExtractionPort,
+  type GraphSummaryPort,
+  NO_TOKENS,
+  type SummaryOutput,
+  type TokenUsage,
+} from "./graphrag/types";
+export { canonicalKnowledgeId, isKnowledgeId } from "./ids";
 export {
   type Enqueuer,
   enqueueIndex,
@@ -112,6 +196,26 @@ export {
 } from "./okf/parse";
 export { directChildren, type IndexEntry, renderIndex } from "./okf/synthesize";
 export type { CrossPageLink, OkfPage, OkfTfFields } from "./okf/types";
+export { type PageReadAuthorizer, PageReadGate, type ReadablePages } from "./page-access";
+export {
+  type MoveEffect,
+  movePage,
+  type PageMoveDestination,
+  type PageMovePreview,
+  previewPageMove,
+  type ReadershipResolver,
+} from "./page-move";
+export {
+  clearPageRestriction,
+  clearSpaceRestriction,
+  getPageRestriction,
+  getSpaceRestriction,
+  type PageRestriction,
+  type RestrictionOutcome,
+  type RestrictionSubject,
+  setPageRestriction,
+  setSpaceRestriction,
+} from "./page-restriction";
 export {
   extractHighlights,
   type PageHit,
@@ -135,7 +239,19 @@ export {
   PgKnowledgeRevisionRepo,
 } from "./repo";
 export { NotImplementedRerank, noopRerank, type RerankStage, resolveRerank } from "./rerank";
-export { DEFAULT_RANKING, type RankingConfig } from "./retrieval-config";
+export {
+  DEFAULT_BLANKET_PRINCIPALS,
+  DEFAULT_GRAPH_EXPAND,
+  DEFAULT_GRAPHRAG,
+  DEFAULT_KNOWLEDGE_ACCESS,
+  DEFAULT_MAX_ACL_ENTRIES_PER_SUBJECT,
+  DEFAULT_RANKING,
+  type GraphExpandConfig,
+  type GraphRagConfig,
+  type KnowledgeAccessConfig,
+  MAX_GRAPH_EXPAND_DEPTH,
+  type RankingConfig,
+} from "./retrieval-config";
 export type {
   KnowledgeAuditSink,
   RetrievalCitation,
@@ -154,8 +270,10 @@ export {
   type CreateSpaceResult,
   type HybridSearchContext,
   type IngestSourceInput,
+  type KnowledgeGraph,
   KnowledgeService,
   type KnowledgeServiceDeps,
+  type PageVisibilityFilter,
   type SpaceGraph,
   SpaceNameTakenError,
   type UpdatePageInput,
@@ -185,6 +303,24 @@ export {
 export { type KnowledgeSpaceRepo, PgKnowledgeSpaceRepo, type SpacePatch } from "./spaces-repo";
 export type { StalenessEvaluation, StaleRevalidationDeps, StaleSource } from "./staleness";
 export { enqueueStaleRevalidation, evaluateStaleness, selectStaleSources } from "./staleness";
+export type {
+  AuthoredPage,
+  KnowledgeAclCapability,
+  KnowledgeAclEffect,
+  KnowledgeAclEntry,
+  KnowledgeSubject,
+  KnowledgeSubjectKind,
+  KnowledgeSubjectStore,
+  PrincipalResolverPort,
+} from "./subject";
+export {
+  AUTHORED_ACL_MAX_AGE_SECONDS,
+  AUTHORED_PROVIDER,
+  BLANKET_READ_PRINCIPAL,
+  InMemoryKnowledgeSubjectStore,
+  pageSubject,
+  sourceSubject,
+} from "./subject";
 export { CITE_SOURCES_TOOL, KNOWLEDGE_TOOLS, type KnowledgeToolContext } from "./tools";
 export type {
   Backlink,
@@ -207,6 +343,7 @@ export type {
   SearchFilters,
   SearchHit,
   SearchResults,
+  SpacePageActivity,
   SpacePageRef,
   SpaceWithActivity,
 } from "./types";

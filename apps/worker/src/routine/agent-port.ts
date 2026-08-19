@@ -17,6 +17,7 @@ import {
   selectModelProfile,
   type ToolDispatchPort,
 } from "@tulipfarm/agent-runtime";
+import { ROUTINE_SERVICE_PRINCIPAL_ID } from "@tulipfarm/constants";
 import {
   type AgentInvocationPlan,
   type JsonObject,
@@ -132,7 +133,7 @@ const SYSTEM_SOURCE_ID = "system";
 const REQUEST_SOURCE_ID = "request";
 
 /** Who a Routine State acts as. There is no participant behind it, and none is invented. */
-const SERVICE_PRINCIPAL = "service:routine-executor";
+const SERVICE_PRINCIPAL = ROUTINE_SERVICE_PRINCIPAL_ID;
 
 /** The same estimate the API's compaction uses, so a budget means the same thing on both sides. */
 function estimateTokens(text: string): number {

@@ -107,7 +107,13 @@ describe("IngressIdentityResolver", () => {
       registry: makeRegistry(execute),
     });
 
-    expect(result).toEqual({ outcome: "linked", user: alice });
+    expect(result).toEqual({
+      outcome: "linked",
+      user: alice,
+      principalKind: "user",
+      principalId: alice._id,
+      principalRef: `user:${alice._id}`,
+    });
     expect(execute).not.toHaveBeenCalled();
   });
 
@@ -225,5 +231,87 @@ describe("IngressIdentityResolver", () => {
     const result = await resolver.resolve({ slug: "chatapp", sender: "EXT4" });
 
     expect(result).toEqual({ outcome: "unlinked", bindOffer: null });
+  });
+});
+
+describe("IngressIdentityResolver sender authority", () => {
+  async function linkedAs(
+    verifiedVia: "link_token" | "bind_link" | "manifest_email" | null | undefined
+  ) {
+    const { resolver, mappings } = harness();
+    await mappings.upsertMapping({
+      provider: "chatapp",
+      externalSubject: "EXT1",
+      userId: alice._id,
+      verifiedAt: new Date(),
+      expiresAt: null,
+      ...(verifiedVia === undefined ? {} : { verifiedVia }),
+    });
+    const result = await resolver.resolve({ slug: "chatapp", sender: "EXT1" });
+    if (result.outcome !== "linked") throw new Error("expected a linked sender");
+    return result;
+  }
+
+  it.each([
+    "link_token",
+    "bind_link",
+  ] as const)("lets a %s sender wield the user's own authority", async (verifiedVia) => {
+    const result = await linkedAs(verifiedVia);
+
+    expect(result.user).toBe(alice);
+    expect(result.principalId).toBe(alice._id);
+    expect(result.principalRef).toBe(`user:${alice._id}`);
+  });
+
+  it.each([
+    ["manifest_email", "manifest_email" as const],
+    ["provenance-less", undefined],
+  ])("denies a %s sender the user's authority while still routing them", async (_label, via) => {
+    // The provider vouching for an email is enough to know which conversation this belongs to.
+    // It is not enough to spend that account's authority: on Slack Connect the counterparty
+    // administers its own users' addresses, so the assertion is the attacker's to make.
+    const result = await linkedAs(via);
+
+    expect(result.user).toBe(alice);
+    expect(result.principalId).not.toBe(alice._id);
+    expect(result.principalRef).not.toBe(`user:${alice._id}`);
+    expect(result.principalRef).toBe("guest:chatapp:EXT1");
+  });
+
+  it("gives a sender auto-linked through the manifest binding only guest authority", async () => {
+    const { resolver } = harness();
+
+    const result = await resolver.resolve({
+      slug: "chatapp",
+      sender: "EXT1",
+      identity: IDENTITY,
+      registry: makeRegistry(profileTool("alice@example.com")),
+    });
+
+    if (result.outcome !== "linked") throw new Error("expected a linked sender");
+    expect(result.user).toBe(alice);
+    expect(result.principalRef).toBe("guest:chatapp:EXT1");
+  });
+
+  it("keeps one guest's authority distinct from another's on the same provider", async () => {
+    // Two guests must not collapse onto one principal, or a shared audience entry would let
+    // either spend a grant meant for the other.
+    const { resolver, mappings } = harness();
+    for (const sender of ["EXT1", "EXT2"]) {
+      await mappings.upsertMapping({
+        provider: "chatapp",
+        externalSubject: sender,
+        userId: alice._id,
+        verifiedAt: new Date(),
+        expiresAt: null,
+        verifiedVia: "manifest_email",
+      });
+    }
+
+    const first = await resolver.resolve({ slug: "chatapp", sender: "EXT1" });
+    const second = await resolver.resolve({ slug: "chatapp", sender: "EXT2" });
+
+    if (first.outcome !== "linked" || second.outcome !== "linked") throw new Error("expected both");
+    expect(first.principalRef).not.toBe(second.principalRef);
   });
 });

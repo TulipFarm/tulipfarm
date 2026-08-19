@@ -1,11 +1,23 @@
-import type { KnowledgeSpace, PageRetrievalService } from "@tulipfarm/knowledge";
-import { type KnowledgeService, SpaceNameTakenError } from "@tulipfarm/knowledge";
-import { parsePaginationQuery } from "@tulipfarm/storage";
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import type {
+  KnowledgePage,
+  KnowledgeSpace,
+  PageRetrievalService,
+  RestrictionSubject,
+} from "@tulipfarm/knowledge";
+import {
+  type KnowledgeDenialSink,
+  type KnowledgeService,
+  recordWriteDenial,
+  SpaceNameTakenError,
+} from "@tulipfarm/knowledge";
+import { encodeCursor, parsePaginationQuery } from "@tulipfarm/storage";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ActivityService } from "../activity/service";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
 import type { RequireAuthorization } from "../authz/route-gate";
+import type { AuthorLabeller } from "./author-label";
 import {
   filtersFromQuery,
   pageHitToApi,
@@ -13,10 +25,16 @@ import {
   toApiHit,
   toApiPage,
   toApiRevision,
+  toApiSpace,
 } from "./mappers";
+import { registerOverviewRoutes } from "./overview-routes";
+import type { PageReadAuthorizer } from "./page-access";
+import type { ReaderDirectory } from "./reader-directory";
+import { registerRestrictionRoutes } from "./restriction-routes";
 import {
   EntityIdParamsSchema,
   IndexStatusResponseSchema,
+  KnowledgeGraphResponseSchema,
   NoContentSchema,
   OverviewQuerySchema,
   OverviewResponseSchema,
@@ -25,15 +43,21 @@ import {
   PageListQuerySchema,
   PageListResponseSchema,
   PageMentionsResponseSchema,
+  PageMoveBodySchema,
+  PageMovePreviewSchema,
   PageResponseSchema,
+  PageRestrictionResponseSchema,
   PageRevisionCreateBodySchema,
   PageRevisionCreatedResponseSchema,
   PageRevisionListResponseSchema,
   PageUpdateBodySchema,
+  PageVisibilityResponseSchema,
   ReindexBodySchema,
   ReindexedCountResponseSchema,
+  RestrictionRefusedSchema,
   SearchBodySchema,
   SearchResponseSchema,
+  SetPageRestrictionBodySchema,
   SpaceCreateBodySchema,
   SpaceGraphResponseSchema,
   SpaceListQuerySchema,
@@ -46,6 +70,7 @@ import {
   SpaceResponseSchema,
   SpaceUpdateBodySchema,
 } from "./schemas";
+import { registerSpaceRoutes } from "./space-routes";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -57,21 +82,110 @@ type SchemaOptions = {
   response: Record<number, object>;
 };
 
+/**
+ * How many candidates to pull per requested result before authorizing. Denied Pages are removed
+ * after ranking, so the surplus is what keeps a page of results full without re-ranking.
+ */
+const SEARCH_OVERFETCH = 4;
+
+/** Bounds the keyset refill loop so a heavily restricted corpus cannot spin. */
+const MAX_REFILL_PASSES = 5;
+
 export function registerKnowledgeRoutes(
   app: FastifyInstance,
   service: KnowledgeService,
   requireAuth: PreHandler,
   requireAuthorization: RequireAuthorization,
+  gate: PageReadAuthorizer,
   retrieval?: PageRetrievalService,
-  activity?: ActivityService
+  activity?: ActivityService,
+  authors?: AuthorLabeller,
+  readers?: ReaderDirectory,
+  denials?: KnowledgeDenialSink
 ): void {
   const sec: Array<Record<string, string[]>> = [{ sessionCookie: [] }, { bearerToken: [] }];
   const tags = ["knowledge"];
+
+  /**
+   * Changing who reads a Page is an ordinary member action — anyone who can read it can reshare it,
+   * as in Confluence and Notion. Declaring it through the gate rather than leaving it implicit is
+   * what makes it auditable, and what lets a deployment tighten it without a code change.
+   */
+  const restrictionWrite = [
+    requireAuth,
+    requireAuthorization({
+      action: "knowledge_page.restrict",
+      resourceType: "knowledge_page",
+      fallback: "authenticated",
+    }),
+  ];
+
+  const restrictionRoute = ({ description, ...schema }: SchemaOptions) => ({
+    preHandler: restrictionWrite,
+    schema: { description, tags, security: sec, ...schema },
+  });
+
+  /** Names the ancestor a restriction comes from, so "inherited" points somewhere the author can go. */
+  const labelLevel = async (level: { kind: string; id: string }): Promise<string | null> => {
+    if (level.kind === "space") return (await service.getSpace(level.id))?.name ?? null;
+    return (await service.getPage(level.id))?.title ?? null;
+  };
 
   const route = ({ description, ...schema }: SchemaOptions) => ({
     preHandler: requireAuth,
     schema: { description, tags, security: sec, ...schema },
   });
+
+  const indexAdmin = [
+    requireAuth,
+    requireAuthorization({
+      action: "knowledge_source.index",
+      resourceType: "knowledge_source",
+      fallback: "admin",
+    }),
+  ];
+
+  const adminRoute = ({ description, ...schema }: SchemaOptions) => ({
+    preHandler: indexAdmin,
+    schema: { description, tags, security: sec, ...schema },
+  });
+
+  /**
+   * Records a refused write, then answers as if the subject were absent.
+   *
+   * Authoring upserts by path, so refusing a taken path tells a caller who may read the Space that
+   * something sits there. The bit cannot be removed, so it is answered with detection: see
+   * `KnowledgeWriteDenial` for why the record names no path, Page or Space.
+   */
+  const refuseWrite = async (
+    req: FastifyRequest,
+    reply: FastifyReply,
+    action: string,
+    subjectKind: "page" | "space"
+  ): Promise<FastifyReply> => {
+    await recordWriteDenial(denials, {
+      actorId: req.user?._id,
+      action,
+      subjectKind,
+      correlationId: req.id,
+    });
+    return reply.code(404).send({ error: "not found" });
+  };
+
+  /** The subset of `ids` this caller may read, as a set, for filtering a derived surface. */
+  const visibleSet = async (
+    req: FastifyRequest,
+    ids: readonly string[]
+  ): Promise<ReadonlySet<string>> => {
+    const { allowed } = await gate.readablePageIds(req.user?._id, ids);
+    return new Set(allowed);
+  };
+
+  /** The same, for Spaces. A restricted Space's *name* is already a disclosure. */
+  const visibleSpaces = async (
+    req: FastifyRequest,
+    ids: readonly string[]
+  ): Promise<ReadonlySet<string>> => new Set(await gate.readableSpaceIds(req.user?._id, ids));
   app.post(
     "/api/v1/knowledge/pages",
     route({
@@ -111,11 +225,43 @@ export function registerKnowledgeRoutes(
     async (req, reply) => {
       const q = req.query as Record<string, unknown>;
       const { limit, after } = parsePaginationQuery(q);
-      const page = await service.listPages({ limit, after, ...filtersFromQuery(q) });
-      const statuses = await service.getIndexingStatuses(page.items.map((d) => d._id));
+      const filters = filtersFromQuery(q);
+
+      // Keyset pages are refilled rather than filtered, so a page of results is the same length it
+      // would be in a corpus where the denied Pages had never been written.
+      const items: KnowledgePage[] = [];
+      let cursor = after;
+      let lastConsumed: KnowledgePage | undefined;
+      let exhausted = false;
+      for (let pass = 0; pass < MAX_REFILL_PASSES && items.length < limit; pass += 1) {
+        const batch = await service.listPages({ limit, after: cursor, ...filters });
+        if (batch.items.length === 0) {
+          exhausted = true;
+          break;
+        }
+        const visible = await visibleSet(
+          req,
+          batch.items.map((d) => d._id)
+        );
+        for (const doc of batch.items) {
+          if (items.length === limit) break;
+          lastConsumed = doc;
+          if (visible.has(doc._id)) items.push(doc);
+        }
+        if (batch.nextCursor === null && items.length < limit) {
+          exhausted = true;
+          break;
+        }
+        cursor =
+          lastConsumed === undefined
+            ? cursor
+            : { createdAt: lastConsumed.createdAt, _id: lastConsumed._id };
+      }
+
+      const statuses = await service.getIndexingStatuses(items.map((d) => d._id));
       return reply.send({
-        items: page.items.map((d) => toApiPage(d, statuses.get(d._id) ?? "pending")),
-        nextCursor: page.nextCursor,
+        items: items.map((d) => toApiPage(d, statuses.get(d._id) ?? "pending")),
+        nextCursor: exhausted || lastConsumed === undefined ? null : encodeCursor(lastConsumed),
       });
     }
   );
@@ -126,9 +272,13 @@ export function registerKnowledgeRoutes(
         "Flat list of every OKF page across all spaces (for the @-mention Pages picker).",
       response: { 200: PageMentionsResponseSchema, 401: ErrorSchema },
     }),
-    async (_req, reply) => {
+    async (req, reply) => {
       const items = await service.listAllPages();
-      return reply.send({ items });
+      const visible = await visibleSet(
+        req,
+        items.map((i) => i.pageId)
+      );
+      return reply.send({ items: items.filter((i) => visible.has(i.pageId)) });
     }
   );
   app.get(
@@ -139,9 +289,19 @@ export function registerKnowledgeRoutes(
       response: { 200: PageResponseSchema, 404: ErrorSchema, 401: ErrorSchema },
     }),
     async (req, reply) => {
-      const page = await service.getPage((req.params as { id: string }).id);
+      const { id } = req.params as { id: string };
+      // Denied and absent share one 404: a distinct code would confirm the Page exists to someone
+      // who may not read it.
+      if (!(await gate.canRead(req.user?._id, id))) {
+        return reply.code(404).send({ error: "not found" });
+      }
+      const page = await service.getPage(id);
       if (!page?.active) return reply.code(404).send({ error: "not found" });
-      return reply.send(toApiPage(page, await service.getIndexingStatus(page._id)));
+      return reply.send({
+        ...toApiPage(page, await service.getIndexingStatus(page._id)),
+        authorLabel: (await authors?.label(page.authorKind, page.authorId)) ?? null,
+        visibility: (await service.getPageScopes([page._id])).get(page._id)?.scope ?? "business",
+      });
     }
   );
   app.put(
@@ -162,6 +322,10 @@ export function registerKnowledgeRoutes(
       const { id } = req.params as { id: string };
       const ifMatch = parseIfMatch(req);
       if (ifMatch === null) return reply.code(400).send({ error: "If-Match header required" });
+      // Before the version check, not after: 409-against-404 would confirm the Page exists, and
+      // an empty body is a legal no-op update whose 200 carries the whole Page back.
+      if (!(await gate.canRead(req.user?._id, id)))
+        return refuseWrite(req, reply, "knowledge.page.update", "page");
       const outcome = await service.updatePage(id, req.body as Record<string, unknown>, ifMatch);
       if (!outcome.ok) {
         return outcome.reason === "not_found"
@@ -179,7 +343,10 @@ export function registerKnowledgeRoutes(
       response: { 204: NoContentSchema, 404: ErrorSchema, 401: ErrorSchema },
     }),
     async (req, reply) => {
-      return (await service.deletePage((req.params as { id: string }).id))
+      const { id } = req.params as { id: string };
+      if (!(await gate.canRead(req.user?._id, id)))
+        return refuseWrite(req, reply, "knowledge.page.delete", "page");
+      return (await service.deletePage(id))
         ? reply.code(204).send()
         : reply.code(404).send({ error: "not found" });
     }
@@ -199,6 +366,8 @@ export function registerKnowledgeRoutes(
     async (req, reply) => {
       const { id } = req.params as { id: string };
       const b = req.body as { content: string; reason?: string | null };
+      if (!(await gate.canRead(req.user?._id, id)))
+        return refuseWrite(req, reply, "knowledge.page.revise", "page");
       const n = await service.createRevision(id, b.content, b.content.trim(), b.reason ?? null);
       return n === null
         ? reply.code(404).send({ error: "not found" })
@@ -213,7 +382,11 @@ export function registerKnowledgeRoutes(
       response: { 200: PageRevisionListResponseSchema, 401: ErrorSchema },
     }),
     async (req, reply) => {
-      const revs = await service.listRevisions((req.params as { id: string }).id);
+      const { id } = req.params as { id: string };
+      // History is the Page. Denial and absence share one 404 so neither confirms the other.
+      if (!(await gate.canRead(req.user?._id, id)))
+        return reply.code(404).send({ error: "not found" });
+      const revs = await service.listRevisions(id);
       return reply.send({ items: revs.map(toApiRevision) });
     }
   );
@@ -236,200 +409,53 @@ export function registerKnowledgeRoutes(
       const limit = Math.min(Math.max(b.limit ?? 10, 1), 50);
       if (b.granularity === "page" && retrieval) {
         const filters = filtersFromQuery(b);
+        // Over-fetch, then authorize, then truncate. Filtering the requested window instead would
+        // return short pages, and a short page is itself a signal that something was withheld.
         const hits =
           b.query.trim() === ""
-            ? await retrieval.recentPages(limit, filters)
-            : await retrieval.searchPages({ query: b.query, filters, limit });
-        return reply.send({ results: hits.map(pageHitToApi), warnings: [] });
+            ? await retrieval.recentPages(limit * SEARCH_OVERFETCH, filters)
+            : await retrieval.searchPages({
+                query: b.query,
+                filters,
+                limit: limit * SEARCH_OVERFETCH,
+              });
+        const visible = await visibleSet(
+          req,
+          hits.map((h) => h.pageId)
+        );
+        const allowed = hits.filter((h) => visible.has(h.pageId)).slice(0, limit);
+        return reply.send({ results: allowed.map(pageHitToApi), warnings: [] });
       }
       if (b.query.trim() === "") {
         return reply.send({ results: [], warnings: [] });
       }
-      const res = await service.search(b.query, filtersFromQuery(b), limit);
-      return reply.send({ results: res.results.map(toApiHit), warnings: res.warnings });
+      const res = await service.search(b.query, filtersFromQuery(b), limit * SEARCH_OVERFETCH);
+      const visible = await visibleSet(
+        req,
+        res.results.map((h) => h.pageId)
+      );
+      const allowed = res.results.filter((h) => visible.has(h.pageId)).slice(0, limit);
+      return reply.send({ results: allowed.map(toApiHit), warnings: res.warnings });
     }
   );
 
-  const toApiSpace = (s: KnowledgeSpace): Record<string, unknown> => ({
-    id: s._id,
-    name: s.name,
-    description: s.description,
-    createdAt: s.createdAt.toISOString(),
-    updatedAt: s.updatedAt.toISOString(),
+  registerSpaceRoutes({
+    app,
+    service,
+    gate,
+    activity,
+    route,
+    refuseWrite,
+    visibleSet,
+    visibleSpaces,
   });
-  app.post(
-    "/api/v1/knowledge/spaces",
-    route({
-      description: "Create an OKF knowledge space.",
-      body: SpaceCreateBodySchema,
-      response: {
-        201: SpaceResponseSchema,
-        400: ErrorSchema,
-        409: ErrorSchema,
-        401: ErrorSchema,
-      },
-    }),
-    async (req, reply) => {
-      const res = await service.createSpace(
-        req.body as { name: string; description?: string | null }
-      );
-      if (!res.ok) {
-        return reply.code(res.reason === "name_taken" ? 409 : 400).send({ error: res.reason });
-      }
-      await activity?.record({
-        category: "knowledge",
-        action: "space.created",
-        actorId: (req.user as UserDoc | undefined)?._id,
-        targetType: "space",
-        targetId: res.space._id,
-        summary: `Created knowledge space "${res.space.name}"`,
-        metadata: { name: res.space.name },
-      });
-      return reply.code(201).send(toApiSpace(res.space));
-    }
-  );
   app.get(
-    "/api/v1/knowledge/spaces",
+    "/api/v1/knowledge/graph",
     route({
-      description: "List OKF spaces (cursor paginated).",
-      querystring: SpaceListQuerySchema,
-      response: { 200: SpaceListResponseSchema, 401: ErrorSchema },
+      description: "Node + edge list for the Business-wide cross-Space Page link graph (capped).",
+      response: { 200: KnowledgeGraphResponseSchema, 401: ErrorSchema },
     }),
-    async (req, reply) => {
-      const { limit, after } = parsePaginationQuery(req.query as Record<string, unknown>);
-      const page = await service.listSpaces({ limit, after });
-      return reply.send({ items: page.items.map(toApiSpace), nextCursor: page.nextCursor });
-    }
-  );
-  app.get(
-    "/api/v1/knowledge/spaces/:id",
-    route({
-      description: "Get one OKF space.",
-      params: EntityIdParamsSchema,
-      response: { 200: SpaceResponseSchema, 404: ErrorSchema, 401: ErrorSchema },
-    }),
-    async (req, reply) => {
-      const s = await service.getSpace((req.params as { id: string }).id);
-      if (!s) return reply.code(404).send({ error: "not found" });
-      return reply.send(toApiSpace(s));
-    }
-  );
-  app.put(
-    "/api/v1/knowledge/spaces/:id",
-    route({
-      description: "Update an OKF space's metadata.",
-      params: EntityIdParamsSchema,
-      body: SpaceUpdateBodySchema,
-      response: {
-        200: SpaceResponseSchema,
-        404: ErrorSchema,
-        409: ErrorSchema,
-        401: ErrorSchema,
-      },
-    }),
-    async (req, reply) => {
-      const { id } = req.params as { id: string };
-      try {
-        const s = await service.updateSpace(
-          id,
-          req.body as { name?: string; description?: string | null }
-        );
-        if (!s) return reply.code(404).send({ error: "not found" });
-        return reply.send(toApiSpace(s));
-      } catch (err) {
-        if (err instanceof SpaceNameTakenError) {
-          return reply.code(409).send({ error: "space name already in use" });
-        }
-        throw err;
-      }
-    }
-  );
-  app.delete(
-    "/api/v1/knowledge/spaces/:id",
-    route({
-      description: "Delete an OKF space (cascades its pages, links, overrides).",
-      params: EntityIdParamsSchema,
-      response: { 204: NoContentSchema, 404: ErrorSchema, 401: ErrorSchema },
-    }),
-    async (req, reply) => {
-      return (await service.deleteSpace((req.params as { id: string }).id))
-        ? reply.code(204).send()
-        : reply.code(404).send({ error: "not found" });
-    }
-  );
-  app.get(
-    "/api/v1/knowledge/spaces/:id/pages",
-    route({
-      description: "List the pages in a space (with path + OKF type).",
-      params: EntityIdParamsSchema,
-      response: { 200: SpacePageListResponseSchema, 404: ErrorSchema, 401: ErrorSchema },
-    }),
-    async (req, reply) => {
-      const { id } = req.params as { id: string };
-      if (!(await service.getSpace(id))) return reply.code(404).send({ error: "not found" });
-      const pages = await service.listSpacePages(id);
-      return reply.send({ items: pages.map((p) => toApiPage(p)) });
-    }
-  );
-  app.post(
-    "/api/v1/knowledge/spaces/:id/pages",
-    route({
-      description:
-        "Author or update an OKF page (full markdown). A reserved index/log path sets a directory override.",
-      params: EntityIdParamsSchema,
-      body: SpacePageWriteBodySchema,
-      response: {
-        200: SpacePageWriteResultSchema,
-        201: PageResponseSchema,
-        400: ErrorSchema,
-        404: ErrorSchema,
-        401: ErrorSchema,
-        503: ErrorSchema,
-      },
-    }),
-    async (req, reply) => {
-      const b = req.body as { path: string; content: string };
-      const res = await service.writePage({
-        spaceId: (req.params as { id: string }).id,
-        path: b.path,
-        content: b.content,
-      });
-      if (!res.ok) {
-        if (res.reason === "space_not_found") return reply.code(404).send({ error: "not found" });
-        if (res.reason === "okf_unavailable") return reply.code(503).send({ error: res.reason });
-        return reply.code(400).send({ error: res.reason });
-      }
-      if ("override" in res) return reply.code(200).send({ override: true, path: b.path });
-      return reply.code(201).send(toApiPage(res.page));
-    }
-  );
-  app.get(
-    "/api/v1/knowledge/spaces/:id/navigate",
-    route({
-      description: "Progressive-disclosure index listing for a directory (dirPath, '' = root).",
-      params: EntityIdParamsSchema,
-      querystring: SpaceNavigateQuerySchema,
-      response: { 200: SpaceNavigateResponseSchema, 404: ErrorSchema, 401: ErrorSchema },
-    }),
-    async (req, reply) => {
-      const { dirPath } = req.query as { dirPath?: string };
-      const listing = await service.navigateSpace((req.params as { id: string }).id, dirPath ?? "");
-      return listing === null
-        ? reply.code(404).send({ error: "not found" })
-        : reply.send({ listing });
-    }
-  );
-  app.get(
-    "/api/v1/knowledge/spaces/:id/graph",
-    route({
-      description: "Node + edge list for a space's cross-link graph (capped).",
-      params: EntityIdParamsSchema,
-      response: { 200: SpaceGraphResponseSchema, 404: ErrorSchema, 401: ErrorSchema },
-    }),
-    async (req, reply) => {
-      const graph = await service.getSpaceGraph((req.params as { id: string }).id);
-      return graph ? reply.send(graph) : reply.code(404).send({ error: "not found" });
-    }
+    async (req, reply) => reply.send(await service.getKnowledgeGraph((ids) => visibleSet(req, ids)))
   );
   app.get(
     "/api/v1/knowledge/pages/:id/backlinks",
@@ -439,103 +465,68 @@ export function registerKnowledgeRoutes(
       response: { 200: PageBacklinksResponseSchema, 404: ErrorSchema, 401: ErrorSchema },
     }),
     async (req, reply) => {
-      const items = await service.getBacklinks((req.params as { id: string }).id);
-      return items === null ? reply.code(404).send({ error: "not found" }) : reply.send({ items });
+      const { id } = req.params as { id: string };
+      if (!(await gate.canRead(req.user?._id, id)))
+        return reply.code(404).send({ error: "not found" });
+      const items = await service.getBacklinks(id);
+      if (items === null) return reply.code(404).send({ error: "not found" });
+      const visible = await visibleSet(
+        req,
+        items.map((b) => b.sourceId)
+      );
+      return reply.send({ items: items.filter((b) => visible.has(b.sourceId)) });
     }
   );
-  app.get(
-    "/api/v1/knowledge/overview",
-    route({
-      description:
-        "Knowledge home overview: every space with page count + last activity, and recently-edited pages.",
-      querystring: OverviewQuerySchema,
-      response: { 200: OverviewResponseSchema, 401: ErrorSchema },
-    }),
-    async (req, reply) => {
-      const raw = Number((req.query as { recentLimit?: number }).recentLimit);
-      const recentLimit = Number.isFinite(raw) ? Math.min(Math.max(raw, 1), 20) : 8;
-      const { spaces, recent } = await service.getKnowledgeOverview(recentLimit);
-      return reply.send({
-        spaces: spaces.map((s) => ({
-          ...toApiSpace(s.space),
-          pageCount: s.pageCount,
-          lastActivity: s.lastActivity.toISOString(),
-        })),
-        recent: recent.map((p) => ({
-          pageId: p.pageId,
-          spaceId: p.spaceId,
-          spaceName: p.spaceName,
-          path: p.path,
-          title: p.title,
-          updatedAt: p.updatedAt.toISOString(),
-        })),
-      });
-    }
-  );
-  const indexAdmin = [
-    requireAuth,
-    requireAuthorization({
-      action: "knowledge_source.index",
-      resourceType: "knowledge_source",
-      fallback: "admin",
-    }),
-  ];
-
-  const adminRoute = ({ description, ...schema }: SchemaOptions) => ({
-    preHandler: indexAdmin,
-    schema: { description, tags, security: sec, ...schema },
-  });
-  app.post(
-    "/api/v1/knowledge/reindex",
-    adminRoute({
-      description:
-        "Re-index knowledge (admin). Body { pageId } re-indexes one page, { spaceId } a whole space, neither a full re-index.",
-      body: ReindexBodySchema,
-      response: { 200: ReindexedCountResponseSchema, 401: ErrorSchema, 403: ErrorSchema },
-    }),
-    async (req, reply) => {
-      const b = (req.body ?? {}) as { pageId?: string; spaceId?: string };
-      return reply.send({
-        reindexed: await service.reindexTargeted({ pageId: b.pageId, spaceId: b.spaceId }),
-      });
-    }
-  );
-  app.post(
-    "/api/v1/knowledge/backfill",
-    adminRoute({
-      description:
-        "Backfill embeddings (admin): re-index every active page with an unembedded or stale-model chunk. No-op without a provider.",
-      response: { 200: ReindexedCountResponseSchema, 401: ErrorSchema, 403: ErrorSchema },
-    }),
-    async (_req, reply) => {
-      return reply.send({ reindexed: await service.backfillMissing() });
-    }
-  );
-  app.get(
-    "/api/v1/knowledge/index-status",
-    adminRoute({
-      description:
-        "Index health (admin): active pages, chunk embed/lexical counts, max index lag, and pg-boss queue stats.",
-      response: { 200: IndexStatusResponseSchema, 401: ErrorSchema, 403: ErrorSchema },
-    }),
-    async (_req, reply) => {
-      const status = await service.indexStatus();
-      return reply.send({
-        activePages: status.activePages,
-        chunks: status.chunks,
-        indexLagSeconds: status.indexLagSeconds,
-        queue: status.queue
-          ? {
-              pending: status.queue.pending,
-              lastError: status.queue.lastError
-                ? {
-                    message: status.queue.lastError.message,
-                    failedAt: status.queue.lastError.failedAt.toISOString(),
-                  }
-                : null,
-            }
-          : null,
-      });
-    }
-  );
+  registerRestrictionRoutes({ app, service, gate, route, restrictionRoute, labelLevel, readers });
+  /**
+   * Moving a Page is a permission change. Both routes refuse identically when the caller cannot
+   * read either end, so neither can be used to probe a Space's existence or its allowlist.
+   */
+  for (const [suffix, apply] of [
+    ["/move/preview", false],
+    ["/move", true],
+  ] as const) {
+    app.post(
+      `/api/v1/knowledge/pages/:id${suffix}`,
+      route({
+        description: apply
+          ? "Move a page (and everything nested beneath it), reporting the readership it produced."
+          : "Report what moving a page would do to its readers, without moving it.",
+        params: EntityIdParamsSchema,
+        body: PageMoveBodySchema,
+        response: {
+          200: PageMovePreviewSchema,
+          400: ErrorSchema,
+          404: ErrorSchema,
+          401: ErrorSchema,
+        },
+      }),
+      async (req, reply) => {
+        const { id } = req.params as { id: string };
+        const dest = req.body as { spaceId?: string; path?: string };
+        if (dest.spaceId === undefined && dest.path === undefined)
+          return reply.code(400).send({ error: "spaceId or path is required" });
+        if (!(await gate.canRead(req.user?._id, id)))
+          return reply.code(404).send({ error: "not found" });
+        if (dest.spaceId !== undefined && !(await gate.canReadSpace(req.user?._id, dest.spaceId)))
+          return reply.code(404).send({ error: "not found" });
+        const result = apply
+          ? await service.movePage(id, dest)
+          : await service.previewPageMove(id, dest);
+        if (result === null) return reply.code(404).send({ error: "not found" });
+        // A nested Page the caller cannot read is omitted, not counted. The move itself still
+        // relocates it — this gates the disclosure, not the write — but a count would be enough to
+        // tell the caller that a Page exists where they are entitled to see nothing.
+        const visibleNested = await visibleSet(
+          req,
+          result.descendants.map((d) => d.pageId)
+        );
+        return reply.send({
+          ...result,
+          descendants: result.descendants.filter((d) => visibleNested.has(d.pageId)),
+        });
+      }
+    );
+  }
+  registerOverviewRoutes({ app, service, activity, route, adminRoute, visibleSet, visibleSpaces });
 }

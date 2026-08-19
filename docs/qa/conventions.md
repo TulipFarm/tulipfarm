@@ -9,7 +9,10 @@ This is **interactive, on-demand, local QA** driven by an agent in a real browse
 does not replace:
 
 - `pnpm test` — Vitest unit and route-module coverage.
-- `scripts/test/browser/*.spec.ts` — deterministic Playwright journeys against an installed instance.
+- `scripts/test/browser-smoke.mjs` — the CI browser smoke (real Chromium against the shipped image);
+  it also guards the Knowledge ACL denial spine ported from the Playwright suite.
+- `scripts/test/browser/*.spec.ts` — deterministic Playwright journeys against an installed
+  instance. **Local-only: this suite is not wired into CI.**
 
 Nothing here is wired into CI. Nothing here generates Playwright specs.
 

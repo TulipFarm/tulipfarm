@@ -1,6 +1,7 @@
 import { NOT_APPLICABLE } from "@tulipfarm/tool-broker";
 import { describe, expect, it } from "vitest";
 import type { ExternalIdentityMappingDoc, ExternalIdentityRepo } from "../identity/external-links";
+import { isProvenLink } from "../identity/external-links";
 import { buildGitHubTools } from "../tools/github/tools";
 import {
   GitHubEntitlementPort,
@@ -14,17 +15,21 @@ import {
 type Permission = Awaited<ReturnType<GitHubPermissionApi["permissionFor"]>>;
 
 function identity(mappings: readonly Partial<ExternalIdentityMappingDoc>[]): ExternalIdentityRepo {
+  const all = () =>
+    mappings.map(
+      (m) =>
+        ({
+          provider: "github",
+          externalSubject: "dhruv",
+          userId: "u1",
+          verifiedVia: "link_token",
+          ...m,
+        }) as ExternalIdentityMappingDoc
+    );
   return {
-    listMappingsForUser: async () =>
-      mappings.map(
-        (m) =>
-          ({
-            provider: "github",
-            externalSubject: "dhruv",
-            userId: "u1",
-            ...m,
-          }) as ExternalIdentityMappingDoc
-      ),
+    listMappingsForUser: async () => all(),
+    // Mirrors the repository's SQL filter, so a test cannot pass on a grade the database drops.
+    listProvenMappingsForUser: async () => all().filter((m) => isProvenLink(m)),
   } as unknown as ExternalIdentityRepo;
 }
 
@@ -84,6 +89,18 @@ describe("repositoriesIn", () => {
 });
 
 describe("GitHubEntitlementPort", () => {
+  it("ignores a link the provider merely asserted, rather than deciding on that GitHub login", async () => {
+    // A `manifest_email` row records a login the counterparty chose, not one this user proved.
+    // Letting it name the GitHub account would hand our entitlement decision to whoever set that
+    // address, in either direction: granting what they may do, or denying what this user may.
+    const p = new GitHubEntitlementPort(
+      identity([{ verifiedVia: "manifest_email", externalSubject: "attacker" }]),
+      api({ "acme/api": "write" })
+    );
+    const verdict = verdictOf(await p.check(query()));
+    expect(verdict.allowed).toBe(false);
+  });
+
   it("allows a read when GitHub says the person can read the repository", async () => {
     const p = new GitHubEntitlementPort(identity([{}]), api({ "acme/api": "read" }));
     expect(await p.check(query())).toEqual({ allowed: true });

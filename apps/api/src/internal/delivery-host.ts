@@ -169,6 +169,11 @@ export class IngressDeliveryHost {
       await this.offerBind(delivery, chat, decision, resolution.bindOffer);
       return { outcome: "unlinked" };
     }
+    // Routing identity, deliberately not authority. This Turn attaches to the Integration's own
+    // Run, whose `effectiveSubject` stays `integration:<slug>`, so nothing here is executed as the
+    // matched account; `user._id` only decides which Conversation the message belongs to. The
+    // routes that *do* confer authority — Surface interactions and approval decisions — read
+    // `principalRef`/`principalId` instead, which a guest sender cannot satisfy.
     const user = resolution.user;
 
     // A verified sender may still not be the person this thread belongs to. Answering anyway would

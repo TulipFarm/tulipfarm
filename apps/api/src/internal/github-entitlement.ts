@@ -167,11 +167,14 @@ export class GitHubEntitlementPort implements ToolEntitlementPort {
     return CLEARED;
   }
 
-  /** The GitHub login this principal is linked to, if the link is present and unexpired. */
+  /** The GitHub login this principal *proved* it owns, if that link is present and unexpired. */
   private async githubLogin(principal: EntitlementQuery["principal"]): Promise<string | undefined> {
     if (principal.kind !== "user") return undefined;
     const now = this.now().getTime();
-    const mappings = await this.identity.listMappingsForUser(principal.id);
+    // Proven links only. A `manifest_email` row names a login the provider asserted, so deciding
+    // an entitlement on it would let whoever controls that address choose the account we ask
+    // GitHub about — and this loop returns the first match, so it could outrank the real link.
+    const mappings = await this.identity.listProvenMappingsForUser(principal.id);
     for (const mapping of mappings) {
       if (mapping.provider !== "github") continue;
       if (mapping.expiresAt && mapping.expiresAt.getTime() <= now) continue;

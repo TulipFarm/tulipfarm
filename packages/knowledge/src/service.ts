@@ -1,7 +1,27 @@
 import { randomUUID } from "node:crypto";
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { PaginatedResult } from "@tulipfarm/storage";
+import type { KnowledgeAclRepo, PageVisibilityScope, PageVisibilitySource } from "./acl-repo";
 import type { KnowledgeChunkRepo } from "./chunks-repo";
 import type { KnowledgeLinksRepo } from "./links-repo";
+import {
+  movePage,
+  type PageMoveDestination,
+  type PageMovePreview,
+  previewPageMove,
+  type ReadershipResolver,
+} from "./page-move";
+import {
+  clearPageRestriction,
+  clearSpaceRestriction,
+  getPageRestriction,
+  getSpaceRestriction,
+  type PageRestriction,
+  type RestrictionOutcome,
+  type RestrictionSubject,
+  setPageRestriction,
+  setSpaceRestriction,
+} from "./page-restriction";
 import type { PageRetrievalService } from "./page-search-adapter";
 import type { KnowledgePageRepo, KnowledgeRevisionRepo, PageListOpts } from "./repo";
 import type { RetrievalDeps } from "./retrieve";
@@ -22,14 +42,18 @@ import {
   createSpace,
   deleteSpace,
   getBacklinks,
+  getKnowledgeGraph,
   getKnowledgeOverview,
   getSpace,
   getSpaceGraph,
+  type KnowledgeGraph,
   listAllPages,
+  listSpacePageActivity,
   listSpacePages,
   listSpaces,
   navigateSpace,
   normalizePagePath,
+  type PageVisibilityFilter,
   type SpaceGraph,
   SpaceNameTakenError,
   updateSpace,
@@ -52,6 +76,7 @@ import type {
   RecentPage,
   SearchFilters,
   SearchResults,
+  SpacePageActivity,
   SpacePageRef,
   SpaceWithActivity,
 } from "./types";
@@ -61,6 +86,8 @@ export type {
   CreateSpaceResult,
   HybridSearchContext,
   IngestSourceInput,
+  KnowledgeGraph,
+  PageVisibilityFilter,
   SpaceGraph,
   WritePageInput,
   WritePageResult,
@@ -105,6 +132,16 @@ export interface KnowledgeServiceDeps {
   overrides?: KnowledgeSpaceOverrideRepo;
   /** ACL-first source retrieval fused into `query_knowledge` when present. */
   sourceRetrieval?: RetrievalDeps;
+  /** When set, a newly authored Page records the blanket read grant. Absent leaves Pages ungated. */
+  acl?: KnowledgeAclRepo;
+  /**
+   * Resolves a Page's readers, its visibility provenance, and its listing scope. Absent, every
+   * Page-ACL surface degrades silently rather than failing: `getPageVisibility` answers null (so
+   * the restrict dialog never renders), `getPageScopes` answers an empty map (so every listing
+   * badge reads "business"), and a move reports no readership change. Wire it in any composition
+   * that serves the product.
+   */
+  readership?: ReadershipResolver;
 }
 
 /** Shared Knowledge core; V1 `plainText` is trimmed markdown. */
@@ -279,16 +316,78 @@ export class KnowledgeService {
   }
 
   /** Directory listing: authored index.md override, else synthesized. */
-  navigateSpace(spaceId: string, dirPath: string): Promise<string | null> {
-    return navigateSpace(this.deps, spaceId, dirPath);
+  navigateSpace(
+    spaceId: string,
+    dirPath: string,
+    visible?: ReadonlySet<string>
+  ): Promise<string | null> {
+    return navigateSpace(this.deps, spaceId, dirPath, visible);
   }
 
   /** Node + edge list for a space's cross-link graph (capped for payload safety). */
-  getSpaceGraph(spaceId: string): Promise<SpaceGraph | null> {
-    return getSpaceGraph(this.deps, spaceId);
+  getSpaceGraph(spaceId: string, authorize?: PageVisibilityFilter): Promise<SpaceGraph | null> {
+    return getSpaceGraph(this.deps, spaceId, authorize);
+  }
+
+  /** Node + edge list for the whole Business, spanning Spaces. */
+  getKnowledgeGraph(authorize?: PageVisibilityFilter): Promise<KnowledgeGraph> {
+    return getKnowledgeGraph(this.deps, authorize);
   }
 
   /** Pages that link to a page (same- or cross-space) — the "Linked from" panel. */
+  getPageRestriction(pageId: string): Promise<PageRestriction | null> {
+    return getPageRestriction(this.deps, pageId);
+  }
+
+  /** Where a Page's readership comes from, with the ancestor provenance a read decision discards. */
+  getPageVisibility(pageId: string): Promise<PageVisibilitySource | null> {
+    return (
+      this.deps.readership?.visibilityOf(DEPLOYMENT_BUSINESS_ID, pageId) ?? Promise.resolve(null)
+    );
+  }
+
+  /** Where each Page's readership comes from, for a listing, in one call. */
+  getPageScopes(pageIds: readonly string[]): Promise<Map<string, PageVisibilityScope>> {
+    return (
+      this.deps.readership?.scopesOf(DEPLOYMENT_BUSINESS_ID, pageIds) ?? Promise.resolve(new Map())
+    );
+  }
+
+  setPageRestriction(
+    pageId: string,
+    subjects: readonly RestrictionSubject[]
+  ): Promise<RestrictionOutcome> {
+    return setPageRestriction(this.deps, pageId, subjects);
+  }
+
+  clearPageRestriction(pageId: string): Promise<RestrictionOutcome> {
+    return clearPageRestriction(this.deps, pageId);
+  }
+
+  getSpaceRestriction(spaceId: string): Promise<PageRestriction | null> {
+    return getSpaceRestriction(this.deps, spaceId);
+  }
+
+  setSpaceRestriction(
+    spaceId: string,
+    subjects: readonly RestrictionSubject[]
+  ): Promise<RestrictionOutcome> {
+    return setSpaceRestriction(this.deps, spaceId, subjects);
+  }
+
+  clearSpaceRestriction(spaceId: string): Promise<RestrictionOutcome> {
+    return clearSpaceRestriction(this.deps, spaceId);
+  }
+
+  /** What a move would do to a Page's readers, without doing it. */
+  previewPageMove(pageId: string, dest: PageMoveDestination): Promise<PageMovePreview | null> {
+    return previewPageMove(this.deps, pageId, dest);
+  }
+
+  movePage(pageId: string, dest: PageMoveDestination): Promise<PageMovePreview | null> {
+    return movePage(this.deps, pageId, dest);
+  }
+
   getBacklinks(pageId: string): Promise<Backlink[] | null> {
     return getBacklinks(this.deps, pageId);
   }
@@ -296,6 +395,10 @@ export class KnowledgeService {
   /** Flat list of every OKF page across spaces for editor `@`-mentions. */
   listAllPages(): Promise<SpacePageRef[]> {
     return listAllPages(this.deps);
+  }
+
+  listSpacePageActivity(spaceIds: readonly string[]): Promise<SpacePageActivity[]> {
+    return listSpacePageActivity(this.deps, spaceIds);
   }
 
   /** Knowledge home overview: spaces with counts/activity plus recently-edited pages. */

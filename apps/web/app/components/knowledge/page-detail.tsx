@@ -1,8 +1,10 @@
 import { Link } from "@remix-run/react";
 import { FileText, History, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { AgentAuthoredBadge } from "~/components/knowledge/agent-authored-badge";
 import { BacklinksPanel } from "~/components/knowledge/backlinks-panel";
 import { HistoryDrawer } from "~/components/knowledge/history-panel";
+import { VisibilityBadge } from "~/components/knowledge/visibility-badge";
 import { MarkdownView } from "~/components/markdown-view";
 import { Button } from "~/components/ui/button";
 import type { Backlink, KnowledgePage } from "~/lib/knowledge-api";
@@ -42,7 +44,22 @@ export function PageDetail({
         <div className="flex min-w-0 flex-col gap-2">
           <h1 className="text-2xl font-bold tracking-tight text-foreground">{doc.title}</h1>
           <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-xs text-muted-foreground">
-            <span>Updated {formatUpdated(doc.updatedAt)}</span>
+            <span>
+              {doc.authorLabel ? `Updated by ${doc.authorLabel} ` : "Updated "}
+              {formatUpdated(doc.updatedAt)}
+            </span>
+            {doc.visibility && doc.visibility !== "business" ? (
+              <>
+                <Dot />
+                <VisibilityBadge visibility={doc.visibility} />
+              </>
+            ) : null}
+            {doc.authorKind === "agent" ? (
+              <>
+                <Dot />
+                <AgentAuthoredBadge authorKind={doc.authorKind} />
+              </>
+            ) : null}
             {doc.resource ? (
               <>
                 <Dot />

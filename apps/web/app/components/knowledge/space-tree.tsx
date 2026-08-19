@@ -11,7 +11,11 @@ import {
 import { listingToNodes, type PageNode } from "~/lib/okf-listing";
 import { buildPageResolver, type PageResolver, pageHref } from "~/lib/page-href";
 import { cn } from "~/lib/utils";
+import { AgentAuthoredBadge } from "./agent-authored-badge";
+import { MoveControl } from "./move-control";
 import { SidebarSearch } from "./sidebar-search";
+import { useTreeExpansion } from "./use-tree-expansion";
+import { VisibilityBadge } from "./visibility-badge";
 
 /* Page+directory basename pairs render as one clickable and expandable node. */
 
@@ -101,16 +105,16 @@ function SpaceNode({
   activePath: string | null;
   resolver: PageResolver;
 }) {
-  const [open, setOpen] = useState(isActiveSpace);
+  const { open, toggle } = useTreeExpansion(space.id, "", { forceOpen: isActiveSpace });
   const base = `/knowledge/spaces/${enc(space.id)}`;
   return (
     <li>
       <div className="group flex items-center gap-1 rounded-sm pr-1 hover:bg-accent">
         <button
           type="button"
-          onClick={() => setOpen((v) => !v)}
+          onClick={toggle}
           aria-expanded={open}
-          aria-label={open ? "Collapse" : "Expand"}
+          aria-label={open ? `Collapse ${space.name}` : `Expand ${space.name}`}
           className="cursor-pointer rounded-sm p-1 text-muted-foreground"
         >
           <ChevronRight
@@ -240,7 +244,9 @@ function PageRow({
   activePath: string | null;
   resolver: PageResolver;
 }) {
-  const [open, setOpen] = useState(() => !!activePath && activePath.startsWith(`${node.path}/`));
+  const { open, toggle } = useTreeExpansion(spaceId, node.path, {
+    forceOpen: !!activePath && activePath.startsWith(`${node.path}/`),
+  });
   const base = `/knowledge/spaces/${enc(spaceId)}`;
   const isActive = activePath === node.path;
   const pad = { paddingLeft: `${depth * 0.75 + 0.25}rem` };
@@ -260,9 +266,9 @@ function PageRow({
         {node.hasChildren ? (
           <button
             type="button"
-            onClick={() => setOpen((v) => !v)}
+            onClick={toggle}
             aria-expanded={open}
-            aria-label={open ? "Collapse" : "Expand"}
+            aria-label={open ? `Collapse ${node.label}` : `Expand ${node.label}`}
             className="cursor-pointer rounded-sm p-0.5 text-muted-foreground"
           >
             <ChevronRight
@@ -293,13 +299,25 @@ function PageRow({
         ) : (
           <button
             type="button"
-            onClick={() => setOpen((v) => !v)}
+            onClick={toggle}
             className="min-w-0 flex-1 cursor-pointer truncate py-1 text-left font-medium text-foreground"
             title={node.label}
           >
             {node.label}
           </button>
         )}
+        <AgentAuthoredBadge authorKind={ref?.authorKind} compact />
+        {ref?.visibility && ref.visibility !== "business" ? (
+          <VisibilityBadge visibility={ref.visibility} compact />
+        ) : null}
+        {ref ? (
+          <MoveControl
+            pageId={ref.pageId}
+            pageTitle={node.label}
+            currentPath={node.path}
+            onMoved={() => window.dispatchEvent(new Event("okf:space-changed"))}
+          />
+        ) : null}
         <Link
           to={`${base}/pages/new?parent=${enc(node.path)}`}
           title="New sub-page"

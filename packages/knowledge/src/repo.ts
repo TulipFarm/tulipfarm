@@ -4,15 +4,17 @@ import type {
   KnowledgePage,
   KnowledgeRevision,
   KnowledgeSource,
+  PageAuthorKind,
   RecentPage,
   SearchFilters,
+  SpacePageActivity,
   SpacePageRef,
 } from "./types";
 
 // OKF columns (space_id..frontmatter_extra) sit between version and the timestamps. frontmatter_extra
 // is jsonb — bound as a JSON string with an explicit ::jsonb cast (works on both pg.Pool and PGlite).
 const PAGE_COLS =
-  "id, title, content, plain_text, source, source_id, domain, tags, active, always_load_for_agents, version, space_id, path, resource, frontmatter_extra, type, created_at, updated_at";
+  "id, title, content, plain_text, source, source_id, domain, tags, active, always_load_for_agents, version, space_id, path, resource, frontmatter_extra, type, author_kind, author_id, created_at, updated_at";
 
 function rowToPage(row: Record<string, unknown>): KnowledgePage {
   return {
@@ -32,6 +34,8 @@ function rowToPage(row: Record<string, unknown>): KnowledgePage {
     resource: (row.resource as string | null) ?? null,
     type: (row.type as string | null) ?? null,
     frontmatterExtra: (row.frontmatter_extra as Record<string, unknown> | null) ?? {},
+    authorKind: (row.author_kind as PageAuthorKind | null) ?? null,
+    authorId: (row.author_id as string | null) ?? null,
     createdAt: row.created_at as Date,
     updatedAt: row.updated_at as Date,
   };
@@ -55,6 +59,8 @@ function pageParams(page: KnowledgePage): unknown[] {
     page.resource ?? null,
     JSON.stringify(page.frontmatterExtra ?? {}),
     page.type ?? null,
+    page.authorKind ?? null,
+    page.authorId ?? null,
     page.createdAt,
     page.updatedAt,
   ];
@@ -84,8 +90,33 @@ export interface KnowledgePageRepo {
   listBySpace(spaceId: string): Promise<KnowledgePage[]>;
   /** Flat list of every active OKF page across all spaces (id, space, path, title) — @-mention source. */
   listAllSpacePages(): Promise<SpacePageRef[]>;
+  /**
+   * Per-Page activity for every active, spaced Page, so a caller holding a principal can compute a
+   * Space's page count and last activity from only the Pages that principal may read. Deliberately
+   * not folded into `listAllSpacePages`: that feeds the @-mention picker, whose response shape is
+   * unfiltered, and an extra timestamp there would be a new disclosure rather than a fix.
+   */
+  listSpacePageActivity(spaceIds: readonly string[]): Promise<SpacePageActivity[]>;
   /** The N most-recently-updated active OKF pages across all spaces — Knowledge home "Recently edited". */
   listRecentPages(limit: number): Promise<RecentPage[]>;
+  /**
+   * Marks the Page's readership as changed, without touching its content or content version.
+   * A snapshot decision compares this against the revision it captured, so a stale snapshot is
+   * refused rather than trusted.
+   */
+  bumpAclRevision(id: string): Promise<boolean>;
+  /**
+   * Relocate a Page and every Page nested beneath it, bumping each one's ACL revision.
+   *
+   * Descendants move with the parent because their readership derives from the parent's path — a
+   * move that left them behind would strand them under an ancestor that no longer exists.
+   */
+  moveSubtree(id: string, spaceId: string | null, path: string): Promise<readonly string[]>;
+  /**
+   * The active Pages nested beneath a Page, nearest first. Read-only sibling of
+   * {@link moveSubtree}, so a move preview can report the branch it would carry along.
+   */
+  listSubtree(id: string): Promise<readonly { id: string; path: string }[]>;
 }
 
 export class PgKnowledgePageRepo implements KnowledgePageRepo {
@@ -94,7 +125,7 @@ export class PgKnowledgePageRepo implements KnowledgePageRepo {
   async insert(page: KnowledgePage): Promise<void> {
     await this.q.query(
       `INSERT INTO knowledge_pages (${PAGE_COLS})
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::text[],$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18)`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::text[],$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19,$20)`,
       pageParams(page)
     );
   }
@@ -102,7 +133,7 @@ export class PgKnowledgePageRepo implements KnowledgePageRepo {
   async upsertBySource(page: KnowledgePage): Promise<{ _id: string; version: number }> {
     const { rows } = await this.q.query(
       `INSERT INTO knowledge_pages (${PAGE_COLS})
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::text[],$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::text[],$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19,$20)
        ON CONFLICT (source, source_id) DO UPDATE SET
          title = EXCLUDED.title, content = EXCLUDED.content, plain_text = EXCLUDED.plain_text,
          domain = EXCLUDED.domain, tags = EXCLUDED.tags,
@@ -110,6 +141,7 @@ export class PgKnowledgePageRepo implements KnowledgePageRepo {
          space_id = EXCLUDED.space_id, path = EXCLUDED.path,
          resource = EXCLUDED.resource, frontmatter_extra = EXCLUDED.frontmatter_extra,
          type = EXCLUDED.type,
+         author_kind = EXCLUDED.author_kind, author_id = EXCLUDED.author_id,
          active = true, version = knowledge_pages.version + 1, updated_at = EXCLUDED.updated_at
        RETURNING id, version`,
       pageParams(page)
@@ -161,8 +193,8 @@ export class PgKnowledgePageRepo implements KnowledgePageRepo {
        SET title=$1, content=$2, plain_text=$3, domain=$4, tags=$5::text[],
            always_load_for_agents=$6, active=$7, version=$8,
            resource=$9, space_id=$10, path=$11, frontmatter_extra=$12::jsonb,
-           type=$13, updated_at=$14
-       WHERE id=$15 AND version=$16 RETURNING id`,
+           type=$13, author_kind=$14, author_id=$15, updated_at=$16
+       WHERE id=$17 AND version=$18 RETURNING id`,
       [
         page.title,
         page.content,
@@ -177,6 +209,8 @@ export class PgKnowledgePageRepo implements KnowledgePageRepo {
         page.path ?? null,
         JSON.stringify(page.frontmatterExtra ?? {}),
         page.type ?? null,
+        page.authorKind ?? null,
+        page.authorId ?? null,
         page.updatedAt,
         id,
         expectedVersion,
@@ -228,7 +262,8 @@ export class PgKnowledgePageRepo implements KnowledgePageRepo {
 
   async listAllSpacePages(): Promise<SpacePageRef[]> {
     const { rows } = await this.q.query(
-      `SELECT p.id, p.space_id, s.name AS space_name, p.path, p.title
+      `SELECT p.id, p.space_id, s.name AS space_name, p.path, p.title,
+              p.author_kind, p.author_id
        FROM knowledge_pages p
        JOIN knowledge_spaces s ON s.id = p.space_id
        WHERE p.space_id IS NOT NULL AND p.path IS NOT NULL AND p.active = true
@@ -242,13 +277,76 @@ export class PgKnowledgePageRepo implements KnowledgePageRepo {
         spaceName: row.space_name as string,
         path: row.path as string,
         title: row.title as string,
+        authorKind: (row.author_kind as PageAuthorKind | null) ?? null,
+        authorId: (row.author_id as string | null) ?? null,
       };
     });
   }
 
+  async listSpacePageActivity(spaceIds: readonly string[]): Promise<SpacePageActivity[]> {
+    if (spaceIds.length === 0) return [];
+    const { rows } = await this.q.query(
+      `SELECT id, space_id, updated_at FROM knowledge_pages
+        WHERE space_id = ANY($1::uuid[]) AND path IS NOT NULL AND active = true`,
+      [[...spaceIds]]
+    );
+    return rows.map((r) => {
+      const row = r as Record<string, unknown>;
+      return {
+        pageId: row.id as string,
+        spaceId: row.space_id as string,
+        updatedAt: row.updated_at as Date,
+      };
+    });
+  }
+
+  async bumpAclRevision(id: string): Promise<boolean> {
+    const { rows } = await this.q.query(
+      `UPDATE knowledge_pages
+          SET acl_revision = (COALESCE(NULLIF(acl_revision, '')::bigint, 0) + 1)::text
+        WHERE id = $1
+      RETURNING id`,
+      [id]
+    );
+    return rows.length > 0;
+  }
+
+  async moveSubtree(id: string, spaceId: string | null, path: string): Promise<readonly string[]> {
+    const { rows } = await this.q.query(
+      `WITH origin AS (SELECT business_id, space_id, path FROM knowledge_pages WHERE id = $1)
+       UPDATE knowledge_pages p
+          SET space_id = $2,
+              path = $3 || substring(p.path from length((SELECT path FROM origin)) + 1),
+              acl_revision = (COALESCE(NULLIF(p.acl_revision, '')::bigint, 0) + 1)::text,
+              updated_at = now()
+         FROM origin
+        WHERE p.business_id = origin.business_id
+          AND p.space_id IS NOT DISTINCT FROM origin.space_id
+          AND (p.id = $1 OR starts_with(p.path, origin.path || '/'))
+      RETURNING p.id`,
+      [id, spaceId, path]
+    );
+    return rows.map((row) => row.id as string);
+  }
+
+  async listSubtree(id: string): Promise<readonly { id: string; path: string }[]> {
+    const { rows } = await this.q.query(
+      `WITH origin AS (SELECT business_id, space_id, path FROM knowledge_pages WHERE id = $1)
+       SELECT p.id, p.path FROM knowledge_pages p, origin
+        WHERE p.business_id = origin.business_id
+          AND p.space_id IS NOT DISTINCT FROM origin.space_id
+          AND p.active = true
+          AND starts_with(p.path, origin.path || '/')
+        ORDER BY p.path`,
+      [id]
+    );
+    return rows.map((r) => ({ id: (r as { id: string }).id, path: (r as { path: string }).path }));
+  }
+
   async listRecentPages(limit: number): Promise<RecentPage[]> {
     const { rows } = await this.q.query(
-      `SELECT p.id, p.space_id, s.name AS space_name, p.path, p.title, p.updated_at
+      `SELECT p.id, p.space_id, s.name AS space_name, p.path, p.title, p.updated_at,
+              p.author_kind, p.author_id
        FROM knowledge_pages p
        JOIN knowledge_spaces s ON s.id = p.space_id
        WHERE p.space_id IS NOT NULL AND p.path IS NOT NULL AND p.active = true
@@ -264,6 +362,8 @@ export class PgKnowledgePageRepo implements KnowledgePageRepo {
         spaceName: row.space_name as string,
         path: row.path as string,
         title: row.title as string,
+        authorKind: (row.author_kind as PageAuthorKind | null) ?? null,
+        authorId: (row.author_id as string | null) ?? null,
         updatedAt: row.updated_at as Date,
       };
     });

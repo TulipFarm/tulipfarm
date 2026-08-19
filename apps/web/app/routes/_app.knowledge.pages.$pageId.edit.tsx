@@ -11,6 +11,7 @@ import { ResourcePanel } from "~/components/resource-panel";
 import { ErrorState, NotFoundState } from "~/components/states";
 import { ApiError } from "~/lib/api";
 import { getPage, getSpace, writePage } from "~/lib/knowledge-api";
+import { pageFormErrors } from "~/lib/page-form-errors";
 import { pageHref } from "~/lib/page-href";
 
 export const meta: MetaFunction = () => [{ title: "Edit page · Knowledge · tulipfarm" }];
@@ -29,6 +30,7 @@ export default function PageEdit() {
   const navigate = useNavigate();
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<"path" | "content", string>>>({});
 
   const spaceHome = `/knowledge/spaces/${encodeURIComponent(space.id)}`;
   const pagePath = pageHref(doc.id, path);
@@ -36,13 +38,16 @@ export default function PageEdit() {
   async function onSubmit(_path: string, content: string) {
     setSubmitting(true);
     setFormError(null);
+    setFieldErrors({});
     try {
       // The path is fixed on edit (read-only field); re-post to the same path to replace content.
       await writePage(space.id, path, content);
       window.dispatchEvent(new Event("okf:space-changed")); // refresh the persistent tree
       navigate(pagePath);
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : "request failed");
+      const mapped = pageFormErrors(err);
+      setFormError(mapped.formError);
+      setFieldErrors(mapped.fieldErrors);
       setSubmitting(false);
     }
   }
@@ -64,6 +69,7 @@ export default function PageEdit() {
         onSubmit={onSubmit}
         submitting={submitting}
         formError={formError}
+        fieldErrors={fieldErrors}
         cancelTo={pagePath}
       />
     </ResourcePanel>

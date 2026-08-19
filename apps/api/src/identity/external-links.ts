@@ -12,6 +12,37 @@ import type { Queryable } from "../db";
 /** Link provenance is audit evidence; null means the row predates this distinction. */
 export type IdentityVerificationMethod = "link_token" | "manifest_email" | "bind_link";
 
+/**
+ * Verification methods strong enough to grant Knowledge document access.
+ *
+ * One mapping row answers two unrelated questions — *who is talking to the bot* and *what may they
+ * read* — and those need different evidence. Both members here prove control of the provider
+ * account **and** the Tulip account: `link_token` is minted for an authenticated user and redeemed
+ * with the provider subject; `bind_link` delivers a nonce to the provider account and is redeemed
+ * while authenticated.
+ *
+ * `manifest_email` deliberately does not qualify. It matches a user by an email the *provider*
+ * reports, and a Slack Connect or guest counterparty administers their own users' addresses — so
+ * it is an assertion from outside our trust boundary, not proof. Such a row still identifies a
+ * chat sender; it simply carries no grant. See ticket 06.
+ *
+ * **Scope, precisely.** This closes the path where a weak mapping puts a principal into a captured
+ * source ACL or satisfies a live membership check. It does **not** close impersonation: a
+ * `manifest_email` sender is still resolved to the matched user by `resolveExternalIdentity`, owns
+ * the resulting Turn as that user, and `query_knowledge` derives its read principal from the Turn
+ * owner — so they still inherit that user's own reads. Ticket 06 records that as open.
+ */
+export const PROVEN_LINK_VERIFICATION: readonly IdentityVerificationMethod[] = [
+  "link_token",
+  "bind_link",
+];
+
+/** Null provenance is not evidence, so it is refused alongside the weak methods. */
+export function isProvenLink(doc: { verifiedVia?: IdentityVerificationMethod | null }): boolean {
+  const via = doc.verifiedVia;
+  return via !== null && via !== undefined && PROVEN_LINK_VERIFICATION.includes(via);
+}
+
 export interface ExternalIdentityMappingDoc {
   provider: string;
   externalSubject: string;
@@ -47,6 +78,12 @@ export interface ExternalIdentityRepo {
     externalSubject: string
   ): Promise<ExternalIdentityMappingDoc | null>;
   listMappingsForUser(userId: string): Promise<ExternalIdentityMappingDoc[]>;
+  /**
+   * Mappings strong enough to grant Knowledge documents. Anything deciding document access must
+   * call this rather than filtering `listMappingsForUser` itself, so a new call site cannot
+   * silently omit the grade check.
+   */
+  listProvenMappingsForUser(userId: string): Promise<ExternalIdentityMappingDoc[]>;
   upsertMapping(mapping: ExternalIdentityMappingDoc): Promise<void>;
   deleteMapping(provider: string, externalSubject: string): Promise<void>;
   createLinkToken(token: ExternalLinkTokenDoc): Promise<void>;
@@ -117,6 +154,18 @@ export class PgExternalIdentityRepo implements ExternalIdentityRepo {
     const { rows } = await this.q.query(
       "SELECT * FROM external_identity_mappings WHERE user_id = $1 ORDER BY provider, external_subject",
       [userId]
+    );
+    return rows.map(rowToMapping);
+  }
+
+  async listProvenMappingsForUser(userId: string): Promise<ExternalIdentityMappingDoc[]> {
+    // Filtered in SQL rather than after the fact so a weak row never reaches a caller that
+    // decides document access.
+    const { rows } = await this.q.query(
+      `SELECT * FROM external_identity_mappings
+       WHERE user_id = $1 AND verified_via = ANY($2::text[])
+       ORDER BY provider, external_subject`,
+      [userId, PROVEN_LINK_VERIFICATION]
     );
     return rows.map(rowToMapping);
   }
@@ -285,10 +334,29 @@ export async function resolveExternalIdentity(
   externalSubject: string,
   now: Date = new Date()
 ): Promise<string> {
+  return (await resolveExternalSender(repo, provider, externalSubject, now)).userId;
+}
+
+/**
+ * The same check as {@link resolveExternalIdentity}, keeping the evidence that produced the match.
+ *
+ * Callers that only need to know *who* the sender is should use `resolveExternalIdentity`. Callers
+ * deciding what the sender may *do* need `verifiedVia` too, because the two questions take
+ * different evidence — see `PROVEN_LINK_VERIFICATION`.
+ */
+export async function resolveExternalSender(
+  repo: ExternalIdentityRepo,
+  provider: string,
+  externalSubject: string,
+  now: Date = new Date()
+): Promise<{ readonly userId: string; readonly verifiedVia?: IdentityVerificationMethod }> {
   const doc = await repo.findMapping(provider, externalSubject);
   const mapping = doc ? toAuthzMapping(doc) : undefined;
   assertExternalIdentityMapped(mapping, DEPLOYMENT_BUSINESS_ID, now);
-  return mapping.principalId;
+  return {
+    userId: mapping.principalId,
+    ...(doc?.verifiedVia ? { verifiedVia: doc.verifiedVia } : {}),
+  };
 }
 
 export { ExternalIdentityDeniedError };
