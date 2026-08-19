@@ -256,10 +256,39 @@ export class HookExecutor {
   }
 
   async close(): Promise<void> {
-    await this.worker.terminate();
     for (const [id, p] of this.pending) {
       p.reject(new Error("executor closed"));
       this.pending.delete(id);
     }
+    await this.shutdownWorker();
+  }
+
+  private shutdownWorker(): Promise<void> {
+    return new Promise((resolve) => {
+      let settled = false;
+      const hardTerminate = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        this.worker
+          .terminate()
+          .catch(() => {})
+          .finally(resolve);
+      };
+      const timer = setTimeout(hardTerminate, 2000);
+
+      this.worker.once("exit", () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve();
+      });
+
+      try {
+        this.worker.postMessage({ type: "shutdown" });
+      } catch {
+        hardTerminate();
+      }
+    });
   }
 }
