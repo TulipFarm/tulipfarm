@@ -4,6 +4,8 @@ import { type PaginatedResult, toPage } from "@tulipfarm/storage";
 import type { Queryable } from "../db";
 import { historyTableName, rowToResourceDoc, tableName } from "./schema";
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export interface ResourceDoc {
   _id: string;
   version: number;
@@ -73,6 +75,7 @@ export class PgResourceRepo implements ResourceRepo {
   }
 
   async findById(id: string): Promise<ResourceDoc | null> {
+    if (!UUID_RE.test(id)) return null;
     const { rows } = await this.q.query(
       `SELECT id, version, created_at, updated_at, deleted_at, data FROM ${this.table} WHERE id = $1`,
       [id]
@@ -121,6 +124,7 @@ export class PgResourceRepo implements ResourceRepo {
   }
 
   async replaceOne(id: string, expectedVersion: number, doc: ResourceDoc): Promise<boolean> {
+    if (!UUID_RE.test(id)) return false;
     const { _id, version, createdAt, updatedAt, deletedAt, ...data } = doc;
     const { rows } = await this.q.query(
       `UPDATE ${this.table}
