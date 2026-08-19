@@ -35,6 +35,7 @@ export function ModelSheet({
   const [resolving, setResolving] = useState(false);
   const [candidates, setCandidates] = useState<string[]>([]);
   const [unmatched, setUnmatched] = useState(false);
+  const [modelError, setModelError] = useState<string | null>(null);
   const provider = row?.provider;
   const model = row?.model;
 
@@ -98,6 +99,14 @@ export function ModelSheet({
   const modelFieldId = useId();
   const modelHelpId = `${modelFieldId}-help`;
 
+  function finish() {
+    if (!row?.model.trim()) {
+      setModelError("Enter a Model ID.");
+      return;
+    }
+    onClose();
+  }
+
   return (
     <Sheet open={open} onClose={onClose} title="Model">
       {row ? (
@@ -120,6 +129,7 @@ export function ModelSheet({
           <Field
             label="Model ID"
             htmlFor={modelFieldId}
+            error={modelError}
             help={
               options?.source === "live"
                 ? "Listed from your configured endpoint."
@@ -136,6 +146,7 @@ export function ModelSheet({
                 value={isSuggested ? row.model : CUSTOM_MODEL}
                 onChange={(e) => {
                   const value = e.target.value;
+                  setModelError(null);
                   setCandidates([]);
                   setUnmatched(false);
                   if (value === CUSTOM_MODEL) {
@@ -161,6 +172,7 @@ export function ModelSheet({
                 value={row.model}
                 onChange={(e) => {
                   onChange({ model: e.target.value, spec: undefined });
+                  setModelError(null);
                   setCandidates([]);
                   setUnmatched(false);
                 }}
@@ -266,7 +278,7 @@ export function ModelSheet({
           </details>
 
           <div className={cn("flex justify-end")}>
-            <Button size="sm" onClick={onClose}>
+            <Button size="sm" onClick={finish}>
               Done
             </Button>
           </div>

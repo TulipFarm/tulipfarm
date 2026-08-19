@@ -113,6 +113,7 @@ export function ModelChains({
     const ids: { id: string; label: string }[] = [];
     for (const tier of TIERS) {
       chains[tier.wire].forEach((row, index) => {
+        if (!row.model.trim()) return;
         const id = profileIdFor(tier.preset, index);
         ids.push({
           id,
