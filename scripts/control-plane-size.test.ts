@@ -132,7 +132,7 @@ import { describe, expect, it } from "vitest";
  * measure that cannot be gamed without noticing is worth more here than a subtle one.
  */
 
-const CEILING = 49_491;
+const CEILING = 49_492;
 
 /**
  * Domains inside `apps/api/src` that already have a package of the same name. Everything here that

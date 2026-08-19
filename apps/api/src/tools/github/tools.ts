@@ -348,7 +348,11 @@ function buildToolDef(
       });
 
       try {
-        const output = await dispatcher.dispatch(businessId, reserved.effect.effectId);
+        const output = await dispatcher.dispatch(
+          businessId,
+          reserved.effect.effectId,
+          ctx.abortSignal
+        );
         return ok(output);
       } catch (error) {
         if (error instanceof ToolDispatchError) return mapDispatchError(error, toolId);

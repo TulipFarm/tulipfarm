@@ -79,7 +79,10 @@ describe("ToolRegistry", () => {
       reg.register(makeTool({ name: "ctx_check", execute }));
       const ts = reg.buildToolSet(ctx);
       await ts.ctx_check.execute?.({}, { messages: [], context: undefined, toolCallId: "tc1" });
-      expect(execute).toHaveBeenCalledWith({}, ctx);
+      expect(execute).toHaveBeenCalledWith(
+        {},
+        expect.objectContaining({ ...ctx, abortSignal: expect.any(AbortSignal) })
+      );
     });
 
     it("allowedToolNames scopes the set to the per-agent allowlist", () => {
@@ -305,7 +308,7 @@ describe("ToolRegistry", () => {
         { messages: [], context: undefined, toolCallId: "tc2" }
       );
       expect(result).toEqual({ success: true, data: "reached" });
-      expect(execute).toHaveBeenCalledWith({ key: "hello" }, ctx);
+      expect(execute).toHaveBeenCalledWith({ key: "hello" }, expect.objectContaining(ctx));
     });
 
     it("bad args with coordinator return validation_error (no coordinator scheduling)", async () => {
@@ -412,24 +415,32 @@ describe("ToolRegistry", () => {
 
     it("returns internal_error when execute hangs past TOOL_TIMEOUT_MS", async () => {
       vi.useFakeTimers();
-      const reg = new ToolRegistry();
-      reg.register(
-        makeTool({
-          execute: () => new Promise(() => {}), // never resolves
-        })
-      );
-      const ts = reg.buildToolSet(ctx);
-      const resultPromise = ts.test_tool.execute?.(
-        {},
-        { messages: [], context: undefined, toolCallId: "tc" }
-      );
-      vi.advanceTimersByTime(TOOL_TIMEOUT_MS);
-      const result = await resultPromise;
-      expect(result).toEqual({
-        success: false,
-        error: { code: "internal_error", message: "tool execution timed out" },
-      });
-      vi.useRealTimers();
+      try {
+        let abortSignal: AbortSignal | undefined;
+        const reg = new ToolRegistry();
+        reg.register(
+          makeTool({
+            execute: (_args, context) => {
+              abortSignal = context.abortSignal;
+              return new Promise(() => {});
+            },
+          })
+        );
+        const ts = reg.buildToolSet(ctx);
+        const resultPromise = ts.test_tool.execute?.(
+          {},
+          { messages: [], context: undefined, toolCallId: "tc" }
+        );
+        vi.advanceTimersByTime(TOOL_TIMEOUT_MS);
+        const result = await resultPromise;
+        expect(result).toEqual({
+          success: false,
+          error: { code: "internal_error", message: "tool execution timed out" },
+        });
+        expect(abortSignal?.aborted).toBe(true);
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 
@@ -652,7 +663,7 @@ describe("ToolRegistry", () => {
 
       expect(result).toEqual({ success: true, data: "ran" });
       // effectiveArgs (the guard's returned args) are forwarded to the tool, not the originals.
-      expect(execute).toHaveBeenCalledWith({ key: "swapped" }, ctx);
+      expect(execute).toHaveBeenCalledWith({ key: "swapped" }, expect.objectContaining(ctx));
     });
 
     it("no guard passed: tool executes unchanged", async () => {
@@ -667,7 +678,7 @@ describe("ToolRegistry", () => {
       );
 
       expect(result).toEqual({ success: true, data: "direct" });
-      expect(execute).toHaveBeenCalledWith({ key: "v" }, ctx);
+      expect(execute).toHaveBeenCalledWith({ key: "v" }, expect.objectContaining(ctx));
     });
 
     it("blocked guard runs AFTER arg-validation (invalid args short-circuit before the guard)", async () => {

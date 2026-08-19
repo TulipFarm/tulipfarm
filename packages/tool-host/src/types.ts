@@ -61,6 +61,8 @@ export interface ClientContext {
 
 export interface RequestContext {
   userId: string;
+  /** Aborts the active Tool call when its host deadline expires. */
+  abortSignal?: AbortSignal;
   actor?: CommitActor;
   /** Server-resolved target. Request payloads cannot override it. */
   presentationContext?: PresentationContext;
