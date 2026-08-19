@@ -1,0 +1,32 @@
+{
+  "id": "l3-an-abandoned-turn-still-announces-itself",
+  "tier": "l3",
+  "agent": "support",
+  "fault": "context",
+  "context": {
+    "memoryDocument": "## Other durable facts\nOpens at 9am on Saturdays.",
+    "governancePages": []
+  },
+  "input": [
+    {
+      "role": "user",
+      "content": "When do you open on Saturdays?"
+    }
+  ],
+  "script": [
+    {
+      "kind": "text",
+      "text": "We open at 9am on Saturdays."
+    }
+  ],
+  "expect": [
+    {
+      "kind": "run_status",
+      "status": "needs_reconciliation"
+    },
+    {
+      "kind": "run_event_emitted",
+      "eventType": "turn.finished"
+    }
+  ]
+}

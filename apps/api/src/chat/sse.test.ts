@@ -18,8 +18,18 @@ describe("formatSseEvent", () => {
 describe("writeSseHeaders", () => {
   it("sets the event-stream headers plus any extras", () => {
     const setHeader = vi.fn();
-    writeSseHeaders({ setHeader } as unknown as ServerResponse, { "X-Stream-Id": "abc" });
+    writeSseHeaders({ setHeader, flushHeaders: vi.fn() } as unknown as ServerResponse, {
+      "X-Stream-Id": "abc",
+    });
     expect(setHeader).toHaveBeenCalledWith("Content-Type", "text/event-stream");
     expect(setHeader).toHaveBeenCalledWith("X-Stream-Id", "abc");
+  });
+
+  it("flushes the headers so the origin has answered before the first event", () => {
+    // Headers set on the raw reply are not sent until something is written, and the first Run event
+    // can be many seconds away. An edge proxy sees a silent origin and answers the client 524.
+    const flushHeaders = vi.fn();
+    writeSseHeaders({ setHeader: vi.fn(), flushHeaders } as unknown as ServerResponse);
+    expect(flushHeaders).toHaveBeenCalledTimes(1);
   });
 });

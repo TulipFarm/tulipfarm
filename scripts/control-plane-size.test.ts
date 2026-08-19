@@ -251,9 +251,29 @@ import { describe, expect, it } from "vitest";
  * The knowledge that did not stay here: which stage each guard is valid in is
  * `GUARDRAIL_STAGE_BY_GUARD` in `packages/schema/src/guardrails.ts`, beside the stage unions that
  * decide it, so the Tool derives the stage rather than restating the mapping.
+ *
+ * It moves to 51,508 for the silent-chat-turn fix, +35 net across the two files that own the SSE
+ * transport for a Chat Turn:
+ *
+ *   +25 `apps/api/src/runs/events.ts` — `needs_reconciliation` joins the statuses that close the
+ *       stream, and `streamRunEvents` writes a `: keepalive` comment on an idle poll. A Run parked
+ *       for reconciliation is not Run-terminal, so the poll loop had no reason to stop and the
+ *       response never ended; and because nothing was written until the first Run event existed,
+ *       the origin sent zero bytes and the edge answered 524 rather than the backend answering at
+ *       all. Most of the growth is the TSDoc separating "stream-terminal" from "Run-terminal",
+ *       because the two sets look like they should be one and must not be.
+ *   +9  `apps/api/src/chat/sse.ts` — `SSE_KEEPALIVE_MS`, and `writeSseHeaders` now flushing. Node
+ *       holds headers until the first body write, so setting them was not answering.
+ *   +1  one import in `apps/api/src/chat/routes.ts`.
+ *
+ * The guarantee this fix exists for did *not* stay here. That a Chat Turn always announces its own
+ * failure is enforced in `packages/turn-executor/src/chat-executor.ts`, beside the driver that owns
+ * a Turn's lifecycle, so a Turn dispatched by the Worker rather than streamed over HTTP is covered
+ * by the same code. Only the transport consequence — when to stop polling, and when to put a byte
+ * on the wire — is Fastify-adjacent and therefore here.
  */
 
-const CEILING = 51_473;
+const CEILING = 51_508;
 
 /**
  * Domains inside `apps/api/src` that already have a package of the same name. Everything here that

@@ -78,6 +78,7 @@ function harness(
     state?: PersistedState | null;
     answer?: string;
     run?: PersistedRun;
+    contextError?: Error;
   } = {}
 ): { execute: () => Promise<string>; recorded: Recorded } {
   const events: Recorded["events"] = [];
@@ -116,6 +117,7 @@ function harness(
   const context: TurnContextPort = {
     resolve: async () => {
       contexts += 1;
+      if (over.contextError !== undefined) throw over.contextError;
       return CONTEXT;
     },
   };
@@ -231,6 +233,31 @@ describe("createChatExecutor", () => {
 
     expect(recorded.contexts).toBe(0);
     expect(recorded.transitions).toEqual([]);
+    // The participant is still owed an answer, and `needs_reconciliation` is not a status the Run
+    // event stream can close on. Without this the reader waits forever on a Run nothing will
+    // finish.
+    expect(recorded.events).toEqual([
+      {
+        eventType: "turn.finished",
+        payload: { status: "failed", messageId: null, reason: "turn_execution_failed" },
+      },
+    ]);
+  });
+
+  it("announces a failed turn when the executor throws outside the driver", async () => {
+    // Context assembly, State reclaim and guard configuration all run before the driver can emit
+    // anything. A throw there used to reach the dispatcher, which parks the Run at
+    // `needs_reconciliation` — a status the stream never closes on — with no participant event at
+    // all. The turn simply stopped, indistinguishable from success.
+    const { execute, recorded } = harness({ contextError: new Error("soul unreachable") });
+
+    await expect(execute()).resolves.toBe("needs_reconciliation");
+
+    expect(recorded.events.at(-1)).toEqual({
+      eventType: "turn.finished",
+      payload: { status: "failed", messageId: null, reason: "turn_execution_failed" },
+    });
+    expect(recorded.messages).toEqual([]);
   });
 
   it("re-claims the State a resumed Run is still parked on, rather than restarting anything", async () => {
