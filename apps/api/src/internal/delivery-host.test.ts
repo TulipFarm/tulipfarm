@@ -11,7 +11,7 @@ import {
   INTEGRATION_REQUEST_SCHEMA_REF,
   INVOCATION_REQUEST_SCHEMAS,
 } from "@tulipfarm/schema";
-import type { SoulIntegration, SoulLoader } from "@tulipfarm/soul";
+import type { SoulAgent, SoulIntegration, SoulLoader } from "@tulipfarm/soul";
 import { DOMAIN_EVENTS, MemoryArtifactStore } from "@tulipfarm/storage";
 import type { ToolDef } from "@tulipfarm/tool-host";
 import type { FastifyBaseLogger } from "fastify";
@@ -144,6 +144,7 @@ async function harness(
     integration?: SoulIntegration | undefined;
     resolve?: IngressIdentityResolver["resolve"];
     envelope?: Record<string, unknown>;
+    agents?: Map<string, SoulAgent>;
   } = {}
 ): Promise<Harness> {
   const lineage = new MemoryArtifactStore();
@@ -188,6 +189,7 @@ async function harness(
   let ids = 0;
   const soul = {
     integrations: new Map([[SLUG, options.integration ?? integration()]]),
+    agents: options.agents ?? new Map<string, SoulAgent>(),
   } as unknown as SoulLoader;
 
   const host = new IngressDeliveryHost({
@@ -198,6 +200,7 @@ async function harness(
       create: async (doc: ConversationDoc) => {
         conversations.push(doc);
       },
+      findById: async (id: string) => conversations.find((doc) => doc._id === id) ?? null,
       deleteOwned: async (id: string, userId: string) => {
         const index = conversations.findIndex((doc) => doc._id === id && doc.userId === userId);
         if (index === -1) return "not_found" as const;
@@ -367,6 +370,60 @@ describe("IngressDeliveryHost.attachChat", () => {
         relation: "derived_from",
       }),
     ]);
+  });
+
+  // #431: the derived chat request used to carry a literal `autonomy: "full"`, which the Tool
+  // dispatcher reads straight back out — so a Channel-delivered Turn ran above whatever ceiling
+  // its Agent was configured with. The routed Agent now supplies both fields.
+  it("carries the routed Agent's own autonomy into the derived chat request", async () => {
+    const agents = new Map<string, SoulAgent>([
+      ["mutator", { name: "mutator", frontmatter: { autonomy: "approval-required" }, body: "" }],
+    ]);
+    const { host, threads, conversations, artifacts } = await harness({ agents });
+    conversations.push({
+      _id: "conv-1",
+      userId: "user-1",
+      agentId: "mutator",
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    await threads.insert({
+      integrationSlug: SLUG,
+      externalKey: THREAD_KEY,
+      conversationId: "conv-1",
+      userId: "user-1",
+    });
+
+    await expect(host.attachChat(BUSINESS_ID, RUN_ID, CHAT)).resolves.toMatchObject({
+      outcome: "attached",
+    });
+
+    const derived = await artifacts.read({
+      businessId: BUSINESS_ID,
+      artifactId: chatRequestArtifactId(RUN_ID),
+      reader: RUN_EXECUTOR_PRINCIPAL_REF,
+      allowedClassifications: [],
+      now: NOW,
+    });
+    expect(derived.content).toMatchObject({
+      agentId: "mutator",
+      autonomy: "approval-required",
+    });
+  });
+
+  it("claims no autonomy at all for a thread no Agent is pinned to", async () => {
+    const { host, artifacts } = await harness();
+
+    await host.attachChat(BUSINESS_ID, RUN_ID, CHAT);
+
+    const derived = await artifacts.read({
+      businessId: BUSINESS_ID,
+      artifactId: chatRequestArtifactId(RUN_ID),
+      reader: RUN_EXECUTOR_PRINCIPAL_REF,
+      allowedClassifications: [],
+      now: NOW,
+    });
+    expect((derived.content as { autonomy?: string }).autonomy).toBeUndefined();
   });
 
   it("is idempotent: a re-run attaches to the Turn it already started", async () => {

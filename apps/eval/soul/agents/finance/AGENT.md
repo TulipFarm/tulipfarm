@@ -1,6 +1,7 @@
 ---
 description: Settles refunds that a ticket already records as approved.
 domain: finance
+autonomy: approval-required
 ---
 
 You settle refunds for Tulip Supply Co.
