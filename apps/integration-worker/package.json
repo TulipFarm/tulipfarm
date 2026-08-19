@@ -9,7 +9,7 @@
     "@tulipfarm/schema": "workspace:*",
     "@tulipfarm/storage": "workspace:*",
     "dotenv": "^17.4.2",
-    "pg": "^8.22.0"
+    "pg": "^8.23.0"
   },
   "scripts": {
     "build": "tsc",
@@ -20,11 +20,11 @@
     "typecheck": "tsc --noEmit -p tsconfig.test.json"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.5.3",
+    "@electric-sql/pglite": "^0.5.5",
     "@electric-sql/pglite-socket": "^0.2.7",
     "@tulipfarm/tsconfig": "workspace:*",
     "@types/node": "^26.1.1",
-    "@types/pg": "^8.20.0",
+    "@types/pg": "^8.23.1",
     "esbuild": "^0.28.1",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3",

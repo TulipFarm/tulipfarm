@@ -9,7 +9,7 @@ export const KNOWLEDGE_INDEX_QUEUE = "knowledge-index";
 const SAFE_TABLE = /^[A-Za-z0-9_."]+$/;
 
 /**
- * Operational stats for the index queue, read from pg-boss (`getQueueStats` + the queue's job
+ * Operational stats for the index queue, read from pg-boss (`getQueue` + the queue's job
  * table). Degrades to `{ pending: 0, lastError: null }` if the pg-boss schema isn't present or its
  * shape changes — index-status should never fail because the queue introspection did.
  */
@@ -18,7 +18,8 @@ export function makeIndexQueueStats(boss: PgBoss, db: Queryable): () => Promise<
     let pending = 0;
     let lastError: IndexQueueStats["lastError"] = null;
     try {
-      const stats = await boss.getQueueStats(KNOWLEDGE_INDEX_QUEUE);
+      const stats = await boss.getQueue(KNOWLEDGE_INDEX_QUEUE);
+      if (!stats) return { pending, lastError };
       pending = stats.readyCount + stats.activeCount;
       if (stats.failedCount > 0 && stats.table && SAFE_TABLE.test(stats.table)) {
         const table = stats.table.includes(".") ? stats.table : `pgboss.${stats.table}`;
