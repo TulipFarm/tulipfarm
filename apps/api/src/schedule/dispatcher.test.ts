@@ -21,6 +21,7 @@ function activeBundleWithDueTrigger(): RuntimeBundle {
         slug: "daily-digest-once",
         authoredVersion: 1,
         hash: "hash",
+        references: [],
         document: {
           apiVersion: "tulipfarm.ai/v1",
           kind: "Trigger",
