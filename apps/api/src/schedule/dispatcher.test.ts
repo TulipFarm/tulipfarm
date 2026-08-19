@@ -46,6 +46,7 @@ function activeBundleWithDueTrigger(): RuntimeBundle {
     assets: [],
     get: () => undefined,
     getById: () => undefined,
+    asset: () => undefined,
   };
 }
 
