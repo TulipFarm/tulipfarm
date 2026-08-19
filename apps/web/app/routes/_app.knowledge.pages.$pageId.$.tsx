@@ -7,11 +7,26 @@ import {
   useNavigate,
   useRouteError,
 } from "@remix-run/react";
+import { Users } from "lucide-react";
 import { useState } from "react";
 import { PageDetail } from "~/components/knowledge/page-detail";
+import { RestrictDialog } from "~/components/knowledge/restrict-dialog";
 import { ErrorState, NotFoundState } from "~/components/states";
+import { Button } from "~/components/ui/button";
 import { ApiError } from "~/lib/api";
-import { deletePage, getBacklinks, getPage, getSpace, listAllPages } from "~/lib/knowledge-api";
+import {
+  deletePage,
+  getBacklinks,
+  getPage,
+  getPageVisibility,
+  getSpace,
+  listAllPages,
+  listSubjects,
+  type PageVisibility,
+  restrictPage,
+  type SubjectDirectory,
+  unrestrictPage,
+} from "~/lib/knowledge-api";
 import { buildPageResolver, pageHref, pageSlug } from "~/lib/page-href";
 
 export const meta: MetaFunction = () => [{ title: "Page · Knowledge · tulipfarm" }];
@@ -44,6 +59,28 @@ export default function PageDetailRoute() {
   const navigate = useNavigate();
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sharing, setSharing] = useState(false);
+  const [visibility, setVisibility] = useState<PageVisibility | null>(null);
+  const [directory, setDirectory] = useState<SubjectDirectory | null>(null);
+
+  // Loaded on demand: the directory and the reader expansion are both wasted work for the many
+  // more people who only read the Page.
+  async function openShare() {
+    setError(null);
+    try {
+      const [v, d] = await Promise.all([getPageVisibility(doc.id), listSubjects()]);
+      setVisibility(v);
+      setDirectory(d);
+      setSharing(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "could not load sharing");
+    }
+  }
+
+  function refresh() {
+    setSharing(false);
+    navigate(".", { replace: true });
+  }
 
   const base = `/knowledge/spaces/${encodeURIComponent(space.id)}`;
   const resolver = buildPageResolver(pages);
@@ -80,6 +117,28 @@ export default function PageDetailRoute() {
         ))}
       </nav>
       {error ? <p className="text-sm text-destructive">error: {error}</p> : null}
+      <div className="flex justify-end">
+        <Button type="button" variant="ghost" onClick={() => void openShare()}>
+          <Users aria-hidden className="size-4" /> Who can read this
+        </Button>
+      </div>
+      {visibility && directory ? (
+        <RestrictDialog
+          open={sharing}
+          subjectLabel={doc.title}
+          visibility={visibility}
+          directory={directory}
+          onRestrict={async (subjects) => {
+            await restrictPage(doc.id, subjects);
+            refresh();
+          }}
+          onClear={async () => {
+            await unrestrictPage(doc.id);
+            refresh();
+          }}
+          onClose={() => setSharing(false)}
+        />
+      ) : null}
       <PageDetail
         spaceId={space.id}
         doc={doc}

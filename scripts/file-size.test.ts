@@ -79,9 +79,18 @@ const IGNORED_DIRS = new Set([
  * ending below both claims. Taking the measurement rather than the higher claim
  * is the ratchet working; keeping upstream's would have banked slack no file
  * was using.
+ *
+ * The ledger was re-measured again for the Knowledge graph retrieval work: five
+ * migrations were appended (#69-#71 for the unified Page/Space ACL tables, #72
+ * for the GraphRAG entity, edge, community and summary tables, #73 for the
+ * trigger that prunes graph rows when their source chunk goes). That is 277
+ * added lines, which against the old allowance would argue for 2358. The
+ * measurement is 2157, because the previous allowance carried slack the file
+ * was not using. Taking the measurement banks the difference back, per the
+ * paragraph above.
  */
 const OVERSIZED: Readonly<Record<string, number>> = {
-  "apps/api/src/pg-migrations/index.ts": 2081,
+  "apps/api/src/pg-migrations/index.ts": 2157,
   "apps/api/src/index.ts": 1314,
 };
 

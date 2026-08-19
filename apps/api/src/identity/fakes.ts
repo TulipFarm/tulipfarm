@@ -3,11 +3,12 @@
  * (and `routes.test.ts`) can share one fake per port.
  */
 import type { ApiClientDoc, ApiClientRepo, ApiClientStatus } from "./api-clients";
-import type {
-  ChannelBindTokenDoc,
-  ExternalIdentityMappingDoc,
-  ExternalIdentityRepo,
-  ExternalLinkTokenDoc,
+import {
+  type ChannelBindTokenDoc,
+  type ExternalIdentityMappingDoc,
+  type ExternalIdentityRepo,
+  type ExternalLinkTokenDoc,
+  isProvenLink,
 } from "./external-links";
 import type { OidcAuthRequestDoc, OidcAuthRequestRepo } from "./oidc";
 
@@ -57,6 +58,9 @@ export class MemoryExternalIdentityRepo implements ExternalIdentityRepo {
   }
   async listMappingsForUser(userId: string): Promise<ExternalIdentityMappingDoc[]> {
     return this.mappings.filter((m) => m.userId === userId);
+  }
+  async listProvenMappingsForUser(userId: string): Promise<ExternalIdentityMappingDoc[]> {
+    return this.mappings.filter((m) => m.userId === userId && isProvenLink(m));
   }
   async upsertMapping(mapping: ExternalIdentityMappingDoc): Promise<void> {
     const existing = await this.findMapping(mapping.provider, mapping.externalSubject);

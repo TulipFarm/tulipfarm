@@ -57,9 +57,13 @@ test.describe("product CRUD journeys", () => {
     await page.getByLabel("description").fill("edited fixture");
     await page.getByRole("button", { name: "Save" }).click();
     await expect(page.getByText("edited fixture")).toBeVisible();
+    await expect(page).toHaveURL(spaceUrl);
     await page.getByRole("button", { name: "Delete" }).click();
     await page.getByRole("button", { name: "Confirm delete" }).click();
-    await page.goto("/knowledge");
+    // The delete handler navigates to /knowledge itself; Firefox fails a goto that races it.
+    // Waiting for that landing and then reloading still proves the Space is gone server-side.
+    await page.waitForURL(/\/knowledge$/);
+    await page.reload({ waitUntil: "domcontentloaded" });
     await expect(page.getByText(name)).not.toBeVisible();
   });
 
@@ -75,7 +79,9 @@ test.describe("product CRUD journeys", () => {
       ["/inbox", "Approvals"],
     ] as const) {
       await page.goto(path);
-      await expect(page.getByText(new RegExp(marker, "i")).first()).toBeVisible();
+      // Scoped to main: the sidebar carries the same words and is off-canvas on a phone, so an
+      // unscoped match resolves to a hidden nav item rather than proving the surface rendered.
+      await expect(page.getByRole("main").getByText(new RegExp(marker, "i")).first()).toBeVisible();
     }
   });
 

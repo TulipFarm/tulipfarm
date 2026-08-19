@@ -1,5 +1,9 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
-import type { KnowledgeService } from "@tulipfarm/knowledge";
+import type {
+  KnowledgeDenialSink,
+  KnowledgeService,
+  PageReadAuthorizer,
+} from "@tulipfarm/knowledge";
 import { KNOWLEDGE_TOOLS } from "@tulipfarm/knowledge";
 import type { KvService } from "@tulipfarm/kv";
 import { KV_TOOLS } from "@tulipfarm/kv";
@@ -27,6 +31,10 @@ export function buildToolRegistry(services: {
   memoryDocuments?: MemoryDocumentRepo;
   kv?: KvService;
   knowledge?: KnowledgeService;
+  /** Authorizes the exact-lookup Knowledge Tools; without it they refuse rather than serve. */
+  knowledgePageGate?: PageReadAuthorizer;
+  /** Records refused Knowledge writes, so path-probing leaves a trail. */
+  knowledgeDenialSink?: KnowledgeDenialSink;
   resources?: ResourceServices;
   resourceTypes?: ResourceTypeToolContext;
   agentTools?: AgentToolContext;
@@ -70,11 +78,15 @@ export function buildToolRegistry(services: {
 
   if (services.knowledge) {
     const svc = services.knowledge;
+    const pageGate = services.knowledgePageGate;
+    const denials = services.knowledgeDenialSink;
     registerFamily(
       KNOWLEDGE_TOOLS,
       ({ userId, agentId, guardrailRevision, runId, conversationId }) => ({
         userId,
         service: svc,
+        pageGate,
+        denials,
         agentId,
         guardrailRevision,
         runId,

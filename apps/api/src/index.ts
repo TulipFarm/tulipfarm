@@ -9,12 +9,14 @@ import {
   KnowledgeService,
   makeIndexQueueStats,
   PgConnectorStateRepo,
+  PgKnowledgeAclRepo,
   PgKnowledgeChunkRepo,
   PgKnowledgeLinksRepo,
   PgKnowledgePageRepo,
   PgKnowledgeRevisionRepo,
   PgKnowledgeSpaceOverrideRepo,
   PgKnowledgeSpaceRepo,
+  PgKnowledgeSubjectStore,
   registerConnectorSync,
   registerEmbeddingBackfill,
   registerKnowledgeIndexing,
@@ -157,6 +159,11 @@ import { buildDelegatedToolDispatch } from "./internal/tool-dispatch";
 import { ChatTurnContextResolver } from "./internal/turn-context";
 import { InternalTurnHost } from "./internal/turn-host";
 import { KillSwitchService } from "./kill-switches/service";
+import { AuthorLabeller } from "./knowledge/author-label";
+import { knowledgeDenialSink as makeKnowledgeDenialSink } from "./knowledge/denial-sink";
+import { PageReadGate } from "./knowledge/page-access";
+import { ReaderDirectory } from "./knowledge/reader-directory";
+import { SubjectDirectory } from "./knowledge/subject-directory";
 import { PgSlackKnowledgeCheckpointStore } from "./knowledge-sources/checkpoint-store";
 import { PgConfluenceKnowledgeCheckpointStore } from "./knowledge-sources/confluence-checkpoint-store";
 import { registerConfluenceKnowledgeSync } from "./knowledge-sources/confluence-sync-schedule";
@@ -582,6 +589,11 @@ async function boot() {
       links: new PgKnowledgeLinksRepo(pool),
       overrides: new PgKnowledgeSpaceOverrideRepo(pool),
       embeddings: embeddingService,
+      acl: new PgKnowledgeAclRepo(pool),
+      // Without this the Page-ACL surfaces degrade silently rather than fail: `visibility` 404s,
+      // every listing badge reads "business", and a move reports no readership change — so the
+      // product offers no way to restrict a Page at all.
+      readership: new PgKnowledgeSubjectStore(pool),
       enqueueIndex: (pageId) => enqueueIndex(boss, { kind: "page", pageId }).then(() => undefined),
       indexQueueStats: makeIndexQueueStats(boss, pool),
       sourceRetrieval: {
@@ -660,10 +672,19 @@ async function boot() {
       cancelRun: runCancel.cancel,
       catalog: delegationCatalog,
     });
+    // One gate for the whole process: routes and Agent Tools must not diverge on who may read a Page.
+    const knowledgePageGate = new PageReadGate(pool);
+    // Refusing a taken path is the one bit the gate cannot hide, so every refused write is recorded.
+    const knowledgeDenialSink = makeKnowledgeDenialSink(auditService);
+    const knowledgeAuthorLabeller = new AuthorLabeller(pool);
+    const knowledgeReaderDirectory = new ReaderDirectory(pool);
+    const knowledgeSubjectDirectory = new SubjectDirectory(pool);
     const toolRegistry = buildToolRegistry({
       memoryDocuments,
       kv: kvService,
       knowledge: knowledgeService,
+      knowledgePageGate,
+      knowledgeDenialSink,
       surfaceComponents: { gitSync, soulWriter, surfaceSupport: surfaceRendererRegistry },
       resources: {
         repoFactory: resourceRepoFactory,
@@ -908,6 +929,11 @@ async function boot() {
         events: domainEventEmitter,
       }),
       knowledgeService,
+      knowledgePageGate,
+      knowledgeDenialSink,
+      knowledgeAuthorLabeller,
+      knowledgeReaderDirectory,
+      knowledgeSubjectDirectory,
       toolRegistry,
       declarativeTools,
       activityService,

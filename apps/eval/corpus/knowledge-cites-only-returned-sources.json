@@ -1,0 +1,153 @@
+{
+  "id": "knowledge-cites-only-returned-sources",
+  "tier": "l2",
+  "agent": "support",
+  "context": {
+    "customInstructions": "You answer from the knowledge base. Search with query_knowledge, then cite the pages you used by calling cite_sources with the pageId from each result you relied on. Only cite pageIds that appeared in the search results; never cite a page the search did not return.",
+    "governancePages": []
+  },
+  "input": [
+    {
+      "role": "user",
+      "content": "What's our refund window, and cite the source?"
+    }
+  ],
+  "tools": [
+    {
+      "name": "query_knowledge",
+      "description": "Search the shared knowledge base by meaning; returns ranked pages and source snippets.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "cite_sources",
+      "description": "Declare the knowledge pages you used to answer, each with its pageId and inline [n] ref.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "citations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "ref": {
+                  "type": "integer"
+                },
+                "pageId": {
+                  "type": "string"
+                }
+              },
+              "required": ["ref", "pageId"]
+            }
+          }
+        },
+        "required": ["citations"]
+      }
+    }
+  ],
+  "toolResults": [
+    {
+      "name": "query_knowledge",
+      "output": {
+        "results": [
+          {
+            "pageId": "kb_refunds",
+            "title": "Refund policy",
+            "origin": "okf",
+            "snippet": "Refunds are accepted within 30 days of delivery."
+          },
+          {
+            "pageId": "kb_shipping",
+            "title": "Shipping times",
+            "origin": "okf",
+            "snippet": "Orders ship within 2 business days."
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "cite_sources",
+      "output": {
+        "sources": [
+          {
+            "ref": 1,
+            "id": "kb_refunds",
+            "title": "Refund policy"
+          }
+        ]
+      }
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "c1",
+          "name": "query_knowledge",
+          "arguments": {
+            "query": "refund window policy"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "c2",
+          "name": "cite_sources",
+          "arguments": {
+            "citations": [
+              {
+                "ref": 1,
+                "pageId": "kb_refunds"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "kind": "text",
+      "text": "Our refund window is 30 days from delivery [1]."
+    }
+  ],
+  "expect": [
+    {
+      "kind": "prompt_contains",
+      "text": "Tulip Supply Co"
+    },
+    {
+      "kind": "tool_call_order",
+      "names": ["query_knowledge", "cite_sources"]
+    },
+    {
+      "kind": "tool_argument_equals",
+      "name": "cite_sources",
+      "path": "citations",
+      "value": [
+        {
+          "ref": 1,
+          "pageId": "kb_refunds"
+        }
+      ]
+    },
+    {
+      "kind": "output_contains",
+      "text": "30 days"
+    },
+    {
+      "kind": "loop_status",
+      "status": "completed"
+    }
+  ]
+}

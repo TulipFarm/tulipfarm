@@ -1,5 +1,6 @@
 import type { Queryable } from "@tulipfarm/storage";
 import { type PaginatedResult, toPage } from "@tulipfarm/storage";
+import { isKnowledgeId } from "./ids";
 import type { KnowledgeSpace, SpaceWithActivity } from "./types";
 
 const SPACE_COLS = "id, name, description, created_at, updated_at";
@@ -31,7 +32,14 @@ export interface KnowledgeSpaceRepo {
   listWithActivity(): Promise<SpaceWithActivity[]>;
   /** Partial metadata update (COALESCE-keep: a null patch field preserves the existing value). */
   update(id: string, patch: SpacePatch, updatedAt: Date): Promise<KnowledgeSpace | null>;
-  /** Cascades to pages, links, and overrides via FK ON DELETE CASCADE. */
+  /**
+   * Deletes the Space and every Page in it.
+   *
+   * `knowledge_pages.space_id` is NO ACTION, not CASCADE, so an accidental `DELETE FROM
+   * knowledge_spaces` cannot silently take a corpus with it — which makes removing the Pages this
+   * method's job. Chunks, revisions, links and the ACL entries naming each Page follow from the
+   * Page rows going, via their own cascades and the `knowledge_*_prune_acl` triggers.
+   */
   delete(id: string): Promise<boolean>;
 }
 
@@ -49,6 +57,8 @@ export class PgKnowledgeSpaceRepo implements KnowledgeSpaceRepo {
   }
 
   async getById(id: string): Promise<KnowledgeSpace | null> {
+    // `id` is a `uuid` column, so a malformed id must read as absent rather than raise.
+    if (!isKnowledgeId(id)) return null;
     const { rows } = await this.q.query(
       `SELECT ${SPACE_COLS} FROM knowledge_spaces WHERE id = $1`,
       [id]
@@ -105,6 +115,7 @@ export class PgKnowledgeSpaceRepo implements KnowledgeSpaceRepo {
   }
 
   async update(id: string, patch: SpacePatch, updatedAt: Date): Promise<KnowledgeSpace | null> {
+    if (!isKnowledgeId(id)) return null;
     const { rows } = await this.q.query(
       `UPDATE knowledge_spaces
        SET name = COALESCE($2, name), description = COALESCE($3, description), updated_at = $4
@@ -115,9 +126,16 @@ export class PgKnowledgeSpaceRepo implements KnowledgeSpaceRepo {
   }
 
   async delete(id: string): Promise<boolean> {
-    const { rows } = await this.q.query("DELETE FROM knowledge_spaces WHERE id = $1 RETURNING id", [
-      id,
-    ]);
+    if (!isKnowledgeId(id)) return false;
+    // One statement, not two: a pool-backed Queryable cannot hold a transaction across calls, and
+    // a Space deleted while its Pages survive would leave a corpus no screen can reach. A
+    // data-modifying CTE always runs to completion, and the NO ACTION check on space_id is made at
+    // end of statement — by which point the Pages are gone.
+    const { rows } = await this.q.query(
+      `WITH deleted_pages AS (DELETE FROM knowledge_pages WHERE space_id = $1 RETURNING id)
+       DELETE FROM knowledge_spaces WHERE id = $1 RETURNING id`,
+      [id]
+    );
     return rows.length === 1;
   }
 }

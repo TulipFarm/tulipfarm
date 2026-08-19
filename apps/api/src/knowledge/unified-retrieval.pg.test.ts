@@ -13,6 +13,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { PgKnowledgeIndexStore } from "../knowledge-sources/index-store";
 import { PgKnowledgeSourceStore } from "../knowledge-sources/source-store";
+import { allowAllPages } from "../test/page-gate";
 import { makeMigratedPglite } from "../test/pglite";
 
 const NOW = new Date("2026-08-08T12:00:00.000Z");
@@ -124,7 +125,10 @@ describe("query_knowledge unified retrieval", () => {
 
     const outcome = await tool.handler(
       { query: "incident", limit: 1 },
-      { userId: "user-without-slack", service, agentId: "agent-1" }
+      // Page ACL is not what this test is about — `tool-search-access.pg.test.ts` owns that. An
+      // explicit permissive gate says so; omitting one would silently deny, since the Tool refuses
+      // rather than serves when it has no authorizer.
+      { userId: "user-without-slack", service, agentId: "agent-1", pageGate: allowAllPages() }
     );
 
     expect(outcome.success).toBe(true);

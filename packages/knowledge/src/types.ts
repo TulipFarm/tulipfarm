@@ -2,6 +2,17 @@
 
 export type KnowledgeSource = "authored" | "resource" | "conversation";
 
+/**
+ * Who wrote a Page. Null on Pages that predate authorship being recorded — deliberately not
+ * defaulted to `user`, which would label every Agent-written Page as human work.
+ */
+export type PageAuthorKind = "user" | "agent";
+
+export interface PageAuthor {
+  kind: PageAuthorKind;
+  id: string;
+}
+
 export type IndexingStatus = "indexed" | "lexical-only" | "pending";
 
 export interface KnowledgePage {
@@ -22,6 +33,9 @@ export interface KnowledgePage {
   resource?: string | null;
   type?: string | null;
   frontmatterExtra?: Record<string, unknown>;
+  /** The author of the most recent write. Null when unknown. */
+  authorKind?: PageAuthorKind | null;
+  authorId?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -60,11 +74,27 @@ export interface SpacePageRef {
   spaceName: string;
   path: string;
   title: string;
+  /** Carried here so the label travels with the Page into every listing, not just the Page view. */
+  authorKind?: PageAuthorKind | null;
+  authorId?: string | null;
+}
+
+/** One active, spaced Page reduced to what a per-principal activity roll-up needs. */
+export interface SpacePageActivity {
+  pageId: string;
+  spaceId: string;
+  updatedAt: Date;
 }
 
 export interface SpaceWithActivity {
   space: KnowledgeSpace;
+  /**
+   * Every active Page in the Space, ignoring who is asking. Not safe to render: a principal-aware
+   * caller must roll its own up from `listSpacePageActivity` filtered through the read gate, or the
+   * number tells a viewer how many Pages they are not being shown.
+   */
   pageCount: number;
+  /** Unfiltered in the same way, and for the same reason — a moving clock is a live-activity tell. */
   lastActivity: Date;
 }
 

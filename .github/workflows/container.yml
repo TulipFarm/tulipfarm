@@ -261,7 +261,9 @@ jobs:
         if: ${{ env.RUN_SMOKE == 'true' }}
       - uses: ./.github/actions/setup
         if: ${{ env.RUN_SMOKE == 'true' }}
-      # The browser smoke (step 6 of the script) drives the shipped SPA in real Chromium.
+      # The browser smoke (step 6 of the script) drives the shipped SPA in real Chromium — the only
+      # place CI runs a browser. It also guards the Knowledge access-control denial spine, ported
+      # from the local-only Playwright suite (scripts/test/browser/knowledge-denial.spec.ts).
       - name: Install Chromium for the browser smoke
         if: ${{ env.RUN_SMOKE == 'true' }}
         run: pnpm exec playwright install --with-deps chromium

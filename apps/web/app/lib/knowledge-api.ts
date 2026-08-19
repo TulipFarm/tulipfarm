@@ -9,6 +9,11 @@ export type IndexingStatus = "indexed" | "lexical-only" | "pending";
 export type KnowledgeSource = "authored" | "resource" | "conversation";
 
 export type KnowledgePage = {
+  visibility?: "business" | "own" | "inherited";
+  authorKind?: "user" | "agent" | null;
+  authorId?: string | null;
+  /** The author's name, resolved by the API. Null when the author is unknown. */
+  authorLabel?: string | null;
   id: string;
   title: string;
   content: string;
@@ -95,6 +100,7 @@ export type PageSearchHit = {
   path: string | null;
   snippet: string;
   highlightRanges: Array<[number, number]>;
+  authorKind?: "user" | "agent" | null;
   score: number;
 };
 
@@ -122,6 +128,7 @@ export type KnowledgeSpace = {
 };
 
 export type SpacePage = {
+  visibility?: "business" | "own" | "inherited";
   id: string;
   title: string;
   content: string;
@@ -135,6 +142,8 @@ export type SpacePage = {
   spaceId: string | null;
   path: string | null;
   resource: string | null;
+  authorKind?: "user" | "agent" | null;
+  authorId?: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -209,6 +218,22 @@ export function getSpaceGraph(id: string): Promise<SpaceGraph> {
   return apiGet<SpaceGraph>(`${BASE}/spaces/${enc(id)}/graph`);
 }
 
+/**
+ * The Business-wide graph. Narrower than {@link SpaceGraph} on purpose: every edge here has two
+ * drawn endpoints, so there is no broken/cross-space stub to render and nothing dangling to infer
+ * a withheld Page from.
+ */
+export type KnowledgeGraph = {
+  nodes: Array<{ id: string; path: string; title: string; spaceId: string }>;
+  edges: Array<{ sourceId: string; targetId: string }>;
+  spaces: Array<{ id: string; name: string }>;
+  truncated: boolean;
+};
+
+export function getKnowledgeGraph(): Promise<KnowledgeGraph> {
+  return apiGet<KnowledgeGraph>(`${BASE}/graph`);
+}
+
 export type Backlink = {
   sourceId: string;
   title: string;
@@ -218,11 +243,15 @@ export type Backlink = {
 };
 
 export type SpacePageRef = {
+  visibility?: "business" | "own" | "inherited";
   pageId: string;
   spaceId: string;
   spaceName: string;
   path: string;
   title: string;
+  /** "agent" when an Agent wrote it. Null means unknown, never "a person wrote it". */
+  authorKind?: "user" | "agent" | null;
+  authorId?: string | null;
 };
 
 export function getBacklinks(pageId: string): Promise<{ items: Backlink[] }> {
@@ -248,6 +277,8 @@ export function listAllPages(): Promise<{ items: SpacePageRef[] }> {
 
 export type SpaceOverview = KnowledgeSpace & { pageCount: number; lastActivity: string };
 export type RecentPage = {
+  visibility?: "business" | "own" | "inherited";
+  authorKind?: "user" | "agent" | null;
   pageId: string;
   spaceId: string;
   spaceName: string;
@@ -259,4 +290,94 @@ export type KnowledgeOverview = { spaces: SpaceOverview[]; recent: RecentPage[] 
 
 export function getKnowledgeOverview(recentLimit = 8): Promise<KnowledgeOverview> {
   return apiGet<KnowledgeOverview>(`${BASE}/overview?recentLimit=${recentLimit}`);
+}
+
+export type SubjectRef = { kind: "user" | "group" | "role"; id: string };
+export type DirectorySubject = SubjectRef & { label: string };
+export type SubjectDirectory = {
+  users: DirectorySubject[];
+  teams: DirectorySubject[];
+  roles: DirectorySubject[];
+};
+
+export type NamedReader = {
+  kind: string;
+  id: string;
+  label: string;
+  /** The Team or Role that grants them access, or null when they were named directly. */
+  via: SubjectRef | null;
+};
+
+/**
+ * Where a Page's readership comes from.
+ *
+ * `scope` separates the three cases a reader has to tell apart before they act: `business` (anyone
+ * here), `own` (this Page carries its own restriction), `inherited` (an ancestor imposes it, and
+ * the author cannot loosen it here).
+ */
+export type PageVisibility = {
+  restricted: boolean;
+  scope: "business" | "own" | "inherited";
+  own: DirectorySubject[];
+  inheritedFrom: { pageId: string | null; path: string; title: string } | null;
+  readers: NamedReader[];
+};
+
+export type MoveEffect = "widens" | "narrows" | "mixed" | "unchanged";
+
+export type PageMoveDescendant = { pageId: string; path: string; effect: MoveEffect };
+
+export type PageMovePreview = {
+  effect: MoveEffect;
+  before: SubjectRef[];
+  after: SubjectRef[];
+  gained: SubjectRef[];
+  lost: SubjectRef[];
+  /** Null when the Page carries no restriction of its own — there is nothing to survive. */
+  ownRestrictionSurvives: boolean | null;
+  descendants: PageMoveDescendant[];
+};
+
+export function previewPageMove(
+  pageId: string,
+  dest: { spaceId?: string; path?: string }
+): Promise<PageMovePreview> {
+  return apiWrite<PageMovePreview>("POST", `${BASE}/pages/${enc(pageId)}/move/preview`, dest);
+}
+
+export function movePage(
+  pageId: string,
+  dest: { spaceId?: string; path?: string }
+): Promise<PageMovePreview> {
+  return apiWrite<PageMovePreview>("POST", `${BASE}/pages/${enc(pageId)}/move`, dest);
+}
+
+export function listSubjects(): Promise<SubjectDirectory> {
+  return apiGet<SubjectDirectory>(`${BASE}/subjects`);
+}
+
+export function getPageVisibility(pageId: string): Promise<PageVisibility> {
+  return apiGet<PageVisibility>(`${BASE}/pages/${enc(pageId)}/visibility`);
+}
+
+export function restrictPage(pageId: string, subjects: SubjectRef[]): Promise<PageVisibility> {
+  return apiWrite<PageVisibility>("PUT", `${BASE}/pages/${enc(pageId)}/restriction`, { subjects });
+}
+
+export function unrestrictPage(pageId: string): Promise<void> {
+  return apiDelete(`${BASE}/pages/${enc(pageId)}/restriction`);
+}
+
+export type SpaceRestriction = { restricted: boolean; subjects: SubjectRef[] };
+
+export function getSpaceRestriction(spaceId: string): Promise<SpaceRestriction> {
+  return apiGet<SpaceRestriction>(`${BASE}/spaces/${enc(spaceId)}/restriction`);
+}
+
+export function restrictSpace(spaceId: string, subjects: SubjectRef[]): Promise<unknown> {
+  return apiWrite("PUT", `${BASE}/spaces/${enc(spaceId)}/restriction`, { subjects });
+}
+
+export function unrestrictSpace(spaceId: string): Promise<void> {
+  return apiDelete(`${BASE}/spaces/${enc(spaceId)}/restriction`);
 }

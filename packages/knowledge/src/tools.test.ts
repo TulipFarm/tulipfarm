@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { PageReadAuthorizer } from "./page-access";
 import type { KnowledgeService } from "./service";
 import { KNOWLEDGE_TOOLS, type KnowledgeToolContext } from "./tools";
 import type { QueryKnowledgeHit } from "./types";
@@ -11,8 +12,19 @@ function getTool(name: string): KnowledgeTool {
   return t;
 }
 
+/**
+ * Authorizes everything. This suite asserts Tool shape and routing, not access control — that is
+ * `apps/api/src/knowledge/tool-page-access.pg.test.ts`, which runs the real gate.
+ */
+const allowAll: PageReadAuthorizer = {
+  canRead: async () => true,
+  canReadSpace: async () => true,
+  readablePageIds: async (_userId, pageIds) => ({ allowed: [...pageIds], excluded: 0 }),
+  readableSpaceIds: async (_userId, spaceIds) => [...spaceIds],
+};
+
 function ctx(service: Partial<KnowledgeService>): KnowledgeToolContext {
-  return { userId: "u1", service: service as KnowledgeService };
+  return { userId: "u1", service: service as KnowledgeService, pageGate: allowAll };
 }
 
 function expectNoMalformedTargets(toolName: string, args: unknown): void {

@@ -187,10 +187,129 @@ export const SpaceGraphResponseSchema = {
   required: ["nodes", "edges", "truncated"],
 } as const;
 
+/**
+ * The Business-wide graph. Typed all the way down, unlike the per-Space graph above: this response
+ * is the one place where an extra field on a node would be an unreviewed disclosure about a Page,
+ * so the schema is the second gate after the ACL filter.
+ */
+export const KnowledgeGraphResponseSchema = {
+  type: "object",
+  properties: {
+    nodes: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          path: { type: "string" },
+          title: { type: "string" },
+          spaceId: { type: "string" },
+        },
+        required: ["id", "path", "title", "spaceId"],
+        additionalProperties: false,
+      },
+    },
+    edges: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { sourceId: { type: "string" }, targetId: { type: "string" } },
+        required: ["sourceId", "targetId"],
+        additionalProperties: false,
+      },
+    },
+    spaces: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { id: { type: "string" }, name: { type: "string" } },
+        required: ["id", "name"],
+        additionalProperties: false,
+      },
+    },
+    truncated: { type: "boolean" },
+  },
+  required: ["nodes", "edges", "spaces", "truncated"],
+} as const;
+
 export const PageBacklinksResponseSchema = {
   type: "object",
   properties: { items: { type: "array" } },
   required: ["items"],
+} as const;
+
+/** Who may read a Page. `kind` is closed: only groupings the product already has. */
+export const RestrictionSubjectSchema = {
+  type: "object",
+  properties: {
+    kind: { type: "string", enum: ["user", "group", "role"] },
+    id: { type: "string", minLength: 1 },
+  },
+  required: ["kind", "id"],
+  additionalProperties: false,
+} as const;
+
+export const PageRestrictionResponseSchema = {
+  type: "object",
+  properties: {
+    restricted: { type: "boolean" },
+    subjects: { type: "array", items: RestrictionSubjectSchema },
+  },
+  required: ["restricted", "subjects"],
+} as const;
+
+const PrincipalListSchema = { type: "array", items: RestrictionSubjectSchema } as const;
+
+export const PageMoveBodySchema = {
+  type: "object",
+  properties: {
+    spaceId: { type: "string", minLength: 1 },
+    path: { type: "string", minLength: 1 },
+  },
+  additionalProperties: false,
+} as const;
+
+export const PageMovePreviewSchema = {
+  type: "object",
+  properties: {
+    effect: { type: "string", enum: ["widens", "narrows", "mixed", "unchanged"] },
+    before: PrincipalListSchema,
+    after: PrincipalListSchema,
+    gained: PrincipalListSchema,
+    lost: PrincipalListSchema,
+    ownRestrictionSurvives: { type: ["boolean", "null"] },
+    descendants: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          pageId: { type: "string" },
+          path: { type: "string" },
+          effect: { type: "string", enum: ["widens", "narrows", "mixed", "unchanged"] },
+        },
+        required: ["pageId", "path", "effect"],
+      },
+    },
+  },
+  required: [
+    "effect",
+    "before",
+    "after",
+    "gained",
+    "lost",
+    "ownRestrictionSurvives",
+    "descendants",
+  ],
+} as const;
+
+/** `minItems: 1` is load-bearing: an empty list would leave a Page no one could read. */
+export const SetPageRestrictionBodySchema = {
+  type: "object",
+  properties: {
+    subjects: { type: "array", items: RestrictionSubjectSchema, minItems: 1 },
+  },
+  required: ["subjects"],
+  additionalProperties: false,
 } as const;
 
 export const OverviewQuerySchema = {
@@ -224,4 +343,47 @@ export const ReindexedCountResponseSchema = {
 export const IndexStatusResponseSchema = {
   type: "object",
   additionalProperties: true,
+} as const;
+
+export const PageVisibilityResponseSchema = {
+  type: "object",
+  additionalProperties: true,
+  properties: {
+    restricted: { type: "boolean" },
+    scope: { type: "string", enum: ["business", "own", "inherited"] },
+    own: { type: "array", items: { type: "object", additionalProperties: true } },
+    inheritedFrom: { type: "object", additionalProperties: true, nullable: true },
+    readers: { type: "array", items: { type: "object", additionalProperties: true } },
+  },
+  required: ["restricted", "scope", "own", "readers"],
+} as const;
+
+export const RestrictionRefusedSchema = {
+  type: "object",
+  additionalProperties: true,
+  properties: {
+    error: { type: "string" },
+    constrainedBy: { type: "object", additionalProperties: true },
+  },
+  required: ["error"],
+} as const;
+
+const DirectorySubjectSchema = {
+  type: "object",
+  properties: {
+    kind: { type: "string", enum: ["user", "group", "role"] },
+    id: { type: "string" },
+    label: { type: "string" },
+  },
+  required: ["kind", "id", "label"],
+} as const;
+
+export const SubjectDirectoryResponseSchema = {
+  type: "object",
+  properties: {
+    users: { type: "array", items: DirectorySubjectSchema },
+    teams: { type: "array", items: DirectorySubjectSchema },
+    roles: { type: "array", items: DirectorySubjectSchema },
+  },
+  required: ["users", "teams", "roles"],
 } as const;

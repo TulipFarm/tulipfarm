@@ -31,6 +31,7 @@ import { registerGitHubInstallRoutes } from "./integrations/github-install-route
 import { registerInternalRouteFamily } from "./internal/route-family";
 import { registerKillSwitchRoutes } from "./kill-switches/routes";
 import { registerKnowledgeRoutes } from "./knowledge/routes";
+import { registerSubjectRoutes } from "./knowledge/subject-directory";
 import { registerKvRoutes } from "./kv/routes";
 import { registerMemoryDocumentRoute } from "./memory/document-routes";
 import { createLogTeeStream } from "./observability/log-stream";
@@ -517,15 +518,27 @@ export async function buildApp(opts: AppOptions = {}) {
     if (opts.feedbackRepo) {
       registerFeedbackRoutes(app, opts.feedbackRepo, requireAuth);
     }
-    if (opts.knowledgeService) {
+    if (opts.knowledgeService && opts.knowledgePageGate) {
       registerKnowledgeRoutes(
         app,
         opts.knowledgeService,
         requireAuth,
         requireAuthorization,
+        opts.knowledgePageGate,
         undefined,
-        opts.activityService
+        opts.activityService,
+        opts.knowledgeAuthorLabeller,
+        opts.knowledgeReaderDirectory,
+        opts.knowledgeDenialSink
       );
+      if (opts.knowledgeSubjectDirectory) {
+        registerSubjectRoutes(
+          app,
+          requireAuth,
+          requireAuthorization,
+          opts.knowledgeSubjectDirectory
+        );
+      }
     }
   }
 

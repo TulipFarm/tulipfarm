@@ -6,9 +6,21 @@
 import type { InvalidationDeps, InvalidationJob } from "./invalidate";
 import { enqueueInvalidation } from "./invalidate";
 import type { KnowledgeAclSnapshot, MutableKnowledgeSourceStore } from "./source";
+import type { KnowledgeSubjectKind } from "./subject";
+
+/** The slice of the ACL repository deletion needs, so this module stays storage-agnostic. */
+export interface KnowledgeAclPruner {
+  removeSubject(
+    businessId: string,
+    subjectKind: KnowledgeSubjectKind,
+    subjectId: string
+  ): Promise<number>;
+}
 
 export interface SourceLifecycleDeps extends Pick<InvalidationDeps, "queue" | "now" | "newId"> {
   readonly sources: MutableKnowledgeSourceStore;
+  /** Optional so existing compositions are unaffected; without it entries outlive the source. */
+  readonly acl?: KnowledgeAclPruner;
 }
 
 export interface SourceLifecycleRequest {
@@ -30,6 +42,9 @@ export async function deleteSource(
   if (source === undefined) return { outcome: "not_found" };
 
   await deps.sources.put({ ...source, status: "deleted" });
+  // Deletion is terminal, so the grants go with it. Revocation deliberately keeps them: the status
+  // already denies every read, and the entries are what a later re-grant restores.
+  await deps.acl?.removeSubject(request.businessId, "source", request.sourceId);
   const job = await enqueueInvalidation(deps, {
     businessId: request.businessId,
     sourceId: request.sourceId,

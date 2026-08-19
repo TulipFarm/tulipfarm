@@ -179,7 +179,12 @@ export function registerChannelInternalRoutes(
       };
       const resolution = await deps.identity.resolve({ slug: provider, sender: externalSubject });
       if (resolution.outcome === "unlinked") return reply.send({ linked: false });
-      return reply.send({ linked: true, principal: { kind: "user", id: resolution.user._id } });
+      // Reports the authority the sender holds, not the account they were matched to. A guest kind
+      // is what makes the caller's `kind !== "user"` guard fire instead of starting a Run as them.
+      return reply.send({
+        linked: true,
+        principal: { kind: resolution.principalKind, id: resolution.principalId },
+      });
     }
   );
 
@@ -520,7 +525,7 @@ export function registerChannelInternalRoutes(
         businessId: DEPLOYMENT_BUSINESS_ID,
         approvalId,
         decision: body.decision,
-        principal: `user:${resolution.user._id}`,
+        principal: resolution.principalRef,
       });
       return reply.send({ outcome });
     }

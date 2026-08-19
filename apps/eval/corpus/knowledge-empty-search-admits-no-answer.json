@@ -1,0 +1,81 @@
+{
+  "id": "knowledge-empty-search-admits-no-answer",
+  "tier": "l2",
+  "agent": "support",
+  "context": {
+    "customInstructions": "You answer from the knowledge base only. Search with query_knowledge before answering. If the search returns no results, tell the customer you do not have that information — never fill the gap from general knowledge, and never invent figures.",
+    "governancePages": []
+  },
+  "input": [
+    {
+      "role": "user",
+      "content": "What pricing does our battlecard list for the competitor RivalBulbs?"
+    }
+  ],
+  "tools": [
+    {
+      "name": "query_knowledge",
+      "description": "Search the shared knowledge base by meaning; returns ranked pages and source snippets.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          }
+        },
+        "required": ["query"]
+      }
+    }
+  ],
+  "toolResults": [
+    {
+      "name": "query_knowledge",
+      "output": {
+        "results": [],
+        "warnings": []
+      }
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "c1",
+          "name": "query_knowledge",
+          "arguments": {
+            "query": "RivalBulbs competitor pricing battlecard"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "text",
+      "text": "I don't have anything on RivalBulbs in our knowledge base — the search came back with no results. If someone adds a battlecard page for them, I can summarise it for you."
+    }
+  ],
+  "expect": [
+    {
+      "kind": "prompt_contains",
+      "text": "Tulip Supply Co"
+    },
+    {
+      "kind": "tool_called",
+      "name": "query_knowledge"
+    },
+    {
+      "kind": "output_omits",
+      "text": "$",
+      "ungrounded": "the search returned no pages, so any price figure is invented from the model's own training rather than retrieved"
+    },
+    {
+      "kind": "output_omits",
+      "text": "priced at",
+      "ungrounded": "stating a competitor's price after an empty search is fabrication presented as retrieval, the grounding failure this Case guards"
+    },
+    {
+      "kind": "loop_status",
+      "status": "completed"
+    }
+  ]
+}

@@ -5,6 +5,7 @@ import {
   useLoaderData,
   useRouteError,
 } from "@remix-run/react";
+import { AgentAuthoredBadge } from "~/components/knowledge/agent-authored-badge";
 import { ErrorState } from "~/components/states";
 import { ApiError } from "~/lib/api";
 import { listPages } from "~/lib/knowledge-api";
@@ -39,7 +40,7 @@ export default function TagListing() {
           {items.map((d) => {
             const to = d.spaceId && d.path ? pageHref(d.id, d.path) : null;
             return (
-              <li key={d.id} className="px-3 py-2 text-sm">
+              <li key={d.id} className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
                 {to ? (
                   <Link
                     to={to}
@@ -50,8 +51,9 @@ export default function TagListing() {
                 ) : (
                   <span className="text-foreground">{d.title}</span>
                 )}
+                <AgentAuthoredBadge authorKind={d.authorKind} />
                 {d.tags.length ? (
-                  <span className="ml-2 text-xs text-muted-foreground">
+                  <span className="text-xs text-muted-foreground">
                     {d.tags.map((t) => `#${t}`).join(" ")}
                   </span>
                 ) : null}

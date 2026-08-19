@@ -16,6 +16,8 @@ export interface PageHit {
   snippet: string;
   /** [start, end) character ranges into `snippet` that matched the query. */
   highlightRanges: Array<[number, number]>;
+  /** "agent" when an Agent wrote the Page. Null means unknown, never "a person wrote it". */
+  authorKind: "user" | "agent" | null;
   score: number;
 }
 
@@ -76,6 +78,7 @@ function rowToPageHit(row: Record<string, unknown>, score: number): PageHit {
     path: (row.path as string | null) ?? null,
     snippet,
     highlightRanges,
+    authorKind: (row.author_kind as "user" | "agent" | null) ?? null,
     score,
   };
 }
@@ -106,7 +109,7 @@ export class PageRetrievalService {
     const filterSql = this.filterSql(filters, params);
     params.push(limit);
     const { rows } = await this.q.query(
-      `SELECT p.id AS page_id, p.title, p.space_id, p.path,
+      `SELECT p.id AS page_id, p.title, p.space_id, p.path, p.author_kind,
               left(p.plain_text, 200) AS snippet
        FROM knowledge_pages p
        WHERE p.active = true AND p.space_id IS NOT NULL AND p.path IS NOT NULL${filterSql}
@@ -136,7 +139,7 @@ export class PageRetrievalService {
          FROM knowledge_chunks c, q
          WHERE c.tsv @@ q.tsq
          GROUP BY c.page_id)
-       SELECT p.id AS page_id, p.title, p.space_id, p.path,
+       SELECT p.id AS page_id, p.title, p.space_id, p.path, p.author_kind,
               ( $2::float8 * ts_rank(p.title_tsv, q.tsq)
               + $3::float8 * COALESCE(ch.max_chunk_rank, 0) )
                 * exp(-extract(epoch FROM (now() - p.updated_at)) * ln(2) / $4::float8) AS score,
@@ -160,7 +163,7 @@ export class PageRetrievalService {
     const filterSql = this.filterSql(filters, params);
     params.push(limit);
     const { rows } = await this.q.query(
-      `SELECT p.id AS page_id, p.title, p.space_id, p.path,
+      `SELECT p.id AS page_id, p.title, p.space_id, p.path, p.author_kind,
               left(p.plain_text, 200) AS snippet,
               similarity(p.title, $1) AS sim
        FROM knowledge_pages p

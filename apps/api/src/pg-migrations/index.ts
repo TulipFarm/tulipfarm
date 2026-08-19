@@ -1876,4 +1876,281 @@ export const PG_MIGRATIONS: PgMigration[] = [
       "ALTER TABLE integration_auth_requests ADD COLUMN IF NOT EXISTS api_url text",
     ]),
   },
+  {
+    version: 69,
+    // Authored Pages had no ACL, no principals and no tenant column, so the one question
+    // `decideSourceAccess` answers for a synced document — may this principal read this? — could
+    // not even be asked of a Page. These columns and this table are what make an authored Page an
+    // ACL'd subject, so a single gate can serve both halves of Knowledge.
+    description:
+      "unify Knowledge authorization: ACL entries, business and ACL revision on spaces and pages",
+    up: applyStatements([
+      // No rows are seeded: absence of a grant is a denial, so a Space is readable by nobody until
+      // somebody is granted it. `capability` is a column rather than an assumption so that a later
+      // write/comment split is a policy change instead of a migration.
+      `CREATE TABLE IF NOT EXISTS knowledge_acl_entries (
+        business_id    text NOT NULL,
+        subject_kind   text NOT NULL CHECK (subject_kind IN ('space', 'page', 'source')),
+        subject_id     text NOT NULL,
+        principal_kind text NOT NULL,
+        principal_id   text NOT NULL,
+        effect         text NOT NULL CHECK (effect IN ('grant', 'deny')),
+        capability     text NOT NULL DEFAULT 'read' CHECK (capability IN ('read')),
+        origin         text NOT NULL DEFAULT 'authored' CHECK (origin IN ('authored', 'synced')),
+        provider       text,
+        acl_revision   text NOT NULL DEFAULT '1',
+        captured_at    timestamptz NOT NULL DEFAULT now(),
+        created_at     timestamptz NOT NULL DEFAULT now(),
+        updated_at     timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (business_id, subject_kind, subject_id, principal_kind, principal_id, capability)
+      )`,
+      `CREATE INDEX IF NOT EXISTS knowledge_acl_entries_subject_idx
+         ON knowledge_acl_entries (business_id, subject_kind, subject_id)`,
+      // Answers "who can currently read this", which is the exposure audit an operator needs
+      // before writing something sensitive into a Space.
+      `CREATE INDEX IF NOT EXISTS knowledge_acl_entries_principal_idx
+         ON knowledge_acl_entries (business_id, principal_kind, principal_id)`,
+      // `subject_id` spans spaces, pages and sources, whose ids are not one type, so this cannot be
+      // a foreign key. Deletion must still be real rather than cosmetic, hence the trigger.
+      `CREATE OR REPLACE FUNCTION knowledge_acl_entries_prune()
+         RETURNS trigger LANGUAGE plpgsql AS $$
+       BEGIN
+         DELETE FROM knowledge_acl_entries
+          WHERE business_id = OLD.business_id
+            AND subject_kind = TG_ARGV[0]
+            AND subject_id = OLD.id::text;
+         RETURN OLD;
+       END $$`,
+      // The wiki tables are guarded because databases restored from a partial schema reach this
+      // migration without them; skipping is correct there, since a Space that does not exist
+      // cannot be under-protected.
+      `DO $mig69$
+       BEGIN
+         IF to_regclass('public.knowledge_spaces') IS NULL THEN RETURN; END IF;
+         ALTER TABLE knowledge_spaces
+           ADD COLUMN IF NOT EXISTS business_id  text NOT NULL DEFAULT '${DEPLOYMENT_BUSINESS_ID.replaceAll("'", "''")}',
+           ADD COLUMN IF NOT EXISTS acl_revision text NOT NULL DEFAULT '1';
+         DROP TRIGGER IF EXISTS knowledge_spaces_prune_acl ON knowledge_spaces;
+         CREATE TRIGGER knowledge_spaces_prune_acl AFTER DELETE ON knowledge_spaces
+           FOR EACH ROW EXECUTE FUNCTION knowledge_acl_entries_prune('space');
+       END $mig69$`,
+      `DO $mig69$
+       BEGIN
+         IF to_regclass('public.knowledge_pages') IS NULL THEN RETURN; END IF;
+         ALTER TABLE knowledge_pages
+           ADD COLUMN IF NOT EXISTS business_id  text NOT NULL DEFAULT '${DEPLOYMENT_BUSINESS_ID.replaceAll("'", "''")}',
+           ADD COLUMN IF NOT EXISTS acl_revision text NOT NULL DEFAULT '1';
+         DROP TRIGGER IF EXISTS knowledge_pages_prune_acl ON knowledge_pages;
+         CREATE TRIGGER knowledge_pages_prune_acl AFTER DELETE ON knowledge_pages
+           FOR EACH ROW EXECUTE FUNCTION knowledge_acl_entries_prune('page');
+       END $mig69$`,
+    ]),
+  },
+  {
+    version: 70,
+    // GraphRAG: an LLM-built entity graph over the corpus, plus community summaries that answer
+    // questions no single chunk contains. Every row records the chunk ids it was derived from,
+    // because a derived artefact with no provenance cannot be authorized at query time and must
+    // therefore be withheld from everybody.
+    description: "GraphRAG entity graph, communities and community summaries",
+    up: applyStatements([
+      // The baseline installs pg_trgm, but a database that predates the baseline reaches this
+      // migration without it, and the entity-name index below cannot be created without it.
+      "CREATE EXTENSION IF NOT EXISTS pg_trgm",
+      // `source_chunk_ids` is the ACL spine of the whole subsystem, not a debugging aid. It is
+      // NOT NULL with no default: a row that cannot say where it came from must not be insertable.
+      `CREATE TABLE IF NOT EXISTS knowledge_graph_entities (
+        id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        business_id      text NOT NULL,
+        entity_key       text NOT NULL,
+        name             text NOT NULL,
+        type             text NOT NULL,
+        description      text NOT NULL DEFAULT '',
+        source_chunk_ids text[] NOT NULL,
+        build_id         text NOT NULL,
+        created_at       timestamptz NOT NULL DEFAULT now(),
+        updated_at       timestamptz NOT NULL DEFAULT now(),
+        UNIQUE (business_id, entity_key)
+      )`,
+      // Trigram, not btree on `lower(name)`: the only lookup is a leading-wildcard `ILIKE`, which
+      // a btree cannot serve at all — it would read every entity in the business and refilter.
+      `CREATE INDEX IF NOT EXISTS knowledge_graph_entities_name_trgm
+         ON knowledge_graph_entities USING gin (name gin_trgm_ops)`,
+      `CREATE INDEX IF NOT EXISTS knowledge_graph_entities_business_idx
+         ON knowledge_graph_entities (business_id)`,
+      // GIN over the provenance array so revoking or deleting a chunk can find everything derived
+      // from it without a sequential scan of the graph.
+      `CREATE INDEX IF NOT EXISTS knowledge_graph_entities_chunks_idx
+         ON knowledge_graph_entities USING gin (source_chunk_ids)`,
+      `CREATE TABLE IF NOT EXISTS knowledge_graph_edges (
+        id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        business_id      text NOT NULL,
+        edge_key         text NOT NULL,
+        source_entity_id uuid NOT NULL REFERENCES knowledge_graph_entities(id) ON DELETE CASCADE,
+        target_entity_id uuid NOT NULL REFERENCES knowledge_graph_entities(id) ON DELETE CASCADE,
+        description      text NOT NULL DEFAULT '',
+        weight           double precision NOT NULL DEFAULT 1,
+        source_chunk_ids text[] NOT NULL,
+        build_id         text NOT NULL,
+        created_at       timestamptz NOT NULL DEFAULT now(),
+        updated_at       timestamptz NOT NULL DEFAULT now(),
+        UNIQUE (business_id, edge_key)
+      )`,
+      `CREATE INDEX IF NOT EXISTS knowledge_graph_edges_source_idx
+         ON knowledge_graph_edges (source_entity_id)`,
+      `CREATE INDEX IF NOT EXISTS knowledge_graph_edges_target_idx
+         ON knowledge_graph_edges (target_entity_id)`,
+      `CREATE INDEX IF NOT EXISTS knowledge_graph_edges_chunks_idx
+         ON knowledge_graph_edges USING gin (source_chunk_ids)`,
+      `CREATE TABLE IF NOT EXISTS knowledge_graph_communities (
+        community_id        text NOT NULL,
+        business_id         text NOT NULL,
+        level               integer NOT NULL,
+        entity_ids          text[] NOT NULL,
+        parent_community_id text,
+        build_id            text NOT NULL,
+        created_at          timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (business_id, community_id)
+      )`,
+      `CREATE INDEX IF NOT EXISTS knowledge_graph_communities_level_idx
+         ON knowledge_graph_communities (business_id, level)`,
+      // `stale` rather than a delete: an invalidated summary must stop being served immediately,
+      // but the row is what tells the next build which community to re-summarise.
+      `CREATE TABLE IF NOT EXISTS knowledge_graph_community_summaries (
+        community_id         text NOT NULL,
+        business_id          text NOT NULL,
+        build_id             text NOT NULL,
+        title                text NOT NULL,
+        summary              text NOT NULL,
+        provenance_chunk_ids text[] NOT NULL,
+        input_tokens         integer NOT NULL DEFAULT 0,
+        output_tokens        integer NOT NULL DEFAULT 0,
+        stale                boolean NOT NULL DEFAULT false,
+        created_at           timestamptz NOT NULL DEFAULT now(),
+        updated_at           timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (business_id, community_id)
+      )`,
+      `CREATE INDEX IF NOT EXISTS knowledge_graph_summaries_chunks_idx
+         ON knowledge_graph_community_summaries USING gin (provenance_chunk_ids)`,
+      `CREATE INDEX IF NOT EXISTS knowledge_graph_summaries_fresh_idx
+         ON knowledge_graph_community_summaries (business_id, stale)`,
+      // Extraction checkpoint. Keyed by chunk revision so a rebuild only pays for what changed,
+      // which is what makes the run resumable after a crash rather than restart-from-zero.
+      `CREATE TABLE IF NOT EXISTS knowledge_graph_extractions (
+        business_id   text NOT NULL,
+        chunk_id      text NOT NULL,
+        subject_kind  text NOT NULL CHECK (subject_kind IN ('space', 'page', 'source')),
+        subject_id    text NOT NULL,
+        revision      text NOT NULL,
+        input_tokens  integer NOT NULL DEFAULT 0,
+        output_tokens integer NOT NULL DEFAULT 0,
+        extracted_at  timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (business_id, chunk_id)
+      )`,
+      // Deleting a document has to find everything derived from it, and provenance is the only
+      // link back. Without this index that sweep is a scan of the whole corpus.
+      `CREATE INDEX IF NOT EXISTS knowledge_graph_extractions_subject_idx
+         ON knowledge_graph_extractions (business_id, subject_kind, subject_id)`,
+    ]),
+  },
+  {
+    version: 71,
+    // Authored Pages start gated. Every Page that predates the gate acquires the same blanket read
+    // grant a new Page now gets on write; without this they would carry no entries at all and the
+    // default-deny gate would make the whole existing corpus unreadable the moment it is consulted.
+    // `ON CONFLICT DO NOTHING` keeps an already restricted Page restricted rather than republishing
+    // it — a restriction is an allowlist that replaced this grant on purpose.
+    description: "backfill the blanket read grant onto Pages authored before the gate",
+    up: applyStatements([
+      // `knowledge_pages` is a baseline table, so a database migrating up from a recorded schema
+      // version predating the baseline has no corpus to backfill. Guard the way migration 68 does,
+      // or the whole migration chain aborts on any such database.
+      `DO $mig71$
+       BEGIN
+         IF to_regclass('public.knowledge_pages') IS NULL THEN RETURN; END IF;
+         IF to_regclass('public.knowledge_acl_entries') IS NULL THEN RETURN; END IF;
+         INSERT INTO knowledge_acl_entries
+           (business_id, subject_kind, subject_id, principal_kind, principal_id,
+            effect, capability, origin, provider, acl_revision, captured_at)
+         SELECT p.business_id, 'page', p.id::text, 'role', 'role-everyone',
+                'grant', 'read', 'authored', 'tulipfarm', '1', now()
+           FROM knowledge_pages p
+          WHERE NOT EXISTS (
+                  SELECT 1 FROM knowledge_acl_entries e
+                   WHERE e.business_id = p.business_id
+                     AND e.subject_kind = 'page'
+                     AND e.subject_id = p.id::text)
+         ON CONFLICT DO NOTHING;
+       END $mig71$`,
+    ]),
+  },
+  {
+    version: 72,
+    // Who wrote a Page is a fact a reader needs in order to weigh it, and it cannot be recovered
+    // later — nothing in the existing schema records it. Both columns stay nullable: a Page that
+    // predates this migration has an unknown author, and guessing "user" would label every
+    // Agent-written Page as human work.
+    description: "record whether a Page was authored by a person or an Agent",
+    up: applyStatements([
+      `DO $mig72$
+       BEGIN
+         IF to_regclass('public.knowledge_pages') IS NULL THEN RETURN; END IF;
+         ALTER TABLE knowledge_pages ADD COLUMN IF NOT EXISTS author_kind text;
+         ALTER TABLE knowledge_pages ADD COLUMN IF NOT EXISTS author_id text;
+       END $mig72$`,
+    ]),
+  },
+  {
+    version: 73,
+    // `source_chunk_ids` and `provenance_chunk_ids` are `text[]`, and Postgres cannot foreign-key
+    // an array element, so the graph's provenance had no referential integrity behind it. Three
+    // ordinary paths delete chunks without passing through `invalidateGraphForChunks` — deleting a
+    // Page (chunks cascade), deleting a Space (Pages deleted in a CTE, then chunks cascade), and
+    // re-indexing (chunks deleted and re-inserted with new ids). Each one left entities, edges and
+    // summaries derived from text that no longer exists, and a stale summary keeps being served.
+    // Enforcing it here means no caller can forget, which is the property a foreign key would have
+    // given if one were expressible.
+    description: "prune GraphRAG rows derived from deleted knowledge chunks",
+    up: applyStatements([
+      `DO $mig73$
+       BEGIN
+         IF to_regclass('public.knowledge_chunks') IS NULL
+            OR to_regclass('public.knowledge_graph_entities') IS NULL THEN RETURN; END IF;
+
+         CREATE OR REPLACE FUNCTION knowledge_graph_prune_deleted_chunks()
+           RETURNS trigger LANGUAGE plpgsql AS $fn$
+         DECLARE
+           gone text[];
+         BEGIN
+           SELECT array_agg(id::text) INTO gone FROM deleted_chunks;
+           IF gone IS NULL THEN RETURN NULL; END IF;
+
+           -- Marked before anything is deleted: a summary stays readable until something marks it,
+           -- so marking last would leave an interval where the prose is served but the material
+           -- behind it is already gone.
+           UPDATE knowledge_graph_community_summaries
+              SET stale = true, updated_at = now()
+            WHERE stale = false AND provenance_chunk_ids && gone;
+
+           -- Edges carry their own provenance, so an edge can outlive both its entities' chunks.
+           DELETE FROM knowledge_graph_edges WHERE source_chunk_ids && gone;
+           -- Overlap, not containment, and it matches deleteEntitiesDerivedFrom: an entity
+           -- described partly from withdrawn text is not re-derivable from what remains.
+           DELETE FROM knowledge_graph_entities WHERE source_chunk_ids && gone;
+           DELETE FROM knowledge_graph_extractions WHERE chunk_id = ANY(gone);
+
+           RETURN NULL;
+         END $fn$;
+
+         DROP TRIGGER IF EXISTS knowledge_chunks_prune_graph ON knowledge_chunks;
+         -- Statement-level with a transition table: re-indexing deletes a Page's chunks in one
+         -- statement, and a per-row trigger would re-scan the graph once per chunk.
+         CREATE TRIGGER knowledge_chunks_prune_graph
+           AFTER DELETE ON knowledge_chunks
+           REFERENCING OLD TABLE AS deleted_chunks
+           FOR EACH STATEMENT
+           EXECUTE FUNCTION knowledge_graph_prune_deleted_chunks();
+       END $mig73$`,
+    ]),
+  },
 ];
