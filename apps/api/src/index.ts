@@ -464,7 +464,7 @@ async function boot() {
       routineDefinitions: new ActiveRoutineInvocationResolver(soulPublications, soulBundleVerifier),
     });
     const scheduleDispatcher = new ScheduleDispatcher({
-      soulLoader,
+      activeBundle: () => soulPublications.activeBundle(DEPLOYMENT_BUSINESS_ID, soulBundleVerifier),
       stateStore: new RoutineScheduleStateStore(pool),
       startRoutine: scheduledRoutineTrigger(invocations),
       businessId: DEPLOYMENT_BUSINESS_ID,
