@@ -16,6 +16,7 @@ publication, approvals, integrations, events, and blob/vector/cache/queue ports.
 | `src/ports/blob-conformance.ts` | What *any* blob implementation must do; every one runs it. |
 | `src/ports/s3-blob.ts`, `s3-api.ts`, `aws-s3-api.ts` | S3 driver, its narrow API port, the SDK adapter. |
 | `src/ports/blob-config.ts` | Which blob store this deployment runs on, read from the environment. |
+| `src/ports/bundled-bucket.ts` | First-boot provisioning of the Compose stack's own S3 server. |
 | `src/soul/` | Soul publication records, projection, outbox, activation history. |
 | `src/artifacts/` | Append-only Artifacts, State Output Bindings, lineage. |
 | `src/runs/` | Runs, States, Attempts, waits/signals, budgets, concurrency, children, events. |
@@ -41,6 +42,8 @@ publication, approvals, integrations, events, and blob/vector/cache/queue ports.
   testing belongs in `S3BlobPort`, where the conformance suite can reach it without a network.
 - Never import `@tulipfarm/testkit` from this package, tests included: the fake runs the
   conformance suite from its own side, so production code can never reach a test double.
+- `bundled-bucket.ts` is the one place that knows a bucket vendor, and the driver must never learn
+  it: the server it provisions has no shell, so a host writes its secrets before it can boot.
 - Domain packages use repository/transaction ports; they never read another owner's tables directly.
 - If a storage rule repeats schema/Soul contracts, derive or reference the owner instead of copying.
 - `actor_principal_id` is required for every Soul publication; no anonymous publish paths except

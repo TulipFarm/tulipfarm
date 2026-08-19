@@ -72,13 +72,14 @@ Open `http://<host>:8080` (or your domain) and create the first admin account th
 
 ## Volumes
 
-The stack creates `tulipfarm_tulipfarm-postgres`, `tulipfarm_tulipfarm-soul`, and
-`tulipfarm_tulipfarm-data` (Portainer prefixes volume names with the stack name). All three
-are visible under **Volumes**.
+The stack creates `tulipfarm_tulipfarm-postgres`, `tulipfarm_tulipfarm-soul`,
+`tulipfarm_tulipfarm-data` and `tulipfarm_tulipfarm-bucket` (Portainer prefixes volume names
+with the stack name). All four are visible under **Volumes**.
 
 <Callout type="warn">
   Back up `tulipfarm-data`. It holds the generated `ENCRYPTION_KEY` unless you supplied one,
   and the database stores only ciphertext — losing the volume loses every secret with it.
+  `tulipfarm-bucket` holds every uploaded and generated file; back that up too.
 </Callout>
 
 ## Do not publish Postgres

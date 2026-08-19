@@ -69,6 +69,7 @@ import {
   ChildLinkStore,
   createBlobPort,
   EventStore,
+  ensureBundledBucket,
   ensureEmbeddingIndexes,
   IntegrationStore,
   KillSwitchRepo,
@@ -83,6 +84,7 @@ import {
   SoulRepositoryStore,
   TaskRepo,
   WaitStore,
+  writeBucketSecrets,
 } from "@tulipfarm/storage";
 import { PgEffectStore } from "@tulipfarm/tool-broker";
 import { ApprovalsRepo, collectHeldRoleIds, ToolApprovalService } from "@tulipfarm/tool-host";
@@ -267,6 +269,17 @@ const secretsBootstrap = ((): BootstrapSecretsResult => {
   }
 })();
 
+// Before anything slow: the bundled bucket restarts until these exist, so every second here is a
+// second it spends crash-looping. It cannot write them itself — its image carries no shell.
+if (process.env.BUCKET_ADMIN_URL) {
+  try {
+    writeBucketSecrets(resolveDataDir() ?? process.cwd());
+  } catch (err) {
+    console.error(`❌ ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  }
+}
+
 validateEnvironment();
 
 const port = Number.parseInt(process.env.PORT || "4010", 10);
@@ -297,6 +310,9 @@ function soulBundleKeyStore(
 
 async function boot() {
   try {
+    // Fills the S3 credentials the blob port is built from below, so it must precede the pool:
+    // a deployment whose file store never came up should say so, not serve requests that fail.
+    await ensureBundledBucket({ dataDir: resolveDataDir() ?? process.cwd() });
     const migrationPool = await connectPg();
     await runPgMigrations(migrationPool);
     // After migrations, on the owner pool (which has no statement timeout): an ANN index left
@@ -525,8 +541,6 @@ async function boot() {
     });
     const kvService = new KvService(new PgKvRepo(pool));
     const taskRepo = new TaskRepo(transactionPort(pool));
-    // Uploads land on the filesystem blob store for now. Slice 11 swaps this one construction for
-    // the S3 driver; nothing above the port changes, which is the point of the port.
     // Sharing a File with a Role resolves that Role live on every read, through the one shared
     // implementation the Tool gate uses. A second answer to "which Roles does this person hold"
     // is how a File stays readable to someone a Role no longer contains.

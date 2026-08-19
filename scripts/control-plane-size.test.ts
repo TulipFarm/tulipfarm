@@ -264,6 +264,21 @@ import { describe, expect, it } from "vitest";
  * `packages/files/src/tools.ts`; the loop that puts a re-read File back in front of the model is
  * in `packages/agent-runtime`. Neither touches Fastify and neither is here.
  *
+ * Raised again, 50_292 -> 50_306, for the bundled bucket, and fourteen lines is the whole of it
+ * because this ratchet rejected the first attempt at 331. What landed is composition order and
+ * nothing else: two imports, and the two calls whose *position* is the design. The secrets are
+ * written at process start, before `validateEnvironment`, because the bucket image carries no
+ * shell and so crash-loops until they exist — every second spent validating is a second it spends
+ * restarting. The provisioning await is the first statement in `boot()`, before the pool, because
+ * a deployment whose file store never came up should refuse to boot rather than serve requests
+ * that fail at the first upload. Neither fact can be expressed anywhere but the composition root.
+ *
+ * What moved out is `packages/storage/src/ports/bundled-bucket.ts`, which was first written here
+ * for the usual reason — the caller was. It touches no Fastify: it writes two secret files and
+ * speaks an admin HTTP API, and it belongs beside `blob-config.ts`, the other module that answers
+ * "what store does this deployment run on". Keeping them apart would have split that question
+ * across an app and a package, which is how the answers stop agreeing.
+ *
  * Line count is a crude proxy for ownership, deliberately. A precise measure would need to model
  * what each domain ought to own, which is the argument the refactor itself has to settle; a crude
  * measure that cannot be gamed without noticing is worth more here than a subtle one.

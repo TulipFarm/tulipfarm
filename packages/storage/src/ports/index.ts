@@ -20,6 +20,17 @@ export {
   type BlobConformanceCheck,
   TAMPER_CONFORMANCE,
 } from "./blob-conformance";
+export {
+  BUCKET_CREDENTIALS_FILE,
+  BUCKET_SECRETS_DIR,
+  type BucketCredentials,
+  type BucketSecretsResult,
+  BundledBucketError,
+  type BundledBucketOutcome,
+  type EnsureBundledBucketOptions,
+  ensureBundledBucket,
+  writeBucketSecrets,
+} from "./bundled-bucket";
 export type { CachePort } from "./cache";
 export {
   FileSystemBlobError,

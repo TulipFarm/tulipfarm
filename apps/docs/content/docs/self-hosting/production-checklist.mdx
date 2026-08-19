@@ -96,6 +96,7 @@ Three things, and a provider snapshot only covers the first:
 | The PostgreSQL database | records, chats, knowledge, runs, and queues. |
 | `tulipfarm-data` (`/data`) | Generated bootstrap secrets plus worker credentials. **The database is ciphertext without the encryption key.** |
 | `tulipfarm-soul` (`/opt/tulipfarm/soul`) | Your whole configuration — unless step 7 mirrors it to git. |
+| `tulipfarm-bucket` (`/var/lib/garage`) | Every uploaded and generated file's bytes. Skip it if you moved storage to an external S3 provider. |
 
 TulipFarm has no built-in scheduled backups. Use your platform's snapshots or your own
 `pg_dump` cron. [Updating and rollback](/docs/self-hosting/updating) covers when to take one.
