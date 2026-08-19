@@ -51,7 +51,7 @@ export type RunBudget = {
 
 export type OperationalHealth = {
   component: string;
-  status: "ok" | "degraded" | "down";
+  status: "ok" | "degraded" | "down" | "unknown";
   detail?: string;
   checkedAt: string;
 };

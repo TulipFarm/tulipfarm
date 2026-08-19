@@ -185,9 +185,21 @@ import { describe, expect, it } from "vitest";
  * The decision behind the first guard — which files a layout can address — did not stay: it is
  * `unstorableArtifactPaths` in `packages/schema/src/artifacts.ts`, beside the registry that owns
  * the answer. Only the HTTP reply for it is here.
+ *
+ * It moves to 51,209 for the `llm` health-probe fix, +37 net in the admin probes this app already
+ * owns:
+ *
+ *   +33 `apps/api/src/admin/health.ts` — the credential verdict is now cached and refreshed out of
+ *       band instead of awaited inside `runProbe`'s 2s budget, so a slow-but-working provider can
+ *       no longer be raced into `down`, and a deployment with no provider configured reports the
+ *       new `unknown` state rather than a failure.
+ *   +4  `apps/api/src/admin/model-reachability.ts` — a budget that fits a real cold start.
+ *
+ * Both are probe wiring for an admin route, which is what `apps/api` is for; the provider
+ * behaviour they report on stays in `packages/llm`.
  */
 
-const CEILING = 51_172;
+const CEILING = 51_209;
 
 /**
  * Domains inside `apps/api/src` that already have a package of the same name. Everything here that
