@@ -3,6 +3,7 @@ import type { ToolAvailability } from "@tulipfarm/tool-broker";
 import {
   type ApprovalGate,
   err,
+  executeToolWithTimeout,
   type RequestContext,
   type ToolCallResult,
   type ToolDef,
@@ -37,25 +38,6 @@ export const MAX_PRESENTATION_CORRECTIVE_ATTEMPTS = 2;
 /** Read surface availability from Tool declarations to avoid drift. */
 function presentsToSurface(toolDefinition: { definition?: { availableTo?: ToolAvailability } }) {
   return toolDefinition.definition?.availableTo?.requiresPresentation === true;
-}
-
-async function withToolTimeout(
-  execute: (abortSignal: AbortSignal) => Promise<ToolCallResult>
-): Promise<ToolCallResult> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TOOL_TIMEOUT_MS);
-  const timedOut = new Promise<ToolCallResult>((resolve) => {
-    controller.signal.addEventListener(
-      "abort",
-      () => resolve(err("internal_error", "tool execution timed out")),
-      { once: true }
-    );
-  });
-  try {
-    return await Promise.race([execute(controller.signal), timedOut]);
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 /** Default-deny adapter: callers must pass the exact authorized Tool allowlist. */
@@ -176,17 +158,11 @@ export class ToolRegistry {
             }
             let full: ToolCallResult;
             try {
+              const executeTool = () =>
+                executeToolWithTimeout(t, effectiveArgs, ctx, TOOL_TIMEOUT_MS);
               full = await (coordinator
-                ? coordinator.schedule(
-                    () =>
-                      withToolTimeout((abortSignal) =>
-                        t.execute(effectiveArgs, { ...ctx, abortSignal })
-                      ),
-                    t.mutating
-                  )
-                : withToolTimeout((abortSignal) =>
-                    t.execute(effectiveArgs, { ...ctx, abortSignal })
-                  ));
+                ? coordinator.schedule(executeTool, t.mutating)
+                : executeTool());
             } catch {
               full = err(
                 "internal_error",

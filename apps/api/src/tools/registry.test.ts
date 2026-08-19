@@ -308,10 +308,7 @@ describe("ToolRegistry", () => {
         { messages: [], context: undefined, toolCallId: "tc2" }
       );
       expect(result).toEqual({ success: true, data: "reached" });
-      expect(execute).toHaveBeenCalledWith(
-        { key: "hello" },
-        expect.objectContaining({ ...ctx, abortSignal: expect.any(AbortSignal) })
-      );
+      expect(execute).toHaveBeenCalledWith({ key: "hello" }, expect.objectContaining(ctx));
     });
 
     it("bad args with coordinator return validation_error (no coordinator scheduling)", async () => {
@@ -666,10 +663,7 @@ describe("ToolRegistry", () => {
 
       expect(result).toEqual({ success: true, data: "ran" });
       // effectiveArgs (the guard's returned args) are forwarded to the tool, not the originals.
-      expect(execute).toHaveBeenCalledWith(
-        { key: "swapped" },
-        expect.objectContaining({ ...ctx, abortSignal: expect.any(AbortSignal) })
-      );
+      expect(execute).toHaveBeenCalledWith({ key: "swapped" }, expect.objectContaining(ctx));
     });
 
     it("no guard passed: tool executes unchanged", async () => {
@@ -684,10 +678,7 @@ describe("ToolRegistry", () => {
       );
 
       expect(result).toEqual({ success: true, data: "direct" });
-      expect(execute).toHaveBeenCalledWith(
-        { key: "v" },
-        expect.objectContaining({ ...ctx, abortSignal: expect.any(AbortSignal) })
-      );
+      expect(execute).toHaveBeenCalledWith({ key: "v" }, expect.objectContaining(ctx));
     });
 
     it("blocked guard runs AFTER arg-validation (invalid args short-circuit before the guard)", async () => {

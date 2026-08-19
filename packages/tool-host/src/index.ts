@@ -99,6 +99,7 @@ export type {
   SurfaceActionStore,
   SurfaceArtifactStore,
 } from "./surface-ports";
+export { executeToolWithTimeout, withAbortTimeout } from "./timeout";
 export {
   type ApprovalDecision,
   type ApprovalGate,

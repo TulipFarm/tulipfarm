@@ -131,7 +131,7 @@ export class EffectDispatcher {
   async dispatch(
     businessId: string,
     effectId: string,
-    options: { abortSignal?: AbortSignal } = {}
+    abortSignal?: AbortSignal
   ): Promise<unknown> {
     const effect = await this.deps.store.get(businessId, effectId);
     if (effect === undefined) throw new ToolDispatchError("effect_not_found", effectId);
@@ -194,7 +194,7 @@ export class EffectDispatcher {
               : this.deps.credentialDispatcher.dispatch(effect, adapter, requestWithSignal);
           },
           contract.timeout?.wallClockMs,
-          options.abortSignal
+          abortSignal
         );
         if (!validateOutput(output)) {
           await this.deps.store.finishAttempt({

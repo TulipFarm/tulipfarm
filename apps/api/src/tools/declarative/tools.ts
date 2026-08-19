@@ -411,9 +411,7 @@ function buildToolDef(
 
       try {
         return ok(
-          await dispatcher.dispatch(deps.businessId, reserved.effect.effectId, {
-            abortSignal: ctx.abortSignal,
-          })
+          await dispatcher.dispatch(deps.businessId, reserved.effect.effectId, ctx.abortSignal)
         );
       } catch (error) {
         if (error instanceof ToolDispatchError) return mapDispatchError(error, slug);

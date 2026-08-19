@@ -151,9 +151,7 @@ describe("EffectDispatcher", () => {
       },
     };
     const controller = new AbortController();
-    const pending = dispatcher(adapter).dispatch(BUSINESS_ID, EFFECT_ID, {
-      abortSignal: controller.signal,
-    });
+    const pending = dispatcher(adapter).dispatch(BUSINESS_ID, EFFECT_ID, controller.signal);
 
     await started;
     controller.abort();
