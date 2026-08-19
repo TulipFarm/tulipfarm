@@ -745,4 +745,40 @@ describe("SoulWriter — degraded dependencies", () => {
     expect(existsSync(join(soulPath, "agents/triage/agent.yaml"))).toBe(true);
     expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("bundle publication failed"));
   });
+
+  it("reports an unpublished write so a caller cannot announce it as live", async () => {
+    const writer = new SoulWriter(store, logger, undefined, undefined, {
+      publishCommittedTree: async () => {
+        throw new Error("publisher exploded");
+      },
+    });
+
+    const result = await writer.apply({
+      subject: "soul: add agent triage",
+      source: "api",
+      actor: ACTOR,
+      businessId: "biz-1",
+      changes: [put("triage")],
+    });
+
+    expect(result.published).toBe(false);
+    expect(result.publicationError).toContain("publisher exploded");
+  });
+
+  it("reports a published write when the bundle publication lands", async () => {
+    const writer = new SoulWriter(store, logger, undefined, undefined, {
+      publishCommittedTree: async () => undefined,
+    });
+
+    const result = await writer.apply({
+      subject: "soul: add agent triage",
+      source: "api",
+      actor: ACTOR,
+      businessId: "biz-1",
+      changes: [put("triage")],
+    });
+
+    expect(result.published).toBe(true);
+    expect(result.publicationError).toBeUndefined();
+  });
 });

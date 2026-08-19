@@ -177,6 +177,19 @@ describe("parseSoulFile still enforces content", () => {
     expect(result.issue?.code).toBe("SCHEMA_VALIDATION_FAILED");
   });
 
+  /**
+   * Every publication re-parses the whole committed tree, and `scaffoldSoul` commits a comment-only
+   * `soul.yaml`. Refusing it wedges bundle publication for the business permanently.
+   */
+  it.each([
+    ["comment-only", "# TulipFarm Soul Configuration\n"],
+    ["blank", "\n"],
+  ])("admits a %s soul.yaml as empty configuration", (_label, content) => {
+    const result = parseSoulFile(upsert("soul.yaml", content));
+    expect(result.issue).toBeUndefined();
+    expect(result.parsed?.mode).toBe("legacy");
+  });
+
   it("hashes a delete by path without needing content", () => {
     const result = parseSoulFile({ operation: "delete", path: "agents/ada/agent.yaml" });
     expect(result.issue).toBeUndefined();
