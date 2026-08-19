@@ -144,6 +144,16 @@ export interface EvalCase {
    * carried more cheaply by an L2 Case, so keep journeys rare.
    */
   readonly journey?: readonly JourneyTurn[];
+  /**
+   * L3 only. Breaks one of the executor's dependencies, so a Case can measure what the Turn does
+   * when its surroundings fail rather than when the model does.
+   *
+   * Every tier otherwise hands the executor working ports, which means the Corpus can only observe
+   * a Turn that got as far as the loop. A Turn abandoned *before* the loop — Context unreadable,
+   * Soul unreachable — is the one failure a participant can neither see nor retry, so it is worth
+   * the one knob it takes to reach it. `"context"` fails Context resolution.
+   */
+  readonly fault?: "context";
   readonly expect: readonly Expectation[];
   /** Raised above 1 only for Cases used to measure the Noise Floor. */
   readonly trials?: number;

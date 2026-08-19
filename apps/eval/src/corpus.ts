@@ -214,6 +214,13 @@ function validate(raw: unknown, file: string): EvalCase {
         t.input.length > 0, `${file}: every "journey" Turn needs a non-empty "input"`);
     }
   }
+  if (c.fault !== undefined) {
+    require(c.fault === "context", `${file}: unknown fault ${JSON.stringify(c.fault)}`);
+    // Only the L3 tier builds the dependency a fault breaks. On an L2 Case the field would be read
+    // by nothing and the Case would quietly measure an ordinary Turn.
+    require(c.tier ===
+      "l3", `${file}: "fault" needs tier "l3"; this Case is tier ${JSON.stringify(c.tier)}`);
+  }
   if (c.redTeam !== undefined) {
     validateRedTeam(c.redTeam, file);
     const guard = (c.expect as { kind: string }[]).find((e) => e.kind.startsWith("guardrail_"));

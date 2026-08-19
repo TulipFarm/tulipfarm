@@ -53,5 +53,13 @@ export function evalTurnContext(options: EvalTurnContextOptions): EvalTurnContex
     compacted: false,
   };
 
-  return { systemPrompt, resolve: async () => resolved };
+  return {
+    systemPrompt,
+    resolve: async () => {
+      if (evalCase.fault === "context") {
+        throw new Error(`eval fault: Context is unreadable for Case ${evalCase.id}`);
+      }
+      return resolved;
+    },
+  };
 }

@@ -64,6 +64,8 @@ before changing how a Case is scored, run or compared.** These are the ones that
 - **Every Case carries a `script`,** so the whole Corpus runs free in ordinary CI.
 - **Two models are a control, not a contest,** and they never run at once.
 - **A Judge failure errors the Trial; it never scores low.**
+- **A `fault` is L3-only and names a dependency, not an outcome.** It breaks what the executor was
+  given, so a Case can measure a Turn abandoned before the loop ever ran.
 - This workspace is CJS-by-default — no `import.meta`.
 
 ## Commands

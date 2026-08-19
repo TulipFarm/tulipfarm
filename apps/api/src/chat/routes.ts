@@ -15,7 +15,7 @@ import {
 } from "../runs/events";
 import { isConversationEntryError, resolveConversationEntry } from "./conversation-entry";
 import type { ConversationRepo } from "./conversations";
-import { writeSseHeaders } from "./sse";
+import { SSE_KEEPALIVE_MS, writeSseHeaders } from "./sse";
 import { type ChatBody, ChatBodySchema, corsPassthrough } from "./turn-helpers";
 import { durableTurnSubmitter } from "./turn-submit";
 
@@ -189,6 +189,7 @@ export function registerChatRoutes(
           authorize: () => stream.authorize(req, runId),
           sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
           ...(stream.pollIntervalMs === undefined ? {} : { pollIntervalMs: stream.pollIntervalMs }),
+          keepaliveMs: SSE_KEEPALIVE_MS,
           ...(stream.pageSize === undefined ? {} : { pageSize: stream.pageSize }),
         },
         { runId, after: 0 }

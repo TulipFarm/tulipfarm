@@ -69,95 +69,132 @@ export function createChatExecutor(options: ChatExecutorOptions): RunExecutor {
       return "succeeded";
     }
 
-    const state = await options.runs.findState(run.businessId, run.id, INVOKE_STATE_KEY);
-    if (state === null) {
-      // A Chat Run without its `invoke` State cannot have been minted by the invocation gateway.
-      return "needs_reconciliation";
-    }
+    const writer = new TurnEventWriter({
+      events: options.events,
+      businessId: run.businessId,
+      runId: run.id,
+      turnId: identity.turnId,
+      attempt: identity.attempt,
+      ...(options.now === undefined ? {} : { now: options.now }),
+    });
 
-    // Reclaim the same State after approval; no second Run or Turn is minted.
-    if (state.status === "waiting") {
-      await reclaimWaitingState(options.transitions, {
-        businessId: run.businessId,
-        runId: run.id,
-        stateKey: INVOKE_STATE_KEY,
-      });
+    try {
+      return await executeTurn(options, run, identity, writer);
+    } catch (error) {
+      // Everything before the driver — State reclaim, Context assembly, guard configuration — runs
+      // where no `turn.finished` has been written yet, and a throw from here reaches the dispatcher,
+      // which parks the Run at `needs_reconciliation`. That is not a status the Run event stream
+      // closes on, so an unannounced failure leaves the participant waiting on a turn nothing will
+      // ever finish. Announce it, then park.
+      options.log.warn({ runId: run.id, turnId: identity.turnId, error }, "chat turn failed");
+      return announceTurnFailure(writer, options.log);
     }
+  };
+}
 
-    // First dispatch claims the gateway's `pending` invoke State.
-    if (state.status === "pending") {
-      await reclaimPendingState(options.transitions, {
-        businessId: run.businessId,
-        runId: run.id,
-        stateKey: INVOKE_STATE_KEY,
-      });
-    }
+/** Reports a turn no attempt can finish; the Run still parks so reconciliation owns its effects. */
+async function announceTurnFailure(
+  writer: TurnEventWriter,
+  log: ChatExecutorOptions["log"]
+): Promise<RunOutcome> {
+  try {
+    await writer.emit(
+      "turn.finished",
+      { status: "failed", messageId: null, reason: "turn_execution_failed" },
+      "finished"
+    );
+  } catch (error) {
+    log.warn({ error }, "chat turn failure could not be announced");
+  }
+  return "needs_reconciliation";
+}
 
-    const request: TurnRequest = {
+async function executeTurn(
+  options: ChatExecutorOptions,
+  run: PersistedRun,
+  identity: { turnId: string; conversationId: string; attempt: number },
+  writer: TurnEventWriter
+): Promise<RunOutcome> {
+  const state = await options.runs.findState(run.businessId, run.id, INVOKE_STATE_KEY);
+  if (state === null) {
+    // A Chat Run without its `invoke` State cannot have been minted by the invocation gateway.
+    return announceTurnFailure(writer, options.log);
+  }
+
+  // Reclaim the same State after approval; no second Run or Turn is minted.
+  if (state.status === "waiting") {
+    await reclaimWaitingState(options.transitions, {
       businessId: run.businessId,
       runId: run.id,
       stateKey: INVOKE_STATE_KEY,
-      stateStatus:
-        state.status === "waiting" || state.status === "pending" ? "claimed" : state.status,
-      turnId: identity.turnId,
-      conversationId: identity.conversationId,
-      attempt: identity.attempt,
-    };
-
-    const writer = new TurnEventWriter({
-      events: options.events,
-      businessId: request.businessId,
-      runId: request.runId,
-      turnId: request.turnId,
-      attempt: request.attempt,
-      ...(options.now === undefined ? {} : { now: options.now }),
     });
-    const model =
-      typeof options.model === "function"
-        ? options.model({
-            events: writer,
-            budgets: new RunBudgetManager(options.budgets),
-            businessId: run.businessId,
-            runId: run.id,
-            conversationId: identity.conversationId,
-          })
-        : options.model;
+  }
 
-    // Wrap dispatch before the loop exists; unconfigured guards refuse every stage.
-    const guardrails = new TurnGuardrails(options.log);
-
-    const loop = new AgentLoop({
-      model,
-      // Guard before announcing; refused Tool calls never ran.
-      tools: guardrails.guard(announceToolCalls(options.tools ?? options.host, writer), writer),
-      checkpoints: options.checkpoints ?? new InMemoryLoopCheckpointStore(),
-      events: writer,
-      budget: runBudget(options.budgets, run.businessId, run.id),
-      isCancelled: async () => {
-        const current = await options.runs.find(run.businessId, run.id);
-        return current !== null && CANCELLING_STATUSES.has(current.status);
-      },
-      log: options.log,
-      ...(options.now === undefined ? {} : { now: options.now }),
+  // First dispatch claims the gateway's `pending` invoke State.
+  if (state.status === "pending") {
+    await reclaimPendingState(options.transitions, {
+      businessId: run.businessId,
+      runId: run.id,
+      stateKey: INVOKE_STATE_KEY,
     });
+  }
 
-    const driver = new TurnDriver({
-      states: new AgentStateRunner({
-        loop,
-        transitions: options.transitions,
-        waits: options.waits,
-      }),
-      context: options.context,
-      completer: new ConversationTurnCompleter({ store: options.host }),
-      guardrails,
-      buildEvents: () => writer,
-      // Only receipt-capable model ports can name the model actually observed.
-      ...(isReceiptSource(model) ? { modelReceipt: () => model.latestModelCallReceipt() } : {}),
-      ...(options.spend === undefined ? {} : { spend: options.spend }),
-    });
-
-    return driver.run(request);
+  const request: TurnRequest = {
+    businessId: run.businessId,
+    runId: run.id,
+    stateKey: INVOKE_STATE_KEY,
+    stateStatus:
+      state.status === "waiting" || state.status === "pending" ? "claimed" : state.status,
+    turnId: identity.turnId,
+    conversationId: identity.conversationId,
+    attempt: identity.attempt,
   };
+
+  const model =
+    typeof options.model === "function"
+      ? options.model({
+          events: writer,
+          budgets: new RunBudgetManager(options.budgets),
+          businessId: run.businessId,
+          runId: run.id,
+          conversationId: identity.conversationId,
+        })
+      : options.model;
+
+  // Wrap dispatch before the loop exists; unconfigured guards refuse every stage.
+  const guardrails = new TurnGuardrails(options.log);
+
+  const loop = new AgentLoop({
+    model,
+    // Guard before announcing; refused Tool calls never ran.
+    tools: guardrails.guard(announceToolCalls(options.tools ?? options.host, writer), writer),
+    checkpoints: options.checkpoints ?? new InMemoryLoopCheckpointStore(),
+    events: writer,
+    budget: runBudget(options.budgets, run.businessId, run.id),
+    isCancelled: async () => {
+      const current = await options.runs.find(run.businessId, run.id);
+      return current !== null && CANCELLING_STATUSES.has(current.status);
+    },
+    log: options.log,
+    ...(options.now === undefined ? {} : { now: options.now }),
+  });
+
+  const driver = new TurnDriver({
+    states: new AgentStateRunner({
+      loop,
+      transitions: options.transitions,
+      waits: options.waits,
+    }),
+    context: options.context,
+    completer: new ConversationTurnCompleter({ store: options.host }),
+    guardrails,
+    buildEvents: () => writer,
+    // Only receipt-capable model ports can name the model actually observed.
+    ...(isReceiptSource(model) ? { modelReceipt: () => model.latestModelCallReceipt() } : {}),
+    ...(options.spend === undefined ? {} : { spend: options.spend }),
+  });
+
+  return driver.run(request);
 }
 
 /** The Run kernel budget, narrowed to the one Run being charged. */
