@@ -114,18 +114,12 @@ describe("approval routes — routine_state kind", () => {
     return { id, runId };
   }
 
-  it("lists pending routine_state approvals with kind discrimination", async () => {
+  it("does not disclose routine_state approvals without the service that authorizes them", async () => {
     const { id } = await insertRoutineApproval();
     const res = await app.inject({ method: "GET", url: "/api/v1/approvals", cookies: authed() });
     expect(res.statusCode).toBe(200);
     const { items } = res.json() as { items: Array<Record<string, unknown>> };
-    const item = items.find((i) => i.approvalId === id);
-    expect(item).toMatchObject({
-      kind: "routine_state",
-      routineSlug: "expense-report",
-      stateName: "Gate",
-      summary: { amount: 900 },
-    });
+    expect(items.find((item) => item.approvalId === id)).toBeUndefined();
   });
 });
 
@@ -447,5 +441,40 @@ describe("approval routes — routine_state kind, decided by role", () => {
     expect(await decide(session.sid, approvalId)).toBe(403);
     expect((await approvals.findById(approvalId))?.status).toBe("pending");
     expect(await runs.find(DEPLOYMENT_BUSINESS_ID, runId)).toMatchObject({ status: "waiting" });
+  });
+
+  it("hides a pending routine approval from a user without the State's approver role", async () => {
+    const { approvalId } = await parkedRun("admin");
+    const member = await signIn("member");
+    app = member.app;
+
+    const hidden = await app.inject({
+      method: "GET",
+      url: "/api/v1/approvals",
+      cookies: { [SESSION_COOKIE]: member.sid },
+    });
+
+    expect(hidden.statusCode).toBe(200);
+    expect(
+      (hidden.json() as { items: Array<{ approvalId: string }> }).items.find(
+        (item) => item.approvalId === approvalId
+      )
+    ).toBeUndefined();
+    await app.close();
+
+    const admin = await signIn("admin");
+    app = admin.app;
+    const visible = await app.inject({
+      method: "GET",
+      url: "/api/v1/approvals",
+      cookies: { [SESSION_COOKIE]: admin.sid },
+    });
+
+    expect(visible.statusCode).toBe(200);
+    expect(
+      (visible.json() as { items: Array<{ approvalId: string }> }).items.find(
+        (item) => item.approvalId === approvalId
+      )
+    ).toBeDefined();
   });
 });
