@@ -261,6 +261,27 @@ test("adding a fallback creates a numbered profile the presets can target", asyn
   });
 });
 
+test("an empty fallback Model ID stays in the sheet and is not offered to presets", async () => {
+  renderChains();
+
+  const fast = screen.getByRole("heading", { name: "Fast" }).closest("section");
+  await userEvent.click(within(fast as HTMLElement).getByRole("button", { name: /add fallback/i }));
+  await userEvent.click(screen.getByRole("button", { name: /^done$/i }));
+
+  expect(screen.getByText("Enter a Model ID.")).toBeInTheDocument();
+  expect(screen.getByLabelText("Model ID")).toBeInTheDocument();
+  expect(
+    within(screen.getByLabelText("Fast")).queryByRole("option", { name: /fast-fallback-1/ })
+  ).not.toBeInTheDocument();
+
+  await userEvent.type(screen.getByLabelText("Model ID"), "gpt-4o-mini");
+  await userEvent.click(screen.getByRole("button", { name: /^done$/i }));
+
+  expect(
+    within(screen.getByLabelText("Fast")).getByRole("option", { name: /fast-fallback-1/ })
+  ).toBeInTheDocument();
+});
+
 test("Auto is shown as the profile it resolves to", async () => {
   const onSubmit = renderChains();
 
