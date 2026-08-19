@@ -237,6 +237,45 @@ describe("resource routes", () => {
       expect(res.json<{ boundary: string }>().boundary).toBe("resource");
     });
 
+    it("points the 422 path at the missing required field", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/resources/ticket",
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+        payload: { priority: "high" },
+      });
+      expect(res.statusCode).toBe(422);
+      expect(res.json<{ path: string }>().path).toBe("/title");
+    });
+
+    it("returns 422 when a required field is present but empty", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/resources/ticket",
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+        payload: { title: "" },
+      });
+      expect(res.statusCode).toBe(422);
+      expect(res.json<{ path: string; error: string }>()).toMatchObject({
+        path: "/title",
+        boundary: "resource",
+      });
+      expect(fakeRepo.docs.size).toBe(0);
+    });
+
+    it("still accepts a filled required field", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/resources/ticket",
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+        payload: { title: "Bug" },
+      });
+      expect(res.statusCode).toBe(201);
+    });
+
     it("strips system fields from body", async () => {
       const res = await app.inject({
         method: "POST",
@@ -552,6 +591,28 @@ describe("resource routes", () => {
       const body = res.json<{ version: number; title: string }>();
       expect(body.version).toBe(2);
       expect(body.title).toBe("Updated bug");
+    });
+
+    it("returns 422 when an update empties a required field", async () => {
+      const id = randomUUID();
+      fakeRepo.docs.set(id, {
+        _id: id,
+        version: 1,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        title: "Bug",
+      });
+
+      const res = await app.inject({
+        method: "PUT",
+        url: `/api/v1/resources/ticket/${id}`,
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF, "if-match": "1" },
+        payload: { title: "" },
+      });
+      expect(res.statusCode).toBe(422);
+      expect(res.json<{ path: string }>().path).toBe("/title");
+      expect(fakeRepo.docs.get(id)?.title).toBe("Bug");
     });
   });
 

@@ -3,6 +3,7 @@ import { makeSoulWriterDouble, type SoulWriterDouble } from "@tulipfarm/soul";
 import type { PaginatedResult } from "@tulipfarm/storage";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { parse as parseYaml } from "yaml";
 import { buildApp } from "../../app";
 import type { TokenDoc, TokenRepo } from "../../auth/api-tokens";
 import { CSRF_COOKIE, CSRF_HEADER } from "../../auth/csrf";
@@ -158,6 +159,41 @@ describe("resource-type routes", () => {
         ],
       });
       expect(soulLoader.reload).toHaveBeenCalledOnce();
+    });
+
+    it("persists the wizard's required array verbatim into the soul", async () => {
+      // The exact document the resource type wizard POSTs, so the required flag it collects is
+      // covered from the browser payload through to the bytes committed to the soul.
+      const wizardSchema = JSON.stringify(
+        {
+          $schema: "https://json-schema.org/draft/2020-12/schema",
+          type: "object",
+          properties: {
+            subject: { type: "string" },
+            description: { type: "string" },
+            status: { type: "string", enum: ["open", "closed"] },
+          },
+          required: ["subject", "status"],
+          additionalProperties: false,
+        },
+        null,
+        2
+      );
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/resource-types",
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+        payload: { name: "ticket", schema: wizardSchema },
+      });
+
+      expect(res.statusCode).toBe(201);
+      const written = soulWriterDouble.applied[0].changes[0] as { content: string };
+      expect(parseYaml(written.content)).toMatchObject({ required: ["subject", "status"] });
+      expect(parseYaml(res.json<{ schema: string }>().schema)).toMatchObject({
+        required: ["subject", "status"],
+      });
     });
 
     it("returns 400 for empty name", async () => {
