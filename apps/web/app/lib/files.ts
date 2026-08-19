@@ -144,6 +144,8 @@ export interface LibraryFile extends UploadedFile {
   readonly owner: string;
   readonly origin: "uploaded" | "generated";
   readonly sourceChatId: string | null;
+  /** How many grants this File carries. `null` when the caller does not own it, never 0. */
+  readonly sharedWithCount: number | null;
 }
 
 export interface FilePage {
@@ -161,22 +163,95 @@ export interface FilePage {
 export async function fetchFiles(
   options: { limit?: number; after?: string | null; signal?: AbortSignal } = {}
 ): Promise<FilePage> {
+  return await fetchFilePage("/api/v1/files", "Your files could not be loaded.", options);
+}
+
+/**
+ * One page of the Files someone else has shared with the caller.
+ *
+ * Separate from `fetchFiles` rather than a filter on it, because they are different questions:
+ * what a person owns is durable, and what reaches them through a share can end at any moment
+ * without them acting.
+ */
+export async function fetchSharedWithMe(
+  options: { limit?: number; after?: string | null; signal?: AbortSignal } = {}
+): Promise<FilePage> {
+  return await fetchFilePage(
+    "/api/v1/files/shared-with-me",
+    "Files shared with you could not be loaded.",
+    options
+  );
+}
+
+async function fetchFilePage(
+  path: string,
+  failure: string,
+  options: { limit?: number; after?: string | null; signal?: AbortSignal }
+): Promise<FilePage> {
   const query = new URLSearchParams({ limit: String(options.limit ?? 50) });
   if (options.after) query.set("after", options.after);
 
+  const response = await fetch(`${API_BASE}${path}?${query}`, {
+    credentials: "include",
+    headers: readHeaders(),
+    ...(options.signal ? { signal: options.signal } : {}),
+  });
+  if (!response.ok) throw new UploadFailed(response.status, failure);
+  const body = (await response.json()) as { files?: LibraryFile[]; nextCursor?: string | null };
+  return { files: body.files ?? [], nextCursor: body.nextCursor ?? null };
+}
+
+/** A share target: one person, or everyone holding one Role. */
+export interface FileGrantee {
+  readonly kind: "user" | "role";
+  readonly id: string;
+}
+
+export interface FileShare extends FileGrantee {
+  readonly sharedBy: string;
+  readonly sharedAt: string;
+}
+
+/** Who a File is shared with. Only its owner may ask; anyone else gets the missing-File answer. */
+export async function fetchFileShares(
+  fileId: string,
+  signal?: AbortSignal
+): Promise<readonly FileShare[]> {
+  const response = await fetch(`${API_BASE}/api/v1/files/${encodeURIComponent(fileId)}/shares`, {
+    credentials: "include",
+    headers: readHeaders(),
+    ...(signal ? { signal } : {}),
+  });
+  if (!response.ok) throw new UploadFailed(response.status, "Sharing could not be loaded.");
+  return ((await response.json()) as { shares?: FileShare[] }).shares ?? [];
+}
+
+export async function shareFile(fileId: string, grantee: FileGrantee): Promise<void> {
+  const response = await fetch(`${API_BASE}/api/v1/files/${encodeURIComponent(fileId)}/shares`, {
+    method: "POST",
+    credentials: "include",
+    headers: mutationHeaders(),
+    body: JSON.stringify(grantee),
+  });
+  if (!response.ok) throw new UploadFailed(response.status, "That file could not be shared.");
+}
+
+export async function unshareFile(fileId: string, grantee: FileGrantee): Promise<void> {
+  const response = await fetch(
+    `${API_BASE}/api/v1/files/${encodeURIComponent(fileId)}/shares/${grantee.kind}/${encodeURIComponent(grantee.id)}`,
+    { method: "DELETE", credentials: "include", headers: mutationHeaders() }
+  );
+  if (!response.ok) throw new UploadFailed(response.status, "That share could not be revoked.");
+}
+
+/** `mutationHeaders` without `Content-Type`, which a GET has no body to describe. */
+function readHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
   for (const [name, value] of Object.entries(mutationHeaders())) {
     if (name === "Content-Type") continue;
     headers[name] = value;
   }
-  const response = await fetch(`${API_BASE}/api/v1/files?${query}`, {
-    credentials: "include",
-    headers,
-    ...(options.signal ? { signal: options.signal } : {}),
-  });
-  if (!response.ok) throw new UploadFailed(response.status, "Your files could not be loaded.");
-  const body = (await response.json()) as { files?: LibraryFile[]; nextCursor?: string | null };
-  return { files: body.files ?? [], nextCursor: body.nextCursor ?? null };
+  return headers;
 }
 
 /** A size a person can read. Binary units, because that is what the byte limits are stated in. */
@@ -194,14 +269,9 @@ export function formatFileSize(bytes: number): string {
 
 /** One File's metadata. Answers 404 for a File the caller does not own, same as a missing one. */
 export async function fetchFile(fileId: string, signal?: AbortSignal): Promise<UploadedFile> {
-  const headers: Record<string, string> = {};
-  for (const [name, value] of Object.entries(mutationHeaders())) {
-    if (name === "Content-Type") continue;
-    headers[name] = value;
-  }
   const response = await fetch(`${API_BASE}/api/v1/files/${encodeURIComponent(fileId)}`, {
     credentials: "include",
-    headers,
+    headers: readHeaders(),
     ...(signal ? { signal } : {}),
   });
   if (!response.ok) throw new UploadFailed(response.status, "That file could not be found.");

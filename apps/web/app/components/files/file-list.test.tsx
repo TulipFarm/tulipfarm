@@ -19,11 +19,16 @@ function libraryFile(overrides: Partial<LibraryFile> = {}): LibraryFile {
     owner: "user_1",
     origin: "uploaded",
     sourceChatId: null,
+    sharedWithCount: null,
     ...overrides,
   };
 }
 
-function renderList(files: readonly LibraryFile[], onAttach?: (f: LibraryFile) => void) {
+function renderList(
+  files: readonly LibraryFile[],
+  onAttach?: (f: LibraryFile) => void,
+  onShare?: (f: LibraryFile) => void
+) {
   const Stub = createRemixStub([
     {
       path: "/",
@@ -33,6 +38,7 @@ function renderList(files: readonly LibraryFile[], onAttach?: (f: LibraryFile) =
           viewerId="user_1"
           onPreview={() => {}}
           {...(onAttach ? { onAttach } : {})}
+          {...(onShare ? { onShare } : {})}
         />
       ),
     },
@@ -41,6 +47,32 @@ function renderList(files: readonly LibraryFile[], onAttach?: (f: LibraryFile) =
 }
 
 describe("FileList", () => {
+  it("says on the row how many people a File is shared with, and stays silent when none", () => {
+    renderList([
+      libraryFile({ id: "shared", filename: "shared.pdf", sharedWithCount: 3 }),
+      libraryFile({ id: "one", filename: "one.pdf", sharedWithCount: 1 }),
+      libraryFile({ id: "private", filename: "private.pdf", sharedWithCount: 0 }),
+    ]);
+
+    expect(screen.getByText("Shared with 3")).toBeTruthy();
+    expect(screen.getByText("Shared with 1")).toBeTruthy();
+    expect(screen.queryByText("Shared with 0")).toBeNull();
+  });
+
+  it("offers Share on a File the viewer owns and withholds it on one shared with them", () => {
+    renderList(
+      [
+        libraryFile({ id: "mine", filename: "mine.pdf", owner: "user_1" }),
+        libraryFile({ id: "theirs", filename: "theirs.pdf", owner: "user_2" }),
+      ],
+      undefined,
+      () => {}
+    );
+
+    expect(screen.getByRole("button", { name: "Share mine.pdf" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Share theirs.pdf" })).toBeNull();
+  });
+
   it("tells an agent-generated File apart from an uploaded one in words, not only colour", () => {
     renderList([
       libraryFile({ id: "a", filename: "made.pdf", origin: "generated" }),

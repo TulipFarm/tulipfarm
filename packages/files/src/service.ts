@@ -17,7 +17,14 @@ import type { BlobPort, BlobRef } from "@tulipfarm/storage";
 import { boundImage, type ImageBoundPolicy } from "./bound";
 import { normalizeFilename } from "./filename";
 import { isAllowedMediaType, MAX_FILE_BYTES } from "./limits";
-import { encodeFileCursor, type FileCursor, type FileRecord, type FileRepo } from "./repo";
+import {
+  encodeFileCursor,
+  type FileCursor,
+  type FileGrantee,
+  type FileRecord,
+  type FileRepo,
+  type FileShare,
+} from "./repo";
 import { resolveMediaType, SNIFF_BYTES } from "./sniff";
 
 export type UploadRejection =
@@ -26,7 +33,8 @@ export type UploadRejection =
   | "disallowed_type"
   | "image_too_large"
   | "not_authorized"
-  | "not_found";
+  | "not_found"
+  | "invalid_share";
 
 export class FileError extends Error {
   constructor(
@@ -59,6 +67,15 @@ export interface FileServiceDeps {
    * without restarting anything. Absent means the default policy.
    */
   readonly imagePolicy?: () => ImageBoundPolicy | Promise<ImageBoundPolicy>;
+  /**
+   * Which Roles a reader currently holds, asked on every read a share has to justify.
+   *
+   * A port rather than a dependency because the one correct answer — direct assignments plus
+   * group-held Roles, minus anything expired — already exists in the authority resolver, and a
+   * second implementation of it here is precisely how a File would stay readable to someone the
+   * Role no longer contains. Absent means no Role-based sharing, never "all Roles".
+   */
+  readonly rolesOf?: (businessId: string, principalId: string) => Promise<readonly string[]>;
 }
 
 /**
@@ -219,18 +236,116 @@ export class FileService {
   }
 
   /**
-   * Reads a File's metadata, refusing a Principal that does not own it.
+   * The identities a read can be justified by: the reader, and every Role they hold right now.
    *
-   * Ownership is the whole ACL in this slice — sharing arrives at slice 07 — and this is checked
-   * freshly on every request rather than cached, so that when sharing does arrive a revocation
-   * takes effect on the next read with nothing to invalidate.
+   * Resolved per read, never cached. That is the entire mechanism behind immediate revocation —
+   * there is no derived state to invalidate, so removing a share or removing someone from a Role
+   * is felt by the very next request.
+   */
+  private async granteesFor(
+    businessId: string,
+    principalId: string
+  ): Promise<readonly FileGrantee[]> {
+    const grantees: FileGrantee[] = [{ kind: "user", id: principalId }];
+    const roles = await this.deps.rolesOf?.(businessId, principalId);
+    for (const roleId of roles ?? []) grantees.push({ kind: "role", id: roleId });
+    return grantees;
+  }
+
+  /**
+   * Reads a File's metadata, refusing a Principal who neither owns it nor has been shared it.
+   *
+   * The ACL is consulted freshly on every request rather than cached, which is why this feature
+   * has no presigned URLs: a presigned URL is an unrevocable bearer capability, and revocation
+   * here has to take effect on the very next read.
    */
   async read(businessId: string, id: string, principalId: string): Promise<FileRecord> {
     const file = await this.deps.repo.get(businessId, id);
-    if (file === null) throw new FileError("not_found", `file ${id} does not exist`);
-    if (file.ownerPrincipalId !== principalId) {
-      // Deliberately the same shape as a missing File: telling a stranger that an id exists but
-      // is not theirs turns the route into an existence oracle.
+    if (file !== null && file.ownerPrincipalId === principalId) return file;
+
+    // Both remaining outcomes are a 404, so both must cost the same. Short-circuiting on a missing
+    // File would make "exists but not yours" the slower of two identical answers, and a caller
+    // that can time the difference has the existence oracle the identical message denies them.
+    // The owner's own read is above this and unaffected: its answer already differs.
+    const [shares, grantees] = await Promise.all([
+      this.deps.repo.listShares(businessId, id),
+      this.granteesFor(businessId, principalId),
+    ]);
+    const permitted = shares.some((share) =>
+      grantees.some((held) => held.kind === share.kind && held.id === share.id)
+    );
+    if (file !== null && permitted) return file;
+
+    throw new FileError("not_found", `file ${id} does not exist`);
+  }
+
+  /**
+   * Shares a File. Only its owner may, and a recipient is never given that power — which is what
+   * stops a share from propagating past the one person who chose to grant it.
+   */
+  async share(
+    businessId: string,
+    id: string,
+    ownerPrincipalId: string,
+    grantee: FileGrantee
+  ): Promise<void> {
+    const file = await this.readAsOwner(businessId, id, ownerPrincipalId);
+    if (grantee.kind === "user" && grantee.id === file.ownerPrincipalId) {
+      throw new FileError("invalid_share", "a File is already readable by its owner");
+    }
+    await this.deps.repo.share(businessId, id, grantee, ownerPrincipalId);
+  }
+
+  /** Revokes a share. Answers whether one existed, so a caller can tell a revoke from a no-op. */
+  async unshare(
+    businessId: string,
+    id: string,
+    ownerPrincipalId: string,
+    grantee: FileGrantee
+  ): Promise<boolean> {
+    await this.readAsOwner(businessId, id, ownerPrincipalId);
+    return await this.deps.repo.unshare(businessId, id, grantee);
+  }
+
+  /** Who a File is shared with. Only its owner may ask; a recipient cannot enumerate the others. */
+  async shares(businessId: string, id: string, ownerPrincipalId: string): Promise<FileShare[]> {
+    await this.readAsOwner(businessId, id, ownerPrincipalId);
+    return await this.deps.repo.listShares(businessId, id);
+  }
+
+  /** One page of Files shared with the caller, excluding the ones they already own. */
+  async listSharedWithMe(
+    businessId: string,
+    principalId: string,
+    limit: number,
+    after?: FileCursor
+  ): Promise<{ files: FileRecord[]; nextCursor: string | null }> {
+    const grantees = await this.granteesFor(businessId, principalId);
+    const page = await this.deps.repo.listSharedWith(
+      businessId,
+      principalId,
+      grantees,
+      limit + 1,
+      after
+    );
+    const files = page.slice(0, limit);
+    const last = files.at(-1);
+    return { files, nextCursor: page.length > limit && last ? encodeFileCursor(last) : null };
+  }
+
+  /**
+   * The File, if this Principal owns it.
+   *
+   * Every act of sharing goes through here rather than through `read`, because `read` now also
+   * admits recipients — and a recipient who could re-share would make revocation meaningless.
+   */
+  private async readAsOwner(
+    businessId: string,
+    id: string,
+    principalId: string
+  ): Promise<FileRecord> {
+    const file = await this.deps.repo.get(businessId, id);
+    if (file === null || file.ownerPrincipalId !== principalId) {
       throw new FileError("not_found", `file ${id} does not exist`);
     }
     return file;
@@ -266,13 +381,17 @@ export class FileService {
     principalId: string,
     limit: number,
     after?: FileCursor
-  ): Promise<{ files: FileRecord[]; nextCursor: string | null }> {
+  ): Promise<{ files: FileRecord[]; nextCursor: string | null; shareCounts: Map<string, number> }> {
     const page = await this.list(businessId, principalId, limit + 1, after);
     const files = page.slice(0, limit);
     const last = files.at(-1);
     return {
       files,
       nextCursor: page.length > limit && last ? encodeFileCursor(last) : null,
+      shareCounts: await this.deps.repo.countShares(
+        businessId,
+        files.map((file) => file.id)
+      ),
     };
   }
 

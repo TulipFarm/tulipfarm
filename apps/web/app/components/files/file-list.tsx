@@ -1,5 +1,14 @@
 import { Link } from "@remix-run/react";
-import { Bot, Download, FileText, ImageIcon, MessageSquare, Paperclip, Upload } from "lucide-react";
+import {
+  Bot,
+  Download,
+  FileText,
+  ImageIcon,
+  MessageSquare,
+  Paperclip,
+  Share2,
+  Upload,
+} from "lucide-react";
 import { useState } from "react";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
@@ -18,17 +27,25 @@ export function FileList({
   viewerId,
   onPreview,
   onAttach,
+  onShare,
 }: {
   files: readonly LibraryFile[];
   viewerId: string;
   onPreview: (file: LibraryFile) => void;
   onAttach?: (file: LibraryFile) => void;
+  onShare?: (file: LibraryFile) => void;
 }) {
   return (
     <ul className="flex flex-col divide-y divide-border rounded-sm border border-border">
       {files.map((file) => (
         <li key={file.id}>
-          <FileRow file={file} viewerId={viewerId} onPreview={onPreview} onAttach={onAttach} />
+          <FileRow
+            file={file}
+            viewerId={viewerId}
+            onPreview={onPreview}
+            onAttach={onAttach}
+            onShare={onShare}
+          />
         </li>
       ))}
     </ul>
@@ -40,12 +57,17 @@ function FileRow({
   viewerId,
   onPreview,
   onAttach,
+  onShare,
 }: {
   file: LibraryFile;
   viewerId: string;
   onPreview: (file: LibraryFile) => void;
   onAttach?: (file: LibraryFile) => void;
+  onShare?: (file: LibraryFile) => void;
 }) {
+  // Only an owner may share, and the server enforces that. Showing the control to a recipient
+  // anyway would offer a power the product does not grant, which is worse than not offering it.
+  const owned = file.owner === viewerId;
   const isImage = file.mediaType.startsWith("image/");
   const Icon = isImage ? ImageIcon : FileText;
   const previewable = isPreviewable(file.mediaType);
@@ -69,13 +91,19 @@ function FileRow({
             </span>
           )}
           <OriginBadge origin={file.origin} />
+          {file.sharedWithCount ? (
+            <Badge variant="info">
+              <Share2 className="size-3" aria-hidden />
+              {file.sharedWithCount === 1 ? "Shared with 1" : `Shared with ${file.sharedWithCount}`}
+            </Badge>
+          ) : null}
         </div>
         <p className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-xs text-muted-foreground">
           <span>{file.mediaType}</span>
           <span aria-hidden>·</span>
           <span>{formatFileSize(file.sizeBytes)}</span>
           <span aria-hidden>·</span>
-          <span>{file.owner === viewerId ? "you" : file.owner}</span>
+          <span>{owned ? "you" : file.owner}</span>
           <span aria-hidden>·</span>
           <time dateTime={file.createdAt}>{formatDate(file.createdAt)}</time>
           {file.sourceChatId ? (
@@ -93,6 +121,17 @@ function FileRow({
         </p>
       </div>
       <div className="flex shrink-0 items-center gap-1">
+        {onShare && owned ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onShare(file)}
+            aria-label={`Share ${file.filename}`}
+          >
+            <Share2 className="size-3.5" aria-hidden />
+            Share
+          </Button>
+        ) : null}
         {onAttach ? (
           <Button
             variant="outline"

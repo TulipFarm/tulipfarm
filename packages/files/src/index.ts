@@ -15,9 +15,13 @@ export {
   contentDisposition,
   downloadHeaders,
   FILE_ERROR_STATUS,
+  FILE_GRANTEE_SCHEMA,
+  FILE_SHARES_SCHEMA,
   FILE_WIRE_SCHEMA,
   fileErrorStatus,
   serializeFile,
+  serializeFilePage,
+  serializeShare,
 } from "./http";
 export {
   ALLOWED_MEDIA_TYPES,
@@ -30,13 +34,18 @@ export {
 export {
   decodeFileCursor,
   encodeFileCursor,
+  FILE_GRANTEE_KINDS,
   FILE_ORIGIN_STATEMENTS,
   FILE_ORIGINS,
+  FILE_SHARE_STATEMENTS,
   FILE_STORAGE_STATEMENTS,
   type FileCursor,
+  type FileGrantee,
+  type FileGranteeKind,
   type FileOrigin,
   type FileRecord,
   type FileRepo,
+  type FileShare,
   type NewFile,
   PgFileRepo,
 } from "./repo";

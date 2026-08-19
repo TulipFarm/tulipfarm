@@ -7,7 +7,7 @@
  */
 
 import { isInlineRenderable } from "./limits";
-import { FILE_ORIGINS, type FileRecord } from "./repo";
+import { FILE_GRANTEE_KINDS, FILE_ORIGINS, type FileRecord, type FileShare } from "./repo";
 import { FileError } from "./service";
 
 /** The wire shape, shared by the route schemas and the serializer so they cannot drift. */
@@ -26,10 +26,16 @@ export const FILE_WIRE_SCHEMA = {
     // `chatId` on the wire, `source_conversation_id` in the table: Chat is the external word for
     // the same thing, and the boundary between them is exactly here.
     sourceChatId: { type: "string", nullable: true },
+    /**
+     * How many grants this File carries. Present only when the caller owns it, because only an
+     * owner may know — and absent, rather than 0, so "not yours to know" cannot be read as
+     * "shared with nobody".
+     */
+    sharedWithCount: { type: "integer", nullable: true },
   },
 } as const;
 
-export function serializeFile(file: FileRecord) {
+export function serializeFile(file: FileRecord, sharedWithCount?: number) {
   return {
     id: file.id,
     filename: file.filename,
@@ -39,6 +45,67 @@ export function serializeFile(file: FileRecord) {
     owner: file.ownerPrincipalId,
     origin: file.origin,
     sourceChatId: file.sourceConversationId,
+    sharedWithCount: sharedWithCount ?? null,
+  };
+}
+
+/**
+ * A page of Files as the listing routes send it.
+ *
+ * `shareCounts` absent means the caller does not own these Files, and the count is then omitted
+ * rather than sent as `0` — how many others hold a File is its owner's business, and `0` would be
+ * a different and false answer.
+ */
+export function serializeFilePage(page: {
+  files: readonly FileRecord[];
+  nextCursor: string | null;
+  shareCounts?: Map<string, number>;
+}) {
+  return {
+    files: page.files.map((file) =>
+      serializeFile(file, page.shareCounts ? (page.shareCounts.get(file.id) ?? 0) : undefined)
+    ),
+    nextCursor: page.nextCursor,
+  };
+}
+
+/** A share target: one Principal, or everyone holding one Role. */
+export const FILE_GRANTEE_SCHEMA = {
+  type: "object",
+  required: ["kind", "id"],
+  properties: {
+    kind: { type: "string", enum: [...FILE_GRANTEE_KINDS] },
+    id: { type: "string", minLength: 1 },
+  },
+  additionalProperties: false,
+} as const;
+
+export const FILE_SHARES_SCHEMA = {
+  type: "object",
+  required: ["shares"],
+  properties: {
+    shares: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["kind", "id", "sharedBy", "sharedAt"],
+        properties: {
+          kind: { type: "string", enum: [...FILE_GRANTEE_KINDS] },
+          id: { type: "string" },
+          sharedBy: { type: "string" },
+          sharedAt: { type: "string" },
+        },
+      },
+    },
+  },
+} as const;
+
+export function serializeShare(share: FileShare) {
+  return {
+    kind: share.kind,
+    id: share.id,
+    sharedBy: share.grantedBy,
+    sharedAt: share.createdAt.toISOString(),
   };
 }
 
@@ -51,6 +118,7 @@ export const FILE_ERROR_STATUS: Record<FileError["reason"], 400 | 403 | 404 | 41
   image_too_large: 413,
   not_authorized: 403,
   not_found: 404,
+  invalid_share: 400,
 };
 
 export function fileErrorStatus(error: unknown): 400 | 403 | 404 | 413 | 415 | null {

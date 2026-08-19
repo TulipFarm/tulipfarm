@@ -233,6 +233,20 @@ import { describe, expect, it } from "vitest";
  * `FileService.listPage`, and the route only translates them. What remains is schema and wiring,
  * which is the one thing apps/api is for.
  *
+ * Raised again, 49_973 -> 50_160, for File sharing: four routes (share, revoke, list shares, and
+ * a "shared with me" listing), each carrying the full OpenAPI schema every route here owes. None of
+ * the deciding is in them. Who may share, what a recipient may do with a share, and how a Role
+ * share resolves against the Roles a reader holds right now are all in `FileService`; the wire
+ * shape of a grantee is in `packages/files/src/http.ts` beside the File's own. The routes read
+ * params, call one method, and map a `FileError` to a status.
+ *
+ * Two things reclaimed in the same change. Both Files listings now page through a single
+ * `sendPage` helper, so a cursor this instance did not issue means the same thing on both; that
+ * cost three lines more than it saved and was still worth doing, because two copies of a paging
+ * contract is how the two stop agreeing. And `serializeFilePage` moved to `packages/files`, where
+ * the rest of the wire shape already lives — whether a share count is omitted or sent as zero is a
+ * fact about what an owner may know, not about Fastify.
+ *
  * Line count is a crude proxy for ownership, deliberately. A precise measure would need to model
  * what each domain ought to own, which is the argument the refactor itself has to settle; a crude
  * measure that cannot be gamed without noticing is worth more here than a subtle one.

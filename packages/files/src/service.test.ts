@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_MAX_IMAGE_DIMENSION } from "./bound";
 import { imageSize } from "./dimensions";
 import { MAX_FILE_BYTES } from "./limits";
-import type { FileRecord, FileRepo, NewFile } from "./repo";
+import type { FileGrantee, FileRecord, FileRepo, FileShare, NewFile } from "./repo";
 import { FileError, FileService } from "./service";
 
 const BUSINESS = "biz";
@@ -39,6 +39,63 @@ class MemoryFileRepo implements FileRepo {
   async listByOwner(businessId: string, owner: string, limit: number): Promise<FileRecord[]> {
     return this.rows
       .filter((r) => r.businessId === businessId && r.ownerPrincipalId === owner)
+      .slice(0, limit);
+  }
+
+  readonly shares: FileShare[] = [];
+
+  async share(
+    _businessId: string,
+    fileId: string,
+    grantee: FileGrantee,
+    grantedBy: string
+  ): Promise<void> {
+    if (
+      this.shares.some((s) => s.fileId === fileId && s.kind === grantee.kind && s.id === grantee.id)
+    ) {
+      return;
+    }
+    this.shares.push({ fileId, ...grantee, grantedBy, createdAt: new Date() });
+  }
+
+  async unshare(_businessId: string, fileId: string, grantee: FileGrantee): Promise<boolean> {
+    const index = this.shares.findIndex(
+      (s) => s.fileId === fileId && s.kind === grantee.kind && s.id === grantee.id
+    );
+    if (index === -1) return false;
+    this.shares.splice(index, 1);
+    return true;
+  }
+
+  async countShares(_businessId: string, fileIds: readonly string[]): Promise<Map<string, number>> {
+    const counts = new Map<string, number>();
+    for (const id of fileIds) {
+      const grants = this.shares.filter((share) => share.fileId === id).length;
+      if (grants > 0) counts.set(id, grants);
+    }
+    return counts;
+  }
+
+  async listShares(_businessId: string, fileId: string): Promise<FileShare[]> {
+    return this.shares.filter((s) => s.fileId === fileId);
+  }
+
+  async listSharedWith(
+    businessId: string,
+    ownerPrincipalId: string,
+    grantees: readonly FileGrantee[],
+    limit: number
+  ): Promise<FileRecord[]> {
+    const shared = new Set(
+      this.shares
+        .filter((s) => grantees.some((g) => g.kind === s.kind && g.id === s.id))
+        .map((s) => s.fileId)
+    );
+    return this.rows
+      .filter(
+        (r) =>
+          r.businessId === businessId && r.ownerPrincipalId !== ownerPrincipalId && shared.has(r.id)
+      )
       .slice(0, limit);
   }
 
@@ -250,6 +307,32 @@ describe("FileService.read", () => {
     expect((denied as FileError).reason).toBe((missing as FileError).reason);
   });
 
+  // The identical message is only half the defence. If a hidden File costs more queries than a
+  // missing one, the difference is measurable and the oracle is back, just in the timing.
+  it("does the same work for a File that is hidden as for one that is not there", async () => {
+    const file = await seed();
+    const counted: string[] = [];
+    const repo = service as unknown as {
+      deps: { repo: { listShares: (...a: never[]) => unknown }; rolesOf?: unknown };
+    };
+    const realListShares = repo.deps.repo.listShares.bind(repo.deps.repo);
+    repo.deps.repo.listShares = (...args: never[]) => {
+      counted.push("listShares");
+      return realListShares(...args);
+    };
+    repo.deps.rolesOf = async () => {
+      counted.push("rolesOf");
+      return [];
+    };
+
+    await service.read(BUSINESS, file.id, STRANGER).catch(() => undefined);
+    const hidden = [...counted];
+    counted.length = 0;
+    await service.read(BUSINESS, randomUUID(), STRANGER).catch(() => undefined);
+
+    expect(counted).toEqual(hidden);
+  });
+
   it("does not leak a File across businesses", async () => {
     const file = await seed();
     await expect(service.read("other-biz", file.id, OWNER)).rejects.toMatchObject({
@@ -402,5 +485,189 @@ describe("FileService.upload — image bounding", () => {
         body: once(jpeg),
       })
     ).rejects.toMatchObject({ reason: "image_too_large" });
+  });
+});
+
+describe("sharing a File", () => {
+  const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+  let root: string;
+  let repo: MemoryFileRepo;
+  let service: FileService;
+  let roles: Map<string, string[]>;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "tulip-files-share-"));
+    repo = new MemoryFileRepo();
+    roles = new Map();
+    service = new FileService({
+      repo,
+      blobs: new FileSystemBlobPort(root),
+      newId: () => randomUUID(),
+      rolesOf: async (_business, principalId) => roles.get(principalId) ?? [],
+    });
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  async function uploaded() {
+    return await service.upload({
+      businessId: BUSINESS,
+      ownerPrincipalId: OWNER,
+      filename: "shot.png",
+      claimedMediaType: "image/png",
+      declaredBytes: PNG_BYTES.byteLength,
+      body: (async function* () {
+        yield PNG_BYTES;
+      })(),
+    });
+  }
+
+  it("is private to its owner until someone shares it", async () => {
+    const file = await uploaded();
+
+    await expect(service.read(BUSINESS, file.id, STRANGER)).rejects.toMatchObject({
+      reason: "not_found",
+    });
+  });
+
+  it("lets a named person read it once shared", async () => {
+    const file = await uploaded();
+
+    await service.share(BUSINESS, file.id, OWNER, { kind: "user", id: STRANGER });
+
+    expect((await service.read(BUSINESS, file.id, STRANGER)).id).toBe(file.id);
+  });
+
+  it("stops working on the very next read once revoked", async () => {
+    const file = await uploaded();
+    await service.share(BUSINESS, file.id, OWNER, { kind: "user", id: STRANGER });
+
+    expect(await service.unshare(BUSINESS, file.id, OWNER, { kind: "user", id: STRANGER })).toBe(
+      true
+    );
+
+    await expect(service.read(BUSINESS, file.id, STRANGER)).rejects.toMatchObject({
+      reason: "not_found",
+    });
+  });
+
+  it("resolves a Role share against the reader's Roles as they are right now", async () => {
+    const file = await uploaded();
+    await service.share(BUSINESS, file.id, OWNER, { kind: "role", id: "support" });
+
+    // Not yet in the Role.
+    await expect(service.read(BUSINESS, file.id, STRANGER)).rejects.toMatchObject({
+      reason: "not_found",
+    });
+
+    roles.set(STRANGER, ["support"]);
+    expect((await service.read(BUSINESS, file.id, STRANGER)).id).toBe(file.id);
+
+    // Leaving the Role revokes the File, with no share row touched and nothing to invalidate.
+    roles.set(STRANGER, []);
+    await expect(service.read(BUSINESS, file.id, STRANGER)).rejects.toMatchObject({
+      reason: "not_found",
+    });
+  });
+
+  it("refuses to let a recipient re-share, which is what keeps a revoke final", async () => {
+    const file = await uploaded();
+    await service.share(BUSINESS, file.id, OWNER, { kind: "user", id: STRANGER });
+
+    await expect(
+      service.share(BUSINESS, file.id, STRANGER, { kind: "user", id: "principal-c" })
+    ).rejects.toMatchObject({ reason: "not_found" });
+    await expect(
+      service.unshare(BUSINESS, file.id, STRANGER, { kind: "user", id: STRANGER })
+    ).rejects.toMatchObject({ reason: "not_found" });
+    await expect(service.shares(BUSINESS, file.id, STRANGER)).rejects.toMatchObject({
+      reason: "not_found",
+    });
+  });
+
+  it("refuses a stranger who shares nothing with the File, without saying it exists", async () => {
+    const file = await uploaded();
+    await service.share(BUSINESS, file.id, OWNER, { kind: "user", id: "principal-c" });
+
+    await expect(service.read(BUSINESS, file.id, STRANGER)).rejects.toMatchObject({
+      reason: "not_found",
+    });
+  });
+
+  it("lists what has been shared with the reader, and never what they already own", async () => {
+    const mine = await uploaded();
+    const theirs = await service.upload({
+      businessId: BUSINESS,
+      ownerPrincipalId: STRANGER,
+      filename: "theirs.png",
+      claimedMediaType: "image/png",
+      declaredBytes: PNG_BYTES.byteLength,
+      body: (async function* () {
+        yield PNG_BYTES;
+      })(),
+    });
+    await service.share(BUSINESS, theirs.id, STRANGER, { kind: "user", id: OWNER });
+
+    const page = await service.listSharedWithMe(BUSINESS, OWNER, 10);
+
+    expect(page.files.map((f) => f.id)).toEqual([theirs.id]);
+    expect(page.files.map((f) => f.id)).not.toContain(mine.id);
+  });
+
+  it("treats sharing twice as one share, so a revoke is not half a revoke", async () => {
+    const file = await uploaded();
+
+    await service.share(BUSINESS, file.id, OWNER, { kind: "user", id: STRANGER });
+    await service.share(BUSINESS, file.id, OWNER, { kind: "user", id: STRANGER });
+
+    expect(await service.shares(BUSINESS, file.id, OWNER)).toHaveLength(1);
+    await service.unshare(BUSINESS, file.id, OWNER, { kind: "user", id: STRANGER });
+    await expect(service.read(BUSINESS, file.id, STRANGER)).rejects.toMatchObject({
+      reason: "not_found",
+    });
+  });
+
+  it("refuses to share a File with its own owner rather than storing a no-op row", async () => {
+    const file = await uploaded();
+
+    await expect(
+      service.share(BUSINESS, file.id, OWNER, { kind: "user", id: OWNER })
+    ).rejects.toMatchObject({ reason: "invalid_share" });
+  });
+
+  it("never lets a Role named like a person stand in for that person, or the reverse", async () => {
+    const file = await uploaded();
+    // A Role whose id happens to equal the stranger's principal id. Matching on the id alone would
+    // silently hand every Role-holder a File shared with one person, and vice versa.
+    await service.share(BUSINESS, file.id, OWNER, { kind: "role", id: STRANGER });
+
+    await expect(service.read(BUSINESS, file.id, STRANGER)).rejects.toMatchObject({
+      reason: "not_found",
+    });
+
+    const second = await uploaded();
+    await service.share(BUSINESS, second.id, OWNER, { kind: "user", id: "support" });
+    roles.set(STRANGER, ["support"]);
+
+    await expect(service.read(BUSINESS, second.id, STRANGER)).rejects.toMatchObject({
+      reason: "not_found",
+    });
+  });
+
+  it("shares nothing when no Role port is wired, rather than everything", async () => {
+    const withoutRoles = new FileService({
+      repo,
+      blobs: new FileSystemBlobPort(root),
+      newId: () => randomUUID(),
+    });
+    const file = await uploaded();
+    await service.share(BUSINESS, file.id, OWNER, { kind: "role", id: "support" });
+    roles.set(STRANGER, ["support"]);
+
+    await expect(withoutRoles.read(BUSINESS, file.id, STRANGER)).rejects.toMatchObject({
+      reason: "not_found",
+    });
   });
 });

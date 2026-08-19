@@ -1,5 +1,9 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
-import { FILE_ORIGIN_STATEMENTS, FILE_STORAGE_STATEMENTS } from "@tulipfarm/files";
+import {
+  FILE_ORIGIN_STATEMENTS,
+  FILE_SHARE_STATEMENTS,
+  FILE_STORAGE_STATEMENTS,
+} from "@tulipfarm/files";
 import { MEMORY_DOCUMENT_STORAGE_STATEMENTS } from "@tulipfarm/memory";
 import { INVOCATION_STORAGE_STATEMENTS } from "@tulipfarm/run-kernel";
 import { MEMORY_SECTION_HEADINGS, MEMORY_SECTION_KEYS } from "@tulipfarm/schema";
@@ -2161,5 +2165,10 @@ export const PG_MIGRATIONS: PgMigration[] = [
     version: 69,
     description: "files: origin and the Chat a File was first sent in, for the Files library",
     up: applyStatements(FILE_ORIGIN_STATEMENTS),
+  },
+  {
+    version: 70,
+    description: "files: explicit share grants, so a File reaches a second reader by decision only",
+    up: applyStatements(FILE_SHARE_STATEMENTS),
   },
 ];

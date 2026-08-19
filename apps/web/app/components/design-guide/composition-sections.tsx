@@ -41,6 +41,7 @@ const GUIDE_FILES = [
     owner: "user_1",
     origin: "uploaded" as const,
     sourceChatId: "conv_1",
+    sharedWithCount: 2,
   },
   {
     id: "file_2",
@@ -51,6 +52,18 @@ const GUIDE_FILES = [
     owner: "user_1",
     origin: "generated" as const,
     sourceChatId: null,
+    sharedWithCount: 0,
+  },
+  {
+    id: "file_3",
+    filename: "shared-with-you.png",
+    mediaType: "image/png",
+    sizeBytes: 18_400,
+    createdAt: "2026-01-04T11:30:00.000Z",
+    owner: "user_2",
+    origin: "uploaded" as const,
+    sourceChatId: null,
+    sharedWithCount: null,
   },
 ];
 
@@ -92,9 +105,16 @@ export function CompositionSections() {
           <h3 className="mb-2 text-sm font-semibold">Files library rows</h3>
           <p className="mb-3 text-sm text-muted-foreground">
             One row shape carries both a screenshot and a document. Origin is an icon plus a word,
-            never a tint alone, so who made a File survives a greyscale screen.
+            never a tint alone, so who made a File survives a greyscale screen. Share appears only
+            on a File the viewer owns — a recipient cannot share one on, so the control never offers
+            a power the product does not grant.
           </p>
-          <FileList files={GUIDE_FILES} viewerId="user_1" onPreview={() => undefined} />
+          <FileList
+            files={GUIDE_FILES}
+            viewerId="user_1"
+            onPreview={() => undefined}
+            onShare={() => undefined}
+          />
         </div>
         <div className="grid gap-4 lg:grid-cols-3">
           <article className="rounded-md border border-border bg-card">

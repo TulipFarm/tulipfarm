@@ -53,6 +53,28 @@ export interface NewFile {
   readonly origin?: FileOrigin;
 }
 
+/**
+ * Who a File is shared with.
+ *
+ * A grantee is a Principal *or* a Role, never an expanded list of Role members. Expanding a Role at
+ * share time would go stale in the direction that matters: someone removed from the Role would keep
+ * the File. Resolving the reader's Roles on every read is what makes revocation immediate.
+ */
+export const FILE_GRANTEE_KINDS = ["user", "role"] as const;
+export type FileGranteeKind = (typeof FILE_GRANTEE_KINDS)[number];
+
+export interface FileGrantee {
+  readonly kind: FileGranteeKind;
+  readonly id: string;
+}
+
+export interface FileShare extends FileGrantee {
+  readonly fileId: string;
+  /** The Principal that granted this share. Only a File's owner ever can. */
+  readonly grantedBy: string;
+  readonly createdAt: Date;
+}
+
 export interface FileRepo {
   create(file: NewFile): Promise<FileRecord>;
   get(businessId: string, id: string): Promise<FileRecord | null>;
@@ -83,6 +105,30 @@ export interface FileRepo {
    * not business-scoped, because the store is not either.
    */
   anyReferencesBlob(hash: string): Promise<boolean>;
+
+  /** Idempotent: sharing the same File with the same grantee twice is one share. */
+  share(businessId: string, fileId: string, grantee: FileGrantee, grantedBy: string): Promise<void>;
+  /** Returns whether a share existed, so a route can tell a revocation from a no-op. */
+  unshare(businessId: string, fileId: string, grantee: FileGrantee): Promise<boolean>;
+  listShares(businessId: string, fileId: string): Promise<FileShare[]>;
+  /**
+   * How many grants each of `fileIds` carries, keyed by File id and omitting the unshared.
+   *
+   * One aggregate rather than a `listShares` per row: the library shows this on every row it
+   * paints, and a per-row query would make the listing cost scale with the page size.
+   */
+  countShares(businessId: string, fileIds: readonly string[]): Promise<Map<string, number>>;
+  /**
+   * The Files shared with any of `grantees`, newest first. Excludes Files the caller owns, which
+   * `listByOwner` already returns.
+   */
+  listSharedWith(
+    businessId: string,
+    ownerPrincipalId: string,
+    grantees: readonly FileGrantee[],
+    limit: number,
+    after?: FileCursor
+  ): Promise<FileRecord[]>;
 }
 
 export const FILE_STORAGE_STATEMENTS = [
@@ -116,6 +162,23 @@ export const FILE_ORIGIN_STATEMENTS = [
   `ALTER TABLE files DROP CONSTRAINT IF EXISTS files_origin_known`,
   `ALTER TABLE files ADD CONSTRAINT files_origin_known
      CHECK (origin IN (${FILE_ORIGINS.map((o) => `'${o}'`).join(", ")}))`,
+];
+
+/** Added with sharing: a File is private to its owner until a row here says otherwise. */
+export const FILE_SHARE_STATEMENTS = [
+  `CREATE TABLE IF NOT EXISTS file_shares (
+     business_id   text NOT NULL,
+     file_id       uuid NOT NULL REFERENCES files (id) ON DELETE CASCADE,
+     grantee_kind  text NOT NULL CHECK (grantee_kind IN (${FILE_GRANTEE_KINDS.map((k) => `'${k}'`).join(", ")})),
+     grantee_id    text NOT NULL,
+     granted_by    text NOT NULL,
+     created_at    timestamptz(3) NOT NULL DEFAULT now(),
+     PRIMARY KEY (file_id, grantee_kind, grantee_id)
+   )`,
+  // Every authorized read of a File the caller does not own hits this, keyed by the reader's
+  // identities rather than by the File.
+  `CREATE INDEX IF NOT EXISTS file_shares_grantee
+     ON file_shares (business_id, grantee_kind, grantee_id)`,
 ];
 
 function toRecord(row: Record<string, unknown>): FileRecord {
@@ -236,5 +299,102 @@ export class PgFileRepo implements FileRepo {
       [businessId, id]
     );
     return result.rows.length > 0;
+  }
+
+  async share(
+    businessId: string,
+    fileId: string,
+    grantee: FileGrantee,
+    grantedBy: string
+  ): Promise<void> {
+    await this.db.query(
+      `INSERT INTO file_shares (business_id, file_id, grantee_kind, grantee_id, granted_by)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (file_id, grantee_kind, grantee_id) DO NOTHING`,
+      [businessId, fileId, grantee.kind, grantee.id, grantedBy]
+    );
+  }
+
+  async unshare(businessId: string, fileId: string, grantee: FileGrantee): Promise<boolean> {
+    const result = await this.db.query(
+      `DELETE FROM file_shares
+       WHERE business_id = $1 AND file_id = $2 AND grantee_kind = $3 AND grantee_id = $4
+       RETURNING file_id`,
+      [businessId, fileId, grantee.kind, grantee.id]
+    );
+    return result.rows.length > 0;
+  }
+
+  async countShares(businessId: string, fileIds: readonly string[]): Promise<Map<string, number>> {
+    if (fileIds.length === 0) return new Map();
+    const result = await this.db.query(
+      `SELECT file_id, count(*)::int AS grants FROM file_shares
+       WHERE business_id = $1 AND file_id = ANY($2::uuid[])
+       GROUP BY file_id`,
+      [businessId, [...fileIds]]
+    );
+    return new Map(
+      (result.rows as Array<Record<string, unknown>>).map((row) => [
+        String(row.file_id),
+        Number(row.grants),
+      ])
+    );
+  }
+
+  async listShares(businessId: string, fileId: string): Promise<FileShare[]> {
+    const result = await this.db.query(
+      `SELECT * FROM file_shares
+       WHERE business_id = $1 AND file_id = $2
+       ORDER BY created_at ASC, grantee_kind ASC, grantee_id ASC`,
+      [businessId, fileId]
+    );
+    return (result.rows as Array<Record<string, unknown>>).map((row) => ({
+      fileId: String(row.file_id),
+      kind: row.grantee_kind === "role" ? "role" : "user",
+      id: String(row.grantee_id),
+      grantedBy: String(row.granted_by),
+      createdAt: row.created_at instanceof Date ? row.created_at : new Date(String(row.created_at)),
+    }));
+  }
+
+  async listSharedWith(
+    businessId: string,
+    ownerPrincipalId: string,
+    grantees: readonly FileGrantee[],
+    limit: number,
+    after?: FileCursor
+  ): Promise<FileRecord[]> {
+    if (grantees.length === 0) return [];
+    // The grantee set is variable-length, so it goes in as two parallel arrays rather than a
+    // generated `IN` list — a query whose text depends on how many Roles the reader holds would
+    // defeat the statement cache and invite an injection every time someone edits it.
+    const result = await this.db.query(
+      // EXISTS, not a join: a File shared both with the reader directly and with a Role they hold
+      // matches two share rows, and a join would emit it twice — showing it twice on one page and
+      // pushing a genuinely different File off the end of the cursor.
+      `SELECT f.* FROM files f
+       WHERE f.business_id = $1
+         AND f.owner_principal_id <> $2
+         AND EXISTS (
+           SELECT 1 FROM file_shares s
+           WHERE s.file_id = f.id
+             AND (s.grantee_kind, s.grantee_id) IN (
+               SELECT * FROM unnest($4::text[], $5::text[])
+             )
+         )
+         AND ($6::timestamptz IS NULL OR (f.created_at, f.id) < ($6::timestamptz, $7::uuid))
+       ORDER BY f.created_at DESC, f.id DESC
+       LIMIT $3`,
+      [
+        businessId,
+        ownerPrincipalId,
+        limit,
+        grantees.map((g) => g.kind),
+        grantees.map((g) => g.id),
+        after?.createdAt ?? null,
+        after?.id ?? null,
+      ]
+    );
+    return (result.rows as Array<Record<string, unknown>>).map(toRecord);
   }
 }

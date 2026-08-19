@@ -17,10 +17,19 @@ import {
   ALLOWED_MEDIA_TYPES,
   decodeFileCursor,
   downloadHeaders,
+  FILE_GRANTEE_KINDS,
+  FILE_GRANTEE_SCHEMA,
+  FILE_SHARES_SCHEMA,
   FILE_WIRE_SCHEMA,
+  type FileCursor,
+  type FileGrantee,
+  type FileGranteeKind,
+  type FileRecord,
   type FileService,
   fileErrorStatus,
   serializeFile,
+  serializeFilePage,
+  serializeShare,
 } from "@tulipfarm/files";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
@@ -36,6 +45,29 @@ export interface FileRoutesDeps {
    * someone writes a prompt around it. A function because the Soul is reloadable.
    */
   readonly acceptedInputModalities: () => readonly string[];
+}
+
+/** The two Files listings differ only in which set they draw from, so they page identically. */
+async function sendPage(
+  req: FastifyRequest,
+  reply: FastifyReply,
+  page: (
+    principalId: string,
+    limit: number,
+    cursor?: FileCursor
+  ) => Promise<{
+    files: readonly FileRecord[];
+    nextCursor: string | null;
+    shareCounts?: Map<string, number>;
+  }>
+): Promise<void> {
+  const { limit = 50, after } = req.query as { limit?: number; after?: string };
+  const cursor = after === undefined ? undefined : decodeFileCursor(after);
+  if (cursor === null) {
+    reply.code(400).send({ error: "that cursor is not one of ours" });
+    return;
+  }
+  reply.send(serializeFilePage(await page((req.principal as RequestPrincipal).id, limit, cursor)));
 }
 
 function reject(reply: FastifyReply, error: unknown): void {
@@ -179,16 +211,149 @@ export function registerFileRoutes(
         },
       },
     },
+    async (req, reply) =>
+      await sendPage(req, reply, (id, limit, cursor) =>
+        deps.files.listPage(DEPLOYMENT_BUSINESS_ID, id, limit, cursor)
+      )
+  );
+
+  app.get(
+    "/api/v1/files/shared-with-me",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "The Files another Principal has shared with the caller, newest first. Files the " +
+          "caller owns are left out — those are already on `GET /api/v1/files`. A Role share is " +
+          "resolved against the Roles the caller holds right now, so losing a Role removes its " +
+          "Files from this list on the very next request.",
+        tags: ["files"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        querystring: {
+          type: "object",
+          properties: {
+            limit: { type: "integer", minimum: 1, maximum: 200, default: 50 },
+            after: { type: "string", description: "A `nextCursor` from an earlier page." },
+          },
+        },
+        response: {
+          200: {
+            type: "object",
+            required: ["files"],
+            properties: {
+              files: { type: "array", items: FILE_WIRE_SCHEMA },
+              nextCursor: { type: "string", nullable: true },
+            },
+          },
+          400: ErrorSchema,
+          401: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) =>
+      await sendPage(req, reply, (id, limit, cursor) =>
+        deps.files.listSharedWithMe(DEPLOYMENT_BUSINESS_ID, id, limit, cursor)
+      )
+  );
+
+  app.get(
+    "/api/v1/files/:id/shares",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "Who a File is shared with. Only its owner may ask: a recipient cannot enumerate the " +
+          "other recipients, and a stranger gets the same 404 a missing File gives.",
+        tags: ["files"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+        response: { 200: FILE_SHARES_SCHEMA, 401: ErrorSchema, 404: ErrorSchema },
+      },
+    },
     async (req, reply) => {
       const principal = req.principal as RequestPrincipal;
-      const { limit = 50, after } = req.query as { limit?: number; after?: string };
-      const cursor = after === undefined ? undefined : decodeFileCursor(after);
-      if (cursor === null) {
-        reply.code(400).send({ error: "that cursor is not one of ours" });
-        return;
+      const { id } = req.params as { id: string };
+      try {
+        const shares = await deps.files.shares(DEPLOYMENT_BUSINESS_ID, id, principal.id);
+        reply.send({ shares: shares.map(serializeShare) });
+      } catch (error) {
+        reject(reply, error);
       }
-      const page = await deps.files.listPage(DEPLOYMENT_BUSINESS_ID, principal.id, limit, cursor);
-      reply.send({ files: page.files.map(serializeFile), nextCursor: page.nextCursor });
+    }
+  );
+
+  app.post(
+    "/api/v1/files/:id/shares",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "Grants one other Principal, or everyone holding one Role, read access to a File. " +
+          "Only the owner may share, and sharing conveys reading alone — a recipient can neither " +
+          "re-share nor revoke. Repeating a share is a no-op rather than an error.",
+        tags: ["files"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+        body: FILE_GRANTEE_SCHEMA,
+        response: {
+          204: { type: "null" },
+          400: ErrorSchema,
+          401: ErrorSchema,
+          404: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const principal = req.principal as RequestPrincipal;
+      const { id } = req.params as { id: string };
+      try {
+        await deps.files.share(DEPLOYMENT_BUSINESS_ID, id, principal.id, req.body as FileGrantee);
+        reply.code(204).send();
+      } catch (error) {
+        reject(reply, error);
+      }
+    }
+  );
+
+  app.delete(
+    "/api/v1/files/:id/shares/:kind/:granteeId",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "Revokes one share. The next read by that recipient fails, with no grace period and " +
+          "no cached decision to wait out. Answers 204 whether or not a share existed, so this " +
+          "route cannot be used to discover who a File was shared with.",
+        tags: ["files"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        params: {
+          type: "object",
+          required: ["id", "kind", "granteeId"],
+          properties: {
+            id: { type: "string" },
+            kind: { type: "string", enum: [...FILE_GRANTEE_KINDS] },
+            granteeId: { type: "string", minLength: 1 },
+          },
+        },
+        response: { 204: { type: "null" }, 401: ErrorSchema, 404: ErrorSchema },
+      },
+    },
+    async (req, reply) => {
+      const principal = req.principal as RequestPrincipal;
+      const { id, kind, granteeId } = req.params as {
+        id: string;
+        kind: FileGranteeKind;
+        granteeId: string;
+      };
+      try {
+        await deps.files.unshare(DEPLOYMENT_BUSINESS_ID, id, principal.id, {
+          kind,
+          id: granteeId,
+        });
+        reply.code(204).send();
+      } catch (error) {
+        reject(reply, error);
+      }
     }
   );
 

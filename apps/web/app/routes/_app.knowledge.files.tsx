@@ -1,16 +1,24 @@
 import { type MetaFunction, useLoaderData, useNavigate, useRouteError } from "@remix-run/react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { FileList } from "~/components/files/file-list";
 import { FilePreview } from "~/components/files/file-preview";
+import { ShareDialog } from "~/components/files/file-share";
 import { ResourcePanel } from "~/components/resource-panel";
 import { ErrorState } from "~/components/states";
 import { Button } from "~/components/ui/button";
 import { ApiError, getSession } from "~/lib/api";
-import { fetchFiles, type LibraryFile } from "~/lib/files";
+import { fetchFiles, fetchSharedWithMe, type LibraryFile } from "~/lib/files";
 
 export const meta: MetaFunction = () => [{ title: "Files · Knowledge · tulipfarm" }];
 
 const PAGE_SIZE = 25;
+
+const TABS = [
+  { id: "yours", label: "Yours", fetch: fetchFiles },
+  { id: "shared", label: "Shared with you", fetch: fetchSharedWithMe },
+] as const;
+
+type TabId = (typeof TABS)[number]["id"];
 
 export async function clientLoader() {
   const [page, viewer] = await Promise.all([fetchFiles({ limit: PAGE_SIZE }), getSession()]);
@@ -25,19 +33,56 @@ export default function FilesIndex() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState<LibraryFile | null>(null);
+  const [sharing, setSharing] = useState<LibraryFile | null>(null);
+  const [tab, setTab] = useState<TabId>("yours");
+  const tabRefs = useRef<Partial<Record<TabId, HTMLButtonElement>>>({});
+  // Switching tabs twice in quick succession leaves two requests in flight. Without this, whichever
+  // answers last wins, and the list can end up showing one tab's Files under the other tab's label
+  // — with a cursor that then pages the wrong set.
+  const request = useRef(0);
+
+  const load = TABS.find((candidate) => candidate.id === tab)?.fetch ?? fetchFiles;
 
   async function loadMore() {
     if (!cursor) return;
+    request.current += 1;
+    const ticket = request.current;
     setLoading(true);
     setError(null);
     try {
-      const batch = await fetchFiles({ limit: PAGE_SIZE, after: cursor });
+      const batch = await load({ limit: PAGE_SIZE, after: cursor });
+      if (request.current !== ticket) return;
       setFiles((prev) => [...prev, ...batch.files]);
       setCursor(batch.nextCursor);
     } catch (err) {
+      if (request.current !== ticket) return;
       setError(err instanceof Error ? err.message : "Those files could not be loaded.");
     } finally {
-      setLoading(false);
+      if (request.current === ticket) setLoading(false);
+    }
+  }
+
+  async function selectTab(next: TabId, focus = false) {
+    request.current += 1;
+    const ticket = request.current;
+    setTab(next);
+    if (focus) tabRefs.current[next]?.focus();
+    setLoading(true);
+    setError(null);
+    setFiles([]);
+    setCursor(null);
+    try {
+      const page = await (TABS.find((candidate) => candidate.id === next)?.fetch ?? fetchFiles)({
+        limit: PAGE_SIZE,
+      });
+      if (request.current !== ticket) return;
+      setFiles(page.files);
+      setCursor(page.nextCursor);
+    } catch (err) {
+      if (request.current !== ticket) return;
+      setError(err instanceof Error ? err.message : "Those files could not be loaded.");
+    } finally {
+      if (request.current === ticket) setLoading(false);
     }
   }
 
@@ -52,18 +97,48 @@ export default function FilesIndex() {
         </p>
       </div>
 
+      <div role="tablist" aria-label="Which files to show" className="flex flex-wrap gap-2">
+        {TABS.map((candidate, index) => (
+          <Button
+            key={candidate.id}
+            type="button"
+            role="tab"
+            ref={(element) => {
+              tabRefs.current[candidate.id] = element ?? undefined;
+            }}
+            size="sm"
+            variant={tab === candidate.id ? "default" : "outline"}
+            aria-selected={tab === candidate.id}
+            tabIndex={tab === candidate.id ? 0 : -1}
+            onClick={() => void selectTab(candidate.id)}
+            onKeyDown={(event) => {
+              const direction = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+              if (direction === 0) return;
+              event.preventDefault();
+              const next = TABS[(index + direction + TABS.length) % TABS.length];
+              if (next) void selectTab(next.id, true);
+            }}
+          >
+            {candidate.label}
+          </Button>
+        ))}
+      </div>
+
       {error ? (
         <p role="alert" className="text-sm text-destructive">
           {error}
         </p>
       ) : null}
 
-      {files.length === 0 ? (
+      {files.length === 0 && !loading ? (
         <div className="rounded-sm border border-dashed border-border px-4 py-10 text-center">
-          <p className="text-sm font-medium text-foreground">No files yet</p>
+          <p className="text-sm font-medium text-foreground">
+            {tab === "shared" ? "Nothing shared with you" : "No files yet"}
+          </p>
           <p className="mt-1 text-sm text-muted-foreground">
-            Attach an image or a PDF to a chat and it will appear here, alongside anything an agent
-            makes for you — so you can find it again without remembering which chat it arrived in.
+            {tab === "shared"
+              ? "When someone shares a file with you, or with a role you hold, it appears here. It leaves again the moment they revoke it."
+              : "Attach an image or a PDF to a chat and it will appear here, alongside anything an agent makes for you — so you can find it again without remembering which chat it arrived in."}
           </p>
         </div>
       ) : (
@@ -73,6 +148,7 @@ export default function FilesIndex() {
             viewerId={loaded.viewerId}
             onPreview={setPreviewing}
             onAttach={(file) => navigate(`/?attach=${encodeURIComponent(file.id)}`)}
+            onShare={setSharing}
           />
           {cursor ? (
             <div>
@@ -85,6 +161,7 @@ export default function FilesIndex() {
       )}
 
       <FilePreview file={previewing} onClose={() => setPreviewing(null)} />
+      <ShareDialog file={sharing} onClose={() => setSharing(null)} />
     </ResourcePanel>
   );
 }

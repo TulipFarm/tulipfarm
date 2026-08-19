@@ -85,7 +85,7 @@ import {
   WaitStore,
 } from "@tulipfarm/storage";
 import { PgEffectStore } from "@tulipfarm/tool-broker";
-import { ApprovalsRepo, ToolApprovalService } from "@tulipfarm/tool-host";
+import { ApprovalsRepo, collectHeldRoleIds, ToolApprovalService } from "@tulipfarm/tool-host";
 import { config } from "dotenv";
 import type { FastifyBaseLogger } from "fastify";
 import { PgBoss } from "pg-boss";
@@ -527,8 +527,17 @@ async function boot() {
     const taskRepo = new TaskRepo(transactionPort(pool));
     // Uploads land on the filesystem blob store for now. Slice 11 swaps this one construction for
     // the S3 driver; nothing above the port changes, which is the point of the port.
+    // Sharing a File with a Role resolves that Role live on every read, through the one shared
+    // implementation the Tool gate uses. A second answer to "which Roles does this person hold"
+    // is how a File stays readable to someone a Role no longer contains.
+    const fileAuthorityRepos = {
+      roles: new PgRoleRepo(transactionPort(pool)),
+      groups: new PgGroupRepo(transactionPort(pool)),
+    };
     const fileService = new FileService({
       repo: new PgFileRepo(pool),
+      rolesOf: (businessId, principalId) =>
+        collectHeldRoleIds(fileAuthorityRepos, businessId, principalId, new Date()),
       blobs: new FileSystemBlobPort(join(resolveDataDir() ?? process.cwd(), "blobs")),
       newId: () => randomUUID(),
       // Read per upload from the Soul, so an operator turning downscaling on takes effect on the

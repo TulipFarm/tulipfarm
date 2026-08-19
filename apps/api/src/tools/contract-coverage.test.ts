@@ -458,6 +458,32 @@ describe("tool contract coverage", () => {
     expect(actionless).toEqual([]);
   });
 
+  // The ticket's demand, stated as a test rather than as a belief: an Agent must not be able to
+  // widen who can read a File. Sharing is a decision a person makes about their own upload, and an
+  // Agent reads attachments from untrusted sources — a Tool that shares is a Tool that a crafted
+  // PDF can aim. If sharing ever needs to be agentic, this test is where that argument gets made.
+  it("gives no Tool any way to share a File or read another Principal's", () => {
+    const reachesSharing = tools.filter((tool) => {
+      const authorization = tool.definition?.authorization;
+      const surface = [
+        tool.name,
+        authorization?.action ?? "",
+        ...(authorization?.resources ?? []),
+      ].join(" ");
+      return /\bfile[._-]?share|share[._-]?file|file\.(share|unshare)/i.test(surface);
+    });
+    expect(reachesSharing.map((tool) => tool.name)).toEqual([]);
+
+    // `navigate_to` sends a person to an app path; it cannot call the API. Everything else that
+    // holds a URL takes it from an Integration manifest, which is authored per provider and can
+    // only name that provider's host. Neither can reach a first-party route, and this asserts the
+    // property that makes that true rather than re-listing the routes.
+    const firstPartyCallers = tools.filter((tool) =>
+      [JSON.stringify(tool.inputSchema), tool.description].join(" ").includes("/api/v1/files")
+    );
+    expect(firstPartyCallers.map((tool) => tool.name)).toEqual([]);
+  });
+
   it("keeps every declared resource inside the two-level grammar", () => {
     const offenders = tools.flatMap((tool) =>
       (tool.definition?.authorization.resources ?? [])

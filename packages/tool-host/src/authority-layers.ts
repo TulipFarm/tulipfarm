@@ -116,6 +116,42 @@ export function agentAuthorityPrincipal(businessId: string, agentId: string): Au
   return { id: agentId, businessId, kind: "agent" };
 }
 
+/**
+ * Every Role a Principal holds right now: direct assignments plus Roles held through a group,
+ * with anything expired left out.
+ *
+ * Exported because a second caller needs the same answer — File sharing resolves a Role share
+ * against the reader's live Roles — and two implementations of "which Roles does this person hold"
+ * is exactly how a File stays readable to someone a Role no longer contains.
+ */
+export async function collectHeldRoleIds(
+  repos: Pick<AuthorityLayerResolverOptions, "roles" | "groups">,
+  businessId: string,
+  principalId: string,
+  now: Date
+): Promise<string[]> {
+  const roleIds = new Set<string>();
+  const directAssignments = await repos.roles.listAssignments(businessId, principalId, now);
+  for (const assignment of directAssignments) roleIds.add(assignment.roleId);
+
+  const groupRepo = repos.groups;
+  if (groupRepo !== undefined) {
+    const memberships = await groupRepo.listMemberships(businessId, principalId, now);
+    for (const membership of memberships) {
+      const group = await groupRepo.getGroup(businessId, membership.groupId);
+      // A missing group, or one that has itself expired, grants nothing even if the membership
+      // row survives — `listMemberships` only checks the membership's own expiry.
+      if (group === undefined || (group.expiresAt !== undefined && group.expiresAt <= now)) {
+        continue;
+      }
+      const held = await groupRepo.listGroupRoles(businessId, membership.groupId, now);
+      for (const holding of held) roleIds.add(holding.roleId);
+    }
+  }
+
+  return [...roleIds];
+}
+
 /** Resolve durable principal and role rows only; Soul compilation stays on the shared path. */
 export class LiveAuthorityLayerResolver {
   private readonly now: () => Date;
@@ -204,30 +240,7 @@ export class LiveAuthorityLayerResolver {
     principal: AuthorityPrincipal,
     now: Date
   ): Promise<string[]> {
-    const roleIds = new Set<string>();
-    const directAssignments = await this.options.roles.listAssignments(
-      principal.businessId,
-      principal.id,
-      now
-    );
-    for (const assignment of directAssignments) roleIds.add(assignment.roleId);
-
-    const groupRepo = this.options.groups;
-    if (groupRepo !== undefined) {
-      const memberships = await groupRepo.listMemberships(principal.businessId, principal.id, now);
-      for (const membership of memberships) {
-        const group = await groupRepo.getGroup(principal.businessId, membership.groupId);
-        // A missing group, or one that has itself expired, grants nothing even if the membership
-        // row survives — `listMemberships` only checks the membership's own expiry.
-        if (group === undefined || (group.expiresAt !== undefined && group.expiresAt <= now)) {
-          continue;
-        }
-        const held = await groupRepo.listGroupRoles(principal.businessId, membership.groupId, now);
-        for (const holding of held) roleIds.add(holding.roleId);
-      }
-    }
-
-    return [...roleIds];
+    return await collectHeldRoleIds(this.options, principal.businessId, principal.id, now);
   }
 
   resolveAgentLayer(businessId: string, agentId: string): Promise<AuthorityLayer> {
