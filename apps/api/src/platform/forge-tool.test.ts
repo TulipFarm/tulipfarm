@@ -6,21 +6,44 @@ import { parse as parseYaml } from "yaml";
 import type { PlatformToolContext } from "./tools";
 import { routineForgeTool } from "./tools";
 
-const VALID_DEFINITION: Record<string, unknown> = {
-  id: "daily-report",
-  version: "1.0",
-  start: "Report",
-  "x-triggers": [{ type: "cron", schedule: "0 9 * * *" }],
-  functions: [{ name: "send", operation: "tool:resource_search" }],
-  states: [
-    {
-      name: "Report",
-      type: "operation",
-      actions: [{ functionRef: { refName: "send" } }],
-      end: true,
-    },
-  ],
+const VALID_ROUTINE = {
+  apiVersion: "tulipfarm.ai/v1",
+  kind: "Routine",
+  metadata: {
+    id: "11111111-1111-4111-8111-111111111111",
+    slug: "daily-report",
+    schemaVersion: 1,
+    authoredVersion: 1,
+    lifecycle: "published",
+  },
+  spec: {
+    owner: "operations",
+    start: "Decide",
+    states: [{ name: "Decide", type: "branch", conditions: [{ condition: "true", end: true }] }],
+  },
 };
+
+function trigger(slug = "daily-report-manual") {
+  return {
+    apiVersion: "tulipfarm.ai/v1",
+    kind: "Trigger",
+    metadata: {
+      id: "22222222-2222-4222-8222-222222222222",
+      slug,
+      schemaVersion: 1,
+      authoredVersion: 1,
+      lifecycle: "published",
+    },
+    spec: {
+      type: "manual",
+      routineRef: { name: "daily-report", version: "1" },
+      eventType: "routine.manual",
+      eventVersion: 1,
+      backgroundIdentity: { principalKind: "service", principalId: "routine-runner" },
+      deduplication: { key: "daily-report-manual" },
+    },
+  };
+}
 
 function makeSoulWriter(): SoulWriter & { apply: ReturnType<typeof vi.fn> } {
   return {
@@ -42,112 +65,72 @@ describe("routine_forge", () => {
     onRoutinesChanged = vi.fn(async () => {}) as typeof onRoutinesChanged;
   });
 
-  function ctx(extra: Partial<PlatformToolContext> = {}): PlatformToolContext {
-    return { soulWriter, onRoutinesChanged, ...extra };
+  function ctx(): PlatformToolContext {
+    return { soulWriter, onRoutinesChanged };
   }
 
-  it("puts routine.yaml + hooks.ts through the write gateway as one changeset, no approval step", async () => {
+  it("commits the published Routine and Trigger atomically", async () => {
     const result = await routineForgeTool.handler(
-      {
-        name: "daily-report",
-        definition: VALID_DEFINITION,
-        hooks: "({ beforeHook(ctx) { return ctx; } })",
-      },
+      { name: "daily-report", definition: VALID_ROUTINE, triggers: [trigger()] },
       ctx()
     );
+
     expect(result).toMatchObject({
       success: true,
-      data: { name: "daily-report", committed: true, hasHooks: true },
+      data: { name: "daily-report", committed: true, triggerSlugs: ["daily-report-manual"] },
     });
-
-    expect(soulWriter.apply).toHaveBeenCalledTimes(1);
     const request = soulWriter.apply.mock.calls[0][0] as {
-      subject: string;
-      source: string;
       businessId: string;
-      changes: Array<{ op: string; target: Record<string, unknown>; content?: string }>;
+      changes: Array<{ target: Record<string, unknown>; content: string }>;
     };
-    expect(request).toMatchObject({
-      subject: "soul: forge routine daily-report",
-      source: "agent",
-      businessId: DEPLOYMENT_BUSINESS_ID,
-    });
-    expect(request.changes).toEqual([
-      {
-        op: "put",
-        target: { kind: "Routine", slug: "daily-report" },
-        content: expect.any(String),
-      },
-      {
-        op: "put",
-        target: { kind: "Routine", slug: "daily-report", companion: "hooks.ts" },
-        content: "({ beforeHook(ctx) { return ctx; } })",
-      },
+    expect(request.businessId).toBe(DEPLOYMENT_BUSINESS_ID);
+    expect(request.changes.map((change) => change.target)).toEqual([
+      { kind: "Routine", slug: "daily-report" },
+      { kind: "Trigger", slug: "daily-report-manual" },
     ]);
-    expect(parseYaml(request.changes[0].content ?? "")).toMatchObject({
-      id: "daily-report",
-      start: "Report",
-    });
+    expect(parseYaml(request.changes[0]?.content)).toMatchObject(VALID_ROUTINE);
+    expect(parseYaml(request.changes[1]?.content)).toMatchObject(trigger());
     expect(onRoutinesChanged).toHaveBeenCalledOnce();
   });
 
-  it("omits the hooks companion when no hooks are supplied", async () => {
-    const result = await routineForgeTool.handler(
-      { name: "no-hooks", definition: { ...VALID_DEFINITION, id: "no-hooks" } },
-      ctx()
-    );
-    expect(result).toMatchObject({ success: true, data: { hasHooks: false } });
-    const request = soulWriter.apply.mock.calls[0][0] as { changes: unknown[] };
-    expect(request.changes).toHaveLength(1);
-  });
-
-  it("rejects deferred constructs BEFORE writing anything", async () => {
-    const result = await routineForgeTool.handler(
+  it("rejects unpublished, mismatched, and duplicate documents before writing", async () => {
+    const unpublished = await routineForgeTool.handler(
       {
-        name: "bad",
+        name: "daily-report",
         definition: {
-          ...VALID_DEFINITION,
-          id: "bad",
-          "x-triggers": [{ type: "integration" }],
+          ...VALID_ROUTINE,
+          metadata: { ...VALID_ROUTINE.metadata, lifecycle: "draft" },
         },
+        triggers: [trigger()],
       },
       ctx()
     );
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.message).toContain("deferred in V1");
-    }
+    expect(unpublished).toMatchObject({ success: false, error: { code: "validation_error" } });
+
+    const mismatched = await routineForgeTool.handler(
+      {
+        name: "daily-report",
+        definition: VALID_ROUTINE,
+        triggers: [
+          {
+            ...trigger(),
+            spec: { ...trigger().spec, routineRef: { name: "other", version: "1" } },
+          },
+        ],
+      },
+      ctx()
+    );
+    expect(mismatched).toMatchObject({ success: false, error: { code: "validation_error" } });
+
+    const duplicate = await routineForgeTool.handler(
+      { name: "daily-report", definition: VALID_ROUTINE, triggers: [trigger(), trigger()] },
+      ctx()
+    );
+    expect(duplicate).toMatchObject({ success: false, error: { code: "validation_error" } });
     expect(soulWriter.apply).not.toHaveBeenCalled();
   });
 
-  it("rejects invalid slugs and schema violations", async () => {
-    const badSlug = await routineForgeTool.handler(
-      { name: "Bad Slug!", definition: VALID_DEFINITION },
-      ctx()
-    );
-    expect(badSlug.success).toBe(false);
-
-    const badSchema = await routineForgeTool.handler(
-      { name: "ok-name", definition: { id: "x", bogus: true } },
-      ctx()
-    );
-    expect(badSchema.success).toBe(false);
-    expect(soulWriter.apply).not.toHaveBeenCalled();
-  });
-
-  it("maps a VALIDATION_FAILED from the gateway to validation_error", async () => {
-    soulWriter.apply.mockRejectedValueOnce(
-      new SoulWriteError("VALIDATION_FAILED", "routines/daily-report/routine.yaml is invalid")
-    );
-    const result = await routineForgeTool.handler(
-      { name: "daily-report", definition: VALID_DEFINITION },
-      ctx()
-    );
-    expect(result).toMatchObject({ success: false, error: { code: "validation_error" } });
-    expect(onRoutinesChanged).not.toHaveBeenCalled();
-  });
-
-  it("maps a CONFLICT from the gateway to the transient unavailable fault", async () => {
+  it("maps writer failures without reporting a routine as committed", async () => {
     soulWriter.apply.mockRejectedValueOnce(
       new SoulWriteError(
         "CONFLICT" satisfies SoulWriteErrorCode,
@@ -155,70 +138,15 @@ describe("routine_forge", () => {
       )
     );
     const result = await routineForgeTool.handler(
-      { name: "daily-report", definition: VALID_DEFINITION },
+      { name: "daily-report", definition: VALID_ROUTINE, triggers: [trigger()] },
       ctx()
     );
     expect(result).toMatchObject({ success: false, error: { code: "unavailable" } });
+    expect(onRoutinesChanged).not.toHaveBeenCalled();
   });
 
-  it("rejects an agent: function ref naming an unknown agent when a Soul is loaded", async () => {
-    const result = await routineForgeTool.handler(
-      {
-        name: "daily-report",
-        definition: {
-          ...VALID_DEFINITION,
-          functions: [{ name: "send", operation: "agent:ghost-agent" }],
-        },
-      },
-      ctx({ soulLoader: { skills: new Map(), agents: new Map() } })
-    );
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.message).toContain('agent "ghost-agent" not found');
-    }
-    expect(soulWriter.apply).not.toHaveBeenCalled();
-  });
-
-  it("accepts a known agent: function ref when a Soul is loaded", async () => {
-    const result = await routineForgeTool.handler(
-      {
-        name: "daily-report",
-        definition: {
-          ...VALID_DEFINITION,
-          functions: [{ name: "send", operation: "agent:joke-generator" }],
-        },
-      },
-      ctx({
-        soulLoader: {
-          skills: new Map(),
-          agents: new Map([
-            ["joke-generator", { name: "joke-generator", frontmatter: {}, body: "" }],
-          ]),
-        },
-      })
-    );
-    expect(result.success).toBe(true);
-  });
-
-  it("does not block an agent: function ref when no Soul is loaded (cannot verify)", async () => {
-    const result = await routineForgeTool.handler(
-      {
-        name: "daily-report",
-        definition: {
-          ...VALID_DEFINITION,
-          functions: [{ name: "send", operation: "agent:whatever" }],
-        },
-      },
-      ctx()
-    );
-    expect(result.success).toBe(true);
-  });
-
-  it("describes the required top-level fields so the model doesn't fall through to skill_create", () => {
-    const { description } = routineForgeTool;
-    for (const field of ["id", "version", "start", "states", "x-triggers"]) {
-      expect(description).toContain(field);
-    }
-    expect(description.toLowerCase()).toContain("not skill_create");
+  it("describes canonical Routine and Trigger requirements", () => {
+    expect(routineForgeTool.description).toContain("canonical published Routine");
+    expect(routineForgeTool.description).toContain("canonical published Trigger");
   });
 });

@@ -51,6 +51,7 @@ interface WriteArguments {
   readonly kind?: unknown;
   readonly slug?: unknown;
   readonly content?: unknown;
+  readonly definitionMode?: unknown;
   readonly subject?: unknown;
 }
 
@@ -94,6 +95,10 @@ export function soulWriterTool(soul: EvalSoul): SoulWriterTool {
         const kind = typeof args.kind === "string" ? args.kind : undefined;
         const slug = typeof args.slug === "string" ? args.slug : undefined;
         const content = typeof args.content === "string" ? args.content : undefined;
+        const definitionMode =
+          args.definitionMode === "definition" || args.definitionMode === "legacy"
+            ? args.definitionMode
+            : "legacy";
         if (kind === undefined || slug === undefined || content === undefined) {
           return {
             status: "invalid_arguments",
@@ -114,10 +119,7 @@ export function soulWriterTool(soul: EvalSoul): SoulWriterTool {
             changes: [
               {
                 op: "put",
-                // `SoulLoader` reads the legacy definition file (`AGENT.md`, `schema.yml`), so a
-                // canonical write would commit a file the product then cannot see — the Case would
-                // pass on a commit that changed nothing observable.
-                target: { kind: kind as never, slug, definitionMode: "legacy" },
+                target: { kind: kind as never, slug, definitionMode },
                 content,
               },
             ],

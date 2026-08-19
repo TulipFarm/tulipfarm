@@ -1,4 +1,4 @@
-import type { SoulRoutine } from "@tulipfarm/soul";
+import type { RuntimeBundle } from "@tulipfarm/soul";
 import { describe, expect, it, vi } from "vitest";
 import { ScheduleDispatcher } from "./dispatcher";
 import type { RoutineScheduleStateRow, RoutineScheduleStateStore } from "./state-store";
@@ -6,16 +6,46 @@ import type { RoutineScheduleStateRow, RoutineScheduleStateStore } from "./state
 const NOW_MS = Date.parse("2026-01-01T00:00:00.000Z");
 const DUE_AT = new Date(NOW_MS - 3_600_000).toISOString();
 
-function routine(config: Record<string, unknown>): SoulRoutine {
-  return { name: "daily-digest", config } as unknown as SoulRoutine;
-}
-
-/** One `datetime` Trigger, already due, so `planSchedule` always returns exactly one fire. */
-function soulLoaderWithDueTrigger() {
+/** One published datetime Trigger, already due, so `planSchedule` always returns exactly one fire. */
+function activeBundleWithDueTrigger(): RuntimeBundle {
   return {
-    routines: new Map([
-      ["daily-digest", routine({ "x-triggers": [{ type: "datetime", at: DUE_AT }] })],
-    ]),
+    bundleVersion: 1,
+    businessId: "biz-1",
+    changesetId: "changeset-1",
+    commitSha: "commit-1",
+    digest: "digest",
+    definitions: [
+      {
+        kind: "Trigger",
+        id: "22222222-2222-4222-8222-222222222222",
+        slug: "daily-digest-once",
+        authoredVersion: 1,
+        hash: "hash",
+        document: {
+          apiVersion: "tulipfarm.ai/v1",
+          kind: "Trigger",
+          metadata: {
+            id: "22222222-2222-4222-8222-222222222222",
+            slug: "daily-digest-once",
+            schemaVersion: 1,
+            authoredVersion: 1,
+            lifecycle: "published",
+          },
+          spec: {
+            type: "datetime",
+            at: DUE_AT,
+            routineRef: { name: "daily-digest", version: "1" },
+            eventType: "routine.scheduled",
+            eventVersion: 1,
+            backgroundIdentity: { principalKind: "service", principalId: "routine-runner" },
+            deduplication: { key: "daily-digest-once" },
+          },
+        },
+      },
+    ],
+    assets: [],
+    get: () => undefined,
+    getById: () => undefined,
   };
 }
 
@@ -50,7 +80,7 @@ describe("ScheduleDispatcher", () => {
   it("does not advance the watermark when startRoutine fails, so the fire is retried next tick", async () => {
     const stateStore = fakeStateStore();
     const dispatcher = new ScheduleDispatcher({
-      soulLoader: soulLoaderWithDueTrigger(),
+      activeBundle: async () => activeBundleWithDueTrigger(),
       stateStore,
       startRoutine: vi.fn().mockRejectedValue(new Error("transient")),
       businessId: "biz-1",
@@ -68,7 +98,7 @@ describe("ScheduleDispatcher", () => {
   it("advances the watermark when startRoutine succeeds", async () => {
     const stateStore = fakeStateStore();
     const dispatcher = new ScheduleDispatcher({
-      soulLoader: soulLoaderWithDueTrigger(),
+      activeBundle: async () => activeBundleWithDueTrigger(),
       stateStore,
       startRoutine: vi.fn().mockResolvedValue({ runId: "run-1", outcome: "started" }),
       businessId: "biz-1",
@@ -95,7 +125,7 @@ describe("ScheduleDispatcher", () => {
     };
     const stateStore = fakeStateStore([existingRow]);
     const dispatcher = new ScheduleDispatcher({
-      soulLoader: { routines: new Map() },
+      activeBundle: async () => undefined,
       stateStore,
       startRoutine: vi.fn(),
       businessId: "biz-1",
