@@ -17,6 +17,7 @@ import type { IntegrationConversationsRepo } from "../ingress/repo";
 import { buildDeclarativeTools } from "./declarative/tools";
 import type { GitHubInstallationDirectory } from "./github/installation";
 import { buildGitHubTools } from "./github/tools";
+import { buildGoogleTools } from "./google/tools";
 import { buildToolRegistry } from "./setup";
 import { buildSlackTools } from "./slack/tools";
 
@@ -118,6 +119,17 @@ function slackDefinitions(): readonly LabeledDefinition[] {
   );
 }
 
+function googleDefinitions(): readonly LabeledDefinition[] {
+  return definitionsFrom(
+    "google",
+    buildGoogleTools(BUSINESS_ID, {
+      effects: new MemoryEffectStore(),
+      adapters: new Map<string, ToolAdapter>(),
+      credentials: inert<CredentialDispatcher>(),
+    })
+  );
+}
+
 function integration(egress: IntegrationManifest["egress"]): SoulIntegration {
   return {
     slug: "google-docs",
@@ -190,6 +202,7 @@ function allDefinitions(): readonly LabeledDefinition[] {
     ...localDefinitions(),
     ...githubDefinitions(),
     ...slackDefinitions(),
+    ...googleDefinitions(),
     ...declarativeDefinitions(),
   ];
 }

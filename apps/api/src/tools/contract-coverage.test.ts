@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   type EgressHttpPort,
   GITHUB_TOOL_CONTRACTS,
+  GOOGLE_TOOL_CONTRACTS,
   SLACK_TOOL_CONTRACTS,
 } from "@tulipfarm/integrations";
 import type { SecretsService } from "@tulipfarm/secrets";
@@ -26,6 +27,7 @@ import { DeclarativeToolSync } from "./declarative/sync";
 import { declarativeToolName } from "./declarative/tools";
 import type { GitHubInstallationDirectory } from "./github/installation";
 import { buildGitHubTools } from "./github/tools";
+import { buildGoogleTools } from "./google/tools";
 import { buildToolRegistry } from "./setup";
 import { buildSlackTools } from "./slack/tools";
 
@@ -154,6 +156,20 @@ const EXPECTED_FAMILY_TOOL_NAMES = [
     ],
   },
   { family: "slack", names: ["send_slack_message"] },
+  {
+    family: "google",
+    names: [
+      "calendar_create_event",
+      "calendar_list_events",
+      "docs_append",
+      "docs_create",
+      "docs_read",
+      "drive_search",
+      "gmail_draft",
+      "gmail_read",
+      "gmail_search",
+    ],
+  },
   { family: "declarative/google-docs", names: [GOOGLE_DOCS_READ_DOCUMENT_TOOL_NAME] },
 ] as const;
 
@@ -163,12 +179,13 @@ const EXPECTED_TOTAL_TOOL_COUNT =
 
 const EXPECTED_CREDENTIAL_MODES_BY_PROVIDER = {
   github: "user_preferred",
+  google: "service",
   "google-docs": "service",
   slack: "service",
 } as const;
 
 const PUBLISHED_DESTINATIONS_BY_ACTION = new Map(
-  [...GITHUB_TOOL_CONTRACTS, ...SLACK_TOOL_CONTRACTS].map((contract) => [
+  [...GITHUB_TOOL_CONTRACTS, ...SLACK_TOOL_CONTRACTS, ...GOOGLE_TOOL_CONTRACTS].map((contract) => [
     contract.spec.action,
     contract.spec.allowedDestinations,
   ])
@@ -230,6 +247,14 @@ function buildSlackFitnessTools(): readonly ToolDef[] {
   });
 }
 
+function buildGoogleFitnessTools(): readonly ToolDef[] {
+  return buildGoogleTools(BUSINESS_ID, {
+    effects: new MemoryEffectStore(),
+    adapters: new Map<string, ToolAdapter>(),
+    credentials: inert<CredentialDispatcher>(),
+  });
+}
+
 function readGoogleDocsIntegration(): SoulIntegration {
   const integrationDir = join(process.cwd(), "../../integrations/google-docs");
   const manifest = parseYaml(readFileSync(join(integrationDir, "manifest.yml"), "utf8"));
@@ -263,6 +288,7 @@ function registerAllFamilies(): CoveredTools {
     ...stubbedCoreServices(),
     github: buildGitHubFitnessTools(),
     slack: buildSlackFitnessTools(),
+    google: buildGoogleFitnessTools(),
   });
 
   const declarativeProblems: string[] = [];
@@ -396,6 +422,8 @@ function expectedCredentialModeFor(provider: string): string | undefined {
   switch (provider) {
     case "github":
       return EXPECTED_CREDENTIAL_MODES_BY_PROVIDER.github;
+    case "google":
+      return EXPECTED_CREDENTIAL_MODES_BY_PROVIDER.google;
     case "google-docs":
       return EXPECTED_CREDENTIAL_MODES_BY_PROVIDER["google-docs"];
     case "slack":

@@ -187,6 +187,7 @@ export const MEMBER_ALLOWED_SURFACES: readonly {
   /** Provider grants expose the surface only; provider ACLs still decide account access. */
   { type: "integration.github", actions: ["*"], enforcedIn: "tools/github/tools.ts" },
   { type: "integration.slack", actions: ["*"], enforcedIn: "tools/slack/tools.ts" },
+  { type: "integration.google", actions: ["*"], enforcedIn: "tools/google/tools.ts" },
   /** Explicit vocabulary counterpart; authority already comes from the wildcard grant. */
   {
     type: "record",
