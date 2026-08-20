@@ -191,6 +191,28 @@ export function formatIso(value: string): string {
   });
 }
 
+const DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/**
+ * Locale-formatted calendar day for a `format: date` field — no time of day.
+ *
+ * A bare `YYYY-MM-DD` must be built from its parts rather than handed to `new Date`, which reads
+ * it as UTC midnight and so renders the previous day everywhere west of Greenwich.
+ */
+export function formatIsoDate(value: string): string {
+  const parts = DATE_ONLY.exec(value.trim());
+  const date = parts
+    ? new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]))
+    : new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "2-digit" });
+}
+
+// Single entry point for the "date" kind, so the read view and the filter cannot drift apart.
+function formatDateField(field: FieldDescriptor, value: string): string {
+  return field.format === "date" ? formatIsoDate(value) : formatIso(value);
+}
+
 // Best human label for a target record: a hinted field, else the first non-system string, else id.
 // Shared by the x-links combobox (picker) and the detail link (so both show "Acme Corp", not a UUID).
 const LABEL_HINTS = ["name", "title", "label", "summary"];
@@ -228,7 +250,7 @@ export function renderValue(
     case "boolean":
       return { kind: "bool", value: Boolean(value) };
     case "date":
-      return { kind: "text", text: formatIso(String(value)) };
+      return { kind: "text", text: formatDateField(field, String(value)) };
     case "array": {
       const arr = Array.isArray(value) ? value : [value];
       if (arr.length === 0) return { kind: "muted", text: "—" };
@@ -260,7 +282,7 @@ export function cellText(field: FieldDescriptor, value: unknown): string {
     case "boolean":
       return value ? "true" : "false";
     case "date":
-      return formatIso(String(value)).toLowerCase();
+      return formatDateField(field, String(value)).toLowerCase();
     case "array": {
       const arr = Array.isArray(value) ? value : [value];
       return arr.map(String).join(", ").toLowerCase();

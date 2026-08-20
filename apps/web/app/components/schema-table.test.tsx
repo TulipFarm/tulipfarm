@@ -123,3 +123,50 @@ test("descending sort reflects aria-sort=descending and the ↓ glyph", () => {
   expect(header).toHaveAttribute("aria-sort", "descending");
   expect(header.textContent).toContain("↓");
 });
+
+// ── Long-value truncation (#439): a wide cell must not dictate the table's column widths ──────────
+
+const LONG_TITLE =
+  "Customer reports the login flow returns a 500 whenever the SSO assertion carries a group claim longer than 256 characters, which cascades into the session store rejecting the write";
+
+const longRecords: ResourceRecord[] = [
+  {
+    id: "TICK-3",
+    title: LONG_TITLE,
+    customerId: "CUST-9",
+    open: true,
+    version: 1,
+    createdAt: "",
+    updatedAt: "2026-06-08T00:00:00Z",
+  },
+];
+
+function renderLongTable() {
+  const Stub = createRemixStub([
+    {
+      path: "/",
+      Component: () => <SchemaTable columns={columns} records={longRecords} type="ticket" />,
+    },
+  ]);
+  render(<Stub initialEntries={["/"]} />);
+}
+
+test("a long cell value is width-capped and truncated rather than widening the column", () => {
+  renderLongTable();
+  const cell = screen.getByText(LONG_TITLE).closest("td");
+  expect(cell).not.toBeNull();
+  const clamp = cell?.querySelector(".truncate");
+  expect(clamp).not.toBeNull();
+  expect(clamp?.className).toMatch(/max-w-/);
+});
+
+test("a truncated cell still offers the full value on hover instead of hiding it", () => {
+  renderLongTable();
+  expect(screen.getByTitle(LONG_TITLE)).toBeInTheDocument();
+});
+
+test("a short cell value carries no title, so hover stays meaningful", () => {
+  renderTable();
+  const cell = screen.getByText("First").closest("td");
+  expect(cell?.querySelector("[title]")).toBeNull();
+});
