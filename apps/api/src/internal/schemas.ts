@@ -295,9 +295,41 @@ export const InternalTurnMessageBodySchema = {
   additionalProperties: false,
   properties: {
     attempt: { type: "integer", minimum: 1 },
-    content: { type: "string", minLength: 1 },
+    // Empty is legal: a Turn that ran Tools and then stopped to ask wrote no prose, but the
+    // Message still has to exist to carry `metadata.toolCalls` into the restored transcript.
+    content: { type: "string" },
     metadata: MESSAGE_METADATA_SCHEMA,
   },
+} as const;
+
+/** Links the Surfaces an attempt presented into its Conversation. */
+export const InternalTurnSurfacesBodySchema = {
+  type: "object",
+  required: ["attempt", "surfaces"],
+  additionalProperties: false,
+  properties: {
+    attempt: { type: "integer", minimum: 1 },
+    surfaces: {
+      type: "array",
+      minItems: 1,
+      items: {
+        type: "object",
+        required: ["artifactId", "revision"],
+        additionalProperties: false,
+        properties: {
+          artifactId: { type: "string", minLength: 1 },
+          revision: { type: "integer", minimum: 1 },
+        },
+      },
+    },
+  },
+} as const;
+
+export const InternalTurnSurfacesResponseSchema = {
+  type: "object",
+  required: ["linked"],
+  additionalProperties: false,
+  properties: { linked: { type: "integer", minimum: 0 } },
 } as const;
 
 export const InternalTurnMessageResponseSchema = {

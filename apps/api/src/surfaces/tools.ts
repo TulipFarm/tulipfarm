@@ -71,36 +71,125 @@ const componentSchema = (
 ): Record<string, unknown> => {
   if (!presentation) return { not: {} };
   return {
-    type: "object",
+    type: ["object", "string"],
     description:
       "A discriminated Surface component. Keep name and version separate and put all display data inside props.",
-    oneOf: components.map((component) => ({
-      type: "object",
-      additionalProperties: false,
-      required: ["name", "version", "props"],
-      description: `${component.name} version ${component.version}`,
-      properties: {
-        name: {
-          const: component.name,
-          description: `Use exactly "${component.name}". Never append the version to this value.`,
-        },
-        version: {
-          const: component.version,
-          description: `Use exactly "${component.version}" as a separate field.`,
-        },
-        props: {
-          ...component.propsSchema,
-          description: `Props for ${component.name}; do not place these fields beside name or version.`,
-        },
+    required: ["name", "version", "props"],
+    properties: {
+      name: {
+        type: "string",
+        description: "Component name only. Never append the version to this value.",
       },
-      examples: component.examples.slice(0, 1).map((props) => ({
-        name: component.name,
-        version: component.version,
-        props,
+      version: {
+        type: "string",
+        description: "Component version as a separate field.",
+      },
+      props: {
+        type: "object",
+        description: "All component display data.",
+      },
+    },
+    oneOf: [
+      ...components.map((component) => ({
+        type: "object",
+        additionalProperties: false,
+        required: ["name", "version", "props"],
+        description: `${component.name} version ${component.version}`,
+        properties: {
+          name: {
+            const: component.name,
+            description: `Use exactly "${component.name}". Never append the version to this value.`,
+          },
+          version: {
+            const: component.version,
+            description: `Use exactly "${component.version}" as a separate field.`,
+          },
+          props: {
+            ...component.propsSchema,
+            description: `Props for ${component.name}; do not place these fields beside name or version.`,
+          },
+        },
+        examples: component.examples.slice(0, 1).map((props) => ({
+          name: component.name,
+          version: component.version,
+          props,
+        })),
       })),
-    })),
+      {
+        type: "string",
+        minLength: 2,
+        description:
+          "Accepted only to recover if the component was accidentally JSON-stringified. Prefer the object shape.",
+      },
+    ],
   };
 };
+
+const BASE_COMPONENT_SCHEMA: Record<string, unknown> = {
+  type: ["object", "string"],
+  description:
+    'Use {"name":"ComponentName","version":"1.0","props":{...}}. Keep the version out of name.',
+  required: ["name", "version", "props"],
+  properties: {
+    name: { type: "string", minLength: 1 },
+    version: { type: "string", minLength: 1 },
+    props: { type: "object" },
+  },
+};
+
+type SurfaceComponentInput = {
+  name: string;
+  version: string;
+  props: Readonly<Record<string, unknown>>;
+};
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeComponentInput(
+  raw: unknown
+):
+  | { success: true; component: SurfaceComponentInput }
+  | { success: false; result: ReturnType<typeof err> } {
+  let component = raw;
+  if (typeof raw === "string") {
+    try {
+      component = JSON.parse(raw);
+    } catch {
+      return {
+        success: false,
+        result: err("validation_error", "/component must be an object or a JSON string object."),
+      };
+    }
+  }
+  if (!isRecord(component)) {
+    return { success: false, result: err("validation_error", "/component must be object.") };
+  }
+  if (
+    typeof component.name !== "string" ||
+    component.name.length === 0 ||
+    typeof component.version !== "string" ||
+    component.version.length === 0 ||
+    !isRecord(component.props)
+  ) {
+    return {
+      success: false,
+      result: err(
+        "validation_error",
+        '/component must use {"name":"ComponentName","version":"1.0","props":{...}}.'
+      ),
+    };
+  }
+  return {
+    success: true,
+    component: {
+      name: component.name,
+      version: component.version,
+      props: component.props,
+    },
+  };
+}
 
 const INPUT_COMPONENT_NAMES = new Set(["Choices", "Form"]);
 
@@ -174,11 +263,7 @@ const PRESENT_SCHEMA: Record<string, unknown> = {
   required: ["component"],
   properties: {
     artifactId: { type: "string", minLength: 1 },
-    component: {
-      type: "object",
-      description:
-        'Use {"name":"ComponentName","version":"1.0","props":{...}}. Keep the version out of name.',
-    },
+    component: BASE_COMPONENT_SCHEMA,
     classification: {
       enum: ["public", "internal", "confidential", "restricted"],
     },
@@ -215,18 +300,16 @@ const presentToolDefinition = defineApiTool<RequestContext>({
     }
     const value = args as {
       artifactId?: string;
-      component: {
-        name: string;
-        version: string;
-        props: Readonly<Record<string, unknown>>;
-      };
+      component: unknown;
       classification?: SurfaceArtifact["classification"];
     };
+    const normalized = normalizeComponentInput(value.component);
+    if (!normalized.success) return normalized.result;
     try {
       const artifact = createSurfaceArtifact({
         id: value.artifactId ?? randomUUID(),
-        component: { name: value.component.name, version: value.component.version },
-        props: value.component.props,
+        component: { name: normalized.component.name, version: normalized.component.version },
+        props: normalized.component.props,
         target: ctx.presentationContext.target,
         audience: [ctx.userId],
         classification: value.classification ?? "internal",
@@ -377,15 +460,16 @@ const requestInputToolDefinition = defineApiTool<RequestContext>({
   handler: async (args, ctx) => {
     const value = args as {
       artifactId?: string;
-      component: {
-        name: string;
-        version: string;
-        props: Readonly<Record<string, unknown>>;
-      };
+      component: unknown;
       classification?: SurfaceArtifact["classification"];
     };
-    const awaitedSchema = awaitedSchemaFor(value.component);
-    const presented = await presentTool.execute({ ...value, awaitedSchema }, ctx);
+    const normalized = normalizeComponentInput(value.component);
+    if (!normalized.success) return normalized.result;
+    const awaitedSchema = awaitedSchemaFor(normalized.component);
+    const presented = await presentTool.execute(
+      { ...value, component: normalized.component, awaitedSchema },
+      ctx
+    );
     if (!presented.success) return presented;
     return ok({
       ...(presented.data as Record<string, unknown>),

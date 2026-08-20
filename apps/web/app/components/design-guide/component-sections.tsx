@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { GuideSection } from "~/components/design-guide/guide-section";
 import { FormStatus } from "~/components/form-status";
 import { Badge } from "~/components/ui/badge";
@@ -5,13 +6,82 @@ import { Button } from "~/components/ui/button";
 import { CopyField } from "~/components/ui/copy-field";
 import { Field } from "~/components/ui/field";
 import { Input } from "~/components/ui/input";
+import { LOADER_VARIANTS, LoadingState } from "~/components/ui/loading-state";
 import { Panel, PanelEmpty, PanelRow } from "~/components/ui/panel";
 import { Select } from "~/components/ui/select";
 import { Textarea } from "~/components/ui/textarea";
 
+function LoadingStateDemo() {
+  const [drawKey, setDrawKey] = useState(0);
+
+  return (
+    <div className="grid gap-4">
+      <div className="rounded-md border border-border bg-card p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+            As mounted
+          </p>
+          <Button variant="secondary" size="sm" onClick={() => setDrawKey((n) => n + 1)}>
+            Draw again
+          </Button>
+        </div>
+        <div className="mt-4">
+          <LoadingState key={drawKey} />
+        </div>
+        <p className="mt-4 max-w-2xl text-sm text-muted-foreground">
+          With no props the pattern and the word are drawn once on mount and held for the life of
+          the wait. Pass <code>label</code> wherever the copy has to say something specific.
+        </p>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {LOADER_VARIANTS.map((variant) => (
+          <div key={variant} className="rounded-md border border-border bg-card p-4">
+            <p className="font-mono text-xs text-muted-foreground">{variant}</p>
+            <div className="mt-3">
+              <LoadingState key={`${variant}-${drawKey}`} variant={variant} label="Sprouting" />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="rounded-md border border-border bg-card p-4">
+        <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+          Without the timer
+        </p>
+        <div className="mt-3">
+          <LoadingState variant="drive" label="Saving" showElapsed={false} />
+        </div>
+        <p className="mt-3 max-w-2xl text-sm text-muted-foreground">
+          Drop the timer on a surface that already reports duration, or on a wait short enough that
+          a running clock is noise rather than reassurance.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export function ComponentSections() {
   return (
     <>
+      <GuideSection
+        id="loading"
+        title="Loading state"
+        description="A pixel grid, a shimmering word, and a live elapsed timer, for work whose duration is unknown."
+      >
+        <LoadingStateDemo />
+        <p className="mt-4 max-w-2xl text-sm text-muted-foreground">
+          The loop is allowed because it reports real state: something is in flight, and the timer
+          in mono tabular figures says for how long. The drawn words all come from the field the
+          product is named for and all describe growth, so a wait reads as something coming up
+          rather than something running late. Under reduced motion the grid and the word freeze to a
+          legible static state while the timer keeps ticking, since that is text rather than
+          movement. The grid and the timer are <code>aria-hidden</code> inside a{" "}
+          <code>role="status"</code> region that announces one stable line — a live region
+          re-reading a tenth-second clock would be unusable.
+        </p>
+      </GuideSection>
+
       <GuideSection
         id="copy-field"
         title="Copyable values"

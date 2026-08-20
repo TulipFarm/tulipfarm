@@ -794,6 +794,7 @@ async function boot() {
         runs: runStore,
         store: conversationStore,
         agentForRun: agentForRunResolver(soulLoader, runArtifacts),
+        messages: messageRepo,
         context: new ChatTurnContextResolver({
           artifacts: runArtifacts,
           store: conversationStore,

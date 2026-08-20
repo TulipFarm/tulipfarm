@@ -4,6 +4,7 @@ import { readTurnAttachment, type TurnAttachmentStore } from "@tulipfarm/files";
 import type { InvocationPrincipal } from "@tulipfarm/run-kernel";
 import { type MessageContent, type ParticipantToolCall, textContent } from "@tulipfarm/schema";
 import type { HostedAgent } from "@tulipfarm/tool-host";
+import { fromToolResult, type MessageRepo } from "../chat/messages";
 import type {
   ConversationStore,
   PersistedTurn,
@@ -156,6 +157,13 @@ export interface InternalTurnHostOptions {
    * from the public File routes because the Worker acts as a Run, not as a session.
    */
   readonly files?: TurnAttachmentStore;
+  /**
+   * Writes the tool-role rows that link a Turn's Surfaces into its Conversation.
+   *
+   * Separate from `store` because `ConversationStore` models LLM history, where every row is
+   * prose. A Surface link is a reference, not text, and must never reach the model as either.
+   */
+  readonly messages?: MessageRepo;
   newId?(): string;
   now?(): Date;
 }
@@ -273,6 +281,34 @@ export class InternalTurnHost {
       createdAt: this.now(),
     });
     return { messageId };
+  }
+
+  /**
+   * Links the Surfaces this attempt presented into the Conversation.
+   *
+   * The Artifact is already durable; this records that *this* Conversation was shown it, which is
+   * the only thing a reload has to restore. Written as one tool-role Message so the ordering
+   * against the assistant reply is the ordering the reader saw.
+   */
+  async appendSurfaceMessage(input: {
+    businessId: string;
+    runId: string;
+    attempt: number;
+    surfaces: readonly { artifactId: string; revision: number }[];
+  }): Promise<void> {
+    if (input.surfaces.length === 0) return;
+    const { turn } = await this.authority(input.businessId, input.runId);
+    if (this.options.messages === undefined) return;
+    await this.options.messages.create(
+      fromToolResult(
+        turn.conversationId,
+        input.surfaces.map((surface) => ({
+          type: "surface" as const,
+          artifactId: surface.artifactId,
+          revision: surface.revision,
+        }))
+      )
+    );
   }
 
   async completeTurn(input: {

@@ -21,6 +21,7 @@ import { surfaceWebManifest } from "./manifest";
 import {
   ActionButton,
   humanize,
+  inlineMarkup,
   SurfaceAlert,
   type SurfaceCompositionProps,
   SurfacePanel,
@@ -40,7 +41,7 @@ function renderSurfaceContent({
     case "Text":
       return (
         <p data-surface-text data-tone={String(props.tone ?? "neutral")}>
-          {String(props.text)}
+          {inlineMarkup(String(props.text))}
         </p>
       );
     case "Heading": {

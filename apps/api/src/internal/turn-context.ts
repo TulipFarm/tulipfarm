@@ -40,6 +40,7 @@ import {
 } from "@tulipfarm/soul";
 import type { IntegrationStore } from "@tulipfarm/storage";
 import type { PresentationContext } from "@tulipfarm/surface";
+import type { RequestContext } from "@tulipfarm/tool-host";
 import type { ToolRegistry } from "../broker/tool-adapter";
 import { estimateTokens } from "../chat/compaction";
 import { assembleAgentSystemPrompt } from "../chat/system-prompt";
@@ -50,7 +51,13 @@ import {
 } from "../chat/turn-helpers";
 import type { ConversationStore, PersistedMessage } from "../conversations/service";
 import { readCustomInstructions } from "../preferences/custom-instructions";
-import { presentationContextFor, surfaceCatalogPromptFor } from "../surfaces/renderer-registry";
+import {
+  presentationContextFor,
+  surfaceCatalogFor,
+  surfaceCatalogPromptFor,
+  surfaceCatalogRevisionFor,
+  surfaceRendererRegistry,
+} from "../surfaces/renderer-registry";
 import { githubDisabledSkillNames, githubExcludedToolNames } from "../tools/github/visibility";
 import { ModelSelectorDeniedError, type ModelSelectorGate } from "./model-authz";
 import { resolveModelSelector } from "./model-selector";
@@ -223,12 +230,27 @@ export class ChatTurnContextResolver implements TurnContextResolver {
       excludedTools
     );
     const allowedNames = new Set(allowed.map((tool) => tool.name));
+    const surfaceComponents = [...(this.options.soulLoader?.surfaceComponents.values() ?? [])];
+    const toolContext: RequestContext = {
+      userId: authority.subject.id,
+      conversationId: authority.turn.conversationId,
+      runId: authority.runId,
+      agentId: platformAgent?.name,
+      presentationContext,
+      surfaceCatalog: surfaceCatalogFor(presentationContext.target, surfaceComponents),
+      surfaceCatalogRevision: surfaceCatalogRevisionFor(
+        presentationContext.target,
+        surfaceComponents
+      ),
+      surfaceRendererManifest: surfaceRendererRegistry.manifestFor(presentationContext.target),
+      surfaceComponents,
+    };
     const tools = (this.options.toolRegistry?.getAll() ?? [])
       .filter((tool) => allowedNames.has(tool.name))
       .map((tool) => ({
         name: tool.name,
         description: tool.description,
-        inputSchema: tool.inputSchema,
+        inputSchema: tool.inputSchemaFor?.(toolContext) ?? tool.inputSchema,
         tier: tool.tier,
         mutating: tool.mutating,
       }));

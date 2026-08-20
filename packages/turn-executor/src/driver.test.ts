@@ -343,20 +343,23 @@ describe("TurnDriver", () => {
     });
   });
 
-  it("settles for input without appending an assistant Message", async () => {
+  // Stopping to ask is not the same as saying nothing: the prose the model streamed before the
+  // question has to survive the reload that the question invites.
+  it("settles for input keeping the reply it already streamed", async () => {
     const { driver, events, store } = harness({
       status: "input_required",
       callId: "input-1",
+      text: "Two things before I start.",
       ...counters,
     });
     const outcome = await driver.run(request());
 
     expect(outcome).toBe("succeeded");
-    expect(store.messages).toEqual([]);
-    expect(store.completed).toEqual([{ status: "succeeded", cursor: 2, messageId: null }]);
+    expect(store.messages).toEqual([{ attempt: 1, content: "Two things before I start." }]);
+    expect(store.completed).toEqual([{ status: "succeeded", cursor: 2, messageId: "msg-1" }]);
     expect(events.appended.at(-1)).toEqual({
       eventType: "turn.finished",
-      payload: { status: "succeeded", messageId: null },
+      payload: { status: "succeeded", messageId: "msg-1" },
     });
   });
 

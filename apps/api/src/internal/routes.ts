@@ -422,6 +422,44 @@ export function registerInternalTurnRoutes(
   );
 
   app.post(
+    "/api/v1/internal/turns/:runId/surfaces",
+    {
+      preHandler,
+      schema: {
+        description: "Link the Surfaces this attempt presented into the Conversation.",
+        tags: ["internal"],
+        security: [{ bearerToken: [] }],
+        params: InternalSchemas.InternalRunParamsSchema,
+        body: InternalSchemas.InternalTurnSurfacesBodySchema,
+        response: {
+          200: InternalSchemas.InternalTurnSurfacesResponseSchema,
+          401: ErrorSchema,
+          403: ErrorSchema,
+          404: ErrorSchema,
+          409: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { runId } = req.params as { runId: string };
+      const body = req.body as {
+        attempt: number;
+        surfaces: { artifactId: string; revision: number }[];
+      };
+      const linked = await guard(reply, async () => {
+        await deps.host.appendSurfaceMessage({
+          businessId: DEPLOYMENT_BUSINESS_ID,
+          runId,
+          attempt: body.attempt,
+          surfaces: body.surfaces,
+        });
+        return { linked: body.surfaces.length };
+      });
+      if (linked !== undefined) return reply.send(linked);
+    }
+  );
+
+  app.post(
     "/api/v1/internal/turns/:runId/completion",
     {
       preHandler,

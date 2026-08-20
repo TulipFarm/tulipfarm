@@ -148,6 +148,8 @@ export type AgentLoopOutcome =
       /** A `request_input` Surface is durable; a later Chat Turn receives the answer. */
       readonly status: "input_required";
       readonly callId: string;
+      /** Model prose already streamed to the participant, so the Turn can persist what was read. */
+      readonly text: string;
       readonly iterations: number;
       readonly toolCalls: number;
       readonly repairs: number;

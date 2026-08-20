@@ -131,6 +131,15 @@ export class AgentLoop {
 
     let textIndex = recovered?.textIndex ?? 0;
 
+    /**
+     * Model text the participant has already been shown, in order.
+     *
+     * A Turn that ends by asking for input has no `completed` output to persist, but the reader
+     * has already read this prose above the question. Without keeping it, a refresh would drop
+     * the sentence that explains why the question is being asked.
+     */
+    let streamedText = "";
+
     /** Streams text deltas; missing `completed` is a model-adapter contract failure. */
     const callModel = async (request: ModelInvocationRequest): Promise<ModelInvocationResult> => {
       const stream = this.deps.model.stream?.(request);
@@ -143,6 +152,7 @@ export class AgentLoop {
           continue;
         }
         if (chunk.text.length === 0) continue;
+        streamedText += chunk.text;
         textIndex += 1;
         try {
           await emit("text_delta", { text: chunk.text, textIndex });
@@ -298,7 +308,12 @@ export class AgentLoop {
           }
           if (outcome.kind === "input_required") {
             return finish(
-              { status: "input_required", callId: outcome.call.callId, ...counters },
+              {
+                status: "input_required",
+                callId: outcome.call.callId,
+                text: streamedText,
+                ...counters,
+              },
               "completed"
             );
           }
@@ -385,7 +400,12 @@ export class AgentLoop {
         }
         if (decision?.kind === "input_required") {
           return finish(
-            { status: "input_required", callId: decision.call.callId, ...counters },
+            {
+              status: "input_required",
+              callId: decision.call.callId,
+              text: streamedText,
+              ...counters,
+            },
             "completed"
           );
         }

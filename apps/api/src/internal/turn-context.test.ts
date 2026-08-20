@@ -69,6 +69,14 @@ function toolDef(name: string): ToolDef {
     mutating: false,
     description: `${name} does something`,
     inputSchema: { type: "object" },
+    ...(name === "present"
+      ? {
+          inputSchemaFor: () => ({
+            type: "object",
+            properties: { component: { type: "object", oneOf: [{ const: "dynamic" }] } },
+          }),
+        }
+      : {}),
     execute: async () => ok({}),
     ...(availableTo === undefined ? {} : { definition: { availableTo } as ToolDef["definition"] }),
   };
@@ -233,6 +241,19 @@ describe("ChatTurnContextResolver", () => {
       "navigate_to",
     ]);
     expect(context.tools[0]).toMatchObject({ inputSchema: { type: "object" } });
+  });
+
+  it("exposes target-scoped Tool schemas to the model", async () => {
+    const { resolver } = makeResolver({ tools: ["present"] });
+
+    const context = await resolver.resolve(AUTHORITY);
+
+    expect(context.tools[0]).toMatchObject({
+      name: "present",
+      inputSchema: {
+        properties: { component: { oneOf: [{ const: "dynamic" }] } },
+      },
+    });
   });
 
   it("withholds the browser-only Tools, but not presentation Tools, for a Slack-sourced Run", async () => {

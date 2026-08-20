@@ -23,7 +23,11 @@ composition patterns over route-local styling.
    alone.
 7. Add or update the matching `/design-guide` example whenever the public component vocabulary
    changes.
-8. Colocate focused Vitest coverage and run the repository verification required by `AGENTS.md`.
+8. Record the decision in [references/design-system.md](references/design-system.md) in the same
+   change — a new or reshaped component family means a Composition pattern entry, an index row,
+   and any failure mode worth naming in §13. A component that ships without this is invisible
+   to the next agent, who will rebuild it slightly differently.
+9. Colocate focused Vitest coverage and run the repository verification required by `AGENTS.md`.
 
 ## Guardrails
 
@@ -38,6 +42,11 @@ composition patterns over route-local styling.
 - In Chat, a participant picks **effort** (Auto/Fast/Balanced/Thorough), never a model; a Model ID
   appears only as receipt metadata on a finished reply.
 - Preserve `[data-theme="dark"]`, keyboard navigation, visible focus, reduced motion, and deep links.
+- Keep the **Trace** (chrome-free narration of interior work) distinct from the **Tool run record**
+  (one bordered, permanent block of evidence). Disclosure follows the work only until the reader
+  toggles it, and a live step is described in the present tense (reference §7).
+- Animate only what reports real state, and give it a static reduced-motion fallback that still
+  says what the motion said. Keep ticking values out of live regions (reference §7, §13).
 - Rely on the global `:focus-visible` outline, and close off-canvas panels with `inert` rather than
   `aria-hidden`.
 - Do not introduce Storybook, a second component framework, raw palette values in components,
@@ -51,4 +60,6 @@ composition patterns over route-local styling.
 - The result composes existing foundations or deliberately extends them.
 - Light and dark modes, 375/768/1024/1440px layouts, keyboard flow, and long content are covered.
 - `/design-guide` and the component index reflect the resulting public vocabulary.
+- `references/design-system.md` carries the new pattern, index row, and any new failure mode, so
+  the next change inherits the decision instead of re-litigating it.
 - Lint, typecheck, tests, secure-context checks, and the web build pass when applicable.

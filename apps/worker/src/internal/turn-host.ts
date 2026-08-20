@@ -187,6 +187,18 @@ export class HttpTurnHost
     });
   }
 
+  async appendSurfaceMessage(
+    input: TurnCompletionRef & {
+      surfaces: readonly { artifactId: string; revision: number }[];
+    }
+  ): Promise<void> {
+    if (input.surfaces.length === 0) return;
+    await this.client.require("POST", turnPath(input.runId, "/surfaces"), {
+      attempt: input.attempt,
+      surfaces: input.surfaces,
+    });
+  }
+
   async completeTurn(
     input: TurnCompletionRef & {
       status: TurnCompletionStatus;

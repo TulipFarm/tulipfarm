@@ -28,6 +28,18 @@ export interface TurnCompletionStore {
       metadata?: { toolCalls?: readonly ParticipantToolCall[] };
     }
   ): Promise<{ messageId: string }>;
+  /**
+   * Links presented Surfaces into the transcript as a tool-role Message.
+   *
+   * The Artifact itself is already durable; what is not is the fact that *this* Conversation was
+   * shown it. Without the link a restored transcript loses every card the Turn rendered.
+   */
+  appendSurfaceMessage?(
+    input: TurnCompletionRef & {
+      conversationId: string;
+      surfaces: readonly TurnSurfaceLink[];
+    }
+  ): Promise<void>;
   completeTurn(
     input: TurnCompletionRef & {
       status: TurnCompletionStatus;
@@ -37,10 +49,15 @@ export interface TurnCompletionStore {
   ): Promise<void>;
 }
 
+export interface TurnSurfaceLink {
+  readonly artifactId: string;
+  readonly revision: number;
+}
+
 export type TurnOutcome =
   | { readonly status: "succeeded"; readonly text: string }
   | { readonly status: "failed"; readonly reason: string }
-  | { readonly status: "input_required" }
+  | { readonly status: "input_required"; readonly text: string }
   | { readonly status: "waiting"; readonly waitId: string };
 
 export interface CompleteTurnInput {
@@ -53,6 +70,8 @@ export interface CompleteTurnInput {
   readonly cursor: number;
   readonly outcome: TurnOutcome;
   readonly metadata?: { readonly toolCalls?: readonly ParticipantToolCall[] };
+  /** Surfaces this Turn presented, linked into the transcript so a refresh can restore them. */
+  readonly surfaces?: readonly TurnSurfaceLink[];
   /** Highest attempt the Turn has; a lower attempt arriving late is stale. */
   readonly latestAttempt?: number;
 }
@@ -110,22 +129,11 @@ export class ConversationTurnCompleter {
       return { status: "failed", reason: input.outcome.reason };
     }
 
-    if (input.outcome.status === "input_required") {
-      await this.options.store.completeTurn({
-        ...ref,
-        status: "succeeded",
-        cursor: input.cursor,
-        messageId: null,
-      });
-      return { status: "succeeded", messageId: null };
-    }
-
-    const { messageId } = await this.options.store.appendAssistantMessage({
-      ...ref,
-      conversationId: input.conversationId,
-      content: input.outcome.text,
-      ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
-    });
+    // A Turn that stops to ask is not a Turn that said nothing: it has run Tools, written prose and
+    // rendered a question, all of which the reader is looking at. Completing it without a Message
+    // left every one of those on the wire only, so a refresh emptied the reply and stranded the
+    // question the Turn is waiting on.
+    const messageId = await this.persistReply(ref, input, input.outcome.text);
     await this.options.store.completeTurn({
       ...ref,
       status: "succeeded",
@@ -133,5 +141,39 @@ export class ConversationTurnCompleter {
       messageId,
     });
     return { status: "succeeded", messageId };
+  }
+
+  /** Writes the reply and links any Surfaces it presented; returns the Message the Turn produced. */
+  private async persistReply(
+    ref: TurnCompletionRef,
+    input: CompleteTurnInput,
+    text: string
+  ): Promise<string | null> {
+    const toolCalls = input.metadata?.toolCalls ?? [];
+    const surfaces = input.surfaces ?? [];
+
+    // An empty reply with nothing to report is no reply; writing it would put a blank turn in the
+    // transcript. A reply that ran Tools is never empty, even when the model wrote no prose.
+    const messageId =
+      text.length === 0 && toolCalls.length === 0
+        ? null
+        : (
+            await this.options.store.appendAssistantMessage({
+              ...ref,
+              conversationId: input.conversationId,
+              content: text,
+              ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
+            })
+          ).messageId;
+
+    if (surfaces.length > 0) {
+      await this.options.store.appendSurfaceMessage?.({
+        ...ref,
+        conversationId: input.conversationId,
+        surfaces,
+      });
+    }
+
+    return messageId;
   }
 }

@@ -1,0 +1,133 @@
+{
+  "id": "present-record-table-uses-object-component",
+  "tier": "l2",
+  "agent": "support",
+  "context": {
+    "governancePages": [],
+    "availableTools": [
+      {
+        "name": "present",
+        "description": "Create one non-blocking informational TSP Artifact."
+      }
+    ]
+  },
+  "input": [
+    {
+      "role": "user",
+      "content": "Show Acme and Globex as a customer table with their status."
+    }
+  ],
+  "tools": [
+    {
+      "name": "present",
+      "description": "Create one non-blocking informational TSP Artifact.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["component"],
+        "properties": {
+          "component": {
+            "type": ["object", "string"],
+            "description": "A discriminated Surface component. Keep name and version separate and put all display data inside props.",
+            "required": ["name", "version", "props"],
+            "properties": {
+              "name": { "type": "string" },
+              "version": { "type": "string" },
+              "props": { "type": "object" }
+            },
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["name", "version", "props"],
+                "properties": {
+                  "name": { "const": "RecordTable" },
+                  "version": { "const": "1.0" },
+                  "props": {
+                    "type": "object",
+                    "required": ["columns", "records"],
+                    "properties": {
+                      "columns": { "type": "array", "items": { "type": "string" } },
+                      "records": { "type": "array", "items": { "type": "object" } }
+                    }
+                  }
+                }
+              },
+              {
+                "type": "string",
+                "minLength": 2
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "toolResults": [
+    {
+      "name": "present",
+      "output": {
+        "artifact": {
+          "id": "artifact-1",
+          "component": { "name": "RecordTable", "version": "1.0" }
+        }
+      }
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "present-1",
+          "name": "present",
+          "arguments": {
+            "component": {
+              "name": "RecordTable",
+              "version": "1.0",
+              "props": {
+                "columns": ["name", "status"],
+                "records": [
+                  { "name": "Acme", "status": "Open" },
+                  { "name": "Globex", "status": "Won" }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "kind": "text",
+      "text": "Shown as a table."
+    }
+  ],
+  "expect": [
+    {
+      "kind": "tool_called",
+      "name": "present"
+    },
+    {
+      "kind": "tool_argument_equals",
+      "name": "present",
+      "path": "component.name",
+      "value": "RecordTable"
+    },
+    {
+      "kind": "tool_argument_equals",
+      "name": "present",
+      "path": "component.version",
+      "value": "1.0"
+    },
+    {
+      "kind": "tool_argument_equals",
+      "name": "present",
+      "path": "component.props.columns",
+      "value": ["name", "status"]
+    },
+    {
+      "kind": "loop_status",
+      "status": "completed"
+    }
+  ]
+}
