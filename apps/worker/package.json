@@ -25,7 +25,7 @@
     "@tulipfarm/storage": "workspace:*",
     "@tulipfarm/tool-host": "workspace:*",
     "@tulipfarm/turn-executor": "workspace:*",
-    "ai": "^7.0.66",
+    "ai": "^7.0.68",
     "dotenv": "^17.4.2",
     "isolated-vm": "^7.0.1",
     "pg": "^8.23.0",
@@ -52,6 +52,6 @@
     "esbuild": "^0.28.2",
     "tsx": "^4.23.12",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   }
 }
