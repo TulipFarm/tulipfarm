@@ -268,6 +268,11 @@ test("turns allowlisted model failures into actionable participant-safe messages
   expect(modelFailureMessage("model_not_configured")).toBe(
     "No model is configured for this business. Add a model chain under Business → Models."
   );
+  // A Turn that stopped because it could not put its question to the operator did not fail at the
+  // model, and reading it as one would hide that nothing was decided on the operator's behalf.
+  expect(modelFailureMessage("input_request_failed")).toBe(
+    "The Agent asked you to choose, but the question could not be shown. It stopped instead of deciding for you. Try again."
+  );
 });
 
 test("releases a held Tool call when the decision lets it report", () => {

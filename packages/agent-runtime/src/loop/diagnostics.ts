@@ -15,16 +15,12 @@ export function deepestErrorMessage(diagnostic: unknown): string {
 }
 
 /**
- * Whether a Tool result is `request_input` asking the Run to suspend.
+ * The Tool that puts a question to the operator and stops the Turn on it.
  *
- * The name alone is not enough: the Tool can answer without needing anybody, and only the
- * `suspendRun` flag distinguishes a question that parks the Run from one that did not have to.
+ * The loop knows it by name rather than by what it answered. A barrier read off the result — the
+ * `suspendRun` flag the Tool sets when the question reached a Surface — held only while the call
+ * succeeded, so every other outcome (rejected props, a denial, a ledger replay) came back as
+ * ordinary Tool feedback and the model went on to take the very action the question existed to
+ * gate (#405). Asking is what stops the Turn; being answered is not this loop's evidence to weigh.
  */
-export function isInputRequired(name: string, output: unknown): boolean {
-  return (
-    name === "request_input" &&
-    typeof output === "object" &&
-    output !== null &&
-    (output as { suspendRun?: unknown }).suspendRun === true
-  );
-}
+export const REQUEST_INPUT_TOOL = "request_input";

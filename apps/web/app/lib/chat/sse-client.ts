@@ -108,6 +108,8 @@ export function modelFailureMessage(reason: string | undefined): string {
       return "The model provider is rate limiting requests. Wait a moment and try again.";
     case "model_provider_unavailable":
       return "The model provider is temporarily unavailable. Try again shortly.";
+    case "input_request_failed":
+      return "The Agent asked you to choose, but the question could not be shown. It stopped instead of deciding for you. Try again.";
     default:
       return "The model request failed. Try again.";
   }

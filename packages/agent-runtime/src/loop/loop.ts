@@ -18,7 +18,7 @@ import type {
   ExposedTool,
   ToolDispatchResult,
 } from "./contract";
-import { deepestErrorMessage, EventSinkFailure, isInputRequired } from "./diagnostics";
+import { deepestErrorMessage, EventSinkFailure, REQUEST_INPUT_TOOL } from "./diagnostics";
 import { extractSkillName, narrowToolsToSkill } from "./narrowing";
 import {
   extractRereadFile,
@@ -212,6 +212,18 @@ export class AgentLoop {
           return { kind: "approval", approvalId: dispatched.approvalId, call };
         }
 
+        // The barrier is the question, not the answer: once this Turn has asked the operator to
+        // decide, nothing else in it may act on the model's own default. A call that reached
+        // nobody ends the Turn rather than feeding the model a failure it will route around,
+        // which is how an unanswered ask became a rubber stamp (#405).
+        if (call.name === REQUEST_INPUT_TOOL) {
+          if (dispatched.status !== "succeeded") {
+            return { kind: "fail", reason: "input_request_failed" };
+          }
+          messages.push(toolMessage(call.callId, { output: dispatched.output }));
+          return { kind: "input_required", call };
+        }
+
         if (dispatched.status === "invalid_arguments") {
           counters.repairs += 1;
           if (counters.repairs > input.limits.maxRepairAttempts) {
@@ -225,9 +237,6 @@ export class AgentLoop {
 
         if (dispatched.status === "succeeded") {
           messages.push(toolMessage(call.callId, { output: dispatched.output }));
-          if (isInputRequired(call.name, dispatched.output)) {
-            return { kind: "input_required", call };
-          }
           if (call.name === "load_skill") {
             const loaded = extractSkillName(call.arguments);
             if (loaded !== undefined) activeSkillName = loaded;

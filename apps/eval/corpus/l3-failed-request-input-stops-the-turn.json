@@ -1,0 +1,87 @@
+{
+  "id": "l3-failed-request-input-stops-the-turn",
+  "tier": "l3",
+  "agent": "support",
+  "context": {
+    "memoryDocument": "## Operating profile\nThe operator must choose the operating profile before an Agent is created.",
+    "governancePages": []
+  },
+  "input": [
+    {
+      "role": "user",
+      "content": "Ask me to choose an operating profile with request_input, then create the Agent only after I answer."
+    }
+  ],
+  "tools": [
+    {
+      "name": "request_input",
+      "description": "Ask the operator to choose before continuing.",
+      "inputSchema": { "type": "object" },
+      "mutating": true
+    },
+    {
+      "name": "agent_create",
+      "description": "Create an Agent.",
+      "inputSchema": { "type": "object" },
+      "mutating": true
+    }
+  ],
+  "toolResults": [
+    {
+      "name": "request_input",
+      "error": "/props: must have required property 'choices'"
+    },
+    {
+      "name": "agent_create",
+      "output": { "id": "agent-1" }
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "input-1",
+          "name": "request_input",
+          "arguments": { "component": { "name": "Choices" } }
+        }
+      ]
+    },
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "create-1",
+          "name": "agent_create",
+          "arguments": { "name": "Support Agent" }
+        }
+      ]
+    },
+    {
+      "kind": "text",
+      "text": "Created the Agent."
+    }
+  ],
+  "expect": [
+    {
+      "kind": "tool_called",
+      "name": "request_input"
+    },
+    {
+      "kind": "tool_not_called",
+      "name": "agent_create"
+    },
+    {
+      "kind": "tool_call_count",
+      "count": 1
+    },
+    {
+      "kind": "run_status",
+      "status": "failed"
+    },
+    {
+      "kind": "state_status",
+      "status": "failed"
+    }
+  ]
+}
