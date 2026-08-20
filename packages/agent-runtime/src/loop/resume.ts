@@ -20,6 +20,8 @@ export interface AgentLoopResumeState {
   };
   /** Last loaded Skill, so narrowing does not silently re-widen the catalog on resume. */
   readonly activeSkillName?: string;
+  /** Whether this Turn already published a report, so a resumed attempt still cannot write. */
+  readonly reported?: boolean;
   /**
    * Files an Agent re-read into this Turn, so a resumed attempt still has what it went and got.
    *

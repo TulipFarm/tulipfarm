@@ -279,6 +279,11 @@ test("turns allowlisted model failures into actionable participant-safe messages
   expect(modelFailureMessage("handoff_unavailable")).toBe(
     "The Agent tried to hand this to another agent, and that hand-off is not available here. It stopped rather than report work it had not done."
   );
+  // A Turn stopped for writing behind its own report (#429) must say the card the reader is
+  // looking at still holds. The generic model message would leave them unsure whether it does.
+  expect(modelFailureMessage("effect_after_report")).toBe(
+    "The Agent had already told you what it did, then tried to do something else. It stopped rather than leave you with a report that no longer matched. Nothing further was changed."
+  );
 });
 
 test("releases a held Tool call when the decision lets it report", () => {

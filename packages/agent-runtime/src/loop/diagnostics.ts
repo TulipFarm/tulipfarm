@@ -41,3 +41,21 @@ const HANDOFF_TOOL_NAMES: ReadonlySet<string> = new Set(["transfer_to_agent", "d
 export function isHandoffTool(name: string): boolean {
   return HANDOFF_TOOL_NAMES.has(name);
 }
+
+/**
+ * The Tools that hand the participant a durable report of what this Turn did.
+ *
+ * A presented Artifact is linked into the Conversation at completion and restored on refresh, so
+ * unlike streamed prose — which the final completion replaces, and which the adapter already
+ * classifies as "not the final answer" when a Tool call follows it — a card is the reader's
+ * permanent copy. Content Drafter presented "Draft blocked … I did not draft or create a post
+ * Record", then created one in the same Turn (#429): the card was authored before the effect and
+ * so could not describe it, and nothing withdrew it afterwards. Reporting is therefore a barrier
+ * for writes, read off the call's identity on the same terms as {@link isHandoffTool}.
+ */
+const REPORT_TOOL_NAMES: ReadonlySet<string> = new Set(["present", "update_presentation"]);
+
+/** Whether this call published a report the participant keeps after the Turn ends. */
+export function isReportTool(name: string): boolean {
+  return REPORT_TOOL_NAMES.has(name);
+}
