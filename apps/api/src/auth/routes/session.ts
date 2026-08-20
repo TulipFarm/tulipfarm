@@ -1,4 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { AuthorizationCheck } from "../../authz/route-gate";
+import { makeAuthorizationCheck } from "../../authz/route-gate";
+import { userPrincipal } from "../../identity/principal";
 import { sessionCookieOptions } from "../cookie-security";
 import { CSRF_COOKIE, setCsrfCookie } from "../csrf";
 import {
@@ -16,7 +19,7 @@ import {
   validatePassword,
   verifyPassword,
 } from "../passwords";
-import { ErrorSchema, PublicUserSchema } from "../schemas";
+import { ErrorSchema, SessionUserSchema } from "../schemas";
 import { DEFAULT_SESSION_TTL_SECONDS, rotateSession, type SessionStore } from "../session-store";
 import {
   MAX_NAME_CHARS,
@@ -24,8 +27,10 @@ import {
   type PasswordWriteRepo,
   type ProfileWriteRepo,
   toPublicUser,
+  type UserDoc,
   type UserRepo,
 } from "../users";
+import { USER_MANAGE } from "./users";
 
 // Precomputed lazily and reused: verifying against a dummy hash on unknown-user
 // login keeps response timing similar to the known-user path (no user enumeration).
@@ -49,6 +54,8 @@ export interface SessionRouteDeps {
   passwordWriteRepo?: PasswordWriteRepo;
   profileWriteRepo?: ProfileWriteRepo;
   inviteRepo?: UserInviteRepo;
+  /** Decides `isAdmin`. Defaults to the no-authorizer gate, which answers from the account role. */
+  authorizationCheck?: AuthorizationCheck;
 }
 
 export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDeps): void {
@@ -62,7 +69,20 @@ export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDe
     passwordWriteRepo,
     profileWriteRepo,
     inviteRepo,
+    authorizationCheck = makeAuthorizationCheck(),
   } = deps;
+
+  /**
+   * The gate's own answer to whether this account may manage People & access — never `role`, which
+   * a granted `Owner` never rewrites (#408). A gate that cannot answer yields `false`: reading your
+   * own session is how the app boots, and every admin surface is gated again on its own request.
+   */
+  async function sessionUser(user: UserDoc) {
+    const isAdmin = await authorizationCheck(userPrincipal(user, "session"), USER_MANAGE).catch(
+      () => false
+    );
+    return { ...toPublicUser(user), isAdmin };
+  }
   const loginPreHandlers = [rateLimitHook, loginRateLimitHook].filter(
     (hook): hook is PreHandler => hook !== undefined
   );
@@ -88,7 +108,7 @@ export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDe
         response: {
           200: {
             type: "object",
-            properties: { user: PublicUserSchema },
+            properties: { user: SessionUserSchema },
             required: ["user"],
           },
           400: ErrorSchema,
@@ -129,7 +149,7 @@ export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDe
       });
       reply.setCookie(SESSION_COOKIE, session.sid, sessionCookieOptions(ttlSeconds));
       setCsrfCookie(reply, session.csrfToken, ttlSeconds);
-      return reply.code(200).send({ user: toPublicUser(user) });
+      return reply.code(200).send({ user: await sessionUser(user) });
     }
   );
 
@@ -165,7 +185,7 @@ export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDe
         response: {
           200: {
             type: "object",
-            properties: { user: PublicUserSchema },
+            properties: { user: SessionUserSchema },
             required: ["user"],
           },
           401: ErrorSchema,
@@ -176,7 +196,7 @@ export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDe
       if (!req.user) {
         return reply.code(401).send({ error: "unauthorized" });
       }
-      return reply.send({ user: toPublicUser(req.user) });
+      return reply.send({ user: await sessionUser(req.user) });
     }
   );
 
@@ -206,7 +226,7 @@ export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDe
           response: {
             200: {
               type: "object",
-              properties: { user: PublicUserSchema },
+              properties: { user: SessionUserSchema },
               required: ["user"],
             },
             400: ErrorSchema,
@@ -245,7 +265,7 @@ export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDe
         });
         reply.setCookie(SESSION_COOKIE, session.sid, sessionCookieOptions(ttlSeconds));
         setCsrfCookie(reply, session.csrfToken, ttlSeconds);
-        return reply.send({ user: toPublicUser(req.user) });
+        return reply.send({ user: await sessionUser(req.user) });
       }
     );
   }
@@ -273,7 +293,7 @@ export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDe
           response: {
             200: {
               type: "object",
-              properties: { user: PublicUserSchema },
+              properties: { user: SessionUserSchema },
               required: ["user"],
             },
             400: ErrorSchema,
@@ -292,7 +312,7 @@ export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDe
         const name = body.name === null ? null : normalizeName(body.name);
 
         await profileWriteRepo.setName(req.user._id, name);
-        return reply.send({ user: toPublicUser({ ...req.user, name }) });
+        return reply.send({ user: await sessionUser({ ...req.user, name }) });
       }
     );
   }
@@ -374,7 +394,7 @@ export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDe
           response: {
             200: {
               type: "object",
-              properties: { user: PublicUserSchema },
+              properties: { user: SessionUserSchema },
               required: ["user"],
             },
             400: ErrorSchema,
@@ -415,7 +435,7 @@ export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDe
         });
         reply.setCookie(SESSION_COOKIE, session.sid, sessionCookieOptions(ttlSeconds));
         setCsrfCookie(reply, session.csrfToken, ttlSeconds);
-        return reply.send({ user: toPublicUser(user) });
+        return reply.send({ user: await sessionUser(user) });
       }
     );
   }

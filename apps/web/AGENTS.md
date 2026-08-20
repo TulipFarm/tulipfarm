@@ -41,6 +41,8 @@ client data loading, schema-driven resource UI, and browser rendering of Surface
   `clientLoader` and `useLoaderData<typeof clientLoader>()`.
 - Use Remix `<Link>` / `<NavLink>`, not raw `<a>` for app navigation.
 - All API calls go through `app/lib/api.ts`; never call `fetch` ad hoc from routes.
+- Gate admin UI on `isBusinessAdmin` / `useIsAdmin`, never on `user.role`: an access level granted
+  from People & access confers admin authority without rewriting the account role.
 - `apiWrite` must send cookies, `x-csrf-token` from the non-httpOnly `csrf_token` cookie, and
   optional `Authorization: Bearer` from `VITE_API_TOKEN`.
 - Render API validation errors from `ApiError.path` as field errors; map `409` to a concurrency

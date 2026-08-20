@@ -492,9 +492,22 @@ import { describe, expect, it } from "vitest";
  * name matches two rows" from "these two selected rows collide"; the rest is the two body schemas.
  * None of it belongs in `packages/soul`: the ambiguity only exists because an HTTP client sent a
  * selection, and the scan cache it resolves against lives in this route module.
+ *
+ * 52_867 -> 52_900 is the read half of the `Owner` access level (#408). The write half had already
+ * landed: granting `Owner` persists and the route gate honours it. What was left is that the
+ * session payload described the caller by the `users.role` column, which no Role grant rewrites, so
+ * the web kept every admin surface hidden from a granted Owner. +11 in `auth/schemas.ts` is
+ * `SessionUserSchema` — `PublicUserSchema` plus `isAdmin` — and the note saying why the two are not
+ * interchangeable. +20 in `auth/routes/session.ts` is the payload builder that asks the existing
+ * gate for that one boolean, its `authorizationCheck` dependency, and the comment for the deliberate
+ * fail-closed on an engine that cannot answer. +1 in `auth/routes/users.ts` exports the People &
+ * access declaration so the session asks the same question the route does rather than a second one,
+ * and +1 in `auth/routes/index.ts` threads the check through. The decision itself is unchanged and
+ * still `packages/authz`'s; this is the Fastify-shaped adapter for reading it, which is the only
+ * reason it is here.
  */
 
-const CEILING = 52_867;
+const CEILING = 52_900;
 
 /**
  * Domains inside `apps/api/src` that already have a package of the same name. Everything here that

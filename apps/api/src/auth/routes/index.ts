@@ -75,6 +75,7 @@ export function registerAuthRoutes(
     passwordWriteRepo: options.passwordWriteRepo,
     profileWriteRepo: options.profileWriteRepo,
     inviteRepo: options.inviteRepo,
+    ...(options.authorizationCheck && { authorizationCheck: options.authorizationCheck }),
   });
   registerTokenRoutes(
     app,

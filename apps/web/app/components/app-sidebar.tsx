@@ -29,6 +29,7 @@ import {
   titleForPath,
   visibleSections,
 } from "~/lib/nav";
+import { isBusinessAdmin } from "~/lib/use-session-user";
 import { cn } from "~/lib/utils";
 
 type ProductMode = NavProductMode;
@@ -380,7 +381,7 @@ function AccountChip({ user }: { user?: SessionUser }) {
   if (!user) return null;
   const name = user.name?.trim() || user.email;
   return (
-    <Tooltip content={user.role === "admin" ? `${name} (Admin)` : name}>
+    <Tooltip content={isBusinessAdmin(user) ? `${name} (Admin)` : name}>
       <Link
         to="/settings/profile"
         aria-label={`Account settings for ${name}`}
