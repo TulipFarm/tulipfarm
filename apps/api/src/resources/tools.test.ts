@@ -412,6 +412,16 @@ describe("record_create", () => {
     expect(result).toMatchObject({ success: false, error: { code: "validation_error" } });
   });
 
+  // The Agent path has to refuse the same blank the HTTP route refuses, or a Record an operator
+  // could not create by hand is one `record_create` call away (#434).
+  it("returns validation_error and writes nothing when a required field is only whitespace", async () => {
+    const factory = new FakeRepoFactory();
+    const tool = getTool("record_create");
+    const result = await tool.handler({ type: "ticket", data: { title: "   " } }, makeCtx(factory));
+    expect(result).toMatchObject({ success: false, error: { code: "validation_error" } });
+    expect((factory.forType("ticket") as FakeRepo).docs.size).toBe(0);
+  });
+
   it("returns validation_error for bad args (no type)", async () => {
     const tool = getTool("record_create");
     const result = await tool.handler({ data: {} }, makeCtx());
