@@ -100,10 +100,12 @@ export function ModelChains({
 }) {
   const [chains, setChains] = useState<Chains>(() => cloneChains(initial));
   const [presets, setPresets] = useState<Presets>(() => clonePresets(initial));
-  const [editing, setEditing] = useState<{ tier: WireTier; uid: number } | null>(null);
-  // An "Add fallback" row lives here until the sheet is completed. Inserting it into the chain up
-  // front is what let a dismissed sheet leave a "no model set" entry behind, ready to be saved.
-  const [draft, setDraft] = useState<{ tier: WireTier; row: Row } | null>(null);
+  // Both adding and editing buffer the row here until the sheet is completed. Letting a sheet write
+  // into the chain as it is typed is what left a dismissed sheet with a "no model set" entry
+  // behind, ready to be saved.
+  const [sheet, setSheet] = useState<{ tier: WireTier; row: Row; mode: "add" | "edit" } | null>(
+    null
+  );
   const [localError, setLocalError] = useState<string | null>(null);
 
   const configured = useMemo(
@@ -134,42 +136,33 @@ export function ModelChains({
     return ids;
   }, [chains, presets, providers]);
 
-  const editingRow = draft
-    ? draft.row
-    : editing
-      ? chains[editing.tier].find((r) => r.uid === editing.uid)
-      : undefined;
+  const editingRow = sheet?.row;
 
   function mutate(tier: WireTier, fn: (rows: Row[]) => Row[]) {
     setChains((prev) => ({ ...prev, [tier]: fn(prev[tier]) }));
     setLocalError(null);
   }
 
-  function updateRow(tier: WireTier, uid: number, patch: Partial<Row>) {
-    mutate(tier, (rows) => rows.map((r) => (r.uid === uid ? { ...r, ...patch } : r)));
-  }
-
   function addRow(tier: WireTier) {
     setLocalError(null);
-    setDraft({
+    setSheet({
       tier,
+      mode: "add",
       row: { uid: nextUid++, provider: configured[0]?.id ?? providers[0]?.id ?? "", model: "" },
     });
   }
 
   function commitSheet() {
-    if (draft) {
-      const { tier, row } = draft;
-      mutate(tier, (rows) => [...rows, row]);
-      setDraft(null);
-      return;
-    }
-    setEditing(null);
+    if (!sheet) return;
+    const { tier, row, mode } = sheet;
+    mutate(tier, (rows) =>
+      mode === "add" ? [...rows, row] : rows.map((r) => (r.uid === row.uid ? row : r))
+    );
+    setSheet(null);
   }
 
   function cancelSheet() {
-    setDraft(null);
-    setEditing(null);
+    setSheet(null);
   }
 
   function move(tier: WireTier, index: number, delta: number) {
@@ -280,7 +273,7 @@ export function ModelChains({
                     providers={providers}
                     secretKeys={secretKeys}
                     profileId={profileIdFor(tier.preset, index)}
-                    onEdit={() => setEditing({ tier: tier.wire, uid: row.uid })}
+                    onEdit={() => setSheet({ tier: tier.wire, row, mode: "edit" })}
                     onMove={(delta) => move(tier.wire, index, delta)}
                     onRemove={() =>
                       mutate(tier.wire, (rows) => rows.filter((r) => r.uid !== row.uid))
@@ -361,13 +354,9 @@ export function ModelChains({
         secretKeys={secretKeys}
         onCancel={cancelSheet}
         onDone={commitSheet}
-        onChange={(patch) => {
-          if (draft) {
-            setDraft({ tier: draft.tier, row: { ...draft.row, ...patch } });
-            return;
-          }
-          if (editing) updateRow(editing.tier, editing.uid, patch);
-        }}
+        onChange={(patch) =>
+          setSheet((prev) => (prev ? { ...prev, row: { ...prev.row, ...patch } } : prev))
+        }
       />
     </div>
   );
