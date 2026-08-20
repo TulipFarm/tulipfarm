@@ -369,6 +369,10 @@ export default function SkillsMarketplace() {
                               variant={s.updateAvailable ? "default" : "outline"}
                               className="shrink-0"
                               disabled={busy !== null}
+                              // The catalog is ~88 identical actions deep, so the visible text is
+                              // the only thing distinguishing them and it is the same on every row.
+                              // Name the Skill in the label so navigating by role stays usable.
+                              aria-label={`${s.updateAvailable ? "Update" : "Install"} ${s.name}`}
                               onClick={() => loadIntoPipeline(catalog.scanId, [s])}
                             >
                               {s.updateAvailable ? "Update" : "Install"}

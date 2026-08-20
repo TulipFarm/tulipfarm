@@ -178,8 +178,8 @@ test("catalog rows badge installed and update-available skills", async () => {
   expect(await screen.findByText(/official marketplace/i)).toBeInTheDocument();
   // Current install reads as a badge; not-installed and stale get per-row actions.
   expect(screen.getByText(/installed ✓/i)).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: /^Install$/ })).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: /^Update$/ })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Install fresh-skill" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Update stale-skill" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "productivity" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "engineering" })).toBeInTheDocument();
   expect(screen.getByText("1 update available")).toBeInTheDocument();
@@ -196,7 +196,7 @@ test("per-row Install loads only that skill into the audit pipeline", async () =
     ],
   });
 
-  const installButtons = await screen.findAllByRole("button", { name: /^Install$/ });
+  const installButtons = await screen.findAllByRole("button", { name: /^Install /i });
   await user.click(installButtons[0]);
   // Only the chosen skill is queued for audit (1 selected), not the whole catalog.
   expect(await screen.findByRole("button", { name: /Run SkillAudit \(1\)/ })).toBeInTheDocument();
@@ -492,4 +492,26 @@ test("an install failure takes focus so it is seen at the point of failure", asy
   const alert = await screen.findByRole("alert");
   expect(alert).toHaveTextContent(/install failed: invalid soul write target/i);
   expect(alert).toHaveFocus();
+});
+
+// #447: the catalog is ~88 rows deep and every row ships the same action, so the accessible name
+// is the only thing a reader navigating by role has to tell them apart. "Install" repeated is a
+// list of identical controls: it names the verb and never the Skill the verb applies to.
+test("each catalog row's action is named for the skill it acts on", async () => {
+  renderInstall({
+    scanId: "mkt-4",
+    source: "tulipfarm/skills",
+    skills: [
+      { name: "kb-article", description: "One.", installed: false, updateAvailable: false },
+      { name: "sql-queries", description: "Two.", installed: false, updateAvailable: false },
+      { name: "ticket-triage", description: "Three.", installed: true, updateAvailable: true },
+    ],
+  });
+
+  const actions = await screen.findAllByRole("button", { name: /^(install|update) /i });
+  expect(actions).toHaveLength(3);
+  // Pairwise distinct: each name resolves to exactly one control.
+  for (const name of ["Install kb-article", "Install sql-queries", "Update ticket-triage"]) {
+    expect(screen.getAllByRole("button", { name }), name).toHaveLength(1);
+  }
 });

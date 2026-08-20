@@ -12,7 +12,7 @@ import {
   type GitSyncService,
   type Logger,
   SoulGitStore,
-  type SoulLoader,
+  SoulLoader,
   type SoulSkill,
   SoulWriter,
 } from "@tulipfarm/soul";
@@ -1006,6 +1006,72 @@ spec:
       );
       await expect(readFile(join(installed, "LICENSE.txt"), "utf8")).resolves.toBe("MIT\n");
       await expect(readFile(join(installed, "requirements.txt"), "utf8")).resolves.toBe("pandas\n");
+    });
+
+    // A 200 from install is not the claim that matters; the claim is that the package is usable.
+    // `load_skill_reference` reaches a companion only once `SoulLoader` has resolved the Skill it
+    // sits under, so a tree that committed but quarantines — or whose companions never landed —
+    // is an install that reported success and delivered nothing a Turn can read. The fixture is
+    // the shape of the packages #446 reported: `LICENSE.txt` and `requirements.txt` beside the
+    // definition, which is what the layout could not address, not the directories it named.
+    it("resolves an installed package's companions through the reader's own path", async () => {
+      const remote = await makeRemoteRepo();
+      temps.push(remote);
+      const skillDir = join(remote, "skills", "demo-skill");
+      await mkdir(join(skillDir, "references"), { recursive: true });
+      await mkdir(join(skillDir, "scripts"), { recursive: true });
+      await writeFile(join(skillDir, "references", "01-playbook.md"), "# Playbook\n", "utf8");
+      await writeFile(join(skillDir, "scripts", "convert_to_asm.py"), "print('convert')\n", "utf8");
+      await writeFile(join(skillDir, "LICENSE.txt"), "MIT\n", "utf8");
+      await writeFile(join(skillDir, "requirements.txt"), "pandas\n", "utf8");
+      await execFileP("git", ["add", "-A"], { cwd: remote });
+      await execFileP("git", ["commit", "-q", "-m", "add package files"], { cwd: remote });
+
+      const scanRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/scan",
+        cookies: auth(),
+        headers,
+        payload: { source: `file://${remote}` },
+      });
+      const { scanId } = scanRes.json();
+      buildAudit.mockResolvedValue({
+        riskRating: "low",
+        summary: "No issue found.",
+        toolsReach: [],
+        findings: [],
+        deterministicScan: CLEAN_DETERMINISTIC_SCAN,
+      });
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/audit",
+        cookies: auth(),
+        headers,
+        payload: { scanId, name: "demo-skill" },
+      });
+
+      const installRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/install",
+        cookies: auth(),
+        headers,
+        payload: { scanId, names: ["demo-skill"] },
+      });
+      expect(installRes.statusCode).toBe(200);
+
+      const reader = new SoulLoader(soulPath, { info() {}, warn() {}, error() {} });
+      await reader.load();
+      expect(reader.quarantined.filter((entry) => entry.name === "demo-skill")).toEqual([]);
+      expect(reader.skills.get("demo-skill")).toBeDefined();
+      // The exact resolution `load_skill_reference` performs beside the loaded Skill.
+      const base = join(soulPath, "skills", "demo-skill");
+      await expect(readFile(join(base, "references", "01-playbook.md"), "utf8")).resolves.toBe(
+        "# Playbook\n"
+      );
+      await expect(readFile(join(base, "scripts", "convert_to_asm.py"), "utf8")).resolves.toBe(
+        "print('convert')\n"
+      );
+      await expect(readFile(join(base, "LICENSE.txt"), "utf8")).resolves.toBe("MIT\n");
     });
 
     // A canonical-format package ships its own `skill.yaml`. That file is the Skill's definition,
