@@ -220,6 +220,41 @@ describe("role catalog fitness", () => {
     ).toEqual([]);
   });
 
+  it("catalogs every action a narrowed member surface could reach", () => {
+    const adminByType = new Map(ADMIN_ONLY_SURFACES.map((s) => [s.type, s.actions]));
+    const allTypes = [
+      ...new Set([...adminByType.keys(), ...MEMBER_ALLOWED_SURFACES.map((s) => s.type)]),
+    ];
+    const narrowed = MEMBER_ALLOWED_SURFACES.filter(
+      (surface) => adminByType.has(surface.type) && !surface.actions.includes("*")
+    );
+    const declared = sourceFiles()
+      .flatMap((path) => [
+        ...readFileSync(resolveCitation(path), "utf8").matchAll(/action: "([a-z0-9_.]+)"/g),
+      ])
+      .map((match) => match[1])
+      .filter((action): action is string => action !== undefined);
+
+    // A dotted action belongs to the longest type that prefixes it, so `integration.github.*`
+    // is never mistaken for an uncatalogued action of the shorter `integration` surface.
+    const ownerType = (action: string): string | undefined =>
+      allTypes
+        .filter((type) => action.startsWith(`${type}.`))
+        .sort((a, b) => b.length - a.length)[0];
+
+    const uncatalogued = narrowed.flatMap((surface) => {
+      const known = new Set([...surface.actions, ...(adminByType.get(surface.type) ?? [])]);
+      return declared.filter((action) => ownerType(action) === surface.type && !known.has(action));
+    });
+
+    expect(
+      [...new Set(uncatalogued)].sort(),
+      "A member surface named action by action stops being an allow-list the moment a new action " +
+        "on that type ships uncatalogued: the member silently loses it. Add it to " +
+        "MEMBER_ALLOWED_SURFACES, or to ADMIN_ONLY_SURFACES if it is operator-only."
+    ).toEqual([]);
+  });
+
   it("grants a member every action the member catalog names", () => {
     const member = DEPLOYMENT_ROLES.find((role) => role.id === "member");
     if (!member) throw new Error("member role missing from the deployment catalog");

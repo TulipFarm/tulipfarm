@@ -103,3 +103,5 @@ export {
   RoleResolutionError,
 } from "./roles";
 export { compileRoutineAuthority } from "./routine-authority";
+export type { RoleSurface } from "./surface-catalog";
+export { restrictedSurfaceCarveOut, surfaceGrants } from "./surface-catalog";
