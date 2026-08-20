@@ -68,6 +68,24 @@ describe("SoulLoader", () => {
         reason: expect.stringContaining("/egress"),
       });
     });
+
+    it("loads a bundled integration's connection.yaml with no manifest.yml", async () => {
+      // Bundled integrations are code-owned: Soul holds only connection state, never manifest.yml
+      // (install.ts refuses to write one for a bundled slug). Reload must not throw on that dir.
+      await write(
+        join(TMP, "integrations", "github", "connection.yaml"),
+        "enabled: true\nenv:\n  GITHUB_INSTALLATION_ID: '123'\n"
+      );
+      const loader = new SoulLoader(TMP, makeLogger());
+
+      await expect(loader.load()).resolves.toBeUndefined();
+
+      const github = loader.integrations.get("github");
+      expect(github?.manifest).toBeUndefined();
+      expect(github?.connection?.enabled).toBe(true);
+      expect(github?.connection?.env?.GITHUB_INSTALLATION_ID).toBe("123");
+      expect(loader.quarantined).toEqual([]);
+    });
   });
 
   describe("agents", () => {

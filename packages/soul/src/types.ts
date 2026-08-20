@@ -282,7 +282,8 @@ export interface IntegrationConnection {
 export interface SoulIntegration {
   slug: string;
   sourceIntegration: string;
-  manifest: IntegrationManifest;
+  /** Absent for a bundled integration: Soul holds only `connection.yaml`, manifest is code-owned. */
+  manifest?: IntegrationManifest;
   connection?: IntegrationConnection;
   setupGuide?: string;
   ingressHandler?: { source: string; hash: string };

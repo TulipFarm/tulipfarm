@@ -68,7 +68,7 @@ export async function registerIngressRoutes(
         const integration = deps.soulLoader.integrations.get(name);
         if (!integration) return reply.code(404).send(NOT_FOUND);
 
-        const ingress = integration.manifest.ingress;
+        const ingress = integration.manifest?.ingress;
         if (!ingress?.webhook || !ingress.handler || !integration.ingressHandler) {
           return reply.code(404).send(NOT_FOUND);
         }

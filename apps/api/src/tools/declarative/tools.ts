@@ -143,6 +143,7 @@ function integrationResource(slug: string): string {
 
 /** Resolve auth steps before credential mode so legacy `oauth` keeps personal credentials. */
 function credentialModeFor(integration: SoulIntegration): ToolCredentialMode {
+  if (integration.manifest === undefined) return "service";
   const personal = resolveAuthSteps(integration.manifest).some(isPersonalCredentialStep);
   return personal ? "user_preferred" : "service";
 }
@@ -304,7 +305,10 @@ interface CompiledIntegration {
 function compileIntegration(integration: SoulIntegration): CompiledIntegration {
   const { manifest, slug } = integration;
   const credentialMode = credentialModeFor(integration);
-  if (manifest.egress?.type !== "openapi") return { slug, tools: [], credentialMode };
+  // Callers filter out manifest-less (bundled) integrations before reaching here.
+  if (manifest === undefined || manifest.egress?.type !== "openapi") {
+    return { slug, tools: [], credentialMode };
+  }
 
   // Connection env fills `{VAR}` placeholders in `base_url` — a per-install path segment such as
   // an Atlassian cloud id. Secret references are excluded: the credential has its own placement,
@@ -518,6 +522,9 @@ export function buildDeclarativeTools(
   const toolOwners = new Map<string, string>();
 
   for (const integration of integrations) {
+    // No manifest means a bundled, code-owned integration (Soul holds only connection state);
+    // its Tools are handwritten, not declarative.
+    if (integration.manifest === undefined) continue;
     try {
       const compiled = compileIntegration(integration);
       if (compiled.tools.length === 0) continue;
