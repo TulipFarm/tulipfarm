@@ -1,6 +1,6 @@
 import { LlmNotConfiguredError, UnknownModelError } from "@tulipfarm/schema";
 import { describe, expect, it, vi } from "vitest";
-import { llmProbe, probeHealth } from "./health";
+import { type HealthResult, llmProbe, probeHealth } from "./health";
 
 /** A configured, resolvable model. Resolution alone cannot tell a live key from a revoked one. */
 const configured = { effortModel: vi.fn(() => ({})) };
@@ -17,7 +17,7 @@ describe("llmProbe", () => {
   it("reports up while a working provider is still answering the live call", async () => {
     // A real model call outlives the probe budget on a cold subscription provider. Awaiting it
     // here timed the probe out, so the page said `down` about a provider that was answering chats.
-    const verify = vi.fn(() => new Promise<void>(() => {}));
+    const verify = vi.fn(() => new Promise<HealthResult>(() => {}));
 
     const [component] = await probeHealth([llmProbe(configured, { reachability: { verify } })], at);
 
@@ -25,11 +25,13 @@ describe("llmProbe", () => {
     expect(verify).toHaveBeenCalledTimes(1);
   });
 
-  it("degrades once the provider refuses the credential", async () => {
+  it("publishes the verdict the reachability check reached, whatever it is", async () => {
     // Resolution succeeds for a revoked key, so without a live check this reported `ok` and the
     // first person to learn the key was dead was a participant mid-chat.
     const probe = llmProbe(configured, {
-      reachability: { verify: async () => Promise.reject(new Error("401 invalid api key")) },
+      reachability: {
+        verify: async () => ({ status: "degraded", detail: "credential refused" }) as HealthResult,
+      },
     });
 
     await probe.check();
@@ -37,23 +39,27 @@ describe("llmProbe", () => {
     await vi.waitFor(async () => {
       const result = await probe.check();
       expect(result.status).toBe("degraded");
-      expect(result.detail).toContain("401 invalid api key");
+      expect(result.detail).toContain("credential refused");
     });
   });
 
-  it("never reports down, so a provider cannot fail this deployment's readiness", async () => {
+  it("reports down when the check itself cannot run, rather than staying green", async () => {
+    // Swallowing this reported a healthy provider on a deployment where nothing had been asked.
     const probe = llmProbe(configured, {
-      reachability: { verify: async () => Promise.reject(new Error("anything")) },
+      reachability: { verify: async () => Promise.reject(new Error("boom")) },
     });
 
     await probe.check();
 
-    await vi.waitFor(async () => expect((await probe.check()).status).toBe("degraded"));
-    expect((await probe.check()).status).not.toBe("down");
+    await vi.waitFor(async () => {
+      const result = await probe.check();
+      expect(result.status).toBe("down");
+      expect(result.detail).toContain("boom");
+    });
   });
 
   it("caches the verdict so scraping the health page cannot spend tokens per hit", async () => {
-    const verify = vi.fn(async () => {});
+    const verify = vi.fn(async (): Promise<HealthResult> => ({ status: "ok" }));
     let clock = 1_000;
     const probe = llmProbe(configured, {
       reachability: { verify },
@@ -81,7 +87,8 @@ describe("llmProbe", () => {
     const [component] = await probeHealth([probe], at);
 
     expect(component.status).toBe("unknown");
-    expect(component.detail).toBe("no LLM provider is configured");
+    expect(component.detail).toContain("no LLM provider is configured");
+    expect(component.detail).toContain("Business → Models");
   });
 
   it("still reports down when a configured model cannot be resolved", async () => {

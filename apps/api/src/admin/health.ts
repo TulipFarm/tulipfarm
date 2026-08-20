@@ -128,16 +128,19 @@ export interface ModelProbeTarget {
   effortModel(preset: "balanced"): unknown;
 }
 
-/** Whether the configured credential is still accepted. Absent means "not checked". */
+/** The verdict a live provider call proved. Absent means "not checked". */
 export interface ModelReachability {
-  /** Rejects only when the provider refused the *credential*; transient faults resolve. */
-  verify(): Promise<void>;
+  /**
+   * Resolves with the verdict for every outcome, including failure: a rejection would leave the
+   * probe unable to say anything but that the check itself broke.
+   */
+  verify(): Promise<HealthResult>;
 }
 
 export interface LlmProbeOptions {
   /**
-   * Optional live credential check. Without it the probe reports configuration only, which
-   * cannot distinguish a working key from a revoked one.
+   * Optional live provider call. Without it the probe reports configuration only, which cannot
+   * distinguish a reachable provider from a revoked key or a dead endpoint.
    */
   readonly reachability?: ModelReachability;
   /** Reachability is cached this long so scraping the health page cannot spend tokens per hit. */
@@ -149,17 +152,17 @@ const REACHABILITY_TTL_MS = 60_000;
 
 /**
  * Checks that a model is configured and resolvable, and — when a reachability check is supplied —
- * that the provider still accepts the credential.
+ * what a live call to the configured provider proved.
  *
- * The credential check runs *outside* this call: a real model call takes seconds, `runProbe` gives
- * every probe a two-second budget, and awaiting one here reported a working provider as `down` on
+ * The live call runs *outside* this one: a real model call takes seconds, `runProbe` gives every
+ * probe a two-second budget, and awaiting one here reported a working provider as `down` on
  * exactly the deployments whose first call is slowest. `check()` therefore answers from the last
  * verdict and refreshes in the background, so provider latency can never decide the status.
  *
- * A provider outage is deliberately *not* our failure: only a refused credential downgrades the
- * component, and only to `degraded`. Reporting `down` would hand a third party the power to fail
- * this deployment's readiness. Without that distinction a revoked key reported `ok` and the first
- * person to learn of it was a participant mid-chat.
+ * The verdict itself is the reachability check's to make, and it distinguishes a provider that
+ * answered — a refused credential, a throttle, a request it did not like — from one that never
+ * answered at all. Swallowing the second class reported `ok` straight through an outage, which is
+ * the more dangerous half of an untrustworthy health row: it is wrong silently.
  */
 export function llmProbe(llm: ModelProbeTarget, options: LlmProbeOptions = {}): HealthProbe {
   const now = options.now ?? Date.now;
@@ -173,15 +176,15 @@ export function llmProbe(llm: ModelProbeTarget, options: LlmProbeOptions = {}): 
     void reachability
       .verify()
       .then(
-        () => {
-          cached = { at: now(), result: { status: "ok" } };
+        (result) => {
+          cached = { at: now(), result };
         },
         (error: unknown) => {
           cached = {
             at: now(),
             result: {
-              status: "degraded",
-              detail: `provider rejected the credential: ${message(error)}`,
+              status: "down",
+              detail: `the provider check could not run: ${message(error)}`,
             },
           };
         }
@@ -198,7 +201,10 @@ export function llmProbe(llm: ModelProbeTarget, options: LlmProbeOptions = {}): 
         llm.effortModel("balanced");
       } catch (error) {
         if (error instanceof LlmNotConfiguredError) {
-          return { status: "unknown", detail: "no LLM provider is configured" };
+          return {
+            status: "unknown",
+            detail: "no LLM provider is configured — connect one under Business → Models",
+          };
         }
         throw error;
       }
@@ -209,7 +215,7 @@ export function llmProbe(llm: ModelProbeTarget, options: LlmProbeOptions = {}): 
       if (cached !== undefined && now() - cached.at < ttlMs) return cached.result;
 
       refresh(reachability);
-      return cached?.result ?? { status: "ok", detail: "credential check pending" };
+      return cached?.result ?? { status: "ok", detail: "provider check pending" };
     },
   };
 }
