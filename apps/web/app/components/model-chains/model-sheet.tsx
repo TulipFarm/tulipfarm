@@ -37,12 +37,15 @@ export function ModelSheet({
   const [resolving, setResolving] = useState(false);
   const [candidates, setCandidates] = useState<string[]>([]);
   const [unmatched, setUnmatched] = useState(false);
-  // Scoped to the row it was raised for, so a newly opened row never inherits it.
-  const [errors, setErrors] = useState<{ uid: number; provider?: string; model?: string } | null>(
-    null
-  );
+  // Cleared when the sheet closes, so re-opening a row never shows the refusal from a previous
+  // visit to a value that has since been discarded.
+  const [errors, setErrors] = useState<{ provider?: string; model?: string } | null>(null);
   const provider = row?.provider;
   const model = row?.model;
+
+  useEffect(() => {
+    if (!open) setErrors(null);
+  }, [open]);
 
   useEffect(() => {
     if (!open || !provider) {
@@ -107,18 +110,16 @@ export function ModelSheet({
   function finish() {
     if (!row) return;
     if (!row.provider.trim()) {
-      setErrors({ uid: row.uid, provider: "Select a provider." });
+      setErrors({ provider: "Select a provider." });
       return;
     }
     if (!row.model.trim()) {
-      setErrors({ uid: row.uid, model: "Enter a Model ID." });
+      setErrors({ model: "Enter a Model ID." });
       return;
     }
     setErrors(null);
     onDone();
   }
-
-  const shownErrors = errors?.uid === row?.uid ? errors : undefined;
 
   return (
     <Sheet open={open} onClose={onCancel} title="Model">
@@ -126,7 +127,7 @@ export function ModelSheet({
         <div className="space-y-4 p-4">
           <Field
             label="Provider"
-            error={shownErrors?.provider}
+            error={errors?.provider}
             help={ready ? undefined : "This provider has no credential yet."}
           >
             <Select
@@ -149,7 +150,7 @@ export function ModelSheet({
           <Field
             label="Model ID"
             htmlFor={modelFieldId}
-            error={shownErrors?.model}
+            error={errors?.model}
             help={
               options?.source === "live"
                 ? "Listed from your configured endpoint."
