@@ -8,6 +8,7 @@ import { ajv, definitions } from "@tulipfarm/schema";
 import type { BundledSkill } from "@tulipfarm/soul";
 import {
   type GitSyncService,
+  type RoutineCatalog,
   resolveSkill,
   type SoulAgent,
   type SoulLoader,
@@ -41,6 +42,12 @@ export interface PlatformToolContext {
   /** The one guarded path that starts a delegated child Run; see `./delegation.ts`. */
   delegateToAgent?: (input: DelegateToAgentInput) => Promise<DelegationOutcome>;
   onRoutinesChanged?: () => Promise<void>;
+  /**
+   * The Routines surface's own read model. `routine_forge` reports success only once the Routine
+   * it wrote is listed here, so the Tool's claim is a read-back through the reader the user will
+   * use rather than a restatement of what the write path was asked to do.
+   */
+  routineCatalog?: RoutineCatalog;
   /**
    * Re-reads `guardrails.yaml` into the live {@link GuardrailsService}. Every Turn's Context
    * carries the in-process policy, not the published bundle, so without this a committed
@@ -353,6 +360,10 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
     } catch (e) {
       return err("internal_error", e instanceof Error ? e.message : String(e));
     }
+
+    const invisible = await routineMissingFromCatalog(ctx.routineCatalog, name);
+    if (invisible !== undefined) return err("internal_error", invisible);
+
     return ok({
       name,
       committed: true,
@@ -360,6 +371,29 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
     });
   },
 });
+
+/**
+ * Why the forged Routine is not on the Routines surface, or `undefined` when it is listed.
+ *
+ * A Tool that announces a Routine the surface cannot show is the failure this guards: the write
+ * path and the read model can drift apart in ways the write path cannot see, and every such drift
+ * has reached users as a confident success message for something unreachable.
+ */
+async function routineMissingFromCatalog(
+  catalog: RoutineCatalog | undefined,
+  slug: string
+): Promise<string | undefined> {
+  if (catalog === undefined) return undefined;
+  try {
+    const listed = await catalog.list();
+    return listed.some((routine) => routine.slug === slug)
+      ? undefined
+      : `Routine ${slug} was committed and published but does not appear on the Routines surface, so it is not available to run or edit`;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return `Routine ${slug} was committed and published but the Routines surface could not be read back, so it cannot be reported as available — ${reason}`;
+  }
+}
 
 const ROUTINE_PICKER_SCHEMA: Record<string, unknown> = {
   type: "object",

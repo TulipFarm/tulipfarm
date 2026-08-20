@@ -180,8 +180,9 @@ no database. It can observe everything the harness *decides*.
 **L3** exists for the one thing L2 structurally cannot see: whether a decision **survives**. It
 boots an in-process PGlite from `@tulipfarm/storage`'s own DDL, mints a real Run, and drives
 `createChatExecutor` from `@tulipfarm/turn-executor` — the same executor a production Turn runs
-through — then reads the persisted result back. That unlocks five Expectation kinds L2 cannot
-honour: `run_status`, `state_status`, `turn_status`, `run_event_emitted` and `soul_committed`.
+through — then reads the persisted result back. That unlocks six Expectation kinds L2 cannot
+honour: `run_status`, `state_status`, `turn_status`, `run_event_emitted`, `soul_committed` and
+`soul_published`.
 `loadCorpus` refuses any of them on an L2 Case, so the mistake costs no model calls.
 
 It deliberately stays small. Each L3 Case costs ~1.5s of setup against L2's milliseconds, and the
@@ -276,6 +277,12 @@ writer's canonical mode commits `agents/<slug>/agent.yaml`, but `SoulLoader` onl
 `AGENT.md` — so the write succeeded, the commit landed, and the product could not see it. A
 single-Turn Case asserting `soul_committed` passes straight through that. The journey Case
 `l3-a-committed-agent-is-visible-next-turn` does not.
+
+`soul_published` covers the second half of the same seam. A commit only reaches a product surface
+once its bundle becomes the *active* publication, so the tier runs the real `SoulPublisher` and
+`SoulPublicationCoordinator` over the fixture repo and reports what the active bundle serves.
+A write that commits and never activates fails `soul_published` while passing `soul_committed` —
+which is the shape the Routines browser hit when a forged Routine stayed invisible.
 
 History is deliberately re-read from `eval_messages` rather than accumulated in a variable: holding
 it in memory would let a journey pass while the Turn persisted nothing at all.

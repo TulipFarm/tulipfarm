@@ -84,6 +84,8 @@ export interface PersistedTurn {
   readonly toolCalls: readonly ToolCall[];
   /** Commits the Turn landed in the Eval Soul's real git repository. */
   readonly soulCommits: readonly SoulCommit[];
+  /** Artifacts the active Soul publication serves once the Turn settled, written `Kind:slug`. */
+  readonly publishedArtifacts: readonly string[];
   /** Files the Turn generated, each with the audience `FileService` gave it. */
   readonly generatedFiles: readonly GeneratedFile[];
   /** The prompt the real Context assembler produced, so `prompt_contains` works at L3 too. */
@@ -171,6 +173,7 @@ async function readBack(
   observed: {
     toolCalls: readonly ToolCall[];
     soulCommits: readonly SoulCommit[];
+    publishedArtifacts: readonly string[];
     generatedFiles: readonly GeneratedFile[];
     systemPrompt: string;
     spend: Spend;
@@ -204,6 +207,7 @@ async function readBack(
     spend: observed.spend,
     toolCalls: observed.toolCalls,
     soulCommits: observed.soulCommits,
+    publishedArtifacts: observed.publishedArtifacts,
     generatedFiles: observed.generatedFiles,
     systemPrompt: observed.systemPrompt,
   };
@@ -321,6 +325,7 @@ async function runOneTurn(
     return await readBack(database, runId, turnId, {
       toolCalls: [...scripted.calls],
       soulCommits: soulWrites.commits.slice(committedBefore),
+      publishedArtifacts: await soulWrites.published(),
       generatedFiles: files.generated.slice(generatedBefore),
       systemPrompt: context.systemPrompt,
       spend,

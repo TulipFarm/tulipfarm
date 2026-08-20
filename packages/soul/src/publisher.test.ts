@@ -109,6 +109,11 @@ async function writeFixture(path: string, content: string): Promise<void> {
 
 afterEach(() => rm(TMP, { recursive: true, force: true }));
 
+/** Coordinator double whose publication settles to `active`, as an inline settle does. */
+function settledCoordinator() {
+  return { publish: vi.fn(async () => {}), settle: vi.fn(async () => "active" as const) };
+}
+
 describe("SoulPublisher", () => {
   it("reads, compiles, signs, and publishes the committed tree with its actor", async () => {
     const { signer } = ed25519();
@@ -117,7 +122,7 @@ describe("SoulPublisher", () => {
       readFiles: vi.fn(async () => []),
     };
     const compiler = vi.fn((request: BundleCompileRequest) => compileExecutionBundle(request));
-    const coordinator = { publish: vi.fn(async () => {}) };
+    const coordinator = settledCoordinator();
     const publisher = new SoulPublisher({
       treeReader,
       compiler,
@@ -159,7 +164,7 @@ describe("SoulPublisher", () => {
       treeReader: { readDefinitions: vi.fn(async () => [routine()]) },
       compiler,
       signer,
-      coordinator: { publish: vi.fn(async () => {}) },
+      coordinator: settledCoordinator(),
       logger: logger(),
       businessId: BUSINESS,
     });
@@ -174,7 +179,7 @@ describe("SoulPublisher", () => {
     const base = {
       compiler: (request: BundleCompileRequest) => compileExecutionBundle(request),
       signer,
-      coordinator: { publish: vi.fn(async () => {}) },
+      coordinator: settledCoordinator(),
       logger: logger(),
       businessId: BUSINESS,
     };
@@ -267,6 +272,49 @@ describe("SoulPublisher", () => {
       "is not trusted"
     );
   }, 15_000);
+
+  it("activates the publication before returning, so no drain is needed to see the write", async () => {
+    const { signer, verifier } = ed25519();
+    const log = logger();
+    const publications = new SoulPublicationCoordinator(
+      new InMemorySoulPublicationStore(),
+      new InMemoryBundleStore(),
+      log
+    );
+    const publisher = new SoulPublisher({
+      treeReader: { readDefinitions: vi.fn(async () => [routine()]) },
+      compiler: compileExecutionBundle,
+      signer,
+      coordinator: publications,
+      logger: log,
+      businessId: BUSINESS,
+    });
+
+    await publisher.publishCommittedTree({ commitSha: COMMIT_SHA, actor: ACTOR });
+
+    const active = await publications.activeBundle(BUSINESS, verifier);
+    expect(active?.get("Routine", "daily-briefing")?.slug).toBe("daily-briefing");
+    expect(await publications.drain("test")).toEqual([]);
+  });
+
+  it("fails the publish when the publication stops short of active", async () => {
+    const { signer } = ed25519();
+    const publisher = new SoulPublisher({
+      treeReader: { readDefinitions: vi.fn(async () => [routine()]) },
+      compiler: compileExecutionBundle,
+      signer,
+      coordinator: {
+        publish: vi.fn(async () => {}),
+        settle: vi.fn(async () => "projected" as const),
+      },
+      logger: logger(),
+      businessId: BUSINESS,
+    });
+
+    await expect(
+      publisher.publishCommittedTree({ commitSha: COMMIT_SHA, actor: ACTOR })
+    ).rejects.toThrow("stopped at stage projected");
+  });
 });
 
 describe("SoulPublisher.reconcile", () => {
@@ -281,7 +329,7 @@ describe("SoulPublisher.reconcile", () => {
       },
       compiler: compileExecutionBundle,
       signer,
-      coordinator: { publish },
+      coordinator: { ...settledCoordinator(), publish },
       logger: log,
       businessId: BUSINESS,
       gitState: {
@@ -345,7 +393,7 @@ describe("SoulPublisher.reconcile", () => {
       treeReader: { readDefinitions: vi.fn(async () => [routine()]) },
       compiler: compileExecutionBundle,
       signer,
-      coordinator: { publish: vi.fn(async () => {}) },
+      coordinator: settledCoordinator(),
       logger: logger(),
       businessId: BUSINESS,
     });

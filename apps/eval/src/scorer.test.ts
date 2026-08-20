@@ -465,6 +465,38 @@ describe("an Expectation whose seam a Tool call has to open", () => {
   });
 });
 
+describe("what the active Soul publication serves", () => {
+  const withPublication = (publishedArtifacts: string[]): Observation => ({
+    ...base,
+    persisted: {
+      runStatus: "succeeded",
+      stateStatus: "succeeded",
+      turnStatus: "succeeded",
+      events: [],
+      soulCommits: [{ message: "soul: update Routine daily-check", paths: ["r/routine.yaml"] }],
+      publishedArtifacts,
+      generatedFiles: [],
+    },
+  });
+
+  it("passes once the artifact is in the active bundle", () => {
+    const result = only(
+      { kind: "soul_published", artifact: "Routine:daily-check" },
+      withPublication(["Routine:daily-check"])
+    );
+    expect(result?.passed).toBe(true);
+  });
+
+  it("fails a committed artifact no bundle serves, naming what is served instead", () => {
+    const result = only(
+      { kind: "soul_published", artifact: "Routine:daily-check" },
+      withPublication(["Agent:support"])
+    );
+    expect(result?.passed).toBe(false);
+    expect(result?.detail).toContain("Agent:support");
+  });
+});
+
 describe("who may read a File the Turn generated", () => {
   const withFiles = (
     generatedFiles: { filename: string; readableBy: string[] }[]
@@ -476,6 +508,7 @@ describe("who may read a File the Turn generated", () => {
       turnStatus: "succeeded",
       events: [],
       soulCommits: [],
+      publishedArtifacts: [],
       generatedFiles: generatedFiles.map((f) => ({ fileId: f.filename, ...f })),
     },
   });
