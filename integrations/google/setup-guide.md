@@ -11,15 +11,40 @@ Google Cloud project. It belongs to this deployment — TulipFarm never sees you
 
 1. In [Google Cloud Console](https://console.cloud.google.com/apis/credentials), open the project
    serving this deployment and enable these APIs from the API Library: **Gmail API**, **Google
-   Calendar API**, **Google Drive API**, **Google Docs API**.
-2. Open **OAuth consent screen** and set **User type** to **Internal**. Internal keeps the app to
-   your own Workspace and skips Google's verification review for the Gmail, Drive, and Docs scopes.
-   (Choose External only if the accounts live outside your Workspace; Google will then require
-   verification before those scopes work for anyone but named test users.)
+   Calendar API**, **Google Drive API**, **Google Docs API**. (See "One client, one token" below —
+   this is the only per-product step, and it is unrelated to tokens.)
+2. Open the **OAuth consent screen** and pick the **User type**:
+   - **Internal** — only offered if this project belongs to a Google **Workspace** organization. It
+     skips Google's verification review for the Gmail, Drive, and Docs scopes.
+   - **External** — use this for a personal Gmail account (no Workspace). Keep the publishing status
+     on **Testing**, then add your own Google account under **Test users**. Restricted scopes work
+     for test users with no verification. One caveat: while in **Testing**, Google expires the
+     **refresh token after 7 days**, so a fully unattended background routine would need a
+     reconnect weekly until the app is published + verified (or moved to a Workspace account). For
+     trying this out, Testing is exactly right.
 3. Open **Credentials → Create credentials → OAuth client ID**, type **Web application**.
-4. Under **Authorized redirect URIs**, add the callback URL shown on the TulipFarm connect screen,
-   exactly. A trailing-slash or scheme mismatch is the most common cause of a failed sign-in.
+4. Under **Authorized redirect URIs**, add TulipFarm's callback URL — this is where Google sends the
+   user back after they approve, and it must match **exactly**. For a default local dev instance it
+   is:
+
+   ```
+   http://localhost:4010/api/v1/integrations/auth/callback
+   ```
+
+   If you set `PUBLIC_API_URL`, use that origin instead, keeping the same
+   `/api/v1/integrations/auth/callback` path. The TulipFarm connect screen also displays the exact
+   value — copy it from there if unsure. A trailing slash or scheme mismatch is the most common
+   cause of a failed sign-in. (Google allows `http://localhost` redirect URIs for local testing.)
 5. Copy the **Client ID** and **Client secret**.
+
+## One client, one token — not one per product
+
+You create **one** OAuth client (a single Client ID + secret); it is **not** per API. Signing in
+once issues **one** token that carries every granted scope, so the same token reaches Gmail,
+Calendar, Drive, and Docs — there is no separate token to create per product. The only per-product
+step is **enabling each API** in the Cloud project (a one-time toggle in the API Library), which
+governs whether a call is allowed, not authentication. Enabling all four now avoids a surprise
+later when the agent first touches one.
 
 ## 2. Connect in TulipFarm
 

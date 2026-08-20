@@ -42,11 +42,14 @@ auth:
         setup_url: https://console.cloud.google.com/apis/credentials
         steps:
           - In Google Cloud Console, open the project serving this deployment and enable the Gmail,
-            Google Calendar, Google Drive, and Google Docs APIs from the API Library.
-          - Set the OAuth consent screen's User type to "Internal" so Google does not require app
-            verification for the Gmail, Drive, and Docs scopes.
+            Google Calendar, Google Drive, and Google Docs APIs from the API Library. One OAuth
+            client and one token cover all of them — enabling each API is the only per-product step.
+          - On the OAuth consent screen, pick User type "Internal" if this is a Google Workspace
+            org; otherwise pick "External", keep it in "Testing", and add your own account under
+            Test users (restricted scopes then work with no verification).
           - Create an OAuth client of type "Web application" and set its Authorized redirect URI to
-            the callback URL shown on this screen, exactly.
+            the callback URL shown on this connect screen, exactly (default local dev value is
+            http://localhost:4010/api/v1/integrations/auth/callback).
           - Copy the Client ID and paste it below.
       - name: GOOGLE_CLIENT_SECRET
         label: OAuth Client Secret
