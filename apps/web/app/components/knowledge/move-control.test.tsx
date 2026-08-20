@@ -94,7 +94,7 @@ describe("getting from a tree row to the readership warning", () => {
     const { onMoved } = setup();
     openAndType("archive/bands");
     await screen.findByTestId("gained");
-    const confirm = screen.getByRole("button", { name: "Move" });
+    const confirm = await screen.findByRole("button", { name: "Move" });
     fireEvent.click(confirm);
     await waitFor(() => expect(movePage).toHaveBeenCalledWith("p1", { path: "archive/bands" }));
     await waitFor(() => expect(onMoved).toHaveBeenCalled());
@@ -105,7 +105,7 @@ describe("getting from a tree row to the readership warning", () => {
     openAndType("archive/bands");
     await screen.findByTestId("gained");
 
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
     expect(screen.queryByTestId("gained")).toBeNull();
     expect(movePage).not.toHaveBeenCalled();
 

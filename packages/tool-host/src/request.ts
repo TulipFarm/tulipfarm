@@ -23,7 +23,7 @@ const CHAT_SOURCE = "chat";
 /** Reads the immutable request Artifact that fixed this turn's parameters. */
 export async function readChatRequest(
   artifacts: ArtifactService,
-  authority: TurnAuthority,
+  authority: Pick<TurnAuthority, "businessId" | "runId" | "source">,
   now: Date
 ): Promise<ChatRequestPayload> {
   const artifact = await artifacts.read({

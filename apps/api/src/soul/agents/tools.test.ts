@@ -1,6 +1,9 @@
+import type { AgentCapabilityRestrictions } from "@tulipfarm/schema";
 import type { GitSyncService, SoulAgent, SoulLoader, SoulWriter } from "@tulipfarm/soul";
 import { SoulWriteError, type SoulWriteErrorCode } from "@tulipfarm/soul";
+import { agentCapabilityDenial } from "@tulipfarm/tool-host";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { parse } from "yaml";
 import { AGENT_TOOLS, type AgentToolContext } from "./tools";
 
 type AgentTool = (typeof AGENT_TOOLS)[number];
@@ -193,6 +196,31 @@ describe("agent_create", () => {
     expect(ctx.soulWriter.apply).toHaveBeenCalledWith(
       expect.objectContaining({ subject: "soul: add agent reviewer" })
     );
+  });
+
+  it("accepts capabilityRestrictions so Agent Forge can create read-only Agents", async () => {
+    const ctx = makeCtx();
+    const res = await createTool.handler(
+      {
+        name: "reporter",
+        body: "You only list and view records.",
+        frontmatter: {
+          capabilityRestrictions: {
+            tools: { allowMutating: false },
+            records: { actions: { allow: ["list", "search", "read"] } },
+            resourceTypes: { actions: { allow: ["list", "read"] } },
+          },
+        },
+      },
+      ctx
+    );
+
+    expect(res.success).toBe(true);
+    const request = ctx.soulWriter.apply.mock.calls[0][0] as {
+      changes: { content: string }[];
+    };
+    expect(request.changes[0].content).toContain("capabilityRestrictions:");
+    expect(request.changes[0].content).toContain("allowMutating: false");
   });
 });
 
@@ -408,5 +436,114 @@ describe("AGENT_TOOLS", () => {
     expect(byName.agent_get.mutating).toBe(false);
     expect(byName.agent_list.mutating).toBe(false);
     expect(byName.agent_delete.mutating).toBe(true);
+  });
+});
+
+// ── chat-authored capability restrictions ─────────────────────────────────────
+
+/**
+ * The authoring path is the only way a user can reach this feature, so it is tested end to end:
+ * what `agent_create` hands the write gateway must parse back into something the dispatcher
+ * refuses. A restriction the Forge cannot write is a restriction users do not have (#461, #462).
+ */
+function writtenFrontmatter(writer: ReturnType<typeof makeSoulWriter>): Record<string, unknown> {
+  const change = writer.apply.mock.calls[0]?.[0]?.changes?.[0];
+  const content = (change as { content?: string } | undefined)?.content ?? "";
+  const body = content.match(/^---\n([\s\S]*?)\n---\n/);
+  return body === null ? {} : (parse(body[1] ?? "") as Record<string, unknown>);
+}
+
+const READ_ONLY_REPORTER = {
+  tools: { allowMutating: false },
+  records: { actions: { allow: ["list", "search", "read"] } },
+};
+
+describe("capability restrictions authored from chat", () => {
+  it("writes the restriction a user asked for into the Agent's frontmatter", async () => {
+    const ctx = makeCtx();
+    const res = await createTool.handler(
+      {
+        name: "reporter",
+        frontmatter: { label: "Reporter", capabilityRestrictions: READ_ONLY_REPORTER },
+        body: "You report on records. You never change them.",
+      },
+      ctx
+    );
+
+    expect(res).toMatchObject({ success: true });
+    expect(writtenFrontmatter(ctx.soulWriter).capabilityRestrictions).toEqual(READ_ONLY_REPORTER);
+  });
+
+  it("lands a restriction the dispatcher actually refuses a delete on", async () => {
+    const ctx = makeCtx();
+    await createTool.handler(
+      {
+        name: "reporter",
+        frontmatter: { capabilityRestrictions: READ_ONLY_REPORTER },
+        body: "body",
+      },
+      ctx
+    );
+
+    const restrictions = writtenFrontmatter(ctx.soulWriter)
+      .capabilityRestrictions as AgentCapabilityRestrictions;
+
+    expect(
+      agentCapabilityDenial(
+        restrictions,
+        { name: "record_delete", mutating: true },
+        {
+          type: "ticket",
+        }
+      )
+    ).toBeDefined();
+    expect(
+      agentCapabilityDenial(restrictions, { name: "delegate_to_agent", mutating: true }, {})
+    ).toBeDefined();
+    expect(
+      agentCapabilityDenial(
+        restrictions,
+        { name: "record_list", mutating: false },
+        {
+          type: "ticket",
+        }
+      )
+    ).toBeUndefined();
+  });
+
+  it("refuses a malformed restriction rather than writing prose that looks enforced", async () => {
+    const ctx = makeCtx();
+    const res = await createTool.handler(
+      {
+        name: "reporter",
+        frontmatter: { capabilityRestrictions: { tools: { allowMutating: "no" } } },
+        body: "body",
+      },
+      ctx
+    );
+
+    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
+    expect(ctx.soulWriter.apply).not.toHaveBeenCalled();
+  });
+
+  it("keeps the restriction when an edit rewrites the frontmatter", async () => {
+    const ctx = makeCtx([
+      {
+        name: "reporter",
+        frontmatter: { capabilityRestrictions: READ_ONLY_REPORTER },
+        body: "body",
+      },
+    ]);
+
+    const res = await updateTool.handler(
+      {
+        name: "reporter",
+        frontmatter: { label: "Reporting agent", capabilityRestrictions: READ_ONLY_REPORTER },
+      },
+      ctx
+    );
+
+    expect(res).toMatchObject({ success: true });
+    expect(writtenFrontmatter(ctx.soulWriter).capabilityRestrictions).toEqual(READ_ONLY_REPORTER);
   });
 });

@@ -271,9 +271,45 @@ import { describe, expect, it } from "vitest";
  * a Turn's lifecycle, so a Turn dispatched by the Worker rather than streamed over HTTP is covered
  * by the same code. Only the transport consequence — when to stop polling, and when to put a byte
  * on the wire — is Fastify-adjacent and therefore here.
+ *
+ * It moves to 51,638 for Agent capability restrictions, +130 measured against a 51,508 base. The
+ * restriction is an authorization boundary rather than stronger prompt wording, so the raise is
+ * entirely the wiring that carries an authored Agent to the places a Tool call is decided:
+ *
+ *   +62 `soul/agents/registry.ts` — `capabilityRestrictions` on the `HostedAgent` the resolver
+ *       already builds, plus `delegableToolNames`, which reads the Tool names a restricted Agent
+ *       still holds so a delegation can only narrow. Both need the `SoulLoader`, and
+ *       `@tulipfarm/soul` may not depend on `@tulipfarm/tool-host`, so this seam is the only place
+ *       that can see both. The file's own comment already records why it cannot move. It also now
+ *       owns `agentForRunResolver`, which `index.ts` used to hold inline: `scripts/file-size.test.ts`
+ *       caps `index.ts` at 1314 lines and forbids widening an allowance to excuse a diff, so the
+ *       closure moved to the module that already resolves Agents rather than the number moving.
+ *   +28 `chat/turn-helpers.ts` — `toolAgentFor` and the `RestrictedPlatformAgent` type. A raise
+ *       that is really a de-duplication: the same intersection had been written inline at three
+ *       call sites, and a live Turn and the prompt preview resolving different Tool sets is exactly
+ *       how a preview comes to describe a turn that cannot happen.
+ *   +17 `internal/turn-host.ts`, +11 `internal/schemas.ts`, +1 `internal/routes.ts` — the Agent now
+ *       rides on the Run's authority. `apps/worker` hosts seven mutating Tools with no Soul to
+ *       resolve an Agent from, so before this neither the restriction nor the already-landed
+ *       autonomy ceiling applied there at all. The schema lines are not optional: Fastify strips an
+ *       undeclared response field, so without them the Worker receives no Agent.
+ *   +3  `index.ts` — the `agentForRun` and `parentToolNames` composition lines.
+ *   +5  `internal/turn-context.ts`, +3 `platform/delegate-tool.ts`, and 0 net in
+ *       `chat/conversation-routes.ts` and `soul/agents/tools.ts`.
+ *
+ * What deliberately did not stay here is why the raise is 115 and not several hundred. The decision
+ * itself is `packages/tool-host/src/capability-restrictions.ts`, beside the dispatcher that has to
+ * obey it and reachable from both hosts. The authority intersection is
+ * `packages/agent-runtime/src/delegation/composition.ts`, which already owned the root authority a
+ * chain starts from. The frontmatter shape is `AgentCapabilityRestrictions` in `packages/schema`.
+ * And the guidance that makes the field reachable from chat is `skills/forge/agent-forge/SKILL.md`
+ * rather than a special case inside the Agent-authoring Tool — the Forge writes frontmatter, so
+ * teaching it the key is what closes the gap, and a hand-written branch here would have been the
+ * wrong place for it. `apps/api` learned who the Agent is and told the Worker; it did not learn
+ * what an Agent may do.
  */
 
-const CEILING = 51_508;
+const CEILING = 51_638;
 
 /**
  * Domains inside `apps/api/src` that already have a package of the same name. Everything here that

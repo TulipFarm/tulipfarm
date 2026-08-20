@@ -1,5 +1,10 @@
 import type { ToolDispatchPort } from "@tulipfarm/agent-runtime";
-import { asChatAutonomy, autonomyDemandsApproval } from "@tulipfarm/tool-host";
+import type { AgentCapabilityRestrictions } from "@tulipfarm/schema";
+import {
+  agentCapabilityDenial,
+  asChatAutonomy,
+  autonomyDemandsApproval,
+} from "@tulipfarm/tool-host";
 import type { EvalCase } from "./case.ts";
 import type { EvalSoul } from "./eval-soul.ts";
 
@@ -37,6 +42,34 @@ export function autonomyBoundedDispatch(
             `tool "${request.name}" is mutating and Agent "${evalCase.agent}" runs at ` +
             `autonomy "${autonomy}", so it needs an approval before it can execute`,
         };
+      }
+      return await tools.dispatch(request);
+    },
+  };
+}
+
+export function capabilityBoundedDispatch(
+  soul: EvalSoul,
+  evalCase: EvalCase,
+  tools: ToolDispatchPort
+): ToolDispatchPort {
+  const capabilityRestrictions = soul.loader.agents.get(evalCase.agent)?.frontmatter
+    .capabilityRestrictions as AgentCapabilityRestrictions | undefined;
+  if (capabilityRestrictions === undefined) return tools;
+
+  const declared = new Map((evalCase.tools ?? []).map((tool) => [tool.name, tool]));
+  return {
+    dispatch: async (request) => {
+      const tool = declared.get(request.name);
+      if (tool !== undefined) {
+        const denial = agentCapabilityDenial(
+          capabilityRestrictions,
+          { name: request.name, mutating: tool.mutating === true },
+          request.arguments
+        );
+        if (denial !== undefined) {
+          return { status: "failed", callId: request.callId, reason: denial };
+        }
       }
       return await tools.dispatch(request);
     },

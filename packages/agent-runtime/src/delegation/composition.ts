@@ -27,6 +27,8 @@ export interface DelegationOutcome {
 
 export interface DelegateToAgentInput {
   readonly parentRunId: string;
+  readonly parentAgentId?: string;
+  readonly parentToolAllowlist?: readonly string[];
   readonly agentId: string;
   readonly task: string;
   readonly context?: Record<string, unknown>;
@@ -70,6 +72,13 @@ export interface AgentDelegationDeps {
    * registered after composition is neither invisible nor stale.
    */
   readonly catalog: () => readonly DelegationCatalogEntry[];
+  /**
+   * The Tool names the delegating Agent's own capability restrictions leave it holding, or
+   * `undefined` when it authored none. Delegation may only narrow, so this bounds the root
+   * authority a chain starts from: without it a restricted Agent could hand a helper the very
+   * mutation it was itself refused (#461). Resolved per call, because the Agent is per call.
+   */
+  readonly parentToolNames?: (agentId: string | undefined) => readonly string[] | undefined;
   readonly now?: () => Date;
   readonly waitMs?: number;
   readonly pollMs?: number;
@@ -162,6 +171,8 @@ export function createAgentDelegation(deps: AgentDelegationDeps): {
   return {
     delegate: async (input) => {
       const startedAt = now();
+      const parentToolAllowlist =
+        input.parentToolAllowlist ?? deps.parentToolNames?.(input.parentAgentId);
       const helper = await coordinator.delegate({
         businessId,
         parentRunId: input.parentRunId,
@@ -170,7 +181,9 @@ export function createAgentDelegation(deps: AgentDelegationDeps): {
         ...(input.context === undefined ? {} : { context: input.context }),
         // Only consulted when the parent Run is unlinked, i.e. it is itself the root of the chain.
         rootAuthority: rootDelegationAuthority(
-          deps.catalog(),
+          parentToolAllowlist === undefined
+            ? deps.catalog()
+            : deps.catalog().filter((tool) => parentToolAllowlist.includes(tool.name)),
           startedAt.getTime() + DELEGATION_MAX_DURATION_MS
         ),
         requested: { mode: "read_only" },

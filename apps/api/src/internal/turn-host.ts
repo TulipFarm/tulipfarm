@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { ModelRequirementsPolicy } from "@tulipfarm/agent-runtime";
 import type { InvocationPrincipal } from "@tulipfarm/run-kernel";
 import type { ParticipantToolCall } from "@tulipfarm/schema";
+import type { HostedAgent } from "@tulipfarm/tool-host";
 import type {
   ConversationStore,
   PersistedTurn,
@@ -45,6 +46,11 @@ export interface TurnAuthority {
   readonly source: string;
   /** The Run's bundle digest, recorded on the Context manifest as what produced this Context. */
   readonly bundleDigest: string;
+  /**
+   * The Agent this Run routes to. Resolved here because only the control plane holds the Soul;
+   * the durable runtime hosts Tools without one and would otherwise dispatch them unrestricted.
+   */
+  readonly agent?: HostedAgent;
 }
 
 /** Everything the model needs for one turn. Mirrors the Worker's `ResolvedTurnContext`. */
@@ -122,6 +128,15 @@ export interface InternalTurnHostOptions {
   readonly context: TurnContextResolver;
   readonly tools: TurnToolDispatcher;
   readonly approvals?: TurnApprovalRegistrar;
+  /**
+   * Resolves the Agent one Run routes to, from the Soul. Absent in a deployment with no Soul; the
+   * authority then names no Agent and every host falls back to its own default, as before.
+   */
+  readonly agentForRun?: (
+    businessId: string,
+    runId: string,
+    source: string
+  ) => Promise<HostedAgent | undefined>;
   newId?(): string;
   now?(): Date;
 }
@@ -147,6 +162,7 @@ export class InternalTurnHost {
     const turn = await this.options.store.findTurnByRunId(businessId, runId);
     if (turn === undefined) throw new TurnAuthorityError("turn_not_found");
 
+    const agent = await this.options.agentForRun?.(businessId, runId, run.source);
     return {
       businessId,
       runId,
@@ -154,6 +170,7 @@ export class InternalTurnHost {
       subject: run.identity.effectiveSubject,
       source: run.source,
       bundleDigest: run.bundle.digest,
+      ...(agent === undefined ? {} : { agent }),
     };
   }
 

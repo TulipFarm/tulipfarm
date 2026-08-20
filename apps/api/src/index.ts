@@ -236,6 +236,7 @@ import {
   provisionIntegrationWorkerCredential,
   provisionWorkerCredential,
 } from "./setup/worker-credential";
+import { agentForRunResolver, delegableToolNames } from "./soul/agents/registry";
 import { bundleRetentionMs, registerSoulBundlePruneSchedule } from "./soul/bundle-prune-schedule";
 import { createGitHubSoulCredentialProvider } from "./soul/github-repo-credential";
 import { registerSoulPublicationRoutes } from "./soul/publication-routes";
@@ -671,6 +672,7 @@ async function boot() {
       conversations: delegationConversations,
       cancelRun: runCancel.cancel,
       catalog: delegationCatalog,
+      parentToolNames: (agentId) => delegableToolNames(soulLoader, agentId, toolRegistry.getAll()),
     });
     // One gate for the whole process: routes and Agent Tools must not diverge on who may read a Page.
     const knowledgePageGate = new PageReadGate(pool);
@@ -752,6 +754,7 @@ async function boot() {
       host: new InternalTurnHost({
         runs: runStore,
         store: conversationStore,
+        agentForRun: agentForRunResolver(soulLoader, runArtifacts),
         context: new ChatTurnContextResolver({
           artifacts: runArtifacts,
           store: conversationStore,

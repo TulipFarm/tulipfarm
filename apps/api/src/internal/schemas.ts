@@ -78,6 +78,17 @@ export const InternalTurnAuthorityResponseSchema = {
     },
     source: { type: "string" },
     bundleDigest: { type: "string" },
+    /** The Soul-resolved Agent this Run routes to; absent when no Soul answered for it. */
+    agent: {
+      type: "object",
+      required: ["name"],
+      properties: {
+        name: { type: "string" },
+        autonomy: { type: "string" },
+        toolAllowlist: { type: "array", items: { type: "string" } },
+        capabilityRestrictions: { type: "object", additionalProperties: true },
+      },
+    },
   },
 } as const;
 

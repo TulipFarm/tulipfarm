@@ -21,7 +21,7 @@ import type { ConversationDoc, ConversationRepo } from "./conversations";
 import type { MessageRepo } from "./messages";
 import { MessageSchema } from "./schemas";
 import { assembleAgentSystemPrompt } from "./system-prompt";
-import { availableToolsFor, canGroundKnowledge } from "./turn-helpers";
+import { availableToolsFor, canGroundKnowledge, toolAgentFor } from "./turn-helpers";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -422,7 +422,7 @@ export function registerConversationRoutes(
           : disabledBundledSkills;
         const tools = availableToolsFor(
           toolRegistry,
-          platformAgent,
+          toolAgentFor(platformAgent, agent),
           presentationContext,
           excludedTools
         );

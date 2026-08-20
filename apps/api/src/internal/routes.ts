@@ -251,6 +251,7 @@ export function registerInternalTurnRoutes(
           subject: authority.subject,
           source: authority.source,
           bundleDigest: authority.bundleDigest,
+          ...(authority.agent === undefined ? {} : { agent: authority.agent }),
         });
     }
   );

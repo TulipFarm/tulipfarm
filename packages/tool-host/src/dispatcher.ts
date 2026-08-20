@@ -2,8 +2,6 @@ import type { AuthorityLayer } from "@tulipfarm/authz";
 import type { ArtifactService } from "@tulipfarm/run-kernel";
 import { ajv } from "@tulipfarm/schema";
 import type { SoulLoader } from "@tulipfarm/soul";
-import { getDefaultAssistant, resolveAgent } from "@tulipfarm/soul";
-import type { IntegrationStore } from "@tulipfarm/storage";
 import {
   type CompositeToolEntitlement,
   type EffectStore,
@@ -24,6 +22,7 @@ import type {
   TurnToolDispatcher,
 } from "./authority";
 import { autonomyCeiling, autonomyDemandsApproval } from "./autonomy";
+import { agentCapabilityDenial } from "./capability-restrictions";
 import { availableToolsFor, type ToolCatalog } from "./catalog";
 import type { CredentialResolution, CredentialResolver } from "./credential-mode";
 import { ChatEffectLedger, ledgerOwnsCall } from "./effect-ledger";
@@ -293,7 +292,9 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
 
   async dispatch(authority: TurnAuthority, call: HostedToolCall): Promise<HostedToolResult> {
     const request = await readChatRequest(this.options.artifacts, authority, this.now());
-    const agent = this.options.agents?.resolve(request.agentId) ?? DEFAULT_AGENT;
+    // A process with a Soul resolves the Agent itself. One without a Soul — the durable runtime —
+    // has only what the Run carried, and takes it rather than defaulting to unrestricted.
+    const agent = this.options.agents?.resolve(request.agentId) ?? authority.agent ?? DEFAULT_AGENT;
     // The routed Agent's configured autonomy is an authority ceiling, so the turn runs at the more
     // restrictive of it and whatever this request asked for. Reading `request.autonomy` alone made
     // the ceiling shown on the Agent advisory: any caller that supplied a permissive per-turn value
@@ -305,10 +306,18 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
       this.options.channelDeliveries
     );
     const excludedTools = await this.options.visibility?.excludedToolNames(authority.businessId);
+    // Visibility only, so capability restrictions are deliberately left out of it: a Tool this
+    // Agent may not use must be refused with the reason it was refused, not reported as a Tool
+    // that does not exist. `agentCapabilityDenial` below is the decision.
+    const dispatchAgent =
+      agent.toolAllowlist === undefined ? undefined : { toolAllowlist: agent.toolAllowlist };
     const allowed = new Set(
-      availableToolsFor(this.options.registry, agent, presentationContext, excludedTools).map(
-        (tool) => tool.name
-      )
+      availableToolsFor(
+        this.options.registry,
+        dispatchAgent,
+        presentationContext,
+        excludedTools
+      ).map((tool) => tool.name)
     );
     // Use registered Tools, not summaries; authority compiles from definitions.
     const availableTools = this.options.registry
@@ -337,6 +346,13 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
     if (!validate(call.arguments)) {
       return { status: "invalid_arguments", reason: argumentErrors(validate) };
     }
+
+    const capabilityDenial = agentCapabilityDenial(
+      agent.capabilityRestrictions,
+      definition,
+      call.arguments
+    );
+    if (capabilityDenial !== undefined) return { status: "denied", reason: capabilityDenial };
 
     // Decide authority before approval; forbidden calls must not reach humans as choices.
     const verdict = await this.authorize(

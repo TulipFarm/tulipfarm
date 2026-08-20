@@ -177,6 +177,9 @@ export function buildLocalToolHost(options: LocalToolHostOptions): LocalToolHost
         waits: options.waits,
       }),
       localDispatchOnly: true,
+      // No `agents` resolver: this process has no Soul to resolve one from. The Agent's authored
+      // autonomy and capability restrictions ride in on `TurnAuthority.agent`, which the control
+      // plane fills in from the Soul when the Worker reads the Run's authority.
     })
   );
 
