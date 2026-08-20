@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
 import type { Dirent } from "node:fs";
-import { readdir, readFile, rm } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { basename, join, relative } from "node:path";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import { gitSourceHttpError, withGitSourceClone } from "@tulipfarm/integrations";
 import {
   type CommitActor,
-  cloneToTemp,
   type IntegrationManifest,
   type SoulLoader,
   type SoulWrite,
@@ -41,7 +41,7 @@ export interface DiscoveredIntegration {
 export class IntegrationInstallError extends Error {
   constructor(
     message: string,
-    readonly status: 400 | 404 | 409
+    readonly status: 400 | 404 | 409 | 429
   ) {
     super(message);
     this.name = "IntegrationInstallError";
@@ -191,27 +191,29 @@ export interface InstallResult {
  * Clone `source` and report what it offers, without writing anything. The install route uses the
  * same discovery, so a preview can never disagree with what installing would do.
  */
-export async function inspectIntegrationSource(source: string): Promise<{
+export async function inspectIntegrationSource(
+  source: string,
+  actorId: string
+): Promise<{
   ref: string;
   integrations: DiscoveredIntegration[];
 }> {
-  let dir: string | undefined;
   try {
-    const clone = await cloneToTemp(source, "integration-scan-");
-    dir = clone.dir;
-    const integrations = await discoverIntegrations(dir);
-    if (integrations.length === 0) {
-      throw new IntegrationInstallError("no manifest.yml found in repo", 400);
-    }
-    return { ref: clone.ref, integrations };
-  } catch (error) {
-    if (error instanceof IntegrationInstallError) throw error;
-    throw new IntegrationInstallError(
-      `clone failed: ${error instanceof Error ? error.message : String(error)}`,
-      400
+    return await withGitSourceClone(
+      source,
+      { prefix: "integration-scan-", actorId },
+      async ({ dir, ref }) => {
+        const integrations = await discoverIntegrations(dir);
+        if (integrations.length === 0) {
+          throw new IntegrationInstallError("no manifest.yml found in repo", 400);
+        }
+        return { ref, integrations };
+      }
     );
-  } finally {
-    if (dir) await rm(dir, { recursive: true, force: true });
+  } catch (error) {
+    const denial = gitSourceHttpError(error);
+    if (!denial) throw error;
+    throw new IntegrationInstallError(denial.body.error, denial.status);
   }
 }
 
@@ -228,9 +230,11 @@ export async function installIntegrationFromSource(
     soulWriter: SoulWriter;
     bundledSlugs: ReadonlySet<string>;
     actor?: CommitActor;
+    /** Whoever asked; the clone gate bounds concurrent scans per actor. */
+    actorId: string;
   }
 ): Promise<InstallResult> {
-  const { ref, integrations } = await inspectIntegrationSource(options.source);
+  const { ref, integrations } = await inspectIntegrationSource(options.source, deps.actorId);
 
   let chosen: DiscoveredIntegration | undefined;
   if (options.name) {

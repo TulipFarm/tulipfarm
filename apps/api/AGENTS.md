@@ -113,6 +113,7 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
   secret env values to `secret://` refs, commit, and reload Soul.
 - Third-party integration installs copy only regular `manifest.yml` and `setup-guide.md`; manifests
   must stay declarative, https-only for provider URLs, and non-executable.
-- Keep the shared Git source allowlist in `@tulipfarm/soul` (`src/git-source.ts`); do not fork SSRF policy.
+- Clone every caller-supplied Git source through `withGitSourceClone` from `@tulipfarm/integrations`
+  (`src/git-source/`); do not fork SSRF policy and never return git's stderr to a caller.
 
 See [Integration authoring](../../docs/architecture/building-an-integration.md).

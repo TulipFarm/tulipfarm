@@ -95,14 +95,7 @@ export {
   convertLegacySkill,
 } from "./converters/legacy-definitions";
 export { hermeticGitEnv } from "./git-env";
-export {
-  ALLOWED_SOURCE_HINT,
-  cloneToTemp,
-  isAllowedSource,
-  normalizeGitUrl,
-  sourceType,
-  splitSourceRef,
-} from "./git-source";
+export { sourceType, splitSourceRef } from "./git-source";
 export type { SoulCommitRequest, SoulCommitResult, SoulGitStoreErrorCode } from "./git-store";
 export { SoulGitStore, SoulGitStoreError } from "./git-store";
 export type {

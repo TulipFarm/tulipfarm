@@ -54,7 +54,13 @@ function isPrivateIpv6(address: string): boolean {
   if (normalized.startsWith("fc") || normalized.startsWith("fd")) return true;
   if (/^fe[89ab]/.test(normalized)) return true;
   const mappedIpv4 = normalized.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/)?.[1];
-  return mappedIpv4 !== undefined && isPrivateIpv4(mappedIpv4);
+  if (mappedIpv4 !== undefined) return isPrivateIpv4(mappedIpv4);
+  // `new URL()` rewrites `::ffff:127.0.0.1` to `::ffff:7f00:1`, so the dotted form is not the
+  // only spelling that reaches here.
+  const hextets = normalized.match(/^::ffff:([\da-f]{1,4}):([\da-f]{1,4})$/);
+  if (hextets === null) return false;
+  const [high, low] = [Number.parseInt(hextets[1], 16), Number.parseInt(hextets[2], 16)];
+  return isPrivateIpv4(`${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`);
 }
 
 /** Loopback, link-local, RFC 1918, CGNAT, multicast and IPv4-mapped IPv6 all count as private. */
