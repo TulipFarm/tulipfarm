@@ -684,6 +684,7 @@ async function boot() {
 
     const slackTooling = buildSlackTooling({
       secrets: async () => secretsService,
+      channelRunDelivery: channelRunDeliveries,
     });
     const slackEffects = new PgEffectStore(runTransactions);
     const slackTools = buildSlackTools(DEPLOYMENT_BUSINESS_ID, {

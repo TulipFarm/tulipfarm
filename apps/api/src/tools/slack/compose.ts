@@ -2,6 +2,7 @@ import {
   type IntegrationHttpPort,
   SLACK_ADAPTER_REF,
   SlackToolAdapter,
+  type SlackToolAdapterDeps,
 } from "@tulipfarm/integrations";
 import {
   type SecretAuthorizer,
@@ -25,6 +26,7 @@ import {
 export interface BuildSlackToolingOptions {
   readonly secrets: () => Promise<SecretsService>;
   readonly http?: IntegrationHttpPort;
+  readonly channelRunDelivery?: SlackToolAdapterDeps["channelRunDelivery"];
 }
 
 export interface SlackTooling {
@@ -43,7 +45,7 @@ const slackOnlyAuthorizer: SecretAuthorizer = {
 
 export function buildSlackTooling(options: BuildSlackToolingOptions): SlackTooling {
   const http = options.http ?? new SlackWebApiHttp();
-  const adapter = new SlackToolAdapter({ http });
+  const adapter = new SlackToolAdapter({ http, channelRunDelivery: options.channelRunDelivery });
 
   const tokenProvider = new SlackBotTokenProvider({ secrets: options.secrets });
   const provider = slackCompositeSecretProvider(

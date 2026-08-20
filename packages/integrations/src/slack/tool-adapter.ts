@@ -1,3 +1,4 @@
+import type { ChannelRunDeliveryStore } from "@tulipfarm/storage";
 import type { ToolAdapter, ToolAdapterRequest } from "@tulipfarm/tool-broker";
 import { AdapterDispatchError } from "@tulipfarm/tool-broker";
 import { classifyHttpFailure, type IntegrationHttpPort } from "../http";
@@ -10,6 +11,11 @@ import { encodeMentionsInText, type SlackUserLookupPort } from "./mentions";
  */
 export interface SlackToolAdapterDeps {
   readonly http: IntegrationHttpPort;
+  /**
+   * When the Run that's calling this Tool was itself started from a Slack thread, replies to the
+   * same channel default to that thread instead of posting a new root message.
+   */
+  readonly channelRunDelivery?: Pick<ChannelRunDeliveryStore, "find">;
 }
 
 interface SlackApiChannel {
@@ -77,12 +83,18 @@ export class SlackToolAdapter implements ToolAdapter {
       ? channel
       : await this.resolveChannelId(normalizeChannelName(channel), credential);
     const encodedText = await encodeMentionsInText(text, this.userLookup(credential));
+    const threadTs = await this.originatingThreadTs(request, channelId, credential);
 
     const response = await this.deps.http.send(
       {
         method: "POST",
         path: "/chat.postMessage",
-        body: { channel: channelId, text: encodedText, client_msg_id: request.idempotencyKey },
+        body: {
+          channel: channelId,
+          text: encodedText,
+          ...(threadTs === undefined ? {} : { thread_ts: threadTs }),
+          client_msg_id: request.idempotencyKey,
+        },
       },
       credential
     );
@@ -101,6 +113,31 @@ export class SlackToolAdapter implements ToolAdapter {
       throw new AdapterDispatchError("after_dispatch", "invalid_response", false);
     }
     return { channelId, ts, threadId: ts };
+  }
+
+  /**
+   * Best-effort: only threads a reply when this Run started from a Slack thread in the same
+   * channel the Tool is posting to. A lookup failure or channel mismatch falls back to a fresh
+   * root message rather than blocking the send.
+   */
+  private async originatingThreadTs(
+    request: ToolAdapterRequest,
+    channelId: string,
+    credential: string
+  ): Promise<string | undefined> {
+    if (this.deps.channelRunDelivery === undefined) return undefined;
+    const delivery = await this.deps.channelRunDelivery
+      .find(request.intent.businessId, request.intent.runId)
+      .catch(() => null);
+    if (delivery === null || delivery.provider !== "slack" || delivery.threadId === undefined) {
+      return undefined;
+    }
+    const destinationId = isChannelId(delivery.destination)
+      ? delivery.destination
+      : await this.resolveChannelId(normalizeChannelName(delivery.destination), credential).catch(
+          () => undefined
+        );
+    return destinationId === channelId ? delivery.threadId : undefined;
   }
 
   /** Memoized best-effort user lookup; first-name fallback only when exactly one match exists. */

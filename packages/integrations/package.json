@@ -11,6 +11,7 @@
   "dependencies": {
     "@tulipfarm/authz": "workspace:*",
     "@tulipfarm/schema": "workspace:*",
+    "@tulipfarm/storage": "workspace:*",
     "@tulipfarm/tool-broker": "workspace:*"
   },
   "devDependencies": {
