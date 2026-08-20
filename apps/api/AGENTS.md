@@ -66,6 +66,9 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
 - `apps/api/src` is capped by `scripts/control-plane-size.test.ts`: new domain logic belongs in the
   owning package. PGlite repository tests stay here even when the repository does not, because this
   app owns the migrations that build the tables.
+- A Record mutation and its history snapshot are one `ResourceRepo` call, committed on one
+  transaction. There is no separate `appendHistory`: a committed Record with no history entry is an
+  audit gap, and the route emits its domain event only after that call returns.
 - Tools return `ok(data)` or `err(code, message)`, never throw; ToolRegistry validates
   JSON Schema before execution. Read batches run in parallel; mutating batches are serial.
 - Every write to the authored Soul tree goes through `SoulWriter.apply()` (ADR-007) — routes, Tools

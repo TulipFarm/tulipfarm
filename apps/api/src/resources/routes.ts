@@ -7,7 +7,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import type { RecordAction, RecordAuthorizer } from "./authorize";
 import { recordPrincipalOf } from "./authorize";
-import { type CounterStore, makeHistoryEntry, type ResourceRepoFactory, toApiRecord } from "./repo";
+import { type CounterStore, type ResourceRepoFactory, toApiRecord } from "./repo";
 import {
   loadForWrite,
   maybeRunAfterHook,
@@ -142,7 +142,6 @@ export function registerResourceRoutes(
       const doc = { _id: id, version: 1, createdAt: now, updatedAt: now, ...data };
       const repo = repoFactory.forType(type);
       await repo.insert(doc);
-      await repo.appendHistory(makeHistoryEntry(id, "create", doc));
       await maybeRunAfterHook(hookExecutor, resourceDef, type, toApiRecord(doc));
       events?.emit(DOMAIN_EVENTS.RESOURCE_CREATED, {
         resourceType: type,
@@ -317,10 +316,8 @@ export function registerResourceRoutes(
         ...data,
       };
 
-      const replaced = await repo.replaceOne(id, existing.version, newDoc);
+      const replaced = await repo.replaceOne(id, existing.version, newDoc, "update");
       if (!replaced) return reply.code(409).send({ error: "version conflict" });
-
-      await repo.appendHistory(makeHistoryEntry(id, "update", newDoc));
       await maybeRunAfterHook(hookExecutor, resourceDef, type, toApiRecord(newDoc));
       events?.emit(DOMAIN_EVENTS.RESOURCE_UPDATED, {
         resourceType: type,
@@ -414,10 +411,8 @@ export function registerResourceRoutes(
         ...data,
       };
 
-      const replaced = await repo.replaceOne(id, existing.version, newDoc);
+      const replaced = await repo.replaceOne(id, existing.version, newDoc, "update");
       if (!replaced) return reply.code(409).send({ error: "version conflict" });
-
-      await repo.appendHistory(makeHistoryEntry(id, "update", newDoc));
       await maybeRunAfterHook(hookExecutor, resourceDef, type, toApiRecord(newDoc));
       events?.emit(DOMAIN_EVENTS.RESOURCE_UPDATED, {
         resourceType: type,
@@ -487,10 +482,8 @@ export function registerResourceRoutes(
         deletedAt: now,
       };
 
-      const replaced = await repo.replaceOne(id, existing.version, softDeleted);
+      const replaced = await repo.replaceOne(id, existing.version, softDeleted, "delete");
       if (!replaced) return reply.code(409).send({ error: "version conflict" });
-
-      await repo.appendHistory(makeHistoryEntry(id, "delete", softDeleted));
       await maybeRunAfterHook(hookExecutor, resourceDef, type, toApiRecord(softDeleted));
       return reply.code(204).send();
     }

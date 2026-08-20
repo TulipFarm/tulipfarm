@@ -3,7 +3,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import { decodeCursor } from "@tulipfarm/storage";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeMigratedPglite } from "../test/pglite";
-import { PgResourceRepo, type ResourceDoc, type ResourceHistoryDoc } from "./repo";
+import { PgResourceRepo, type ResourceDoc } from "./repo";
 import { createHistoryTableSql, createResourceTableSql } from "./schema";
 
 const TYPE = "ticket";
@@ -81,11 +81,11 @@ describe("PgResourceRepo", () => {
     const d = doc();
     await repo.insert(d);
 
-    const wrong = await repo.replaceOne(d._id, 99, { ...d, version: 100, title: "nope" });
+    const wrong = await repo.replaceOne(d._id, 99, { ...d, version: 100, title: "nope" }, "update");
     expect(wrong).toBe(false);
 
     const next = { ...d, version: 2, title: "updated", updatedAt: new Date() };
-    const ok = await repo.replaceOne(d._id, 1, next);
+    const ok = await repo.replaceOne(d._id, 1, next, "update");
     expect(ok).toBe(true);
 
     const found = await repo.findById(d._id);
@@ -97,28 +97,38 @@ describe("PgResourceRepo", () => {
     const d = doc();
     await repo.insert(d);
 
-    expect(await repo.replaceOne("qa-does-not-exist-id", 1, d)).toBe(false);
+    expect(await repo.replaceOne("qa-does-not-exist-id", 1, d, "update")).toBe(false);
   });
 
-  it("appendHistory writes a snapshot row", async () => {
+  it("writes one history snapshot per committed mutation", async () => {
     const d = doc();
     await repo.insert(d);
-    const entry: ResourceHistoryDoc = {
-      _id: randomUUID(),
-      resourceId: d._id,
-      operation: "create",
-      snapshot: d,
-      at: new Date(),
-    };
-    await repo.appendHistory(entry);
+    await repo.replaceOne(d._id, 1, { ...d, version: 2, title: "updated" }, "update");
+    await repo.replaceOne(d._id, 2, { ...d, version: 3, deletedAt: new Date() }, "delete");
 
     const { rows } = await db.query(
-      `SELECT operation, snapshot FROM resources."${TYPE}_history" WHERE resource_id = $1`,
+      `SELECT operation, snapshot FROM resources."${TYPE}_history"
+       WHERE resource_id = $1 ORDER BY at`,
       [d._id]
     );
-    expect(rows).toHaveLength(1);
-    expect((rows[0] as { operation: string }).operation).toBe("create");
+    expect(rows.map((r) => (r as { operation: string }).operation)).toEqual([
+      "create",
+      "update",
+      "delete",
+    ]);
     expect((rows[0] as { snapshot: { title: string } }).snapshot.title).toBe("Bug");
+  });
+
+  it("writes no history row when the mutation was refused on version", async () => {
+    const d = doc();
+    await repo.insert(d);
+    await repo.replaceOne(d._id, 99, { ...d, version: 100 }, "update");
+
+    const { rows } = await db.query(
+      `SELECT count(*)::int AS n FROM resources."${TYPE}_history" WHERE resource_id = $1`,
+      [d._id]
+    );
+    expect((rows[0] as { n: number }).n).toBe(1);
   });
 
   it("paginates by keyset in created order", async () => {
