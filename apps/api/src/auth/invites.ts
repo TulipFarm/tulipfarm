@@ -16,9 +16,8 @@ export interface UserInviteDoc {
 }
 
 export interface UserInviteRepo {
+  /** Issues the one live link for a user, superseding any link still outstanding. */
   create(invite: UserInviteDoc): Promise<void>;
-  /** Revokes every outstanding link for a user, so at most one is ever live. */
-  deleteUnconsumedForUser(userId: string): Promise<void>;
   /** Unspent state of an invite, for previewing it without spending it. */
   find(tokenHash: string): Promise<UserInviteDoc | null>;
   /** Atomically spends the invite; null when unknown, expired, or already redeemed. */
@@ -44,8 +43,12 @@ export class PgUserInviteRepo implements UserInviteRepo {
   constructor(private readonly q: Queryable) {}
 
   async create(invite: UserInviteDoc): Promise<void> {
+    // Revoking the outstanding link and inserting its replacement must be one statement. As two,
+    // a concurrent issue for the same user lands in between and deletes the token already handed
+    // to the admin, so a link they were shown seconds ago previews as dead on its first use.
     await this.q.query(
-      `INSERT INTO user_invites (token_hash, user_id, created_by, created_at, expires_at, consumed_at)
+      `WITH revoked AS (DELETE FROM user_invites WHERE user_id = $2 AND consumed_at IS NULL)
+       INSERT INTO user_invites (token_hash, user_id, created_by, created_at, expires_at, consumed_at)
        VALUES ($1, $2, $3, $4, $5, $6)`,
       [
         invite.tokenHash,
@@ -56,12 +59,6 @@ export class PgUserInviteRepo implements UserInviteRepo {
         invite.consumedAt,
       ]
     );
-  }
-
-  async deleteUnconsumedForUser(userId: string): Promise<void> {
-    await this.q.query("DELETE FROM user_invites WHERE user_id = $1 AND consumed_at IS NULL", [
-      userId,
-    ]);
   }
 
   async find(tokenHash: string): Promise<UserInviteDoc | null> {
@@ -83,11 +80,17 @@ export class PgUserInviteRepo implements UserInviteRepo {
   }
 }
 
+/** Why an invite was refused. Server-side only — the wire message stays coarse. */
+export type InviteDenialReason = "no-invite" | "redeemed" | "no-user" | "disabled";
+
 /** Coarse rejection reason; never reveal guessed vs expired vs redeemed. */
 export class InviteDeniedError extends Error {
-  constructor(message = "this invite link is no longer valid") {
+  readonly reason: InviteDenialReason;
+
+  constructor(reason: InviteDenialReason, message = "this invite link is no longer valid") {
     super(message);
     this.name = "InviteDeniedError";
+    this.reason = reason;
   }
 }
 
@@ -96,7 +99,7 @@ export interface IssuedInvite {
   expiresAt: Date;
 }
 
-/** Issue the one live link for a user; revoke older links first. */
+/** Issue the one live link for a user, superseding any link still outstanding. */
 export async function issueInvite(
   repo: UserInviteRepo,
   input: { userId: string; createdBy: string; ttlSeconds?: number }
@@ -107,7 +110,6 @@ export async function issueInvite(
     now.getTime() + (input.ttlSeconds ?? DEFAULT_INVITE_TTL_SECONDS) * 1000
   );
 
-  await repo.deleteUnconsumedForUser(input.userId);
   await repo.create({
     tokenHash: hashInviteToken(raw),
     userId: input.userId,
@@ -134,10 +136,11 @@ export interface InviteOffer {
 /** Preview resolves the account without spending the token. */
 export async function previewInvite(stores: InviteStores, raw: string): Promise<InviteOffer> {
   const invite = await stores.invites.find(hashInviteToken(raw));
-  if (!invite) throw new InviteDeniedError();
+  if (!invite) throw new InviteDeniedError("no-invite");
   const user = await stores.users.findById(invite.userId);
   // Disabled-account invites are dead even if the invite row remains.
-  if (!user || user.status === "disabled") throw new InviteDeniedError();
+  if (!user || user.status === "disabled")
+    throw new InviteDeniedError(user ? "disabled" : "no-user");
   return { email: user.email, expiresAt: invite.expiresAt };
 }
 
@@ -147,9 +150,10 @@ export async function redeemInvite(
   input: { raw: string; passwordHash: string }
 ): Promise<UserDoc> {
   const invite = await stores.invites.consume(hashInviteToken(input.raw));
-  if (!invite) throw new InviteDeniedError();
+  if (!invite) throw new InviteDeniedError("redeemed");
   const user = await stores.users.findById(invite.userId);
-  if (!user || user.status === "disabled") throw new InviteDeniedError();
+  if (!user || user.status === "disabled")
+    throw new InviteDeniedError(user ? "disabled" : "no-user");
 
   await stores.passwords.setPassword(user._id, input.passwordHash);
   return { ...user, passwordHash: input.passwordHash, status: "active" };

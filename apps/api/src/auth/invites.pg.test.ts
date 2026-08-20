@@ -104,4 +104,24 @@ describe("user invites (Postgres)", () => {
     );
     expect(rows[0].consumed_at).not.toBeNull();
   });
+
+  it("keeps exactly one live link when two issues for the same user overlap", async () => {
+    const user = await inviteUser(users, "overlap@example.com");
+    const [first, second] = await Promise.all([
+      issueInvite(invites, { userId: user._id, createdBy: adminId }),
+      issueInvite(invites, { userId: user._id, createdBy: adminId }),
+    ]);
+
+    const { rows } = await db.query<{ token_hash: string }>(
+      "SELECT token_hash FROM user_invites WHERE user_id = $1 AND consumed_at IS NULL",
+      [user._id]
+    );
+    const live = rows.map((r) => r.token_hash);
+    const issued = [first, second].map((i) => hashInviteToken(i.token));
+
+    expect({
+      liveCount: live.length,
+      stranded: issued.filter((h) => !live.includes(h)).length,
+    }).toEqual({ liveCount: 1, stranded: 1 });
+  });
 });
