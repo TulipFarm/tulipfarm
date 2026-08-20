@@ -11,8 +11,7 @@
     "lint": "biome check --no-errors-on-unmatched ."
   },
   "dependencies": {
-    "@fontsource-variable/jetbrains-mono": "^5.2.8",
-    "@orama/orama": "^3.1.18",
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
     "fumadocs-core": "16.14.5",
     "fumadocs-mdx": "15.2.3",
     "fumadocs-ui": "16.14.5",
@@ -26,7 +25,7 @@
     "@tailwindcss/postcss": "^4.3.3",
     "@tulipfarm/tsconfig": "workspace:*",
     "@types/mdx": "^2.0.14",
-    "@types/node": "^26.1.1",
+    "@types/node": "^26.2.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "postcss": "^8.5.26",

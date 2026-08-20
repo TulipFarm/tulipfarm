@@ -3,8 +3,8 @@
   "version": "0.0.0",
   "private": true,
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "0.3.234",
-    "@openai/codex": "0.147.0",
+    "@anthropic-ai/claude-agent-sdk": "0.3.235",
+    "@openai/codex": "0.148.0",
     "@tulipfarm/agent-runtime": "workspace:*",
     "@tulipfarm/constants": "workspace:*",
     "@tulipfarm/curator": "workspace:*",
@@ -27,7 +27,7 @@
     "@tulipfarm/turn-executor": "workspace:*",
     "ai": "^7.0.66",
     "dotenv": "^17.4.2",
-    "isolated-vm": "^7.0.0",
+    "isolated-vm": "^7.0.1",
     "pg": "^8.23.0",
     "pg-boss": "^12.27.0"
   },
@@ -47,7 +47,7 @@
     "@tulipfarm/memory": "workspace:*",
     "@tulipfarm/tool-broker": "workspace:*",
     "@tulipfarm/tsconfig": "workspace:*",
-    "@types/node": "^26.1.1",
+    "@types/node": "^26.2.0",
     "@types/pg": "^8.23.1",
     "esbuild": "^0.28.2",
     "tsx": "^4.23.12",
