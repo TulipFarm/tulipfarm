@@ -30,7 +30,7 @@ Every scenario stands alone — a failure in one does not block the next.
 
 ## S2 — Screen reader ARIA and semantic HTML audit
 
-Sweep across top-level routes (`/`, `/chats`, `/resources`, `/agents`, `/skills`, `/routines`, `/knowledge`, `/integrations`, `/inbox`, `/settings`, `/business/profile`, `/design-guide`).
+Sweep across top-level routes (`/`, `/chats`, `/resources`, `/agents`, `/skills`, `/routines`, `/knowledge`, `/integrations`, `/inbox`, `/settings`, `/business/profile`, and — on a dev server only — `/design-guide`).
 
 | # | Action | Expected |
 | --- | --- | --- |
@@ -45,7 +45,7 @@ Sweep across top-level routes (`/`, `/chats`, `/resources`, `/agents`, `/skills`
 
 | # | Action | Expected |
 | --- | --- | --- |
-| 1 | On `/design-guide` and `/settings`, set theme to **Light** | Light theme active |
+| 1 | On `/design-guide` (dev server only) and `/settings`, set theme to **Light** | Light theme active |
 | 2 | `expect` all primary text, secondary text, mute text, badges, and button labels meet contrast guidelines against background | High legibility, no light grey on white |
 | 3 | Set theme to **Dark** | Dark theme active |
 | 4 | `expect` dark mode contrast meets guidelines; no dark text on dark background, no un-themed white component boxes | Legible dark theme |
@@ -68,7 +68,7 @@ Sweep across top-level routes (`/`, `/chats`, `/resources`, `/agents`, `/skills`
 
 | # | Action | Expected |
 | --- | --- | --- |
-| 1 | Sequentially visit all top-level routes: `/`, `/chats`, `/resources`, `/agents`, `/skills`, `/routines`, `/knowledge`, `/integrations`, `/inbox`, `/runs`, `/operations`, `/settings`, `/business/profile`, `/business/people`, `/business/guardrails`, `/design-guide` | All routes loaded |
+| 1 | Sequentially visit all top-level routes: `/`, `/chats`, `/resources`, `/agents`, `/skills`, `/routines`, `/knowledge`, `/integrations`, `/inbox`, `/runs`, `/operations`, `/settings`, `/business/profile`, `/business/people`, `/business/guardrails`, and `/design-guide` (dev server only; it 404s on a built instance by design) | All routes loaded |
 | 2 | Compare all console messages against `evidence/console-baseline.txt` recorded in Preflight | Zero new uncaught exceptions or error logs |
 | 3 | `expect` no React hydration mismatch warnings (`Hydration failed because...`) | Clean React hydration |
 | 4 | `expect` no unhandled promise rejections | Clean console |

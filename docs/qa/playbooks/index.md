@@ -35,7 +35,7 @@ Preflight always runs. It is the only playbook that aborts the run on failure.
 | 14 | Channel Linking | [`channel-linking.md`](channel-linking.md) | `/link-channel` | smoke, full | S1 | integration-worker running | 8m |
 | 15 | Operations & Dispatch | [`operations-monitoring.md`](operations-monitoring.md) | `/operations` | smoke, full | S1 | worker running | 8m |
 | 16 | Audit & Compliance | [`audit-compliance.md`](audit-compliance.md) | `/business/activities` | smoke, full | S1 | — | 10m |
-| 17 | Design System | [`design-system.md`](design-system.md) | `/design-guide` | smoke, full | S1 | — | 8m |
+| 17 | Design System | [`design-system.md`](design-system.md) | `/design-guide` | smoke, full | S1 | **dev server only** — the route 404s on a built instance | 8m |
 | 18 | Setup & Onboarding | [`onboarding-setup.md`](onboarding-setup.md) | `/setup`, `/onboarding` | smoke, full | S1 | fresh incognito context available | 8m |
 | 19 | Guardrails & Governance | [`guardrails-governance.md`](guardrails-governance.md) | `/business/guardrails` | smoke, full | S1 | signed-in session; admin for writes | 10m |
 | 20 | Soul Git Operations | [`soul-git-operations.md`](soul-git-operations.md) | `/business/soul` | smoke, full | S1 | — | 10m |

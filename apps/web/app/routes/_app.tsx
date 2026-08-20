@@ -1,4 +1,4 @@
-import { Outlet, redirect, useLoaderData } from "@remix-run/react";
+import { type ClientLoaderFunctionArgs, Outlet, redirect, useLoaderData } from "@remix-run/react";
 import { AppShell } from "~/components/app-sidebar";
 import { OnboardingCompanion } from "~/components/onboarding/companion";
 import { GlobalConnectionStatus } from "~/components/shell/states";
@@ -12,7 +12,7 @@ import { isBusinessAdmin } from "~/lib/use-session-user";
 // Auth gate for the whole app shell: every /app/* route runs this parent loader first.
 // Checks setup status first: if the instance needs first-run setup, redirect to /setup.
 // Then checks auth: unauthenticated session (401) redirects to /login.
-export async function clientLoader() {
+export async function clientLoader({ request }: ClientLoaderFunctionArgs) {
   // Both requests go out together: this loader gates the first paint, so a second serial round trip
   // is pure blank-screen time on a slow host. Precedence is unchanged — setup still wins over auth.
   // On an un-set-up instance this does spend one wasted (401) session call, which is the cheaper
@@ -29,7 +29,10 @@ export async function clientLoader() {
 
   if (!session.ok) {
     if (session.err instanceof ApiError && session.err.status === 401) {
-      const here = typeof window !== "undefined" ? window.location.pathname : "/";
+      // The destination Remix is loading, not `window.location`: history only commits after the
+      // loaders resolve, so on a redirect hop (`/setup` -> `/`) the address bar still reads the
+      // route we are leaving and would send the user back to it after login.
+      const here = new URL(request.url).pathname;
       throw redirect(`/login?redirectTo=${encodeURIComponent(here)}`);
     }
     throw session.err;
