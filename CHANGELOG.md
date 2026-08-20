@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.12.1](https://github.com/TulipFarm/tulipfarm/compare/v0.12.0...v0.12.1) (2026-08-20)
+
+### Features
+
+* **chat:** replace boxed run chrome with a Trace rail and persist asking Turns ([#505](https://github.com/TulipFarm/tulipfarm/issues/505)) ([b3be9ca](https://github.com/TulipFarm/tulipfarm/commit/b3be9ca7e5b6e9c5ebb9154225f9ee82ecb7ce96))
+
+### Bug Fixes
+
+* **eval:** synthesize real PDF bytes for application/pdf Case content ([#507](https://github.com/TulipFarm/tulipfarm/issues/507)) ([41c2e1e](https://github.com/TulipFarm/tulipfarm/commit/41c2e1e8c32dbc6d1b16a84b9b0983280648dc7b))
+* **integrations:** thread Slack replies and drop invalid GitHub App events ([#509](https://github.com/TulipFarm/tulipfarm/issues/509)) ([7205c20](https://github.com/TulipFarm/tulipfarm/commit/7205c2028d11339a2199df9137bd1b19dca69e18))
+
 ## [0.12.0](https://github.com/TulipFarm/tulipfarm/compare/v0.11.0...v0.12.0) (2026-08-20)
 
 ### Features
