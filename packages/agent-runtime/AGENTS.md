@@ -16,7 +16,7 @@ orchestration. It owns prompt assembly and runtime control, not model providers.
 | `src/context/` | Instruction precedence, Context manifests, prompt assembly. |
 | `src/guardrails/` | Input/tool/output guard stages and `DEFAULT_GUARDRAILS`. |
 | `src/skills/` | Exact-version Skill resolution, trust tiers, scanning, ability intersection. |
-| `src/loop/` | Bounded durable Tool loop; the broker is the only effect path. `reread.ts` puts a File an Agent read mid-Turn back in front of the model. |
+| `src/loop/` | Bounded durable Tool loop; the broker is the only effect path. `reread.ts` puts a File an Agent read mid-Turn back in front of the model. `diagnostics.ts` owns the barrier identities — a Tool named there ends the Turn on its *identity*, with no repair path, so a hand-off or a pause can never be narrated as done. `narrowing.ts` narrows the offer to a Skill's scope but never hides a mutating Tool. |
 | `src/delegation/` | Helper Agents as child Runs: depth, deadline and authority narrowing (`delegate.ts`), and the composition that mints and awaits the child (`composition.ts`). |
 | `test/security/` | Injection and non-amplification corpus. |
 

@@ -132,7 +132,14 @@ describe("/api/v1/internal/turns", () => {
                 guardrailDigest: "guardrail-digest",
                 guardrailPolicy: { input: [] },
                 messages: [{ role: "user", content: textContent(`as ${authority.subject.id}`) }],
-                tools: [],
+                tools: [
+                  {
+                    name: "record_create",
+                    inputSchema: { type: "object" },
+                    tier: "business",
+                    mutating: true,
+                  },
+                ],
                 limits: { maxIterations: 25, maxToolCalls: 25, maxRepairAttempts: 2 },
                 compacted: false,
               };
@@ -248,6 +255,20 @@ describe("/api/v1/internal/turns", () => {
     });
 
     expect(res.json().modelPolicy).toEqual({ residency: "eu", dataRetention: "none" });
+  });
+
+  it("carries each Tool's mutating flag to the Worker", async () => {
+    // Skill narrowing may hide a read and never a write (#419); stripped here, every Tool reaches
+    // the loop looking like a read and the write vanishes from the offer with no error anywhere.
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/v1/internal/turns/${RUN_ID}/context`,
+      headers: asWorker(),
+    });
+
+    expect(res.json().tools).toEqual([
+      { name: "record_create", inputSchema: { type: "object" }, tier: "business", mutating: true },
+    ]);
   });
 
   it("carries the acting principal to the Worker, kind included", async () => {

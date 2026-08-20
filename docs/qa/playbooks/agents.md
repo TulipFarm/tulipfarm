@@ -153,9 +153,10 @@ boundary.
 **6a — Per-Skill tool-offer narrowing is a context-size optimization, not authorization.**
 `packages/agent-runtime/src/loop/loop.ts:53-58` (commit `e64e178`) narrows which tools the loop
 **offers** the model on an iteration where a Skill is active, to that Skill's declared `tools:`
-scope plus a fixed always-exposed set (`load_skill`, `complete_task`, `transfer_to_agent`,
-`delegate_to_agent`, `present`, `request_input`, `update_presentation` — seeing these alongside a
-narrowed scope is correct, not a leak). The doc comment is explicit: **"context-size optimization
+scope, plus a fixed always-exposed set (`load_skill`, `complete_task`, `delegate_to_agent`,
+`present`, `request_input`, `update_presentation`), plus every mutating Tool the Agent holds
+(#419 — a Skill scope may hide a read and never a write). Seeing any of these alongside a narrowed
+scope is correct, not a leak. The doc comment is explicit: **"context-size optimization
 only, not a security boundary — `exposed` below still authorizes every `tools` entry regardless of
 what a given iteration offers the model."** So:
 

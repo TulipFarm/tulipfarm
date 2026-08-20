@@ -118,6 +118,7 @@ export type AgentLoopFailureReason =
   | "repair_budget_exhausted"
   | "budget_exhausted"
   | "input_request_failed"
+  | "handoff_unavailable"
   | ModelInvocationFailureReason
   | "empty_model_output";
 

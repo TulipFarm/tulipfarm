@@ -87,6 +87,11 @@ export interface HostedTurnContext {
     readonly inputSchema: Record<string, unknown>;
     /** The Tool's tier, so the tool-call guard can refuse a whole category rather than a name. */
     readonly tier: string;
+    /**
+     * Whether the Tool has an effect. Carried because Skill narrowing may hide a read and never a
+     * write (#419), and the loop cannot tell them apart once this crosses the wire.
+     */
+    readonly mutating?: boolean;
   }[];
   readonly limits: {
     readonly maxIterations: number;

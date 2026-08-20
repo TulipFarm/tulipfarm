@@ -19,6 +19,7 @@ import type { IntegrationConversationsRepo } from "../ingress/repo";
 import { integrationSecretKey } from "../integrations/connection-env";
 import type { SurfaceActionStore } from "../surfaces/action-store";
 import type { SurfaceArtifactStore } from "../surfaces/artifact-store";
+import * as ChannelSchemas from "./channel-schemas";
 import * as InternalSchemas from "./schemas";
 
 /** The subset of `SecretsService` the credential route needs (narrow for testability). */
@@ -165,9 +166,9 @@ export function registerChannelInternalRoutes(
           "Resolve a verified Channel sender to its own Tulip principal. Never substitutes another user — an unmapped sender resolves to `linked: false`, and the bind link that could fix that is never handed to a worker.",
         tags: ["internal"],
         security: [{ bearerToken: [] }],
-        body: InternalSchemas.ChannelIdentityResolveBodySchema,
+        body: ChannelSchemas.ChannelIdentityResolveBodySchema,
         response: {
-          200: InternalSchemas.ChannelIdentityResolveResponseSchema,
+          200: ChannelSchemas.ChannelIdentityResolveResponseSchema,
           401: ErrorSchema,
           403: ErrorSchema,
         },
@@ -198,9 +199,9 @@ export function registerChannelInternalRoutes(
           "Answers an unmapped Slack sender with a single-use bind link, posted to Slack from this process. The bind token is a bearer credential and must never cross into a Worker process (see `apps/api/src/internal/delivery-host.ts`'s module doc), so this route resolves the offer and posts the reply itself rather than handing the token back.",
         tags: ["internal"],
         security: [{ bearerToken: [] }],
-        body: InternalSchemas.ChannelIdentityBindOfferBodySchema,
+        body: ChannelSchemas.ChannelIdentityBindOfferBodySchema,
         response: {
-          200: InternalSchemas.ChannelIdentityBindOfferResponseSchema,
+          200: ChannelSchemas.ChannelIdentityBindOfferResponseSchema,
           401: ErrorSchema,
           403: ErrorSchema,
         },
@@ -281,9 +282,9 @@ export function registerChannelInternalRoutes(
           "Mint (or replay-resolve) the durable Run that answers one Channel message. The external thread maps 1:1 onto a Conversation, created on first message and reused after; `eventId` is the Turn's idempotency key, so a redelivered event never answers twice.",
         tags: ["internal"],
         security: [{ bearerToken: [] }],
-        body: InternalSchemas.ChannelRunCreateBodySchema,
+        body: ChannelSchemas.ChannelRunCreateBodySchema,
         response: {
-          200: InternalSchemas.ChannelRunCreateResponseSchema,
+          200: ChannelSchemas.ChannelRunCreateResponseSchema,
           401: ErrorSchema,
           403: ErrorSchema,
           409: ErrorSchema,
@@ -391,9 +392,9 @@ export function registerChannelInternalRoutes(
         tags: ["internal"],
         security: [{ bearerToken: [] }],
         params: InternalSchemas.InternalRunParamsSchema,
-        querystring: InternalSchemas.ChannelRunReplyQuerySchema,
+        querystring: ChannelSchemas.ChannelRunReplyQuerySchema,
         response: {
-          200: InternalSchemas.ChannelRunReplyResponseSchema,
+          200: ChannelSchemas.ChannelRunReplyResponseSchema,
           401: ErrorSchema,
           403: ErrorSchema,
           404: ErrorSchema,
@@ -442,7 +443,7 @@ export function registerChannelInternalRoutes(
         security: [{ bearerToken: [] }],
         params: InternalSchemas.InternalRunParamsSchema,
         response: {
-          200: InternalSchemas.ChannelRunPendingApprovalResponseSchema,
+          200: ChannelSchemas.ChannelRunPendingApprovalResponseSchema,
           401: ErrorSchema,
           403: ErrorSchema,
         },
@@ -471,7 +472,7 @@ export function registerChannelInternalRoutes(
         tags: ["internal"],
         security: [{ bearerToken: [] }],
         response: {
-          200: InternalSchemas.ChannelSlackCredentialResponseSchema,
+          200: ChannelSchemas.ChannelSlackCredentialResponseSchema,
           401: ErrorSchema,
           403: ErrorSchema,
         },
@@ -499,10 +500,10 @@ export function registerChannelInternalRoutes(
           "Resolve a Slack Block Kit Approve/Deny click to a tool-call approval decision. The clicking sender is resolved to a principal here, in this process — a worker states only the click, never the identity it decides as.",
         tags: ["internal"],
         security: [{ bearerToken: [] }],
-        params: InternalSchemas.ChannelApprovalDecisionParamsSchema,
-        body: InternalSchemas.ChannelApprovalDecisionBodySchema,
+        params: ChannelSchemas.ChannelApprovalDecisionParamsSchema,
+        body: ChannelSchemas.ChannelApprovalDecisionBodySchema,
         response: {
-          200: InternalSchemas.ChannelApprovalDecisionResponseSchema,
+          200: ChannelSchemas.ChannelApprovalDecisionResponseSchema,
           401: ErrorSchema,
           403: ErrorSchema,
         },

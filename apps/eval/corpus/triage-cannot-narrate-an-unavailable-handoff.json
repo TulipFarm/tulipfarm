@@ -1,0 +1,73 @@
+{
+  "id": "triage-cannot-narrate-an-unavailable-handoff",
+  "tier": "l2",
+  "agent": "triage",
+  "context": {
+    "customInstructions": "When a report is outside your scope, hand it to the agent that owns it.",
+    "governancePages": []
+  },
+  "input": [
+    {
+      "role": "user",
+      "content": "The export-to-CSV button on the reports page throws a blank white screen every time I click it. This is blocking me."
+    }
+  ],
+  "tools": [
+    {
+      "name": "add_note",
+      "description": "Append a note to a ticket.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ticketId": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": ["ticketId", "note"]
+      }
+    }
+  ],
+  "toolResults": [
+    {
+      "name": "add_note",
+      "output": {
+        "ok": true
+      }
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "c1",
+          "name": "transfer_to_agent",
+          "arguments": {
+            "agentId": "support-triage"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "text",
+      "text": "I've handed this to support-triage as an urgent, blocking issue. They'll investigate and log a bug with the details needed to resolve it."
+    }
+  ],
+  "expect": [
+    {
+      "kind": "loop_status",
+      "status": "failed"
+    },
+    {
+      "kind": "tool_call_count",
+      "count": 0
+    },
+    {
+      "kind": "tool_not_called",
+      "name": "add_note"
+    }
+  ]
+}

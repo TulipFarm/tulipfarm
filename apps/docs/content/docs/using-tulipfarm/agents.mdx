@@ -81,8 +81,8 @@ its turn and explain itself. An agent with no `capabilityRestrictions` is unrest
 
 Risk is otherwise managed through guardrails, approvals, SkillAudit, and role-based authority.
 
-## Transfer and delegation
+## Delegation
 
-`transfer_to_agent` changes who owns the active chat. `delegate_to_agent` starts helper work as a
-child run and returns results to the current agent. Delegation is useful for scoped work; transfer is
-useful when another agent should become the main actor.
+`delegate_to_agent` starts helper work as a child run and returns results to the current agent. It
+is the only hand-off an agent can perform; use it for scoped work. To change who owns a chat, the
+participant `@mentions` the agent they want, which re-targets the chat from that message on.

@@ -58,12 +58,12 @@ Do not use this workflow for:
 - `name` must equal the Skill directory name; `description` is required.
 - `description`: one sentence, maximum 60 characters by house style, ending with a period.
 - `tools`: the array of exact Tool names this Skill's procedure actually calls — required for every
-  new Skill. Once loaded, the loop offers the model only this list plus the always-exposed baseline
-  (`load_skill`, `complete_task`, `transfer_to_agent`, `delegate_to_agent`, `present`,
-  `request_input`, `update_presentation`) instead of the full catalog, so omitting a Tool the
-  procedure calls makes that call unreachable while the Skill is active. Do not list one the
-  procedure never calls. A Skill with no `tools` declared falls back to the full catalog — every
-  Skill should declare its list rather than rely on that fallback.
+  new Skill. Once loaded, the loop offers the model only this list, plus the always-exposed baseline
+  (`load_skill`, `complete_task`, `delegate_to_agent`, `present`, `request_input`,
+  `update_presentation`), plus every mutating Tool the Agent holds — a Skill scope may hide a read
+  and never a write. Omitting a *read* the procedure calls makes that call unreachable while the
+  Skill is active. Do not list one the procedure never calls. A Skill with no `tools` declared falls
+  back to the full catalog — every Skill should declare its list rather than rely on that fallback.
 - Unknown benign fields are tolerated; authority-grant and underscore-prefixed fields are reserved.
 
 Body section order:
