@@ -112,6 +112,8 @@ export function modelFailureMessage(reason: string | undefined): string {
       return "The Agent asked you to choose, but the question could not be shown. It stopped instead of deciding for you. Try again.";
     case "handoff_unavailable":
       return "The Agent tried to hand this to another agent, and that hand-off is not available here. It stopped rather than report work it had not done.";
+    case "effect_after_report":
+      return "The Agent had already told you what it did, then tried to do something else. It stopped rather than leave you with a report that no longer matched. Nothing further was changed.";
     default:
       return "The model request failed. Try again.";
   }
