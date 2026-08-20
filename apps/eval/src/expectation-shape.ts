@@ -60,6 +60,7 @@ const EXPECTATION_FIELDS: Record<string, readonly [string, FieldType][]> = {
   turn_status: [["status", "string"]],
   run_event_emitted: [["eventType", "string"]],
   soul_committed: [["path", "string"]],
+  soul_published: [["artifact", "string"]],
   generated_file_readable_by: [["grantee", "string"]],
   generated_file_not_readable_by: [["grantee", "string"]],
 };

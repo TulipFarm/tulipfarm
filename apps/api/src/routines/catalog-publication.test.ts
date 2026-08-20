@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import {
+  ActiveRoutineCatalog,
   type BundleVerifier,
   type CommitSigner,
   compileExecutionBundle,
@@ -22,7 +23,6 @@ import {
 import { InMemorySoulPublicationStore } from "@tulipfarm/storage";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type PlatformToolContext, routineForgeTool } from "../platform/tools";
-import { ActiveRoutineCatalog } from "./catalog";
 
 /**
  * The Routines surface reads only the verified active bundle, so `routine_forge` succeeding proves
@@ -118,7 +118,9 @@ describe("routine_forge → Soul publication → Routines catalog", () => {
       undefined,
       publisher
     );
-    catalog = new ActiveRoutineCatalog(coordinator, bundleVerifier, DEPLOYMENT_BUSINESS_ID);
+    catalog = new ActiveRoutineCatalog(() =>
+      coordinator.activeBundle(DEPLOYMENT_BUSINESS_ID, bundleVerifier)
+    );
   });
 
   afterEach(() => {
@@ -128,7 +130,7 @@ describe("routine_forge → Soul publication → Routines catalog", () => {
   function forge(ctx: PlatformToolContext) {
     return routineForgeTool.handler(
       { name: "daily-report", definition: ROUTINE, triggers: [TRIGGER] },
-      ctx
+      { routineCatalog: catalog, ...ctx }
     );
   }
 
@@ -147,6 +149,23 @@ describe("routine_forge → Soul publication → Routines catalog", () => {
         triggers: [{ slug: "daily-report-manual", type: "manual", summary: "manual" }],
       },
     ]);
+  });
+
+  it("lists a forged Routine as soon as the Tool reports success", async () => {
+    const result = await forge({ soulWriter: writer });
+    expect(result).toMatchObject({ success: true, data: { committed: true } });
+
+    expect(await catalog.list()).toMatchObject([{ slug: "daily-report" }]);
+  });
+
+  it("refuses to report success for a Routine the Routines surface does not list", async () => {
+    const result = await forge({
+      soulWriter: writer,
+      routineCatalog: { list: async () => [] },
+    });
+
+    expect(result).toMatchObject({ success: false, error: { code: "internal_error" } });
+    expect(JSON.stringify(result)).toContain("does not appear on the Routines surface");
   });
 
   it("reports a failure instead of success when publication does not land", async () => {

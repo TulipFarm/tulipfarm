@@ -34,6 +34,8 @@ export interface PersistedState {
   readonly turnStatus: string | null;
   readonly events: readonly string[];
   readonly soulCommits: readonly { readonly message: string; readonly paths: readonly string[] }[];
+  /** Artifacts the active Soul publication serves, written `Kind:slug`. */
+  readonly publishedArtifacts: readonly string[];
   /** Files the Turn generated, each with the audience the product actually gave it. */
   readonly generatedFiles: readonly {
     readonly filename: string;
@@ -222,6 +224,21 @@ function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: 
               persisted.soulCommits.length === 0
                 ? "the Turn committed nothing"
                 : `it committed ${persisted.soulCommits.flatMap((c) => c.paths).join(", ")}`
+            }`,
+          };
+    }
+
+    case "soul_published": {
+      const persisted = obs.persisted;
+      if (persisted === undefined) return notPersisted(a.kind);
+      return persisted.publishedArtifacts.includes(a.artifact)
+        ? { passed: true, detail: `${a.artifact} is in the active Soul publication` }
+        : {
+            passed: false,
+            detail: `${a.artifact} is not published; the active bundle serves ${
+              persisted.publishedArtifacts.length === 0
+                ? "nothing"
+                : persisted.publishedArtifacts.join(", ")
             }`,
           };
     }
@@ -479,6 +496,8 @@ export function scoreCase(
  */
 const SEAM_TOOL: Readonly<Record<string, string>> = {
   soul_committed: "soul_write",
+  // Same seam: nothing can be published that the model never asked to be written.
+  soul_published: "soul_write",
   // Same shape: there is no audience to read until the model has actually written a document.
   generated_file_readable_by: "file_create",
   generated_file_not_readable_by: "file_create",

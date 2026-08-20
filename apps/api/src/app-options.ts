@@ -16,6 +16,7 @@ import type {
   BundledIntegration,
   BundledSkill,
   GitSyncService,
+  RoutineCatalog,
   SoulLoader,
   SoulWriter,
 } from "@tulipfarm/soul";
@@ -66,7 +67,6 @@ import type { RateLimiter } from "./rate-limit";
 import type { RecordAuthorizer } from "./resources/authorize";
 import type { CounterStore, ResourceRepoFactory } from "./resources/repo";
 import type { CanonicalRoutineAuthoringService } from "./routines/authoring";
-import type { RoutineCatalog } from "./routines/catalog";
 import type { RunEventRouteDeps } from "./runs/events";
 import type { RunReplayDeps } from "./runs/replay";
 import type { SetupAdminCreator } from "./setup/first-admin";

@@ -270,6 +270,7 @@ async function runL3Trial(
         turnStatus: turn.turnStatus,
         events: turn.events,
         soulCommits: turn.soulCommits,
+        publishedArtifacts: turn.publishedArtifacts,
         generatedFiles: turn.generatedFiles,
       },
     });

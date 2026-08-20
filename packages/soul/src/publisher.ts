@@ -7,6 +7,9 @@ import type { Logger } from "./types";
 
 export type ExecutionBundleCompiler = (request: BundleCompileRequest) => ExecutionBundle;
 
+/** Names the write path in the outbox ledger so an inline settle is told apart from a drain. */
+const INLINE_PUBLICATION_CONSUMER = "soul.publisher.inline";
+
 /** The Git facts {@link SoulPublisher.reconcile} needs, kept as a port so tests need no real repo. */
 export interface SoulPublisherGitState {
   /** Current HEAD commit sha, or `undefined` when the repo has no commits yet. */
@@ -19,7 +22,7 @@ export interface SoulPublisherOptions {
   readonly treeReader: SoulTreeReader;
   readonly compiler: ExecutionBundleCompiler;
   readonly signer: BundleSigner;
-  readonly coordinator: Pick<SoulPublicationCoordinator, "publish">;
+  readonly coordinator: Pick<SoulPublicationCoordinator, "publish" | "settle">;
   readonly logger: Logger;
   readonly businessId: string;
   /** Required only by {@link SoulPublisher.reconcile}; `publishCommittedTree` does not use it. */
@@ -50,8 +53,20 @@ export class SoulPublisher {
     });
     const signed = signExecutionBundle(bundle, this.options.signer);
     await this.options.coordinator.publish({ bundle: signed, actor: request.actor });
+    // Enqueueing is not publishing. Every surface reads the *active* digest, so returning here
+    // would let a caller announce an artifact the Runtime has not started serving — and if the
+    // publication then dead-letters, never will.
+    const stage = await this.options.coordinator.settle(
+      bundle.changesetId,
+      INLINE_PUBLICATION_CONSUMER
+    );
+    if (stage !== "active") {
+      throw new Error(
+        `Soul publisher: committed tree ${request.commitSha} was enqueued as ${signed.digest} but publication stopped at stage ${stage}; the Runtime keeps serving the previous bundle until a drain completes it`
+      );
+    }
     this.options.logger.info(
-      `Soul publisher: committed tree ${request.commitSha} enqueued as ${signed.digest} in ${Date.now() - startedAt}ms`
+      `Soul publisher: committed tree ${request.commitSha} activated as ${signed.digest} in ${Date.now() - startedAt}ms`
     );
   }
 

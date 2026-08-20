@@ -1,6 +1,6 @@
+import type { RoutineCatalog } from "@tulipfarm/soul";
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { RoutineCatalog } from "./catalog";
 import { registerRoutineCatalogRoutes } from "./catalog-routes";
 
 describe("Routine catalogue routes", () => {

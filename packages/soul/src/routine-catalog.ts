@@ -1,6 +1,7 @@
-import type { BundleVerifier, SoulPublicationCoordinator } from "@tulipfarm/soul";
+import type { RuntimeBundle } from "./bundle";
 
-type ActiveBundleReader = Pick<SoulPublicationCoordinator, "activeBundle">;
+/** Reads the one bundle the Runtime is currently serving, or nothing when none is active. */
+export type ActiveBundleReader = () => Promise<RuntimeBundle | undefined>;
 
 export interface RoutineCatalogTrigger {
   slug: string;
@@ -39,14 +40,10 @@ function triggerSummary(spec: Record<string, unknown>): string {
 
 /** Browser read model sourced only from the verified active Soul publication. */
 export class ActiveRoutineCatalog implements RoutineCatalog {
-  constructor(
-    private readonly publications: ActiveBundleReader,
-    private readonly verifier: BundleVerifier,
-    private readonly businessId: string
-  ) {}
+  constructor(private readonly activeBundle: ActiveBundleReader) {}
 
   async list(): Promise<RoutineCatalogItem[]> {
-    const bundle = await this.publications.activeBundle(this.businessId, this.verifier);
+    const bundle = await this.activeBundle();
     if (!bundle) return [];
 
     const triggersByRoutine = new Map<string, RoutineCatalogTrigger[]>();

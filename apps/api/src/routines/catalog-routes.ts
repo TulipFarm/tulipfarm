@@ -1,5 +1,5 @@
+import type { RoutineCatalog } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { RoutineCatalog } from "./catalog";
 
 type PreHandler = (request: FastifyRequest, reply: FastifyReply) => Promise<unknown>;
 
