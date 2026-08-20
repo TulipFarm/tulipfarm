@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
 import { AgentGlyph } from "~/components/agent-glyph";
-import type { MentionKind } from "./mention-config";
+import { KIND_TO_CONFIG, type MentionKind } from "./mention-config";
 import type { MentionItem } from "./serialize";
 
 /** Imperative key handling keeps suggestion navigation from blurring the editor. */
@@ -14,9 +14,9 @@ export const MentionList = forwardRef<
   {
     items: MentionItem[];
     command: (item: { id: string; label: string }) => void;
-    /** Trigger kind — agent rows render a glyph avatar; skill/resource rows don't. */
-    kind?: MentionKind;
-    /** Async Knowledge search is pending; render feedback instead of hiding the menu. */
+    /** Trigger kind — picks the empty/loading wording, and agent rows render a glyph avatar. */
+    kind: MentionKind;
+    /** A search is pending; rendered only for a trigger that declares a `loadingLabel`. */
     loading?: boolean;
   }
 >(({ items, command, kind, loading = false }, ref) => {
@@ -49,12 +49,15 @@ export const MentionList = forwardRef<
     [items, selected, command]
   );
 
+  // A menu that renders nothing is indistinguishable from a broken one, so an empty list still
+  // draws a labelled panel for every trigger (docs/qa/playbooks/chat.md S4 step 6).
   if (items.length === 0) {
-    if (!loading && kind !== "knowledge") return null;
+    const { emptyLabel, loadingLabel } = KIND_TO_CONFIG[kind];
+    const pending = loading ? loadingLabel : undefined;
     return (
       <div className="w-64 rounded-sm border border-border bg-card p-2 text-sm shadow-md">
-        <p className="text-muted-foreground" role={loading ? "status" : undefined}>
-          {loading ? "Searching Knowledge…" : "No matching Knowledge."}
+        <p className="text-muted-foreground" role={pending ? "status" : undefined}>
+          {pending ?? emptyLabel}
         </p>
       </div>
     );
