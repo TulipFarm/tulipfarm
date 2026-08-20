@@ -494,6 +494,84 @@ describe("AgentLoop", () => {
     expect(tools.calls).toEqual([{ name: "request_input", arguments: { component: {} } }]);
   });
 
+  it("ends the Turn when request_input reaches nobody, rather than letting the model proceed", async () => {
+    const model = scriptedModel(
+      toolCallResult([{ callId: "input-1", name: "request_input", arguments: { component: {} } }]),
+      toolCallResult([{ callId: "create-1", name: "agent_create", arguments: {} }])
+    );
+    const tools = dispatcher({
+      status: "failed",
+      callId: "input-1",
+      reason: "/props: must have required property 'choices'",
+    });
+
+    const outcome = await loop({ model, tools }).run(
+      input({
+        tools: [
+          { name: "request_input", inputSchema: {}, mutating: true },
+          { name: "agent_create", inputSchema: {}, mutating: true },
+        ],
+      })
+    );
+
+    expect(outcome).toMatchObject({ status: "failed", reason: "input_request_failed" });
+    expect(model.requests).toBe(1);
+    expect(tools.calls.map((call) => call.name)).toEqual(["request_input"]);
+  });
+
+  it("stops at a request_input whose result carries no suspend flag", async () => {
+    const model = scriptedModel(
+      toolCallResult([{ callId: "input-1", name: "request_input", arguments: { component: {} } }]),
+      toolCallResult([{ callId: "create-1", name: "agent_create", arguments: {} }])
+    );
+    // What a ledger replay of an ask an earlier attempt already made answers.
+    const tools = dispatcher({
+      status: "succeeded",
+      callId: "input-1",
+      output: { replayed: true },
+    });
+
+    const outcome = await loop({ model, tools }).run(
+      input({
+        tools: [
+          { name: "request_input", inputSchema: {}, mutating: true },
+          { name: "agent_create", inputSchema: {}, mutating: true },
+        ],
+      })
+    );
+
+    expect(outcome).toMatchObject({ status: "input_required", callId: "input-1" });
+    expect(tools.calls.map((call) => call.name)).toEqual(["request_input"]);
+  });
+
+  it("stops at a denied request_input dispatched beside other reads", async () => {
+    const model = scriptedModel(
+      toolCallResult([
+        { callId: "list-1", name: "agent_list", arguments: {} },
+        { callId: "input-1", name: "request_input", arguments: { component: {} } },
+      ]),
+      toolCallResult([{ callId: "create-1", name: "agent_create", arguments: {} }])
+    );
+    const tools = dispatcher(
+      { status: "succeeded", callId: "list-1", output: { agents: [] } },
+      { status: "denied", callId: "input-1", reason: "a guardrail refused it" }
+    );
+
+    const outcome = await loop({ model, tools }).run(
+      input({
+        tools: [
+          { name: "agent_list", inputSchema: {}, mutating: false },
+          { name: "request_input", inputSchema: {}, mutating: false },
+          { name: "agent_create", inputSchema: {}, mutating: true },
+        ],
+      })
+    );
+
+    expect(outcome).toMatchObject({ status: "failed", reason: "input_request_failed" });
+    expect(model.requests).toBe(1);
+    expect(tools.calls.map((call) => call.name)).toEqual(["agent_list", "request_input"]);
+  });
+
   it("AJV-validates structured output and repairs an invalid one", async () => {
     const outcome = await loop({
       model: scriptedModel(

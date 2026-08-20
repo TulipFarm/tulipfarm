@@ -117,6 +117,7 @@ export type AgentLoopFailureReason =
   | "tool_call_limit"
   | "repair_budget_exhausted"
   | "budget_exhausted"
+  | "input_request_failed"
   | ModelInvocationFailureReason
   | "empty_model_output";
 
