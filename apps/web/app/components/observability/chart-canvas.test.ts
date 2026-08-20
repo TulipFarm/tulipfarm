@@ -1,4 +1,4 @@
-import type { TooltipItem } from "chart.js";
+import type { ChartTypeRegistry, TooltipItem } from "chart.js";
 import { describe, expect, it } from "vitest";
 import { buildChartConfig, type ChartColors } from "./chart-canvas";
 
@@ -26,9 +26,12 @@ const multi = [
 ];
 
 // A tooltip item is only partially constructed here; the callbacks under test read `raw`,
-// `parsed.y` and `dataset.label`, which is all this needs to supply.
+// `parsed.y` and `dataset.label`, which is all this needs to supply. `buildChartConfig` returns a
+// `ChartConfiguration` over every chart type, so its callbacks take the union-typed item.
 function item(raw: unknown, y: number | null, label: string) {
-  return { raw, parsed: { y }, dataset: { label } } as unknown as TooltipItem<"line">;
+  return { raw, parsed: { y }, dataset: { label } } as unknown as TooltipItem<
+    keyof ChartTypeRegistry
+  >;
 }
 
 // `ChartConfiguration` types datasets as a union across every chart type, which hides line-only
