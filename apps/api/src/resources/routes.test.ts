@@ -15,6 +15,7 @@ import { DEPLOYMENT_ROLES } from "../identity/roles";
 import { LiveRecordAuthorizer } from "./authorize";
 import type {
   CounterStore,
+  HistoryOp,
   ListOpts,
   ResourceDoc,
   ResourceHistoryDoc,
@@ -33,6 +34,11 @@ class FakeResourceRepo implements ResourceRepo {
 
   async insert(doc: ResourceDoc): Promise<void> {
     this.docs.set(doc._id, { ...doc });
+    this.log(doc._id, "create", doc);
+  }
+
+  private log(id: string, operation: HistoryOp, snapshot: ResourceDoc): void {
+    this.history.push({ _id: randomUUID(), resourceId: id, operation, snapshot, at: new Date() });
   }
 
   async findById(id: string): Promise<ResourceDoc | null> {
@@ -57,15 +63,17 @@ class FakeResourceRepo implements ResourceRepo {
     return { items: sliced, nextCursor: items.length > opts.limit ? "next" : null };
   }
 
-  async replaceOne(id: string, expectedVersion: number, doc: ResourceDoc): Promise<boolean> {
+  async replaceOne(
+    id: string,
+    expectedVersion: number,
+    doc: ResourceDoc,
+    op: HistoryOp
+  ): Promise<boolean> {
     const existing = this.docs.get(id);
     if (!existing || existing.version !== expectedVersion) return false;
     this.docs.set(id, { ...doc });
+    this.log(id, op, doc);
     return true;
-  }
-
-  async appendHistory(entry: ResourceHistoryDoc): Promise<void> {
-    this.history.push(entry);
   }
 }
 
