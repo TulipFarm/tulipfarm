@@ -1,0 +1,107 @@
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { FileShare, LibraryFile } from "~/lib/files";
+import { ShareDialog } from "./file-share";
+
+const fetchFileShares = vi.fn<() => Promise<readonly FileShare[]>>();
+const shareFile = vi.fn<() => Promise<void>>();
+const unshareFile = vi.fn<() => Promise<void>>();
+
+vi.mock("~/lib/files", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("~/lib/files")>()),
+  fetchFileShares: (...args: unknown[]) => fetchFileShares(...(args as [])),
+  shareFile: (...args: unknown[]) => shareFile(...(args as [])),
+  unshareFile: (...args: unknown[]) => unshareFile(...(args as [])),
+}));
+
+const FILE: LibraryFile = {
+  id: "file_1",
+  filename: "contract.pdf",
+  mediaType: "application/pdf",
+  sizeBytes: 4096,
+  createdAt: "2026-01-02T03:04:05.000Z",
+  owner: "user_1",
+  origin: "uploaded",
+  sourceChatId: null,
+  sourceRunId: null,
+  sharedWithCount: null,
+};
+
+describe("ShareDialog", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    fetchFileShares.mockResolvedValue([]);
+    shareFile.mockResolvedValue(undefined);
+    unshareFile.mockResolvedValue(undefined);
+  });
+
+  it("says plainly that an unshared File is readable only by its owner", async () => {
+    render(<ShareDialog file={FILE} onClose={() => {}} />);
+    expect(await screen.findByText("Only you can read this file.")).toBeInTheDocument();
+  });
+
+  it("shares with a named person and shows the new grant without a reload", async () => {
+    const user = userEvent.setup();
+    render(<ShareDialog file={FILE} onClose={() => {}} />);
+    await screen.findByText("Only you can read this file.");
+
+    fetchFileShares.mockResolvedValue([
+      { kind: "user", id: "user_2", sharedBy: "user_1", sharedAt: "2026-01-02T03:05:00.000Z" },
+    ]);
+    await user.type(screen.getByLabelText("Their principal id"), "user_2");
+    await user.click(screen.getByRole("button", { name: "Share" }));
+
+    expect(shareFile).toHaveBeenCalledWith("file_1", { kind: "user", id: "user_2" });
+    expect(await screen.findByText("user_2")).toBeInTheDocument();
+    // The field clears, so a second share cannot be sent by a stray Enter on a stale value.
+    await waitFor(() => expect(screen.getByLabelText("Their principal id")).toHaveValue(""));
+  });
+
+  it("asks for a Role id, and sends one, when sharing with a Role", async () => {
+    const user = userEvent.setup();
+    render(<ShareDialog file={FILE} onClose={() => {}} />);
+    await screen.findByText("Only you can read this file.");
+
+    await user.selectOptions(screen.getByLabelText("Share with"), "role");
+    await user.type(screen.getByLabelText("Role id"), "support");
+    await user.click(screen.getByRole("button", { name: "Share" }));
+
+    expect(shareFile).toHaveBeenCalledWith("file_1", { kind: "role", id: "support" });
+  });
+
+  it("revokes a share and stops offering it", async () => {
+    const user = userEvent.setup();
+    fetchFileShares.mockResolvedValue([
+      { kind: "role", id: "support", sharedBy: "user_1", sharedAt: "2026-01-02T03:05:00.000Z" },
+    ]);
+    render(<ShareDialog file={FILE} onClose={() => {}} />);
+
+    await user.click(await screen.findByRole("button", { name: "Revoke access for support" }));
+    expect(unshareFile).toHaveBeenCalledWith("file_1", {
+      kind: "role",
+      id: "support",
+      sharedBy: "user_1",
+      sharedAt: "2026-01-02T03:05:00.000Z",
+    });
+  });
+
+  it("refuses to send an empty grantee", async () => {
+    render(<ShareDialog file={FILE} onClose={() => {}} />);
+    await screen.findByText("Only you can read this file.");
+    expect(screen.getByRole("button", { name: "Share" })).toBeDisabled();
+    expect(shareFile).not.toHaveBeenCalled();
+  });
+
+  it("reports a failed share instead of implying it worked", async () => {
+    const user = userEvent.setup();
+    shareFile.mockRejectedValue(new Error("That file could not be shared."));
+    render(<ShareDialog file={FILE} onClose={() => {}} />);
+    await screen.findByText("Only you can read this file.");
+
+    await user.type(screen.getByLabelText("Their principal id"), "user_2");
+    await user.click(screen.getByRole("button", { name: "Share" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("That file could not be shared.");
+  });
+});

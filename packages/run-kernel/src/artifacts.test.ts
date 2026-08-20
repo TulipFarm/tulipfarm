@@ -1,7 +1,14 @@
 import { createHash } from "node:crypto";
 import { canonicalHash } from "@tulipfarm/schema";
-import type { BlobPort, BlobRef, PersistedArtifact } from "@tulipfarm/storage";
-import { MemoryArtifactStore } from "@tulipfarm/storage";
+import {
+  type BlobBody,
+  type BlobMetadata,
+  type BlobPort,
+  type BlobRef,
+  collectBlobBytes,
+  MemoryArtifactStore,
+  type PersistedArtifact,
+} from "@tulipfarm/storage";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   ArtifactAccessError,
@@ -23,20 +30,30 @@ const CLASSIFY_SCHEMA = {
   properties: { label: { type: "string" }, note: { type: "string" } },
 };
 
+async function* oneChunk(bytes: Uint8Array): AsyncIterable<Uint8Array> {
+  yield bytes;
+}
+
 /** In-memory `BlobPort` whose bytes can be corrupted to simulate an untrusted blob store. */
 class MemoryBlobStore implements BlobPort {
   private readonly bytes = new Map<string, Uint8Array>();
 
-  async put(bytes: Uint8Array): Promise<BlobRef> {
+  async put(body: BlobBody): Promise<BlobRef> {
+    const bytes = body instanceof Uint8Array ? body : await collectBlobBytes(body);
     const hash = createHash("sha256").update(bytes).digest("hex");
     this.bytes.set(hash, bytes);
     return { key: hash, hash };
   }
 
-  async get(ref: BlobRef): Promise<Uint8Array> {
+  async get(ref: BlobRef): Promise<AsyncIterable<Uint8Array>> {
     const stored = this.bytes.get(ref.key);
     if (!stored) throw new Error("blob_missing");
-    return stored;
+    return oneChunk(stored);
+  }
+
+  async head(ref: BlobRef): Promise<BlobMetadata | null> {
+    const stored = this.bytes.get(ref.key);
+    return stored === undefined ? null : { size: stored.byteLength };
   }
 
   async delete(ref: BlobRef): Promise<void> {

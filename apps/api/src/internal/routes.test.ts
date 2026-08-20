@@ -1,3 +1,4 @@
+import { textContent } from "@tulipfarm/schema";
 import type { PaginatedResult } from "@tulipfarm/storage";
 import type { HostedAgent } from "@tulipfarm/tool-host";
 import type { FastifyInstance } from "fastify";
@@ -130,7 +131,7 @@ describe("/api/v1/internal/turns", () => {
                 contextDigest: "context-digest",
                 guardrailDigest: "guardrail-digest",
                 guardrailPolicy: { input: [] },
-                messages: [{ role: "user", content: `as ${authority.subject.id}` }],
+                messages: [{ role: "user", content: textContent(`as ${authority.subject.id}`) }],
                 tools: [],
                 limits: { maxIterations: 25, maxToolCalls: 25, maxRepairAttempts: 2 },
                 compacted: false,
@@ -233,7 +234,7 @@ describe("/api/v1/internal/turns", () => {
     // The subject came from the Run, and the worker never named one.
     expect(res.json()).toMatchObject({
       contextDigest: "context-digest",
-      messages: [{ role: "user", content: "as slack" }],
+      messages: [{ role: "user", content: textContent("as slack") }],
     });
   });
 

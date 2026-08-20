@@ -13,6 +13,13 @@
 
 import { PGlite } from "@electric-sql/pglite";
 import {
+  FILE_KNOWLEDGE_STATEMENTS,
+  FILE_ORIGIN_STATEMENTS,
+  FILE_SHARE_STATEMENTS,
+  FILE_STORAGE_STATEMENTS,
+} from "@tulipfarm/files";
+import {
+  AUTHORIZATION_STORAGE_STATEMENTS,
   BUDGET_STORAGE_STATEMENTS,
   BudgetStore,
   type Queryable,
@@ -63,6 +70,8 @@ export interface EvalDatabase {
   readonly events: RunEventStore;
   readonly budgets: BudgetStore;
   readonly transactions: TransactionPort;
+  /** Auto-committing handle, for the repositories that take one instead of a transaction. */
+  readonly queryable: Queryable;
   query(text: string, params?: readonly unknown[]): Promise<{ rows: Record<string, unknown>[] }>;
   close(): Promise<void>;
 }
@@ -91,6 +100,16 @@ async function migratedSnapshot(): Promise<Blob | File> {
       ...RUN_EVENT_STORAGE_STATEMENTS,
       ...BUDGET_STORAGE_STATEMENTS,
       ...CONVERSATION_STATEMENTS,
+      // A generated File's audience is decided by the Roles its authoring Agent holds, and those
+      // are rows: `role_assignments` against a registered Principal. Seeding the answer instead
+      // would measure this app's idea of who holds what rather than the product's.
+      ...AUTHORIZATION_STORAGE_STATEMENTS,
+      // Applied in the order the API's migration ledger applies them: the later three are ALTERs
+      // against the first, and `origin` is NOT NULL on every row `create` writes.
+      ...FILE_STORAGE_STATEMENTS,
+      ...FILE_ORIGIN_STATEMENTS,
+      ...FILE_KNOWLEDGE_STATEMENTS,
+      ...FILE_SHARE_STATEMENTS,
     ]) {
       await database.exec(statement);
     }
@@ -110,6 +129,7 @@ export async function openEvalDatabase(): Promise<EvalDatabase> {
     events: new RunEventStore(transactions),
     budgets: new BudgetStore(transactions),
     transactions,
+    queryable: database as Queryable,
     query: (text, params) =>
       database.query(text, params as unknown[]) as Promise<{ rows: Record<string, unknown>[] }>,
     close: () => database.close(),

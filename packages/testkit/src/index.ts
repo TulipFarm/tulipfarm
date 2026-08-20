@@ -1,3 +1,12 @@
+export {
+  type FakeBlobBody,
+  type FakeBlobMetadata,
+  type FakeBlobRange,
+  type FakeBlobRef,
+  InMemoryBlobError,
+  type InMemoryBlobErrorCode,
+  InMemoryBlobPort,
+} from "./blob";
 export { type ClockInstant, FakeClock } from "./clock";
 export {
   type FailureHit,

@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
+import { join } from "node:path";
 import { delegationCatalogOf, GuardrailsService } from "@tulipfarm/agent-runtime";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import { FileService, PgFileRepo } from "@tulipfarm/files";
 import { FetchEgressHttp, GuardedEgressHttp, PublicOriginsService } from "@tulipfarm/integrations";
 import {
   buildDefaultRegistry,
@@ -65,7 +67,9 @@ import {
   ChannelRunDeliveryStore,
   ChildLinkAncestryStore,
   ChildLinkStore,
+  createBlobPort,
   EventStore,
+  ensureBundledBucket,
   ensureEmbeddingIndexes,
   IntegrationStore,
   KillSwitchRepo,
@@ -80,9 +84,10 @@ import {
   SoulRepositoryStore,
   TaskRepo,
   WaitStore,
+  writeBucketSecrets,
 } from "@tulipfarm/storage";
 import { PgEffectStore } from "@tulipfarm/tool-broker";
-import { ApprovalsRepo, ToolApprovalService } from "@tulipfarm/tool-host";
+import { ApprovalsRepo, collectHeldRoleIds, ToolApprovalService } from "@tulipfarm/tool-host";
 import { config } from "dotenv";
 import type { FastifyBaseLogger } from "fastify";
 import { PgBoss } from "pg-boss";
@@ -133,6 +138,7 @@ import {
 } from "./db";
 import { logEnvironmentStatus, validateEnvironment } from "./env";
 import { FeedbackRepo } from "./feedback/repo";
+import { buildFileKnowledgeBridge } from "./files/knowledge-bridge";
 import { registerGuardrailsReload } from "./guardrails/reload";
 import { createHookExecutor } from "./hooks/executor";
 import { PgRawPayloadVault } from "./hooks/raw-payload-vault";
@@ -229,6 +235,7 @@ import {
   assertNoOrphanedDeks,
   type BootstrapSecretsResult,
   bootstrapSecrets,
+  resolveDataDir,
 } from "./setup/bootstrap-secrets";
 import { PgSetupAdminCreator } from "./setup/first-admin";
 import { readSoulConfig, SOUL_GIT_CREDENTIAL_KEY } from "./setup/soul-config";
@@ -263,6 +270,17 @@ const secretsBootstrap = ((): BootstrapSecretsResult => {
   }
 })();
 
+// Before anything slow: the bundled bucket restarts until these exist, so every second here is a
+// second it spends crash-looping. It cannot write them itself — its image carries no shell.
+if (process.env.BUCKET_ADMIN_URL) {
+  try {
+    writeBucketSecrets(resolveDataDir() ?? process.cwd());
+  } catch (err) {
+    console.error(`❌ ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  }
+}
+
 validateEnvironment();
 
 const port = Number.parseInt(process.env.PORT || "4010", 10);
@@ -293,6 +311,9 @@ function soulBundleKeyStore(
 
 async function boot() {
   try {
+    // Fills the S3 credentials the blob port is built from below, so it must precede the pool:
+    // a deployment whose file store never came up should say so, not serve requests that fail.
+    await ensureBundledBucket({ dataDir: resolveDataDir() ?? process.cwd() });
     const migrationPool = await connectPg();
     await runPgMigrations(migrationPool);
     // After migrations, on the owner pool (which has no statement timeout): an ANN index left
@@ -521,6 +542,23 @@ async function boot() {
     });
     const kvService = new KvService(new PgKvRepo(pool));
     const taskRepo = new TaskRepo(transactionPort(pool));
+    // Sharing a File with a Role resolves that Role live on every read, through the one shared
+    // implementation the Tool gate uses. A second answer to "which Roles does this person hold"
+    // is how a File stays readable to someone a Role no longer contains.
+    const fileAuthorityRepos = {
+      roles: new PgRoleRepo(transactionPort(pool)),
+      groups: new PgGroupRepo(transactionPort(pool)),
+    };
+    const fileService = new FileService({
+      repo: new PgFileRepo(pool),
+      rolesOf: (businessId, principalId) =>
+        collectHeldRoleIds(fileAuthorityRepos, businessId, principalId, new Date()),
+      blobs: createBlobPort(join(resolveDataDir() ?? process.cwd(), "blobs")),
+      newId: () => randomUUID(),
+      // Read per upload from the Soul, so an operator turning downscaling on takes effect on the
+      // next upload rather than on the next restart.
+      imagePolicy: async () => (await readSoulConfig(soulPath)).files ?? {},
+    });
     const activityService = new ActivityService(new PgActivityRepo(pool));
     // Audit is separate from activity by design: activity is a UI feed, audit is evidence.
     // Persisted to an append-only ledger the runtime role cannot rewrite (see `audit/repo.ts`).
@@ -684,6 +722,7 @@ async function boot() {
     const toolRegistry = buildToolRegistry({
       memoryDocuments,
       kv: kvService,
+      files: fileService,
       knowledge: knowledgeService,
       knowledgePageGate,
       knowledgeDenialSink,
@@ -779,7 +818,9 @@ async function boot() {
             log: (event, message) => console.warn(JSON.stringify({ ...event, msg: message })),
           }),
           telemetry: memoryTelemetry,
+          files: fileService,
         }),
+        files: fileService,
         tools: buildDelegatedToolDispatch({
           links: childLinks,
           catalog: delegationCatalog,
@@ -927,6 +968,8 @@ async function boot() {
       memoryDocuments,
       kvService,
       taskStore: taskRepo,
+      fileService,
+      fileKnowledge: buildFileKnowledgeBridge(pool, boss, DEPLOYMENT_BUSINESS_ID),
       ...buildCurator({
         pool,
         documents: memoryDocuments,

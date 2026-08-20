@@ -28,6 +28,7 @@
     "@tulipfarm/constants": "workspace:*",
     "@tulipfarm/curator": "workspace:*",
     "@tulipfarm/curator-host": "workspace:*",
+    "@tulipfarm/files": "workspace:*",
     "@tulipfarm/integrations": "workspace:*",
     "@tulipfarm/knowledge": "workspace:*",
     "@tulipfarm/kv": "workspace:*",

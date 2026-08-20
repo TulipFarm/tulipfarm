@@ -123,6 +123,51 @@ import { describe, expect, it } from "vitest";
  * is 1,015 lines below the last: `memory/routes.ts`, the extraction service, the engine repository
  * and thirteen of their pg tests went with it.
  *
+ * Message content became an ordered list of parts, and that is the next +7: four files in
+ * `apps/api/src` now import `@tulipfarm/schema` to build, flatten or collapse them, and the
+ * message repo carries two pg tests pinning that a text-only row still reaches the Chat wire as a
+ * string. The logic itself —
+ * the part union, the legacy-row normaliser, the text projection — lives in `@tulipfarm/schema`,
+ * so what landed here is three import statements and no new branch.
+ *
+ * File upload is the next +269, and it is the largest single raise this file has taken. What
+ * landed: `files/routes.ts` (four routes, most of it the response schemas the OpenAPI rule
+ * requires, plus the raw-stream content-type parsers, which are Fastify by definition) and its
+ * 13 pg tests, which boot the real app and speak real HTTP because the things they pin — a
+ * refused media type, a 413 on a declared length, one Principal being unable to read another's
+ * File — are only observable through the stack. Migration 68 lives here by the same convention as
+ * 64 and 65.
+ *
+ * What did *not* land here, and the extraction is the reason this number is 269 and not 374: the
+ * whole of `@tulipfarm/files` — the limits, the magic-byte sniffer, the filename normaliser, the
+ * repository and the ordered upload pipeline. Two further pieces were moved out after this ratchet
+ * caught them, both first written into the app purely because the route was: `files/http.ts` (the
+ * File wire shape, the `FileError`-to-status table, the RFC-5987 disposition and the download
+ * headers — all facts about Files, none about Fastify) and `files/attachments.ts`, which resolves
+ * the file ids a Chat request claims against the caller's authority and touches no HTTP at all.
+ *
+ * The review of that slice added the last 117, all of it schema and the tests that pin it: the
+ * `file` variant on the Message response schema, without which fast-json-stringify failed the
+ * whole page and one attachment made a Conversation unloadable, plus three route tests — the
+ * serializer round trip that caught it, an attachment-only Message, and the proof that a refused
+ * attachment leaves neither a Turn nor an empty Conversation behind.
+ *
+ * Sending an attachment to the model is the next +35, and the number is 35 because this ratchet
+ * rejected the first attempt at 101. What landed is only what Fastify forces: the internal route
+ * that streams one Turn's File to the Worker — bytes cannot ride inside the JSON Context response,
+ * so a second endpoint is the only way — its params schema, the `attachments` manifest on the
+ * Context response schema (undeclared properties are stripped on serialization, so an omitted key
+ * would silently drop the File between API and Worker), and the composition that wires the File
+ * service into both.
+ *
+ * What moved out instead, and is the whole difference: `@tulipfarm/files/turn-attachments.ts`,
+ * holding both halves of the rule — which Files a Turn may send, re-authorized rather than
+ * trusted and scoped to the Turn by `turnId`, and the two-gate byte read that answers `null`
+ * identically for "never attached" and "no longer authorized". Both were first written into the
+ * app for no better reason than that the route was, and keeping them together matters beyond
+ * ownership: the manifest the Context carries and the bytes the Worker later fetches have to
+ * agree about which Files a Turn attached, and two copies of that rule would be free to drift.
+ *
  * This is that. The ceiling is a high-water mark, not a target — lowering it as code moves out is
  * the point, and the only edit this file should ever receive. Raising it needs a reviewed reason,
  * because "the number went up again" is exactly the event three editions failed to catch.
@@ -307,9 +352,137 @@ import { describe, expect, it } from "vitest";
  * teaching it the key is what closes the gap, and a hand-written branch here would have been the
  * wrong place for it. `apps/api` learned who the Agent is and told the Worker; it did not learn
  * what an Agent may do.
+ *
+ * Ticket 05 raised it again, to 49_943, for the same shape of reason. Refusing an attachment at
+ * routing time is correct but late: the person has already chosen the file and written a prompt
+ * around it. So a Turn's composer needs to know, before any of that, whether some configured model
+ * could read the thing at all — which is a route (`GET /api/v1/files/accepted-modalities`), its
+ * response schema, and the composition that supplies it. All three are Fastify and can live
+ * nowhere else. The judgement they expose is not: `acceptedInputModalities` is in
+ * `@tulipfarm/schema` beside `modalitiesFor`, the one place that already decides what a pinned
+ * spec implies about modality, so the answer the composer acts on and the answer routing enforces
+ * are derived from the same rule rather than two that could disagree.
+ *
+ * That growth was paid for in the same change: the hand-written `ModelSpecRouteSchema` in
+ * `soul/llm-config/routes.ts` was a copy of `ModelSpecSchema` maintained by hand, and adding
+ * `supports_pdf_input` to both is what exposed it. It now imports the real schema, which is 21
+ * lines smaller and, more to the point, cannot drift from the contract again.
+ *
+ * Raised again, 49_943 -> 49_973, for the Files library listing: the route gained a cursor
+ * querystring, a `nextCursor` on the response, a 400 for a cursor this instance did not issue, and
+ * a provenance call after a chat submit. The paging itself is *not* here — reading one row past the
+ * page and encoding the resume key are facts about listing Files, so they live in
+ * `FileService.listPage`, and the route only translates them. What remains is schema and wiring,
+ * which is the one thing apps/api is for.
+ *
+ * Raised again, 49_973 -> 50_160, for File sharing: four routes (share, revoke, list shares, and
+ * a "shared with me" listing), each carrying the full OpenAPI schema every route here owes. None of
+ * the deciding is in them. Who may share, what a recipient may do with a share, and how a Role
+ * share resolves against the Roles a reader holds right now are all in `FileService`; the wire
+ * shape of a grantee is in `packages/files/src/http.ts` beside the File's own. The routes read
+ * params, call one method, and map a `FileError` to a status.
+ *
+ * Two things reclaimed in the same change. Both Files listings now page through a single
+ * `sendPage` helper, so a cursor this instance did not issue means the same thing on both; that
+ * cost three lines more than it saved and was still worth doing, because two copies of a paging
+ * contract is how the two stop agreeing. And `serializeFilePage` moved to `packages/files`, where
+ * the rest of the wire shape already lives — whether a share count is omitted or sent as zero is a
+ * fact about what an owner may know, not about Fastify.
+ *
+ * Raised again, 50_160 -> 50_280, for destroying a File. Two things live here and belong here.
+ * One route, `DELETE /api/v1/files/:id`, which reads a param, calls one method, and records the
+ * audit event — the durable facts about a File that no longer exists have to be captured at the
+ * moment the object stops existing, and the audit writer is an apps/api concern. And the
+ * substitution that lets an old Chat render a destroyed attachment as removed rather than as a
+ * broken image: `referencedFileIds` and `withUnavailableFiles` in `chat/messages.ts`, which are
+ * pure functions over `MessageDoc` — a shape apps/api owns, so moving them would move the type and
+ * buy nothing. Who may delete, what deletion does to shares, and whether the bytes may go are all
+ * decided in `FileService`.
+ *
+ * Raised again, 50_280 -> 50_292, for letting an Agent re-read a File. Twelve lines, and all of
+ * them registration: `buildToolRegistry` binds the `file_*` family to the calling person's
+ * `userId` rather than to the Agent, which is the decision that keeps an Agent's reach into the
+ * library exactly its caller's. The Tools themselves, their caps and what a read returns are in
+ * `packages/files/src/tools.ts`; the loop that puts a re-read File back in front of the model is
+ * in `packages/agent-runtime`. Neither touches Fastify and neither is here.
+ *
+ * Raised again, 50_292 -> 50_306, for the bundled bucket, and fourteen lines is the whole of it
+ * because this ratchet rejected the first attempt at 331. What landed is composition order and
+ * nothing else: two imports, and the two calls whose *position* is the design. The secrets are
+ * written at process start, before `validateEnvironment`, because the bucket image carries no
+ * shell and so crash-loops until they exist — every second spent validating is a second it spends
+ * restarting. The provisioning await is the first statement in `boot()`, before the pool, because
+ * a deployment whose file store never came up should refuse to boot rather than serve requests
+ * that fail at the first upload. Neither fact can be expressed anywhere but the composition root.
+ *
+ * What moved out is `packages/storage/src/ports/bundled-bucket.ts`, which was first written here
+ * for the usual reason — the caller was. It touches no Fastify: it writes two secret files and
+ * speaks an admin HTTP API, and it belongs beside `blob-config.ts`, the other module that answers
+ * "what store does this deployment run on". Keeping them apart would have split that question
+ * across an app and a package, which is how the answers stop agreeing.
+ *
+ * Raised 51_901 -> 52_185 for Files-into-Knowledge. All of it is `files/knowledge-bridge.ts` and
+ * the two routes that call it. The bridge cannot move into a package: `@tulipfarm/files` and
+ * `@tulipfarm/knowledge` are forbidden from importing each other, and joining them is exactly what
+ * this does — only an app sees both. It is also the *small* half of the feature. The half that
+ * parses bytes lives in `apps/worker/src/knowledge/file-index.ts`, because reading a stranger's
+ * PDF does not belong in the process terminating HTTP requests, so the growth this ratchet is
+ * measuring is already the residue after the expensive part was pushed out.
+ *
+ * 52_185 -> 52_201 for the two fail-closed orderings the same feature needed: a File is un-indexed
+ * before it is destroyed, and a revoke that cannot reach Knowledge withdraws the Page instead of
+ * leaving a revoked reader able to retrieve the text. Both are sequencing between two subsystems
+ * that only an app sees at once, so neither has a package to live in, and both are guarded by
+ * tests in `apps/api/src/files/knowledge.pg.test.ts`.
+ *
+ * 52_201 -> 52_319 for the races the review found in that same feature. Indexing happens on a
+ * queue, so "is this File in Knowledge" could not be answered by whether a Page existed yet, and
+ * every removal in that window succeeded against nothing. Closing it needed a durable opt-in
+ * (migration 77) and a guard keeping a File's Page out of the wiki's write surface, since a
+ * read-only recipient could otherwise clear its restriction and publish a private upload. Both are
+ * sequencing between two subsystems that only an app sees at once, so neither has a package to
+ * live in; the Knowledge routes themselves were moved to `files/knowledge-routes.ts` first, so
+ * this is the residue after the extraction rather than instead of it.
+ *
+ * 52_319 -> 52_323 is four lines of comment, not logic. `tools/setup.ts` now passes `agentId` into
+ * the File Tool context so a generated File reaches the Roles its authoring Agent holds, and the
+ * comment beside it has to say why reading stays bound to the caller while writing does not — an
+ * asymmetry that looks like a bug to anyone who finds only half of it. The rule it explains lives
+ * in `packages/files/src/audience.ts`; this app supplies the identity and nothing else.
+ *
+ * Rebased onto main at 51_473, and re-measured to 52_689.
+ *
+ * The Files and multimodal entries above were written against the base this branch was cut from,
+ * so their running totals no longer chain onto main's. Each delta in them is still the true cost of
+ * the change it describes; only the absolute figures are stale, and they are left as written rather
+ * than back-fitted, because a ledger edited to look continuous is a ledger that has stopped
+ * recording what actually happened. The tree is what gets measured. This is the same re-baselining
+ * case as the #388-#390 and #391-#393 merges above: the number comes from the merged tree, never
+ * from widening an allowance to fit a diff.
+ *
+ * The +1_216 over main is this branch's own growth, already reviewed entry by entry above, plus
+ * nothing new — no logic was added during any rebase. Main's contributions in the same window (the
+ * Skill install fix, the `llm` probe, required fields, the `Owner` access level, the Agent autonomy
+ * ceiling and `guardrail_forge`) are the other side of the sum and arrived through main's own
+ * review.
+ *
+ * A later rebase moved main from 51_305 to 51_473 and the measurement from 52_521 to 52_689. Both
+ * are +168, which is `guardrail_forge` itemised above and nothing else: the branch contributed no
+ * lines to that move, and the difference over main is still exactly 1_216.
+ *
+ * The rebase after that moved main 51_473 -> 51_508 and the measurement 52_689 -> 52_724. Both are
+ * +35, the silent-chat-turn fix itemised above. The branch contributed nothing to it either, and
+ * the difference over main is still 1_216 — which is the point of re-measuring rather than adding:
+ * the gap has not moved across three rebases, so every raise so far has been main paying for its
+ * own growth.
+ *
+ * The rebase after that moved main 51_508 -> 51_638 and the measurement 52_724 -> 52_854. Both are
+ * +130, the Agent capability restrictions itemised above. Four rebases now, four raises, and the
+ * difference over main has been exactly 1_216 at every one of them — the branch has added no line
+ * to `apps/api/src` since its own entries above were reviewed.
  */
 
-const CEILING = 51_638;
+const CEILING = 52_854;
 
 /**
  * Domains inside `apps/api/src` that already have a package of the same name. Everything here that

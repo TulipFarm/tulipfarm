@@ -10,6 +10,7 @@ import {
   CHAT_REQUEST_SCHEMA_REF,
   INTEGRATION_REQUEST_SCHEMA_REF,
   INVOCATION_REQUEST_SCHEMAS,
+  textContent,
 } from "@tulipfarm/schema";
 import type { SoulAgent, SoulIntegration, SoulLoader } from "@tulipfarm/soul";
 import { DOMAIN_EVENTS, MemoryArtifactStore } from "@tulipfarm/storage";
@@ -349,7 +350,7 @@ describe("IngressDeliveryHost.attachChat", () => {
     expect(store.turns).toHaveLength(1);
     expect(store.turns[0]).toMatchObject({ runId: RUN_ID, status: "running", attempt: 1 });
     expect(store.messages).toHaveLength(1);
-    expect(store.messages[0]).toMatchObject({ role: "user", content: CHAT.text });
+    expect(store.messages[0]).toMatchObject({ role: "user", content: textContent(CHAT.text) });
     expect(conversations).toHaveLength(1);
     expect(await threads.find(SLUG, THREAD_KEY)).toMatchObject({ userId: "user-1" });
 
@@ -609,7 +610,7 @@ describe("IngressDeliveryHost.postReplyForAttempt", () => {
       conversationId: store.turns[0]?.conversationId ?? "",
       turnId: attached.turnId,
       role: "assistant",
-      content: "  Here is your answer  ",
+      content: textContent("  Here is your answer  "),
       createdAt: NOW,
     });
     await store.completeTurn({

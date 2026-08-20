@@ -15,7 +15,12 @@ import {
 import type { PersistedRun, RunStore } from "@tulipfarm/storage";
 import { AgentStateRunner, type ApprovalWaitPort, type StateTransitionPort } from "./agent-state";
 import { ConversationTurnCompleter, type TurnCompletionStore } from "./conversation-turn";
-import { type TurnContextPort, TurnDriver, type TurnRequest } from "./driver";
+import {
+  type TurnAttachmentPort,
+  type TurnContextPort,
+  TurnDriver,
+  type TurnRequest,
+} from "./driver";
 import { TurnGuardrails } from "./guardrails";
 import { reclaimPendingState, reclaimWaitingState } from "./kernel-ports";
 import type { ModelCallReceiptSource, RunExecutor, RunOutcome, SpendSink } from "./ports";
@@ -39,6 +44,8 @@ export interface ChatExecutorOptions {
   /** Where Tool calls go. Defaults to `host`; a process that hosts Tools passes its own router. */
   readonly tools?: ToolDispatchPort;
   readonly context: TurnContextPort;
+  /** Fetches attached File bytes. Absent leaves every Turn attachment-free. */
+  readonly attachments?: TurnAttachmentPort;
   readonly runs: Pick<RunStore, "find" | "findState">;
   readonly events: RunEventAppendPort;
   readonly budgets: RunBudgetStore;
@@ -176,6 +183,9 @@ async function executeTurn(
       return current !== null && CANCELLING_STATUSES.has(current.status);
     },
     log: options.log,
+    // The same port the Context's own attachments come from: a File re-read mid-Turn is fetched
+    // and re-authorized exactly as one the person attached, through one gate rather than two.
+    ...(options.attachments === undefined ? {} : { attachments: options.attachments }),
     ...(options.now === undefined ? {} : { now: options.now }),
   });
 
@@ -192,6 +202,7 @@ async function executeTurn(
     // Only receipt-capable model ports can name the model actually observed.
     ...(isReceiptSource(model) ? { modelReceipt: () => model.latestModelCallReceipt() } : {}),
     ...(options.spend === undefined ? {} : { spend: options.spend }),
+    ...(options.attachments === undefined ? {} : { attachments: options.attachments }),
   });
 
   return driver.run(request);

@@ -4,7 +4,7 @@
 #   curl -fsSL https://tulipfarm.site/uninstall.sh | bash
 #
 # Permanently removes the TulipFarm Compose project, its named volumes (Postgres,
-# Soul, generated secrets, and backups), locally cached TulipFarm application
+# Soul, generated secrets, backups, and stored files), locally cached TulipFarm application
 # images, and the installer-managed directory. Docker/Podman itself and external
 # datastores are never removed.
 #
@@ -160,7 +160,7 @@ confirm_uninstall() {
   warn "This permanently deletes the TulipFarm instance and cannot be undone."
   printf 'The purge includes:\n'
   printf '  • Compose project: %s (containers and networks)\n' "$PROJECT_NAME"
-  printf '  • Named volumes: PostgreSQL, Soul, generated secrets, and local backups\n'
+  printf '  • Named volumes: PostgreSQL, Soul, generated secrets, local backups, and stored files\n'
   printf '  • TulipFarm application images and unshared images used by this project\n'
   printf '  • Install directory: %s (including .env files)\n' "$INSTALL_DIR"
   printf '\nDocker/Podman itself and externally managed databases are not removed.\n\n'
@@ -242,7 +242,7 @@ remove_project_volumes() {
 
   # Some Podman Compose releases do not preserve Docker's project labels. These
   # exact fallback names are the only volumes declared by TulipFarm's Compose file.
-  for suffix in tulipfarm-postgres tulipfarm-soul tulipfarm-data; do
+  for suffix in tulipfarm-postgres tulipfarm-soul tulipfarm-data tulipfarm-bucket; do
     id="${PROJECT_NAME}_${suffix}"
     if runtime "$engine" volume inspect "$id" >/dev/null 2>&1; then
       runtime "$engine" volume rm "$id" >/dev/null 2>&1 \
@@ -309,7 +309,7 @@ verify_runtime_clean() {
   )"
   [ -z "$remaining" ] || fail "${engine}: TulipFarm project networks remain"
 
-  for suffix in tulipfarm-postgres tulipfarm-soul tulipfarm-data; do
+  for suffix in tulipfarm-postgres tulipfarm-soul tulipfarm-data tulipfarm-bucket; do
     runtime "$engine" volume inspect "${PROJECT_NAME}_${suffix}" >/dev/null 2>&1 \
       && fail "${engine}: TulipFarm volume ${PROJECT_NAME}_${suffix} remains"
   done

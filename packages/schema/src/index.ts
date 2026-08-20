@@ -113,6 +113,7 @@ export {
   LlmConfigValidationError,
   LlmCredentialError,
   LlmNotConfiguredError,
+  ModelSpecSchema,
   UnknownModelError,
   validateLlmConfig,
 } from "./llm";
@@ -127,12 +128,28 @@ export {
   type MemorySections,
 } from "./memory-document";
 export type {
+  MessageContent,
+  MessageContentPart,
+  MessageFilePart,
+} from "./message-content";
+export {
+  collapseToText,
+  contentFiles,
+  contentText,
+  MessageContentPartSchema,
+  MessageContentSchema,
+  modalityForMediaType,
+  normalizeMessageContent,
+  textContent,
+} from "./message-content";
+export type {
   DerivedModelProfile,
   EffortPreset,
   EffortRung,
   HoistedConnections,
 } from "./model-catalog";
 export {
+  acceptedInputModalities,
   asEffortPreset,
   DEPRECATED_TIER_ALIASES,
   deriveModelProfiles,
@@ -209,8 +226,8 @@ export {
   SKILL_LIST_SCHEMA,
   SKILL_UPDATE_SCHEMA,
 } from "./skill-tool-schemas";
-export type { SoulConfig } from "./soul-config";
-export { SoulConfigSchema, validateSoulConfig } from "./soul-config";
+export type { FilesConfig, SoulConfig } from "./soul-config";
+export { FilesConfigSchema, SoulConfigSchema, validateSoulConfig } from "./soul-config";
 export type { CounterFn } from "./transforms";
 export {
   applyTransforms,

@@ -84,10 +84,10 @@ redirects to `/setup`, where you create the first admin account. Walk through
 
 ## Persistence
 
-Coolify manages the three named volumes from the Compose file
-(`tulipfarm-postgres`, `tulipfarm-soul`, `tulipfarm-data`). Include all three in your
-Coolify backup configuration, or use a [managed database](/docs/self-hosting/managed-database)
-and back up `tulipfarm-soul` and `tulipfarm-data` only.
+Coolify manages the four named volumes from the Compose file (`tulipfarm-postgres`,
+`tulipfarm-soul`, `tulipfarm-data`, `tulipfarm-bucket`). Include all four in your Coolify
+backup configuration, or use a [managed database](/docs/self-hosting/managed-database) and back
+up `tulipfarm-soul`, `tulipfarm-data` and `tulipfarm-bucket` only.
 
 <Callout type="warn">
   `tulipfarm-data` holds the generated `ENCRYPTION_KEY` unless you set one yourself. Lose

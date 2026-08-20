@@ -17,6 +17,7 @@ import type {
   ModelPort,
 } from "../packages/agent-runtime/src/ports";
 import { DEPLOYMENT_BUSINESS_ID } from "../packages/constants/src/index";
+import { contentText, textContent } from "../packages/schema/src/message-content";
 import type { Queryable as StorageQueryable, TransactionPort } from "../packages/storage/src/ports";
 import { RunLoopCheckpointStore } from "../packages/storage/src/runs/loop-checkpoint-store";
 import { RunStore, type StartRunInput } from "../packages/storage/src/runs/run-store";
@@ -165,7 +166,7 @@ function loopInput(): AgentLoopInput {
     modelProfileId: "profile-1",
     contextDigest: "sha256:context",
     guardrailDigest: "sha256:guardrail",
-    messages: [{ role: "user", content: "upgrade cust-1 to gold" }],
+    messages: [{ role: "user", content: textContent("upgrade cust-1 to gold") }],
     tools: TOOLS,
     limits: { maxIterations: 8, maxToolCalls: 4, maxRepairAttempts: 2 },
   };
@@ -254,7 +255,7 @@ describe("approval park/resume transcript durability (L4-6)", () => {
     // The resumed model was given the transcript, not amnesia: it saw its own proposed calls and
     // both results, including the one produced after the approval.
     const resumedPrompt = second.prompts.at(0) ?? [];
-    const transcript = resumedPrompt.map((message) => message.content).join("\n");
+    const transcript = resumedPrompt.map((message) => contentText(message.content)).join("\n");
     expect(transcript).toContain(READ_TOOL);
     expect(transcript).toContain("cust-1");
     expect(transcript).toContain('"updated":true');
@@ -277,7 +278,7 @@ describe("approval park/resume transcript durability (L4-6)", () => {
       conversationId: CONVERSATION_ID,
       turnId: TURN_ID,
       role: "user",
-      content: "upgrade cust-1 to gold",
+      content: textContent("upgrade cust-1 to gold"),
       createdAt: CREATED_AT,
     });
     await store.saveTurn({
@@ -313,7 +314,9 @@ describe("approval park/resume transcript durability (L4-6)", () => {
 
     // …and none of it reached the conversation a user reads.
     const visible = await store.listMessages(DEPLOYMENT_BUSINESS_ID, CONVERSATION_ID);
-    expect(visible.map((message) => message.content)).toEqual(["upgrade cust-1 to gold"]);
+    expect(visible.map((message) => contentText(message.content))).toEqual([
+      "upgrade cust-1 to gold",
+    ]);
     const messages = await database.query<{ count: string }>("SELECT count(*) FROM messages");
     expect(Number(messages.rows[0]?.count)).toBe(1);
   });

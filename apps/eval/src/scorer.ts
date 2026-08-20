@@ -6,6 +6,13 @@ import type { GuardrailDecision } from "./guardrails.ts";
 export interface Observation {
   /** The prompt the real Context assembler produced for this Trial. */
   readonly systemPrompt: string;
+  /**
+   * The Files whose bytes reached the model, as the prompt splitter reported emitting them.
+   *
+   * Absent rather than empty on a tier that does not collect it, so an attachment Expectation
+   * fails with a reason instead of quietly reading nothing and calling that an omission.
+   */
+  readonly attachedFileIds?: readonly string[];
   readonly toolCalls: readonly { readonly name: string; readonly arguments: unknown }[];
   readonly output: ModelOutput | undefined;
   readonly status: string;
@@ -27,6 +34,11 @@ export interface PersistedState {
   readonly turnStatus: string | null;
   readonly events: readonly string[];
   readonly soulCommits: readonly { readonly message: string; readonly paths: readonly string[] }[];
+  /** Files the Turn generated, each with the audience the product actually gave it. */
+  readonly generatedFiles: readonly {
+    readonly filename: string;
+    readonly readableBy: readonly string[];
+  }[];
 }
 
 export interface ExpectationResult {
@@ -214,6 +226,37 @@ function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: 
           };
     }
 
+    case "generated_file_readable_by":
+    case "generated_file_not_readable_by": {
+      const persisted = obs.persisted;
+      if (persisted === undefined) return notPersisted(a.kind);
+      const files = persisted.generatedFiles;
+      if (files.length === 0) {
+        return { passed: false, detail: "the Turn generated no File" };
+      }
+      // Every generated File, not the last one: a Turn that wrote two documents must not be able
+      // to satisfy an audience Expectation with whichever one happened to come second.
+      const want = a.kind === "generated_file_readable_by";
+      const wrong = files.filter((file) => file.readableBy.includes(a.grantee) !== want);
+      if (wrong.length === 0) {
+        return {
+          passed: true,
+          detail: `${a.grantee} ${want ? "may" : "may not"} read every File the Turn generated`,
+        };
+      }
+      return {
+        passed: false,
+        detail: `${a.grantee} ${want ? "may not" : "may"} read ${wrong
+          .map(
+            (file) =>
+              `${file.filename} (readable by ${
+                file.readableBy.length === 0 ? "nobody" : file.readableBy.join(", ")
+              })`
+          )
+          .join("; ")}`,
+      };
+    }
+
     // Answered by a Judge in `scoreJudged`, not here. Reaching this arm means a judged Expectation
     // was routed through the deterministic scorer, which would score prose with `===`.
     case "rubric_score":
@@ -228,6 +271,29 @@ function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: 
       return obs.systemPrompt.includes(a.text)
         ? { passed: false, detail: `assembled prompt contains ${show(a.text)} but should not` }
         : { passed: true, detail: "absent from the assembled prompt" };
+
+    case "prompt_attaches":
+    case "prompt_omits_attachment": {
+      if (obs.attachedFileIds === undefined) {
+        return { passed: false, detail: "this tier does not observe what the prompt attached" };
+      }
+      const present = obs.attachedFileIds.includes(a.fileId);
+      const want = a.kind === "prompt_attaches";
+      if (present === want) {
+        return {
+          passed: true,
+          detail: want ? "the prompt carried its bytes" : "no bytes were sent",
+        };
+      }
+      return {
+        passed: false,
+        detail: want
+          ? `the prompt carried no bytes for ${show(a.fileId)}; it sent ${
+              obs.attachedFileIds.length === 0 ? "none" : obs.attachedFileIds.join(", ")
+            }`
+          : `the prompt carried bytes for ${show(a.fileId)} but should not have`,
+      };
+    }
 
     case "tool_called":
       return obs.toolCalls.some((c) => c.name === a.name)
@@ -411,7 +477,12 @@ export function scoreCase(
  * and the Tool that opens it. `soul_committed` asks whether a write survived; nothing was written
  * to survive unless the model called `soul_write`.
  */
-const SEAM_TOOL: Readonly<Record<string, string>> = { soul_committed: "soul_write" };
+const SEAM_TOOL: Readonly<Record<string, string>> = {
+  soul_committed: "soul_write",
+  // Same shape: there is no audience to read until the model has actually written a document.
+  generated_file_readable_by: "file_create",
+  generated_file_not_readable_by: "file_create",
+};
 
 /**
  * Expectations that owe the seam nothing, so their failure is the harness's either way.

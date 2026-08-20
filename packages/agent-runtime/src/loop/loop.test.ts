@@ -1,3 +1,4 @@
+import { contentText, textContent } from "@tulipfarm/schema";
 import { describe, expect, it, vi } from "vitest";
 import type {
   ModelInvocationRequest,
@@ -11,6 +12,7 @@ import { InMemoryLoopCheckpointStore } from "./checkpoint";
 import type {
   AgentLoopEvent,
   AgentLoopInput,
+  LoopAttachmentPort,
   ToolDispatchPort,
   ToolDispatchResult,
 } from "./contract";
@@ -74,6 +76,32 @@ function streamingModel(
   return port;
 }
 
+/** Like `scriptedModel`, but records the Files each request actually carried. */
+function attachmentRecordingModel(...results: readonly ModelInvocationResult[]): ModelPort & {
+  attachmentsByRequest: string[][];
+} {
+  const queue = [...results];
+  const port = {
+    attachmentsByRequest: [] as string[][],
+    invoke: async (request: ModelInvocationRequest) => {
+      port.attachmentsByRequest.push((request.attachments ?? []).map((file) => file.fileId));
+      const next = queue.shift();
+      if (next === undefined) throw new Error("model called more times than scripted");
+      return next;
+    },
+  };
+  return port;
+}
+
+/** A `file_read` result that asks for a File to be put in front of the model. */
+function attachedFile(fileId: string, mediaType = "application/pdf"): ToolDispatchResult {
+  return {
+    status: "succeeded",
+    callId: "call-1",
+    output: { fileId, mediaType, filename: `${fileId}.pdf`, kind: "attached", attached: true },
+  };
+}
+
 /** Like `scriptedModel`, but records each request's offered Tool names for narrowing assertions. */
 function recordingModel(...results: readonly ModelInvocationResult[]): ModelPort & {
   requests: number;
@@ -116,7 +144,7 @@ function input(overrides: Partial<AgentLoopInput> = {}): AgentLoopInput {
     modelProfileId: "primary",
     contextDigest: "sha256:context",
     guardrailDigest: "sha256:guardrail",
-    messages: [{ role: "user", content: "triage the issue" }],
+    messages: [{ role: "user", content: textContent("triage the issue") }],
     tools: [{ name: "github.issue.comment", inputSchema: { type: "object", required: ["body"] } }],
     limits: { maxIterations: 5, maxToolCalls: 3, maxRepairAttempts: 2 },
     ...overrides,
@@ -143,6 +171,7 @@ function loop(options: {
   budget?: { consume: (input: { key: string; amount: number }) => Promise<{ outcome: string }> };
   cancelled?: () => Promise<boolean>;
   log?: { warn(obj: unknown, msg?: string): void };
+  attachments?: LoopAttachmentPort;
 }) {
   return new AgentLoop({
     model: options.model,
@@ -152,6 +181,7 @@ function loop(options: {
     budget: options.budget ?? { consume: async () => ({ outcome: "allowed" }) },
     isCancelled: options.cancelled ?? (async () => false),
     ...(options.log === undefined ? {} : { log: options.log }),
+    ...(options.attachments === undefined ? {} : { attachments: options.attachments }),
   });
 }
 
@@ -1090,7 +1120,144 @@ describe("AgentLoop resume after an approval park", () => {
     const { resumed, model } = await parkThenResume(tools);
 
     expect(resumed).toMatchObject({ status: "completed" });
-    const transcript = (model.prompts.at(0) ?? []).map((message) => message.content).join("\n");
+    const transcript = (model.prompts.at(0) ?? [])
+      .map((message) => contentText(message.content))
+      .join("\n");
     expect(transcript).toContain("denied by operator");
+  });
+});
+
+describe("AgentLoop re-reading a File mid-Turn", () => {
+  const readCall = toolCallResult([
+    { callId: "call-1", name: "file_read", arguments: { fileId: "file-1" } },
+  ]);
+
+  it("puts a re-read File in front of the model on the next step", async () => {
+    // The whole point of sending a File only on the Turn it was attached to: an Agent that needs
+    // it three Turns later gets it back, so the saving is a saving rather than forgetting.
+    const model = attachmentRecordingModel(readCall, textResult("the audit lists three findings"));
+    const port = { read: async () => new Uint8Array([1, 2, 3]) };
+    const outcome = await loop({
+      model,
+      tools: dispatcher(attachedFile("file-1")),
+      attachments: port,
+    }).run(input({ tools: [{ name: "file_read", inputSchema: { type: "object" } }] }));
+
+    expect(outcome.status).toBe("completed");
+    expect(model.attachmentsByRequest).toEqual([[], ["file-1"]]);
+  });
+
+  it("honours a share revoked between the read and the next step", async () => {
+    // The port's refusal is the authorization check, and it runs again every iteration. A cached
+    // copy would keep serving a File the person is no longer allowed to see.
+    const model = attachmentRecordingModel(
+      readCall,
+      toolCallResult([{ callId: "call-2", name: "file_read", arguments: { fileId: "file-2" } }]),
+      textResult("done")
+    );
+    let allowed = true;
+    const port = {
+      read: async () => {
+        const bytes = allowed ? new Uint8Array([1]) : undefined;
+        allowed = false;
+        return bytes;
+      },
+    };
+    const outcome = await loop({
+      model,
+      tools: dispatcher(attachedFile("file-1"), attachedFile("file-2")),
+      attachments: port,
+    }).run(input({ tools: [{ name: "file_read", inputSchema: { type: "object" } }] }));
+
+    expect(outcome.status).toBe("completed");
+    expect(model.attachmentsByRequest).toEqual([[], ["file-1"], []]);
+  });
+
+  it("carries a File exactly once when it was both attached and re-read", async () => {
+    const model = attachmentRecordingModel(readCall, textResult("same document"));
+    const outcome = await loop({
+      model,
+      tools: dispatcher(attachedFile("file-1")),
+      attachments: { read: async () => new Uint8Array([9]) },
+    }).run(
+      input({
+        tools: [{ name: "file_read", inputSchema: { type: "object" } }],
+        attachments: [
+          { fileId: "file-1", mediaType: "application/pdf", name: "a.pdf", data: new Uint8Array() },
+        ],
+      })
+    );
+
+    expect(outcome.status).toBe("completed");
+    expect(model.attachmentsByRequest).toEqual([["file-1"], ["file-1"]]);
+  });
+
+  it("sends nothing extra when a text File was read, since its content came back as text", async () => {
+    const model = attachmentRecordingModel(readCall, textResult("answered from the text"));
+    const outcome = await loop({
+      model,
+      tools: dispatcher({
+        status: "succeeded",
+        callId: "call-1",
+        output: { fileId: "file-1", kind: "text", text: "hello", mediaType: "text/plain" },
+      }),
+      attachments: { read: async () => new Uint8Array([1]) },
+    }).run(input({ tools: [{ name: "file_read", inputSchema: { type: "object" } }] }));
+
+    expect(outcome.status).toBe("completed");
+    expect(model.attachmentsByRequest).toEqual([[], []]);
+  });
+
+  it("survives a park: a resumed Turn still holds what it went and got", async () => {
+    const checkpoints = new InMemoryLoopCheckpointStore();
+    const parked = await loop({
+      model: scriptedModel(
+        readCall,
+        toolCallResult([{ callId: "call-2", name: "approve_me", arguments: {} }])
+      ),
+      tools: dispatcher(attachedFile("file-1"), {
+        status: "awaiting_approval",
+        callId: "call-2",
+        approvalId: "approval-1",
+      }),
+      attachments: { read: async () => new Uint8Array([1]) },
+      checkpoints,
+    }).run(
+      input({
+        tools: [
+          { name: "file_read", inputSchema: { type: "object" } },
+          { name: "approve_me", inputSchema: { type: "object" } },
+        ],
+      })
+    );
+    expect(parked.status).toBe("awaiting_approval");
+
+    const model = attachmentRecordingModel(textResult("still knows the document"));
+    const resumed = await loop({
+      model,
+      tools: dispatcher({ status: "succeeded", callId: "call-2", output: {} }),
+      attachments: { read: async () => new Uint8Array([1]) },
+      checkpoints,
+    }).run(
+      input({
+        tools: [
+          { name: "file_read", inputSchema: { type: "object" } },
+          { name: "approve_me", inputSchema: { type: "object" } },
+        ],
+      })
+    );
+
+    expect(resumed.status).toBe("completed");
+    expect(model.attachmentsByRequest).toEqual([["file-1"]]);
+  });
+
+  it("sends nothing when no attachment port is wired, rather than failing the Turn", async () => {
+    const model = attachmentRecordingModel(readCall, textResult("no bytes to be had"));
+    const outcome = await loop({ model, tools: dispatcher(attachedFile("file-1")) }).run(
+      input({ tools: [{ name: "file_read", inputSchema: { type: "object" } }] })
+    );
+
+    expect(outcome.status).toBe("completed");
+    expect(model.attachmentsByRequest).toEqual([[], []]);
   });
 });

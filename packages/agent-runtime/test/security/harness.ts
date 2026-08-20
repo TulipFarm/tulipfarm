@@ -4,6 +4,7 @@ import type {
   ChildLinkAncestry,
   ChildLinkStore,
 } from "@tulipfarm/run-kernel";
+import { textContent } from "@tulipfarm/schema";
 import {
   AgentLoop,
   type AgentLoopEvent,
@@ -58,7 +59,7 @@ export function loopHarness(options: {
     modelProfileId: "primary",
     contextDigest: "sha256:context",
     guardrailDigest: "sha256:guardrail",
-    messages: [{ role: "user", content: "handle the ticket" }],
+    messages: [{ role: "user", content: textContent("handle the ticket") }],
     tools: [{ name: TOOL_NAME, inputSchema: { type: "object", required: ["body"] } }],
     limits: { maxIterations: 5, maxToolCalls: 5, maxRepairAttempts: 2 },
     ...overrides,

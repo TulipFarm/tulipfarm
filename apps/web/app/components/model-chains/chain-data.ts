@@ -19,5 +19,6 @@ export function specFacts(spec: ModelSpec | undefined): string[] {
   if (spec.max_input_tokens) facts.push(`${Math.round(spec.max_input_tokens / 1000)}k context`);
   if (spec.supports_function_calling) facts.push("tools");
   if (spec.supports_vision) facts.push("vision");
+  if (spec.supports_pdf_input) facts.push("documents");
   return facts;
 }

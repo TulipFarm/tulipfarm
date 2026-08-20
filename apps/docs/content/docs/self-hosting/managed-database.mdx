@@ -37,7 +37,7 @@ workers:
 ```bash
 EXTERNAL_DATASTORE=true \
 DATABASE_URL=postgresql://tulipfarm:<password>@db.example.com:5432/tulipfarm?sslmode=require \
-  docker compose up -d app worker integration-worker
+  docker compose up -d app worker integration-worker bucket
 ```
 
 Naming only `app worker integration-worker` is what keeps the bundled `postgres` service

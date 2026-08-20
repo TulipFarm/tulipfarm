@@ -1,6 +1,11 @@
 import type { GuardContext, ToolDispatchPort } from "@tulipfarm/agent-runtime";
-import { canonicalHash, validateGuardrailsConfig } from "@tulipfarm/schema";
-import { type GuardedText, TurnEventWriter, TurnGuardrails } from "@tulipfarm/turn-executor";
+import { canonicalHash, type MessageContent, validateGuardrailsConfig } from "@tulipfarm/schema";
+import {
+  type GuardedContent,
+  type GuardedText,
+  TurnEventWriter,
+  TurnGuardrails,
+} from "@tulipfarm/turn-executor";
 import type { EvalSoul } from "./eval-soul.ts";
 
 /** One guard's refusal, as a Case can assert on it. */
@@ -17,7 +22,7 @@ export interface EvalGuardrails {
   readonly decisions: readonly GuardrailDecision[];
   /** Wraps the dispatcher so a blocked Tool becomes a model-visible denial. */
   guard(tools: ToolDispatchPort): ToolDispatchPort;
-  input(text: string): Promise<GuardedText>;
+  input(content: MessageContent, attachmentText: readonly string[]): Promise<GuardedContent>;
   output(text: string): Promise<GuardedText>;
 }
 
@@ -74,7 +79,7 @@ export function turnGuardrails(soul: EvalSoul, conversationId: string): EvalGuar
     digest,
     decisions,
     guard: (tools) => guardrails.guard(tools, events),
-    input: (text) => guardrails.input(text, events),
+    input: (content, attachmentText) => guardrails.input(content, events, attachmentText),
     output: (text) => guardrails.output(text, events),
   };
 }

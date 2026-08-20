@@ -42,6 +42,7 @@ export {
   agentAuthorityPrincipal,
   authorityLayerRepos,
   buildLiveAuthorityLayerResolver,
+  collectHeldRoleIds,
   type DiagnosedAuthorityLayer,
   type LayerEmptyReason,
   LiveAuthorityLayerResolver,

@@ -3,6 +3,25 @@ import { ajv } from "./ajv";
 import { TulipFarmValidationError } from "./error";
 import { LlmConfigSchema, validateLlmConfig } from "./llm";
 
+/**
+ * How attached images are bounded before they reach a model.
+ *
+ * Refusing is the default rather than resizing because a resize is a silent edit to what the
+ * person attached: the model then answers about a picture nobody saw. An operator who would
+ * rather trade fidelity for reach turns `downscaleImages` on knowingly.
+ */
+export const FilesConfigSchema = Type.Object(
+  {
+    /** Longest edge, in pixels, an image may have before it is refused or downscaled. */
+    maxImageDimension: Type.Optional(Type.Integer({ minimum: 1 })),
+    /** When true an oversized image is downscaled to fit instead of refused. */
+    downscaleImages: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: false }
+);
+
+export type FilesConfig = Static<typeof FilesConfigSchema>;
+
 export const SoulConfigSchema = Type.Object(
   {
     soulFormatVersion: Type.Optional(Type.Integer({ minimum: 0 })),
@@ -12,6 +31,7 @@ export const SoulConfigSchema = Type.Object(
     setupComplete: Type.Optional(Type.Boolean()),
     gitRemoteUrl: Type.Optional(Type.String()),
     llm: Type.Optional(LlmConfigSchema),
+    files: Type.Optional(FilesConfigSchema),
   },
   { additionalProperties: true }
 );

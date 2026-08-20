@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { LanguageModelV3 } from "@ai-sdk/provider";
 import type { PGlite } from "@electric-sql/pglite";
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import { FileService, PgFileRepo } from "@tulipfarm/files";
 import type { LlmService } from "@tulipfarm/llm";
 import {
   ArtifactService,
@@ -15,7 +20,13 @@ import {
   INVOCATION_REQUEST_SCHEMAS,
 } from "@tulipfarm/schema";
 import type { PaginatedResult } from "@tulipfarm/storage";
-import { ArtifactStore, ChildLinkStore, RunEventStore, RunStore } from "@tulipfarm/storage";
+import {
+  ArtifactStore,
+  ChildLinkStore,
+  FileSystemBlobPort,
+  RunEventStore,
+  RunStore,
+} from "@tulipfarm/storage";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app";
@@ -26,7 +37,6 @@ import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
 import { PgConversationStore } from "../conversations/store.pg";
 import { ambientTransactionPort, type Queryable, transactionPort } from "../db";
-
 import { runCanceller } from "../runs/cancel";
 import { makeMigratedPglite } from "../test/pglite";
 import type { ConversationDoc } from "./conversations";
@@ -115,10 +125,14 @@ describe("durable chat submission over HTTP", () => {
   let userId: string;
   let sid: string;
   let otherSid: string;
+  let files: FileService;
+  let ownerPrincipalId: string;
+  let otherPrincipalId: string;
   let validator: TypedOutputValidator;
   let conversationRepo: PgConversationRepo;
   /** Flipped by the budget test; every other test runs with the budget open. */
   let withinBudget: boolean;
+  let blobRoot: string;
 
   beforeEach(async () => {
     withinBudget = true;
@@ -131,6 +145,15 @@ describe("durable chat submission over HTTP", () => {
     sid = await sessionStore.create(userId);
     const other = await createUser(userRepo, "other@example.com", "pass", "member");
     otherSid = await sessionStore.create(other._id);
+    ownerPrincipalId = user._id;
+    otherPrincipalId = other._id;
+
+    blobRoot = await mkdtemp(join(tmpdir(), "tulip-chat-files-"));
+    files = new FileService({
+      repo: new PgFileRepo(db as never),
+      blobs: new FileSystemBlobPort(blobRoot),
+      newId: () => randomUUID(),
+    });
 
     validator = new TypedOutputValidator(INVOCATION_REQUEST_SCHEMAS);
     const queryable = db as unknown as Queryable;
@@ -176,6 +199,7 @@ describe("durable chat submission over HTTP", () => {
       runCancel: runCanceller(
         new RunCancellationManager(runStore, new ChildLinkStore(runTransactions))
       ),
+      fileService: files,
       rateLimiter: {
         check: async (_key, limit) => ({
           allowed: withinBudget,
@@ -438,6 +462,92 @@ describe("durable chat submission over HTTP", () => {
     });
 
     expect(stopped.statusCode).toBe(404);
+  });
+
+  async function upload(ownerId: string) {
+    return files.upload({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      ownerPrincipalId: ownerId,
+      filename: "shot.png",
+      claimedMediaType: "image/png",
+      declaredBytes: 8,
+      body: (async function* () {
+        yield new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+      })(),
+    });
+  }
+
+  it("persists an attached File as a part of the user Message", async () => {
+    const file = await upload(ownerPrincipalId);
+    const pending = app.inject({
+      method: "POST",
+      url: "/api/v1/chat",
+      cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: CSRF },
+      headers: { "x-csrf-token": CSRF, "idempotency-key": IDEMPOTENCY_KEY },
+      payload: { message: { role: "user", content: "what is this?", fileIds: [file.id] } },
+    });
+    // The stream stays open until the Run finishes, so settle it as the other turn tests do.
+    const run = await awaitRun();
+    await db.query("UPDATE runs SET status = 'succeeded' WHERE id = $1", [run.id]);
+    expect((await pending).statusCode).toBe(200);
+    const rows = await db.query<{ content: unknown }>(
+      "select content from messages where role = 'user'"
+    );
+    expect(rows.rows[0]?.content).toEqual([
+      { type: "text", text: "what is this?" },
+      { type: "file", fileId: file.id, mediaType: "image/png", name: "shot.png" },
+    ]);
+  });
+
+  it("refuses a turn that attaches a File belonging to someone else", async () => {
+    const file = await upload(otherPrincipalId);
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/chat",
+      cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: CSRF },
+      headers: { "x-csrf-token": CSRF, "idempotency-key": IDEMPOTENCY_KEY },
+      payload: { message: { role: "user", content: "show me", fileIds: [file.id] } },
+    });
+
+    // Refused, and — the part that matters — neither a Turn nor an empty Conversation shell.
+    expect(response.statusCode).toBe(404);
+    expect(await count("conversation_turns")).toBe(0);
+    expect(await count("conversations")).toBe(0);
+  });
+
+  it("accepts a message that is an attachment and no text at all", async () => {
+    const file = await upload(ownerPrincipalId);
+    const pending = app.inject({
+      method: "POST",
+      url: "/api/v1/chat",
+      cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: CSRF },
+      headers: { "x-csrf-token": CSRF, "idempotency-key": IDEMPOTENCY_KEY },
+      payload: { message: { role: "user", content: "", fileIds: [file.id] } },
+    });
+    const run = await awaitRun();
+    await db.query("UPDATE runs SET status = 'succeeded' WHERE id = $1", [run.id]);
+
+    expect((await pending).statusCode).toBe(200);
+    const rows = await db.query<{ content: unknown }>(
+      "select content from messages where role = 'user'"
+    );
+    expect(rows.rows[0]?.content).toEqual([
+      { type: "text", text: "" },
+      { type: "file", fileId: file.id, mediaType: "image/png", name: "shot.png" },
+    ]);
+  });
+
+  it("refuses a message that is empty of both text and files", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/chat",
+      cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: CSRF },
+      headers: { "x-csrf-token": CSRF, "idempotency-key": IDEMPOTENCY_KEY },
+      payload: { message: { role: "user", content: "" } },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(await count("conversations")).toBe(0);
   });
 
   it("keeps one caller's idempotency key from claiming another's turn", async () => {

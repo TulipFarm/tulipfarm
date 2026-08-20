@@ -13,6 +13,7 @@ import {
   deriveModelProfiles,
   type LlmConfig,
   LlmConfigValidationError,
+  ModelSpecSchema,
   type TierConfig,
   validateLlmConfig,
 } from "@tulipfarm/schema";
@@ -82,27 +83,6 @@ const PRESET_KEYS = ["default", "fast", "balanced", "thorough"] as const;
 
 const LIVE_MODELS_TIMEOUT_MS = 5000;
 
-const ModelSpecRouteSchema = {
-  type: "object",
-  additionalProperties: true,
-  properties: {
-    litellm_key: { type: "string" },
-    input_cost_per_token: { type: "number", minimum: 0 },
-    output_cost_per_token: { type: "number", minimum: 0 },
-    cache_read_input_token_cost: { type: "number", minimum: 0 },
-    cache_creation_input_token_cost: { type: "number", minimum: 0 },
-    max_input_tokens: { type: "integer", minimum: 1 },
-    max_output_tokens: { type: "integer", minimum: 1 },
-    mode: { type: "string" },
-    supports_function_calling: { type: "boolean" },
-    supports_vision: { type: "boolean" },
-    supports_prompt_caching: { type: "boolean" },
-    supports_reasoning: { type: "boolean" },
-    deprecation_date: { type: "string", nullable: true },
-    fetched_at: { type: "string" },
-  },
-} as const;
-
 const ProviderEntryRouteSchema = {
   type: "object",
   additionalProperties: true,
@@ -112,7 +92,7 @@ const ProviderEntryRouteSchema = {
     api_key_ref: { type: "string" },
     base_url: { type: "string" },
     resource_name: { type: "string" },
-    spec: ModelSpecRouteSchema,
+    spec: ModelSpecSchema,
   },
 } as const;
 

@@ -66,6 +66,7 @@ function curate(key: string, entry: Record<string, unknown>, fetchedAt: string):
     mode: str(entry.mode),
     supports_function_calling: bool(entry.supports_function_calling),
     supports_vision: bool(entry.supports_vision),
+    supports_pdf_input: bool(entry.supports_pdf_input),
     supports_prompt_caching: bool(entry.supports_prompt_caching),
     supports_reasoning: bool(entry.supports_reasoning),
     deprecation_date: str(entry.deprecation_date) ?? null,

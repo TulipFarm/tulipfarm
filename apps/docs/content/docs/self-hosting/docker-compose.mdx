@@ -101,14 +101,63 @@ if you would rather the environment stay authoritative and the screen stay read-
 ## Use a managed database instead
 
 Point `DATABASE_URL` at your own PostgreSQL 17, set `EXTERNAL_DATASTORE=true`, and start
-the app plus both workers — the bundled `postgres` service is then never created:
+the app, both workers and the bundled bucket — only `postgres` is then never created:
 
 ```bash
-docker compose up -d app worker integration-worker
+docker compose up -d app worker integration-worker bucket
 ```
 
 Full walkthrough, including the extensions your provider must allow:
 [Use a managed database](/docs/self-hosting/managed-database).
+
+## Where uploaded and generated files go
+
+The stack ships its own S3 server, the `bucket` service, so uploading an image for an
+agent to read — or downloading a document one wrote — works with no cloud account.
+
+Its access key is not in the compose file and is not a default. `app` generates it on
+first boot, creates the bucket over the server's admin API, and writes the credentials to
+`/data/bucket.env` at `mode 0600`, the same place and pattern as the other generated
+secrets. The bucket publishes no host port: a file is authorized per request by `app`, so
+a bucket a browser could reach would be a way around that check.
+
+<Callout type="warn">
+  **Back up the `tulipfarm-bucket` volume too.** It holds the file bytes. The
+  `tulipfarm-data` volume holds the key to reach them; the database holds who may see
+  what. All three are needed to restore an instance.
+</Callout>
+
+### Use an external S3 provider instead
+
+Amazon S3, Cloudflare R2, Backblaze B2, Wasabi, DigitalOcean Spaces, Ceph and MinIO all
+speak the same protocol, and TulipFarm has one driver for all of them. Turn the bundled
+server off by setting `BUCKET_ADMIN_URL` to an empty value, then supply your own:
+
+```bash
+BUCKET_ADMIN_URL=
+S3_BUCKET=my-bucket
+S3_REGION=eu-central-1
+S3_ENDPOINT=https://s3.eu-central-1.amazonaws.com
+S3_ACCESS_KEY_ID=...
+S3_SECRET_ACCESS_KEY=...
+```
+
+Start without the bundled server:
+
+```bash
+docker compose up -d app worker integration-worker postgres
+```
+
+Omit `S3_ENDPOINT` for Amazon S3 itself. Path-style addressing turns on automatically
+whenever `S3_ENDPOINT` is set, which is what MinIO, Ceph and any host reached by IP need.
+
+### Running without Compose
+
+Nothing above is Compose-specific. A process started by hand with none of these variables
+set stores files on disk under `TF_DATA_DIR`, which is the right answer for development
+and the wrong one for anything that runs more than one replica or restarts its container.
+Set `S3_BUCKET` and the two credentials to move it to a bucket; naming a bucket is enough
+to select the S3 driver, and `BLOB_STORE` only exists to force the choice either way.
 
 ## Health checks
 
@@ -119,10 +168,15 @@ Two endpoints, for the two questions an orchestrator asks:
 | `app` | `8080` | `/livez` | `/readyz`; `/health` is an alias. |
 | `worker` | `4020` | `/livez` | `/readyz`; also checks the schema floor and required consumers. |
 | `integration-worker` | `4030` | `/livez` | `/readyz`; also checks the schema floor and required consumers. |
+| `bucket` | — | `garage status` | Same command; the container has no HTTP client to probe with. |
 
 Only `app` publishes a host port. The worker probe ports are internal to Compose. Give
 startup probes a generous timeout: database migrations run in `app` before it starts
 listening, and both workers wait for healthy `app` because they never migrate.
+
+`bucket` starts after `app` rather than before it, because `app` writes the two secrets
+it boots from. On a first boot it may exit and restart once or twice while it waits for
+them, which is normal and costs a few seconds.
 
 ## Update
 

@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1112.0",
     "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/schema": "workspace:*",
     "@tulipfarm/surface": "workspace:*"

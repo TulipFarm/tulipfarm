@@ -1,0 +1,83 @@
+{
+  "id": "support-rereads-a-file-from-an-earlier-turn",
+  "tier": "l2",
+  "agent": "support",
+  "context": {
+    "customInstructions": "Answer from the documents the person has given you.",
+    "governancePages": [],
+    "availableTools": [
+      {
+        "name": "file_read",
+        "description": "Read one File by id."
+      }
+    ]
+  },
+  "input": [
+    {
+      "role": "user",
+      "content": [
+        { "type": "text", "text": "Here is the warranty policy. What does it cover?" },
+        {
+          "type": "file",
+          "fileId": "file-warranty",
+          "mediaType": "application/pdf",
+          "name": "warranty-policy.pdf"
+        }
+      ]
+    },
+    { "role": "assistant", "content": "It covers manufacturing defects." },
+    { "role": "user", "content": "Thanks. And what is the claim window in that policy?" }
+  ],
+  "readable": [
+    {
+      "fileId": "file-warranty",
+      "mediaType": "application/pdf",
+      "name": "warranty-policy.pdf",
+      "content": "Warranty policy. Claims must be filed within 90 days of delivery."
+    }
+  ],
+  "tools": [
+    {
+      "name": "file_read",
+      "description": "Read one File by id.",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "fileId": { "type": "string" } },
+        "required": ["fileId"]
+      }
+    }
+  ],
+  "toolResults": [
+    {
+      "name": "file_read",
+      "output": {
+        "fileId": "file-warranty",
+        "filename": "warranty-policy.pdf",
+        "mediaType": "application/pdf",
+        "sizeBytes": 64,
+        "kind": "attached",
+        "attached": true,
+        "note": "This File is attached to the Turn; you will see it on your next step."
+      }
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [{ "callId": "c1", "name": "file_read", "arguments": { "fileId": "file-warranty" } }]
+    },
+    { "kind": "text", "text": "Claims must be filed within 90 days of delivery." }
+  ],
+  "expect": [
+    { "kind": "tool_called", "name": "file_read" },
+    {
+      "kind": "tool_argument_equals",
+      "name": "file_read",
+      "path": "fileId",
+      "value": "file-warranty"
+    },
+    { "kind": "prompt_attaches", "fileId": "file-warranty" },
+    { "kind": "output_contains", "text": "90 days" },
+    { "kind": "loop_status", "status": "completed" }
+  ]
+}

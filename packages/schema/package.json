@@ -7,6 +7,7 @@
     ".": "./src/index.ts",
     "./ajv": "./src/ajv.ts",
     "./canonicalize": "./src/canonicalize.ts",
+    "./message-content": "./src/message-content.ts",
     "./model-catalog": "./src/model-catalog.ts"
   },
   "scripts": {

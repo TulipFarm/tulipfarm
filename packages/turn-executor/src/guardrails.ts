@@ -5,7 +5,12 @@ import {
   type ToolDispatchRequest,
   type ToolDispatchResult,
 } from "@tulipfarm/agent-runtime";
-import type { RunEventGuardrailStage } from "@tulipfarm/schema";
+import {
+  contentFiles,
+  contentText,
+  type MessageContent,
+  type RunEventGuardrailStage,
+} from "@tulipfarm/schema";
 import type { TurnEventWriter } from "./run-events";
 
 /** Enforces the Context's guardrail policy and refuses digest mismatches before execution. */
@@ -16,6 +21,10 @@ const DEFAULT_BLOCK_MESSAGE = "I can't help with that request.";
 /** A guard's verdict, as the caller needs to act on it. */
 export type GuardedText =
   | { readonly blocked: false; readonly text: string }
+  | { readonly blocked: true; readonly message: string };
+
+export type GuardedContent =
+  | { readonly blocked: false; readonly content: MessageContent }
   | { readonly blocked: true; readonly message: string };
 
 export class GuardrailDigestMismatchError extends Error {
@@ -60,13 +69,65 @@ export class TurnGuardrails {
     this.settings = settings;
   }
 
-  /** The user's request, before any of it reaches the model. */
-  async input(text: string, events: TurnEventWriter): Promise<GuardedText> {
+  /**
+   * The user's request, before any of it reaches the model.
+   *
+   * The guards read text, so the screenable text is derived here rather than at the call site:
+   * this is the one place that has to learn when a new part starts carrying words, instead of
+   * every caller silently screening less than it thinks it does.
+   *
+   * @param attachmentText What the Files this Turn attached actually say, already extracted by the
+   * side that owns them. An uploaded document is the widest indirect-injection channel there is,
+   * because its instructions arrive looking like data; screening it here is what stops a PDF being
+   * a way around the screening a plain message gets.
+   */
+  async input(
+    content: MessageContent,
+    events: TurnEventWriter,
+    attachmentText: readonly string[]
+  ): Promise<GuardedContent> {
     const { service, ctx } = this.require();
+    const text = contentText(content);
     const result = await service.runInput(text, ctx);
-    if (!result.blocked) return { blocked: false, text: result.value };
-    await this.record(events, "input", result.guard, result.reason, "input");
-    return { blocked: true, message: result.message ?? DEFAULT_BLOCK_MESSAGE };
+    if (result.blocked) {
+      await this.record(events, "input", result.guard, result.reason, "input");
+      return { blocked: true, message: result.message ?? DEFAULT_BLOCK_MESSAGE };
+    }
+
+    const names = contentFiles(content)
+      .map((part) => part.name)
+      .join("\n");
+    if (names.length > 0) {
+      // A filename is attacker-chosen text that reaches the model verbatim, so it is screened
+      // like any other input. Screened separately and for blocking only: a redaction cannot be
+      // applied to a name without changing which File the part refers to, and an attachment
+      // named to carry an instruction is not a message worth partially admitting.
+      const named = await service.runInput(names, ctx);
+      if (named.blocked) {
+        await this.record(events, "input", named.guard, named.reason, "input");
+        return { blocked: true, message: named.message ?? DEFAULT_BLOCK_MESSAGE };
+      }
+    }
+
+    for (const extracted of attachmentText) {
+      if (extracted.length === 0) continue;
+      // Blocking only, for the same reason as a filename: a redaction cannot be applied to a
+      // File's bytes, and the model is sent the bytes. Admitting the File with its text "cleaned"
+      // would tell the operator the words were removed while the model still read them.
+      const attached = await service.runInput(extracted, ctx);
+      if (attached.blocked) {
+        await this.record(events, "input", attached.guard, attached.reason, "input");
+        return { blocked: true, message: attached.message ?? DEFAULT_BLOCK_MESSAGE };
+      }
+    }
+
+    if (result.value === text) return { blocked: false, content };
+    // A guard rewrote the text — redaction. The rewrite covers the message's text as a whole, so
+    // it is carried as one part; keeping the original text parts would re-admit what was removed.
+    return {
+      blocked: false,
+      content: [{ type: "text", text: result.value }, ...contentFiles(content)],
+    };
   }
 
   /** The answer, before it is persisted as a Message any channel will read. */

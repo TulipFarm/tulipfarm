@@ -1,4 +1,5 @@
 import type { EventEmitter } from "node:events";
+import { type FileService, isAttachmentRefusal, resolveAttachments } from "@tulipfarm/files";
 import type { LlmService } from "@tulipfarm/llm";
 import type { DurableInvocationGateway } from "@tulipfarm/run-kernel";
 import type { SoulLoader } from "@tulipfarm/soul";
@@ -13,6 +14,7 @@ import {
   sinkFor,
   streamRunEvents,
 } from "../runs/events";
+
 import { isConversationEntryError, resolveConversationEntry } from "./conversation-entry";
 import type { ConversationRepo } from "./conversations";
 import { SSE_KEEPALIVE_MS, writeSseHeaders } from "./sse";
@@ -51,6 +53,8 @@ export interface ChatRoutesOptions {
   readonly events?: EventEmitter;
   /** Shared limiter; absent falls back to an in-process one, so a turn is never unbudgeted. */
   readonly rateLimiter?: RateLimiter;
+  /** Absent on instances without file storage; attaching a file then refuses rather than 500s. */
+  readonly fileService?: FileService;
 }
 
 /** Per-principal turn budget; IP keys would let one proxied caller exhaust everyone. */
@@ -131,6 +135,22 @@ export function registerChatRoutes(
         return reply.code(409).send({ error: "duplicate chat invocation", runId: replayed.runId });
       }
 
+      // Resolved before the Conversation is opened, for the same reason the replay check is: a
+      // refusal afterwards would leave an empty thread in the sidebar for every rejected attempt.
+      const attachments = await resolveAttachments(
+        options.fileService,
+        principal.businessId,
+        principal.id,
+        body.message.fileIds
+      );
+      if (isAttachmentRefusal(attachments)) {
+        return reply.code(attachments.status).send({ error: attachments.error });
+      }
+      // `content` alone may be empty now that a File can carry the message; empty of both cannot.
+      if (body.message.content.length === 0 && attachments.length === 0) {
+        return reply.code(400).send({ error: "a message must carry text or a file" });
+      }
+
       const entry = await resolveConversationEntry(
         {
           repo: options.repo,
@@ -156,6 +176,7 @@ export function registerChatRoutes(
       const submission = await resolvedSubmitter.submit({
         conversationId: entry.conversation._id,
         content: body.message.content,
+        files: attachments,
       });
       if (submission.outcome === "duplicate") {
         // Replayed turn: return the existing Run so one message is not answered twice.
@@ -166,6 +187,18 @@ export function registerChatRoutes(
       const runId = submission.run?.runId;
       if (!runId) {
         return reply.code(503).send({ error: "chat turn could not be dispatched" });
+      }
+
+      if (attachments.length > 0) {
+        // Provenance for the Files library, not part of the send contract: the message is already
+        // accepted, so a failure here must not turn a delivered turn into an error.
+        await options.fileService
+          ?.noteSentIn(
+            principal.businessId,
+            attachments.map((file) => file.fileId),
+            entry.conversation._id
+          )
+          .catch((error: unknown) => req.log.warn({ err: error }, "file provenance not recorded"));
       }
 
       const grant = await stream.authorize(req, runId);

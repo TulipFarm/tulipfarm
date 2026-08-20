@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { ModelRequirementsPolicy } from "@tulipfarm/agent-runtime";
+import { readTurnAttachment, type TurnAttachmentStore } from "@tulipfarm/files";
 import type { InvocationPrincipal } from "@tulipfarm/run-kernel";
-import type { ParticipantToolCall } from "@tulipfarm/schema";
+import { type MessageContent, type ParticipantToolCall, textContent } from "@tulipfarm/schema";
 import type { HostedAgent } from "@tulipfarm/tool-host";
 import type {
   ConversationStore,
@@ -67,7 +68,18 @@ export interface HostedTurnContext {
   readonly guardrailDigest: string;
   /** Validated guardrail policy named by digest; Worker enforces it without reading Soul. */
   readonly guardrailPolicy: Record<string, unknown>;
-  readonly messages: readonly { readonly role: string; readonly content: string }[];
+  readonly messages: readonly { readonly role: string; readonly content: MessageContent }[];
+  /**
+   * The Files this Turn may send to the model, re-authorized at assembly time.
+   *
+   * Names only — bytes are fetched separately, because this context crosses an HTTP boundary as
+   * JSON and base64 would put a whole image through a response schema on every Turn.
+   */
+  readonly attachments?: readonly {
+    readonly fileId: string;
+    readonly mediaType: string;
+    readonly name: string;
+  }[];
   readonly tools: readonly {
     readonly name: string;
     readonly description?: string;
@@ -137,6 +149,13 @@ export interface InternalTurnHostOptions {
     runId: string,
     source: string
   ) => Promise<HostedAgent | undefined>;
+  /**
+   * Serves the bytes of a File this Turn attached. Absent leaves Turns attachment-free.
+   *
+   * Separate from `context` because bytes cannot ride in a JSON context response, and separate
+   * from the public File routes because the Worker acts as a Run, not as a session.
+   */
+  readonly files?: TurnAttachmentStore;
   newId?(): string;
   now?(): Date;
 }
@@ -181,6 +200,26 @@ export class InternalTurnHost {
 
   async resolveContext(businessId: string, runId: string): Promise<HostedTurnContext> {
     return this.options.context.resolve(await this.authority(businessId, runId));
+  }
+
+  /** Delegates to the File domain, which owns whether this Turn may have these bytes. */
+  async readAttachment(
+    businessId: string,
+    runId: string,
+    fileId: string
+  ): Promise<{ mediaType: string; sizeBytes: number; body: AsyncIterable<Uint8Array> } | null> {
+    const files = this.options.files;
+    if (files === undefined) return null;
+
+    const { turn, subject } = await this.authority(businessId, runId);
+    return readTurnAttachment({
+      files,
+      messages: await this.options.store.listMessages(businessId, turn.conversationId),
+      businessId,
+      turnId: turn.id,
+      fileId,
+      principalId: subject.id,
+    });
   }
 
   async dispatchTool(
@@ -228,7 +267,7 @@ export class InternalTurnHost {
       conversationId: turn.conversationId,
       turnId: turn.id,
       role: "assistant",
-      content: input.content,
+      content: textContent(input.content),
       ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
       attempt: input.attempt,
       createdAt: this.now(),

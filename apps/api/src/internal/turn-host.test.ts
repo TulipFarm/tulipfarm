@@ -1,3 +1,4 @@
+import { textContent } from "@tulipfarm/schema";
 import { describe, expect, it } from "vitest";
 import {
   BUSINESS_ID,
@@ -125,7 +126,7 @@ describe("InternalTurnHost", () => {
         conversationId: CONVERSATION_ID,
         turnId: TURN_ID,
         role: "assistant",
-        content: "the answer",
+        content: textContent("the answer"),
         metadata: {
           toolCalls: [
             {

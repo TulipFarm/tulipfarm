@@ -84,13 +84,32 @@ log "asserting the app minted the worker credential…"
 compose exec -T app grep -q '^WORKER_API_CREDENTIAL=tfc_' /data/worker.env \
   || fail "app did not write a worker credential to /data/worker.env"
 
+# The bundled bucket cannot generate its own credentials — its image has no shell — so a paste-and-
+# run install only stores files if the app provisioned them. `--wait` already gated on the bucket's
+# healthcheck; these assert the handoff the healthcheck cannot see.
+log "asserting the app provisioned the bundled bucket…"
+compose exec -T app grep -q '^S3_ACCESS_KEY_ID=GK' /data/bucket.env \
+  || fail "app did not provision an access key into /data/bucket.env"
+compose exec -T app grep -q '^S3_SECRET_ACCESS_KEY=.' /data/bucket.env \
+  || fail "app wrote an access key with no secret"
+compose exec -T bucket /garage bucket info tulipfarm | grep -q 'RWO' \
+  || fail "the bucket exists but its access key holds no read/write/owner grant"
+
+log "asserting the worker reads the bucket credentials back off the volume…"
+compose exec -T worker grep -q '^S3_ACCESS_KEY_ID=GK' /data/bucket.env \
+  || fail "worker cannot see the provisioned bucket credentials"
+
 log "asserting generated secrets survive a restart…"
 secrets_before="$(compose exec -T app cat /data/secrets.env)"
+bucket_before="$(compose exec -T app cat /data/bucket.env)"
 grep -q '^ENCRYPTION_KEY=' <<<"$secrets_before"
 compose down
 compose up -d --wait --wait-timeout 180 --pull missing
 secrets_after="$(compose exec -T app cat /data/secrets.env)"
 [ "$secrets_before" = "$secrets_after" ] || fail "secrets.env changed across restart"
+# A second key would leave every file already stored unreachable by the running instance.
+[ "$bucket_before" = "$(compose exec -T app cat /data/bucket.env)" ] \
+  || fail "bucket.env was re-provisioned across restart"
 
 log "asserting key-loss guard refuses to orphan encrypted secrets…"
 compose down

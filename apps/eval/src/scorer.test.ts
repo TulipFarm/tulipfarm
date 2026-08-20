@@ -464,3 +464,75 @@ describe("an Expectation whose seam a Tool call has to open", () => {
     expect(seamUnreached([pass(commit)], [])).toBeUndefined();
   });
 });
+
+describe("who may read a File the Turn generated", () => {
+  const withFiles = (
+    generatedFiles: { filename: string; readableBy: string[] }[]
+  ): Observation => ({
+    ...base,
+    persisted: {
+      runStatus: "succeeded",
+      stateStatus: "succeeded",
+      turnStatus: "succeeded",
+      events: [],
+      soulCommits: [],
+      generatedFiles: generatedFiles.map((f) => ({ fileId: f.filename, ...f })),
+    },
+  });
+
+  it("passes when the named grantee is in the audience", () => {
+    const obs = withFiles([{ filename: "a.pdf", readableBy: ["user:eval", "role:hr-team"] }]);
+    expect(only({ kind: "generated_file_readable_by", grantee: "role:hr-team" }, obs).passed).toBe(
+      true
+    );
+  });
+
+  it("fails when it is not, and names both the grantee and who actually got it", () => {
+    const obs = withFiles([{ filename: "a.pdf", readableBy: ["user:eval"] }]);
+    const r = only({ kind: "generated_file_readable_by", grantee: "role:hr-team" }, obs);
+    expect(r.passed).toBe(false);
+    expect(r.detail).toContain("role:hr-team");
+    expect(r.detail).toContain("user:eval");
+  });
+
+  it("bounds the widening: a Role the Agent does not hold must not appear", () => {
+    const obs = withFiles([{ filename: "a.pdf", readableBy: ["user:eval", "role:hr-team"] }]);
+    expect(
+      only({ kind: "generated_file_not_readable_by", grantee: "role:finance" }, obs).passed
+    ).toBe(true);
+    expect(
+      only({ kind: "generated_file_not_readable_by", grantee: "role:hr-team" }, obs).passed
+    ).toBe(false);
+  });
+
+  it("checks every File, so a second document cannot satisfy the Expectation alone", () => {
+    // A Turn that wrote two documents and shared only one with the team has leaked the other into
+    // a narrower audience than the operator configured. Scoring the last one would call that fine.
+    const obs = withFiles([
+      { filename: "a.pdf", readableBy: ["user:eval"] },
+      { filename: "b.pdf", readableBy: ["user:eval", "role:hr-team"] },
+    ]);
+    const r = only({ kind: "generated_file_readable_by", grantee: "role:hr-team" }, obs);
+    expect(r.passed).toBe(false);
+    expect(r.detail).toContain("a.pdf");
+    expect(r.detail).not.toContain("b.pdf");
+  });
+
+  it("fails rather than passes vacuously when the Turn generated nothing", () => {
+    const r = only({ kind: "generated_file_readable_by", grantee: "role:hr-team" }, withFiles([]));
+    expect(r.passed).toBe(false);
+    expect(r.detail).toContain("no File");
+  });
+
+  it("is held out as unexercised when the model never called the Tool", () => {
+    const scored = [
+      {
+        expectation: { kind: "generated_file_readable_by", grantee: "role:hr-team" } as Expectation,
+        passed: false,
+        detail: "the Turn generated no File",
+      },
+    ];
+    expect(seamUnreached(scored, [])).toBe("file_create");
+    expect(seamUnreached(scored, [{ name: "file_create" }])).toBeUndefined();
+  });
+});

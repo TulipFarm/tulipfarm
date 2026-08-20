@@ -1,0 +1,183 @@
+/**
+ * How a File appears on an HTTP wire.
+ *
+ * None of this touches Fastify. What a File looks like as JSON, which status a refusal deserves,
+ * and which headers make serving user-supplied bytes safe are all facts about Files — so they live
+ * beside the rules that produced them rather than in whichever app happens to serve them.
+ */
+
+import { isInlineRenderable } from "./limits";
+import { FILE_GRANTEE_KINDS, FILE_ORIGINS, type FileRecord, type FileShare } from "./repo";
+import { FileError } from "./service";
+
+/** The wire shape, shared by the route schemas and the serializer so they cannot drift. */
+export const FILE_WIRE_SCHEMA = {
+  type: "object",
+  required: ["id", "filename", "mediaType", "sizeBytes", "createdAt", "owner", "origin"],
+  properties: {
+    id: { type: "string" },
+    filename: { type: "string" },
+    mediaType: { type: "string" },
+    sizeBytes: { type: "integer" },
+    createdAt: { type: "string" },
+    /** The owning Principal's id. A display name needs a lookup the File itself cannot do. */
+    owner: { type: "string" },
+    origin: { type: "string", enum: [...FILE_ORIGINS] },
+    // `chatId` on the wire, `source_conversation_id` in the table: Chat is the external word for
+    // the same thing, and the boundary between them is exactly here.
+    sourceChatId: { type: "string", nullable: true },
+    /** The Run that authored a generated File. Null for anything a person uploaded. */
+    sourceRunId: { type: "string", nullable: true },
+    /**
+     * How many grants this File carries. Present only when the caller owns it, because only an
+     * owner may know — and absent, rather than 0, so "not yours to know" cannot be read as
+     * "shared with nobody".
+     */
+    sharedWithCount: { type: "integer", nullable: true },
+    inKnowledge: { type: "boolean", nullable: true },
+  },
+} as const;
+
+/** The querystring both listing routes take, so a page is requested the same way on each. */
+export const FILE_PAGE_QUERY_SCHEMA = {
+  type: "object",
+  properties: {
+    limit: { type: "integer", minimum: 1, maximum: 200, default: 50 },
+    after: { type: "string", description: "A `nextCursor` from an earlier page." },
+  },
+} as const;
+
+/** The envelope {@link serializeFilePage} produces, so the schema and the serializer cannot drift. */
+export const FILE_PAGE_SCHEMA = {
+  type: "object",
+  required: ["files"],
+  properties: {
+    files: { type: "array", items: FILE_WIRE_SCHEMA },
+    nextCursor: { type: "string", nullable: true },
+  },
+} as const;
+
+export function serializeFile(file: FileRecord, sharedWithCount?: number, inKnowledge?: boolean) {
+  return {
+    id: file.id,
+    filename: file.filename,
+    mediaType: file.mediaType,
+    sizeBytes: file.sizeBytes,
+    createdAt: file.createdAt.toISOString(),
+    owner: file.ownerPrincipalId,
+    origin: file.origin,
+    sourceChatId: file.sourceConversationId,
+    sourceRunId: file.sourceRunId,
+    sharedWithCount: sharedWithCount ?? null,
+    inKnowledge: inKnowledge ?? null,
+  };
+}
+
+/**
+ * A page of Files as the listing routes send it.
+ *
+ * `shareCounts` absent means the caller does not own these Files, and the count is then omitted
+ * rather than sent as `0` — how many others hold a File is its owner's business, and `0` would be
+ * a different and false answer. `knowledgeIds` is absent for the same reason: only an owner may
+ * put a File into Knowledge or take it out, so only an owner is told whether it is in.
+ */
+export function serializeFilePage(page: {
+  files: readonly FileRecord[];
+  nextCursor: string | null;
+  shareCounts?: Map<string, number>;
+  knowledgeIds?: ReadonlySet<string>;
+}) {
+  return {
+    files: page.files.map((file) =>
+      serializeFile(
+        file,
+        page.shareCounts ? (page.shareCounts.get(file.id) ?? 0) : undefined,
+        page.knowledgeIds ? page.knowledgeIds.has(file.id) : undefined
+      )
+    ),
+    nextCursor: page.nextCursor,
+  };
+}
+
+/** A share target: one Principal, or everyone holding one Role. */
+export const FILE_GRANTEE_SCHEMA = {
+  type: "object",
+  required: ["kind", "id"],
+  properties: {
+    kind: { type: "string", enum: [...FILE_GRANTEE_KINDS] },
+    id: { type: "string", minLength: 1 },
+  },
+  additionalProperties: false,
+} as const;
+
+export const FILE_SHARES_SCHEMA = {
+  type: "object",
+  required: ["shares"],
+  properties: {
+    shares: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["kind", "id", "sharedBy", "sharedAt"],
+        properties: {
+          kind: { type: "string", enum: [...FILE_GRANTEE_KINDS] },
+          id: { type: "string" },
+          sharedBy: { type: "string" },
+          sharedAt: { type: "string" },
+        },
+      },
+    },
+  },
+} as const;
+
+export function serializeShare(share: FileShare) {
+  return {
+    kind: share.kind,
+    id: share.id,
+    sharedBy: share.grantedBy,
+    sharedAt: share.createdAt.toISOString(),
+  };
+}
+
+export const FILE_ERROR_STATUS: Record<FileError["reason"], 400 | 404 | 413 | 415> = {
+  too_large: 413,
+  empty: 400,
+  disallowed_type: 415,
+  // An image over the pixel limit is a payload the instance refuses to carry, same as one over
+  // the byte limit — the person's remedy is to make it smaller either way.
+  image_too_large: 413,
+  not_found: 404,
+  invalid_share: 400,
+};
+
+export function fileErrorStatus(error: unknown): 400 | 404 | 413 | 415 | null {
+  return error instanceof FileError ? FILE_ERROR_STATUS[error.reason] : null;
+}
+
+/**
+ * The filename in a `Content-Disposition`, encoded twice on purpose.
+ *
+ * The bare `filename=` form is ASCII-only, so a non-ASCII name has to travel in `filename*` per
+ * RFC 5987, with the ASCII form kept as a fallback. The value is already normalised on upload, so
+ * this is encoding, not sanitisation.
+ */
+export function contentDisposition(file: FileRecord): string {
+  const disposition = isInlineRenderable(file.mediaType) ? "inline" : "attachment";
+  const ascii = file.filename.replace(/[^\x20-\x7e]/g, "_");
+  return `${disposition}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(file.filename)}`;
+}
+
+/**
+ * Every header a File download needs, including the two that are not optional: the bytes are
+ * user-supplied, so nothing about them may be sniffed or framed by the browser whatever the type
+ * claims.
+ */
+export function downloadHeaders(file: FileRecord): Record<string, string> {
+  return {
+    "content-type": file.mediaType,
+    "content-length": String(file.sizeBytes),
+    "content-disposition": contentDisposition(file),
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; sandbox",
+  };
+}

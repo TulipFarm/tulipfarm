@@ -22,10 +22,12 @@ export type Conversation = ConversationSummary & {
 
 export type WireMessagePart =
   | { type: "text"; text: string }
+  | { type: "file"; fileId: string; mediaType: string; name: string }
   | { type: "tool-call"; toolCallId: string; toolName: string; args: unknown }
   | { type: "tool-result"; toolCallId: string; toolName: string; result: unknown }
   | { type: "surface"; artifactId: string; revision: number }
-  | { type: "surface-unavailable"; message: "Legacy presentation unavailable" };
+  | { type: "surface-unavailable"; message: "Legacy presentation unavailable" }
+  | { type: "file-unavailable"; fileId: string; name: string };
 
 export type ConversationMessage = {
   _id: string;

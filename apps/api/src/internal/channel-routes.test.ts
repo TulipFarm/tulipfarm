@@ -7,7 +7,7 @@ import {
   RunResumeGateway,
   TypedOutputValidator,
 } from "@tulipfarm/run-kernel";
-import { INVOCATION_REQUEST_SCHEMAS } from "@tulipfarm/schema";
+import { INVOCATION_REQUEST_SCHEMAS, textContent } from "@tulipfarm/schema";
 import { ChannelRunDeliveryStore, RunStore, WaitStore } from "@tulipfarm/storage";
 import { createSurfaceArtifact } from "@tulipfarm/surface";
 import { ApprovalsRepo, ToolApprovalService } from "@tulipfarm/tool-host";
@@ -357,7 +357,7 @@ describe("/api/v1/internal/channels", () => {
       expect(res.statusCode).toBe(200);
       expect(res.json()).toMatchObject({ outcome: "started" });
       expect(store.turns).toHaveLength(1);
-      expect(store.messages[0]?.content).toBe("hi");
+      expect(store.messages[0]?.content).toEqual(textContent("hi"));
     });
 
     it("resolves a redelivered event to the same Run instead of answering twice", async () => {
@@ -541,7 +541,7 @@ describe("/api/v1/internal/channels", () => {
         conversationId: "conversation-1",
         turnId: "turn-1",
         role: "assistant",
-        content: "  the answer  ",
+        content: textContent("  the answer  "),
         createdAt: new Date(),
       });
       store.completions.push({
@@ -584,7 +584,7 @@ describe("/api/v1/internal/channels", () => {
         conversationId: "conversation-1",
         turnId: "turn-1",
         role: "assistant",
-        content: "the answer",
+        content: textContent("the answer"),
         createdAt: new Date(),
       });
       store.completions.push({
@@ -659,7 +659,7 @@ describe("/api/v1/internal/channels", () => {
         conversationId,
         turnId: "turn-1",
         role: "assistant",
-        content: "the answer",
+        content: textContent("the answer"),
         createdAt: new Date(),
       });
       store.completions.push({

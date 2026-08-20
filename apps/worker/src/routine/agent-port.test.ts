@@ -4,7 +4,7 @@ import type {
   ModelPort,
 } from "@tulipfarm/agent-runtime";
 import type { AgentInvocationPlan } from "@tulipfarm/run-kernel";
-import type { AgentDefinition, ModelProfileDefinition } from "@tulipfarm/schema";
+import { type AgentDefinition, contentText, type ModelProfileDefinition } from "@tulipfarm/schema";
 import type { BundleDefinition, RuntimeBundle } from "@tulipfarm/soul";
 import type { RunEventAppendPort } from "@tulipfarm/turn-executor";
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
@@ -200,8 +200,8 @@ describe("BundleRoutineAgentPort", () => {
     expect(invoked.modelProfileId).toBe("fast");
     // The Agent's own instructions outrank the Routine's question, which is carried as the request.
     expect(invoked.messages[0]?.role).toBe("system");
-    expect(invoked.messages[0]?.content).toContain("You triage incoming work.");
-    expect(invoked.messages[1]?.content).toContain("invoice overdue");
+    expect(contentText(invoked.messages[0]?.content ?? [])).toContain("You triage incoming work.");
+    expect(contentText(invoked.messages[1]?.content ?? [])).toContain("invoice overdue");
     expect(appended[1]?.payload).toMatchObject({ modelProfileId: "fast" });
   });
 
@@ -211,9 +211,13 @@ describe("BundleRoutineAgentPort", () => {
 
     const invoked = invoke.mock.calls[0]?.[0] as ModelInvocationRequest;
     // A Routine State has no participant, so there is no timezone preference to read: UTC.
-    expect(invoked.messages[0]?.content).toContain("<current-context>");
-    expect(invoked.messages[0]?.content).toContain("date: Saturday, 08 August 2026");
-    expect(invoked.messages[0]?.content).toContain("time: 11:12 (UTC, UTC+00:00)");
+    expect(contentText(invoked.messages[0]?.content ?? [])).toContain("<current-context>");
+    expect(contentText(invoked.messages[0]?.content ?? [])).toContain(
+      "date: Saturday, 08 August 2026"
+    );
+    expect(contentText(invoked.messages[0]?.content ?? [])).toContain(
+      "time: 11:12 (UTC, UTC+00:00)"
+    );
   });
 
   it("exposes no Tools to the Agent, so a Routine's effects stay on its Tool States", async () => {

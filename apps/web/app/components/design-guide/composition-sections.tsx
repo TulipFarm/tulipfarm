@@ -1,7 +1,9 @@
 import { Check, Search, Settings } from "lucide-react";
 import { Composer } from "~/components/chat/composer";
+import { RemovedAttachment } from "~/components/chat/file-attachment";
 import { Transcript } from "~/components/chat/transcript";
 import { GuideSection } from "~/components/design-guide/guide-section";
+import { FileList } from "~/components/files/file-list";
 import type { ChatMessage } from "~/lib/chat/types";
 
 /**
@@ -27,6 +29,45 @@ const TRANSCRIPT_MESSAGES: ChatMessage[] = [
       modelCallLatencyMs: 1240,
     },
     sourceTurn: { text: "Which invoices are overdue?", options: { model: "auto" } },
+  },
+];
+
+const GUIDE_FILES = [
+  {
+    id: "file_1",
+    filename: "storefront.png",
+    mediaType: "image/png",
+    sizeBytes: 184_320,
+    createdAt: "2026-01-02T09:00:00.000Z",
+    owner: "user_1",
+    origin: "uploaded" as const,
+    sourceChatId: "conv_1",
+    sourceRunId: null,
+    sharedWithCount: 2,
+  },
+  {
+    id: "file_2",
+    filename: "q1-summary.pdf",
+    mediaType: "application/pdf",
+    sizeBytes: 51_200,
+    createdAt: "2026-01-03T09:00:00.000Z",
+    owner: "user_1",
+    origin: "generated" as const,
+    sourceChatId: null,
+    sourceRunId: "run_1",
+    sharedWithCount: 0,
+  },
+  {
+    id: "file_3",
+    filename: "shared-with-you.png",
+    mediaType: "image/png",
+    sizeBytes: 18_400,
+    createdAt: "2026-01-04T11:30:00.000Z",
+    owner: "user_2",
+    origin: "uploaded" as const,
+    sourceChatId: null,
+    sourceRunId: null,
+    sharedWithCount: null,
   },
 ];
 
@@ -63,6 +104,36 @@ export function CompositionSections() {
               },
             ]}
           />
+        </div>
+        <div className="mb-6">
+          <h3 className="mb-2 text-sm font-semibold">Files library rows</h3>
+          <p className="mb-3 text-sm text-muted-foreground">
+            One row shape carries both a screenshot and a document. Origin is an icon plus a word,
+            never a tint alone, so who made a File survives a greyscale screen. Share and Delete
+            appear only on a File the viewer owns — a recipient cannot share one on and cannot
+            destroy it, so neither control ever offers a power the product does not grant. Delete
+            carries the destructive tone and opens a confirmation, because it is permanent.
+          </p>
+          <FileList
+            files={GUIDE_FILES}
+            viewerId="user_1"
+            onPreview={() => undefined}
+            onShare={() => undefined}
+            onDelete={() => undefined}
+          />
+        </div>
+        <div className="mb-6">
+          <h3 className="mb-2 text-sm font-semibold">A removed attachment</h3>
+          <p className="mb-3 text-sm text-muted-foreground">
+            Messages are immutable, so a File that was destroyed — or unshared — cannot be edited
+            out of the Chat that named it. The reference stays and says what happened, next to one
+            that is still there. It never says which of the two occurred: to this reader they are
+            the same fact, and distinguishing them would say whether the File still exists.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <RemovedAttachment name="q3-budget.pdf" />
+            <RemovedAttachment name="screenshot.png" />
+          </div>
         </div>
         <div className="grid gap-4 lg:grid-cols-3">
           <article className="rounded-md border border-border bg-card">

@@ -22,12 +22,13 @@ export type {
 export { ConversationTurnCompleter } from "./conversation-turn";
 export type {
   ResolvedTurnContext,
+  TurnAttachmentPort,
   TurnContextPort,
   TurnDriverOptions,
   TurnRequest,
 } from "./driver";
 export { TurnDriver } from "./driver";
-export type { GuardedText, TurnGuardrailPolicy } from "./guardrails";
+export type { GuardedContent, GuardedText, TurnGuardrailPolicy } from "./guardrails";
 export { GuardrailDigestMismatchError, TurnGuardrails } from "./guardrails";
 export {
   MissingStateError,

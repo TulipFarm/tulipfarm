@@ -11,6 +11,7 @@ import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { KnowledgeService, RestrictionSubject } from "@tulipfarm/knowledge";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
+import { refusedAsFileManaged } from "./managed-pages";
 import type { PageReadAuthorizer } from "./page-access";
 import type { ReaderDirectory } from "./reader-directory";
 import {
@@ -193,6 +194,7 @@ export function registerRestrictionRoutes({
       // Answering 403 would confirm the Page exists to someone who may not know it does.
       if (!(await gate.canRead(req.user?._id, id)))
         return reply.code(404).send({ error: "not found" });
+      if (await refusedAsFileManaged(service, id, reply)) return reply;
       const { subjects } = req.body as { subjects: RestrictionSubject[] };
 
       // An ancestor's restriction is a ceiling, not a suggestion. Applying the allowed half would
@@ -223,14 +225,22 @@ export function registerRestrictionRoutes({
   app.delete(
     "/api/v1/knowledge/pages/:id/restriction",
     restrictionRoute({
-      description: "Remove a page's restriction, returning it to Business-wide read.",
+      description:
+        "Remove a page's restriction, returning it to Business-wide read. A page that indexes a " +
+        "File is managed on the File and answers 409.",
       params: EntityIdParamsSchema,
-      response: { 200: PageRestrictionResponseSchema, 404: ErrorSchema, 401: ErrorSchema },
+      response: {
+        200: PageRestrictionResponseSchema,
+        404: ErrorSchema,
+        409: ErrorSchema,
+        401: ErrorSchema,
+      },
     }),
     async (req, reply) => {
       const { id } = req.params as { id: string };
       if (!(await gate.canRead(req.user?._id, id)))
         return reply.code(404).send({ error: "not found" });
+      if (await refusedAsFileManaged(service, id, reply)) return reply;
       const outcome = await service.clearPageRestriction(id);
       if (outcome !== "ok") return reply.code(404).send({ error: "not found" });
       return reply.send(await service.getPageRestriction(id));

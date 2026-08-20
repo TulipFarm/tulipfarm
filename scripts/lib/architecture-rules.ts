@@ -191,11 +191,17 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
       "memory",
       "observability",
     ],
+    // The File entity: what may be uploaded, what its bytes really are, and who may read them.
+    // It owns its own table so the ordered upload pipeline — authorize, length, stream, sniff,
+    // reject, write — stays in one place; `apps/api` only adapts it to Fastify.
+    // `tool-host` because the File Tools are declared here, beside the service they call: a
+    // family split from its service is a family whose two halves can disagree about what a File is.
+    files: ["constants", "schema", "storage", "tool-host"],
     // Translation between the `ModelPort` contract and the Vercel AI SDK's prompt, tool and usage
     // shapes. Extracted from the Worker so the offline eval harness converts a request and reads a
     // result exactly as production does — a second copy would let the eval score a tool call the
     // product would never make. Pure functions only: no provider, no credential, no I/O.
-    "model-adapter": ["agent-runtime", "llm"],
+    "model-adapter": ["schema", "agent-runtime", "llm"],
     // How one Chat Turn executes, extracted from the Worker so a second host — the offline eval
     // harness — can drive a real Turn without importing an app. It declares the ports it needs
     // (`RunExecutor`, `SpendSink`, `ModelCallReceiptSource`) rather than importing the Worker's
@@ -208,6 +214,7 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
       "schema",
       "soul",
       "constants",
+      "files",
       "authz",
       "audit",
       "secrets",
@@ -259,6 +266,9 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
       "tool-host",
       "kv",
       "platform-tools",
+      // `files` renders Agent-authored documents. That is untrusted-input processing, so it runs
+      // in the durable runtime rather than the process serving people's requests.
+      "files",
       "turn-executor",
       "model-adapter",
     ],
@@ -277,7 +287,7 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
       "observability",
     ],
     // `apps/web` uses shared wire schemas and presentation-only packages.
-    web: ["schema", "surface", "surface-web", "editor"],
+    web: ["files", "schema", "surface", "surface-web", "editor"],
     // `apps/eval` drives the real Agent loop and Context assembler against a versioned Corpus.
     // It is an app, not a package, because a package may not import from `apps/*` and the L3
     // tier has to reach the same executor a real turn runs through.
@@ -312,6 +322,9 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
       "storage",
       "run-kernel",
       "tool-host",
+      // `files` so a Case can name a shipped platform Tool instead of copying its declaration. A
+      // copy would measure the model against a description no deployment sends.
+      "files",
     ],
   },
   // Legacy v1 edges that still exist during cutover. Each is a target package

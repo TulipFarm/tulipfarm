@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@tulipfarm/agent-runtime": "workspace:*",
+    "@tulipfarm/files": "workspace:*",
     "@tulipfarm/llm": "workspace:*",
     "@tulipfarm/model-adapter": "workspace:*",
     "@tulipfarm/run-kernel": "workspace:*",

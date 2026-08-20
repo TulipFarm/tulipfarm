@@ -41,6 +41,7 @@ import {
   type CreateSpaceResult,
   createSpace,
   deleteSpace,
+  findSpaceByName,
   getBacklinks,
   getKnowledgeGraph,
   getKnowledgeOverview,
@@ -289,6 +290,10 @@ export class KnowledgeService {
 
   getSpace(id: string): Promise<KnowledgeSpace | null> {
     return getSpace(this.deps, id);
+  }
+
+  findSpaceByName(name: string): Promise<KnowledgeSpace | null> {
+    return findSpaceByName(this.deps, name);
   }
 
   listSpaces(opts: {

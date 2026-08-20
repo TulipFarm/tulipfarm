@@ -69,6 +69,7 @@ sibling `AGENTS.md`.
 | [`apps/eval`](apps/eval/AGENTS.md) | Offline eval Corpus, Expectations, Sweeps, Scorecards, red team |
 | [`packages/agent-runtime`](packages/agent-runtime/AGENTS.md) | Context assembly, bounded Tool loop, model profiles, delegation |
 | [`packages/run-kernel`](packages/run-kernel/AGENTS.md) | Run/State machines, waits, retries, child Runs |
+| [`packages/files`](packages/files/AGENTS.md) | Upload limits, the type allowlist, magic-byte sniffing, the `files` table |
 | [`packages/curator`](packages/curator/AGENTS.md) | Curator prompt, output schema, citation and injection validation, proposal templating |
 | [`packages/curator-host`](packages/curator-host/AGENTS.md) | Minting a Curator job and its Run, context pinning, output revalidation, crash recovery |
 | [`packages/model-adapter`](packages/model-adapter/AGENTS.md) | Translating `ModelPort` requests, tool calls and usage to and from the AI SDK |

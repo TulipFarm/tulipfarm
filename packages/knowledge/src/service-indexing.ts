@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { indexPage as indexPageImpl, reindexAll as reindexAllImpl } from "./index-service";
+import { type RestrictionSubject, setPageRestriction } from "./page-restriction";
 import type { KnowledgeServiceDeps } from "./service";
 import type { IndexQueueStats, IndexStatusReport, KnowledgePage, KnowledgeSource } from "./types";
 
@@ -10,6 +11,24 @@ export interface IngestSourceInput {
   content: string;
   domain?: string | null;
   tags?: string[];
+  /**
+   * Exactly who may read the Page this produces.
+   *
+   * Omitted, the Page is Business-wide readable, which is right for a Resource or a Conversation
+   * every member can already open. A File is not that: it is readable by its owner and whoever it
+   * was shared with, so indexing one without naming them would publish it to the whole Business.
+   */
+  readers?: readonly RestrictionSubject[];
+  /**
+   * Where the Page sits, for callers that produce a browsable Page rather than a bare source
+   * record.
+   *
+   * Not optional in spirit: the lexical arm of retrieval only considers Pages that have both, so a
+   * Page ingested without them is findable by vector search alone and silently invisible on a
+   * deployment with no embedding provider. Omit it only for sources that are retrieved through
+   * `searchKnowledgeSources` instead.
+   */
+  placement?: { spaceId: string; path: string };
 }
 
 export function indexPage(deps: KnowledgeServiceDeps, page: KnowledgePage): Promise<unknown> {
@@ -36,6 +55,8 @@ export async function ingestSource(
     sourceId: input.sourceId,
     domain: input.domain ?? null,
     tags: input.tags ?? [],
+    spaceId: input.placement?.spaceId ?? null,
+    path: input.placement?.path ?? null,
     active: true,
     alwaysLoadForAgents: false,
     version: 1,
@@ -43,6 +64,12 @@ export async function ingestSource(
     updatedAt: now,
   };
   const { _id } = await deps.pages.upsertBySource(draft);
+  // Readership is written before the content is chunked, never after. Reversed, there is a window
+  // in which the Page is indexed and still carries its default Business-wide grant, and a question
+  // asked inside that window is answered from a File the asker may not read.
+  if (input.readers !== undefined && input.readers.length > 0) {
+    await setPageRestriction(deps, _id, input.readers);
+  }
   const canonical = await deps.pages.getById(_id);
   if (canonical) await indexPage(deps, canonical);
   return canonical;
