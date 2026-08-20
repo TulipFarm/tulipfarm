@@ -15,7 +15,7 @@ function deps(overrides: Partial<MentionGateDeps> = {}): MentionGateDeps {
   };
 }
 
-function envelope(event: Record<string, unknown>): SlackEventEnvelope {
+function envelope(event: Record<string, unknown>, botUserId = "UBOT"): SlackEventEnvelope {
   return {
     token: "t",
     team_id: "T1",
@@ -23,6 +23,7 @@ function envelope(event: Record<string, unknown>): SlackEventEnvelope {
     event_id: "Ev1",
     event_time: 1720000000,
     type: "event_callback",
+    ...(botUserId === "" ? {} : { authorizations: [{ user_id: botUserId, is_bot: true }] }),
     // biome-ignore lint/suspicious/noExplicitAny: test builds a raw Slack payload shape
     event: event as any,
   };
@@ -107,6 +108,55 @@ describe("applyMentionGate", () => {
       gateDeps
     );
     expect(result).toEqual({ outcome: "drop", reason: "bot_message" });
+  });
+
+  it("drops a message sent by the bot's own user id even when Slack stamps no bot_id", async () => {
+    const result = await applyMentionGate(
+      envelope({ type: "message", channel: "D1", channel_type: "im", ts: "1.1", user: "UBOT" }),
+      deps()
+    );
+    expect(result).toEqual({ outcome: "drop", reason: "self_message" });
+  });
+
+  it("still passes a DM when the envelope carries no authorizations to identify the bot", async () => {
+    const result = await applyMentionGate(
+      envelope({ type: "message", channel: "D1", channel_type: "im", ts: "1.1", user: "U1" }, ""),
+      deps()
+    );
+    expect(result.outcome).toBe("pass");
+  });
+
+  it("drops a metadata subtype whose author lives under event.message, not event.user", async () => {
+    for (const subtype of ["message_changed", "message_deleted", "channel_join"]) {
+      const result = await applyMentionGate(
+        envelope({ type: "message", subtype, channel: "D1", channel_type: "im", ts: "1.1" }),
+        deps()
+      );
+      expect(result).toEqual({ outcome: "drop", reason: "non_chat_subtype" });
+    }
+  });
+
+  it("passes the message subtypes that still carry a human's chat text", async () => {
+    const gateDeps = deps({
+      mentionedThreads: {
+        mark: vi.fn(),
+        isMentioned: vi.fn().mockResolvedValue(true),
+      } as unknown as ChannelMentionedThreadStore,
+    });
+    for (const subtype of ["file_share", "me_message", "thread_broadcast"]) {
+      const result = await applyMentionGate(
+        envelope({
+          type: "message",
+          subtype,
+          channel: "C1",
+          ts: "1.2",
+          thread_ts: "1.1",
+          user: "U1",
+        }),
+        gateDeps
+      );
+      expect(result.outcome).toBe("pass");
+    }
   });
 
   it("drops the duplicate plain-message delivery paired with a fresh top-level app_mention", async () => {

@@ -11,18 +11,35 @@ function adapter(result: SlackReceiveResult): SlackChannelAdapter {
   return { receive: vi.fn().mockResolvedValue(result) } as unknown as SlackChannelAdapter;
 }
 
+/** The gate is mandatory, so every events_api case needs one; `mentioned` opens the thread path. */
+function gate(mentioned = true) {
+  return {
+    businessId: "business-1",
+    provider: "slack",
+    mentionedThreads: {
+      mark: vi.fn().mockResolvedValue(undefined),
+      isMentioned: vi.fn().mockResolvedValue(mentioned),
+    } as unknown as ChannelMentionedThreadStore,
+  };
+}
+
+const DM_EVENT = {
+  type: "event_callback",
+  event: { type: "message", channel_type: "im", channel: "D1", ts: "1.1", user: "U1" },
+};
+
 describe("dispatchSlackEnvelope", () => {
   it("routes an events_api envelope to the channel adapter with an already-acked no-op ack", async () => {
     const channelAdapter = adapter({ outcome: "started", runId: "run-1" });
 
     await dispatchSlackEnvelope(
-      { envelope_id: "env-1", type: "events_api", payload: { event: {} } },
-      { businessId: "business-1", channelAdapter, log: log() }
+      { envelope_id: "env-1", type: "events_api", payload: DM_EVENT },
+      { businessId: "business-1", channelAdapter, mentionGate: gate(), log: log() }
     );
 
     expect(channelAdapter.receive).toHaveBeenCalledWith(
       "business-1",
-      { event: {} },
+      DM_EVENT,
       expect.any(Function)
     );
   });
@@ -32,8 +49,8 @@ describe("dispatchSlackEnvelope", () => {
     const logger = log();
 
     await dispatchSlackEnvelope(
-      { envelope_id: "env-1", type: "events_api", payload: {} },
-      { businessId: "business-1", channelAdapter, log: logger }
+      { envelope_id: "env-1", type: "events_api", payload: DM_EVENT },
+      { businessId: "business-1", channelAdapter, mentionGate: gate(), log: logger }
     );
 
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("external_identity_unmapped"));
@@ -47,9 +64,18 @@ describe("dispatchSlackEnvelope", () => {
       {
         envelope_id: "env-1",
         type: "events_api",
-        payload: { event: { user: "U1", channel: "C1", thread_ts: "1.1" } },
+        payload: {
+          type: "event_callback",
+          event: { type: "message", user: "U1", channel: "C1", ts: "1.2", thread_ts: "1.1" },
+        },
       },
-      { businessId: "business-1", channelAdapter, identityBindOffer, log: log() }
+      {
+        businessId: "business-1",
+        channelAdapter,
+        mentionGate: gate(),
+        identityBindOffer,
+        log: log(),
+      }
     );
 
     expect(identityBindOffer.offer).toHaveBeenCalledWith({
@@ -68,9 +94,18 @@ describe("dispatchSlackEnvelope", () => {
       {
         envelope_id: "env-1",
         type: "events_api",
-        payload: { event: { user: "U1", channel: "C1" } },
+        payload: {
+          type: "event_callback",
+          event: { type: "message", channel_type: "im", user: "U1", channel: "D1", ts: "1.1" },
+        },
       },
-      { businessId: "business-1", channelAdapter, identityBindOffer, log: log() }
+      {
+        businessId: "business-1",
+        channelAdapter,
+        mentionGate: gate(),
+        identityBindOffer,
+        log: log(),
+      }
     );
 
     expect(identityBindOffer.offer).not.toHaveBeenCalled();
@@ -84,8 +119,8 @@ describe("dispatchSlackEnvelope", () => {
 
     await expect(
       dispatchSlackEnvelope(
-        { envelope_id: "env-1", type: "events_api", payload: {} },
-        { businessId: "business-1", channelAdapter, log: logger }
+        { envelope_id: "env-1", type: "events_api", payload: DM_EVENT },
+        { businessId: "business-1", channelAdapter, mentionGate: gate(), log: logger }
       )
     ).resolves.toBeUndefined();
     expect(logger.warn).toHaveBeenCalled();
@@ -97,7 +132,7 @@ describe("dispatchSlackEnvelope", () => {
 
     await dispatchSlackEnvelope(
       { envelope_id: "env-2", type: "interactive", payload: { action: "approve" } },
-      { businessId: "business-1", channelAdapter, onInteractive, log: log() }
+      { businessId: "business-1", channelAdapter, mentionGate: gate(), onInteractive, log: log() }
     );
 
     expect(onInteractive).toHaveBeenCalledWith({ action: "approve" });
@@ -109,7 +144,7 @@ describe("dispatchSlackEnvelope", () => {
     await expect(
       dispatchSlackEnvelope(
         { envelope_id: "env-2", type: "interactive", payload: {} },
-        { businessId: "business-1", channelAdapter, log: log() }
+        { businessId: "business-1", channelAdapter, mentionGate: gate(), log: log() }
       )
     ).resolves.toBeUndefined();
   });
@@ -129,14 +164,7 @@ describe("dispatchSlackEnvelope", () => {
       {
         businessId: "business-1",
         channelAdapter,
-        mentionGate: {
-          businessId: "business-1",
-          provider: "slack",
-          mentionedThreads: {
-            mark: vi.fn(),
-            isMentioned: vi.fn().mockResolvedValue(false),
-          } as unknown as ChannelMentionedThreadStore,
-        },
+        mentionGate: gate(false),
         log: log(),
       }
     );
@@ -159,14 +187,7 @@ describe("dispatchSlackEnvelope", () => {
       {
         businessId: "business-1",
         channelAdapter,
-        mentionGate: {
-          businessId: "business-1",
-          provider: "slack",
-          mentionedThreads: {
-            mark: vi.fn().mockResolvedValue(undefined),
-            isMentioned: vi.fn(),
-          } as unknown as ChannelMentionedThreadStore,
-        },
+        mentionGate: gate(),
         log: log(),
       }
     );
@@ -183,7 +204,7 @@ describe("dispatchSlackEnvelope", () => {
 
     await dispatchSlackEnvelope(
       { envelope_id: "env-3", type: "slash_commands", payload: {} },
-      { businessId: "business-1", channelAdapter, log: log() }
+      { businessId: "business-1", channelAdapter, mentionGate: gate(), log: log() }
     );
 
     expect(channelAdapter.receive).not.toHaveBeenCalled();
