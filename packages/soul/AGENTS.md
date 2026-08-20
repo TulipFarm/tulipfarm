@@ -13,7 +13,7 @@ Loader, compiler, publisher, and git-sync engine for Soul artifacts. Root `soul/
 | `src/soul-loader.ts`, `src/tree-reader.ts`, `src/soul-path.ts` | Disk and tree reads. |
 | `src/compiler.ts`, `src/bundle.ts`, `src/bundle-retention.ts`, `src/published-loader.ts` | Runtime bundles. |
 | `src/signatures.ts`, `src/publication.ts`, `src/publisher.ts` | Publish flow. |
-| `src/routine-catalog.ts` | Routines browse model over the active publication. |
+| `src/routine-catalog.ts`, `src/routines/` | Routines browse model; Routine reference validation. |
 | `src/git-*`, `src/pinned-definition.ts`, `src/definition-reader.ts` | Git and pinned reads. |
 | `src/integration-*`, `src/types.ts` | Integration manifest trust/auth contracts. |
 | `src/migrations/`, `src/soul-migrations.ts` | Migrations. |

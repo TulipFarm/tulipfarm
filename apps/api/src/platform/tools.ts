@@ -16,6 +16,7 @@ import {
   type SoulSkill,
   SoulWriteError,
   type SoulWriter,
+  unresolvedRoutineResourceTypes,
 } from "@tulipfarm/soul";
 import type { RequestContext } from "@tulipfarm/tool-host";
 import { type ApiToolDefinition, defineApiTool } from "@tulipfarm/tool-host";
@@ -32,6 +33,8 @@ export interface PlatformToolContext {
     skills: Map<string, SoulSkill>;
     agents: Map<string, SoulAgent>;
     routines?: Map<string, SoulRoutine>;
+    /** Read by `routine_forge` so a Routine cannot name a Resource type the Soul does not have. */
+    resources?: ReadonlyMap<string, unknown>;
   };
   soulPath?: string;
   gitSync?: GitSyncService;
@@ -297,6 +300,8 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
       return err("validation_error", "definition.metadata.slug must match name");
     if (routine.metadata.lifecycle !== "published")
       return err("validation_error", "definition.metadata.lifecycle must be published");
+    const unresolved = unresolvedRoutineResourceTypes(routine.spec, ctx.soulLoader?.resources);
+    if (unresolved !== undefined) return err(unresolved.code, unresolved.message);
     if (
       new Set(triggerDefinitions.map((trigger) => trigger.metadata.slug)).size !==
       triggerDefinitions.length

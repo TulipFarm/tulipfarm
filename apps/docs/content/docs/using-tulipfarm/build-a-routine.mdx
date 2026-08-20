@@ -27,6 +27,11 @@ want to trigger it manually.
 The assistant loads `routine-forge`, asks for missing inputs, writes the routine into the
 soul, commits it, and reconciles live.
 
+A routine that reads or writes records can only refer to a resource type that already exists.
+If it names one you have not defined yet, the forge refuses to publish and tells you which type
+is missing, so [define the resource type](/docs/using-tulipfarm/define-a-resource-type) first
+and then ask again.
+
 ## Review it on the canvas
 
 <Steps>

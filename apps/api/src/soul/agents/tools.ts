@@ -1,7 +1,11 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { ajv, TulipFarmValidationError, validateAgentFrontmatter } from "@tulipfarm/schema";
 import {
+  AGENT_EXISTING_DECISIONS,
+  type AgentExistingDecision,
+  agentWriteRequest,
   type GitSyncService,
+  resolveAgentName,
   type SoulLoader,
   SoulWriteError,
   type SoulWriter,
@@ -14,7 +18,6 @@ import {
   type RequestContext,
   type ToolCallResult,
 } from "@tulipfarm/tool-host";
-import { stringify } from "yaml";
 import { SYSTEM_SOUL_COMMIT_ACTOR } from "../../runtime/soul-writer";
 import { soulCommitError } from "../../tools/soul-faults";
 
@@ -77,11 +80,6 @@ function firstError(validate: ReturnType<typeof ajv.compile>): string {
   return `${e.instancePath || "(root)"} ${e.message ?? "is invalid"}`.trim();
 }
 
-function serializeAgent(frontmatter: Record<string, unknown>, body: string): string {
-  if (Object.keys(frontmatter).length === 0) return body;
-  return `---\n${stringify(frontmatter)}---\n${body}`;
-}
-
 // Write-time meta-schema gate (VAL-V1-010). Returns a validation_error
 // result on invalid frontmatter, or null when it passes.
 function frontmatterError(frontmatter: Record<string, unknown>): ToolCallResult | null {
@@ -93,6 +91,25 @@ function frontmatterError(frontmatter: Record<string, unknown>): ToolCallResult 
       return err("validation_error", `${e.path} ${e.message}`.trim());
     }
     throw e;
+  }
+}
+
+/** The one `AGENT.md` write both agent Tools take: the failing result, or `null` once committed. */
+async function putAgent(
+  ctx: AgentToolContext,
+  verb: "add" | "update",
+  name: string,
+  frontmatter: Record<string, unknown>,
+  body: string,
+  onPrecondition: () => ToolCallResult
+): Promise<ToolCallResult | null> {
+  const actor = ctx.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR;
+  try {
+    await ctx.soulWriter.apply(agentWriteRequest(verb, name, frontmatter, body, actor));
+    return null;
+  } catch (e) {
+    if (e instanceof SoulWriteError) return mapSoulWriteError(e, onPrecondition);
+    return err("internal_error", reason(e));
   }
 }
 
@@ -113,6 +130,12 @@ const CREATE_SCHEMA = {
       type: "object",
       description:
         "Optional frontmatter. Allowed keys: label, domain, description, model, autonomy (full|supervised|approval-required|manual), modelPolicy, capabilityRestrictions, placeholder (string[]), suggestions (string[]). Use capabilityRestrictions to set server-enforced Tool, Record, and Resource type limits such as read-only access.",
+    },
+    onExisting: {
+      type: "string",
+      enum: [...AGENT_EXISTING_DECISIONS],
+      description:
+        "The user's decision when an Agent already holds this name or label. Omit on the first attempt; the Tool then reports the collision. Ask the user once, then re-call with 'keep' to leave the existing Agent untouched or 'update' to replace its body and frontmatter. Never ask the same question twice.",
     },
   },
 } as const;
@@ -139,10 +162,12 @@ const agentCreate = defineApiTool<AgentToolContext>({
       name,
       body,
       frontmatter = {},
+      onExisting,
     } = args as {
       name: string;
       body: string;
       frontmatter?: Record<string, unknown>;
+      onExisting?: AgentExistingDecision;
     };
 
     if (!NAME_RE.test(name)) return err("validation_error", "invalid agent name");
@@ -150,29 +175,16 @@ const agentCreate = defineApiTool<AgentToolContext>({
     const fmError = frontmatterError(frontmatter);
     if (fmError) return fmError;
 
-    try {
-      await ctx.soulWriter.apply({
-        subject: `soul: add agent ${name}`,
-        source: "agent",
-        actor: ctx.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
-        businessId: DEPLOYMENT_BUSINESS_ID,
-        changes: [
-          {
-            op: "put",
-            target: { kind: "Agent", slug: name, definitionMode: "legacy" },
-            content: serializeAgent(frontmatter, body),
-          },
-        ],
-        preconditions: [{ kind: "Agent", slug: name, state: "absent" }],
-      });
-    } catch (e) {
-      if (e instanceof SoulWriteError) {
-        return mapSoulWriteError(e, () => err("validation_error", "agent already exists"));
-      }
-      return err("internal_error", reason(e));
-    }
+    const plan = resolveAgentName(ctx.soulLoader.agents, name, frontmatter, onExisting);
+    if (plan.outcome === "refuse") return err("validation_error", plan.message);
+    if (plan.outcome === "keep") return ok({ created: false, changed: false, ...plan.agent });
 
-    return ok({ name, frontmatter, body });
+    const created = plan.outcome === "create";
+    const target = created ? name : plan.agent.name;
+    const failure = await putAgent(ctx, created ? "add" : "update", target, frontmatter, body, () =>
+      err("validation_error", "agent already exists")
+    );
+    return failure ?? ok({ name: target, created, changed: true, frontmatter, body });
   },
 });
 
@@ -232,28 +244,10 @@ const agentUpdate = defineApiTool<AgentToolContext>({
     const newBody = body ?? existing.body;
     const newFm = frontmatter ?? existing.frontmatter;
 
-    try {
-      await ctx.soulWriter.apply({
-        subject: `soul: update agent ${name}`,
-        source: "agent",
-        actor: ctx.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
-        businessId: DEPLOYMENT_BUSINESS_ID,
-        changes: [
-          {
-            op: "put",
-            target: { kind: "Agent", slug: name, definitionMode: "legacy" },
-            content: serializeAgent(newFm, newBody),
-          },
-        ],
-      });
-    } catch (e) {
-      if (e instanceof SoulWriteError) {
-        return mapSoulWriteError(e, () => err("not_found", `agent not found: ${name}`));
-      }
-      return err("internal_error", reason(e));
-    }
-
-    return ok({ name, frontmatter: newFm, body: newBody });
+    const failure = await putAgent(ctx, "update", name, newFm, newBody, () =>
+      err("not_found", `agent not found: ${name}`)
+    );
+    return failure ?? ok({ name, frontmatter: newFm, body: newBody });
   },
 });
 

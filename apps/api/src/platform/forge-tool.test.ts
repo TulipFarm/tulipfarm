@@ -45,6 +45,34 @@ function trigger(slug = "daily-report-manual") {
   };
 }
 
+function routineOverRecords(resourceType: string) {
+  return {
+    ...VALID_ROUTINE,
+    spec: {
+      owner: "operations",
+      start: "Search",
+      states: [
+        {
+          name: "Search",
+          type: "tool",
+          toolRef: { name: "record_search", version: "1" },
+          action: "record_search",
+          input: { type: resourceType },
+          transition: "Update",
+        },
+        {
+          name: "Update",
+          type: "tool",
+          toolRef: { name: "record_update", version: "1" },
+          action: "record_update",
+          input: { type: resourceType, id: "${states.Search.output.id}" },
+          end: true,
+        },
+      ],
+    },
+  };
+}
+
 function makeSoulWriter(): SoulWriter & { apply: ReturnType<typeof vi.fn> } {
   return {
     apply: vi.fn().mockResolvedValue({
@@ -162,6 +190,40 @@ describe("routine_forge", () => {
     expect(result).toMatchObject({ success: false, error: { code: "internal_error" } });
     expect(JSON.stringify(result)).toContain("bundle storage unavailable");
     expect(onRoutinesChanged).not.toHaveBeenCalled();
+  });
+
+  // #436: a Routine whose Record States name a Resource type that was never created is doomed at
+  // every future Run, so the reference has to be checked against the Soul before it is committed.
+  it("refuses a Routine that references a Resource type the Soul does not have", async () => {
+    const result = await routineForgeTool.handler(
+      {
+        name: "daily-report",
+        definition: routineOverRecords("totally-nonexistent-resource-xyz"),
+        triggers: [trigger()],
+      },
+      { ...ctx(), soulLoader: { skills: new Map(), agents: new Map(), resources: new Map() } }
+    );
+
+    expect(result).toMatchObject({ success: false, error: { code: "validation_error" } });
+    expect(JSON.stringify(result)).toContain("totally-nonexistent-resource-xyz");
+    expect(soulWriter.apply).not.toHaveBeenCalled();
+  });
+
+  it("commits a Routine whose referenced Resource type exists", async () => {
+    const result = await routineForgeTool.handler(
+      { name: "daily-report", definition: routineOverRecords("ticket"), triggers: [trigger()] },
+      {
+        ...ctx(),
+        soulLoader: {
+          skills: new Map(),
+          agents: new Map(),
+          resources: new Map([["ticket", {}]]),
+        },
+      }
+    );
+
+    expect(result).toMatchObject({ success: true, data: { name: "daily-report" } });
+    expect(soulWriter.apply).toHaveBeenCalledOnce();
   });
 
   it("describes canonical Routine and Trigger requirements", () => {
