@@ -35,6 +35,10 @@ single highest-value thing on this page.
 You can also seed this at boot with `SOUL_GIT_REMOTE_URL` and `SOUL_GIT_CREDENTIAL`, which is what
 a scripted deployment should do.
 
+The panel above the file tree always reports where the soul stands: **Not connected** until a
+remote is set, then **Up to date**, **N ahead, M behind**, or **Sync failed** with the reason git
+gave. Below it sit the short commit the soul is on and when it last synced.
+
 <Callout type="warn">
   A backed-up soul is **not** a backup of your instance. Records, knowledge, chats, runs,
   approvals, memory, secrets, audit, and identity are all in PostgreSQL. Losing the database loses
