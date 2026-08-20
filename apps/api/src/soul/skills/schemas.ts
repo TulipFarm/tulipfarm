@@ -144,7 +144,12 @@ export const SkillAuditBodySchema = {
   type: "object",
   required: ["scanId", "name"],
   additionalProperties: false,
-  properties: { scanId: { type: "string" }, name: { type: "string" } },
+  properties: {
+    scanId: { type: "string" },
+    name: { type: "string" },
+    /** Resolves the row exactly; `name` alone picks whichever row the scan listed first. */
+    skillPath: { type: "string" },
+  },
 } as const;
 
 export const SkillAuditResponseSchema = {
@@ -155,11 +160,14 @@ export const SkillAuditResponseSchema = {
 
 export const SkillInstallBodySchema = {
   type: "object",
-  required: ["scanId", "names"],
+  required: ["scanId"],
   additionalProperties: false,
   properties: {
     scanId: { type: "string" },
+    /** Legacy selection; cannot distinguish two scanned skills that share a name. */
     names: { type: "array", items: { type: "string" }, minItems: 1 },
+    /** `skillPath` values from the scan — unique per row, so this is the preferred selection. */
+    paths: { type: "array", items: { type: "string" }, minItems: 1 },
   },
 } as const;
 

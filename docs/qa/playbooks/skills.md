@@ -102,7 +102,7 @@ keep this to exactly one skill this run can identify unambiguously.
 | 1 | On `/skills/marketplace`, `click` `Install` on the chosen row | Loads just that one skill into the pipeline: `Run SkillAudit (1)` appears |
 | 2 | `note` the exact skill name shown — this is the artifact identity for the rest of this scenario and for S5–S7's cleanup in S7 | Recorded |
 | 3 | `click` `Run SkillAudit (1)` | Button reads "Auditing…" |
-| 4 | `wait-until` settled (max 10s) | An audit report card renders: skill name, a risk pill (`low risk` / `medium risk` / `high risk`), a summary sentence, and — if present — a "tool reach:" line listing the abilities the audit attributes to the skill | Rendered |
+| 4 | `wait-until` settled (max 10s) | An audit report card renders: skill name, a risk pill (`low risk` / `medium risk` / `high risk`), a summary sentence, and — if present — a "tool reach:" line listing the abilities the audit attributes to the skill. `Run SkillAudit` gives way to `Confirm install`, so exactly one action is offered | Rendered |
 | 5 | `expect` a findings list (or "No specific findings.") — each finding shows a category and a detail sentence | Present |
 | 6 | `expect` a "Deterministic pre-scan" block: a verdict pill (`safe`/`caution`/`dangerous`), a trust-level tag (`builtin`/`trusted`/`community` source), and the text "Advisory scanner evidence is shown verbatim and never blocks the operator's choice." | Present |
 | 7 | If the deterministic scan has structural findings, `expect` each is grouped by category (`exfiltration`, `injection`, `destructive`, `obfuscation`, `network`, or `persistence`) and shows severity, a `patternId`, `file:line`, a description, and the matched text verbatim | Present |

@@ -1125,6 +1125,117 @@ spec:
       expect(installRes.json().error).toContain("more than one skill with the same name");
       expect(commits).toEqual([]);
     });
+
+    // Selecting by name loses which of two same-named rows the operator reviewed, so the whole
+    // pair became uninstallable. `paths` carries that identity from the scan to the write.
+    it("installs the one same-named row the operator selected when identified by path", async () => {
+      const remote = await makeRemoteRepo();
+      temps.push(remote);
+      const second = join(remote, "extra", "demo-skill");
+      await mkdir(second, { recursive: true });
+      await writeFile(
+        join(second, "SKILL.md"),
+        "---\nname: demo-skill\ndescription: A rival demo skill.\n---\nDo it differently.",
+        "utf8"
+      );
+      await execFileP("git", ["add", "-A"], { cwd: remote });
+      await execFileP("git", ["commit", "-q", "-m", "add duplicate name"], { cwd: remote });
+
+      const scanRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/scan",
+        cookies: auth(),
+        headers,
+        payload: { source: `file://${remote}` },
+      });
+      const { scanId, skills } = scanRes.json();
+      const rival = (skills as { skillPath: string }[]).find((skill) =>
+        skill.skillPath.startsWith("extra/")
+      )?.skillPath;
+      expect(rival).toBeDefined();
+
+      buildAudit.mockResolvedValue({
+        riskRating: "low",
+        summary: "No issue found.",
+        toolsReach: [],
+        findings: [],
+        deterministicScan: CLEAN_DETERMINISTIC_SCAN,
+      });
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/audit",
+        cookies: auth(),
+        headers,
+        payload: { scanId, name: "demo-skill", skillPath: rival },
+      });
+      // The audit resolved the selected row, not whichever the scan listed first.
+      expect(buildAudit.mock.calls[0][1]).toMatchObject({ description: "A rival demo skill." });
+
+      const installRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/install",
+        cookies: auth(),
+        headers,
+        payload: { scanId, paths: [rival] },
+      });
+
+      expect(installRes.statusCode).toBe(200);
+      const written = await readFile(join(soulPath, "skills", "demo-skill", "SKILL.md"), "utf8");
+      expect(written).toContain("Do it differently.");
+    });
+
+    it("refuses to install two selected rows that share a name, naming both paths", async () => {
+      const remote = await makeRemoteRepo();
+      temps.push(remote);
+      const second = join(remote, "extra", "demo-skill");
+      await mkdir(second, { recursive: true });
+      await writeFile(
+        join(second, "SKILL.md"),
+        "---\nname: demo-skill\ndescription: A rival demo skill.\n---\nDo it differently.",
+        "utf8"
+      );
+      await execFileP("git", ["add", "-A"], { cwd: remote });
+      await execFileP("git", ["commit", "-q", "-m", "add duplicate name"], { cwd: remote });
+
+      const scanRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/scan",
+        cookies: auth(),
+        headers,
+        payload: { source: `file://${remote}` },
+      });
+      const { scanId, skills } = scanRes.json();
+      const paths = (skills as { skillPath: string }[]).map((skill) => skill.skillPath);
+
+      buildAudit.mockResolvedValue({
+        riskRating: "low",
+        summary: "No issue found.",
+        toolsReach: [],
+        findings: [],
+        deterministicScan: CLEAN_DETERMINISTIC_SCAN,
+      });
+      for (const skillPath of paths) {
+        await app.inject({
+          method: "POST",
+          url: "/api/v1/skills/audit",
+          cookies: auth(),
+          headers,
+          payload: { scanId, name: "demo-skill", skillPath },
+        });
+      }
+
+      const installRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/install",
+        cookies: auth(),
+        headers,
+        payload: { scanId, paths },
+      });
+
+      expect(installRes.statusCode).toBe(400);
+      for (const skillPath of paths) expect(installRes.json().error).toContain(skillPath);
+      expect(commits).toEqual([]);
+    });
   });
 
   describe("DELETE /api/v1/skills/:name", () => {
