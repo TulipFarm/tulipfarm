@@ -9,11 +9,15 @@ function newId(): string {
 }
 
 // Map a persisted assistant `content` (string or parts) to renderable timeline parts.
+// A reply that only ran Tools or only asked a question persists with empty text — the Message
+// exists to carry `metadata.toolCalls` and its Surface link. Emitting a text part for it would
+// restore a blank paragraph above the run that was never there live.
 function assistantParts(content: string | WireMessagePart[]): TimelinePart[] {
-  if (typeof content === "string") return [{ kind: "text", text: content }];
+  if (typeof content === "string") return content ? [{ kind: "text", text: content }] : [];
   const parts: TimelinePart[] = [];
   for (const part of content) {
     if (part.type === "text") {
+      if (!part.text) continue;
       parts.push({ kind: "text", text: part.text });
     } else if (part.type === "tool-call") {
       parts.push({
@@ -199,6 +203,11 @@ export function messagesToTimeline(
         id: newId(),
         serverId: doc._id,
         role: "assistant",
+        // Tools first, then text: a persisted reply stores its text as one string and its calls as
+        // a flat `metadata.toolCalls` with no positions, so where the text sat between the calls is
+        // not on the wire. A restored transcript therefore groups the whole run as one block even
+        // when the live one split it around a preamble. Accepted — restoring the interleaving means
+        // persisting ordered parts instead of a string, which the LLM history rebuild also reads.
         parts: [...toolPartsFromMetadata(doc.metadata), ...assistantParts(doc.content)],
         sealed: true,
         feedback: votes?.get(doc._id),

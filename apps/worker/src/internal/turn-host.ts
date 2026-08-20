@@ -192,6 +192,7 @@ export class HttpTurnHost
       status: TurnCompletionStatus;
       cursor: number;
       messageId: string | null;
+      surfaces?: readonly { artifactId: string; revision: number }[];
     }
   ): Promise<void> {
     await this.client.require("POST", turnPath(input.runId, "/completion"), {
@@ -199,6 +200,7 @@ export class HttpTurnHost
       status: input.status,
       cursor: input.cursor,
       messageId: input.messageId,
+      ...(input.surfaces?.length ? { surfaces: input.surfaces } : {}),
     });
   }
 }

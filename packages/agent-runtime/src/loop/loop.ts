@@ -131,6 +131,17 @@ export class AgentLoop {
 
     let textIndex = recovered?.textIndex ?? 0;
 
+    /**
+     * Model text already shown to the participant. An asking Turn has no `completed` output to
+     * persist, yet the reader has read this prose above the question; dropping it would leave a
+     * refreshed transcript showing the question with nothing explaining it.
+     */
+    let streamedText = "";
+
+    /** Both dispatch paths can reach the question, and both end the Turn the same way. */
+    const askedForInput = (callId: string) =>
+      finish({ status: "input_required", callId, text: streamedText, ...counters }, "completed");
+
     /** Streams text deltas; missing `completed` is a model-adapter contract failure. */
     const callModel = async (request: ModelInvocationRequest): Promise<ModelInvocationResult> => {
       const stream = this.deps.model.stream?.(request);
@@ -143,6 +154,7 @@ export class AgentLoop {
           continue;
         }
         if (chunk.text.length === 0) continue;
+        streamedText += chunk.text;
         textIndex += 1;
         try {
           await emit("text_delta", { text: chunk.text, textIndex });
@@ -296,12 +308,7 @@ export class AgentLoop {
             approval = { approvalId: outcome.approvalId, call: outcome.call };
             break;
           }
-          if (outcome.kind === "input_required") {
-            return finish(
-              { status: "input_required", callId: outcome.call.callId, ...counters },
-              "completed"
-            );
-          }
+          if (outcome.kind === "input_required") return askedForInput(outcome.call.callId);
           index += 1;
           continue;
         }
@@ -383,12 +390,7 @@ export class AgentLoop {
         if (decision?.kind === "fail") {
           return finish({ status: "failed", reason: decision.reason, ...counters }, "failed");
         }
-        if (decision?.kind === "input_required") {
-          return finish(
-            { status: "input_required", callId: decision.call.callId, ...counters },
-            "completed"
-          );
-        }
+        if (decision?.kind === "input_required") return askedForInput(decision.call.callId);
         if (decision !== undefined) {
           approval = { approvalId: decision.approvalId, call: decision.call };
           break;

@@ -28,19 +28,34 @@ export interface TurnCompletionStore {
       metadata?: { toolCalls?: readonly ParticipantToolCall[] };
     }
   ): Promise<{ messageId: string }>;
+  /**
+   * Records the outcome, and links any Surfaces the attempt presented.
+   *
+   * The Surfaces ride with completion rather than on a call of their own so that the link and the
+   * outcome land together: the Artifact is already durable, but the fact that *this* Conversation
+   * was shown it is not, and a crash between two writes would either lose the cards or duplicate
+   * them on redelivery.
+   */
   completeTurn(
     input: TurnCompletionRef & {
       status: TurnCompletionStatus;
       cursor: number;
       messageId: string | null;
+      conversationId?: string;
+      surfaces?: readonly TurnSurfaceLink[];
     }
   ): Promise<void>;
+}
+
+export interface TurnSurfaceLink {
+  readonly artifactId: string;
+  readonly revision: number;
 }
 
 export type TurnOutcome =
   | { readonly status: "succeeded"; readonly text: string }
   | { readonly status: "failed"; readonly reason: string }
-  | { readonly status: "input_required" }
+  | { readonly status: "input_required"; readonly text: string }
   | { readonly status: "waiting"; readonly waitId: string };
 
 export interface CompleteTurnInput {
@@ -53,6 +68,8 @@ export interface CompleteTurnInput {
   readonly cursor: number;
   readonly outcome: TurnOutcome;
   readonly metadata?: { readonly toolCalls?: readonly ParticipantToolCall[] };
+  /** Surfaces this Turn presented, linked into the transcript so a refresh can restore them. */
+  readonly surfaces?: readonly TurnSurfaceLink[];
   /** Highest attempt the Turn has; a lower attempt arriving late is stale. */
   readonly latestAttempt?: number;
 }
@@ -110,28 +127,38 @@ export class ConversationTurnCompleter {
       return { status: "failed", reason: input.outcome.reason };
     }
 
-    if (input.outcome.status === "input_required") {
-      await this.options.store.completeTurn({
-        ...ref,
-        status: "succeeded",
-        cursor: input.cursor,
-        messageId: null,
-      });
-      return { status: "succeeded", messageId: null };
-    }
-
-    const { messageId } = await this.options.store.appendAssistantMessage({
-      ...ref,
-      conversationId: input.conversationId,
-      content: input.outcome.text,
-      ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
-    });
+    // A Turn that stops to ask is not a Turn that said nothing: it has run Tools, written prose and
+    // rendered a question, all of which the reader is looking at. Completing it without a Message
+    // left every one of those on the wire only, so a refresh emptied the reply and stranded the
+    // question the Turn is waiting on.
+    const messageId = await this.persistReply(ref, input, input.outcome.text);
     await this.options.store.completeTurn({
       ...ref,
       status: "succeeded",
       cursor: input.cursor,
       messageId,
+      conversationId: input.conversationId,
+      surfaces: input.surfaces ?? [],
     });
     return { status: "succeeded", messageId };
+  }
+
+  /** Writes the reply the reader watched arrive; returns the Message it produced, if any. */
+  private async persistReply(
+    ref: TurnCompletionRef,
+    input: CompleteTurnInput,
+    text: string
+  ): Promise<string | null> {
+    // An empty reply with nothing to report is no reply; writing it would put a blank turn in the
+    // transcript. A reply that ran Tools is never empty, even when the model wrote no prose.
+    if (text.length === 0 && (input.metadata?.toolCalls ?? []).length === 0) return null;
+
+    const { messageId } = await this.options.store.appendAssistantMessage({
+      ...ref,
+      conversationId: input.conversationId,
+      content: text,
+      ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
+    });
+    return messageId;
   }
 }

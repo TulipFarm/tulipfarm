@@ -46,3 +46,10 @@ Run event emission, Tool-call announcement or preview, or the ports a Turn host 
   extracted text are **block-only** — a redaction cannot be applied to bytes already on their way to
   the model, and rewriting a name would change which File the part refers to. `read` keeps a
   bytes-only shape on purpose, so the same object still satisfies `LoopAttachmentPort`.
+- **A Turn that stops to ask still persists a Message.** `input_required` once completed with
+  `messageId: null`, so the prose, the Tool steps and the question the reader was looking at
+  survived only on the wire — a reload emptied the reply. `ConversationTurnCompleter.persistReply`
+  now runs on the settled *and* the input-required path.
+- **The Turn is the seam that links a Surface to a Conversation, not the Tool.** A Surface can go
+  to Slack, Telegram or a Routine, so `packages/tool-host` has no message repo and must not gain
+  one. `TurnCompletionStore.appendSurfaceMessage` writes the `tool`-role link row instead.

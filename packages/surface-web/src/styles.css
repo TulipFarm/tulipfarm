@@ -57,9 +57,7 @@
   background: var(--card);
 }
 
-[data-surface-panel][data-surface-kind="section"],
-[data-surface-choices],
-[data-surface-form] {
+[data-surface-panel][data-surface-kind="section"] {
   border-left: 2px solid var(--primary);
 }
 
@@ -728,7 +726,15 @@ ol[data-surface-list] li::before {
   min-height: 2.75rem;
   padding: 0.625rem 0.75rem;
   text-align: left;
+  /* These options are the card's only actions. Muted text made them read as disabled placeholders
+   * next to the recommendation card's filled CTA. */
+  color: var(--foreground);
+  font-weight: 500;
   background: var(--background);
+}
+
+[data-surface-choice-list] [data-surface-button]:hover:not(:disabled) {
+  background: var(--muted);
 }
 
 [data-surface-choice-list] [data-surface-button][aria-pressed="true"] {
@@ -746,11 +752,29 @@ ol[data-surface-list] li::before {
   text-transform: uppercase;
 }
 
+[data-surface-form-header] {
+  padding: 0.875rem 1rem 0;
+}
+
+[data-surface-form-header] h3 {
+  margin: 0;
+  color: var(--foreground);
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+/*
+ * One column. A Chat transcript is a single narrow column, so two field columns left roughly 18rem
+ * per field — enough to wrap a question onto three lines and put its answer at a different height
+ * from its neighbour's. A form the reader fills top to bottom also has one reading order, and a
+ * two-column grid is the one layout that hides it.
+ */
 [data-surface-form-fields] {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.875rem;
-  padding: 1rem;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+  padding: 0.875rem 1rem;
 }
 
 [data-surface-field] {
@@ -759,21 +783,29 @@ ol[data-surface-list] li::before {
   min-width: 0;
 }
 
-[data-surface-field] > span,
-[data-surface-checkbox] > span {
+/*
+ * Every field label, whatever element carries it. `legend` was the bug worth naming: it takes a
+ * browser default size, so one question rendered at twice the weight of the field beside it purely
+ * because it happened to be a radio group.
+ */
+[data-surface-field-label] {
+  display: block;
+  padding: 0;
   color: var(--foreground);
   font-size: 0.75rem;
   font-weight: 600;
   line-height: 1.4;
 }
 
+/* Uppercase-tracked "REQUIRED" beside most labels was the loudest thing on the form and repeated
+   down it, which is the chrome the recommendation card dropped. A required field announces itself
+   when it is left blank; until then this only has to be legible. */
 [data-surface-required] {
-  margin-left: 0.5rem;
+  margin-left: 0.375rem;
   color: var(--muted-foreground);
-  font-size: 0.625rem;
-  font-weight: 500;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-size: 0.6875rem;
+  font-weight: 400;
+  opacity: 0.75;
 }
 
 [data-surface-field] input,
@@ -803,22 +835,72 @@ ol[data-surface-list] li::before {
   outline-offset: 0;
 }
 
-[data-surface-checkbox] {
-  display: flex;
-  grid-column: 1 / -1;
-  align-items: flex-start;
-  gap: 0.625rem;
-  padding: 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm, 0.25rem);
-  background: color-mix(in oklab, var(--muted) 35%, transparent);
+/*
+ * A radio group had no rules at all, which is why its options rendered as one run-together line.
+ * Each option is a row with its own hit area: the label is part of the target, not a caption
+ * beside it.
+ */
+[data-surface-radio-group] {
+  display: grid;
+  gap: 0.375rem;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
 }
 
+[data-surface-radio] {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.5rem;
+  border-radius: var(--radius-sm, 0.25rem);
+  color: var(--foreground);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  cursor: pointer;
+  transition: background-color 100ms ease;
+}
+
+[data-surface-radio]:hover {
+  background: color-mix(in oklab, var(--muted) 55%, transparent);
+}
+
+[data-surface-radio] input,
 [data-surface-checkbox] input {
-  width: 1rem;
-  height: 1rem;
-  margin: 0.125rem 0 0;
+  width: 0.875rem;
+  height: 0.875rem;
+  flex-shrink: 0;
+  margin: 0;
   accent-color: var(--primary);
+}
+
+[data-surface-radio]:has(input:focus-visible),
+[data-surface-checkbox]:has(input:focus-visible) {
+  outline: 2px solid color-mix(in oklab, var(--ring) 45%, transparent);
+  outline-offset: 1px;
+}
+
+/* No box. A checkbox inside a boxed form would be a second border for one line of text. */
+[data-surface-checkbox] {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.5rem;
+  border-radius: var(--radius-sm, 0.25rem);
+  cursor: pointer;
+  transition: background-color 100ms ease;
+}
+
+[data-surface-checkbox]:hover {
+  background: color-mix(in oklab, var(--muted) 55%, transparent);
+}
+
+/* A checkbox's text is the option itself, so it reads like one — not like a field heading. */
+[data-surface-checkbox] > span {
+  color: var(--foreground);
+  font-size: 0.8125rem;
+  line-height: 1.45;
 }
 
 [data-surface-form-footer] {
@@ -965,8 +1047,7 @@ ol[data-surface-list] li::before {
     white-space: normal;
   }
 
-  [data-surface-record-detail],
-  [data-surface-form-fields] {
+  [data-surface-record-detail] {
     grid-template-columns: 1fr;
   }
 
@@ -995,5 +1076,234 @@ ol[data-surface-list] li::before {
   [data-surface-chart],
   [data-surface-force-graph] {
     min-width: 32rem;
+  }
+}
+
+/* ── Recommendation card ────────────────────────────────────────────────────
+ * A Choices artifact that names a recommendation leads with it in prose, states how sure the
+ * agent is, and files the rest behind a drawer. Without a recommendation the same card falls back
+ * to the equal-weight option list above.
+ */
+
+[data-surface-choices][data-surface-recommend] [data-surface-choices-header] {
+  min-height: 0;
+  border-bottom: 0;
+  padding-bottom: 0;
+  background: transparent;
+}
+
+[data-surface-choices-body] {
+  padding: 0.375rem 1rem 0.875rem;
+}
+
+[data-surface-choices-detail] {
+  margin: 0;
+  /* Promoting an alternative swaps this text in place. Without a floor the card resizes under the
+   * pointer and the button the reader was aiming at moves. */
+  min-height: 2.8rem;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+  line-height: 1.6;
+  animation: surface-choice-fade 180ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-surface-choices-detail] {
+    animation: none;
+  }
+}
+
+@keyframes surface-choice-fade {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+}
+
+/* Inline code inside agent-authored prose. */
+[data-surface-code] {
+  padding: 0.0625rem 0.3125rem;
+  border-radius: var(--radius-sm, 0.25rem);
+  color: var(--foreground);
+  background: var(--code-surface);
+  box-shadow: inset 0 0 0 1px var(--code-border);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.8125em;
+  white-space: nowrap;
+}
+
+/* ── Signal meter ── */
+[data-surface-signal] {
+  display: inline-flex;
+  flex: none;
+  align-items: flex-end;
+  gap: 0.09375rem;
+}
+
+[data-surface-signal-bar] {
+  width: 0.1875rem;
+  height: 0.625rem;
+  border-radius: 999px;
+  background: var(--signal-empty);
+  transition: background-color 200ms ease;
+}
+
+[data-surface-signal][data-confidence="high"] [data-surface-signal-bar][data-filled="true"] {
+  background: var(--signal-high);
+}
+
+[data-surface-signal][data-confidence="medium"] [data-surface-signal-bar][data-filled="true"] {
+  background: var(--signal-medium);
+}
+
+[data-surface-signal][data-confidence="low"] [data-surface-signal-bar][data-filled="true"] {
+  background: var(--signal-low);
+}
+
+/* ── Alternatives drawer ── */
+[data-surface-choices-drawer] {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 260ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 200ms ease;
+}
+
+[data-surface-choices-drawer][data-open="true"] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-surface-choices-drawer] {
+    transition: none;
+  }
+}
+
+[data-surface-choices-drawer-clip] {
+  overflow: hidden;
+}
+
+[data-surface-choices-drawer-body] {
+  padding: 0.5rem;
+  border-top: 1px solid var(--border);
+  background: color-mix(in oklab, var(--muted) 38%, var(--card));
+}
+
+[data-surface-choices-drawer-title] {
+  margin: 0;
+  padding: 0 0.375rem 0.25rem;
+  color: var(--muted-foreground);
+  font-size: 0.6875rem;
+  font-weight: 500;
+}
+
+[data-surface-choices-alternative] {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  width: 100%;
+  padding: 0.375rem;
+  border: 0;
+  border-radius: var(--radius-sm, 0.25rem);
+  color: var(--foreground);
+  background: transparent;
+  font: inherit;
+  font-size: 0.8125rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 100ms ease;
+}
+
+[data-surface-choices-alternative]:hover:not(:disabled) {
+  background: var(--accent);
+}
+
+[data-surface-choices-alternative]:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
+[data-surface-choices-alternative]:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+[data-surface-choices-alternative-label] {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-surface-choices-alternative-meta] {
+  flex: none;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+/* ── Footer ── */
+[data-surface-choices-footer] {
+  display: flex;
+  align-items: center;
+  /* The controls are fixed-size and must never be squeezed or overlapped, so when the confidence
+   * caption and the actions stop fitting on one line the actions drop to their own row. Truncating
+   * the caption instead would hide the one word that says how much to trust the recommendation. */
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem 0.75rem;
+  padding: 0.625rem 0.75rem;
+  border-top: 1px solid var(--border);
+  background: color-mix(in oklab, var(--muted) 38%, var(--card));
+}
+
+[data-surface-choices-confidence] {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  /* Claims the row so the controls wrap below rather than crowding the caption. */
+  flex: 1 1 auto;
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  /* Two words on two lines reads as a heading, not as a footnote to the meter beside it. */
+  white-space: nowrap;
+}
+
+[data-surface-choices-controls] {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+[data-surface-choices-controls] [data-surface-button] {
+  justify-content: center;
+  min-height: 2rem;
+  padding: 0.3125rem 0.75rem;
+}
+
+/* An accepted action reports what happened; it is not an invitation to press again. */
+[data-surface-button][data-state="accepted"],
+[data-surface-button][data-state="accepted"]:disabled {
+  border-color: var(--signal-high);
+  color: var(--primary-foreground);
+  background: var(--signal-high);
+  opacity: 1;
+}
+
+[data-surface-button][data-state="accepted"] [data-surface-button-state] {
+  display: none;
+}
+
+@media (max-width: 30rem) {
+  [data-surface-choices-controls] {
+    flex: 1;
+  }
+
+  [data-surface-choices-controls] [data-surface-button] {
+    flex: 1;
   }
 }

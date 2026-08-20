@@ -5,7 +5,6 @@
     "apps/api/src/chat/compaction.ts#compactHistory",
     "apps/api/src/chat/messages.ts#fromAssistantParts",
     "apps/api/src/chat/messages.ts#fromAssistantText",
-    "apps/api/src/chat/messages.ts#fromToolResult",
     "apps/api/src/chat/messages.ts#fromUserText",
     "apps/api/src/chat/messages.ts#toModelMessage",
     "apps/api/src/chat/turn-helpers.ts#parseLastEventId",

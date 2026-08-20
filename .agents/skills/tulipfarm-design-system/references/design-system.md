@@ -169,6 +169,17 @@ Agent identity does not get a parallel color scale. Continue to use `--glyph-hue
 External *product* identity is different again: it is not ours to tokenize, so it follows §3.1 and
 lives only in `IntegrationIcon`.
 
+### 5.5 Diff vocabulary
+
+A change to a file gets its own closed pair: `--diff-added` and `--diff-removed`, with
+`--diff-added-surface` and `--diff-removed-surface` for the line tints behind them. They own diff
+lines, `+N`/`−N` counts, and file chips.
+
+They exist because **deleting a line is not an error**. Reaching for `--run-ok` and `--run-error`
+puts a failure tone on a perfectly successful edit, and reuses a state scale for an authorship
+fact. Green and red here mean added and removed, nothing else. Never carry them into run state,
+content status, or priority.
+
 ## 6. Component Hierarchy
 
 1. **Foundations:** tokens, type, spacing, radius, motion, elevation, icons, breakpoints.
@@ -197,6 +208,20 @@ safer. Keep domain fetching and mutations out of primitives.
 - **Page:** top bar, optional description/actions, then one `full`, `wide`, `reading`, or `form`
   content width.
 - **List/detail:** stable list controls, semantic table/list, empty/loading/error feedback, deep link.
+- **Waiting:** `LoadingState` owns any wait whose length the UI cannot predict — a Chat Turn
+  before its first token, a Run before its first event. Its loop is earned the same way the run
+  rail's is: it reports that something is genuinely in flight, and the mono `tabular-nums` timer
+  beside it keeps that claim honest. Draw the pattern and the word once on mount rather than
+  cycling them, since a label that changes under the reader implies progress the component cannot
+  see. Reach for an inline spinner only inside a control that is itself busy, such as a submitting
+  button.
+- **Waiting copy:** the drawn words are closed, one or two words, present participle, and all
+  describe growth — `Sprouting`, `Budding`, `Unfurling`, `Greening`, `Taking root`, `Perking up`,
+  `Rising`, `Coming up`. A wait should read as something coming up, never as an apology for its own
+  length; `Still going` tells the reader to start counting. `Blooming`, `Planting` and `Harvesting`
+  are excluded because `app/lib/farm.ts` spends all three on real artifact state, and a loader
+  borrowing one would look like it was reporting one. Pass an explicit `label` wherever the copy has
+  to name the specific work.
 - **Form:** visible labels, persistent help, field-local errors, footer actions, first-error focus.
 - **Multi-step setup:** each step carries a label and a sentence saying why it is being asked. On
   desktop show the whole step list so the shape of the flow stays visible; below `lg` fall back to
@@ -219,23 +244,126 @@ safer. Keep domain fetching and mutations out of primitives.
   the answer. When Auto answered, name the rung it resolved to (`Auto → Balanced`); reporting only
   "Auto" hides the choice made on the participant's behalf, and reporting only the rung hides that
   they never picked it. Cost is operator evidence and stays off this row.
-- **Chat Tool row:** collapsed rows show Tool identity, tier, mutating marker when present, current
-  or final run state, and duration when known. Expanded rows reveal labelled Input and Output panes;
-  never show two unlabelled raw dumps. The state tone comes from `run-*`, the glyph chip comes from
-  `tool-tier-*`, and deliberate withholding uses `code-redacted`.
-- **Chat Tool run (trace block, not a card stack):** consecutive Tool rows are always drawn as **one**
-  bordered container with `divide-y` separators, never as a column of individually bordered cards.
-  Repeating a card border per call is the single most common way this surface goes wrong: it costs a
-  border, a radius, and a gap per call, and turns a nine-lookup turn into a wall of identical boxes.
-  One block reads as one trace.
-  - Status **leads** the row, so a reader scans a column of outcomes rather than hunting a trailing
+- **Chat Tool step:** a step shows Tool identity, current or final run state, and — when the Tool can
+  write — a labelled mutating marker on its face, because write capability is a standing property of
+  the Tool and must not hide behind a disclosure. Expanding a step reveals its one-line facts (error
+  code, result hint, duration) and then labelled Input and Output panes; never show two unlabelled
+  raw dumps. The state tone comes from `run-*` and deliberate withholding uses `code-redacted`.
+- **Trace (the one presentation a run of work gets):** a `Trace` discloses what a Turn did on its way
+  to an answer — reasoning, lookups, the steps it took. It is chrome-free narration on a rail,
+  written to be ignorable, and it stays that way after the work seals. Do not hand a settled run
+  back to a bordered block: the box costs a border, a radius and a slab of chrome above the answer
+  the reader actually asked for, and it buys nothing the rail does not already carry. Build one, not
+  a second thing that overlaps it.
+  - **There is no second presentation, not even for a decision.** An approval is an ask, not
+    narration, so it does not hide — it sits *between* the steps, never behind one, and pins its
+    run open. A question the reader has to click to find is a question they will miss.
+  - **An ask earns weight from contrast, not from chrome.** The approval is a step on the rail: no
+    border, no fill, no radius. In a surface where nothing else is filled, one filled button is
+    already the loudest thing on screen, and a `font-medium` label is enough to separate the one
+    line that asks from the many that narrate. Reach for a box only when contrast has run out. It
+    has not.
+  - **A decided ask stops being an ask.** Once approved, denied or expired it collapses to a single
+    settled line, no heavier than the steps either side. Leaving spent controls or an alarmed
+    treatment behind trains the reader to ignore the next real one. Denial is a decision, not a
+    fault: tone it `run-blocked`, never `run-error`.
+  - **The rail is the whole vocabulary for narration.** Plans, single tasks, cited sources, agent
+    handoffs and guardrail refusals are all one system: a glyph, a line of text, no border, no fill,
+    no radius. Sources are rows, not a grid of cards — a citation is a footnote, and a footnote that
+    outweighs the sentence is a design error. A refusal is the sharpest case: boxing it would make it
+    outrank the approval ask, which is the most important interruption in the product and wears no
+    box at all. So a guardrail earns its weight from tone (`run-blocked`) and a `font-medium`
+    "Blocked", nothing more.
+  - **Only a verbatim payload may take a border**, and only inside a disclosure the reader opened on
+    purpose — that block is evidence, not narration, and its box says "this is quoted, not written".
+    Everything the transcript says in its own voice stays chrome-free.
+- **Decisions (the `Choices` Surface):** one mutually exclusive question, and the card takes one of
+  two shapes chosen by the data, never by taste.
+  - **Leading with one option *is* making a recommendation.** So the card leads only when the agent
+    set `recommend`. Then it puts that option's `detail` in prose, draws a three-bar signal meter
+    for its `confidence`, files every other option behind an `Alternatives` drawer, and labels the
+    primary action with the choice's own label — so the reader can accept without reading past the
+    first line. With no `recommend`, the same card lists every option at equal weight, with no
+    drawer and no meter. Never synthesise a lead out of `choices[0]`: a surface must not make a
+    recommendation the agent did not make.
+  - **Confidence is its own token axis (`--signal-high|medium|low|empty`).** It is not `run-*`,
+    because the run has not happened — reusing `run-ok` would claim the option already succeeded,
+    which is exactly what it has not done. It is not `status-*` either, because that describes a
+    Record's state, not the agent's certainty. The meter always draws three bars so it shows its
+    own denominator; `--signal-empty` is the unfilled one.
+  - **The choice's own label is the button.** There is no separate CTA field, so the label has to
+    read as the action it takes — "Reorder from cone_king", never the bare identifier "cone_king".
+    A button labelled with a noun leaves the reader guessing what pressing it does.
+  - **An unstated confidence is not a low one.** Say "No signal" rather than showing three empty
+    bars: an unlabelled empty meter reads as a score of zero, which is a claim nobody made.
+  - **Promotion moves the commit.** Picking an alternative makes it the lead *and* what the primary
+    action submits. A card that offers one option and submits another is a trap, not a shortcut.
+  - **The drawer is `inert` while closed.** It animates its height, so it stays in the box tree —
+    without `inert` its buttons stay in the tab order and a keyboard reader walks into options the
+    card is not showing.
+  - **Agent prose renders backticks as inline code, and nothing else.** `inlineMarkup` splits on the
+    backtick; it is not a markup parser, and an unpaired backtick stays literal. Rendering
+    agent-authored markup is how a Surface becomes an injection surface.
+  - **Folding away is not hiding.** A settled step opens onto the verbatim Input and Output panes
+    and the metadata strip — everything, unabridged. The rail changes the chrome, not the evidence.
+    A surface that narrates less than it records forces the reader to wait for a seal to learn what
+    happened.
+  - **Disclosure follows the work, until the reader touches it.** The Trace opens itself while work
+    is in flight, the live step stays expanded with its detail, finished steps drop back to one
+    line, and when the last step lands the whole Trace folds to its header. The instant the reader
+    toggles anything, that choice is pinned and the policy stops steering it — a panel that reopens
+    under someone who closed it is worse than one that never opened.
+  - **A live Trace always shows a live edge.** If nothing named is in flight, the last row is an
+    unnamed running step (`Thinking`) rather than a column of finished ticks. Without it the reader
+    watches a static list while work is still happening, and the next result snaps in already
+    ticked — the trace looks finished several times before it is. Drop the edge, and fold the whole
+    Trace, the moment anything follows the work it describes.
+  - **The unit of work is the Turn, not the step.** Whether a run reads as live is a question about
+    the Turn: it is live while it is the last thing in the message and nothing has followed it. Do
+    not gate that on a step being mid-flight. A platform Tool returns in ~20ms — shorter than one
+    frame, and the reducer applies its call and its result in the same batch, so `running` often
+    never paints. Between steps the model round-trip takes *seconds* during which every step is
+    done. Gate on the step and the reader watches a finished-looking column while the work is
+    visibly still going.
+  - **A Tool that draws the answer is not a step.** Presentation Tools — the ones whose whole job is
+    to render what the reader is already looking at — never appear in the trace, in any outcome.
+    Naming them tells the reader a tool was called to do the one thing they can plainly see being
+    done, and a failure among them is a rendering fault, not work they can act on. While one is in
+    flight, show a `LoadingState` instead: something is being drawn, and it is not a step in the
+    reader's errand.
+  - **A failed step holds itself open, but its run may still fold.** Inside an open trace an `error`
+    step expands onto its evidence without being asked. The run around it is allowed to collapse —
+    provided the header says so. Fold a failure under a silent summary and the surface lies.
+  - **Every label ships as a tense pair.** House style says a step names its object in the past
+    tense (`Read the Ticket resource type`), but that sentence beside a spinner claims to be
+    finished. `Trace` takes `activeLabel`/`settledLabel` and `TraceStep` takes `activeLabel`/`label`
+    for exactly this: present participle while running, past tense once done.
+  - **No artificial stagger.** Reference implementations delay row *i* by `i × 120ms` because their
+    data is fake and arrives all at once. Ours arrives when the work actually happens, so each row
+    animates on its own mount and the timing carries real information.
+  - Elapsed time is authoritative when the wire supplies a duration; otherwise the Trace times its
+    own working window and **stays silent until it has measured something**, so a restored
+    conversation never claims a confident `0.0s`. The ticker is `aria-hidden` and stays out of the
+    live region (§13).
+  - Compose it — `Trace` + `TraceStep`/`TraceNote`/`TraceQuery`/`TraceSource` — rather than adding a
+    `variant` enum. Thinking, reasoning, search, and tool traces differ only in which children they
+    hold.
+- **Chip:** a chip carries the *object* a step acted on, never the step itself. The verb stays
+  readable in the label while the identifier truncates inside the chip. A `DiffChip` adds what
+  changed and previews it on hover **and on keyboard focus**; a `+N more` control must actually
+  reveal N things, never decorate a count.
+- **Chat Tool run (one trace, not a card stack):** consecutive Tool calls are always drawn as **one**
+  Trace, never as a column of individually bordered cards. Repeating a card border per call is the
+  single most common way this surface goes wrong: it costs a border, a radius, and a gap per call,
+  and turns a nine-lookup turn into a wall of identical boxes. One run reads as one trace.
+  - Status **leads** the step, so a reader scans a column of outcomes rather than hunting a trailing
     glyph at a ragged x-position.
-  - The row is a single line: status, tier glyph, human summary, Tool name in mono, then a right
-    aligned `tabular-nums` group carrying the result hint and duration.
-  - Carry one fact from the output on the collapsed row (`4 documents`, `2 assertions`) so the
+  - The step is a single line: status, human summary, Tool name in a mono chip, then the mutating
+    marker when the Tool can write.
+  - Carry one fact from the output on the collapsed step (`4 documents`, `2 assertions`) so the
     reader learns something without opening every call. Derive it from the payload or say nothing;
     never estimate a count.
-  - Every row summary is **past tense and names its object**: `Listed agents`, `Read github pull
+  - Every step summary is **past tense and names its object**: `Listed agents`, `Read github pull
     request`, `Created space Ops`. Two failure modes to write against, both of which shipped once:
     a bare verb (`Listed`) makes two different calls in a run indistinguishable, and an imperative
     (`List resource types`) sits wrong next to the past-tense rows around it. Tool names lead with
@@ -243,14 +371,28 @@ safer. Keep domain fetching and mutations out of primitives.
     other half of the name supplies the object.
   - The disclosure chevron stays dimmed until row hover. An always-dark chevron per row reads as
     chrome noise at list length.
-  - A long settled run folds to one `Ran N tools` line naming its members. A run containing a
-    failure, a live call, or a pending approval never folds.
+  - A long settled run folds to one `Ran N tools` line naming its members. A run that is still live,
+    or holding an approval, never folds — an ask hidden behind a click strands the reader on a
+    decision they cannot see. Below three steps nothing folds either, because collapsing two costs
+    a click and saves nothing.
+  - **A summary may hide a failure only if it counts it.** A folded run that failed reads
+    `Ran 4 tools · 1 failed` and swaps its header glyph for the error tone. The count is the entire
+    licence to fold: a green `Ran 4 tools` sitting over a failure is a lie, and the reader who
+    never expands it never learns otherwise. This is the general rule for every collapsed summary
+    in the system — a fold may cost the reader a click, never a fact.
+  - **Put the tone on the glyph, not inside the sentence.** Tinting one clause of a label means
+    splitting it into two nodes, and accessible-name computation trims each child before joining
+    them: `Ran 4 tools` + ` · 1 failed` is announced as `Ran 4 tools· 1 failed`. Keep the summary
+    one string and carry the severity in the icon beside it.
 - **Chat step timeline:** use a vertical rail to connect ordered execution steps. The rail reports
   real execution state, not decoration. While a Tool call is running, `.run-rail-active` may show an
   indeterminate sweep; under `prefers-reduced-motion: reduce`, it collapses to a static tinted rail.
   Motion in this system is permitted only when it reports real state. The onboarding tulip's growth
   (`TulipGrowth`, `/setup`) passes this same test — each stage is answered-input count, not
-  ornament — so treat it as precedent, not an exception, when judging future progress motion.
+  ornament — so treat it as precedent, not an exception, when judging future progress motion. The
+  `LoadingState` pixel grid is the third member of that set: it loops only while work is in flight,
+  and under reduced motion both the grid and the shimmering word freeze to a legible static state
+  while the elapsed timer keeps ticking, because a timer is text rather than movement.
 - **Chat inspect pane:** separate Tool Input from Tool Output with explicit labels, independent
   borders, and JSON/code coloring from `code-*` tokens. Preserve order, whitespace where it matters,
   redaction markers, empty states, error states, and long-value wrapping without horizontal page
@@ -315,7 +457,9 @@ safer. Keep domain fetching and mutations out of primitives.
 
 The authenticated route exists only in development. Link it from Settings in development; return
 the normal not-found state in production. It must render real shared components and cover tokens,
-type, spacing, radii, icons, status, priority, primitive variants, feedback states, composition,
+type, spacing, radii, icons, status, priority, primitive variants, feedback states, waiting states
+(every loader variant plus the as-mounted draw), traces (a replayable live-work demo, not a static
+snapshot, since the disclosure policy is only visible in motion) and tool/diff chips, composition,
 the Chat composer and transcript (effort control, receipt, Try harder, Tool row, timeline, inspect
 pane), shell dimensions, keyboard focus, and both themes. Update it in the same change as a public
 component contract.
@@ -324,12 +468,23 @@ component contract.
 
 | Layer | Components |
 | --- | --- |
-| UI | Button, Badge, Input, Textarea, Select, Checkbox, Tooltip, Separator, Modal, Sheet |
+| UI | Button, Badge, Input, Textarea, Select, Checkbox, Tooltip, Separator, Modal, Sheet, LoadingState, Trace, ToolChip, DiffChip |
 | Shell | AppShell, AppSidebar, and the `modeForPath`/`titleForPath`/`iconForPath` helpers, all in `components/app-sidebar.tsx` |
 | Feedback | StatusBadge, PriorityBadge, LoadingState, EmptyState, ErrorState |
 | Data/forms | Panel, Field, SchemaTable, ResourceForm, LinkCombobox |
 | Rich content | MarkdownView, SurfaceArtifact, Chat transcript/composer, Chat Tool row/timeline/inspect pane, Knowledge editor |
 | Identity | AgentGlyph (derived from name/domain/autonomy), IntegrationIcon (external brand mark, see §3.1) |
+
+The waiting vocabulary is closed as well. `LoadingState` exports `LOADER_VARIANTS` (`drive`, `dots`,
+`orbit`, `rain`) and `LOADER_LABELS`; both are the whole set. Add a variant only with a pattern that
+reads differently at 3x3, and a word only if it passes the growth and Farm-collision rules in §7.
+
+The trace vocabulary is closed too. `trace.tsx` exports `TRACE_STATUSES` (`pending`, `running`,
+`done`, `error`) and `tool-chip.tsx` exports `DIFF_TONES` (`add`, `remove`, `context`); both are the
+whole set. `Trace` is a `ui/` primitive and must stay one: it re-declares its own status union and
+formats its own elapsed time rather than importing from `lib/chat` or `components/chat`, so the
+primitive layer never depends on the chat layer. The unions are structurally identical, so a
+`StepStatus` from the wire is assignable without a cast.
 
 The rail, context panel, breadcrumb, and account chip are internal to `app-sidebar.tsx` rather than
 exported primitives. Promote one into `components/ui` only when a second surface needs it, and add
@@ -356,21 +511,56 @@ Prefer the index and source search over guessing component names.
 - Colocate `*.test.tsx`. Use Remix `Link`/`NavLink`, the shared API client, and canonical terms.
 - Keep changes surgical; components stay app-local until a second app genuinely needs them.
 
+## 12b. Surfaces That Ask
+
+A Surface that asks the reader something — `Choices`, `Form`, `MultiChoice` — is the one place a
+box is still earned, because it bounds a region the reader is expected to act inside. Everything
+*else* on it obeys the same de-chroming as the Trace.
+
+- **The container stays; the accent bar goes.** A left `2px solid var(--primary)` competes with the
+  primary submit button for the one accent on screen. The reader should look at what they press.
+- **No eyebrow, no self-count.** "Input requested" above a form full of inputs, or "5 fields" above
+  five visible fields, are labels for things the reader can already see. The title carries it.
+- **One column, always.** A form has one reading order, and a two-column grid is the single layout
+  that hides it. In a transcript it also leaves ~18rem per field, which wraps a question onto three
+  lines and puts its answer at a different height from its neighbour's.
+- **Give every label the same element.** A radio group's `<legend>` takes a browser default size,
+  so a question renders at twice the weight of the one beside it purely because its answers are
+  radios. One label class, one ramp.
+- **A repeated qualifier is chrome.** Uppercase tracked `REQUIRED` beside most labels was the
+  loudest thing on the form and it repeated down it. A required field announces itself when it is
+  left blank; until then it only has to be legible.
+
+### The fold boundary
+
+A run of Tool calls folds at **two**, not three. The boundary is where the header starts saying
+more than the rows it hides: `Ran 2 tools` is a summary, `Ran 1 tool` is strictly less information
+than the single line it would replace. Locked by literal in `timeline-groups.test.ts`.
+
+### A Turn that stops to ask is still a Turn that spoke
+
+If a Surface asks a question, everything above it — the prose, the Tool steps, the Surface itself —
+has to survive the reload the question invites. This is a persistence rule, not a rendering one,
+but it is a design failure when it breaks: the reader answers a question that is no longer there.
+
 ## 13. Common Mistakes to Avoid
 
 - Raw hex, `text-white`, or framework palette colors inside feature components.
 - Using coral for status, counts, large fills, or decoration; using destructive red for emphasis.
 - Encoding run state with the content `status-*` tones, or encoding content state with `run-*`
   tones.
-- Drawing a run of Tool calls as a column of separately bordered cards. Consecutive Tool rows are
-  one bordered block with `divide-y` rows; a border per call is per-row chrome tax and reads as a
-  wall of boxes.
+- Drawing a run of Tool calls inside a border at all — one box around the run, or worse, a column
+  of separately bordered cards. A run is a rail: consecutive Tool calls are steps on one Trace. A
+  border per call is per-row chrome tax and reads as a wall of boxes; a border around the run is a
+  slab of chrome above the answer the reader actually asked for.
 - Trailing the status glyph at the end of a Tool row, where a ragged summary length pushes it to a
   different x-position on every row. Status leads.
 - A Tool row that reports only that a call succeeded. Carry one fact from the output, or stay quiet
   — but never fabricate or client-side estimate a count to fill the space.
 - A Tool row whose summary is a bare verb (`Listed`, `Read`) or an imperative (`List resource
   types`). Say what happened, in past tense, naming the object: `Listed agents`.
+- Putting an accent bar, an eyebrow, or a field count on a Surface that asks. See §12b.
+- Laying a Form out in two columns, or letting a radio group's `<legend>` set its own size.
 - Letting the global outset focus halo be clipped by a container's `overflow-hidden`. A full-bleed
   row needs `focus-visible:-outline-offset-2`, or keyboard users get one stray line that looks like
   a divider.
@@ -392,6 +582,43 @@ Prefer the index and source search over guessing component names.
 - `aria-hidden` on a closed navigation drawer, which hides it from readers but leaves it tabbable.
 - Responsive visibility classes on a tooltip's child; the wrapper stays in the flow and keeps
   consuming the parent's gap. Put them on a wrapper around the tooltip instead.
+- Wrapping a ticking value in a live region. A `role="status"` that re-reads a tenth-second timer
+  is unusable with a screen reader; announce one stable line and mark the moving parts
+  `aria-hidden`.
+- Loading copy that apologizes for itself (`Still going`, `This may take a while`) or that names a
+  step the loader cannot see. It reports that work is in flight, nothing more.
+- Cycling the loader's word or pattern mid-wait. A label that changes under the reader implies
+  progress the component has no evidence for; draw once on mount and hold.
+- Describing a live step in the past tense. `Read the Ticket resource type` beside a spinner claims
+  the work is finished; ship the `activeLabel`/`label` pair so a running step reads as running.
+- Gating a live surface on a state shorter than a frame. A platform Tool returns in ~20ms, so its
+  `running` state may never paint at all, and between steps everything is `done` for seconds.
+  Decide live-vs-settled from the Turn, or the reader watches a finished-looking column while the
+  work is visibly still going.
+- Swapping presentation when work seals — narrating on a rail, then redrawing the same run as a
+  bordered block the instant it finishes. The reader watched the whole thing; reshuffling it under
+  them at the moment of completion reads as a bug. Keeping two components that say the same thing
+  guarantees this bug: one of them will win a render you did not predict. Delete the loser.
+- Listing a Tool whose only job was to draw the answer. `present` beside the table it rendered
+  narrates the frame instead of the work, and a failure there is a rendering fault the reader
+  cannot act on. Show a loading state while it draws, and nothing after.
+- A collapsed summary that hides a failure without counting it. `Ran 4 tools` with a green check
+  over a run where one call failed is the surface lying to a reader who chose not to expand it.
+  Count the failures on the line that survives the fold, or do not fold.
+- Building a label out of two tinted nodes. The accessible name joins trimmed child contributions,
+  so `Ran 4 tools` + ` · 1 failed` is announced as `Ran 4 tools· 1 failed`. Keep it one string and
+  put the tone on the adjacent glyph.
+- A live trace with no live edge — every row ticked while the Turn is still working. It reads as
+  finished, then the next row snaps in already ticked. Carry an unnamed running step at the bottom,
+  and fold the trace only once something follows it.
+- Reopening a panel the reader closed. Once a disclosure is toggled by hand, that choice outranks
+  the follow-the-work policy for the rest of the session.
+- Borrowing `run-ok` and `run-error` for a diff. Removing a line is authorship, not failure — use
+  the `diff-*` pair (§5.5).
+- A `+N more` control with nothing behind it. If it does not reveal N real things when activated,
+  it is a decoration pretending to be an affordance.
+- An elapsed timer that starts at a confident `0.0s` on a restored conversation. Say nothing until
+  the duration is either supplied by the wire or actually measured.
 - All-monospace prose, uppercase tracking on normal labels, or body text below 12px.
 - Nested page scroll areas, covered content, desktop-only navigation, or broken browser back.
 - Tiny icon targets, missing focus, placeholder-only labels, color-only feedback, or hover-only UI.

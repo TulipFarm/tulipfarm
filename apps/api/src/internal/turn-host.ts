@@ -4,6 +4,7 @@ import { readTurnAttachment, type TurnAttachmentStore } from "@tulipfarm/files";
 import type { InvocationPrincipal } from "@tulipfarm/run-kernel";
 import { type MessageContent, type ParticipantToolCall, textContent } from "@tulipfarm/schema";
 import type { HostedAgent } from "@tulipfarm/tool-host";
+import { fromToolResult, type MessageRepo } from "../chat/messages";
 import type {
   ConversationStore,
   PersistedTurn,
@@ -156,6 +157,13 @@ export interface InternalTurnHostOptions {
    * from the public File routes because the Worker acts as a Run, not as a session.
    */
   readonly files?: TurnAttachmentStore;
+  /**
+   * Writes the tool-role rows that link a Turn's Surfaces into its Conversation.
+   *
+   * Separate from `store` because `ConversationStore` models LLM history, where every row is
+   * prose. A Surface link is a reference, not text, and must never reach the model as either.
+   */
+  readonly messages?: MessageRepo;
   newId?(): string;
   now?(): Date;
 }
@@ -282,9 +290,25 @@ export class InternalTurnHost {
     status: TurnCompletionStatus;
     cursor: number;
     messageId: string | null;
+    surfaces?: readonly { artifactId: string; revision: number }[];
   }): Promise<void> {
     const { turn, subject } = await this.authority(input.businessId, input.runId);
     const now = this.now();
+    // The Artifact is already durable; this records that *this* Conversation was shown it, which
+    // is the only part a reload has to restore. One tool-role Message keeps the cards in the order
+    // the reader saw them, and writing it here keeps the link and the outcome inseparable.
+    if (input.surfaces?.length && this.options.messages !== undefined) {
+      await this.options.messages.create(
+        fromToolResult(
+          turn.conversationId,
+          input.surfaces.map((surface) => ({
+            type: "surface" as const,
+            artifactId: surface.artifactId,
+            revision: surface.revision,
+          }))
+        )
+      );
+    }
     // Late completion from a superseded attempt must not restate the Turn outcome.
     const current = input.attempt >= turn.attempt;
     await this.options.store.completeTurn({

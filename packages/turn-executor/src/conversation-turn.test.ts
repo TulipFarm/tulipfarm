@@ -10,6 +10,10 @@ class FakeStore implements TurnCompletionStore {
   records: TurnCompletionRecord[] = [];
   appended: { turnId: string; attempt: number; content: string }[] = [];
   completed: { turnId: string; attempt: number; status: string; cursor: number }[] = [];
+  surfaceMessages: {
+    conversationId: string;
+    surfaces: readonly { artifactId: string; revision: number }[];
+  }[] = [];
   /** Every write states the Run it acts under; a store proving its authority needs it. */
   runIds: string[] = [];
 
@@ -33,9 +37,17 @@ class FakeStore implements TurnCompletionStore {
       status: "succeeded" | "failed";
       cursor: number;
       messageId: string | null;
+      conversationId?: string;
+      surfaces?: readonly { artifactId: string; revision: number }[];
     }
   ): Promise<void> {
     this.runIds.push(input.runId);
+    if (input.surfaces?.length) {
+      this.surfaceMessages.push({
+        conversationId: input.conversationId ?? "",
+        surfaces: input.surfaces,
+      });
+    }
     this.completed.push({
       turnId: input.turnId,
       attempt: input.attempt,
@@ -109,19 +121,60 @@ describe("ConversationTurnCompleter", () => {
     expect(result).toMatchObject({ status: "failed", reason: "iteration_limit" });
   });
 
-  it("completes an input-required Turn without inventing an assistant Message", async () => {
+  // A Turn that stops to ask has already shown the reader prose, Tool steps and a question. Ending
+  // it with no Message left all three on the wire only, so a reload emptied the reply and stranded
+  // the question it is waiting on.
+  it("persists what an input-required Turn already showed the reader", async () => {
     const store = new FakeStore();
     const completer = new ConversationTurnCompleter({ store });
 
     const result = await completer.complete({
       ...request,
-      outcome: { status: "input_required" },
+      outcome: { status: "input_required", text: "I need a few details first." },
+      surfaces: [{ artifactId: "artifact-1", revision: 1 }],
     });
 
-    expect(store.appended).toEqual([]);
+    expect(store.appended).toEqual([
+      { turnId: "turn-1", attempt: 1, content: "I need a few details first." },
+    ]);
+    expect(store.surfaceMessages).toEqual([
+      { conversationId: "conv-1", surfaces: [{ artifactId: "artifact-1", revision: 1 }] },
+    ]);
     expect(store.completed).toEqual([
       { turnId: "turn-1", attempt: 1, status: "succeeded", cursor: 12 },
     ]);
+    expect(result).toEqual({ status: "succeeded", messageId: "msg-1" });
+  });
+
+  // The model can call `request_input` with no preamble; the Message still has to exist, because
+  // it is what carries the Tool steps the reader watched run.
+  it("writes a Message for a wordless Turn that still ran Tools", async () => {
+    const store = new FakeStore();
+    const completer = new ConversationTurnCompleter({ store });
+
+    const result = await completer.complete({
+      ...request,
+      outcome: { status: "input_required", text: "" },
+      metadata: { toolCalls: [{ callId: "call-1", name: "list_resource_types" }] },
+    });
+
+    expect(store.appended).toEqual([{ turnId: "turn-1", attempt: 1, content: "" }]);
+    expect(result).toEqual({ status: "succeeded", messageId: "msg-1" });
+  });
+
+  it("writes no Message when a Turn asked for input having said and done nothing", async () => {
+    const store = new FakeStore();
+    const completer = new ConversationTurnCompleter({ store });
+
+    const result = await completer.complete({
+      ...request,
+      outcome: { status: "input_required", text: "" },
+      surfaces: [{ artifactId: "artifact-1", revision: 1 }],
+    });
+
+    // The Surface is still linked: it is the question, and it is the whole point of the Turn.
+    expect(store.appended).toEqual([]);
+    expect(store.surfaceMessages).toHaveLength(1);
     expect(result).toEqual({ status: "succeeded", messageId: null });
   });
 

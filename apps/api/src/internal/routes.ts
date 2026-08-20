@@ -447,6 +447,7 @@ export function registerInternalTurnRoutes(
         status: "succeeded" | "failed";
         cursor: number;
         messageId?: string | null;
+        surfaces?: { artifactId: string; revision: number }[];
       };
       const recorded = await guard(reply, async () => {
         await deps.host.completeTurn({
@@ -456,6 +457,7 @@ export function registerInternalTurnRoutes(
           status: body.status,
           cursor: body.cursor,
           messageId: body.messageId ?? null,
+          surfaces: body.surfaces ?? [],
         });
         return true;
       });

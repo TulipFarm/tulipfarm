@@ -18,10 +18,13 @@ test("pending approval shows approve/deny and fires the decision", async () => {
     />
   );
 
-  expect(screen.getByText("[approval required]")).toBeInTheDocument();
+  expect(screen.getByText("Needs your approval")).toBeInTheDocument();
   expect(screen.getByText("write_thing")).toBeInTheDocument();
 
-  await user.click(screen.getByRole("button", { name: "deny" }));
+  // The bare number is meaningless without saying what runs out; the sentence carries the stakes.
+  expect(screen.getByText(/^Expires in \d+ seconds$/)).toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: "Deny" }));
   expect(onDecide).toHaveBeenCalledWith("deny");
 });
 
@@ -34,6 +37,6 @@ test("resolved approval shows the outcome and no buttons", () => {
     />
   );
 
-  expect(screen.getByText("denied")).toBeInTheDocument();
+  expect(screen.getByText("Denied")).toBeInTheDocument();
   expect(screen.queryByRole("button")).toBeNull();
 });

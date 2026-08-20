@@ -401,4 +401,84 @@ describe("surfaceWebRenderer", () => {
       expect(markup).not.toContain("<pre");
     }
   });
+  it("renders a recommended choice as a lead with inline code and a signal meter", () => {
+    const artifact = createSurfaceArtifact({
+      id: "restock",
+      component: { name: "Choices", version: "1.0" },
+      props: {
+        question: "Want me to place this restock order?",
+        choices: [
+          {
+            label: "Reorder from cone_king",
+            value: "reorder",
+            detail: "Reorder waffle cones from `cone_king`.",
+            confidence: "high",
+          },
+          { label: "Full restock", value: "restock" },
+        ],
+        recommend: "reorder",
+        action: { event: "restock.choose" },
+      },
+      target: { channel: "web", surface: "chat" },
+      audience: ["user:1"],
+      classification: "internal",
+    });
+
+    const markup = renderToStaticMarkup(
+      surfaceWebRenderer.render(artifact, { destination: "chat", actionHandleFor: () => "sf_1" })
+    );
+
+    expect(markup).toContain("data-surface-recommend");
+    expect(markup).toContain('data-surface-code="true">cone_king</code>');
+    expect(markup).not.toContain("`cone_king`");
+    expect(markup).toContain('data-confidence="high"');
+    // The alternative is present but sealed, so no reader and no tab stop reaches it unopened.
+    expect(markup).toContain('data-open="false"');
+  });
+
+  it("keeps every option at equal weight when no choice is recommended", () => {
+    const artifact = createSurfaceArtifact({
+      id: "environment",
+      component: { name: "Choices", version: "1.0" },
+      props: {
+        question: "Which environment?",
+        choices: [
+          { label: "Production", value: "production" },
+          { label: "Staging", value: "staging" },
+        ],
+        action: { event: "environment.choose" },
+      },
+      target: { channel: "web", surface: "chat" },
+      audience: ["user:1"],
+      classification: "internal",
+    });
+
+    const markup = renderToStaticMarkup(
+      surfaceWebRenderer.render(artifact, { destination: "chat", actionHandleFor: () => "sf_1" })
+    );
+
+    // Leading with one option is a recommendation. The renderer must not invent one.
+    expect(markup).not.toContain("data-surface-recommend");
+    expect(markup).not.toContain("Alternatives");
+    expect(markup).toContain("Production");
+    expect(markup).toContain("Staging");
+  });
+
+  it("leaves an unpaired backtick as literal text rather than swallowing the rest", () => {
+    const artifact = createSurfaceArtifact({
+      id: "text",
+      component: { name: "Text", version: "1.0" },
+      props: { text: "Use the `shell to continue" },
+      target: { channel: "web", surface: "chat" },
+      audience: ["user:1"],
+      classification: "internal",
+    });
+
+    const markup = renderToStaticMarkup(
+      surfaceWebRenderer.render(artifact, { destination: "chat" })
+    );
+
+    expect(markup).toContain("Use the `shell to continue");
+    expect(markup).not.toContain("data-surface-code");
+  });
 });

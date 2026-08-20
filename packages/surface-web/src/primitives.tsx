@@ -16,6 +16,30 @@ export interface SurfaceCompositionProps extends SurfaceWebProps {
   readonly view: ResolvedSurfaceViewNode;
 }
 
+/**
+ * Renders backtick spans in agent-authored text as inline code.
+ *
+ * A split on the backtick, never a markup parse: the renderer contract forbids rendering
+ * agent-authored markup, so the only thing that crosses the boundary here is plain text placed
+ * into React elements this module owns. An unpaired backtick is left as literal text rather than
+ * swallowing the rest of the string.
+ */
+export function inlineMarkup(text: string): ReactNode {
+  if (!text.includes("`")) return text;
+  const segments = text.split("`");
+  // An even count of backticks leaves an unpaired trailing one; treat the whole string as prose.
+  if (segments.length % 2 === 0) return text;
+
+  return segments.map((segment, index) => {
+    if (index % 2 === 0) return segment === "" ? null : <span key={index}>{segment}</span>;
+    return (
+      <code key={index} data-surface-code>
+        {segment}
+      </code>
+    );
+  });
+}
+
 export function string(value: unknown): string {
   if (value === null || value === undefined) return "—";
   return typeof value === "string" ? value : JSON.stringify(value);
@@ -103,6 +127,8 @@ export function ActionButton(props: {
   readonly selected?: boolean;
   readonly primary?: boolean;
   readonly submit?: boolean;
+  /** Reports that this action already ran, so the button can say so instead of inviting a repeat. */
+  readonly state?: "accepted";
 }) {
   const handle = props.actionHandleFor?.(props.action);
   return (
@@ -114,6 +140,7 @@ export function ActionButton(props: {
       data-surface-action={handle}
       data-surface-button
       data-variant={props.primary ? "primary" : "secondary"}
+      data-state={props.state}
       onClick={
         props.submit
           ? undefined

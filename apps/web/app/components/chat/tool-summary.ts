@@ -4,35 +4,25 @@ import type { TimelinePart, ToolTier } from "~/lib/chat/types";
 
 type ToolPart = Extract<TimelinePart, { kind: "tool" }>;
 
-/** Hide successful plumbing/presentation rows; failed presentation calls still show the error. */
+/** Hide plumbing/presentation rows: their output already renders as the thing they produced. */
 const PRESENTATION_TOOL_NAMES = new Set(["present", "update_presentation", "request_input"]);
 
-/** Live streams use redacted previews; restored conversations may carry verbatim results. */
-export function toolSucceeded(part: ToolPart): boolean {
-  if (part.outcome === "error") return false;
-  const candidates: unknown[] = [];
-  if (part.resultPreview !== undefined) {
-    try {
-      candidates.push(JSON.parse(part.resultPreview.json));
-    } catch {
-      // A preview that will not parse tells us nothing about success; fall through to `result`.
-    }
-  }
-  candidates.push(part.result);
-
-  return candidates.some(
-    (value) =>
-      typeof value === "object" &&
-      value !== null &&
-      "success" in value &&
-      (value as { success?: unknown }).success === true
-  );
+/**
+ * Whether this Tool builds the reply's own UI rather than doing work the reader follows.
+ *
+ * These never earn a Tool row, in any outcome. A reader watching an answer take shape does not
+ * think of the rendering as a step the agent took, and a failed `present` that the agent
+ * immediately retries is machinery, not evidence — showing it puts a red row above a table that
+ * rendered perfectly well.
+ */
+export function isPresentationToolPart(part: ToolPart): boolean {
+  return PRESENTATION_TOOL_NAMES.has(part.toolName);
 }
 
 /** Whether this Tool row is suppressed because its output already renders as something else. */
 export function isHiddenToolPart(part: ToolPart): boolean {
   if (part.toolName === "cite_sources") return true;
-  return PRESENTATION_TOOL_NAMES.has(part.toolName) && toolSucceeded(part);
+  return isPresentationToolPart(part);
 }
 
 export type ToolFamily =
@@ -243,6 +233,55 @@ export function describeToolCall(toolName: string, args: unknown, serverSummary?
   }
   if (subject !== undefined) return `${verb.verb} ${subject}`;
   return verb.fallbackObject === undefined ? verb.verb : `${verb.verb} ${verb.fallbackObject}`;
+}
+
+/**
+ * Present participle for every past verb this module can produce. Kept as one map rather than a
+ * second tense column on `VERB_BY_*`, because the leading word is the only part that changes:
+ * `Pushed to owner/x#412` differs from `Pushing to owner/x#412` by exactly one token.
+ */
+const PRESENT_BY_PAST: Readonly<Record<string, string>> = {
+  Added: "Adding",
+  Assigned: "Assigning",
+  Called: "Calling",
+  Checked: "Checking",
+  Closed: "Closing",
+  Commented: "Commenting",
+  Completed: "Completing",
+  Created: "Creating",
+  Deleted: "Deleting",
+  Fetched: "Fetching",
+  Labelled: "Labelling",
+  Listed: "Listing",
+  Loaded: "Loading",
+  Merged: "Merging",
+  Opened: "Opening",
+  Pushed: "Pushing",
+  Ran: "Running",
+  Read: "Reading",
+  Removed: "Removing",
+  Reviewed: "Reviewing",
+  Saved: "Saving",
+  Searched: "Searching",
+  Sent: "Sending",
+  Updated: "Updating",
+  Wrote: "Writing",
+};
+
+/**
+ * The same summary, said as work still in progress: `Listed agents` → `Listing agents`.
+ *
+ * A row that says `Read the invoice` beside a spinner claims to be finished, so a live Tool step
+ * needs the present tense. Returns `undefined` when the phrase does not start with a verb this
+ * module wrote — a server-supplied summary or a humanized Tool name is not ours to conjugate, and
+ * a caller should fall back to the settled label rather than guess.
+ */
+export function describeToolCallActive(summary: string): string | undefined {
+  const [first, ...rest] = summary.split(" ");
+  if (first === undefined) return undefined;
+  const present = PRESENT_BY_PAST[first];
+  if (present === undefined) return undefined;
+  return [present, ...rest].join(" ");
 }
 
 /** Keys whose numeric value is a count worth showing on a collapsed row. */

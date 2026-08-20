@@ -323,6 +323,7 @@ export class TurnDriver {
       cursor: events.cursor,
       outcome: await this.guardOutput(turnOutcome(result), events),
       ...(events.toolCalls.length === 0 ? {} : { metadata: { toolCalls: events.toolCalls } }),
+      ...(events.surfaces.length === 0 ? {} : { surfaces: events.surfaces }),
       ...(request.latestAttempt === undefined ? {} : { latestAttempt: request.latestAttempt }),
     });
 
@@ -387,7 +388,7 @@ function turnOutcome(
   result: Extract<AgentStateResult, { status: "succeeded" | "failed" | "input_required" }>
 ): TurnOutcome {
   if (result.status === "failed") return { status: "failed", reason: result.reason };
-  if (result.status === "input_required") return { status: "input_required" };
+  if (result.status === "input_required") return { status: "input_required", text: result.text };
   const text = renderAnswer(result.output);
   if (text.length === 0) return { status: "failed", reason: "empty_model_output" };
   return { status: "succeeded", text };

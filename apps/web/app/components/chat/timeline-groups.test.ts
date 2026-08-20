@@ -38,12 +38,12 @@ describe("groupTimelineParts", () => {
     expect(run(nodes[0]).foldable).toBe(false);
   });
 
-  it("keeps a failed call in the run but refuses to fold it away", () => {
+  it("keeps a failed call in the run and still folds it, because the header counts failures", () => {
     const nodes = groupTimelineParts([tool(), tool(), tool(), tool({ outcome: "error" })]);
 
     expect(nodes).toHaveLength(1);
     expect(run(nodes[0]).parts).toHaveLength(4);
-    expect(run(nodes[0]).foldable).toBe(false);
+    expect(run(nodes[0]).foldable).toBe(true);
   });
 
   it("never folds a run holding a call that is awaiting an approval", () => {
@@ -88,5 +88,19 @@ describe("groupTimelineParts", () => {
     expect(nodes.map((node) => node.kind)).toEqual(["tool-run", "part", "tool-run"]);
     expect(run(nodes[0]).parts).toHaveLength(2);
     expect(run(nodes[2]).parts).toHaveLength(2);
+  });
+});
+
+// The threshold is a product boundary, not a tuning knob, so it is asserted with literals: the
+// other tests here derive their sizes from MIN_CLUSTER_SIZE and so pass at any value.
+describe("the fold boundary", () => {
+  it("folds a run of two Tools, where the header says more than the rows it hides", () => {
+    const nodes = groupTimelineParts([tool(), tool()]);
+    expect(run(nodes[0]).foldable).toBe(true);
+  });
+
+  it("leaves a single Tool as itself, since `Ran 1 tool` says less than the row", () => {
+    const nodes = groupTimelineParts([tool()]);
+    expect(run(nodes[0]).foldable).toBe(false);
   });
 });

@@ -505,9 +505,20 @@ import { describe, expect, it } from "vitest";
  * and +1 in `auth/routes/index.ts` threads the check through. The decision itself is unchanged and
  * still `packages/authz`'s; this is the Fastify-shaped adapter for reading it, which is the only
  * reason it is here.
+ *
+ * 52_900 -> 53_041 records a mark that had already been passed. At 4b769031 — the tip this branch
+ * rebased onto — `apps/api/src` measures 53_113, so main sat 213 lines above the recorded ceiling
+ * and nothing bumped it. This branch measures 53_041, which is 72 lines *below* main, so the new
+ * mark is the lowest honest reading available rather than headroom bought for this change.
+ *
+ * What this change itself puts in `apps/api`: the Surfaces a Turn presented now ride on the
+ * existing completion request instead of a route of their own, so the linking costs ~10 lines
+ * inside `internal/turn-host.ts#completeTurn` and one shared schema, and the deduplicated
+ * `ArtifactService` construction in `index.ts` gives back more than that. Only the Fastify-shaped
+ * adapter is here; the decision about *when* to link is `packages/turn-executor`'s.
  */
 
-const CEILING = 52_900;
+const CEILING = 53_041;
 
 /**
  * Domains inside `apps/api/src` that already have a package of the same name. Everything here that

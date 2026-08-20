@@ -1,13 +1,44 @@
+import type { ArtifactService } from "@tulipfarm/run-kernel";
 import type { SurfaceComponentDefinition } from "@tulipfarm/surface";
+import {
+  InMemoryToolCatalog,
+  RegistryToolDispatcher,
+  type TurnAuthority,
+} from "@tulipfarm/tool-host";
 import { describe, expect, it } from "vitest";
 import { MemorySurfaceActionStore } from "./action-store";
 import { MemorySurfaceArtifactStore } from "./artifact-store";
 import {
+  apiSurfacePresentation,
   presentationContextFor,
   surfaceCatalogFor,
   surfaceRendererRegistry,
 } from "./renderer-registry";
 import { presentTool, requestInputTool } from "./tools";
+
+const AUTHORITY: TurnAuthority = {
+  businessId: "business-1",
+  runId: "run-1",
+  turn: { id: "turn-1", conversationId: "conversation-1", attempt: 1 },
+  subject: { kind: "user", id: "user-1" },
+  source: "chat",
+  bundleDigest: "bundle-1",
+};
+
+function surfaceDispatcher() {
+  const registry = new InMemoryToolCatalog();
+  registry.register(presentTool);
+  registry.register(requestInputTool);
+  return new RegistryToolDispatcher({
+    registry,
+    artifacts: {
+      read: async () => ({ content: { autonomy: "full" } }),
+    } as unknown as ArtifactService,
+    surfaces: apiSurfacePresentation,
+    surfaceStore: new MemorySurfaceArtifactStore(),
+    surfaceActionStore: new MemorySurfaceActionStore(),
+  });
+}
 
 describe("Surface presentation Tool schema", () => {
   it("teaches the model the exact discriminated component shape", () => {
@@ -52,6 +83,15 @@ describe("Surface presentation Tool schema", () => {
     };
 
     expect(component.description).toContain("Keep name and version separate");
+    expect(component).toMatchObject({
+      type: ["object", "string"],
+      required: ["name", "version", "props"],
+      properties: {
+        name: { type: "string" },
+        version: { type: "string" },
+        props: { type: "object" },
+      },
+    });
     expect(component.oneOf[0]?.properties.name).toMatchObject({
       const: "RecordTable",
     });
@@ -118,10 +158,16 @@ describe("Surface presentation Tool schema", () => {
       oneOf: Array<{ properties: { name: { const: string } } }>;
     };
 
-    expect(presentComponent.oneOf.map((branch) => branch.properties.name.const)).toEqual(["Alert"]);
-    expect(requestComponent.oneOf.map((branch) => branch.properties.name.const)).toEqual([
-      "Choices",
-    ]);
+    expect(
+      presentComponent.oneOf.flatMap((branch) =>
+        branch.properties?.name.const === undefined ? [] : [branch.properties.name.const]
+      )
+    ).toEqual(["Alert"]);
+    expect(
+      requestComponent.oneOf.flatMap((branch) =>
+        branch.properties?.name.const === undefined ? [] : [branch.properties.name.const]
+      )
+    ).toEqual(["Choices"]);
     expect(requestSchema?.required).toEqual(["component"]);
     expect(requestSchema?.properties).not.toHaveProperty("awaitedSchema");
   });
@@ -172,6 +218,109 @@ describe("Surface presentation Tool schema", () => {
         },
       },
       suspendRun: true,
+    });
+  });
+
+  it("creates a presentation from an object component", async () => {
+    const result = await surfaceDispatcher().dispatch(AUTHORITY, {
+      callId: "present-object",
+      name: "present",
+      arguments: {
+        component: {
+          name: "RecordTable",
+          version: "1.0",
+          props: {
+            columns: ["name", "status"],
+            records: [{ name: "Acme", status: "Open" }],
+          },
+        },
+      },
+    });
+
+    expect(result).toMatchObject({
+      status: "succeeded",
+      output: {
+        artifact: {
+          component: { name: "RecordTable", version: "1.0" },
+          props: {
+            columns: ["name", "status"],
+            records: [{ name: "Acme", status: "Open" }],
+          },
+        },
+      },
+    });
+  });
+
+  it("parses a stringified component before creating a presentation", async () => {
+    const result = await surfaceDispatcher().dispatch(AUTHORITY, {
+      callId: "present-string",
+      name: "present",
+      arguments: {
+        component: JSON.stringify({
+          name: "RecordTable",
+          version: "1.0",
+          props: {
+            columns: ["name", "status"],
+            records: [{ name: "Acme", status: "Open" }],
+          },
+        }),
+      },
+    });
+
+    expect(result).toMatchObject({
+      status: "succeeded",
+      output: {
+        artifact: {
+          component: { name: "RecordTable", version: "1.0" },
+          props: {
+            columns: ["name", "status"],
+            records: [{ name: "Acme", status: "Open" }],
+          },
+        },
+      },
+    });
+  });
+
+  it("rejects genuinely invalid present input as invalid_arguments", async () => {
+    const result = await surfaceDispatcher().dispatch(AUTHORITY, {
+      callId: "present-invalid",
+      name: "present",
+      arguments: { component: 42 },
+    });
+
+    expect(result).toMatchObject({
+      status: "invalid_arguments",
+      reason: expect.stringContaining("/component"),
+    });
+  });
+
+  it("parses a stringified component before request_input derives the awaited schema", async () => {
+    const result = await surfaceDispatcher().dispatch(AUTHORITY, {
+      callId: "input-string",
+      name: "request_input",
+      arguments: {
+        component: JSON.stringify({
+          name: "Choices",
+          version: "1.0",
+          props: {
+            question: "What should we do?",
+            choices: [{ label: "Roll back", value: "rollback" }],
+            action: { event: "incident.choose" },
+          },
+        }),
+      },
+    });
+
+    expect(result).toMatchObject({
+      status: "succeeded",
+      output: {
+        awaitedSchema: {
+          properties: {
+            value: { type: "string", const: "rollback" },
+          },
+        },
+        suspendRun: true,
+      },
     });
   });
 });
