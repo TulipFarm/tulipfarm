@@ -480,14 +480,12 @@ async function boot() {
     );
     const rateLimiter = new PgRateLimiter(pool);
     const invocationValidator = new TypedOutputValidator(INVOCATION_REQUEST_SCHEMAS);
+    /** Every Artifact reader is the same service over a different transaction scope. */
+    const artifactsOver = (transactions: ConstructorParameters<typeof ArtifactStore>[0]) =>
+      new ArtifactService(new ArtifactStore(transactions), invocationValidator);
     const invocations = new DurableInvocationGateway({
-      store: new PgDurableInvocationStore(
-        runTransactions,
-        (transaction) =>
-          new ArtifactService(
-            new ArtifactStore(ambientTransactionPort(transaction)),
-            invocationValidator
-          )
+      store: new PgDurableInvocationStore(runTransactions, (transaction) =>
+        artifactsOver(ambientTransactionPort(transaction))
       ),
       validator: invocationValidator,
       routineDefinitions: new ActiveRoutineInvocationResolver(soulPublications, soulBundleVerifier),
@@ -789,10 +787,7 @@ async function boot() {
 
     // with, so a worker credential is a key to a Run rather than a principal of its own.
     const conversationStore = new PgConversationStore(pool);
-    const runArtifacts = new ArtifactService(
-      new ArtifactStore(runTransactions),
-      invocationValidator
-    );
+    const runArtifacts = artifactsOver(runTransactions);
     const internalTurns = {
       host: new InternalTurnHost({
         runs: runStore,

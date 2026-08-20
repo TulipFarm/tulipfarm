@@ -29,22 +29,20 @@ export interface TurnCompletionStore {
     }
   ): Promise<{ messageId: string }>;
   /**
-   * Links presented Surfaces into the transcript as a tool-role Message.
+   * Records the outcome, and links any Surfaces the attempt presented.
    *
-   * The Artifact itself is already durable; what is not is the fact that *this* Conversation was
-   * shown it. Without the link a restored transcript loses every card the Turn rendered.
+   * The Surfaces ride with completion rather than on a call of their own so that the link and the
+   * outcome land together: the Artifact is already durable, but the fact that *this* Conversation
+   * was shown it is not, and a crash between two writes would either lose the cards or duplicate
+   * them on redelivery.
    */
-  appendSurfaceMessage?(
-    input: TurnCompletionRef & {
-      conversationId: string;
-      surfaces: readonly TurnSurfaceLink[];
-    }
-  ): Promise<void>;
   completeTurn(
     input: TurnCompletionRef & {
       status: TurnCompletionStatus;
       cursor: number;
       messageId: string | null;
+      conversationId?: string;
+      surfaces?: readonly TurnSurfaceLink[];
     }
   ): Promise<void>;
 }
@@ -139,41 +137,28 @@ export class ConversationTurnCompleter {
       status: "succeeded",
       cursor: input.cursor,
       messageId,
+      conversationId: input.conversationId,
+      surfaces: input.surfaces ?? [],
     });
     return { status: "succeeded", messageId };
   }
 
-  /** Writes the reply and links any Surfaces it presented; returns the Message the Turn produced. */
+  /** Writes the reply the reader watched arrive; returns the Message it produced, if any. */
   private async persistReply(
     ref: TurnCompletionRef,
     input: CompleteTurnInput,
     text: string
   ): Promise<string | null> {
-    const toolCalls = input.metadata?.toolCalls ?? [];
-    const surfaces = input.surfaces ?? [];
-
     // An empty reply with nothing to report is no reply; writing it would put a blank turn in the
     // transcript. A reply that ran Tools is never empty, even when the model wrote no prose.
-    const messageId =
-      text.length === 0 && toolCalls.length === 0
-        ? null
-        : (
-            await this.options.store.appendAssistantMessage({
-              ...ref,
-              conversationId: input.conversationId,
-              content: text,
-              ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
-            })
-          ).messageId;
+    if (text.length === 0 && (input.metadata?.toolCalls ?? []).length === 0) return null;
 
-    if (surfaces.length > 0) {
-      await this.options.store.appendSurfaceMessage?.({
-        ...ref,
-        conversationId: input.conversationId,
-        surfaces,
-      });
-    }
-
+    const { messageId } = await this.options.store.appendAssistantMessage({
+      ...ref,
+      conversationId: input.conversationId,
+      content: text,
+      ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
+    });
     return messageId;
   }
 }

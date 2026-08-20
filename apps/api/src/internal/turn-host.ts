@@ -283,34 +283,6 @@ export class InternalTurnHost {
     return { messageId };
   }
 
-  /**
-   * Links the Surfaces this attempt presented into the Conversation.
-   *
-   * The Artifact is already durable; this records that *this* Conversation was shown it, which is
-   * the only thing a reload has to restore. Written as one tool-role Message so the ordering
-   * against the assistant reply is the ordering the reader saw.
-   */
-  async appendSurfaceMessage(input: {
-    businessId: string;
-    runId: string;
-    attempt: number;
-    surfaces: readonly { artifactId: string; revision: number }[];
-  }): Promise<void> {
-    if (input.surfaces.length === 0) return;
-    const { turn } = await this.authority(input.businessId, input.runId);
-    if (this.options.messages === undefined) return;
-    await this.options.messages.create(
-      fromToolResult(
-        turn.conversationId,
-        input.surfaces.map((surface) => ({
-          type: "surface" as const,
-          artifactId: surface.artifactId,
-          revision: surface.revision,
-        }))
-      )
-    );
-  }
-
   async completeTurn(input: {
     businessId: string;
     runId: string;
@@ -318,9 +290,25 @@ export class InternalTurnHost {
     status: TurnCompletionStatus;
     cursor: number;
     messageId: string | null;
+    surfaces?: readonly { artifactId: string; revision: number }[];
   }): Promise<void> {
     const { turn, subject } = await this.authority(input.businessId, input.runId);
     const now = this.now();
+    // The Artifact is already durable; this records that *this* Conversation was shown it, which
+    // is the only part a reload has to restore. One tool-role Message keeps the cards in the order
+    // the reader saw them, and writing it here keeps the link and the outcome inseparable.
+    if (input.surfaces?.length && this.options.messages !== undefined) {
+      await this.options.messages.create(
+        fromToolResult(
+          turn.conversationId,
+          input.surfaces.map((surface) => ({
+            type: "surface" as const,
+            artifactId: surface.artifactId,
+            revision: surface.revision,
+          }))
+        )
+      );
+    }
     // Late completion from a superseded attempt must not restate the Turn outcome.
     const current = input.attempt >= turn.attempt;
     await this.options.store.completeTurn({

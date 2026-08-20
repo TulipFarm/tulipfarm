@@ -32,27 +32,22 @@ class FakeStore implements TurnCompletionStore {
     return { messageId: `msg-${this.appended.length}` };
   }
 
-  async appendSurfaceMessage(
-    input: TurnCompletionRef & {
-      conversationId: string;
-      surfaces: readonly { artifactId: string; revision: number }[];
-    }
-  ): Promise<void> {
-    this.runIds.push(input.runId);
-    this.surfaceMessages.push({
-      conversationId: input.conversationId,
-      surfaces: input.surfaces,
-    });
-  }
-
   async completeTurn(
     input: TurnCompletionRef & {
       status: "succeeded" | "failed";
       cursor: number;
       messageId: string | null;
+      conversationId?: string;
+      surfaces?: readonly { artifactId: string; revision: number }[];
     }
   ): Promise<void> {
     this.runIds.push(input.runId);
+    if (input.surfaces?.length) {
+      this.surfaceMessages.push({
+        conversationId: input.conversationId ?? "",
+        surfaces: input.surfaces,
+      });
+    }
     this.completed.push({
       turnId: input.turnId,
       attempt: input.attempt,
