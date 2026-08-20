@@ -1,6 +1,6 @@
 import { GitBranch } from "lucide-react";
 import { type FormEvent, useState } from "react";
-import { Badge } from "~/components/ui/badge";
+import { StatusBadge, type StatusTone } from "~/components/status-badge";
 import { Button } from "~/components/ui/button";
 import { Field } from "~/components/ui/field";
 import { Input } from "~/components/ui/input";
@@ -16,23 +16,28 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? friendlyGitError(err.message) : "request failed";
 }
 
+/**
+ * Every state below is one `GET /api/v1/soul/git-config` can actually report: `remoteConfigured`,
+ * `lastSyncError`, and the `ahead`/`behind` counts `GitSync.getStatus()` derives from
+ * `rev-list --left-right`. Nothing here is inferred.
+ */
 function statusLabel(status: SoulGitConfig["status"]): {
   text: string;
-  variant: "neutral" | "danger" | "primary";
+  tone: StatusTone;
 } {
   if (!status.remoteConfigured) {
-    return { text: "Not connected", variant: "neutral" };
+    return { text: "Not connected", tone: "neutral" };
   }
   if (status.lastSyncError) {
-    return { text: "Sync failed", variant: "danger" };
+    return { text: "Sync failed", tone: "danger" };
   }
   if (status.ahead === 0 && status.behind === 0) {
-    return { text: "Up to date", variant: "neutral" };
+    return { text: "Up to date", tone: "success" };
   }
   const parts: string[] = [];
   if (status.ahead > 0) parts.push(`${status.ahead} ahead`);
   if (status.behind > 0) parts.push(`${status.behind} behind`);
-  return { text: parts.join(", "), variant: "primary" };
+  return { text: parts.join(", "), tone: "warning" };
 }
 
 function formatLastSync(iso: string | null): string {
@@ -100,38 +105,44 @@ export function SoulGitConfigPanel({
         </p>
       ) : null}
 
+      {/* The status header is outside the editing branch: an admin with no remote lands straight in
+          the connect form, and that is exactly the operator who needs to be told the soul is not
+          connected. */}
+      <div className="flex items-center gap-2 px-3 py-2">
+        <GitBranch aria-hidden className="size-4 text-muted-foreground" />
+        <span className="font-medium text-foreground">Git remote</span>
+        <StatusBadge label={status.text} tone={status.tone} />
+        {!editing ? (
+          <div className="ml-auto flex items-center gap-1">
+            {config.remoteUrl ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="cursor-pointer rounded-sm"
+                disabled={syncing}
+                onClick={onSync}
+              >
+                {syncing ? "Syncing…" : "Sync now"}
+              </Button>
+            ) : null}
+            {isAdmin ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="cursor-pointer rounded-sm"
+                onClick={() => setEditing(true)}
+              >
+                Edit
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+
       {!editing ? (
         <>
-          <div className="flex items-center gap-2 px-3 py-2">
-            <GitBranch aria-hidden className="size-4 text-muted-foreground" />
-            <span className="font-medium text-foreground">Git remote</span>
-            <Badge variant={status.variant}>{status.text}</Badge>
-            <div className="ml-auto flex items-center gap-1">
-              {config.remoteUrl ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="cursor-pointer rounded-sm"
-                  disabled={syncing}
-                  onClick={onSync}
-                >
-                  {syncing ? "Syncing…" : "Sync now"}
-                </Button>
-              ) : null}
-              {isAdmin ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="cursor-pointer rounded-sm"
-                  onClick={() => setEditing(true)}
-                >
-                  Edit
-                </Button>
-              ) : null}
-            </div>
-          </div>
           {config.remoteUrl ? (
             <p className="truncate border-t border-border px-3 py-2 font-mono text-xs text-muted-foreground">
               {config.remoteUrl}
@@ -143,6 +154,12 @@ export function SoulGitConfigPanel({
           )}
           {config.remoteUrl ? (
             <p className="truncate border-t border-border px-3 py-2 text-xs text-muted-foreground">
+              {config.status.headSha ? (
+                <>
+                  <span className="font-mono">{config.status.headSha.slice(0, 7)}</span>
+                  {" · "}
+                </>
+              ) : null}
               {formatLastSync(config.status.lastSyncAt)}
             </p>
           ) : null}
@@ -156,7 +173,7 @@ export function SoulGitConfigPanel({
           ) : null}
         </>
       ) : (
-        <form onSubmit={onSubmit} className="flex flex-col gap-3 p-3">
+        <form onSubmit={onSubmit} className="flex flex-col gap-3 border-t border-border p-3">
           <p className="text-sm font-medium text-foreground">
             {config.remoteUrl ? "Edit git remote" : "Connect a git remote"}
           </p>
