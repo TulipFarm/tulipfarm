@@ -6,7 +6,9 @@
 
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import ts from "typescript";
+// TypeScript 7 ships no programmatic compiler API, so this reads the syntax-only API from the
+// TypeScript team's 6.0 compatibility package. `tsc` itself is still 7.
+import ts from "@typescript/typescript6";
 import type { ImportGraph } from "./architecture-rules.ts";
 
 const WORKSPACE_ROOTS = ["packages", "apps"] as const;
