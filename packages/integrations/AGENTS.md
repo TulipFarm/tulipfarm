@@ -16,6 +16,7 @@ Owns adapter contracts, event normalization, source ACLs, sync checkpoints, and 
 | `src/http.ts` | Provider-neutral HTTP port, failure classification, bounded pagination. |
 | `src/grants.ts` | Default-deny grants for concrete external targets. |
 | `src/egress/` | Manifest-to-ToolContract compiler, adapter, fetch transport, destination cage. |
+| `src/git-source/` | Pre-clone Git source cage and the bounded, sanitised clone helper. |
 | `src/import/`, `src/ingress/`, `src/external-protocol/` | Import and ingress protocols. |
 | `src/github/`, `src/jira/` | Tool adapters and provider contracts. |
 | `src/slack/`, `src/telegram/` | Messaging Tool adapters and provider contracts. |
@@ -31,6 +32,9 @@ Owns adapter contracts, event normalization, source ACLs, sync checkpoints, and 
 - Manifest hosts are chat-authored: compile through `assertPublicEgressUrl`, send through
   `GuardedEgressHttp`. Neither subsumes the other — a public name can hold an inward A record.
 - `openapi-compile.ts` must resolve every `$ref`; survivors can break unrelated Tool registration.
+- Every caller-supplied Git source clones through `withGitSourceClone`; never spawn `git` directly
+  and never surface its stderr. `GIT_SOURCE_ALLOWED_HOSTS` widens the host allowlist;
+  `GIT_SOURCE_ALLOW_LOCAL_PATHS=1` (fixtures only) re-enables `file://`.
 - `collectPages` must throw `PaginationBoundError` rather than silently truncate a paged read.
 - Jira creates use `tulipfarm-effect-<hash>` labels and must read provider state before writing.
 - Integration events must resolve external principals; never borrow Conversation owner identity.

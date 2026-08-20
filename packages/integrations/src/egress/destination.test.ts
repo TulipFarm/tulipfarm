@@ -49,6 +49,14 @@ describe("isPrivateNetworkAddress", () => {
     expect(isPrivateNetworkAddress("::ffff:8.8.8.8")).toBe(false);
   });
 
+  // `new URL()` rewrites the dotted mapped form to hextets, so both spellings reach a guard.
+  it("denies an IPv4-mapped address written as hextets", () => {
+    for (const address of ["::ffff:7f00:1", "::ffff:a00:5", "::ffff:c0a8:1", "::ffff:a9fe:a9fe"]) {
+      expect(isPrivateNetworkAddress(address), address).toBe(true);
+    }
+    expect(isPrivateNetworkAddress("::ffff:808:808")).toBe(false);
+  });
+
   it("denies anything that is not an address, because a guard that cannot tell must not allow", () => {
     for (const value of ["", "not-an-ip", "10.1.2", "10.1.2.3.4", "999.1.1.1"]) {
       expect(isPrivateNetworkAddress(value), value).toBe(true);

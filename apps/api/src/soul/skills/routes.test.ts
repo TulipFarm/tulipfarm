@@ -136,6 +136,9 @@ describe("skills routes", () => {
   const temps: string[] = [];
 
   beforeEach(async () => {
+    // These tests serve their fixtures from local git repos, which the clone policy denies unless
+    // the deployment opted in. The policy itself is exercised in "clone source policy" below.
+    process.env.GIT_SOURCE_ALLOW_LOCAL_PATHS = "1";
     store = new MemorySessionStore();
     const userRepo = new FakeUserRepo();
     const tokenRepo = new FakeTokenRepo();
@@ -227,6 +230,7 @@ describe("skills routes", () => {
   });
 
   afterEach(async () => {
+    delete process.env.GIT_SOURCE_ALLOW_LOCAL_PATHS;
     await app.close();
     for (const dir of temps.splice(0)) await rm(dir, { recursive: true, force: true });
   });
@@ -426,30 +430,6 @@ spec:
       expect(res.statusCode).toBe(400);
     });
 
-    it("rejects a disallowed source scheme (ssh) before cloning", async () => {
-      const res = await app.inject({
-        method: "POST",
-        url: "/api/v1/skills/scan",
-        cookies: auth(),
-        headers,
-        payload: { source: "ssh://internal-host/repo.git" },
-      });
-      expect(res.statusCode).toBe(400);
-      expect(res.json().error).toMatch(/owner\/repo|http/);
-    });
-
-    it("rejects a source with an unsafe #ref suffix before cloning", async () => {
-      const res = await app.inject({
-        method: "POST",
-        url: "/api/v1/skills/scan",
-        cookies: auth(),
-        headers,
-        payload: { source: "owner/repo#--upload-pack=evil" },
-      });
-      expect(res.statusCode).toBe(400);
-      expect(res.json().error).toMatch(/owner\/repo|http/);
-    });
-
     it("scans a non-default branch when the source carries a #ref suffix", async () => {
       const remote = await makeRemoteRepo();
       temps.push(remote);
@@ -531,6 +511,66 @@ spec:
       );
       const stale = await scan(fileUrl);
       expect(stale.json().skills[0]).toMatchObject({ installed: true, updateAvailable: true });
+    });
+  });
+
+  describe("POST /api/v1/skills/scan — clone source policy", () => {
+    beforeEach(() => {
+      delete process.env.GIT_SOURCE_ALLOW_LOCAL_PATHS;
+    });
+
+    const scan = (source: string) =>
+      app.inject({
+        method: "POST",
+        url: "/api/v1/skills/scan",
+        cookies: auth(),
+        headers,
+        payload: { source },
+      });
+
+    // Every row must be refused by the URL/address policy, before any git process is started.
+    const forbidden: ReadonlyArray<readonly [string, string]> = [
+      ["a local filesystem repository", "file:///srv/secrets/repo"],
+      ["plain HTTP", "http://github.com/owner/repo.git"],
+      ["embedded credentials", "https://user:pass@github.com/owner/repo.git"],
+      ["IPv4 loopback", "https://127.0.0.1/owner/repo.git"],
+      ["IPv6 loopback", "https://[::1]/owner/repo.git"],
+      ["the unspecified address", "https://0.0.0.0/owner/repo.git"],
+      ["the cloud metadata address", "https://169.254.169.254/latest/repo.git"],
+      ["RFC 1918 10/8", "https://10.1.2.3/owner/repo.git"],
+      ["RFC 1918 192.168/16", "https://192.168.1.1/owner/repo.git"],
+      ["RFC 1918 172.16/12", "https://172.20.0.1/owner/repo.git"],
+      ["unique local IPv6", "https://[fd00::1]/owner/repo.git"],
+      ["link-local IPv6", "https://[fe80::1]/owner/repo.git"],
+      ["decimal-encoded IPv4", "https://2130706433/owner/repo.git"],
+      ["hex-encoded IPv4", "https://0x7f000001/owner/repo.git"],
+      ["octal-encoded IPv4", "https://0177.0.0.1/owner/repo.git"],
+      ["IPv4-mapped IPv6", "https://[::ffff:127.0.0.1]/owner/repo.git"],
+      ["an unapproved host", "https://git.internal.example/owner/repo.git"],
+      ["a trailing-dot unapproved host", "https://git.internal.example./owner/repo.git"],
+      ["an scp-style source", "git@internal.example.com:secrets/repo.git"],
+      ["a git:// source", "git://internal.example.com/repo.git"],
+      ["an ssh source", "ssh://internal-host/repo.git"],
+      ["an unsafe #ref suffix", "owner/repo#--upload-pack=evil"],
+    ];
+
+    it.each(forbidden)("rejects %s without cloning", async (_label, source) => {
+      const res = await scan(source);
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).not.toContain("git clone");
+    });
+
+    // Issue #437: the operator sees a verdict, never the command, its stderr or a server path.
+    it("reports a clone failure without leaking the command, stderr or temp paths", async () => {
+      process.env.GIT_SOURCE_ALLOW_LOCAL_PATHS = "1";
+      const res = await scan(`file://${join(tmpdir(), "does-not-exist-qa-stress-xyz")}`);
+      expect(res.statusCode).toBe(400);
+      const { error } = res.json() as { error: string };
+      expect(error).toBe("Repository not found or not accessible.");
+      expect(error).not.toContain("git clone");
+      expect(error).not.toContain("Command failed");
+      expect(error).not.toContain("fatal:");
+      expect(error).not.toContain(tmpdir());
     });
   });
 

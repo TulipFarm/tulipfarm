@@ -19,7 +19,7 @@ Loader, compiler, publisher, and git-sync engine for Soul artifacts. Root `soul/
 | `src/migrations/`, `src/soul-migrations.ts` | Migrations. |
 | `src/writer.ts` | `SoulWriter` — the one authored-tree write gateway. |
 | `src/skills/`, `src/integrations/`, `src/agents/` | Skill threat scan, bundled discovery, registries, platform agents. |
-| `src/{catalogue,tree,git-source,write-errors}.ts` | Catalogue, safe tree walk, Git source allowlist, write-error mapping. |
+| `src/{catalogue,tree,git-source,write-errors}.ts` | Catalogue, safe tree walk, Git source parsing, write-error mapping. |
 | `src/soul-writer-double.ts` | In-memory `SoulWriter` for tests. |
 
 ## Rules
