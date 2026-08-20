@@ -201,6 +201,26 @@ import { describe, expect, it } from "vitest";
  * worse outcome than a higher number. The ACL logic they call is already in the package — 9,531
  * lines of it against 2,016 here, which is the ratio this gate exists to protect.
  *
+ * It moves to 53,041 -> 53,560 for the single-login Google Workspace integration. Google's Gmail,
+ * Calendar, Drive and Docs Tools are handwritten rather than manifest-declared egress, which is the
+ * same exception `tools/github/` and `tools/slack/` already take: bespoke provider Tools that broker
+ * a live OAuth credential have no owning package to move to, because the credential leasing is
+ * app-wiring, not domain logic. The gross cost is +602, itemised:
+ *
+ *   +250  `tools/google/tools.ts` — the Gmail/Calendar/Drive/Docs chat Tools themselves.
+ *   +156  `tools/google/credentials.ts` — `GoogleAccessTokenProvider`, a `SecretProvider` that
+ *         leases the sealed OAuth access token and refreshes it in place before expiry, writing the
+ *         rotated token back through the secret store so the soul's `secret://` refs keep resolving.
+ *    +91  `integrations/google-http.ts` — the Google egress HTTP helper the Tools call through.
+ *    +69  `tools/google/compose.ts` — the composition that wires the provider and Tools together.
+ *    +36  `index.ts`, `tools/setup.ts` and `identity/roles.ts` — app wiring and the new role action.
+ *
+ * 83 of those 602 lines land in the headroom main was already carrying under its 53,041 ceiling, so
+ * the mark rises by 519 rather than the full gross. Nothing here is a candidate to move into
+ * `packages/integrations`: the declarative adapter and MIME contracts that *are* domain logic
+ * already live there under `src/google`, and what remains in the app is the Fastify-adjacent
+ * credential broker and Tool host that the github/slack exception exists for.
+ *
  * It then moved to 51,149 for the Agent autonomy ceiling. The rule itself did not land here — the
  * ladder, the min and the approval predicate are 47 lines in `packages/tool-host/src/autonomy.ts`,
  * which is where every host already reads its gate from. What stayed is the +42 of per-path wiring
@@ -518,7 +538,7 @@ import { describe, expect, it } from "vitest";
  * adapter is here; the decision about *when* to link is `packages/turn-executor`'s.
  */
 
-const CEILING = 53_041;
+const CEILING = 53_560;
 
 /**
  * Domains inside `apps/api/src` that already have a package of the same name. Everything here that

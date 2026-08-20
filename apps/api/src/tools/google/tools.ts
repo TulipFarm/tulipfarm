@@ -248,8 +248,3 @@ export function buildGoogleTools(businessId: string, tooling: GoogleToolingConte
     buildToolDef(contract.spec.toolId as GoogleToolId, businessId, tooling)
   );
 }
-
-/** Google chat tool names, computable without live tooling composition. */
-export const GOOGLE_TOOL_NAMES: ReadonlySet<string> = new Set(
-  Object.values(GOOGLE_TOOL_SPECS).map((spec) => spec.name)
-);

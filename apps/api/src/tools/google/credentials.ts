@@ -52,6 +52,8 @@ export class GoogleAccessTokenProvider implements SecretProvider {
     try {
       secrets = await this.deps.secrets();
     } catch {
+      // No reachable secret store means no credential to lease; the caller treats null as
+      // "Google not connected" rather than surfacing an infrastructure error to the Tool layer.
       return null;
     }
 
@@ -123,6 +125,7 @@ export class GoogleAccessTokenProvider implements SecretProvider {
     try {
       return await secrets.get(integrationSecretKey(GOOGLE_INTEGRATION, oauth2ExpiresAtEnv(step)));
     } catch {
+      // No shadow expiry has been written yet; fall back to the connection env's expiry instead.
       return undefined;
     }
   }

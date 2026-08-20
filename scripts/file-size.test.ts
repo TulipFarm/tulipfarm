@@ -117,10 +117,20 @@ const IGNORED_DIRS = new Set([
  * so the list is append-only by definition. The statements themselves live in
  * `packages/files/src/repo.ts` beside the table they alter; what lands here is
  * the version, the description and the call.
+ *
+ * `index.ts` moved 1350 -> 1374 for the single-login Google Workspace
+ * integration, and this branch owns all 24. Registering a chat Tool family in
+ * the composition root is what this file is for: two imports, one `google:`
+ * entry in the Tool setup, and the `buildGoogleTooling`/`buildGoogleTools`
+ * block that leases the OAuth credential and reads the live Soul so a reconnect
+ * is picked up without a restart — the same shape the `slack` and `github`
+ * families already take here. The Tools, the credential provider and the egress
+ * helper are their own files under `tools/google/`; only the wiring is here,
+ * because a composition root is the one place wiring can be.
  */
 const OVERSIZED: Readonly<Record<string, number>> = {
   "apps/api/src/pg-migrations/index.ts": 2183,
-  "apps/api/src/index.ts": 1350,
+  "apps/api/src/index.ts": 1374,
 };
 
 /**

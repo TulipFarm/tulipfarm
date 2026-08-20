@@ -7,7 +7,6 @@ import {
 /** First-party Google Workspace chat Tools. Step one covers Gmail: search, read, draft. */
 
 export const GOOGLE_ADAPTER_REF = "integration:google";
-export const GOOGLE_PROVIDER = "google";
 export const GOOGLE_DESTINATION = "google";
 
 export const GOOGLE_TOOL_IDS = {

@@ -13,7 +13,6 @@
     "apps/api/src/identity/fakes.ts#MemoryExternalIdentityRepo",
     "apps/api/src/identity/fakes.ts#MemoryOidcRequestRepo",
     "apps/api/src/integrations/auth-broker.ts#credentialsExpireWithin",
-    "apps/api/src/integrations/auth-broker.ts#refreshOAuth2Credentials",
     "apps/api/src/integrations/brand-icon.ts#clearBrandIconCache",
     "apps/api/src/integrations/principal-tokens.ts#InMemoryPrincipalProviderTokenRepo",
     "apps/api/src/observability/capture.ts#attributeModel",
