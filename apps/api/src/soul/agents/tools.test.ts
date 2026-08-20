@@ -98,7 +98,13 @@ describe("agent_create", () => {
 
     expect(res).toEqual({
       success: true,
-      data: { name: "task-planner", frontmatter: {}, body: "You plan tasks." },
+      data: {
+        name: "task-planner",
+        created: true,
+        changed: true,
+        frontmatter: {},
+        body: "You plan tasks.",
+      },
     });
     expect(ctx.soulWriter.apply).toHaveBeenCalledWith(
       expect.objectContaining({

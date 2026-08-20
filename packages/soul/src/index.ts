@@ -7,6 +7,9 @@ export type {
   PublishedAgentVersion,
 } from "./agent-publication";
 export { AgentPublicationError, publishAgentVersion } from "./agent-publication";
+export { agentWriteRequest, serializeAgent } from "./agents/agent-write";
+export type { AgentExistingDecision, AgentNamePlan } from "./agents/name-conflict";
+export { AGENT_EXISTING_DECISIONS, resolveAgentName } from "./agents/name-conflict";
 export type { PlatformAgent } from "./agents/platform-agents";
 export {
   DEFAULT_ASSISTANT,
@@ -198,6 +201,11 @@ export type {
   RoutineCatalogTrigger,
 } from "./routine-catalog";
 export { ActiveRoutineCatalog } from "./routine-catalog";
+export type { RoutineResourceRefusal } from "./routines/resource-references";
+export {
+  routineResourceTypeReferences,
+  unresolvedRoutineResourceTypes,
+} from "./routines/resource-references";
 export { scaffoldSoul } from "./scaffold-soul";
 export { validateSoulSemantics } from "./semantic";
 export type { BundleSigner, BundleVerifier, TrustedBundlePublicKey } from "./signatures";
