@@ -4,13 +4,7 @@
   "agent": "support",
   "context": {
     "customInstructions": "Answer from the documents the person has given you.",
-    "governancePages": [],
-    "availableTools": [
-      {
-        "name": "file_read",
-        "description": "Read one File by id."
-      }
-    ]
+    "governancePages": []
   },
   "input": [
     {
@@ -36,18 +30,27 @@
       "content": "Warranty policy. Claims must be filed within 90 days of delivery."
     }
   ],
-  "tools": [
-    {
-      "name": "file_read",
-      "description": "Read one File by id.",
-      "inputSchema": {
-        "type": "object",
-        "properties": { "fileId": { "type": "string" } },
-        "required": ["fileId"]
-      }
-    }
-  ],
+  "platformTools": ["file_read", "file_list"],
   "toolResults": [
+    {
+      "name": "file_list",
+      "output": {
+        "scope": "all",
+        "files": [
+          {
+            "fileId": "file-warranty",
+            "filename": "warranty-policy.pdf",
+            "mediaType": "application/pdf",
+            "sizeBytes": 64,
+            "origin": "uploaded",
+            "source": "mine",
+            "createdAt": "2026-08-01T00:00:00.000Z"
+          }
+        ],
+        "count": 1,
+        "limit": 20
+      }
+    },
     {
       "name": "file_read",
       "output": {
