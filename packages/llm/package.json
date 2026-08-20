@@ -10,8 +10,8 @@
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.39",
-    "@ai-sdk/azure": "^4.0.43",
-    "@ai-sdk/openai": "^4.0.42",
+    "@ai-sdk/azure": "^4.0.44",
+    "@ai-sdk/openai": "^4.0.43",
     "@ai-sdk/openai-compatible": "^3.0.31",
     "@ai-sdk/provider": "^4.0.7",
     "@anthropic-ai/claude-agent-sdk": "0.3.235",
@@ -19,13 +19,13 @@
     "@tulipfarm/schema": "workspace:*",
     "@tulipfarm/secrets": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
-    "ai": "^7.0.66",
+    "ai": "^7.0.68",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@tulipfarm/tsconfig": "workspace:*",
     "@types/node": "^26.2.0",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   }
 }
