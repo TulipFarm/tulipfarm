@@ -107,7 +107,16 @@ export type {
   SurfaceActionStore,
   SurfaceArtifactStore,
 } from "./surface-ports";
-export { executeToolWithTimeout, withAbortTimeout } from "./timeout";
+export {
+  CANCELLATION_GRACE_MS,
+  type CancellationOptions,
+  type CancellationOutcome,
+  executeToolWithTimeout,
+  INDETERMINATE_TIMEOUT_MESSAGE,
+  type LateSettlement,
+  runWithCancellation,
+  type ToolTimeoutOptions,
+} from "./timeout";
 export {
   type ApprovalDecision,
   type ApprovalGate,
@@ -115,6 +124,7 @@ export {
   type ChatAutonomy,
   type ClientContext,
   err,
+  isIndeterminateFault,
   isInfrastructureFault,
   ok,
   type RequestContext,

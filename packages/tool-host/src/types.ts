@@ -18,7 +18,15 @@ export type ToolErrorCode =
    * failure it cannot repair, spends repair budget rewording arguments that were never wrong, and
    * the person reading the turn is told the platform is broken when it was merely busy.
    */
-  | "unavailable";
+  | "unavailable"
+  /**
+   * The call was abandoned — a deadline expired — without the work acknowledging its cancellation,
+   * so whether the side effect landed is unknown. Neither `internal_error` nor `unavailable` can
+   * carry this: one invites a repair the arguments do not need, the other invites the retry that
+   * duplicates a payment, a notification, or a record write. Nothing may retry an indeterminate
+   * call automatically; the effect is settled `ambiguous` and reconciliation decides.
+   */
+  | "indeterminate";
 
 /**
  * What kind of fault a code represents, and therefore who may act on it. The request itself is the
@@ -26,7 +34,9 @@ export type ToolErrorCode =
  * can only reproduce it. Retrying is the correct response and the model must *not* be asked to
  * repair it, because there is nothing in the arguments to fix.
  */
-export const TOOL_FAULT_CLASS: Readonly<Record<ToolErrorCode, "business" | "infrastructure">> = {
+export const TOOL_FAULT_CLASS: Readonly<
+  Record<ToolErrorCode, "business" | "infrastructure" | "indeterminate">
+> = {
   validation_error: "business",
   surface_invalid: "business",
   presentation_unavailable: "business",
@@ -36,10 +46,16 @@ export const TOOL_FAULT_CLASS: Readonly<Record<ToolErrorCode, "business" | "infr
   audit_required: "business",
   internal_error: "business",
   unavailable: "infrastructure",
+  indeterminate: "indeterminate",
 };
 
 export function isInfrastructureFault(code: ToolErrorCode): boolean {
   return TOOL_FAULT_CLASS[code] === "infrastructure";
+}
+
+/** True when the call's side effect may have landed, so only reconciliation may retry it. */
+export function isIndeterminateFault(code: ToolErrorCode): boolean {
+  return TOOL_FAULT_CLASS[code] === "indeterminate";
 }
 
 export type ToolCallResult =
