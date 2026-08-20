@@ -18,6 +18,7 @@ export {
   PgKnowledgeSubjectStore,
   PgPrincipalResolver,
 } from "./acl-repo";
+export { NOTES_SPACE_NAME } from "./authored-page";
 export { type ChunkOptions, chunkText, type TextChunk } from "./chunk";
 export { type KnowledgeChunkRepo, PgKnowledgeChunkRepo, pageFilterConditions } from "./chunks-repo";
 export { buildDefaultRegistry } from "./connectors/registry";
