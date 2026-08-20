@@ -17,6 +17,7 @@ subscription-CLI model adapters.
 | `src/fallback.ts`, `src/provider-error.ts` | Fallback order and hard/transient failures. |
 | `src/embeddings.ts`, `src/embedding-provider.ts` | Embedding providers and execution. |
 | `src/model-spec.ts`, `src/pricing.ts` | Model metadata and cost helpers. |
+| `src/reachability.ts` | One live call's verdict on a configured model, for health reporting. |
 | `src/prompt-cache.ts` | Whether a prompt prefix asks for provider-side caching. |
 | `src/cli/` | Subscription Provider adapters, jail, transcripts, JSON mode, specs. |
 
@@ -51,5 +52,8 @@ subscription-CLI model adapters.
 - Do not pass ambient vendor env credentials through the CLI jail; only saved credentials.
 - Timed-out CLI turns must throw, not finish as a normal `stop`.
 - Subscription Providers are models only: disable shell, file tools, web, and ambient capability.
+- A reachability verdict is `degraded` whenever the provider *answered* — refused credential,
+  throttle, or a request it disliked — and `unreachable` only when no answer arrived. Collapsing
+  the two makes the operator's `llm` health row lie in both directions.
 - New CLI provider: implement `CliLanguageModel`, add a static `ModelSpec`, register provider id in
   `packages/secrets/src/registry.ts`, add `provider.ts` case, dependency, and Docker external.

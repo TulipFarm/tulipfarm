@@ -58,3 +58,8 @@ export {
   type LlmProviderFailureReason,
   ProviderUnavailableError,
 } from "./provider-error";
+export {
+  checkModelReachability,
+  MODEL_REACHABILITY_TIMEOUT_MS,
+  type ModelReachabilityReport,
+} from "./reachability";
