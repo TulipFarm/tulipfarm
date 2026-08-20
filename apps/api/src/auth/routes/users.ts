@@ -13,7 +13,8 @@ import {
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
-const USER_MANAGE: RouteAuthorization = {
+/** What People & access requires of its caller; also what "is an admin" means to a session. */
+export const USER_MANAGE: RouteAuthorization = {
   action: "user.manage",
   resourceType: "user",
   fallback: "admin",

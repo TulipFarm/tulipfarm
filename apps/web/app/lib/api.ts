@@ -193,6 +193,11 @@ export type SessionUser = {
   role: string;
   status: UserStatus;
   createdAt?: string;
+  /**
+   * Whether the API considers this person an admin of the business, decided by the same gate the
+   * admin routes are behind rather than by `role`, which a granted access level never rewrites.
+   */
+  isAdmin?: boolean;
 };
 
 // Establish a session: POST credentials to the API, which sets the httpOnly session cookie + the
