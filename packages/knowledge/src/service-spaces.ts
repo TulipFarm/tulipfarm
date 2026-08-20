@@ -247,7 +247,7 @@ export function listSpacePages(
  * Every Page is readable by everyone in the Business by default. The grant names the blanket Role
  * rather than expanding to members, so it never drifts as people join or leave.
  */
-async function grantBlanketRead(deps: KnowledgeServiceDeps, pageId: string): Promise<void> {
+export async function grantBlanketRead(deps: KnowledgeServiceDeps, pageId: string): Promise<void> {
   if (!deps.acl) return;
   await deps.acl.put({
     businessId: DEPLOYMENT_BUSINESS_ID,

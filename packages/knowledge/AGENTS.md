@@ -15,6 +15,7 @@ propagation. This is the sole accountable owner for source ACL enforcement.
 | `src/indexing.ts`, `src/retrieve.ts` | Authorized indexing and authorize -> rank -> re-check. |
 | `src/graph-expand.ts` | Bounded hop walk over `knowledge_links` and the banded hop-decay score. |
 | `src/graphrag/` | GraphRAG: LLM extraction, deterministic clustering, community summaries, local/global search, graph repo and invalidation. |
+| `src/authored-page.ts` | Standalone Page authoring: the `Notes` Space, path derivation, blanket grant. |
 | `src/{invalidate,delete,staleness}.ts` | Invalidation, deletion, stale-ACL sweeps. |
 | `src/provenance.ts` | `authorizeSynthesis` citation reauthorization. |
 | `src/types.ts`, `src/chunk.ts` | Shared page/chunk/space/search shapes and text chunking. |
@@ -36,6 +37,13 @@ propagation. This is the sole accountable owner for source ACL enforcement.
   both onto one `decideKnowledgeAccess`; a second ACL evaluator is a defect. Authored ACLs are
   read live from our own tables, so they project as a fresh `snapshot` with a finite max age —
   never an infinite one, which would fail open on a malformed timestamp.
+- Every authored Page is **placed and granted in the same write that inserts it**. `createPage`
+  lands a standalone Page in the unrestricted `Notes` Space with a derived path and records the
+  blanket read grant, exactly as `writePage` does for a Space page. Neither half is optional: an
+  unplaced Page is invisible to retrieval's lexical arm and to every Space listing, and an ungranted
+  Page is denied by `PageReadGate` to everyone including its author — so the write reports success
+  for a Page nothing can open, list or cite. `create_knowledge_page` re-reads both facts through the
+  reader's own paths and fails the call rather than report that success.
 - A **File** is `source: "file"` — an authored Page carrying explicit reader grants, never a
   connected source with a captured ACL snapshot. The grants are the File's own owner and sharees,
   so a share change is felt on the very next question with nothing to refresh. `ingestSource`

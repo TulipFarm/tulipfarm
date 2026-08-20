@@ -212,7 +212,7 @@ const citeSources = defineApiTool<KnowledgeToolContext>({
 const createKnowledgePage = defineApiTool<KnowledgeToolContext>({
   name: "create_knowledge_page",
   description:
-    "Author a new knowledge page (markdown). Use for durable, page-sized content that exceeds Memory. Returns the new page id.",
+    "Author a new knowledge page (markdown). Use for durable, page-sized content that exceeds Memory. The page lands in the shared 'Notes' space, readable by everyone in the business. Returns the new page id, its space and its path.",
   tier: "platform",
   mutating: true,
   inputSchema: CREATE_PAGE_SCHEMA,
@@ -226,7 +226,13 @@ const createKnowledgePage = defineApiTool<KnowledgeToolContext>({
     const a = args as { title: string; content: string; domain?: string; tags?: string[] };
     try {
       const page = await ctx.service.createPage(a);
-      return ok({ id: page._id, title: page.title });
+      // The writer verifies through the reader's own paths before reporting success. A Page that
+      // is unplaced or ungranted is one an Agent will later cite and be refused, so an unusable
+      // Page is a failed write here rather than a success the next turn discovers.
+      const stored = await ctx.service.getActivePage(page._id);
+      if (!stored?.spaceId || !stored.path) return err("internal_error", "page_not_placed");
+      if (!(await mayReadPage(ctx, page._id))) return err("internal_error", "page_not_readable");
+      return ok({ id: page._id, title: page.title, spaceId: stored.spaceId, path: stored.path });
     } catch (e) {
       return err("internal_error", reason(e));
     }
