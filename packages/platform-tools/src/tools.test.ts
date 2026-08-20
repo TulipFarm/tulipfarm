@@ -66,8 +66,6 @@ describe("validateArtifactTool", () => {
   });
 });
 
-// ── transfer_to_agent ─────────────────────────────────────────────────────────
-
 describe("completeStateTool", () => {
   const routineCtx = { routineId: "daily-digest", runId: "run-001" };
 

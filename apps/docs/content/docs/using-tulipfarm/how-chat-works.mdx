@@ -35,10 +35,10 @@ The web UI can start a turn with a selected agent. A running agent can also move
 
 | Tool | Meaning |
 | --- | --- |
-| `transfer_to_agent` | Hands the active chat to another agent so the next work is owned by that agent. |
 | `delegate_to_agent` | Starts helper work as a child run while the current agent keeps ownership of the chat. |
 
-Delegation is for scoped help; transfer is for changing the actor responsible for the chat.
+Delegation is for scoped help. To change the actor responsible for the chat, `@mention` the agent
+you want; the chat stays with that agent until a different one is mentioned.
 
 ## Choosing effort, not a model
 

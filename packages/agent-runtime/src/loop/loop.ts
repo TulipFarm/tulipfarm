@@ -1,4 +1,3 @@
-import { usdToCostMicros } from "@tulipfarm/run-kernel";
 import { ajv, textContent } from "@tulipfarm/schema";
 import type {
   ModelInvocationRequest,
@@ -7,6 +6,7 @@ import type {
   ModelUsage,
 } from "../ports";
 import { ModelInvocationError } from "../ports";
+import { chargeModelUsage } from "./budget";
 import type { AgentLoopCheckpoint } from "./checkpoint";
 import type {
   AgentLoopDependencies,
@@ -18,7 +18,12 @@ import type {
   ExposedTool,
   ToolDispatchResult,
 } from "./contract";
-import { deepestErrorMessage, EventSinkFailure, REQUEST_INPUT_TOOL } from "./diagnostics";
+import {
+  deepestErrorMessage,
+  EventSinkFailure,
+  isHandoffTool,
+  REQUEST_INPUT_TOOL,
+} from "./diagnostics";
 import { extractSkillName, narrowToolsToSkill } from "./narrowing";
 import {
   extractRereadFile,
@@ -40,8 +45,7 @@ import {
 /** Bounded Tool loop: broker-only effects, untrusted model output, durable budgets. */
 
 const ITERATION_BUDGET_KEY = "iterations";
-const TOKEN_BUDGET_KEY = "tokens";
-const COST_BUDGET_KEY = "costMicros";
+const HANDOFF_UNAVAILABLE = "handoff_unavailable";
 
 export class AgentLoop {
   constructor(private readonly deps: AgentLoopDependencies) {}
@@ -168,24 +172,8 @@ export class AgentLoop {
     };
 
     /** Charges tokens and cost against the Run budget; shared by the success and failure paths. */
-    const chargeUsage = async (usage: ModelUsage): Promise<"ok" | "exhausted"> => {
-      const tokens = usage.inputTokens + usage.outputTokens;
-      if (tokens > 0) {
-        const tokenBudget = await this.deps.budget.consume({
-          key: TOKEN_BUDGET_KEY,
-          amount: tokens,
-        });
-        if (tokenBudget.outcome === "exhausted") return "exhausted";
-      }
-      if (usage.costUsd !== undefined && usage.costUsd > 0) {
-        const costBudget = await this.deps.budget.consume({
-          key: COST_BUDGET_KEY,
-          amount: usdToCostMicros(usage.costUsd),
-        });
-        if (costBudget.outcome === "exhausted") return "exhausted";
-      }
-      return "ok";
-    };
+    const chargeUsage = (usage: ModelUsage): Promise<"ok" | "exhausted"> =>
+      chargeModelUsage(this.deps.budget, usage);
 
     /**
      * Dispatches one model-proposed batch and records it in the transcript. Returns the
@@ -272,6 +260,18 @@ export class AgentLoop {
         const call = calls[index];
         const tool = exposed.get(call.name);
         if (tool === undefined) {
+          // A hand-off is a barrier read off the call's identity, never off its result: a Turn
+          // that tried to move the work elsewhere and could not must not be handed feedback it
+          // can route around, because routing around it is how a hand-off nobody performed ends
+          // up reported as done (#419). Deliberately no repair path.
+          if (isHandoffTool(call.name)) {
+            await emit("tool_call_rejected", {
+              toolName: call.name,
+              callId: call.callId,
+              outcome: HANDOFF_UNAVAILABLE,
+            });
+            return finish({ status: "failed", reason: HANDOFF_UNAVAILABLE, ...counters }, "failed");
+          }
           // A Tool the caller never exposed is refused here; the broker never sees it.
           messages.push(toolMessage(call.callId, { error: "tool_not_available" }));
           await emit("tool_call_rejected", {

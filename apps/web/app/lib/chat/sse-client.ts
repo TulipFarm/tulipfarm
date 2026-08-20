@@ -110,6 +110,8 @@ export function modelFailureMessage(reason: string | undefined): string {
       return "The model provider is temporarily unavailable. Try again shortly.";
     case "input_request_failed":
       return "The Agent asked you to choose, but the question could not be shown. It stopped instead of deciding for you. Try again.";
+    case "handoff_unavailable":
+      return "The Agent tried to hand this to another agent, and that hand-off is not available here. It stopped rather than report work it had not done.";
     default:
       return "The model request failed. Try again.";
   }

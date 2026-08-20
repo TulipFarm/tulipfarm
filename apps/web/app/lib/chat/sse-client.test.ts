@@ -273,6 +273,12 @@ test("turns allowlisted model failures into actionable participant-safe messages
   expect(modelFailureMessage("input_request_failed")).toBe(
     "The Agent asked you to choose, but the question could not be shown. It stopped instead of deciding for you. Try again."
   );
+  // The whole point of failing a hand-off the Agent cannot make (#419) is that the reader is told
+  // nobody picked the work up. Falling through to the generic model message would restore exactly
+  // the silence the barrier exists to break.
+  expect(modelFailureMessage("handoff_unavailable")).toBe(
+    "The Agent tried to hand this to another agent, and that hand-off is not available here. It stopped rather than report work it had not done."
+  );
 });
 
 test("releases a held Tool call when the decision lets it report", () => {
