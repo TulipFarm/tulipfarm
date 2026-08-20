@@ -18,6 +18,7 @@ import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
 import type { RequireAuthorization } from "../authz/route-gate";
 import type { AuthorLabeller } from "./author-label";
+import { refusedAsFileManaged } from "./managed-pages";
 import {
   filtersFromQuery,
   pageHitToApi,
@@ -326,6 +327,7 @@ export function registerKnowledgeRoutes(
       // an empty body is a legal no-op update whose 200 carries the whole Page back.
       if (!(await gate.canRead(req.user?._id, id)))
         return refuseWrite(req, reply, "knowledge.page.update", "page");
+      if (await refusedAsFileManaged(service, id, reply)) return reply;
       const outcome = await service.updatePage(id, req.body as Record<string, unknown>, ifMatch);
       if (!outcome.ok) {
         return outcome.reason === "not_found"
@@ -338,14 +340,22 @@ export function registerKnowledgeRoutes(
   app.delete(
     "/api/v1/knowledge/pages/:id",
     route({
-      description: "Soft-delete a knowledge page.",
+      description:
+        "Soft-delete a knowledge page. A page that indexes a File is managed on the File and " +
+        "answers 409.",
       params: EntityIdParamsSchema,
-      response: { 204: NoContentSchema, 404: ErrorSchema, 401: ErrorSchema },
+      response: {
+        204: NoContentSchema,
+        404: ErrorSchema,
+        409: ErrorSchema,
+        401: ErrorSchema,
+      },
     }),
     async (req, reply) => {
       const { id } = req.params as { id: string };
       if (!(await gate.canRead(req.user?._id, id)))
         return refuseWrite(req, reply, "knowledge.page.delete", "page");
+      if (await refusedAsFileManaged(service, id, reply)) return reply;
       return (await service.deletePage(id))
         ? reply.code(204).send()
         : reply.code(404).send({ error: "not found" });
@@ -360,6 +370,7 @@ export function registerKnowledgeRoutes(
       response: {
         201: PageRevisionCreatedResponseSchema,
         404: ErrorSchema,
+        409: ErrorSchema,
         401: ErrorSchema,
       },
     }),
@@ -368,6 +379,7 @@ export function registerKnowledgeRoutes(
       const b = req.body as { content: string; reason?: string | null };
       if (!(await gate.canRead(req.user?._id, id)))
         return refuseWrite(req, reply, "knowledge.page.revise", "page");
+      if (await refusedAsFileManaged(service, id, reply)) return reply;
       const n = await service.createRevision(id, b.content, b.content.trim(), b.reason ?? null);
       return n === null
         ? reply.code(404).send({ error: "not found" })
@@ -498,6 +510,7 @@ export function registerKnowledgeRoutes(
           200: PageMovePreviewSchema,
           400: ErrorSchema,
           404: ErrorSchema,
+          409: ErrorSchema,
           401: ErrorSchema,
         },
       }),
@@ -510,6 +523,7 @@ export function registerKnowledgeRoutes(
           return reply.code(404).send({ error: "not found" });
         if (dest.spaceId !== undefined && !(await gate.canReadSpace(req.user?._id, dest.spaceId)))
           return reply.code(404).send({ error: "not found" });
+        if (apply && (await refusedAsFileManaged(service, id, reply))) return reply;
         const result = apply
           ? await service.movePage(id, dest)
           : await service.previewPageMove(id, dest);

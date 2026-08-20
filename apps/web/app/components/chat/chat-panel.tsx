@@ -78,6 +78,7 @@ export function ChatPanel({
   initialMessages,
   onConversationChange,
   initialDraft,
+  attachFileId,
 }: {
   agentId?: string;
   defaultModel?: ChatModelSelector;
@@ -89,6 +90,8 @@ export function ChatPanel({
   onConversationChange?: (conversationId: string | undefined) => void;
   /** A prompt to draft into the composer once, seeded by the onboarding Companion. */
   initialDraft?: string;
+  /** An already-stored File to stage on the composer, handed over by the Files library. */
+  attachFileId?: string | null;
 }) {
   const {
     messages,
@@ -213,6 +216,7 @@ export function ChatPanel({
         }
         suggestions={hasMessages ? [] : suggestions}
         initialDraft={initialDraft}
+        attachFileId={attachFileId}
         // A `@agent` mention in the composer overrides the panel's active agent for that turn.
         onSend={(text, opts) => send(text, { ...opts, agentId: opts.agentId ?? agentId })}
       />

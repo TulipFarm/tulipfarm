@@ -26,5 +26,13 @@ folded into `ModelUsage`.
 - **Cache and reasoning token counts are a breakdown, never an addend.** `cacheReadTokens`,
   `cacheWriteTokens` and `reasoningTokens` are already inside `inputTokens`/`outputTokens`. Adding
   them again double-counts spend.
+- **Bytes reach the model only through `ModelInvocationRequest.attachments`.** `splitPrompt` emits
+  an SDK `image`/`file` part for a `file` part whose id some attachment resolves, and nothing for
+  one it does not — that absence is how a File stays confined to its own Turn. Never inline bytes
+  into `MessageContent`, which is persisted. `splitPrompt` reports what it emitted as `attached`;
+  read that rather than re-deriving it.
+- **Image tokens are already inside `inputTokens`.** No provider breaks them out and the SDK
+  exposes no field for them, so there is nothing to add — and adding an estimate would charge the
+  same tokens twice.
 - **Never price a call here.** `priceCall` in `@tulipfarm/llm` is the enforced sole authority on
   cost (`scripts/llm-pricing-authority.test.ts`).

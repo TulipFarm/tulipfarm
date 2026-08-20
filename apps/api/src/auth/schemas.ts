@@ -19,6 +19,17 @@ export const PublicUserSchema = {
 } as const;
 
 /**
+ * The caller's own account plus whether it holds admin authority right now. `role` is the account's
+ * own level and a Role grant never rewrites it, so a client deriving "is an admin" from `role`
+ * hides every admin surface from a granted `Owner` (#408).
+ */
+export const SessionUserSchema = {
+  type: "object",
+  properties: { ...PublicUserSchema.properties, isAdmin: { type: "boolean" } },
+  required: [...PublicUserSchema.required, "isAdmin"],
+} as const;
+
+/**
  * An issued invite link. `token` is the credential itself and is returned exactly once, to the
  * admin who asked for it — it is never readable again, because only its hash is stored.
  */

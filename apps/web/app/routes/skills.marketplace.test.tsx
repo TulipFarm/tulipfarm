@@ -1,7 +1,7 @@
 import { createRemixStub } from "@remix-run/testing";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { expect, test, vi } from "vitest";
+import { beforeEach, expect, test, vi } from "vitest";
 
 // Mock the skills client so no real fetch/audit runs; drive the flow through the UI.
 vi.mock("~/lib/skills", () => ({
@@ -9,10 +9,16 @@ vi.mock("~/lib/skills", () => ({
   auditSkill: vi.fn(),
   installSkills: vi.fn(),
   marketplaceSkills: vi.fn(),
+  skillRowKey: (skill: { name: string; skillPath?: string }) => skill.skillPath ?? skill.name,
 }));
 
 import { auditSkill, installSkills, type MarketplaceCatalog, scanSkills } from "~/lib/skills";
 import SkillsMarketplace from "./_app.skills.marketplace";
+
+// Call arguments are asserted per test, so recorded calls must not leak between them.
+beforeEach(() => {
+  vi.clearAllMocks();
+});
 
 function renderInstall(catalog: MarketplaceCatalog | null = null) {
   const Stub = createRemixStub([
@@ -26,7 +32,13 @@ test("scan → audit → advisory + operator confirm → install", async () => {
   vi.mocked(scanSkills).mockResolvedValue({
     scanId: "s1",
     skills: [
-      { name: "demo-skill", description: "A demo.", installed: false, updateAvailable: false },
+      {
+        name: "demo-skill",
+        skillPath: "skills/demo-skill/SKILL.md",
+        description: "A demo.",
+        installed: false,
+        updateAvailable: false,
+      },
     ],
   });
   vi.mocked(auditSkill).mockResolvedValue({
@@ -75,7 +87,9 @@ test("scan → audit → advisory + operator confirm → install", async () => {
   await user.click(screen.getByRole("button", { name: /confirm install/i }));
 
   expect(await screen.findByText(/Installed demo-skill/i)).toBeInTheDocument();
-  expect(installSkills).toHaveBeenCalledWith("s1", ["demo-skill"]);
+  expect(installSkills).toHaveBeenCalledWith("s1", [
+    { name: "demo-skill", skillPath: "skills/demo-skill/SKILL.md" },
+  ]);
 });
 
 test("marketplace catalog feeds the same audit → operator-confirm flow", async () => {
@@ -120,7 +134,10 @@ test("marketplace catalog feeds the same audit → operator-confirm flow", async
 
   await user.click(screen.getByRole("button", { name: /confirm install/i }));
   expect(await screen.findByText(/Installed demo-skill/i)).toBeInTheDocument();
-  expect(installSkills).toHaveBeenCalledWith("mkt-1", ["demo-skill"]);
+  // A catalog row without a path falls back to identifying the skill by name.
+  expect(installSkills).toHaveBeenCalledWith("mkt-1", [
+    { name: "demo-skill", skillPath: undefined },
+  ]);
 });
 
 test("a missing marketplace catalog still renders the manual git-url scan form", async () => {
@@ -196,4 +213,283 @@ test("a scan failure surfaces an error banner", async () => {
   await user.click(screen.getByRole("button", { name: /^Scan$/ }));
 
   expect(await screen.findByText(/scan failed: no SKILL\.md files found/i)).toBeInTheDocument();
+});
+
+// A source may define two different skills under the same directory name. Keying rows by name
+// merged them into one selection, so the operator saw a checkbox they could not clear and the
+// install request carried a different set of names from the one on screen.
+test("two scanned skills sharing a name stay separately selectable", async () => {
+  const user = userEvent.setup();
+  vi.mocked(scanSkills).mockResolvedValue({
+    scanId: "s2",
+    skills: [
+      {
+        name: "review-contract",
+        skillPath: "legal/review-contract/SKILL.md",
+        description: "Legal review.",
+        installed: false,
+        updateAvailable: false,
+      },
+      {
+        name: "review-contract",
+        skillPath: "sales/review-contract/SKILL.md",
+        description: "Sales review.",
+        installed: false,
+        updateAvailable: false,
+      },
+    ],
+  });
+
+  renderInstall();
+  await user.type(await screen.findByLabelText(/git url/i), "owner/repo");
+  await user.click(screen.getByRole("button", { name: /^Scan$/ }));
+
+  const boxes = await screen.findAllByRole("checkbox");
+  expect(boxes).toHaveLength(2);
+  expect(screen.getByRole("button", { name: /Run SkillAudit \(2\)/ })).toBeInTheDocument();
+
+  await user.click(boxes[0]);
+
+  expect(boxes[0]).not.toBeChecked();
+  expect(boxes[1]).toBeChecked();
+  expect(screen.getByRole("button", { name: /Run SkillAudit \(1\)/ })).toBeInTheDocument();
+});
+
+test("an install failure is reported beside the confirm button, not only in the page banner", async () => {
+  const user = userEvent.setup();
+  vi.mocked(scanSkills).mockResolvedValue({
+    scanId: "s3",
+    skills: [
+      {
+        name: "demo-skill",
+        skillPath: "skills/demo-skill/SKILL.md",
+        description: "A demo.",
+        installed: false,
+        updateAvailable: false,
+      },
+    ],
+  });
+  vi.mocked(auditSkill).mockResolvedValue({
+    riskRating: "low",
+    summary: "Benign.",
+    toolsReach: [],
+    findings: [],
+    deterministicScan: { verdict: "safe", trustLevel: "trusted", findings: [] },
+  });
+  vi.mocked(installSkills).mockRejectedValue(new Error("invalid soul write target"));
+
+  renderInstall();
+  await user.type(await screen.findByLabelText(/git url/i), "owner/repo");
+  await user.click(screen.getByRole("button", { name: /^Scan$/ }));
+  await user.click(await screen.findByRole("button", { name: /Run SkillAudit/ }));
+  await user.click(await screen.findByRole("button", { name: /confirm install/i }));
+
+  const alert = await screen.findByRole("alert");
+  expect(alert).toHaveTextContent(/install failed: invalid soul write target/i);
+  // The confirm button is still there to retry, and nothing claims a successful install.
+  expect(screen.getByRole("button", { name: /confirm install/i })).toBeInTheDocument();
+  expect(screen.queryByText(/^Installed /)).not.toBeInTheDocument();
+});
+
+// The two rows are distinct packages, so each must get its own report. Auditing by name alone
+// makes the server resolve whichever row it listed first and shows that one report twice.
+test("two scanned skills sharing a name are audited and reported separately", async () => {
+  const user = userEvent.setup();
+  vi.mocked(scanSkills).mockResolvedValue({
+    scanId: "s4",
+    skills: [
+      {
+        name: "review-contract",
+        skillPath: "legal/review-contract/SKILL.md",
+        description: "Negotiation playbook review.",
+        installed: false,
+        updateAvailable: false,
+      },
+      {
+        name: "review-contract",
+        skillPath: "small-business/review-contract/SKILL.md",
+        description: "Plain-English review.",
+        installed: false,
+        updateAvailable: false,
+      },
+    ],
+  });
+  vi.mocked(auditSkill).mockImplementation(async (_scanId, _name, skillPath) => ({
+    riskRating: "low",
+    summary:
+      skillPath === "legal/review-contract/SKILL.md" ? "Legal summary." : "Small-biz summary.",
+    toolsReach: [],
+    findings: [],
+    deterministicScan: { verdict: "safe", trustLevel: "community", findings: [] },
+  }));
+
+  renderInstall();
+  await user.type(await screen.findByLabelText(/git url/i), "owner/repo");
+  await user.click(screen.getByRole("button", { name: /^Scan$/ }));
+  await user.click(await screen.findByRole("button", { name: /Run SkillAudit \(2\)/ }));
+
+  expect(await screen.findByText("Legal summary.")).toBeInTheDocument();
+  expect(screen.getByText("Small-biz summary.")).toBeInTheDocument();
+});
+
+// What the operator selected must reach the install request intact. Sending bare names collapses
+// the two rows into one string and silently drops a package the operator saw and confirmed.
+test("the install payload identifies each selected row by its path", async () => {
+  const user = userEvent.setup();
+  vi.mocked(scanSkills).mockResolvedValue({
+    scanId: "s5",
+    skills: [
+      {
+        name: "review-contract",
+        skillPath: "legal/review-contract/SKILL.md",
+        description: "Negotiation playbook review.",
+        installed: false,
+        updateAvailable: false,
+      },
+      {
+        name: "review-contract",
+        skillPath: "small-business/review-contract/SKILL.md",
+        description: "Plain-English review.",
+        installed: false,
+        updateAvailable: false,
+      },
+    ],
+  });
+  vi.mocked(auditSkill).mockResolvedValue({
+    riskRating: "low",
+    summary: "Benign.",
+    toolsReach: [],
+    findings: [],
+    deterministicScan: { verdict: "safe", trustLevel: "community", findings: [] },
+  });
+  vi.mocked(installSkills).mockResolvedValue({ installed: ["review-contract"] });
+
+  renderInstall();
+  await user.type(await screen.findByLabelText(/git url/i), "owner/repo");
+  await user.click(screen.getByRole("button", { name: /^Scan$/ }));
+  await user.click(await screen.findByRole("button", { name: /Run SkillAudit \(2\)/ }));
+  await user.click(await screen.findByRole("button", { name: /confirm install/i }));
+
+  expect(installSkills).toHaveBeenCalledWith("s5", [
+    { name: "review-contract", skillPath: "legal/review-contract/SKILL.md" },
+    { name: "review-contract", skillPath: "small-business/review-contract/SKILL.md" },
+  ]);
+});
+
+test("selecting one of two same-named rows installs exactly that row", async () => {
+  const user = userEvent.setup();
+  vi.mocked(scanSkills).mockResolvedValue({
+    scanId: "s6",
+    skills: [
+      {
+        name: "review-contract",
+        skillPath: "legal/review-contract/SKILL.md",
+        description: "Negotiation playbook review.",
+        installed: false,
+        updateAvailable: false,
+      },
+      {
+        name: "review-contract",
+        skillPath: "small-business/review-contract/SKILL.md",
+        description: "Plain-English review.",
+        installed: false,
+        updateAvailable: false,
+      },
+    ],
+  });
+  vi.mocked(auditSkill).mockResolvedValue({
+    riskRating: "low",
+    summary: "Benign.",
+    toolsReach: [],
+    findings: [],
+    deterministicScan: { verdict: "safe", trustLevel: "community", findings: [] },
+  });
+  vi.mocked(installSkills).mockResolvedValue({ installed: ["review-contract"] });
+
+  renderInstall();
+  await user.type(await screen.findByLabelText(/git url/i), "owner/repo");
+  await user.click(screen.getByRole("button", { name: /^Scan$/ }));
+
+  const boxes = await screen.findAllByRole("checkbox");
+  await user.click(boxes[1]);
+  await user.click(await screen.findByRole("button", { name: /Run SkillAudit \(1\)/ }));
+  await user.click(await screen.findByRole("button", { name: /confirm install/i }));
+
+  expect(installSkills).toHaveBeenCalledWith("s6", [
+    { name: "review-contract", skillPath: "legal/review-contract/SKILL.md" },
+  ]);
+});
+
+// #444: after the audit resolves the operator was offered two competing primary actions with no
+// indication which one advanced the flow.
+test("the audit action gives way to confirm once the selection is audited", async () => {
+  const user = userEvent.setup();
+  vi.mocked(scanSkills).mockResolvedValue({
+    scanId: "s7",
+    skills: [
+      {
+        name: "demo-skill",
+        skillPath: "skills/demo-skill/SKILL.md",
+        description: "A demo.",
+        installed: false,
+        updateAvailable: false,
+      },
+    ],
+  });
+  vi.mocked(auditSkill).mockResolvedValue({
+    riskRating: "low",
+    summary: "Benign.",
+    toolsReach: [],
+    findings: [],
+    deterministicScan: { verdict: "safe", trustLevel: "trusted", findings: [] },
+  });
+
+  renderInstall();
+  await user.type(await screen.findByLabelText(/git url/i), "owner/repo");
+  await user.click(screen.getByRole("button", { name: /^Scan$/ }));
+  await user.click(await screen.findByRole("button", { name: /Run SkillAudit/ }));
+
+  expect(await screen.findByRole("button", { name: /confirm install/i })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /Run SkillAudit/ })).not.toBeInTheDocument();
+
+  // Changing the selection invalidates the audit, so the audit action comes back.
+  await user.click(screen.getByRole("checkbox"));
+  expect(await screen.findByRole("button", { name: /Run SkillAudit \(0\)/ })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /confirm install/i })).not.toBeInTheDocument();
+});
+
+// #444: the report list is long, so an error rendered in place is still off-screen. Move focus to
+// it so the failure is announced and scrolled to at the point of failure.
+test("an install failure takes focus so it is seen at the point of failure", async () => {
+  const user = userEvent.setup();
+  vi.mocked(scanSkills).mockResolvedValue({
+    scanId: "s8",
+    skills: [
+      {
+        name: "demo-skill",
+        skillPath: "skills/demo-skill/SKILL.md",
+        description: "A demo.",
+        installed: false,
+        updateAvailable: false,
+      },
+    ],
+  });
+  vi.mocked(auditSkill).mockResolvedValue({
+    riskRating: "low",
+    summary: "Benign.",
+    toolsReach: [],
+    findings: [],
+    deterministicScan: { verdict: "safe", trustLevel: "trusted", findings: [] },
+  });
+  vi.mocked(installSkills).mockRejectedValue(new Error("invalid soul write target"));
+
+  renderInstall();
+  await user.type(await screen.findByLabelText(/git url/i), "owner/repo");
+  await user.click(screen.getByRole("button", { name: /^Scan$/ }));
+  await user.click(await screen.findByRole("button", { name: /Run SkillAudit/ }));
+  await user.click(await screen.findByRole("button", { name: /confirm install/i }));
+
+  const alert = await screen.findByRole("alert");
+  expect(alert).toHaveTextContent(/install failed: invalid soul write target/i);
+  expect(alert).toHaveFocus();
 });

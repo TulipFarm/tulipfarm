@@ -14,6 +14,12 @@ import {
 import type { TaskStore } from "@tulipfarm/storage";
 import { type ConstructorOptions, PgBoss } from "pg-boss";
 import type { Queryable } from "./db";
+import {
+  FILE_INDEX_QUEUE,
+  type FileIndexDeps,
+  type FileIndexJob,
+  handleFileIndexJob,
+} from "./knowledge/file-index";
 import { reconcileTasks } from "./reconcile/task-reconciler";
 import type { TaskSignalsGatherer } from "./reconcile/task-signals";
 import { breached, readSpendWindow, spendAlertMessage } from "./spend-alert";
@@ -59,6 +65,11 @@ export interface JobConsumerOptions {
    * without both there is nothing to sweep, so the queue is simply not registered.
    */
   readonly bundles?: UnreferencedBundleDeleter;
+  /**
+   * File-into-Knowledge indexing. Absent leaves the queue unregistered, which is the honest state
+   * for a composition with no blob store: jobs then wait rather than being consumed and dropped.
+   */
+  readonly fileIndex?: FileIndexDeps;
 }
 
 interface ObservabilityPruneJob {
@@ -154,6 +165,22 @@ export async function startJobConsumers(options: JobConsumerOptions): Promise<Pg
       {},
       { singletonKey: "boot", singletonSeconds: BOOT_RECONCILE_DEBOUNCE_SECONDS }
     );
+  }
+
+  if (options.fileIndex) {
+    const fileIndex = options.fileIndex;
+    await boss.createQueue(FILE_INDEX_QUEUE);
+    await boss.work<FileIndexJob>(FILE_INDEX_QUEUE, async (jobs) => {
+      for (const job of jobs) {
+        const outcome = await handleFileIndexJob(job.data, fileIndex);
+        // A skip is reported rather than thrown. Every reason for one is a fact about the File a
+        // retry cannot change, so failing the job would only re-read the same bytes three times
+        // before giving up, and say nothing about why to whoever asked for the indexing.
+        if (outcome.kind === "skipped") {
+          options.log?.info?.(`file ${job.data.fileId} not indexed: ${outcome.reason}`);
+        }
+      }
+    });
   }
 
   return boss;

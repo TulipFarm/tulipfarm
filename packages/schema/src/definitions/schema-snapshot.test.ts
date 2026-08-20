@@ -26,10 +26,11 @@ describe("definition schema wire contract", () => {
     );
   });
 
-  it.each(
-    registrations.map((entry) => [entry.kind, entry] as const)
-  )("%s matches its locked schema", async (kind, registration) => {
-    const schema = `${JSON.stringify(sortDeep(registration.schema), null, 2)}\n`;
-    await expect(schema).toMatchFileSnapshot(`./__schemas__/${kind}.json`);
-  });
+  it.each(registrations.map((entry) => [entry.kind, entry] as const))(
+    "%s matches its locked schema",
+    async (kind, registration) => {
+      const schema = `${JSON.stringify(sortDeep(registration.schema), null, 2)}\n`;
+      await expect(schema).toMatchFileSnapshot(`./__schemas__/${kind}.json`);
+    }
+  );
 });

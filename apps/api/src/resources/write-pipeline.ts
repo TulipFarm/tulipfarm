@@ -72,6 +72,41 @@ export async function validateLinks(
   return null;
 }
 
+type AjvError = NonNullable<ReturnType<typeof ajv.compile>["errors"]>[number];
+
+/**
+ * JSON Pointer for an ajv error. A `required` failure reports `instancePath: ""` because the
+ * offending property is absent, so the field name only lives in `params.missingProperty` — without
+ * this the client gets an empty path and cannot map the 422 back onto the input that caused it.
+ */
+function ajvErrorPath(error: AjvError): string {
+  if (error.keyword === "required") {
+    const missing = (error.params as { missingProperty?: unknown }).missingProperty;
+    if (typeof missing === "string" && missing.length > 0) {
+      return `${error.instancePath}/${missing}`;
+    }
+  }
+  return error.instancePath ?? "";
+}
+
+/**
+ * A required field that is present but blank is empty, not supplied. JSON Schema `required` only
+ * asserts presence, so `""` would otherwise satisfy a field the author marked mandatory.
+ */
+function emptyRequiredField(
+  schema: Record<string, unknown>,
+  data: Record<string, unknown>
+): string | null {
+  const required = schema.required;
+  if (!Array.isArray(required)) return null;
+  for (const field of required) {
+    if (typeof field !== "string") continue;
+    const value = data[field];
+    if (typeof value === "string" && value.trim() === "") return field;
+  }
+  return null;
+}
+
 /** A 422/404/409 response a write helper can hand back for the route to send. */
 export type WriteError<C extends number = number> = {
   code: C;
@@ -109,7 +144,18 @@ export async function validateAndLink(
       body: {
         error: e?.message ?? "validation failed",
         boundary: "resource",
-        path: e?.instancePath ?? "",
+        path: e ? ajvErrorPath(e) : "",
+      },
+    };
+  }
+  const emptyField = emptyRequiredField(schema, data);
+  if (emptyField) {
+    return {
+      code: 422,
+      body: {
+        error: `${emptyField} must not be empty`,
+        boundary: "resource",
+        path: `/${emptyField}`,
       },
     };
   }

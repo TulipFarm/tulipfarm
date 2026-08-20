@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type { ModelRequirementsPolicy } from "@tulipfarm/agent-runtime";
+import { readTurnAttachment, type TurnAttachmentStore } from "@tulipfarm/files";
 import type { InvocationPrincipal } from "@tulipfarm/run-kernel";
-import type { ParticipantToolCall } from "@tulipfarm/schema";
+import { type MessageContent, type ParticipantToolCall, textContent } from "@tulipfarm/schema";
+import type { HostedAgent } from "@tulipfarm/tool-host";
+import { fromToolResult, type MessageRepo } from "../chat/messages";
 import type {
   ConversationStore,
   PersistedTurn,
@@ -45,6 +48,11 @@ export interface TurnAuthority {
   readonly source: string;
   /** The Run's bundle digest, recorded on the Context manifest as what produced this Context. */
   readonly bundleDigest: string;
+  /**
+   * The Agent this Run routes to. Resolved here because only the control plane holds the Soul;
+   * the durable runtime hosts Tools without one and would otherwise dispatch them unrestricted.
+   */
+  readonly agent?: HostedAgent;
 }
 
 /** Everything the model needs for one turn. Mirrors the Worker's `ResolvedTurnContext`. */
@@ -61,7 +69,18 @@ export interface HostedTurnContext {
   readonly guardrailDigest: string;
   /** Validated guardrail policy named by digest; Worker enforces it without reading Soul. */
   readonly guardrailPolicy: Record<string, unknown>;
-  readonly messages: readonly { readonly role: string; readonly content: string }[];
+  readonly messages: readonly { readonly role: string; readonly content: MessageContent }[];
+  /**
+   * The Files this Turn may send to the model, re-authorized at assembly time.
+   *
+   * Names only — bytes are fetched separately, because this context crosses an HTTP boundary as
+   * JSON and base64 would put a whole image through a response schema on every Turn.
+   */
+  readonly attachments?: readonly {
+    readonly fileId: string;
+    readonly mediaType: string;
+    readonly name: string;
+  }[];
   readonly tools: readonly {
     readonly name: string;
     readonly description?: string;
@@ -122,6 +141,29 @@ export interface InternalTurnHostOptions {
   readonly context: TurnContextResolver;
   readonly tools: TurnToolDispatcher;
   readonly approvals?: TurnApprovalRegistrar;
+  /**
+   * Resolves the Agent one Run routes to, from the Soul. Absent in a deployment with no Soul; the
+   * authority then names no Agent and every host falls back to its own default, as before.
+   */
+  readonly agentForRun?: (
+    businessId: string,
+    runId: string,
+    source: string
+  ) => Promise<HostedAgent | undefined>;
+  /**
+   * Serves the bytes of a File this Turn attached. Absent leaves Turns attachment-free.
+   *
+   * Separate from `context` because bytes cannot ride in a JSON context response, and separate
+   * from the public File routes because the Worker acts as a Run, not as a session.
+   */
+  readonly files?: TurnAttachmentStore;
+  /**
+   * Writes the tool-role rows that link a Turn's Surfaces into its Conversation.
+   *
+   * Separate from `store` because `ConversationStore` models LLM history, where every row is
+   * prose. A Surface link is a reference, not text, and must never reach the model as either.
+   */
+  readonly messages?: MessageRepo;
   newId?(): string;
   now?(): Date;
 }
@@ -147,6 +189,7 @@ export class InternalTurnHost {
     const turn = await this.options.store.findTurnByRunId(businessId, runId);
     if (turn === undefined) throw new TurnAuthorityError("turn_not_found");
 
+    const agent = await this.options.agentForRun?.(businessId, runId, run.source);
     return {
       businessId,
       runId,
@@ -154,6 +197,7 @@ export class InternalTurnHost {
       subject: run.identity.effectiveSubject,
       source: run.source,
       bundleDigest: run.bundle.digest,
+      ...(agent === undefined ? {} : { agent }),
     };
   }
 
@@ -164,6 +208,26 @@ export class InternalTurnHost {
 
   async resolveContext(businessId: string, runId: string): Promise<HostedTurnContext> {
     return this.options.context.resolve(await this.authority(businessId, runId));
+  }
+
+  /** Delegates to the File domain, which owns whether this Turn may have these bytes. */
+  async readAttachment(
+    businessId: string,
+    runId: string,
+    fileId: string
+  ): Promise<{ mediaType: string; sizeBytes: number; body: AsyncIterable<Uint8Array> } | null> {
+    const files = this.options.files;
+    if (files === undefined) return null;
+
+    const { turn, subject } = await this.authority(businessId, runId);
+    return readTurnAttachment({
+      files,
+      messages: await this.options.store.listMessages(businessId, turn.conversationId),
+      businessId,
+      turnId: turn.id,
+      fileId,
+      principalId: subject.id,
+    });
   }
 
   async dispatchTool(
@@ -211,7 +275,7 @@ export class InternalTurnHost {
       conversationId: turn.conversationId,
       turnId: turn.id,
       role: "assistant",
-      content: input.content,
+      content: textContent(input.content),
       ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
       attempt: input.attempt,
       createdAt: this.now(),
@@ -226,9 +290,25 @@ export class InternalTurnHost {
     status: TurnCompletionStatus;
     cursor: number;
     messageId: string | null;
+    surfaces?: readonly { artifactId: string; revision: number }[];
   }): Promise<void> {
     const { turn, subject } = await this.authority(input.businessId, input.runId);
     const now = this.now();
+    // The Artifact is already durable; this records that *this* Conversation was shown it, which
+    // is the only part a reload has to restore. One tool-role Message keeps the cards in the order
+    // the reader saw them, and writing it here keeps the link and the outcome inseparable.
+    if (input.surfaces?.length && this.options.messages !== undefined) {
+      await this.options.messages.create(
+        fromToolResult(
+          turn.conversationId,
+          input.surfaces.map((surface) => ({
+            type: "surface" as const,
+            artifactId: surface.artifactId,
+            revision: surface.revision,
+          }))
+        )
+      );
+    }
     // Late completion from a superseded attempt must not restate the Turn outcome.
     const current = input.attempt >= turn.attempt;
     await this.options.store.completeTurn({

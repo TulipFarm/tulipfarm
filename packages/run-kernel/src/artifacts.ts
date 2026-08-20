@@ -12,6 +12,7 @@ import type {
   PutArtifactInput,
   PutArtifactResult,
 } from "@tulipfarm/storage";
+import { collectBlobBytes } from "@tulipfarm/storage";
 import { type JsonObject, TypedOutputError, type TypedOutputValidator } from "./outputs";
 
 export interface ArtifactStorePort {
@@ -274,7 +275,7 @@ export class ArtifactService {
     ) {
       throw new ArtifactAccessError("artifact_tampered", artifact.id);
     }
-    const bytes = await this.blobs.get({ key: blob.key, hash: blob.hash });
+    const bytes = await collectBlobBytes(await this.blobs.get({ key: blob.key, hash: blob.hash }));
     const rawHash = createHash("sha256").update(bytes).digest("hex");
     if (
       rawHash !== blob.hash ||
@@ -347,7 +348,7 @@ export class ArtifactService {
     if (!this.blobs || !artifact.blob) {
       throw new ArtifactAccessError("artifact_blob_unavailable", artifact.id);
     }
-    const bytes = await this.blobs.get(artifact.blob);
+    const bytes = await collectBlobBytes(await this.blobs.get(artifact.blob));
     let parsed: unknown;
     try {
       parsed = JSON.parse(new TextDecoder().decode(bytes));

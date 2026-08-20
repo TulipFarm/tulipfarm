@@ -74,8 +74,8 @@ test("default view is the live chat empty state with adaptive suggestions", asyn
     await screen.findByRole("button", { name: "Set up ticket management?" })
   ).toBeInTheDocument();
 
-  // No file-attachment affordance in V1.
-  expect(document.querySelector('input[type="file"]')).toBeNull();
+  // The empty state composes a full message, attachments included.
+  expect(document.querySelector('input[type="file"]')).not.toBeNull();
 });
 
 test("clientLoader does no fetching, so nothing can delay the first paint", async () => {

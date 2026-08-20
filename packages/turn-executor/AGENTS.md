@@ -39,3 +39,17 @@ Run event emission, Tool-call announcement or preview, or the ports a Turn host 
   own imports still read naturally — do not redeclare them there.
 - **`model` is injected as `ModelPort | ((input) => ModelPort)`.** The factory form is what lets a
   host bind a different model per Turn; the eval harness relies on it.
+- **The input guard screens an attachment's text, not just its name.** `TurnAttachmentPort` carries
+  both `read` and `extract` so a host cannot supply Files without also supplying the means to screen
+  them; `run()` therefore resolves attachments *before* `guardInput`, at no vendor cost. Text is
+  extracted as the type the Context authorized, never as what the bytes claim. Both the name and the
+  extracted text are **block-only** — a redaction cannot be applied to bytes already on their way to
+  the model, and rewriting a name would change which File the part refers to. `read` keeps a
+  bytes-only shape on purpose, so the same object still satisfies `LoopAttachmentPort`.
+- **A Turn that stops to ask still persists a Message.** `input_required` once completed with
+  `messageId: null`, so the prose, the Tool steps and the question the reader was looking at
+  survived only on the wire — a reload emptied the reply. `ConversationTurnCompleter.persistReply`
+  now runs on the settled *and* the input-required path.
+- **The Turn is the seam that links a Surface to a Conversation, not the Tool.** A Surface can go
+  to Slack, Telegram or a Routine, so `packages/tool-host` has no message repo and must not gain
+  one. `TurnCompletionStore.appendSurfaceMessage` writes the `tool`-role link row instead.

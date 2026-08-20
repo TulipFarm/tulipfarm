@@ -4,7 +4,7 @@ import type { ToolRegistry } from "../broker/tool-adapter";
 import { declarativeToolName } from "../tools/declarative/tools";
 import { postReply } from "./responder";
 
-const RUN = { runId: "run-1", toolCallId: "ingress-reply:1:default" };
+const RUN = { runId: "run-1", toolCallId: "ingress-reply:1:default", autonomy: undefined };
 
 const REPLY = {
   default: { tool: "send_message", args: { channel_id: "{channel}", text: "{text}" } },

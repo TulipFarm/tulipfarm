@@ -16,11 +16,11 @@ describe("parseLastEventId", () => {
   });
 });
 
-function stubTool(name: string): ToolDef {
+function stubTool(name: string, mutating = false): ToolDef {
   return {
     name,
     tier: "platform",
-    mutating: false,
+    mutating,
     description: `desc ${name}`,
     inputSchema: { type: "object" },
     execute: async () => ({ success: true, data: {} }),
@@ -52,5 +52,20 @@ describe("allowedToolNamesFor / availableToolsFor excluded param", () => {
     expect(availableToolsFor(registry, undefined, undefined, undefined).map((t) => t.name)).toEqual(
       ["github_issue_read"]
     );
+  });
+
+  it("filters Tools denied by Agent capability restrictions from the prompt index", () => {
+    const registry = new ToolRegistry();
+    registry.register(stubTool("record_list"));
+    registry.register(stubTool("record_delete", true));
+
+    const available = availableToolsFor(registry, {
+      name: "reporter",
+      frontmatter: {},
+      body: "",
+      capabilityRestrictions: { records: { actions: { deny: ["delete"] } } },
+    });
+
+    expect(available.map((t) => t.name)).toEqual(["record_list"]);
   });
 });

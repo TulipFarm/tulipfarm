@@ -11,12 +11,13 @@
   "dependencies": {
     "@tulipfarm/agent-runtime": "workspace:*",
     "@tulipfarm/llm": "workspace:*",
-    "ai": "^7.0.2"
+    "@tulipfarm/schema": "workspace:*",
+    "ai": "^7.0.68"
   },
   "devDependencies": {
     "@tulipfarm/tsconfig": "workspace:*",
-    "@types/node": "^26.1.1",
-    "typescript": "^6.0.3",
-    "vitest": "^4.1.9"
+    "@types/node": "^26.2.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
   }
 }

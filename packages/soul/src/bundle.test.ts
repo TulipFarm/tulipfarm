@@ -92,9 +92,9 @@ describe("InMemoryBundleStore", () => {
 
     (document.spec as Record<string, unknown>).nested = { value: 2 };
 
-    expect((stored.bundle.definitions[0]?.document.spec as Record<string, unknown>).nested).toEqual(
-      { value: 1 }
-    );
+    expect(
+      (stored.bundle.definitions[0]?.document.spec as Record<string, unknown>)?.nested
+    ).toEqual({ value: 1 });
     expect(Object.isFrozen(stored.bundle.definitions[0]?.document.spec)).toBe(true);
   });
 

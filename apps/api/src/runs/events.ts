@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
-import { formatSseEvent, writeSseHeaders } from "../chat/sse";
+import { formatSseEvent, SSE_KEEPALIVE_MS, writeSseHeaders } from "../chat/sse";
 import { makeRateLimitHook, type RateLimiter } from "../rate-limit";
 
 export type RunEventAudience = "participant" | "operator";
@@ -51,6 +51,9 @@ export interface RunEventStreamDeps {
   readonly sleep: (ms: number) => Promise<void>;
   readonly pollIntervalMs?: number;
   readonly pageSize?: number;
+  /** Silence budget: an idle stream writes a comment this often so no proxy calls it a dead origin. */
+  readonly keepaliveMs?: number;
+  now?(): number;
 }
 
 export interface RunEventStreamRequest {
@@ -58,7 +61,17 @@ export interface RunEventStreamRequest {
   readonly after: number;
 }
 
-const TERMINAL_RUN_STATUSES: readonly string[] = ["succeeded", "failed", "cancelled"];
+/**
+ * Statuses this stream closes on. `needs_reconciliation` is not terminal for the Run, but nothing
+ * further streams for the attempt that parked it: a reader left polling never learns the turn is
+ * over, so the chat composer stays busy and the next prompt cannot be sent.
+ */
+const STREAM_CLOSING_RUN_STATUSES: readonly string[] = [
+  "succeeded",
+  "failed",
+  "cancelled",
+  "needs_reconciliation",
+];
 const DEFAULT_POLL_INTERVAL_MS = 500;
 const DEFAULT_PAGE_SIZE = 200;
 
@@ -72,7 +85,9 @@ export async function streamRunEvents(
   request: RunEventStreamRequest
 ): Promise<RunStreamOutcome> {
   const pageSize = deps.pageSize ?? DEFAULT_PAGE_SIZE;
+  const now = deps.now ?? Date.now;
   let cursor = request.after;
+  let lastWriteAt: number | undefined;
 
   for (;;) {
     if (sink.destroyed) return "client_disconnected";
@@ -97,6 +112,7 @@ export async function streamRunEvents(
         eventType: event.eventType,
         data: { ...event.payload, occurredAt: event.occurredAt },
       });
+      lastWriteAt = now();
     }
     // A full page means more backlog is waiting; drain it before polling for Run status.
     if (page.length === pageSize) continue;
@@ -106,7 +122,7 @@ export async function streamRunEvents(
       sink.end();
       return "run_not_found";
     }
-    if (TERMINAL_RUN_STATUSES.includes(run.status)) {
+    if (STREAM_CLOSING_RUN_STATUSES.includes(run.status)) {
       await emit(sink, {
         seq: cursor,
         eventType: "stream.closed",
@@ -114,6 +130,14 @@ export async function streamRunEvents(
       });
       sink.end();
       return "completed";
+    }
+    if (
+      deps.keepaliveMs !== undefined &&
+      (lastWriteAt === undefined || now() - lastWriteAt >= deps.keepaliveMs)
+    ) {
+      // A comment carries no event, so a reader's cursor is untouched by it.
+      sink.write(": keepalive\n\n");
+      lastWriteAt = now();
     }
     await deps.sleep(deps.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
   }
@@ -238,6 +262,7 @@ export function registerRunEventRoutes(
           sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
           pollIntervalMs: deps.pollIntervalMs,
           pageSize: deps.pageSize,
+          keepaliveMs: SSE_KEEPALIVE_MS,
         },
         { runId: id, after }
       );

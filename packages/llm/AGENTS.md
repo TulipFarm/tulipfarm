@@ -17,6 +17,7 @@ subscription-CLI model adapters.
 | `src/fallback.ts`, `src/provider-error.ts` | Fallback order and hard/transient failures. |
 | `src/embeddings.ts`, `src/embedding-provider.ts` | Embedding providers and execution. |
 | `src/model-spec.ts`, `src/pricing.ts` | Model metadata and cost helpers. |
+| `src/reachability.ts` | One live call's verdict on a configured model, for health reporting. |
 | `src/prompt-cache.ts` | Whether a prompt prefix asks for provider-side caching. |
 | `src/cli/` | Subscription Provider adapters, jail, transcripts, JSON mode, specs. |
 
@@ -25,6 +26,9 @@ subscription-CLI model adapters.
 - `tiers` remains only as authored LLM config shape; `@tulipfarm/schema` derives ModelProfiles.
 - Import config schemas, validators, and LLM config/runtime error classes from `@tulipfarm/schema`.
 - Config is validated at `LlmService.init`; never read partial or unvalidated config.
+- Chain entries naming no provider or model are dropped at `init` with a warning, never fatal: an
+  instance may still hold one from before the write gate rejected it, and failing the whole `llm:`
+  block would take every working chain down with it and leave no page from which to delete it.
 - `chainModel(ids)` must execute the whole selected chain; do not collapse fallback to the head.
 - API-keyed providers read `entry.api_key_ref`: `env://VAR` from env, else `secrets.get(ref)`.
 - Fallback hard failures propagate: auth, `404`, abort. `429`, `5xx`, timeout fall through.
@@ -48,5 +52,8 @@ subscription-CLI model adapters.
 - Do not pass ambient vendor env credentials through the CLI jail; only saved credentials.
 - Timed-out CLI turns must throw, not finish as a normal `stop`.
 - Subscription Providers are models only: disable shell, file tools, web, and ambient capability.
+- A reachability verdict is `degraded` whenever the provider *answered* — refused credential,
+  throttle, or a request it disliked — and `unreachable` only when no answer arrived. Collapsing
+  the two makes the operator's `llm` health row lie in both directions.
 - New CLI provider: implement `CliLanguageModel`, add a static `ModelSpec`, register provider id in
   `packages/secrets/src/registry.ts`, add `provider.ts` case, dependency, and Docker external.

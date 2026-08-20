@@ -16,6 +16,8 @@ export type Expectation =
   /** The assembled system prompt contains this text — the only check that proves the real Context
    *  assembler ran, rather than a hand-written prompt being fed to the loop. */
   | { readonly kind: "prompt_contains"; readonly text: string }
+  | { readonly kind: "prompt_attaches"; readonly fileId: string }
+  | { readonly kind: "prompt_omits_attachment"; readonly fileId: string }
   | { readonly kind: "prompt_omits"; readonly text: string }
   | { readonly kind: "tool_called"; readonly name: string }
   | { readonly kind: "tool_not_called"; readonly name: string }
@@ -68,7 +70,25 @@ export type Expectation =
    *  only place a Turn that stopped emitting its events can be caught. */
   | { readonly kind: "run_event_emitted"; readonly eventType: string }
   /** L3 only. A Soul artifact was committed to the Eval Soul's real git repository. */
-  | { readonly kind: "soul_committed"; readonly path: string };
+  | { readonly kind: "soul_committed"; readonly path: string }
+  /**
+   * L3 only. The Runtime is serving this artifact, written `Kind:slug`.
+   *
+   * Committing is not publishing: an artifact only reaches a product surface once its bundle is the
+   * active publication. Pair it with `soul_committed` — a write that commits and never activates
+   * passes the commit Expectation while remaining invisible to every user.
+   */
+  | { readonly kind: "soul_published"; readonly artifact: string }
+  /**
+   * L3 only. A File the Turn generated is readable by this grantee, written `kind:id`.
+   *
+   * The audience is not in the Tool call — the model neither chooses it nor sees it — so this is
+   * the only Expectation that can tell "an Agent wrote a document" apart from "a team can open the
+   * document their Agent wrote".
+   */
+  | { readonly kind: "generated_file_readable_by"; readonly grantee: string }
+  /** L3 only. The counterpart: the audience widened this far and no further. */
+  | { readonly kind: "generated_file_not_readable_by"; readonly grantee: string };
 
 /** Expectations that read persisted state, which only the L3 tier can observe. */
 const PERSISTED_KINDS: ReadonlySet<string> = new Set([
@@ -77,6 +97,9 @@ const PERSISTED_KINDS: ReadonlySet<string> = new Set([
   "turn_status",
   "run_event_emitted",
   "soul_committed",
+  "soul_published",
+  "generated_file_readable_by",
+  "generated_file_not_readable_by",
 ]);
 
 export function isPersisted(expectation: Expectation): boolean {
@@ -114,6 +137,96 @@ export interface JourneyTurn {
   readonly script?: readonly ModelOutput[];
 }
 
+/**
+ * A File a Case makes available to its Turn.
+ *
+ * Carries no bytes: the runner synthesises them, because what a Case is asserting is whether a
+ * File *reached* the prompt, and a base64 blob in the Corpus would make every such Case expensive
+ * to read and review without making the assertion any stronger.
+ */
+/**
+ * Every string anywhere in `value`.
+ *
+ * Serializing and searching the JSON would be shorter and wrong: `JSON.stringify` escapes quotes
+ * and newlines, so a payload containing either would not match text it is genuinely present in.
+ */
+export function everyString(value: unknown, found: string[] = []): string[] {
+  if (typeof value === "string") found.push(value);
+  else if (Array.isArray(value)) for (const item of value) everyString(item, found);
+  else if (typeof value === "object" && value !== null) {
+    for (const item of Object.values(value)) everyString(item, found);
+  }
+  return found;
+}
+
+export interface CaseAttachment {
+  readonly fileId: string;
+  readonly mediaType: string;
+  readonly name: string;
+  /**
+   * The File's actual bytes, as text.
+   *
+   * Only needed when the Case turns on what is *inside* the File — a red-team payload hidden in an
+   * attachment, say. Without it the bytes are a deterministic stand-in, which is enough for a Case
+   * that only asserts a File reached the prompt, and cheaper to review.
+   */
+  readonly content?: string;
+}
+
+function escapePdfText(text: string): string {
+  return text.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+}
+
+/**
+ * A minimal single-page PDF whose text layer is `text`, byte-exact down to the xref table.
+ *
+ * A real model reading a `application/pdf` attachment runs an actual PDF parser, not a text
+ * decoder — bytes that are just `text` encoded as UTF-8 read to it as a corrupt document, not a
+ * document with no answer. `content` only ever carries plain ASCII in this Corpus, so the JS
+ * string length used for the offsets below equals the UTF-8 byte length; a non-ASCII Case would
+ * need this rewritten to measure encoded bytes instead.
+ */
+function synthesizePdf(text: string): Uint8Array {
+  const stream = `BT /F1 12 Tf 72 720 Td\n(${escapePdfText(text)}) Tj\nET`;
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+  ];
+
+  let pdf = "%PDF-1.4\n";
+  const offsets: number[] = [];
+  for (const [i, body] of objects.entries()) {
+    offsets.push(pdf.length);
+    pdf += `${i + 1} 0 obj\n${body}\nendobj\n`;
+  }
+  const xrefStart = pdf.length;
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const offset of offsets) pdf += `${offset.toString().padStart(10, "0")} 00000 n \n`;
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF`;
+  return new TextEncoder().encode(pdf);
+}
+
+/**
+ * The bytes a Case's File carries.
+ *
+ * A Case that only asserts whether a File *reached* the prompt does not care what is in it, and
+ * real bytes in the Corpus would cost review effort for no signal — so those get a stand-in
+ * derived from the id, keeping a Sweep reproducible. A Case that declares `content` gets exactly
+ * that, because an attack the model never receives would make the Case pass by vacuity. A
+ * `content` declared under `mediaType: "application/pdf"` gets that text wrapped in a real PDF
+ * rather than sent raw, because a real model parses the bytes as a document, not as text.
+ */
+export function synthesizeAttachment(file: CaseAttachment): CaseAttachment & { data: Uint8Array } {
+  if (file.content !== undefined && file.mediaType === "application/pdf") {
+    return { ...file, data: synthesizePdf(file.content) };
+  }
+  const bytes = file.content ?? `eval-bytes:${file.fileId}`;
+  return { ...file, data: new TextEncoder().encode(bytes) };
+}
+
 export interface EvalCase {
   readonly id: string;
   /**
@@ -126,7 +239,31 @@ export interface EvalCase {
   /** What feeds the real Context assembler. The assembler's output is what the model sees. */
   readonly context: AssembleContext;
   readonly input: readonly ModelMessage[];
+  /**
+   * The Files resolved for *this* Turn, as the Context assembler would resolve them.
+   *
+   * A file part in `input` that no entry here names carries no bytes and reaches no provider —
+   * which is exactly how a File stays confined to the Turn it was attached to.
+   */
+  readonly attachments?: readonly CaseAttachment[];
+  /**
+   * Files the library holds that this Turn did *not* send — what `file_read` can go and fetch.
+   *
+   * The counterpart to `attachments`, and the reason confinement is a saving rather than data
+   * loss: a document from three Turns ago is here, reachable by a Tool call, without riding every
+   * prompt in between. A Case that asserts re-reading must put its File here and not in
+   * `attachments`, or the bytes were present from the first step and the Case proves nothing.
+   */
+  readonly readable?: readonly CaseAttachment[];
   readonly tools?: readonly ExposedTool[];
+  /**
+   * Platform Tools exposed as the product actually declares them, named rather than copied.
+   *
+   * Use this for any Tool the product ships. A copy in `tools` measures the model against a
+   * description no deployment sends, and cannot assert the properties that live in the
+   * declaration itself.
+   */
+  readonly platformTools?: readonly string[];
   readonly toolResults?: readonly ScriptedToolResult[];
   /**
    * Model outputs replayed in order by the scripted binding.
@@ -144,6 +281,25 @@ export interface EvalCase {
    * carried more cheaply by an L2 Case, so keep journeys rare.
    */
   readonly journey?: readonly JourneyTurn[];
+  /**
+   * L3 only. Breaks one of the executor's dependencies, so a Case can measure what the Turn does
+   * when its surroundings fail rather than when the model does.
+   *
+   * Every tier otherwise hands the executor working ports, which means the Corpus can only observe
+   * a Turn that got as far as the loop. A Turn abandoned *before* the loop — Context unreadable,
+   * Soul unreachable — is the one failure a participant can neither see nor retry, so it is worth
+   * the one knob it takes to reach it. `"context"` fails Context resolution.
+   */
+  readonly fault?: "context";
+  /**
+   * L3 only. Roles an admin has assigned this Case's Agent, seeded as `role_assignments` rows.
+   *
+   * Deliberately not read from the Agent's Soul `roles:` list. That list is advisory metadata and
+   * creates no assignment — `reconcileSoulRoles` projects Role *definitions* only — so a fixture
+   * that read it would measure a mapping the product does not have, and would go on passing after
+   * live authority stopped reaching Files. These are the rows `/business/access/agents` writes.
+   */
+  readonly agentRoles?: readonly string[];
   readonly expect: readonly Expectation[];
   /** Raised above 1 only for Cases used to measure the Noise Floor. */
   readonly trials?: number;
@@ -165,4 +321,21 @@ export const LOOP_LIMITS = {
  */
 export function isJudged(a: Expectation): boolean {
   return a.kind === "rubric_score" || a.kind === "rubric_denies";
+}
+
+/**
+ * The File library this Case's Agent can reach with `file_read`, as the loop dependency.
+ *
+ * Stands in for the store the control plane would serve. Absent — not empty — when the Case
+ * declares no `readable` File, because an empty port would let the loop believe it asked and got
+ * nothing, which is the answer a Case asserting confinement is trying to distinguish.
+ */
+export function readableLibrary(evalCase: EvalCase): {
+  attachments?: { read: (runId: string, fileId: string) => Promise<Uint8Array | undefined> };
+} {
+  const library = new Map(
+    (evalCase.readable ?? []).map((file) => [file.fileId, synthesizeAttachment(file).data])
+  );
+  if (library.size === 0) return {};
+  return { attachments: { read: async (_runId, fileId) => library.get(fileId) } };
 }

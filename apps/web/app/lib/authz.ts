@@ -272,6 +272,19 @@ export function revokeRoleFromGroup(groupId: string, roleId: string): Promise<vo
   );
 }
 
+/**
+ * Makes a non-human principal — an Agent, an adapter — grantable. Idempotent for the same kind.
+ *
+ * An Agent has no row until something registers one, so granting it a Role has to be preceded by
+ * this rather than assuming the Soul created it.
+ */
+export function registerPrincipal(
+  id: string,
+  kind: "agent" | "routine" | "integration_adapter" | "api" | "service"
+): Promise<{ status: "ok" }> {
+  return apiWrite("POST", "/api/v1/authz/principals", { id, kind });
+}
+
 export function assignRole(
   roleId: string,
   principalId: string,

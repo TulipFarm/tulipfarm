@@ -82,6 +82,17 @@
   --run-blocked: oklch(0.58 0.14 75);
   --run-skipped: oklch(0.68 0.01 250);
 
+  /*
+   * Recommendation confidence. A third axis: not how an execution ended (run-*) and not the state
+   * of a Record (status-*), but how sure the agent is about the option it is leading with. Reusing
+   * run-ok here would claim the option already succeeded, which is exactly what it has not done.
+   * `signal-empty` is the unfilled bar, so a meter always shows its own denominator.
+   */
+  --signal-high: oklch(0.5 0.13 150);
+  --signal-medium: oklch(0.58 0.14 75);
+  --signal-low: oklch(0.6 0.01 250);
+  --signal-empty: oklch(0.89 0 0);
+
   --run-surface: oklch(0.985 0 0);
   --run-surface-hover: oklch(0.965 0 0);
   --run-border: oklch(0.9 0 0);
@@ -102,6 +113,14 @@
   --code-boolean: oklch(0.5 0.13 30);
   --code-null: oklch(0.58 0 0);
   --code-redacted: oklch(0.6 0.05 75);
+
+  /* Diff encoding. Added and removed are not run states — deleting a line is not an error — so
+     they get their own pair rather than borrowing run-ok/run-error. The surfaces are line tints
+     for a unified diff and are only ever used behind diff text. */
+  --diff-added: oklch(0.46 0.12 150);
+  --diff-removed: oklch(0.52 0.18 27);
+  --diff-added-surface: oklch(0.95 0.04 150);
+  --diff-removed-surface: oklch(0.95 0.04 27);
 
   /* Onboarding growth. Not in the categorical/status/run families: a seed and a stem are not
      data, content status, or execution state — just what the tulip is made of. `petal-deep` is the
@@ -180,6 +199,11 @@
   --run-blocked: oklch(0.78 0.12 75);
   --run-skipped: oklch(0.5 0.01 250);
 
+  --signal-high: oklch(0.7 0.12 150);
+  --signal-medium: oklch(0.78 0.12 75);
+  --signal-low: oklch(0.6 0.01 250);
+  --signal-empty: oklch(1 0 0 / 18%);
+
   --run-surface: oklch(0.215 0 0);
   --run-surface-hover: oklch(0.245 0 0);
   --run-border: oklch(1 0 0 / 12%);
@@ -198,6 +222,11 @@
   --code-boolean: oklch(0.75 0.12 30);
   --code-null: oklch(0.6 0 0);
   --code-redacted: oklch(0.72 0.06 75);
+
+  --diff-added: oklch(0.74 0.11 150);
+  --diff-removed: oklch(0.7 0.16 27);
+  --diff-added-surface: oklch(0.28 0.05 150);
+  --diff-removed-surface: oklch(0.28 0.06 27);
 
   --tulip-stem: oklch(0.68 0.1 150);
   --tulip-seed: oklch(0.62 0.03 75);

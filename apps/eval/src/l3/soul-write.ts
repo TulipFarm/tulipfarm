@@ -12,14 +12,23 @@
  */
 
 import { execFileSync } from "node:child_process";
+import { generateKeyPairSync } from "node:crypto";
 import type { ToolDispatchPort } from "@tulipfarm/agent-runtime";
 import {
+  compileExecutionBundle,
+  createEd25519BundleSigner,
+  createEd25519BundleVerifier,
   createHmacCommitSigner,
+  GitSoulTreeReader,
   hermeticGitEnv,
+  InMemoryBundleStore,
   SoulGitStore,
+  SoulPublicationCoordinator,
+  SoulPublisher,
   SoulWriteError,
   SoulWriter,
 } from "@tulipfarm/soul";
+import { InMemorySoulPublicationStore } from "@tulipfarm/storage";
 import type { EvalSoul } from "../eval-soul.ts";
 
 export const SOUL_WRITE_TOOL = "soul_write";
@@ -36,6 +45,14 @@ export interface SoulWriterTool {
   /** Commits this Trial landed, in order. Empty means the Turn changed no configuration. */
   readonly commits: readonly SoulCommit[];
   /**
+   * The artifacts the Runtime is actually serving, written `Kind:slug`.
+   *
+   * Read from the *active* publication, never from the commit. A committed artifact that never
+   * reaches an active bundle is invisible to every product surface, so this is the only place a
+   * Case can tell "the agent wrote it" apart from "a user can find it".
+   */
+  published(): Promise<readonly string[]>;
+  /**
    * Returns the fixture to the commit it was loaded at.
    *
    * A Soul is loaded once per Sweep and every L3 Trial commits into the same repository, so without
@@ -47,10 +64,14 @@ export interface SoulWriterTool {
 
 const SILENT = { debug() {}, info() {}, warn() {}, error() {} };
 
+const EVAL_BUSINESS = "eval";
+const EVAL_BUNDLE_KEY = "eval-bundle-key";
+
 interface WriteArguments {
   readonly kind?: unknown;
   readonly slug?: unknown;
   readonly content?: unknown;
+  readonly companion?: unknown;
   readonly definitionMode?: unknown;
   readonly subject?: unknown;
 }
@@ -58,9 +79,12 @@ interface WriteArguments {
 /**
  * The Tool the L3 tier exposes for Soul writes.
  *
- * Deliberately narrow: it puts one artifact's definition file. Reproducing the API's full Agent and
- * Skill Tool surface here would be a second implementation of the product's own Tools, and a Case
- * passing against it would prove nothing about the ones users reach.
+ * Deliberately narrow: it puts one artifact's definition file, or one companion file beside it.
+ * Reproducing the API's full Agent and Skill Tool surface here would be a second implementation of
+ * the product's own Tools, and a Case passing against it would prove nothing about the ones users
+ * reach. A companion is included because a Skill is a *package* — its prose, references and scripts
+ * are the artifact as much as its definition is, and a writer that can only address the definition
+ * cannot measure whether the rest of the package survives.
  */
 export function soulWriterTool(soul: EvalSoul): SoulWriterTool {
   const commits: SoulCommit[] = [];
@@ -76,12 +100,45 @@ export function soulWriterTool(soul: EvalSoul): SoulWriterTool {
     createHmacCommitSigner("eval", "eval-soul-commit-key"),
     SILENT
   );
-  // No push port and no publisher: the fixture repo has no remote, and a bundle publish would need
-  // the API's signing stack. Neither decides whether the commit landed, which is what L3 measures.
-  const writer = new SoulWriter(store, SILENT, undefined, { reload: () => soul.loader.load() });
+  // No push port: the fixture repo has no remote. A publisher, though, is not optional — without
+  // one `SoulWriter.apply` commits and stops, and no surface would ever serve what it wrote.
+  const publications = new SoulPublicationCoordinator(
+    new InMemorySoulPublicationStore(),
+    new InMemoryBundleStore(),
+    SILENT
+  );
+  const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+  const verifier = createEd25519BundleVerifier([
+    {
+      keyId: EVAL_BUNDLE_KEY,
+      publicKeyPem: publicKey.export({ format: "pem", type: "spki" }).toString(),
+    },
+  ]);
+  const publisher = new SoulPublisher({
+    treeReader: new GitSoulTreeReader(soul.path),
+    compiler: compileExecutionBundle,
+    signer: createEd25519BundleSigner(
+      EVAL_BUNDLE_KEY,
+      privateKey.export({ format: "pem", type: "pkcs8" }).toString()
+    ),
+    coordinator: publications,
+    logger: SILENT,
+    businessId: EVAL_BUSINESS,
+  });
+  const writer = new SoulWriter(
+    store,
+    SILENT,
+    undefined,
+    { reload: () => soul.loader.load() },
+    publisher
+  );
 
   return {
     commits,
+    published: async () => {
+      const bundle = await publications.activeBundle(EVAL_BUSINESS, verifier);
+      return bundle?.definitions.map((definition) => `${definition.kind}:${definition.slug}`) ?? [];
+    },
     reset: () => {
       git("reset", "--hard", base);
       git("clean", "-fd");
@@ -95,6 +152,7 @@ export function soulWriterTool(soul: EvalSoul): SoulWriterTool {
         const kind = typeof args.kind === "string" ? args.kind : undefined;
         const slug = typeof args.slug === "string" ? args.slug : undefined;
         const content = typeof args.content === "string" ? args.content : undefined;
+        const companion = typeof args.companion === "string" ? args.companion : undefined;
         const definitionMode =
           args.definitionMode === "canonical" || args.definitionMode === "legacy"
             ? args.definitionMode
@@ -115,11 +173,14 @@ export function soulWriterTool(soul: EvalSoul): SoulWriterTool {
                 : `soul: update ${kind} ${slug}`,
             source: "agent",
             actor: { principalId: "agent:eval", name: "Eval", email: "eval@tulipfarm.local" },
-            businessId: "eval",
+            businessId: EVAL_BUSINESS,
             changes: [
               {
                 op: "put",
-                target: { kind: kind as never, slug, definitionMode },
+                target:
+                  companion === undefined
+                    ? { kind: kind as never, slug, definitionMode }
+                    : { kind: kind as never, slug, companion },
                 content,
               },
             ],

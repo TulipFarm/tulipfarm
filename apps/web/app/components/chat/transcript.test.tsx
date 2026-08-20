@@ -46,14 +46,16 @@ describe("Transcript renders each part from its SSE event", () => {
           type: "tool-result",
           data: { toolCallId: "c1", toolName: "write_thing", result: { ok: true } },
         },
+        // The panes belong to the sealed record; a live Turn is narrated instead.
+        { type: "finish", data: { reason: "stop" } },
       ])
     );
     expect(screen.getByText("write_thing")).toBeInTheDocument();
-    // Collapsed: the panes and their contents are hidden until the row is expanded.
-    expect(screen.queryByText("Input")).toBeNull();
-    expect(screen.queryByText("Output")).toBeNull();
+    const step = screen.getByRole("button", { name: /write_thing/i });
+    // Nothing is disclosed until it is asked for; the panes live behind the step's own toggle.
+    expect(step).toHaveAttribute("aria-expanded", "false");
 
-    await user.click(screen.getByRole("button", { name: /write_thing/i }));
+    await user.click(step);
 
     // Input and Output are labelled and distinct — the old row printed the same JSON twice.
     expect(screen.getByText("Input")).toBeInTheDocument();
@@ -80,6 +82,12 @@ describe("Transcript renders each part from its SSE event", () => {
             meta: { tier: "integration", mutating: true, durationMs: 1240 },
           },
         },
+        // The panes belong to the settled record; a call still in flight is narrated instead.
+        {
+          type: "tool-result",
+          data: { toolCallId: "c1", toolName: "github_issue_comment", result: { ok: true } },
+        },
+        { type: "finish", data: { reason: "stop" } },
       ])
     );
 
@@ -128,8 +136,8 @@ describe("Transcript renders each part from its SSE event", () => {
         },
       ])
     );
-    expect(screen.getByText("[approval required]")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "approve" }));
+    expect(screen.getByText("Needs your approval")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Approve" }));
     expect(onApprove).toHaveBeenCalledWith("ap1", "approve");
   });
 
@@ -153,8 +161,8 @@ describe("Transcript renders each part from its SSE event", () => {
         },
       ])
     );
-    expect(screen.getByText("denied")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "approve" })).toBeNull();
+    expect(screen.getByText("Denied")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
   });
 
   it("a routine Plan/Task progress view", () => {
@@ -222,9 +230,10 @@ describe("Transcript message actions", () => {
     expect(screen.queryByRole("button", { name: "Bad response" })).toBeNull();
   });
 
-  it("shows an in-flight tool call as running, not skipped", () => {
+  it("narrates an in-flight tool call in the present tense, not as the settled record", () => {
     // The running state was unreachable in the real transcript because the streaming flag was
-    // gated on `part.kind === "text"`, so every live tool call rendered as blocked.
+    // gated on `part.kind === "text"`, so every live tool call rendered as blocked. It now renders
+    // as a Trace: the reader follows along while it runs, and gets the record once it settles.
     const state = fold(
       [{ type: "tool-call", data: { toolCallId: "c1", toolName: "write_thing", args: { x: 1 } } }],
       "hi"
@@ -234,7 +243,65 @@ describe("Transcript message actions", () => {
     );
 
     expect(state.status).toBe("streaming");
-    expect(container.querySelector(".run-rail-active")).not.toBeNull();
+    // Present tense while it runs — "Wrote thing" beside a spinner would claim it had finished.
+    expect(screen.getAllByText("Writing thing").length).toBeGreaterThan(0);
+    // Narration, not evidence: the bordered record block is not drawn yet.
+    expect(container.querySelector(".rounded-lg.border-run-border")).toBeNull();
+  });
+
+  it("shows a loading state, not a Tool row, while a presentation Tool is in flight", () => {
+    // `present` draws the answer; naming it as a step would tell the reader the assistant had
+    // called a tool to do the one thing they can already see it doing.
+    const state = fold(
+      [{ type: "tool-call", data: { toolCallId: "p1", toolName: "present", args: {} } }],
+      "hi"
+    );
+    const { container } = render(
+      <Transcript messages={state.messages} status={state.status} onApprove={vi.fn()} />
+    );
+
+    expect(container.querySelector(".tf-trace-row")).toBeNull();
+    expect(screen.queryByText("present")).toBeNull();
+    expect(screen.getAllByText("Rendering").length).toBeGreaterThan(0);
+  });
+
+  it("keeps narrating between calls, while the Turn is still live", () => {
+    // A platform Tool returns in ~20ms and the model then thinks for seconds. Gating narration on
+    // a call being mid-flight handed the reader the finished record while the Turn was still going.
+    const state = fold(
+      [
+        { type: "tool-call", data: { toolCallId: "c1", toolName: "list_agents", args: {} } },
+        { type: "tool-result", data: { toolCallId: "c1", toolName: "list_agents", result: [] } },
+      ],
+      "hi"
+    );
+    const { container } = render(
+      <Transcript messages={state.messages} status={state.status} onApprove={vi.fn()} />
+    );
+
+    expect(state.status).toBe("streaming");
+    expect(container.querySelector(".rounded-lg.border-run-border")).toBeNull();
+    expect(container.querySelector(".tf-trace-row")).not.toBeNull();
+  });
+
+  it("keeps a settled tool run in the trace instead of handing it back to a bordered record", () => {
+    const state = fold([
+      { type: "tool-call", data: { toolCallId: "c1", toolName: "write_thing", args: { x: 1 } } },
+      {
+        type: "tool-result",
+        data: { toolCallId: "c1", toolName: "write_thing", result: { ok: true } },
+      },
+      { type: "finish", data: { reason: "stop" } },
+    ]);
+    const { container } = render(
+      <Transcript messages={state.messages} status={state.status} onApprove={vi.fn()} />
+    );
+
+    expect(screen.getByText("Wrote thing")).toBeInTheDocument();
+    expect(screen.queryByText("Writing thing")).toBeNull();
+    // The box is gone for good; only a run awaiting a decision still gets one.
+    expect(container.querySelector(".rounded-lg.border-run-border")).toBeNull();
+    expect(container.querySelector(".tf-trace-row")).not.toBeNull();
   });
 
   // A sealed assistant reply with its server id attached — the prerequisite for rendering thumbs.
@@ -520,17 +587,19 @@ describe("Transcript folds a long run of tool calls", () => {
     const user = userEvent.setup();
     renderTranscript(fold([...clusterEvents, { type: "finish", data: { reason: "completed" } }]));
 
-    expect(screen.getByText("Ran 3 tools")).toBeInTheDocument();
+    const header = screen.getByRole("button", { name: /Ran 3 tools/ });
     // The individual rows are folded away until asked for.
-    expect(screen.queryByText("search_a")).toBeNull();
+    expect(header).toHaveAttribute("aria-expanded", "false");
 
-    await user.click(screen.getByRole("button", { name: /Ran 3 tools/ }));
+    await user.click(header);
 
+    expect(header).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("search_a")).toBeInTheDocument();
     expect(screen.getByText("search_c")).toBeInTheDocument();
   });
 
-  it("keeps every row on screen when the run contains a failure", () => {
+  it("folds a run that failed, but names the failure count on the line that survives", async () => {
+    const user = userEvent.setup();
     renderTranscript(
       fold([
         ...clusterEvents,
@@ -548,10 +617,59 @@ describe("Transcript folds a long run of tool calls", () => {
       ])
     );
 
-    // A failure anywhere in the run keeps every row on screen, fold header included.
-    expect(screen.queryByText(/Ran \d+ tools/)).toBeNull();
+    // Folding a failure is only honest because the header reports it — the reader loses a click,
+    // never the fact that something went wrong.
+    const header = screen.getByRole("button", { name: /Ran 4 tools · 1 failed/ });
+    expect(header).toHaveAttribute("aria-expanded", "false");
+
+    await user.click(header);
+
     expect(screen.getByText("write_thing")).toBeInTheDocument();
     expect(screen.getByText("search_a")).toBeInTheDocument();
+    // The failed step opens itself, so the error code is there without a second click.
     expect(screen.getByText("tool_failed")).toBeInTheDocument();
+  });
+});
+
+describe("an attachment the reader can no longer open", () => {
+  const withParts = (parts: ChatState["messages"][number]["parts"]): ChatState => ({
+    ...initialChatState,
+    messages: [{ id: "m1", role: "user", parts, sealed: true }],
+  });
+
+  it("names what was removed instead of leaving a broken image", () => {
+    render(
+      <Transcript
+        messages={
+          withParts([
+            { kind: "text", text: "what is this?" },
+            { kind: "file-unavailable", fileId: "f1", name: "budget.pdf" },
+          ]).messages
+        }
+        status="idle"
+        onApprove={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("budget.pdf")).toBeInTheDocument();
+    expect(screen.getByText("removed")).toBeInTheDocument();
+  });
+
+  it("renders a removed attachment alongside one that is still there", () => {
+    render(
+      <Transcript
+        messages={
+          withParts([
+            { kind: "file", fileId: "f1", mediaType: "application/pdf", name: "here.pdf" },
+            { kind: "file-unavailable", fileId: "f2", name: "gone.pdf" },
+          ]).messages
+        }
+        status="idle"
+        onApprove={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Download here.pdf" })).toBeInTheDocument();
+    expect(screen.getByText("gone.pdf")).toBeInTheDocument();
   });
 });

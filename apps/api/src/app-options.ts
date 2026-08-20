@@ -2,6 +2,7 @@
 
 import type { EventEmitter } from "node:events";
 import type { GuardrailsService } from "@tulipfarm/agent-runtime";
+import type { FileService } from "@tulipfarm/files";
 import type { PublicOriginsService } from "@tulipfarm/integrations";
 import type { KnowledgeDenialSink, KnowledgeService } from "@tulipfarm/knowledge";
 import type { KvService } from "@tulipfarm/kv";
@@ -15,6 +16,7 @@ import type {
   BundledIntegration,
   BundledSkill,
   GitSyncService,
+  RoutineCatalog,
   SoulLoader,
   SoulWriter,
 } from "@tulipfarm/soul";
@@ -41,6 +43,7 @@ import type { ConversationStore } from "./conversations/service";
 import type { CuratorReviewDeps } from "./curator/review-routes";
 import type { CuratorRouteDeps } from "./curator/routes";
 import type { FeedbackRepo } from "./feedback/repo";
+import type { FileKnowledgeBridge } from "./files/knowledge-bridge";
 import type { FormsRoutesDeps } from "./forms/routes";
 import type { HookIngressDeps } from "./hooks/routes";
 import type { IdentityRouteDeps } from "./identity/routes";
@@ -64,7 +67,6 @@ import type { RateLimiter } from "./rate-limit";
 import type { RecordAuthorizer } from "./resources/authorize";
 import type { CounterStore, ResourceRepoFactory } from "./resources/repo";
 import type { CanonicalRoutineAuthoringService } from "./routines/authoring";
-import type { RoutineCatalog } from "./routines/catalog";
 import type { RunEventRouteDeps } from "./runs/events";
 import type { RunReplayDeps } from "./runs/replay";
 import type { SetupAdminCreator } from "./setup/first-admin";
@@ -162,6 +164,13 @@ export interface AppOptions {
   runEvents?: RunEventRouteDeps;
   runReplay?: RunReplayDeps;
   taskStore?: TaskStore;
+  /** Composed in `index.ts`, where the blob substrate lives. Absent in tests that never upload. */
+  fileService?: FileService;
+  /**
+   * Lets the Files routes add a File to Knowledge and keep its readership in step. Absent leaves
+   * those routes answering 501 — a deployment with no pg-boss has nothing to run the extraction.
+   */
+  fileKnowledge?: FileKnowledgeBridge;
   kvService?: KvService;
   triggerInvoke?: TriggerInvokeDeps;
   forms?: FormsRoutesDeps;

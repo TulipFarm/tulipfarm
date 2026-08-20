@@ -282,6 +282,37 @@ test("an empty fallback Model ID stays in the sheet and is not offered to preset
   ).toBeInTheDocument();
 });
 
+test("an incomplete fallback never enters the chain, even before Done is pressed", async () => {
+  const onSubmit = renderChains();
+
+  const fast = screen.getByRole("heading", { name: "Fast" }).closest("section");
+  await userEvent.click(within(fast as HTMLElement).getByRole("button", { name: /add fallback/i }));
+
+  // The chain behind the sheet still holds only the primary; nothing renders as "no model set".
+  expect(within(fast as HTMLElement).getAllByRole("listitem")).toHaveLength(1);
+  expect(within(fast as HTMLElement).queryByText(/no model set/i)).not.toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole("button", { name: /^close$/i }));
+
+  expect(within(fast as HTMLElement).getAllByRole("listitem")).toHaveLength(1);
+
+  await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
+  const submitted = onSubmit.mock.calls[0][0] as LlmConfig;
+  expect(submitted.tiers?.quick.providers).toHaveLength(1);
+});
+
+test("a fallback with no provider selected stays in the sheet with a field error", async () => {
+  renderChains();
+
+  const fast = screen.getByRole("heading", { name: "Fast" }).closest("section");
+  await userEvent.click(within(fast as HTMLElement).getByRole("button", { name: /add fallback/i }));
+  await userEvent.selectOptions(await screen.findByLabelText("Provider"), "");
+  await userEvent.click(screen.getByRole("button", { name: /^done$/i }));
+
+  expect(screen.getByText("Select a provider.")).toBeInTheDocument();
+  expect(within(fast as HTMLElement).getAllByRole("listitem")).toHaveLength(1);
+});
+
 test("Auto is shown as the profile it resolves to", async () => {
   const onSubmit = renderChains();
 

@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
+import { join } from "node:path";
 import { delegationCatalogOf, GuardrailsService } from "@tulipfarm/agent-runtime";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import { FileService, PgFileRepo } from "@tulipfarm/files";
 import { FetchEgressHttp, GuardedEgressHttp, PublicOriginsService } from "@tulipfarm/integrations";
 import {
   buildDefaultRegistry,
@@ -44,6 +46,7 @@ import {
 } from "@tulipfarm/secrets";
 import type { AuthOAuth2Step } from "@tulipfarm/soul";
 import {
+  ActiveRoutineCatalog,
   type CommitActor,
   type CredentialProvider,
   compileExecutionBundle,
@@ -67,7 +70,9 @@ import {
   ChannelRunDeliveryStore,
   ChildLinkAncestryStore,
   ChildLinkStore,
+  createBlobPort,
   EventStore,
+  ensureBundledBucket,
   ensureEmbeddingIndexes,
   IntegrationStore,
   KillSwitchRepo,
@@ -82,9 +87,10 @@ import {
   SoulRepositoryStore,
   TaskRepo,
   WaitStore,
+  writeBucketSecrets,
 } from "@tulipfarm/storage";
 import { PgEffectStore } from "@tulipfarm/tool-broker";
-import { ApprovalsRepo, ToolApprovalService } from "@tulipfarm/tool-host";
+import { ApprovalsRepo, collectHeldRoleIds, ToolApprovalService } from "@tulipfarm/tool-host";
 import { config } from "dotenv";
 import type { FastifyBaseLogger } from "fastify";
 import { PgBoss } from "pg-boss";
@@ -135,6 +141,7 @@ import {
 } from "./db";
 import { logEnvironmentStatus, validateEnvironment } from "./env";
 import { FeedbackRepo } from "./feedback/repo";
+import { buildFileKnowledgeBridge } from "./files/knowledge-bridge";
 import { registerGuardrailsReload } from "./guardrails/reload";
 import { createHookExecutor } from "./hooks/executor";
 import { PgRawPayloadVault } from "./hooks/raw-payload-vault";
@@ -200,7 +207,6 @@ import { PgRateLimiter } from "./rate-limit";
 import { LiveRecordAuthorizer } from "./resources/authorize";
 import { reconcileResourceTables, registerResourceReconcile } from "./resources/reconcile";
 import { PgCounterStore, PgResourceRepoFactory } from "./resources/repo";
-import { ActiveRoutineCatalog } from "./routines/catalog";
 import { runCanceller } from "./runs/cancel";
 import {
   integrationInvoker,
@@ -231,6 +237,7 @@ import {
   assertNoOrphanedDeks,
   type BootstrapSecretsResult,
   bootstrapSecrets,
+  resolveDataDir,
 } from "./setup/bootstrap-secrets";
 import { PgSetupAdminCreator } from "./setup/first-admin";
 import { readSoulConfig, SOUL_GIT_CREDENTIAL_KEY } from "./setup/soul-config";
@@ -238,6 +245,7 @@ import {
   provisionIntegrationWorkerCredential,
   provisionWorkerCredential,
 } from "./setup/worker-credential";
+import { agentForRunResolver, delegableToolNames } from "./soul/agents/registry";
 import { bundleRetentionMs, registerSoulBundlePruneSchedule } from "./soul/bundle-prune-schedule";
 import { createGitHubSoulCredentialProvider } from "./soul/github-repo-credential";
 import { registerSoulPublicationRoutes } from "./soul/publication-routes";
@@ -265,6 +273,17 @@ const secretsBootstrap = ((): BootstrapSecretsResult => {
     process.exit(1);
   }
 })();
+
+// Before anything slow: the bundled bucket restarts until these exist, so every second here is a
+// second it spends crash-looping. It cannot write them itself — its image carries no shell.
+if (process.env.BUCKET_ADMIN_URL) {
+  try {
+    writeBucketSecrets(resolveDataDir() ?? process.cwd());
+  } catch (err) {
+    console.error(`❌ ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  }
+}
 
 validateEnvironment();
 
@@ -296,6 +315,9 @@ function soulBundleKeyStore(
 
 async function boot() {
   try {
+    // Fills the S3 credentials the blob port is built from below, so it must precede the pool:
+    // a deployment whose file store never came up should say so, not serve requests that fail.
+    await ensureBundledBucket({ dataDir: resolveDataDir() ?? process.cwd() });
     const migrationPool = await connectPg();
     await runPgMigrations(migrationPool);
     // After migrations, on the owner pool (which has no statement timeout): an ANN index left
@@ -462,20 +484,21 @@ async function boot() {
     );
     const rateLimiter = new PgRateLimiter(pool);
     const invocationValidator = new TypedOutputValidator(INVOCATION_REQUEST_SCHEMAS);
+    /** Every Artifact reader is the same service over a different transaction scope. */
+    const artifactsOver = (transactions: ConstructorParameters<typeof ArtifactStore>[0]) =>
+      new ArtifactService(new ArtifactStore(transactions), invocationValidator);
     const invocations = new DurableInvocationGateway({
-      store: new PgDurableInvocationStore(
-        runTransactions,
-        (transaction) =>
-          new ArtifactService(
-            new ArtifactStore(ambientTransactionPort(transaction)),
-            invocationValidator
-          )
+      store: new PgDurableInvocationStore(runTransactions, (transaction) =>
+        artifactsOver(ambientTransactionPort(transaction))
       ),
       validator: invocationValidator,
       routineDefinitions: new ActiveRoutineInvocationResolver(soulPublications, soulBundleVerifier),
     });
+    const activeSoulBundle = () =>
+      soulPublications.activeBundle(DEPLOYMENT_BUSINESS_ID, soulBundleVerifier);
+    const routineCatalog = new ActiveRoutineCatalog(activeSoulBundle);
     const scheduleDispatcher = new ScheduleDispatcher({
-      activeBundle: () => soulPublications.activeBundle(DEPLOYMENT_BUSINESS_ID, soulBundleVerifier),
+      activeBundle: activeSoulBundle,
       stateStore: new RoutineScheduleStateStore(pool),
       startRoutine: scheduledRoutineTrigger(invocations),
       businessId: DEPLOYMENT_BUSINESS_ID,
@@ -524,6 +547,23 @@ async function boot() {
     });
     const kvService = new KvService(new PgKvRepo(pool));
     const taskRepo = new TaskRepo(transactionPort(pool));
+    // Sharing a File with a Role resolves that Role live on every read, through the one shared
+    // implementation the Tool gate uses. A second answer to "which Roles does this person hold"
+    // is how a File stays readable to someone a Role no longer contains.
+    const fileAuthorityRepos = {
+      roles: new PgRoleRepo(transactionPort(pool)),
+      groups: new PgGroupRepo(transactionPort(pool)),
+    };
+    const fileService = new FileService({
+      repo: new PgFileRepo(pool),
+      rolesOf: (businessId, principalId) =>
+        collectHeldRoleIds(fileAuthorityRepos, businessId, principalId, new Date()),
+      blobs: createBlobPort(join(resolveDataDir() ?? process.cwd(), "blobs")),
+      newId: () => randomUUID(),
+      // Read per upload from the Soul, so an operator turning downscaling on takes effect on the
+      // next upload rather than on the next restart.
+      imagePolicy: async () => (await readSoulConfig(soulPath)).files ?? {},
+    });
     const activityService = new ActivityService(new PgActivityRepo(pool));
     // Audit is separate from activity by design: activity is a UI feed, audit is evidence.
     // Persisted to an append-only ledger the runtime role cannot rewrite (see `audit/repo.ts`).
@@ -698,6 +738,7 @@ async function boot() {
       conversations: delegationConversations,
       cancelRun: runCancel.cancel,
       catalog: delegationCatalog,
+      parentToolNames: (agentId) => delegableToolNames(soulLoader, agentId, toolRegistry.getAll()),
     });
     // One gate for the whole process: routes and Agent Tools must not diverge on who may read a Page.
     const knowledgePageGate = new PageReadGate(pool);
@@ -709,6 +750,7 @@ async function boot() {
     const toolRegistry = buildToolRegistry({
       memoryDocuments,
       kv: kvService,
+      files: fileService,
       knowledge: knowledgeService,
       knowledgePageGate,
       knowledgeDenialSink,
@@ -743,11 +785,17 @@ async function boot() {
         bundledSkills,
         disabledBundledSkills,
         triggerRoutine: manualRoutineTrigger(invocations),
+        routineCatalog,
         delegateToAgent: agentDelegation.delegate,
         onRoutinesChanged: async () => {
           await soulLoader.reload();
           // Ticks immediately so a newly-authored/edited schedule is reconciled without waiting up
           await scheduleDispatcher.tick();
+        },
+        // The Soul write gateway reloads the catalog; the guard pipeline is rebuilt separately
+        // because every Turn's Context reads this service, not the published bundle.
+        onGuardrailsChanged: async () => {
+          guardrailsService.init(soulLoader.guardrailsConfig, app.log);
         },
       },
     });
@@ -767,14 +815,13 @@ async function boot() {
 
     // with, so a worker credential is a key to a Run rather than a principal of its own.
     const conversationStore = new PgConversationStore(pool);
-    const runArtifacts = new ArtifactService(
-      new ArtifactStore(runTransactions),
-      invocationValidator
-    );
+    const runArtifacts = artifactsOver(runTransactions);
     const internalTurns = {
       host: new InternalTurnHost({
         runs: runStore,
         store: conversationStore,
+        agentForRun: agentForRunResolver(soulLoader, runArtifacts),
+        messages: messageRepo,
         context: new ChatTurnContextResolver({
           artifacts: runArtifacts,
           store: conversationStore,
@@ -799,7 +846,9 @@ async function boot() {
             log: (event, message) => console.warn(JSON.stringify({ ...event, msg: message })),
           }),
           telemetry: memoryTelemetry,
+          files: fileService,
         }),
+        files: fileService,
         tools: buildDelegatedToolDispatch({
           links: childLinks,
           catalog: delegationCatalog,
@@ -947,6 +996,8 @@ async function boot() {
       memoryDocuments,
       kvService,
       taskStore: taskRepo,
+      fileService,
+      fileKnowledge: buildFileKnowledgeBridge(pool, boss, DEPLOYMENT_BUSINESS_ID),
       ...buildCurator({
         pool,
         documents: memoryDocuments,
@@ -977,11 +1028,7 @@ async function boot() {
       internalTurns,
       approvalsRepo,
       routineApprovals,
-      routineCatalog: new ActiveRoutineCatalog(
-        soulPublications,
-        soulBundleVerifier,
-        DEPLOYMENT_BUSINESS_ID
-      ),
+      routineCatalog,
       toolApprovals,
       channels: (log: FastifyBaseLogger) => ({
         store: conversationStore,

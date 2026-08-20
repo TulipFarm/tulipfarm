@@ -4,20 +4,24 @@ import {
   type AgentLoopInput,
   assembleSystemPrompt,
   InMemoryLoopCheckpointStore,
-  type ModelMessage,
   type ModelOutput,
   type ModelPort,
 } from "@tulipfarm/agent-runtime";
-import { type EvalCase, LOOP_LIMITS } from "./case.ts";
+import { splitPrompt } from "@tulipfarm/model-adapter";
+import { textContent } from "@tulipfarm/schema";
+import { autonomyBoundedDispatch, capabilityBoundedDispatch } from "./autonomy.ts";
+import { type EvalCase, LOOP_LIMITS, readableLibrary, synthesizeAttachment } from "./case.ts";
 import type { Corpus } from "./corpus.ts";
 import { toolDispatcher } from "./dispatch.ts";
 import { type EvalSoul, soulContext } from "./eval-soul.ts";
-import type { EvalGuardrails, GuardrailDecision } from "./guardrails.ts";
+import { guardInput, guardOutput, screenableText } from "./guard-stage.ts";
+import type { GuardrailDecision } from "./guardrails.ts";
 import { turnGuardrails } from "./guardrails.ts";
 import type { Judge } from "./judge.ts";
 import { scoreJudged } from "./judged.ts";
 import { runPersistedTurn } from "./l3/tier.ts";
 import { measureNoise, type NoiseFloor } from "./noise.ts";
+import { exposedToolsFor } from "./platform-tools.ts";
 import type { SweepProgress } from "./progress.ts";
 import { guardUnexercised } from "./red-team.ts";
 import { measureResistance, type ResistanceRate } from "./resistance.ts";
@@ -192,42 +196,6 @@ function isVendorFault(reason: AgentLoopFailureReason): boolean {
   return reason.startsWith("model_") || reason === "empty_model_output";
 }
 
-/**
- * Guards the latest user message, as `TurnDriver.guardInput` does.
- *
- * Returns the guarded message list, not just the refusal: a guard may *transform* rather than
- * block, and discarding the transform would send the model text production would never have sent.
- */
-async function guardInput(
-  guards: EvalGuardrails,
-  input: readonly ModelMessage[]
-): Promise<
-  | { readonly blocked: true; readonly message: string }
-  | { readonly blocked: false; readonly messages: readonly ModelMessage[] }
-> {
-  let index = input.length - 1;
-  while (index >= 0 && input[index]?.role !== "user") index -= 1;
-  const current = index < 0 ? undefined : input[index];
-  if (current === undefined) return { blocked: false, messages: input };
-
-  const guarded = await guards.input(current.content);
-  if (guarded.blocked) return guarded;
-
-  const messages = [...input];
-  messages[index] = { role: current.role, content: guarded.text };
-  return { blocked: false, messages };
-}
-
-/** Blocked answers are replaced by the guard's message, never dropped. */
-async function guardOutput(
-  guards: EvalGuardrails,
-  output: ModelOutput | undefined
-): Promise<ModelOutput | undefined> {
-  if (output?.kind !== "text") return output;
-  const guarded = await guards.output(output.text);
-  return guarded.blocked ? { kind: "text", text: guarded.message } : output;
-}
-
 async function scored(
   evalCase: EvalCase,
   trial: number,
@@ -302,6 +270,8 @@ async function runL3Trial(
         turnStatus: turn.turnStatus,
         events: turn.events,
         soulCommits: turn.soulCommits,
+        publishedArtifacts: turn.publishedArtifacts,
+        generatedFiles: turn.generatedFiles,
       },
     });
   } catch (cause) {
@@ -353,8 +323,14 @@ async function runTrial(
       retries += 1;
     },
   });
+  // What the production prompt splitter actually emitted, not a second opinion about what it
+  // should have. A Case asserting confinement has to read the same traversal that sends the bytes.
+  const attachedFileIds = new Set<string>();
   const model: ModelPort = {
     invoke: async (request) => {
+      for (const id of splitPrompt(request.messages, request.attachments).attached) {
+        attachedFileIds.add(id);
+      }
       const result = await port.invoke(request);
       lastOutput = result.output;
       spend = addSpend(spend, result.usage);
@@ -375,8 +351,13 @@ async function runTrial(
   const loop = new AgentLoop({
     model,
     // Guards wrap the dispatcher exactly as `TurnDriver` wraps it, so a blocked Tool reaches the
-    // model as a denial it must recover from — not as a call that silently never happened.
-    tools: guards.guard(tools.port),
+    // model as a denial it must recover from — not as a call that silently never happened. The
+    // Agent's autonomy ceiling sits inside the guards, matching production's order: policy decides
+    // before the ceiling is consulted about what is left.
+    tools: guards.guard(
+      capabilityBoundedDispatch(soul, evalCase, autonomyBoundedDispatch(soul, evalCase, tools.port))
+    ),
+    ...readableLibrary(evalCase),
     checkpoints: new InMemoryLoopCheckpointStore(),
     events: { append: async () => {} },
     budget: { consume: async () => ({ outcome: "allowed" }) },
@@ -385,15 +366,18 @@ async function runTrial(
   });
 
   try {
-    // Ordering is the driver's: the input guard settles the turn before any model or Tool work,
-    // so a refused request must cost nothing and must never reach the vendor.
-    const guarded = await guardInput(guards, evalCase.input);
+    // Ordering is the driver's: bytes are resolved first because nothing can screen text it has
+    // not read, then the input guard settles the turn before any model or Tool work — so a
+    // refused request must cost nothing and must never reach the vendor.
+    const attached = (evalCase.attachments ?? []).map(synthesizeAttachment);
+    const guarded = await guardInput(guards, evalCase.input, await screenableText(attached));
     if (guarded.blocked) {
       return await scored(evalCase, trial, vacuous, spend, retries, guards.decisions, judge, {
         systemPrompt,
         toolCalls: [],
         output: { kind: "text", text: guarded.message },
         status: "completed",
+        attachedFileIds: [...attachedFileIds],
       });
     }
 
@@ -404,9 +388,10 @@ async function runTrial(
       modelProfileId: "eval",
       contextDigest: "sha256:eval",
       guardrailDigest: guards.digest,
-      messages: [{ role: "system", content: systemPrompt }, ...guarded.messages],
-      tools: evalCase.tools ?? [],
+      messages: [{ role: "system", content: textContent(systemPrompt) }, ...guarded.messages],
+      tools: exposedToolsFor(evalCase),
       limits: LOOP_LIMITS,
+      ...(attached.length === 0 ? {} : { attachments: attached }),
     };
 
     const outcome = await loop.run(input);
@@ -421,6 +406,7 @@ async function runTrial(
       outcome.status === "completed" ? asOutput(outcome.output, lastOutput) : lastOutput;
     return await scored(evalCase, trial, vacuous, spend, retries, guards.decisions, judge, {
       systemPrompt,
+      attachedFileIds: [...attachedFileIds],
       toolCalls: tools.calls,
       // The output guard is the last thing production runs before an answer becomes durable, so a
       // Case scores the text a participant would actually have received.

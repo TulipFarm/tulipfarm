@@ -49,6 +49,12 @@ const SECRET_WRITE = {
   fallback: "admin",
 } as const;
 
+/** What People & access requires of its caller. */
+const USER_MANAGE = {
+  action: "user.manage",
+  resourceType: "user",
+  fallback: "admin",
+} as const;
 async function memberGrantCount(db: PGlite): Promise<number> {
   const result = await db.query<{ count: string }>(
     "SELECT count(*)::text AS count FROM role_grants WHERE business_id = $1 AND role_id = 'member'",
@@ -143,5 +149,31 @@ describe("deployment roles under the live route gate", () => {
     }
 
     expect(denied).toEqual([]);
+  });
+
+  /**
+   * The `Owner` level is the only promotion the product offers, and its own copy calls it "can do
+   * anything, including managing access" — so it has to survive the boot sync as authority, not as
+   * the placeholder grants the migration seeded against resource types no route declares (#408).
+   */
+  it("grants a member promoted to Owner the admin-only surfaces", async () => {
+    await new PgRoleRepo(transactionPort(db)).assign({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      principalId: MEMBER_ID,
+      roleId: "owner",
+    });
+    await syncDeploymentRoles(new PgRoleRepo(transactionPort(db)));
+    const decide = check();
+
+    expect(await decide(member, USER_MANAGE)).toBe(true);
+    expect(await decide(member, SECRET_WRITE)).toBe(true);
+  });
+
+  it("keeps admin-only surfaces refused to everyday access", async () => {
+    await syncDeploymentRoles(new PgRoleRepo(transactionPort(db)));
+    const decide = check();
+
+    expect(await decide(member, USER_MANAGE)).toBe(false);
+    expect(await decide(admin, USER_MANAGE)).toBe(true);
   });
 });

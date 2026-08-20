@@ -95,12 +95,19 @@ function validatorFor(type: RunEventType, schema: Record<string, unknown>): Comp
   return compiled;
 }
 
+/** A Surface a Turn presented, at the exact revision the participant was shown. */
+export interface TurnSurfaceRef {
+  readonly artifactId: string;
+  readonly revision: number;
+}
+
 /** Project only loop text and pre-dispatch rejections; Tool args stay out of participant events. */
 export class TurnEventWriter implements AgentLoopEventSink {
   private cursorSequence = 0;
   private lastLoopSequence = 0;
   private readonly toolCallOrder: string[] = [];
   private readonly toolCallsById = new Map<string, ParticipantToolCall>();
+  private readonly surfacesById = new Map<string, TurnSurfaceRef>();
 
   constructor(private readonly options: TurnEventWriterOptions) {}
 
@@ -115,6 +122,22 @@ export class TurnEventWriter implements AgentLoopEventSink {
       const call = this.toolCallsById.get(callId);
       return call === undefined ? [] : [{ ...call }];
     });
+  }
+
+  /**
+   * Surfaces this Turn presented, in the order they were emitted.
+   *
+   * `surface.emitted` carries no revision, so the reference is recorded here rather than
+   * reconstructed from the event stream: a persisted transcript has to name the exact revision the
+   * reader saw, not whichever one the Artifact has reached by the time it is replayed.
+   */
+  get surfaces(): readonly TurnSurfaceRef[] {
+    return [...this.surfacesById.values()].map((surface) => ({ ...surface }));
+  }
+
+  /** Records a presented Surface so a completed Turn can link it into the transcript. */
+  recordSurface(surface: TurnSurfaceRef): void {
+    this.surfacesById.set(surface.artifactId, surface);
   }
 
   /** Append one event; `key` makes redelivery derive the same idempotency key. */

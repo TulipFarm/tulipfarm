@@ -35,6 +35,8 @@ Only its own Cases need updating when their observable behaviour moves.
 | `src/eval-soul.ts` | `loadEvalSoul` — copies the fixture to a throwaway git repo and reads it with the real `SoulLoader`; `soulContext` maps an Agent into the assembler. |
 | `src/guardrails.ts` | Runs the Eval Soul's `guardrails.yaml` through the production `TurnGuardrails`; collects refusals off the real Run events. |
 | `src/l3/` | The persisted tier: one Turn through the real Chat executor on in-process PGlite. `tier.ts` is the entry point. |
+| `src/l3/soul-write.ts` | The `soul_write` Tool, over the real writer *and* the real publisher, so a Case can tell a commit from a publication. |
+| `src/l3/file-store.ts` | The one place `file_create` runs for real, so a Case can read who a generated File was actually shared with. |
 | `src/verdict.ts` | `caseVerdict`, `scoreable` — one Case collapsed into one word. Shared so the grid and a Baseline delta can never disagree. |
 | `src/baseline.ts` | `compareToBaseline` — pure. Refuses a delta across two Corpora or two models. |
 | `src/artifact.ts` | `ScorecardArtifact` read/write, `harnessVersion`, `baselinePath`. The durable form. |
@@ -61,9 +63,27 @@ before changing how a Case is scored, run or compared.** These are the ones that
 - **Nothing becomes the Baseline on its own.** Promotion is `--promote`, from a clean tree, from a
   complete and unregressed Sweep only.
 - **A content Expectation must be grounded** in what the model was given, or declare `ungrounded`.
+  A File's declared `content` counts as given; its id and filename do not.
+- **`attachments` is what this Turn sent; `readable` is what `file_read` can go and get.** A File
+  in both would be in the prompt from the first step, so a re-read Case asserting `prompt_attaches`
+  would pass with the whole mechanism removed. Declaring it in neither is refused for the same
+  reason.
+- **Name a shipped Tool with `platformTools`; only hand-declare a Tool an operator would author.**
+  A copy measures the model against a description no deployment sends, and cannot assert the
+  properties that live in the declaration. The resolved declaration is in `corpusHash`, so
+  rewording one retires every Baseline. An unresolvable name fails the load.
+- **`soul_write` and `file_create` are the only Tools L3 runs for real,** routed by name in
+  `routeTools`. Each writes something — a commit, a set of shares — that no scripted result could
+  stand in for, so scripting one is impossible rather than discouraged.
+- **A generated File's audience comes from `agentRoles`, never the soul's `roles:`,** which is
+  advisory and writes no `role_assignments`. Pair `generated_file_readable_by` with a
+  `generated_file_not_readable_by` for a Role the Agent lacks, or the Case passes just as well
+  against an audience that shares every File with everyone.
 - **Every Case carries a `script`,** so the whole Corpus runs free in ordinary CI.
 - **Two models are a control, not a contest,** and they never run at once.
 - **A Judge failure errors the Trial; it never scores low.**
+- **A `fault` is L3-only and names a dependency, not an outcome.** It breaks what the executor was
+  given, so a Case can measure a Turn abandoned before the loop ever ran.
 - This workspace is CJS-by-default — no `import.meta`.
 
 ## Commands

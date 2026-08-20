@@ -153,7 +153,11 @@ export function useChatStream(opts?: UseChatStreamOptions) {
     try {
       await postChat(
         {
-          message: { role: "user", content: text },
+          message: {
+            role: "user",
+            content: text,
+            ...(opts?.files?.length ? { fileIds: opts.files.map((file) => file.fileId) } : {}),
+          },
           conversationId: conversationIdRef.current,
           model: opts?.model,
           autonomy: opts?.autonomy,

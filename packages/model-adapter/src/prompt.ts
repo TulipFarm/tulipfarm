@@ -1,10 +1,23 @@
-import type { ModelInvocationRequest, ModelOutput } from "@tulipfarm/agent-runtime";
+import type {
+  ModelInvocationRequest,
+  ModelOutput,
+  ResolvedAttachment,
+} from "@tulipfarm/agent-runtime";
 import type { PromptCacheDecision } from "@tulipfarm/llm";
 import {
+  contentFiles,
+  contentText,
+  type MessageContent,
+  modalityForMediaType,
+} from "@tulipfarm/schema";
+import {
+  type FilePart,
+  type ImagePart,
   jsonSchema,
   type ModelMessage as SdkMessage,
   type SystemModelMessage,
   type streamText,
+  type TextPart,
   type ToolCallPart,
   type ToolResultPart,
   type ToolSet,
@@ -75,14 +88,33 @@ export function withCacheBreakpoint(
   );
 }
 
-/** Convert loop transcript to SDK prompt; tool results stay attributed to their tool calls. */
-export function splitPrompt(transcript: readonly { role: string; content: string }[]): {
+/**
+ * Convert loop transcript to SDK prompt; tool results stay attributed to their tool calls.
+ *
+ * A user message whose parts name a File the caller resolved becomes a multipart message carrying
+ * that File's bytes. A file part with no resolved bytes contributes nothing — that is how a File
+ * reaches only the Turn it was attached to, rather than every Turn after it.
+ */
+export function splitPrompt(
+  transcript: readonly { role: string; content: MessageContent }[],
+  attachments: readonly ResolvedAttachment[] = []
+): {
   instructions: SystemModelMessage[];
   messages: SdkMessage[];
+  /**
+   * The Files whose bytes this prompt actually carries.
+   *
+   * Reported from the same traversal that emits them, so a caller checking what the model was
+   * given cannot drift from what it was given — a second implementation of "which Files count"
+   * would be free to disagree, and the interesting cases are exactly the ones where it would.
+   */
+  attached: string[];
 } {
   const instructions: SystemModelMessage[] = [];
   const messages: SdkMessage[] = [];
+  const attached: string[] = [];
   const toolNamesByCallId = new Map<string, string>();
+  const resolved = new Map(attachments.map((file) => [file.fileId, file]));
   let pendingResults: ToolResultPart[] = [];
 
   const flushResults = () => {
@@ -93,17 +125,18 @@ export function splitPrompt(transcript: readonly { role: string; content: string
   };
 
   for (const message of transcript) {
+    const content = contentText(message.content);
     if (message.role === "system") {
       flushResults();
-      instructions.push({ role: "system", content: message.content });
+      instructions.push({ role: "system", content });
       continue;
     }
 
     if (message.role === "assistant") {
-      const calls = parseToolCalls(message.content);
+      const calls = parseToolCalls(content);
       if (calls === undefined) {
         flushResults();
-        messages.push({ role: "assistant", content: message.content });
+        messages.push({ role: "assistant", content });
         continue;
       }
       flushResults();
@@ -119,7 +152,7 @@ export function splitPrompt(transcript: readonly { role: string; content: string
     }
 
     if (message.role === "tool") {
-      const result = parseToolResult(message.content);
+      const result = parseToolResult(content);
       if (result !== undefined) {
         pendingResults.push({
           type: "tool-result",
@@ -132,10 +165,45 @@ export function splitPrompt(transcript: readonly { role: string; content: string
     }
 
     flushResults();
-    messages.push({ role: "user", content: message.content });
+    const parts = userParts(message.content, content, resolved, attached);
+    messages.push(
+      parts === undefined ? { role: "user", content } : { role: "user", content: parts }
+    );
   }
   flushResults();
-  return { instructions, messages };
+  return { instructions, messages, attached };
+}
+
+/**
+ * The multipart body of a user message, or `undefined` when plain text says the same thing.
+ *
+ * Falling back to a string rather than a one-element part array keeps every text-only prompt byte
+ * identical to what it was before Files existed, so nothing about prompt caching or provider
+ * behaviour shifts for the messages that carry no File.
+ */
+function userParts(
+  content: MessageContent,
+  text: string,
+  resolved: ReadonlyMap<string, ResolvedAttachment>,
+  attached: string[]
+): (TextPart | ImagePart | FilePart)[] | undefined {
+  const files = contentFiles(content).flatMap((part) => {
+    const file = resolved.get(part.fileId);
+    return file === undefined ? [] : [file];
+  });
+  if (files.length === 0) return undefined;
+
+  const parts: (TextPart | ImagePart | FilePart)[] = [];
+  if (text.length > 0) parts.push({ type: "text", text });
+  for (const file of files) {
+    attached.push(file.fileId);
+    parts.push(
+      modalityForMediaType(file.mediaType) === "image"
+        ? { type: "image", image: file.data, mediaType: file.mediaType }
+        : { type: "file", data: file.data, mediaType: file.mediaType, filename: file.name }
+    );
+  }
+  return parts;
 }
 
 /** Recognizes loop-encoded Tool calls; other assistant text passes through. */

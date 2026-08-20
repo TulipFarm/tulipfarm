@@ -80,6 +80,7 @@ export function makeSoulWriterDouble(baseCommit = "0".repeat(40)): SoulWriterDou
         filesChanged: paths.length,
         paths,
         pushed: true,
+        published: true,
       };
     },
   };

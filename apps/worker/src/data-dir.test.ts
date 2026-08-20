@@ -70,9 +70,48 @@ describe("loadDataDirEnv", () => {
     const env: Record<string, string | undefined> = {};
     expect(loadDataDirEnv(env)).toEqual([]);
   });
+
+  it("picks the bundled bucket's credentials up off the volume", () => {
+    const dir = tempDataDir();
+    writeFileSync(join(dir, "worker.env"), "WORKER_API_CREDENTIAL=tfc_a.b\n");
+    writeFileSync(join(dir, "secrets.env"), "ENCRYPTION_KEY=kek\n");
+    writeFileSync(join(dir, "bucket.env"), "S3_ACCESS_KEY_ID=GK1\nS3_SECRET_ACCESS_KEY=sec\n");
+    const env: Record<string, string | undefined> = { TF_DATA_DIR: dir };
+
+    expect(loadDataDirEnv(env)).toContain("S3_ACCESS_KEY_ID");
+    expect(env.S3_ACCESS_KEY_ID).toBe("GK1");
+    expect(env.S3_SECRET_ACCESS_KEY).toBe("sec");
+  });
+
+  it("still fills the bucket credentials when the required pair is already on the env", () => {
+    const dir = tempDataDir();
+    writeFileSync(join(dir, "bucket.env"), "S3_ACCESS_KEY_ID=GK1\nS3_SECRET_ACCESS_KEY=sec\n");
+    const env: Record<string, string | undefined> = {
+      TF_DATA_DIR: dir,
+      WORKER_API_CREDENTIAL: "tfc_a.b",
+      ENCRYPTION_KEY: "kek",
+    };
+
+    expect(loadDataDirEnv(env).sort()).toEqual(["S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"]);
+  });
 });
 
 describe("waitForDataDirEnv", () => {
+  it("does not wait on the bucket credentials, which most deployments never have", async () => {
+    const dir = tempDataDir();
+    writeFileSync(join(dir, "worker.env"), "WORKER_API_CREDENTIAL=tfc_a.b\n");
+    writeFileSync(join(dir, "secrets.env"), "ENCRYPTION_KEY=kek\n");
+    const env: Record<string, string | undefined> = { TF_DATA_DIR: dir };
+    let retries = 0;
+
+    const filled = await waitForDataDirEnv(
+      { attempts: 3, delayMs: 10, onRetry: () => (retries += 1) },
+      env
+    );
+
+    expect(filled.sort()).toEqual(["ENCRYPTION_KEY", "WORKER_API_CREDENTIAL"]);
+    expect(retries).toBe(0);
+  });
   it("retries until a value the file lacked at first shows up", async () => {
     const dir = tempDataDir();
     writeFileSync(join(dir, "secrets.env"), "ENCRYPTION_KEY=kek\n");

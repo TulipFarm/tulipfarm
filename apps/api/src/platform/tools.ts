@@ -8,6 +8,7 @@ import { ajv, definitions } from "@tulipfarm/schema";
 import type { BundledSkill } from "@tulipfarm/soul";
 import {
   type GitSyncService,
+  type RoutineCatalog,
   resolveSkill,
   type SoulAgent,
   type SoulLoader,
@@ -20,10 +21,11 @@ import type { RequestContext } from "@tulipfarm/tool-host";
 import { type ApiToolDefinition, defineApiTool } from "@tulipfarm/tool-host";
 import { stringify as stringifyYaml } from "yaml";
 import { SYSTEM_SOUL_COMMIT_ACTOR } from "../runtime/soul-writer";
-import { soulCommitError } from "../tools/soul-faults";
+import { mapSoulWriteError, soulCommitError } from "../tools/soul-faults";
 import { delegateToAgentTool } from "./delegate-tool";
+import { guardrailForgeTool } from "./guardrail-tool";
 import { firstError, SOUL_ROUTINE_TARGET, SOUL_SKILL_TARGET, soulTarget } from "./tool-args";
-import { err, ok, type ToolCallResult } from "./tool-result";
+import { err, ok } from "./tool-result";
 
 export interface PlatformToolContext {
   soulLoader?: {
@@ -40,25 +42,23 @@ export interface PlatformToolContext {
   /** The one guarded path that starts a delegated child Run; see `./delegation.ts`. */
   delegateToAgent?: (input: DelegateToAgentInput) => Promise<DelegationOutcome>;
   onRoutinesChanged?: () => Promise<void>;
+  /**
+   * The Routines surface's own read model. `routine_forge` reports success only once the Routine
+   * it wrote is listed here, so the Tool's claim is a read-back through the reader the user will
+   * use rather than a restatement of what the write path was asked to do.
+   */
+  routineCatalog?: RoutineCatalog;
+  /**
+   * Re-reads `guardrails.yaml` into the live {@link GuardrailsService}. Every Turn's Context
+   * carries the in-process policy, not the published bundle, so without this a committed
+   * Guardrail is not enforced until the next Soul sync or restart.
+   */
+  onGuardrailsChanged?: () => Promise<void>;
   bundledSkills?: ReadonlyMap<string, BundledSkill>;
   disabledBundledSkills?: ReadonlySet<string>;
   platformAgentNames?: ReadonlySet<string>;
   requestContext?: RequestContext;
   events?: EventEmitter;
-}
-
-/** Map a Soul write-gateway rejection onto `routine_forge`'s error vocabulary. */
-function mapRoutineWriteError(e: SoulWriteError): ToolCallResult {
-  switch (e.code) {
-    case "VALIDATION_FAILED":
-    case "INVALID_TARGET":
-    case "PRECONDITION_FAILED":
-      return err("validation_error", e.message);
-    case "CONFLICT":
-      return err("unavailable", e.message);
-    default:
-      return soulCommitError(e, e.message);
-  }
 }
 
 const SOUL_REPO_TARGET = "soul.repo";
@@ -317,8 +317,9 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
       }
     }
 
+    let write: Awaited<ReturnType<SoulWriter["apply"]>>;
     try {
-      await ctx.soulWriter.apply({
+      write = await ctx.soulWriter.apply({
         subject: `soul: forge routine ${name}`,
         source: "agent",
         actor: ctx.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
@@ -337,8 +338,20 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
         ],
       });
     } catch (e) {
-      if (e instanceof SoulWriteError) return mapRoutineWriteError(e);
+      if (e instanceof SoulWriteError) return mapSoulWriteError(e);
       return soulCommitError(e, e instanceof Error ? e.message : String(e));
+    }
+
+    // Committed is not published: the Routines surface and every Run read the active bundle, so a
+    // Routine whose publication failed is invisible and cannot be triggered. Reporting success here
+    // is what makes the Tool claim an outcome the Runtime never reached.
+    if (!write.published) {
+      return err(
+        "internal_error",
+        `Routine ${name} was committed to the Soul but its runtime bundle publication failed, so it is not published and will not appear in Routines${
+          write.publicationError === undefined ? "" : ` — ${write.publicationError}`
+        }`
+      );
     }
 
     // The gateway reloads the catalog but does not reschedule cron triggers.
@@ -347,6 +360,10 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
     } catch (e) {
       return err("internal_error", e instanceof Error ? e.message : String(e));
     }
+
+    const invisible = await routineMissingFromCatalog(ctx.routineCatalog, name);
+    if (invisible !== undefined) return err("internal_error", invisible);
+
     return ok({
       name,
       committed: true,
@@ -354,6 +371,29 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
     });
   },
 });
+
+/**
+ * Why the forged Routine is not on the Routines surface, or `undefined` when it is listed.
+ *
+ * A Tool that announces a Routine the surface cannot show is the failure this guards: the write
+ * path and the read model can drift apart in ways the write path cannot see, and every such drift
+ * has reached users as a confident success message for something unreachable.
+ */
+async function routineMissingFromCatalog(
+  catalog: RoutineCatalog | undefined,
+  slug: string
+): Promise<string | undefined> {
+  if (catalog === undefined) return undefined;
+  try {
+    const listed = await catalog.list();
+    return listed.some((routine) => routine.slug === slug)
+      ? undefined
+      : `Routine ${slug} was committed and published but does not appear on the Routines surface, so it is not available to run or edit`;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return `Routine ${slug} was committed and published but the Routines surface could not be read back, so it cannot be reported as available — ${reason}`;
+  }
+}
 
 const ROUTINE_PICKER_SCHEMA: Record<string, unknown> = {
   type: "object",
@@ -483,6 +523,7 @@ export const PLATFORM_TOOLS: ApiToolDefinition<PlatformToolContext>[] = [
   triggerRoutineTool,
   routineForgeTool,
   routinePickerTool,
+  guardrailForgeTool,
   soulRepoPushTool,
   callSkillTool,
   // Context-free Tools the durable runtime also hosts; `PlatformRuntimeContext` is a subset of

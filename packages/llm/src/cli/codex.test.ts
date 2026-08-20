@@ -508,14 +508,12 @@ describe("isCodexAuthFailure", () => {
     expect(isCodexAuthFailure(text)).toBe(true);
   });
 
-  it.each([
-    "rate limit exceeded",
-    "upstream 503",
-    "context length exceeded",
-    "socket hang up",
-  ])("does not match %s", (text) => {
-    expect(isCodexAuthFailure(text)).toBe(false);
-  });
+  it.each(["rate limit exceeded", "upstream 503", "context length exceeded", "socket hang up"])(
+    "does not match %s",
+    (text) => {
+      expect(isCodexAuthFailure(text)).toBe(false);
+    }
+  );
 });
 
 describe("isCodexAuthError", () => {

@@ -10,6 +10,11 @@ describe("validateAgentFrontmatter", () => {
       description: "Plans and sequences work.",
       model: "claude-opus-4-8",
       autonomy: "approval-required",
+      capabilityRestrictions: {
+        tools: { allowMutating: false, deny: ["record_delete"] },
+        records: { actions: { allow: ["list", "search", "read"], deny: ["delete"] } },
+        resourceTypes: { actions: { allow: ["list", "read"], deny: ["create", "update"] } },
+      },
       placeholder: ["Plan next sprint..."],
       suggestions: ["Plan next sprint", "Triage the backlog"],
     };
@@ -24,6 +29,21 @@ describe("validateAgentFrontmatter", () => {
 
   it("accepts a partial subset of fields", () => {
     expect(() => validateAgentFrontmatter({ domain: "ops" })).not.toThrow();
+  });
+
+  it("accepts capability restrictions for tool, Record, and Resource type actions", () => {
+    const result = validateAgentFrontmatter({
+      capabilityRestrictions: {
+        tools: { allow: ["record_list", "record_get"], allowMutating: false },
+        records: {
+          resourceTypes: ["ticket"],
+          actions: { allow: ["list", "read"], deny: ["delete"] },
+        },
+        resourceTypes: { names: ["ticket"], actions: { allow: ["list", "read"] } },
+      },
+    });
+
+    expect(result.capabilityRestrictions?.records?.actions?.deny).toEqual(["delete"]);
   });
 
   it("accepts every autonomy enum value", () => {
@@ -71,6 +91,17 @@ describe("validateAgentFrontmatter", () => {
     expect(() => validateAgentFrontmatter({ suggestions: [1, 2] })).toThrow(
       TulipFarmValidationError
     );
+  });
+
+  it("rejects unknown capability restriction actions and keys", () => {
+    expect(() =>
+      validateAgentFrontmatter({
+        capabilityRestrictions: { records: { actions: { deny: ["destroy"] } } },
+      })
+    ).toThrow(TulipFarmValidationError);
+    expect(() =>
+      validateAgentFrontmatter({ capabilityRestrictions: { tools: { denied: ["record_delete"] } } })
+    ).toThrow(TulipFarmValidationError);
   });
 
   it("rejects a model id containing whitespace", () => {

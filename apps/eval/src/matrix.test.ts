@@ -1,3 +1,4 @@
+import { textContent } from "@tulipfarm/schema";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { EvalCase } from "./case.ts";
 import type { Corpus } from "./corpus.ts";
@@ -12,7 +13,7 @@ const evalCase = (id: string): EvalCase => ({
   tier: "l2",
   agent: "triage",
   context: { agentId: "triage", governancePages: [] },
-  input: [{ role: "user", content: "hello" }],
+  input: [{ role: "user", content: textContent("hello") }],
   expect: [{ kind: "loop_status", status: "completed" }],
 });
 

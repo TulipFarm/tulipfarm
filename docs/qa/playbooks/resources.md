@@ -51,11 +51,11 @@ the fixture the Agents/Skills/Routines playbooks reference.
 
 | # | Action | Expected |
 | --- | --- | --- |
-| 1 | `navigate /resources`, `click` `+ New type` | `/resources/new` renders within 5s: fields `type name * (singular, kebab-case)` and `description`, one field row (`field 1 name`, `field 1 type` defaulted to `text`, a `required` checkbox, `remove field 1`), `+ add field`, and `Create type` / `Cancel` |
+| 1 | `navigate /resources`, `click` `+ New type` | `/resources/new` renders within 5s: fields `type name * (singular, kebab-case)` and `description`, one field row (`field 1 name`, `field 1 type` defaulted to `text`, `field 1 required`, `remove field 1`), `+ add field`, and `Create type` / `Cancel` |
 | 2 | Leave `type name` blank, `click` `Create type` | Inline "error: Type name must be lowercase kebab-case (e.g. support-ticket)." — no request fires |
 | 3 | `type` `type name` `QA_Bad_Name` (uppercase), `click` `Create type` | Same kebab-case error — the regex rejects case as well as blanks |
 | 4 | `type` `type name` `qa-<run-id>-widget`, leave `field 1 name` blank, `click` `Create type` | Inline "error: Add at least one field." — a name-only field row doesn't count |
-| 5 | Fill `field 1 name` `title`, check its `required` box. `click` `+ add field` six times and fill: `count`→number, `qty`→integer, `active`→boolean, `dueDate`→date, `startsAt`→datetime, `status`→enum with `field N choices` = `open, closed, done` (check `required` on `status` too) | Each row accepts its value; the choices input only appears for the `status` row |
+| 5 | Fill `field 1 name` `title`, check `field 1 required`. `click` `+ add field` six times and fill: `count`→number, `qty`→integer, `active`→boolean, `dueDate`→date, `startsAt`→datetime, `status`→enum with `field N choices` = `open, closed, done` (check `field N required` on `status` too) | Each row accepts its value; the choices input only appears for the `status` row |
 | 6 | `expect` the `field N type` select offers exactly: text, number, integer, boolean, date, datetime, "enum (choices)" | No array, object, or relation (x-links) option — the wizard's ceiling. Covered by hand-editing the schema, next |
 | 7 | `note` `number` and `integer` render and behave identically in this UI (both become a plain HTML number input; only the generated schema's `type` differs) — not a bug, just a UI/schema granularity mismatch worth knowing before reading "each field type" results later | Recorded |
 | 8 | `click` `Create type` | Button reads "Creating…", then `wait-until` navigated to `/resources/qa-<run-id>-widget` (max 10s, form-submit budget) |
@@ -189,7 +189,7 @@ route's actual behavior rather than assuming one uniform "friendly 404".
 
 | # | Action | Expected |
 | --- | --- | --- |
-| 1 | Tab through `/resources/new` | Order: `type name` → `description` → `field 1 name` → `field 1 type` → (`field 1 choices` if enum) → `required` → `remove field 1` → `+ add field` → `Create type` → `Cancel`, each with a visible focus ring |
+| 1 | Tab through `/resources/new` | Order: `type name` → `description` → `field 1 name` → `field 1 type` → (`field 1 choices` if enum) → `field 1 required` → `remove field 1` → `+ add field` → `Create type` → `Cancel`, each with a visible focus ring |
 | 2 | Tab through a record create form with a relation field present | Reaches the `relatedTo` combobox; `expect` its option list is operable by keyboard alone (Enter/Arrow), not mouse-only |
 | 3 | `expect` (P2 if not true) | Source shows the combobox's options only handle `onMouseDown` — no `onKeyDown` for Enter/Arrow selection. If Tabbing into an open list provides no way to choose an option without a pointer, that is a keyboard-operability failure |
 | 4 | On `/settings/auth` (or wherever the toggle lives in this session), record the current theme, `click` `Toggle dark mode` | Theme flips |

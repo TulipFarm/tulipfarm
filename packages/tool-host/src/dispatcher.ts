@@ -2,13 +2,10 @@ import type { AuthorityLayer } from "@tulipfarm/authz";
 import type { ArtifactService } from "@tulipfarm/run-kernel";
 import { ajv } from "@tulipfarm/schema";
 import type { SoulLoader } from "@tulipfarm/soul";
-import { getDefaultAssistant, resolveAgent } from "@tulipfarm/soul";
-import type { IntegrationStore } from "@tulipfarm/storage";
 import {
   type CompositeToolEntitlement,
   type EffectStore,
   NOT_APPLICABLE,
-  retryDelayMs,
   type ToolAuthorizationDenialReason,
   type ToolTargetRef,
 } from "@tulipfarm/tool-broker";
@@ -23,10 +20,13 @@ import type {
   TurnAuthority,
   TurnToolDispatcher,
 } from "./authority";
+import { autonomyCeiling, autonomyDemandsApproval } from "./autonomy";
+import { agentCapabilityDenial } from "./capability-restrictions";
 import { availableToolsFor, type ToolCatalog } from "./catalog";
 import type { CredentialResolution, CredentialResolver } from "./credential-mode";
 import { ChatEffectLedger, ledgerOwnsCall } from "./effect-ledger";
 import { localDispatchRefusal } from "./eligibility";
+import { runToolAttempts } from "./execution";
 import { gateAutonomyOf, type ToolGate } from "./gate";
 import type {
   AgentResolver,
@@ -40,11 +40,7 @@ import type {
 import { type AuthorityPrincipal, principalKindOf } from "./principal";
 import { presentationContextForAuthority, readChatRequest } from "./request";
 import type { SurfaceActionStore, SurfaceArtifactStore } from "./surface-ports";
-import type { RequestContext, ToolDef, ToolErrorCode } from "./types";
-import { isInfrastructureFault } from "./types";
-
-/** Default infra-fault retries without a ledger: one retry, then stop to avoid duplicate writes. */
-const DEFAULT_TRANSIENT_ATTEMPTS = 2;
+import type { RequestContext, ToolDef } from "./types";
 
 /**
  * Used when no `AgentResolver` was composed. It carries no `toolAllowlist`, which means the whole
@@ -85,6 +81,14 @@ export interface RegistryToolDispatcherOptions {
    * that slipped into the local catalog is refused rather than authorized on thinner evidence.
    */
   readonly localDispatchOnly?: boolean;
+  /**
+   * Wall-clock ceiling on one `execute`. Without it a Tool that never settles pins the Run's lease
+   * forever; with it the call is aborted, and a mutating Tool that ignored the abort settles
+   * `ambiguous` for reconciliation instead of being answered as a plain failure.
+   */
+  readonly executeTimeoutMs?: number;
+  /** Host cancellation — Run cancellation or drain — delivered to the Tool as `abortSignal`. */
+  readonly abortSignal?: AbortSignal;
   now?(): Date;
 }
 
@@ -92,13 +96,6 @@ type AuthorizeVerdict =
   | { readonly decision: "proceed" }
   | { readonly decision: "approval"; readonly demand: ApprovalDemand }
   | { readonly decision: "denied"; readonly result: HostedToolResult };
-
-/** Worker approvals mirror the web path: mutating, `approval-required`, and not opted out. */
-function needsApproval(definition: ToolDef, autonomy: string | undefined): boolean {
-  return (
-    autonomy === "approval-required" && definition.mutating && definition.requiresApproval !== false
-  );
-}
 
 /**
  * Spends the one-use approval this dispatch is about to act on. Fails closed: a decision that
@@ -205,22 +202,6 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
     };
   }
 
-  /** Retry only infrastructure faults with budget; mutating Tools need explicit `safeToRetry`. */
-  private mayRetryFault(tool: ToolDef, code: ToolErrorCode, attempt: number): boolean {
-    if (!isInfrastructureFault(code)) return false;
-    // Provider Tools already spent their ledger retry budget; do not start a second effect.
-    if (tool.definition?.provider !== undefined) return false;
-    const policy = tool.definition?.retry;
-    if (attempt >= Math.max(1, policy?.maxAttempts ?? DEFAULT_TRANSIENT_ATTEMPTS)) return false;
-    // Without a phase, landed-then-failed is indistinguishable from never-landed.
-    return !tool.mutating || policy?.safeToRetry === true;
-  }
-
-  private async wait(delayMs: number): Promise<void> {
-    if (delayMs <= 0) return;
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
-  }
-
   /** Provider entitlement checks run for human calls, even with personal credentials. */
   private async entitlementDenial(
     authority: TurnAuthority,
@@ -299,17 +280,32 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
 
   async dispatch(authority: TurnAuthority, call: HostedToolCall): Promise<HostedToolResult> {
     const request = await readChatRequest(this.options.artifacts, authority, this.now());
-    const agent = this.options.agents?.resolve(request.agentId) ?? DEFAULT_AGENT;
+    // A process with a Soul resolves the Agent itself. One without a Soul — the durable runtime —
+    // has only what the Run carried, and takes it rather than defaulting to unrestricted.
+    const agent = this.options.agents?.resolve(request.agentId) ?? authority.agent ?? DEFAULT_AGENT;
+    // The routed Agent's configured autonomy is an authority ceiling, so the turn runs at the more
+    // restrictive of it and whatever this request asked for. Reading `request.autonomy` alone made
+    // the ceiling shown on the Agent advisory: any caller that supplied a permissive per-turn value
+    // — or hardcoded one, as the Channel path did — dispatched above it.
+    const autonomy = autonomyCeiling(agent.autonomy, request.autonomy);
     const presentationContext = await presentationContextForAuthority(
       authority,
       this.options.surfaces,
       this.options.channelDeliveries
     );
     const excludedTools = await this.options.visibility?.excludedToolNames(authority.businessId);
+    // Visibility only, so capability restrictions are deliberately left out of it: a Tool this
+    // Agent may not use must be refused with the reason it was refused, not reported as a Tool
+    // that does not exist. `agentCapabilityDenial` below is the decision.
+    const dispatchAgent =
+      agent.toolAllowlist === undefined ? undefined : { toolAllowlist: agent.toolAllowlist };
     const allowed = new Set(
-      availableToolsFor(this.options.registry, agent, presentationContext, excludedTools).map(
-        (tool) => tool.name
-      )
+      availableToolsFor(
+        this.options.registry,
+        dispatchAgent,
+        presentationContext,
+        excludedTools
+      ).map((tool) => tool.name)
     );
     // Use registered Tools, not summaries; authority compiles from definitions.
     const availableTools = this.options.registry
@@ -339,6 +335,13 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
       return { status: "invalid_arguments", reason: argumentErrors(validate) };
     }
 
+    const capabilityDenial = agentCapabilityDenial(
+      agent.capabilityRestrictions,
+      definition,
+      call.arguments
+    );
+    if (capabilityDenial !== undefined) return { status: "denied", reason: capabilityDenial };
+
     // Decide authority before approval; forbidden calls must not reach humans as choices.
     const verdict = await this.authorize(
       authority,
@@ -346,7 +349,7 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
       definition,
       availableTools,
       call,
-      request.autonomy
+      autonomy
     );
     if (verdict.decision === "denied") return verdict.result;
 
@@ -361,7 +364,7 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
 
     // Ask after validation and before `execute`, so no invalid call or effect reaches approval.
     const approvalRequired =
-      verdict.decision === "approval" || needsApproval(definition, request.autonomy);
+      verdict.decision === "approval" || autonomyDemandsApproval(definition, autonomy);
     if (approvalRequired && this.options.approvals === undefined) {
       // Missing approval plumbing must deny, not convert "not yet" into "yes".
       return {
@@ -434,12 +437,13 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
       runId: authority.runId,
       toolCallId: call.callId,
       agentId: agent.name,
-      autonomy: request.autonomy as RequestContext["autonomy"],
+      autonomy,
       guardrailRevision: this.options.guardrails?.revision ?? "none",
       surfaceStore: this.options.surfaceStore,
       surfaceActionStore: this.options.surfaceActionStore,
       surfaceComponents,
       ...surfaceFields,
+      ...(this.options.abortSignal === undefined ? {} : { abortSignal: this.options.abortSignal }),
       ...(credential.use === "principal" ? { credentialPrincipal: credential.principal } : {}),
     };
     // Reserve only after refusals and approval; denied calls leave no effect row.
@@ -475,54 +479,17 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
       };
     }
 
-    let result: Awaited<ReturnType<ToolDef["execute"]>>;
-    for (let attempt = 1; ; attempt += 1) {
-      try {
-        result = await definition.execute(call.arguments, context);
-      } catch {
-        // Throws are unknown phase: never retry, and settle ledgered writes as `ambiguous`.
-        if (ledger && reservation) {
-          await ledger.finishAttempt(
-            authority.businessId,
-            reservation.effectId,
-            reservation.attempt,
-            {
-              state: "ambiguous",
-              errorCode: "tool_raised",
-            }
-          );
-        }
-        return { status: "failed", reason: `tool "${call.name}" raised an internal error` };
-      }
-      if (result.success) {
-        if (ledger && reservation) {
-          await ledger.finishAttempt(
-            authority.businessId,
-            reservation.effectId,
-            reservation.attempt,
-            { state: "confirmed" }
-          );
-        }
-        return { status: "succeeded", output: result.data };
-      }
-      if (!this.mayRetryFault(definition, result.error.code, attempt)) break;
-      await this.wait(retryDelayMs(attempt));
-    }
-    // Structured errors have a known phase; there is nothing to reconcile.
-    if (ledger && reservation) {
-      await ledger.finishAttempt(authority.businessId, reservation.effectId, reservation.attempt, {
-        state: "failed",
-        errorCode: result.error.code,
-      });
-    }
-    // Schema-shaped rejections count against the model repair budget.
-    if (result.error.code === "validation_error") {
-      return { status: "invalid_arguments", reason: result.error.message };
-    }
-    // Exhausted infra faults are machinery failures, not repairable argument failures.
-    return isInfrastructureFault(result.error.code)
-      ? { status: "failed", reason: `tool "${call.name}" is temporarily unavailable; try again` }
-      : { status: "failed", reason: result.error.message };
+    return runToolAttempts({
+      businessId: authority.businessId,
+      tool: definition,
+      call,
+      context,
+      ...(this.options.executeTimeoutMs === undefined
+        ? {}
+        : { timeoutMs: this.options.executeTimeoutMs }),
+      ...(ledger === undefined ? {} : { ledger }),
+      ...(reservation === undefined ? {} : { reservation }),
+    });
   }
 }
 

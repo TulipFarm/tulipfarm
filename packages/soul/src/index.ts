@@ -198,6 +198,13 @@ export {
   compileSoulRoles,
   SoulRoleCompileError,
 } from "./role-compiler";
+export type {
+  ActiveBundleReader,
+  RoutineCatalog,
+  RoutineCatalogItem,
+  RoutineCatalogTrigger,
+} from "./routine-catalog";
+export { ActiveRoutineCatalog } from "./routine-catalog";
 export { scaffoldSoul } from "./scaffold-soul";
 export { validateSoulSemantics } from "./semantic";
 export type { BundleSigner, BundleVerifier, TrustedBundlePublicKey } from "./signatures";
@@ -306,4 +313,4 @@ export type {
   SoulWriteResult,
   SoulWriteTarget,
 } from "./writer";
-export { SoulWriteError, SoulWriter } from "./writer";
+export { artifactWriteTarget, SoulWriteError, SoulWriter } from "./writer";

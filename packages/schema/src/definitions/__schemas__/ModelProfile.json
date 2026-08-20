@@ -167,7 +167,8 @@
                   "text",
                   "image",
                   "audio",
-                  "video"
+                  "video",
+                  "document"
                 ],
                 "type": "string"
               },
@@ -180,7 +181,8 @@
                   "text",
                   "image",
                   "audio",
-                  "video"
+                  "video",
+                  "document"
                 ],
                 "type": "string"
               },

@@ -50,10 +50,36 @@ Every agent turn still goes through [guardrails](/docs/administration/how-guardr
 ## Tools and current limits
 
 Agents use TulipFarm's built-in tools for records, knowledge, soul artifacts, memory, KV, routines,
-surfaces, and connected integrations. Today you cannot restrict tools per agent; connected
-integration tools are broadly available to agents on eligible turns. Risk is managed through
-guardrails, approvals, SkillAudit, and role-based authority, not a per-agent tool allowlist in
-the UI.
+surfaces, and connected integrations. Connected integration tools are broadly available to agents on
+eligible turns.
+
+An agent can also be given **capability restrictions** — hard limits the server checks before a tool
+runs, rather than instructions the model is asked to respect. Describe the limit in chat ("read-only",
+"must never delete a Ticket") and `agent-forge` writes it into the agent's frontmatter:
+
+```markdown title="soul/agents/reporting/AGENT.md"
+---
+label: Reporting
+domain: reporting
+description: Lists and views records without changing them.
+capabilityRestrictions:
+  tools:
+    allowMutating: false
+  records:
+    actions:
+      allow: [list, search, read]
+      deny: [create, update, delete]
+---
+```
+
+A restricted tool is not offered to the model, and a call to it is refused at dispatch even if the
+model makes it anyway — including when someone claims in chat to be authorizing an exception. A
+read-only agent also cannot use `delegate_to_agent` to have a less restricted agent do the work,
+because delegated authority is the intersection of the two. `present`, `request_input`,
+`complete_task` and `complete_state` are never withdrawn, so a restricted agent can still finish
+its turn and explain itself. An agent with no `capabilityRestrictions` is unrestricted.
+
+Risk is otherwise managed through guardrails, approvals, SkillAudit, and role-based authority.
 
 ## Transfer and delegation
 

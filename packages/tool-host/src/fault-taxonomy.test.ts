@@ -1,7 +1,12 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { isInfrastructureFault, TOOL_FAULT_CLASS, type ToolErrorCode } from "./types";
+import {
+  isIndeterminateFault,
+  isInfrastructureFault,
+  TOOL_FAULT_CLASS,
+  type ToolErrorCode,
+} from "./types";
 
 describe("tool fault taxonomy", () => {
   it("classifies exactly the codes the union declares, no more and no fewer", () => {
@@ -28,16 +33,24 @@ describe("tool fault taxonomy", () => {
     expect(isInfrastructureFault("unavailable")).toBe(true);
   });
 
-  it("keeps both classes populated, so neither reading collapses", () => {
+  it("keeps an abandoned call out of both retryable readings", () => {
+    expect(isInfrastructureFault("indeterminate")).toBe(false);
+    expect(isIndeterminateFault("indeterminate")).toBe(true);
+    expect(isIndeterminateFault("unavailable")).toBe(false);
+  });
+
+  it("keeps every class populated, so no reading collapses", () => {
     const values = Object.values(TOOL_FAULT_CLASS);
     expect(values).toContain("business");
     expect(values).toContain("infrastructure");
+    expect(values).toContain("indeterminate");
   });
 
   it("gives every code exactly one class", () => {
     for (const [code, klass] of Object.entries(TOOL_FAULT_CLASS)) {
-      expect(["business", "infrastructure"]).toContain(klass);
+      expect(["business", "infrastructure", "indeterminate"]).toContain(klass);
       expect(isInfrastructureFault(code as ToolErrorCode)).toBe(klass === "infrastructure");
+      expect(isIndeterminateFault(code as ToolErrorCode)).toBe(klass === "indeterminate");
     }
   });
 });

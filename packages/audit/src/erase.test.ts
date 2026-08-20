@@ -1,5 +1,5 @@
 import { createHmac, randomUUID } from "node:crypto";
-import type { BlobPort, BlobRef } from "@tulipfarm/storage";
+import { type BlobPort, type BlobRef, collectBlobBytes } from "@tulipfarm/storage";
 import { describe, expect, it } from "vitest";
 import { EraseError, eraseSegment, type SegmentKeyPort } from "./erase";
 import { placeLegalHold } from "./legal-hold";
@@ -18,10 +18,15 @@ function hmacSigner(): SealSigner {
   };
 }
 
+async function* oneChunk(bytes: Uint8Array): AsyncIterable<Uint8Array> {
+  yield bytes;
+}
+
 function inMemoryBlob(): BlobPort {
   const store = new Map<string, Uint8Array>();
   return {
-    async put(bytes) {
+    async put(body) {
+      const bytes = body instanceof Uint8Array ? body : await collectBlobBytes(body);
       const hash = createHmac("sha256", "blob").update(bytes).digest("hex");
       const ref: BlobRef = { key: hash, hash };
       store.set(ref.key, bytes);
@@ -30,7 +35,11 @@ function inMemoryBlob(): BlobPort {
     async get(ref) {
       const bytes = store.get(ref.key);
       if (!bytes) throw new Error("not found");
-      return bytes;
+      return oneChunk(bytes);
+    },
+    async head(ref) {
+      const bytes = store.get(ref.key);
+      return bytes === undefined ? null : { size: bytes.byteLength };
     },
     async delete(ref) {
       store.delete(ref.key);

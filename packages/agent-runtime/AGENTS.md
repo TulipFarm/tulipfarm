@@ -16,7 +16,7 @@ orchestration. It owns prompt assembly and runtime control, not model providers.
 | `src/context/` | Instruction precedence, Context manifests, prompt assembly. |
 | `src/guardrails/` | Input/tool/output guard stages and `DEFAULT_GUARDRAILS`. |
 | `src/skills/` | Exact-version Skill resolution, trust tiers, scanning, ability intersection. |
-| `src/loop/` | Bounded durable Tool loop; the broker is the only effect path. |
+| `src/loop/` | Bounded durable Tool loop; the broker is the only effect path. `reread.ts` puts a File an Agent read mid-Turn back in front of the model. |
 | `src/delegation/` | Helper Agents as child Runs: depth, deadline and authority narrowing (`delegate.ts`), and the composition that mints and awaits the child (`composition.ts`). |
 | `test/security/` | Injection and non-amplification corpus. |
 
@@ -37,3 +37,8 @@ orchestration. It owns prompt assembly and runtime control, not model providers.
   `DEFAULT_GUARDRAILS`, and digest checks depend on `config` returning the validated policy.
 - If `ModelPort.stream` exists, a missing `completed` chunk fails the turn. `AgentLoopEvent`
   carries model text only; Tool args/output stay with `ToolDispatchPort`.
+- A Turn sends a File once, on the Turn it was attached to. `file_read` is the only Tool the loop
+  knows by name for bytes: its `attached` result names a File, and `LoopAttachmentPort` fetches it
+  *every* iteration, because that fetch is the authorization check — a revoked share has to stop
+  the File on the next step, which no cached copy could do. The set is capped and held as names,
+  so a resumed Turn re-authorizes rather than replaying a stale copy.

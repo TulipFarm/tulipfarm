@@ -6,6 +6,11 @@ import {
   type ModelRequirementsPolicy,
   narrowDelegatedTurn,
 } from "@tulipfarm/agent-runtime";
+import {
+  resolveTurnAttachments,
+  type TurnAttachmentReader,
+  type TurnAttachmentRef,
+} from "@tulipfarm/files";
 import type { KnowledgeService } from "@tulipfarm/knowledge";
 import type { KvService } from "@tulipfarm/kv";
 import type { MemoryDocumentRepo } from "@tulipfarm/memory";
@@ -24,7 +29,7 @@ import {
   RUN_EXECUTOR_PRINCIPAL_REF,
   requestArtifactId,
 } from "@tulipfarm/run-kernel";
-import { canonicalHash } from "@tulipfarm/schema";
+import { canonicalHash, contentText, type MessageContent, textContent } from "@tulipfarm/schema";
 import type { BundledSkill, SoulAgent, SoulLoader } from "@tulipfarm/soul";
 import {
   buildSoulCatalogue,
@@ -35,13 +40,24 @@ import {
 } from "@tulipfarm/soul";
 import type { IntegrationStore } from "@tulipfarm/storage";
 import type { PresentationContext } from "@tulipfarm/surface";
+import type { RequestContext } from "@tulipfarm/tool-host";
 import type { ToolRegistry } from "../broker/tool-adapter";
 import { estimateTokens } from "../chat/compaction";
 import { assembleAgentSystemPrompt } from "../chat/system-prompt";
-import { availableToolsFor } from "../chat/turn-helpers";
+import {
+  availableToolsFor,
+  type RestrictedPlatformAgent,
+  toolAgentFor,
+} from "../chat/turn-helpers";
 import type { ConversationStore, PersistedMessage } from "../conversations/service";
 import { readCustomInstructions } from "../preferences/custom-instructions";
-import { presentationContextFor, surfaceCatalogPromptFor } from "../surfaces/renderer-registry";
+import {
+  presentationContextFor,
+  surfaceCatalogFor,
+  surfaceCatalogPromptFor,
+  surfaceCatalogRevisionFor,
+  surfaceRendererRegistry,
+} from "../surfaces/renderer-registry";
 import { githubDisabledSkillNames, githubExcludedToolNames } from "../tools/github/visibility";
 import { ModelSelectorDeniedError, type ModelSelectorGate } from "./model-authz";
 import { resolveModelSelector } from "./model-selector";
@@ -88,10 +104,10 @@ export interface ChatRequestPayload {
 }
 
 /** Recall scores against the newest user message, never the assistant's own words. */
-function latestUserMessage(history: readonly { role: string; content: string }[]): string {
+function latestUserMessage(history: readonly { role: string; content: MessageContent }[]): string {
   for (let i = history.length - 1; i >= 0; i--) {
     const message = history[i];
-    if (message !== undefined && message.role === "user") return message.content;
+    if (message !== undefined && message.role === "user") return contentText(message.content);
   }
   return "";
 }
@@ -152,6 +168,12 @@ export interface ChatTurnContextResolverOptions {
    * every turn did before this existed; a deployment wires it to measure the rate.
    */
   readonly telemetry?: TelemetryPort;
+  /**
+   * Reads the Files this Turn attached, so their authorization can be checked again here.
+   *
+   * Absent leaves every Turn attachment-free, which is what every Turn did before Files existed.
+   */
+  readonly files?: TurnAttachmentReader;
   now?(): Date;
 }
 
@@ -169,6 +191,7 @@ export class ChatTurnContextResolver implements TurnContextResolver {
     const request = await readChatRequest(this.options.artifacts, authority, this.now());
     const agent = resolveAgent(this.options.soulLoader, request.agentId);
     const platformAgent = getDefaultAssistant(agent.name);
+    const toolAgent = toolAgentFor(platformAgent, agent);
     const presentationContext = await presentationContextForAuthority(
       authority,
       this.options.channelDeliveries
@@ -191,7 +214,7 @@ export class ChatTurnContextResolver implements TurnContextResolver {
     const system = await this.buildSystemPrompt(
       authority,
       agent,
-      platformAgent,
+      toolAgent,
       presentationContext,
       excludedTools,
       disabledSkills,
@@ -202,17 +225,32 @@ export class ChatTurnContextResolver implements TurnContextResolver {
     // keyed by conversation), so the presentation Tools are offered for every channel alike.
     const allowed = availableToolsFor(
       this.options.toolRegistry,
-      platformAgent,
+      toolAgent,
       presentationContext,
       excludedTools
     );
     const allowedNames = new Set(allowed.map((tool) => tool.name));
+    const surfaceComponents = [...(this.options.soulLoader?.surfaceComponents.values() ?? [])];
+    const toolContext: RequestContext = {
+      userId: authority.subject.id,
+      conversationId: authority.turn.conversationId,
+      runId: authority.runId,
+      agentId: platformAgent?.name,
+      presentationContext,
+      surfaceCatalog: surfaceCatalogFor(presentationContext.target, surfaceComponents),
+      surfaceCatalogRevision: surfaceCatalogRevisionFor(
+        presentationContext.target,
+        surfaceComponents
+      ),
+      surfaceRendererManifest: surfaceRendererRegistry.manifestFor(presentationContext.target),
+      surfaceComponents,
+    };
     const tools = (this.options.toolRegistry?.getAll() ?? [])
       .filter((tool) => allowedNames.has(tool.name))
       .map((tool) => ({
         name: tool.name,
         description: tool.description,
-        inputSchema: tool.inputSchema,
+        inputSchema: tool.inputSchemaFor?.(toolContext) ?? tool.inputSchema,
         tier: tool.tier,
         mutating: tool.mutating,
       }));
@@ -240,7 +278,7 @@ export class ChatTurnContextResolver implements TurnContextResolver {
 
     const messages = [
       ...(system.length > 0 && !dropped.has(SYSTEM_SOURCE_ID)
-        ? [{ role: "system", content: system }]
+        ? [{ role: "system", content: textContent(system) }]
         : []),
       ...history
         .filter((message) => !dropped.has(message.id))
@@ -262,6 +300,8 @@ export class ChatTurnContextResolver implements TurnContextResolver {
       this.options.bundledSkills
     );
 
+    const attachments = await this.resolveAttachments(authority, history);
+
     return {
       agentId: agent.name,
       subjectId: authority.subject.id,
@@ -272,11 +312,35 @@ export class ChatTurnContextResolver implements TurnContextResolver {
       guardrailDigest,
       guardrailPolicy,
       messages,
+      ...(attachments.length === 0 ? {} : { attachments }),
       tools: delegated.tools,
       limits: delegated.limits,
       compacted: dropped.size > 0,
       ...(skillToolScopes === undefined ? {} : { skillToolScopes }),
     };
+  }
+
+  /** Delegates to the File domain, which owns which Files a Turn may send. */
+  private async resolveAttachments(
+    authority: TurnAuthority,
+    history: readonly PersistedMessage[]
+  ): Promise<TurnAttachmentRef[]> {
+    const files = this.options.files;
+    if (files === undefined) return [];
+    return resolveTurnAttachments({
+      files,
+      messages: history,
+      businessId: authority.businessId,
+      turnId: authority.turn.id,
+      principalId: authority.subject.id,
+      onOmitted: (fileId) => {
+        this.options.telemetry?.log("warn", "turn attachment omitted: no longer authorized", {
+          "tulip.file.id": fileId,
+          "tulip.turn.id": authority.turn.id,
+          "tulip.subject.id": authority.subject.id,
+        });
+      },
+    });
   }
 
   /**
@@ -336,7 +400,7 @@ export class ChatTurnContextResolver implements TurnContextResolver {
   private async buildSystemPrompt(
     authority: TurnAuthority,
     agent: ReturnType<typeof resolveAgent>,
-    platformAgent: ReturnType<typeof getDefaultAssistant>,
+    platformAgent: RestrictedPlatformAgent | undefined,
     presentationContext: PresentationContext,
     excludedTools?: ReadonlySet<string>,
     disabledSkills?: ReadonlySet<string>,
@@ -468,7 +532,7 @@ function candidatesFor(
         classification: "internal",
         taint: "trusted",
         authorization: allow,
-        tokens: estimateTokens(message.content),
+        tokens: estimateTokens(contentText(message.content)),
         digest: canonicalHash({ content: message.content }),
       })
     ),

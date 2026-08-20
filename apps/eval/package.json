@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@tulipfarm/agent-runtime": "workspace:*",
+    "@tulipfarm/files": "workspace:*",
     "@tulipfarm/llm": "workspace:*",
     "@tulipfarm/model-adapter": "workspace:*",
     "@tulipfarm/run-kernel": "workspace:*",
@@ -23,16 +24,17 @@
     "@tulipfarm/secrets": "workspace:*",
     "@tulipfarm/soul": "workspace:*",
     "@tulipfarm/storage": "workspace:*",
+    "@tulipfarm/tool-host": "workspace:*",
     "@tulipfarm/turn-executor": "workspace:*",
-    "ai": "^7.0.2"
+    "ai": "^7.0.68"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.5.3",
+    "@electric-sql/pglite": "^0.5.5",
     "@tulipfarm/tsconfig": "workspace:*",
-    "@types/node": "^26.1.1",
-    "tsx": "^4.22.4",
-    "typescript": "^6.0.3",
-    "vitest": "^4.1.9",
+    "@types/node": "^26.2.0",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11",
     "yaml": "^2.9.0"
   }
 }

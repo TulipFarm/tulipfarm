@@ -1,5 +1,7 @@
+import type { AgentCapabilityRestrictions } from "@tulipfarm/schema";
 import type { PresentationContext } from "@tulipfarm/surface";
 import type { ToolAvailability } from "@tulipfarm/tool-broker";
+import { agentCanBeOfferedTool } from "./capability-restrictions";
 import type { ToolDef } from "./types";
 
 /**
@@ -45,7 +47,12 @@ function offerable(
 /** Per-agent tool scoping: an agent without an allowlist gets an explicit registry snapshot. */
 export function allowedToolNamesFor(
   catalog: ToolCatalog | undefined,
-  agent: { readonly toolAllowlist?: readonly string[] } | undefined,
+  agent:
+    | {
+        readonly toolAllowlist?: readonly string[];
+        readonly capabilityRestrictions?: AgentCapabilityRestrictions;
+      }
+    | undefined,
   presentationContext?: PresentationContext,
   excluded?: ReadonlySet<string>
 ): ReadonlySet<string> | undefined {
@@ -59,7 +66,12 @@ export function allowedToolNamesFor(
   return new Set(
     [...agentAllowed].filter((name) => {
       if (excluded?.has(name)) return false;
-      return offerable(availability.get(name), presentationContext);
+      const tool = catalog.getAll().find((entry) => entry.name === name);
+      return (
+        tool !== undefined &&
+        offerable(availability.get(name), presentationContext) &&
+        agentCanBeOfferedTool(agent?.capabilityRestrictions, tool)
+      );
     })
   );
 }
@@ -67,7 +79,12 @@ export function allowedToolNamesFor(
 /** Name/description pairs for the prompt, sorted for a byte-stable prefix. */
 export function availableToolsFor(
   catalog: ToolCatalog | undefined,
-  agent: { readonly toolAllowlist?: readonly string[] } | undefined,
+  agent:
+    | {
+        readonly toolAllowlist?: readonly string[];
+        readonly capabilityRestrictions?: AgentCapabilityRestrictions;
+      }
+    | undefined,
   presentationContext?: PresentationContext,
   excluded?: ReadonlySet<string>
 ): { name: string; description: string }[] {

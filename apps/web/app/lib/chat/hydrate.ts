@@ -9,11 +9,15 @@ function newId(): string {
 }
 
 // Map a persisted assistant `content` (string or parts) to renderable timeline parts.
+// A reply that only ran Tools or only asked a question persists with empty text — the Message
+// exists to carry `metadata.toolCalls` and its Surface link. Emitting a text part for it would
+// restore a blank paragraph above the run that was never there live.
 function assistantParts(content: string | WireMessagePart[]): TimelinePart[] {
-  if (typeof content === "string") return [{ kind: "text", text: content }];
+  if (typeof content === "string") return content ? [{ kind: "text", text: content }] : [];
   const parts: TimelinePart[] = [];
   for (const part of content) {
     if (part.type === "text") {
+      if (!part.text) continue;
       parts.push({ kind: "text", text: part.text });
     } else if (part.type === "tool-call") {
       parts.push({
@@ -156,6 +160,31 @@ function mergeToolResults(assistant: ChatMessage, content: WireMessagePart[]): v
 // `feedback` so a restored transcript shows prior votes. The assistant's persisted id is kept as
 // `serverId` (the React-key `id` stays a fresh uuid) so feedback can target the persisted row; user
 // turns carry no `serverId` since only assistant replies are rateable.
+/**
+ * A user Message is a string only when it is text alone; anything with an attachment arrives as
+ * parts. Dropping the non-string form — which this did before Files existed — silently rendered
+ * every message carrying an image as blank.
+ */
+function userParts(content: ConversationMessage["content"]): TimelinePart[] {
+  if (typeof content === "string") return [{ kind: "text", text: content }];
+  const parts: TimelinePart[] = [];
+  for (const part of content) {
+    if (part.type === "text") {
+      if (part.text.length > 0) parts.push({ kind: "text", text: part.text });
+    } else if (part.type === "file") {
+      parts.push({
+        kind: "file",
+        fileId: part.fileId,
+        mediaType: part.mediaType,
+        name: part.name,
+      });
+    } else if (part.type === "file-unavailable") {
+      parts.push({ kind: "file-unavailable", fileId: part.fileId, name: part.name });
+    }
+  }
+  return parts.length > 0 ? parts : [{ kind: "text", text: "" }];
+}
+
 export function messagesToTimeline(
   docs: ConversationMessage[],
   votes?: Map<string, "up" | "down">
@@ -165,8 +194,7 @@ export function messagesToTimeline(
   let surfaceOnly = false;
   for (const doc of docs) {
     if (doc.role === "user") {
-      const text = typeof doc.content === "string" ? doc.content : "";
-      out.push({ id: newId(), role: "user", parts: [{ kind: "text", text }], sealed: true });
+      out.push({ id: newId(), role: "user", parts: userParts(doc.content), sealed: true });
       lastAssistant = undefined;
       surfaceOnly = false;
     } else if (doc.role === "assistant") {
@@ -175,6 +203,11 @@ export function messagesToTimeline(
         id: newId(),
         serverId: doc._id,
         role: "assistant",
+        // Tools first, then text: a persisted reply stores its text as one string and its calls as
+        // a flat `metadata.toolCalls` with no positions, so where the text sat between the calls is
+        // not on the wire. A restored transcript therefore groups the whole run as one block even
+        // when the live one split it around a preamble. Accepted — restoring the interleaving means
+        // persisting ordered parts instead of a string, which the LLM history rebuild also reads.
         parts: [...toolPartsFromMetadata(doc.metadata), ...assistantParts(doc.content)],
         sealed: true,
         feedback: votes?.get(doc._id),

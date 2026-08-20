@@ -4,10 +4,12 @@ import { BrandOnboardingSections } from "~/components/design-guide/brand-onboard
 import { ColorSections } from "~/components/design-guide/color-sections";
 import { ComponentSections } from "~/components/design-guide/component-sections";
 import { CompositionSections } from "~/components/design-guide/composition-sections";
+import { DecisionSections } from "~/components/design-guide/decision-sections";
 import { FarmSections } from "~/components/design-guide/farm-sections";
 import { FoundationsSections } from "~/components/design-guide/foundations-sections";
 import { GuideSection } from "~/components/design-guide/guide-section";
 import { ReferenceSections } from "~/components/design-guide/reference-sections";
+import { TraceSections } from "~/components/design-guide/trace-sections";
 import { Badge } from "~/components/ui/badge";
 import { Separator } from "~/components/ui/separator";
 
@@ -26,10 +28,14 @@ const GUIDE_LINKS = [
   ["typography", "Typography scale"],
   ["status-priority", "Status & priority systems"],
   ["agent-run", "Agent run vocabulary"],
+  ["trace", "Trace"],
+  ["tool-chips", "Tool chips"],
+  ["decisions", "Decisions"],
   ["brand-marks", "Brand marks"],
   ["onboarding", "Onboarding: tulip & Companion"],
   ["farm", "Farm: the tulip field"],
   ["copy-field", "Copyable values"],
+  ["loading", "Loading state"],
   ["hierarchy", "Component hierarchy"],
   ["composition", "Composition patterns"],
   ["actions", "Interactive patterns"],
@@ -99,6 +105,8 @@ export default function DesignGuideRoute() {
       <ColorSections />
       <FoundationsSections />
       <AgentRunSections />
+      <TraceSections />
+      <DecisionSections />
       <BrandOnboardingSections />
 
       <FarmSections />

@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CommitActor, CommitSigner } from "./commit-signing";
 import { SoulGitStore } from "./git-store";
 import type { Logger } from "./types";
-import { type SoulWrite, SoulWriteError, SoulWriter } from "./writer";
+import { artifactWriteTarget, type SoulWrite, SoulWriteError, SoulWriter } from "./writer";
 
 /** Tests use real Git to cover atomicity, base conflicts, path guards, and cleanup. */
 
@@ -481,6 +481,59 @@ describe("SoulWriter — regressions", () => {
     ).rejects.toMatchObject({ code: "INVALID_TARGET" });
   });
 
+  // A real Skill is a package: reference material in subdirectories and provenance files beside
+  // SKILL.md. Every one of them has to be addressable through the gateway, or installing such a
+  // Skill fails as a whole and the only way to land it is the raw-filesystem bypass.
+  it("addresses a Skill's whole package — subdirectory and root companions alike", async () => {
+    const result = await apply([
+      { op: "put", target: { kind: "Skill", slug: "packing" }, content: skillDoc("packing") },
+      {
+        op: "put",
+        target: { kind: "Skill", slug: "packing", companion: "references/bulbs.md" },
+        content: "# Bulb handling\n",
+      },
+      {
+        op: "put",
+        target: { kind: "Skill", slug: "packing", companion: "scripts/pack.py" },
+        content: "print('pack')\n",
+      },
+      {
+        op: "put",
+        target: { kind: "Skill", slug: "packing", companion: "LICENSE.txt" },
+        content: "MIT\n",
+      },
+      {
+        op: "put",
+        target: { kind: "Skill", slug: "packing", companion: "requirements.txt" },
+        content: "pandas\n",
+      },
+    ]);
+
+    expect(result.paths).toEqual([
+      "skills/packing/skill.yaml",
+      "skills/packing/references/bulbs.md",
+      "skills/packing/scripts/pack.py",
+      "skills/packing/LICENSE.txt",
+      "skills/packing/requirements.txt",
+    ]);
+    expect(existsSync(join(soulPath, "skills/packing/references/bulbs.md"))).toBe(true);
+  });
+
+  it("still refuses a companion that escapes the artifact's own directory", async () => {
+    for (const companion of [
+      "../escape/notes.md",
+      "references/../../escape.md",
+      "/etc/passwd",
+      "..\\escape.md",
+    ]) {
+      await expect(
+        apply([
+          { op: "put", target: { kind: "Skill", slug: "packing", companion }, content: "x\n" },
+        ])
+      ).rejects.toMatchObject({ code: "INVALID_TARGET" });
+    }
+  });
+
   it("does not destroy unrelated uncommitted work when materializing a committed changeset", async () => {
     await apply([put("first")]);
     writeFileSync(join(soulPath, "tracked-notes.md"), "committed baseline\n");
@@ -691,5 +744,64 @@ describe("SoulWriter — degraded dependencies", () => {
     expect(result.commitSha).toBeTruthy();
     expect(existsSync(join(soulPath, "agents/triage/agent.yaml"))).toBe(true);
     expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("bundle publication failed"));
+  });
+
+  it("reports an unpublished write so a caller cannot announce it as live", async () => {
+    const writer = new SoulWriter(store, logger, undefined, undefined, {
+      publishCommittedTree: async () => {
+        throw new Error("publisher exploded");
+      },
+    });
+
+    const result = await writer.apply({
+      subject: "soul: add agent triage",
+      source: "api",
+      actor: ACTOR,
+      businessId: "biz-1",
+      changes: [put("triage")],
+    });
+
+    expect(result.published).toBe(false);
+    expect(result.publicationError).toContain("publisher exploded");
+  });
+
+  it("reports a published write when the bundle publication lands", async () => {
+    const writer = new SoulWriter(store, logger, undefined, undefined, {
+      publishCommittedTree: async () => undefined,
+    });
+
+    const result = await writer.apply({
+      subject: "soul: add agent triage",
+      source: "api",
+      actor: ACTOR,
+      businessId: "biz-1",
+      changes: [put("triage")],
+    });
+
+    expect(result.published).toBe(true);
+    expect(result.publicationError).toBeUndefined();
+  });
+});
+
+describe("artifactWriteTarget", () => {
+  it("addresses a layout's definition file as the definition, not as a companion", () => {
+    expect(artifactWriteTarget("Skill", "packing", "skill.yaml")).toEqual({
+      kind: "Skill",
+      slug: "packing",
+    });
+    expect(artifactWriteTarget("Integration", "github", "integration.yaml")).toEqual({
+      kind: "Integration",
+      slug: "github",
+    });
+  });
+
+  it("addresses every other package file as a companion", () => {
+    for (const path of ["SKILL.md", "references/bulbs.md", "scripts/convert.py", "LICENSE.txt"]) {
+      expect(artifactWriteTarget("Skill", "packing", path)).toEqual({
+        kind: "Skill",
+        slug: "packing",
+        companion: path,
+      });
+    }
   });
 });

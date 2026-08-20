@@ -11,11 +11,12 @@
  */
 
 import { assembleSystemPrompt } from "@tulipfarm/agent-runtime";
-import { canonicalHash, validateGuardrailsConfig } from "@tulipfarm/schema";
+import { canonicalHash, textContent, validateGuardrailsConfig } from "@tulipfarm/schema";
 import type { ResolvedTurnContext, TurnContextPort } from "@tulipfarm/turn-executor";
 import type { EvalCase } from "../case.ts";
 import { LOOP_LIMITS } from "../case.ts";
 import { type EvalSoul, soulContext } from "../eval-soul.ts";
+import { exposedToolsFor } from "../platform-tools.ts";
 
 export interface EvalTurnContextOptions {
   readonly evalCase: EvalCase;
@@ -45,13 +46,21 @@ export function evalTurnContext(options: EvalTurnContextOptions): EvalTurnContex
     contextDigest: `sha256:${canonicalHash({ id: evalCase.id, prompt: systemPrompt })}`,
     guardrailDigest: canonicalHash(policy),
     guardrailPolicy: policy as unknown as Record<string, unknown>,
-    messages: [{ role: "system", content: systemPrompt }, ...evalCase.input],
+    messages: [{ role: "system", content: textContent(systemPrompt) }, ...evalCase.input],
     // Untiered, exactly as the L2 tier leaves them: the fixture blocks Tools by name, and inventing
     // tiers here would measure a categorisation no Soul in this repository declares.
-    tools: (evalCase.tools ?? []).map((tool) => ({ ...tool, tier: "untiered" })),
+    tools: exposedToolsFor(evalCase).map((tool) => ({ ...tool, tier: "untiered" })),
     limits: LOOP_LIMITS,
     compacted: false,
   };
 
-  return { systemPrompt, resolve: async () => resolved };
+  return {
+    systemPrompt,
+    resolve: async () => {
+      if (evalCase.fault === "context") {
+        throw new Error(`eval fault: Context is unreadable for Case ${evalCase.id}`);
+      }
+      return resolved;
+    },
+  };
 }

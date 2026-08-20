@@ -1,4 +1,5 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import type { FileService } from "@tulipfarm/files";
 import type { KnowledgeService } from "@tulipfarm/knowledge";
 import type { MemoryDocumentRepo } from "@tulipfarm/memory";
 import type { BundledSkill, SoulLoader } from "@tulipfarm/soul";
@@ -18,10 +19,10 @@ import type { ToolRegistry } from "../broker/tool-adapter";
 import { presentationContextFor, surfaceCatalogPromptFor } from "../surfaces/renderer-registry";
 import { githubDisabledSkillNames, githubExcludedToolNames } from "../tools/github/visibility";
 import type { ConversationDoc, ConversationRepo } from "./conversations";
-import type { MessageRepo } from "./messages";
+import { type MessageRepo, referencedFileIds, withUnavailableFiles } from "./messages";
 import { MessageSchema } from "./schemas";
 import { assembleAgentSystemPrompt } from "./system-prompt";
-import { availableToolsFor, canGroundKnowledge } from "./turn-helpers";
+import { availableToolsFor, canGroundKnowledge, toolAgentFor } from "./turn-helpers";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -45,6 +46,13 @@ export interface ConversationRoutesDeps {
   /** The conversation owner's Memory Document, so the reconstructed prompt matches the live one. */
   memoryDocuments?: MemoryDocumentRepo;
   messageRepo: MessageRepo;
+  /**
+   * Resolves which attached Files the reader can still open, so a transcript can render a
+   * destroyed or un-shared attachment as removed rather than as a broken image. Absent only where
+   * a deployment runs without Files at all, in which case every attachment renders as removed —
+   * which is the truthful answer there too.
+   */
+  files?: Pick<FileService, "presentFor">;
   knowledge?: KnowledgeService;
   soulLoader?: SoulLoader;
   toolRegistry?: ToolRegistry;
@@ -70,6 +78,7 @@ export function registerConversationRoutes(
     bundledSkills,
     disabledBundledSkills,
     githubStatus,
+    files,
   } = deps;
 
   app.get(
@@ -349,7 +358,12 @@ export function registerConversationRoutes(
       }
 
       const result = await messageRepo.listByConversation(id, limit, after);
-      const messages = result.items;
+      // Asked once for the whole page rather than per attachment: an old Chat can name a dozen
+      // Files, and a query each would make scrolling back through it cost more than reading it.
+      const present = files
+        ? await files.presentFor(DEPLOYMENT_BUSINESS_ID, user._id, referencedFileIds(result.items))
+        : new Set<string>();
+      const messages = withUnavailableFiles(result.items, present);
       return reply.send({ messages, nextCursor: result.nextCursor });
     }
   );
@@ -422,7 +436,7 @@ export function registerConversationRoutes(
           : disabledBundledSkills;
         const tools = availableToolsFor(
           toolRegistry,
-          platformAgent,
+          toolAgentFor(platformAgent, agent),
           presentationContext,
           excludedTools
         );

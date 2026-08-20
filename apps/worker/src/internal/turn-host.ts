@@ -3,11 +3,13 @@ import type {
   ToolDispatchRequest,
   ToolDispatchResult,
 } from "@tulipfarm/agent-runtime";
+import { extractText } from "@tulipfarm/files";
 import type { ParticipantToolCall } from "@tulipfarm/schema";
 import type { TurnAuthority } from "@tulipfarm/tool-host";
 import type {
   ApprovalWaitPort,
   ResolvedTurnContext,
+  TurnAttachmentPort,
   TurnCompletionRecord,
   TurnCompletionRef,
   TurnCompletionStatus,
@@ -59,7 +61,12 @@ function turnPath(runId: string, suffix = ""): string {
 }
 
 export class HttpTurnHost
-  implements TurnContextPort, TurnCompletionStore, ToolDispatchPort, ApprovalWaitPort
+  implements
+    TurnContextPort,
+    TurnAttachmentPort,
+    TurnCompletionStore,
+    ToolDispatchPort,
+    ApprovalWaitPort
 {
   constructor(private readonly client: InternalApiClient) {}
 
@@ -95,6 +102,36 @@ export class HttpTurnHost
   /** `TurnContextPort`. */
   async resolve(request: TurnRequest): Promise<ResolvedTurnContext> {
     return this.client.require<ResolvedTurnContext>("POST", turnPath(request.runId, "/context"));
+  }
+
+  /**
+   * `TurnAttachmentPort`. The far side re-authorizes the File against the Run's own subject.
+   *
+   * A `404` means this Run may not have these bytes — either its Turn never attached the File or
+   * the subject may no longer read it. The two are deliberately indistinguishable, so that a
+   * Worker cannot use this route to learn which File ids exist.
+   *
+   */
+  async read(runId: string, fileId: string): Promise<Uint8Array | undefined> {
+    return this.client.bytes(
+      turnPath(runId, `/attachments/${encodeURIComponent(fileId)}`),
+      [404, 409]
+    );
+  }
+
+  /**
+   * `TurnAttachmentPort`. What an attached File says, so the guards can screen it.
+   *
+   * Runs here rather than in the API because parsing a hostile document is the riskiest thing this
+   * product does with an upload, and the Worker is the process that is allowed to be crashed by
+   * one. It also keeps a PDF engine out of the control plane.
+   *
+   * A File with no readable text is screened as nothing rather than refused: an image is
+   * unreadable to a text guard by nature, and refusing it would ban vision rather than screen it.
+   */
+  async extract(mediaType: string, bytes: Uint8Array): Promise<string | undefined> {
+    const extracted = await extractText(mediaType, bytes);
+    return extracted.kind === "text" ? extracted.text : undefined;
   }
 
   /** `ToolDispatchPort`. The far side re-derives the callId's authority from the Run. */
@@ -155,6 +192,7 @@ export class HttpTurnHost
       status: TurnCompletionStatus;
       cursor: number;
       messageId: string | null;
+      surfaces?: readonly { artifactId: string; revision: number }[];
     }
   ): Promise<void> {
     await this.client.require("POST", turnPath(input.runId, "/completion"), {
@@ -162,6 +200,7 @@ export class HttpTurnHost
       status: input.status,
       cursor: input.cursor,
       messageId: input.messageId,
+      ...(input.surfaces?.length ? { surfaces: input.surfaces } : {}),
     });
   }
 }

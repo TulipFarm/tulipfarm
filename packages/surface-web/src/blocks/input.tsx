@@ -3,8 +3,62 @@
 import type { SurfaceAction, SurfaceArtifact } from "@tulipfarm/surface";
 import type { ChangeEvent, FormEvent, ReactElement } from "react";
 import { useId, useState } from "react";
-import { ActionButton, type SurfaceWebProps } from "../primitives";
+import { ActionButton, inlineMarkup, type SurfaceWebProps } from "../primitives";
 
+type Choice = {
+  label: string;
+  value: string;
+  detail?: string;
+  confidence?: "high" | "medium" | "low";
+};
+
+const CONFIDENCE_LABEL: Record<NonNullable<Choice["confidence"]>, string> = {
+  high: "High confidence",
+  medium: "Needs review",
+  low: "Low confidence",
+};
+
+/**
+ * An unstated confidence is not a low one. Without these words an empty meter reads as a score of
+ * zero, which is a claim the agent never made.
+ */
+const NO_CONFIDENCE_LABEL = "No signal";
+
+function confidenceLabel(confidence: Choice["confidence"]): string {
+  return confidence === undefined ? NO_CONFIDENCE_LABEL : CONFIDENCE_LABEL[confidence];
+}
+
+const CONFIDENCE_BARS: Record<NonNullable<Choice["confidence"]>, number> = {
+  high: 3,
+  medium: 2,
+  low: 1,
+};
+
+/**
+ * How sure the agent is, as three bars. Always draws all three so the reader sees the
+ * denominator — two filled bars only means something next to the one that is not.
+ */
+function SignalMeter({ confidence }: { readonly confidence?: Choice["confidence"] }) {
+  const filled = confidence === undefined ? 0 : CONFIDENCE_BARS[confidence];
+  return (
+    <span data-surface-signal data-confidence={confidence ?? "none"} aria-hidden="true">
+      {[0, 1, 2].map((bar) => (
+        <span key={bar} data-surface-signal-bar data-filled={bar < filled ? "true" : "false"} />
+      ))}
+    </span>
+  );
+}
+
+/**
+ * A mutually exclusive decision.
+ *
+ * Two shapes, chosen by the data rather than by taste. When the agent names a `recommend` value
+ * the card leads with that option in prose, states its confidence, and files the rest behind an
+ * Alternatives drawer — the reader can accept the recommendation without reading past the first
+ * line. When no `recommend` is given the card lists every option at equal weight, because a
+ * surface that leads with one option is making a recommendation, and it must never make one the
+ * agent did not.
+ */
 export function SurfaceChoices({
   artifact,
   props,
@@ -16,27 +70,129 @@ export function SurfaceChoices({
   readonly onInteraction?: SurfaceWebProps["onInteraction"];
   readonly actionHandleFor?: SurfaceWebProps["actionHandleFor"];
 }) {
-  const [selected, setSelected] = useState<string>();
-  const choices = props.choices as Array<{ label: string; value: string }>;
+  const choices = props.choices as Choice[];
   const action = props.action as SurfaceAction;
+  const recommend = typeof props.recommend === "string" ? props.recommend : undefined;
+  const recommendedIndex = choices.findIndex((choice) => choice.value === recommend);
+
+  const [leadIndex, setLeadIndex] = useState(recommendedIndex);
+  const [open, setOpen] = useState(false);
+  const [selected, setSelected] = useState<string>();
   const questionId = `surface-${artifact.id}-question`;
 
+  const choose = (choice: Choice) => ({
+    ...action,
+    payload: { ...action.payload, value: choice.value },
+  });
+
+  const question = (
+    <header data-surface-choices-header>
+      <h3 id={questionId}>{inlineMarkup(String(props.question))}</h3>
+    </header>
+  );
+
+  const lead = choices[leadIndex];
+  if (lead === undefined) {
+    return (
+      <section data-surface-choices aria-labelledby={questionId}>
+        {question}
+        <div data-surface-choice-list>
+          {choices.map((choice) => (
+            <ActionButton
+              key={choice.value}
+              label={choice.label}
+              action={choose(choice)}
+              disabled={selected !== undefined}
+              selected={selected === choice.value}
+              onInteraction={async (handle, input) => {
+                setSelected(choice.value);
+                try {
+                  await onInteraction?.(handle, input);
+                } catch {
+                  setSelected(undefined);
+                }
+              }}
+              actionHandleFor={actionHandleFor}
+            />
+          ))}
+        </div>
+      </section>
+    );
+  }
+
+  const alternatives = choices.filter((_, index) => index !== leadIndex);
+  const decided = selected !== undefined;
+
   return (
-    <section data-surface-choices aria-labelledby={questionId}>
-      <header data-surface-choices-header>
-        <span data-surface-eyebrow>Select one</span>
-        <h3 id={questionId}>{String(props.question)}</h3>
-      </header>
-      <div data-surface-choice-list>
-        {choices.map((choice) => (
+    <section data-surface-choices data-surface-recommend aria-labelledby={questionId}>
+      {question}
+      <div data-surface-choices-body>
+        {/* Keyed on the value so promoting an alternative replays the entry, not a silent swap. */}
+        <p key={lead.value} data-surface-choices-detail>
+          {inlineMarkup(lead.detail ?? lead.label)}
+        </p>
+      </div>
+
+      {alternatives.length === 0 ? null : (
+        <div
+          data-surface-choices-drawer
+          data-open={open ? "true" : "false"}
+          // `inert` rather than `hidden`: the drawer animates its height, so it stays in the box
+          // tree while closed, and without this its buttons stay in the tab order the whole time.
+          inert={open ? undefined : true}
+        >
+          <div data-surface-choices-drawer-clip>
+            <div data-surface-choices-drawer-body>
+              <p data-surface-choices-drawer-title>Other options</p>
+              {alternatives.map((choice) => (
+                <button
+                  key={choice.value}
+                  type="button"
+                  disabled={decided}
+                  data-surface-choices-alternative
+                  onClick={() => {
+                    setLeadIndex(choices.indexOf(choice));
+                    setOpen(false);
+                  }}
+                >
+                  <SignalMeter confidence={choice.confidence} />
+                  <span data-surface-choices-alternative-label>{inlineMarkup(choice.label)}</span>
+                  <span data-surface-choices-alternative-meta>
+                    {confidenceLabel(choice.confidence)}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <footer data-surface-choices-footer>
+        <span data-surface-choices-confidence>
+          <SignalMeter confidence={lead.confidence} />
+          <span>{confidenceLabel(lead.confidence)}</span>
+        </span>
+        <span data-surface-choices-controls>
+          {alternatives.length === 0 ? null : (
+            <button
+              type="button"
+              data-surface-button
+              data-variant="secondary"
+              aria-expanded={open}
+              disabled={decided}
+              onClick={() => setOpen((current) => !current)}
+            >
+              <span>Alternatives</span>
+            </button>
+          )}
           <ActionButton
-            key={choice.value}
-            label={choice.label}
-            action={{ ...action, payload: { ...action.payload, value: choice.value } }}
-            disabled={selected !== undefined}
-            selected={selected === choice.value}
+            label={decided ? "Accepted" : lead.label}
+            action={choose(lead)}
+            disabled={decided}
+            state={decided ? "accepted" : undefined}
+            primary
             onInteraction={async (handle, input) => {
-              setSelected(choice.value);
+              setSelected(lead.value);
               try {
                 await onInteraction?.(handle, input);
               } catch {
@@ -45,8 +201,8 @@ export function SurfaceChoices({
             }}
             actionHandleFor={actionHandleFor}
           />
-        ))}
-      </div>
+        </span>
+      </footer>
     </section>
   );
 }
@@ -136,14 +292,12 @@ export function SurfaceForm({
 
   return (
     <form data-surface-form onSubmit={submit}>
-      <header data-surface-panel-header>
-        <div data-surface-panel-heading>
-          <span data-surface-eyebrow>Input requested</span>
-          <h3>{typeof props.title === "string" ? props.title : "Provide details"}</h3>
-        </div>
-        <span data-surface-panel-meta>
-          {fields.length} {fields.length === 1 ? "field" : "fields"}
-        </span>
+      {/*
+        No eyebrow and no field count. A form with inputs and a submit button already says it is an
+        ask, and a count of its own fields is a number no reader acts on.
+      */}
+      <header data-surface-form-header>
+        <h3>{typeof props.title === "string" ? props.title : "Provide details"}</h3>
       </header>
       <div data-surface-form-fields>
         {fields.map((field) => {
@@ -177,7 +331,7 @@ export function SurfaceForm({
           if (input === "radio") {
             return (
               <fieldset key={name} data-surface-radio-group>
-                <legend>
+                <legend data-surface-field-label>
                   {label}
                   {required ? <small data-surface-required>required</small> : null}
                 </legend>
@@ -201,7 +355,7 @@ export function SurfaceForm({
           if (input === "multiselect") {
             return (
               <label key={name} htmlFor={fieldId} data-surface-field>
-                <span>
+                <span data-surface-field-label>
                   {label}
                   {required ? <small data-surface-required>required</small> : null}
                 </span>
@@ -282,7 +436,7 @@ export function SurfaceForm({
 
           return (
             <label key={name} htmlFor={fieldId} data-surface-field>
-              <span>
+              <span data-surface-field-label>
                 {label}
                 {required ? <small data-surface-required>required</small> : null}
               </span>

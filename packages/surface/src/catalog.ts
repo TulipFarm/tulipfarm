@@ -172,17 +172,41 @@ const definitions = [
         Type.Object({
           label: Type.String({ minLength: 1, maxLength: 100 }),
           value: Type.String({ minLength: 1, maxLength: 200 }),
+          detail: Type.Optional(Type.String({ maxLength: 600 })),
+          confidence: Type.Optional(
+            Type.Union([Type.Literal("high"), Type.Literal("medium"), Type.Literal("low")])
+          ),
         }),
         { minItems: 1, maxItems: 10 }
       ),
+      /**
+       * The `value` of the choice you are recommending. Omit it when you have no preference: the
+       * renderer leads with the recommended option and files the rest under alternatives, so
+       * naming one here is you making a recommendation, not a display hint.
+       */
+      recommend: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
       action: SurfaceActionSchema,
     }),
     events: events("choose"),
     examples: [
       {
-        question: "Which environment?",
-        choices: [{ label: "Production", value: "production" }],
-        action: { event: "environment.choose" },
+        question: "Want me to place this restock order?",
+        choices: [
+          {
+            label: "Reorder from cone_king",
+            value: "reorder_cone_king",
+            detail: "Reorder waffle cones from `cone_king` with lead time `7_days`.",
+            confidence: "high",
+          },
+          {
+            label: "Switch to vanilla_madagascar",
+            value: "switch_vanilla",
+            detail: "Switch vanilla to `vanilla_madagascar` for peak season.",
+            confidence: "medium",
+          },
+        ],
+        recommend: "reorder_cone_king",
+        action: { event: "restock.choose" },
       },
     ],
   }),
@@ -311,6 +335,7 @@ export function surfaceCatalogPrompt(
     "Use present only for non-blocking information. If you ask the user to choose, confirm, or enter anything before continuing, you MUST call request_input instead of present.",
     "Choices and Form always use request_input. After a successful presentation Tool call, do not call another presentation Tool or repeat the content in prose.",
     "Selection guide: Alert is for an outage, degradation, urgent warning, or important success; Status is one compact state; Metric is one or more KPIs; Timeline is ordered events; Comparison is an option-by-criteria decision matrix; Breakdown is a proportional split; Gauge is bounded progress; RecordTable is repeated Records sharing fields; Choices is one mutually exclusive decision; Form is typed multi-field input.",
+    'In Choices, set recommend to the value you would pick and give that choice a detail sentence and a confidence. Omit recommend when you genuinely have no preference — it is a recommendation, not a default. Each label becomes the button the reader presses, so write it as the action it takes ("Reorder from cone_king"), never as a bare identifier ("cone_king"). Wrap identifiers, values and settings in backticks in question and detail; they render as inline code.',
     'Call present or request_input with {"component":{"name":"ComponentName","version":"1.0","props":{...}}}. The server derives input validation for request_input; do not supply an awaitedSchema.',
     'The component name never contains its version: use "RecordTable", not "RecordTable@1.0".',
     "All component-specific fields belong inside component.props.",

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { LlmConfig, ProviderEntry } from "./llm";
 import {
+  acceptedInputModalities,
   asEffortPreset,
   deriveModelProfiles,
   hoistProviderConnections,
@@ -280,5 +281,50 @@ describe("deriveModelProfiles — connections", () => {
 
     expect(derived.find((p) => p.profileId === "fast")?.connection).toBe("azure");
     expect(derived.find((p) => p.profileId === "fast-fallback-1")?.connection).toBe("azure-2");
+  });
+});
+
+describe("acceptedInputModalities", () => {
+  const entry = (spec?: Record<string, unknown>) => ({
+    provider: "openai",
+    model: "gpt-x",
+    ...(spec ? { spec } : {}),
+  });
+  const config = (...providers: ReturnType<typeof entry>[]): LlmConfig => ({
+    tiers: {
+      quick: { providers: [providers[0] ?? entry()] },
+      standard: { providers: [providers[1] ?? providers[0] ?? entry()] },
+      complex: { providers: [providers[2] ?? providers[0] ?? entry()] },
+    },
+  });
+
+  it("is text-only when nothing declares a richer input", () => {
+    expect(acceptedInputModalities(config())).toEqual(["text"]);
+  });
+
+  it("reports a modality any configured model can accept", () => {
+    // The union, not the intersection: refusing at attach time is a courtesy that must never be
+    // wrong, and the turn may still route to the one model that reads the file.
+    const seeing = entry({ supports_vision: true });
+    expect(acceptedInputModalities(config(entry(), seeing, entry()))).toEqual(["text", "image"]);
+  });
+
+  it("reports documents separately from images", () => {
+    const reader = entry({ supports_pdf_input: true });
+    expect(acceptedInputModalities(config(reader))).toEqual(["text", "document"]);
+  });
+
+  it("reports both when different tiers cover different modalities", () => {
+    const seeing = entry({ supports_vision: true });
+    const reading = entry({ supports_pdf_input: true });
+    expect(acceptedInputModalities(config(entry(), seeing, reading))).toEqual([
+      "text",
+      "image",
+      "document",
+    ]);
+  });
+
+  it("is text-only for an instance with no tiers configured yet", () => {
+    expect(acceptedInputModalities({})).toEqual(["text"]);
   });
 });

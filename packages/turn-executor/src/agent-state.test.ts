@@ -95,14 +95,19 @@ describe("AgentStateRunner", () => {
   });
 
   it("settles the State when input is required for a later Chat Turn", async () => {
-    const harness = runner({ status: "input_required", callId: "input-1", ...counters });
+    const harness = runner({
+      status: "input_required",
+      callId: "input-1",
+      text: "",
+      ...counters,
+    });
     const result = await harness.agentState.execute(request(), LOOP_INPUT);
 
     expect(harness.transitions).toEqual([
       { from: "claimed", to: "running" },
       { from: "running", to: "succeeded" },
     ]);
-    expect(result).toEqual({ status: "input_required" });
+    expect(result).toEqual({ status: "input_required", text: "" });
   });
 
   it("takes a cancelled loop through cancelling to cancelled", async () => {

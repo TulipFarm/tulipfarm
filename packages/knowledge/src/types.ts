@@ -1,6 +1,13 @@
 // Knowledge/vector subsystem data types; `_id` maps to API `id`, `plainText` is indexed.
 
-export type KnowledgeSource = "authored" | "resource" | "conversation";
+/**
+ * Where a Page's content came from.
+ *
+ * `file` is a File a person explicitly added to Knowledge. It is a Source kind rather than a
+ * connected provider because we hold the bytes and the ACL ourselves, so its readership is read
+ * live from our own tables instead of being snapshotted from somebody else's.
+ */
+export type KnowledgeSource = "authored" | "resource" | "conversation" | "file";
 
 /**
  * Who wrote a Page. Null on Pages that predate authorship being recorded — deliberately not

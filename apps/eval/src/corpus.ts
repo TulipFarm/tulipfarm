@@ -1,9 +1,12 @@
 import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import type { AssembleContext } from "@tulipfarm/agent-runtime";
-import { type EvalCase, type Expectation, isGuardrail, isPersisted } from "./case.ts";
+import type { AssembleContext, ModelMessage } from "@tulipfarm/agent-runtime";
+import { normalizeMessageContent } from "@tulipfarm/schema";
+import { type EvalCase, type Expectation, everyString, isGuardrail, isPersisted } from "./case.ts";
 import { type EvalSoul, SOUL_OWNED_CONTEXT_KEYS, soulContext } from "./eval-soul.ts";
+import { expectationShapeError, isKnownExpectationKind } from "./expectation-shape.ts";
+import { platformToolNames, resolvePlatformTool } from "./platform-tools.ts";
 import { expandRedTeam, type RedTeamOutcome } from "./red-team.ts";
 import { OUTPUT_FLAGS } from "./scorer.ts";
 import { CLASS_NAMES, isVulnerabilityClass } from "./vulnerability.ts";
@@ -47,25 +50,6 @@ const RETIRED_CONTEXT: Record<string, string> = {
 };
 
 /**
- * Required fields per Expectation kind.
- *
- * Checking only `kind` is not enough: `{"kind":"output_matches"}` would compile to an empty
- * regex and pass against anything, and a missing `path` would throw inside the scorer. Both turn
- * an unchecked Case into a green one, which is the failure mode this framework exists to prevent.
- */
-/** The three points a guard can refuse, mirroring `RunEventGuardrailStage`. */
-const GUARD_STAGES = ["input", "tool_call", "output"] as const;
-
-/**
- * Every guard `validateGuardrailsConfig` accepts.
- *
- * Spelled out rather than imported because the schema declares them as TypeBox literals with no
- * runtime array to read. A guard added there and not here fails Corpus load with a clear message,
- * which is the safe direction: the alternative is a Case naming a guard that can never fire.
- */
-const GUARD_NAMES = ["prompt_injection", "tool_blocklist", "content_filter"] as const;
-
-/**
  * The directory whose Cases may carry `redTeam`, and only whose Cases may.
  *
  * Separation is by directory rather than by convention because the two corpora have separate
@@ -77,45 +61,6 @@ export const RED_TEAM_DIR = "red-team";
 const RED_TEAM_OUTCOMES: readonly RedTeamOutcome[] = ["guard_held", "model_resisted"];
 
 /** A required field's type, or the closed set of values it may take. */
-type FieldType = "string" | "number" | "strings" | "any" | readonly string[];
-
-const EXPECTATION_FIELDS: Record<string, readonly [string, FieldType][]> = {
-  prompt_contains: [["text", "string"]],
-  prompt_omits: [["text", "string"]],
-  tool_called: [["name", "string"]],
-  tool_not_called: [["name", "string"]],
-  tool_call_order: [["names", "strings"]],
-  tool_argument_equals: [
-    ["name", "string"],
-    ["path", "string"],
-    ["value", "any"],
-  ],
-  output_contains: [["text", "string"]],
-  output_matches: [["pattern", "string"]],
-  output_omits: [["text", "string"]],
-  output_field_equals: [
-    ["path", "string"],
-    ["value", "any"],
-  ],
-  loop_status: [["status", "string"]],
-  tool_call_count: [["count", "number"]],
-  guardrail_blocked: [
-    ["stage", GUARD_STAGES],
-    ["guard", GUARD_NAMES],
-  ],
-  guardrail_allowed: [["stage", GUARD_STAGES]],
-  rubric_score: [
-    ["criteria", "strings"],
-    ["min", "number"],
-  ],
-  rubric_denies: [["question", "string"]],
-  run_status: [["status", "string"]],
-  state_status: [["status", "string"]],
-  turn_status: [["status", "string"]],
-  run_event_emitted: [["eventType", "string"]],
-  soul_committed: [["path", "string"]],
-};
-
 /**
  * Serialise with object keys sorted at every depth.
  *
@@ -144,9 +89,17 @@ export function corpusHash(
   judgeVersion = "no-judge"
 ): string {
   const sorted = [...cases].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  // A Case that names a platform Tool carries the name, not the declaration — and the declaration
+  // is what reaches the prompt. Left out, editing `file_create`'s description would change what
+  // every such Case measures while its Baseline went on comparing against the old numbers.
+  const platform = [...new Set(sorted.flatMap((c) => c.platformTools ?? []))]
+    .sort()
+    .map((name) => resolvePlatformTool(name) ?? { name });
   return (
     createHash("sha256")
       .update(canonical(sorted))
+      .update("\0platform\0")
+      .update(canonical(platform))
       .update("\0soul\0")
       .update(soulHash)
       // Swapping the Judge re-scores every rubric Case, so it must break comparison as loudly as
@@ -181,15 +134,11 @@ function validate(raw: unknown, file: string): EvalCase {
       0, `${file}: "expect" must be a non-empty array; a Case that expects nothing always passes`);
   for (const a of c.expect as unknown[]) {
     const kind = (a as { kind?: unknown } | null)?.kind;
-    require(typeof kind === "string" &&
-      kind in EXPECTATION_FIELDS, `${file}: unknown expectation kind ${JSON.stringify(kind)}`);
-    const record = a as Record<string, unknown>;
-    for (const [field, type] of EXPECTATION_FIELDS[kind as string]) {
-      require(fieldOk(
-        record[field],
-        type
-      ), `${file}: expectation "${kind}" needs a ${describeField(type)} field "${field}"`);
-    }
+    require(isKnownExpectationKind(
+      kind
+    ), `${file}: unknown expectation kind ${JSON.stringify(kind)}`);
+    const shape = expectationShapeError(kind, a as Record<string, unknown>);
+    require(shape === "", `${file}: ${shape}`);
     // Caught here rather than at scoring time: an L2 Sweep has no persisted state to read, so
     // this Case could only ever error — and it would do so after the model calls were paid for.
     require(c.tier === "l3" ||
@@ -200,6 +149,17 @@ function validate(raw: unknown, file: string): EvalCase {
     require(c.tier !== "l3" ||
       !isGuardrail(a as Expectation), `${file}: expectation "${kind}" reads guardrail decisions, ` +
       `which only tier "l2" collects; move this Case to tier "l2"`);
+  }
+  if (c.agentRoles !== undefined) {
+    require(Array.isArray(c.agentRoles) &&
+      c.agentRoles.every(
+        (id) => typeof id === "string" && id.length > 0
+      ), `${file}: "agentRoles" must be an array of Role ids the Agent's Principal holds`);
+    // Only L3 assigns them, because only L3 has a database to assign them in. On an L2 Case the
+    // field would be read by nothing, and any audience Expectation resting on it would be measuring
+    // a Role assignment that was never made.
+    require(c.tier ===
+      "l3", `${file}: "agentRoles" needs tier "l3"; this Case is tier ${JSON.stringify(c.tier)}`);
   }
   if (c.journey !== undefined) {
     require(Array.isArray(c.journey) &&
@@ -214,6 +174,13 @@ function validate(raw: unknown, file: string): EvalCase {
         t.input.length > 0, `${file}: every "journey" Turn needs a non-empty "input"`);
     }
   }
+  if (c.fault !== undefined) {
+    require(c.fault === "context", `${file}: unknown fault ${JSON.stringify(c.fault)}`);
+    // Only the L3 tier builds the dependency a fault breaks. On an L2 Case the field would be read
+    // by nothing and the Case would quietly measure an ordinary Turn.
+    require(c.tier ===
+      "l3", `${file}: "fault" needs tier "l3"; this Case is tier ${JSON.stringify(c.tier)}`);
+  }
   if (c.redTeam !== undefined) {
     validateRedTeam(c.redTeam, file);
     const guard = (c.expect as { kind: string }[]).find((e) => e.kind.startsWith("guardrail_"));
@@ -223,7 +190,144 @@ function validate(raw: unknown, file: string): EvalCase {
       `"${guard?.kind}" — a harness defence. A Case may assert one ending or the other, never ` +
       `both, or the guard could stop firing and the Case stay green because the model refused anyway.`);
   }
-  return raw as EvalCase;
+  validateAttachments(c, file);
+  validatePlatformTools(c, file);
+  const parsed = raw as EvalCase;
+  return {
+    ...parsed,
+    input: normalizeInput(parsed.input),
+    ...(parsed.journey === undefined
+      ? {}
+      : {
+          journey: parsed.journey.map((turn) => ({ ...turn, input: normalizeInput(turn.input) })),
+        }),
+  };
+}
+
+/**
+ * Check that every named platform Tool exists and is not also hand-declared.
+ *
+ * Loading fails rather than skipping, because the whole reason to name a shipped Tool is that the
+ * Case should stop being green the day that Tool is renamed or removed. A Case allowed to load
+ * with an unresolved name would go on asserting `tool_called` against a Tool the model was never
+ * offered, which no longer measures anything.
+ */
+function validatePlatformTools(c: Record<string, unknown>, file: string): void {
+  if (c.platformTools === undefined) return;
+  require(Array.isArray(c.platformTools), `${file}: "platformTools" must be an array of names`);
+  const declared = new Set(
+    ((c.tools ?? []) as { name?: string }[]).map((tool) => tool.name).filter(Boolean)
+  );
+  for (const name of c.platformTools as unknown[]) {
+    require(typeof name === "string", `${file}: each "platformTools" entry must be a Tool name`);
+    require(resolvePlatformTool(name as string) !==
+      undefined, `${file}: "${name}" is not a platform Tool this build ships. Available: ` +
+      `${platformToolNames().join(", ")}`);
+    require(!declared.has(
+      name as string
+    ), `${file}: "${name}" is both named in "platformTools" and hand-declared in "tools". ` +
+      `The copy would win and the Case would stop tracking the shipped declaration.`);
+  }
+}
+
+/**
+ * Check a Case's Files, and that every attachment Expectation is grounded in one.
+ *
+ * The rule worth the code is the last one. `prompt_omits_attachment` naming a File no message
+ * ever references passes for a reason that has nothing to do with the harness — nothing was there
+ * to omit — so it would go on passing after the confinement it claims to test was removed.
+ */
+function validateAttachments(c: Record<string, unknown>, file: string): void {
+  const validateFiles = (key: string): Set<string> => {
+    const ids = new Set<string>();
+    if (c[key] === undefined) return ids;
+    require(Array.isArray(c[key]), `${file}: "${key}" must be an array`);
+    for (const raw of c[key] as unknown[]) {
+      require(typeof raw === "object" &&
+        raw !== null, `${file}: each ${key} entry must be an object`);
+      const a = raw as Record<string, unknown>;
+      for (const field of ["fileId", "mediaType", "name"]) {
+        require(typeof a[field] === "string" &&
+          (a[field] as string).length >
+            0, `${file}: each ${key} entry needs a non-empty "${field}"`);
+      }
+      require(a.content === undefined ||
+        (typeof a.content === "string" &&
+          a.content.length >
+            0), `${file}: a ${key} entry's "content" must be a non-empty string when declared`);
+      ids.add(a.fileId as string);
+    }
+    return ids;
+  };
+
+  const declared = validateFiles("attachments");
+  const readable = validateFiles("readable");
+  for (const id of readable) {
+    require(!declared.has(
+      id
+    ), `${file}: "${id}" is both attached and readable. A File this Turn already sent proves ` +
+      `nothing about re-reading, because its bytes were in the prompt from the first step.`);
+  }
+
+  const referenced = new Set<string>();
+  for (const message of (c.input ?? []) as ModelMessage[]) {
+    if (!Array.isArray(message.content)) continue;
+    for (const part of message.content) {
+      if (part.type === "file") referenced.add(part.fileId);
+    }
+  }
+
+  for (const id of declared) {
+    require(referenced.has(
+      id
+    ), `${file}: attachment "${id}" is declared but no message references it, so it would ` +
+      `never reach the prompt however the harness behaved`);
+  }
+
+  // An attack delivered by File has to actually be inside one. Without this a red-team Case can
+  // pass because the payload never reached the model at all, which is indistinguishable from the
+  // model resisting it and stays green after the defence it claims to test is gone.
+  const redTeam = c.redTeam as { payload?: string } | undefined;
+  if (redTeam?.payload !== undefined && declared.size > 0) {
+    const elsewhere = everyString([c.input, c.toolResults]).some((text) =>
+      text.includes(redTeam.payload as string)
+    );
+    const inAFile = ((c.attachments ?? []) as { content?: string }[]).some((a) =>
+      a.content?.includes(redTeam.payload as string)
+    );
+    require(elsewhere ||
+      inAFile, `${file}: the red-team payload appears in no message, Tool result, or attachment ` +
+      `"content" — the model would never receive the attack, so the Case would pass by vacuity`);
+  }
+
+  for (const a of (c.expect ?? []) as { kind: string; fileId?: string }[]) {
+    if (a.kind === "prompt_attaches") {
+      require(declared.has(a.fileId ?? "") ||
+        readable.has(
+          a.fileId ?? ""
+        ), `${file}: "prompt_attaches" names "${a.fileId}", which the Case declares in neither ` +
+        `"attachments" nor "readable" — no harness could make it reach the prompt`);
+    }
+    if (a.kind === "prompt_omits_attachment") {
+      require(referenced.has(
+        a.fileId ?? ""
+      ), `${file}: "prompt_omits_attachment" names "${a.fileId}", which no message references. ` +
+        `Nothing was there to omit, so the Case would pass with the confinement removed.`);
+    }
+  }
+}
+
+/**
+ * Accepts a Case that authors `content` as a bare string as well as one that authors parts.
+ *
+ * Normalising here rather than at use means the red-team generator and the scorer see one shape;
+ * a string-only reader downstream would silently no-op on a Case carrying a File.
+ */
+function normalizeInput(input: readonly ModelMessage[]): readonly ModelMessage[] {
+  return input.map((message) => ({
+    role: message.role,
+    content: normalizeMessageContent(message.content),
+  }));
 }
 
 /**
@@ -271,6 +375,12 @@ function givenToModel(c: EvalCase, fromSoul: Partial<AssembleContext>): string {
   walk(c.context);
   walk(c.input);
   walk(c.toolResults ?? []);
+  // A File's bytes are handed to the model as surely as a Tool result is, so a fact stated only
+  // inside one is grounded. Only `content`: an id or a filename is metadata, not something the
+  // model could have read the answer out of.
+  for (const each of [...(c.attachments ?? []), ...(c.readable ?? [])]) walk(each.content);
+  // A shipped Tool's description reaches the model verbatim, so text quoted from it is grounded.
+  for (const name of c.platformTools ?? []) walk(resolvePlatformTool(name)?.description);
   // A journey's later Turns are handed to the model too, so a fact stated only there is grounded.
   for (const turn of c.journey ?? []) {
     walk(turn.input);
@@ -325,27 +435,6 @@ function requireGrounded(c: EvalCase, file: string, fromSoul: Partial<AssembleCo
           `than recall.`;
     require(grounded, `${file}: expectation "${e.kind}" looks for ${JSON.stringify(needle)}, which appears nowhere ` +
       `in the Eval Soul, the Case's context, input or tool results — ${why}`);
-  }
-}
-
-/** How a rejected field is described back to the author. */
-function describeField(type: FieldType): string {
-  if (typeof type !== "string") return `one of ${type.map((v) => JSON.stringify(v)).join(", ")}`;
-  return type === "strings" ? "non-empty string array" : type;
-}
-
-function fieldOk(value: unknown, type: FieldType): boolean {
-  if (typeof type !== "string") return typeof value === "string" && type.includes(value);
-  switch (type) {
-    case "string":
-      return typeof value === "string" && value.length > 0;
-    case "number":
-      return typeof value === "number" && Number.isFinite(value);
-    case "strings":
-      return Array.isArray(value) && value.length > 0 && value.every((v) => typeof v === "string");
-    // `value` in an equality expectation may legitimately be null, false or 0; only absence is wrong.
-    case "any":
-      return value !== undefined;
   }
 }
 

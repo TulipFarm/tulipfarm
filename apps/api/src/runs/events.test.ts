@@ -246,4 +246,83 @@ describe("streamRunEvents", () => {
     expect(sink.chunks).toEqual([]);
     expect(sink.ended).toBe(true);
   });
+
+  it("closes the stream when the Run parks for reconciliation", async () => {
+    // `needs_reconciliation` is where a Chat Run lands when its executor throws. Nothing further
+    // streams for that attempt, so a reader that keeps polling waits forever — the composer stays
+    // busy and the next prompt cannot be sent. Close it and name the status instead.
+    const sink = new RecordingSink();
+    let polls = 0;
+    const guard = async () => {
+      polls += 1;
+      if (polls > 3) throw new Error("stream kept polling a Run nothing will finish");
+    };
+
+    const outcome = await streamRunEvents(
+      sink,
+      { ...deps([record(1)], "needs_reconciliation"), sleep: guard },
+      { runId: RUN_ID, after: 0 }
+    );
+
+    expect(outcome).toBe("completed");
+    expect(types(sink)).toEqual(["state.transitioned", "stream.closed"]);
+    expect(sink.chunks.at(-1)).toContain('"status":"needs_reconciliation"');
+    expect(sink.ended).toBe(true);
+  });
+
+  it("writes a keepalive before the first event so the origin has answered", async () => {
+    // Nothing is written until a Run event exists, and an edge proxy counts silence against the
+    // origin: a turn whose first event is slow returns 524 with no body the client can explain.
+    const sink = new RecordingSink();
+    let polls = 0;
+
+    const outcome = await streamRunEvents(
+      sink,
+      {
+        events: new FakeEventReader([]),
+        runs: {
+          async find() {
+            polls += 1;
+            return { status: polls > 1 ? "succeeded" : "running" };
+          },
+        },
+        authorize: async () => GRANT,
+        sleep: noSleep,
+        keepaliveMs: 15_000,
+      },
+      { runId: RUN_ID, after: 0 }
+    );
+
+    expect(outcome).toBe("completed");
+    expect(sink.chunks[0]).toBe(": keepalive\n\n");
+  });
+
+  it("repeats the keepalive only once the interval has elapsed", async () => {
+    const sink = new RecordingSink();
+    let polls = 0;
+    let clock = 0;
+
+    await streamRunEvents(
+      sink,
+      {
+        events: new FakeEventReader([]),
+        runs: {
+          async find() {
+            polls += 1;
+            return { status: polls > 3 ? "succeeded" : "running" };
+          },
+        },
+        authorize: async () => GRANT,
+        sleep: async () => {
+          clock += 10_000;
+        },
+        keepaliveMs: 15_000,
+        now: () => clock,
+      },
+      { runId: RUN_ID, after: 0 }
+    );
+
+    // Polls at t=0, 10s and 20s: the opening comment, nothing at 10s, a second at 20s.
+    expect(sink.chunks.filter((chunk) => chunk.startsWith(":"))).toHaveLength(2);
+  });
 });

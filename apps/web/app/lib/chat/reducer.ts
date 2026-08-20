@@ -36,6 +36,7 @@ function cloneOptions(options: ChatTurnOptions | undefined): ChatTurnOptions | u
     ...(options.knowledgePages === undefined
       ? {}
       : { knowledgePages: [...options.knowledgePages] }),
+    ...(options.files === undefined ? {} : { files: [...options.files] }),
   };
 }
 
@@ -52,7 +53,11 @@ export function appendUserMessage(
   const message: ChatMessage = {
     id: newId(),
     role: "user",
-    parts: [{ kind: "text", text }],
+    // Files first, so the optimistic bubble matches the one hydrate builds on reload.
+    parts: [
+      ...(options?.files ?? []).map((file) => ({ kind: "file" as const, ...file })),
+      ...(text.length > 0 ? [{ kind: "text" as const, text }] : []),
+    ],
     sealed: true,
     sourceTurn: sourceTurn(text, options),
   };

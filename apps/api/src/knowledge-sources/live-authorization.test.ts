@@ -171,12 +171,12 @@ describe("SlackLiveSourceAuthorization", () => {
       return auth.check(baseInput([{ kind: "user", id: "user-1" }]));
     };
 
-    it.each([
-      "link_token",
-      "bind_link",
-    ] as const)("allows a current member mapped via %s", async (method) => {
-      expect(await checkVia(method)).toEqual({ allowed: true });
-    });
+    it.each(["link_token", "bind_link"] as const)(
+      "allows a current member mapped via %s",
+      async (method) => {
+        expect(await checkVia(method)).toEqual({ allowed: true });
+      }
+    );
 
     it("denies a current member whose mapping came from a provider-asserted email", async () => {
       expect(await checkVia("manifest_email")).toEqual({ allowed: false });

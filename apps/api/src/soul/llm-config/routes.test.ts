@@ -422,6 +422,63 @@ describe("llm-config routes", () => {
       expect(soulWriterDouble.applied).toEqual([]);
       expect(init).not.toHaveBeenCalled();
     });
+
+    it.each([
+      ["an empty", ""],
+      ["a whitespace-only", "   "],
+    ])("rejects %s fallback Model ID and names the field", async (_label, model) => {
+      const res = await app.inject({
+        method: "PUT",
+        url: "/api/v1/llm-config",
+        cookies: cookies(adminSid),
+        headers,
+        payload: {
+          tiers: {
+            quick: {
+              providers: [
+                { provider: "anthropic", model: "claude-haiku-4-5" },
+                { provider: "anthropic", model },
+              ],
+            },
+            standard: { providers: [{ provider: "anthropic", model: "claude-sonnet-4-6" }] },
+            complex: { providers: [{ provider: "anthropic", model: "claude-opus-4-8" }] },
+          },
+        },
+      });
+      expect(res.statusCode).toBe(422);
+      expect(res.json().error).toBe(
+        "/tiers/quick/providers/1/model: Model ID is required and must not be blank"
+      );
+      expect(soulWriterDouble.applied).toEqual([]);
+      expect(init).not.toHaveBeenCalled();
+    });
+
+    it("rejects a fallback entry that names no provider", async () => {
+      const res = await app.inject({
+        method: "PUT",
+        url: "/api/v1/llm-config",
+        cookies: cookies(adminSid),
+        headers,
+        payload: {
+          tiers: {
+            quick: {
+              providers: [
+                { provider: "anthropic", model: "claude-haiku-4-5" },
+                { provider: "", model: "gpt-4o-mini" },
+              ],
+            },
+            standard: { providers: [{ provider: "anthropic", model: "claude-sonnet-4-6" }] },
+            complex: { providers: [{ provider: "anthropic", model: "claude-opus-4-8" }] },
+          },
+        },
+      });
+      expect(res.statusCode).toBe(422);
+      expect(res.json().error).toBe(
+        "/tiers/quick/providers/1/provider: Provider is required and must not be blank"
+      );
+      expect(soulWriterDouble.applied).toEqual([]);
+      expect(init).not.toHaveBeenCalled();
+    });
   });
 
   const CATALOG = {
@@ -520,7 +577,7 @@ describe("llm-config routes", () => {
         "fetch",
         vi.fn(async (url: string, init?: RequestInit) => {
           if (url === "http://localhost:11434/v1/models") {
-            expect((init?.headers as Record<string, string>).Authorization).toBe("Bearer sk-test");
+            expect((init?.headers as Record<string, string>)?.Authorization).toBe("Bearer sk-test");
             return {
               ok: true,
               json: async () => ({ data: [{ id: "llama3" }, { id: "mixtral" }] }),

@@ -23,6 +23,7 @@ Every update runs migrations, and migrations have no down-path. Take these befor
 | The database | `pg_dump` it, or take your managed provider's snapshot. |
 | `tulipfarm-data` (`/data`) | Volume copy. Holds the generated `ENCRYPTION_KEY` and auto-minted worker credentials if you did not supply your own. |
 | `tulipfarm-soul` | Volume copy — or nothing, if `SOUL_GIT_REMOTE_URL` already mirrors it to git. |
+| `tulipfarm-bucket` | Volume copy. Holds the file bytes — or nothing, if storage points at an external S3 provider. |
 
 <Callout type="warn">
   A database backup alone is not a recovery plan. Secrets are stored as ciphertext; without

@@ -1,5 +1,10 @@
-export type { AgentFrontmatter } from "./agent";
-export { AUTONOMY_VALUES, validateAgentFrontmatter } from "./agent";
+export type { AgentCapabilityRestrictions, AgentFrontmatter } from "./agent";
+export {
+  AGENT_RECORD_ACTIONS,
+  AGENT_RESOURCE_TYPE_ACTIONS,
+  AUTONOMY_VALUES,
+  validateAgentFrontmatter,
+} from "./agent";
 export { ajv } from "./ajv";
 export type {
   ArtifactCompanion,
@@ -30,6 +35,7 @@ export {
   legacyDefinitionPaths,
   TEMPORAL_CLASSES,
   temporalClassOf,
+  unstorableArtifactPaths,
   withinArtifactTree,
 } from "./artifacts";
 export type { ValidationBoundary } from "./boundaries";
@@ -55,11 +61,17 @@ export type { ParsedFrontmatter } from "./frontmatter";
 export { parseFrontmatter } from "./frontmatter";
 export type {
   ContentFilterConfig,
+  GuardrailGuardName,
+  GuardrailStage,
   GuardrailsConfig,
   PromptInjectionConfig,
   ToolBlocklistConfig,
 } from "./guardrails";
-export { validateGuardrailsConfig } from "./guardrails";
+export {
+  GUARDRAIL_STAGE_BY_GUARD,
+  guardrailStageFor,
+  validateGuardrailsConfig,
+} from "./guardrails";
 export type { LegacyIntegrationManifest } from "./integration-manifest";
 export {
   LegacyIntegrationManifestSchema,
@@ -92,13 +104,16 @@ export type {
   ProviderConnection,
   ProviderEntry,
   TierConfig,
+  UnusableProviderEntry,
 } from "./llm";
 export {
+  dropUnusableProviderEntries,
   EmbeddingUnavailableError,
   LlmConfigSchema,
   LlmConfigValidationError,
   LlmCredentialError,
   LlmNotConfiguredError,
+  ModelSpecSchema,
   UnknownModelError,
   validateLlmConfig,
 } from "./llm";
@@ -113,12 +128,28 @@ export {
   type MemorySections,
 } from "./memory-document";
 export type {
+  MessageContent,
+  MessageContentPart,
+  MessageFilePart,
+} from "./message-content";
+export {
+  collapseToText,
+  contentFiles,
+  contentText,
+  MessageContentPartSchema,
+  MessageContentSchema,
+  modalityForMediaType,
+  normalizeMessageContent,
+  textContent,
+} from "./message-content";
+export type {
   DerivedModelProfile,
   EffortPreset,
   EffortRung,
   HoistedConnections,
 } from "./model-catalog";
 export {
+  acceptedInputModalities,
   asEffortPreset,
   DEPRECATED_TIER_ALIASES,
   deriveModelProfiles,
@@ -182,6 +213,7 @@ export type {
   SkillValidationResult,
 } from "./skill-frontmatter";
 export {
+  SKILL_RUNTIME_FRONTMATTER_KEYS,
   SkillFrontmatterSchema,
   serializeSkill,
   validateSkill,
@@ -194,8 +226,8 @@ export {
   SKILL_LIST_SCHEMA,
   SKILL_UPDATE_SCHEMA,
 } from "./skill-tool-schemas";
-export type { SoulConfig } from "./soul-config";
-export { SoulConfigSchema, validateSoulConfig } from "./soul-config";
+export type { FilesConfig, SoulConfig } from "./soul-config";
+export { FilesConfigSchema, SoulConfigSchema, validateSoulConfig } from "./soul-config";
 export type { CounterFn } from "./transforms";
 export {
   applyTransforms,

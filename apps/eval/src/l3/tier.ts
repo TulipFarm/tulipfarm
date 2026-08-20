@@ -1,3 +1,4 @@
+import { contentText, type MessageContent, normalizeMessageContent } from "@tulipfarm/schema";
 /**
  * The L3 tier: one Chat Turn, executed by the product's own Chat executor.
  *
@@ -30,6 +31,13 @@ import { addSpend, mergeSpend, NO_SPEND, type Spend } from "../spend.ts";
 import { evalTurnContext } from "./context.ts";
 import { type EvalDatabase, openEvalDatabase } from "./database.ts";
 import {
+  type EvalFileStore,
+  evalFileStore,
+  FILE_CREATE_TOOL,
+  type GeneratedFile,
+  seedAgentRoles,
+} from "./file-store.ts";
+import {
   SOUL_WRITE_TOOL,
   type SoulCommit,
   type SoulWriterTool,
@@ -38,6 +46,8 @@ import {
 import { evalTurnHost } from "./turn-host.ts";
 
 const BUSINESS_ID = "eval";
+/** The person every L3 Turn runs for, and so the one reader a generated File always has. */
+const PARTICIPANT_ID = "eval";
 
 /** One dispatched Tool call, as a Case's Tool Expectations read it. */
 export interface ToolCall {
@@ -74,6 +84,10 @@ export interface PersistedTurn {
   readonly toolCalls: readonly ToolCall[];
   /** Commits the Turn landed in the Eval Soul's real git repository. */
   readonly soulCommits: readonly SoulCommit[];
+  /** Artifacts the active Soul publication serves once the Turn settled, written `Kind:slug`. */
+  readonly publishedArtifacts: readonly string[];
+  /** Files the Turn generated, each with the audience `FileService` gave it. */
+  readonly generatedFiles: readonly GeneratedFile[];
   /** The prompt the real Context assembler produced, so `prompt_contains` works at L3 too. */
   readonly systemPrompt: string;
   /**
@@ -113,7 +127,7 @@ async function mintRun(database: EvalDatabase, runId: string, turnId: string): P
     source: "chat",
     bundle: { digest: "sha256:eval", routineId: "chat", routineVersion: "eval" },
     identity: {
-      initiator: { kind: "user", id: "eval" },
+      initiator: { kind: "user", id: PARTICIPANT_ID },
       effectiveSubject: { kind: "agent", id: "eval" },
       guardrailContextRef: "eval",
     },
@@ -129,23 +143,25 @@ async function mintRun(database: EvalDatabase, runId: string, turnId: string): P
 }
 
 /**
- * Sends a Soul write to the real writer and everything else to the Case's script.
+ * Sends the two real Tools to the real implementations and everything else to the Case's script.
  *
- * Routing by name rather than merging keeps the two honest: a Case cannot accidentally script a
- * result for `soul_write` and have the tier report a commit that never happened.
+ * Routing by name rather than merging keeps them honest: a Case cannot accidentally script a
+ * result for `soul_write` and have the tier report a commit that never happened, nor script one
+ * for `file_create` and have it report an audience nothing granted.
  */
 function routeTools(
   scripted: { port: ToolDispatchPort; calls: ToolCall[] },
-  soulWrites: ToolDispatchPort
+  real: Readonly<Record<string, ToolDispatchPort>>
 ): ToolDispatchPort {
   return {
     dispatch: (request) => {
-      if (request.name !== SOUL_WRITE_TOOL) return scripted.port.dispatch(request);
+      const port = real[request.name];
+      if (port === undefined) return scripted.port.dispatch(request);
       // Recorded into the same log the scripted dispatcher keeps. Without this a Soul write is
       // invisible to the scorer, and `tool_not_called soul_write` — the natural way to assert an
       // agent must not reconfigure the business — passes even as the commit lands.
       scripted.calls.push({ name: request.name, arguments: request.arguments });
-      return soulWrites.dispatch(request);
+      return port.dispatch(request);
     },
   };
 }
@@ -157,6 +173,8 @@ async function readBack(
   observed: {
     toolCalls: readonly ToolCall[];
     soulCommits: readonly SoulCommit[];
+    publishedArtifacts: readonly string[];
+    generatedFiles: readonly GeneratedFile[];
     systemPrompt: string;
     spend: Spend;
   }
@@ -183,11 +201,14 @@ async function readBack(
     stateStatus: state?.status ?? "missing",
     turnStatus:
       turnRow?.status === undefined || turnRow.status === null ? null : String(turnRow.status),
-    answer: message.rows[0] === undefined ? null : String(message.rows[0].content),
+    answer:
+      message.rows[0] === undefined ? null : contentText(decodeContent(message.rows[0].content)),
     events: events.rows.map((row) => String(row.event_type)),
     spend: observed.spend,
     toolCalls: observed.toolCalls,
     soulCommits: observed.soulCommits,
+    publishedArtifacts: observed.publishedArtifacts,
+    generatedFiles: observed.generatedFiles,
     systemPrompt: observed.systemPrompt,
   };
 }
@@ -206,13 +227,23 @@ async function runOneTurn(
     conversationId: string;
     soul: EvalSoul;
     soulWrites: SoulWriterTool;
+    files: EvalFileStore;
+    /**
+     * The Run the File store should stamp on what this Turn generates.
+     *
+     * A box rather than a parameter because the store outlives one Turn — it is shared across a
+     * journey — while the Run does not, and a store built once against the first Run would record
+     * every later Turn's File as having come from a Run that did not write it.
+     */
+    activeRun: { id: string };
     /** What this Turn newly submits, as distinct from the history it was handed. */
     submit: readonly ModelMessage[];
   }
 ): Promise<PersistedTurn> {
-  const { database, conversationId, soul, soulWrites } = shared;
+  const { database, conversationId, soul, soulWrites, files } = shared;
   const runId = randomUUID();
   const turnId = randomUUID();
+  shared.activeRun.id = runId;
   {
     await mintRun(database, runId, turnId);
     await database.query(
@@ -233,7 +264,7 @@ async function runOneTurn(
           conversationId,
           turnId,
           message.role,
-          typeof message.content === "string" ? message.content : JSON.stringify(message.content),
+          JSON.stringify(message.content),
         ]
       );
     }
@@ -242,7 +273,13 @@ async function runOneTurn(
     // The writer is shared across a journey so its reset restores the pre-journey commit, which
     // means its `commits` accumulate. Only this Turn's slice belongs to this Turn.
     const committedBefore = soulWrites.commits.length;
-    const tools = routeTools(scripted, soulWrites.port);
+    // The File store is shared across a journey for the same reason, so its `generated` accumulate
+    // and only this Turn's slice belongs to this Turn.
+    const generatedBefore = files.generated.length;
+    const tools = routeTools(scripted, {
+      [SOUL_WRITE_TOOL]: soulWrites.port,
+      [FILE_CREATE_TOOL]: files.port,
+    });
     // Wrapped rather than passed straight through: the executor owns the call loop, so this is the
     // only seam where an L3 Turn's usage can be observed at all.
     let spend = NO_SPEND;
@@ -288,6 +325,8 @@ async function runOneTurn(
     return await readBack(database, runId, turnId, {
       toolCalls: [...scripted.calls],
       soulCommits: soulWrites.commits.slice(committedBefore),
+      publishedArtifacts: await soulWrites.published(),
+      generatedFiles: files.generated.slice(generatedBefore),
       systemPrompt: context.systemPrompt,
       spend,
     });
@@ -312,8 +351,18 @@ async function priorMessages(
   );
   return rows.rows.map((row) => ({
     role: String(row.role) as ModelMessage["role"],
-    content: String(row.content),
+    content: decodeContent(row.content),
   }));
+}
+
+/**
+ * Reads a stored Message back into parts.
+ *
+ * Both writers store the part array, so this never has to guess from the payload's shape — a reply
+ * whose text is itself a JSON array would otherwise decode as parts and lose its content.
+ */
+function decodeContent(raw: unknown): MessageContent {
+  return normalizeMessageContent(JSON.parse(String(raw)));
 }
 
 /**
@@ -347,6 +396,7 @@ export function foldJourney(turns: readonly PersistedTurn[]): PersistedTurn {
     events: turns.flatMap((turn) => turn.events),
     toolCalls: turns.flatMap((turn) => turn.toolCalls),
     soulCommits: turns.flatMap((turn) => turn.soulCommits),
+    generatedFiles: turns.flatMap((turn) => turn.generatedFiles),
     spend: turns.reduce<Spend>((total, turn) => mergeSpend(total, turn.spend), NO_SPEND),
   };
 }
@@ -364,11 +414,30 @@ export async function runPersistedTurn(options: L3Options): Promise<PersistedTur
     // Inside the `try`: it shells out to git, and constructing it above would leak the database
     // opened on the line before if that throws.
     soulWrites = soulWriterTool(options.soul);
+    // Seeded before the first Turn, because the audience is resolved during the Turn and a Role
+    // assigned afterwards would be a Role the File was never offered to.
+    await seedAgentRoles({
+      database,
+      businessId: BUSINESS_ID,
+      agentId: options.evalCase.agent,
+      roleIds: options.evalCase.agentRoles ?? [],
+    });
+    // One store for the whole journey, so a later Turn cannot silently start a second library.
+    const activeRun = { id: "" };
+    const files = evalFileStore({
+      database,
+      businessId: BUSINESS_ID,
+      principalId: PARTICIPANT_ID,
+      agentId: options.evalCase.agent,
+      runId: () => activeRun.id,
+    });
     const first = await runOneTurn(options, {
       database,
       conversationId,
       soul: options.soul,
       soulWrites,
+      files,
+      activeRun,
       submit: options.evalCase.input,
     });
     const journey = options.evalCase.journey ?? [];
@@ -383,7 +452,7 @@ export async function runPersistedTurn(options: L3Options): Promise<PersistedTur
       turns.push(
         await runOneTurn(
           { ...options, evalCase: journeyCase(options.evalCase, turn, history) },
-          { database, conversationId, soul, soulWrites, submit: turn.input }
+          { database, conversationId, soul, soulWrites, files, activeRun, submit: turn.input }
         )
       );
     }

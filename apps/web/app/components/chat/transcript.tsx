@@ -1,12 +1,14 @@
 import { Check, ChevronsUp, Copy, RotateCcw, ThumbsDown, ThumbsUp } from "lucide-react";
 import { memo, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { MarkdownView } from "~/components/markdown-view";
+import { LoadingState } from "~/components/ui/loading-state";
 import { nextEffortPreset } from "~/lib/chat/effort-escalation";
 import type { ChatMessage, ChatStatus, ModelReceipt, TimelinePart } from "~/lib/chat/types";
 import { copyText } from "~/lib/clipboard";
+import { FileAttachment, RemovedAttachment } from "./file-attachment";
 import { MessagePartView } from "./parts";
 import { groupTimelineParts } from "./timeline-groups";
-import { ToolRun } from "./tool-call";
+import { ToolTrace } from "./tool-trace";
 import type { MentionEntry } from "./use-mention-catalog";
 
 function partKey(part: TimelinePart, i: number): string {
@@ -256,12 +258,33 @@ function AssistantActions({
 // User turn: a right-aligned bubble with a copy toolbar.
 function UserMessage({ message, mentions }: { message: ChatMessage; mentions?: MentionEntry[] }) {
   const text = messageText(message);
+  const files = message.parts.filter(
+    (part) => part.kind === "file" || part.kind === "file-unavailable"
+  );
 
   return (
     <article aria-label="Your message" className="group flex flex-col items-end gap-1">
-      <div className="max-w-[90%] rounded-lg bg-secondary px-3.5 py-2.5 text-sm leading-6 text-foreground sm:max-w-[78%] [&_:first-child]:mt-0 [&_:last-child]:mb-0">
-        <MarkdownView mentions={mentions}>{text}</MarkdownView>
-      </div>
+      {files.length > 0 ? (
+        <div className="flex max-w-[90%] flex-wrap justify-end gap-2 sm:max-w-[78%]">
+          {files.map((file) =>
+            file.kind === "file-unavailable" ? (
+              <RemovedAttachment key={file.fileId} name={file.name} />
+            ) : (
+              <FileAttachment
+                fileId={file.fileId}
+                key={file.fileId}
+                mediaType={file.mediaType}
+                name={file.name}
+              />
+            )
+          )}
+        </div>
+      ) : null}
+      {text.length > 0 ? (
+        <div className="max-w-[90%] rounded-lg bg-secondary px-3.5 py-2.5 text-sm leading-6 text-foreground sm:max-w-[78%] [&_:first-child]:mt-0 [&_:last-child]:mb-0">
+          <MarkdownView mentions={mentions}>{text}</MarkdownView>
+        </div>
+      ) : null}
       <div className={`${toolbar} justify-end`}>
         <CopyButton text={text} />
       </div>
@@ -310,6 +333,7 @@ function MessageRow({
 
   const streaming = !message.sealed && status === "streaming";
   const lastIndex = message.parts.length - 1;
+  const nodes = groupTimelineParts(message.parts, { streaming });
   const text = messageText(message);
   // Regenerate re-runs the last turn — only offer it on the latest, finished assistant reply.
   const canRegenerate = isLast && status === "idle" ? onRegenerate : undefined;
@@ -322,16 +346,24 @@ function MessageRow({
       : undefined;
   return (
     <article aria-label="Assistant response" className="group flex flex-col gap-2">
-      {groupTimelineParts(message.parts, { streaming }).map((node) =>
-        node.kind === "tool-run" ? (
-          <ToolRun
-            key={`tools-${node.index}`}
-            parts={node.parts}
-            foldable={node.foldable}
-            streaming={streaming}
-            onApprove={onApprove}
-          />
-        ) : (
+      {nodes.map((node, nodeIndex) => {
+        if (node.kind === "surface-building") {
+          // A presentation Tool draws no row, so this is the only sign the reply is still building
+          // the thing the reader is about to look at.
+          return <LoadingState key="surface-building" label="Rendering" />;
+        }
+        if (node.kind === "tool-run") {
+          return (
+            <ToolTrace
+              key={`tools-${node.index}`}
+              parts={node.parts}
+              foldable={node.foldable}
+              pending={streaming && nodeIndex === nodes.length - 1}
+              onApprove={onApprove}
+            />
+          );
+        }
+        return (
           <MessagePartView
             key={partKey(node.part, node.index)}
             part={node.part}
@@ -340,8 +372,8 @@ function MessageRow({
             onApprove={onApprove}
             onSurfaceInteraction={onSurfaceInteraction}
           />
-        )
-      )}
+        );
+      })}
       {message.sealed ? (
         <AssistantMetaRow
           receipt={message.receipt}
@@ -371,14 +403,7 @@ function MessageRow({
 const Message = memo(MessageRow);
 
 function Loader() {
-  return (
-    <div className="flex items-center gap-2 text-sm text-muted-foreground" aria-live="polite">
-      <span aria-hidden className="animate-cursor text-primary">
-        ▍
-      </span>
-      <span className="sr-only">Assistant is responding</span>
-    </div>
-  );
+  return <LoadingState className="text-muted-foreground" />;
 }
 
 /** Scrolling transcript; auto-sticks to the bottom unless the reader has scrolled up. */

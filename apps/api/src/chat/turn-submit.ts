@@ -1,4 +1,5 @@
 import type { DurableInvocationGateway } from "@tulipfarm/run-kernel";
+import type { MessageFilePart } from "@tulipfarm/schema";
 import type { FastifyBaseLogger } from "fastify";
 import { type ChatTurnPrincipal, chatConversationService } from "../conversations/chat-turns";
 import type { ConversationStore } from "../conversations/service";
@@ -7,6 +8,8 @@ import type { ConversationStore } from "../conversations/service";
 export interface ChatTurnRequest {
   readonly conversationId: string;
   readonly content: string;
+  /** Files already resolved against the caller's authority; see `StartTurnInput.files`. */
+  readonly files?: readonly MessageFilePart[];
 }
 
 /** The Run minted for a submitted turn. */
@@ -50,7 +53,7 @@ export function durableTurnSubmitter(deps: DurableTurnSubmitterDeps): ChatTurnSu
   };
   return {
     findSubmitted,
-    submit: async ({ conversationId, content }) => {
+    submit: async ({ conversationId, content, files }) => {
       // Re-checked after the conversation is opened: a replay that raced this turn must not stream.
       const replayed = await findSubmitted();
       if (replayed) return { outcome: "duplicate", runId: replayed.runId };
@@ -63,6 +66,7 @@ export function durableTurnSubmitter(deps: DurableTurnSubmitterDeps): ChatTurnSu
         businessId,
         conversationId,
         content,
+        ...(files === undefined ? {} : { files }),
         idempotencyKey: deps.idempotencyKey,
       });
 

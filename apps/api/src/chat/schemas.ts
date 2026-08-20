@@ -20,6 +20,17 @@ export const MessageSchema = {
               {
                 type: "object",
                 additionalProperties: false,
+                required: ["type", "fileId", "mediaType", "name"],
+                properties: {
+                  type: { const: "file" },
+                  fileId: { type: "string" },
+                  mediaType: { type: "string" },
+                  name: { type: "string" },
+                },
+              },
+              {
+                type: "object",
+                additionalProperties: false,
                 required: ["type", "toolCallId", "toolName", "args"],
                 properties: {
                   type: { const: "tool-call" },
@@ -56,6 +67,16 @@ export const MessageSchema = {
                 properties: {
                   type: { const: "surface-unavailable" },
                   message: { const: "Legacy presentation unavailable" },
+                },
+              },
+              {
+                type: "object",
+                additionalProperties: false,
+                required: ["type", "fileId", "name"],
+                properties: {
+                  type: { const: "file-unavailable" },
+                  fileId: { type: "string" },
+                  name: { type: "string" },
                 },
               },
             ],

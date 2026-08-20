@@ -1,6 +1,6 @@
 import { ModelInvocationError, type ModelInvocationRequest } from "@tulipfarm/agent-runtime";
 import { isSubscriptionProvider } from "@tulipfarm/llm";
-import type { ProviderEntry } from "@tulipfarm/schema";
+import { type ProviderEntry, textContent } from "@tulipfarm/schema";
 import { APICallError, type LanguageModel } from "ai";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 import { describe, expect, it } from "vitest";
@@ -52,7 +52,7 @@ const evalCase = (): EvalCase => ({
   id: "c1",
   tier: "l2",
   agent: "triage",
-  input: [{ role: "user", content: "hello" }],
+  input: [{ role: "user", content: textContent("hello") }],
   context: { agentId: "eval", governancePages: [] },
   expect: [],
 });
@@ -61,8 +61,8 @@ const request = (overrides: Partial<ModelInvocationRequest> = {}): ModelInvocati
   requestId: "r1",
   modelProfileId: "eval",
   messages: [
-    { role: "system", content: "be brief" },
-    { role: "user", content: "hello" },
+    { role: "system", content: textContent("be brief") },
+    { role: "user", content: textContent("hello") },
   ],
   tools: [],
   ...overrides,

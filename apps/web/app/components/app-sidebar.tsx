@@ -6,6 +6,7 @@ import {
   Menu,
   PanelLeftClose,
   PanelLeftOpen,
+  Paperclip,
   Plus,
 } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
@@ -28,6 +29,7 @@ import {
   titleForPath,
   visibleSections,
 } from "~/lib/nav";
+import { isBusinessAdmin } from "~/lib/use-session-user";
 import { cn } from "~/lib/utils";
 
 type ProductMode = NavProductMode;
@@ -276,7 +278,19 @@ function ContextPanel({
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto py-3">
         {mode === "chat" ? <ChatContext onNavigate={onNavigate} /> : null}
-        {mode === "knowledge" ? <KnowledgeTree /> : null}
+        {mode === "knowledge" ? (
+          <>
+            <nav aria-label="knowledge navigation" className="flex flex-col gap-1 px-2 pb-3">
+              <ContextLink
+                to="/knowledge/files"
+                label="Files"
+                icon={Paperclip}
+                onNavigate={onNavigate}
+              />
+            </nav>
+            <KnowledgeTree />
+          </>
+        ) : null}
         {mode === "build" || mode === "operate" || mode === "settings" ? (
           <LinkList mode={mode} onNavigate={onNavigate} isAdmin={isAdmin} />
         ) : null}
@@ -367,7 +381,7 @@ function AccountChip({ user }: { user?: SessionUser }) {
   if (!user) return null;
   const name = user.name?.trim() || user.email;
   return (
-    <Tooltip content={user.role === "admin" ? `${name} (Admin)` : name}>
+    <Tooltip content={isBusinessAdmin(user) ? `${name} (Admin)` : name}>
       <Link
         to="/settings/profile"
         aria-label={`Account settings for ${name}`}

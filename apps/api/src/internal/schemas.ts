@@ -1,4 +1,4 @@
-import { MESSAGE_METADATA_SCHEMA } from "@tulipfarm/schema";
+import { MESSAGE_METADATA_SCHEMA, MessageContentSchema } from "@tulipfarm/schema";
 
 /**
  * A durable wait exactly as the run-kernel planned it, minus the identity the route states. The
@@ -78,6 +78,17 @@ export const InternalTurnAuthorityResponseSchema = {
     },
     source: { type: "string" },
     bundleDigest: { type: "string" },
+    /** The Soul-resolved Agent this Run routes to; absent when no Soul answered for it. */
+    agent: {
+      type: "object",
+      required: ["name"],
+      properties: {
+        name: { type: "string" },
+        autonomy: { type: "string" },
+        toolAllowlist: { type: "array", items: { type: "string" } },
+        capabilityRestrictions: { type: "object", additionalProperties: true },
+      },
+    },
   },
 } as const;
 
@@ -85,6 +96,15 @@ export const InternalRunParamsSchema = {
   type: "object",
   required: ["runId"],
   properties: { runId: { type: "string", minLength: 1 } },
+} as const;
+
+export const InternalTurnAttachmentParamsSchema = {
+  type: "object",
+  required: ["runId", "fileId"],
+  properties: {
+    runId: { type: "string", minLength: 1 },
+    fileId: { type: "string", minLength: 1 },
+  },
 } as const;
 
 export const InternalLlmConfigResponseSchema = {
@@ -167,7 +187,20 @@ export const InternalTurnContextResponseSchema = {
       items: {
         type: "object",
         required: ["role", "content"],
-        properties: { role: { type: "string" }, content: { type: "string" } },
+        properties: { role: { type: "string" }, content: MessageContentSchema },
+      },
+    },
+    attachments: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["fileId", "mediaType", "name"],
+        additionalProperties: false,
+        properties: {
+          fileId: { type: "string" },
+          mediaType: { type: "string" },
+          name: { type: "string" },
+        },
       },
     },
     tools: {
@@ -262,7 +295,8 @@ export const InternalTurnMessageBodySchema = {
   additionalProperties: false,
   properties: {
     attempt: { type: "integer", minimum: 1 },
-    content: { type: "string", minLength: 1 },
+    // Empty is legal: a Turn that only ran Tools still needs a Message to carry `toolCalls`.
+    content: { type: "string" },
     metadata: MESSAGE_METADATA_SCHEMA,
   },
 } as const;
@@ -271,6 +305,17 @@ export const InternalTurnMessageResponseSchema = {
   type: "object",
   required: ["messageId"],
   properties: { messageId: { type: "string" } },
+} as const;
+
+/** A Surface an attempt presented; rides with the outcome so the two cannot diverge. */
+const SURFACE_LINK_SCHEMA = {
+  type: "object",
+  required: ["artifactId", "revision"],
+  additionalProperties: false,
+  properties: {
+    artifactId: { type: "string", minLength: 1 },
+    revision: { type: "integer", minimum: 1 },
+  },
 } as const;
 
 export const InternalTurnCompletionRecordBodySchema = {
@@ -282,6 +327,7 @@ export const InternalTurnCompletionRecordBodySchema = {
     status: { type: "string", enum: ["succeeded", "failed"] },
     cursor: { type: "integer", minimum: 0 },
     messageId: { type: ["string", "null"] },
+    surfaces: { type: "array", items: SURFACE_LINK_SCHEMA },
   },
 } as const;
 

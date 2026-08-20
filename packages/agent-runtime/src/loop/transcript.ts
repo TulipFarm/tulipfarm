@@ -1,4 +1,4 @@
-import type { ajv } from "@tulipfarm/schema";
+import { type ajv, textContent } from "@tulipfarm/schema";
 import type { ModelMessage } from "../ports";
 
 /** How model output and Tool results are shaped into transcript messages the model reads back. */
@@ -27,7 +27,7 @@ export function normalizeCalls(
 }
 
 export function toolMessage(callId: string, payload: Record<string, unknown>): ModelMessage {
-  return { role: "tool", content: JSON.stringify({ callId, ...payload }) };
+  return { role: "tool", content: textContent(JSON.stringify({ callId, ...payload })) };
 }
 
 export function assistantToolCallMessage(
@@ -35,13 +35,15 @@ export function assistantToolCallMessage(
 ): ModelMessage {
   return {
     role: "assistant",
-    content: JSON.stringify({
-      toolCalls: calls.map((call) => ({
-        callId: call.callId,
-        name: call.name,
-        arguments: call.arguments,
-      })),
-    }),
+    content: textContent(
+      JSON.stringify({
+        toolCalls: calls.map((call) => ({
+          callId: call.callId,
+          name: call.name,
+          arguments: call.arguments,
+        })),
+      })
+    ),
   };
 }
 

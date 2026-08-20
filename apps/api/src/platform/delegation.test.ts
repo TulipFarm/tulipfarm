@@ -6,7 +6,7 @@ import {
   type DurableInvocationRecord,
   TypedOutputValidator,
 } from "@tulipfarm/run-kernel";
-import { INVOCATION_REQUEST_SCHEMAS } from "@tulipfarm/schema";
+import { INVOCATION_REQUEST_SCHEMAS, textContent } from "@tulipfarm/schema";
 import type { Queryable, QueryResult, TransactionPort } from "@tulipfarm/storage";
 import { ChildLinkAncestryStore, ChildLinkStore } from "@tulipfarm/storage";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -129,7 +129,7 @@ class FakeConversationStore implements ConversationStore {
         conversationId: turn.conversationId,
         turnId: turn.id,
         role: "assistant",
-        content: answer,
+        content: textContent(answer),
         createdAt: new Date(),
       });
     }
@@ -137,7 +137,12 @@ class FakeConversationStore implements ConversationStore {
   }
 }
 
-function harness(options: { waitMs?: number } = {}) {
+function harness(
+  options: {
+    waitMs?: number;
+    parentToolNames?: (agentId: string | undefined) => readonly string[] | undefined;
+  } = {}
+) {
   const links = new FakeLinkTable();
   const store = new FakeConversationStore();
   const created: { id: string; agentId?: string }[] = [];
@@ -179,6 +184,7 @@ function harness(options: { waitMs?: number } = {}) {
       { name: "record_list", mutating: false, dataClasses: ["business_record"] },
       { name: "record_create", mutating: true, dataClasses: ["business_record"] },
     ],
+    ...(options.parentToolNames === undefined ? {} : { parentToolNames: options.parentToolNames }),
     waitMs: options.waitMs ?? 200,
     pollMs: 5,
   });
@@ -237,6 +243,55 @@ describe("createAgentDelegation", () => {
     const recorded = context.links.rows[0].authority.limits[DELEGATION_DEADLINE_LIMIT_KEY];
     expect(recorded).toBe(Date.parse(outcome.deadlineAt));
     expect(recorded).toBeGreaterThan(Date.now());
+  });
+
+  it("does not let transfer to a laxer Agent exceed the delegating Agent's restrictions", async () => {
+    const settled = context.delegation.delegate({
+      parentRunId: PARENT_RUN,
+      parentAgentId: "reporter",
+      parentToolAllowlist: ["record_list"],
+      agentId: "mutator",
+      task: "Delete the oldest ticket.",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    context.store.settle(context.persisted[0].runId, "succeeded", "I cannot delete it.");
+    await settled;
+
+    expect(context.links.rows[0].authority.tools).toEqual(["record_list"]);
+    expect(context.links.rows[0].authority.tools).not.toContain("record_create");
+  });
+
+  it("narrows the root authority from the delegating Agent's own restrictions", async () => {
+    const scoped = harness({
+      waitMs: 200,
+      parentToolNames: (agentId) => (agentId === "reporter" ? ["record_list"] : undefined),
+    });
+    const settled = scoped.delegation.delegate({
+      parentRunId: PARENT_RUN,
+      parentAgentId: "reporter",
+      agentId: "mutator",
+      task: "Delete the oldest ticket.",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    scoped.store.settle(scoped.persisted[0].runId, "succeeded", "I cannot delete it.");
+    await settled;
+
+    expect(scoped.links.rows[0].authority.tools).toEqual(["record_list"]);
+  });
+
+  it("leaves the root authority whole for a delegating Agent that authored no restrictions", async () => {
+    const scoped = harness({ waitMs: 200, parentToolNames: () => undefined });
+    const settled = scoped.delegation.delegate({
+      parentRunId: PARENT_RUN,
+      parentAgentId: "plain",
+      agentId: "researcher",
+      task: "Look",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    scoped.store.settle(scoped.persisted[0].runId, "succeeded", "done");
+    await settled;
+
+    expect(scoped.links.rows[0].authority.tools).toContain("record_list");
   });
 
   it("reports the helper as running rather than answering for it when it does not settle", async () => {

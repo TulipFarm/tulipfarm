@@ -8,6 +8,7 @@ import { LlmNotConfiguredError } from "@tulipfarm/schema";
 import type { BundledSkill } from "@tulipfarm/soul";
 import {
   type CommitSigner,
+  convertLegacySkill,
   type GitSyncService,
   type Logger,
   SoulGitStore,
@@ -558,6 +559,7 @@ spec:
       expect(skills).toEqual([
         {
           name: "demo-skill",
+          skillPath: join("skills", "demo-skill", "SKILL.md"),
           description: "A demo skill.",
           installed: false,
           updateAvailable: false,
@@ -906,6 +908,334 @@ spec:
       expect(installRes.json().error).toMatch(/100,000 characters/);
       expect(commits).toEqual([]);
     });
+
+    // A real marketplace Skill is a package: reference material, helper scripts, and the licence
+    // and dependency files its author shipped. Every file has to reach the soul, or the operator
+    // installs a Skill whose `load_skill_reference` targets are simply missing.
+    it("installs a Skill package's references, scripts and root provenance files", async () => {
+      const remote = await makeRemoteRepo();
+      temps.push(remote);
+      const skillDir = join(remote, "skills", "demo-skill");
+      await mkdir(join(skillDir, "references"), { recursive: true });
+      await mkdir(join(skillDir, "scripts"), { recursive: true });
+      await writeFile(join(skillDir, "references", "playbook.md"), "# Playbook\n", "utf8");
+      await writeFile(join(skillDir, "scripts", "convert.py"), "print('convert')\n", "utf8");
+      await writeFile(join(skillDir, "LICENSE.txt"), "MIT\n", "utf8");
+      await writeFile(join(skillDir, "requirements.txt"), "pandas\n", "utf8");
+      await execFileP("git", ["add", "-A"], { cwd: remote });
+      await execFileP("git", ["commit", "-q", "-m", "add package files"], { cwd: remote });
+
+      const scanRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/scan",
+        cookies: auth(),
+        headers,
+        payload: { source: `file://${remote}` },
+      });
+      const { scanId } = scanRes.json();
+      buildAudit.mockResolvedValue({
+        riskRating: "low",
+        summary: "No issue found.",
+        toolsReach: [],
+        findings: [],
+        deterministicScan: CLEAN_DETERMINISTIC_SCAN,
+      });
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/audit",
+        cookies: auth(),
+        headers,
+        payload: { scanId, name: "demo-skill" },
+      });
+
+      const installRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/install",
+        cookies: auth(),
+        headers,
+        payload: { scanId, names: ["demo-skill"] },
+      });
+
+      expect(installRes.statusCode).toBe(200);
+      const installed = join(soulPath, "skills", "demo-skill");
+      await expect(readFile(join(installed, "references", "playbook.md"), "utf8")).resolves.toBe(
+        "# Playbook\n"
+      );
+      await expect(readFile(join(installed, "scripts", "convert.py"), "utf8")).resolves.toBe(
+        "print('convert')\n"
+      );
+      await expect(readFile(join(installed, "LICENSE.txt"), "utf8")).resolves.toBe("MIT\n");
+      await expect(readFile(join(installed, "requirements.txt"), "utf8")).resolves.toBe("pandas\n");
+    });
+
+    // A canonical-format package ships its own `skill.yaml`. That file is the Skill's definition,
+    // not a companion, so installing it has to address it as one — otherwise the whole package is
+    // rejected and none of its references or scripts ever reach the soul.
+    it("installs a Skill package that ships its own skill.yaml definition", async () => {
+      const remote = await makeRemoteRepo();
+      temps.push(remote);
+      const skillDir = join(remote, "skills", "demo-skill");
+      const definition = convertLegacySkill({
+        name: "demo-skill",
+        frontmatter: { trustTier: "third_party", references: ["references/playbook.md"] },
+        body: "Do the demo.",
+      }).files.find((file) => file.path.endsWith("skill.yaml"));
+      if (definition?.operation !== "upsert") throw new Error("no skill.yaml fixture");
+      await mkdir(join(skillDir, "references"), { recursive: true });
+      await writeFile(join(skillDir, "skill.yaml"), definition.content, "utf8");
+      await writeFile(join(skillDir, "references", "playbook.md"), "# Playbook\n", "utf8");
+      await execFileP("git", ["add", "-A"], { cwd: remote });
+      await execFileP("git", ["commit", "-q", "-m", "add canonical package"], { cwd: remote });
+
+      const scanRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/scan",
+        cookies: auth(),
+        headers,
+        payload: { source: `file://${remote}` },
+      });
+      const { scanId } = scanRes.json();
+      buildAudit.mockResolvedValue({
+        riskRating: "low",
+        summary: "No issue found.",
+        toolsReach: [],
+        findings: [],
+        deterministicScan: CLEAN_DETERMINISTIC_SCAN,
+      });
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/audit",
+        cookies: auth(),
+        headers,
+        payload: { scanId, name: "demo-skill" },
+      });
+
+      const installRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/install",
+        cookies: auth(),
+        headers,
+        payload: { scanId, names: ["demo-skill"] },
+      });
+
+      expect(installRes.statusCode).toBe(200);
+      const installed = join(soulPath, "skills", "demo-skill");
+      await expect(readFile(join(installed, "skill.yaml"), "utf8")).resolves.toBe(
+        definition.content
+      );
+      await expect(readFile(join(installed, "references", "playbook.md"), "utf8")).resolves.toBe(
+        "# Playbook\n"
+      );
+    });
+
+    it("names the offending file when a package carries something the soul cannot store", async () => {
+      const remote = await makeRemoteRepo();
+      temps.push(remote);
+      await writeFile(join(remote, "skills", "demo-skill", "notes.rst"), "notes\n", "utf8");
+      await execFileP("git", ["add", "-A"], { cwd: remote });
+      await execFileP("git", ["commit", "-q", "-m", "add unstorable file"], { cwd: remote });
+
+      const scanRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/scan",
+        cookies: auth(),
+        headers,
+        payload: { source: `file://${remote}` },
+      });
+      const { scanId } = scanRes.json();
+      buildAudit.mockResolvedValue({
+        riskRating: "low",
+        summary: "No issue found.",
+        toolsReach: [],
+        findings: [],
+        deterministicScan: CLEAN_DETERMINISTIC_SCAN,
+      });
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/audit",
+        cookies: auth(),
+        headers,
+        payload: { scanId, name: "demo-skill" },
+      });
+
+      const installRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/install",
+        cookies: auth(),
+        headers,
+        payload: { scanId, names: ["demo-skill"] },
+      });
+
+      expect(installRes.statusCode).toBe(400);
+      expect(installRes.json().error).toContain("notes.rst");
+      expect(commits).toEqual([]);
+    });
+
+    // A Skill's name is its soul directory, so two same-named packages in one source cannot both
+    // be installed. Say so instead of installing whichever the scan happened to list first.
+    it("refuses an ambiguous install when one source defines two skills with the same name", async () => {
+      const remote = await makeRemoteRepo();
+      temps.push(remote);
+      const second = join(remote, "extra", "demo-skill");
+      await mkdir(second, { recursive: true });
+      await writeFile(
+        join(second, "SKILL.md"),
+        "---\nname: demo-skill\ndescription: A rival demo skill.\n---\nDo it differently.",
+        "utf8"
+      );
+      await execFileP("git", ["add", "-A"], { cwd: remote });
+      await execFileP("git", ["commit", "-q", "-m", "add duplicate name"], { cwd: remote });
+
+      const scanRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/scan",
+        cookies: auth(),
+        headers,
+        payload: { source: `file://${remote}` },
+      });
+      const { scanId, skills } = scanRes.json();
+      expect(skills).toHaveLength(2);
+      // The two rows are distinguishable, which is what lets a client key them apart.
+      expect(new Set(skills.map((s: { skillPath: string }) => s.skillPath)).size).toBe(2);
+
+      buildAudit.mockResolvedValue({
+        riskRating: "low",
+        summary: "No issue found.",
+        toolsReach: [],
+        findings: [],
+        deterministicScan: CLEAN_DETERMINISTIC_SCAN,
+      });
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/audit",
+        cookies: auth(),
+        headers,
+        payload: { scanId, name: "demo-skill" },
+      });
+
+      const installRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/install",
+        cookies: auth(),
+        headers,
+        payload: { scanId, names: ["demo-skill"] },
+      });
+
+      expect(installRes.statusCode).toBe(400);
+      expect(installRes.json().error).toContain("more than one skill with the same name");
+      expect(commits).toEqual([]);
+    });
+
+    // Selecting by name loses which of two same-named rows the operator reviewed, so the whole
+    // pair became uninstallable. `paths` carries that identity from the scan to the write.
+    it("installs the one same-named row the operator selected when identified by path", async () => {
+      const remote = await makeRemoteRepo();
+      temps.push(remote);
+      const second = join(remote, "extra", "demo-skill");
+      await mkdir(second, { recursive: true });
+      await writeFile(
+        join(second, "SKILL.md"),
+        "---\nname: demo-skill\ndescription: A rival demo skill.\n---\nDo it differently.",
+        "utf8"
+      );
+      await execFileP("git", ["add", "-A"], { cwd: remote });
+      await execFileP("git", ["commit", "-q", "-m", "add duplicate name"], { cwd: remote });
+
+      const scanRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/scan",
+        cookies: auth(),
+        headers,
+        payload: { source: `file://${remote}` },
+      });
+      const { scanId, skills } = scanRes.json();
+      const rival = (skills as { skillPath: string }[]).find((skill) =>
+        skill.skillPath.startsWith("extra/")
+      )?.skillPath;
+      expect(rival).toBeDefined();
+
+      buildAudit.mockResolvedValue({
+        riskRating: "low",
+        summary: "No issue found.",
+        toolsReach: [],
+        findings: [],
+        deterministicScan: CLEAN_DETERMINISTIC_SCAN,
+      });
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/audit",
+        cookies: auth(),
+        headers,
+        payload: { scanId, name: "demo-skill", skillPath: rival },
+      });
+      // The audit resolved the selected row, not whichever the scan listed first.
+      expect(buildAudit.mock.calls[0][1]).toMatchObject({ description: "A rival demo skill." });
+
+      const installRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/install",
+        cookies: auth(),
+        headers,
+        payload: { scanId, paths: [rival] },
+      });
+
+      expect(installRes.statusCode).toBe(200);
+      const written = await readFile(join(soulPath, "skills", "demo-skill", "SKILL.md"), "utf8");
+      expect(written).toContain("Do it differently.");
+    });
+
+    it("refuses to install two selected rows that share a name, naming both paths", async () => {
+      const remote = await makeRemoteRepo();
+      temps.push(remote);
+      const second = join(remote, "extra", "demo-skill");
+      await mkdir(second, { recursive: true });
+      await writeFile(
+        join(second, "SKILL.md"),
+        "---\nname: demo-skill\ndescription: A rival demo skill.\n---\nDo it differently.",
+        "utf8"
+      );
+      await execFileP("git", ["add", "-A"], { cwd: remote });
+      await execFileP("git", ["commit", "-q", "-m", "add duplicate name"], { cwd: remote });
+
+      const scanRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/scan",
+        cookies: auth(),
+        headers,
+        payload: { source: `file://${remote}` },
+      });
+      const { scanId, skills } = scanRes.json();
+      const paths = (skills as { skillPath: string }[]).map((skill) => skill.skillPath);
+
+      buildAudit.mockResolvedValue({
+        riskRating: "low",
+        summary: "No issue found.",
+        toolsReach: [],
+        findings: [],
+        deterministicScan: CLEAN_DETERMINISTIC_SCAN,
+      });
+      for (const skillPath of paths) {
+        await app.inject({
+          method: "POST",
+          url: "/api/v1/skills/audit",
+          cookies: auth(),
+          headers,
+          payload: { scanId, name: "demo-skill", skillPath },
+        });
+      }
+
+      const installRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/install",
+        cookies: auth(),
+        headers,
+        payload: { scanId, paths },
+      });
+
+      expect(installRes.statusCode).toBe(400);
+      for (const skillPath of paths) expect(installRes.json().error).toContain(skillPath);
+      expect(commits).toEqual([]);
+    });
   });
 
   describe("DELETE /api/v1/skills/:name", () => {
@@ -1029,6 +1359,7 @@ spec:
       expect(body.skills).toEqual([
         {
           name: "demo-skill",
+          skillPath: "skills/demo-skill/SKILL.md",
           skillId: "demo-skill",
           description: "A demo skill.",
           category: "productivity",
@@ -1054,6 +1385,7 @@ spec:
       expect(res.json().skills).toEqual([
         {
           name: "demo-skill",
+          skillPath: "skills/demo-skill/SKILL.md",
           description: "A demo skill.",
           installed: false,
           updateAvailable: false,
@@ -1076,6 +1408,7 @@ spec:
       expect(res.json().skills).toEqual([
         {
           name: "demo-skill",
+          skillPath: "productivity/demo-skill/SKILL.md",
           description: "A demo skill.",
           category: "productivity",
           installed: false,
@@ -1223,6 +1556,7 @@ spec:
       expect(updates.json().skills).toEqual([
         {
           name: "demo-skill",
+          skillPath: "skills/demo-skill/SKILL.md",
           skillId: "demo-skill",
           description: "A demo skill.",
           category: "productivity",

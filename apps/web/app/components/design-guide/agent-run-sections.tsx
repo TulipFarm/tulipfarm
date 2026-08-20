@@ -1,5 +1,6 @@
+import { ApprovalCard } from "~/components/chat/approval-card";
 import { MessagePartView } from "~/components/chat/parts";
-import { ToolRun } from "~/components/chat/tool-call";
+import { ToolTrace } from "~/components/chat/tool-trace";
 import { GuideSection } from "~/components/design-guide/guide-section";
 import type { PlanStep, TimelinePart } from "~/lib/chat/types";
 
@@ -91,10 +92,86 @@ const CLUSTER_SPECIMEN: Extract<TimelinePart, { kind: "tool" }>[] = [
   },
 ];
 
+const FAILED_SPECIMEN: Extract<TimelinePart, { kind: "tool" }>[] = [
+  ...CLUSTER_SPECIMEN,
+  {
+    kind: "tool",
+    toolCallId: "call_cluster_4",
+    toolName: "slack_post_message",
+    args: { argsDigest: "sha256:aa04" },
+    status: "done",
+    outcome: "error",
+    argsPreview: { json: JSON.stringify({ channel: "#ops" }) },
+    resultPreview: { json: JSON.stringify({ error: "channel_not_found" }) },
+    meta: { tier: "integration", mutating: true, durationMs: 320, errorCode: "channel_not_found" },
+  },
+];
+
+const LIVE_SPECIMEN: Extract<TimelinePart, { kind: "tool" }>[] = [
+  {
+    kind: "tool",
+    toolCallId: "call_live_1",
+    toolName: "list_resource_types",
+    args: {},
+    status: "done",
+    outcome: "ok",
+    resultPreview: { json: JSON.stringify({ success: true, types: [1, 2, 3, 4] }) },
+    meta: { tier: "platform", durationMs: 180 },
+  },
+  {
+    kind: "tool",
+    toolCallId: "call_live_2",
+    toolName: "search_knowledge",
+    args: { argsDigest: "sha256:bb02" },
+    status: "done",
+    outcome: "ok",
+    argsPreview: { json: JSON.stringify({ query: "escalation policy" }) },
+    resultPreview: { json: JSON.stringify({ success: true, matches: 4 }) },
+    meta: { tier: "platform", durationMs: 640 },
+  },
+  {
+    kind: "tool",
+    toolCallId: "call_live_3",
+    toolName: "create_record",
+    args: { argsDigest: "sha256:bb03" },
+    status: "running",
+    argsPreview: { json: JSON.stringify({ name: "Ticket #4102" }) },
+    meta: { tier: "platform" },
+  },
+];
+
 const PLAN_SPECIMEN: PlanStep[] = [
   { id: "s1", label: "Read the overdue invoices", status: "done" },
   { id: "s2", label: "Draft the reminder", status: "running" },
   { id: "s3", label: "Send to each owner", status: "pending" },
+];
+
+const APPROVAL_SPECIMEN: Extract<TimelinePart, { kind: "tool" }>[] = [
+  {
+    kind: "tool",
+    toolCallId: "call_appr_1",
+    toolName: "search_docs",
+    args: { argsDigest: "sha256:cc01" },
+    status: "done",
+    outcome: "ok",
+    argsPreview: { json: JSON.stringify({ query: "refund policy" }) },
+    resultPreview: { json: JSON.stringify({ success: true, matches: 4 }) },
+    meta: { tier: "platform", durationMs: 210 },
+  },
+  {
+    kind: "tool",
+    toolCallId: "call_appr_2",
+    toolName: "send_email",
+    args: { argsDigest: "sha256:cc02" },
+    status: "running",
+    argsPreview: { json: JSON.stringify({ to: "ops@tulipfarm.dev", subject: "Refund issued" }) },
+    approval: {
+      approvalId: "appr_1",
+      status: "pending",
+      expiresAt: new Date(Date.now() + 120_000).toISOString(),
+    },
+    meta: { tier: "integration", mutating: true },
+  },
 ];
 
 export function AgentRunSections() {
@@ -102,7 +179,7 @@ export function AgentRunSections() {
     <GuideSection
       id="agent-run"
       title="Agent run vocabulary"
-      description="A Tool row carries the whole call on one line: which kind of Tool ran, what it did in words, how long it took, and how it ended. Expanding separates Input from Output and names every withheld field. Parts tagged contract-only are typed, reduced and rendered, but no backend event emits them yet."
+      description="A run of Tool calls draws as one Trace — a rail, no border, a step per call. A step names what it did, whether the Tool can write, and how it ended; expanding it separates Input from Output and names every withheld field. Parts tagged contract-only are typed, reduced and rendered, but no backend event emits them yet."
     >
       <div className="mb-6 space-y-4">
         {TOOL_SPECIMENS.map(({ caption, part }) => (
@@ -117,8 +194,57 @@ export function AgentRunSections() {
         ))}
 
         <div>
-          <p className="mb-1.5 text-xs text-muted-foreground">Consecutive settled calls, folded</p>
-          <ToolRun parts={CLUSTER_SPECIMEN} foldable onApprove={() => undefined} />
+          <p className="mb-1.5 text-xs text-muted-foreground">
+            A run while it is still the live edge of the Turn
+          </p>
+          <ToolTrace parts={LIVE_SPECIMEN} pending foldable={false} onApprove={() => undefined} />
+        </div>
+
+        <div>
+          <p className="mb-1.5 text-xs text-muted-foreground">
+            The same shape once the Turn moved on — folded to its header
+          </p>
+          <ToolTrace
+            parts={CLUSTER_SPECIMEN}
+            pending={false}
+            foldable
+            onApprove={() => undefined}
+          />
+        </div>
+
+        <div>
+          <p className="mb-1.5 text-xs text-muted-foreground">
+            A run that failed folds too, but the header names the count
+          </p>
+          <ToolTrace parts={FAILED_SPECIMEN} pending={false} foldable onApprove={() => undefined} />
+        </div>
+
+        <div>
+          <p className="mb-1.5 text-xs text-muted-foreground">
+            A run holding a decision — the ask sits on the rail, never behind a disclosure
+          </p>
+          <ToolTrace
+            parts={APPROVAL_SPECIMEN}
+            pending
+            foldable={false}
+            onApprove={() => undefined}
+          />
+        </div>
+
+        <div>
+          <p className="mb-1.5 text-xs text-muted-foreground">
+            Once decided, the ask drops to a settled line no heavier than the steps around it
+          </p>
+          <div className="ml-[6px] flex flex-col gap-0.5 border-l border-run-border py-1 pl-3.5">
+            {(["approved", "denied", "timeout"] as const).map((status) => (
+              <ApprovalCard
+                key={status}
+                toolName="send_email"
+                approval={{ approvalId: `appr_${status}`, status }}
+                onDecide={() => undefined}
+              />
+            ))}
+          </div>
         </div>
       </div>
 
@@ -154,6 +280,33 @@ export function AgentRunSections() {
                   url: "https://github.com/pgvector/pgvector",
                 },
               ],
+            }}
+            onApprove={() => undefined}
+          />
+        </div>
+        <div>
+          <p className="mb-1.5 text-xs text-muted-foreground">
+            A step, a handoff and a refusal — all narration, so none of them takes a box
+          </p>
+          <MessagePartView
+            part={{
+              kind: "task",
+              taskId: "t-guide",
+              label: "Reconciling the ledger",
+              status: "running",
+            }}
+            onApprove={() => undefined}
+          />
+          <MessagePartView
+            part={{ kind: "agent-handoff", to: "Billing", reason: "needs invoice authority" }}
+            onApprove={() => undefined}
+          />
+          <MessagePartView
+            part={{
+              kind: "guardrail",
+              stage: "output",
+              reason: "policy",
+              message: "Refunds over $500 need a human decision.",
             }}
             onApprove={() => undefined}
           />

@@ -38,7 +38,7 @@ export class EmbeddingUnavailableError extends Error {
 }
 
 // Curated LiteLLM spec pinned into Soul; costs are USD/token and future fields stay allowed.
-const ModelSpecSchema = Type.Object(
+export const ModelSpecSchema = Type.Object(
   {
     litellm_key: Type.Optional(Type.String()),
     input_cost_per_token: Type.Optional(Type.Number({ minimum: 0 })),
@@ -50,6 +50,8 @@ const ModelSpecSchema = Type.Object(
     mode: Type.Optional(Type.String()),
     supports_function_calling: Type.Optional(Type.Boolean()),
     supports_vision: Type.Optional(Type.Boolean()),
+    /** LiteLLM's flag for native document (PDF) input, distinct from vision. */
+    supports_pdf_input: Type.Optional(Type.Boolean()),
     supports_prompt_caching: Type.Optional(Type.Boolean()),
     supports_reasoning: Type.Optional(Type.Boolean()),
     deprecation_date: Type.Optional(Type.Union([Type.String(), Type.Null()])),
@@ -59,9 +61,12 @@ const ModelSpecSchema = Type.Object(
   { additionalProperties: true }
 );
 
+/** Both halves of a chain entry's address. Blank or padded, the entry can never serve a call. */
+const ChainIdentifierSchema = Type.String({ minLength: 1, pattern: "^\\S+$" });
+
 const ProviderEntrySchema = Type.Object({
-  provider: Type.String(),
-  model: Type.String({ minLength: 1, pattern: "^\\S+$" }),
+  provider: ChainIdentifierSchema,
+  model: ChainIdentifierSchema,
   api_key_ref: Type.Optional(Type.String()),
   base_url: Type.Optional(Type.String()),
   resource_name: Type.Optional(Type.String()),
@@ -115,8 +120,8 @@ const ProviderConnectionSchema = Type.Object({
 });
 
 const EmbeddingProviderEntrySchema = Type.Object({
-  provider: Type.String(),
-  model: Type.String({ minLength: 1, pattern: "^\\S+$" }),
+  provider: ChainIdentifierSchema,
+  model: ChainIdentifierSchema,
   api_key_ref: Type.Optional(Type.String()),
   base_url: Type.Optional(Type.String()),
   resource_name: Type.Optional(Type.String()),
@@ -166,11 +171,34 @@ export type LlmConfig = Static<typeof LlmConfigSchema>;
 
 const checkConfig = ajv.compile(LlmConfigSchema);
 
+/** The field name an operator sees, for the two identifiers a chain entry cannot go without. */
+const CHAIN_IDENTIFIER_LABELS: Readonly<Record<string, string>> = {
+  model: "Model ID",
+  provider: "Provider",
+};
+
+/**
+ * AJV reports a blank identifier as `must NOT have fewer than 1 characters`, which names neither
+ * the field an operator filled in nor what to do about it. The instancePath is kept so a client
+ * can still point the message at the right row.
+ */
+function describeConfigError(error: {
+  keyword?: string;
+  instancePath: string;
+  message?: string;
+}): string {
+  const path = error.instancePath ? `${error.instancePath}: ` : "";
+  const label = CHAIN_IDENTIFIER_LABELS[error.instancePath.split("/").pop() ?? ""];
+  if (label !== undefined && (error.keyword === "minLength" || error.keyword === "pattern")) {
+    return `${path}${label} is required and must not be blank`;
+  }
+  return `${path}${error.message ?? "invalid config"}`;
+}
+
 export function validateLlmConfig(data: unknown): LlmConfig {
   if (!checkConfig(data)) {
     const e = checkConfig.errors?.[0] ?? { instancePath: "", message: "invalid config" };
-    const path = e.instancePath ? `${e.instancePath}: ` : "";
-    throw new LlmConfigValidationError(`${path}${e.message ?? "invalid config"}`);
+    throw new LlmConfigValidationError(describeConfigError(e));
   }
   const config = data as LlmConfig;
   // Effort Presets name derived profiles; without chains they point at nothing.
@@ -178,4 +206,65 @@ export function validateLlmConfig(data: unknown): LlmConfig {
     throw new LlmConfigValidationError("config must declare provider chains in tiers");
   }
   return config;
+}
+
+/** A chain entry that was dropped because it named no provider or no model. */
+export interface UnusableProviderEntry {
+  readonly tier: string;
+  /** Position in the authored chain, so a warning can name the row an operator sees. */
+  readonly index: number;
+  readonly provider: string;
+  readonly model: string;
+}
+
+function isBlankIdentifier(value: unknown): boolean {
+  return typeof value !== "string" || value.trim() === "";
+}
+
+/**
+ * Remove chain entries that name no provider or no model from an *authored* config.
+ *
+ * Writes are rejected outright by {@link validateLlmConfig}, but an instance may already hold such
+ * an entry from before that constraint existed. Validating it on load would fail the whole
+ * `llm:` block, taking every working chain down with the one broken row and leaving no page from
+ * which to delete it. Dropping it instead keeps the rest of the chain serving.
+ *
+ * The input is never mutated; the original object is returned when nothing was dropped.
+ */
+export function dropUnusableProviderEntries(raw: unknown): {
+  config: unknown;
+  dropped: UnusableProviderEntry[];
+} {
+  const dropped: UnusableProviderEntry[] = [];
+  if (raw === null || typeof raw !== "object") return { config: raw, dropped };
+  const source = raw as Record<string, unknown>;
+  const tiers = source.tiers;
+  if (tiers === null || typeof tiers !== "object") return { config: raw, dropped };
+
+  const nextTiers: Record<string, unknown> = {};
+  for (const [tier, value] of Object.entries(tiers as Record<string, unknown>)) {
+    const providers = (value as { providers?: unknown } | null)?.providers;
+    if (!Array.isArray(providers)) {
+      nextTiers[tier] = value;
+      continue;
+    }
+    const kept = providers.filter((entry, index) => {
+      const candidate = entry as { provider?: unknown; model?: unknown } | null;
+      if (!isBlankIdentifier(candidate?.provider) && !isBlankIdentifier(candidate?.model)) {
+        return true;
+      }
+      dropped.push({
+        tier,
+        index,
+        provider: typeof candidate?.provider === "string" ? candidate.provider : "",
+        model: typeof candidate?.model === "string" ? candidate.model : "",
+      });
+      return false;
+    });
+    nextTiers[tier] =
+      kept.length === providers.length ? value : { ...(value as object), providers: kept };
+  }
+
+  if (dropped.length === 0) return { config: raw, dropped };
+  return { config: { ...source, tiers: nextTiers }, dropped };
 }

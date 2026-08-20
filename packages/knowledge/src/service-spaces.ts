@@ -148,6 +148,18 @@ export async function getSpace(
   return space ? space.spaces.getById(id) : null;
 }
 
+/**
+ * A Space by its name, for callers that own a Space by convention rather than by id — indexing
+ * Files into one well-known Space, say. Answers `null` when OKF is unwired, same as {@link getSpace}.
+ */
+export async function findSpaceByName(
+  deps: KnowledgeServiceDeps,
+  name: string
+): Promise<KnowledgeSpace | null> {
+  const space = okf(deps);
+  return space ? space.spaces.getByName(name) : null;
+}
+
 export async function listSpaces(
   deps: KnowledgeServiceDeps,
   opts: {

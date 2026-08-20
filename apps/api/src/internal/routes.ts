@@ -1,3 +1,4 @@
+import { Readable } from "node:stream";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { ParticipantToolCall } from "@tulipfarm/schema";
 import type { FastifyBaseLogger, FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -217,6 +218,37 @@ export function registerInternalTurnRoutes(
   );
 
   app.get(
+    "/api/v1/internal/turns/:runId/attachments/:fileId",
+    {
+      preHandler,
+      schema: {
+        description: "Read the bytes of one File the named Turn attached.",
+        tags: ["internal"],
+        security: [{ bearerToken: [] }],
+        params: InternalSchemas.InternalTurnAttachmentParamsSchema,
+        response: {
+          401: ErrorSchema,
+          403: ErrorSchema,
+          404: ErrorSchema,
+          409: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { runId, fileId } = req.params as { runId: string; fileId: string };
+      const attachment = await guard(reply, () =>
+        deps.host.readAttachment(DEPLOYMENT_BUSINESS_ID, runId, fileId)
+      );
+      if (attachment === undefined) return;
+      if (attachment === null) return reply.code(404).send({ error: "file not found" });
+      return reply
+        .header("content-type", attachment.mediaType)
+        .header("content-length", String(attachment.sizeBytes))
+        .send(Readable.from(attachment.body));
+    }
+  );
+
+  app.get(
     "/api/v1/internal/turns/:runId/authority",
     {
       preHandler,
@@ -251,6 +283,7 @@ export function registerInternalTurnRoutes(
           subject: authority.subject,
           source: authority.source,
           bundleDigest: authority.bundleDigest,
+          ...(authority.agent === undefined ? {} : { agent: authority.agent }),
         });
     }
   );
@@ -414,6 +447,7 @@ export function registerInternalTurnRoutes(
         status: "succeeded" | "failed";
         cursor: number;
         messageId?: string | null;
+        surfaces?: { artifactId: string; revision: number }[];
       };
       const recorded = await guard(reply, async () => {
         await deps.host.completeTurn({
@@ -423,6 +457,7 @@ export function registerInternalTurnRoutes(
           status: body.status,
           cursor: body.cursor,
           messageId: body.messageId ?? null,
+          surfaces: body.surfaces ?? [],
         });
         return true;
       });

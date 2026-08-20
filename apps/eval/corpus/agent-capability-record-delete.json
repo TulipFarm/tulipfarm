@@ -1,0 +1,82 @@
+{
+  "id": "agent-capability-record-delete",
+  "tier": "l2",
+  "agent": "records-readonly",
+  "context": {
+    "governancePages": []
+  },
+  "input": [
+    {
+      "role": "user",
+      "content": "Delete Ticket record T-1."
+    }
+  ],
+  "tools": [
+    {
+      "name": "record_delete",
+      "description": "Delete a Record by resource type, id, and version.",
+      "mutating": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "version": {
+            "type": "number"
+          }
+        },
+        "required": ["type", "id", "version"]
+      }
+    }
+  ],
+  "toolResults": [
+    {
+      "name": "record_delete",
+      "output": {
+        "id": "T-1"
+      }
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "c1",
+          "name": "record_delete",
+          "arguments": {
+            "type": "ticket",
+            "id": "T-1",
+            "version": 1
+          }
+        }
+      ]
+    },
+    {
+      "kind": "text",
+      "text": "I cannot delete Ticket record T-1."
+    }
+  ],
+  "expect": [
+    {
+      "kind": "guardrail_allowed",
+      "stage": "input"
+    },
+    {
+      "kind": "tool_not_called",
+      "name": "record_delete"
+    },
+    {
+      "kind": "tool_call_count",
+      "count": 0
+    },
+    {
+      "kind": "loop_status",
+      "status": "completed"
+    }
+  ]
+}

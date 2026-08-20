@@ -8,6 +8,7 @@ import fastifyStatic from "@fastify/static";
 import swagger from "@fastify/swagger";
 import scalar from "@scalar/fastify-api-reference";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import { acceptedInputModalities, type LlmConfig } from "@tulipfarm/schema";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { registerActivityRoutes } from "./activity/routes";
 import { postgresProbe, probeHealth } from "./admin/health";
@@ -24,6 +25,7 @@ import { registerConversationRoutes } from "./chat/conversation-routes";
 import { registerChatRoutes } from "./chat/routes";
 import { registerCuratorReviewRoutes } from "./curator/review-routes";
 import { registerFeedbackRoutes } from "./feedback/routes";
+import { registerFileRoutes } from "./files/routes";
 import { registerFormRoutes } from "./forms/routes";
 import { registerHookIngressRoutes } from "./hooks/routes";
 import { registerIngressRoutes } from "./ingress/routes";
@@ -404,6 +406,20 @@ export async function buildApp(opts: AppOptions = {}) {
       );
     }
     registerSoulRouteFamily(app, opts, requireAuth, requireAuthorization, authorizationCheck);
+    if (opts.fileService) {
+      registerFileRoutes(
+        app,
+        {
+          files: opts.fileService,
+          ...(opts.auditService === undefined ? {} : { audit: opts.auditService }),
+          ...(opts.fileKnowledge === undefined ? {} : { knowledge: opts.fileKnowledge }),
+          acceptedInputModalities: () =>
+            acceptedInputModalities((opts.soulLoader?.llmConfig as LlmConfig | undefined) ?? {}),
+        },
+        requireAuth,
+        requireAuthorization
+      );
+    }
     if (opts.taskStore) {
       registerTaskRoutes(
         app,
@@ -449,6 +465,7 @@ export async function buildApp(opts: AppOptions = {}) {
         buildToolRegistry({
           ...(opts.memoryDocuments === undefined ? {} : { memoryDocuments: opts.memoryDocuments }),
           kv: opts.kvService,
+          ...(opts.fileService === undefined ? {} : { files: opts.fileService }),
           knowledge: opts.knowledgeService,
         });
       registerConversationRoutes(
@@ -462,6 +479,7 @@ export async function buildApp(opts: AppOptions = {}) {
           bundledSkills: opts.bundledSkills,
           disabledBundledSkills: opts.disabledBundledSkills,
           githubStatus: opts.githubStatus,
+          ...(opts.fileService === undefined ? {} : { files: opts.fileService }),
         },
         requireAuth
       );
@@ -480,6 +498,7 @@ export async function buildApp(opts: AppOptions = {}) {
             ...(opts.runCancel ? { cancel: opts.runCancel } : {}),
             ...(opts.soulLoader ? { soulLoader: opts.soulLoader } : {}),
             ...(opts.domainEventEmitter ? { events: opts.domainEventEmitter } : {}),
+            ...(opts.fileService ? { fileService: opts.fileService } : {}),
           },
           requireAuth
         );

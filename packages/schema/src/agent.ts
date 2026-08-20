@@ -6,6 +6,62 @@ import { TulipFarmValidationError } from "./error";
 /** AGENT.md frontmatter schema: write-time only, strict, and name comes from directory. */
 
 export const AUTONOMY_VALUES = ["full", "supervised", "approval-required", "manual"] as const;
+export const AGENT_RECORD_ACTIONS = [
+  "list",
+  "search",
+  "read",
+  "create",
+  "update",
+  "delete",
+] as const;
+export const AGENT_RESOURCE_TYPE_ACTIONS = ["list", "read", "create", "update"] as const;
+
+const agentToolRestrictionsSchema = Type.Object(
+  {
+    allow: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
+    deny: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
+    allowMutating: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: false }
+);
+
+const agentActionRestrictionsSchema = <T extends readonly string[]>(values: T) =>
+  Type.Object(
+    {
+      allow: Type.Optional(
+        Type.Array(Type.Unsafe<T[number]>({ type: "string", enum: [...values] }))
+      ),
+      deny: Type.Optional(
+        Type.Array(Type.Unsafe<T[number]>({ type: "string", enum: [...values] }))
+      ),
+    },
+    { additionalProperties: false }
+  );
+
+const AgentCapabilityRestrictionsSchema = Type.Object(
+  {
+    tools: Type.Optional(agentToolRestrictionsSchema),
+    records: Type.Optional(
+      Type.Object(
+        {
+          actions: Type.Optional(agentActionRestrictionsSchema(AGENT_RECORD_ACTIONS)),
+          resourceTypes: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
+        },
+        { additionalProperties: false }
+      )
+    ),
+    resourceTypes: Type.Optional(
+      Type.Object(
+        {
+          actions: Type.Optional(agentActionRestrictionsSchema(AGENT_RESOURCE_TYPE_ACTIONS)),
+          names: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
+        },
+        { additionalProperties: false }
+      )
+    ),
+  },
+  { additionalProperties: false }
+);
 
 export const AgentFrontmatterSchema = Type.Object(
   {
@@ -18,6 +74,7 @@ export const AgentFrontmatterSchema = Type.Object(
       Type.Unsafe<(typeof AUTONOMY_VALUES)[number]>({ type: "string", enum: [...AUTONOMY_VALUES] })
     ),
     modelPolicy: Type.Optional(modelPolicySchema),
+    capabilityRestrictions: Type.Optional(AgentCapabilityRestrictionsSchema),
     placeholder: Type.Optional(Type.Array(Type.String())),
     suggestions: Type.Optional(Type.Array(Type.String())),
   },
@@ -25,6 +82,7 @@ export const AgentFrontmatterSchema = Type.Object(
 );
 
 export type AgentFrontmatter = Static<typeof AgentFrontmatterSchema>;
+export type AgentCapabilityRestrictions = NonNullable<AgentFrontmatter["capabilityRestrictions"]>;
 
 const check = ajv.compile(AgentFrontmatterSchema);
 

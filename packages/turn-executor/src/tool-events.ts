@@ -10,14 +10,19 @@ import { buildToolPreview } from "./tool-preview";
 // Surface tool output is matched structurally; the worker has no tool identity here.
 function surfaceArtifactFrom(
   output: unknown
-): { artifactId: string; componentId?: string } | undefined {
-  const artifact = (output as { artifact?: { id?: unknown; component?: { name?: unknown } } })
-    ?.artifact;
+): { artifactId: string; revision: number; componentId?: string } | undefined {
+  const artifact = (
+    output as {
+      artifact?: { id?: unknown; revision?: unknown; component?: { name?: unknown } };
+    }
+  )?.artifact;
   if (typeof artifact?.id !== "string" || artifact.id.length === 0) return undefined;
+  // A Surface minted without an explicit revision is its first.
+  const revision = typeof artifact.revision === "number" ? artifact.revision : 1;
   const componentId = artifact.component?.name;
   return typeof componentId === "string" && componentId.length > 0
-    ? { artifactId: artifact.id, componentId }
-    : { artifactId: artifact.id };
+    ? { artifactId: artifact.id, revision, componentId }
+    : { artifactId: artifact.id, revision };
 }
 
 /** Injectable clock so a test can assert a duration instead of racing the real one. */
@@ -85,7 +90,9 @@ export function announceToolCalls(
       if (result.status === "succeeded") {
         const surface = surfaceArtifactFrom(result.output);
         if (surface !== undefined) {
-          await events.emit("surface.emitted", surface, `surface:emitted:${request.callId}`);
+          const { revision, ...emitted } = surface;
+          events.recordSurface({ artifactId: surface.artifactId, revision });
+          await events.emit("surface.emitted", emitted, `surface:emitted:${request.callId}`);
         }
       }
 

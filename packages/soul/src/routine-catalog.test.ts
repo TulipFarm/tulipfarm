@@ -1,8 +1,6 @@
-import type { BundleVerifier, RuntimeBundle, SoulPublicationCoordinator } from "@tulipfarm/soul";
-import { describe, expect, it, vi } from "vitest";
-import { ActiveRoutineCatalog } from "./catalog";
-
-const verifier: BundleVerifier = { trustedKeyIds: ["test"], verify: () => true };
+import { describe, expect, it } from "vitest";
+import type { RuntimeBundle } from "./bundle";
+import { ActiveRoutineCatalog } from "./routine-catalog";
 
 function bundle(): RuntimeBundle {
   const definitions = [
@@ -87,10 +85,7 @@ function bundle(): RuntimeBundle {
 
 describe("ActiveRoutineCatalog", () => {
   it("returns only published Routines and their published Trigger summaries", async () => {
-    const publications = {
-      activeBundle: vi.fn(async () => bundle()),
-    } as unknown as SoulPublicationCoordinator;
-    const catalog = new ActiveRoutineCatalog(publications, verifier, "business-1");
+    const catalog = new ActiveRoutineCatalog(async () => bundle());
 
     await expect(catalog.list()).resolves.toEqual([
       {
@@ -107,14 +102,10 @@ describe("ActiveRoutineCatalog", () => {
         ],
       },
     ]);
-    expect(publications.activeBundle).toHaveBeenCalledWith("business-1", verifier);
   });
 
   it("returns an empty catalogue when no active bundle exists", async () => {
-    const publications = {
-      activeBundle: vi.fn(async () => undefined),
-    } as unknown as SoulPublicationCoordinator;
-    const catalog = new ActiveRoutineCatalog(publications, verifier, "business-1");
+    const catalog = new ActiveRoutineCatalog(async () => undefined);
 
     await expect(catalog.list()).resolves.toEqual([]);
   });

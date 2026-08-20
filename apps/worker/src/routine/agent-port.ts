@@ -28,7 +28,7 @@ import {
   type ScopedLimits,
 } from "@tulipfarm/run-kernel";
 import type { AgentDefinition, ModelProfileDefinition, RunEventPayloads } from "@tulipfarm/schema";
-import { canonicalHash, canonicalize } from "@tulipfarm/schema";
+import { canonicalHash, canonicalize, textContent } from "@tulipfarm/schema";
 import type { RuntimeBundle } from "@tulipfarm/soul";
 import type { RunStore } from "@tulipfarm/storage";
 import type { RunEventAppendPort } from "@tulipfarm/turn-executor";
@@ -288,8 +288,8 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
         requestId: request.stateKey,
         modelProfileId: agent.spec.modelProfile,
         messages: [
-          { role: "system", content: system },
-          { role: "user", content: guardedInput.value },
+          { role: "system", content: textContent(system) },
+          { role: "user", content: textContent(guardedInput.value) },
         ],
         ...(request.outputSchema === undefined ? {} : { outputSchema: request.outputSchema }),
       }),
@@ -368,8 +368,8 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
       contextDigest: manifest.digest,
       guardrailDigest: guardrails.revision,
       messages: [
-        { role: "system", content: system },
-        { role: "user", content: guardedInput.value },
+        { role: "system", content: textContent(system) },
+        { role: "user", content: textContent(guardedInput.value) },
       ],
       tools: [],
       limits: this.limits(plan),

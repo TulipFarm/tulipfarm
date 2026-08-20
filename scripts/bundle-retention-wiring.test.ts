@@ -31,6 +31,9 @@ const WORKER_SRC = join(ROOT, "apps/worker/src");
 const SCHEDULE = join(API_SRC, "soul/bundle-prune-schedule.ts");
 const CONSUMERS = join(WORKER_SRC, "job-consumers.ts");
 const WORKER_MAIN = join(WORKER_SRC, "main.ts");
+// The maintenance consumers moved out of `main.ts` when it crossed the file-size limit. They are
+// still the Worker's composition root for this schedule, so the wiring is asserted where it lives.
+const WORKER_MAINTENANCE = join(WORKER_SRC, "maintenance.ts");
 const RETENTION = join(ROOT, "packages/soul/src/bundle-retention.ts");
 const STORE = join(ROOT, "packages/soul/src/bundle-store.pg.ts");
 const DEBT = join(ROOT, "scripts/reachability-debt.json");
@@ -105,9 +108,9 @@ describe("published bundle retention wiring (L7-4)", () => {
   });
 
   it("hands the Worker composition root a real bundle store", () => {
-    const main = readFileSync(WORKER_MAIN, "utf8");
+    const maintenance = readFileSync(WORKER_MAINTENANCE, "utf8");
     // Without this argument the consumer is never registered and the schedule fires into nothing.
-    expect(main).toMatch(/bundles:\s*new PgBundleStore\(transactions\)/);
+    expect(maintenance).toMatch(/bundles:\s*new PgBundleStore\(o\.transactions\)/);
   });
 
   it("no longer carries the method as reachability debt", () => {

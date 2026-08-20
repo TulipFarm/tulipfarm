@@ -36,6 +36,17 @@ propagation. This is the sole accountable owner for source ACL enforcement.
   both onto one `decideKnowledgeAccess`; a second ACL evaluator is a defect. Authored ACLs are
   read live from our own tables, so they project as a fresh `snapshot` with a finite max age —
   never an infinite one, which would fail open on a malformed timestamp.
+- A **File** is `source: "file"` — an authored Page carrying explicit reader grants, never a
+  connected source with a captured ACL snapshot. The grants are the File's own owner and sharees,
+  so a share change is felt on the very next question with nothing to refresh. `ingestSource`
+  writes `readers` *between* the upsert and the index for that reason: reversed, the Page is
+  briefly indexed under the default Business-wide grant and a question asked inside that window
+  answers from a File the asker may not open. Never call `ingestSource` for a File without
+  `readers`, and never without `placement` — the lexical arm of `hybridSearchPages` only considers
+  Pages carrying a Space *and* a path, so an unplaced Page is reachable by vector search alone and
+  is silently invisible wherever no embedding provider is configured. Files land in one unrestricted
+  `Files` Space: grants intersect down the chain, so an unrestricted Space imposes no ceiling and
+  each File's own grants stay the whole of its authorization.
 - Retrieval cache keys bind principal plus Guardrail/Context epochs; reauthorize cache hits.
 - An edge is not a grant. `graph-expand` admits a neighbour only if the authorization pass already
   passed it, walks *out of* readable pages only, and caps **admitted** pages rather than walked

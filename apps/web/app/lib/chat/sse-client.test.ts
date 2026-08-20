@@ -268,6 +268,11 @@ test("turns allowlisted model failures into actionable participant-safe messages
   expect(modelFailureMessage("model_not_configured")).toBe(
     "No model is configured for this business. Add a model chain under Business → Models."
   );
+  // A Turn that stopped because it could not put its question to the operator did not fail at the
+  // model, and reading it as one would hide that nothing was decided on the operator's behalf.
+  expect(modelFailureMessage("input_request_failed")).toBe(
+    "The Agent asked you to choose, but the question could not be shown. It stopped instead of deciding for you. Try again."
+  );
 });
 
 test("releases a held Tool call when the decision lets it report", () => {
@@ -313,4 +318,28 @@ test("releases the timeline when the Run ends without announcing the turn", () =
   const announced = createRunEventMapper();
   announced({ seq: 1, type: "turn.finished", data: { status: "succeeded", messageId: "m1" } });
   expect(announced({ seq: 2, type: "stream.closed", data: { status: "succeeded" } })).toEqual([]);
+});
+
+test("surfaces an error when the Run ends badly and never said why", () => {
+  // A close is the only frame such a turn produces. Reading it as a plain finish leaves the
+  // composer idle with no answer and no banner — indistinguishable from a turn that succeeded.
+  const failed = createRunEventMapper();
+  expect(failed({ seq: 1, type: "stream.closed", data: { status: "failed" } })).toEqual([
+    { type: "error", data: { message: "The turn stopped before it could answer. Try again." } },
+  ]);
+
+  const parked = createRunEventMapper();
+  expect(
+    parked({ seq: 1, type: "stream.closed", data: { status: "needs_reconciliation" } })
+  ).toEqual([
+    { type: "error", data: { message: "The turn stopped before it could answer. Try again." } },
+  ]);
+});
+
+test("names a turn the runtime abandoned as such, not as a model failure", () => {
+  // `turn_execution_failed` is written when the executor threw outside the model call, so blaming
+  // the model provider would send the reader to the wrong settings page.
+  expect(modelFailureMessage("turn_execution_failed")).toBe(
+    "The turn stopped before it could answer. Try again."
+  );
 });

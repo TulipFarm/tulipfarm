@@ -7,9 +7,10 @@ import {
   RUN_EXECUTOR_PRINCIPAL_REF,
   requestArtifactId,
 } from "@tulipfarm/run-kernel";
-import { CHAT_REQUEST_SCHEMA_REF } from "@tulipfarm/schema";
-import type { ChatIngressConfig, SoulLoader } from "@tulipfarm/soul";
+import { CHAT_REQUEST_SCHEMA_REF, contentText, textContent } from "@tulipfarm/schema";
+import { type ChatIngressConfig, resolveAgent, type SoulLoader } from "@tulipfarm/soul";
 import { DOMAIN_EVENTS, type IntegrationEventPayload } from "@tulipfarm/storage";
+import { asChatAutonomy, type ChatAutonomy } from "@tulipfarm/tool-host";
 import type { FastifyBaseLogger } from "fastify";
 import type { ToolRegistry } from "../broker/tool-adapter";
 import type { ConversationRepo } from "../chat/conversations";
@@ -93,7 +94,7 @@ export interface IngressDeliveryHostOptions {
   readonly runs: HostedRunReader;
   readonly artifacts: ArtifactService;
   readonly store: ConversationStore;
-  readonly conversations: Pick<ConversationRepo, "create" | "deleteOwned">;
+  readonly conversations: Pick<ConversationRepo, "create" | "deleteOwned" | "findById">;
   readonly threads: IntegrationConversationsRepo;
   readonly integrationEvents: IntegrationEventsRepo;
   readonly soulLoader: SoulLoader;
@@ -159,14 +160,18 @@ export class IngressDeliveryHost {
       return { outcome: "ignored", reason: "no_thread_mapping" };
     }
 
+    // Before identity, so the manifest's own identity binding is bounded too, not just the loop.
+    const routed = await this.routedAgent(mapping?.conversationId);
+
     const resolution = await this.options.identity.resolve({
       slug: delivery.slug,
       sender: decision.sender,
       ...(chat.identity === undefined ? {} : { identity: chat.identity }),
       ...(this.options.toolRegistry === undefined ? {} : { registry: this.options.toolRegistry }),
+      ...(routed.autonomy === undefined ? {} : { autonomy: routed.autonomy }),
     });
     if (resolution.outcome === "unlinked") {
-      await this.offerBind(delivery, chat, decision, resolution.bindOffer);
+      await this.offerBind(delivery, chat, decision, resolution.bindOffer, routed.autonomy);
       return { outcome: "unlinked" };
     }
     // Routing identity, deliberately not authority. This Turn attaches to the Integration's own
@@ -227,7 +232,7 @@ export class IngressDeliveryHost {
       conversationId,
       turnId,
       role: "user",
-      content: decision.text,
+      content: textContent(decision.text),
       createdAt: now,
     });
     const turn: PersistedTurn = {
@@ -258,7 +263,9 @@ export class IngressDeliveryHost {
       value: {
         conversationId,
         message: { role: "user", content: decision.text },
-        autonomy: "full",
+        // Never a literal: this is read straight back out as `request.autonomy` at dispatch.
+        ...(routed.agentId === undefined ? {} : { agentId: routed.agentId }),
+        ...(routed.autonomy === undefined ? {} : { autonomy: routed.autonomy }),
       },
       storage: "inline",
       classification: [],
@@ -326,6 +333,7 @@ export class IngressDeliveryHost {
 
     const turn = await this.options.store.findTurnByRunId(businessId, runId);
     if (turn === undefined) return { delivered: false };
+    const { autonomy } = await this.routedAgent(turn.conversationId);
 
     await postReply(
       {
@@ -340,7 +348,7 @@ export class IngressDeliveryHost {
         text: await this.replyText(businessId, turn, input.attempt, input.outcome),
         // Stable per (run, attempt, binding): a provider redelivering the webhook reserves the
         // same Effect and replays instead of posting the answer a second time.
-        run: { runId, toolCallId: `ingress-reply:${input.attempt}:${input.binding}` },
+        run: { runId, toolCallId: `ingress-reply:${input.attempt}:${input.binding}`, autonomy },
       }
     );
     return { delivered: true };
@@ -360,7 +368,7 @@ export class IngressDeliveryHost {
     if (completion?.status !== "succeeded" || completion.messageId === null) return ERROR_REPLY;
     const messages = await this.options.store.listMessages(businessId, turn.conversationId);
     const answer = messages.find((message) => message.id === completion.messageId);
-    return answer?.content.trim() || ERROR_REPLY;
+    return (answer === undefined ? "" : contentText(answer.content).trim()) || ERROR_REPLY;
   }
 
   /** Sends single-use bind links from this process only; the Worker never receives them. */
@@ -368,7 +376,8 @@ export class IngressDeliveryHost {
     delivery: DeliveryAuthority,
     chat: ChatIngressConfig,
     decision: { reply: { binding: string; vars?: Record<string, string> } },
-    offer: { token: string; expiresAt: Date } | null
+    offer: { token: string; expiresAt: Date } | null,
+    autonomy: ChatAutonomy | undefined
   ): Promise<void> {
     if (offer === null) {
       this.options.log.warn(
@@ -377,6 +386,7 @@ export class IngressDeliveryHost {
       );
       return;
     }
+    const toolCallId = `ingress-bind-offer:${decision.reply.binding}`;
     await postReply(
       {
         ...(this.options.toolRegistry === undefined ? {} : { registry: this.options.toolRegistry }),
@@ -387,13 +397,27 @@ export class IngressDeliveryHost {
         reply: chat.reply,
         binding: decision.reply.binding,
         vars: decision.reply.vars ?? {},
-        run: { runId: delivery.runId, toolCallId: `ingress-bind-offer:${decision.reply.binding}` },
+        run: { runId: delivery.runId, toolCallId, autonomy },
         text:
           "I don't know who you are yet. Open this link while signed in to TulipFarm to " +
           `connect this account: ${this.options.bindLinkUrl(offer.token)} — it works once and ` +
           "expires in 15 minutes.",
       }
     );
+  }
+
+  /** The Agent a Channel thread routes to; an unpinned thread declares no ceiling, as before. */
+  private async routedAgent(
+    conversationId: string | undefined
+  ): Promise<{ agentId?: string; autonomy?: ChatAutonomy }> {
+    if (conversationId === undefined) return {};
+    const conversation = await this.options.conversations.findById(conversationId);
+    const agentId = conversation?.agentId;
+    if (agentId === undefined) return {};
+    const autonomy = asChatAutonomy(
+      resolveAgent(this.options.soulLoader, agentId).frontmatter.autonomy
+    );
+    return { agentId, ...(autonomy === undefined ? {} : { autonomy }) };
   }
 
   private async hasThreadMapping(delivery: DeliveryAuthority): Promise<boolean> {

@@ -25,7 +25,7 @@ pnpm --filter @tulipfarm/docs typecheck  # fumadocs-mdx + next typegen + tsc
 | `lib/layout.shared.tsx` | Shared layout options |
 | `app/(home)` | Landing page route group |
 | `app/docs` | Documentation layout and pages |
-| `app/api/search` | Search index, statically generated (Orama) |
+| `app/api/search` | Search index, statically generated |
 | `source.config.ts` | Fumadocs MDX config (frontmatter schema etc.) |
 | `scripts/sync-public-assets.mjs` | Copies the install and uninstall assets into `public/` before build/dev |
 

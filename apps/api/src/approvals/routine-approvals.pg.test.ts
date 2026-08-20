@@ -154,7 +154,7 @@ describe("routine approvals as durable waits", () => {
     const row = await repo.findById(opened.approvalId);
     expect(row).toMatchObject({ kind: "routine_state", status: "pending" });
     // The token lives beside the approval, in the process that redeems it — never in the answer.
-    expect((row?.payload as { resumeToken?: string }).resumeToken).toEqual(expect.any(String));
+    expect((row?.payload as { resumeToken?: string })?.resumeToken).toEqual(expect.any(String));
   });
 
   it("returns the approval already open for this State occurrence rather than asking twice", async () => {

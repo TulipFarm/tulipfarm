@@ -11,7 +11,19 @@ const SOURCES = {
   ENCRYPTION_KEY: "secrets.env",
 } as const;
 
-type Filled = keyof typeof SOURCES;
+/**
+ * The same lane, but never waited for. A deployment on the filesystem blob store has no
+ * `bucket.env` at all, and one pointed at an external S3 provider is handed these directly, so
+ * their absence is a normal shape rather than a startup race worth retrying.
+ */
+const OPTIONAL_SOURCES = {
+  S3_ACCESS_KEY_ID: "bucket.env",
+  S3_SECRET_ACCESS_KEY: "bucket.env",
+} as const;
+
+type RequiredSource = keyof typeof SOURCES;
+
+type Filled = RequiredSource | keyof typeof OPTIONAL_SOURCES;
 
 type Env = Record<string, string | undefined>;
 
@@ -42,14 +54,16 @@ function readKey(contents: string, key: string): string | undefined {
 }
 
 /**
- * Fills any of `WORKER_API_CREDENTIAL` / `ENCRYPTION_KEY` still missing from the data volume.
+ * Fills any of `WORKER_API_CREDENTIAL` / `ENCRYPTION_KEY` / the bundled bucket's S3 credentials
+ * still missing from the data volume.
  * Mutates `env` — callers run this before `loadConfig`, and before any secret is unwrapped.
  *
  * Returns the names it filled, for the boot log. Nothing is invented here: a value that is on
  * neither the environment nor the volume stays missing, and `loadConfig` says so by name.
  */
 export function loadDataDirEnv(env: Env = process.env): Filled[] {
-  const missing = (Object.keys(SOURCES) as Filled[]).filter((name) => !env[name]);
+  const sources = { ...SOURCES, ...OPTIONAL_SOURCES };
+  const missing = (Object.keys(sources) as Filled[]).filter((name) => !env[name]);
   if (missing.length === 0) return [];
 
   const dataDir = resolveDataDir(env);
@@ -57,7 +71,7 @@ export function loadDataDirEnv(env: Env = process.env): Filled[] {
 
   const filled: Filled[] = [];
   for (const name of missing) {
-    const file = join(dataDir, SOURCES[name]);
+    const file = join(dataDir, sources[name]);
     if (!existsSync(file)) continue;
     const value = readKey(readFileSync(file, "utf8"), name);
     if (value === undefined) continue;

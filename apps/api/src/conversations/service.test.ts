@@ -1,3 +1,4 @@
+import { textContent } from "@tulipfarm/schema";
 import { describe, expect, it } from "vitest";
 import {
   type CompleteTurnInput,
@@ -130,7 +131,10 @@ describe("ConversationService", () => {
     const started = await conversations.startTurn(turnInput);
 
     expect(store.messages).toHaveLength(1);
-    expect(store.messages[0]).toMatchObject({ role: "user", content: "summarize the incident" });
+    expect(store.messages[0]).toMatchObject({
+      role: "user",
+      content: textContent("summarize the incident"),
+    });
     expect(runs.starts).toEqual([{ turnId: started.turnId, attempt: 1 }]);
     expect(started).toMatchObject({ runId: "run-1", cursor: 0 });
   });
@@ -191,7 +195,10 @@ describe("ConversationService", () => {
     expect(store.turns).toHaveLength(2);
     expect(store.turns[0]).toMatchObject({ attempt: 1, runId: "run-1" });
     expect(store.messages).toHaveLength(2);
-    expect(store.messages[1]).toMatchObject({ role: "user", content: "summarize the incident" });
+    expect(store.messages[1]).toMatchObject({
+      role: "user",
+      content: textContent("summarize the incident"),
+    });
   });
 
   it("rechecks authorization on every Turn and persists nothing when it is denied", async () => {

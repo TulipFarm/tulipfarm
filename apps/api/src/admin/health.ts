@@ -1,6 +1,11 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import { LlmNotConfiguredError } from "@tulipfarm/schema";
 
-export type HealthStatus = "ok" | "degraded" | "down";
+/**
+ * `unknown` is not a fault: the component has nothing configured to check, so no verdict about it
+ * would be honest. Reporting it as `down` tells an operator to fix something that is not broken.
+ */
+export type HealthStatus = "ok" | "degraded" | "down" | "unknown";
 
 export interface HealthResult {
   readonly status: HealthStatus;
@@ -123,16 +128,19 @@ export interface ModelProbeTarget {
   effortModel(preset: "balanced"): unknown;
 }
 
-/** Whether the configured credential is still accepted. Absent means "not checked". */
+/** The verdict a live provider call proved. Absent means "not checked". */
 export interface ModelReachability {
-  /** Rejects only when the provider refused the *credential*; transient faults resolve. */
-  verify(): Promise<void>;
+  /**
+   * Resolves with the verdict for every outcome, including failure: a rejection would leave the
+   * probe unable to say anything but that the check itself broke.
+   */
+  verify(): Promise<HealthResult>;
 }
 
 export interface LlmProbeOptions {
   /**
-   * Optional live credential check. Without it the probe reports configuration only, which
-   * cannot distinguish a working key from a revoked one.
+   * Optional live provider call. Without it the probe reports configuration only, which cannot
+   * distinguish a reachable provider from a revoked key or a dead endpoint.
    */
   readonly reachability?: ModelReachability;
   /** Reachability is cached this long so scraping the health page cannot spend tokens per hit. */
@@ -144,39 +152,70 @@ const REACHABILITY_TTL_MS = 60_000;
 
 /**
  * Checks that a model is configured and resolvable, and — when a reachability check is supplied —
- * that the provider still accepts the credential.
+ * what a live call to the configured provider proved.
  *
- * A provider outage is deliberately *not* our failure: only a refused credential downgrades the
- * component, and only to `degraded`. Reporting `down` would hand a third party the power to fail
- * this deployment's readiness. Without that distinction a revoked key reported `ok` and the first
- * person to learn of it was a participant mid-chat.
+ * The live call runs *outside* this one: a real model call takes seconds, `runProbe` gives every
+ * probe a two-second budget, and awaiting one here reported a working provider as `down` on
+ * exactly the deployments whose first call is slowest. `check()` therefore answers from the last
+ * verdict and refreshes in the background, so provider latency can never decide the status.
+ *
+ * The verdict itself is the reachability check's to make, and it distinguishes a provider that
+ * answered — a refused credential, a throttle, a request it did not like — from one that never
+ * answered at all. Swallowing the second class reported `ok` straight through an outage, which is
+ * the more dangerous half of an untrustworthy health row: it is wrong silently.
  */
 export function llmProbe(llm: ModelProbeTarget, options: LlmProbeOptions = {}): HealthProbe {
   const now = options.now ?? Date.now;
   const ttlMs = options.ttlMs ?? REACHABILITY_TTL_MS;
   let cached: { at: number; result: HealthResult } | undefined;
+  let refreshing = false;
+
+  function refresh(reachability: ModelReachability): void {
+    if (refreshing) return;
+    refreshing = true;
+    void reachability
+      .verify()
+      .then(
+        (result) => {
+          cached = { at: now(), result };
+        },
+        (error: unknown) => {
+          cached = {
+            at: now(),
+            result: {
+              status: "down",
+              detail: `the provider check could not run: ${message(error)}`,
+            },
+          };
+        }
+      )
+      .finally(() => {
+        refreshing = false;
+      });
+  }
 
   return {
     component: "llm",
     async check() {
-      llm.effortModel("balanced");
+      try {
+        llm.effortModel("balanced");
+      } catch (error) {
+        if (error instanceof LlmNotConfiguredError) {
+          return {
+            status: "unknown",
+            detail: "no LLM provider is configured — connect one under Business → Models",
+          };
+        }
+        throw error;
+      }
+
       const reachability = options.reachability;
       if (reachability === undefined) return { status: "ok" };
 
       if (cached !== undefined && now() - cached.at < ttlMs) return cached.result;
 
-      let result: HealthResult;
-      try {
-        await reachability.verify();
-        result = { status: "ok" };
-      } catch (error) {
-        result = {
-          status: "degraded",
-          detail: `provider rejected the credential: ${message(error)}`,
-        };
-      }
-      cached = { at: now(), result };
-      return result;
+      refresh(reachability);
+      return cached?.result ?? { status: "ok", detail: "provider check pending" };
     },
   };
 }

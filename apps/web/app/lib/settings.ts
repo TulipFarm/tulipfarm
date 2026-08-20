@@ -11,6 +11,7 @@ export type ModelSpec = {
   mode?: string;
   supports_function_calling?: boolean;
   supports_vision?: boolean;
+  supports_pdf_input?: boolean;
   supports_prompt_caching?: boolean;
   supports_reasoning?: boolean;
   deprecation_date?: string | null;

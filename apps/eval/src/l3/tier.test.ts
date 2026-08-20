@@ -1,10 +1,12 @@
 import { execFileSync } from "node:child_process";
+import { contentText, textContent } from "@tulipfarm/schema";
 import { describe, expect, it } from "vitest";
 import type { EvalCase } from "../case.ts";
 import { type EvalSoul, loadEvalSoul } from "../eval-soul.ts";
 import type { ModelBinding } from "../runner.ts";
 import { scriptedBinding } from "../scripted.ts";
 import { NO_SPEND } from "../spend.ts";
+import { FILE_CREATE_TOOL } from "./file-store.ts";
 import { SOUL_WRITE_TOOL } from "./soul-write.ts";
 import { foldJourney, type PersistedTurn, runPersistedTurn } from "./tier.ts";
 
@@ -17,7 +19,7 @@ const answering = (text: string): EvalCase => ({
   tier: "l3",
   agent: "support",
   context: { governancePages: [] },
-  input: [{ role: "user", content: "When do you open?" }],
+  input: [{ role: "user", content: textContent("When do you open?") }],
   expect: [],
   script: [{ kind: "text", text }],
 });
@@ -100,7 +102,7 @@ const writing = (content: string): EvalCase => ({
   tier: "l3",
   agent: "support",
   context: { governancePages: [] },
-  input: [{ role: "user", content: "Add an agent called billing." }],
+  input: [{ role: "user", content: textContent("Add an agent called billing.") }],
   tools: [
     {
       name: SOUL_WRITE_TOOL,
@@ -237,7 +239,7 @@ describe("a journey", () => {
           ),
           journey: [
             {
-              input: [{ role: "user", content: "Which agents exist now?" }],
+              input: [{ role: "user", content: textContent("Which agents exist now?") }],
               script: [{ kind: "text", text: "Support and billing." }],
             },
           ],
@@ -267,7 +269,7 @@ describe("a journey", () => {
           const port = inner.create(evalCase);
           return {
             invoke: async (request) => {
-              seen.push(request.messages.map((m) => `${m.role}:${String(m.content)}`));
+              seen.push(request.messages.map((m) => `${m.role}:${contentText(m.content)}`));
               return port.invoke(request);
             },
           };
@@ -279,7 +281,7 @@ describe("a journey", () => {
           ...answering("We open at 9am."),
           journey: [
             {
-              input: [{ role: "user", content: "And on Sundays?" }],
+              input: [{ role: "user", content: textContent("And on Sundays?") }],
               script: [{ kind: "text", text: "Closed on Sundays." }],
             },
           ],
@@ -308,7 +310,7 @@ describe("a journey", () => {
           ...answering("We open at 9am."),
           journey: [
             {
-              input: [{ role: "user", content: "And on Sundays?" }],
+              input: [{ role: "user", content: textContent("And on Sundays?") }],
               script: [{ kind: "text", text: "Closed on Sundays." }],
             },
           ],
@@ -334,6 +336,8 @@ describe("folding a journey into one result", () => {
     events: [],
     toolCalls: [],
     soulCommits: [],
+    publishedArtifacts: [],
+    generatedFiles: [],
     systemPrompt: "",
     ...over,
   });
@@ -404,12 +408,167 @@ describe("what an L3 Turn costs", () => {
       soul ??= await loadEvalSoul();
       const journey: EvalCase = {
         ...answering("ignored"),
-        journey: [{ input: [{ role: "user", content: "again" }], script: [] }],
+        journey: [{ input: [{ role: "user", content: textContent("again") }], script: [] }],
       };
       const turn = await runPersistedTurn({ evalCase: journey, soul, binding: billing() });
 
       expect(turn.spend.inputTokens).toBe(2400);
       expect(turn.spend.calls).toBe(2);
+    },
+    TIMEOUT
+  );
+});
+
+const generating = (over: Partial<EvalCase> = {}): EvalCase => ({
+  id: "l3-file-create",
+  tier: "l3",
+  agent: "support",
+  context: { governancePages: [] },
+  input: [{ role: "user", content: textContent("Write the delays up as a PDF.") }],
+  platformTools: [FILE_CREATE_TOOL],
+  expect: [],
+  script: [
+    {
+      kind: "tool_calls",
+      calls: [
+        {
+          callId: "c1",
+          name: FILE_CREATE_TOOL,
+          arguments: {
+            filename: "delays",
+            format: "pdf",
+            title: "Delays",
+            content: "# Delays\n\nTwo hundred and forty orders were late.",
+          },
+        },
+      ],
+    },
+    { kind: "text", text: "Written up as delays.pdf." },
+  ],
+  ...over,
+});
+
+describe("a Turn that generates a File", () => {
+  it(
+    "runs the shipped Tool for real, so the audience is read rather than scripted",
+    async () => {
+      soul ??= await loadEvalSoul();
+      const turn = await runPersistedTurn({
+        evalCase: generating(),
+        soul,
+        binding: scriptedBinding(),
+      });
+
+      expect(turn.runStatus).toBe("succeeded");
+      expect(turn.toolCalls.map((c) => c.name)).toContain(FILE_CREATE_TOOL);
+      expect(turn.generatedFiles).toHaveLength(1);
+      expect(turn.generatedFiles[0]?.filename).toBe("delays.pdf");
+    },
+    TIMEOUT
+  );
+
+  it(
+    "shares what an Agent holding no Role wrote with the requester alone",
+    async () => {
+      soul ??= await loadEvalSoul();
+      const turn = await runPersistedTurn({
+        evalCase: generating(),
+        soul,
+        binding: scriptedBinding(),
+      });
+
+      expect(turn.generatedFiles[0]?.readableBy).toEqual(["user:eval"]);
+    },
+    TIMEOUT
+  );
+
+  it(
+    "widens the audience to every Role the authoring Agent's Principal holds",
+    async () => {
+      soul ??= await loadEvalSoul();
+      const turn = await runPersistedTurn({
+        evalCase: generating({ agentRoles: ["hr-team", "ops-desk"] }),
+        soul,
+        binding: scriptedBinding(),
+      });
+
+      const readable = [...(turn.generatedFiles[0]?.readableBy ?? [])].sort();
+      expect(readable).toEqual(["role:hr-team", "role:ops-desk", "user:eval"]);
+    },
+    TIMEOUT
+  );
+
+  it(
+    "keeps the requester's own share, so joining a team never costs them the document",
+    async () => {
+      soul ??= await loadEvalSoul();
+      const turn = await runPersistedTurn({
+        evalCase: generating({ agentRoles: ["hr-team"] }),
+        soul,
+        binding: scriptedBinding(),
+      });
+
+      expect(turn.generatedFiles[0]?.readableBy).toContain("user:eval");
+    },
+    TIMEOUT
+  );
+
+  it(
+    "grants no Role the Agent was never assigned",
+    async () => {
+      // The bound on the widening. Without it the Case above would pass just as well against an
+      // audience that shared every generated File with every Role in the business.
+      soul ??= await loadEvalSoul();
+      const turn = await runPersistedTurn({
+        evalCase: generating({ agentRoles: ["hr-team"] }),
+        soul,
+        binding: scriptedBinding(),
+      });
+
+      expect(turn.generatedFiles[0]?.readableBy).not.toContain("role:ops-desk");
+    },
+    TIMEOUT
+  );
+
+  it(
+    "attributes each Turn of a journey's File to the Turn that wrote it",
+    async () => {
+      soul ??= await loadEvalSoul();
+      const turn = await runPersistedTurn({
+        evalCase: generating({
+          agentRoles: ["hr-team"],
+          journey: [
+            {
+              input: [{ role: "user", content: textContent("Now one for March.") }],
+              script: [
+                {
+                  kind: "tool_calls",
+                  calls: [
+                    {
+                      callId: "c2",
+                      name: FILE_CREATE_TOOL,
+                      arguments: {
+                        filename: "march",
+                        format: "pdf",
+                        title: "March",
+                        content: "# March\n\nEighty orders were late.",
+                      },
+                    },
+                  ],
+                },
+                { kind: "text", text: "Written up as march.pdf." },
+              ],
+            },
+          ],
+        }),
+        soul,
+        binding: scriptedBinding(),
+      });
+
+      // The store is shared across a journey, so a folded result must add up to both Turns rather
+      // than report the first Turn's File twice.
+      expect(turn.generatedFiles).toHaveLength(2);
+      expect(new Set(turn.generatedFiles.map((f) => f.fileId)).size).toBe(2);
     },
     TIMEOUT
   );

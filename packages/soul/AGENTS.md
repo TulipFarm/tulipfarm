@@ -9,9 +9,11 @@ Loader, compiler, publisher, and git-sync engine for Soul artifacts. Root `soul/
 | Path | Owns |
 | --- | --- |
 | `src/index.ts` | Public exports; do not mirror the list here. |
+| `src/repo-dir.ts` | Locates the checkout for the dev-only bundled Skill/integration fallbacks. |
 | `src/soul-loader.ts`, `src/tree-reader.ts`, `src/soul-path.ts` | Disk and tree reads. |
 | `src/compiler.ts`, `src/bundle.ts`, `src/bundle-retention.ts`, `src/published-loader.ts` | Runtime bundles. |
 | `src/signatures.ts`, `src/publication.ts`, `src/publisher.ts` | Publish flow. |
+| `src/routine-catalog.ts` | Routines browse model over the active publication. |
 | `src/git-*`, `src/pinned-definition.ts`, `src/definition-reader.ts` | Git and pinned reads. |
 | `src/integration-*`, `src/types.ts` | Integration manifest trust/auth contracts. |
 | `src/migrations/`, `src/soul-migrations.ts` | Migrations. |
@@ -39,7 +41,8 @@ Loader, compiler, publisher, and git-sync engine for Soul artifacts. Root `soul/
 - `GitSyncService` stages only the paths given (`commitPaths`/`withSyncPaths`); there is no ambient
   `commit`/`withSync`, and `git add -A` is confined to scaffolding an empty repo.
 - Every commit helper must call the post-commit publication hook; publication activates one signed
-  digest only after committed -> projected -> stored -> active.
+  digest only after committed -> projected -> stored -> active. `SoulPublisher.publishCommittedTree`
+  settles its own publication inline, so `SoulWriteResult.published` means active, not enqueued.
 - API signs bundles with the private key; Workers verify with public keys only. SOUL-V1-004:
   upstream wins on real divergence; preserve unpushed local commits by retrying push.
 - Widening integration types widens third-party trust; update `integration-trust.ts` too. Third-party

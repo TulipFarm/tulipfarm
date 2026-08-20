@@ -3,11 +3,12 @@
   "version": "0.0.0",
   "private": true,
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "0.3.211",
-    "@openai/codex": "0.147.0",
+    "@anthropic-ai/claude-agent-sdk": "0.3.235",
+    "@openai/codex": "0.148.0",
     "@tulipfarm/agent-runtime": "workspace:*",
-    "@tulipfarm/curator": "workspace:*",
     "@tulipfarm/constants": "workspace:*",
+    "@tulipfarm/curator": "workspace:*",
+    "@tulipfarm/files": "workspace:*",
     "@tulipfarm/integrations": "workspace:*",
     "@tulipfarm/knowledge": "workspace:*",
     "@tulipfarm/kv": "workspace:*",
@@ -24,11 +25,11 @@
     "@tulipfarm/storage": "workspace:*",
     "@tulipfarm/tool-host": "workspace:*",
     "@tulipfarm/turn-executor": "workspace:*",
-    "ai": "^7.0.2",
+    "ai": "^7.0.68",
     "dotenv": "^17.4.2",
-    "isolated-vm": "^7.0.0",
-    "pg": "^8.22.0",
-    "pg-boss": "^12.23.0"
+    "isolated-vm": "^7.0.1",
+    "pg": "^8.23.0",
+    "pg-boss": "^12.27.0"
   },
   "scripts": {
     "build": "tsc",
@@ -39,18 +40,18 @@
     "typecheck": "tsc --noEmit -p tsconfig.test.json"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.5.3",
+    "@electric-sql/pglite": "^0.5.5",
     "@electric-sql/pglite-socket": "^0.2.7",
     "@tulipfarm/authz": "workspace:*",
     "@tulipfarm/knowledge": "workspace:*",
     "@tulipfarm/memory": "workspace:*",
     "@tulipfarm/tool-broker": "workspace:*",
     "@tulipfarm/tsconfig": "workspace:*",
-    "@types/node": "^26.1.1",
-    "@types/pg": "^8.20.0",
-    "esbuild": "^0.28.1",
-    "tsx": "^4.22.4",
-    "typescript": "^6.0.3",
-    "vitest": "^4.1.9"
+    "@types/node": "^26.2.0",
+    "@types/pg": "^8.23.1",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
   }
 }

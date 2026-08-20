@@ -14,14 +14,14 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@sinclair/typebox": "^0.34.49",
+    "@sinclair/typebox": "^0.34.52",
     "@tulipfarm/schema": "workspace:*",
     "ajv": "^8.20.0"
   },
   "devDependencies": {
     "@tulipfarm/tsconfig": "workspace:*",
-    "@types/node": "^26.1.1",
-    "typescript": "^6.0.3",
-    "vitest": "^4.1.9"
+    "@types/node": "^26.2.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
   }
 }

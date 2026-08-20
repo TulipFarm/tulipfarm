@@ -42,6 +42,7 @@ An omitted edge is forbidden.
 | `packages/memory` | `packages/schema`, `packages/authz`, `packages/audit`, `packages/storage`, `packages/observability`, `packages/constants`, `packages/tool-host` |
 | `packages/tool-host` | `packages/schema`, `packages/authz`, `packages/soul`, `packages/run-kernel`, `packages/tool-broker`, `packages/surface`, `packages/storage`, `packages/observability` |
 | `packages/kv` | `packages/schema`, `packages/storage`, `packages/tool-host` |
+| `packages/files` | `packages/constants`, `packages/schema`, `packages/storage`, `packages/tool-host` |
 | `packages/platform-tools` | `packages/schema`, `packages/tool-host`, `packages/agent-runtime` |
 | `packages/surface` | `packages/schema` |
 | `packages/surface-web` | `packages/surface` |
@@ -64,11 +65,11 @@ the Agent runtime. Applications register implementations during composition.
 
 | Consumer | May import from |
 | --- | --- |
-| `apps/api` | `schema`, `soul`, `constants`, `authz`, `audit`, `secrets`, `run-kernel`, `tool-broker`, `agent-runtime`, `knowledge`, `memory`, `curator`, `curator-host`, `surface`, `surface-web`, `surface-slack`, `surface-telegram`, `surface-github`, `sandbox`, `integrations`, `storage`, `observability`, `tool-host`, `kv`, `platform-tools` |
-| `apps/worker` | `schema`, `constants`, `authz`, `audit`, `secrets`, `soul`, `run-kernel`, `tool-broker`, `agent-runtime`, `knowledge`, `memory`, `curator`, `surface`, `integrations`, `sandbox`, `storage`, `observability`, `tool-host`, `kv`, `platform-tools`, `turn-executor`, `model-adapter` |
+| `apps/api` | `schema`, `soul`, `constants`, `files`, `authz`, `audit`, `secrets`, `run-kernel`, `tool-broker`, `agent-runtime`, `knowledge`, `memory`, `curator`, `curator-host`, `surface`, `surface-web`, `surface-slack`, `surface-telegram`, `surface-github`, `sandbox`, `integrations`, `storage`, `observability`, `tool-host`, `kv`, `platform-tools` |
+| `apps/worker` | `schema`, `constants`, `authz`, `audit`, `secrets`, `soul`, `run-kernel`, `tool-broker`, `agent-runtime`, `knowledge`, `memory`, `curator`, `surface`, `integrations`, `sandbox`, `storage`, `observability`, `tool-host`, `kv`, `platform-tools`, `files`, `turn-executor`, `model-adapter` |
 | `apps/integration-worker` | `schema`, `authz`, `audit`, `run-kernel`, `tool-broker`, `integrations`, `storage`, `observability` |
-| `apps/web` | `schema`, `surface`, `surface-web`, and presentation-only packages such as `ui`/`editor` |
-| `apps/eval` | `agent-runtime`, `turn-executor`, `model-adapter`, `llm`, `schema`, `secrets`, `soul` |
+| `apps/web` | `schema`, `files`, `surface`, `surface-web`, and presentation-only packages such as `ui`/`editor` |
+| `apps/eval` | `agent-runtime`, `turn-executor`, `model-adapter`, `llm`, `schema`, `secrets`, `soul`, `storage`, `run-kernel`, `tool-host`, `files` |
 
 `packages/constants` is a dependency-free leaf holding non-sensitive deployment defaults. The API
 and the worker must resolve the same business scope or the worker claims nothing, and an app may

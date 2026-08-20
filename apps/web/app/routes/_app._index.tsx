@@ -20,8 +20,10 @@ export async function clientLoader({ request }: ClientLoaderFunctionArgs) {
   // Seeded by the onboarding Companion (a Task's "chat" action) — drafted into the
   // composer, never auto-sent.
   const draft = url.searchParams.get("draft") || undefined;
+  // Handed over by the Files library: a File already stored, staged without re-uploading its bytes.
+  const attach = url.searchParams.get("attach") || undefined;
   const defaultModel: ChatModelSelector = DEFAULT_CHAT_MODEL_SELECTOR;
-  return { agentId, defaultModel, draft };
+  return { agentId, defaultModel, draft, attach };
 }
 
 /*
@@ -50,14 +52,15 @@ function useOnboardingSuggestions(newChatNonce: number) {
 }
 
 export default function ChatRoute() {
-  const { agentId, defaultModel, draft } = useLoaderData<typeof clientLoader>();
-  // Strip `?draft=` once applied so a reload or Back doesn't redraft over the user's own typing.
+  const { agentId, defaultModel, draft, attach } = useLoaderData<typeof clientLoader>();
+  // Strip both once applied so a reload or Back doesn't redraft, or re-stage, over what was sent.
   useEffect(() => {
-    if (!draft) return;
+    if (!draft && !attach) return;
     const url = new URL(window.location.href);
     url.searchParams.delete("draft");
+    url.searchParams.delete("attach");
     window.history.replaceState(null, "", `${url.pathname}${url.search}`);
-  }, [draft]);
+  }, [draft, attach]);
   const { refresh, setActiveChatId, newChatNonce } = useConversations();
   const suggestions = useOnboardingSuggestions(newChatNonce);
   const { tasks } = useCompanion();
@@ -88,6 +91,7 @@ export default function ChatRoute() {
       tasks={tasks}
       onConversationChange={onConversationChange}
       initialDraft={draft}
+      attachFileId={attach}
     />
   );
 }

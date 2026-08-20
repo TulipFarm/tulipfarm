@@ -8,7 +8,7 @@ import {
   RunResumeGateway,
   TypedOutputValidator,
 } from "@tulipfarm/run-kernel";
-import { INVOCATION_REQUEST_SCHEMAS } from "@tulipfarm/schema";
+import { INVOCATION_REQUEST_SCHEMAS, textContent } from "@tulipfarm/schema";
 import { ChannelRunDeliveryStore, RunStore, WaitStore } from "@tulipfarm/storage";
 import { createSurfaceArtifact } from "@tulipfarm/surface";
 import { ApprovalsRepo, ToolApprovalService } from "@tulipfarm/tool-host";
@@ -290,7 +290,7 @@ describe("POST /api/v1/internal/surfaces/interactions", () => {
 
     expect(conversationStore.turns).toHaveLength(1);
     expect(conversationStore.turns[0]?.conversationId).toBe("conv-1");
-    expect(conversationStore.messages[0]?.content).toBe("Submitted");
+    expect(conversationStore.messages[0]?.content).toEqual(textContent("Submitted"));
 
     const pending = await runDeliveries.listPending(DEPLOYMENT_BUSINESS_ID);
     expect(pending).toHaveLength(2);

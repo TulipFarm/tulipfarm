@@ -1,5 +1,5 @@
 import { usdToCostMicros } from "@tulipfarm/run-kernel";
-import { ajv } from "@tulipfarm/schema";
+import { ajv, textContent } from "@tulipfarm/schema";
 import type {
   ModelInvocationRequest,
   ModelInvocationResult,
@@ -18,7 +18,15 @@ import type {
   ExposedTool,
   ToolDispatchResult,
 } from "./contract";
+import { deepestErrorMessage, EventSinkFailure, REQUEST_INPUT_TOOL } from "./diagnostics";
 import { extractSkillName, narrowToolsToSkill } from "./narrowing";
+import {
+  extractRereadFile,
+  FILE_READ_TOOL,
+  type RereadFile,
+  rememberReread,
+  resolveIterationAttachments,
+} from "./reread";
 import type { AgentLoopResumeState } from "./resume";
 import type { NormalizedToolCall } from "./transcript";
 import {
@@ -34,20 +42,6 @@ import {
 const ITERATION_BUDGET_KEY = "iterations";
 const TOKEN_BUDGET_KEY = "tokens";
 const COST_BUDGET_KEY = "costMicros";
-
-/** Event-sink failures rethrow as sink failures, not model failures. */
-class EventSinkFailure extends Error {
-  constructor(readonly cause: unknown) {
-    super("event sink failed");
-  }
-}
-
-/** Walks `.cause` to the innermost diagnostic message. */
-function deepestErrorMessage(diagnostic: unknown): string {
-  let current = diagnostic;
-  while (current instanceof Error && current.cause !== undefined) current = current.cause;
-  return current instanceof Error ? current.message : String(current);
-}
 
 export class AgentLoop {
   constructor(private readonly deps: AgentLoopDependencies) {}
@@ -75,6 +69,10 @@ export class AgentLoop {
     // The approved-but-never-executed call this Turn parked on, replayed before the model runs
     // again so the user's one approval performs the work once, with no re-planning round trip.
     let replay = recovered?.pendingCall;
+    // Files the Agent went back for mid-Turn. Held as names, not bytes: what the model is sent is
+    // re-fetched every iteration, so authority is re-checked at assembly time rather than trusted
+    // from the moment the Tool ran.
+    let reread: readonly RereadFile[] = recovered?.rereadFiles ?? [];
 
     const toolsForIteration = (): readonly ExposedTool[] =>
       narrowToolsToSkill(input.tools, activeSkillName, input.skillToolScopes);
@@ -108,6 +106,7 @@ export class AgentLoop {
           messages: messages.slice(input.messages.length),
           ...(pendingCall === undefined ? {} : { pendingCall }),
           ...(activeSkillName === undefined ? {} : { activeSkillName }),
+          ...(reread.length === 0 ? {} : { rereadFiles: reread }),
           sequence,
           textIndex,
         },
@@ -132,6 +131,17 @@ export class AgentLoop {
 
     let textIndex = recovered?.textIndex ?? 0;
 
+    /**
+     * Model text already shown to the participant. An asking Turn has no `completed` output to
+     * persist, yet the reader has read this prose above the question; dropping it would leave a
+     * refreshed transcript showing the question with nothing explaining it.
+     */
+    let streamedText = "";
+
+    /** Both dispatch paths can reach the question, and both end the Turn the same way. */
+    const askedForInput = (callId: string) =>
+      finish({ status: "input_required", callId, text: streamedText, ...counters }, "completed");
+
     /** Streams text deltas; missing `completed` is a model-adapter contract failure. */
     const callModel = async (request: ModelInvocationRequest): Promise<ModelInvocationResult> => {
       const stream = this.deps.model.stream?.(request);
@@ -144,6 +154,7 @@ export class AgentLoop {
           continue;
         }
         if (chunk.text.length === 0) continue;
+        streamedText += chunk.text;
         textIndex += 1;
         try {
           await emit("text_delta", { text: chunk.text, textIndex });
@@ -213,6 +224,18 @@ export class AgentLoop {
           return { kind: "approval", approvalId: dispatched.approvalId, call };
         }
 
+        // The barrier is the question, not the answer: once this Turn has asked the operator to
+        // decide, nothing else in it may act on the model's own default. A call that reached
+        // nobody ends the Turn rather than feeding the model a failure it will route around,
+        // which is how an unanswered ask became a rubber stamp (#405).
+        if (call.name === REQUEST_INPUT_TOOL) {
+          if (dispatched.status !== "succeeded") {
+            return { kind: "fail", reason: "input_request_failed" };
+          }
+          messages.push(toolMessage(call.callId, { output: dispatched.output }));
+          return { kind: "input_required", call };
+        }
+
         if (dispatched.status === "invalid_arguments") {
           counters.repairs += 1;
           if (counters.repairs > input.limits.maxRepairAttempts) {
@@ -226,12 +249,13 @@ export class AgentLoop {
 
         if (dispatched.status === "succeeded") {
           messages.push(toolMessage(call.callId, { output: dispatched.output }));
-          if (isInputRequired(call.name, dispatched.output)) {
-            return { kind: "input_required", call };
-          }
           if (call.name === "load_skill") {
             const loaded = extractSkillName(call.arguments);
             if (loaded !== undefined) activeSkillName = loaded;
+          }
+          if (call.name === FILE_READ_TOOL) {
+            const file = extractRereadFile(dispatched.output);
+            if (file !== undefined) reread = rememberReread(reread, file);
           }
           return { kind: "continue" };
         }
@@ -284,12 +308,7 @@ export class AgentLoop {
             approval = { approvalId: outcome.approvalId, call: outcome.call };
             break;
           }
-          if (outcome.kind === "input_required") {
-            return finish(
-              { status: "input_required", callId: outcome.call.callId, ...counters },
-              "completed"
-            );
-          }
+          if (outcome.kind === "input_required") return askedForInput(outcome.call.callId);
           index += 1;
           continue;
         }
@@ -371,12 +390,7 @@ export class AgentLoop {
         if (decision?.kind === "fail") {
           return finish({ status: "failed", reason: decision.reason, ...counters }, "failed");
         }
-        if (decision?.kind === "input_required") {
-          return finish(
-            { status: "input_required", callId: decision.call.callId, ...counters },
-            "completed"
-          );
-        }
+        if (decision?.kind === "input_required") return askedForInput(decision.call.callId);
         if (decision !== undefined) {
           approval = { approvalId: decision.approvalId, call: decision.call };
           break;
@@ -447,11 +461,18 @@ export class AgentLoop {
       counters.iterations += 1;
       await emit("iteration_started");
 
+      const attachments = await resolveIterationAttachments(
+        input.attachments ?? [],
+        reread,
+        this.deps.attachments,
+        input.runId
+      );
       const request: ModelInvocationRequest = {
         requestId: `${input.runId}:${input.stateId}:${counters.iterations}`,
         modelProfileId: input.modelProfileId,
         messages,
         tools: toolsForIteration(),
+        ...(attachments.length === 0 ? {} : { attachments }),
         ...(input.modelPolicy === undefined ? {} : { policy: input.modelPolicy }),
         ...(input.principal === undefined ? {} : { principal: input.principal }),
         ...(input.agentId === undefined ? {} : { agentId: input.agentId }),
@@ -524,10 +545,12 @@ export class AgentLoop {
         }
         messages.push({
           role: "user",
-          content: JSON.stringify({
-            error: "structured_output_invalid",
-            detail: errorText(validate),
-          }),
+          content: textContent(
+            JSON.stringify({
+              error: "structured_output_invalid",
+              detail: errorText(validate),
+            })
+          ),
         });
         await checkpoint();
         continue;
@@ -554,10 +577,12 @@ export class AgentLoop {
         }
         messages.push({
           role: "user",
-          content: JSON.stringify({
-            error: "empty_output",
-            detail: "Your last response had no content. Provide a final answer for the user.",
-          }),
+          content: textContent(
+            JSON.stringify({
+              error: "empty_output",
+              detail: "Your last response had no content. Provide a final answer for the user.",
+            })
+          ),
         });
         await checkpoint();
         continue;
@@ -567,13 +592,4 @@ export class AgentLoop {
       return finish({ status: "completed", output, ...counters }, "completed");
     }
   }
-}
-
-function isInputRequired(name: string, output: unknown): boolean {
-  return (
-    name === "request_input" &&
-    typeof output === "object" &&
-    output !== null &&
-    (output as { suspendRun?: unknown }).suspendRun === true
-  );
 }

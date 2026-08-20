@@ -88,8 +88,14 @@ type RunEventData = {
   artifactId?: string;
 };
 
+/** A turn that ended without an answer, whichever half of the runtime gave up on it. */
+const TURN_STOPPED_MESSAGE = "The turn stopped before it could answer. Try again.";
+
 export function modelFailureMessage(reason: string | undefined): string {
   switch (reason) {
+    case "turn_execution_failed":
+    case "needs_reconciliation":
+      return TURN_STOPPED_MESSAGE;
     case "model_billing_inactive":
       return "The model provider's API billing is inactive. Activate billing or use another Provider Credential.";
     case "model_authentication_failed":
@@ -102,6 +108,8 @@ export function modelFailureMessage(reason: string | undefined): string {
       return "The model provider is rate limiting requests. Wait a moment and try again.";
     case "model_provider_unavailable":
       return "The model provider is temporarily unavailable. Try again shortly.";
+    case "input_request_failed":
+      return "The Agent asked you to choose, but the question could not be shown. It stopped instead of deciding for you. Try again.";
     default:
       return "The model request failed. Try again.";
   }
@@ -235,8 +243,20 @@ export function createRunEventMapper(): (frame: ParsedFrame) => ChatEvent[] {
         return [{ type: "error", data: { message: modelFailureMessage(data.reason) } }];
       }
 
-      case "stream.closed":
-        return finished ? [] : [{ type: "finish", data: { reason: "closed" } }];
+      case "stream.closed": {
+        if (finished) return [];
+        // Only a Run that ended well can close silently. Anything else has no other frame to
+        // explain itself, and a plain finish would leave the composer idle with no answer.
+        if (data.status === "succeeded" || data.status === "cancelled") {
+          return [{ type: "finish", data: { reason: "closed" } }];
+        }
+        return [
+          {
+            type: "error",
+            data: { message: TURN_STOPPED_MESSAGE },
+          },
+        ];
+      }
 
       case "stream.revoked":
         return [{ type: "error", data: { message: "access to this run was revoked" } }];
@@ -253,7 +273,7 @@ export function createRunEventMapper(): (frame: ParsedFrame) => ChatEvent[] {
 }
 
 export type ChatRequestBody = {
-  message: { role: "user"; content: string };
+  message: { role: "user"; content: string; fileIds?: string[] };
   conversationId?: string;
   model?: ChatModelSelector;
   agentId?: string;

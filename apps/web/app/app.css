@@ -72,6 +72,10 @@
   --color-run-ok: var(--run-ok);
   --color-run-error: var(--run-error);
   --color-run-blocked: var(--run-blocked);
+  --color-signal-high: var(--signal-high);
+  --color-signal-medium: var(--signal-medium);
+  --color-signal-low: var(--signal-low);
+  --color-signal-empty: var(--signal-empty);
   --color-run-skipped: var(--run-skipped);
   --color-run-surface: var(--run-surface);
   --color-run-surface-hover: var(--run-surface-hover);
@@ -91,6 +95,11 @@
   --color-code-boolean: var(--code-boolean);
   --color-code-null: var(--code-null);
   --color-code-redacted: var(--code-redacted);
+
+  --color-diff-added: var(--diff-added);
+  --color-diff-removed: var(--diff-removed);
+  --color-diff-added-surface: var(--diff-added-surface);
+  --color-diff-removed-surface: var(--diff-removed-surface);
 
   --color-tulip-stem: var(--tulip-stem);
   --color-tulip-seed: var(--tulip-seed);
@@ -165,6 +174,92 @@
     width: 100%;
     opacity: 0.45;
   }
+}
+
+/*
+ * Pixel-grid loader (components/ui/loading-state). The wavefront reports that work is in flight,
+ * which is the only thing that earns a loop here. Cells carry their own duration and delay as
+ * custom properties so one keyframe serves every variant. Under reduced motion both the grid and
+ * the label freeze to a legible static state; the elapsed timer keeps ticking, since that is text.
+ */
+@keyframes pixel-on {
+  0% {
+    opacity: 0.15;
+  }
+  28% {
+    opacity: 1;
+  }
+  64%,
+  100% {
+    opacity: 0.15;
+  }
+}
+
+.tf-loader-pixel {
+  opacity: 0.15;
+  animation: pixel-on var(--pixel-dur, 650ms) ease-in-out var(--pixel-delay, 0ms) infinite;
+}
+
+/* Cells the pattern never lights (the orbit centre) sit below the resting dim. */
+.tf-loader-pixel[data-idle="true"] {
+  opacity: 0.07;
+  animation: none;
+}
+
+@keyframes shimmer-text {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+.tf-loader-label {
+  background-image: linear-gradient(
+    90deg,
+    var(--muted-foreground) 35%,
+    var(--foreground) 50%,
+    var(--muted-foreground) 65%
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer-text 1.4s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tf-loader-pixel {
+    animation: none;
+    opacity: 0.4;
+  }
+  /* A frozen gradient would leave the word half-faded, so drop it back to solid ink. */
+  .tf-loader-label {
+    background-image: none;
+    animation: none;
+    color: var(--foreground);
+  }
+}
+
+/*
+ * Trace rows (components/ui/trace). A row fading in reports one real event: this step just
+ * started. The reference this was adapted from staggers rows by index, which only reads as
+ * natural because its data is fake — ours arrive when the work actually happens, so each row
+ * animates on its own mount and no artificial delay is stacked on top.
+ */
+@keyframes trace-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.tf-trace-row {
+  animation: trace-row-in 180ms var(--ease-snappy) both;
 }
 
 /*

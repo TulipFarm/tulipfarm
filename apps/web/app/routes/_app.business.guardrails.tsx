@@ -1,4 +1,4 @@
-import { useLoaderData, useRevalidator, useRouteError } from "@remix-run/react";
+import { Link, useLoaderData, useRevalidator, useRouteError } from "@remix-run/react";
 import { useState } from "react";
 import { FormStatus } from "~/components/form-status";
 import { Badge } from "~/components/ui/badge";
@@ -7,6 +7,14 @@ import { Panel, PanelEmpty } from "~/components/ui/panel";
 import { getGuardrails, proposeGuardrailToggle } from "~/lib/admin";
 import { ApiError } from "~/lib/api";
 import { shortRevision } from "~/lib/utils";
+
+/**
+ * A Guardrail is authored by an agent through `guardrail_forge`, so the create control drafts the
+ * request into the chat composer rather than posting a policy this screen would have to compose.
+ */
+const ADD_GUARDRAIL_DRAFT =
+  "Add a guardrail. Ask me what it should limit — blocking a tool by name, filtering sensitive " +
+  "content out of replies, or screening prompt injection — then create it.";
 
 export async function clientLoader() {
   return { model: await getGuardrails() };
@@ -37,6 +45,11 @@ export default function BusinessGuardrails() {
       <Panel
         title="Guardrails"
         description={`Turning one on or off is a Soul changeset, so it may need approval before it takes effect. Revision ${shortRevision(model.revision)}.`}
+        actions={
+          <Button asChild size="sm">
+            <Link to={`/?draft=${encodeURIComponent(ADD_GUARDRAIL_DRAFT)}`}>Add guardrail</Link>
+          </Button>
+        }
         flush
       >
         {model.items.length === 0 ? (

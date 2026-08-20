@@ -1,3 +1,4 @@
+import type { AgentCapabilityRestrictions } from "@tulipfarm/schema";
 import type {
   PresentationContext,
   SoulSurfaceComponent,
@@ -6,6 +7,7 @@ import type {
   SurfaceTarget,
 } from "@tulipfarm/surface";
 import type { ApprovalDemand } from "./approvals/evidence";
+import type { ChatAutonomy } from "./types";
 
 /**
  * Ports the Tool host needs but must not own. Each one is something a process may legitimately
@@ -41,6 +43,12 @@ export interface ChannelDeliveryReader {
 export interface HostedAgent {
   readonly name: string;
   readonly toolAllowlist?: readonly string[];
+  /**
+   * The Agent's own configured autonomy, which bounds every turn it runs. Absent means the Agent
+   * declares no ceiling and the request's own autonomy stands alone.
+   */
+  readonly autonomy?: ChatAutonomy;
+  readonly capabilityRestrictions?: AgentCapabilityRestrictions;
 }
 
 /** Resolves the Agent named by a chat request. Absence collapses to the deployment default. */

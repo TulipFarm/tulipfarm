@@ -51,6 +51,7 @@ const ALWAYS_ON_TOOL_NAMES = [
 const EXPECTED_FAMILY_TOOL_NAMES = [
   { family: "memory", names: ["update_memory"] },
   { family: "kv", names: ["kv_delete", "kv_get", "kv_list", "kv_set"] },
+  { family: "files", names: ["file_list", "file_read", "file_create"] },
   {
     family: "knowledge",
     names: [
@@ -124,6 +125,7 @@ const EXPECTED_FAMILY_TOOL_NAMES = [
       "get_current_time",
       "load_skill",
       "load_skill_reference",
+      "guardrail_forge",
       "routine_forge",
       "routine_picker",
       "soul_repo_push",
@@ -218,6 +220,7 @@ function stubbedCoreServices(): RegistryServices {
   return {
     memoryDocuments: stub,
     kv: stub,
+    files: stub,
     knowledge: stub,
     resources: stub,
     resourceTypes: stub,
@@ -483,6 +486,87 @@ describe("tool contract coverage", () => {
       .filter((tool) => (tool.definition?.authorization.action ?? "").length === 0)
       .map((t) => t.name);
     expect(actionless).toEqual([]);
+  });
+
+  // The ticket's demand, stated as a test rather than as a belief: an Agent must not be able to
+  // widen who can read a File. Sharing is a decision a person makes about their own upload, and an
+  // Agent reads attachments from untrusted sources — a Tool that shares is a Tool that a crafted
+  // PDF can aim. If sharing ever needs to be agentic, this test is where that argument gets made.
+  it("gives no Tool any way to share a File or read another Principal's", () => {
+    const reachesSharing = tools.filter((tool) => {
+      const authorization = tool.definition?.authorization;
+      const surface = [
+        tool.name,
+        authorization?.action ?? "",
+        ...(authorization?.resources ?? []),
+      ].join(" ");
+      return /\bfile[._-]?share|share[._-]?file|file\.(share|unshare)/i.test(surface);
+    });
+    expect(reachesSharing.map((tool) => tool.name)).toEqual([]);
+
+    // `navigate_to` sends a person to an app path; it cannot call the API. Everything else that
+    // holds a URL takes it from an Integration manifest, which is authored per provider and can
+    // only name that provider's host. Neither can reach a first-party route, and this asserts the
+    // property that makes that true rather than re-listing the routes.
+    const firstPartyCallers = tools.filter((tool) =>
+      [JSON.stringify(tool.inputSchema), tool.description].join(" ").includes("/api/v1/files")
+    );
+    expect(firstPartyCallers.map((tool) => tool.name)).toEqual([]);
+  });
+
+  // Same argument as sharing, one step further: destruction is irreversible and there is no
+  // versioning behind it. An Agent that could delete a File on instruction would turn a crafted
+  // attachment into a way to destroy the very evidence of it. Deletion stays a person's act.
+  it("gives no Tool any way to delete a File", () => {
+    const reachesDeletion = tools.filter((tool) => {
+      const authorization = tool.definition?.authorization;
+      const surface = [
+        tool.name,
+        authorization?.action ?? "",
+        ...(authorization?.resources ?? []),
+      ].join(" ");
+      return /\bfile[._-]?(delete|destroy|erase|remove)|(delete|destroy|erase|remove)[._-]?file/i.test(
+        surface
+      );
+    });
+    expect(reachesDeletion.map((tool) => tool.name)).toEqual([]);
+  });
+
+  // A Turn sends a File only on the Turn it was attached to, so an Agent needs a way back to it —
+  // and that way must not be a way to anything else. List, read and create are the whole surface.
+  // Creating is admitted because it makes a File nobody had a claim on yet; every verb that
+  // changes who can reach a File that already exists is not. The two ratchets above prove that
+  // negative across every Tool; this proves the positive about the family that exists to touch
+  // Files, so adding a fourth `file_*` verb has to be an argued decision rather than a slip.
+  it("gives Agents Files to list, read and create, and nothing else to do with them", () => {
+    const fileTools = tools.filter((tool) => tool.name.startsWith("file_"));
+    expect(fileTools.map((tool) => tool.name).sort()).toEqual([
+      "file_create",
+      "file_list",
+      "file_read",
+    ]);
+    expect(fileTools.filter((tool) => tool.mutating === true).map((tool) => tool.name)).toEqual([
+      "file_create",
+    ]);
+    expect(fileTools.map((tool) => tool.definition?.authorization.action).sort()).toEqual([
+      "file.create",
+      "file.list",
+      "file.read",
+    ]);
+  });
+
+  // Ownership is the whole reason a Routine's monthly report survives the offboarding of whoever
+  // scheduled it. An input the Agent controls that names an owner would hand that decision back to
+  // the model, so the schema must have no way to express one.
+  it("gives the Agent no way to say who owns what it creates", () => {
+    const create = tools.find((tool) => tool.name === "file_create");
+    const schema = JSON.stringify(create?.inputSchema ?? {});
+    expect(create).toBeDefined();
+    expect(schema).not.toMatch(/owner|principal|shareWith|readableBy/i);
+    // Without this an unknown property is dropped in silence rather than refused.
+    expect((create?.inputSchema as { additionalProperties?: boolean })?.additionalProperties).toBe(
+      false
+    );
   });
 
   it("keeps every declared resource inside the two-level grammar", () => {

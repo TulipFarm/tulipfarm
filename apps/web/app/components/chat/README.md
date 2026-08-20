@@ -73,55 +73,136 @@ inline (`PUT /api/v1/chats/:id` → `renameConversation` / `setConversationStarr
 | Component | Driven by |
 |---|---|
 | `parts.tsx` Response (text) | `text` (live) |
-| `tool-call.tsx` + `json-view.tsx` + `approval-card.tsx` | `tool-call`/`tool-result` + `approval-request`/`approval-resolved` (live) |
-| `tool-call.tsx` `<ToolRun>` via `timeline-groups.ts` | groups consecutive Tool rows into one block, folding a long settled run; emits no events of its own |
+| `tool-inspector.tsx` + `json-view.tsx` + `approval-card.tsx` | `tool-call`/`tool-result` + `approval-request`/`approval-resolved` (live) |
+| `tool-trace.tsx` `<ToolTrace>` via `timeline-groups.ts` | groups consecutive Tool rows into one `tool-run` node and draws it — live and sealed alike; emits no events of its own |
 | `parts.tsx` sources | `sources` (live) and restored conversations via `lib/chat/hydrate.ts` |
 | `parts.tsx` reasoning / plan / task / agent-handoff / surface (`<SurfaceFrame>`) | **contract-only** — typed + rendered now, light up when the backend emits. No participant-audience event in `RUN_EVENT_TYPES` produces them today; `/design-guide` tags these specimens `contract-only` so they are not mistaken for shipped behaviour. |
 | `model-selector.tsx` | sets POST `model` to an Effort Preset id — Auto/Fast/Balanced/Thorough in a portalled dropdown with signal-bar intensity icons. Auto is visible as the default path: the system balances effort, latency, and cost unless the participant deliberately overrides it. Fast, Balanced, and Thorough explain the tradeoff directly; the picker does not list provider model names because `GET /api/v1/llm-config` exposes legacy provider chains, not a per-preset display contract. |
 | `autonomy-control.tsx` | sets POST `autonomy`; `approval-required` arms the live tool-approval gate |
 
-## Tool calls (`tool-call.tsx`, `json-view.tsx`, `tool-summary.ts`)
+## Tool calls (`tool-trace.tsx`, `tool-inspector.tsx`, `json-view.tsx`, `tool-summary.ts`)
 
-A Tool row is the transcript's execution record, so it has to answer four questions on one line:
-which kind of Tool ran, what it did, how long it took, and how it ended.
+**A run of Tool calls has one presentation: the Trace.** `ToolTrace` draws it — a rail, no border,
+a present-tense header while the work is live, a `Ran N tools` header once it is over. It replaced
+a bordered record that said the same things inside a box, which made every reply that touched a
+Tool open with a slab of chrome above the answer the reader actually asked for.
 
-- **Collapsed:** a tier-tinted glyph (family chosen from the Tool's name by `toolFamily`), a human
-  summary in verb-object form from `describeToolCall`, the Tool name in mono, a duration, and a
-  status glyph. A `mutating` Tool carries a labelled write marker. A running row shows an
-  indeterminate rail (`.run-rail-active`) rather than a decorative pulsing dot, because the motion
-  reports live state.
-- **Expanded:** separate **Input** and **Output** panes, each with its own copy control. The earlier
-  row printed the same JSON twice and left the reader to guess which was which.
-- **Metadata strip:** tier, agent, `callId`, and `argsDigest`, all copyable and in mono.
+There is no bordered record left, in any state. An **approval** is the one thing the trace does
+not hide: `ApprovalCard` renders as a sibling *between* the steps, always visible, and its run is
+never `foldable`. A question the reader has to click to find is a question they will miss.
 
-An attached approval renders outside the collapse, because it needs the reader to act.
+It is a step on the rail, not a card — no border, no fill. In a surface where nothing else is
+filled, the primary `Approve` button is the loudest thing on screen without any help. Once the
+decision lands the card collapses to one settled line (`Approved` / `Denied` / `Expired without a
+decision`); a denial is toned `run-blocked`, because it is a decision and not a fault.
+
+A step has to answer four questions on one line: which Tool ran, what it did, how long it took, and
+how it ended.
+
+- **Collapsed:** a status glyph, a human summary in verb-object form from `describeToolCall`, the
+  Tool name in a mono chip, and — for a `mutating` Tool — a labelled write marker, because write
+  capability is a standing property of the Tool and should not hide behind a disclosure.
+- **Expanded:** the one-line facts (error code, result hint, duration) and then `ToolInspector` —
+  separate **Input** and **Output** panes with their own copy controls, plus the metadata strip
+  (tier, agent, `callId`, `argsDigest`). The earlier row printed the same JSON twice and left the
+  reader to guess which was which.
+- A step with nothing to report stays silent and non-expandable rather than offering a chevron onto
+  an empty panel.
+
+### The rail is the vocabulary for all narration, not just Tools
+
+`parts.tsx` renders plans, single tasks, cited sources, agent handoffs and guardrail refusals in
+the same vocabulary: a glyph, a line of text, no border, no fill, no radius. Sources are rows
+(`TraceSource`), never a grid of cards — a citation is a footnote, and a footnote that outweighs
+its sentence is a design error.
+
+A **guardrail** is the sharpest case. Boxing a refusal would make it outrank the approval ask,
+which is the most important interruption in the product and wears no box at all. So it earns its
+weight from tone (`run-blocked`) and a `font-medium` "Blocked", nothing more.
+
+The one exception is a **verbatim payload** inside a disclosure the reader opened on purpose
+(`ToolInspector`, `json-view`): that block is evidence, not narration, and its border says "this is
+quoted, not written". `parts.test.tsx` locks the rule — every narration part is asserted to carry
+no `border-run-border` and no bordered radius.
 
 ### Grouping a run (`timeline-groups.ts`)
 
 A turn that ran nine lookups should read as one block, not nine free-floating cards.
-`groupTimelineParts` gathers **consecutive** Tool rows into a single `tool-run` node, which
-`ToolRun` draws as one bordered container with `divide-y` rows. Grouping is unconditional: a run is
-always one block, so the transcript never becomes a stack of identical boxes.
+`groupTimelineParts` gathers **consecutive** Tool rows into a single `tool-run` node. Grouping is
+unconditional: a run is always one node, so the transcript never becomes a stack of identical
+blocks.
 
-Folding is the separate decision. A run collapses to one `Ran N tools` line only when it is
-`foldable`: at least `MIN_CLUSTER_SIZE` (3) members, and every member finished, successful, and
-unattended. Anything that still wants attention keeps the whole run open:
+Folding is the separate decision, and the Trace takes it from the same `foldable` flag the record
+used (`keepOpen={!foldable}`). A run collapses to one `Ran N tools` line when it has at least
+`MIN_CLUSTER_SIZE` (3) members, every member has finished, and none is holding an approval:
 
 | Never folded | Why |
 |---|---|
 | still running | it is happening now |
-| awaiting an approval | it is an ask, not a record |
-| failed | the error is the evidence |
+| awaiting an approval | it is an ask, not a record, and an ask hidden behind a click strands the reader |
 | the trailing part while streaming | folding the live edge makes a turn look finished before it is |
+| fewer than three steps | collapsing two costs a click and saves nothing |
 
-Below three rows nothing folds — collapsing two costs a click and saves nothing. A failure does not
-split the run; it keeps the run open, so `ok ok ok · error` renders as one block with four visible
-rows. The folded line's green check is only ever as strong as the rows it hides: `isFoldable`
-mirrors the row's own `runStateOf`, so a call that would show a check standalone is the only kind
-that can be folded under one.
+**A failure folds, but it is never silent.** The header reads `Ran 4 tools · 1 failed` and swaps its
+glyph for an error-toned `AlertTriangle`, so folding costs the reader a click and never the fact.
+The count is the whole licence for folding one: without it a green `Ran 4 tools` over a failure
+would be a lie. Open the run and the failed step is already expanded onto its error code, because
+`TraceStep` holds an `error` step open on its own.
 
-Rows hidden by `isHiddenToolPart` (`cite_sources`, successful presentation Tools) are dropped before
+That count is why it is a *string* rather than a tinted fragment. Splitting it into two nodes made
+the accessible name come out `Ran 4 tools· 1 failed`, since `dom-accessibility-api` trims each
+child's contribution before joining. Tone belongs on the glyph, not inside the sentence.
+
+A failure does not split the run; it stays one Trace. The folded line's check is only ever as strong
+as the steps it hides: `isFoldable` refuses anything unfinished or awaiting a decision, so the
+header can always describe what is underneath it.
+
+Rows hidden by `isHiddenToolPart` (`cite_sources`, **all** presentation Tools) are dropped before
 grouping, so they cannot split a run that should read as one.
+
+A live transcript and a restored one can group the same Turn differently, and that is expected. A
+persisted reply stores its text as one string and its calls as a flat `metadata.toolCalls` with no
+positions, so `hydrate.ts` can only lay the run out as all tools then all text. A Turn that live
+read as `Ran 3 tools` → text → two more calls comes back as one five-row block.
+
+### Presentation Tools never draw a step
+
+`present`, `update_presentation` and `request_input` are how the assistant *draws the answer*.
+Naming them as steps tells the reader the assistant called a tool to do the one thing they can
+already see it doing, and a failure among them is a rendering fault, not work the reader can act
+on. `isPresentationToolPart` hides them in every outcome — success, failure, in flight.
+
+While one is in flight the grouping pass emits a `surface-building` node instead, and the transcript
+renders a `LoadingState` labelled `Rendering`. That is the honest report: something is being drawn,
+and it is not a step in the reader's errand.
+
+### Narrating a live run (`tool-trace.tsx`)
+
+The unit of work is **the Turn, not the call**. Gating narration on a call being mid-flight does not
+work here: a platform Tool returns in ~20ms, shorter than one frame, and the reducer applies
+`tool-call` and `tool-result` in the same synchronous batch, so `running` frequently never paints.
+Between calls the model round-trip takes seconds during which every part is `done`. Narrating only
+those windows handed the reader a finished-looking column while the Turn was visibly still working.
+
+`describeToolCallActive` in `tool-summary.ts` supplies the present-tense label by swapping the
+leading verb through a closed map. It returns `undefined` for any word this module did not write —
+a server-supplied summary is never conjugated — and the step falls back to its past-tense label.
+
+`transcript.tsx` no longer chooses a presentation. Every `tool-run` node is a `ToolTrace` — live,
+sealed, failed, or holding a decision.
+
+`pending` marks the run as the **live edge** — the last node in the message, with nothing after it
+yet. It decides two things:
+
+| `pending` | The run reads as | Why |
+|---|---|---|
+| `true`, a call in flight | header names that call, its step expanded | the work has a name |
+| `true`, nothing in flight | a trailing `Thinking` step under the finished ones | the Turn is still working; a column of ticks would read as done |
+| `false` | folded to `Ran N tools`, if `foldable` | something followed it, so the work it describes is over |
+
+The trailing `Thinking` step is the answer to the gap this surface used to have: a platform Tool
+returns in ~20ms, so between calls the reader saw only finished ticks for seconds and the next
+result appeared already ticked.
 
 ### What a participant may see
 
@@ -199,3 +280,16 @@ Set the composer mode to **Approval** → a mutating tool suspends server-side a
 Component tests fold synthetic `ChatEvent`s through the **real reducer** (no network); see
 `transcript.test.tsx`, `composer.test.tsx`, `approval-card.test.tsx`. The live end-to-end round-trip is
 covered in `apps/api/src/chat/routes.test.ts`.
+
+## A run folds at two calls
+
+`MIN_CLUSTER_SIZE` in `timeline-groups.ts` is **2**. The boundary is where the fold header starts
+saying more than the rows it replaces: `Ran 2 tools` is a summary; `Ran 1 tool` is strictly less
+information than the one row it would hide. `timeline-groups.test.ts` asserts both sides with
+literals — the older tests derive their sizes from the constant and so pass at any value.
+
+## A restored reply can be text-free
+
+A Turn that only ran Tools, or that stopped to ask a question, persists with `content: ""`; the
+Message exists to carry `metadata.toolCalls` and its Surface link. `assistantParts` in
+`app/lib/chat/hydrate.ts` drops empty text rather than emitting a blank paragraph above the run.

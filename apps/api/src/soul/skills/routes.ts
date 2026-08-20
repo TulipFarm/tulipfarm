@@ -10,10 +10,12 @@ import {
   LlmNotConfiguredError,
   SchemaRegistry,
   type SkillDefinition,
+  unstorableArtifactPaths,
   validateSkill,
 } from "@tulipfarm/schema";
 import {
   ALLOWED_SOURCE_HINT,
+  artifactWriteTarget,
   type BundledSkill,
   cloneToTemp as cloneSourceToTemp,
   convertLegacySkill,
@@ -127,7 +129,7 @@ async function skillInstallChanges(root: string, skill: DiscoveredSkill): Promis
   const changes: SoulWrite[] = [];
   const written = new Set<string>();
   const put = (path: string, content: string): void => {
-    changes.push({ op: "put", target: { kind: "Skill", slug: skill.name, companion: path }, content });
+    changes.push({ op: "put", target: artifactWriteTarget("Skill", skill.name, path), content });
     written.add(path);
   };
   for (const file of skill.files) if (file.symlinkTarget === undefined) put(file.path, file.content);
@@ -138,8 +140,7 @@ async function skillInstallChanges(root: string, skill: DiscoveredSkill): Promis
   }
   try {
     for (const file of await collectSkillFiles(join(root, "skills", skill.name))) {
-      if (written.has(file.path)) continue;
-      changes.push({ op: "delete", target: file.path === "skill.yaml" ? { kind: "Skill", slug: skill.name } : { kind: "Skill", slug: skill.name, companion: file.path } });
+      if (!written.has(file.path)) changes.push({ op: "delete", target: artifactWriteTarget("Skill", skill.name, file.path) });
     }
   } catch {
     return changes;
@@ -323,6 +324,7 @@ async function loadMarketplace(gitSync: GitSyncService, soulLoader: SoulLoader, 
         const status = installStatus(skill, lock, soulLoader, bundledSkills, disabledBundledSkills);
         return {
           name: skill.name,
+          skillPath: skill.skillPath,
           skillId: asString(meta?.skillId),
           description: skill.description ?? asString(meta?.description),
           category: skill.category ?? asString(meta?.category),
@@ -469,7 +471,7 @@ export function registerSkillRoutes(app: FastifyInstance, soulLoader: SoulLoader
       const scanId = randomUUID();
       pruneScans(Date.now());
       scans.set(scanId, { source, ref: clone.ref, skills: discovered, audited: new Set(), expires: Date.now() + SCAN_TTL_MS });
-      return { scanId, skills: discovered.map((skill) => ({ name: skill.name, description: skill.description, ...installStatus(skill, lock, soulLoader, bundledSkills, disabledBundledSkills) })) };
+      return { scanId, skills: discovered.map((skill) => ({ name: skill.name, skillPath: skill.skillPath, description: skill.description, ...installStatus(skill, lock, soulLoader, bundledSkills, disabledBundledSkills) })) };
     } catch (error) {
       return reply.code(400).send({ error: `scan failed: ${error instanceof Error ? error.message : String(error)}` });
     } finally {
@@ -485,15 +487,15 @@ export function registerSkillRoutes(app: FastifyInstance, soulLoader: SoulLoader
       response: { 200: SkillAuditResponseSchema, 401: ErrorSchema, 404: ErrorSchema, 422: ErrorSchema, 502: ErrorSchema },
     },
   }, async (req, reply) => {
-    const { scanId, name } = req.body as { scanId: string; name: string };
+    const { scanId, name, skillPath } = req.body as { scanId: string; name: string; skillPath?: string };
     const entry = scans.get(scanId);
-    const skill = entry?.skills.find((scannedSkill) => scannedSkill.name === name);
+    const skill = entry?.skills.find((scannedSkill) => (skillPath === undefined ? scannedSkill.name === name : scannedSkill.skillPath === skillPath));
     if (!entry || !skill) return reply.code(404).send({ error: "scanned skill not found (scan may have expired)" });
     const { body } = parseFrontmatter(skill.content);
     const deterministicScan = { ...scanSkill(skill.files), trustLevel: skillTrustLevel(entry.source) };
     try {
       const report = await buildAudit(llmService.effortModel("balanced"), { name: skill.name, description: skill.description, body }, deterministicScan);
-      entry.audited.add(name);
+      entry.audited.add(skill.skillPath);
       return { report };
     } catch (error) {
       if (error instanceof LlmNotConfiguredError) {
@@ -511,19 +513,29 @@ export function registerSkillRoutes(app: FastifyInstance, soulLoader: SoulLoader
       response: { 200: SkillInstallResponseSchema, 400: ErrorSchema, 401: ErrorSchema, 404: ErrorSchema, 409: ErrorSchema, 422: ErrorSchema, 500: ErrorSchema },
     },
   }, async (req, reply) => {
-    const { scanId, names } = req.body as { scanId: string; names: string[] };
+    const { scanId, names, paths } = req.body as { scanId: string; names?: string[]; paths?: string[] };
     const entry = scans.get(scanId);
     if (!entry) return reply.code(404).send({ error: "scan not found (it may have expired)" });
-    const unique = [...new Set(names)];
-    const chosen = unique.map((name) => entry.skills.find((skill) => skill.name === name));
-    const missing = unique.filter((_, index) => !chosen[index]);
+    // `paths` names a scanned row exactly; `names` is the legacy selection and cannot tell two same-named packages apart, so it stays ambiguous by construction.
+    const wanted = paths !== undefined
+      ? [...new Set(paths)].map((path) => ({ key: path, matches: entry.skills.filter((skill) => skill.skillPath === path) }))
+      : [...new Set(names ?? [])].map((name) => ({ key: name, matches: entry.skills.filter((skill) => skill.name === name) }));
+    if (wanted.length === 0) return reply.code(400).send({ error: "select at least one skill to install" });
+    const missing = wanted.filter((want) => want.matches.length === 0).map((want) => want.key);
     if (missing.length > 0) return reply.code(400).send({ error: `not in scan: ${missing.join(", ")}` });
-    const unaudited = unique.filter((name) => !entry.audited.has(name));
-    if (unaudited.length > 0) return reply.code(409).send({ error: `audit required before install: ${unaudited.join(", ")}` });
-    for (const skill of chosen as DiscoveredSkill[]) {
+    const chosen = wanted.flatMap((want) => (want.matches.length === 1 ? want.matches : []));
+    // A Skill name is its soul directory, so two chosen Skills sharing one name cannot both be installed. Refuse rather than install whichever the scan listed first: the operator reviewed two packages and would be given one.
+    const collisions = [...new Set(chosen.map((skill) => skill.name))].map((name) => chosen.filter((skill) => skill.name === name)).filter((group) => group.length > 1);
+    const ambiguous = [...wanted.filter((want) => want.matches.length > 1).map((want) => want.matches), ...collisions];
+    if (ambiguous.length > 0) return reply.code(400).send({ error: `this source defines more than one skill with the same name, so the selection is ambiguous: ${ambiguous.map((matches) => `${matches[0].name} (${matches.map((skill) => skill.skillPath).join(", ")})`).join("; ")}` });
+    const unaudited = chosen.filter((skill) => !entry.audited.has(skill.skillPath));
+    if (unaudited.length > 0) return reply.code(409).send({ error: `audit required before install: ${unaudited.map((skill) => skill.name).join(", ")}` });
+    for (const skill of chosen) {
       const { frontmatter, body } = parseFrontmatter(skill.content);
       const validation = validateSkill({ name: skill.name, frontmatter, body, content: skill.content });
       if (!validation.valid) return reply.code(400).send({ error: `invalid Skill "${skill.name}": ${validation.error}` });
+      const unstorable = unstorableArtifactPaths("Skill", skill.name, skill.files.filter((file) => file.symlinkTarget === undefined).map((file) => file.path));
+      if (unstorable.length > 0) return reply.code(400).send({ error: `Skill "${skill.name}" contains files the soul cannot store: ${unstorable.join(", ")}` });
       const blockers = scanSkill(skill.files).findings.filter((finding) => STRUCTURAL_INSTALL_BLOCKERS.has(finding.patternId));
       if (blockers.length > 0) {
         return reply.code(400).send({ error: `Skill "${skill.name}" contains unsupported package files: ${[...new Set(blockers.map((finding) => finding.patternId))].join(", ")}` });
@@ -533,12 +545,12 @@ export function registerSkillRoutes(app: FastifyInstance, soulLoader: SoulLoader
     }
     const installed: string[] = [];
     const changes: SoulWrite[] = [];
-    for (const skill of chosen as DiscoveredSkill[]) {
+    for (const skill of chosen) {
       changes.push(...(await skillInstallChanges(gitSync.path, skill)));
       installed.push(skill.name);
     }
     const lock = await readLock(gitSync.path);
-    for (const skill of chosen as DiscoveredSkill[]) {
+    for (const skill of chosen) {
       lock.skills[skill.name] = { sourceUrl: stripUrlCredentials(entry.source), sourceType: sourceType(entry.source), skillPath: skill.skillPath, ref: entry.ref, hash: skillDirectoryHash(skill.files) };
     }
     changes.push({ op: "put", target: { kind: "SkillsLock" }, content: `${JSON.stringify(lock, null, 2)}\n` });

@@ -1,4 +1,10 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import {
+  FILE_KNOWLEDGE_STATEMENTS,
+  FILE_ORIGIN_STATEMENTS,
+  FILE_SHARE_STATEMENTS,
+  FILE_STORAGE_STATEMENTS,
+} from "@tulipfarm/files";
 import { MEMORY_DOCUMENT_STORAGE_STATEMENTS } from "@tulipfarm/memory";
 import { INVOCATION_STORAGE_STATEMENTS } from "@tulipfarm/run-kernel";
 import { MEMORY_SECTION_HEADINGS, MEMORY_SECTION_KEYS } from "@tulipfarm/schema";
@@ -769,13 +775,11 @@ async function seedAuthorizationBootstrap(q: Queryable): Promise<void> {
       ON users (setup_bootstrap) WHERE setup_bootstrap AND role = 'admin'`);
   }
 
+  // Kept in step with `DEPLOYMENT_ROLES`: the boot sync rewrites both rows anyway, but a seed that
+  // disagrees with the catalog is how `owner` came to grant nothing at all (#408).
   await seedBootstrapRole(q, "owner", [
-    { action: "*", resourceType: "authz.role", effect: "allow" },
-    { action: "*", resourceType: "authz.role", domain: "*", effect: "allow" },
-    { action: "*", resourceType: "authz.assignment", effect: "allow" },
-    { action: "*", resourceType: "authz.assignment", domain: "*", effect: "allow" },
-    { action: "*", resourceType: "authz.relation", effect: "allow" },
-    { action: "*", resourceType: "authz.relation", domain: "*", effect: "allow" },
+    { action: "*", resourceType: "*", effect: "allow" },
+    { action: "*", resourceType: "*", domain: "*", effect: "allow" },
   ]);
   await seedBootstrapRole(q, "admin", [
     { action: "*", resourceType: "*", effect: "allow" },
@@ -2152,5 +2156,25 @@ export const PG_MIGRATIONS: PgMigration[] = [
            EXECUTE FUNCTION knowledge_graph_prune_deleted_chunks();
        END $mig73$`,
     ]),
+  },
+  {
+    version: 74,
+    description: "files: business-scoped, Principal-owned uploads behind Chat attachments",
+    up: applyStatements(FILE_STORAGE_STATEMENTS),
+  },
+  {
+    version: 75,
+    description: "files: origin and the Chat a File was first sent in, for the Files library",
+    up: applyStatements(FILE_ORIGIN_STATEMENTS),
+  },
+  {
+    version: 76,
+    description: "files: explicit share grants, so a File reaches a second reader by decision only",
+    up: applyStatements(FILE_SHARE_STATEMENTS),
+  },
+  {
+    version: 77,
+    description: "files: the durable Knowledge opt-in a queued index job re-reads before it writes",
+    up: applyStatements(FILE_KNOWLEDGE_STATEMENTS),
   },
 ];

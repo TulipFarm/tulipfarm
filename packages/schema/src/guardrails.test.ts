@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { TulipFarmValidationError } from "./error";
-import { type GuardrailsConfig, validateGuardrailsConfig } from "./guardrails";
+import {
+  GUARDRAIL_STAGE_BY_GUARD,
+  type GuardrailsConfig,
+  guardrailStageFor,
+  validateGuardrailsConfig,
+} from "./guardrails";
 
 describe("validateGuardrailsConfig", () => {
   it("accepts a valid full config across all three stages", () => {
@@ -41,5 +46,25 @@ describe("validateGuardrailsConfig", () => {
         unexpected: true,
       })
     ).toThrow(TulipFarmValidationError);
+  });
+});
+
+describe("guardrailStageFor", () => {
+  it("names the only stage each guard validates in", () => {
+    for (const [guard, stage] of Object.entries(GUARDRAIL_STAGE_BY_GUARD)) {
+      const sample =
+        guard === "content_filter"
+          ? { guard, patterns: ["ssn"] }
+          : guard === "tool_blocklist"
+            ? { guard, block: ["record_delete"] }
+            : { guard };
+      expect(guardrailStageFor(guard)).toBe(stage);
+      expect(validateGuardrailsConfig({ [stage]: [sample] })).toEqual({ [stage]: [sample] });
+    }
+  });
+
+  it("returns undefined for a guard no stage union admits", () => {
+    expect(guardrailStageFor("ai_disclosure")).toBeUndefined();
+    expect(guardrailStageFor("constructor")).toBeUndefined();
   });
 });

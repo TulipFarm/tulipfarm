@@ -1,0 +1,46 @@
+{
+  "id": "l3-a-generated-file-reaches-the-agents-team",
+  "tier": "l3",
+  "agent": "support",
+  "agentRoles": ["support-desk"],
+  "context": {
+    "customInstructions": "When someone asks for a report or a summary they can keep, produce a document rather than a long chat message.",
+    "governancePages": []
+  },
+  "input": [
+    {
+      "role": "user",
+      "content": "Write up the delivery delays as a PDF the rest of the desk can read. Two hundred and forty orders were late last week, all of them from the Rotterdam depot."
+    }
+  ],
+  "platformTools": ["file_create"],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "c1",
+          "name": "file_create",
+          "arguments": {
+            "filename": "delivery-delays",
+            "format": "pdf",
+            "title": "Delivery Delays",
+            "content": "# Delivery Delays\n\nTwo hundred and forty orders were late last week. All of them shipped from the Rotterdam depot."
+          }
+        }
+      ]
+    },
+    {
+      "kind": "text",
+      "text": "I have written it up as delivery-delays.pdf — it covers the two hundred and forty late orders and the Rotterdam depot."
+    }
+  ],
+  "expect": [
+    { "kind": "tool_called", "name": "file_create" },
+    { "kind": "generated_file_readable_by", "grantee": "user:eval" },
+    { "kind": "generated_file_readable_by", "grantee": "role:support-desk" },
+    { "kind": "generated_file_not_readable_by", "grantee": "role:finance-desk" },
+    { "kind": "run_status", "status": "succeeded" },
+    { "kind": "turn_status", "status": "succeeded" }
+  ]
+}

@@ -1,5 +1,73 @@
 # Changelog
 
+## [0.12.0](https://github.com/TulipFarm/tulipfarm/compare/v0.11.0...v0.12.0) (2026-08-20)
+
+### Features
+
+* **files:** add file storage, uploads and multimodal chat ([#490](https://github.com/TulipFarm/tulipfarm/issues/490)) ([07b97f5](https://github.com/TulipFarm/tulipfarm/commit/07b97f50c12b56cbeda1619aa10b2d55f89b4289))
+* **guardrails:** add a guardrail authoring surface ([#478](https://github.com/TulipFarm/tulipfarm/issues/478)) ([8e8afe0](https://github.com/TulipFarm/tulipfarm/commit/8e8afe0a6332f5781bfdf521fa5ad87a0d2797d9)), closes [#432](https://github.com/TulipFarm/tulipfarm/issues/432)
+* **knowledge:** add graph retrieval and close Space ACL holes ([#459](https://github.com/TulipFarm/tulipfarm/issues/459)) ([3ca937a](https://github.com/TulipFarm/tulipfarm/commit/3ca937a6d24a663c053fa02b598f25f075b1363e))
+* **system:** manage public integration origins ([#448](https://github.com/TulipFarm/tulipfarm/issues/448)) ([4a33682](https://github.com/TulipFarm/tulipfarm/commit/4a336822be90844de1dd078cc7d70f508edcc038))
+
+### Bug Fixes
+
+* **admin:** stop reporting a working llm provider as down ([#474](https://github.com/TulipFarm/tulipfarm/issues/474)) ([6c38824](https://github.com/TulipFarm/tulipfarm/commit/6c38824dadc9bbd380d3c69f4fbaf540705c4c82))
+* **agent:** enforce Agent capability restrictions at dispatch ([#483](https://github.com/TulipFarm/tulipfarm/issues/483)) ([06e4158](https://github.com/TulipFarm/tulipfarm/commit/06e4158628dd38188741082be8b311e3e5c1ef30)), closes [#461](https://github.com/TulipFarm/tulipfarm/issues/461) [#462](https://github.com/TulipFarm/tulipfarm/issues/462)
+* **api:** filter approval lists by decider authority ([#426](https://github.com/TulipFarm/tulipfarm/issues/426)) ([54c71a8](https://github.com/TulipFarm/tulipfarm/commit/54c71a82493fefff266cf126881638894504b393))
+* **api:** treat malformed record ids as missing ([#449](https://github.com/TulipFarm/tulipfarm/issues/449)) ([e61425e](https://github.com/TulipFarm/tulipfarm/commit/e61425eff56d2a308673f7bbfcfba72e6af6c318))
+* **auth:** owner access level admin ([#497](https://github.com/TulipFarm/tulipfarm/issues/497)) ([2cbf635](https://github.com/TulipFarm/tulipfarm/commit/2cbf6353a5d8fcaa936b2afed4711078b2c3d3c3)), closes [#444](https://github.com/TulipFarm/tulipfarm/issues/444)
+* **authz:** enforce the Agent autonomy ceiling on every dispatch path ([#473](https://github.com/TulipFarm/tulipfarm/issues/473)) ([97d9bc8](https://github.com/TulipFarm/tulipfarm/commit/97d9bc831759cb42ad7cd42077dce79ed4ed85ac)), closes [#424](https://github.com/TulipFarm/tulipfarm/issues/424) [#431](https://github.com/TulipFarm/tulipfarm/issues/431)
+* **authz:** make the Owner access level confer admin rights ([#471](https://github.com/TulipFarm/tulipfarm/issues/471)) ([45cae5a](https://github.com/TulipFarm/tulipfarm/commit/45cae5afcc3036e81425f99c9e7050ec8ac97e84))
+* **chat:** never end a Turn without announcing it ([#485](https://github.com/TulipFarm/tulipfarm/issues/485)) ([a030dba](https://github.com/TulipFarm/tulipfarm/commit/a030dba2218edbc5516c06f645657086fcb7daa0)), closes [#427](https://github.com/TulipFarm/tulipfarm/issues/427)
+* **chat:** pause turns for requested input ([#443](https://github.com/TulipFarm/tulipfarm/issues/443)) ([8dfd22c](https://github.com/TulipFarm/tulipfarm/commit/8dfd22cecc5902fb579296a628a9640538ff1b83))
+* **chat:** run mentions as resolved agents ([#425](https://github.com/TulipFarm/tulipfarm/issues/425)) ([c258d4b](https://github.com/TulipFarm/tulipfarm/commit/c258d4b6f9e4fcf379de9cf5c96601bd93b722c0))
+* **chat:** show knowledge mention states ([#450](https://github.com/TulipFarm/tulipfarm/issues/450)) ([b8c3788](https://github.com/TulipFarm/tulipfarm/commit/b8c3788c687624d0d41020a57395efb83cc2322f))
+* **chat:** stop a Turn at request_input whatever it answers ([#500](https://github.com/TulipFarm/tulipfarm/issues/500)) ([f1a3820](https://github.com/TulipFarm/tulipfarm/commit/f1a38208f47b54ab3239188534c57f7d6f335033)), closes [#405](https://github.com/TulipFarm/tulipfarm/issues/405)
+* **deps:** restore the undici 7.29.0 lockfile entry ([#484](https://github.com/TulipFarm/tulipfarm/issues/484)) ([df116ac](https://github.com/TulipFarm/tulipfarm/commit/df116ac90ded70c50c92d8a19d001bd3e1f22b85)), references [#479](https://github.com/TulipFarm/tulipfarm/issues/479) [#477](https://github.com/TulipFarm/tulipfarm/issues/477)
+* **eval:** expose file_read/file_list as shipped platform Tools ([#504](https://github.com/TulipFarm/tulipfarm/issues/504)) ([83411c9](https://github.com/TulipFarm/tulipfarm/commit/83411c9e7968b1f119d39c3d304b2f5f584f7a8e))
+* **llm:** report real provider reachability in the llm health check ([#502](https://github.com/TulipFarm/tulipfarm/issues/502)) ([031a140](https://github.com/TulipFarm/tulipfarm/commit/031a1407b2eed3ab73ae5a44abec853f849e2a1b))
+* **models:** reject blank fallback provider and model ids ([#475](https://github.com/TulipFarm/tulipfarm/issues/475)) ([e36cf82](https://github.com/TulipFarm/tulipfarm/commit/e36cf8281d815f12cd5b7a85746f15e9967efd78))
+* **models:** require fallback model ids ([#430](https://github.com/TulipFarm/tulipfarm/issues/430)) ([7f59056](https://github.com/TulipFarm/tulipfarm/commit/7f59056ebb1060d8cb996f63a2194f39062b55a1))
+* **resources:** enforce required fields from the resource type wizard ([#472](https://github.com/TulipFarm/tulipfarm/issues/472)) ([53a9a69](https://github.com/TulipFarm/tulipfarm/commit/53a9a69ba101639cd602ae4a0218cd8d75a178c0)), closes [#456](https://github.com/TulipFarm/tulipfarm/issues/456) [#457](https://github.com/TulipFarm/tulipfarm/issues/457)
+* **routines:** activate a publication before reporting the write live ([#503](https://github.com/TulipFarm/tulipfarm/issues/503)) ([88b7acd](https://github.com/TulipFarm/tulipfarm/commit/88b7acd4a59831fd9cffe2b6b79ec71a9dc243d3))
+* **routines:** forge canonical published triggers ([#441](https://github.com/TulipFarm/tulipfarm/issues/441)) ([c5fcd4a](https://github.com/TulipFarm/tulipfarm/commit/c5fcd4a1956209fd8947b2b3f329c709b842f33c))
+* **runtime:** distinguish skill categories ([#451](https://github.com/TulipFarm/tulipfarm/issues/451)) ([1323d06](https://github.com/TulipFarm/tulipfarm/commit/1323d069de4d00ab92557b5addff2cffb9638072))
+* **sandbox:** drain hook workers before termination ([#452](https://github.com/TulipFarm/tulipfarm/issues/452)) ([006d772](https://github.com/TulipFarm/tulipfarm/commit/006d772748f4ad2256c6ace951ad4a0a8dcdafb1))
+* **skill:** companion file install ([#494](https://github.com/TulipFarm/tulipfarm/issues/494)) ([5ebf3d8](https://github.com/TulipFarm/tulipfarm/commit/5ebf3d833ab921e3e6756599c8f7101e1e0c9553)), references [#483](https://github.com/TulipFarm/tulipfarm/issues/483)
+* **skills:** identify scanned Skills by path through install ([#496](https://github.com/TulipFarm/tulipfarm/issues/496)) ([3730203](https://github.com/TulipFarm/tulipfarm/commit/3730203de3f8b4c1c1adeed86b3c7ca0b7f97f0b)), closes [#444](https://github.com/TulipFarm/tulipfarm/issues/444)
+* **skills:** install Skill packages with companion files ([#464](https://github.com/TulipFarm/tulipfarm/issues/464)) ([11b6ab4](https://github.com/TulipFarm/tulipfarm/commit/11b6ab4c8c7f759192c65953734abade2bc7fa07))
+* **soul:** publish forged Routines and report unpublished writes ([#465](https://github.com/TulipFarm/tulipfarm/issues/465)) ([78ed5dc](https://github.com/TulipFarm/tulipfarm/commit/78ed5dc84c843ba5be2bfe7d96b00253b6dc22ce))
+* **tools:** cancel timed-out effect dispatches ([#428](https://github.com/TulipFarm/tulipfarm/issues/428)) ([3ebf95e](https://github.com/TulipFarm/tulipfarm/commit/3ebf95e1db14c699a51069a0d5eef8b16962235b))
+* **tools:** cancel timed-out Tool calls instead of racing them ([#493](https://github.com/TulipFarm/tulipfarm/issues/493)) ([0ecf451](https://github.com/TulipFarm/tulipfarm/commit/0ecf451a745191a32cfb938e74c7ef49997272b0))
+* **web:** expose degraded health details ([#442](https://github.com/TulipFarm/tulipfarm/issues/442)) ([cb17a62](https://github.com/TulipFarm/tulipfarm/commit/cb17a62bfacd20c5137dd8140d35e2784a3aa121))
+
+### Documentation
+
+* **qa:** add journey playbooks and run history to QA index ([#466](https://github.com/TulipFarm/tulipfarm/issues/466)) ([8f3f0ab](https://github.com/TulipFarm/tulipfarm/commit/8f3f0abd5a56d9c3aa92b910ed80fd0f75ecd017))
+* restructure public docs into three reader tracks ([#455](https://github.com/TulipFarm/tulipfarm/issues/455)) ([08c9367](https://github.com/TulipFarm/tulipfarm/commit/08c9367e639b7f13d38d78134cb86879195f514e))
+
+### Continuous Integration
+
+* **container:** cache the Chromium download in the installer smoke ([#487](https://github.com/TulipFarm/tulipfarm/issues/487)) ([7b6f177](https://github.com/TulipFarm/tulipfarm/commit/7b6f177dd3748f32083a022b415869f563869b63))
+
+### Maintenance
+
+* **deps-dev:** bump @testing-library/jest-dom from 6.9.1 to 7.0.1 ([#470](https://github.com/TulipFarm/tulipfarm/issues/470)) ([45a5516](https://github.com/TulipFarm/tulipfarm/commit/45a55166bf11c7c8b786dbc98fe07e1caa866a67))
+* **deps:** docs ([#491](https://github.com/TulipFarm/tulipfarm/issues/491)) ([332b79e](https://github.com/TulipFarm/tulipfarm/commit/332b79e43cbbd2785561cfb925a6066c448241d0))
+* **deps:** misc ([#495](https://github.com/TulipFarm/tulipfarm/issues/495)) ([a6e6325](https://github.com/TulipFarm/tulipfarm/commit/a6e6325849b58cfcb2647a271fd1483621defad2))
+* **deps:** refresh tiptap, ai sdk and test tooling ([#501](https://github.com/TulipFarm/tulipfarm/issues/501)) ([4b76903](https://github.com/TulipFarm/tulipfarm/commit/4b76903153b658bc4c993fd4fed324f2ca5cbce5))
+* **deps:** typescript ([#499](https://github.com/TulipFarm/tulipfarm/issues/499)) ([18472ad](https://github.com/TulipFarm/tulipfarm/commit/18472ad95013397e890dd0c6c985410a757bd069))
+* **deps:** upgrade biome, turbo, lefthook and lint-staged ([#476](https://github.com/TulipFarm/tulipfarm/issues/476)) ([f3242d6](https://github.com/TulipFarm/tulipfarm/commit/f3242d6043d1fb7d2ab3a17358a6dc4c0d0bbdb4))
+* **deps:** upgrade commitlint and conventional-changelog ([#482](https://github.com/TulipFarm/tulipfarm/issues/482)) ([7425894](https://github.com/TulipFarm/tulipfarm/commit/742589464fb1cf743775d43a6e581d2327f2a640))
+* **deps:** upgrade fastify and its plugins ([#480](https://github.com/TulipFarm/tulipfarm/issues/480)) ([a2e0f24](https://github.com/TulipFarm/tulipfarm/commit/a2e0f2415df046320555220376428790ff0dafc0))
+* **deps:** upgrade pg, pg-boss and pglite ([#481](https://github.com/TulipFarm/tulipfarm/issues/481)) ([5ece0d0](https://github.com/TulipFarm/tulipfarm/commit/5ece0d00f111fad40e7861c2e17b1a477fc8cd06))
+* **deps:** upgrade react, radix and lucide-react ([#486](https://github.com/TulipFarm/tulipfarm/issues/486)) ([1f651e8](https://github.com/TulipFarm/tulipfarm/commit/1f651e8de6e23a816b9829f09d83380960dd9117))
+* **deps:** upgrade shiki to 4.4.3 ([#489](https://github.com/TulipFarm/tulipfarm/issues/489)) ([b20e07a](https://github.com/TulipFarm/tulipfarm/commit/b20e07a0a35ccd53da6dc7fa35d9a4b463257fe1))
+* **deps:** upgrade the ai sdk group to latest ([#479](https://github.com/TulipFarm/tulipfarm/issues/479)) ([385214f](https://github.com/TulipFarm/tulipfarm/commit/385214f4dfe4aac4dd352f6a4e9890d1ee02a51b))
+* **deps:** upgrade tiptap to 3.30.1 ([#488](https://github.com/TulipFarm/tulipfarm/issues/488)) ([3f6e0fe](https://github.com/TulipFarm/tulipfarm/commit/3f6e0fe694daa84b23b4e380c7dbad55471e5852))
+* **deps:** upgrade vite, tsx and esbuild ([#492](https://github.com/TulipFarm/tulipfarm/issues/492)) ([dbbe95a](https://github.com/TulipFarm/tulipfarm/commit/dbbe95aa381fec751db080473591703be689f01e))
+* **deps:** upgrade vitest, jsdom and testing-library ([#477](https://github.com/TulipFarm/tulipfarm/issues/477)) ([4ad600a](https://github.com/TulipFarm/tulipfarm/commit/4ad600af86ff43f3a52a9bf9536bec61e65c2747))
+
 ## [0.11.0](https://github.com/TulipFarm/tulipfarm/compare/v0.10.0...v0.11.0) (2026-08-18)
 
 ### Features

@@ -263,3 +263,92 @@ describe("selectModelProfile — modality", () => {
     expect(selection.outcome).toBe("selected");
   });
 });
+
+describe("selectModelProfile — documents", () => {
+  const documentTurn: ModelRequirements = {
+    ...requirements,
+    inputModalities: ["text", "document"],
+  };
+  const reader = profile({
+    supports: {
+      tools: true,
+      structuredOutput: true,
+      contextWindowTokens: 100_000,
+      inputModalities: ["text", "image", "document"],
+    },
+  });
+
+  it("refuses a document on a model that only declares vision", () => {
+    // Reading a picture and reading a PDF are separate capabilities; a provider that accepts one
+    // routinely rejects the other, so vision must not stand in for document support.
+    const vision = profile({
+      supports: {
+        tools: true,
+        structuredOutput: true,
+        contextWindowTokens: 100_000,
+        inputModalities: ["text", "image"],
+      },
+    });
+
+    expect(selectModelProfile("primary", documentTurn, catalog(vision))).toMatchObject({
+      outcome: "denied",
+      reason: "modality_unsupported",
+    });
+  });
+
+  it("selects a profile that declares document input", () => {
+    expect(selectModelProfile("primary", documentTurn, catalog(reader)).outcome).toBe("selected");
+  });
+
+  it("drops a fallback that cannot read documents, and says which and why", () => {
+    // This is the settled answer to fallback-versus-denial: filter the chain rather than fail the
+    // turn or let it degrade. A model answering about a document it never received looks like
+    // success, which is worse than a shorter chain — and the drop is recorded so an operator
+    // asking "why did this ignore my PDF" has an answer.
+    const chained = profile({
+      supports: {
+        tools: true,
+        structuredOutput: true,
+        contextWindowTokens: 100_000,
+        inputModalities: ["text", "image", "document"],
+      },
+      fallbacks: ["local"],
+    });
+    const local = profile({ profileId: "local", fallbacks: [] });
+
+    const selection = selectModelProfile("primary", documentTurn, catalog(chained, local));
+
+    if (selection.outcome !== "selected") throw new Error("expected selection");
+    expect(selection.chain.map((entry) => entry.profileId)).toEqual(["primary"]);
+    expect(selection.rejectedFallbacks).toEqual([
+      { profileId: "local", reason: "modality_unsupported" },
+    ]);
+  });
+
+  it("keeps a document-capable fallback in the chain", () => {
+    const chained = profile({
+      supports: {
+        tools: true,
+        structuredOutput: true,
+        contextWindowTokens: 100_000,
+        inputModalities: ["text", "document"],
+      },
+      fallbacks: ["backup"],
+    });
+    const backup = profile({
+      profileId: "backup",
+      supports: {
+        tools: true,
+        structuredOutput: true,
+        contextWindowTokens: 100_000,
+        inputModalities: ["text", "document"],
+      },
+      fallbacks: [],
+    });
+
+    const selection = selectModelProfile("primary", documentTurn, catalog(chained, backup));
+
+    if (selection.outcome !== "selected") throw new Error("expected selection");
+    expect(selection.chain.map((entry) => entry.profileId)).toEqual(["primary", "backup"]);
+  });
+});

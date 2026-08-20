@@ -18,6 +18,7 @@ const CATALOG: LiteLlmCatalog = {
     mode: "chat",
     supports_function_calling: true,
     supports_vision: true,
+    supports_pdf_input: true,
     supports_prompt_caching: true,
   },
   "azure_ai/kimi-k2.5": {
@@ -113,5 +114,21 @@ describe("fetchLiteLlmCatalog", () => {
     expect(
       await fetchLiteLlmCatalog({ fetchImpl: fetchMock as unknown as typeof fetch })
     ).toBeNull();
+  });
+});
+
+describe("resolveModelSpec — document input", () => {
+  it("carries supports_pdf_input, which is what lets a PDF reach a model at all", () => {
+    // Without it every model derives a text-and-image-only modality set and every attached PDF is
+    // refused, however capable the model actually is.
+    expect(resolveModelSpec("openai", "gpt-4o", CATALOG, FETCHED).spec?.supports_pdf_input).toBe(
+      true
+    );
+  });
+
+  it("leaves it absent for a model the catalogue says nothing about, never guessing true", () => {
+    expect(
+      resolveModelSpec("azure", "kimi-k2.5", CATALOG, FETCHED).spec?.supports_pdf_input
+    ).toBeUndefined();
   });
 });
