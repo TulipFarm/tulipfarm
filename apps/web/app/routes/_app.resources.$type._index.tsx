@@ -11,6 +11,7 @@ import { ResourcePanel } from "~/components/resource-panel";
 import { SchemaTable } from "~/components/schema-table";
 import { ErrorState } from "~/components/states";
 import { Button } from "~/components/ui/button";
+import { ConfirmModal } from "~/components/ui/modal";
 import {
   ApiError,
   deleteResourceType,
@@ -59,20 +60,21 @@ export default function ResourceList() {
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [typeError, setTypeError] = useState<string | null>(null);
+  const [confirmingDeleteType, setConfirmingDeleteType] = useState(false);
+  const [deletingType, setDeletingType] = useState(false);
 
   async function onDeleteType() {
-    if (
-      !window.confirm(
-        `Delete the "${type}" resource type? Its records are kept in the database but the type is removed.`
-      )
-    )
-      return;
+    if (deletingType) return;
+    setDeletingType(true);
     setTypeError(null);
     try {
       await deleteResourceType(type);
       navigate("/resources");
     } catch (err) {
       setTypeError(err instanceof ApiError ? err.message : "failed to delete type");
+    } finally {
+      setDeletingType(false);
+      setConfirmingDeleteType(false);
     }
   }
 
@@ -132,10 +134,19 @@ export default function ResourceList() {
         <Button asChild variant="outline" size="sm">
           <Link to={`/resources/${encodeURIComponent(type)}/schema`}>Edit type</Link>
         </Button>
-        <Button variant="destructive" size="sm" onClick={onDeleteType}>
+        <Button variant="destructive" size="sm" onClick={() => setConfirmingDeleteType(true)}>
           Delete type
         </Button>
       </div>
+      <ConfirmModal
+        open={confirmingDeleteType}
+        onClose={() => setConfirmingDeleteType(false)}
+        onConfirm={() => void onDeleteType()}
+        title="Delete resource type"
+        description={`Delete the "${type}" resource type? Its records are kept in the database but the type is removed.`}
+        confirmLabel="Delete type"
+        busy={deletingType}
+      />
       {typeError ? <p className="text-destructive">error: {typeError}</p> : null}
       {schemaError ? (
         <p className="text-destructive">error: schema parse failed — {schemaError}</p>

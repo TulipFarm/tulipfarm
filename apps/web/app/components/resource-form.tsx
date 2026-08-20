@@ -1,5 +1,5 @@
 import { Link } from "@remix-run/react";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useRef, useState } from "react";
 import { LinkCombobox } from "~/components/link-combobox";
 import { Button } from "~/components/ui/button";
 import { ApiError } from "~/lib/api";
@@ -80,13 +80,17 @@ export function ResourceForm({
     )
   );
   const [jsonErrors, setJsonErrors] = useState<Record<string, string>>({});
+  // A ref, not state: the `submitting` prop only disables the button one commit after the parent
+  // reacts, so two submit events landing in the same task both pass an is-it-disabled check.
+  const inFlight = useRef(false);
 
   function set(name: string, value: unknown) {
     setValues((prev) => ({ ...prev, [name]: value }));
   }
 
-  function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    if (inFlight.current || submitting) return;
     const payload: Record<string, unknown> = {};
     const nextJsonErrors: Record<string, string> = {};
 
@@ -130,11 +134,16 @@ export function ResourceForm({
       return;
     }
     setJsonErrors({});
-    onSubmit(payload);
+    inFlight.current = true;
+    try {
+      await onSubmit(payload);
+    } finally {
+      inFlight.current = false;
+    }
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-4" noValidate>
+    <form onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-4" noValidate>
       {formError ? (
         <p className="rounded-sm border border-destructive/40 bg-destructive/5 px-3 py-2 text-destructive">
           error: {formError}
