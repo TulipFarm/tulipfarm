@@ -15,6 +15,12 @@ import { Separator } from "~/components/ui/separator";
 
 export const meta: MetaFunction = () => [{ title: "Design guide · tulipfarm" }];
 
+/**
+ * Development-only surface. The guide ships demo-only specimens and component vocabulary that has
+ * not been released yet, so a built instance must never serve it — the sidebar entry is `devOnly`
+ * and this gate makes the route itself unreachable. The 404 on staging and production is
+ * deliberate; see `docs/qa/playbooks/design-system.md`.
+ */
 export function clientLoader() {
   if (!import.meta.env.DEV) throw new Response("Not found", { status: 404 });
   return null;
