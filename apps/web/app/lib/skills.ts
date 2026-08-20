@@ -112,20 +112,36 @@ export async function scanSkills(source: string): Promise<ScanResult> {
   return apiWrite<ScanResult>("POST", "/api/v1/skills/scan", { source });
 }
 
-export async function auditSkill(scanId: string, name: string): Promise<SkillAuditReport> {
+export async function auditSkill(
+  scanId: string,
+  name: string,
+  skillPath?: string
+): Promise<SkillAuditReport> {
   const body = await apiWrite<{ report: SkillAuditReport }>("POST", "/api/v1/skills/audit", {
     scanId,
     name,
+    skillPath,
   });
   return body.report;
 }
 
-// Operator confirm step: actually install the named scanned skills into the soul repo.
+/**
+ * Operator confirm step: install the selected scanned rows into the soul repo.
+ *
+ * Rows are sent as `paths` so the server installs exactly what the operator reviewed; `names`
+ * is the fallback for a source whose scan predates `skillPath` and cannot tell two same-named
+ * packages apart.
+ */
 export async function installSkills(
   scanId: string,
-  names: string[]
+  skills: readonly { name: string; skillPath?: string }[]
 ): Promise<{ installed: string[] }> {
-  return apiWrite<{ installed: string[] }>("POST", "/api/v1/skills/install", { scanId, names });
+  const paths = skills.flatMap((skill) => (skill.skillPath ? [skill.skillPath] : []));
+  const body =
+    paths.length === skills.length
+      ? { scanId, paths }
+      : { scanId, names: skills.map((skill) => skill.name) };
+  return apiWrite<{ installed: string[] }>("POST", "/api/v1/skills/install", body);
 }
 
 export async function marketplaceSkills(): Promise<MarketplaceCatalog> {

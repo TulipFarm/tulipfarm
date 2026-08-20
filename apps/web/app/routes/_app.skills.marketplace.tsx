@@ -1,5 +1,5 @@
 import { Link, type MetaFunction, useLoaderData } from "@remix-run/react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ResourcePanel } from "~/components/resource-panel";
 import { SkillsTabs } from "~/components/skills-tabs";
 import { Button } from "~/components/ui/button";
@@ -183,11 +183,14 @@ export default function SkillsMarketplace() {
   const [error, setError] = useState<string | null>(null);
   const [installError, setInstallError] = useState<string | null>(null);
   const [installed, setInstalled] = useState<string[] | null>(null);
+  const installErrorRef = useRef<HTMLParagraphElement>(null);
 
-  // Selection is keyed by row, not by name: a source may define two skills with the same name.
+  // Selection, reports and the install payload are all keyed by row, never by name: a source may
+  // define two different skills with the same name, and merging them silently swaps one package
+  // for another between what the operator reviewed and what is written to the soul.
   const selectedSkills = (scan?.skills ?? []).filter((s) => selected.has(skillRowKey(s)));
-  const selectedNames = selectedSkills.map((s) => s.name);
-  const allAudited = selectedSkills.length > 0 && selectedSkills.every((s) => reports[s.name]);
+  const allAudited =
+    selectedSkills.length > 0 && selectedSkills.every((s) => reports[skillRowKey(s)]);
   const catalogGroups = new Map<string, MarketplaceCatalog["skills"]>();
   for (const skill of catalog?.skills ?? []) {
     const category = skill.category ?? "other";
@@ -196,6 +199,12 @@ export default function SkillsMarketplace() {
     else catalogGroups.set(category, [skill]);
   }
   const updateCount = catalog?.skills.filter((skill) => skill.updateAvailable).length ?? 0;
+
+  // The report list is long, so an error rendered beside the confirm button can still be off
+  // screen. Focus scrolls it into view and announces it at the point of failure (#444).
+  useEffect(() => {
+    if (installError) installErrorRef.current?.focus();
+  }, [installError]);
 
   // Load one or more catalog skills into the select → audit → confirm pipeline (the audit gate runs
   // unchanged). Used by the per-row Install/Update buttons and the "Review all" button.
@@ -240,19 +249,19 @@ export default function SkillsMarketplace() {
   }
 
   async function onAudit() {
-    if (!scan || selectedNames.length === 0) return;
+    if (!scan || selectedSkills.length === 0) return;
     setBusy("audit");
     setError(null);
     setInstallError(null);
     // Audit each selected skill independently so one failure does not discard the others' reports.
     const settled = await Promise.allSettled(
-      selectedNames.map((name) => auditSkill(scan.scanId, name))
+      selectedSkills.map((s) => auditSkill(scan.scanId, s.name, s.skillPath))
     );
     const next: Record<string, SkillAuditReport> = {};
     const failures: string[] = [];
     settled.forEach((result, i) => {
-      if (result.status === "fulfilled") next[selectedNames[i]] = result.value;
-      else failures.push(`${selectedNames[i]}: ${errMessage(result.reason)}`);
+      if (result.status === "fulfilled") next[skillRowKey(selectedSkills[i])] = result.value;
+      else failures.push(`${selectedSkills[i].name}: ${errMessage(result.reason)}`);
     });
     setReports(next);
     setError(failures.length > 0 ? failures.join("; ") : null);
@@ -265,7 +274,10 @@ export default function SkillsMarketplace() {
     setError(null);
     setInstallError(null);
     try {
-      const res = await installSkills(scan.scanId, selectedNames);
+      const res = await installSkills(
+        scan.scanId,
+        selectedSkills.map((s) => ({ name: s.name, skillPath: s.skillPath }))
+      );
       setInstalled(res.installed);
     } catch (e) {
       // Kept beside the confirm button as well as in the page banner: the banner sits above a long
@@ -445,11 +457,11 @@ export default function SkillsMarketplace() {
                       )}
                       <span className="ml-auto flex shrink-0 items-baseline gap-2">
                         <InstallBadge installed={s.installed} updateAvailable={s.updateAvailable} />
-                        {reports[s.name] ? (
+                        {reports[skillRowKey(s)] ? (
                           <span
-                            className={`rounded-sm border px-1.5 py-0.5 text-xs uppercase tracking-[0.15em] ${RISK_CLASS[reports[s.name].riskRating]}`}
+                            className={`rounded-sm border px-1.5 py-0.5 text-xs uppercase tracking-[0.15em] ${RISK_CLASS[reports[skillRowKey(s)].riskRating]}`}
                           >
-                            {reports[s.name].riskRating}
+                            {reports[skillRowKey(s)].riskRating}
                           </span>
                         ) : null}
                       </span>
@@ -457,15 +469,19 @@ export default function SkillsMarketplace() {
                   </li>
                 ))}
               </ul>
-              <Button
-                size="sm"
-                variant="outline"
-                className="self-start"
-                onClick={() => void onAudit()}
-                disabled={busy !== null || selectedNames.length === 0}
-              >
-                {busy === "audit" ? "Auditing…" : `Run SkillAudit (${selectedNames.length})`}
-              </Button>
+              {/* Once the selection is audited the only action left is confirm; offering both at
+                  once left the operator unable to tell which one advanced the flow (#444). */}
+              {allAudited ? null : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="self-start"
+                  onClick={() => void onAudit()}
+                  disabled={busy !== null || selectedSkills.length === 0}
+                >
+                  {busy === "audit" ? "Auditing…" : `Run SkillAudit (${selectedSkills.length})`}
+                </Button>
+              )}
             </div>
           ) : null}
 
@@ -473,7 +489,11 @@ export default function SkillsMarketplace() {
           {allAudited ? (
             <div className="flex flex-col gap-3 border-t border-border pt-4">
               {selectedSkills.map((s) => (
-                <AuditReportCard key={skillRowKey(s)} name={s.name} report={reports[s.name]} />
+                <AuditReportCard
+                  key={skillRowKey(s)}
+                  name={s.name}
+                  report={reports[skillRowKey(s)]}
+                />
               ))}
               <p className="rounded-sm border border-border bg-muted px-3 py-2 text-xs text-muted-foreground">
                 SkillAudit is <span className="text-foreground">advisory, not a guarantee</span>. A
@@ -484,8 +504,10 @@ export default function SkillsMarketplace() {
               </p>
               {installError ? (
                 <p
+                  ref={installErrorRef}
+                  tabIndex={-1}
                   role="alert"
-                  className="rounded-sm border border-destructive bg-destructive/10 px-3 py-2 text-destructive"
+                  className="rounded-sm border border-destructive bg-destructive/10 px-3 py-2 text-destructive outline-none"
                 >
                   install failed: {installError}
                 </p>
@@ -496,7 +518,7 @@ export default function SkillsMarketplace() {
                 onClick={() => void onInstall()}
                 disabled={busy !== null}
               >
-                {busy === "install" ? "Installing…" : `Confirm install (${selectedNames.length})`}
+                {busy === "install" ? "Installing…" : `Confirm install (${selectedSkills.length})`}
               </Button>
             </div>
           ) : null}

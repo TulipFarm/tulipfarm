@@ -480,9 +480,21 @@ import { describe, expect, it } from "vitest";
  * +130, the Agent capability restrictions itemised above. Four rebases now, four raises, and the
  * difference over main has been exactly 1_216 at every one of them — the branch has added no line
  * to `apps/api/src` since its own entries above were reviewed.
+ *
+ * 52_854 -> 52_867 is thirteen lines across `soul/skills/routes.ts` and `soul/skills/schemas.ts`,
+ * paying for skill identity at the install boundary (#445). A scanned source can define two
+ * distinct Skills under the same directory name, so `names: string[]` could not say which of them
+ * the operator reviewed and confirmed — selecting either one was refused as ambiguous and the pair
+ * was uninstallable. `POST /skills/install` now also accepts `paths`, the `skillPath` values the
+ * scan already returns, and `POST /skills/audit` an optional `skillPath`; resolution, the audited
+ * set and the same-name refusal are rekeyed onto that path. Ten of the thirteen lines are the
+ * install handler's resolve-then-refuse block, which grew because it must now distinguish "this
+ * name matches two rows" from "these two selected rows collide"; the rest is the two body schemas.
+ * None of it belongs in `packages/soul`: the ambiguity only exists because an HTTP client sent a
+ * selection, and the scan cache it resolves against lives in this route module.
  */
 
-const CEILING = 52_854;
+const CEILING = 52_867;
 
 /**
  * Domains inside `apps/api/src` that already have a package of the same name. Everything here that
