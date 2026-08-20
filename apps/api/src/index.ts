@@ -45,6 +45,7 @@ import {
   SecretsService,
 } from "@tulipfarm/secrets";
 import {
+  ActiveRoutineCatalog,
   type CommitActor,
   type CredentialProvider,
   compileExecutionBundle,
@@ -204,7 +205,6 @@ import { PgRateLimiter } from "./rate-limit";
 import { LiveRecordAuthorizer } from "./resources/authorize";
 import { reconcileResourceTables, registerResourceReconcile } from "./resources/reconcile";
 import { PgCounterStore, PgResourceRepoFactory } from "./resources/repo";
-import { ActiveRoutineCatalog } from "./routines/catalog";
 import { runCanceller } from "./runs/cancel";
 import {
   integrationInvoker,
@@ -492,8 +492,11 @@ async function boot() {
       validator: invocationValidator,
       routineDefinitions: new ActiveRoutineInvocationResolver(soulPublications, soulBundleVerifier),
     });
+    const activeSoulBundle = () =>
+      soulPublications.activeBundle(DEPLOYMENT_BUSINESS_ID, soulBundleVerifier);
+    const routineCatalog = new ActiveRoutineCatalog(activeSoulBundle);
     const scheduleDispatcher = new ScheduleDispatcher({
-      activeBundle: () => soulPublications.activeBundle(DEPLOYMENT_BUSINESS_ID, soulBundleVerifier),
+      activeBundle: activeSoulBundle,
       stateStore: new RoutineScheduleStateStore(pool),
       startRoutine: scheduledRoutineTrigger(invocations),
       businessId: DEPLOYMENT_BUSINESS_ID,
@@ -756,6 +759,7 @@ async function boot() {
         bundledSkills,
         disabledBundledSkills,
         triggerRoutine: manualRoutineTrigger(invocations),
+        routineCatalog,
         delegateToAgent: agentDelegation.delegate,
         onRoutinesChanged: async () => {
           await soulLoader.reload();
@@ -1000,11 +1004,7 @@ async function boot() {
       internalTurns,
       approvalsRepo,
       routineApprovals,
-      routineCatalog: new ActiveRoutineCatalog(
-        soulPublications,
-        soulBundleVerifier,
-        DEPLOYMENT_BUSINESS_ID
-      ),
+      routineCatalog,
       toolApprovals,
       channels: (log: FastifyBaseLogger) => ({
         store: conversationStore,

@@ -181,6 +181,25 @@ describe("SoulPublicationCoordinator", () => {
     return record;
   }
 
+  it("settles a publication to active without waiting for a drain, and consumes its message", async () => {
+    const record = signedBundle("cs-settle", "c0ffee", docsV1);
+    await coordinator.publish({ bundle: record, actor: ACTOR });
+
+    expect(await coordinator.settle("cs-settle", CONSUMER)).toBe("active");
+
+    expect(await coordinator.activeDigest(BUSINESS)).toBe(record.digest);
+    expect(await coordinator.drain(CONSUMER)).toEqual([]);
+  });
+
+  it("reports the stage a publication stopped at instead of claiming it settled", async () => {
+    const record = signedBundle("cs-stuck", "c0ffee", docsV1);
+    await coordinator.publish({ bundle: record, actor: ACTOR });
+    failOnce(store, "replaceProjection");
+
+    expect(await coordinator.settle("cs-stuck", CONSUMER)).toBe("committed");
+    expect(await coordinator.activeDigest(BUSINESS)).toBeUndefined();
+  });
+
   it("does not activate a digest until every stage succeeded", async () => {
     const record = signedBundle("cs-1", "c0ffee", docsV1);
 

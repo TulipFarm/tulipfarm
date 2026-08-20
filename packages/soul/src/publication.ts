@@ -259,6 +259,21 @@ export class SoulPublicationCoordinator {
     return outcomes;
   }
 
+  /**
+   * Advance one publication to `active` now rather than leaving it for the background drain, and
+   * report the stage reached — anything but `active` means the artifact is not live yet.
+   *
+   * A producer cannot wait: until the digest is active every surface still reads the previous
+   * bundle. A failure leaves the outbox row alone, so an unsettled publication retries as usual.
+   */
+  async settle(changesetId: string, consumer: string): Promise<SoulPublicationStage> {
+    const record = await this.store.withTransaction((tx) => tx.getPublication(changesetId));
+    // A revert reproduces an earlier tree exactly, so `publish` re-activates that tree's existing
+    // row rather than writing a second one under this changeset — there is no record to advance.
+    if (record === undefined || record.stage === "active") return "active";
+    return (await this.advance(changesetId, consumer)).stage;
+  }
+
   /** Active digest for a business, or `undefined` before the first publication completes. */
   async activeDigest(businessId: string): Promise<string | undefined> {
     return this.store.withTransaction((tx) => tx.getActiveDigest(businessId));

@@ -336,6 +336,7 @@ describe("folding a journey into one result", () => {
     events: [],
     toolCalls: [],
     soulCommits: [],
+    publishedArtifacts: [],
     generatedFiles: [],
     systemPrompt: "",
     ...over,

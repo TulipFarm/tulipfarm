@@ -72,6 +72,14 @@ export type Expectation =
   /** L3 only. A Soul artifact was committed to the Eval Soul's real git repository. */
   | { readonly kind: "soul_committed"; readonly path: string }
   /**
+   * L3 only. The Runtime is serving this artifact, written `Kind:slug`.
+   *
+   * Committing is not publishing: an artifact only reaches a product surface once its bundle is the
+   * active publication. Pair it with `soul_committed` — a write that commits and never activates
+   * passes the commit Expectation while remaining invisible to every user.
+   */
+  | { readonly kind: "soul_published"; readonly artifact: string }
+  /**
    * L3 only. A File the Turn generated is readable by this grantee, written `kind:id`.
    *
    * The audience is not in the Tool call — the model neither chooses it nor sees it — so this is
@@ -89,6 +97,7 @@ const PERSISTED_KINDS: ReadonlySet<string> = new Set([
   "turn_status",
   "run_event_emitted",
   "soul_committed",
+  "soul_published",
   "generated_file_readable_by",
   "generated_file_not_readable_by",
 ]);

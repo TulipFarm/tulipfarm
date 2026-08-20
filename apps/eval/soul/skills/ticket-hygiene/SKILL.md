@@ -1,4 +1,5 @@
 ---
+name: ticket-hygiene
 description: The standing rules every Tulip Supply Co reply must follow.
 eager: true
 ---
