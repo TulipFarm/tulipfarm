@@ -37,8 +37,9 @@ the locked contract-scope decision.
 - `push`
 - `check_run`
 - `check_suite`
-- `installation`
-- `installation_repositories`
+
+`installation` and `installation_repositories` are account-level events GitHub sends
+automatically once the App is installed — not valid in `default_events`, so they are omitted.
 
 ## Auth model
 

@@ -68,8 +68,6 @@ auth:
         - push
         - check_run
         - check_suite
-        - installation
-        - installation_repositories
     exchange:
       url: https://api.github.com/app-manifests/{code}/conversions
       map:
