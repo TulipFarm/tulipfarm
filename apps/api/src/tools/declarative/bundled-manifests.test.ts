@@ -42,6 +42,7 @@ describe("bundled integrations", () => {
     expect(entries.map((entry) => entry.slug)).toEqual([
       "confluence",
       "github",
+      "google",
       "google-docs",
       "google-drive",
       "notion",
