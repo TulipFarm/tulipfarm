@@ -28,7 +28,7 @@ import {
   fileCreateTool,
   PgFileRepo,
 } from "@tulipfarm/files";
-import { type BlobPort, PgGroupRepo, PgRoleRepo } from "@tulipfarm/storage";
+import { type BlobPort, collectBlobBytes, PgGroupRepo, PgRoleRepo } from "@tulipfarm/storage";
 import { collectHeldRoleIds } from "@tulipfarm/tool-host";
 import type { EvalDatabase } from "./database.ts";
 
@@ -68,9 +68,7 @@ function memoryBlobs(): BlobPort {
   };
   return {
     put: async (body) => {
-      const chunks: Uint8Array[] = [];
-      for await (const chunk of body) chunks.push(chunk);
-      const bytes = Buffer.concat(chunks);
+      const bytes = body instanceof Uint8Array ? body : await collectBlobBytes(body);
       const hash = createHash("sha256").update(bytes).digest("hex");
       objects.set(hash, bytes);
       return { key: `eval/${hash}`, hash };
