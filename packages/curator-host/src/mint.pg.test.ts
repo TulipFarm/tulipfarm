@@ -8,6 +8,7 @@ import {
   CuratorMintStore,
   CuratorRepo,
   type Queryable,
+  RUN_STORAGE_STATEMENTS,
   recordCuratorWork,
   TASK_STORAGE_STATEMENTS,
 } from "@tulipfarm/storage";
@@ -85,6 +86,7 @@ describe("CuratorMinter", () => {
     pool = database as unknown as Queryable;
     for (const statement of [
       ...TASK_STORAGE_STATEMENTS,
+      ...RUN_STORAGE_STATEMENTS,
       ...CURATOR_WORK_STORAGE_STATEMENTS,
       ...CURATOR_STORAGE_STATEMENTS,
       ...CURATOR_ADMISSION_STATEMENTS,

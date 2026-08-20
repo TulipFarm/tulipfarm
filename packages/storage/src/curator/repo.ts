@@ -194,8 +194,13 @@ export class CuratorRepo {
    * This exists because the live-target unique index is otherwise a trap: a job stuck in `minted`
    * holds its target forever, so one crash silently retires that user from the loop. Age alone
    * never decides — a Run that is merely slow is still a Run — so `unstartedBefore` must be
-   * comfortably longer than a mint's own gateway call, and a bound Run is judged only by the
-   * kernel's own terminal statuses.
+   * comfortably longer than a mint's own gateway call.
+   *
+   * `needs_reconciliation` counts as dead here even though the kernel allows a Run to leave it:
+   * dispatch parks a Run there when its executor throws, nothing requeues a parked Run, and a
+   * Curator Run's State never enters reconciliation, so `StateReconciler` cannot settle it either.
+   * Treating it as live is what strands the target. Freeing it costs nothing, because
+   * `abandonCuratorJob` still refuses any job that already recorded an answer.
    */
   async listStale(
     businessId: string,
@@ -214,7 +219,9 @@ export class CuratorRepo {
             (run_id IS NULL AND created_at < $2)
             OR EXISTS (SELECT 1 FROM runs
                         WHERE runs.id::text = curator_job.run_id
-                          AND runs.status IN ('succeeded', 'failed', 'cancelled'))
+                          AND runs.status IN (
+                                'succeeded', 'failed', 'cancelled', 'needs_reconciliation'
+                              ))
           )
         ORDER BY created_at
         LIMIT $3`,
