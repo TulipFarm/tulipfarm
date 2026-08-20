@@ -173,15 +173,56 @@ export interface CaseAttachment {
   readonly content?: string;
 }
 
+function escapePdfText(text: string): string {
+  return text.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+}
+
+/**
+ * A minimal single-page PDF whose text layer is `text`, byte-exact down to the xref table.
+ *
+ * A real model reading a `application/pdf` attachment runs an actual PDF parser, not a text
+ * decoder — bytes that are just `text` encoded as UTF-8 read to it as a corrupt document, not a
+ * document with no answer. `content` only ever carries plain ASCII in this Corpus, so the JS
+ * string length used for the offsets below equals the UTF-8 byte length; a non-ASCII Case would
+ * need this rewritten to measure encoded bytes instead.
+ */
+function synthesizePdf(text: string): Uint8Array {
+  const stream = `BT /F1 12 Tf 72 720 Td\n(${escapePdfText(text)}) Tj\nET`;
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+  ];
+
+  let pdf = "%PDF-1.4\n";
+  const offsets: number[] = [];
+  for (const [i, body] of objects.entries()) {
+    offsets.push(pdf.length);
+    pdf += `${i + 1} 0 obj\n${body}\nendobj\n`;
+  }
+  const xrefStart = pdf.length;
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const offset of offsets) pdf += `${offset.toString().padStart(10, "0")} 00000 n \n`;
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF`;
+  return new TextEncoder().encode(pdf);
+}
+
 /**
  * The bytes a Case's File carries.
  *
  * A Case that only asserts whether a File *reached* the prompt does not care what is in it, and
  * real bytes in the Corpus would cost review effort for no signal — so those get a stand-in
  * derived from the id, keeping a Sweep reproducible. A Case that declares `content` gets exactly
- * that, because an attack the model never receives would make the Case pass by vacuity.
+ * that, because an attack the model never receives would make the Case pass by vacuity. A
+ * `content` declared under `mediaType: "application/pdf"` gets that text wrapped in a real PDF
+ * rather than sent raw, because a real model parses the bytes as a document, not as text.
  */
 export function synthesizeAttachment(file: CaseAttachment): CaseAttachment & { data: Uint8Array } {
+  if (file.content !== undefined && file.mediaType === "application/pdf") {
+    return { ...file, data: synthesizePdf(file.content) };
+  }
   const bytes = file.content ?? `eval-bytes:${file.fileId}`;
   return { ...file, data: new TextEncoder().encode(bytes) };
 }
