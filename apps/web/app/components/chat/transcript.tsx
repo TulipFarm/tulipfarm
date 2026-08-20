@@ -430,7 +430,6 @@ export function Transcript({
   ) => void | Promise<void>;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const endRef = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
 
   function onScroll() {
@@ -439,10 +438,16 @@ export function Transcript({
   }
 
   // Auto-scroll is layout-forcing, so coalesce bursts of stream updates into one write per frame.
+  // Writing scrollTop instead of scrolling a sentinel into view keeps the movement inside this
+  // container: scrollIntoView also scrolls every scrollable ancestor, which dragged the shell's
+  // <main> and the document down whenever a response started loading (#69).
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-pin on any transcript change
   useEffect(() => {
     if (!stick.current) return;
-    const frame = requestAnimationFrame(() => endRef.current?.scrollIntoView({ block: "end" }));
+    const frame = requestAnimationFrame(() => {
+      const el = scrollRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+    });
     return () => cancelAnimationFrame(frame);
   }, [messages, status]);
 
@@ -464,7 +469,6 @@ export function Transcript({
           />
         ))}
         {status === "submitted" ? <Loader /> : null}
-        <div ref={endRef} />
       </div>
     </div>
   );

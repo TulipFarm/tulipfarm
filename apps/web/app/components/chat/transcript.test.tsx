@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Transcript } from "~/components/chat/transcript";
@@ -671,5 +671,69 @@ describe("an attachment the reader can no longer open", () => {
 
     expect(screen.getByRole("button", { name: "Download here.pdf" })).toBeInTheDocument();
     expect(screen.getByText("gone.pdf")).toBeInTheDocument();
+  });
+});
+
+describe("Transcript auto-scroll stays inside its own scroll container", () => {
+  // `scrollIntoView` walks every scrollable ancestor, so the shell's <main> and the document
+  // itself get dragged down with the transcript (#69). Writing `scrollTop` cannot leave the
+  // container, so the guard is that the transcript never reaches for `scrollIntoView` again.
+  function trackScrolling() {
+    const intoView = vi.fn();
+    Element.prototype.scrollIntoView = intoView;
+    const scrolled: number[] = [];
+    const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, "scrollTop");
+    Object.defineProperty(Element.prototype, "scrollTop", {
+      configurable: true,
+      get: () => 0,
+      set: (value: number) => void scrolled.push(value),
+    });
+    return {
+      intoView,
+      scrolled,
+      restore: () => {
+        if (descriptor) Object.defineProperty(Element.prototype, "scrollTop", descriptor);
+      },
+    };
+  }
+
+  function flushFrames() {
+    return act(async () => {
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+    });
+  }
+
+  it("pins to the bottom without scrolling any ancestor while a response is loading", async () => {
+    const tracked = trackScrolling();
+    try {
+      const state = fold([], "hello");
+      expect(state.status).toBe("submitted");
+      render(<Transcript messages={state.messages} status={state.status} onApprove={vi.fn()} />);
+      await flushFrames();
+
+      expect(tracked.intoView).not.toHaveBeenCalled();
+      expect(tracked.scrolled.length).toBeGreaterThan(0);
+    } finally {
+      tracked.restore();
+    }
+  });
+
+  it("pins to the bottom without scrolling any ancestor while text streams in", async () => {
+    const tracked = trackScrolling();
+    try {
+      render(
+        <Transcript
+          messages={fold([{ type: "text", data: { delta: "streaming" } }], "hi").messages}
+          status="streaming"
+          onApprove={vi.fn()}
+        />
+      );
+      await flushFrames();
+
+      expect(tracked.intoView).not.toHaveBeenCalled();
+      expect(tracked.scrolled.length).toBeGreaterThan(0);
+    } finally {
+      tracked.restore();
+    }
   });
 });
