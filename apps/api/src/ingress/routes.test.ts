@@ -160,7 +160,7 @@ describe("POST /api/v1/hooks/integrations/:name", () => {
   it("dedups on a declared header and forwards context headers into the job", async () => {
     await app.close();
     const integration = makeIntegration();
-    const ingress = integration.manifest.ingress;
+    const ingress = integration.manifest?.ingress;
     if (ingress) {
       ingress.webhook.dedup_key = undefined;
       ingress.webhook.dedup_header = "X-Provider-Delivery";
@@ -184,7 +184,7 @@ describe("POST /api/v1/hooks/integrations/:name", () => {
   it("enqueues without dedup when the manifest declares no dedup_key", async () => {
     await app.close();
     const integration = makeIntegration();
-    const ingress = integration.manifest.ingress;
+    const ingress = integration.manifest?.ingress;
     if (ingress) ingress.webhook.dedup_key = undefined;
     await build([integration]);
     await inject(EVENT);
@@ -283,7 +283,7 @@ describe("POST /api/v1/hooks/integrations/:name", () => {
   it("enqueues everything when no accept filter is declared", async () => {
     await app.close();
     const integration = makeIntegration();
-    const ingress = integration.manifest.ingress;
+    const ingress = integration.manifest?.ingress;
     if (ingress) ingress.webhook.accept = undefined;
     await build([integration]);
     const res = await inject({ kind: "system_notice" });

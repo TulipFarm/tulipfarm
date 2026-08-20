@@ -448,7 +448,7 @@ export class IngressDeliveryHost {
     };
 
     const integration = this.options.soulLoader.integrations.get(envelope.slug);
-    const ingress = integration?.manifest.ingress;
+    const ingress = integration?.manifest?.ingress;
     const handler = integration?.ingressHandler;
     if (!integration?.connection?.enabled || ingress === undefined || handler === undefined) {
       throw new DeliveryDeniedError("integration_unavailable");

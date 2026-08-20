@@ -64,9 +64,13 @@ export function mergeIntegrations(
   }
   for (const [slug, soulEntry] of soulLoader.integrations) {
     const bundledEntry = bundled.get(slug);
+    const manifest = bundledEntry?.manifest ?? soulEntry.manifest;
+    // Soul entry has no manifest of its own (bundled, code-owned) and no bundled entry either —
+    // nothing to catalog.
+    if (manifest === undefined) continue;
     merged.set(slug, {
       slug,
-      manifest: bundledEntry?.manifest ?? soulEntry.manifest,
+      manifest,
       connected: soulEntry.connection?.enabled === true,
       connectionEnv: soulEntry.connection?.env,
       setupGuide: bundledEntry?.setupGuide ?? soulEntry.setupGuide,
