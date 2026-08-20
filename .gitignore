@@ -42,3 +42,6 @@ apps/eval/scorecard-*.txt
 # Failure screenshot from the browser smoke run (scripts/test/browser-smoke.mjs). Diagnostic
 # output from a local run; an untracked one at the root marks the tree dirty for every later check.
 /browser-smoke-failure.png
+
+# Agent-authored PR descriptions, staged locally per worktree
+.prbody.md

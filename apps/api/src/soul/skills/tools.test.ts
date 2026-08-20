@@ -7,6 +7,7 @@ import type {
   SoulWriteRequest,
   SoulWriter,
 } from "@tulipfarm/soul";
+import { SoulChangesetValidationError, SoulWriteError } from "@tulipfarm/soul";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SKILL_TOOLS, type SkillToolContext } from "./tools";
 
@@ -363,9 +364,33 @@ describe("skill_create", () => {
     });
     expect(writeFile).not.toHaveBeenCalled();
   });
-});
 
-// ── skill_activate ────────────────────────────────────────────────────────────
+  // The chat surface only ever showed the gateway's issue count, so an Agent — and the operator
+  // reading the tool panel — could not tell which file was refused or why.
+  it("surfaces the gateway's offending path and code when the changeset is refused", async () => {
+    const ctx = makeCtx([], makeLlmService());
+    // Exactly what `SoulWriter.apply` raises for a refused changeset.
+    const rejection = new SoulChangesetValidationError("FILE_VALIDATION_FAILED", [
+      { code: "SCHEMA_VALIDATION_FAILED", path: "skills/skill-x/SKILL.md" },
+    ]);
+    vi.mocked(ctx.soulWriter.apply).mockRejectedValueOnce(
+      new SoulWriteError("VALIDATION_FAILED", rejection.message, { issues: rejection.issues })
+    );
+
+    const res = await createTool.handler(
+      { name: "skill-x", body: "Body.", frontmatter: frontmatter("skill-x") },
+      ctx
+    );
+
+    expect(res).toMatchObject({
+      success: false,
+      error: {
+        code: "validation_error",
+        message: expect.stringContaining("skills/skill-x/SKILL.md SCHEMA_VALIDATION_FAILED"),
+      },
+    });
+  });
+});
 
 describe("skill_activate", () => {
   beforeEach(() => {

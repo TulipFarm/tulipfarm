@@ -8,6 +8,7 @@ import { LlmNotConfiguredError } from "@tulipfarm/schema";
 import type { BundledSkill } from "@tulipfarm/soul";
 import {
   type CommitSigner,
+  convertLegacySkill,
   type GitSyncService,
   type Logger,
   SoulGitStore,
@@ -965,6 +966,66 @@ spec:
       );
       await expect(readFile(join(installed, "LICENSE.txt"), "utf8")).resolves.toBe("MIT\n");
       await expect(readFile(join(installed, "requirements.txt"), "utf8")).resolves.toBe("pandas\n");
+    });
+
+    // A canonical-format package ships its own `skill.yaml`. That file is the Skill's definition,
+    // not a companion, so installing it has to address it as one — otherwise the whole package is
+    // rejected and none of its references or scripts ever reach the soul.
+    it("installs a Skill package that ships its own skill.yaml definition", async () => {
+      const remote = await makeRemoteRepo();
+      temps.push(remote);
+      const skillDir = join(remote, "skills", "demo-skill");
+      const definition = convertLegacySkill({
+        name: "demo-skill",
+        frontmatter: { trustTier: "third_party", references: ["references/playbook.md"] },
+        body: "Do the demo.",
+      }).files.find((file) => file.path.endsWith("skill.yaml"));
+      if (definition?.operation !== "upsert") throw new Error("no skill.yaml fixture");
+      await mkdir(join(skillDir, "references"), { recursive: true });
+      await writeFile(join(skillDir, "skill.yaml"), definition.content, "utf8");
+      await writeFile(join(skillDir, "references", "playbook.md"), "# Playbook\n", "utf8");
+      await execFileP("git", ["add", "-A"], { cwd: remote });
+      await execFileP("git", ["commit", "-q", "-m", "add canonical package"], { cwd: remote });
+
+      const scanRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/scan",
+        cookies: auth(),
+        headers,
+        payload: { source: `file://${remote}` },
+      });
+      const { scanId } = scanRes.json();
+      buildAudit.mockResolvedValue({
+        riskRating: "low",
+        summary: "No issue found.",
+        toolsReach: [],
+        findings: [],
+        deterministicScan: CLEAN_DETERMINISTIC_SCAN,
+      });
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/audit",
+        cookies: auth(),
+        headers,
+        payload: { scanId, name: "demo-skill" },
+      });
+
+      const installRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/install",
+        cookies: auth(),
+        headers,
+        payload: { scanId, names: ["demo-skill"] },
+      });
+
+      expect(installRes.statusCode).toBe(200);
+      const installed = join(soulPath, "skills", "demo-skill");
+      await expect(readFile(join(installed, "skill.yaml"), "utf8")).resolves.toBe(
+        definition.content
+      );
+      await expect(readFile(join(installed, "references", "playbook.md"), "utf8")).resolves.toBe(
+        "# Playbook\n"
+      );
     });
 
     it("names the offending file when a package carries something the soul cannot store", async () => {

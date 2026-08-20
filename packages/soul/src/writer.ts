@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   type ArtifactKind,
   artifactDirectory,
+  artifactLayout,
   companionPath,
   definitionPath,
   legacyDefinitionPaths,
@@ -46,6 +47,24 @@ export type SoulWrite =
   | { readonly op: "delete"; readonly target: SoulWriteTarget }
   /** Remove an entire artifact — its definition and every companion beside it. */
   | { readonly op: "deleteArtifact"; readonly kind: ArtifactKind; readonly slug: string };
+
+/**
+ * The target that addresses `path` inside an artifact's own directory.
+ *
+ * An installer holds a package's relative paths, not targets, and the definition file is the one
+ * path the gateway refuses as a companion. Deciding it here keeps every installer from re-deriving
+ * which filename a layout calls its definition — a package that ships its own `skill.yaml` was
+ * otherwise rejected whole.
+ */
+export function artifactWriteTarget(
+  kind: ArtifactKind,
+  slug: string,
+  path: string
+): SoulWriteTarget {
+  return artifactLayout(kind)?.definitionFile === path
+    ? { kind, slug }
+    : { kind, slug, companion: path };
+}
 
 /** What must already be true of the tree for the write to be allowed to proceed. */
 export type SoulPrecondition =

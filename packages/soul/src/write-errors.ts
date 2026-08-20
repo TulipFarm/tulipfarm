@@ -8,18 +8,25 @@ import { SoulWriteError } from "./writer";
  * route hand-rolled its own `try/catch` around raw `fs` writes, and the same underlying failure
  * surfaced as a 500 on one route and a 409 on another.
  *
- * The message is deliberately generic: `SoulWriteError` carries structured issues, never file
- * content, and this boundary keeps it that way.
+ * `SoulWriteError` carries structured issues and path-shaped evidence, never file content, so the
+ * reason a target or a definition was rejected travels to the caller with it. Withholding it cost
+ * a QA cycle: `invalid soul write target` alone does not say which of a package's files the
+ * gateway refused, or why.
  */
 export interface SoulWriteHttpError {
   readonly status: 400 | 404 | 409 | 422 | 500;
   readonly body: { readonly error: string };
 }
 
+/** Gateway messages are prefixed for logs; the HTTP body supplies its own subject. */
+function reason(error: SoulWriteError): string {
+  return error.message.replace(/^Soul write: /, "");
+}
+
 export function soulWriteHttpError(error: SoulWriteError): SoulWriteHttpError {
   switch (error.code) {
     case "INVALID_TARGET":
-      return { status: 400, body: { error: "invalid soul write target" } };
+      return { status: 400, body: { error: `invalid soul write target: ${reason(error)}` } };
     case "PRECONDITION_FAILED":
       // The tree moved between the caller's read and its write. From the caller's point of view
       // the thing it addressed is no longer where it thought — a 404, not a server fault.
@@ -30,7 +37,7 @@ export function soulWriteHttpError(error: SoulWriteError): SoulWriteHttpError {
         body: {
           error:
             error.issues.length > 0
-              ? `invalid soul definition: ${error.issues.map((i) => `${i.path} ${i.code}`).join("; ")}`
+              ? `invalid soul definition: ${error.issues.map((i) => `${i.path} ${i.code}${i.field ? ` at ${i.field}` : ""}`).join("; ")}`
               : "invalid soul definition",
         },
       };
