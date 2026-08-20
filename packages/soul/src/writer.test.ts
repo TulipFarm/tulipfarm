@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CommitActor, CommitSigner } from "./commit-signing";
 import { SoulGitStore } from "./git-store";
 import type { Logger } from "./types";
-import { type SoulWrite, SoulWriteError, SoulWriter } from "./writer";
+import { artifactWriteTarget, type SoulWrite, SoulWriteError, SoulWriter } from "./writer";
 
 /** Tests use real Git to cover atomicity, base conflicts, path guards, and cleanup. */
 
@@ -780,5 +780,28 @@ describe("SoulWriter — degraded dependencies", () => {
 
     expect(result.published).toBe(true);
     expect(result.publicationError).toBeUndefined();
+  });
+});
+
+describe("artifactWriteTarget", () => {
+  it("addresses a layout's definition file as the definition, not as a companion", () => {
+    expect(artifactWriteTarget("Skill", "packing", "skill.yaml")).toEqual({
+      kind: "Skill",
+      slug: "packing",
+    });
+    expect(artifactWriteTarget("Integration", "github", "integration.yaml")).toEqual({
+      kind: "Integration",
+      slug: "github",
+    });
+  });
+
+  it("addresses every other package file as a companion", () => {
+    for (const path of ["SKILL.md", "references/bulbs.md", "scripts/convert.py", "LICENSE.txt"]) {
+      expect(artifactWriteTarget("Skill", "packing", path)).toEqual({
+        kind: "Skill",
+        slug: "packing",
+        companion: path,
+      });
+    }
   });
 });

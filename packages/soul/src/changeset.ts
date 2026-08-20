@@ -70,12 +70,24 @@ export class SoulChangesetValidationError extends Error {
     super(
       code === "BASE_MISMATCH"
         ? "Soul changeset expected base does not match the current base"
-        : `Soul changeset validation failed (${issues.length} issue${issues.length === 1 ? "" : "s"})`
+        : `Soul changeset validation failed (${issues.length} issue${issues.length === 1 ? "" : "s"})${describeIssues(issues)}`
     );
     this.name = "SoulChangesetValidationError";
     this.code = code;
     this.issues = Object.freeze([...issues]);
   }
+}
+
+/**
+ * Issue evidence for the message. A caller that only ever sees the count cannot tell which file of
+ * a multi-file changeset was refused; issues carry paths and codes, never file content.
+ */
+function describeIssues(issues: readonly SoulChangesetValidationIssue[]): string {
+  if (issues.length === 0) return "";
+  const described = issues.map(
+    (issue) => `${issue.path} ${issue.code}${issue.field ? ` at ${issue.field}` : ""}`
+  );
+  return `: ${described.join("; ")}`;
 }
 
 export interface ValidatedSoulFileChange {

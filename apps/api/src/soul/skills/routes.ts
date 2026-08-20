@@ -15,6 +15,7 @@ import {
 } from "@tulipfarm/schema";
 import {
   ALLOWED_SOURCE_HINT,
+  artifactWriteTarget,
   type BundledSkill,
   cloneToTemp as cloneSourceToTemp,
   convertLegacySkill,
@@ -128,7 +129,7 @@ async function skillInstallChanges(root: string, skill: DiscoveredSkill): Promis
   const changes: SoulWrite[] = [];
   const written = new Set<string>();
   const put = (path: string, content: string): void => {
-    changes.push({ op: "put", target: { kind: "Skill", slug: skill.name, companion: path }, content });
+    changes.push({ op: "put", target: artifactWriteTarget("Skill", skill.name, path), content });
     written.add(path);
   };
   for (const file of skill.files) if (file.symlinkTarget === undefined) put(file.path, file.content);
@@ -139,8 +140,7 @@ async function skillInstallChanges(root: string, skill: DiscoveredSkill): Promis
   }
   try {
     for (const file of await collectSkillFiles(join(root, "skills", skill.name))) {
-      if (written.has(file.path)) continue;
-      changes.push({ op: "delete", target: file.path === "skill.yaml" ? { kind: "Skill", slug: skill.name } : { kind: "Skill", slug: skill.name, companion: file.path } });
+      if (!written.has(file.path)) changes.push({ op: "delete", target: artifactWriteTarget("Skill", skill.name, file.path) });
     }
   } catch {
     return changes;

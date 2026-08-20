@@ -306,4 +306,4 @@ export type {
   SoulWriteResult,
   SoulWriteTarget,
 } from "./writer";
-export { SoulWriteError, SoulWriter } from "./writer";
+export { artifactWriteTarget, SoulWriteError, SoulWriter } from "./writer";
