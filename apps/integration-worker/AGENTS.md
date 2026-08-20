@@ -31,6 +31,8 @@ reconciliation, and rate limits for channel workers.
 - This app never migrates; wait for the schema floor and fail closed like `apps/worker`.
 - Serve `/livez` and `/readyz`; drain cleanly on `SIGTERM`/`SIGINT`.
 - Slack Socket Mode ingress and delivery polling register loops through `src/channels/`.
+- Every Slack `events_api` envelope passes `channels/mention-gate.ts` before the adapter; the gate
+  is a required dispatch dependency, never an option.
 - Telegram long-poll and delivery retry should join the same loop array pattern.
 - `src/db.ts` is a deliberate local `pg` copy; apps must not import other apps.
 - Keep `src/index.ts` as the public barrel for transport scaffolds, separate from `main.ts`.

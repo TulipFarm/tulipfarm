@@ -65,6 +65,9 @@ signed, one-use OAuth state identifies Slack when the provider returns.
 
 - DM the bot for private chat with TulipFarm.
 - @mention the bot in a channel to start or continue a channel thread.
+- Replies inside a thread the bot already answered continue that chat without another @mention.
+- Everything else is ignored silently: unaddressed channel chatter, threads the bot never joined,
+  and message edits or deletions. Nothing is posted and no agent turn runs.
 - If the sender is not linked, TulipFarm offers a single-use channel-link flow.
 
 ## Link a Slack account
