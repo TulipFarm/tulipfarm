@@ -48,6 +48,10 @@ describe("Curator reconciliation (PostgreSQL)", () => {
     return rows[0]?.id ?? "";
   };
 
+  const runStatus = async (runId: string): Promise<string | undefined> =>
+    (await database.query<{ status: string }>(`SELECT status FROM runs WHERE id = $1`, [runId]))
+      .rows[0]?.status;
+
   beforeAll(async () => {
     database = new PGlite();
     for (const sql of [
@@ -98,6 +102,14 @@ describe("Curator reconciliation (PostgreSQL)", () => {
     it("reports a job whose Run reached a terminal state as abandoned", async () => {
       const jobId = await mint();
       await repo.attachRun(jobId, await run("failed"));
+      const stale = await repo.listStale(BUSINESS, NOW, 10);
+      expect(stale.map((entry) => entry.disposition)).toEqual(["abandoned"]);
+      expect(stale[0]?.job.id).toBe(jobId);
+    });
+
+    it("reports a job whose Run was parked for reconciliation as abandoned", async () => {
+      const jobId = await mint();
+      await repo.attachRun(jobId, await run("needs_reconciliation"));
       const stale = await repo.listStale(BUSINESS, NOW, 10);
       expect(stale.map((entry) => entry.disposition)).toEqual(["abandoned"]);
       expect(stale[0]?.job.id).toBe(jobId);
@@ -160,6 +172,26 @@ describe("Curator reconciliation (PostgreSQL)", () => {
       const jobId = await mint();
       expect(await abandonCuratorJob(db, jobId)).toBe(true);
       expect(await abandonCuratorJob(db, jobId)).toBe(false);
+    });
+
+    it("closes the parked Run it gave up on", async () => {
+      const jobId = await mint();
+      const runId = await run("needs_reconciliation");
+      await repo.attachRun(jobId, runId);
+
+      expect(await abandonCuratorJob(db, jobId)).toBe(true);
+
+      expect(await runStatus(runId)).toBe("failed");
+    });
+
+    it("leaves a Run the kernel already settled exactly as it found it", async () => {
+      const jobId = await mint();
+      const runId = await run("succeeded");
+      await repo.attachRun(jobId, runId);
+
+      expect(await abandonCuratorJob(db, jobId)).toBe(true);
+
+      expect(await runStatus(runId)).toBe("succeeded");
     });
   });
 });
