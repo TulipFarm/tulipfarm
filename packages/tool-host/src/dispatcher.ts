@@ -6,7 +6,6 @@ import {
   type CompositeToolEntitlement,
   type EffectStore,
   NOT_APPLICABLE,
-  retryDelayMs,
   type ToolAuthorizationDenialReason,
   type ToolTargetRef,
 } from "@tulipfarm/tool-broker";
@@ -27,6 +26,7 @@ import { availableToolsFor, type ToolCatalog } from "./catalog";
 import type { CredentialResolution, CredentialResolver } from "./credential-mode";
 import { ChatEffectLedger, ledgerOwnsCall } from "./effect-ledger";
 import { localDispatchRefusal } from "./eligibility";
+import { runToolAttempts } from "./execution";
 import { gateAutonomyOf, type ToolGate } from "./gate";
 import type {
   AgentResolver,
@@ -40,11 +40,7 @@ import type {
 import { type AuthorityPrincipal, principalKindOf } from "./principal";
 import { presentationContextForAuthority, readChatRequest } from "./request";
 import type { SurfaceActionStore, SurfaceArtifactStore } from "./surface-ports";
-import type { RequestContext, ToolDef, ToolErrorCode } from "./types";
-import { isInfrastructureFault } from "./types";
-
-/** Default infra-fault retries without a ledger: one retry, then stop to avoid duplicate writes. */
-const DEFAULT_TRANSIENT_ATTEMPTS = 2;
+import type { RequestContext, ToolDef } from "./types";
 
 /**
  * Used when no `AgentResolver` was composed. It carries no `toolAllowlist`, which means the whole
@@ -85,6 +81,14 @@ export interface RegistryToolDispatcherOptions {
    * that slipped into the local catalog is refused rather than authorized on thinner evidence.
    */
   readonly localDispatchOnly?: boolean;
+  /**
+   * Wall-clock ceiling on one `execute`. Without it a Tool that never settles pins the Run's lease
+   * forever; with it the call is aborted, and a mutating Tool that ignored the abort settles
+   * `ambiguous` for reconciliation instead of being answered as a plain failure.
+   */
+  readonly executeTimeoutMs?: number;
+  /** Host cancellation — Run cancellation or drain — delivered to the Tool as `abortSignal`. */
+  readonly abortSignal?: AbortSignal;
   now?(): Date;
 }
 
@@ -196,22 +200,6 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
       decision: "denied",
       result: { status: "denied", reason: denialReason(call.name, outcome.reason) },
     };
-  }
-
-  /** Retry only infrastructure faults with budget; mutating Tools need explicit `safeToRetry`. */
-  private mayRetryFault(tool: ToolDef, code: ToolErrorCode, attempt: number): boolean {
-    if (!isInfrastructureFault(code)) return false;
-    // Provider Tools already spent their ledger retry budget; do not start a second effect.
-    if (tool.definition?.provider !== undefined) return false;
-    const policy = tool.definition?.retry;
-    if (attempt >= Math.max(1, policy?.maxAttempts ?? DEFAULT_TRANSIENT_ATTEMPTS)) return false;
-    // Without a phase, landed-then-failed is indistinguishable from never-landed.
-    return !tool.mutating || policy?.safeToRetry === true;
-  }
-
-  private async wait(delayMs: number): Promise<void> {
-    if (delayMs <= 0) return;
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
   }
 
   /** Provider entitlement checks run for human calls, even with personal credentials. */
@@ -455,6 +443,7 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
       surfaceActionStore: this.options.surfaceActionStore,
       surfaceComponents,
       ...surfaceFields,
+      ...(this.options.abortSignal === undefined ? {} : { abortSignal: this.options.abortSignal }),
       ...(credential.use === "principal" ? { credentialPrincipal: credential.principal } : {}),
     };
     // Reserve only after refusals and approval; denied calls leave no effect row.
@@ -490,54 +479,17 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
       };
     }
 
-    let result: Awaited<ReturnType<ToolDef["execute"]>>;
-    for (let attempt = 1; ; attempt += 1) {
-      try {
-        result = await definition.execute(call.arguments, context);
-      } catch {
-        // Throws are unknown phase: never retry, and settle ledgered writes as `ambiguous`.
-        if (ledger && reservation) {
-          await ledger.finishAttempt(
-            authority.businessId,
-            reservation.effectId,
-            reservation.attempt,
-            {
-              state: "ambiguous",
-              errorCode: "tool_raised",
-            }
-          );
-        }
-        return { status: "failed", reason: `tool "${call.name}" raised an internal error` };
-      }
-      if (result.success) {
-        if (ledger && reservation) {
-          await ledger.finishAttempt(
-            authority.businessId,
-            reservation.effectId,
-            reservation.attempt,
-            { state: "confirmed" }
-          );
-        }
-        return { status: "succeeded", output: result.data };
-      }
-      if (!this.mayRetryFault(definition, result.error.code, attempt)) break;
-      await this.wait(retryDelayMs(attempt));
-    }
-    // Structured errors have a known phase; there is nothing to reconcile.
-    if (ledger && reservation) {
-      await ledger.finishAttempt(authority.businessId, reservation.effectId, reservation.attempt, {
-        state: "failed",
-        errorCode: result.error.code,
-      });
-    }
-    // Schema-shaped rejections count against the model repair budget.
-    if (result.error.code === "validation_error") {
-      return { status: "invalid_arguments", reason: result.error.message };
-    }
-    // Exhausted infra faults are machinery failures, not repairable argument failures.
-    return isInfrastructureFault(result.error.code)
-      ? { status: "failed", reason: `tool "${call.name}" is temporarily unavailable; try again` }
-      : { status: "failed", reason: result.error.message };
+    return runToolAttempts({
+      businessId: authority.businessId,
+      tool: definition,
+      call,
+      context,
+      ...(this.options.executeTimeoutMs === undefined
+        ? {}
+        : { timeoutMs: this.options.executeTimeoutMs }),
+      ...(ledger === undefined ? {} : { ledger }),
+      ...(reservation === undefined ? {} : { reservation }),
+    });
   }
 }
 

@@ -6,6 +6,7 @@ import type {
   ToolCallResult,
   ToolDef,
 } from "@tulipfarm/tool-host";
+import { isIndeterminateFault, isInfrastructureFault } from "@tulipfarm/tool-host";
 import { describe, expect, it, vi } from "vitest";
 import {
   MAX_PRESENTATION_CORRECTIVE_ATTEMPTS,
@@ -28,6 +29,21 @@ function makeTool(overrides: Partial<ToolDef> = {}): ToolDef {
 }
 
 const ctx: RequestContext = { userId: "u1", agentId: "a1" };
+
+/** Drives fake timers until `promise` settles, so a deadline plus grace window cannot deadlock. */
+async function advanceUntilSettled(promise: Promise<unknown> | undefined): Promise<void> {
+  if (promise === undefined) return;
+  let finished = false;
+  void promise.then(
+    () => {
+      finished = true;
+    },
+    () => {
+      finished = true;
+    }
+  );
+  for (let i = 0; i < 200 && !finished; i += 1) await vi.advanceTimersByTimeAsync(1_000);
+}
 
 describe("ToolRegistry", () => {
   it("register + getAll returns all tools in insertion order", () => {
@@ -431,13 +447,85 @@ describe("ToolRegistry", () => {
           {},
           { messages: [], context: undefined, toolCallId: "tc" }
         );
-        vi.advanceTimersByTime(TOOL_TIMEOUT_MS);
+        await advanceUntilSettled(resultPromise);
         const result = await resultPromise;
         expect(result).toEqual({
           success: false,
           error: { code: "internal_error", message: "tool execution timed out" },
         });
         expect(abortSignal?.aborted).toBe(true);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("never lets a timed-out mutating Tool's late write reach the model", async () => {
+      vi.useFakeTimers();
+      try {
+        let committed = 0;
+        const reg = new ToolRegistry();
+        reg.register(
+          makeTool({
+            name: "write_x",
+            mutating: true,
+            execute: (_args, context) =>
+              new Promise<ToolCallResult>((resolve) => {
+                setTimeout(() => {
+                  // A cooperating Tool checks the signal before it commits anything.
+                  if (context.abortSignal?.aborted === true) {
+                    resolve({ success: false, error: { code: "unavailable", message: "aborted" } });
+                    return;
+                  }
+                  committed += 1;
+                  resolve({ success: true, data: "written" });
+                }, TOOL_TIMEOUT_MS * 2);
+              }),
+          })
+        );
+        const ts = reg.buildToolSet(ctx);
+        const resultPromise = ts.write_x.execute?.(
+          {},
+          { messages: [], context: undefined, toolCallId: "tc" }
+        );
+        await advanceUntilSettled(resultPromise);
+
+        expect(await resultPromise).toEqual({
+          success: false,
+          error: {
+            code: "indeterminate",
+            message: expect.stringContaining("may already have been applied"),
+          },
+        });
+        await vi.advanceTimersByTimeAsync(TOOL_TIMEOUT_MS * 2);
+        expect(committed).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("keeps a mutating Tool that ignores its abort out of the model's retry path", async () => {
+      vi.useFakeTimers();
+      try {
+        const reg = new ToolRegistry();
+        reg.register(
+          makeTool({
+            name: "write_y",
+            mutating: true,
+            execute: () => new Promise<ToolCallResult>(() => {}),
+          })
+        );
+        const ts = reg.buildToolSet(ctx);
+        const resultPromise = ts.write_y.execute?.(
+          {},
+          { messages: [], context: undefined, toolCallId: "tc" }
+        );
+        await advanceUntilSettled(resultPromise);
+
+        const result = (await resultPromise) as ToolCallResult;
+        expect(result.success).toBe(false);
+        expect(!result.success && result.error.code).toBe("indeterminate");
+        expect(isIndeterminateFault("indeterminate")).toBe(true);
+        expect(isInfrastructureFault("indeterminate")).toBe(false);
       } finally {
         vi.useRealTimers();
       }

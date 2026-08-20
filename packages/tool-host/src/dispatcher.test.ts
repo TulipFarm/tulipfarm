@@ -83,6 +83,21 @@ function makeDispatcher(
   };
 }
 
+/** Drives fake timers until `promise` settles, so a deadline plus grace window cannot deadlock. */
+async function drain<T>(promise: Promise<T>): Promise<T> {
+  let finished = false;
+  void promise.then(
+    () => {
+      finished = true;
+    },
+    () => {
+      finished = true;
+    }
+  );
+  for (let i = 0; i < 200 && !finished; i += 1) await vi.advanceTimersByTimeAsync(100);
+  return promise;
+}
+
 /** An `AgentResolver` that answers with one authored Agent, ceiling included. */
 function agentWithAutonomy(autonomy: ChatAutonomy | undefined): AgentResolver {
   return { resolve: () => ({ name: "mutator", ...(autonomy === undefined ? {} : { autonomy }) }) };
@@ -136,6 +151,8 @@ describe("RegistryToolDispatcher", () => {
         surfaceCatalog: expect.any(Array),
         surfaceCatalogRevision: expect.any(String),
         surfaceRendererManifest: expect.anything(),
+        // Every dispatch now carries its own deadline, so the Tool can fail closed on abort.
+        abortSignal: expect.any(AbortSignal),
       },
     ]);
     expect(artifacts.read).toHaveBeenCalledWith(
@@ -1191,7 +1208,7 @@ describe("effect ledger", () => {
     ) as ToolDef;
   }
 
-  function ledgerDispatcher(tool: ToolDef) {
+  function ledgerDispatcher(tool: ToolDef, executeTimeoutMs?: number) {
     const registry = new InMemoryToolCatalog();
     registry.register(tool);
     const effects = new MemoryEffectStore();
@@ -1201,6 +1218,7 @@ describe("effect ledger", () => {
         registry,
         artifacts: fakeArtifacts() as unknown as ArtifactService,
         effects,
+        ...(executeTimeoutMs === undefined ? {} : { executeTimeoutMs }),
       }),
     };
   }
@@ -1245,6 +1263,56 @@ describe("effect ledger", () => {
     expect(conflicting).toMatchObject({ status: "failed" });
     expect(conflicting.status === "failed" && conflicting.reason).toContain("different arguments");
     expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("settles a mutating tool that ignored its abort as ambiguous, not failed", async () => {
+    vi.useFakeTimers();
+    try {
+      let committed = 0;
+      const { dispatcher, effects } = ledgerDispatcher(
+        ledgeredTool(
+          () =>
+            new Promise((resolve) => {
+              setTimeout(() => {
+                committed += 1;
+                resolve(ok({ done: true }));
+              }, 60_000);
+            })
+        ),
+        1_000
+      );
+
+      const result = await drain(dispatcher.dispatch(AUTHORITY, CALL));
+
+      expect(result).toMatchObject({ status: "failed" });
+      expect(result.status === "failed" && result.reason).toContain(
+        "may already have been applied"
+      );
+      const records = await effects.list(BUSINESS_ID);
+      expect(records[0]?.state).toBe("ambiguous");
+      // The abandoned call keeps running; its write must never reach the caller's answer.
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(committed).toBe(1);
+      expect((await effects.list(BUSINESS_ID))[0]?.state).toBe("ambiguous");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("replays an abandoned call as unresolved instead of running it a second time", async () => {
+    vi.useFakeTimers();
+    try {
+      const execute = vi.fn(() => new Promise<ReturnType<typeof ok>>(() => {}));
+      const { dispatcher } = ledgerDispatcher(ledgeredTool(execute), 1_000);
+
+      await drain(dispatcher.dispatch(AUTHORITY, CALL));
+      const second = await drain(dispatcher.dispatch(AUTHORITY, CALL));
+
+      expect(execute).toHaveBeenCalledTimes(1);
+      expect(second).toMatchObject({ status: "failed" });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("settles a thrown mutating tool as ambiguous, not failed", async () => {
