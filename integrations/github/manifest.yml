@@ -50,6 +50,10 @@ auth:
       url: "{web_url}"
       # GitHub redirects here after creation with `?code=`, which the exchange below redeems.
       redirect_url: "{callback_url}"
+      # Without this, GitHub never redirects back after "Install on GitHub" — the install step's
+      # `installation_id` capture (below) would never fire and the integration would stay
+      # "Not connected" no matter how many times the operator installs the App.
+      setup_url: "{callback_url}"
       hook_attributes:
         url: "{api_url}/api/v1/integrations/github/webhook"
         active: true
