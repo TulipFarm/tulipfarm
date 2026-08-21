@@ -177,6 +177,15 @@ const TURN_FINISHED_SCHEMA = {
     status: { type: "string", enum: ["succeeded", "failed", "cancelled"] },
     messageId: { type: ["string", "null"] },
     reason: { type: "string" },
+    modelFailure: {
+      type: "object",
+      required: ["requestId"],
+      additionalProperties: false,
+      properties: {
+        requestId: { type: "string", minLength: 1 },
+        modelId: { type: "string", minLength: 1 },
+      },
+    },
     modelId: { type: "string", minLength: 1 },
     effortPreset: { type: "string", enum: EFFORT_PRESETS },
     effortApplied: { type: "string", enum: EFFORT_RUNGS },
@@ -480,6 +489,7 @@ export interface RunEventPayloads {
     readonly status: "succeeded" | "failed" | "cancelled";
     readonly messageId?: string | null;
     readonly reason?: string;
+    readonly modelFailure?: { readonly requestId: string; readonly modelId?: string };
     readonly modelId?: string;
     readonly effortPreset?: EffortPreset;
     readonly effortApplied?: EffortRung;

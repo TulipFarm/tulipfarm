@@ -384,6 +384,7 @@ describe("TurnDriver", () => {
     const { driver, events } = harness({
       status: "failed",
       reason: "model_error",
+      modelFailure: { requestId: "run-without-model:invoke:1", modelId: "gpt-5.6-terra" },
       ...counters,
     });
 
@@ -391,7 +392,12 @@ describe("TurnDriver", () => {
 
     expect(events.appended.at(-1)).toEqual({
       eventType: "turn.finished",
-      payload: { status: "failed", messageId: null, reason: "model_error" },
+      payload: {
+        status: "failed",
+        messageId: null,
+        reason: "model_error",
+        modelFailure: { requestId: "run-without-model:invoke:1", modelId: "gpt-5.6-terra" },
+      },
     });
   });
 

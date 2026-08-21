@@ -708,7 +708,11 @@ describe("AgentLoop", () => {
 
     const outcome = await loop({ model, log: { warn } }).run(input());
 
-    expect(outcome).toMatchObject({ status: "failed", reason: "model_billing_inactive" });
+    expect(outcome).toMatchObject({
+      status: "failed",
+      reason: "model_billing_inactive",
+      modelFailure: { requestId: "run-1:state-1:1" },
+    });
     expect(warn).toHaveBeenCalledWith(
       expect.objectContaining({
         reason: "model_billing_inactive",

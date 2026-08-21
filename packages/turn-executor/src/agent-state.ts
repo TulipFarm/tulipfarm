@@ -1,4 +1,8 @@
-import type { AgentLoopInput, AgentLoopOutcome } from "@tulipfarm/agent-runtime";
+import type {
+  AgentLoopInput,
+  AgentLoopOutcome,
+  ModelFailureDiagnostic,
+} from "@tulipfarm/agent-runtime";
 import { assertStateTransition, type StateStatus } from "@tulipfarm/run-kernel";
 import { StateTransitionConflictError } from "./kernel-ports";
 
@@ -44,7 +48,11 @@ export interface AgentStateRunnerOptions {
 
 export type AgentStateResult =
   | { readonly status: "succeeded"; readonly output: unknown }
-  | { readonly status: "failed"; readonly reason: string }
+  | {
+      readonly status: "failed";
+      readonly reason: string;
+      readonly modelFailure?: ModelFailureDiagnostic;
+    }
   | {
       readonly status: "waiting";
       readonly waitId: string;
@@ -81,7 +89,11 @@ export class AgentStateRunner {
 
       case "failed":
         await this.move(request, "running", "failed", outcome.reason);
-        return { status: "failed", reason: outcome.reason };
+        return {
+          status: "failed",
+          reason: outcome.reason,
+          ...(outcome.modelFailure === undefined ? {} : { modelFailure: outcome.modelFailure }),
+        };
 
       case "awaiting_approval": {
         const { waitId } = await this.options.waits.register({

@@ -22,6 +22,11 @@ export interface ModelResponderRef {
   modelId?: string;
 }
 
+/** The chain link whose provider call actually began, including a failed final attempt. */
+export interface ModelAttemptRef {
+  modelId?: string;
+}
+
 export interface FallbackCallLease {
   succeeded(): void;
   failed(reason: string): void;
@@ -62,7 +67,8 @@ export class FallbackModel implements LanguageModelV4 {
     /** Records which link served, so cost is attributed to the model that answered. */
     private readonly responder?: ModelResponderRef,
     private readonly gate?: FallbackCallGate,
-    private readonly providerKeys: readonly string[] = models.map((model) => model.provider)
+    private readonly providerKeys: readonly string[] = models.map((model) => model.provider),
+    private readonly attempted?: ModelAttemptRef
   ) {
     const primary = models[0];
     if (!primary) throw new Error("FallbackModel requires at least one model");
@@ -80,6 +86,9 @@ export class FallbackModel implements LanguageModelV4 {
       let lease: FallbackCallLease | undefined;
       try {
         lease = await this.gate?.acquire(this.providerKey(index, model));
+        if ((lease !== undefined || this.gate === undefined) && this.attempted !== undefined) {
+          this.attempted.modelId = model.modelId;
+        }
         const generated = await model.doGenerate(options);
         lease?.succeeded();
         this.commit(model);
@@ -104,6 +113,9 @@ export class FallbackModel implements LanguageModelV4 {
       let result: Awaited<ReturnType<LanguageModelV4["doStream"]>>;
       try {
         lease = await this.gate?.acquire(this.providerKey(index, model));
+        if ((lease !== undefined || this.gate === undefined) && this.attempted !== undefined) {
+          this.attempted.modelId = model.modelId;
+        }
         result = await model.doStream(options);
       } catch (err) {
         if (isHardFailure(err)) {

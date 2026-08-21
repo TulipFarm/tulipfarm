@@ -56,6 +56,7 @@ export interface ModelInvocationRequest {
 export type ModelInvocationFailureReason =
   | "model_billing_inactive"
   | "model_authentication_failed"
+  | "model_not_configured"
   | "model_not_found"
   | "model_rate_limited"
   | "model_provider_unavailable"
@@ -73,7 +74,9 @@ export class ModelInvocationError extends Error {
      * output was generated, and the provider bills for both. Without this the Run is charged
      * nothing, so a failure loop can spend without limit against a budget it never touches.
      */
-    readonly usage?: ModelUsage
+    readonly usage?: ModelUsage,
+    /** The provider model whose call began, when the adapter can know it. */
+    readonly modelId?: string
   ) {
     super(reason, { cause });
     this.name = "ModelInvocationError";

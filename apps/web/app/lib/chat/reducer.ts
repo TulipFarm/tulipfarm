@@ -61,14 +61,20 @@ export function appendUserMessage(
     sealed: true,
     sourceTurn: sourceTurn(text, options),
   };
-  return { ...state, messages: [...state.messages, message], status: "submitted" };
+  return {
+    ...state,
+    messages: [...state.messages, message],
+    status: "submitted",
+    error: undefined,
+    errorDetails: undefined,
+  };
 }
 
 export function rewindLastTurn(state: ChatState): ChatState {
   const messages = state.messages.slice();
   while (messages.length > 0 && messages[messages.length - 1].role === "assistant") messages.pop();
   if (messages.length > 0 && messages[messages.length - 1].role === "user") messages.pop();
-  return { ...state, messages, status: "idle", error: undefined };
+  return { ...state, messages, status: "idle", error: undefined, errorDetails: undefined };
 }
 
 function ensureAssistant(messages: ChatMessage[]): {
@@ -347,7 +353,12 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
     }
 
     case "error":
-      return { ...state, status: "error", error: event.data.message };
+      return {
+        ...state,
+        status: "error",
+        error: event.data.message,
+        errorDetails: event.data.details,
+      };
 
     case "client-action":
       return state;

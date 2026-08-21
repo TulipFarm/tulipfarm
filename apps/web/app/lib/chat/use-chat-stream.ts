@@ -125,7 +125,9 @@ export function surfaceInteractionAnswer(input: Readonly<Record<string, unknown>
 
 function reducer(state: ChatState, action: ChatAction): ChatState {
   if (action.type === "user") return appendUserMessage(state, action.text, action.options);
-  if (action.type === "surface-submit") return { ...state, status: "submitted", error: undefined };
+  if (action.type === "surface-submit") {
+    return { ...state, status: "submitted", error: undefined, errorDetails: undefined };
+  }
   if (action.type === "reset") return initialChatState;
   if (action.type === "stopped") return rewindLastTurn(state);
   if (action.type === "regenerate") {
@@ -133,7 +135,7 @@ function reducer(state: ChatState, action: ChatAction): ChatState {
     while (messages.length > 0 && messages[messages.length - 1].role === "assistant") {
       messages.pop();
     }
-    return { ...state, messages, status: "submitted", error: undefined };
+    return { ...state, messages, status: "submitted", error: undefined, errorDetails: undefined };
   }
   if (action.type === "meta") {
     return {
@@ -391,6 +393,7 @@ export function useChatStream(opts?: UseChatStreamOptions) {
     currentAgent: state.currentAgent,
     conversationId: state.conversationId,
     error: state.error,
+    errorDetails: state.errorDetails,
     connectionState,
     send,
     stop,

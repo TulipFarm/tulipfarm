@@ -361,7 +361,14 @@ export class TurnDriver {
     if (completion.status === "failed") {
       await events.emit(
         "turn.finished",
-        { status: "failed", messageId: null, reason: completion.reason },
+        {
+          status: "failed",
+          messageId: null,
+          reason: completion.reason,
+          ...(completion.modelFailure === undefined
+            ? {}
+            : { modelFailure: completion.modelFailure }),
+        },
         "finished"
       );
       this.reportTurn(spend, "error");
@@ -387,7 +394,13 @@ export class TurnDriver {
 function turnOutcome(
   result: Extract<AgentStateResult, { status: "succeeded" | "failed" | "input_required" }>
 ): TurnOutcome {
-  if (result.status === "failed") return { status: "failed", reason: result.reason };
+  if (result.status === "failed") {
+    return {
+      status: "failed",
+      reason: result.reason,
+      ...(result.modelFailure === undefined ? {} : { modelFailure: result.modelFailure }),
+    };
+  }
   if (result.status === "input_required") return { status: "input_required", text: result.text };
   const text = renderAnswer(result.output);
   if (text.length === 0) return { status: "failed", reason: "empty_model_output" };

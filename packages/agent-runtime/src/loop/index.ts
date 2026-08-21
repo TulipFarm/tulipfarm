@@ -12,6 +12,7 @@ export type {
   AgentLoopOutcome,
   ExposedTool,
   LoopAttachmentPort,
+  ModelFailureDiagnostic,
   ToolDispatchPort,
   ToolDispatchRequest,
   ToolDispatchResult,

@@ -293,9 +293,10 @@ export interface EvalCase {
    * Every tier otherwise hands the executor working ports, which means the Corpus can only observe
    * a Turn that got as far as the loop. A Turn abandoned *before* the loop — Context unreadable,
    * Soul unreachable — is the one failure a participant can neither see nor retry, so it is worth
-   * the one knob it takes to reach it. `"context"` fails Context resolution.
+   * the one knob it takes to reach it. `"context"` fails Context resolution; `"model"` fails the
+   * Model Port.
    */
-  readonly fault?: "context";
+  readonly fault?: "context" | "model";
   /**
    * L3 only. Roles an admin has assigned this Case's Agent, seeded as `role_assignments` rows.
    *

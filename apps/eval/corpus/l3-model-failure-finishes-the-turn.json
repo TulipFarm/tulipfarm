@@ -1,0 +1,33 @@
+{
+  "id": "l3-model-failure-finishes-the-turn",
+  "tier": "l3",
+  "agent": "support",
+  "fault": "model",
+  "context": {
+    "governancePages": []
+  },
+  "input": [
+    {
+      "role": "user",
+      "content": "What are your opening hours?"
+    }
+  ],
+  "expect": [
+    {
+      "kind": "run_status",
+      "status": "failed"
+    },
+    {
+      "kind": "state_status",
+      "status": "failed"
+    },
+    {
+      "kind": "turn_status",
+      "status": "failed"
+    },
+    {
+      "kind": "run_event_emitted",
+      "eventType": "turn.finished"
+    }
+  ]
+}

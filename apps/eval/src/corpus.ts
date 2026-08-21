@@ -182,7 +182,8 @@ function validate(raw: unknown, file: string): EvalCase {
     }
   }
   if (c.fault !== undefined) {
-    require(c.fault === "context", `${file}: unknown fault ${JSON.stringify(c.fault)}`);
+    require(c.fault === "context" ||
+      c.fault === "model", `${file}: unknown fault ${JSON.stringify(c.fault)}`);
     // Only the L3 tier builds the dependency a fault breaks. On an L2 Case the field would be read
     // by nothing and the Case would quietly measure an ordinary Turn.
     require(c.tier ===

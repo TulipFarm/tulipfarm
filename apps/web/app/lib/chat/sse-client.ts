@@ -86,6 +86,7 @@ type RunEventData = {
   effortApplied?: EffortRung;
   modelCallLatencyMs?: number;
   artifactId?: string;
+  modelFailure?: { requestId?: string; modelId?: string };
 };
 
 /** A turn that ended without an answer, whichever half of the runtime gave up on it. */
@@ -121,6 +122,21 @@ export function modelFailureMessage(reason: string | undefined): string {
   }
 }
 
+function modelFailureDetails(
+  data: RunEventData
+):
+  | { readonly reason?: string; readonly requestId?: string; readonly modelId?: string }
+  | undefined {
+  if (data.reason === undefined && data.modelFailure === undefined) return undefined;
+  return {
+    ...(data.reason === undefined ? {} : { reason: data.reason }),
+    ...(data.modelFailure?.requestId === undefined
+      ? {}
+      : { requestId: data.modelFailure.requestId }),
+    ...(data.modelFailure?.modelId === undefined ? {} : { modelId: data.modelFailure.modelId }),
+  };
+}
+
 function compact<T extends object>(value: T): T {
   return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as T;
 }
@@ -143,7 +159,7 @@ export function createRunEventMapper(): (frame: ParsedFrame) => ChatEvent[] {
       case "text.delta":
         return [{ type: "text", data: { delta: data.text ?? "" } }];
 
-      case "tool.call":
+      case "tool.call": {
         return [
           {
             type: "tool-call",
@@ -163,6 +179,7 @@ export function createRunEventMapper(): (frame: ParsedFrame) => ChatEvent[] {
             }),
           },
         ];
+      }
 
       case "tool.result": {
         const callId = data.callId ?? "";
@@ -246,7 +263,16 @@ export function createRunEventMapper(): (frame: ParsedFrame) => ChatEvent[] {
           ];
         }
         if (data.status === "cancelled") return [{ type: "finish", data: { reason: "cancelled" } }];
-        return [{ type: "error", data: { message: modelFailureMessage(data.reason) } }];
+        const details = modelFailureDetails(data);
+        return [
+          {
+            type: "error",
+            data: {
+              message: modelFailureMessage(data.reason),
+              ...(details === undefined ? {} : { details }),
+            },
+          },
+        ];
       }
 
       case "stream.closed": {
