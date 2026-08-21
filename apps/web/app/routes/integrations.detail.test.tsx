@@ -24,6 +24,7 @@ vi.mock("~/lib/integrations", async (importOriginal) => ({
   deleteIntegration: vi.fn(),
   disconnectIntegration: vi.fn(),
   disconnectGitHubInstallation: vi.fn(),
+  disconnectPersonalIntegration: vi.fn(),
 }));
 
 import type { IntegrationDetail } from "~/lib/integrations";
@@ -203,4 +204,57 @@ test("still shows a member what the integration is and whether it is connected",
   expect(screen.getByText("Connected")).toBeInTheDocument();
   expect(screen.getByText(/issues, pull requests/i)).toBeInTheDocument();
   expect(screen.getByText("Open a pull request")).toBeInTheDocument();
+});
+
+test("offers every signed-in user their own GitHub connect action", async () => {
+  admin = false;
+  renderDetail(
+    detail({
+      connected: true,
+      status: "connected",
+      auth: [
+        {
+          index: 3,
+          kind: "oauth2",
+          personal: true,
+          satisfied: false,
+          producesEnv: true,
+        },
+      ],
+    })
+  );
+
+  expect(
+    await screen.findByRole("button", { name: "Connect your GitHub account" })
+  ).toBeInTheDocument();
+  expect(screen.getByText(/never fall back to the business's GitHub App/i)).toBeInTheDocument();
+});
+
+test("keeps a personal OAuth step out of the administrator's business setup rail", async () => {
+  renderDetail(
+    detail({
+      connected: false,
+      auth: [
+        {
+          index: 0,
+          kind: "fields",
+          title: "Business app",
+          satisfied: false,
+          producesEnv: true,
+          fields: [{ name: "APP_ID", label: "App ID" }],
+        },
+        {
+          index: 1,
+          kind: "oauth2",
+          title: "Connect your GitHub account",
+          personal: true,
+          satisfied: false,
+          producesEnv: true,
+        },
+      ],
+    })
+  );
+
+  expect((await screen.findAllByText("Business app")).length).toBeGreaterThan(0);
+  expect(screen.queryByText("Connect your GitHub account")).not.toBeInTheDocument();
 });

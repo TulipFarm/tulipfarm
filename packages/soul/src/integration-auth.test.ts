@@ -582,6 +582,25 @@ describe("step satisfaction", () => {
     expect(authFlowSatisfied(m, {})).toBe(false);
     expect(authFlowSatisfied(m, { API_KEY: "k" })).toBe(true);
   });
+
+  it("does not make a business connection wait for each user's personal OAuth step", () => {
+    const m = manifest({
+      auth: [
+        { kind: "fields", fields: [{ name: "APP_ID", label: "App ID" }] },
+        {
+          kind: "oauth2",
+          personal: true,
+          authorization_url: "https://provider.example/authorize",
+          token_url: "https://provider.example/token",
+          client_id_env: "APP_ID",
+          client_secret_env: "APP_SECRET",
+          token_env: "USER_TOKEN",
+        },
+      ],
+    });
+
+    expect(authFlowSatisfied(m, { APP_ID: "client" })).toBe(true);
+  });
 });
 
 describe("authStepProducesEnv", () => {

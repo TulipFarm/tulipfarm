@@ -5,6 +5,7 @@ import {
 import {
   integrationAppById,
   integrationAppField,
+  principalSecretKey,
   type SecretProvider,
   type SecretsService,
 } from "@tulipfarm/secrets";
@@ -15,6 +16,33 @@ import type { GitHubInstallationDirectory } from "./installation";
  * `selectGitHubInstallation` is shared with scope resolution to prevent confused deputies.
  */
 export const GITHUB_INSTALLATION_SECRET_REF = "secret://integrations/github/installation-token";
+export const GITHUB_PERSONAL_TOKEN_ENV = "GITHUB_OAUTH_ACCESS_TOKEN";
+const GITHUB_PERSONAL_SECRET_REF = "secret://integrations/github/personal";
+
+export type GitHubCredentialPrincipal = { readonly kind: string; readonly id: string };
+
+/** The principal-scoped ref recorded in a human-triggered GitHub effect. */
+export function githubPersonalSecretRef(principal: GitHubCredentialPrincipal): string {
+  return `${GITHUB_PERSONAL_SECRET_REF}/${encodeURIComponent(principal.kind)}/${encodeURIComponent(principal.id)}`;
+}
+
+function parseGitHubPersonalSecretRef(secretRef: string): GitHubCredentialPrincipal | undefined {
+  const prefix = `${GITHUB_PERSONAL_SECRET_REF}/`;
+  if (!secretRef.startsWith(prefix)) return undefined;
+  const parts = secretRef.slice(prefix.length).split("/");
+  if (parts.length !== 2) return undefined;
+  try {
+    const kind = decodeURIComponent(parts[0] ?? "");
+    const id = decodeURIComponent(parts[1] ?? "");
+    return kind === "" || id === "" ? undefined : { kind, id };
+  } catch {
+    return undefined;
+  }
+}
+
+export function isGitHubPersonalSecretRef(secretRef: string): boolean {
+  return parseGitHubPersonalSecretRef(secretRef) !== undefined;
+}
 
 /** `any` resolves only when exactly one active installation exists; it never falls back. */
 export type GitHubInstallationSelector =
@@ -151,14 +179,35 @@ export class GitHubInstallationTokenProvider implements SecretProvider {
   }
 }
 
-/** Routes every GitHub installation-token ref to `github`; other refs fall through to `base`. */
+/** Resolves only the principal named by the ref; there is no installation-token fallback. */
+export class GitHubPersonalTokenProvider implements SecretProvider {
+  constructor(private readonly secrets: () => Promise<SecretsService>) {}
+
+  async resolveCurrent(secretRef: string) {
+    const principal = parseGitHubPersonalSecretRef(secretRef);
+    if (principal === undefined) return null;
+    try {
+      return {
+        value: await (await this.secrets()).get(
+          principalSecretKey(principal, "github", GITHUB_PERSONAL_TOKEN_ENV)
+        ),
+      };
+    } catch {
+      return null;
+    }
+  }
+}
+
+/** Routes GitHub refs to their narrow provider; unrelated refs fall through to `base`. */
 export function githubCompositeSecretProvider(
   base: SecretProvider,
-  github: SecretProvider
+  installation: SecretProvider,
+  personal: SecretProvider
 ): SecretProvider {
   return {
     async resolveCurrent(secretRef) {
-      if (isGitHubInstallationSecretRef(secretRef)) return github.resolveCurrent(secretRef);
+      if (isGitHubInstallationSecretRef(secretRef)) return installation.resolveCurrent(secretRef);
+      if (isGitHubPersonalSecretRef(secretRef)) return personal.resolveCurrent(secretRef);
       return base.resolveCurrent(secretRef);
     },
   };

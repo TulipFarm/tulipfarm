@@ -89,6 +89,14 @@ describe("repositoriesIn", () => {
 });
 
 describe("GitHubEntitlementPort", () => {
+  it("uses the GitHub login verified by the connected personal credential", async () => {
+    const p = new GitHubEntitlementPort(identity([]), api({ "acme/api": "read" }), undefined, {
+      find: async () => ({ externalSubject: "dhruv" }),
+    } as unknown as import("../integrations/principal-tokens").PrincipalProviderTokenRepo);
+
+    expect(await p.check(query())).toEqual({ allowed: true });
+  });
+
   it("ignores a link the provider merely asserted, rather than deciding on that GitHub login", async () => {
     // A `manifest_email` row records a login the counterparty chose, not one this user proved.
     // Letting it name the GitHub account would hand our entitlement decision to whoever set that
@@ -146,7 +154,7 @@ describe("GitHubEntitlementPort", () => {
     const p = new GitHubEntitlementPort(identity([]), api({ "acme/api": "write" }));
     const verdict = verdictOf(await p.check(query()));
     expect(verdict.allowed).toBe(false);
-    expect(verdict.reason).toContain("link");
+    expect(verdict.reason).toContain("connect your account");
   });
 
   it("ignores an expired identity link", async () => {
@@ -255,7 +263,7 @@ describe("GitHubEntitlementPort", () => {
     const p = new GitHubEntitlementPort(identity([]), api({}, { acme: CAN_CREATE }));
     const verdict = verdictOf(await p.check(createQuery()));
     expect(verdict.allowed).toBe(false);
-    expect(verdict.reason).toContain("not linked");
+    expect(verdict.reason).toContain("connect your account");
   });
 
   it("still denies a person on a repository they lack, with an org target also present", async () => {

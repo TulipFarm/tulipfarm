@@ -5,6 +5,7 @@ import {
   type ToolEntitlementPort,
 } from "@tulipfarm/tool-broker";
 import type { ExternalIdentityRepo } from "../identity/external-links";
+import type { PrincipalProviderTokenRepo } from "../integrations/principal-tokens";
 import type { GitHubInstallationSelector } from "../tools/github/credentials";
 
 /** A 404, which for a membership lookup is a verdict and not a failure. */
@@ -93,7 +94,8 @@ export class GitHubEntitlementPort implements ToolEntitlementPort {
   constructor(
     private readonly identity: ExternalIdentityRepo,
     private readonly api: GitHubPermissionApi,
-    private readonly now: () => Date = () => new Date()
+    private readonly now: () => Date = () => new Date(),
+    private readonly tokens?: PrincipalProviderTokenRepo
   ) {}
 
   async check(query: EntitlementQuery): Promise<EntitlementAnswer> {
@@ -114,7 +116,7 @@ export class GitHubEntitlementPort implements ToolEntitlementPort {
       return {
         allowed: false,
         reason:
-          "your GitHub account is not linked to this workspace, so GitHub cannot be asked what you have access to — link it from Settings › Integrations",
+          "your GitHub account is not connected, so GitHub cannot confirm what you can access — open Integrations › GitHub and connect your account",
       };
     }
 
@@ -170,6 +172,8 @@ export class GitHubEntitlementPort implements ToolEntitlementPort {
   /** The GitHub login this principal *proved* it owns, if that link is present and unexpired. */
   private async githubLogin(principal: EntitlementQuery["principal"]): Promise<string | undefined> {
     if (principal.kind !== "user") return undefined;
+    const credential = await this.tokens?.find(principal, "github");
+    if (credential?.externalSubject) return credential.externalSubject;
     const now = this.now().getTime();
     // Proven links only. A `manifest_email` row names a login the provider asserted, so deciding
     // an entitlement on it would let whoever controls that address choose the account we ask

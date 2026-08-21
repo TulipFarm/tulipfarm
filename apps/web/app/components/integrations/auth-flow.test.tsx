@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test, vi } from "vitest";
-import { IntegrationAuthFlow } from "~/components/integrations/auth-flow";
+import { IntegrationAuthFlow, startHandoff } from "~/components/integrations/auth-flow";
 import type { AuthStepSummary } from "~/lib/integrations";
 
 const connectIntegration = vi.hoisted(() => vi.fn());
@@ -217,8 +217,25 @@ test("a redirect step navigates the browser to the provider", async () => {
 
   await waitFor(() => expect(assign).toHaveBeenCalled());
   // The step's own index must be sent, not its position in the list.
-  expect(startAuthStep).toHaveBeenCalledWith("slack", 3);
+  expect(startAuthStep).toHaveBeenCalledWith("slack", 3, {});
   expect(assign).toHaveBeenCalledWith("https://slack.com/oauth/v2/authorize?client_id=1");
+});
+
+test("a personal handoff starts the step with user scope", async () => {
+  const assign = vi.fn();
+  Object.defineProperty(window, "location", {
+    configurable: true,
+    value: { ...window.location, assign },
+  });
+  startAuthStep.mockResolvedValue({
+    action: "redirect",
+    url: "https://github.com/login/oauth/authorize?client_id=1",
+  });
+
+  await startHandoff("github", 3, false, undefined, "user");
+
+  expect(startAuthStep).toHaveBeenCalledWith("github", 3, { scope: "user" });
+  expect(assign).toHaveBeenCalled();
 });
 
 test("a form_post step POSTs the manifest, which a redirect cannot express", async () => {
@@ -274,7 +291,7 @@ test("an org typed into the optional field is sent with the handoff", async () =
   await user.type(screen.getByLabelText("Organization (optional)"), "acme-corp");
   await user.click(screen.getByRole("button", { name: /Create app on Slack/ }));
 
-  await waitFor(() => expect(startAuthStep).toHaveBeenCalledWith("slack", 0, "acme-corp"));
+  await waitFor(() => expect(startAuthStep).toHaveBeenCalledWith("slack", 0, { org: "acme-corp" }));
 });
 
 test("the org field is absent when the step does not support org targeting", () => {

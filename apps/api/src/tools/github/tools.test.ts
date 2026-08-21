@@ -1,6 +1,6 @@
 import { generateKeyPairSync } from "node:crypto";
 import { GITHUB_TOOL_CONTRACTS, type IntegrationHttpRequest } from "@tulipfarm/integrations";
-import type { SecretsService } from "@tulipfarm/secrets";
+import { principalSecretKey, type SecretsService } from "@tulipfarm/secrets";
 import type { IntegrationStore, PersistedRoutingSnapshot } from "@tulipfarm/storage";
 import { MemoryEffectStore } from "@tulipfarm/tool-broker";
 import type { RequestContext } from "@tulipfarm/tool-host";
@@ -356,6 +356,61 @@ describe("buildGitHubTools", () => {
     if (result.success) {
       expect(result.data).toMatchObject({ repository: "tulip/farm", number: 42, title: "Bug" });
     }
+  });
+
+  it("spends the human caller's OAuth token without minting an installation token", async () => {
+    const principal = { kind: "user", id: "user-1" };
+    let installationMinted = false;
+    const tooling = buildGitHubTooling({
+      businessId: BUSINESS_ID,
+      integrations: fakeIntegrationStore(),
+      secrets: async () =>
+        ({
+          get: async (key: string) => {
+            if (key === principalSecretKey(principal, "github", "GITHUB_OAUTH_ACCESS_TOKEN")) {
+              return "gho_personal";
+            }
+            if (key === "integration.github.GITHUB_APP_PRIVATE_KEY") return APP_PRIVATE_KEY_PEM;
+            throw new Error(`no secret ${key}`);
+          },
+        }) as SecretsService,
+      http: {
+        async send(request: IntegrationHttpRequest, credential?: string) {
+          if (request.path.endsWith("/access_tokens")) {
+            installationMinted = true;
+            throw new Error("installation token must not be minted");
+          }
+          expect(credential).toBe("gho_personal");
+          return {
+            status: 200,
+            headers: {},
+            body: {
+              number: 42,
+              title: "Private bug",
+              body: "",
+              state: "open",
+              html_url: "https://github.com/tulip/farm/issues/42",
+              labels: [],
+              assignees: [],
+            },
+          };
+        },
+      },
+    });
+    const tools = buildGitHubTools(BUSINESS_ID, {
+      ...tooling,
+      effects: new MemoryEffectStore(),
+    });
+    const tool = tools.find((candidate) => candidate.name === "github_issue_read");
+    if (tool === undefined) throw new Error("github_issue_read not registered");
+
+    const result = await tool.execute(
+      { repository: "tulip/farm", issueNumber: 42 },
+      context({ credentialPrincipal: principal })
+    );
+
+    expect(result.success).toBe(true);
+    expect(installationMinted).toBe(false);
   });
 
   it("dispatches a mutating tool and marks it mutating for the approval gate", async () => {

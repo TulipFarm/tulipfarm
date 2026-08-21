@@ -1,11 +1,5 @@
 import { createHash } from "node:crypto";
-import {
-  GITHUB_ORGANIZATION_TARGET,
-  GITHUB_REPOSITORY_TARGET,
-  GITHUB_TOOL_CONTRACTS,
-  GITHUB_TOOL_IDS,
-  type GitHubToolId,
-} from "@tulipfarm/integrations";
+import { GITHUB_TOOL_CONTRACTS, GITHUB_TOOL_IDS, type GitHubToolId } from "@tulipfarm/integrations";
 import type { MutationGuard } from "@tulipfarm/observability";
 import {
   EffectDispatcher,
@@ -27,12 +21,15 @@ import {
   toToolDef,
 } from "@tulipfarm/tool-host";
 import type { GitHubTooling } from "./compose";
-import { type GitHubInstallationSelector, githubInstallationSecretRef } from "./credentials";
+import {
+  type GitHubInstallationSelector,
+  githubInstallationSecretRef,
+  githubPersonalSecretRef,
+} from "./credentials";
 
 /** Chat GitHub Tools use the effect-ledger path; approval stays the chat mutating gate. */
 
 const GITHUB_CATALOG = ToolCatalog.load(GITHUB_TOOL_CONTRACTS);
-const GITHUB_INSTALLATION_TARGET = "github.installation";
 const GITHUB_ALL_REPOSITORIES_TARGET_ID = "all-repositories";
 const GITHUB_RESOURCE = "integration.github";
 
@@ -313,7 +310,10 @@ function buildToolDef(
         // Build intent from `targetsFor`; the gate reads the same derivation.
         targetRefs: definition.targetsFor(args, ctx),
         arguments: args,
-        credentialRef: githubInstallationSecretRef(githubCredentialSelector(toolId, args)),
+        credentialRef:
+          ctx.credentialPrincipal === undefined
+            ? githubInstallationSecretRef(githubCredentialSelector(toolId, args))
+            : githubPersonalSecretRef(ctx.credentialPrincipal),
         idempotencyKey: derivedId("github-idempotency", runId, stateId, toolId),
       };
       const intent = normalizeToolIntent(rawIntent);

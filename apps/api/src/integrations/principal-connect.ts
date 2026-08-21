@@ -17,6 +17,7 @@ export interface SealPrincipalCredentialInput {
   readonly secrets: PrincipalSecretStore;
   readonly tokens: PrincipalProviderTokenRepo;
   readonly now?: () => Date;
+  readonly externalSubject?: string | null;
 }
 
 function parseExpiry(value: string | undefined): Date | null {
@@ -69,7 +70,7 @@ export async function sealPrincipalCredential(
     refreshSecretKey,
     // Only what the provider actually reported. A subject we invented would be worse than none:
     // it is the value an audit uses to say which account acted.
-    externalSubject: null,
+    externalSubject: input.externalSubject ?? null,
     scopes,
     connectedAt: now,
     updatedAt: now,

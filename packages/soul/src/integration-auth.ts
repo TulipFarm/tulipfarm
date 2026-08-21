@@ -274,12 +274,14 @@ export function nextAuthStep(
   return index === -1 ? null : { index, step: steps[index] };
 }
 
-/** A no-auth flow is satisfied immediately; this is the single connected check. */
+/** A business connection never waits for credentials that each person must issue for themselves. */
 export function authFlowSatisfied(
   manifest: IntegrationManifest,
   env: Record<string, string>
 ): boolean {
-  return nextAuthStep(manifest, env) === null;
+  return resolveAuthSteps(manifest)
+    .filter((step) => !isPersonalCredentialStep(step))
+    .every((step) => authStepSatisfied(step, env));
 }
 
 /** Reject classifier context env that names secrets; do not silently filter declared intent. */

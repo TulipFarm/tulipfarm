@@ -68,6 +68,8 @@ export type IntegrationDetail = IntegrationSummary & {
   /** The manifest's declared auth flow, resolved and ordered. Drives the whole connect UI. */
   auth: AuthStepSummary[];
   connected: boolean;
+  /** Whether the signed-in user has a live personal credential for this provider. */
+  personalConnected?: boolean;
   setupGuide?: string;
   ingress?: { enabled: boolean; webhookUrl: string | null };
 };
@@ -87,6 +89,8 @@ export type AuthStepSummary = {
   fields?: RequiredEnvVar[];
   /** Whether an `app_manifest` step can create the app under a caller-named org. */
   supportsOrgTarget?: boolean;
+  /** Personal steps issue a credential for the signed-in user, never the business. */
+  personal?: boolean;
 };
 
 /** UI switches on broker `action`, not provider name, to avoid per-provider branches. */
@@ -100,13 +104,20 @@ export type AuthStartAction =
 export async function startAuthStep(
   name: string,
   step: number,
-  org?: string
+  options: { org?: string; scope?: "business" | "user" } = {}
 ): Promise<AuthStartAction> {
   return apiWrite<AuthStartAction>(
     "POST",
     `/api/v1/integrations/${encodeURIComponent(name)}/auth/start/${step}`,
-    org ? { org } : {}
+    {
+      ...(options.org ? { org: options.org } : {}),
+      ...(options.scope ? { scope: options.scope } : {}),
+    }
   );
+}
+
+export async function disconnectPersonalIntegration(name: string): Promise<void> {
+  await apiWrite("POST", `/api/v1/integrations/${encodeURIComponent(name)}/auth/revoke`, {});
 }
 
 /** One integration offered by a git repo, as reported by inspect. */
