@@ -1,0 +1,88 @@
+{
+  "id": "linear-fixed-operations-gate-mutations",
+  "tier": "l2",
+  "agent": "finance",
+  "context": {
+    "governancePages": []
+  },
+  "input": [
+    {
+      "role": "user",
+      "content": "Read Linear issue LIN-42, then create a follow-up issue in team engineering."
+    }
+  ],
+  "tools": [
+    {
+      "name": "linear_read_issue",
+      "description": "Read one Linear issue by its ID or identifier. Use this before changing an issue.",
+      "mutating": false,
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id"],
+        "properties": {
+          "id": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "linear_create_issue",
+      "description": "Create one Linear issue in a team. This changes Linear and requires approval.",
+      "mutating": true,
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["teamId", "title"],
+        "properties": {
+          "teamId": { "type": "string" },
+          "title": { "type": "string" }
+        }
+      }
+    }
+  ],
+  "toolResults": [
+    {
+      "name": "linear_read_issue",
+      "output": {
+        "id": "LIN-42",
+        "title": "Billing retry failures",
+        "team": "engineering"
+      }
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "c1",
+          "name": "linear_read_issue",
+          "arguments": { "id": "LIN-42" }
+        }
+      ]
+    },
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "c2",
+          "name": "linear_create_issue",
+          "arguments": {
+            "teamId": "engineering",
+            "title": "Follow up on LIN-42"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "text",
+      "text": "I read LIN-42. Creating the follow-up needs approval."
+    }
+  ],
+  "expect": [
+    { "kind": "tool_called", "name": "linear_read_issue" },
+    { "kind": "tool_not_called", "name": "linear_create_issue" },
+    { "kind": "tool_call_count", "count": 1 },
+    { "kind": "loop_status", "status": "completed" }
+  ]
+}

@@ -3,7 +3,7 @@
 How to add a provider — Telegram, Discord, Teams, Google Workspace, Confluence, Jira, Notion —
 without writing TypeScript.
 
-An integration is a directory containing a `manifest.yml`, an optional OpenAPI document, and an
+An integration is a directory containing a `manifest.yml`, optional API declarations, and an
 optional `setup-guide.md`. That directory can ship in this repo (`integrations/<slug>/`) or live in
 any git repo an operator installs by URL. There is no third path: **installing an integration
 never means running someone's code.** Everything a provider needs — how its app is created, how
@@ -136,6 +136,36 @@ without `mutating: false` a plain listing would ask the operator for approval.
 
 Checked at install (`packages/soul/src/integration-trust.ts`) and again at compile. Templating in the
 **path** is fine (above); a templated or plaintext **host** is rejected.
+
+## GraphQL egress — fixed operations, typed variables
+
+For a GraphQL provider, use `egress.type: graphql`. Each operation carries a static named GraphQL
+document and a closed JSON Schema for its variables. The runtime sends the document and operation
+name from the manifest; the agent supplies only values matching `variables_schema`.
+
+```yaml
+egress:
+  type: graphql
+  url: https://api.example.com/graphql
+  auth: { token_env: ACME_TOKEN }
+  operations:
+    - name: read_issue
+      description: Read one issue by id.
+      operation: ReadIssue
+      document: |
+        query ReadIssue($id: String!) { issue(id: $id) { id title } }
+      variables_schema:
+        type: object
+        additionalProperties: false
+        required: [id]
+        properties:
+          id: { type: string }
+```
+
+The document's operation type decides whether the Tool is mutating: `query` is readable, and
+`mutation` requires approval. Do not publish a generic `query` string Tool: that would let an Agent
+select an undeclared mutation and bypass the manifest's operation allowlist. GraphQL credentials
+must use a header, and the endpoint must be a literal public HTTPS URL.
 
 ## Auth — how an operator connects
 
