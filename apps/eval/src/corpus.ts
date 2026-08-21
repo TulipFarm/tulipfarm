@@ -124,6 +124,13 @@ function validate(raw: unknown, file: string): EvalCase {
   require(c.tier === "l2" ||
     c.tier ===
       "l3", `${file}: tier ${JSON.stringify(c.tier)} is not runnable; expected "l2" or "l3"`);
+  if (c.curator !== undefined) {
+    require(c.tier ===
+      "l3", `${file}: "curator" needs tier "l3"; this Case is tier ${JSON.stringify(c.tier)}`);
+    require(typeof c.curator === "object" &&
+      c.curator !== null &&
+      "output" in c.curator, `${file}: "curator" must contain an "output" fixture`);
+  }
   require(typeof c.context === "object" && c.context !== null, `${file}: missing "context"`);
   require(Array.isArray(c.input) &&
     c.input.length > 0, `${file}: "input" must be a non-empty array`);

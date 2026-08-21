@@ -41,6 +41,7 @@ export interface PersistedState {
     readonly filename: string;
     readonly readableBy: readonly string[];
   }[];
+  readonly curatorTasks?: readonly { readonly title: string }[];
 }
 
 export interface ExpectationResult {
@@ -272,6 +273,14 @@ function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: 
           )
           .join("; ")}`,
       };
+    }
+
+    case "curator_task_visible": {
+      const persisted = obs.persisted;
+      if (persisted === undefined) return notPersisted(a.kind);
+      return (persisted.curatorTasks ?? []).some((task) => task.title === a.title)
+        ? { passed: true, detail: `Curator delivered Task "${a.title}"` }
+        : { passed: false, detail: `no Curator Task titled "${a.title}"` };
     }
 
     // Answered by a Judge in `scoreJudged`, not here. Reaching this arm means a judged Expectation

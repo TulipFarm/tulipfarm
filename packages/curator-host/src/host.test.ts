@@ -18,6 +18,7 @@ const DIGEST = "digest-1";
 interface RecordedEffect {
   readonly kind: CuratorEffectKind;
   readonly payload: unknown;
+  readonly executionMode?: "shadow" | "apply";
 }
 
 class FakeCuratorRepo {
@@ -27,6 +28,7 @@ class FakeCuratorRepo {
   settled: string[] = [];
   candidates: { id: string; payload: unknown }[] = [];
   conflict = false;
+  reorderPinnedSectionHashes = false;
 
   async getJob(businessId: string, jobId: string): Promise<CuratorJobRecord | undefined> {
     const job = this.jobs.get(jobId);
@@ -37,8 +39,11 @@ class FakeCuratorRepo {
     if (!job) throw new Error(`no job ${jobId}`);
     const existing = job.contextPin;
     if (existing) return existing;
-    this.jobs.set(jobId, { ...job, contextPin: pin });
-    return pin;
+    const stored = this.reorderPinnedSectionHashes
+      ? { ...pin, sectionHashes: Object.fromEntries(Object.entries(pin.sectionHashes).reverse()) }
+      : pin;
+    this.jobs.set(jobId, { ...job, contextPin: stored });
+    return stored;
   }
   async readCandidates(
     _businessId: string,
@@ -178,6 +183,12 @@ describe("CuratorHost", () => {
       await expect(host.context(BUSINESS, "job-1")).resolves.toBeDefined();
     });
 
+    it("accepts an equivalent pin when JSON storage changes its key order", async () => {
+      repo.reorderPinnedSectionHashes = true;
+      repo.jobs.set("job-1", job());
+      await expect(host.context(BUSINESS, "job-1")).resolves.toBeDefined();
+    });
+
     it("serves only the candidates the job pinned, never whatever is open now", async () => {
       repo.jobs.set(
         "job-1",
@@ -301,7 +312,7 @@ describe("CuratorHost", () => {
         knowledgePromotions: [],
       });
       expect(result.recorded).toBe(1);
-      expect(repo.effects[0]?.kind).toBe("memory_patch");
+      expect(repo.effects[0]).toMatchObject({ kind: "memory_patch", executionMode: "shadow" });
       expect(repo.settled).toHaveLength(1);
     });
 
@@ -358,7 +369,25 @@ describe("CuratorHost", () => {
         knowledgePromotions: [],
       });
       expect(result.recorded).toBe(1);
-      expect(repo.effects[0]?.kind).toBe("proposal");
+      expect(repo.effects[0]).toMatchObject({ kind: "proposal", executionMode: "apply" });
+    });
+
+    it("keeps a pill-only Proposal in shadow mode", async () => {
+      await seed();
+      await host.submit(BUSINESS, "job-1", DIGEST, {
+        memory: [],
+        proposals: [
+          {
+            kind: "create_agent_for_integration",
+            subjectId: "github",
+            rationale: "GitHub was connected",
+            deliver: ["pill"],
+            citations: [{ turnId: "turn-1", quote: "I work on the payments team" }],
+          },
+        ],
+        knowledgePromotions: [],
+      });
+      expect(repo.effects[0]).toMatchObject({ kind: "proposal", executionMode: "shadow" });
     });
 
     it("plans a business job from its pinned candidates", async () => {

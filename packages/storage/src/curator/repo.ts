@@ -102,6 +102,15 @@ export interface CuratorEffectRecord {
   readonly createdAt: Date;
 }
 
+/** An applyable Proposal effect claimed for delivery to its subject's Task queue. */
+export interface CuratorProposalTaskEffect {
+  readonly id: string;
+  readonly jobId: string;
+  readonly businessId: string;
+  readonly userId: string;
+  readonly payload: unknown;
+}
+
 /** A dropped claim. Recorded, never inferred from an absence — "why" is the loop's own metric. */
 export interface CuratorRejectionRecord {
   readonly jobId: string;
@@ -337,7 +346,12 @@ export class CuratorRepo {
     readonly job: CuratorJobRecord;
     readonly outputDigest: string;
     readonly generation: number;
-    readonly effects: readonly { readonly kind: CuratorEffectKind; readonly payload: unknown }[];
+    readonly effects: readonly {
+      readonly kind: CuratorEffectKind;
+      readonly payload: unknown;
+      /** Omitted only by legacy callers, which inherit the job's immutable mode. */
+      readonly executionMode?: CuratorExecutionMode;
+    }[];
     readonly rejections: readonly {
       readonly effect: string;
       readonly reason: string;
@@ -373,8 +387,9 @@ export class CuratorRepo {
         };
       }
 
-      const state: CuratorEffectState = job.executionMode === "shadow" ? "shadowed" : "pending";
       for (const [ordinal, effect] of effects.entries()) {
+        const executionMode = effect.executionMode ?? job.executionMode;
+        const state: CuratorEffectState = executionMode === "shadow" ? "shadowed" : "pending";
         await tx.query(
           `INSERT INTO curator_effect
              (id, job_id, business_id, kind, generation, execution_mode, state, payload)
@@ -385,7 +400,7 @@ export class CuratorRepo {
             job.businessId,
             effect.kind,
             generation,
-            job.executionMode,
+            executionMode,
             state,
             JSON.stringify(effect.payload),
           ]
@@ -402,6 +417,120 @@ export class CuratorRepo {
       await completeCuratorWork(tx, job.id, new Date());
       return { recorded: effects.length, rejected: rejections.length, replayed: false };
     });
+  }
+
+  /**
+   * Claims a bounded batch of Proposal effects for delivery as Tasks.
+   *
+   * An applying row is retried only after its lease window. The Task upsert is idempotent on the
+   * Curator-owned dedupe key, so reclaiming after a crash between the Task write and settlement
+   * cannot create a duplicate Task.
+   */
+  async claimProposalTasks(input: {
+    readonly businessId: string;
+    readonly limit: number;
+    readonly staleBefore: Date;
+  }): Promise<CuratorProposalTaskEffect[]> {
+    const { rows } = await withTransaction(this.db, (tx) =>
+      tx.query<{
+        id: string;
+        job_id: string;
+        business_id: string;
+        user_id: string;
+        payload: unknown;
+      }>(
+        `WITH candidates AS (
+           SELECT e.id
+             FROM curator_effect AS e
+             JOIN curator_job AS j ON j.id = e.job_id
+            WHERE e.business_id = $1
+              AND e.kind = 'proposal'
+              AND e.execution_mode = 'apply'
+              AND j.scope = 'user'
+              AND j.user_id IS NOT NULL
+              AND (
+                e.state IN ('pending', 'retryable_failed')
+                OR (e.state = 'applying' AND e.updated_at < $2)
+              )
+            ORDER BY e.created_at, e.id
+            FOR UPDATE OF e SKIP LOCKED
+            LIMIT $3
+         )
+         UPDATE curator_effect AS e
+            SET state = 'applying', updated_at = now()
+           FROM candidates, curator_job AS j
+          WHERE e.id = candidates.id AND j.id = e.job_id
+          RETURNING e.id, e.job_id, e.business_id, j.user_id, e.payload`,
+        [input.businessId, input.staleBefore, Math.max(0, input.limit)]
+      )
+    );
+    return rows.map((row) => ({
+      id: row.id,
+      jobId: row.job_id,
+      businessId: row.business_id,
+      userId: row.user_id,
+      payload: row.payload,
+    }));
+  }
+
+  /** Records the Task projection and settles the claimed effect in one transaction. */
+  async completeProposalTask(input: {
+    readonly effectId: string;
+    readonly taskId: string;
+    readonly kind: string;
+    readonly deliver: readonly string[];
+    readonly citations: unknown;
+    readonly rationale: string;
+  }): Promise<boolean> {
+    return await withTransaction(this.db, async (tx) => {
+      const effect = await tx.query<{ business_id: string }>(
+        `UPDATE curator_effect
+            SET state = 'succeeded', updated_at = now()
+          WHERE id = $1 AND state = 'applying'
+          RETURNING business_id`,
+        [input.effectId]
+      );
+      const businessId = effect.rows[0]?.business_id;
+      if (!businessId) return false;
+      await tx.query(
+        `INSERT INTO curator_task_metadata (task_id, business_id, kind, deliver, citations, rationale)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (task_id) DO NOTHING`,
+        [
+          input.taskId,
+          businessId,
+          input.kind,
+          input.deliver,
+          JSON.stringify(input.citations),
+          input.rationale,
+        ]
+      );
+      return true;
+    });
+  }
+
+  /** A malformed or permanently dismissed Proposal is evidence, not work to retry forever. */
+  async rejectProposalTask(effectId: string): Promise<boolean> {
+    const { rows } = await this.db.query<{ id: string }>(
+      `UPDATE curator_effect
+          SET state = 'terminal_rejected', updated_at = now()
+        WHERE id = $1 AND state = 'applying'
+        RETURNING id`,
+      [effectId]
+    );
+    return rows.length > 0;
+  }
+
+  /** A transient Task-store failure leaves durable retry evidence for the next sweep. */
+  async retryProposalTask(effectId: string): Promise<boolean> {
+    const { rows } = await this.db.query<{ id: string }>(
+      `UPDATE curator_effect
+          SET state = 'retryable_failed', updated_at = now()
+        WHERE id = $1 AND state = 'applying'
+        RETURNING id`,
+      [effectId]
+    );
+    return rows.length > 0;
   }
 
   /**

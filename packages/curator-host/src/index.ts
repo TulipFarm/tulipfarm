@@ -1,4 +1,9 @@
 export {
+  CuratorTaskDelivery,
+  type CuratorTaskDeliveryDeps,
+  type CuratorTaskDeliveryResult,
+} from "./delivery";
+export {
   CuratorHost,
   type CuratorHostDenial,
   type CuratorHostDeps,
