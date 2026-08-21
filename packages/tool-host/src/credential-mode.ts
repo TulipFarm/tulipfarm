@@ -46,8 +46,19 @@ function isHumanTriggered(subject: CredentialSubject): boolean {
   return subject.kind === "user";
 }
 
+/**
+ * A workspace can hold a service-level connection to `provider` (an installed App, a shared bot
+ * token) while no individual has connected their own account — the two are unrelated credentials.
+ * Saying so explicitly stops "but this provider is already connected" (true of the service
+ * credential a read-only Tool may have just used) from reading as a reason this denial is wrong.
+ */
 function connectPrompt(provider: string, toolName: string): string {
-  return `"${toolName}" acts on ${provider} as you, and you have not connected your ${provider} account — open Integrations › ${provider} and connect your account, then try again. Do not retry this call until you have.`;
+  return (
+    `"${toolName}" acts on ${provider} as you personally, which is separate from any ${provider} ` +
+    `connection a workspace admin already set up — you have not connected your own ${provider} ` +
+    `account yet. Open Integrations › ${provider} and connect your account, then try again. Do ` +
+    `not retry this call until you have.`
+  );
 }
 
 export class CredentialResolver {
