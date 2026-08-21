@@ -16,6 +16,8 @@
   },
   "dependencies": {
     "@tulipfarm/agent-runtime": "workspace:*",
+    "@tulipfarm/curator": "workspace:*",
+    "@tulipfarm/curator-host": "workspace:*",
     "@tulipfarm/files": "workspace:*",
     "@tulipfarm/llm": "workspace:*",
     "@tulipfarm/model-adapter": "workspace:*",

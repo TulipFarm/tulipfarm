@@ -352,6 +352,12 @@ importers:
       '@tulipfarm/agent-runtime':
         specifier: workspace:*
         version: link:../../packages/agent-runtime
+      '@tulipfarm/curator':
+        specifier: workspace:*
+        version: link:../../packages/curator
+      '@tulipfarm/curator-host':
+        specifier: workspace:*
+        version: link:../../packages/curator-host
       '@tulipfarm/files':
         specifier: workspace:*
         version: link:../../packages/files

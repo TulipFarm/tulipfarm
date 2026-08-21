@@ -63,6 +63,7 @@ const EXPECTATION_FIELDS: Record<string, readonly [string, FieldType][]> = {
   soul_published: [["artifact", "string"]],
   generated_file_readable_by: [["grantee", "string"]],
   generated_file_not_readable_by: [["grantee", "string"]],
+  curator_task_visible: [["title", "string"]],
 };
 
 export function isKnownExpectationKind(kind: unknown): kind is string {

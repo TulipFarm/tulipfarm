@@ -1,10 +1,11 @@
 /**
  * The Curator's fan-out half of the five-minute sweep.
  *
- * It carries no reasoning and no policy: it repairs jobs that stopped making progress, asks which
- * users have a backlog, then posts one mint per user and one for the business. Every refusal that
- * matters — a live job for the same target, an exhausted budget, an admission cap — is decided by
- * the API, so a sweep that runs twice or races another process cannot mint the same target twice.
+ * It carries no reasoning and no policy: it delivers ready Proposal Tasks, repairs jobs that
+ * stopped making progress, asks which users have a backlog, then posts one mint per user and one
+ * for the business. Every refusal that matters — a live job for the same target, an exhausted
+ * budget, an admission cap — is decided by the API, so a sweep that runs twice or races another
+ * process cannot mint the same target twice.
  */
 
 /**
@@ -16,6 +17,8 @@ export const CURATOR_SWEEP_USER_LIMIT = 25;
 export interface CuratorSweepApi {
   require<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T>;
 }
+
+export const CURATOR_DELIVERY_PATH = "/api/v1/internal/curator/deliver";
 
 /** Narrow port over `listUsersWithDueWork`, composed in `main.ts` where the pool is typed. */
 export type CuratorBacklogReader = (input: {
@@ -50,6 +53,11 @@ export async function sweepCurator(options: CuratorSweepOptions): Promise<Curato
   // for and refused every tick until something frees it. Repairing first lets the same tick mint.
   let recovered = 0;
   let abandoned = 0;
+  try {
+    await api.require("POST", CURATOR_DELIVERY_PATH);
+  } catch (error) {
+    log?.error(`[curator] proposal delivery failed — ${message(error)}`);
+  }
   try {
     const repair = await api.require<ReconcileOutcome>(
       "POST",

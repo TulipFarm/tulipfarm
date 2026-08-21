@@ -64,6 +64,10 @@ interface Plan {
   readonly rejections: readonly { effect: string; reason: string; detail?: string }[];
 }
 
+function executionMode(effect: CuratorEffect): "apply" | "shadow" {
+  return effect.kind === "proposal" && effect.deliver.includes("task") ? "apply" : "shadow";
+}
+
 /**
  * Serves the pinned half of the Curator protocol.
  *
@@ -193,6 +197,7 @@ export class CuratorHost {
     const effects = kept.map((effect) => ({
       kind: effect.kind as CuratorEffectKind,
       payload: effect,
+      executionMode: executionMode(effect),
     }));
     try {
       const { recorded, rejected } = await this.deps.repo.settle({
@@ -270,7 +275,7 @@ function samePin(a: CuratorContextPin, b: CuratorContextPin): boolean {
     a.candidateDigest === b.candidateDigest &&
     a.seedDigest === b.seedDigest &&
     a.soulDigest === b.soulDigest &&
-    JSON.stringify(a.sectionHashes) === JSON.stringify(b.sectionHashes)
+    MEMORY_SECTION_KEYS.every((key) => a.sectionHashes[key] === b.sectionHashes[key])
   );
 }
 
