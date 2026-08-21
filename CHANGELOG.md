@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.13.3](https://github.com/TulipFarm/tulipfarm/compare/v0.13.2...v0.13.3) (2026-08-21)
+
+### Features
+
+* **dev:** implement surface protocol sandbox for /dev/surfaces ([#411](https://github.com/TulipFarm/tulipfarm/issues/411)) ([#562](https://github.com/TulipFarm/tulipfarm/issues/562)) ([186606e](https://github.com/TulipFarm/tulipfarm/commit/186606e0e1832374062d67b65813ce0624dfe257))
+* **integrations:** add one-click update button for integrations with updates ([#156](https://github.com/TulipFarm/tulipfarm/issues/156)) ([#566](https://github.com/TulipFarm/tulipfarm/issues/566)) ([92eba63](https://github.com/TulipFarm/tulipfarm/commit/92eba63c1c9faf80d2c36b7c8738a84e683bc0ae))
+
+### Bug Fixes
+
+* **skills:** enable marketplace browse and github install tools for chat ([#460](https://github.com/TulipFarm/tulipfarm/issues/460)) ([#567](https://github.com/TulipFarm/tulipfarm/issues/567)) ([7cef0d4](https://github.com/TulipFarm/tulipfarm/commit/7cef0d4a1c1e03f565ad142daae90cdb03694a68))
+* **turn-executor:** abort pending actions when confirmation is cancelled ([#458](https://github.com/TulipFarm/tulipfarm/issues/458)) ([#565](https://github.com/TulipFarm/tulipfarm/issues/565)) ([bbf3d33](https://github.com/TulipFarm/tulipfarm/commit/bbf3d33eee319f6913fc4918a881c93f14c3e26f))
+
 ## [0.13.2](https://github.com/TulipFarm/tulipfarm/compare/v0.13.1...v0.13.2) (2026-08-21)
 
 ### Features
