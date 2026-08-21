@@ -536,9 +536,19 @@ import { describe, expect, it } from "vitest";
  * inside `internal/turn-host.ts#completeTurn` and one shared schema, and the deduplicated
  * `ArtifactService` construction in `index.ts` gives back more than that. Only the Fastify-shaped
  * adapter is here; the decision about *when* to link is `packages/turn-executor`'s.
+ *
+ * Merged main into the branch and re-measured to 53_616, +56 over the 53_560 Google mark above.
+ * The branch's own addition since that entry is Calendar update and delete: `calendar_update_event`
+ * (a partial PATCH) and `calendar_delete_event`, which are two more specs in `tools/google/tools.ts`
+ * under the same handwritten-Tool exception `tools/github/` and `tools/slack/` take, plus the one
+ * `manifest` guard line `index.ts` needed once the merge made `SoulIntegration.manifest` optional.
+ * The dispatch and contracts those Tools call are in `packages/integrations/src/google`, not here.
+ * The remainder of the +56 is main's own growth in the merge window, which arrived through main's
+ * review; the mark is the measurement of the merged tree, per the re-baselining paragraphs above,
+ * never an allowance widened to fit a diff.
  */
 
-const CEILING = 53_560;
+const CEILING = 53_616;
 
 /**
  * Domains inside `apps/api/src` that already have a package of the same name. Everything here that

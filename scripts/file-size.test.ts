@@ -127,10 +127,26 @@ const IGNORED_DIRS = new Set([
  * families already take here. The Tools, the credential provider and the egress
  * helper are their own files under `tools/google/`; only the wiring is here,
  * because a composition root is the one place wiring can be.
+ *
+ * `index.ts` moved 1374 -> 1376 on merging main. The two lines are the `manifest`
+ * guard the `buildGoogleTooling` connection callback needed once the merge made
+ * `SoulIntegration.manifest` optional: reading it into a local and refusing when
+ * it is absent, so the callback still hands the refresh path a defined manifest.
+ * That is composition-root wiring, which is the one thing this file is for.
+ *
+ * `packages/integrations/src/google/contracts.ts` crosses 600 to 655 for the
+ * Calendar update and delete contracts — two published `ToolContractDefinition`s
+ * and their input/output schemas (a partial-update `PATCH` and a delete). It is
+ * the owning package's content-addressed contract registry for the whole Google
+ * Tool family, so this growth is already on the correct side of the boundary the
+ * control-plane gate protects. Splitting it would separate a schema from the
+ * definition that publishes it — the mutually-dependent split this test's own
+ * header forbids — so it is recorded here rather than moved.
  */
 const OVERSIZED: Readonly<Record<string, number>> = {
   "apps/api/src/pg-migrations/index.ts": 2183,
-  "apps/api/src/index.ts": 1374,
+  "apps/api/src/index.ts": 1376,
+  "packages/integrations/src/google/contracts.ts": 655,
 };
 
 /**
