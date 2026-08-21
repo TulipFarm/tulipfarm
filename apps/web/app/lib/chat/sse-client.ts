@@ -96,6 +96,8 @@ export function modelFailureMessage(reason: string | undefined): string {
     case "turn_execution_failed":
     case "needs_reconciliation":
       return TURN_STOPPED_MESSAGE;
+    case "repair_budget_exhausted":
+      return "The Agent kept producing an invalid result and gave up retrying. Try rephrasing your request.";
     case "model_billing_inactive":
       return "The model provider's API billing is inactive. Activate billing or use another Provider Credential.";
     case "model_authentication_failed":
