@@ -1,0 +1,93 @@
+{
+  "id": "skills-install-from-marketplace",
+  "tier": "l2",
+  "agent": "support",
+  "context": {
+    "customInstructions": "Use Skills only after their audit has completed.",
+    "governancePages": []
+  },
+  "input": [
+    {
+      "role": "user",
+      "content": "Install the code-review Skill from owner/skills."
+    }
+  ],
+  "platformTools": ["skill_source_scan", "skill_scanned_audit", "skill_scanned_install"],
+  "toolResults": [
+    {
+      "name": "skill_source_scan",
+      "output": {
+        "scanId": "scan-1",
+        "source": "owner/skills",
+        "ref": "abc123",
+        "skills": [
+          {
+            "name": "code-review",
+            "skillPath": "skills/code-review/SKILL.md",
+            "installed": false,
+            "updateAvailable": false
+          }
+        ]
+      }
+    },
+    { "name": "skill_scanned_audit", "output": { "report": { "riskRating": "low" } } },
+    {
+      "name": "skill_scanned_install",
+      "output": {
+        "installed": [{ "name": "code-review", "skillPath": "skills/code-review/SKILL.md" }],
+        "source": "owner/skills",
+        "ref": "abc123"
+      }
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        { "callId": "scan", "name": "skill_source_scan", "arguments": { "source": "owner/skills" } }
+      ]
+    },
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "audit",
+          "name": "skill_scanned_audit",
+          "arguments": {
+            "scanId": "scan-1",
+            "name": "code-review",
+            "skillPath": "skills/code-review/SKILL.md"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "install",
+          "name": "skill_scanned_install",
+          "arguments": {
+            "scanId": "scan-1",
+            "name": "code-review",
+            "skillPath": "skills/code-review/SKILL.md"
+          }
+        }
+      ]
+    },
+    { "kind": "text", "text": "Installed code-review from owner/skills at abc123." }
+  ],
+  "expect": [
+    { "kind": "tool_called", "name": "skill_source_scan" },
+    { "kind": "tool_called", "name": "skill_scanned_audit" },
+    { "kind": "tool_called", "name": "skill_scanned_install" },
+    {
+      "kind": "tool_argument_equals",
+      "name": "skill_scanned_install",
+      "path": "skillPath",
+      "value": "skills/code-review/SKILL.md"
+    },
+    { "kind": "output_contains", "text": "abc123" },
+    { "kind": "loop_status", "status": "completed" }
+  ]
+}

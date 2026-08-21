@@ -175,7 +175,8 @@ export function registerSoulRouteFamily(
           opts.activityService,
           opts.bundledSkills,
           opts.disabledBundledSkills,
-          opts.auditService
+          opts.auditService,
+          opts.skillMarketplace
         );
         if (opts.secretsService) {
           registerLlmConfigRoutes(

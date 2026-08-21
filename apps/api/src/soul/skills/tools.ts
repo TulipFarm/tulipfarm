@@ -31,8 +31,9 @@ import {
   type ApiToolDefinition,
   defineApiTool,
   err,
+  MARKETPLACE_SKILL_TOOLS,
+  type MarketplaceSkillToolContext,
   ok,
-  type RequestContext,
   type ToolCallResult,
 } from "@tulipfarm/tool-host";
 import { firstError } from "../../platform/tool-args";
@@ -40,14 +41,13 @@ import { SYSTEM_SOUL_COMMIT_ACTOR } from "../../runtime/soul-writer";
 import { soulCommitError } from "../../tools/soul-faults";
 import { buildAudit } from "./audit.js";
 
-export interface SkillToolContext {
+export interface SkillToolContext extends MarketplaceSkillToolContext {
   gitSync: GitSyncService;
   soulLoader: SoulLoader;
   llmService?: LlmService;
   bundledSkills: ReadonlyMap<string, BundledSkill>;
   disabledBundledSkills: Set<string>;
   readonly soulWriter: SoulWriter;
-  requestContext?: RequestContext;
 }
 
 const SOUL_SKILL_TARGET = "soul.skill";
@@ -564,4 +564,5 @@ export const SKILL_TOOLS: ApiToolDefinition<SkillToolContext>[] = [
   skillList,
   skillDelete,
   skillActivate,
+  ...MARKETPLACE_SKILL_TOOLS,
 ];

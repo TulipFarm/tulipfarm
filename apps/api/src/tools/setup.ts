@@ -136,7 +136,7 @@ export function buildToolRegistry(services: {
 
   if (services.skillTools) {
     const ctx = services.skillTools;
-    registerFamily(SKILL_TOOLS, () => ctx);
+    registerFamily(SKILL_TOOLS, (requestContext) => ({ ...ctx, requestContext }));
   }
 
   if (services.surfaceComponents) {

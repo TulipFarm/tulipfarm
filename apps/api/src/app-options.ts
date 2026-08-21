@@ -17,6 +17,7 @@ import type {
   BundledSkill,
   GitSyncService,
   RoutineCatalog,
+  SkillMarketplaceFlow,
   SoulLoader,
   SoulWriter,
 } from "@tulipfarm/soul";
@@ -99,6 +100,8 @@ export interface AppOptions {
   soulLoader?: SoulLoader;
   bundledSkills?: ReadonlyMap<string, BundledSkill>;
   disabledBundledSkills?: Set<string>;
+  /** Shared marketplace scan/audit/install flow for REST routes and Chat Tools. */
+  skillMarketplace?: SkillMarketplaceFlow;
   bundledIntegrations?: ReadonlyMap<string, BundledIntegration>;
   slackBind?: {
     integrations: IntegrationStore;
