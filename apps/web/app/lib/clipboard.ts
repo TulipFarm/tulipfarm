@@ -27,3 +27,15 @@ export async function copyText(text: string): Promise<boolean> {
     textarea.remove();
   }
 }
+
+export async function copyImageBlob(blob: Blob): Promise<boolean> {
+  if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ [blob.type || "image/png"]: blob })]);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}

@@ -9,7 +9,7 @@ PATTERNS=(
   "crypto\\.subtle::${NO_FALLBACK}"
   "navigator\\.clipboard::use copyText() from ~/lib/clipboard"
   "navigator\\.credentials::${NO_FALLBACK}"
-  "navigator\\.mediaDevices::${NO_FALLBACK}"
+  "navigator\\.mediaDevices::use captureScreenshot() from ~/lib/report-bug"
   "navigator\\.geolocation::${NO_FALLBACK}"
   "navigator\\.serviceWorker::${NO_FALLBACK}"
   "navigator\\.storage::${NO_FALLBACK}"
@@ -21,7 +21,7 @@ PATTERNS=(
 
 is_exempt() {
   case "$1" in
-    */app/lib/uuid.ts | */app/lib/clipboard.ts) return 0 ;;
+    */app/lib/uuid.ts | */app/lib/clipboard.ts | */app/lib/report-bug.ts) return 0 ;;
     *.test.ts | *.test.tsx) return 0 ;;
     *) return 1 ;;
   esac
@@ -44,7 +44,7 @@ done
 
 if [ "$failed" -eq 1 ]; then
   printf '\nThese are undefined when the app is served over plain http from a LAN IP.\n'
-  printf 'See apps/web/app/lib/uuid.ts and apps/web/app/lib/clipboard.ts for the pattern.\n'
+  printf 'See apps/web/app/lib/uuid.ts, apps/web/app/lib/clipboard.ts, and apps/web/app/lib/report-bug.ts for the pattern.\n'
   exit 1
 fi
 
