@@ -27,6 +27,7 @@ import {
   type SkillScanFile,
   type SoulLoader,
   type SoulSkill,
+  type SoulWrite,
   type SoulWriter,
   soulWriteHttpError,
 } from "@tulipfarm/soul";
