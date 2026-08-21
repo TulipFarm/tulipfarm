@@ -36,6 +36,7 @@ function parseGitHubPersonalSecretRef(secretRef: string): GitHubCredentialPrinci
     const id = decodeURIComponent(parts[1] ?? "");
     return kind === "" || id === "" ? undefined : { kind, id };
   } catch {
+    // Malformed encoded principal refs are not credentials; keep the lease fail-closed.
     return undefined;
   }
 }
@@ -193,6 +194,7 @@ export class GitHubPersonalTokenProvider implements SecretProvider {
         ),
       };
     } catch {
+      // A missing or unavailable personal Secret means there is no credential to lease.
       return null;
     }
   }

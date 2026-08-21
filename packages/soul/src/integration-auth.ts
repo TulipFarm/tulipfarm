@@ -264,13 +264,15 @@ export function authStepProducesEnv(step: AuthStep): boolean {
   }
 }
 
-/** The first step still waiting on the operator, or `null` when the flow is complete. */
+/** The first business step still waiting on the operator; personal steps belong to each user. */
 export function nextAuthStep(
   manifest: IntegrationManifest,
   env: Record<string, string>
 ): { index: number; step: AuthStep } | null {
   const steps = resolveAuthSteps(manifest);
-  const index = steps.findIndex((step) => !authStepSatisfied(step, env));
+  const index = steps.findIndex(
+    (step) => !isPersonalCredentialStep(step) && !authStepSatisfied(step, env)
+  );
   return index === -1 ? null : { index, step: steps[index] };
 }
 
@@ -279,9 +281,7 @@ export function authFlowSatisfied(
   manifest: IntegrationManifest,
   env: Record<string, string>
 ): boolean {
-  return resolveAuthSteps(manifest)
-    .filter((step) => !isPersonalCredentialStep(step))
-    .every((step) => authStepSatisfied(step, env));
+  return nextAuthStep(manifest, env) === null;
 }
 
 /** Reject classifier context env that names secrets; do not silently filter declared intent. */

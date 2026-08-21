@@ -4,9 +4,28 @@ import {
   NOT_APPLICABLE,
   type ToolEntitlementPort,
 } from "@tulipfarm/tool-broker";
-import type { ExternalIdentityRepo } from "../identity/external-links";
-import type { PrincipalProviderTokenRepo } from "../integrations/principal-tokens";
-import type { GitHubInstallationSelector } from "../tools/github/credentials";
+
+export interface GitHubIdentityMapping {
+  readonly provider: string;
+  readonly externalSubject: string;
+  readonly expiresAt: Date | null;
+}
+
+export interface GitHubIdentityPort {
+  listProvenMappingsForUser(userId: string): Promise<readonly GitHubIdentityMapping[]>;
+}
+
+export interface GitHubPrincipalCredentialPort {
+  find(
+    principal: { readonly kind: string; readonly id: string },
+    provider: string
+  ): Promise<{ readonly externalSubject: string | null } | null>;
+}
+
+export type GitHubInstallationSelector =
+  | { readonly kind: "any" }
+  | { readonly kind: "repository"; readonly repository: string }
+  | { readonly kind: "account"; readonly owner: string };
 
 /** A 404, which for a membership lookup is a verdict and not a failure. */
 const NOT_FOUND = Symbol("github.not-found");
@@ -92,10 +111,10 @@ export class GitHubEntitlementPort implements ToolEntitlementPort {
   readonly provider = "github";
 
   constructor(
-    private readonly identity: ExternalIdentityRepo,
+    private readonly identity: GitHubIdentityPort,
     private readonly api: GitHubPermissionApi,
     private readonly now: () => Date = () => new Date(),
-    private readonly tokens?: PrincipalProviderTokenRepo
+    private readonly tokens?: GitHubPrincipalCredentialPort
   ) {}
 
   async check(query: EntitlementQuery): Promise<EntitlementAnswer> {

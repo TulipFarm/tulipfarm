@@ -10,6 +10,7 @@ import {
 import { ArrowLeft, ExternalLink, MoreHorizontal, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { IntegrationAuthFlow, startHandoff } from "~/components/integrations/auth-flow";
+import { GitHubPersonalAccount } from "~/components/integrations/github-personal-account";
 import { IntegrationIcon } from "~/components/integrations/integration-icon";
 import { MarkdownView } from "~/components/markdown-view";
 import { ErrorState, NotFoundState } from "~/components/states";
@@ -23,7 +24,6 @@ import {
   deleteIntegration,
   disconnectGitHubInstallation,
   disconnectIntegration,
-  disconnectPersonalIntegration,
   type GitHubInstallation,
   getGitHubStatus,
   getIntegration,
@@ -223,7 +223,6 @@ export default function IntegrationDetailPage() {
   const [disconnecting, setDisconnecting] = useState(false);
   const [disconnectingInstallId, setDisconnectingInstallId] = useState<string>();
   const [addingInstall, setAddingInstall] = useState(false);
-  const [personalBusy, setPersonalBusy] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [actionError, setActionError] = useState<string>();
   const [callbackError, setCallbackError] = useState<string>();
@@ -231,7 +230,6 @@ export default function IntegrationDetailPage() {
 
   const isAdmin = useIsAdmin();
   const authSteps = (integration.auth ?? []).filter((step) => !step.personal);
-  const personalStep = (integration.auth ?? []).find((step) => step.personal);
   const isConnected = integration.connected;
   const installStep = authSteps.find((step) => step.kind === "install");
   const name = displayName(integration);
@@ -289,31 +287,6 @@ export default function IntegrationDetailPage() {
     } catch (err) {
       setActionError(errMessage(err));
       setAddingInstall(false);
-    }
-  }
-
-  async function handlePersonalConnect() {
-    if (!personalStep) return;
-    setPersonalBusy(true);
-    setActionError(undefined);
-    try {
-      await startHandoff(integration.name, personalStep.index, false, undefined, "user");
-    } catch (err) {
-      setActionError(errMessage(err));
-      setPersonalBusy(false);
-    }
-  }
-
-  async function handlePersonalDisconnect() {
-    setPersonalBusy(true);
-    setActionError(undefined);
-    try {
-      await disconnectPersonalIntegration(integration.name);
-      revalidator.revalidate();
-    } catch (err) {
-      setActionError(errMessage(err));
-    } finally {
-      setPersonalBusy(false);
     }
   }
 
@@ -472,39 +445,12 @@ export default function IntegrationDetailPage() {
           </section>
         )}
 
-        {integration.name === "github" && isConnected && personalStep && (
-          <section className="flex flex-col gap-2">
-            <SectionHeading>Your GitHub account</SectionHeading>
-            <p className="max-w-prose text-xs text-muted-foreground">
-              GitHub Tools used in Chat act with your GitHub permissions. They never fall back to
-              the business's GitHub App when your account is not connected.
-            </p>
-            {callbackError && <p className="text-sm text-destructive">{callbackError}</p>}
-            <div className="flex items-center gap-3">
-              <Button
-                size="sm"
-                variant={integration.personalConnected ? "outline" : "default"}
-                disabled={personalBusy}
-                onClick={handlePersonalConnect}
-              >
-                {personalBusy
-                  ? "Opening…"
-                  : integration.personalConnected
-                    ? "Reconnect GitHub account"
-                    : "Connect your GitHub account"}
-              </Button>
-              {integration.personalConnected && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={personalBusy}
-                  onClick={handlePersonalDisconnect}
-                >
-                  Disconnect account
-                </Button>
-              )}
-            </div>
-          </section>
+        {integration.name === "github" && isConnected && (
+          <GitHubPersonalAccount
+            integration={integration}
+            callbackError={callbackError}
+            onChanged={() => revalidator.revalidate()}
+          />
         )}
 
         {/* Where the GitHub App currently reaches. Provider-shaped state, not part of connecting. */}

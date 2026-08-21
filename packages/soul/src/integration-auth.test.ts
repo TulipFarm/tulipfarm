@@ -599,6 +599,7 @@ describe("step satisfaction", () => {
       ],
     });
 
+    expect(nextAuthStep(m, { APP_ID: "client" })).toBeNull();
     expect(authFlowSatisfied(m, { APP_ID: "client" })).toBe(true);
   });
 });

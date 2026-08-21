@@ -1,12 +1,12 @@
 import type { DelegatedAuthorityGuardDeps } from "@tulipfarm/agent-runtime";
 import { withDelegatedAuthority } from "@tulipfarm/agent-runtime";
+import { GitHubEntitlementPort, HttpGitHubPermissionApi } from "@tulipfarm/integrations";
 import { CompositeToolEntitlement, PgEffectStore } from "@tulipfarm/tool-broker";
 import type { RegistryToolDispatcherOptions } from "@tulipfarm/tool-host";
 import { CredentialResolver, LiveToolGate, RegistryToolDispatcher } from "@tulipfarm/tool-host";
 import type { PrincipalProviderTokenRepo } from "../integrations/principal-tokens";
 import { hostedAgentResolver } from "../soul/agents/registry";
 import { githubExcludedToolNames } from "../tools/github/visibility";
-import { GitHubEntitlementPort, HttpGitHubPermissionApi } from "./github-entitlement";
 
 export type DelegatedToolDispatchDeps = Pick<
   RegistryToolDispatcherOptions,
