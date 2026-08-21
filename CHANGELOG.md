@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.12.4](https://github.com/TulipFarm/tulipfarm/compare/v0.12.3...v0.12.4) (2026-08-21)
+
+### Features
+
+* **integrations:** support targeting a GitHub org for App creation ([#534](https://github.com/TulipFarm/tulipfarm/issues/534)) ([d887018](https://github.com/TulipFarm/tulipfarm/commit/d887018e7d521e1308cc834f4cbf7b986628415c))
+
 ## [0.12.3](https://github.com/TulipFarm/tulipfarm/compare/v0.12.2...v0.12.3) (2026-08-21)
 
 ### Bug Fixes
