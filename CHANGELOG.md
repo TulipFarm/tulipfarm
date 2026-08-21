@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.13.2](https://github.com/TulipFarm/tulipfarm/compare/v0.13.1...v0.13.2) (2026-08-21)
+
+### Features
+
+* **web:** add client-side report a bug button and modal ([#559](https://github.com/TulipFarm/tulipfarm/issues/559)) ([32be854](https://github.com/TulipFarm/tulipfarm/commit/32be854f08c1a155c9f0df516714764fb518270d))
+
+### Bug Fixes
+
+* **chat:** prevent full page scroll during response loading ([#69](https://github.com/TulipFarm/tulipfarm/issues/69)) ([#561](https://github.com/TulipFarm/tulipfarm/issues/561)) ([a526ed3](https://github.com/TulipFarm/tulipfarm/commit/a526ed3a121d886cb64d521b022e80bc101add74))
+* **github:** clarify per-user link is separate from App install ([#556](https://github.com/TulipFarm/tulipfarm/issues/556)) ([e797f26](https://github.com/TulipFarm/tulipfarm/commit/e797f26e995469a2f4d2f0381143a01f7d0164a0)), references [#544](https://github.com/TulipFarm/tulipfarm/issues/544) [#552](https://github.com/TulipFarm/tulipfarm/issues/552)
+* **skills:** teach routine-forge the canonical Routine/Trigger shape ([#558](https://github.com/TulipFarm/tulipfarm/issues/558)) ([2ec4ec0](https://github.com/TulipFarm/tulipfarm/commit/2ec4ec025defbb0fbe4e0f4e0d8e17d5aaeed62f))
+* **soul:** provide canonical reference examples and narrowing for routine-forge ([#560](https://github.com/TulipFarm/tulipfarm/issues/560)) ([8d545a1](https://github.com/TulipFarm/tulipfarm/commit/8d545a1acc3de7fc1434429e2590fc897a48fabc))
+* **worker:** prevent curator run from parking in needs_reconciliation ([#407](https://github.com/TulipFarm/tulipfarm/issues/407)) ([#563](https://github.com/TulipFarm/tulipfarm/issues/563)) ([b3e740f](https://github.com/TulipFarm/tulipfarm/commit/b3e740f781065ea9c7267076ff39516aa3d17191))
+
+### Continuous Integration
+
+* **release:** enable auto-merge on release pull requests ([#557](https://github.com/TulipFarm/tulipfarm/issues/557)) ([54544aa](https://github.com/TulipFarm/tulipfarm/commit/54544aa265bb0174d30e2215a1b6dbd290c35f1a))
+
 ## [0.13.1](https://github.com/TulipFarm/tulipfarm/compare/v0.13.0...v0.13.1) (2026-08-21)
 
 ### Features
