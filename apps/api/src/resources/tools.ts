@@ -5,6 +5,7 @@ import { ajv } from "@tulipfarm/schema";
 import type { SoulLoader } from "@tulipfarm/soul";
 import { parsePaginationQuery } from "@tulipfarm/storage";
 import { type ApiToolDefinition, defineApiTool, err, ok } from "@tulipfarm/tool-host";
+import { firstError } from "../platform/tool-args";
 import {
   deliverResourceSideEffect,
   type ResourceMutationKind,
@@ -43,12 +44,6 @@ export interface ResourceServices {
   soulLoader: SoulLoader;
   hookExecutor?: HookExecutor;
   events?: EventEmitter;
-}
-
-function firstError(validate: ReturnType<typeof ajv.compile>): string {
-  const e = validate.errors?.[0];
-  if (!e) return "invalid arguments";
-  return `${e.instancePath || "(root)"} ${e.message ?? "is invalid"}`.trim();
 }
 
 function reason(e: unknown): string {
@@ -216,7 +211,7 @@ const resourceCreate = defineApiTool<ResourceToolContext>({
     dataClasses: ["business_record"],
   },
   handler: async (args, ctx) => {
-    if (!validateCreate(args)) return err("validation_error", firstError(validateCreate));
+    if (!validateCreate(args)) return err("validation_error", firstError(validateCreate.errors));
     const { type, data: rawData } = args as { type: string; data: Record<string, unknown> };
 
     const resourceDef = ctx.soulLoader.resources.get(type);
@@ -275,7 +270,7 @@ const resourceList = defineApiTool<ResourceToolContext>({
     dataClasses: ["business_record"],
   },
   handler: async (args, ctx) => {
-    if (!validateList(args)) return err("validation_error", firstError(validateList));
+    if (!validateList(args)) return err("validation_error", firstError(validateList.errors));
     const a = args as { type: string; cursor?: string; limit?: number; includeDeleted?: boolean };
 
     if (!ctx.soulLoader.resources.has(a.type))
@@ -307,7 +302,7 @@ const resourceGet = defineApiTool<ResourceToolContext>({
     dataClasses: ["business_record"],
   },
   handler: async (args, ctx) => {
-    if (!validateGet(args)) return err("validation_error", firstError(validateGet));
+    if (!validateGet(args)) return err("validation_error", firstError(validateGet.errors));
     const { type, id } = args as { type: string; id: string };
 
     if (!ctx.soulLoader.resources.has(type))
@@ -338,7 +333,7 @@ const resourceUpdate = defineApiTool<ResourceToolContext>({
     dataClasses: ["business_record"],
   },
   handler: async (args, ctx) => {
-    if (!validateUpdate(args)) return err("validation_error", firstError(validateUpdate));
+    if (!validateUpdate(args)) return err("validation_error", firstError(validateUpdate.errors));
     const {
       type,
       id,
@@ -422,7 +417,7 @@ const resourceDelete = defineApiTool<ResourceToolContext>({
     dataClasses: ["business_record"],
   },
   handler: async (args, ctx) => {
-    if (!validateDelete(args)) return err("validation_error", firstError(validateDelete));
+    if (!validateDelete(args)) return err("validation_error", firstError(validateDelete.errors));
     const { type, id, version } = args as { type: string; id: string; version: number };
 
     const resourceDef = ctx.soulLoader.resources.get(type);
@@ -476,7 +471,7 @@ const resourceSearch = defineApiTool<ResourceToolContext>({
     dataClasses: ["business_record"],
   },
   handler: async (args, ctx) => {
-    if (!validateSearch(args)) return err("validation_error", firstError(validateSearch));
+    if (!validateSearch(args)) return err("validation_error", firstError(validateSearch.errors));
     const a = args as {
       type: string;
       filters?: Record<string, unknown>;

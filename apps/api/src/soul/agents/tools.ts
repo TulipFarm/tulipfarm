@@ -18,6 +18,7 @@ import {
   type RequestContext,
   type ToolCallResult,
 } from "@tulipfarm/tool-host";
+import { firstError } from "../../platform/tool-args";
 import { SYSTEM_SOUL_COMMIT_ACTOR } from "../../runtime/soul-writer";
 import { soulCommitError } from "../../tools/soul-faults";
 
@@ -72,12 +73,6 @@ function agentTargets(args: unknown) {
   const id = stringArg(args, "name");
   // Soul targets use the same two-level name as their static resource (`soul.<thing>`).
   return id === undefined ? [] : [{ type: SOUL_AGENT_TARGET, id }];
-}
-
-function firstError(validate: ReturnType<typeof ajv.compile>): string {
-  const e = validate.errors?.[0];
-  if (!e) return "invalid arguments";
-  return `${e.instancePath || "(root)"} ${e.message ?? "is invalid"}`.trim();
 }
 
 // Write-time meta-schema gate (VAL-V1-010). Returns a validation_error
@@ -157,7 +152,7 @@ const agentCreate = defineApiTool<AgentToolContext>({
   },
   requiresApproval: false,
   handler: async (args, ctx) => {
-    if (!validateCreate(args)) return err("validation_error", firstError(validateCreate));
+    if (!validateCreate(args)) return err("validation_error", firstError(validateCreate.errors));
     const {
       name,
       body,
@@ -224,7 +219,7 @@ const agentUpdate = defineApiTool<AgentToolContext>({
   },
   requiresApproval: false,
   handler: async (args, ctx) => {
-    if (!validateUpdate(args)) return err("validation_error", firstError(validateUpdate));
+    if (!validateUpdate(args)) return err("validation_error", firstError(validateUpdate.errors));
     const { name, body, frontmatter } = args as {
       name: string;
       body?: string;
@@ -278,7 +273,7 @@ const agentGet = defineApiTool<AgentToolContext>({
   },
   requiresApproval: false,
   handler: async (args, ctx) => {
-    if (!validateGet(args)) return err("validation_error", firstError(validateGet));
+    if (!validateGet(args)) return err("validation_error", firstError(validateGet.errors));
     const { name } = args as { name: string };
     const agent = ctx.soulLoader.agents.get(name);
     if (!agent) return err("not_found", `agent not found: ${name}`);
@@ -309,7 +304,7 @@ const agentList = defineApiTool<AgentToolContext>({
   },
   requiresApproval: false,
   handler: async (args, ctx) => {
-    if (!validateList(args)) return err("validation_error", firstError(validateList));
+    if (!validateList(args)) return err("validation_error", firstError(validateList.errors));
     const agents = Array.from(ctx.soulLoader.agents.values()).map(({ name, frontmatter }) => ({
       name,
       frontmatter,
@@ -346,7 +341,7 @@ const agentDelete = defineApiTool<AgentToolContext>({
   },
   requiresApproval: false,
   handler: async (args, ctx) => {
-    if (!validateDelete(args)) return err("validation_error", firstError(validateDelete));
+    if (!validateDelete(args)) return err("validation_error", firstError(validateDelete.errors));
     const { name } = args as { name: string };
 
     if (!ctx.soulLoader.agents.has(name)) return err("not_found", `agent not found: ${name}`);

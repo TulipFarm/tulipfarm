@@ -8,6 +8,7 @@ import {
   type TaskSubjectRef,
 } from "@tulipfarm/storage";
 import { type ApiToolDefinition, defineApiTool, err, ok } from "@tulipfarm/tool-host";
+import { firstError } from "../platform/tool-args";
 
 /** Per-request context a task tool handler runs against — closes over the calling Agent. */
 export interface TaskToolContext {
@@ -83,12 +84,6 @@ const CLOSE_SCHEMA: Record<string, unknown> = {
 
 const validateCreate = ajv.compile(CREATE_SCHEMA);
 const validateClose = ajv.compile(CLOSE_SCHEMA);
-
-function firstError(errors: typeof validateCreate.errors): string {
-  const e = errors?.[0];
-  if (!e) return "invalid arguments";
-  return `${e.instancePath || "(root)"} ${e.message ?? "is invalid"}`.trim();
-}
 
 interface CreateTaskArgs {
   assignee: { kind: TaskAssigneeKind; id: string };
