@@ -528,6 +528,15 @@ importers:
       '@tulipfarm/surface':
         specifier: workspace:*
         version: link:../../packages/surface
+      '@tulipfarm/surface-github':
+        specifier: workspace:*
+        version: link:../../packages/surface-github
+      '@tulipfarm/surface-slack':
+        specifier: workspace:*
+        version: link:../../packages/surface-slack
+      '@tulipfarm/surface-telegram':
+        specifier: workspace:*
+        version: link:../../packages/surface-telegram
       '@tulipfarm/surface-web':
         specifier: workspace:*
         version: link:../../packages/surface-web
