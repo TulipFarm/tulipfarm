@@ -36,6 +36,7 @@
     "@tulipfarm/memory": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/platform-tools": "workspace:*",
+    "@tulipfarm/resources": "workspace:*",
     "@tulipfarm/run-kernel": "workspace:*",
     "@tulipfarm/sandbox": "workspace:*",
     "@tulipfarm/schema": "workspace:*",

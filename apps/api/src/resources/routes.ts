@@ -1,23 +1,20 @@
-import { randomUUID } from "node:crypto";
 import type { EventEmitter } from "node:events";
-import type { HookExecutor } from "@tulipfarm/sandbox";
+import {
+  createRecord,
+  deleteRecord,
+  ResourceBeforeHookError,
+  type ResourceWritePorts,
+  updateRecord,
+} from "@tulipfarm/resources";
+import { HookError, type HookExecutor } from "@tulipfarm/sandbox";
 import type { SoulLoader } from "@tulipfarm/soul";
-import { DOMAIN_EVENTS, parsePaginationQuery } from "@tulipfarm/storage";
+import { parsePaginationQuery } from "@tulipfarm/storage";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import type { RecordAction, RecordAuthorizer } from "./authorize";
 import { recordPrincipalOf } from "./authorize";
+import { deliverResourceSideEffect, type ResourceSideEffect } from "./outbox";
 import { type CounterStore, type ResourceRepoFactory, toApiRecord } from "./repo";
-import {
-  loadForWrite,
-  maybeRunAfterHook,
-  maybeRunBeforeHook,
-  stripImmutable,
-  stripReadOnly,
-  stripSystemFields,
-  transformAndValidate,
-  validateAndLink,
-} from "./write-pipeline.js";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -50,6 +47,24 @@ function parseIfMatch(req: FastifyRequest): number | null {
   return Number.isNaN(n) ? null : n;
 }
 
+function idempotencyKey(req: FastifyRequest): string | null | undefined {
+  const raw = req.headers["idempotency-key"];
+  if (raw === undefined) return undefined;
+  if (typeof raw !== "string") return null;
+  const key = raw.trim();
+  return key.length > 0 && key.length <= 200 ? key : null;
+}
+
+async function deliverImmediatelyWhenUndurable(
+  repo: { readonly durableSideEffects?: true },
+  effect: ResourceSideEffect,
+  hookExecutor: HookExecutor | undefined,
+  events: EventEmitter | undefined
+): Promise<void> {
+  if (repo.durableSideEffects) return;
+  await deliverResourceSideEffect(effect, hookExecutor, events);
+}
+
 export function registerResourceRoutes(
   app: FastifyInstance,
   repoFactory: ResourceRepoFactory,
@@ -62,6 +77,25 @@ export function registerResourceRoutes(
   recordAuthorizer?: RecordAuthorizer
 ): void {
   const counter = counterStore.makeCounterFn();
+  const writePorts: ResourceWritePorts = {
+    catalog: soulLoader.resources,
+    repositories: repoFactory,
+    counter,
+    ...(hookExecutor
+      ? {
+          beforeHook: {
+            run: async (source, type, data, hash) => {
+              try {
+                return await hookExecutor.runBeforeHook(source, type, data, hash);
+              } catch (error) {
+                if (error instanceof HookError) throw new ResourceBeforeHookError(error.message);
+                throw error;
+              }
+            },
+          },
+        }
+      : {}),
+  };
 
   /** Refuse uncovered or undescribable principals with the shared `403` denial shape. */
   async function denyUnauthorized(
@@ -98,9 +132,15 @@ export function registerResourceRoutes(
         tags: ["resources"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         params: { type: "object", properties: { type: { type: "string" } }, required: ["type"] },
+        headers: {
+          type: "object",
+          properties: { "idempotency-key": { type: "string", minLength: 1, maxLength: 200 } },
+        },
         body: { type: "object", additionalProperties: true },
         response: {
+          200: RecordSchema,
           201: RecordSchema,
+          400: ErrorSchema,
           403: ErrorSchema,
           404: ErrorSchema,
           422: ValidationErrorSchema,
@@ -114,43 +154,29 @@ export function registerResourceRoutes(
       if (!resourceDef) return reply.code(404).send({ error: `resource type not found: ${type}` });
       if (await denyUnauthorized(req, reply, "record.create", type)) return reply;
 
-      const schema = resourceDef.schema;
-      const now = new Date();
-      const id = randomUUID();
-
-      let data = stripReadOnly(schema, stripSystemFields(req.body as Record<string, unknown>));
-
-      const prepared = await transformAndValidate(
-        type,
-        schema,
-        data,
-        counter,
-        repoFactory,
-        soulLoader
+      const actorId = (req.user as { _id: string } | undefined)?._id;
+      const key = idempotencyKey(req);
+      if (key === null) return reply.code(400).send({ error: "invalid Idempotency-Key header" });
+      const created = await createRecord(
+        {
+          type,
+          resource: resourceDef,
+          data: req.body as Record<string, unknown>,
+          actorId,
+          ...(key === undefined ? {} : { idempotencyKey: key }),
+        },
+        writePorts
       );
-      if (!prepared.ok) return reply.code(prepared.err.code).send(prepared.err.body);
-      data = prepared.data;
-
-      const before = await maybeRunBeforeHook(hookExecutor, resourceDef, type, data);
-      if (!before.ok) return reply.code(before.err.code).send(before.err.body);
-      data = before.data;
-      if (before.ran) {
-        const reErr = await validateAndLink(schema, data, repoFactory, soulLoader);
-        if (reErr) return reply.code(reErr.code).send(reErr.body);
+      if (!created.ok) return reply.code(created.err.code).send(created.err.body);
+      if (!created.replayed) {
+        await deliverImmediatelyWhenUndurable(
+          created.repo,
+          created.sideEffect,
+          hookExecutor,
+          events
+        );
       }
-
-      const doc = { _id: id, version: 1, createdAt: now, updatedAt: now, ...data };
-      const repo = repoFactory.forType(type);
-      await repo.insert(doc);
-      await maybeRunAfterHook(hookExecutor, resourceDef, type, toApiRecord(doc));
-      events?.emit(DOMAIN_EVENTS.RESOURCE_CREATED, {
-        resourceType: type,
-        resourceId: id,
-        record: toApiRecord(doc),
-        actorId: (req.user as { _id: string } | undefined)?._id,
-      });
-
-      return reply.code(201).send(toApiRecord(doc));
+      return reply.code(created.replayed ? 200 : 201).send(toApiRecord(created.doc));
     }
   );
 
@@ -276,57 +302,21 @@ export function registerResourceRoutes(
       const ifMatch = parseIfMatch(req);
       if (ifMatch === null) return reply.code(400).send({ error: "If-Match header required" });
 
-      const repo = repoFactory.forType(type);
-      const loaded = await loadForWrite(repo, id, ifMatch);
-      if (!loaded.ok) return reply.code(loaded.err.code).send(loaded.err.body);
-      const existing = loaded.doc;
-
-      const schema = resourceDef.schema;
-      let data = stripImmutable(
-        schema,
-        existing,
-        stripReadOnly(schema, stripSystemFields(req.body as Record<string, unknown>))
+      const updated = await updateRecord(
+        {
+          type,
+          resource: resourceDef,
+          id,
+          expectedVersion: ifMatch,
+          data: req.body as Record<string, unknown>,
+          mode: "replace",
+          actorId: (req.user as { _id: string } | undefined)?._id,
+        },
+        writePorts
       );
-
-      const prepared = await transformAndValidate(
-        type,
-        schema,
-        data,
-        counter,
-        repoFactory,
-        soulLoader
-      );
-      if (!prepared.ok) return reply.code(prepared.err.code).send(prepared.err.body);
-      data = prepared.data;
-
-      const before = await maybeRunBeforeHook(hookExecutor, resourceDef, type, data);
-      if (!before.ok) return reply.code(before.err.code).send(before.err.body);
-      data = before.data;
-      if (before.ran) {
-        const reErr = await validateAndLink(schema, data, repoFactory, soulLoader);
-        if (reErr) return reply.code(reErr.code).send(reErr.body);
-      }
-
-      const now = new Date();
-      const newDoc = {
-        _id: id,
-        version: existing.version + 1,
-        createdAt: existing.createdAt,
-        updatedAt: now,
-        ...data,
-      };
-
-      const replaced = await repo.replaceOne(id, existing.version, newDoc, "update");
-      if (!replaced) return reply.code(409).send({ error: "version conflict" });
-      await maybeRunAfterHook(hookExecutor, resourceDef, type, toApiRecord(newDoc));
-      events?.emit(DOMAIN_EVENTS.RESOURCE_UPDATED, {
-        resourceType: type,
-        resourceId: id,
-        record: toApiRecord(newDoc),
-        actorId: (req.user as { _id: string } | undefined)?._id,
-      });
-
-      return reply.send(toApiRecord(newDoc));
+      if (!updated.ok) return reply.code(updated.err.code).send(updated.err.body);
+      await deliverImmediatelyWhenUndurable(updated.repo, updated.sideEffect, hookExecutor, events);
+      return reply.send(toApiRecord(updated.doc));
     }
   );
 
@@ -365,63 +355,21 @@ export function registerResourceRoutes(
       const ifMatch = parseIfMatch(req);
       if (ifMatch === null) return reply.code(400).send({ error: "If-Match header required" });
 
-      const repo = repoFactory.forType(type);
-      const loaded = await loadForWrite(repo, id, ifMatch);
-      if (!loaded.ok) return reply.code(loaded.err.code).send(loaded.err.body);
-      const existing = loaded.doc;
-
-      const schema = resourceDef.schema;
-      const {
-        _id: _eid,
-        version: _ev,
-        createdAt: _eca,
-        updatedAt: _eua,
-        deletedAt: _eda,
-        ...existingData
-      } = existing;
-
-      const patch = stripReadOnly(schema, stripSystemFields(req.body as Record<string, unknown>));
-      let data = stripImmutable(schema, existingData, { ...existingData, ...patch });
-
-      const prepared = await transformAndValidate(
-        type,
-        schema,
-        data,
-        counter,
-        repoFactory,
-        soulLoader
+      const updated = await updateRecord(
+        {
+          type,
+          resource: resourceDef,
+          id,
+          expectedVersion: ifMatch,
+          data: req.body as Record<string, unknown>,
+          mode: "patch",
+          actorId: (req.user as { _id: string } | undefined)?._id,
+        },
+        writePorts
       );
-      if (!prepared.ok) return reply.code(prepared.err.code).send(prepared.err.body);
-      data = prepared.data;
-
-      const before = await maybeRunBeforeHook(hookExecutor, resourceDef, type, data);
-      if (!before.ok) return reply.code(before.err.code).send(before.err.body);
-      data = before.data;
-      if (before.ran) {
-        const reErr = await validateAndLink(schema, data, repoFactory, soulLoader);
-        if (reErr) return reply.code(reErr.code).send(reErr.body);
-      }
-
-      const now = new Date();
-      const newDoc = {
-        _id: id,
-        version: existing.version + 1,
-        createdAt: existing.createdAt,
-        updatedAt: now,
-        ...data,
-      };
-
-      const replaced = await repo.replaceOne(id, existing.version, newDoc, "update");
-      if (!replaced) return reply.code(409).send({ error: "version conflict" });
-      await maybeRunAfterHook(hookExecutor, resourceDef, type, toApiRecord(newDoc));
-      events?.emit(DOMAIN_EVENTS.RESOURCE_UPDATED, {
-        resourceType: type,
-        resourceId: id,
-        record: toApiRecord(newDoc),
-        actorId: (req.user as { _id: string } | undefined)?._id,
-      });
-
-      return reply.send(toApiRecord(newDoc));
+      if (!updated.ok) return reply.code(updated.err.code).send(updated.err.body);
+      await deliverImmediatelyWhenUndurable(updated.repo, updated.sideEffect, hookExecutor, events);
+      return reply.send(toApiRecord(updated.doc));
     }
   );
 
@@ -461,30 +409,18 @@ export function registerResourceRoutes(
       const ifMatch = parseIfMatch(req);
       if (ifMatch === null) return reply.code(400).send({ error: "If-Match header required" });
 
-      const repo = repoFactory.forType(type);
-      const loaded = await loadForWrite(repo, id, ifMatch);
-      if (!loaded.ok) return reply.code(loaded.err.code).send(loaded.err.body);
-      const existing = loaded.doc;
-
-      const before = await maybeRunBeforeHook(
-        hookExecutor,
-        resourceDef,
-        type,
-        toApiRecord(existing)
+      const deleted = await deleteRecord(
+        {
+          type,
+          resource: resourceDef,
+          id,
+          expectedVersion: ifMatch,
+          actorId: (req.user as { _id: string } | undefined)?._id,
+        },
+        writePorts
       );
-      if (!before.ok) return reply.code(before.err.code).send(before.err.body);
-
-      const now = new Date();
-      const softDeleted = {
-        ...existing,
-        version: existing.version + 1,
-        updatedAt: now,
-        deletedAt: now,
-      };
-
-      const replaced = await repo.replaceOne(id, existing.version, softDeleted, "delete");
-      if (!replaced) return reply.code(409).send({ error: "version conflict" });
-      await maybeRunAfterHook(hookExecutor, resourceDef, type, toApiRecord(softDeleted));
+      if (!deleted.ok) return reply.code(deleted.err.code).send(deleted.err.body);
+      await deliverImmediatelyWhenUndurable(deleted.repo, deleted.sideEffect, hookExecutor, events);
       return reply.code(204).send();
     }
   );

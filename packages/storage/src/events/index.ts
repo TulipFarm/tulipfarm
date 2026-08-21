@@ -18,3 +18,4 @@ export {
   EventStore,
   OutboxLeaseError,
 } from "./event-store";
+export * from "./resource-side-effects";
