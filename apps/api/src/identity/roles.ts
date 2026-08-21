@@ -7,6 +7,7 @@ import {
   surfaceGrants,
 } from "@tulipfarm/authz";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import { GITHUB_TOOL_IDS } from "@tulipfarm/integrations";
 import type { GrantRecord, RoleRecord, RoleRepo } from "@tulipfarm/storage";
 
 /** Mirrors live role gates; update this catalog whenever route or Tool gates change. */
@@ -22,15 +23,30 @@ export const ADMIN_ONLY_SURFACES: readonly {
     actions: ["integration.connect", "integration.disconnect", "integration.remove"],
     enforcedIn: "integrations/routes.ts",
   },
-  /** GitHub install disconnect and Soul repo selection are admin-only shared credentials. */
+  /**
+   * GitHub install disconnect and Soul repo selection are admin-only shared credentials; writing
+   * to a connected repo (issues, PRs, pushes) is provider-facing and needs a Team-level grant
+   * (#access-audit) rather than shipping default-on to every member.
+   */
   {
     type: "integration.github",
     actions: [
       "integration.github.installation.disconnect",
       "integration.github.soul_repo.connect",
       "integration.github.soul_repo.create",
+      GITHUB_TOOL_IDS.issueCreate,
+      GITHUB_TOOL_IDS.issueComment,
+      GITHUB_TOOL_IDS.issueLabel,
+      GITHUB_TOOL_IDS.issueAssign,
+      GITHUB_TOOL_IDS.issueClose,
+      GITHUB_TOOL_IDS.pullRequestCreate,
+      GITHUB_TOOL_IDS.pullRequestComment,
+      GITHUB_TOOL_IDS.pullRequestReview,
+      GITHUB_TOOL_IDS.pullRequestMerge,
+      GITHUB_TOOL_IDS.repoPush,
+      GITHUB_TOOL_IDS.repositoryCreate,
     ],
-    enforcedIn: "integrations/github-install-routes.ts",
+    enforcedIn: "integrations/github-install-routes.ts; tools/github/tools.ts",
   },
   {
     type: "identity",
@@ -83,10 +99,21 @@ export const ADMIN_ONLY_SURFACES: readonly {
    */
   { type: "soul.git_config", actions: ["*"], enforcedIn: "soul/routes.ts" },
   { type: "soul.publication", actions: ["*"], enforcedIn: "soul/publication-routes.ts" },
-  /** Resource domains are admin-only; domained deletes are gated to prevent re-create bypass. */
+  /**
+   * Resource domains are admin-only; domained deletes are gated to prevent re-create bypass.
+   * Authoring a Resource type (create/update/hooks) is the operator-facing surface and needs a
+   * Team-level grant (#access-audit) rather than shipping default-on to every member.
+   */
   {
     type: "soul.resource_type",
-    actions: ["soul.resource_type.set_domain", "soul.resource_type.delete_domained"],
+    actions: [
+      "soul.resource_type.set_domain",
+      "soul.resource_type.delete_domained",
+      "soul.resource_type.create",
+      "soul.resource_type.update",
+      "soul.resource_type.hooks.update",
+      "soul.resource_type.hooks.delete",
+    ],
     enforcedIn: "soul/resource-types/routes.ts",
   },
   {

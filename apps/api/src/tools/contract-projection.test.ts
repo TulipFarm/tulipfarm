@@ -289,7 +289,18 @@ describe("every Tool's authority is expressible as a grant", () => {
     )
   );
 
-  const OPERATOR_AUTHORED_RESOURCES = new Set(["integration.google-docs"]);
+  // Reshaping the business (Agents, Routines, Skills, Surface Components) or reaching a connected
+  // third party (Slack, Google) needs an explicit Team-level grant; a Team with no grants must not
+  // give its members default access, so these resources carry no built-in Role allow (#access-audit).
+  const OPERATOR_AUTHORED_RESOURCES = new Set([
+    "integration.google-docs",
+    "soul.agent",
+    "soul.routine",
+    "soul.skill",
+    "soul.surface_component",
+    "integration.slack",
+    "integration.google",
+  ]);
 
   it("declares no resource that no built-in Role can grant", () => {
     const ungrantable = new Set<string>();
