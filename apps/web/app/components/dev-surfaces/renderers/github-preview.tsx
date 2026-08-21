@@ -19,6 +19,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
+import { copyText } from "~/lib/clipboard";
 
 export interface GitHubPreviewProps {
   readonly artifact: SurfaceArtifact;
@@ -85,7 +86,7 @@ export function GitHubPreview({ artifact, onInteraction }: GitHubPreviewProps) {
 
   const handleCopy = () => {
     if (!rawString) return;
-    void navigator.clipboard.writeText(rawString);
+    void copyText(rawString);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };

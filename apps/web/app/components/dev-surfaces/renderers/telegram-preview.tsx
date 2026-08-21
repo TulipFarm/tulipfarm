@@ -4,6 +4,7 @@ import { Check, Copy, MessageCircle, Terminal } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
+import { copyText } from "~/lib/clipboard";
 
 export interface TelegramPreviewProps {
   readonly artifact: SurfaceArtifact;
@@ -41,7 +42,7 @@ export function TelegramPreview({ artifact, onInteraction }: TelegramPreviewProp
 
   const handleCopy = () => {
     if (!jsonString) return;
-    void navigator.clipboard.writeText(jsonString);
+    void copyText(jsonString);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };

@@ -2,6 +2,7 @@ import { Activity, Check, Copy, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
+import { copyText } from "~/lib/clipboard";
 
 export interface LoggedInteraction {
   readonly id: string;
@@ -21,7 +22,7 @@ export function EventInspector({ events, onClear }: EventInspectorProps) {
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const handleCopyEvent = (event: LoggedInteraction) => {
-    void navigator.clipboard.writeText(JSON.stringify(event, null, 2));
+    void copyText(JSON.stringify(event, null, 2));
     setCopiedId(event.id);
     setTimeout(() => setCopiedId(null), 2000);
   };

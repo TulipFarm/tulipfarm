@@ -26,6 +26,7 @@ import { TelegramPreview } from "~/components/dev-surfaces/renderers/telegram-pr
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Select } from "~/components/ui/select";
+import { randomUUID } from "~/lib/uuid";
 
 export const meta: MetaFunction = () => [
   { title: "Tulip Surface Protocol Sandbox · tulipfarm" },
@@ -99,7 +100,7 @@ export default function DevelopmentSurfacesRoute() {
       : "web:chat";
 
     const newEvent: LoggedInteraction = {
-      id: `evt-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      id: `evt-${randomUUID()}`,
       timestamp: new Date().toISOString(),
       actionId,
       componentId: `${componentName} (${componentId})`,

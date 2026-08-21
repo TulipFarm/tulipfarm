@@ -1,17 +1,8 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import * as clipboard from "~/lib/clipboard";
 import DevelopmentSurfacesRoute from "./dev.surfaces";
-
-// Mock clipboard API
-if (!navigator.clipboard) {
-  Object.defineProperty(navigator, "clipboard", {
-    value: {
-      writeText: vi.fn().mockResolvedValue(undefined),
-    },
-    configurable: true,
-  });
-}
 
 describe("/dev/surfaces - Tulip Surface Protocol Sandbox", () => {
   it("S1: loads sandbox layout, heading, and default preset", () => {
@@ -182,10 +173,10 @@ describe("/dev/surfaces - Tulip Surface Protocol Sandbox", () => {
     await user.click(formatBtn);
 
     // Test Copy button
-    const writeSpy = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
+    const copySpy = vi.spyOn(clipboard, "copyText").mockResolvedValue(true);
     const copyBtn = screen.getByTitle("Copy JSON");
     await user.click(copyBtn);
-    expect(writeSpy).toHaveBeenCalled();
+    expect(copySpy).toHaveBeenCalled();
   });
 
   it("S5: switches viewport simulation modes (Desktop, Tablet, Mobile)", async () => {

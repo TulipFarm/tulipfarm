@@ -8,6 +8,7 @@ import { Check, Copy, MessageSquare, Terminal } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
+import { copyText } from "~/lib/clipboard";
 
 export interface SlackPreviewProps {
   readonly artifact: SurfaceArtifact;
@@ -61,7 +62,7 @@ export function SlackPreview({ artifact, onInteraction }: SlackPreviewProps) {
 
   const handleCopy = () => {
     if (!jsonString) return;
-    void navigator.clipboard.writeText(jsonString);
+    void copyText(jsonString);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };

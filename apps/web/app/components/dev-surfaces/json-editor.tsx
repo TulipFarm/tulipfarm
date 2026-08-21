@@ -13,6 +13,7 @@ import { useState } from "react";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Textarea } from "~/components/ui/textarea";
+import { copyText } from "~/lib/clipboard";
 
 export interface JsonEditorProps {
   readonly value: string;
@@ -34,7 +35,7 @@ export function JsonEditor({
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {
-    void navigator.clipboard.writeText(value);
+    void copyText(value);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
