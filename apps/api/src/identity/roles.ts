@@ -23,11 +23,7 @@ export const ADMIN_ONLY_SURFACES: readonly {
     actions: ["integration.connect", "integration.disconnect", "integration.remove"],
     enforcedIn: "integrations/routes.ts",
   },
-  /**
-   * GitHub install disconnect and Soul repo selection are admin-only shared credentials; writing
-   * to a connected repo (issues, PRs, pushes) is provider-facing and needs a Team-level grant
-   * (#access-audit) rather than shipping default-on to every member.
-   */
+  /** Shared credentials and provider writes require an explicit Team-level grant. */
   {
     type: "integration.github",
     actions: [
@@ -99,11 +95,7 @@ export const ADMIN_ONLY_SURFACES: readonly {
    */
   { type: "soul.git_config", actions: ["*"], enforcedIn: "soul/routes.ts" },
   { type: "soul.publication", actions: ["*"], enforcedIn: "soul/publication-routes.ts" },
-  /**
-   * Resource domains are admin-only; domained deletes are gated to prevent re-create bypass.
-   * Authoring a Resource type (create/update/hooks) is the operator-facing surface and needs a
-   * Team-level grant (#access-audit) rather than shipping default-on to every member.
-   */
+  /** Resource type authoring requires an explicit Team-level grant. */
   {
     type: "soul.resource_type",
     actions: [
@@ -139,10 +131,8 @@ export const ADMIN_ONLY_SURFACES: readonly {
 /**
  * Keeps today's access to legacy Resource types that declare no domain. Once a Resource type
  * declares `domain`, this grant no longer matches; that domain needs its own explicit grant.
- * Record CRUD is everyday business-data use (working a Ticket, a Customer); it stays default-on.
- * Authoring new Resource *types*, Routines, Agents, Skills, and provider Tool access (Slack,
- * GitHub write) is the operator-facing surface and moved to an explicit Team-level grant
- * (#access-audit) instead — a Team with no grants must not let a member reshape the business.
+ * Record CRUD stays default-on; authoring and provider Tool access require explicit Team grants.
+ * A Team with no grants must not let a member reshape the business.
  *
  * Exported because it is the one wildcard `member` still holds, so it is also the only thing the
  * admin-only carve-out below has to close.
@@ -202,10 +192,7 @@ export const MEMBER_ALLOWED_SURFACES: readonly {
   { type: "soul", actions: ["*"], enforcedIn: "soul/routes.ts" },
   { type: "soul.guardrails", actions: ["*"], enforcedIn: "platform/guardrail-tool.ts" },
   { type: "soul.repo", actions: ["*"], enforcedIn: "platform/tools.ts" },
-  /**
-   * Read-only by default; authoring resource types moved to an explicit Team-level grant
-   * (#access-audit) so a member can see what exists without being able to define new types.
-   */
+  /** Resource type authoring requires an explicit Team-level grant. */
   {
     type: "soul.resource_type",
     actions: [
