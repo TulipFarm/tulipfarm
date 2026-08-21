@@ -7,7 +7,6 @@ import {
   surfaceGrants,
 } from "@tulipfarm/authz";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
-import { GITHUB_TOOL_IDS } from "@tulipfarm/integrations";
 import type { GrantRecord, RoleRecord, RoleRepo } from "@tulipfarm/storage";
 
 /** Mirrors live role gates; update this catalog whenever route or Tool gates change. */
@@ -111,18 +110,17 @@ export const ADMIN_ONLY_SURFACES: readonly {
 ];
 
 /**
- * Keeps today's access to legacy Resource types that declare no domain. Once a Resource type
+ * Keeps today's read access to legacy Resource types that declare no domain. Once a Resource type
  * declares `domain`, this grant no longer matches; that domain needs its own explicit grant.
+ * Write actions (`create`/`update`/`delete`) moved to an explicit Team-level grant (#access-audit)
+ * so a Team with no grants gives its members no way to mutate business data by default.
  *
  * Exported because it is the one wildcard `member` still holds, so it is also the only thing the
  * admin-only carve-out below has to close.
  */
 export const MEMBER_UNDOMAINED_RECORD_ACTIONS = [
-  "record.create",
   "record.list",
   "record.read",
-  "record.update",
-  "record.delete",
   "record.search",
 ] as const;
 
@@ -170,32 +168,20 @@ export const MEMBER_ALLOWED_SURFACES: readonly {
   { type: "preference", actions: ["*"], enforcedIn: "preferences/routes.ts" },
   { type: "secret", actions: ["secret.read"], enforcedIn: "secrets/routes.ts" },
   { type: "soul", actions: ["*"], enforcedIn: "soul/routes.ts" },
-  { type: "soul.agent", actions: ["*"], enforcedIn: "soul/agents/routes.ts; soul/agents/tools.ts" },
   { type: "soul.guardrails", actions: ["*"], enforcedIn: "platform/guardrail-tool.ts" },
   { type: "soul.repo", actions: ["*"], enforcedIn: "platform/tools.ts" },
   /**
-   * Named action by action rather than `*` for the same reason as `integration.github`: a same-type
-   * wildcard forces a deny for each admin-only action, which no granted Role can then lift (#408).
+   * Read-only by default; authoring resource types moved to an explicit Team-level grant
+   * (#access-audit) so a member can see what exists without being able to define new types.
    */
   {
     type: "soul.resource_type",
     actions: [
-      "soul.resource_type.create",
       "soul.resource_type.list",
       "soul.resource_type.read",
-      "soul.resource_type.update",
       "soul.resource_type.hooks.read",
-      "soul.resource_type.hooks.update",
-      "soul.resource_type.hooks.delete",
     ],
     enforcedIn: "soul/resource-types/routes.ts; soul/resource-types/tools.ts",
-  },
-  { type: "soul.routine", actions: ["*"], enforcedIn: "platform/tools.ts" },
-  { type: "soul.skill", actions: ["*"], enforcedIn: "soul/skills/routes.ts; soul/skills/tools.ts" },
-  {
-    type: "soul.surface_component",
-    actions: ["*"],
-    enforcedIn: "soul/surface-components/tools.ts",
   },
   { type: "surface", actions: ["*"], enforcedIn: "surfaces/routes.ts" },
   { type: "platform.surface", actions: ["*"], enforcedIn: "surfaces/tools.ts" },
@@ -206,28 +192,21 @@ export const MEMBER_ALLOWED_SURFACES: readonly {
   { type: "platform.task", actions: ["*"], enforcedIn: "platform/tools.ts" },
   { type: "platform.time", actions: ["*"], enforcedIn: "platform/tools.ts" },
   /**
-   * Provider grants expose the surface only; provider ACLs still decide account access. Named
-   * action by action rather than `*`: a same-type wildcard forces a compensating deny for each
-   * admin-only action, and that deny then outranks any Role granted on top of `member` (#408).
+   * Catalog browsing only. Provider Tool access (Slack send, GitHub write, Google) requires an
+   * explicit Team-level grant (#access-audit) — a Team with no grants must give its members no
+   * reach into connected third parties.
    */
   {
     type: "integration.github",
-    actions: [
-      ...Object.values(GITHUB_TOOL_IDS),
-      "github.repository.list",
-      "integration.github.read",
-    ],
+    actions: ["integration.github.read"],
     enforcedIn: "tools/github/tools.ts",
   },
-  { type: "integration.slack", actions: ["*"], enforcedIn: "tools/slack/tools.ts" },
-  { type: "integration.google", actions: ["*"], enforcedIn: "tools/google/tools.ts" },
   /** Explicit vocabulary counterpart; authority already comes from the wildcard grant. */
   {
     type: "record",
     actions: [...MEMBER_UNDOMAINED_RECORD_ACTIONS],
     enforcedIn: "resources/tools.ts",
   },
-  { type: "trigger", actions: ["*"], enforcedIn: "triggers/routes.ts" },
 ];
 
 /** Self-owned surfaces stay member-allowed; scoped denies cover other users' records. */
