@@ -1,7 +1,9 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { definitions } from "@tulipfarm/schema";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { parse as parseYaml } from "yaml";
 import type { Logger } from "../types";
 import {
   bundledSkillsDir,
@@ -135,6 +137,25 @@ describe("loadBundledSkills", () => {
       expect(body, `agent-forge must teach ${key}`).toContain(key);
     }
     expect(body).toMatch(/never|must not|read-only/i);
+  });
+
+  it("ships Routine Forge with a worked example that round-trips through the canonical schema", async () => {
+    const routineForge = (await loadBundledSkills(makeLogger())).get("routine-forge");
+    const body = routineForge?.body ?? "";
+
+    const yamlBlocks = [...body.matchAll(/```yaml\n([\s\S]*?)```/g)].map((match) => match[1]);
+    expect(yamlBlocks).toHaveLength(2);
+
+    const [routineDoc, triggerDoc] = yamlBlocks.map((block) => parseYaml(block));
+
+    const routine = definitions.routine.validateRoutineDefinition(routineDoc).document;
+    const trigger = definitions.trigger.validateTriggerDefinition(triggerDoc).document;
+
+    // Mirrors the cross-document checks `routine_forge` enforces in
+    // apps/api/src/platform/tools.ts beyond per-document schema validation.
+    expect(trigger.metadata.lifecycle).toBe("published");
+    expect(trigger.spec.routineRef.name).toBe(routine.metadata.slug);
+    expect(trigger.spec.routineRef.version).toBe(String(routine.metadata.authoredVersion));
   });
 
   it("ships Skill Forge with the compact description and mandatory authoring section order", async () => {
