@@ -328,11 +328,39 @@ describe("knowledge tools", () => {
   });
 
   it("create_knowledge_page validates and returns the id", async () => {
-    const createPage = vi.fn(async () => ({ _id: "doc-1", title: "T" }));
+    const stored = { _id: "doc-1", title: "T", spaceId: "space-1", path: "t" };
+    const createPage = vi.fn(async () => stored);
+    const getActivePage = vi.fn(async () => stored);
     const t = getTool("create_knowledge_page");
     expect(await t.handler({ title: "T" }, ctx({}))).toMatchObject({ success: false });
-    const res = await t.handler({ title: "T", content: "body" }, ctx({ createPage } as never));
-    expect(res).toMatchObject({ success: true, data: { id: "doc-1" } });
+    const res = await t.handler(
+      { title: "T", content: "body" },
+      ctx({ createPage, getActivePage } as never)
+    );
+    expect(res).toMatchObject({ success: true, data: { id: "doc-1", spaceId: "space-1" } });
+  });
+
+  /**
+   * A Page the reader's own paths cannot reach is not a created Page. Reporting success for one is
+   * how an Agent comes to believe it wrote content that nothing can later cite.
+   */
+  it("create_knowledge_page fails rather than reporting a Page no reader can reach", async () => {
+    const t = getTool("create_knowledge_page");
+    const unplaced = { _id: "doc-1", title: "T", spaceId: null, path: null };
+    const placed = { _id: "doc-1", title: "T", spaceId: "space-1", path: "t" };
+
+    const noPlace = await t.handler(
+      { title: "T", content: "body" },
+      ctx({ createPage: async () => unplaced, getActivePage: async () => unplaced } as never)
+    );
+    const noRead = await getTool("create_knowledge_page").handler({ title: "T", content: "body" }, {
+      userId: "u1",
+      service: { createPage: async () => placed, getActivePage: async () => placed },
+      pageGate: { ...allowAll, canRead: async () => false },
+    } as never);
+
+    expect(noPlace).toMatchObject({ success: false, error: { message: "page_not_placed" } });
+    expect(noRead).toMatchObject({ success: false, error: { message: "page_not_readable" } });
   });
 
   it("returns internal_error (never throws) when the service fails", async () => {

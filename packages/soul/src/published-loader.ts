@@ -363,6 +363,15 @@ export class SoulLoader {
       // manifest.yml is the V2 format; manifest.json is no longer supported
       const manifestPath = join(dir, "manifest.yml");
       try {
+        // Bundled integrations are code-owned: Soul holds connection.yaml only, no manifest.yml
+        // (install.ts refuses to write one). Such a dir just carries connection state.
+        if (!(await fileExists(this.soulPath, manifestPath))) {
+          const connRaw = (parseYaml(
+            await readContainedFile(this.soulPath, join(dir, "connection.yaml"))
+          ) ?? {}) as IntegrationConnection;
+          map.set(slug, { slug, sourceIntegration: slug, connection: connRaw });
+          continue;
+        }
         const parsedManifest =
           parseYaml(await readContainedFile(this.soulPath, manifestPath)) ?? {};
         const manifestRaw = validateLegacyIntegrationManifest(

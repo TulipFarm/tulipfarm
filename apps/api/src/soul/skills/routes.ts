@@ -1,8 +1,9 @@
 // biome-ignore-all format: keep business logic local while meeting the control-plane size cap
 import { createHash, randomUUID } from "node:crypto";
-import { readdir, readFile, readlink, realpath, rm } from "node:fs/promises";
+import { readdir, readFile, readlink, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import { gitSourceHttpError, withGitSourceClone } from "@tulipfarm/integrations";
 import type { LlmService } from "@tulipfarm/llm";
 import { SandboxRuntimeProfileRegistry, shellTsPythonV1 } from "@tulipfarm/sandbox";
 import {
@@ -14,14 +15,11 @@ import {
   validateSkill,
 } from "@tulipfarm/schema";
 import {
-  ALLOWED_SOURCE_HINT,
   artifactWriteTarget,
   type BundledSkill,
-  cloneToTemp as cloneSourceToTemp,
   convertLegacySkill,
   DISABLED_BUNDLED_SKILLS_FILE,
   type GitSyncService,
-  isAllowedSource,
   isSoulWriteError,
   mergedSkills,
   parseFrontmatter,
@@ -335,21 +333,18 @@ async function loadMarketplace(gitSync: GitSyncService, soulLoader: SoulLoader, 
       }),
     };
   }
-  let dir: string | undefined;
-  try {
-    const clone = await cloneSourceToTemp(source, "skill-scan-");
-    dir = clone.dir;
+  await withGitSourceClone(source, { prefix: "skill-scan-", actorId: "system:marketplace" }, async ({ dir, ref }) => {
     const scanId = randomUUID();
     pruneScans(now);
-    scans.set(scanId, { source, ref: clone.ref, skills: await discoverSkills(dir), audited: new Set(), expires: now + SCAN_TTL_MS });
+    scans.set(scanId, { source, ref, skills: await discoverSkills(dir), audited: new Set(), expires: now + SCAN_TTL_MS });
     marketplaceCache.set(source, { scanId, expires: now + SCAN_TTL_MS, manifest: await readManifest(dir) });
-    return loadMarketplace(gitSync, soulLoader, bundledSkills, disabledBundledSkills);
-  } finally {
-    if (dir) await rm(dir, { recursive: true, force: true });
-  }
+  });
+  return loadMarketplace(gitSync, soulLoader, bundledSkills, disabledBundledSkills);
 }
+// The operator sees that the catalog is unreachable, never git's stderr or a server temp path.
 function sendMarketplaceUnavailable(reply: FastifyReply, error: unknown) {
-  return reply.code(502).send({ error: `marketplace unavailable: ${error instanceof Error ? error.message : String(error)}` });
+  const denial = gitSourceHttpError(error);
+  return reply.code(502).send({ error: `marketplace unavailable: ${denial?.body.error ?? "the catalog repository could not be read"}` });
 }
 function rethrowSoulWriteError(reply: FastifyReply, error: unknown): never | FastifyReply {
   if (isSoulWriteError(error)) {
@@ -456,26 +451,24 @@ export function registerSkillRoutes(app: FastifyInstance, soulLoader: SoulLoader
       description: "Clone a git repo (source accepts an optional #branch suffix) and discover installable SKILL.md files.",
       tags: ["skills"], security: [{ sessionCookie: [] }, { bearerToken: [] }],
       body: SkillScanBodySchema,
-      response: { 200: SkillScanResponseSchema, 400: ErrorSchema, 401: ErrorSchema },
+      response: { 200: SkillScanResponseSchema, 400: ErrorSchema, 401: ErrorSchema, 429: ErrorSchema },
     },
   }, async (req, reply) => {
     const { source } = req.body as { source: string };
-    if (!isAllowedSource(source)) return reply.code(400).send({ error: ALLOWED_SOURCE_HINT });
-    let dir: string | undefined;
     try {
-      const clone = await cloneSourceToTemp(source, "skill-scan-");
-      dir = clone.dir;
-      const discovered = await discoverSkills(dir);
-      if (discovered.length === 0) return reply.code(400).send({ error: "no SKILL.md files found in repo" });
-      const lock = await readLock(gitSync.path);
-      const scanId = randomUUID();
-      pruneScans(Date.now());
-      scans.set(scanId, { source, ref: clone.ref, skills: discovered, audited: new Set(), expires: Date.now() + SCAN_TTL_MS });
-      return { scanId, skills: discovered.map((skill) => ({ name: skill.name, skillPath: skill.skillPath, description: skill.description, ...installStatus(skill, lock, soulLoader, bundledSkills, disabledBundledSkills) })) };
+      return await withGitSourceClone(source, { prefix: "skill-scan-", actorId: commitActorFromRequest(req).principalId }, async ({ dir, ref }) => {
+        const discovered = await discoverSkills(dir);
+        if (discovered.length === 0) return reply.code(400).send({ error: "no SKILL.md files found in repo" });
+        const lock = await readLock(gitSync.path);
+        const scanId = randomUUID();
+        pruneScans(Date.now());
+        scans.set(scanId, { source, ref, skills: discovered, audited: new Set(), expires: Date.now() + SCAN_TTL_MS });
+        return { scanId, skills: discovered.map((skill) => ({ name: skill.name, skillPath: skill.skillPath, description: skill.description, ...installStatus(skill, lock, soulLoader, bundledSkills, disabledBundledSkills) })) };
+      });
     } catch (error) {
-      return reply.code(400).send({ error: `scan failed: ${error instanceof Error ? error.message : String(error)}` });
-    } finally {
-      if (dir) await rm(dir, { recursive: true, force: true });
+      const denial = gitSourceHttpError(error);
+      if (!denial) throw error;
+      return reply.code(denial.status).send(denial.body);
     }
   });
   app.post("/api/v1/skills/audit", {

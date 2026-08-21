@@ -2,11 +2,17 @@ import type { ExposedTool } from "./contract";
 
 /** Skill narrowing: which exposed Tools the model is shown. Never an authorization decision. */
 
-/** Structural Tools cannot be hidden by Skill narrowing. */
+/**
+ * Structural Tools cannot be hidden by Skill narrowing.
+ *
+ * Every name here is a way a Turn *ends* — it answers, asks, or hands the work on. `delegate_to_agent`
+ * belongs for that reason; `transfer_to_agent` was listed beside it and no host has ever registered
+ * it, so the set advertised an exit that could not be taken (#419). A name is admitted here only
+ * once some host offers it.
+ */
 const ALWAYS_EXPOSED_TOOL_NAMES: ReadonlySet<string> = new Set([
   "load_skill",
   "complete_task",
-  "transfer_to_agent",
   "delegate_to_agent",
   "present",
   "request_input",
@@ -16,6 +22,16 @@ const ALWAYS_EXPOSED_TOOL_NAMES: ReadonlySet<string> = new Set([
 /**
  * The Tools an iteration shows the model. `tools` stays the authorization boundary — narrowing
  * only shrinks the catalog the model sees, so an unnarrowed name is still refused at dispatch.
+ *
+ * A scope may hide a read; it may never hide a write. Hiding a read costs the model an
+ * alternative it can work without — it still holds the Skill's own reads, and can answer or say
+ * it cannot. Hiding a *write* takes away the only way the Turn can do the thing it was asked to
+ * do, and does it silently: the Tool is absent rather than refused, the system prompt assembled
+ * before the `load_skill` still lists it, and no result comes back for the model to reason about.
+ * The only completion left is text, which is how a Turn that filed nothing ends by claiming it
+ * did (#419). `mutating === true` and not `!== false` on purpose: dispatch treats an undeclared
+ * Tool as a write because that fails safe, whereas narrowing is a visibility choice, so it acts
+ * only on a Tool that declares itself.
  */
 export function narrowToolsToSkill(
   tools: readonly ExposedTool[],
@@ -24,7 +40,9 @@ export function narrowToolsToSkill(
 ): readonly ExposedTool[] {
   const scope = activeSkillName === undefined ? undefined : skillToolScopes?.get(activeSkillName);
   if (scope === undefined) return tools;
-  return tools.filter((t) => ALWAYS_EXPOSED_TOOL_NAMES.has(t.name) || scope.includes(t.name));
+  return tools.filter(
+    (t) => t.mutating === true || ALWAYS_EXPOSED_TOOL_NAMES.has(t.name) || scope.includes(t.name)
+  );
 }
 
 /** `load_skill`'s only argument is `{ name: string }` — the Skill this call switched into. */

@@ -250,6 +250,46 @@ test("a form_post step POSTs the manifest, which a redirect cannot express", asy
   expect(input.value).toBe('{"name":"TulipFarm"}');
 });
 
+test("an org typed into the optional field is sent with the handoff", async () => {
+  const user = userEvent.setup();
+  const submit = vi.fn();
+  vi.spyOn(HTMLFormElement.prototype, "submit").mockImplementation(submit);
+  startAuthStep.mockResolvedValue({
+    action: "form_post",
+    url: "https://github.com/organizations/acme-corp/settings/apps/new?state=xyz",
+    field: "manifest",
+    value: '{"name":"TulipFarm"}',
+  });
+  flow([
+    {
+      index: 0,
+      kind: "app_manifest",
+      title: "Create the GitHub App",
+      satisfied: false,
+      producesEnv: true,
+      supportsOrgTarget: true,
+    },
+  ]);
+
+  await user.type(screen.getByLabelText("Organization (optional)"), "acme-corp");
+  await user.click(screen.getByRole("button", { name: /Create app on Slack/ }));
+
+  await waitFor(() => expect(startAuthStep).toHaveBeenCalledWith("slack", 0, "acme-corp"));
+});
+
+test("the org field is absent when the step does not support org targeting", () => {
+  flow([
+    {
+      index: 0,
+      kind: "app_manifest",
+      title: "Create the Slack app",
+      satisfied: false,
+      producesEnv: true,
+    },
+  ]);
+  expect(screen.queryByLabelText("Organization (optional)")).not.toBeInTheDocument();
+});
+
 test("a handoff failure is reported and the button becomes usable again", async () => {
   const user = userEvent.setup();
   startAuthStep.mockRejectedValue(new Error("SLACK_CLIENT_ID is not set"));

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { PaginatedResult } from "@tulipfarm/storage";
 import type { KnowledgeAclRepo, PageVisibilityScope, PageVisibilitySource } from "./acl-repo";
+import { createAuthoredPage } from "./authored-page";
 import type { KnowledgeChunkRepo } from "./chunks-repo";
 import type { KnowledgeLinksRepo } from "./links-repo";
 import {
@@ -151,27 +152,8 @@ export class KnowledgeService {
 
   // ── pages ────────────────────────────────────────────────────────────────────
 
-  async createPage(input: CreatePageInput): Promise<KnowledgePage> {
-    const now = new Date();
-    const id = randomUUID();
-    const page: KnowledgePage = {
-      _id: id,
-      title: input.title,
-      content: input.content,
-      plainText: input.content.trim(),
-      source: "authored",
-      sourceId: id,
-      domain: input.domain ?? null,
-      tags: input.tags ?? [],
-      active: true,
-      alwaysLoadForAgents: input.alwaysLoadForAgents ?? false,
-      version: 1,
-      createdAt: now,
-      updatedAt: now,
-    };
-    await this.deps.pages.insert(page);
-    await afterWrite(this.deps, page);
-    return page;
+  createPage(input: CreatePageInput): Promise<KnowledgePage> {
+    return createAuthoredPage(this.deps, input);
   }
 
   getPage(id: string): Promise<KnowledgePage | null> {

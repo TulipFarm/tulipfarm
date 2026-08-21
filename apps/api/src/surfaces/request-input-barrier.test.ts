@@ -91,7 +91,7 @@ function choicesCall(props: Record<string, unknown>) {
   };
 }
 
-async function runTurn(props: Record<string, unknown>) {
+async function runTurn(props: Record<string, unknown>, alsoInSameBatch: readonly string[] = []) {
   const created: string[] = [];
   const registry = new InMemoryToolCatalog();
   registry.register(requestInputTool);
@@ -128,7 +128,14 @@ async function runTurn(props: Record<string, unknown>) {
 
   const loop = new AgentLoop({
     model: scriptedModel(
-      toolCalls([choicesCall(props)]),
+      toolCalls([
+        choicesCall(props),
+        ...alsoInSameBatch.map((id) => ({
+          callId: id,
+          name: "agent_create",
+          arguments: { name: id },
+        })),
+      ]),
       toolCalls([{ callId: "create-1", name: "agent_create", arguments: { name: "Sam" } }]),
       {
         requestId: "req",
@@ -188,5 +195,20 @@ describe("request_input stops a Chat Turn", () => {
     expect(created).toEqual([]);
     expect(dispatched).toEqual(["request_input"]);
     expect(outcome).toMatchObject({ status: "failed", reason: "input_request_failed" });
+  });
+
+  // A model that asks and acts in one output is the shape #458 reported: the confirmation card and
+  // the bulk writes it was meant to gate arrive together, so the operator's Cancel lands on work
+  // that already ran. The barrier has to hold within the batch, not only across iterations.
+  it("dispatches nothing else from the batch that carried the question", async () => {
+    const { outcome, dispatched, created } = await runTurn(VALID_CHOICES, [
+      "bulk-1",
+      "bulk-2",
+      "bulk-3",
+    ]);
+
+    expect(created).toEqual([]);
+    expect(dispatched).toEqual(["request_input"]);
+    expect(outcome).toMatchObject({ status: "input_required", callId: "input-1" });
   });
 });

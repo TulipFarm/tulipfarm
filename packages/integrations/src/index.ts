@@ -128,6 +128,23 @@ export {
   GenericWebhookError,
 } from "./generic";
 export type {
+  ClonableGitSource,
+  GitClone,
+  GitCloneLimits,
+  GitCloneOptions,
+  GitHostResolver,
+  GitRunner,
+  GitSourceDenial,
+} from "./git-source";
+export {
+  assertClonableGitSource,
+  DEFAULT_GIT_CLONE_LIMITS,
+  GitSourceError,
+  gitSourceHttpError,
+  splitGitSourceRef,
+  withGitSourceClone,
+} from "./git-source";
+export type {
   CachingInstallationTokenMinterDeps,
   GitHubAdapterDeps,
   GitHubCheckRunAction,

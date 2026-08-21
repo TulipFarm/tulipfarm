@@ -66,7 +66,6 @@ class FakeInviteRepo implements UserInviteRepo {
   async create(invite: UserInviteDoc): Promise<void> {
     this.invites.push(invite);
   }
-  async deleteUnconsumedForUser(): Promise<void> {}
   async find(): Promise<UserInviteDoc | null> {
     return null;
   }

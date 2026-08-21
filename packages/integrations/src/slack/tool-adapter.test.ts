@@ -121,3 +121,87 @@ describe("SlackToolAdapter mention encoding", () => {
     );
   });
 });
+
+function threadTs(calls: readonly IntegrationHttpRequest[]): string | undefined {
+  const call = calls.find((c) => c.path === "/chat.postMessage");
+  const body = call?.body as { thread_ts?: string } | undefined;
+  return body?.thread_ts;
+}
+
+describe("SlackToolAdapter thread replies", () => {
+  it("threads a reply when the Run started from a Slack thread in the same channel", async () => {
+    const http = fakeHttp([]);
+    const adapter = new SlackToolAdapter({
+      http,
+      channelRunDelivery: {
+        async find() {
+          return {
+            businessId: "biz-1",
+            runId: "run-1",
+            integrationId: "int-1",
+            routeId: "route-1",
+            provider: "slack",
+            destination: "C0123456789",
+            threadId: "1700000000.000001",
+            agentId: "agent-1",
+            principalId: "principal-1",
+            idempotencyKey: "idem-1",
+            status: "pending",
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+          };
+        },
+      },
+    });
+
+    await adapter.dispatch(sendRequest("C0123456789", "here you go"), CREDENTIAL);
+
+    expect(threadTs(http.calls)).toBe("1700000000.000001");
+  });
+
+  it("does not thread when the Run's origin channel differs from the target channel", async () => {
+    const http = fakeHttp([]);
+    const adapter = new SlackToolAdapter({
+      http,
+      channelRunDelivery: {
+        async find() {
+          return {
+            businessId: "biz-1",
+            runId: "run-1",
+            integrationId: "int-1",
+            routeId: "route-1",
+            provider: "slack",
+            destination: "C0999999999",
+            threadId: "1700000000.000001",
+            agentId: "agent-1",
+            principalId: "principal-1",
+            idempotencyKey: "idem-1",
+            status: "pending",
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+          };
+        },
+      },
+    });
+
+    await adapter.dispatch(sendRequest("C0123456789", "here you go"), CREDENTIAL);
+
+    expect(threadTs(http.calls)).toBeUndefined();
+  });
+
+  it("does not thread when the Run has no recorded delivery", async () => {
+    const http = fakeHttp([]);
+    const adapter = new SlackToolAdapter({
+      http,
+      channelRunDelivery: {
+        async find() {
+          return null;
+        },
+      },
+    });
+
+    await adapter.dispatch(sendRequest("C0123456789", "here you go"), CREDENTIAL);
+
+    expect(threadTs(http.calls)).toBeUndefined();
+  });
+});

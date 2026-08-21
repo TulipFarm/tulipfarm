@@ -1,4 +1,5 @@
 import { Link } from "@remix-run/react";
+import type * as React from "react";
 import type { ResourceRecord } from "~/lib/api";
 import { type FieldDescriptor, type RenderedCell, renderValue, type SortState } from "~/lib/schema";
 
@@ -27,6 +28,30 @@ export function ValueCell({ cell }: { cell: RenderedCell }) {
     default:
       return <span>{cell.text}</span>;
   }
+}
+
+const CELL_MAX_CHARS = 48;
+
+/** The text a cell renders, for the hover title. A boolean glyph has no text worth repeating. */
+function cellFullText(cell: RenderedCell): string {
+  switch (cell.kind) {
+    case "link":
+      return cell.label;
+    case "bool":
+      return "";
+    default:
+      return cell.text;
+  }
+}
+
+/* Long values are clamped so one wide cell cannot dictate every column's width, but the full text
+   stays reachable on hover rather than being silently cropped. */
+function Cell({ text, children }: { text: string; children: React.ReactNode }) {
+  return (
+    <div className="max-w-[24rem] truncate" title={text.length > CELL_MAX_CHARS ? text : undefined}>
+      {children}
+    </div>
+  );
 }
 
 export function SchemaTable({
@@ -84,18 +109,27 @@ export function SchemaTable({
             <tr key={record.id} className="transition-colors hover:bg-accent">
               {columns.map((col) => {
                 const value = record[col.name];
+                if (col.isIdField) {
+                  const label = String(value ?? record.id);
+                  return (
+                    <td key={col.name} className="px-3 py-2 align-top">
+                      <Cell text={label}>
+                        <Link
+                          to={`/resources/${encodeURIComponent(type)}/${encodeURIComponent(record.id)}`}
+                          className="font-medium text-primary hover:underline"
+                        >
+                          {label}
+                        </Link>
+                      </Cell>
+                    </td>
+                  );
+                }
+                const cell = renderValue(col, value);
                 return (
-                  <td key={col.name} className="whitespace-nowrap px-3 py-2 align-top">
-                    {col.isIdField ? (
-                      <Link
-                        to={`/resources/${encodeURIComponent(type)}/${encodeURIComponent(record.id)}`}
-                        className="font-medium text-primary hover:underline"
-                      >
-                        {String(value ?? record.id)}
-                      </Link>
-                    ) : (
-                      <ValueCell cell={renderValue(col, value)} />
-                    )}
+                  <td key={col.name} className="px-3 py-2 align-top">
+                    <Cell text={cellFullText(cell)}>
+                      <ValueCell cell={cell} />
+                    </Cell>
                   </td>
                 );
               })}

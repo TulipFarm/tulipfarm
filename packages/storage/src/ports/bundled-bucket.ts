@@ -45,16 +45,18 @@ export function writeBucketSecrets(dataDir: string): BucketSecretsResult {
   const dir = join(dataDir, BUCKET_SECRETS_DIR);
   const rpcSecretFile = join(dir, RPC_SECRET_FILE);
   const adminTokenFile = join(dir, ADMIN_TOKEN_FILE);
-  if (existsSync(rpcSecretFile) && existsSync(adminTokenFile)) {
-    return { generated: false, rpcSecretFile, adminTokenFile };
-  }
+  const alreadyGenerated = existsSync(rpcSecretFile) && existsSync(adminTokenFile);
 
   try {
     mkdirSync(dir, { recursive: true });
     for (const file of [rpcSecretFile, adminTokenFile]) {
-      if (existsSync(file)) continue;
-      // No trailing newline: Garage reads the whole file as the secret.
-      writeFileSync(file, randomBytes(32).toString("hex"), { mode: 0o600 });
+      if (!existsSync(file)) {
+        // No trailing newline: Garage reads the whole file as the secret.
+        writeFileSync(file, randomBytes(32).toString("hex"), { mode: 0o600 });
+      }
+      // Garage refuses to boot against a world-readable secret; re-assert the mode on every
+      // boot, not just the one that wrote the file, since a prior version of this code (or a
+      // volume populated some other way) may have left it looser than 0600.
       chmodSync(file, 0o600);
     }
   } catch (err) {
@@ -65,7 +67,7 @@ export function writeBucketSecrets(dataDir: string): BucketSecretsResult {
         "S3_ENDPOINT at an external S3 provider and supply its credentials instead."
     );
   }
-  return { generated: true, rpcSecretFile, adminTokenFile };
+  return { generated: !alreadyGenerated, rpcSecretFile, adminTokenFile };
 }
 
 /** How the S3 credentials on `env` were arrived at. */

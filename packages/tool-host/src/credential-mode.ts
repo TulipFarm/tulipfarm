@@ -35,6 +35,7 @@ export interface CredentialResolverDeps {
 
 /** Personal support is explicit `personal: true`, never inferred from OAuth grant type. */
 export function providerSupportsPersonalCredential(integration: SoulIntegration): boolean {
+  if (integration.manifest === undefined) return false;
   return resolveAuthSteps(integration.manifest).some(isPersonalCredentialStep);
 }
 

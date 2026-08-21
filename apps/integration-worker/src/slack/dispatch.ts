@@ -11,8 +11,8 @@ function optionalString(value: unknown): string | undefined {
 export interface SlackDispatchDeps {
   businessId: string;
   channelAdapter: SlackChannelAdapter;
-  /** Optional events_api gate; without it every subscribed DM/channel message reaches the adapter. */
-  mentionGate?: MentionGateDeps;
+  /** Required: without it every subscribed DM/channel message would reach the adapter (#508). */
+  mentionGate: MentionGateDeps;
   /** Optional bind-link offer for `external_identity_unmapped` denials. */
   identityBindOffer?: ChannelIdentityBindOfferPort;
   /** Optional Approve/Deny block-action handler; Slack interactive envelopes are already acked. */
@@ -28,12 +28,9 @@ export async function dispatchSlackEnvelope(
   if (envelope.type === "events_api") {
     try {
       const rawEvent = envelope.payload as SlackEventEnvelope;
-      let gated = rawEvent;
-      if (deps.mentionGate !== undefined) {
-        const gate = await applyMentionGate(rawEvent, deps.mentionGate);
-        if (gate.outcome === "drop") return;
-        gated = gate.envelope;
-      }
+      const gate = await applyMentionGate(rawEvent, deps.mentionGate);
+      if (gate.outcome === "drop") return;
+      const gated = gate.envelope;
       const result = await deps.channelAdapter.receive(deps.businessId, gated, async () => {
         // Already acked at the transport layer before dispatch ran.
       });

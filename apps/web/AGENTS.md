@@ -43,6 +43,9 @@ client data loading, schema-driven resource UI, and browser rendering of Surface
 - All API calls go through `app/lib/api.ts`; never call `fetch` ad hoc from routes.
 - Gate admin UI on `isBusinessAdmin` / `useIsAdmin`, never on `user.role`: an access level granted
   from People & access confers admin authority without rewriting the account role.
+- A section page's one `h1` comes from `SectionShell` and is `sr-only`, because the top bar already
+  names the page. A route drilled into from a section names itself instead; `_app.business.access`
+  covers its own tab children.
 - `apiWrite` must send cookies, `x-csrf-token` from the non-httpOnly `csrf_token` cookie, and
   optional `Authorization: Bearer` from `VITE_API_TOKEN`.
 - Render API validation errors from `ApiError.path` as field errors; map `409` to a concurrency

@@ -5,12 +5,7 @@ import { ajv } from "@tulipfarm/schema";
 import type { SoulLoader } from "@tulipfarm/soul";
 import { parsePaginationQuery } from "@tulipfarm/storage";
 import { type ApiToolDefinition, defineApiTool, err, ok } from "@tulipfarm/tool-host";
-import {
-  type CounterStore,
-  makeHistoryEntry,
-  type ResourceRepoFactory,
-  toApiRecord,
-} from "./repo.js";
+import { type CounterStore, type ResourceRepoFactory, toApiRecord } from "./repo.js";
 import {
   loadForWrite,
   maybeRunAfterHook,
@@ -212,7 +207,6 @@ const resourceCreate = defineApiTool<ResourceToolContext>({
     const repo = ctx.repoFactory.forType(type);
     try {
       await repo.insert(doc);
-      await repo.appendHistory(makeHistoryEntry(id, "create", doc));
     } catch (e) {
       return err("internal_error", reason(e));
     }
@@ -357,9 +351,8 @@ const resourceUpdate = defineApiTool<ResourceToolContext>({
     };
 
     try {
-      const replaced = await repo.replaceOne(id, existing.version, newDoc);
+      const replaced = await repo.replaceOne(id, existing.version, newDoc, "update");
       if (!replaced) return err("not_found", "version conflict");
-      await repo.appendHistory(makeHistoryEntry(id, "update", newDoc));
     } catch (e) {
       return err("internal_error", reason(e));
     }
@@ -410,9 +403,8 @@ const resourceDelete = defineApiTool<ResourceToolContext>({
     };
 
     try {
-      const replaced = await repo.replaceOne(id, existing.version, softDeleted);
+      const replaced = await repo.replaceOne(id, existing.version, softDeleted, "delete");
       if (!replaced) return err("not_found", "version conflict");
-      await repo.appendHistory(makeHistoryEntry(id, "delete", softDeleted));
     } catch (e) {
       return err("internal_error", reason(e));
     }

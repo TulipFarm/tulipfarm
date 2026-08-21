@@ -8,7 +8,7 @@ credential — so both the control plane and the durable runtime can execute the
 **Read on** if you are adding a platform Tool, changing artifact validation, or changing what a
 Routine State reports on completion.
 
-**Skip** if the Tool you are touching reads the Soul (`load_skill`, `transfer_to_agent`,
+**Skip** if the Tool you are touching reads the Soul (`load_skill`, `delegate_to_agent`,
 `trigger_routine`, …) — those stay in `apps/api/src/platform/tools.ts` and declare
 `requiresAmbient: ["soul"]`.
 

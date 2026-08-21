@@ -221,6 +221,80 @@ describe("startAuthStep", () => {
     expect(action.url).toContain(`state=${repo.requests[0].state}`);
   });
 
+  it("targets an org's create_url when the caller names one and the step supports it", async () => {
+    const repo = new MemoryAuthRequestRepo();
+    const action = await startAuthStep({
+      slug: "github",
+      manifest: manifestWith([
+        {
+          kind: "app_manifest",
+          create_url: "https://github.com/settings/apps/new?state={state}",
+          create_url_for_org:
+            "https://github.com/organizations/{org}/settings/apps/new?state={state}",
+          manifest_param: "manifest",
+          delivery: "form_post",
+          manifest: { name: "Tulip" },
+        },
+      ]),
+      stepIndex: 0,
+      env: {},
+      endpoints,
+      repo,
+      org: "acme-corp",
+    });
+    if (action.action !== "form_post") throw new Error("expected form_post");
+    expect(action.url).toBe(
+      `https://github.com/organizations/acme-corp/settings/apps/new?state=${repo.requests[0].state}`
+    );
+  });
+
+  it("falls back to the personal create_url when no org is given", async () => {
+    const repo = new MemoryAuthRequestRepo();
+    const action = await startAuthStep({
+      slug: "github",
+      manifest: manifestWith([
+        {
+          kind: "app_manifest",
+          create_url: "https://github.com/settings/apps/new?state={state}",
+          create_url_for_org:
+            "https://github.com/organizations/{org}/settings/apps/new?state={state}",
+          manifest_param: "manifest",
+          delivery: "form_post",
+          manifest: { name: "Tulip" },
+        },
+      ]),
+      stepIndex: 0,
+      env: {},
+      endpoints,
+      repo,
+    });
+    if (action.action !== "form_post") throw new Error("expected form_post");
+    expect(action.url).toBe(`https://github.com/settings/apps/new?state=${repo.requests[0].state}`);
+  });
+
+  it("ignores an org when the step declares no create_url_for_org", async () => {
+    const repo = new MemoryAuthRequestRepo();
+    const action = await startAuthStep({
+      slug: "github",
+      manifest: manifestWith([
+        {
+          kind: "app_manifest",
+          create_url: "https://github.com/settings/apps/new?state={state}",
+          manifest_param: "manifest",
+          delivery: "form_post",
+          manifest: { name: "Tulip" },
+        },
+      ]),
+      stepIndex: 0,
+      env: {},
+      endpoints,
+      repo,
+      org: "acme-corp",
+    });
+    if (action.action !== "form_post") throw new Error("expected form_post");
+    expect(action.url).toBe(`https://github.com/settings/apps/new?state=${repo.requests[0].state}`);
+  });
+
   it("sends the app manifest as a query param when the provider wants one", async () => {
     const repo = new MemoryAuthRequestRepo();
     const action = await startAuthStep({

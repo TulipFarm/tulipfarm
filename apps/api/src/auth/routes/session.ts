@@ -5,6 +5,7 @@ import { userPrincipal } from "../../identity/principal";
 import { sessionCookieOptions } from "../cookie-security";
 import { CSRF_COOKIE, setCsrfCookie } from "../csrf";
 import {
+  hashInviteToken,
   InviteDeniedError,
   type InviteStores,
   previewInvite,
@@ -43,6 +44,12 @@ function getDummyHash(): Promise<string> {
 }
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
+
+/** A denial is opaque on the wire; log which cause it was, keyed by a hash prefix, not the token. */
+function logInviteDenial(req: FastifyRequest, at: string, err: InviteDeniedError, token: string) {
+  const hash = hashInviteToken(token).slice(0, 12);
+  req.log.warn({ at, reason: err.reason, hash }, "invite denied");
+}
 
 export interface SessionRouteDeps {
   store: SessionStore;
@@ -363,6 +370,7 @@ export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDe
           return reply.send({ email: offer.email, expiresAt: offer.expiresAt.toISOString() });
         } catch (err) {
           if (err instanceof InviteDeniedError) {
+            logInviteDenial(req, "preview", err, token);
             return reply.code(404).send({ error: err.message });
           }
           throw err;
@@ -422,6 +430,7 @@ export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDe
           });
         } catch (err) {
           if (err instanceof InviteDeniedError) {
+            logInviteDenial(req, "accept", err, token);
             return reply.code(404).send({ error: err.message });
           }
           throw err;

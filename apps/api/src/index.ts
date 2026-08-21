@@ -688,6 +688,7 @@ async function boot() {
 
     const slackTooling = buildSlackTooling({
       secrets: async () => secretsService,
+      channelRunDelivery: channelRunDeliveries,
     });
     const slackEffects = new PgEffectStore(runTransactions);
     const slackTools = buildSlackTools(DEPLOYMENT_BUSINESS_ID, {
@@ -707,8 +708,9 @@ async function boot() {
       connection: async () => {
         const integration = soulLoader.integrations.get("google");
         const env = integration?.connection?.env;
-        if (integration === undefined || env === undefined) return undefined;
-        const step = resolveAuthSteps(integration.manifest).find(
+        const manifest = integration?.manifest;
+        if (env === undefined || manifest === undefined) return undefined;
+        const step = resolveAuthSteps(manifest).find(
           (candidate): candidate is AuthOAuth2Step => candidate.kind === "oauth2"
         );
         return step === undefined ? undefined : { step, env };

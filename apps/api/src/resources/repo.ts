@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { CounterFn } from "@tulipfarm/schema";
-import { type PaginatedResult, toPage } from "@tulipfarm/storage";
+import { type PaginatedResult, toPage, withTransaction } from "@tulipfarm/storage";
 import type { Queryable } from "../db";
 import { historyTableName, rowToResourceDoc, tableName } from "./schema";
 
@@ -15,10 +15,12 @@ export interface ResourceDoc {
   [key: string]: unknown;
 }
 
+export type HistoryOp = "create" | "update" | "delete";
+
 export interface ResourceHistoryDoc {
   _id: string;
   resourceId: string;
-  operation: "create" | "update" | "delete";
+  operation: HistoryOp;
   snapshot: ResourceDoc;
   at: Date;
 }
@@ -33,13 +35,16 @@ export interface SearchOpts extends ListOpts {
   filter?: Record<string, unknown>;
 }
 
+/**
+ * Every mutation also writes the Record's history snapshot, and the two must land together: a
+ * committed Record with no history entry is an audit gap no later write can repair.
+ */
 export interface ResourceRepo {
   insert(doc: ResourceDoc): Promise<void>;
   findById(id: string): Promise<ResourceDoc | null>;
   list(opts: ListOpts): Promise<PaginatedResult<ResourceDoc>>;
   search(opts: SearchOpts): Promise<PaginatedResult<ResourceDoc>>;
-  replaceOne(id: string, expectedVersion: number, doc: ResourceDoc): Promise<boolean>;
-  appendHistory(entry: ResourceHistoryDoc): Promise<void>;
+  replaceOne(id: string, expected: number, doc: ResourceDoc, op: HistoryOp): Promise<boolean>;
 }
 
 /** Builds a `ResourceRepo` bound to a resource type's table (per-request, dynamic type). */
@@ -67,11 +72,14 @@ export class PgResourceRepo implements ResourceRepo {
 
   async insert(doc: ResourceDoc): Promise<void> {
     const { _id, version, createdAt, updatedAt, deletedAt, ...data } = doc;
-    await this.q.query(
-      `INSERT INTO ${this.table} (id, version, created_at, updated_at, deleted_at, data)
-       VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
-      [_id, version, createdAt, updatedAt, deletedAt ?? null, JSON.stringify(data)]
-    );
+    await withTransaction(this.q, async (tx) => {
+      await tx.query(
+        `INSERT INTO ${this.table} (id, version, created_at, updated_at, deleted_at, data)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+        [_id, version, createdAt, updatedAt, deletedAt ?? null, JSON.stringify(data)]
+      );
+      await this.appendHistory(tx, historyEntry(_id, "create", doc));
+    });
   }
 
   async findById(id: string): Promise<ResourceDoc | null> {
@@ -123,21 +131,30 @@ export class PgResourceRepo implements ResourceRepo {
     return toPage(rows.map(rowToResourceDoc), opts.limit);
   }
 
-  async replaceOne(id: string, expectedVersion: number, doc: ResourceDoc): Promise<boolean> {
+  async replaceOne(
+    id: string,
+    expected: number,
+    doc: ResourceDoc,
+    op: HistoryOp
+  ): Promise<boolean> {
     if (!UUID_RE.test(id)) return false;
     const { _id, version, createdAt, updatedAt, deletedAt, ...data } = doc;
-    const { rows } = await this.q.query(
-      `UPDATE ${this.table}
-       SET version = $1, created_at = $2, updated_at = $3, deleted_at = $4, data = $5::jsonb
-       WHERE id = $6 AND version = $7
-       RETURNING id`,
-      [version, createdAt, updatedAt, deletedAt ?? null, JSON.stringify(data), id, expectedVersion]
-    );
-    return rows.length === 1;
+    return withTransaction(this.q, async (tx) => {
+      const { rows } = await tx.query(
+        `UPDATE ${this.table}
+         SET version = $1, created_at = $2, updated_at = $3, deleted_at = $4, data = $5::jsonb
+         WHERE id = $6 AND version = $7
+         RETURNING id`,
+        [version, createdAt, updatedAt, deletedAt ?? null, JSON.stringify(data), id, expected]
+      );
+      if (rows.length !== 1) return false;
+      await this.appendHistory(tx, historyEntry(id, op, doc));
+      return true;
+    });
   }
 
-  async appendHistory(entry: ResourceHistoryDoc): Promise<void> {
-    await this.q.query(
+  private async appendHistory(tx: Queryable, entry: ResourceHistoryDoc): Promise<void> {
+    await tx.query(
       `INSERT INTO ${this.historyTable} (id, resource_id, operation, snapshot, at)
        VALUES ($1, $2, $3, $4::jsonb, $5)`,
       [entry._id, entry.resourceId, entry.operation, JSON.stringify(entry.snapshot), entry.at]
@@ -184,10 +201,6 @@ export function toApiRecord(doc: ResourceDoc): Record<string, unknown> {
   };
 }
 
-export function makeHistoryEntry(
-  resourceId: string,
-  operation: ResourceHistoryDoc["operation"],
-  snapshot: ResourceDoc
-): ResourceHistoryDoc {
+function historyEntry(resourceId: string, operation: HistoryOp, snapshot: ResourceDoc) {
   return { _id: randomUUID(), resourceId, operation, snapshot, at: new Date() };
 }

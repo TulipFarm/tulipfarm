@@ -64,9 +64,13 @@ export function mergeIntegrations(
   }
   for (const [slug, soulEntry] of soulLoader.integrations) {
     const bundledEntry = bundled.get(slug);
+    const manifest = bundledEntry?.manifest ?? soulEntry.manifest;
+    // Soul entry has no manifest of its own (bundled, code-owned) and no bundled entry either —
+    // nothing to catalog.
+    if (manifest === undefined) continue;
     merged.set(slug, {
       slug,
-      manifest: bundledEntry?.manifest ?? soulEntry.manifest,
+      manifest,
       connected: soulEntry.connection?.enabled === true,
       connectionEnv: soulEntry.connection?.env,
       setupGuide: bundledEntry?.setupGuide ?? soulEntry.setupGuide,
@@ -162,6 +166,8 @@ async function toDetail(entry: MergedIntegration, listing?: RegistryEntry) {
       // walkthrough: a step that writes nothing is satisfied before it is started.
       producesEnv: authStepProducesEnv(step),
       fields: step.kind === "fields" ? step.fields : undefined,
+      // Only an app_manifest step that declares an org-scoped create_url can honor an org input.
+      supportsOrgTarget: step.kind === "app_manifest" && step.create_url_for_org !== undefined,
     })),
     connected: entry.connected,
     setupGuide: entry.setupGuide,

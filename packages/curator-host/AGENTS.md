@@ -34,5 +34,6 @@ Prompts, output schemas and citation rules (`packages/curator`), SQL and table s
   moved, the job is retired (`context_drifted`); output validated against inputs it never saw
   proves nothing. Drift is judged **per section** at submit, so one moved section does not discard
   the rest of the answer.
-- Age alone never kills a job. Only a job with no Run, or one whose Run the kernel calls terminal,
-  is touched.
+- Age alone never kills a job. Only a job with no Run, or one whose Run can no longer make
+  progress — terminal, or parked in `needs_reconciliation`, which nothing requeues — is touched.
+  Retiring one closes its Run too, so no Run outlives the work it describes.

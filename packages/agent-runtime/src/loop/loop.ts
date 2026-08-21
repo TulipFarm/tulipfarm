@@ -1,4 +1,3 @@
-import { usdToCostMicros } from "@tulipfarm/run-kernel";
 import { ajv, textContent } from "@tulipfarm/schema";
 import type {
   ModelInvocationRequest,
@@ -7,6 +6,7 @@ import type {
   ModelUsage,
 } from "../ports";
 import { ModelInvocationError } from "../ports";
+import { chargeModelUsage } from "./budget";
 import type { AgentLoopCheckpoint } from "./checkpoint";
 import type {
   AgentLoopDependencies,
@@ -18,7 +18,13 @@ import type {
   ExposedTool,
   ToolDispatchResult,
 } from "./contract";
-import { deepestErrorMessage, EventSinkFailure, REQUEST_INPUT_TOOL } from "./diagnostics";
+import {
+  deepestErrorMessage,
+  EventSinkFailure,
+  isHandoffTool,
+  isReportTool,
+  REQUEST_INPUT_TOOL,
+} from "./diagnostics";
 import { extractSkillName, narrowToolsToSkill } from "./narrowing";
 import {
   extractRereadFile,
@@ -40,8 +46,6 @@ import {
 /** Bounded Tool loop: broker-only effects, untrusted model output, durable budgets. */
 
 const ITERATION_BUDGET_KEY = "iterations";
-const TOKEN_BUDGET_KEY = "tokens";
-const COST_BUDGET_KEY = "costMicros";
 
 export class AgentLoop {
   constructor(private readonly deps: AgentLoopDependencies) {}
@@ -73,6 +77,8 @@ export class AgentLoop {
     // re-fetched every iteration, so authority is re-checked at assembly time rather than trusted
     // from the moment the Tool ran.
     let reread: readonly RereadFile[] = recovered?.rereadFiles ?? [];
+    // A report cannot describe an effect that lands after it, so a reported Turn may not write.
+    let reported = recovered?.reported ?? false;
 
     const toolsForIteration = (): readonly ExposedTool[] =>
       narrowToolsToSkill(input.tools, activeSkillName, input.skillToolScopes);
@@ -106,6 +112,7 @@ export class AgentLoop {
           messages: messages.slice(input.messages.length),
           ...(pendingCall === undefined ? {} : { pendingCall }),
           ...(activeSkillName === undefined ? {} : { activeSkillName }),
+          ...(reported ? { reported } : {}),
           ...(reread.length === 0 ? {} : { rereadFiles: reread }),
           sequence,
           textIndex,
@@ -142,6 +149,13 @@ export class AgentLoop {
     const askedForInput = (callId: string) =>
       finish({ status: "input_required", callId, text: streamedText, ...counters }, "completed");
 
+    /** A refusal read off a call's identity: it never dispatches, and no repair path follows. */
+    const barrier = async (call: NormalizedToolCall, reason: AgentLoopFailureReason) => {
+      const { name: toolName, callId } = call;
+      await emit("tool_call_rejected", { toolName, callId, outcome: reason });
+      return finish({ status: "failed", reason, ...counters }, "failed");
+    };
+
     /** Streams text deltas; missing `completed` is a model-adapter contract failure. */
     const callModel = async (request: ModelInvocationRequest): Promise<ModelInvocationResult> => {
       const stream = this.deps.model.stream?.(request);
@@ -168,24 +182,8 @@ export class AgentLoop {
     };
 
     /** Charges tokens and cost against the Run budget; shared by the success and failure paths. */
-    const chargeUsage = async (usage: ModelUsage): Promise<"ok" | "exhausted"> => {
-      const tokens = usage.inputTokens + usage.outputTokens;
-      if (tokens > 0) {
-        const tokenBudget = await this.deps.budget.consume({
-          key: TOKEN_BUDGET_KEY,
-          amount: tokens,
-        });
-        if (tokenBudget.outcome === "exhausted") return "exhausted";
-      }
-      if (usage.costUsd !== undefined && usage.costUsd > 0) {
-        const costBudget = await this.deps.budget.consume({
-          key: COST_BUDGET_KEY,
-          amount: usdToCostMicros(usage.costUsd),
-        });
-        if (costBudget.outcome === "exhausted") return "exhausted";
-      }
-      return "ok";
-    };
+    const chargeUsage = (usage: ModelUsage): Promise<"ok" | "exhausted"> =>
+      chargeModelUsage(this.deps.budget, usage);
 
     /**
      * Dispatches one model-proposed batch and records it in the transcript. Returns the
@@ -249,6 +247,7 @@ export class AgentLoop {
 
         if (dispatched.status === "succeeded") {
           messages.push(toolMessage(call.callId, { output: dispatched.output }));
+          if (isReportTool(call.name)) reported = true;
           if (call.name === "load_skill") {
             const loaded = extractSkillName(call.arguments);
             if (loaded !== undefined) activeSkillName = loaded;
@@ -272,18 +271,22 @@ export class AgentLoop {
         const call = calls[index];
         const tool = exposed.get(call.name);
         if (tool === undefined) {
+          // A hand-off is a barrier read off the call's identity, never off its result: routing
+          // around the feedback is how a hand-off nobody performed ends up reported as done
+          // (#419). Deliberately no repair path.
+          if (isHandoffTool(call.name)) return barrier(call, "handoff_unavailable");
           // A Tool the caller never exposed is refused here; the broker never sees it.
-          messages.push(toolMessage(call.callId, { error: "tool_not_available" }));
-          await emit("tool_call_rejected", {
-            toolName: call.name,
-            callId: call.callId,
-            outcome: "tool_not_available",
-          });
+          const outcome = "tool_not_available";
+          messages.push(toolMessage(call.callId, { error: outcome }));
+          await emit("tool_call_rejected", { toolName: call.name, callId: call.callId, outcome });
           index += 1;
           continue;
         }
 
         if (tool.mutating !== false) {
+          // Nothing this Turn does next can correct a report the participant has already read, so
+          // the effect that report does not describe must not land (#429).
+          if (reported) return barrier(call, "effect_after_report");
           // A write dispatches alone: the next Tool call must never race the effect it causes.
           // The ceiling is checked before the dispatch, never after: `maxToolCalls` is backed by
           // a durable checkpoint, so a call counted after its effect would let a resume replay

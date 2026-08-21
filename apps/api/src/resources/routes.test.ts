@@ -15,6 +15,7 @@ import { DEPLOYMENT_ROLES } from "../identity/roles";
 import { LiveRecordAuthorizer } from "./authorize";
 import type {
   CounterStore,
+  HistoryOp,
   ListOpts,
   ResourceDoc,
   ResourceHistoryDoc,
@@ -33,6 +34,11 @@ class FakeResourceRepo implements ResourceRepo {
 
   async insert(doc: ResourceDoc): Promise<void> {
     this.docs.set(doc._id, { ...doc });
+    this.log(doc._id, "create", doc);
+  }
+
+  private log(id: string, operation: HistoryOp, snapshot: ResourceDoc): void {
+    this.history.push({ _id: randomUUID(), resourceId: id, operation, snapshot, at: new Date() });
   }
 
   async findById(id: string): Promise<ResourceDoc | null> {
@@ -57,15 +63,17 @@ class FakeResourceRepo implements ResourceRepo {
     return { items: sliced, nextCursor: items.length > opts.limit ? "next" : null };
   }
 
-  async replaceOne(id: string, expectedVersion: number, doc: ResourceDoc): Promise<boolean> {
+  async replaceOne(
+    id: string,
+    expectedVersion: number,
+    doc: ResourceDoc,
+    op: HistoryOp
+  ): Promise<boolean> {
     const existing = this.docs.get(id);
     if (!existing || existing.version !== expectedVersion) return false;
     this.docs.set(id, { ...doc });
+    this.log(id, op, doc);
     return true;
-  }
-
-  async appendHistory(entry: ResourceHistoryDoc): Promise<void> {
-    this.history.push(entry);
   }
 }
 
@@ -263,6 +271,37 @@ describe("resource routes", () => {
         boundary: "resource",
       });
       expect(fakeRepo.docs.size).toBe(0);
+    });
+
+    // `""` is omitted by the create form, so whitespace is the shape a browser actually sends for
+    // a required field the user left blank. Pinned apart from the `""` case because an equality
+    // test against the empty string passes that one and reopens this (#434).
+    it("returns 422 when a required field holds only whitespace", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/resources/ticket",
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+        payload: { title: "   " },
+      });
+      expect(res.statusCode).toBe(422);
+      expect(res.json<{ path: string; boundary: string }>()).toMatchObject({
+        path: "/title",
+        boundary: "resource",
+      });
+      expect(fakeRepo.docs.size).toBe(0);
+    });
+
+    it("keeps meaningful surrounding whitespace on a required field", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/resources/ticket",
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+        payload: { title: " Bug " },
+      });
+      expect(res.statusCode).toBe(201);
+      expect(res.json<{ title: string }>().title).toBe(" Bug ");
     });
 
     it("still accepts a filled required field", async () => {
@@ -613,6 +652,29 @@ describe("resource routes", () => {
       expect(res.statusCode).toBe(422);
       expect(res.json<{ path: string }>().path).toBe("/title");
       expect(fakeRepo.docs.get(id)?.title).toBe("Bug");
+    });
+
+    it("returns 422 when an update blanks a required field with whitespace", async () => {
+      const id = randomUUID();
+      fakeRepo.docs.set(id, {
+        _id: id,
+        version: 1,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        title: "Bug",
+      });
+
+      const res = await app.inject({
+        method: "PUT",
+        url: `/api/v1/resources/ticket/${id}`,
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF, "if-match": "1" },
+        payload: { title: "   " },
+      });
+      expect(res.statusCode).toBe(422);
+      expect(res.json<{ path: string }>().path).toBe("/title");
+      expect(fakeRepo.docs.get(id)?.title).toBe("Bug");
+      expect(fakeRepo.docs.get(id)?.version).toBe(1);
     });
   });
 

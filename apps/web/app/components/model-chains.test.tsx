@@ -313,6 +313,78 @@ test("a fallback with no provider selected stays in the sheet with a field error
   expect(within(fast as HTMLElement).getAllByRole("listitem")).toHaveLength(1);
 });
 
+test("a whitespace-only fallback Model ID is refused like an empty one", async () => {
+  const onSubmit = renderChains();
+
+  const fast = screen.getByRole("heading", { name: "Fast" }).closest("section");
+  await userEvent.click(within(fast as HTMLElement).getByRole("button", { name: /add fallback/i }));
+  await userEvent.type(await screen.findByLabelText("Model ID"), "   ");
+  await userEvent.click(screen.getByRole("button", { name: /^done$/i }));
+
+  expect(screen.getByText("Enter a Model ID.")).toBeInTheDocument();
+  expect(within(fast as HTMLElement).getAllByRole("listitem")).toHaveLength(1);
+
+  await userEvent.click(screen.getByRole("button", { name: /^close$/i }));
+  await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
+  expect((onSubmit.mock.calls[0][0] as LlmConfig).tiers?.quick.providers).toHaveLength(1);
+});
+
+test("abandoning an edit that emptied the Model ID leaves the chain entry intact", async () => {
+  const onSubmit = renderChains();
+
+  await userEvent.click(screen.getByRole("button", { name: "Edit claude-haiku-4-5" }));
+  await userEvent.clear(await screen.findByLabelText("Model ID"));
+  await userEvent.click(screen.getByRole("button", { name: /^done$/i }));
+  expect(screen.getByText("Enter a Model ID.")).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole("button", { name: /^close$/i }));
+
+  const fast = screen.getByRole("heading", { name: "Fast" }).closest("section");
+  expect(within(fast as HTMLElement).queryByText(/no model set/i)).not.toBeInTheDocument();
+  expect(within(fast as HTMLElement).getAllByRole("listitem")[0]).toHaveTextContent(
+    "claude-haiku-4-5"
+  );
+
+  // Re-opening the row must not carry the refusal that the discarded edit raised.
+  await userEvent.click(screen.getByRole("button", { name: "Edit claude-haiku-4-5" }));
+  expect(await screen.findByLabelText("Model ID")).toHaveValue("claude-haiku-4-5");
+  expect(screen.queryByText("Enter a Model ID.")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: /^close$/i }));
+
+  await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
+  expect((onSubmit.mock.calls[0][0] as LlmConfig).tiers?.quick.providers[0]?.model).toBe(
+    "claude-haiku-4-5"
+  );
+});
+
+test("a chain already holding a blank entry never offers it as a preset target", async () => {
+  renderChains({
+    initial: {
+      ...initial,
+      tiers: {
+        quick: {
+          providers: [
+            { provider: "anthropic", model: "claude-haiku-4-5" },
+            { provider: "openai", model: "" },
+            { provider: "openai", model: "gpt-4o-mini" },
+          ],
+        },
+        standard: initial.tiers?.standard ?? { providers: [] },
+        complex: initial.tiers?.complex ?? { providers: [] },
+      },
+    },
+  });
+
+  const options = within(screen.getByLabelText("Fast"))
+    .getAllByRole("option")
+    .map((o) => o.textContent ?? "")
+    .join("|");
+  expect(options).not.toMatch(/unset/);
+  expect(options).not.toMatch(/fast-fallback-1\b/);
+  // The usable third entry keeps its real position, so a preset targeting it still resolves.
+  expect(options).toMatch(/fast-fallback-2/);
+});
+
 test("Auto is shown as the profile it resolves to", async () => {
   const onSubmit = renderChains();
 

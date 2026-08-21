@@ -145,6 +145,9 @@ describe("integration marketplace routes", () => {
   const temps: string[] = [];
 
   beforeEach(async () => {
+    // Browse and install are exercised against local git repos, which the clone policy denies
+    // unless the deployment opted in.
+    process.env.GIT_SOURCE_ALLOW_LOCAL_PATHS = "1";
     const store = new MemorySessionStore();
     const userRepo = new FakeUserRepo();
     const tokenRepo = new FakeTokenRepo();
@@ -225,6 +228,7 @@ describe("integration marketplace routes", () => {
   afterEach(async () => {
     // Avoid leaking literal `undefined` into later path resolution.
     delete process.env.BUNDLED_INTEGRATIONS_DIR;
+    delete process.env.GIT_SOURCE_ALLOW_LOCAL_PATHS;
     await app.close();
     for (const dir of temps.splice(0)) await rm(dir, { recursive: true, force: true });
   });
@@ -310,7 +314,41 @@ describe("integration marketplace routes", () => {
         payload: { source: "git@internal.example.com:secrets/repo.git" },
       });
       expect(res.statusCode).toBe(400);
-      expect(res.json().error).toContain("owner/repo slug");
+      expect(res.json().error).toContain('"owner/repo" slug');
+    });
+
+    // Issue #183: the same cage guards this route, and it is applied before git is started.
+    it.each([
+      ["a local filesystem repository", "file:///srv/secrets/repo"],
+      ["plain HTTP", "http://github.com/owner/repo.git"],
+      ["embedded credentials", "https://user:pass@github.com/owner/repo.git"],
+      ["IPv4 loopback", "https://127.0.0.1/owner/repo.git"],
+      ["the cloud metadata address", "https://169.254.169.254/owner/repo.git"],
+      ["an unapproved host", "https://git.internal.example/owner/repo.git"],
+    ])("rejects %s", async (_label, source) => {
+      delete process.env.GIT_SOURCE_ALLOW_LOCAL_PATHS;
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/inspect",
+        cookies: auth(),
+        headers,
+        payload: { source },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).not.toContain("git clone");
+    });
+
+    // Issue #437: a failing clone reports a verdict, not git's stderr or a server path.
+    it("reports a clone failure without leaking the command or temp paths", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/inspect",
+        cookies: auth(),
+        headers,
+        payload: { source: `file://${join(tmpdir(), "no-such-integration-repo-xyz")}` },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe("Repository not found or not accessible.");
     });
 
     it("reports what a repo offers without writing anything", async () => {
@@ -671,7 +709,7 @@ describe("integration marketplace routes", () => {
         payload: { source: `file://${join(tmpdir(), "does-not-exist-repo")}` },
       });
       expect(res.statusCode).toBe(400);
-      expect(res.json().error).toContain("clone failed");
+      expect(res.json().error).toBe("Repository not found or not accessible.");
     });
   });
 

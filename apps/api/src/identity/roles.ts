@@ -3,8 +3,11 @@ import {
   assertRoleGraphAcyclic,
   collectRoleGrants,
   type Role,
+  restrictedSurfaceCarveOut,
+  surfaceGrants,
 } from "@tulipfarm/authz";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import { GITHUB_TOOL_IDS } from "@tulipfarm/integrations";
 import type { GrantRecord, RoleRecord, RoleRepo } from "@tulipfarm/storage";
 
 /** Mirrors live role gates; update this catalog whenever route or Tool gates change. */
@@ -170,9 +173,21 @@ export const MEMBER_ALLOWED_SURFACES: readonly {
   { type: "soul.agent", actions: ["*"], enforcedIn: "soul/agents/routes.ts; soul/agents/tools.ts" },
   { type: "soul.guardrails", actions: ["*"], enforcedIn: "platform/guardrail-tool.ts" },
   { type: "soul.repo", actions: ["*"], enforcedIn: "platform/tools.ts" },
+  /**
+   * Named action by action rather than `*` for the same reason as `integration.github`: a same-type
+   * wildcard forces a deny for each admin-only action, which no granted Role can then lift (#408).
+   */
   {
     type: "soul.resource_type",
-    actions: ["*"],
+    actions: [
+      "soul.resource_type.create",
+      "soul.resource_type.list",
+      "soul.resource_type.read",
+      "soul.resource_type.update",
+      "soul.resource_type.hooks.read",
+      "soul.resource_type.hooks.update",
+      "soul.resource_type.hooks.delete",
+    ],
     enforcedIn: "soul/resource-types/routes.ts; soul/resource-types/tools.ts",
   },
   { type: "soul.routine", actions: ["*"], enforcedIn: "platform/tools.ts" },
@@ -190,8 +205,20 @@ export const MEMBER_ALLOWED_SURFACES: readonly {
   { type: "platform.state", actions: ["*"], enforcedIn: "platform/tools.ts" },
   { type: "platform.task", actions: ["*"], enforcedIn: "platform/tools.ts" },
   { type: "platform.time", actions: ["*"], enforcedIn: "platform/tools.ts" },
-  /** Provider grants expose the surface only; provider ACLs still decide account access. */
-  { type: "integration.github", actions: ["*"], enforcedIn: "tools/github/tools.ts" },
+  /**
+   * Provider grants expose the surface only; provider ACLs still decide account access. Named
+   * action by action rather than `*`: a same-type wildcard forces a compensating deny for each
+   * admin-only action, and that deny then outranks any Role granted on top of `member` (#408).
+   */
+  {
+    type: "integration.github",
+    actions: [
+      ...Object.values(GITHUB_TOOL_IDS),
+      "github.repository.list",
+      "integration.github.read",
+    ],
+    enforcedIn: "tools/github/tools.ts",
+  },
   { type: "integration.slack", actions: ["*"], enforcedIn: "tools/slack/tools.ts" },
   { type: "integration.google", actions: ["*"], enforcedIn: "tools/google/tools.ts" },
   /** Explicit vocabulary counterpart; authority already comes from the wildcard grant. */
@@ -221,41 +248,6 @@ export const OWNER_SCOPED_SURFACES: readonly {
     enforcedIn: "integrations/auth-routes.ts",
   },
 ];
-
-function surfaceGrants(
-  surfaces: readonly { readonly type: string; readonly actions: readonly string[] }[],
-  effect: AccessGrant["effect"]
-): AccessGrant[] {
-  return surfaces.flatMap((surface) =>
-    surface.actions.map((action): AccessGrant => ({ action, resourceType: surface.type, effect }))
-  );
-}
-
-/**
- * The admin-only carve-out of the allows `member` holds broadly.
- *
- * A blanket `deny` on every admin-only action reads safer than it is: a Role's grants all land in
- * one authority layer and deny beats allow there, so a member carrying those denies could never be
- * lifted by *any* Role granted on top — `Owner` included, which is the only promotion the product
- * offers (#408). An admin-only action is already unreachable to a member by default deny, so the
- * only denies worth keeping are the ones compensating for a member allow that would otherwise
- * reach the action: the residual `resourceType: "*"` record grant (a business may name a Resource
- * type after an admin-only one) and any same-type wildcard in `MEMBER_ALLOWED_SURFACES`.
- */
-function adminOnlyCarveOut(): AccessGrant[] {
-  return ADMIN_ONLY_SURFACES.flatMap((surface) => {
-    const memberActions = MEMBER_ALLOWED_SURFACES.filter(
-      (allowed) => allowed.type === surface.type
-    ).flatMap((allowed) => allowed.actions);
-    const denied = new Set<string>(MEMBER_UNDOMAINED_RECORD_ACTIONS);
-    for (const action of surface.actions) {
-      if (memberActions.includes("*") || memberActions.includes(action)) denied.add(action);
-    }
-    return [...denied].map(
-      (action): AccessGrant => ({ action, resourceType: surface.type, effect: "deny" })
-    );
-  });
-}
 
 /**
  * Unrestricted authority, spelled for both request shapes: a grant with no domain covers only
@@ -299,7 +291,11 @@ export const DEPLOYMENT_ROLES: readonly Role[] = [
       ...MEMBER_UNDOMAINED_RECORD_ACTIONS.map(
         (action): AccessGrant => ({ action, resourceType: "*", effect: "allow" })
       ),
-      ...adminOnlyCarveOut(),
+      ...restrictedSurfaceCarveOut(
+        ADMIN_ONLY_SURFACES,
+        MEMBER_ALLOWED_SURFACES,
+        MEMBER_UNDOMAINED_RECORD_ACTIONS
+      ),
       ...OWNER_SCOPED_SURFACES.map(
         (surface): AccessGrant => ({
           action: "*",

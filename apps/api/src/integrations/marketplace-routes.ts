@@ -1,10 +1,5 @@
 import type { BundledIntegration, SoulLoader, SoulWriter } from "@tulipfarm/soul";
-import {
-  ALLOWED_SOURCE_HINT,
-  isAllowedSource,
-  isSoulWriteError,
-  soulWriteHttpError,
-} from "@tulipfarm/soul";
+import { isSoulWriteError, soulWriteHttpError } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import { commitActorFromRequest } from "../soul/commit-actor";
@@ -70,16 +65,15 @@ export function registerIntegrationMarketplaceRoutes(
           },
           400: ErrorSchema,
           401: ErrorSchema,
+          429: ErrorSchema,
         },
       },
     },
     async (req, reply) => {
       const { source } = req.body as { source: string };
-      if (!isAllowedSource(source)) {
-        return reply.code(400).send({ error: ALLOWED_SOURCE_HINT });
-      }
       try {
-        const { ref, integrations } = await inspectIntegrationSource(source);
+        const actorId = commitActorFromRequest(req).principalId;
+        const { ref, integrations } = await inspectIntegrationSource(source, actorId);
         const bundledNames = bundledSlugs();
         return {
           source,
@@ -138,15 +132,14 @@ export function registerIntegrationMarketplaceRoutes(
           404: ErrorSchema,
           409: ErrorSchema,
           422: ErrorSchema,
+          429: ErrorSchema,
           500: ErrorSchema,
         },
       },
     },
     async (req, reply) => {
       const { source, name } = req.body as { source: string; name?: string };
-      if (!isAllowedSource(source)) {
-        return reply.code(400).send({ error: ALLOWED_SOURCE_HINT });
-      }
+      const actor = commitActorFromRequest(req);
       try {
         return await installIntegrationFromSource(
           { source, name },
@@ -154,7 +147,8 @@ export function registerIntegrationMarketplaceRoutes(
             soulLoader,
             soulWriter,
             bundledSlugs: bundledSlugs(),
-            actor: commitActorFromRequest(req),
+            actor,
+            actorId: actor.principalId,
           }
         );
       } catch (error) {

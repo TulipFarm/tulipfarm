@@ -10,6 +10,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import type {
   CounterStore,
+  HistoryOp,
   ListOpts,
   ResourceDoc,
   ResourceHistoryDoc,
@@ -25,6 +26,11 @@ class FakeRepo implements ResourceRepo {
 
   async insert(doc: ResourceDoc): Promise<void> {
     this.docs.set(doc._id, { ...doc });
+    this.log(doc._id, "create", doc);
+  }
+
+  private log(id: string, operation: HistoryOp, snapshot: ResourceDoc): void {
+    this.history.push({ _id: randomUUID(), resourceId: id, operation, snapshot, at: new Date() });
   }
 
   async findById(id: string): Promise<ResourceDoc | null> {
@@ -47,15 +53,17 @@ class FakeRepo implements ResourceRepo {
     return { items: items.slice(0, opts.limit), nextCursor: null };
   }
 
-  async replaceOne(id: string, expectedVersion: number, doc: ResourceDoc): Promise<boolean> {
+  async replaceOne(
+    id: string,
+    expectedVersion: number,
+    doc: ResourceDoc,
+    op: HistoryOp
+  ): Promise<boolean> {
     const ex = this.docs.get(id);
     if (!ex || ex.version !== expectedVersion) return false;
     this.docs.set(id, { ...doc });
+    this.log(id, op, doc);
     return true;
-  }
-
-  async appendHistory(entry: ResourceHistoryDoc): Promise<void> {
-    this.history.push(entry);
   }
 }
 
@@ -402,6 +410,16 @@ describe("record_create", () => {
     const tool = getTool("record_create");
     const result = await tool.handler({ type: "ticket", data: {} }, makeCtx());
     expect(result).toMatchObject({ success: false, error: { code: "validation_error" } });
+  });
+
+  // The Agent path has to refuse the same blank the HTTP route refuses, or a Record an operator
+  // could not create by hand is one `record_create` call away (#434).
+  it("returns validation_error and writes nothing when a required field is only whitespace", async () => {
+    const factory = new FakeRepoFactory();
+    const tool = getTool("record_create");
+    const result = await tool.handler({ type: "ticket", data: { title: "   " } }, makeCtx(factory));
+    expect(result).toMatchObject({ success: false, error: { code: "validation_error" } });
+    expect((factory.forType("ticket") as FakeRepo).docs.size).toBe(0);
   });
 
   it("returns validation_error for bad args (no type)", async () => {

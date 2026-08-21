@@ -1,5 +1,56 @@
 # Changelog
 
+## [0.12.4](https://github.com/TulipFarm/tulipfarm/compare/v0.12.3...v0.12.4) (2026-08-21)
+
+### Features
+
+* **integrations:** support targeting a GitHub org for App creation ([#534](https://github.com/TulipFarm/tulipfarm/issues/534)) ([d887018](https://github.com/TulipFarm/tulipfarm/commit/d887018e7d521e1308cc834f4cbf7b986628415c))
+
+## [0.12.3](https://github.com/TulipFarm/tulipfarm/compare/v0.12.2...v0.12.3) (2026-08-21)
+
+### Bug Fixes
+
+* **storage:** re-assert bundled bucket secret perms every boot ([#532](https://github.com/TulipFarm/tulipfarm/issues/532)) ([23ee09e](https://github.com/TulipFarm/tulipfarm/commit/23ee09e56c643f0a762a22fd85d0b98b6c712fa3))
+
+## [0.12.2](https://github.com/TulipFarm/tulipfarm/compare/v0.12.1...v0.12.2) (2026-08-20)
+
+### Bug Fixes
+
+* **agent-runtime:** stop a Turn narrating a hand-off it never made ([#510](https://github.com/TulipFarm/tulipfarm/issues/510)) ([036ba30](https://github.com/TulipFarm/tulipfarm/commit/036ba30445065f3c5a5dd024f58cb7ddbb08d8d9)), closes [#419](https://github.com/TulipFarm/tulipfarm/issues/419), references [#405](https://github.com/TulipFarm/tulipfarm/issues/405)
+* **agent-runtime:** stop a Turn writing behind its own report ([#522](https://github.com/TulipFarm/tulipfarm/issues/522)) ([de2c686](https://github.com/TulipFarm/tulipfarm/commit/de2c6863e6f5c8fe0c300cf6aca3228acc8f0907)), closes [#429](https://github.com/TulipFarm/tulipfarm/issues/429), references [#419](https://github.com/TulipFarm/tulipfarm/issues/419) [#405](https://github.com/TulipFarm/tulipfarm/issues/405) [#417](https://github.com/TulipFarm/tulipfarm/issues/417) [#451](https://github.com/TulipFarm/tulipfarm/issues/451) [pre-#451](https://github.com/pre-/issues/451)
+* **auth:** issue an invite link in one statement ([#511](https://github.com/TulipFarm/tulipfarm/issues/511)) ([9490a23](https://github.com/TulipFarm/tulipfarm/commit/9490a23fe8ace65f144191eb7c3141d69a7c2ecb))
+* **authz:** let a granted Owner reach every admin-only action ([#521](https://github.com/TulipFarm/tulipfarm/issues/521)) ([c9bf68a](https://github.com/TulipFarm/tulipfarm/commit/c9bf68a7fe70ba7d4d07a3b9f0d162282790ff5e)), references [#408](https://github.com/TulipFarm/tulipfarm/issues/408)
+* **chat:** show an empty state for every mention trigger ([#519](https://github.com/TulipFarm/tulipfarm/issues/519)) ([c0f6da9](https://github.com/TulipFarm/tulipfarm/commit/c0f6da93b7eba02047b6e3a062701c7e38c11aac)), references [#450](https://github.com/TulipFarm/tulipfarm/issues/450)
+* **curator:** retire a job whose Run was parked for reconciliation ([#523](https://github.com/TulipFarm/tulipfarm/issues/523)) ([0b10f19](https://github.com/TulipFarm/tulipfarm/commit/0b10f1956ed6d5744972e14a85413447bfd61881))
+* **forge:** enforce name and resource checks in forge Tools ([#530](https://github.com/TulipFarm/tulipfarm/issues/530)) ([f4f534b](https://github.com/TulipFarm/tulipfarm/commit/f4f534bf84dd40ff7cf0369720586e63e0f198da)), closes [#463](https://github.com/TulipFarm/tulipfarm/issues/463) [#435](https://github.com/TulipFarm/tulipfarm/issues/435) [#436](https://github.com/TulipFarm/tulipfarm/issues/436), references [#435](https://github.com/TulipFarm/tulipfarm/issues/435) [#463](https://github.com/TulipFarm/tulipfarm/issues/463) [#436](https://github.com/TulipFarm/tulipfarm/issues/436)
+* **integration-worker:** gate Slack self-posts and metadata subtypes ([#524](https://github.com/TulipFarm/tulipfarm/issues/524)) ([632048f](https://github.com/TulipFarm/tulipfarm/commit/632048f6707795ed93c9b1099125edd689f16af6)), references [#508](https://github.com/TulipFarm/tulipfarm/issues/508)
+* **integrations:** cage caller-supplied Git clone sources ([#515](https://github.com/TulipFarm/tulipfarm/issues/515)) ([45876b6](https://github.com/TulipFarm/tulipfarm/commit/45876b69dbc9293b4f3766df0e468e1f193ef9a2))
+* **knowledge:** place and grant a Page authored by create_knowledge_page ([#517](https://github.com/TulipFarm/tulipfarm/issues/517)) ([ad80a77](https://github.com/TulipFarm/tulipfarm/commit/ad80a774feffa0ac49efc2ad1dc42ed6a6f01d37))
+* **resources:** make Record mutation and history one transaction ([#513](https://github.com/TulipFarm/tulipfarm/issues/513)) ([36bfd97](https://github.com/TulipFarm/tulipfarm/commit/36bfd971af6090df6473cca0186351f7b6ff7102))
+* **skills:** name the marketplace install action for its skill ([#529](https://github.com/TulipFarm/tulipfarm/issues/529)) ([8faa91c](https://github.com/TulipFarm/tulipfarm/commit/8faa91c8b99ef5dbd745f268e60321d3a99ffb46)), closes [#447](https://github.com/TulipFarm/tulipfarm/issues/447) [#464](https://github.com/TulipFarm/tulipfarm/issues/464) [#494](https://github.com/TulipFarm/tulipfarm/issues/494) [#496](https://github.com/TulipFarm/tulipfarm/issues/496), references [#446](https://github.com/TulipFarm/tulipfarm/issues/446) [#445](https://github.com/TulipFarm/tulipfarm/issues/445) [#446](https://github.com/TulipFarm/tulipfarm/issues/446) [#445](https://github.com/TulipFarm/tulipfarm/issues/445)
+* **soul:** tolerate a bundled integration's manifest-less Soul dir ([#520](https://github.com/TulipFarm/tulipfarm/issues/520)) ([425d44d](https://github.com/TulipFarm/tulipfarm/commit/425d44d4919c6898e8bb178f1d513c56d3b39eae))
+* **web:** buffer model sheet edits so a cleared Model ID cannot land ([#514](https://github.com/TulipFarm/tulipfarm/issues/514)) ([3e6383a](https://github.com/TulipFarm/tulipfarm/commit/3e6383a1ed4986749cff55380e4d6898020c7f32)), references [#430](https://github.com/TulipFarm/tulipfarm/issues/430) [#475](https://github.com/TulipFarm/tulipfarm/issues/475)
+* **web:** correct Record field display and guard destructive actions ([#518](https://github.com/TulipFarm/tulipfarm/issues/518)) ([0e035d9](https://github.com/TulipFarm/tulipfarm/commit/0e035d9dcf148e900e3bcaaf8b09a8b3263777b8)), references [#440](https://github.com/TulipFarm/tulipfarm/issues/440) [#439](https://github.com/TulipFarm/tulipfarm/issues/439) [#410](https://github.com/TulipFarm/tulipfarm/issues/410) [#438](https://github.com/TulipFarm/tulipfarm/issues/438)
+* **web:** keep chat auto-scroll inside the transcript container ([#527](https://github.com/TulipFarm/tulipfarm/issues/527)) ([50270b7](https://github.com/TulipFarm/tulipfarm/commit/50270b72759f435a56f6029e16b825829865f379)), references [#69](https://github.com/TulipFarm/tulipfarm/issues/69) [#420](https://github.com/TulipFarm/tulipfarm/issues/420)
+* **web:** surface soul git sync status and give section pages an h1 ([#525](https://github.com/TulipFarm/tulipfarm/issues/525)) ([5baefc0](https://github.com/TulipFarm/tulipfarm/commit/5baefc068a97ca6cbe43a4a19903a37165d2d390)), closes [#414](https://github.com/TulipFarm/tulipfarm/issues/414) [#413](https://github.com/TulipFarm/tulipfarm/issues/413)
+* **web:** target the login bounce at the route being loaded ([#526](https://github.com/TulipFarm/tulipfarm/issues/526)) ([a1a3914](https://github.com/TulipFarm/tulipfarm/commit/a1a39141415e1de5f5f3fa527bde81ac15c4d9c2)), closes [#403](https://github.com/TulipFarm/tulipfarm/issues/403) [#409](https://github.com/TulipFarm/tulipfarm/issues/409)
+
+### Tests
+
+* **resources:** pin the blank and barrier cases two bugs reported ([#528](https://github.com/TulipFarm/tulipfarm/issues/528)) ([cb21ca0](https://github.com/TulipFarm/tulipfarm/commit/cb21ca03ad52d7cdf354a8cf582bc37b6ea80a36)), references [#458](https://github.com/TulipFarm/tulipfarm/issues/458) [#434](https://github.com/TulipFarm/tulipfarm/issues/434) [#458](https://github.com/TulipFarm/tulipfarm/issues/458) [#500](https://github.com/TulipFarm/tulipfarm/issues/500) [#458](https://github.com/TulipFarm/tulipfarm/issues/458) [#434](https://github.com/TulipFarm/tulipfarm/issues/434) [#472](https://github.com/TulipFarm/tulipfarm/issues/472) [#458](https://github.com/TulipFarm/tulipfarm/issues/458) [#434](https://github.com/TulipFarm/tulipfarm/issues/434)
+* **routines:** bind the forged one-off Trigger to the schedule dispatch ([#516](https://github.com/TulipFarm/tulipfarm/issues/516)) ([fdaaff1](https://github.com/TulipFarm/tulipfarm/commit/fdaaff176ad20b445ab39cafc1d650f06dbc17e4)), references [#467](https://github.com/TulipFarm/tulipfarm/issues/467) [#465](https://github.com/TulipFarm/tulipfarm/issues/465) [#503](https://github.com/TulipFarm/tulipfarm/issues/503) [#441](https://github.com/TulipFarm/tulipfarm/issues/441) [#406](https://github.com/TulipFarm/tulipfarm/issues/406) [#467](https://github.com/TulipFarm/tulipfarm/issues/467) [pre-#465](https://github.com/pre-/issues/465)
+
+## [0.12.1](https://github.com/TulipFarm/tulipfarm/compare/v0.12.0...v0.12.1) (2026-08-20)
+
+### Features
+
+* **chat:** replace boxed run chrome with a Trace rail and persist asking Turns ([#505](https://github.com/TulipFarm/tulipfarm/issues/505)) ([b3be9ca](https://github.com/TulipFarm/tulipfarm/commit/b3be9ca7e5b6e9c5ebb9154225f9ee82ecb7ce96))
+
+### Bug Fixes
+
+* **eval:** synthesize real PDF bytes for application/pdf Case content ([#507](https://github.com/TulipFarm/tulipfarm/issues/507)) ([41c2e1e](https://github.com/TulipFarm/tulipfarm/commit/41c2e1e8c32dbc6d1b16a84b9b0983280648dc7b))
+* **integrations:** thread Slack replies and drop invalid GitHub App events ([#509](https://github.com/TulipFarm/tulipfarm/issues/509)) ([7205c20](https://github.com/TulipFarm/tulipfarm/commit/7205c2028d11339a2199df9137bd1b19dca69e18))
+
 ## [0.12.0](https://github.com/TulipFarm/tulipfarm/compare/v0.11.0...v0.12.0) (2026-08-20)
 
 ### Features

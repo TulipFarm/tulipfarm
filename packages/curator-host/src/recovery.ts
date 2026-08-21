@@ -29,7 +29,7 @@ export interface CuratorRecoveryDeps {
  * between committing its job and starting its Run leaves a job holding the target forever, so that
  * user is silently retired from the loop and the work they already produced is stranded `claimed`
  * behind it. Nothing here decides a job is dead from age alone — a Run that is merely slow is still
- * a Run — so only a job with *no* Run, or one whose Run the kernel says is terminal, is touched.
+ * a Run — so only a job with *no* Run, or one whose Run can no longer make progress, is touched.
  */
 export class CuratorRecovery {
   constructor(private readonly deps: CuratorRecoveryDeps) {}

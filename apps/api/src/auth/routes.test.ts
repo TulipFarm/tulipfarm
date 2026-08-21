@@ -74,13 +74,9 @@ class FakeInviteRepo implements UserInviteRepo {
   readonly invites: UserInviteDoc[] = [];
 
   async create(invite: UserInviteDoc): Promise<void> {
+    const live = this.invites.findIndex((i) => i.userId === invite.userId && i.consumedAt === null);
+    if (live >= 0) this.invites.splice(live, 1);
     this.invites.push(invite);
-  }
-  async deleteUnconsumedForUser(userId: string): Promise<void> {
-    for (let i = this.invites.length - 1; i >= 0; i--) {
-      const invite = this.invites[i];
-      if (invite.userId === userId && invite.consumedAt === null) this.invites.splice(i, 1);
-    }
   }
   private live(tokenHash: string): UserInviteDoc | undefined {
     return this.invites.find(

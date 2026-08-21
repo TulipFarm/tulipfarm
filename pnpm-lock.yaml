@@ -1002,6 +1002,9 @@ importers:
       '@tulipfarm/schema':
         specifier: workspace:*
         version: link:../schema
+      '@tulipfarm/storage':
+        specifier: workspace:*
+        version: link:../storage
       '@tulipfarm/tool-broker':
         specifier: workspace:*
         version: link:../tool-broker
