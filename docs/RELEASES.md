@@ -54,10 +54,10 @@ The command authenticates with `gh` and dispatches the **Prepare release** workf
 It does not change the local checkout, create a tag, publish an image, or create a GitHub Release.
 
 The workflow freezes the current `main` commit, opens a ready-for-review PR named
-`chore(release): v<version>`, and generates `package.json` and `CHANGELOG.md` for that exact
-snapshot. Review both files, wait for the required checks, and merge the PR. That merge is the
-maintainer's publication approval. No command, workflow dispatch, or approval is required after
-the merge.
+`chore(release): v<version>` with auto-merge enabled, and generates `package.json` and
+`CHANGELOG.md` for that exact snapshot. Review both files and ensure required checks pass. Merging
+that PR (or letting auto-merge complete once approved/passing) is the maintainer's publication
+approval. No command, workflow dispatch, or approval is required after the merge.
 
 Version increments such as `minor` are intentionally rejected. An exact version keeps the proposed
 release explicit and reviewable.
@@ -135,8 +135,9 @@ Configure these controls once:
    permissions and allow GitHub Actions to create pull requests. Alternatively, configure a
    `RELEASE_TOKEN` secret that can write repository contents, open pull requests, and dispatch
    workflows.
-3. Add a tag ruleset for `v*` that restricts creation, updates, and deletion to release automation.
-4. Keep the GHCR package linked to this repository and grant Actions write access to it.
+3. In **Settings → General → Pull Requests**, enable **Allow auto-merge**.
+4. Add a tag ruleset for `v*` that restricts creation, updates, and deletion to release automation.
+5. Keep the GHCR package linked to this repository and grant Actions write access to it.
 
 When `RELEASE_TOKEN` is absent, **Prepare release** explicitly dispatches CI for the generated
 branch. GitHub suppresses ordinary push and pull-request workflow events created by its default

@@ -71,7 +71,9 @@ function main(): void {
   }
 
   console.log(`Release v${version} requested.`);
-  console.log("The workflow will open a release PR; merging it starts publication automatically.");
+  console.log(
+    "The workflow will open a release PR with auto-merge enabled; merging it starts publication automatically."
+  );
 }
 
 const entrypoint = process.argv[1];
