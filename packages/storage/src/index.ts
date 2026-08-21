@@ -10,7 +10,6 @@ export * from "./pg/pagination";
 export * from "./pg/transaction-helpers";
 export * from "./pg/vector-search";
 export * from "./ports";
-export * from "./resources/resource-repo";
 export * from "./runs";
 export * from "./soul";
 export * from "./system";
