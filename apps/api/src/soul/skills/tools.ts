@@ -10,6 +10,14 @@ import {
   SKILL_DELETE_SCHEMA,
   SKILL_GET_SCHEMA,
   SKILL_LIST_SCHEMA,
+  SKILL_MARKETPLACE_BROWSE_DESCRIPTION,
+  SKILL_MARKETPLACE_BROWSE_SCHEMA,
+  SKILL_SCANNED_AUDIT_DESCRIPTION,
+  SKILL_SCANNED_AUDIT_SCHEMA,
+  SKILL_SCANNED_INSTALL_DESCRIPTION,
+  SKILL_SCANNED_INSTALL_SCHEMA,
+  SKILL_SOURCE_SCAN_DESCRIPTION,
+  SKILL_SOURCE_SCAN_SCHEMA,
   SKILL_UPDATE_SCHEMA,
   serializeSkill,
   validateSkill,
@@ -39,6 +47,7 @@ import { firstError } from "../../platform/tool-args";
 import { SYSTEM_SOUL_COMMIT_ACTOR } from "../../runtime/soul-writer";
 import { soulCommitError } from "../../tools/soul-faults";
 import { buildAudit } from "./audit.js";
+import { SkillMarketplaceError, type SkillMarketplaceFlow } from "./marketplace.js";
 
 export interface SkillToolContext {
   gitSync: GitSyncService;
@@ -46,6 +55,7 @@ export interface SkillToolContext {
   llmService?: LlmService;
   bundledSkills: ReadonlyMap<string, BundledSkill>;
   disabledBundledSkills: Set<string>;
+  marketplace: SkillMarketplaceFlow;
   readonly soulWriter: SoulWriter;
   requestContext?: RequestContext;
 }
@@ -95,6 +105,18 @@ function skillTargets(args: unknown) {
   return id === undefined ? [] : [{ type: SOUL_SKILL_TARGET, id }];
 }
 
+function marketplaceError(error: unknown): ToolCallResult {
+  if (error instanceof SkillMarketplaceError) {
+    const code =
+      error.status === 409
+        ? "audit_required"
+        : error.status === 422
+          ? "unavailable"
+          : "validation_error";
+    return err(code, error.message);
+  }
+  return err("unavailable", reason(error));
+}
 function publicFrontmatter(frontmatter: Record<string, unknown>): {
   frontmatter: Record<string, unknown>;
   pendingAudit: boolean;
@@ -557,6 +579,121 @@ const skillActivate = defineApiTool<SkillToolContext>({
   },
 });
 
+const validateMarketplaceBrowse = ajv.compile(SKILL_MARKETPLACE_BROWSE_SCHEMA);
+const skillMarketplaceBrowse = defineApiTool<SkillToolContext>({
+  name: "skill_marketplace_browse",
+  description: SKILL_MARKETPLACE_BROWSE_DESCRIPTION,
+  tier: "system",
+  mutating: false,
+  inputSchema: SKILL_MARKETPLACE_BROWSE_SCHEMA,
+  authorization: {
+    action: "soul.skill.list",
+    resources: ["soul.skill"],
+    targets: () => [],
+    dataClasses: ["soul_definition"],
+  },
+  requiresApproval: false,
+  handler: async (args, ctx) => {
+    if (!validateMarketplaceBrowse(args))
+      return err("validation_error", firstError(validateMarketplaceBrowse.errors));
+    try {
+      return ok(await ctx.marketplace.browse());
+    } catch (error) {
+      return marketplaceError(error);
+    }
+  },
+});
+
+const validateSourceScan = ajv.compile(SKILL_SOURCE_SCAN_SCHEMA);
+const skillSourceScan = defineApiTool<SkillToolContext>({
+  name: "skill_source_scan",
+  description: SKILL_SOURCE_SCAN_DESCRIPTION,
+  tier: "system",
+  mutating: false,
+  inputSchema: SKILL_SOURCE_SCAN_SCHEMA,
+  authorization: {
+    action: "soul.skill.list",
+    resources: ["soul.skill"],
+    targets: () => [],
+    dataClasses: ["soul_definition"],
+  },
+  requiresApproval: false,
+  handler: async (args, ctx) => {
+    if (!validateSourceScan(args))
+      return err("validation_error", firstError(validateSourceScan.errors));
+    try {
+      return ok(
+        await ctx.marketplace.scan({
+          source: (args as { source: string }).source,
+          actorId: ctx.requestContext?.actor?.principalId ?? SYSTEM_SOUL_COMMIT_ACTOR.principalId,
+        })
+      );
+    } catch (error) {
+      return marketplaceError(error);
+    }
+  },
+});
+
+const validateScannedAudit = ajv.compile(SKILL_SCANNED_AUDIT_SCHEMA);
+const skillScannedAudit = defineApiTool<SkillToolContext>({
+  name: "skill_scanned_audit",
+  description: SKILL_SCANNED_AUDIT_DESCRIPTION,
+  tier: "system",
+  mutating: false,
+  inputSchema: SKILL_SCANNED_AUDIT_SCHEMA,
+  authorization: {
+    action: "soul.skill.read",
+    resources: ["soul.skill"],
+    targets: skillTargets,
+    dataClasses: ["soul_definition"],
+  },
+  requiresApproval: false,
+  handler: async (args, ctx) => {
+    if (!validateScannedAudit(args))
+      return err("validation_error", firstError(validateScannedAudit.errors));
+    try {
+      return ok(
+        await ctx.marketplace.audit(args as { scanId: string; name: string; skillPath: string })
+      );
+    } catch (error) {
+      return marketplaceError(error);
+    }
+  },
+});
+
+const validateScannedInstall = ajv.compile(SKILL_SCANNED_INSTALL_SCHEMA);
+const skillScannedInstall = defineApiTool<SkillToolContext>({
+  name: "skill_scanned_install",
+  description: SKILL_SCANNED_INSTALL_DESCRIPTION,
+  tier: "system",
+  mutating: true,
+  inputSchema: SKILL_SCANNED_INSTALL_SCHEMA,
+  authorization: {
+    action: "soul.skill.create",
+    resources: ["soul.skill"],
+    targets: skillTargets,
+    dataClasses: ["soul_definition"],
+  },
+  requiresApproval: false,
+  handler: async (args, ctx) => {
+    if (!validateScannedInstall(args))
+      return err("validation_error", firstError(validateScannedInstall.errors));
+    const selection = args as { scanId: string; name: string; skillPath: string };
+    try {
+      return ok(
+        await ctx.marketplace.install({
+          scanId: selection.scanId,
+          names: [selection.name],
+          paths: [selection.skillPath],
+          actor: ctx.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
+        })
+      );
+    } catch (error) {
+      return marketplaceError(error);
+    }
+  },
+});
+
 export const SKILL_TOOLS: ApiToolDefinition<SkillToolContext>[] = [
   skillCreate,
   skillUpdate,
@@ -564,4 +701,8 @@ export const SKILL_TOOLS: ApiToolDefinition<SkillToolContext>[] = [
   skillList,
   skillDelete,
   skillActivate,
+  skillMarketplaceBrowse,
+  skillSourceScan,
+  skillScannedAudit,
+  skillScannedInstall,
 ];

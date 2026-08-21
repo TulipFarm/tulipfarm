@@ -70,6 +70,7 @@ import type { CanonicalRoutineAuthoringService } from "./routines/authoring";
 import type { RunEventRouteDeps } from "./runs/events";
 import type { RunReplayDeps } from "./runs/replay";
 import type { SetupAdminCreator } from "./setup/first-admin";
+import type { SkillMarketplaceFlow } from "./soul/skills/marketplace";
 import type { SurfaceActionStore } from "./surfaces/action-store";
 import type { SurfaceArtifactStore } from "./surfaces/artifact-store";
 import type { SystemRoutesDeps } from "./system/routes";
@@ -99,6 +100,8 @@ export interface AppOptions {
   soulLoader?: SoulLoader;
   bundledSkills?: ReadonlyMap<string, BundledSkill>;
   disabledBundledSkills?: Set<string>;
+  /** Shared marketplace scan/audit/install flow for REST routes and Chat Tools. */
+  skillMarketplace?: SkillMarketplaceFlow;
   bundledIntegrations?: ReadonlyMap<string, BundledIntegration>;
   slackBind?: {
     integrations: IntegrationStore;
