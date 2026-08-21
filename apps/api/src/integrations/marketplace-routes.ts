@@ -7,6 +7,7 @@ import {
   IntegrationInstallError,
   inspectIntegrationSource,
   installIntegrationFromSource,
+  updateIntegrationFromSource,
 } from "./install";
 
 /* Installing curated integrations uses the same clone/validate/write path as a pasted repo URL. */
@@ -142,6 +143,74 @@ export function registerIntegrationMarketplaceRoutes(
       const actor = commitActorFromRequest(req);
       try {
         return await installIntegrationFromSource(
+          { source, name },
+          {
+            soulLoader,
+            soulWriter,
+            bundledSlugs: bundledSlugs(),
+            actor,
+            actorId: actor.principalId,
+          }
+        );
+      } catch (error) {
+        if (error instanceof IntegrationInstallError) {
+          return reply.code(error.status).send({ error: error.message });
+        }
+        if (isSoulWriteError(error)) {
+          const mapped = soulWriteHttpError(error);
+          return reply.code(mapped.status).send(mapped.body);
+        }
+        throw error;
+      }
+    }
+  );
+
+  app.post(
+    "/api/v1/integrations/:name/update",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description: "Update an installed integration from its source repository.",
+        tags: ["integrations"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        params: {
+          type: "object",
+          required: ["name"],
+          properties: { name: { type: "string" } },
+        },
+        body: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            source: { type: "string" },
+          },
+        },
+        response: {
+          200: {
+            type: "object",
+            required: ["name", "source", "ref"],
+            properties: {
+              name: { type: "string" },
+              source: { type: "string" },
+              ref: { type: "string" },
+            },
+          },
+          400: ErrorSchema,
+          401: ErrorSchema,
+          404: ErrorSchema,
+          409: ErrorSchema,
+          422: ErrorSchema,
+          429: ErrorSchema,
+          500: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { name } = req.params as { name: string };
+      const { source } = (req.body ?? {}) as { source?: string };
+      const actor = commitActorFromRequest(req);
+      try {
+        return await updateIntegrationFromSource(
           { source, name },
           {
             soulLoader,

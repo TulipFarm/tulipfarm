@@ -324,3 +324,96 @@ export async function installIntegrationFromSource(
 
   return { name: chosen.name, source: stripUrlCredentials(options.source), ref };
 }
+
+/** Updates an already installed Integration from its source repository. */
+export async function updateIntegrationFromSource(
+  options: {
+    source?: string;
+    name: string;
+  },
+  deps: {
+    soulLoader: SoulLoader;
+    soulWriter: SoulWriter;
+    bundledSlugs: ReadonlySet<string>;
+    actor?: CommitActor;
+    actorId: string;
+  }
+): Promise<InstallResult> {
+  const lock = readIntegrationLock(deps.soulWriter);
+  const source = options.source ?? lock.integrations[options.name]?.sourceUrl;
+  if (!source) {
+    throw new IntegrationInstallError(
+      `no source repository known for integration "${options.name}"`,
+      400
+    );
+  }
+
+  const { ref, integrations } = await inspectIntegrationSource(source, deps.actorId);
+  const chosen = integrations.find((entry) => entry.name === options.name);
+  if (!chosen) {
+    throw new IntegrationInstallError(
+      `integration "${options.name}" not found in ${stripUrlCredentials(source)}`,
+      404
+    );
+  }
+
+  if (chosen.issues.length > 0) {
+    throw new IntegrationInstallError(
+      `integration "${chosen.name}" is not installable: ${chosen.issues.join("; ")}`,
+      400
+    );
+  }
+
+  if (deps.bundledSlugs.has(chosen.name)) {
+    throw new IntegrationInstallError(`cannot update bundled integration: ${chosen.name}`, 409);
+  }
+
+  // Normalize manifest bytes; filtering is enforced by manifestIssues() above.
+  const manifestYaml = stringifyYaml(chosen.manifest);
+
+  const changes: SoulWrite[] = [
+    {
+      op: "put",
+      target: { kind: "Integration", slug: chosen.name, definitionMode: "legacy" },
+      content: manifestYaml,
+    },
+  ];
+  if (chosen.setupGuide) {
+    changes.push({
+      op: "put",
+      target: { kind: "Integration", slug: chosen.name, companion: "setup-guide.md" },
+      content: chosen.setupGuide,
+    });
+  }
+  if (chosen.egressSpec) {
+    changes.push({
+      op: "put",
+      target: { kind: "Integration", slug: chosen.name, companion: chosen.egressSpec.file },
+      content: chosen.egressSpec.raw,
+    });
+  }
+
+  lock.integrations[chosen.name] = {
+    sourceUrl: stripUrlCredentials(source),
+    sourceType: sourceType(source),
+    manifestPath: chosen.manifestPath,
+    ref,
+    hash: createHash("sha256").update(manifestYaml).digest("hex"),
+  };
+  changes.push({
+    op: "put",
+    target: { kind: "IntegrationsLock" },
+    content: serializeIntegrationLock(lock),
+  });
+
+  await deps.soulWriter.apply({
+    subject: `soul: update integration ${chosen.name}`,
+    source: "api",
+    actor: deps.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
+    businessId: DEPLOYMENT_BUSINESS_ID,
+    changes,
+  });
+  await deps.soulLoader.reload();
+
+  return { name: chosen.name, source: stripUrlCredentials(source), ref };
+}

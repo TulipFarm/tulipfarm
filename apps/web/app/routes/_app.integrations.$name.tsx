@@ -30,6 +30,7 @@ import {
   type IntegrationDetail,
   type IntegrationGrant,
   listSlackRoutes,
+  updateIntegration,
 } from "~/lib/integrations";
 import { useIsAdmin } from "~/lib/use-session-user";
 
@@ -224,6 +225,7 @@ export default function IntegrationDetailPage() {
   const [disconnectingInstallId, setDisconnectingInstallId] = useState<string>();
   const [addingInstall, setAddingInstall] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [updating, setUpdating] = useState(false);
   const [actionError, setActionError] = useState<string>();
   const [callbackError, setCallbackError] = useState<string>();
   const [guideOpen, setGuideOpen] = useState(false);
@@ -287,6 +289,19 @@ export default function IntegrationDetailPage() {
     } catch (err) {
       setActionError(errMessage(err));
       setAddingInstall(false);
+    }
+  }
+
+  async function handleUpdate() {
+    setUpdating(true);
+    setActionError(undefined);
+    try {
+      await updateIntegration(integration.name, integration.source);
+      revalidator.revalidate();
+    } catch (err) {
+      setActionError(errMessage(err));
+    } finally {
+      setUpdating(false);
     }
   }
 
@@ -365,6 +380,11 @@ export default function IntegrationDetailPage() {
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
+            {integration.updateAvailable && isAdmin && (
+              <Button size="sm" disabled={updating} onClick={handleUpdate}>
+                {updating ? "Updating…" : "Update"}
+              </Button>
+            )}
             <StatusBadge
               label={isConnected ? "Connected" : "Not connected"}
               tone={isConnected ? "success" : "neutral"}
@@ -372,6 +392,27 @@ export default function IntegrationDetailPage() {
             {isAdmin && <MoreMenu onDelete={handleDelete} deleting={deleting} />}
           </div>
         </header>
+
+        {integration.updateAvailable && (
+          <div className="flex flex-col gap-3 rounded-sm border border-primary/30 bg-primary/5 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-0.5">
+              <span className="text-sm font-medium text-foreground">Update available</span>
+              <span className="text-xs text-muted-foreground">
+                A newer version of this integration is available from its source repository.
+              </span>
+            </div>
+            {isAdmin && (
+              <Button
+                size="sm"
+                disabled={updating}
+                onClick={handleUpdate}
+                className="self-start sm:self-auto"
+              >
+                {updating ? "Updating…" : "Update now"}
+              </Button>
+            )}
+          </div>
+        )}
 
         {integration.description && (
           <p className="max-w-prose text-sm text-muted-foreground">{integration.description}</p>

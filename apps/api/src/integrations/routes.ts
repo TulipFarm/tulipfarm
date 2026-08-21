@@ -199,6 +199,7 @@ const IntegrationSummarySchema = {
     source: { type: "string" },
     installed: { type: "boolean" },
     status: { type: "string", enum: ["connected", "disconnected"] },
+    updateAvailable: { type: "boolean" },
   },
 };
 

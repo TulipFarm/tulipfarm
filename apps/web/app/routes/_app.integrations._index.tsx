@@ -12,10 +12,12 @@ import { IntegrationIcon } from "~/components/integrations/integration-icon";
 import { ErrorState } from "~/components/states";
 import { StatusBadge } from "~/components/status-badge";
 import { Badge } from "~/components/ui/badge";
+import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Panel, PanelEmpty } from "~/components/ui/panel";
 import { ApiError } from "~/lib/api";
-import { type IntegrationSummary, listIntegrations } from "~/lib/integrations";
+import { type IntegrationSummary, listIntegrations, updateIntegration } from "~/lib/integrations";
+import { useIsAdmin } from "~/lib/use-session-user";
 import { cn } from "~/lib/utils";
 
 /* Connection state is a row property; install is only for curated entries not yet cloned. */
@@ -37,6 +39,22 @@ export default function IntegrationsIndex() {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<string>();
   const searchId = useId();
+  const isAdmin = useIsAdmin();
+  const [updatingName, setUpdatingName] = useState<string>();
+  const [updateError, setUpdateError] = useState<string>();
+
+  async function handleUpdate(name: string, source?: string) {
+    setUpdatingName(name);
+    setUpdateError(undefined);
+    try {
+      await updateIntegration(name, source);
+      revalidator.revalidate();
+    } catch (err) {
+      setUpdateError(err instanceof Error ? err.message : "Update failed.");
+    } finally {
+      setUpdatingName(undefined);
+    }
+  }
 
   const categories = useMemo(() => {
     const found = integrations.map((i) => i.category).filter((c): c is string => Boolean(c));
@@ -103,6 +121,12 @@ export default function IntegrationsIndex() {
         )}
       </div>
 
+      {updateError && (
+        <p className="rounded-sm border border-destructive bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {updateError}
+        </p>
+      )}
+
       {visible.length === 0 ? (
         <Panel>
           <PanelEmpty>
@@ -113,9 +137,23 @@ export default function IntegrationsIndex() {
         </Panel>
       ) : (
         <>
-          {connected.length > 0 && <Section title="Connected" items={connected} />}
+          {connected.length > 0 && (
+            <Section
+              title="Connected"
+              items={connected}
+              onUpdate={handleUpdate}
+              updatingName={updatingName}
+              isAdmin={isAdmin}
+            />
+          )}
           {rest.length > 0 && (
-            <Section title={connected.length > 0 ? "Available" : "All integrations"} items={rest} />
+            <Section
+              title={connected.length > 0 ? "Available" : "All integrations"}
+              items={rest}
+              onUpdate={handleUpdate}
+              updatingName={updatingName}
+              isAdmin={isAdmin}
+            />
           )}
         </>
       )}
@@ -149,12 +187,30 @@ function CategoryChip({
   );
 }
 
-function Section({ title, items }: { title: string; items: IntegrationSummary[] }) {
+function Section({
+  title,
+  items,
+  onUpdate,
+  updatingName,
+  isAdmin,
+}: {
+  title: string;
+  items: IntegrationSummary[];
+  onUpdate: (name: string, source?: string) => void;
+  updatingName?: string;
+  isAdmin: boolean;
+}) {
   return (
     <Panel title={title} actions={<Badge>{items.length}</Badge>} flush>
       <ul className="flex flex-col divide-y divide-border">
         {items.map((integration) => (
-          <IntegrationRow key={integration.name} integration={integration} />
+          <IntegrationRow
+            key={integration.name}
+            integration={integration}
+            onUpdate={onUpdate}
+            updating={updatingName === integration.name}
+            isAdmin={isAdmin}
+          />
         ))}
       </ul>
     </Panel>
@@ -187,7 +243,17 @@ function RowBody({ integration }: { integration: IntegrationSummary }) {
   );
 }
 
-function IntegrationRow({ integration }: { integration: IntegrationSummary }) {
+function IntegrationRow({
+  integration,
+  onUpdate,
+  updating,
+  isAdmin,
+}: {
+  integration: IntegrationSummary;
+  onUpdate: (name: string, source?: string) => void;
+  updating?: boolean;
+  isAdmin?: boolean;
+}) {
   // A curated entry that has not been cloned has no detail page to open — linking there would 404.
   // It is a row about a repository, not about an integration this deployment has.
   if (!integration.installed) {
@@ -209,6 +275,26 @@ function IntegrationRow({ integration }: { integration: IntegrationSummary }) {
       >
         <RowBody integration={integration} />
         <span className="flex shrink-0 items-center gap-2">
+          {integration.updateAvailable && (
+            <span className="shrink-0 rounded-sm border border-primary px-1.5 py-0.5 text-xs uppercase tracking-[0.15em] text-primary">
+              update available
+            </span>
+          )}
+          {integration.updateAvailable && isAdmin && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={updating}
+              aria-label={`Update ${displayName(integration)}`}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onUpdate(integration.name, integration.source);
+              }}
+            >
+              {updating ? "Updating…" : "Update"}
+            </Button>
+          )}
           {integration.status === "connected" ? (
             <StatusBadge label="connected" tone="success" />
           ) : (
