@@ -516,14 +516,14 @@ export function AppShell({ children, user }: { children: ReactNode; user?: Sessi
   }
 
   return (
-    <div className="flex min-h-svh bg-background lg:h-svh lg:overflow-hidden">
+    <div className="flex h-svh overflow-hidden bg-background">
       <AppSidebar
         open={open}
         onClose={() => setOpen(false)}
         collapsed={collapsed}
         navigation={user?.navigation}
       />
-      <div className="flex min-w-0 flex-1 flex-col lg:h-svh">
+      <div className="flex h-svh min-w-0 flex-1 flex-col">
         <header
           className={cn(HEADER_ROW, "gap-2 border-b border-border bg-background px-3 sm:px-4")}
         >
