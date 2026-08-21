@@ -40,6 +40,13 @@ integrations:
     homepage: https://www.atlassian.com/software/jira
     description: Search, create, estimate, prioritize, and transition Jira Cloud issues.
 
+  - name: linear
+    title: Linear
+    icon: linear
+    category: productivity
+    homepage: https://linear.app
+    description: Read, create, update, and comment on issues with approval for changes.
+
   - name: notion
     title: Notion
     icon: notion

@@ -58,6 +58,20 @@ export interface EgressOperation {
   mutating?: boolean;
 }
 
+/** A fixed GraphQL operation whose variables are the only agent-controlled input. */
+export interface GraphqlEgressOperation {
+  /** Tool name agents call, namespaced by the integration slug. */
+  name: string;
+  /** Agent-facing purpose and preconditions. */
+  description: string;
+  /** The named operation selected from the static document at dispatch. */
+  operation: string;
+  /** Static GraphQL document. Agent arguments are sent only as its variables. */
+  document: string;
+  /** JSON Schema for the variables object. Must close its properties at compile time. */
+  variables_schema: Record<string, unknown>;
+}
+
 export type EgressConfig =
   | { type: "mcp"; entry: McpEntry }
   | {
@@ -66,6 +80,14 @@ export type EgressConfig =
       /** Explicit operation allowlist; absent or empty publishes no Tools. */
       operations?: EgressOperation[];
       base_url?: string;
+      auth?: EgressAuth;
+      headers?: Record<string, string>;
+    }
+  | {
+      type: "graphql";
+      /** Literal provider endpoint. It cannot be templated or supplied by an Agent. */
+      url: string;
+      operations?: GraphqlEgressOperation[];
       auth?: EgressAuth;
       headers?: Record<string, string>;
     }

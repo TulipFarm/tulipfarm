@@ -46,6 +46,7 @@ describe("bundled integrations", () => {
       "google-docs",
       "google-drive",
       "jira",
+      "linear",
       "notion",
       "slack",
       "telegram",

@@ -48,6 +48,17 @@ const EgressOperationSchema = Type.Object(
   { additionalProperties: true }
 );
 
+const GraphqlEgressOperationSchema = Type.Object(
+  {
+    name: Type.String({ minLength: 1 }),
+    description: Type.String({ minLength: 1 }),
+    operation: Type.String({ minLength: 1 }),
+    document: Type.String({ minLength: 1 }),
+    variables_schema: UnknownRecordSchema,
+  },
+  { additionalProperties: true }
+);
+
 const EgressSchema = Type.Union([
   Type.Object({ type: Type.Literal("none") }, { additionalProperties: true }),
   Type.Object(
@@ -66,6 +77,16 @@ const EgressSchema = Type.Union([
         },
         { additionalProperties: true }
       ),
+    },
+    { additionalProperties: true }
+  ),
+  Type.Object(
+    {
+      type: Type.Literal("graphql"),
+      url: Type.String({ minLength: 1 }),
+      operations: Type.Optional(Type.Array(GraphqlEgressOperationSchema)),
+      auth: Type.Optional(EgressAuthSchema),
+      headers: Type.Optional(StringRecordSchema),
     },
     { additionalProperties: true }
   ),

@@ -151,6 +151,14 @@ describe("validateThirdPartyManifest", () => {
       ]);
     });
 
+    it("rejects a plaintext GraphQL endpoint", () => {
+      expect(
+        validateThirdPartyManifest(
+          manifest({ egress: { type: "graphql", url: "http://api.acme.com/graphql" } })
+        )
+      ).toEqual(['egress.url must be an https:// URL (got "http://api.acme.com/graphql")']);
+    });
+
     it("rejects a scheme-relative URL, which is not literally https", () => {
       const issues = validateThirdPartyManifest(
         manifest({ auth: [{ kind: "install", url: "//acme.com/install" }] })

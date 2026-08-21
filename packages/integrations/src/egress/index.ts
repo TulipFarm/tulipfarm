@@ -9,6 +9,17 @@ export {
   isPrivateNetworkAddress,
 } from "./destination";
 export { type EgressHttpOptions, FetchEgressHttp } from "./fetch-http";
+export { GraphqlToolAdapter, type GraphqlToolAdapterDeps } from "./graphql-adapter";
+export {
+  type CompiledGraphqlTool,
+  type CompileGraphqlEgressInput,
+  compileGraphqlEgress,
+  GraphqlCompileError,
+  type GraphqlCompileErrorCode,
+  type GraphqlEgress,
+  type GraphqlEgressOperation,
+  type GraphqlOperationBinding,
+} from "./graphql-compile";
 export {
   type EgressHttpPort,
   type EgressHttpRequest,

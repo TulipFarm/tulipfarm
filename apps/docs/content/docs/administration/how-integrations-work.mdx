@@ -3,8 +3,8 @@ title: Integrations
 description: The bundled integrations, what they enable, and current limits.
 ---
 
-Integrations connect TulipFarm to external systems. Seven ship bundled: **GitHub**, **Slack**,
-**Telegram**, **Notion**, **Confluence**, **Google Drive**, and **Google Docs**. All appear in the
+Integrations connect TulipFarm to external systems. Nine ship bundled: **GitHub**, **Slack**,
+**Telegram**, **Notion**, **Confluence**, **Google Drive**, **Google Docs**, **Jira**, and **Linear**. All appear in the
 integrations UI and store their configuration through the soul and secrets store.
 
 You are not limited to those. An integration is a data file — a manifest describing how to
@@ -70,6 +70,15 @@ All three also index into knowledge, and that path preserves per-user access rat
 it — a page you cannot see in Confluence is not one an agent will cite to you. Access is resolved
 through external identity mappings, so an unmapped account grants nothing. Link-sharing in Drive is
 not treated as everyone.
+
+## Linear
+
+The Linear integration lets agents list teams and issues, read issue details, and—after approval—
+create or update issues and add comments. It uses a scoped Linear API key that you connect through
+**Integrations → Linear**.
+
+Each action is fixed by the integration. Agents provide issue details such as an ID or title, but
+cannot choose an API address or send their own query.
 
 ## Current limits
 
