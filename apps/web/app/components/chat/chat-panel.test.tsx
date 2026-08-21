@@ -8,7 +8,21 @@ import type { Suggestion } from "~/lib/onboarding";
 // renders deterministically and `send` is observable.
 const send = vi.fn();
 const regenerate = vi.fn();
-let stream = {
+let stream: {
+  messages: [];
+  status: string;
+  error: string | null;
+  errorDetails?: {
+    reason?: string;
+    requestId?: string;
+    modelId?: string;
+  };
+  send: typeof send;
+  approve: ReturnType<typeof vi.fn>;
+  regenerate: typeof regenerate;
+  reset: ReturnType<typeof vi.fn>;
+  sendSurfaceInteraction: ReturnType<typeof vi.fn>;
+} = {
   messages: [],
   status: "ready",
   error: null,
