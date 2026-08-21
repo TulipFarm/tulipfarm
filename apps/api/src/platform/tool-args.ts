@@ -24,19 +24,38 @@ export function soulTarget(
   return id === undefined ? [] : [{ type, id }];
 }
 
-// Prefer deepest non-oneOf AJV errors so users see the real schema defect.
-function bestError(errors: AjvErrors): NonNullable<AjvErrors>[number] | undefined {
-  if (!errors || errors.length === 0) return undefined;
+// AJV's own `oneOf` errors just say "must match exactly one schema"; the branch errors nested
+// under them name the real defect. Drop the `oneOf` noise, but only once something more specific
+// survives to replace it.
+function meaningfulErrors(errors: AjvErrors): NonNullable<AjvErrors> {
+  if (!errors || errors.length === 0) return [];
   const specific = errors.filter((e) => e.keyword !== "oneOf");
-  const pool = specific.length > 0 ? specific : errors;
-  return pool.reduce((deepest, e) =>
-    e.instancePath.length > deepest.instancePath.length ? e : deepest
-  );
+  return specific.length > 0 ? specific : errors;
 }
 
+/**
+ * Renders every AJV violation from one failed call, not just one — AJV is configured with
+ * `allErrors: true` (`packages/schema/src/ajv.ts`) so it already finds them all. Reporting a
+ * single error forced a model correcting a bad Tool call to discover the rest one repair attempt
+ * at a time, burning the Turn's repair budget on defects it was never told about.
+ */
 export function firstError(errors: AjvErrors): string {
-  const e = bestError(errors);
-  return e
-    ? `${e.instancePath || "(root)"} ${e.message ?? "is invalid"}`.trim()
-    : "invalid arguments";
+  const list = meaningfulErrors(errors);
+  if (list.length === 0) return "invalid arguments";
+
+  const seen = new Set<string>();
+  const lines: string[] = [];
+  for (const e of list) {
+    const path = e.instancePath || "(root)";
+    const message = e.message ?? "is invalid";
+    const key = `${path}|${message}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    lines.push(`- \`${path}\`: ${message}`);
+  }
+
+  return (
+    `<validation_errors count="${lines.length}">\n${lines.join("\n")}\n</validation_errors>\n` +
+    "Fix every error listed above before retrying the call."
+  );
 }

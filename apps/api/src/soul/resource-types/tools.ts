@@ -19,6 +19,7 @@ import {
   type ToolCallResult,
 } from "@tulipfarm/tool-host";
 import { parse as parseYaml } from "yaml";
+import { firstError } from "../../platform/tool-args";
 import { SYSTEM_SOUL_COMMIT_ACTOR } from "../../runtime/soul-writer";
 import { soulCommitError } from "../../tools/soul-faults";
 
@@ -158,12 +159,6 @@ const validateList = ajv.compile(LIST_SCHEMA);
 const validateSchemaGet = ajv.compile(SCHEMA_GET_SCHEMA);
 const validateUpdate = ajv.compile(UPDATE_SCHEMA);
 
-function firstError(validate: ReturnType<typeof ajv.compile>): string {
-  const e = validate.errors?.[0];
-  if (!e) return "invalid arguments";
-  return `${e.instancePath || "(root)"} ${e.message ?? "is invalid"}`.trim();
-}
-
 const createResourceType = defineApiTool<ResourceTypeToolContext>({
   name: "create_resource_type",
   description:
@@ -179,7 +174,7 @@ const createResourceType = defineApiTool<ResourceTypeToolContext>({
     dataClasses: ["soul_definition"],
   },
   handler: async (args, ctx) => {
-    if (!validateCreate(args)) return err("validation_error", firstError(validateCreate));
+    if (!validateCreate(args)) return err("validation_error", firstError(validateCreate.errors));
     const { name, schema: schemaYaml } = args as { name: string; schema: string };
 
     if (!NAME_RE.test(name)) return err("validation_error", "invalid resource type name");
@@ -235,7 +230,7 @@ const listResourceTypes = defineApiTool<ResourceTypeToolContext>({
     dataClasses: ["soul_definition"],
   },
   handler: async (args, ctx) => {
-    if (!validateList(args)) return err("validation_error", firstError(validateList));
+    if (!validateList(args)) return err("validation_error", firstError(validateList.errors));
     const types = Array.from(ctx.soulLoader.resources.values()).map(resourceTypePayload);
     return ok({ types });
   },
@@ -255,7 +250,8 @@ const resourceTypeSchema = defineApiTool<ResourceTypeToolContext>({
     dataClasses: ["soul_definition"],
   },
   handler: async (args, ctx) => {
-    if (!validateSchemaGet(args)) return err("validation_error", firstError(validateSchemaGet));
+    if (!validateSchemaGet(args))
+      return err("validation_error", firstError(validateSchemaGet.errors));
     const { name } = args as { name: string };
 
     const rt = ctx.soulLoader.resources.get(name);
@@ -280,7 +276,7 @@ const resourceTypeUpdate = defineApiTool<ResourceTypeToolContext>({
     dataClasses: ["soul_definition"],
   },
   handler: async (args, ctx) => {
-    if (!validateUpdate(args)) return err("validation_error", firstError(validateUpdate));
+    if (!validateUpdate(args)) return err("validation_error", firstError(validateUpdate.errors));
     const { name, schema: schemaYaml } = args as { name: string; schema: string };
 
     if (!ctx.soulLoader.resources.has(name))
@@ -429,7 +425,8 @@ const createResourceHooks = defineApiTool<ResourceTypeToolContext>({
     dataClasses: ["soul_definition"],
   },
   handler: async (args, ctx) => {
-    if (!validateHooksWrite(args)) return err("validation_error", firstError(validateHooksWrite));
+    if (!validateHooksWrite(args))
+      return err("validation_error", firstError(validateHooksWrite.errors));
     const { name, source } = args as { name: string; source: string };
 
     if (!ctx.soulLoader.resources.has(name)) {
@@ -482,7 +479,8 @@ const getResourceHooks = defineApiTool<ResourceTypeToolContext>({
     dataClasses: ["soul_definition"],
   },
   handler: async (args, ctx) => {
-    if (!validateHooksGet(args)) return err("validation_error", firstError(validateHooksGet));
+    if (!validateHooksGet(args))
+      return err("validation_error", firstError(validateHooksGet.errors));
     const { name } = args as { name: string };
 
     const rt = ctx.soulLoader.resources.get(name);
@@ -507,7 +505,8 @@ const deleteResourceHooks = defineApiTool<ResourceTypeToolContext>({
     dataClasses: ["soul_definition"],
   },
   handler: async (args, ctx) => {
-    if (!validateHooksDelete(args)) return err("validation_error", firstError(validateHooksDelete));
+    if (!validateHooksDelete(args))
+      return err("validation_error", firstError(validateHooksDelete.errors));
     const { name } = args as { name: string };
 
     if (!ctx.soulLoader.resources.has(name)) {

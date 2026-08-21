@@ -8,13 +8,7 @@ import {
   type ToolDef,
   toToolDef,
 } from "@tulipfarm/tool-host";
-
-function firstError(errors: ReturnType<typeof ajv.compile>["errors"]): string {
-  const e = errors?.[0];
-  return e
-    ? `${e.instancePath || "(root)"} ${e.message ?? "is invalid"}`.trim()
-    : "invalid arguments";
-}
+import { firstError } from "./tool-args";
 
 function requireContextRead(ctx: RequestContext): ToolCallResult | null {
   if (ctx.contextRead && !ctx.contextRead.value) {

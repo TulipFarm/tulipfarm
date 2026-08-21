@@ -35,6 +35,7 @@ import {
   type RequestContext,
   type ToolCallResult,
 } from "@tulipfarm/tool-host";
+import { firstError } from "../../platform/tool-args";
 import { SYSTEM_SOUL_COMMIT_ACTOR } from "../../runtime/soul-writer";
 import { soulCommitError } from "../../tools/soul-faults";
 import { buildAudit } from "./audit.js";
@@ -94,12 +95,6 @@ function skillTargets(args: unknown) {
   return id === undefined ? [] : [{ type: SOUL_SKILL_TARGET, id }];
 }
 
-function firstError(validate: ReturnType<typeof ajv.compile>): string {
-  const e = validate.errors?.[0];
-  if (!e) return "invalid arguments";
-  return `${e.instancePath || "(root)"} ${e.message ?? "is invalid"}`.trim();
-}
-
 function publicFrontmatter(frontmatter: Record<string, unknown>): {
   frontmatter: Record<string, unknown>;
   pendingAudit: boolean;
@@ -127,7 +122,7 @@ const skillCreate = defineApiTool<SkillToolContext>({
   },
   requiresApproval: false,
   handler: async (args, ctx) => {
-    if (!validateCreate(args)) return err("validation_error", firstError(validateCreate));
+    if (!validateCreate(args)) return err("validation_error", firstError(validateCreate.errors));
     const { name, body, frontmatter } = args as {
       name: string;
       body: string;
@@ -231,7 +226,7 @@ const skillUpdate = defineApiTool<SkillToolContext>({
   },
   requiresApproval: false,
   handler: async (args, ctx) => {
-    if (!validateUpdate(args)) return err("validation_error", firstError(validateUpdate));
+    if (!validateUpdate(args)) return err("validation_error", firstError(validateUpdate.errors));
     const { name, body, frontmatter, old_string, new_string, replace_all } = args as {
       name: string;
       body?: string;
@@ -377,7 +372,7 @@ const skillGet = defineApiTool<SkillToolContext>({
   },
   requiresApproval: false,
   handler: async (args, ctx) => {
-    if (!validateGet(args)) return err("validation_error", firstError(validateGet));
+    if (!validateGet(args)) return err("validation_error", firstError(validateGet.errors));
     const { name } = args as { name: string };
     const soulSkill = ctx.soulLoader.skills.get(name);
     const skill = resolveSkill(name, ctx.soulLoader, ctx.bundledSkills, ctx.disabledBundledSkills);
@@ -408,7 +403,7 @@ const skillList = defineApiTool<SkillToolContext>({
   },
   requiresApproval: false,
   handler: async (args, ctx) => {
-    if (!validateList(args)) return err("validation_error", firstError(validateList));
+    if (!validateList(args)) return err("validation_error", firstError(validateList.errors));
     const skills = Array.from(
       mergedSkills(ctx.soulLoader, ctx.bundledSkills, ctx.disabledBundledSkills).values()
     ).map(({ name, frontmatter }) => ({
@@ -439,7 +434,7 @@ const skillDelete = defineApiTool<SkillToolContext>({
   },
   requiresApproval: false,
   handler: async (args, ctx) => {
-    if (!validateDelete(args)) return err("validation_error", firstError(validateDelete));
+    if (!validateDelete(args)) return err("validation_error", firstError(validateDelete.errors));
     const { name } = args as { name: string };
 
     const soulSkill = ctx.soulLoader.skills.get(name);
@@ -521,7 +516,8 @@ const skillActivate = defineApiTool<SkillToolContext>({
   },
   requiresApproval: false,
   handler: async (args, ctx) => {
-    if (!validateActivate(args)) return err("validation_error", firstError(validateActivate));
+    if (!validateActivate(args))
+      return err("validation_error", firstError(validateActivate.errors));
     const { name } = args as { name: string };
 
     const skill = ctx.soulLoader.skills.get(name);
