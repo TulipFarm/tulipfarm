@@ -452,7 +452,7 @@ export function Transcript({
   }, [messages, status]);
 
   return (
-    <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto">
+    <div ref={scrollRef} onScroll={onScroll} className="flex-1 min-h-0 overflow-y-auto">
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-7 px-4 py-7 sm:px-6 sm:py-9">
         {messages.map((m, i) => (
           <Message

@@ -28,7 +28,7 @@ function EmptyState({
   onPick: (text: string) => void;
 }) {
   return (
-    <div className="flex flex-1 overflow-y-auto">
+    <div className="flex flex-1 min-h-0 overflow-y-auto">
       <section className="mx-auto flex w-full max-w-4xl flex-col justify-start gap-7 px-4 py-8 sm:px-6 sm:py-14 md:justify-center">
         <div className="grid gap-7 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-500 md:grid-cols-[minmax(0,1fr)_12rem] md:items-end">
           <div>
@@ -135,7 +135,7 @@ export function ChatPanel({
   const errorCta = status === "error" ? errorAction(error) : null;
 
   return (
-    <div className="flex h-[calc(100svh-3.25rem)] flex-col lg:h-full">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
       {/* The top bar names the conversation, so this strip only says what it can't: which Agent is
           driving the chat. Without an Agent there is nothing left to show and it collapses away. */}
       {hasMessages && activeAgentName ? (

@@ -97,13 +97,13 @@ export default function App() {
 export function HydrateFallback() {
   return (
     <Document>
-      <div className="flex min-h-svh bg-background lg:h-svh lg:overflow-hidden">
+      <div className="flex h-svh overflow-hidden bg-background">
         <div className="hidden shrink-0 border-sidebar-border border-r md:block md:w-14 lg:w-[var(--shell-sidebar-width)]">
           <div className="flex h-[52px] items-center justify-center border-sidebar-border border-b">
             <span className="size-6 rounded-md bg-muted" />
           </div>
         </div>
-        <div className="flex min-w-0 flex-1 flex-col lg:h-svh">
+        <div className="flex h-svh min-w-0 flex-1 flex-col">
           <div className="flex h-[52px] shrink-0 items-center gap-2 border-border border-b px-3 sm:px-4">
             <span className="size-9 rounded-md bg-muted" />
             <span className="h-4 w-32 rounded-sm bg-muted" />
