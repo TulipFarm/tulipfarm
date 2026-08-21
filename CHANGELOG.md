@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.13.0](https://github.com/TulipFarm/tulipfarm/compare/v0.12.4...v0.13.0) (2026-08-21)
+
+### Features
+
+* **integrations:** add Google Workspace integration — login, chat tools, and token refresh ([#498](https://github.com/TulipFarm/tulipfarm/issues/498)) ([6b3e182](https://github.com/TulipFarm/tulipfarm/commit/6b3e1827cb77258c2733c29262a9307bc0aaec1f))
+
+### Bug Fixes
+
+* **integrations:** add setup_url to GitHub App manifest ([#536](https://github.com/TulipFarm/tulipfarm/issues/536)) ([12957e0](https://github.com/TulipFarm/tulipfarm/commit/12957e03b24ee80f7199c565813557e1ba409c63))
+
 ## [0.12.4](https://github.com/TulipFarm/tulipfarm/compare/v0.12.3...v0.12.4) (2026-08-21)
 
 ### Features
