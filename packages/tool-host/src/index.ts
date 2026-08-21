@@ -84,6 +84,10 @@ export {
   type ToolGateAgent,
   type ToolGateRequest,
 } from "./gate";
+export {
+  MARKETPLACE_SKILL_TOOLS,
+  type MarketplaceSkillToolContext,
+} from "./marketplace-skills";
 export type {
   AgentResolver,
   ChannelDeliveryReader,

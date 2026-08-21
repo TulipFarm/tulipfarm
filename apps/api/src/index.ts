@@ -249,7 +249,7 @@ import { agentForRunResolver, delegableToolNames } from "./soul/agents/registry"
 import { bundleRetentionMs, registerSoulBundlePruneSchedule } from "./soul/bundle-prune-schedule";
 import { createGitHubSoulCredentialProvider } from "./soul/github-repo-credential";
 import { registerSoulPublicationRoutes } from "./soul/publication-routes";
-import { createSkillMarketplaceFlow } from "./soul/skills/marketplace";
+import { composeSkillTools } from "./soul/skills/compose";
 import { registerSoulSync } from "./soul-sync";
 import { PgSurfaceActionStore } from "./surfaces/action-store";
 import { PgSurfaceArtifactStore } from "./surfaces/artifact-store";
@@ -724,7 +724,6 @@ async function boot() {
       mutationGuard,
     });
 
-    // (resource records/types, agents, skills, platform tools). Without this, a chat turn only
     const delegationConversations = new PgConversationStore(pool);
     const childLinks = new ChildLinkAncestryStore(pool);
     // Read at call time: the registry is still being built on the next statement.
@@ -750,14 +749,14 @@ async function boot() {
     const knowledgeAuthorLabeller = new AuthorLabeller(pool);
     const knowledgeReaderDirectory = new ReaderDirectory(pool);
     const knowledgeSubjectDirectory = new SubjectDirectory(pool);
-    const skillMarketplace = createSkillMarketplaceFlow({
+    const { marketplace: skillMarketplace, skillTools } = composeSkillTools(
       gitSync,
       soulWriter,
       soulLoader,
       llmService,
       bundledSkills,
-      disabledBundledSkills,
-    });
+      disabledBundledSkills
+    );
     const toolRegistry = buildToolRegistry({
       memoryDocuments,
       kv: kvService,
@@ -775,15 +774,7 @@ async function boot() {
       },
       resourceTypes: { gitSync, soulWriter, soulLoader, reconcile: reconcileResources },
       agentTools: { gitSync, soulWriter, soulLoader },
-      skillTools: {
-        gitSync,
-        soulWriter,
-        soulLoader,
-        llmService,
-        bundledSkills,
-        disabledBundledSkills,
-        marketplace: skillMarketplace,
-      },
+      skillTools,
       github: githubTools,
       slack: slackTools,
       google: googleTools,
@@ -979,12 +970,10 @@ async function boot() {
       hookExecutor,
       resourceRepoFactory,
       counterStore,
-      // domain wall the gate enforces is only a wall if this door enforces it too.
       recordAuthorizer: new LiveRecordAuthorizer(soulLoader, authorityLayerResolver),
       routeAuthorizer,
       authorizationGate: gateOptions,
       reconcileResources,
-      // so projecting without reloading would write the state from before the level was committed.
       reconcileSoulRoles: async () => {
         await soulLoader.reload();
         await reconcileSoulRoles(
