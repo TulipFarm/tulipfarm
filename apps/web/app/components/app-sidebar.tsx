@@ -12,6 +12,7 @@ import {
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { KnowledgeTree } from "~/components/knowledge/space-tree";
 import { CompanionMobileTrigger } from "~/components/onboarding/companion";
+import { ReportBugButton } from "~/components/report-bug-button";
 import { ThemeToggle } from "~/components/theme-toggle";
 import { Badge } from "~/components/ui/badge";
 import { Separator } from "~/components/ui/separator";
@@ -561,6 +562,7 @@ export function AppShell({ children, user }: { children: ReactNode; user?: Sessi
               <CompanionMobileTrigger />
             </span>
             <AccountChip user={user} />
+            <ReportBugButton />
             <span className="flex items-center lg:hidden">
               <ThemeToggle iconOnly />
             </span>

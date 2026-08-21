@@ -27,11 +27,15 @@ describe("secure-context API guard", () => {
     });
   });
 
-  it("keeps the clipboard helper exemption explicit", async () => {
+  it("keeps the clipboard and report-bug helper exemptions explicit", async () => {
     const dir = await mkdtemp(join(tmpdir(), "tf-secure-context-"));
     const helperDir = join(dir, "app/lib");
     await mkdir(helperDir, { recursive: true });
     await writeFile(join(helperDir, "clipboard.ts"), "navigator.clipboard.writeText('x');\n");
+    await writeFile(
+      join(helperDir, "report-bug.ts"),
+      "navigator.mediaDevices.getDisplayMedia({ video: true });\n"
+    );
     await expect(runGuard(dir)).resolves.toMatchObject({
       stdout: expect.stringContaining("ok"),
     });

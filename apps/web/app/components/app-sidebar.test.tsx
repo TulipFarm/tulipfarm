@@ -317,3 +317,8 @@ test("reduces the signed-in account to a monogram in the top bar", () => {
   expect(account).toHaveTextContent("PN");
   expect(screen.queryByText("priya.nair@northgate.dev")).not.toBeInTheDocument();
 });
+
+test("renders the report a bug button in the top bar", () => {
+  render(<ShellStub initialEntries={["/inbox"]} />);
+  expect(screen.getByRole("button", { name: "Report a bug" })).toBeInTheDocument();
+});
