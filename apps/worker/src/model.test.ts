@@ -10,7 +10,7 @@ import {
   InMemoryLoopCheckpointStore,
   ModelInvocationError,
 } from "@tulipfarm/agent-runtime";
-import { type CostBasis, LlmProviderError } from "@tulipfarm/llm";
+import { type CostBasis, FallbackModel, LlmProviderError } from "@tulipfarm/llm";
 import { type EffortRung, type RunEventEffortInference, textContent } from "@tulipfarm/schema";
 import { APICallError, type LanguageModel } from "ai";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
@@ -1194,11 +1194,19 @@ describe("LlmModelPort — a call the provider gate refused", () => {
   const gatedPort = (gate: ModelCallGate, mock: MockLanguageModelV4): LlmModelPort =>
     new LlmModelPort({
       gate,
-      model: async (selector): Promise<LlmModelResolution> => ({
+      model: async (
+        selector,
+        _requirements,
+        _inference,
+        _principal,
+        linkGate
+      ): Promise<LlmModelResolution> => ({
         kind: "available",
         price: TEST_PRICE,
         provider: "openai",
-        model: mock as unknown as LanguageModel,
+        model: new FallbackModel([mock], undefined, undefined, linkGate, [
+          "openai",
+        ]) as LanguageModel,
         routing: {
           outcome: "raw_model",
           selector,
@@ -1234,6 +1242,49 @@ describe("LlmModelPort — a call the provider gate refused", () => {
         }),
       }),
     });
+
+  it("keeps later chats on the fallback while the primary circuit is open", async () => {
+    const gate = new ProviderGate({ recoveryAfterMs: 60_000 });
+    const sonnet = failingModel();
+    const terra = healthyModel();
+    const port = (): LlmModelPort =>
+      new LlmModelPort({
+        gate,
+        model: async (
+          selector,
+          _requirements,
+          _inference,
+          _principal,
+          linkGate
+        ): Promise<LlmModelResolution> => ({
+          kind: "available",
+          price: TEST_PRICE,
+          provider: "anthropic",
+          model: new FallbackModel([sonnet, terra], undefined, undefined, linkGate, [
+            "anthropic",
+            "codex",
+          ]) as LanguageModel,
+          routing: {
+            outcome: "selected",
+            selector,
+            resolution: "profile_ref",
+            profileId: "balanced",
+            chain: [
+              { profileId: "balanced", modelId: "sonnet" },
+              { profileId: "balanced-fallback-1", modelId: "terra" },
+            ],
+            cacheAllowed: false,
+            rejectedFallbacks: [],
+          },
+        }),
+      });
+
+    await expect(port().invoke(request())).resolves.toBeDefined();
+    await expect(port().invoke(request())).resolves.toBeDefined();
+
+    expect(sonnet.doStreamCalls).toHaveLength(1);
+    expect(terra.doStreamCalls).toHaveLength(2);
+  });
 
   it("reports a shed provider as unavailable, not as a generic model failure", async () => {
     const gate = new ProviderGate({ failureThreshold: 1, recoveryAfterMs: 60_000 });

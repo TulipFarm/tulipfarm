@@ -13,6 +13,8 @@ export {
   type EmbeddingUsageSink,
 } from "./embeddings";
 export {
+  type FallbackCallGate,
+  type FallbackCallLease,
   type FallbackLogger,
   FallbackModel,
   isHardFailure,

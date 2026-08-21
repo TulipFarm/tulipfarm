@@ -1,11 +1,15 @@
-import { ProviderUnavailableError } from "@tulipfarm/llm";
+import {
+  type FallbackCallGate,
+  type FallbackCallLease,
+  ProviderUnavailableError,
+} from "@tulipfarm/llm";
 import { CircuitBreaker } from "@tulipfarm/observability";
 
 /** Parallel in-flight calls allowed against one provider before further turns queue. */
 const DEFAULT_MAX_CONCURRENCY = 8;
 
-/** Consecutive infrastructure failures before a provider is shed rather than retried. */
-const DEFAULT_FAILURE_THRESHOLD = 5;
+/** One failed link is enough to move new calls to its configured fallback. */
+const DEFAULT_FAILURE_THRESHOLD = 1;
 
 /** How long a shed provider is left alone before one probe call is allowed through. */
 const DEFAULT_RECOVERY_MS = 30_000;
@@ -13,24 +17,8 @@ const DEFAULT_RECOVERY_MS = 30_000;
 /** Longest a turn waits for a slot before it is better to fail than to keep holding a lease. */
 const DEFAULT_QUEUE_TIMEOUT_MS = 30_000;
 
-/** Failures that say something about the *provider*, as opposed to this one request. */
-const INFRASTRUCTURE_FAILURES = new Set([
-  "model_provider_unavailable",
-  "model_rate_limited",
-  "model_error",
-]);
-
-/** A held slot. `release` must run exactly once, or the provider leaks capacity. */
-export interface ModelCallLease {
-  succeeded(): void;
-  /** `reason` decides whether this counts against the provider or only against the request. */
-  failed(reason: string): void;
-  release(): void;
-}
-
-export interface ModelCallGate {
-  acquire(provider: string): Promise<ModelCallLease>;
-}
+export type ModelCallLease = FallbackCallLease;
+export type ModelCallGate = FallbackCallGate;
 
 export interface ProviderGateOptions {
   readonly maxConcurrency?: number;
@@ -90,11 +78,7 @@ export class ProviderGate implements ModelCallGate {
     let settled = false;
     return {
       succeeded: () => state.breaker.recordSuccess(),
-      failed: (reason: string) => {
-        // A model that does not exist, or a request this key may not make, says nothing about
-        // whether the provider is healthy. Counting it would shed a provider over a config error.
-        if (INFRASTRUCTURE_FAILURES.has(reason)) state.breaker.recordFailure();
-      },
+      failed: () => state.breaker.recordFailure(),
       release: () => {
         if (settled) return;
         settled = true;

@@ -46,7 +46,8 @@ export interface LlmModelPortOptions {
     selector: string,
     requirements: ModelRequirements,
     inference?: RunEventEffortInference,
-    principal?: PrincipalRef
+    principal?: PrincipalRef,
+    gate?: ModelCallGate
   ): Promise<LlmModelResolution>;
   /** Optional `auto` effort inference; consulted once per Turn-attempt port instance. */
   readonly effort?: EffortInferencePort;
@@ -121,7 +122,8 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
       request.modelProfileId,
       requirements,
       inference,
-      request.principal
+      request.principal,
+      this.options.gate
     );
     if (resolution.kind === "available" && resolution.budgetLimits !== undefined) {
       await this.options.budgets?.open(resolution.budgetLimits);
@@ -178,9 +180,6 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
       })
     );
     const startedAt = this.now();
-    // Held for the whole call: releasing early would let the next turn in while this one is
-    // still occupying a provider connection.
-    const lease = await this.options.gate?.acquire(resolution.provider ?? "unknown");
     const watchdog = new ModelCallWatchdog({
       ...(this.options.signal === undefined ? {} : { signal: this.options.signal }),
       ...(this.options.stallTimeoutMs === undefined
@@ -242,7 +241,6 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
       if (streamError !== undefined) throw streamError;
 
       [calls, text, usage] = await Promise.all([result.toolCalls, result.text, result.usage]);
-      lease?.succeeded();
     } catch (error) {
       // A watchdog abort must not be reported as a generic provider error: the operator needs to
       // know the call was cut off here, and by which bound.
@@ -253,20 +251,17 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
       );
       this.reportSpend(request, resolution, "error", partial, this.now() - startedAt);
       if (watchdog.expired !== undefined) {
-        lease?.failed("model_provider_unavailable");
         throw new ModelInvocationError(
           "model_provider_unavailable",
           new Error(`${watchdog.message()} — model call aborted`, { cause: error }),
           partial
         );
       }
-      lease?.failed(classifyProviderError(error));
       throw error instanceof ModelInvocationError
         ? new ModelInvocationError(error.reason, error.cause, partial)
         : new ModelInvocationError(classifyProviderError(error), error, partial);
     } finally {
       watchdog.close();
-      lease?.release();
     }
 
     const finishedAt = this.now();

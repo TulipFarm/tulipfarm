@@ -44,7 +44,9 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
   })),
 }));
 
-const { ClaudeCodeModel, isAuthFailure, stripMcpPrefix } = await import("./claude-code");
+const { ClaudeCodeModel, isAuthFailure, isBillingFailure, stripMcpPrefix } = await import(
+  "./claude-code"
+);
 
 const lastOptions = () => calls[calls.length - 1]?.options ?? {};
 
@@ -125,7 +127,6 @@ describe("isAuthFailure", () => {
     "401 Unauthorized",
     "403 Forbidden",
     "authentication_error",
-    "Your credit balance is too low to access the Anthropic API",
     // Captured from linux-arm64 claude 2.1.211: invalid OAuth returned `success` plus 401 error.
     "Failed to authenticate. API Error: 401 OAuth access token is invalid",
   ])("classifies %j as an auth failure", (text) => {
@@ -138,6 +139,20 @@ describe("isAuthFailure", () => {
     "context length exceeded",
   ])("does not classify %j as an auth failure", (text) => {
     expect(isAuthFailure(text)).toBe(false);
+  });
+});
+
+describe("isBillingFailure", () => {
+  it.each([
+    "Your credit balance is too low to access the Anthropic API",
+    "You've hit your limit · resets 8pm",
+    "Claude subscription usage limit reached",
+  ])("classifies %j as exhausted billing", (text) => {
+    expect(isBillingFailure(text)).toBe(true);
+  });
+
+  it("does not mistake an invalid credential for exhausted billing", () => {
+    expect(isBillingFailure("401 Unauthorized")).toBe(false);
   });
 });
 
@@ -376,6 +391,15 @@ describe("ClaudeCodeModel — turn translation", () => {
 });
 
 describe("ClaudeCodeModel — failure classification", () => {
+  it("classifies an exhausted subscription as inactive billing", async () => {
+    script = [result({ is_error: true, result: "You've hit your limit · resets 8pm" })];
+    const model = new ClaudeCodeModel("sonnet", "tok");
+
+    await expect(model.doGenerate(callOptions())).rejects.toMatchObject({
+      reason: "model_billing_inactive",
+    });
+  });
+
   it("raises a hard authentication failure for a rejected credential", async () => {
     // A2: observed live shape was `success` plus `is_error`; both must be checked.
     script = [

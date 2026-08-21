@@ -1,6 +1,12 @@
 import type { ModelProfileCatalog, ModelRequirements } from "@tulipfarm/agent-runtime";
 import { selectModelProfile } from "@tulipfarm/agent-runtime";
-import type { CostBasis, ModelPrice, ModelResponderRef, PrincipalRef } from "@tulipfarm/llm";
+import type {
+  CostBasis,
+  FallbackCallGate,
+  ModelPrice,
+  ModelResponderRef,
+  PrincipalRef,
+} from "@tulipfarm/llm";
 import { isPriceable, LlmService, priceCall, SecretsPrincipalCredentials } from "@tulipfarm/llm";
 import type { ResolvedLimits } from "@tulipfarm/run-kernel";
 import { resolveModelProfileBudgetLimits } from "@tulipfarm/run-kernel";
@@ -121,8 +127,12 @@ export class SoulLlm {
   }
 
   /** Resolves selectors to the full selected chain; raw model ids bypass profile checks. */
-  async model(selector: string, requirements: ModelRequirements): Promise<LanguageModel> {
-    const resolution = await this.resolveModel(selector, requirements);
+  async model(
+    selector: string,
+    requirements: ModelRequirements,
+    gate?: FallbackCallGate
+  ): Promise<LanguageModel> {
+    const resolution = await this.resolveModel(selector, requirements, undefined, undefined, gate);
     if (resolution.kind === "denied") {
       throw new ModelProfileDeniedError(
         resolution.routing.profileId,
@@ -134,9 +144,9 @@ export class SoulLlm {
   }
 
   /** Builds an already-routed Routine chain without re-resolving against current config. */
-  async chainModel(modelIds: readonly string[]): Promise<LanguageModel> {
+  async chainModel(modelIds: readonly string[], gate?: FallbackCallGate): Promise<LanguageModel> {
     await this.sync();
-    return this.service.chainModel(modelIds);
+    return this.service.chainModel(modelIds, undefined, undefined, gate);
   }
 
   /**
@@ -146,13 +156,14 @@ export class SoulLlm {
   async resolveChain(
     modelIds: readonly string[],
     routing: ModelRoutingPayload,
-    principal?: PrincipalRef
+    principal?: PrincipalRef,
+    gate?: FallbackCallGate
   ): Promise<LlmModelResolution> {
     await this.sync();
     const responder: ModelResponderRef = {};
     return {
       kind: "available",
-      model: await this.service.chainModelFor(modelIds, principal, undefined, responder),
+      model: await this.service.chainModelFor(modelIds, principal, undefined, responder, gate),
       ...(this.providerOf(modelIds[0]) === undefined
         ? {}
         : { provider: this.providerOf(modelIds[0]) }),
@@ -165,7 +176,8 @@ export class SoulLlm {
     selector: string,
     requirements: ModelRequirements,
     inference?: RunEventEffortInference,
-    principal?: PrincipalRef
+    principal?: PrincipalRef,
+    gate?: FallbackCallGate
   ): Promise<LlmModelResolution> {
     await this.sync();
 
@@ -173,7 +185,13 @@ export class SoulLlm {
     if (resolved.kind === "raw_model") {
       return {
         kind: "available",
-        model: await this.service.chainModelFor([resolved.modelId], principal, undefined),
+        model: await this.service.chainModelFor(
+          [resolved.modelId],
+          principal,
+          undefined,
+          undefined,
+          gate
+        ),
         ...(this.providerOf(resolved.modelId) === undefined
           ? {}
           : { provider: this.providerOf(resolved.modelId) }),
@@ -254,7 +272,7 @@ export class SoulLlm {
 
     return {
       kind: "available",
-      model: await this.service.chainModelFor(chain, principal, undefined, responder),
+      model: await this.service.chainModelFor(chain, principal, undefined, responder, gate),
       ...(this.providerOf(chain[0]) === undefined ? {} : { provider: this.providerOf(chain[0]) }),
       ...(budgetEvidence === undefined ? {} : { budgetLimits }),
       // Attributed to the link that answered: a chain that rate-limits through to a cheaper model

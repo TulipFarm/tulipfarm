@@ -18,7 +18,12 @@ import {
 } from "@tulipfarm/schema";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { LanguageModel } from "ai";
-import { type FallbackLogger, FallbackModel, type ModelResponderRef } from "./fallback";
+import {
+  type FallbackCallGate,
+  type FallbackLogger,
+  FallbackModel,
+  type ModelResponderRef,
+} from "./fallback";
 import { createModel, type PrincipalCredentialResolver, type PrincipalRef } from "./provider";
 
 /**
@@ -229,20 +234,29 @@ export class LlmService {
     modelIds: readonly string[],
     principal: PrincipalRef | undefined,
     logger: FallbackLogger = this.logger,
-    responder?: ModelResponderRef
+    responder?: ModelResponderRef,
+    gate?: FallbackCallGate
   ): Promise<LanguageModel> {
     if (principal === undefined || this.credentials === undefined) {
-      return this.chainModel(modelIds, logger, responder);
+      return this.chainModel(modelIds, logger, responder, gate);
     }
     const built = (
-      await Promise.all(modelIds.map((id) => this.principalModel(id, principal)))
-    ).filter((m) => m !== undefined);
+      await Promise.all(
+        modelIds.map(async (id) => ({ id, model: await this.principalModel(id, principal) }))
+      )
+    ).filter((link): link is { id: string; model: LanguageModelV4 } => link.model !== undefined);
     if (built.length === 0) throw new LlmNotConfiguredError();
-    if (built.length === 1) {
-      if (responder !== undefined) responder.modelId = built[0].modelId;
-      return built[0];
+    if (built.length === 1 && gate === undefined) {
+      if (responder !== undefined) responder.modelId = built[0].model.modelId;
+      return built[0].model;
     }
-    return new FallbackModel(built, logger, responder);
+    return new FallbackModel(
+      built.map((link) => link.model),
+      logger,
+      responder,
+      gate,
+      built.map((link) => this.entryByModelId.get(link.id)?.provider ?? link.model.provider)
+    );
   }
 
   /** One model built for one principal, cached; falls back to the shared model when they have none. */
@@ -285,10 +299,14 @@ export class LlmService {
   chainModel(
     modelIds: readonly string[],
     logger: FallbackLogger = this.logger,
-    responder?: ModelResponderRef
+    responder?: ModelResponderRef,
+    gate?: FallbackCallGate
   ): LanguageModel {
     if (!this.configured) throw new LlmNotConfiguredError();
-    const built = modelIds.map((id) => this.byModelId.get(id)).filter((m) => m !== undefined);
+    const built = modelIds.flatMap((id) => {
+      const model = this.byModelId.get(id);
+      return model === undefined ? [] : [{ id, model }];
+    });
     // The ids came from the catalog, so an empty chain means every provider behind them failed to
     // build — a configuration or credential fault, not an unknown model. Callers surface the two
     // very differently, and telling an operator their configured model is "unknown" sends them
@@ -296,10 +314,16 @@ export class LlmService {
     if (built.length === 0) throw new LlmNotConfiguredError();
     // A single link needs no wrapper — and wrapping would hide a genuinely unconfigured chain.
     // Its responder is known without executing anything: there is nothing else that could answer.
-    if (built.length === 1) {
-      if (responder !== undefined) responder.modelId = built[0].modelId;
-      return built[0];
+    if (built.length === 1 && gate === undefined) {
+      if (responder !== undefined) responder.modelId = built[0].model.modelId;
+      return built[0].model;
     }
-    return new FallbackModel(built, logger, responder);
+    return new FallbackModel(
+      built.map((link) => link.model),
+      logger,
+      responder,
+      gate,
+      built.map((link) => this.entryByModelId.get(link.id)?.provider ?? link.model.provider)
+    );
   }
 }

@@ -72,13 +72,23 @@ const AUTH_FAILURE_PATTERNS = [
   /authentication_error/i,
   /\b401\b/,
   /\b403\b/,
-  /credit balance/i,
   /please run \/login/i,
   /run `claude setup-token`/i,
 ] as const;
 
+const BILLING_FAILURE_PATTERNS = [
+  /credit balance/i,
+  /hit your (?:usage )?limit/i,
+  /usage limit/i,
+  /subscription.*(?:expired|exhausted|limit)/i,
+] as const;
+
 export function isAuthFailure(text: string): boolean {
   return AUTH_FAILURE_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+export function isBillingFailure(text: string): boolean {
+  return BILLING_FAILURE_PATTERNS.some((pattern) => pattern.test(text));
 }
 
 /** Remediation the operator can act on, surfaced alongside the classified failure. */
@@ -256,6 +266,9 @@ export class ClaudeCodeModel extends CliLanguageModel {
           // `result` text distinguish it from a real completion, so both must be checked.
           if (result.subtype !== "success" || result.is_error) {
             const text = result.result ?? result.subtype ?? "Claude Code turn failed";
+            if (isBillingFailure(text)) {
+              throw new LlmProviderError("model_billing_inactive", new Error(text));
+            }
             if (isAuthFailure(text)) {
               // `LlmProviderError` keeps only its reason participant-visible; the cause is
               // operator-only, and `AgentLoop`'s `deepestErrorMessage` surfaces it in the log —
