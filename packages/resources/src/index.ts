@@ -1,0 +1,15 @@
+export {
+  createRecord,
+  deleteRecord,
+  type ResourceBeforeHook,
+  ResourceBeforeHookError,
+  type ResourceCatalog,
+  type ResourceDefinition,
+  type ResourceDoc,
+  type ResourceRepo,
+  type ResourceRepoFactory,
+  type ResourceWriteError,
+  type ResourceWritePorts,
+  type ResourceWriteResult,
+  updateRecord,
+} from "./service";

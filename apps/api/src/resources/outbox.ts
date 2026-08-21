@@ -1,6 +1,13 @@
 import type { EventEmitter } from "node:events";
 import type { HookExecutor } from "@tulipfarm/sandbox";
-import { DOMAIN_EVENTS, type ResourceEventPayload } from "@tulipfarm/storage";
+import {
+  DOMAIN_EVENTS,
+  RESOURCE_SIDE_EFFECT_STORAGE_STATEMENTS,
+  type ResourceEventPayload,
+  ResourceSideEffectDispatcher,
+  ResourceSideEffectOutbox,
+} from "@tulipfarm/storage";
+import type { Queryable } from "../db";
 
 export type { ResourceMutationKind, ResourceSideEffect } from "@tulipfarm/storage";
 export {
@@ -37,4 +44,45 @@ export async function deliverResourceSideEffect(
         : DOMAIN_EVENTS.RESOURCE_DELETED,
     payload
   );
+}
+
+export async function startDelivery(
+  database: Queryable,
+  hookExecutor: HookExecutor | undefined,
+  events: EventEmitter,
+  log: { error(message: string): void }
+): Promise<() => void> {
+  const dispatcher = new ResourceSideEffectDispatcher(
+    new ResourceSideEffectOutbox(database),
+    `api.resource-side-effects.${process.pid}`,
+    (effect) => deliverResourceSideEffect(effect, hookExecutor, events)
+  );
+  const report = (error: unknown) =>
+    log.error(
+      `Resource side-effect drain failed — ${error instanceof Error ? error.message : String(error)}`
+    );
+  await dispatcher.dispatchBatch().catch(report);
+  let draining = false;
+  const interval = setInterval(() => {
+    if (draining) return;
+    draining = true;
+    void dispatcher
+      .dispatchBatch()
+      .catch(report)
+      .finally(() => {
+        draining = false;
+      });
+  }, 1_000);
+  interval.unref?.();
+  return () => clearInterval(interval);
+}
+
+export function resourceSideEffectMigration(
+  apply: (statements: readonly string[]) => (database: Queryable) => Promise<void>
+): { version: number; description: string; up: (database: Queryable) => Promise<void> } {
+  return {
+    version: 78,
+    description: "resources: durable mutation delivery and idempotent Record creation",
+    up: apply(RESOURCE_SIDE_EFFECT_STORAGE_STATEMENTS),
+  };
 }

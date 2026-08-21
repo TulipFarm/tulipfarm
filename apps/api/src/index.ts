@@ -205,11 +205,7 @@ import { runPgMigrations } from "./pg-migrate";
 import { createAgentDelegation, startChildConversation } from "./platform/delegation";
 import { PgRateLimiter } from "./rate-limit";
 import { LiveRecordAuthorizer } from "./resources/authorize";
-import {
-  deliverResourceSideEffect,
-  ResourceSideEffectDispatcher,
-  ResourceSideEffectOutbox,
-} from "./resources/outbox";
+import { startDelivery } from "./resources/outbox";
 import { reconcileResourceTables, registerResourceReconcile } from "./resources/reconcile";
 import { PgCounterStore, PgResourceRepoFactory } from "./resources/repo";
 import { runCanceller } from "./runs/cancel";
@@ -1226,39 +1222,10 @@ async function boot() {
       },
       activity: activityService,
     });
-    await registerEmbeddingBackfill(boss, {
-      db: pool,
-      embeddings: embeddingService,
-      log: app.log,
-    });
+    await registerEmbeddingBackfill(boss, { db: pool, embeddings: embeddingService, log: app.log });
     subscribeKnowledgeIndexing(domainEventEmitter, boss);
     subscribeActivityLogging(domainEventEmitter, activityService);
-    const resourceSideEffects = new ResourceSideEffectDispatcher(
-      new ResourceSideEffectOutbox(pool),
-      `api.resource-side-effects.${process.pid}`,
-      async (effect) => deliverResourceSideEffect(effect, hookExecutor, domainEventEmitter)
-    );
-    await resourceSideEffects.dispatchBatch().catch((err) => {
-      app.log.error(
-        `Resource side-effect boot drain failed — ${err instanceof Error ? err.message : String(err)}`
-      );
-    });
-    let resourceSideEffectDrainRunning = false;
-    const resourceSideEffectDrainInterval = setInterval(() => {
-      if (resourceSideEffectDrainRunning) return;
-      resourceSideEffectDrainRunning = true;
-      void resourceSideEffects
-        .dispatchBatch()
-        .catch((err) => {
-          app.log.error(
-            `Resource side-effect drain failed — ${err instanceof Error ? err.message : String(err)}`
-          );
-        })
-        .finally(() => {
-          resourceSideEffectDrainRunning = false;
-        });
-    }, 1_000);
-    resourceSideEffectDrainInterval.unref?.();
+    const stopDelivery = await startDelivery(pool, hookExecutor, domainEventEmitter, app.log);
     // the token resolves — the default path loads nothing extra.
     let metricsSink: OtlpMetricsExporter | undefined;
     let tracesSink: OtlpTracesExporter | undefined;
@@ -1372,7 +1339,7 @@ async function boot() {
       force.unref();
       try {
         if (soulSyncInterval) clearInterval(soulSyncInterval);
-        clearInterval(resourceSideEffectDrainInterval);
+        stopDelivery();
         clearInterval(soulPublicationDrainInterval);
         await app.close();
         await boss.stop({ graceful: false });

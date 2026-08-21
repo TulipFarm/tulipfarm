@@ -81,6 +81,7 @@ sibling `AGENTS.md`.
 | [`packages/schema`](packages/schema/AGENTS.md) | Any config shape, TypeBox schema, validator, Run event type |
 | [`packages/soul`](packages/soul/AGENTS.md) | Soul artifact loading, git sync |
 | [`packages/storage`](packages/storage/AGENTS.md) | PostgreSQL repositories, outbox/inbox, blob/vector/cache ports |
+| [`packages/resources`](packages/resources/AGENTS.md) | Record write policy, validation, hooks, idempotency, and side-effect orchestration |
 | [`packages/authz`](packages/authz/AGENTS.md) | Principals, roles, grants, authority intersection |
 | [`packages/audit`](packages/audit/AGENTS.md) | Audit events, hash chaining, sealing/export, lineage |
 | [`packages/knowledge`](packages/knowledge/AGENTS.md) | Source ingestion, retrieval, provenance |

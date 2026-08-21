@@ -1,32 +1,19 @@
-import { randomUUID } from "node:crypto";
 import type { EventEmitter } from "node:events";
-import type { HookExecutor } from "@tulipfarm/sandbox";
+import {
+  createRecord,
+  deleteRecord,
+  ResourceBeforeHookError,
+  type ResourceWritePorts,
+  updateRecord,
+} from "@tulipfarm/resources";
+import { HookError, type HookExecutor } from "@tulipfarm/sandbox";
 import { ajv } from "@tulipfarm/schema";
 import type { SoulLoader } from "@tulipfarm/soul";
 import { parsePaginationQuery } from "@tulipfarm/storage";
 import { type ApiToolDefinition, defineApiTool, err, ok } from "@tulipfarm/tool-host";
 import { firstError } from "../platform/tool-args";
-import {
-  deliverResourceSideEffect,
-  type ResourceMutationKind,
-  type ResourceSideEffect,
-} from "./outbox.js";
-import {
-  type CounterStore,
-  type ResourceDoc,
-  type ResourceRepo,
-  type ResourceRepoFactory,
-  toApiRecord,
-} from "./repo.js";
-import {
-  loadForWrite,
-  maybeRunBeforeHook,
-  stripImmutable,
-  stripReadOnly,
-  stripSystemFields,
-  transformAndValidate,
-  validateAndLink,
-} from "./write-pipeline.js";
+import { deliverResourceSideEffect, type ResourceSideEffect } from "./outbox.js";
+import { type CounterStore, type ResourceRepoFactory, toApiRecord } from "./repo.js";
 
 export interface ResourceToolContext {
   userId: string;
@@ -44,6 +31,28 @@ export interface ResourceServices {
   soulLoader: SoulLoader;
   hookExecutor?: HookExecutor;
   events?: EventEmitter;
+}
+
+function resourceWritePorts(ctx: ResourceToolContext): ResourceWritePorts {
+  return {
+    catalog: ctx.soulLoader.resources,
+    repositories: ctx.repoFactory,
+    counter: ctx.counterStore.makeCounterFn(),
+    ...(ctx.hookExecutor
+      ? {
+          beforeHook: {
+            run: async (source, type, data, hash) => {
+              try {
+                return (await ctx.hookExecutor?.runBeforeHook(source, type, data, hash)) ?? data;
+              } catch (error) {
+                if (error instanceof HookError) throw new ResourceBeforeHookError(error.message);
+                throw error;
+              }
+            },
+          },
+        }
+      : {}),
+  };
 }
 
 function reason(e: unknown): string {
@@ -65,33 +74,8 @@ function resourceDomain(ctx: ResourceToolContext | undefined, type: string): str
   return ctx?.soulLoader.resources.get(type)?.domain;
 }
 
-type HookedResource = {
-  readonly hookSource?: string;
-  readonly hookHash?: string;
-  readonly hooksEnabled?: boolean;
-};
-
-function resourceSideEffect(
-  kind: ResourceMutationKind,
-  resourceDef: HookedResource,
-  type: string,
-  doc: ResourceDoc
-): ResourceSideEffect {
-  const afterHook =
-    resourceDef.hookSource && resourceDef.hooksEnabled !== false
-      ? { source: resourceDef.hookSource, hash: resourceDef.hookHash }
-      : undefined;
-  return {
-    kind,
-    resourceType: type,
-    resourceId: doc._id,
-    record: toApiRecord(doc),
-    ...(afterHook === undefined ? {} : { afterHook }),
-  };
-}
-
 async function deliverImmediatelyWhenUndurable(
-  repo: ResourceRepo,
+  repo: { readonly durableSideEffects?: true },
   effect: ResourceSideEffect,
   hookExecutor: HookExecutor | undefined,
   events: EventEmitter | undefined
@@ -217,42 +201,24 @@ const resourceCreate = defineApiTool<ResourceToolContext>({
     const resourceDef = ctx.soulLoader.resources.get(type);
     if (!resourceDef) return err("not_found", `resource type not found: ${type}`);
 
-    const schema = resourceDef.schema;
-    const counter = ctx.counterStore.makeCounterFn();
-    const now = new Date();
-    const id = randomUUID();
-
-    let data = stripReadOnly(schema, stripSystemFields(rawData));
-
-    const prepared = await transformAndValidate(
-      type,
-      schema,
-      data,
-      counter,
-      ctx.repoFactory,
-      ctx.soulLoader
-    );
-    if (!prepared.ok) return err("validation_error", prepared.err.body.error);
-    data = prepared.data;
-
-    const before = await maybeRunBeforeHook(ctx.hookExecutor, resourceDef, type, data);
-    if (!before.ok) return err("validation_error", before.err.body.error);
-    data = before.data;
-    if (before.ran) {
-      const reErr = await validateAndLink(schema, data, ctx.repoFactory, ctx.soulLoader);
-      if (reErr) return err("validation_error", reErr.body.error);
-    }
-
-    const doc = { _id: id, version: 1, createdAt: now, updatedAt: now, ...data };
-    const repo = ctx.repoFactory.forType(type);
-    const effect = resourceSideEffect("create", resourceDef, type, doc);
     try {
-      await repo.insert(doc, effect);
+      const created = await createRecord(
+        { type, resource: resourceDef, data: rawData },
+        resourceWritePorts(ctx)
+      );
+      if (!created.ok) return err("validation_error", created.err.body.error);
+      if (!created.replayed) {
+        await deliverImmediatelyWhenUndurable(
+          created.repo,
+          created.sideEffect,
+          ctx.hookExecutor,
+          ctx.events
+        );
+      }
+      return ok(toApiRecord(created.doc));
     } catch (e) {
       return err("internal_error", reason(e));
     }
-    await deliverImmediatelyWhenUndurable(repo, effect, ctx.hookExecutor, ctx.events);
-    return ok(toApiRecord(doc));
   },
 });
 
@@ -344,62 +310,33 @@ const resourceUpdate = defineApiTool<ResourceToolContext>({
     const resourceDef = ctx.soulLoader.resources.get(type);
     if (!resourceDef) return err("not_found", `resource type not found: ${type}`);
 
-    const repo = ctx.repoFactory.forType(type);
-    const loaded = await loadForWrite(repo, id, version);
-    if (!loaded.ok) return err("not_found", loaded.err.body.error);
-    const existing = loaded.doc;
-
-    const schema = resourceDef.schema;
-    const counter = ctx.counterStore.makeCounterFn();
-
-    const {
-      _id: _eid,
-      version: _ev,
-      createdAt: _eca,
-      updatedAt: _eua,
-      deletedAt: _eda,
-      ...existingData
-    } = existing;
-    const patch = stripReadOnly(schema, stripSystemFields(rawPatch));
-    let data = stripImmutable(schema, existingData, { ...existingData, ...patch });
-
-    const prepared = await transformAndValidate(
-      type,
-      schema,
-      data,
-      counter,
-      ctx.repoFactory,
-      ctx.soulLoader
-    );
-    if (!prepared.ok) return err("validation_error", prepared.err.body.error);
-    data = prepared.data;
-
-    const before = await maybeRunBeforeHook(ctx.hookExecutor, resourceDef, type, data);
-    if (!before.ok) return err("validation_error", before.err.body.error);
-    data = before.data;
-    if (before.ran) {
-      const reErr = await validateAndLink(schema, data, ctx.repoFactory, ctx.soulLoader);
-      if (reErr) return err("validation_error", reErr.body.error);
-    }
-
-    const now = new Date();
-    const newDoc = {
-      _id: id,
-      version: existing.version + 1,
-      createdAt: existing.createdAt,
-      updatedAt: now,
-      ...data,
-    };
-    const effect = resourceSideEffect("update", resourceDef, type, newDoc);
-
     try {
-      const replaced = await repo.replaceOne(id, existing.version, newDoc, "update", effect);
-      if (!replaced) return err("not_found", "version conflict");
+      const updated = await updateRecord(
+        {
+          type,
+          resource: resourceDef,
+          id,
+          expectedVersion: version,
+          data: rawPatch,
+          mode: "patch",
+        },
+        resourceWritePorts(ctx)
+      );
+      if (!updated.ok)
+        return err(
+          updated.err.code === 422 ? "validation_error" : "not_found",
+          updated.err.body.error
+        );
+      await deliverImmediatelyWhenUndurable(
+        updated.repo,
+        updated.sideEffect,
+        ctx.hookExecutor,
+        ctx.events
+      );
+      return ok(toApiRecord(updated.doc));
     } catch (e) {
       return err("internal_error", reason(e));
     }
-    await deliverImmediatelyWhenUndurable(repo, effect, ctx.hookExecutor, ctx.events);
-    return ok(toApiRecord(newDoc));
   },
 });
 
@@ -423,36 +360,26 @@ const resourceDelete = defineApiTool<ResourceToolContext>({
     const resourceDef = ctx.soulLoader.resources.get(type);
     if (!resourceDef) return err("not_found", `resource type not found: ${type}`);
 
-    const repo = ctx.repoFactory.forType(type);
-    const loaded = await loadForWrite(repo, id, version);
-    if (!loaded.ok) return err("not_found", loaded.err.body.error);
-    const existing = loaded.doc;
-
-    const before = await maybeRunBeforeHook(
-      ctx.hookExecutor,
-      resourceDef,
-      type,
-      toApiRecord(existing)
-    );
-    if (!before.ok) return err("validation_error", before.err.body.error);
-
-    const now = new Date();
-    const softDeleted = {
-      ...existing,
-      version: existing.version + 1,
-      updatedAt: now,
-      deletedAt: now,
-    };
-    const effect = resourceSideEffect("delete", resourceDef, type, softDeleted);
-
     try {
-      const replaced = await repo.replaceOne(id, existing.version, softDeleted, "delete", effect);
-      if (!replaced) return err("not_found", "version conflict");
+      const deleted = await deleteRecord(
+        { type, resource: resourceDef, id, expectedVersion: version },
+        resourceWritePorts(ctx)
+      );
+      if (!deleted.ok)
+        return err(
+          deleted.err.code === 422 ? "validation_error" : "not_found",
+          deleted.err.body.error
+        );
+      await deliverImmediatelyWhenUndurable(
+        deleted.repo,
+        deleted.sideEffect,
+        ctx.hookExecutor,
+        ctx.events
+      );
+      return ok({ id });
     } catch (e) {
       return err("internal_error", reason(e));
     }
-    await deliverImmediatelyWhenUndurable(repo, effect, ctx.hookExecutor, ctx.events);
-    return ok({ id });
   },
 });
 

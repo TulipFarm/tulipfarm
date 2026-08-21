@@ -175,6 +175,9 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
     ],
     kv: ["schema", "storage", "tool-host"],
     "platform-tools": ["schema", "tool-host", "agent-runtime"],
+    // Record write policy is a domain module. Dynamic table selection stays in the API adapter;
+    // this package receives only repository, catalog, and hook ports.
+    resources: ["schema", "storage"],
     surface: ["schema"],
     "surface-web": ["surface"],
     "surface-slack": ["surface"],
@@ -241,6 +244,7 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
       "tool-host",
       "kv",
       "platform-tools",
+      "resources",
     ],
     worker: [
       "schema",

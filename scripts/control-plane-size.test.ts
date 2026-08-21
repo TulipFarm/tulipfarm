@@ -263,8 +263,8 @@ import { describe, expect, it } from "vitest";
  * Both are probe wiring for an admin route, which is what `apps/api` is for; the provider
  * behaviour they report on stays in `packages/llm`.
  *
- * It moves to 51,255 for the required-field fix, all of it in `resources/write-pipeline.ts`, which
- * is where a Record write is already validated against its Resource type:
+ * The required-field fix now lives in `packages/resources`, where a Record write is validated
+ * against its Resource type through injected repository and hook ports:
  *
  *   +17 `ajvErrorPath` and its `AjvError` alias. ajv reports `instancePath: ""` for a `required`
  *       failure because the offending property is absent, so the field name lives only in
