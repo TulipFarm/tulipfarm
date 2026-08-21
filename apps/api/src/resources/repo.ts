@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { CounterFn } from "@tulipfarm/schema";
 import { type PaginatedResult, toPage, withTransaction } from "@tulipfarm/storage";
 import type { Queryable } from "../db";
+import { type ResourceSideEffect, writeResourceSideEffect } from "./outbox";
 import { historyTableName, rowToResourceDoc, tableName } from "./schema";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -40,11 +41,23 @@ export interface SearchOpts extends ListOpts {
  * committed Record with no history entry is an audit gap no later write can repair.
  */
 export interface ResourceRepo {
-  insert(doc: ResourceDoc): Promise<void>;
+  insert(doc: ResourceDoc, sideEffect?: ResourceSideEffect): Promise<void>;
+  createIdempotently?(
+    doc: ResourceDoc,
+    idempotencyKey: string,
+    sideEffect: ResourceSideEffect
+  ): Promise<{ readonly created: boolean; readonly doc: ResourceDoc }>;
   findById(id: string): Promise<ResourceDoc | null>;
   list(opts: ListOpts): Promise<PaginatedResult<ResourceDoc>>;
   search(opts: SearchOpts): Promise<PaginatedResult<ResourceDoc>>;
-  replaceOne(id: string, expected: number, doc: ResourceDoc, op: HistoryOp): Promise<boolean>;
+  replaceOne(
+    id: string,
+    expected: number,
+    doc: ResourceDoc,
+    op: HistoryOp,
+    sideEffect?: ResourceSideEffect
+  ): Promise<boolean>;
+  readonly durableSideEffects?: true;
 }
 
 /** Builds a `ResourceRepo` bound to a resource type's table (per-request, dynamic type). */
@@ -59,18 +72,19 @@ export interface CounterStore {
 
 /** Resource repo: typed system columns plus schema-driven `data jsonb`; tables pre-exist. */
 export class PgResourceRepo implements ResourceRepo {
+  readonly durableSideEffects = true as const;
   private readonly table: string;
   private readonly historyTable: string;
 
   constructor(
     private readonly q: Queryable,
-    type: string
+    private readonly type: string
   ) {
     this.table = tableName(type);
     this.historyTable = historyTableName(type);
   }
 
-  async insert(doc: ResourceDoc): Promise<void> {
+  async insert(doc: ResourceDoc, sideEffect?: ResourceSideEffect): Promise<void> {
     const { _id, version, createdAt, updatedAt, deletedAt, ...data } = doc;
     await withTransaction(this.q, async (tx) => {
       await tx.query(
@@ -79,6 +93,47 @@ export class PgResourceRepo implements ResourceRepo {
         [_id, version, createdAt, updatedAt, deletedAt ?? null, JSON.stringify(data)]
       );
       await this.appendHistory(tx, historyEntry(_id, "create", doc));
+      if (sideEffect) await writeResourceSideEffect(tx, randomUUID(), sideEffect);
+    });
+  }
+
+  async createIdempotently(
+    doc: ResourceDoc,
+    idempotencyKey: string,
+    sideEffect: ResourceSideEffect
+  ): Promise<{ readonly created: boolean; readonly doc: ResourceDoc }> {
+    return withTransaction(this.q, async (tx) => {
+      const claimed = await tx.query<{ resource_id: string }>(
+        `INSERT INTO resource_create_requests (resource_type, caller_id, idempotency_key, resource_id)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (resource_type, caller_id, idempotency_key) DO NOTHING
+         RETURNING resource_id`,
+        [this.type, sideEffect.actorId ?? "system", idempotencyKey, doc._id]
+      );
+      if (claimed.rows.length === 0) {
+        const existing = await tx.query(
+          `SELECT id, version, created_at, updated_at, deleted_at, data
+             FROM ${this.table}
+            WHERE id = (
+              SELECT resource_id FROM resource_create_requests
+               WHERE resource_type = $1 AND caller_id = $2 AND idempotency_key = $3
+            )`,
+          [this.type, sideEffect.actorId ?? "system", idempotencyKey]
+        );
+        const row = existing.rows[0];
+        if (!row) throw new Error("resource_idempotency_conflict_without_record");
+        return { created: false, doc: rowToResourceDoc(row) };
+      }
+
+      const { _id, version, createdAt, updatedAt, deletedAt, ...data } = doc;
+      await tx.query(
+        `INSERT INTO ${this.table} (id, version, created_at, updated_at, deleted_at, data)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+        [_id, version, createdAt, updatedAt, deletedAt ?? null, JSON.stringify(data)]
+      );
+      await this.appendHistory(tx, historyEntry(_id, "create", doc));
+      await writeResourceSideEffect(tx, randomUUID(), sideEffect);
+      return { created: true, doc };
     });
   }
 
@@ -135,7 +190,8 @@ export class PgResourceRepo implements ResourceRepo {
     id: string,
     expected: number,
     doc: ResourceDoc,
-    op: HistoryOp
+    op: HistoryOp,
+    sideEffect?: ResourceSideEffect
   ): Promise<boolean> {
     if (!UUID_RE.test(id)) return false;
     const { _id, version, createdAt, updatedAt, deletedAt, ...data } = doc;
@@ -149,6 +205,7 @@ export class PgResourceRepo implements ResourceRepo {
       );
       if (rows.length !== 1) return false;
       await this.appendHistory(tx, historyEntry(id, op, doc));
+      if (sideEffect) await writeResourceSideEffect(tx, randomUUID(), sideEffect);
       return true;
     });
   }

@@ -23,7 +23,7 @@ function describeResource(record: Record<string, unknown>, resourceId: string): 
 /** Activity writes are best-effort; completion events are skipped to avoid turn-level noise. */
 export function subscribeActivityLogging(emitter: EventEmitter, activity: ActivityService): void {
   const onResource =
-    (verb: "created" | "updated") =>
+    (verb: "created" | "updated" | "deleted") =>
     (p: ResourceEventPayload): void => {
       const label = describeResource(p.record, p.resourceId);
       fireAndForget(
@@ -33,13 +33,14 @@ export function subscribeActivityLogging(emitter: EventEmitter, activity: Activi
           actorId: p.actorId ?? null,
           targetType: "resource",
           targetId: p.resourceId,
-          summary: `${verb === "created" ? "Created" : "Updated"} ${p.resourceType} ${label}`,
+          summary: `${verb === "created" ? "Created" : verb === "updated" ? "Updated" : "Deleted"} ${p.resourceType} ${label}`,
           metadata: { resourceType: p.resourceType },
         })
       );
     };
   emitter.on(DOMAIN_EVENTS.RESOURCE_CREATED, onResource("created"));
   emitter.on(DOMAIN_EVENTS.RESOURCE_UPDATED, onResource("updated"));
+  emitter.on(DOMAIN_EVENTS.RESOURCE_DELETED, onResource("deleted"));
   emitter.on(DOMAIN_EVENTS.CONVERSATION_CREATED, (p: ConversationCreatedPayload): void => {
     fireAndForget(
       activity.record({

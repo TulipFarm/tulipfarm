@@ -6,10 +6,20 @@ import type { SoulLoader } from "@tulipfarm/soul";
 import { parsePaginationQuery } from "@tulipfarm/storage";
 import { type ApiToolDefinition, defineApiTool, err, ok } from "@tulipfarm/tool-host";
 import { firstError } from "../platform/tool-args";
-import { type CounterStore, type ResourceRepoFactory, toApiRecord } from "./repo.js";
+import {
+  deliverResourceSideEffect,
+  type ResourceMutationKind,
+  type ResourceSideEffect,
+} from "./outbox.js";
+import {
+  type CounterStore,
+  type ResourceDoc,
+  type ResourceRepo,
+  type ResourceRepoFactory,
+  toApiRecord,
+} from "./repo.js";
 import {
   loadForWrite,
-  maybeRunAfterHook,
   maybeRunBeforeHook,
   stripImmutable,
   stripReadOnly,
@@ -53,6 +63,41 @@ function stringArg(args: unknown, key: string): string | undefined {
 
 function resourceDomain(ctx: ResourceToolContext | undefined, type: string): string | undefined {
   return ctx?.soulLoader.resources.get(type)?.domain;
+}
+
+type HookedResource = {
+  readonly hookSource?: string;
+  readonly hookHash?: string;
+  readonly hooksEnabled?: boolean;
+};
+
+function resourceSideEffect(
+  kind: ResourceMutationKind,
+  resourceDef: HookedResource,
+  type: string,
+  doc: ResourceDoc
+): ResourceSideEffect {
+  const afterHook =
+    resourceDef.hookSource && resourceDef.hooksEnabled !== false
+      ? { source: resourceDef.hookSource, hash: resourceDef.hookHash }
+      : undefined;
+  return {
+    kind,
+    resourceType: type,
+    resourceId: doc._id,
+    record: toApiRecord(doc),
+    ...(afterHook === undefined ? {} : { afterHook }),
+  };
+}
+
+async function deliverImmediatelyWhenUndurable(
+  repo: ResourceRepo,
+  effect: ResourceSideEffect,
+  hookExecutor: HookExecutor | undefined,
+  events: EventEmitter | undefined
+): Promise<void> {
+  if (repo.durableSideEffects) return;
+  await deliverResourceSideEffect(effect, hookExecutor, events);
 }
 
 function recordTypeTargets(args: unknown, ctx?: ResourceToolContext): TargetRef[] {
@@ -200,12 +245,13 @@ const resourceCreate = defineApiTool<ResourceToolContext>({
 
     const doc = { _id: id, version: 1, createdAt: now, updatedAt: now, ...data };
     const repo = ctx.repoFactory.forType(type);
+    const effect = resourceSideEffect("create", resourceDef, type, doc);
     try {
-      await repo.insert(doc);
+      await repo.insert(doc, effect);
     } catch (e) {
       return err("internal_error", reason(e));
     }
-    await maybeRunAfterHook(ctx.hookExecutor, resourceDef, type, toApiRecord(doc));
+    await deliverImmediatelyWhenUndurable(repo, effect, ctx.hookExecutor, ctx.events);
     return ok(toApiRecord(doc));
   },
 });
@@ -344,14 +390,15 @@ const resourceUpdate = defineApiTool<ResourceToolContext>({
       updatedAt: now,
       ...data,
     };
+    const effect = resourceSideEffect("update", resourceDef, type, newDoc);
 
     try {
-      const replaced = await repo.replaceOne(id, existing.version, newDoc, "update");
+      const replaced = await repo.replaceOne(id, existing.version, newDoc, "update", effect);
       if (!replaced) return err("not_found", "version conflict");
     } catch (e) {
       return err("internal_error", reason(e));
     }
-    await maybeRunAfterHook(ctx.hookExecutor, resourceDef, type, toApiRecord(newDoc));
+    await deliverImmediatelyWhenUndurable(repo, effect, ctx.hookExecutor, ctx.events);
     return ok(toApiRecord(newDoc));
   },
 });
@@ -396,14 +443,15 @@ const resourceDelete = defineApiTool<ResourceToolContext>({
       updatedAt: now,
       deletedAt: now,
     };
+    const effect = resourceSideEffect("delete", resourceDef, type, softDeleted);
 
     try {
-      const replaced = await repo.replaceOne(id, existing.version, softDeleted, "delete");
+      const replaced = await repo.replaceOne(id, existing.version, softDeleted, "delete", effect);
       if (!replaced) return err("not_found", "version conflict");
     } catch (e) {
       return err("internal_error", reason(e));
     }
-    await maybeRunAfterHook(ctx.hookExecutor, resourceDef, type, toApiRecord(softDeleted));
+    await deliverImmediatelyWhenUndurable(repo, effect, ctx.hookExecutor, ctx.events);
     return ok({ id });
   },
 });

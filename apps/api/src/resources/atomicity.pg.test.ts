@@ -58,11 +58,18 @@ class FakeTokenRepo implements TokenRepo {
 }
 
 /** Lets every Record mutation through and rejects only the history append, as a transient would. */
-function rejectHistoryWrites(db: PGlite): Queryable {
+function rejectAtomicWritePart(
+  db: PGlite,
+  shouldRejectHistory: () => boolean,
+  shouldRejectSideEffect: () => boolean
+): Queryable {
   const wrap = (q: Queryable): Queryable => ({
     query: async (text, params) => {
-      if (/INSERT INTO resources\."ticket_history"/.test(text)) {
+      if (shouldRejectHistory() && /INSERT INTO resources\."ticket_history"/.test(text)) {
         throw new Error("transient: history insert failed");
+      }
+      if (shouldRejectSideEffect() && /INSERT INTO resource_side_effect_outbox/.test(text)) {
+        throw new Error("transient: side-effect enqueue failed");
       }
       return q.query(text, params);
     },
@@ -88,9 +95,13 @@ describe("record write atomicity", () => {
   let sid: string;
   let plain: PgResourceRepo;
   let emitted: string[];
+  let rejectHistory: boolean;
+  let rejectSideEffect: boolean;
 
   beforeEach(async () => {
     emitted = [];
+    rejectHistory = true;
+    rejectSideEffect = false;
     const domainEventEmitter = new EventEmitter();
     for (const name of [DOMAIN_EVENTS.RESOURCE_CREATED, DOMAIN_EVENTS.RESOURCE_UPDATED]) {
       domainEventEmitter.on(name, () => emitted.push(name));
@@ -122,7 +133,13 @@ describe("record write atomicity", () => {
           ],
         ]),
       } as unknown as SoulLoader,
-      resourceRepoFactory: new PgResourceRepoFactory(rejectHistoryWrites(db)),
+      resourceRepoFactory: new PgResourceRepoFactory(
+        rejectAtomicWritePart(
+          db,
+          () => rejectHistory,
+          () => rejectSideEffect
+        )
+      ),
       counterStore: { makeCounterFn: () => async () => 1 },
       domainEventEmitter,
     });
@@ -150,6 +167,11 @@ describe("record write atomicity", () => {
     return page.items;
   }
 
+  async function sideEffectCount(): Promise<number> {
+    const { rows } = await db.query(`SELECT count(*)::int AS n FROM resource_side_effect_outbox`);
+    return (rows[0] as { n: number }).n;
+  }
+
   /** Seeds through a repo the fault injector does not wrap, so setup is not the write under test. */
   async function seed(): Promise<ResourceDoc> {
     const now = new Date();
@@ -175,6 +197,7 @@ describe("record write atomicity", () => {
     expect(res.statusCode).toBe(500);
     expect(await liveRows()).toHaveLength(0);
     expect(await historyCount()).toBe(0);
+    expect(await sideEffectCount()).toBe(0);
   });
 
   it("does not commit a replaced Record when its history append fails", async () => {
@@ -192,6 +215,7 @@ describe("record write atomicity", () => {
     expect(rows[0]?.version).toBe(1);
     expect(rows[0]?.title).toBe("seeded");
     expect(await historyCount()).toBe(historyBefore);
+    expect(await sideEffectCount()).toBe(0);
   });
 
   it("does not commit a patched Record when its history append fails", async () => {
@@ -209,6 +233,7 @@ describe("record write atomicity", () => {
     expect(rows[0]?.version).toBe(1);
     expect(rows[0]?.title).toBe("seeded");
     expect(await historyCount()).toBe(historyBefore);
+    expect(await sideEffectCount()).toBe(0);
   });
 
   it("does not commit a soft delete when its history append fails", async () => {
@@ -225,6 +250,7 @@ describe("record write atomicity", () => {
     expect(rows[0]?.version).toBe(1);
     expect(rows[0]?.deletedAt).toBeUndefined();
     expect(await historyCount()).toBe(historyBefore);
+    expect(await sideEffectCount()).toBe(0);
   });
 
   it("emits no domain event for a write that did not commit", async () => {
@@ -235,5 +261,43 @@ describe("record write atomicity", () => {
       payload: { title: "Bug" },
     });
     expect(emitted).toEqual([]);
+  });
+
+  it("does not commit a created Record when durable delivery cannot be enqueued", async () => {
+    rejectHistory = false;
+    rejectSideEffect = true;
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/v1/resources/${TYPE}`,
+      ...withSession(),
+      payload: { title: "No partial write" },
+    });
+
+    expect(res.statusCode).toBe(500);
+    expect(await liveRows()).toHaveLength(0);
+    expect(await historyCount()).toBe(0);
+    expect(await sideEffectCount()).toBe(0);
+  });
+
+  it("deduplicates a retried create with its caller idempotency key", async () => {
+    rejectHistory = false;
+    rejectSideEffect = false;
+    const request = {
+      method: "POST" as const,
+      url: `/api/v1/resources/${TYPE}`,
+      ...withSession({ "idempotency-key": "request-176" }),
+      payload: { title: "Only once" },
+    };
+
+    const first = await app.inject(request);
+    const second = await app.inject(request);
+
+    expect(first.statusCode).toBe(201);
+    expect(second.statusCode).toBe(200);
+    expect(second.json().id).toBe(first.json().id);
+    expect(await liveRows()).toHaveLength(1);
+    expect(await historyCount()).toBe(1);
+    expect(await sideEffectCount()).toBe(1);
   });
 });
