@@ -1,0 +1,50 @@
+{
+  "id": "l3-curator-proposal-reaches-task",
+  "tier": "l3",
+  "agent": "support",
+  "context": {
+    "governancePages": []
+  },
+  "input": [
+    {
+      "role": "user",
+      "content": "I need a way to manage support tickets."
+    }
+  ],
+  "script": [
+    {
+      "kind": "text",
+      "text": "I can help you set that up."
+    }
+  ],
+  "curator": {
+    "output": {
+      "memory": [],
+      "proposals": [
+        {
+          "kind": "create_resource_type",
+          "subjectId": "tickets",
+          "rationale": "The participant wants to manage support tickets.",
+          "deliver": ["task"],
+          "citations": [
+            {
+              "turnId": "eval-curator-turn",
+              "quote": "I need a way to manage support tickets."
+            }
+          ]
+        }
+      ],
+      "knowledgePromotions": []
+    }
+  },
+  "expect": [
+    {
+      "kind": "curator_task_visible",
+      "title": "Set up ticket management"
+    },
+    {
+      "kind": "run_status",
+      "status": "succeeded"
+    }
+  ]
+}

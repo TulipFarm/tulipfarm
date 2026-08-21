@@ -18,6 +18,7 @@ export type {
   CuratorJobRecord,
   CuratorJobState,
   CuratorManifest,
+  CuratorProposalTaskEffect,
   CuratorRejectionRecord,
   CuratorScope,
   StaleCuratorJob,

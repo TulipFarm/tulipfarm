@@ -1,0 +1,90 @@
+name: jira
+version: "1.0.0"
+description: Let TulipFarm agents search, estimate, prioritize, and create Jira Cloud issues using
+  your Atlassian OAuth token.
+maintainer: TulipFarm
+icon: jira
+capabilities:
+  - Search issues with JQL, including their fields and changelog for delivery analysis
+  - Read issue details, priorities, and available workflow transitions
+  - Create issues and update their fields, including priority and estimates
+  - Move issues through the workflow after approval
+grants:
+  - label: Jira issues and projects
+    access: read
+    description: Search and read issues, priorities, and workflow transitions the token can access.
+  - label: Jira issues
+    access: write
+    description: Create issues, update their fields, and transition them in projects the token can edit.
+
+# Jira Cloud's per-site Cloud ID belongs in the path, while the literal Atlassian gateway host keeps
+# the egress destination pinned. This intentionally supports Jira Cloud, not Jira Server.
+egress:
+  type: openapi
+  spec: openapi.json
+  base_url: https://api.atlassian.com/ex/jira/{JIRA_CLOUD_ID}/rest/api/3
+  auth:
+    token_env: JIRA_ACCESS_TOKEN
+  operations:
+    - operation: searchIssues
+      name: search_issues
+      description: Search Jira issues with JQL. Use this before estimating or reporting so the
+        result is based on the matching issues, their dates, and their changelog rather than guesses.
+      # Jira models JQL search as POST even though it only reads data.
+      mutating: false
+    - operation: getIssue
+      name: read_issue
+      description: Read one Jira issue by key or ID. Request fields and expand=changelog when you
+        need its estimates, priority, status changes, cycle time, or lead time.
+    - operation: getPriorities
+      name: list_priorities
+      description: List the Jira priorities available to this token. Read this before changing an
+        issue priority when you do not know the exact priority ID to use.
+    - operation: createIssue
+      name: create_issue
+      description: Create one Jira issue. Set the project, issue type, summary, and any known fields
+        in the request body; this is a write and requires approval.
+      mutating: true
+    - operation: editIssue
+      name: update_issue
+      description: Update fields on one Jira issue, including priority or an estimate. Read the
+        issue first when the field ID or allowed value is not already known; this requires approval.
+      mutating: true
+    - operation: getTransitions
+      name: list_transitions
+      description: List the workflow transitions available for one Jira issue. Read this before
+        moving the issue because each Jira project can use different transition IDs.
+    - operation: doTransition
+      name: transition_issue
+      description: Move one Jira issue using a transition ID returned by list_transitions. This
+        changes provider state and requires approval.
+      mutating: true
+
+auth:
+  - kind: fields
+    title: Connect your Jira Cloud site
+    description: Paste an Atlassian OAuth access token and the Cloud ID for the Jira Cloud site it
+      can access. The setup guide shows where to get both values.
+    fields:
+      - name: JIRA_CLOUD_ID
+        label: Cloud ID
+        description: Atlassian Cloud ID for the Jira Cloud site. It forms part of the API address.
+        secret: false
+        setup_url: https://admin.atlassian.com
+        steps:
+          - Open Atlassian Administration for the site and copy its Cloud ID. If you cannot find it
+            there, visit https://<your-site>.atlassian.net/_edge/tenant_info while signed in and
+            copy the cloudId value.
+          - Paste the Cloud ID below. It identifies the Jira Cloud site this connection can reach.
+      - name: JIRA_ACCESS_TOKEN
+        label: OAuth Access Token
+        description: Atlassian OAuth bearer token with Jira read and write scopes for this site.
+        secret: true
+        setup_url: https://developer.atlassian.com/console/myapps/
+        steps:
+          - In the Atlassian developer console, create or open an OAuth 2.0 integration for this
+            deployment and add Jira API read and write scopes.
+          - Authorize the integration for this Jira Cloud site, then copy a current access token and
+            paste it below.
+
+setup_guide_path: setup-guide.md

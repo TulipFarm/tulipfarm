@@ -60,7 +60,7 @@ describe("loadIntegrationRegistry", () => {
   describe("the shipped catalog", () => {
     it("lists every bundled integration, so nothing ships without a display name", async () => {
       const registry = await loadIntegrationRegistry(logger, bundledIntegrationsDir());
-      for (const name of ["slack", "github"]) {
+      for (const name of ["slack", "github", "jira"]) {
         expect(registry.get(name)?.title).toBeTruthy();
         expect(registry.get(name)?.category).toBeTruthy();
       }

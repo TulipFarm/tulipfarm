@@ -7,7 +7,8 @@ package because none of it touches Fastify — `apps/api` keeps only routes and 
 
 ## Read on
 
-Minting a job, starting or recovering its Run, resolving pinned context, or accepting model output.
+Minting a job, starting or recovering its Run, resolving pinned context, accepting model output, or
+delivering an approved Proposal as a Task.
 
 ## Skip
 
@@ -20,6 +21,7 @@ Prompts, output schemas and citation rules (`packages/curator`), SQL and table s
 | --- | --- |
 | `src/mint.ts` | `CuratorMinter` — provider preflight, claim-and-reserve via `CuratorMintStore`, `gateway.start()` under a per-job idempotency key, `recover()`, atomic `abandon()` |
 | `src/host.ts` | `CuratorHost` — context pinning and drift detection, then revalidation of submitted output and exactly-once settlement |
+| `src/delivery.ts` | `CuratorTaskDelivery` — claims applyable Proposal effects, upserts direct-user Tasks, and records retryable or terminal outcomes |
 | `src/recovery.ts` | `CuratorRecovery` — replays a mint that crashed before the gateway, frees a target whose Run died |
 
 ## Rules

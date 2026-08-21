@@ -33,6 +33,13 @@ integrations:
     homepage: https://github.com
     description: Read and write repositories, issues, and pull requests.
 
+  - name: jira
+    title: Jira
+    icon: jira
+    category: productivity
+    homepage: https://www.atlassian.com/software/jira
+    description: Search, create, estimate, prioritize, and transition Jira Cloud issues.
+
   - name: notion
     title: Notion
     icon: notion
