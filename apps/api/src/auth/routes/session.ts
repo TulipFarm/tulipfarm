@@ -1,3 +1,4 @@
+import { withSessionNav } from "@tulipfarm/authz";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AuthorizationCheck } from "../../authz/route-gate";
 import { makeAuthorizationCheck } from "../../authz/route-gate";
@@ -31,7 +32,6 @@ import {
   type UserDoc,
   type UserRepo,
 } from "../users";
-import { USER_MANAGE } from "./users";
 
 // Precomputed lazily and reused: verifying against a dummy hash on unknown-user
 // login keeps response timing similar to the known-user path (no user enumeration).
@@ -61,7 +61,7 @@ export interface SessionRouteDeps {
   passwordWriteRepo?: PasswordWriteRepo;
   profileWriteRepo?: ProfileWriteRepo;
   inviteRepo?: UserInviteRepo;
-  /** Decides `isAdmin`. Defaults to the no-authorizer gate, which answers from the account role. */
+  /** Decides session authority. Defaults to the no-authorizer gate, which answers from the account role. */
   authorizationCheck?: AuthorizationCheck;
 }
 
@@ -85,10 +85,7 @@ export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDe
    * own session is how the app boots, and every admin surface is gated again on its own request.
    */
   async function sessionUser(user: UserDoc) {
-    const isAdmin = await authorizationCheck(userPrincipal(user, "session"), USER_MANAGE).catch(
-      () => false
-    );
-    return { ...toPublicUser(user), isAdmin };
+    return withSessionNav(toPublicUser(user), userPrincipal(user, "session"), authorizationCheck);
   }
   const loginPreHandlers = [rateLimitHook, loginRateLimitHook].filter(
     (hook): hook is PreHandler => hook !== undefined

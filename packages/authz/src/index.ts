@@ -64,6 +64,16 @@ export { assertGuestActive, GuestDeniedError, guestGrants } from "./guests";
 export type { JitDenialReason, JitGrantRequest } from "./jit";
 export { assertJitGrantIssuable, JitDeniedError } from "./jit";
 export type {
+  NavigationAuthorization,
+  NavigationAuthorizationCheck,
+  NavigationRequirement,
+} from "./navigation";
+export {
+  NAVIGATION_REQUIREMENTS,
+  sessionNavigationCapabilities,
+  withSessionNav,
+} from "./navigation";
+export type {
   IdentityPort,
   IdentityResolution,
   IdentityResolutionRequest,

@@ -245,6 +245,7 @@ describe("auth routes", () => {
     });
     expect(res.statusCode).toBe(200);
     expect(res.json().user.email).toBe("user@example.com");
+    expect(res.json().user.navigation.visiblePaths).toContain("/inbox");
   });
 
   it("GET /session returns 401 without a cookie", async () => {

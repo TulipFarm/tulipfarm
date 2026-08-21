@@ -52,6 +52,7 @@ test("accepting an invite reads the token from the fragment and sets the passwor
     name: null,
     role: "member",
     status: "active",
+    navigation: { visiblePaths: [] },
   });
 
   renderAccept();
@@ -100,6 +101,7 @@ test("changing a password sends the current one alongside the new", async () => 
     name: null,
     role: "member",
     status: "active",
+    navigation: { visiblePaths: [] },
   });
 
   render(<AuthSettings />);

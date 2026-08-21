@@ -33,7 +33,6 @@ export type NavItem = {
   label: string;
   icon: LucideIcon;
   badge?: boolean;
-  adminOnly?: boolean;
   devOnly?: boolean;
   /**
    * The one line the top bar cannot say. Rendered by the section shell instead of a second page
@@ -46,6 +45,11 @@ export type NavItem = {
 export type NavSection = {
   heading?: string;
   items: NavItem[];
+};
+
+export type NavigationVisibility = {
+  isDev: boolean;
+  visiblePaths?: readonly string[];
 };
 
 /*
@@ -108,7 +112,6 @@ export const MODE_SECTIONS: Record<"build" | "operate" | "settings", NavSection[
           to: "/business/observability",
           label: "Observability",
           icon: Gauge,
-          adminOnly: true,
           description: "What your agents are spending and doing — cost, tokens, and reliability.",
           wide: true,
         },
@@ -161,7 +164,6 @@ export const MODE_SECTIONS: Record<"build" | "operate" | "settings", NavSection[
           to: "/business/access",
           label: "People & access",
           icon: Users,
-          adminOnly: true,
           description:
             "Invite people, turn accounts off, and decide what each person is allowed to do.",
           wide: true,
@@ -210,16 +212,37 @@ export const MODE_SECTIONS: Record<"build" | "operate" | "settings", NavSection[
 
 export function visibleSections(
   mode: "build" | "operate" | "settings",
-  { isAdmin, isDev }: { isAdmin: boolean; isDev: boolean }
+  { isDev, visiblePaths }: NavigationVisibility
 ): NavSection[] {
   return MODE_SECTIONS[mode]
     .map((section) => ({
       ...section,
       items: section.items.filter(
-        (item) => (!item.adminOnly || isAdmin) && (!item.devOnly || isDev)
+        (item) =>
+          (visiblePaths === undefined || visiblePaths.includes(item.to)) && (!item.devOnly || isDev)
       ),
     }))
     .filter((section) => section.items.length > 0);
+}
+
+export function visibleModes({ isDev, visiblePaths }: NavigationVisibility): ProductMode[] {
+  const visible = ["chat"] as ProductMode[];
+  if (visibleSections("build", { isDev, visiblePaths }).length > 0) visible.push("build");
+  if (visiblePaths === undefined || visiblePaths.includes("/knowledge")) visible.push("knowledge");
+  if (visibleSections("operate", { isDev, visiblePaths }).length > 0) visible.push("operate");
+  if (visiblePaths === undefined || visiblePaths.includes("/farm")) visible.push("farm");
+  if (visibleSections("settings", { isDev, visiblePaths }).length > 0) visible.push("settings");
+  return visible;
+}
+
+export function destinationForMode(mode: ProductMode, visibility: NavigationVisibility): string {
+  if (mode !== "build" && mode !== "operate" && mode !== "settings") {
+    return MODE_META[mode].to;
+  }
+  return (
+    visibleSections(mode, visibility).flatMap((section) => section.items)[0]?.to ??
+    MODE_META[mode].to
+  );
 }
 
 export function modeForPath(pathname: string): ProductMode {
