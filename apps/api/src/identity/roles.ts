@@ -110,17 +110,22 @@ export const ADMIN_ONLY_SURFACES: readonly {
 ];
 
 /**
- * Keeps today's read access to legacy Resource types that declare no domain. Once a Resource type
+ * Keeps today's access to legacy Resource types that declare no domain. Once a Resource type
  * declares `domain`, this grant no longer matches; that domain needs its own explicit grant.
- * Write actions (`create`/`update`/`delete`) moved to an explicit Team-level grant (#access-audit)
- * so a Team with no grants gives its members no way to mutate business data by default.
+ * Record CRUD is everyday business-data use (working a Ticket, a Customer); it stays default-on.
+ * Authoring new Resource *types*, Routines, Agents, Skills, and provider Tool access (Slack,
+ * GitHub write) is the operator-facing surface and moved to an explicit Team-level grant
+ * (#access-audit) instead — a Team with no grants must not let a member reshape the business.
  *
  * Exported because it is the one wildcard `member` still holds, so it is also the only thing the
  * admin-only carve-out below has to close.
  */
 export const MEMBER_UNDOMAINED_RECORD_ACTIONS = [
+  "record.create",
   "record.list",
   "record.read",
+  "record.update",
+  "record.delete",
   "record.search",
 ] as const;
 

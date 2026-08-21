@@ -51,7 +51,7 @@ describe("describeDeploymentRoles", () => {
   it("keeps the member record wildcard off admin-only resource types", () => {
     const grants = member().grants;
     expect(grants).toContain("deny record.read on user");
-    expect(grants).toContain("deny record.read on secret");
+    expect(grants).toContain("deny record.delete on secret");
   });
 
   it("lets a Role granted on top of the member baseline actually take effect", () => {
@@ -77,10 +77,8 @@ describe("describeDeploymentRoles", () => {
     expect(grants).toContain("allow any action on chat");
     expect(grants).toContain("allow any action on api_token");
     expect(grants).toContain("allow identity.external_link.read on identity");
-    expect(grants).toContain("allow record.read on any resource");
-    expect(grants).toContain("allow record.search on any resource");
-    expect(grants).not.toContain("allow record.create on any resource");
-    expect(grants).not.toContain("allow record.update on any resource");
+    expect(grants).toContain("allow record.create on any resource");
+    expect(grants).toContain("allow record.update on any resource");
     expect(grants).toContain("allow secret.read on secret");
   });
 
@@ -127,23 +125,13 @@ describe("describeDeploymentRoles", () => {
     expect(decision.allowed).toBe(false);
   });
 
-  it("keeps member record read access for resource types with no domain", () => {
-    const memberRole = DEPLOYMENT_ROLES.find((role) => role.id === "member");
-    if (!memberRole) throw new Error("member role missing from the deployment catalog");
-    const decision = decideEffectivePermission([{ name: "member", grants: memberRole.grants }], {
-      action: "record.read",
-      resourceType: "record.ticket",
-    });
-    expect(decision.allowed).toBe(true);
-  });
-
-  it("denies member record writes by default; a Team-level grant is required", () => {
+  it("keeps member record access for resource types with no domain", () => {
     const memberRole = DEPLOYMENT_ROLES.find((role) => role.id === "member");
     if (!memberRole) throw new Error("member role missing from the deployment catalog");
     const decision = decideEffectivePermission([{ name: "member", grants: memberRole.grants }], {
       action: "record.update",
       resourceType: "record.ticket",
     });
-    expect(decision.allowed).toBe(false);
+    expect(decision.allowed).toBe(true);
   });
 });
