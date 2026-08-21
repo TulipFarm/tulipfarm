@@ -105,3 +105,86 @@ export const SKILL_ACTIVATE_SCHEMA = {
     name: { type: "string", minLength: 1, description: "Skill name to activate." },
   },
 } as const;
+
+export const SKILL_MARKETPLACE_BROWSE_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {},
+} as const;
+
+export const SKILL_SOURCE_SCAN_SCHEMA = {
+  type: "object",
+  required: ["source"],
+  additionalProperties: false,
+  properties: {
+    source: {
+      type: "string",
+      minLength: 1,
+      description: "Git source to scan, optionally suffixed with #branch or #tag.",
+    },
+  },
+} as const;
+
+const SKILL_SCANNED_SELECTION_PROPERTIES = {
+  scanId: {
+    type: "string",
+    minLength: 1,
+    description: "Scan identifier returned by skill_source_scan.",
+  },
+  name: { type: "string", minLength: 1, description: "Exact Skill name returned by the scan." },
+  skillPath: {
+    type: "string",
+    minLength: 1,
+    description:
+      "Exact SKILL.md path returned by the scan; use it to disambiguate same-named packages.",
+  },
+} as const;
+
+export const SKILL_SCANNED_AUDIT_SCHEMA = {
+  type: "object",
+  required: ["scanId", "name", "skillPath"],
+  additionalProperties: false,
+  properties: SKILL_SCANNED_SELECTION_PROPERTIES,
+} as const;
+
+export const SKILL_SCANNED_INSTALL_SCHEMA = {
+  type: "object",
+  required: ["scanId", "name", "skillPath"],
+  additionalProperties: false,
+  properties: SKILL_SCANNED_SELECTION_PROPERTIES,
+} as const;
+
+export const SKILL_MARKETPLACE_BROWSE_DESCRIPTION =
+  "Browse the configured Skill marketplace. Returns a scanId and the exact skillPath for every available Skill; use those exact values to audit and install a package.";
+
+export const SKILL_SOURCE_SCAN_DESCRIPTION =
+  "Clone and scan a Git source for installable Skills. Returns the source, resolved ref, scanId, and exact skillPath for each package. Audit a selected package before installing it.";
+
+export const SKILL_SCANNED_AUDIT_DESCRIPTION =
+  "Run SkillAudit on one exact scanned package. Supply the scanId, Skill name, and skillPath returned by browsing or scanning before installation.";
+
+export const SKILL_SCANNED_INSTALL_DESCRIPTION =
+  "Install one audited Skill from a scan into the soul repository. Supply the exact scanId, name, and skillPath returned by the scan; the result preserves its source and resolved ref as provenance.";
+
+export const SKILL_MARKETPLACE_TOOL_DECLARATIONS = [
+  {
+    name: "skill_marketplace_browse",
+    description: SKILL_MARKETPLACE_BROWSE_DESCRIPTION,
+    inputSchema: SKILL_MARKETPLACE_BROWSE_SCHEMA,
+  },
+  {
+    name: "skill_source_scan",
+    description: SKILL_SOURCE_SCAN_DESCRIPTION,
+    inputSchema: SKILL_SOURCE_SCAN_SCHEMA,
+  },
+  {
+    name: "skill_scanned_audit",
+    description: SKILL_SCANNED_AUDIT_DESCRIPTION,
+    inputSchema: SKILL_SCANNED_AUDIT_SCHEMA,
+  },
+  {
+    name: "skill_scanned_install",
+    description: SKILL_SCANNED_INSTALL_DESCRIPTION,
+    inputSchema: SKILL_SCANNED_INSTALL_SCHEMA,
+  },
+] as const;

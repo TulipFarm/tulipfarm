@@ -596,10 +596,11 @@ spec:
       });
       expect(scanRes.statusCode).toBe(200);
       const { scanId, skills } = scanRes.json();
+      const skillPath = join("skills", "demo-skill", "SKILL.md");
       expect(skills).toEqual([
         {
           name: "demo-skill",
-          skillPath: join("skills", "demo-skill", "SKILL.md"),
+          skillPath,
           description: "A demo skill.",
           installed: false,
           updateAvailable: false,
@@ -621,7 +622,7 @@ spec:
         url: "/api/v1/skills/audit",
         cookies: auth(),
         headers,
-        payload: { scanId, name: "demo-skill" },
+        payload: { scanId, name: "demo-skill", skillPath },
       });
       expect(auditRes.statusCode).toBe(200);
       expect(auditRes.json().report.riskRating).toBe("medium");
@@ -636,7 +637,7 @@ spec:
         url: "/api/v1/skills/install",
         cookies: auth(),
         headers,
-        payload: { scanId, names: ["demo-skill"] },
+        payload: { scanId, paths: [skillPath] },
       });
       expect(installRes.statusCode).toBe(200);
       expect(installRes.json()).toEqual({ installed: ["demo-skill"] });

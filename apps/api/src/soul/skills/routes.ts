@@ -8,11 +8,8 @@ import type { LlmService } from "@tulipfarm/llm";
 import { SandboxRuntimeProfileRegistry, shellTsPythonV1 } from "@tulipfarm/sandbox";
 import {
   DEFINITION_REGISTRATIONS,
-  LlmNotConfiguredError,
   SchemaRegistry,
   type SkillDefinition,
-  unstorableArtifactPaths,
-  validateSkill,
 } from "@tulipfarm/schema";
 import {
   artifactWriteTarget,
@@ -30,18 +27,19 @@ import {
   type SoulSkill,
   type SoulWrite,
   type SoulWriter,
-  scanSkill,
-  skillTrustLevel,
   soulWriteHttpError,
-  sourceType,
 } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ActivityService } from "../../activity/service";
 import type { AuditService } from "../../audit/service";
-import { makeSoulAuditWriter, redactRemoteUrl, stripUrlCredentials } from "../../audit/soul-write";
+import { makeSoulAuditWriter, redactRemoteUrl, } from "../../audit/soul-write";
 import { ErrorSchema } from "../../auth/schemas";
 import { commitActorFromRequest } from "../commit-actor";
-import { buildAudit } from "./audit";
+import {
+  createSkillMarketplaceFlow,
+  SkillMarketplaceError,
+  type SkillMarketplaceFlow,
+} from "./marketplace";
 import {
   SkillAuditBodySchema,
   SkillAuditResponseSchema,
@@ -82,7 +80,7 @@ export interface DiscoveredSkill {
 const NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const SCAN_TTL_MS = 10 * 60 * 1000;
 const MAX_SCANS = 25;
-const STRUCTURAL_INSTALL_BLOCKERS = new Set(["binary_file", "oversized_file", "oversized_skill", "symlink_escape", "too_many_files"]);
+const _STRUCTURAL_INSTALL_BLOCKERS = new Set(["binary_file", "oversized_file", "oversized_skill", "symlink_escape", "too_many_files"]);
 const scans = new Map<string, ScanEntry>();
 const definitionRegistry = new SchemaRegistry(DEFINITION_REGISTRATIONS);
 const marketplaceCache = new Map<string, { scanId: string; expires: number; manifest: Map<string, MarketplaceManifestEntry> }>();
@@ -123,7 +121,7 @@ function generatedSkillDefinition(skill: DiscoveredSkill): string | undefined {
   const definition = result.files.find((file) => file.path.endsWith("/skill.yaml"));
   return definition?.operation === "upsert" ? definition.content : undefined;
 }
-async function skillInstallChanges(root: string, skill: DiscoveredSkill): Promise<SoulWrite[]> {
+async function _skillInstallChanges(root: string, skill: DiscoveredSkill): Promise<SoulWrite[]> {
   const changes: SoulWrite[] = [];
   const written = new Set<string>();
   const put = (path: string, content: string): void => {
@@ -187,7 +185,7 @@ async function skillPackageDetail(directory: string | undefined): Promise<SkillP
     })),
   };
 }
-function executablePackageBlocker(skill: DiscoveredSkill): string | undefined {
+function _executablePackageBlocker(skill: DiscoveredSkill): string | undefined {
   const definitionFile = skill.files.find((file) => file.path === "skill.yaml" || file.path === "skill.yml");
   if (definitionFile === undefined) return undefined;
   let definition: SkillDefinition;
@@ -307,7 +305,7 @@ async function readManifest(dir: string): Promise<Map<string, MarketplaceManifes
   }
   return byName;
 }
-async function loadMarketplace(gitSync: GitSyncService, soulLoader: SoulLoader, bundledSkills: ReadonlyMap<string, BundledSkill>, disabledBundledSkills: ReadonlySet<string>): Promise<MarketplaceResponse> {
+async function _loadMarketplace(gitSync: GitSyncService, soulLoader: SoulLoader, bundledSkills: ReadonlyMap<string, BundledSkill>, disabledBundledSkills: ReadonlySet<string>): Promise<MarketplaceResponse> {
   const source = marketplaceSource();
   const now = Date.now();
   const cached = marketplaceCache.get(source);
@@ -339,7 +337,7 @@ async function loadMarketplace(gitSync: GitSyncService, soulLoader: SoulLoader, 
     scans.set(scanId, { source, ref, skills: await discoverSkills(dir), audited: new Set(), expires: now + SCAN_TTL_MS });
     marketplaceCache.set(source, { scanId, expires: now + SCAN_TTL_MS, manifest: await readManifest(dir) });
   });
-  return loadMarketplace(gitSync, soulLoader, bundledSkills, disabledBundledSkills);
+  return _loadMarketplace(gitSync, soulLoader, bundledSkills, disabledBundledSkills);
 }
 // The operator sees that the catalog is unreachable, never git's stderr or a server temp path.
 function sendMarketplaceUnavailable(reply: FastifyReply, error: unknown) {
@@ -353,7 +351,7 @@ function rethrowSoulWriteError(reply: FastifyReply, error: unknown): never | Fas
   }
   throw error;
 }
-export function registerSkillRoutes(app: FastifyInstance, soulLoader: SoulLoader, gitSync: GitSyncService, soulWriter: SoulWriter, llmService: LlmService, requireAuth: PreHandler, activity?: ActivityService, bundledSkills: ReadonlyMap<string, BundledSkill> = new Map(), disabledBundledSkills: Set<string> = new Set(), audit?: AuditService): void {
+export function registerSkillRoutes(app: FastifyInstance, soulLoader: SoulLoader, gitSync: GitSyncService, soulWriter: SoulWriter, llmService: LlmService, requireAuth: PreHandler, activity?: ActivityService, bundledSkills: ReadonlyMap<string, BundledSkill> = new Map(), disabledBundledSkills: Set<string> = new Set(), audit?: AuditService, marketplace: SkillMarketplaceFlow = createSkillMarketplaceFlow({ gitSync, soulLoader, soulWriter, llmService, bundledSkills, disabledBundledSkills })): void {
   const auditWrite = makeSoulAuditWriter(audit);
   app.get("/api/v1/skills", {
     preHandler: requireAuth,
@@ -377,7 +375,7 @@ export function registerSkillRoutes(app: FastifyInstance, soulLoader: SoulLoader
   }, async (_req, reply) => {
     reply.header("cache-control", "no-store");
     try {
-      return await loadMarketplace(gitSync, soulLoader, bundledSkills, disabledBundledSkills);
+      return await marketplace.browse();
     } catch (error) {
       return sendMarketplaceUnavailable(reply, error);
     }
@@ -392,8 +390,8 @@ export function registerSkillRoutes(app: FastifyInstance, soulLoader: SoulLoader
   }, async (_req, reply) => {
     reply.header("cache-control", "no-store");
     try {
-      const marketplace = await loadMarketplace(gitSync, soulLoader, bundledSkills, disabledBundledSkills);
-      return { ...marketplace, skills: marketplace.skills.filter((skill) => skill.updateAvailable) };
+      const catalog = await marketplace.browse();
+      return { ...catalog, skills: catalog.skills.filter((skill) => skill.updateAvailable) };
     } catch (error) {
       return sendMarketplaceUnavailable(reply, error);
     }
@@ -456,16 +454,11 @@ export function registerSkillRoutes(app: FastifyInstance, soulLoader: SoulLoader
   }, async (req, reply) => {
     const { source } = req.body as { source: string };
     try {
-      return await withGitSourceClone(source, { prefix: "skill-scan-", actorId: commitActorFromRequest(req).principalId }, async ({ dir, ref }) => {
-        const discovered = await discoverSkills(dir);
-        if (discovered.length === 0) return reply.code(400).send({ error: "no SKILL.md files found in repo" });
-        const lock = await readLock(gitSync.path);
-        const scanId = randomUUID();
-        pruneScans(Date.now());
-        scans.set(scanId, { source, ref, skills: discovered, audited: new Set(), expires: Date.now() + SCAN_TTL_MS });
-        return { scanId, skills: discovered.map((skill) => ({ name: skill.name, skillPath: skill.skillPath, description: skill.description, ...installStatus(skill, lock, soulLoader, bundledSkills, disabledBundledSkills) })) };
-      });
+      return await marketplace.scan({ source, actorId: commitActorFromRequest(req).principalId });
     } catch (error) {
+      if (error instanceof SkillMarketplaceError && error.status === 400) {
+        return reply.code(400).send({ error: error.message });
+      }
       const denial = gitSourceHttpError(error);
       if (!denial) throw error;
       return reply.code(denial.status).send(denial.body);
@@ -480,19 +473,15 @@ export function registerSkillRoutes(app: FastifyInstance, soulLoader: SoulLoader
       response: { 200: SkillAuditResponseSchema, 401: ErrorSchema, 404: ErrorSchema, 422: ErrorSchema, 502: ErrorSchema },
     },
   }, async (req, reply) => {
-    const { scanId, name, skillPath } = req.body as { scanId: string; name: string; skillPath?: string };
-    const entry = scans.get(scanId);
-    const skill = entry?.skills.find((scannedSkill) => (skillPath === undefined ? scannedSkill.name === name : scannedSkill.skillPath === skillPath));
-    if (!entry || !skill) return reply.code(404).send({ error: "scanned skill not found (scan may have expired)" });
-    const { body } = parseFrontmatter(skill.content);
-    const deterministicScan = { ...scanSkill(skill.files), trustLevel: skillTrustLevel(entry.source) };
+    const { scanId, name, skillPath } = req.body as { scanId: string; name: string; skillPath: string };
     try {
-      const report = await buildAudit(llmService.effortModel("balanced"), { name: skill.name, description: skill.description, body }, deterministicScan);
-      entry.audited.add(skill.skillPath);
-      return { report };
+      return await marketplace.audit({ scanId, name, skillPath });
     } catch (error) {
-      if (error instanceof LlmNotConfiguredError) {
-        return reply.code(422).send({ error: "SkillAudit needs an LLM provider — configure one in Operate → Business → Models." });
+      if (
+        error instanceof SkillMarketplaceError &&
+        (error.status === 404 || error.status === 422)
+      ) {
+        return reply.code(error.status).send({ error: error.message });
       }
       return reply.code(502).send({ error: `SkillAudit failed: ${error instanceof Error ? error.message : String(error)}` });
     }
@@ -507,62 +496,33 @@ export function registerSkillRoutes(app: FastifyInstance, soulLoader: SoulLoader
     },
   }, async (req, reply) => {
     const { scanId, names, paths } = req.body as { scanId: string; names?: string[]; paths?: string[] };
-    const entry = scans.get(scanId);
-    if (!entry) return reply.code(404).send({ error: "scan not found (it may have expired)" });
-    // `paths` names a scanned row exactly; `names` is the legacy selection and cannot tell two same-named packages apart, so it stays ambiguous by construction.
-    const wanted = paths !== undefined
-      ? [...new Set(paths)].map((path) => ({ key: path, matches: entry.skills.filter((skill) => skill.skillPath === path) }))
-      : [...new Set(names ?? [])].map((name) => ({ key: name, matches: entry.skills.filter((skill) => skill.name === name) }));
-    if (wanted.length === 0) return reply.code(400).send({ error: "select at least one skill to install" });
-    const missing = wanted.filter((want) => want.matches.length === 0).map((want) => want.key);
-    if (missing.length > 0) return reply.code(400).send({ error: `not in scan: ${missing.join(", ")}` });
-    const chosen = wanted.flatMap((want) => (want.matches.length === 1 ? want.matches : []));
-    // A Skill name is its soul directory, so two chosen Skills sharing one name cannot both be installed. Refuse rather than install whichever the scan listed first: the operator reviewed two packages and would be given one.
-    const collisions = [...new Set(chosen.map((skill) => skill.name))].map((name) => chosen.filter((skill) => skill.name === name)).filter((group) => group.length > 1);
-    const ambiguous = [...wanted.filter((want) => want.matches.length > 1).map((want) => want.matches), ...collisions];
-    if (ambiguous.length > 0) return reply.code(400).send({ error: `this source defines more than one skill with the same name, so the selection is ambiguous: ${ambiguous.map((matches) => `${matches[0].name} (${matches.map((skill) => skill.skillPath).join(", ")})`).join("; ")}` });
-    const unaudited = chosen.filter((skill) => !entry.audited.has(skill.skillPath));
-    if (unaudited.length > 0) return reply.code(409).send({ error: `audit required before install: ${unaudited.map((skill) => skill.name).join(", ")}` });
-    for (const skill of chosen) {
-      const { frontmatter, body } = parseFrontmatter(skill.content);
-      const validation = validateSkill({ name: skill.name, frontmatter, body, content: skill.content });
-      if (!validation.valid) return reply.code(400).send({ error: `invalid Skill "${skill.name}": ${validation.error}` });
-      const unstorable = unstorableArtifactPaths("Skill", skill.name, skill.files.filter((file) => file.symlinkTarget === undefined).map((file) => file.path));
-      if (unstorable.length > 0) return reply.code(400).send({ error: `Skill "${skill.name}" contains files the soul cannot store: ${unstorable.join(", ")}` });
-      const blockers = scanSkill(skill.files).findings.filter((finding) => STRUCTURAL_INSTALL_BLOCKERS.has(finding.patternId));
-      if (blockers.length > 0) {
-        return reply.code(400).send({ error: `Skill "${skill.name}" contains unsupported package files: ${[...new Set(blockers.map((finding) => finding.patternId))].join(", ")}` });
-      }
-      const executableBlocker = executablePackageBlocker(skill);
-      if (executableBlocker !== undefined) return reply.code(400).send({ error: `Skill "${skill.name}" cannot be published: ${executableBlocker}` });
-    }
-    const installed: string[] = [];
-    const changes: SoulWrite[] = [];
-    for (const skill of chosen) {
-      changes.push(...(await skillInstallChanges(gitSync.path, skill)));
-      installed.push(skill.name);
-    }
-    const lock = await readLock(gitSync.path);
-    for (const skill of chosen) {
-      lock.skills[skill.name] = { sourceUrl: stripUrlCredentials(entry.source), sourceType: sourceType(entry.source), skillPath: skill.skillPath, ref: entry.ref, hash: skillDirectoryHash(skill.files) };
-    }
-    changes.push({ op: "put", target: { kind: "SkillsLock" }, content: `${JSON.stringify(lock, null, 2)}\n` });
     try {
-      await soulWriter.apply({ subject: `soul: install skill(s) ${installed.join(", ")}`, source: "api", actor: commitActorFromRequest(req), businessId: DEPLOYMENT_BUSINESS_ID, changes });
+      const result = await marketplace.install({
+        scanId,
+        names,
+        paths,
+        actor: commitActorFromRequest(req),
+        source: "api",
+      });
+      const installed = result.installed.map((skill) => skill.name);
+      await activity?.record({
+        category: "skill",
+        action: "skill.installed",
+        actorId: (req.user as { _id: string } | undefined)?._id,
+        targetType: "skill",
+        targetId: installed.join(", "),
+        summary: `Installed skill(s): ${installed.join(", ")}`,
+        metadata: { skills: installed, source: result.source, ref: result.ref },
+      });
+      await auditWrite(req, "skill.install", `skill:${installed.join(",")}`, {
+        skills: installed,
+        source: redactRemoteUrl(result.source),
+        ...(result.ref ? { ref: result.ref } : {}),
+      });
+      return { installed };
     } catch (error) {
+      if (error instanceof SkillMarketplaceError) return reply.code(error.status).send({ error: error.message });
       return rethrowSoulWriteError(reply, error);
     }
-    await soulLoader.reload();
-    await activity?.record({
-      category: "skill",
-      action: "skill.installed",
-      actorId: (req.user as { _id: string } | undefined)?._id,
-      targetType: "skill",
-      targetId: installed.join(", "),
-      summary: `Installed skill(s): ${installed.join(", ")}`,
-      metadata: { skills: installed, source: stripUrlCredentials(entry.source), ref: entry.ref },
-    });
-    await auditWrite(req, "skill.install", `skill:${installed.join(",")}`, { skills: installed, source: redactRemoteUrl(entry.source), ...(entry.ref ? { ref: entry.ref } : {}) });
-    return { installed };
   });
 }

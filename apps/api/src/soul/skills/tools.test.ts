@@ -9,6 +9,7 @@ import type {
 } from "@tulipfarm/soul";
 import { SoulChangesetValidationError, SoulWriteError } from "@tulipfarm/soul";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { SkillMarketplaceFlow } from "./marketplace";
 import { SKILL_TOOLS, type SkillToolContext } from "./tools";
 
 type SkillTool = (typeof SKILL_TOOLS)[number];
@@ -115,6 +116,12 @@ function makeCtx(
     bundledSkills: new Map(bundledSkills.map((skill) => [skill.name, skill])),
     disabledBundledSkills,
     soulWriter: makeSoulWriter(existingCompanions),
+    marketplace: {
+      browse: vi.fn(),
+      scan: vi.fn(),
+      audit: vi.fn(),
+      install: vi.fn(),
+    } as unknown as SkillMarketplaceFlow,
   };
 }
 
@@ -136,6 +143,12 @@ const updateTool = SKILL_TOOLS.find((t) => t.name === "skill_update") as SkillTo
 const getTool = SKILL_TOOLS.find((t) => t.name === "skill_get") as SkillTool;
 const listTool = SKILL_TOOLS.find((t) => t.name === "skill_list") as SkillTool;
 const deleteTool = SKILL_TOOLS.find((t) => t.name === "skill_delete") as SkillTool;
+const marketplaceBrowseTool = SKILL_TOOLS.find(
+  (t) => t.name === "skill_marketplace_browse"
+) as SkillTool;
+const sourceScanTool = SKILL_TOOLS.find((t) => t.name === "skill_source_scan") as SkillTool;
+const scannedAuditTool = SKILL_TOOLS.find((t) => t.name === "skill_scanned_audit") as SkillTool;
+const scannedInstallTool = SKILL_TOOLS.find((t) => t.name === "skill_scanned_install") as SkillTool;
 
 function expectNoNullishTargetText(targets: unknown): void {
   expect(JSON.stringify(targets)).not.toMatch(/undefined|null/);
@@ -921,8 +934,8 @@ describe("skill_delete", () => {
 // ── SKILL_TOOLS export ────────────────────────────────────────────────────────
 
 describe("SKILL_TOOLS", () => {
-  it("exports 6 tools with correct mutating flags", () => {
-    expect(SKILL_TOOLS).toHaveLength(6);
+  it("exports marketplace scan, audit, and install tools with correct mutating flags", () => {
+    expect(SKILL_TOOLS).toHaveLength(10);
     const byName = Object.fromEntries(SKILL_TOOLS.map((t) => [t.name, t]));
     expect(byName.skill_create.mutating).toBe(true);
     expect(byName.skill_update.mutating).toBe(true);
@@ -930,5 +943,73 @@ describe("SKILL_TOOLS", () => {
     expect(byName.skill_list.mutating).toBe(false);
     expect(byName.skill_delete.mutating).toBe(true);
     expect(byName.skill_activate.mutating).toBe(true);
+    expect(byName.skill_marketplace_browse.mutating).toBe(false);
+    expect(byName.skill_source_scan.mutating).toBe(false);
+    expect(byName.skill_scanned_audit.mutating).toBe(false);
+    expect(byName.skill_scanned_install.mutating).toBe(true);
+  });
+});
+
+describe("marketplace Skill Tools", () => {
+  it("passes an exact scanned selection through audit and install, preserving provenance", async () => {
+    const ctx = makeCtx();
+    vi.mocked(ctx.marketplace.audit).mockResolvedValue({ report: FAKE_REPORT });
+    vi.mocked(ctx.marketplace.install).mockResolvedValue({
+      installed: [{ name: "code-review", skillPath: "skills/code-review/SKILL.md" }],
+      source: "owner/skills",
+      ref: "abc123",
+    });
+    const selection = {
+      scanId: "scan-1",
+      name: "code-review",
+      skillPath: "skills/code-review/SKILL.md",
+    };
+
+    await expect(scannedAuditTool.handler(selection, ctx)).resolves.toMatchObject({
+      success: true,
+    });
+    await expect(scannedInstallTool.handler(selection, ctx)).resolves.toEqual({
+      success: true,
+      data: {
+        installed: [{ name: "code-review", skillPath: "skills/code-review/SKILL.md" }],
+        source: "owner/skills",
+        ref: "abc123",
+      },
+    });
+    expect(ctx.marketplace.audit).toHaveBeenCalledWith(selection);
+    expect(ctx.marketplace.install).toHaveBeenCalledWith({
+      scanId: "scan-1",
+      names: ["code-review"],
+      paths: ["skills/code-review/SKILL.md"],
+      actor: expect.objectContaining({ principalId: "service:tulipfarm-system" }),
+    });
+  });
+
+  it("uses the request actor for source scans and exposes the marketplace catalog", async () => {
+    const ctx = makeCtx();
+    ctx.requestContext = {
+      userId: "user-1",
+      actor: { principalId: "user-1", name: "User", email: "user@example.com" },
+    };
+    vi.mocked(ctx.marketplace.browse).mockResolvedValue({
+      scanId: "catalog-1",
+      source: "owner/skills",
+      skills: [],
+    });
+    vi.mocked(ctx.marketplace.scan).mockResolvedValue({
+      scanId: "scan-1",
+      source: "owner/skills",
+      ref: "abc123",
+      skills: [],
+    });
+
+    await expect(marketplaceBrowseTool.handler({}, ctx)).resolves.toMatchObject({ success: true });
+    await expect(sourceScanTool.handler({ source: "owner/skills" }, ctx)).resolves.toMatchObject({
+      success: true,
+    });
+    expect(ctx.marketplace.scan).toHaveBeenCalledWith({
+      source: "owner/skills",
+      actorId: "user-1",
+    });
   });
 });

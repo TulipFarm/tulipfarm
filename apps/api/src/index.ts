@@ -249,6 +249,7 @@ import { agentForRunResolver, delegableToolNames } from "./soul/agents/registry"
 import { bundleRetentionMs, registerSoulBundlePruneSchedule } from "./soul/bundle-prune-schedule";
 import { createGitHubSoulCredentialProvider } from "./soul/github-repo-credential";
 import { registerSoulPublicationRoutes } from "./soul/publication-routes";
+import { createSkillMarketplaceFlow } from "./soul/skills/marketplace";
 import { registerSoulSync } from "./soul-sync";
 import { PgSurfaceActionStore } from "./surfaces/action-store";
 import { PgSurfaceArtifactStore } from "./surfaces/artifact-store";
@@ -749,6 +750,14 @@ async function boot() {
     const knowledgeAuthorLabeller = new AuthorLabeller(pool);
     const knowledgeReaderDirectory = new ReaderDirectory(pool);
     const knowledgeSubjectDirectory = new SubjectDirectory(pool);
+    const skillMarketplace = createSkillMarketplaceFlow({
+      gitSync,
+      soulWriter,
+      soulLoader,
+      llmService,
+      bundledSkills,
+      disabledBundledSkills,
+    });
     const toolRegistry = buildToolRegistry({
       memoryDocuments,
       kv: kvService,
@@ -773,6 +782,7 @@ async function boot() {
         llmService,
         bundledSkills,
         disabledBundledSkills,
+        marketplace: skillMarketplace,
       },
       github: githubTools,
       slack: slackTools,
@@ -986,6 +996,7 @@ async function boot() {
       },
       domainEventEmitter,
       llmService,
+      skillMarketplace,
       triggerCuratorSweep: async () => {
         await boss.send(CURATOR_SWEEP_QUEUE, {});
       },
