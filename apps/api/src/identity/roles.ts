@@ -23,15 +23,26 @@ export const ADMIN_ONLY_SURFACES: readonly {
     actions: ["integration.connect", "integration.disconnect", "integration.remove"],
     enforcedIn: "integrations/routes.ts",
   },
-  /** GitHub install disconnect and Soul repo selection are admin-only shared credentials. */
+  /** Shared credentials and provider writes require an explicit Team-level grant. */
   {
     type: "integration.github",
     actions: [
       "integration.github.installation.disconnect",
       "integration.github.soul_repo.connect",
       "integration.github.soul_repo.create",
+      GITHUB_TOOL_IDS.issueCreate,
+      GITHUB_TOOL_IDS.issueComment,
+      GITHUB_TOOL_IDS.issueLabel,
+      GITHUB_TOOL_IDS.issueAssign,
+      GITHUB_TOOL_IDS.issueClose,
+      GITHUB_TOOL_IDS.pullRequestCreate,
+      GITHUB_TOOL_IDS.pullRequestComment,
+      GITHUB_TOOL_IDS.pullRequestReview,
+      GITHUB_TOOL_IDS.pullRequestMerge,
+      GITHUB_TOOL_IDS.repoPush,
+      GITHUB_TOOL_IDS.repositoryCreate,
     ],
-    enforcedIn: "integrations/github-install-routes.ts",
+    enforcedIn: "integrations/github-install-routes.ts; tools/github/tools.ts",
   },
   {
     type: "identity",
@@ -84,10 +95,17 @@ export const ADMIN_ONLY_SURFACES: readonly {
    */
   { type: "soul.git_config", actions: ["*"], enforcedIn: "soul/routes.ts" },
   { type: "soul.publication", actions: ["*"], enforcedIn: "soul/publication-routes.ts" },
-  /** Resource domains are admin-only; domained deletes are gated to prevent re-create bypass. */
+  /** Resource type authoring requires an explicit Team-level grant. */
   {
     type: "soul.resource_type",
-    actions: ["soul.resource_type.set_domain", "soul.resource_type.delete_domained"],
+    actions: [
+      "soul.resource_type.set_domain",
+      "soul.resource_type.delete_domained",
+      "soul.resource_type.create",
+      "soul.resource_type.update",
+      "soul.resource_type.hooks.update",
+      "soul.resource_type.hooks.delete",
+    ],
     enforcedIn: "soul/resource-types/routes.ts",
   },
   {
@@ -113,6 +131,8 @@ export const ADMIN_ONLY_SURFACES: readonly {
 /**
  * Keeps today's access to legacy Resource types that declare no domain. Once a Resource type
  * declares `domain`, this grant no longer matches; that domain needs its own explicit grant.
+ * Record CRUD stays default-on; authoring and provider Tool access require explicit Team grants.
+ * A Team with no grants must not let a member reshape the business.
  *
  * Exported because it is the one wildcard `member` still holds, so it is also the only thing the
  * admin-only carve-out below has to close.
@@ -170,32 +190,17 @@ export const MEMBER_ALLOWED_SURFACES: readonly {
   { type: "preference", actions: ["*"], enforcedIn: "preferences/routes.ts" },
   { type: "secret", actions: ["secret.read"], enforcedIn: "secrets/routes.ts" },
   { type: "soul", actions: ["*"], enforcedIn: "soul/routes.ts" },
-  { type: "soul.agent", actions: ["*"], enforcedIn: "soul/agents/routes.ts; soul/agents/tools.ts" },
   { type: "soul.guardrails", actions: ["*"], enforcedIn: "platform/guardrail-tool.ts" },
   { type: "soul.repo", actions: ["*"], enforcedIn: "platform/tools.ts" },
-  /**
-   * Named action by action rather than `*` for the same reason as `integration.github`: a same-type
-   * wildcard forces a deny for each admin-only action, which no granted Role can then lift (#408).
-   */
+  /** Resource type authoring requires an explicit Team-level grant. */
   {
     type: "soul.resource_type",
     actions: [
-      "soul.resource_type.create",
       "soul.resource_type.list",
       "soul.resource_type.read",
-      "soul.resource_type.update",
       "soul.resource_type.hooks.read",
-      "soul.resource_type.hooks.update",
-      "soul.resource_type.hooks.delete",
     ],
     enforcedIn: "soul/resource-types/routes.ts; soul/resource-types/tools.ts",
-  },
-  { type: "soul.routine", actions: ["*"], enforcedIn: "platform/tools.ts" },
-  { type: "soul.skill", actions: ["*"], enforcedIn: "soul/skills/routes.ts; soul/skills/tools.ts" },
-  {
-    type: "soul.surface_component",
-    actions: ["*"],
-    enforcedIn: "soul/surface-components/tools.ts",
   },
   { type: "surface", actions: ["*"], enforcedIn: "surfaces/routes.ts" },
   { type: "platform.surface", actions: ["*"], enforcedIn: "surfaces/tools.ts" },
@@ -206,28 +211,21 @@ export const MEMBER_ALLOWED_SURFACES: readonly {
   { type: "platform.task", actions: ["*"], enforcedIn: "platform/tools.ts" },
   { type: "platform.time", actions: ["*"], enforcedIn: "platform/tools.ts" },
   /**
-   * Provider grants expose the surface only; provider ACLs still decide account access. Named
-   * action by action rather than `*`: a same-type wildcard forces a compensating deny for each
-   * admin-only action, and that deny then outranks any Role granted on top of `member` (#408).
+   * Catalog browsing only. Provider Tool access (Slack send, GitHub write, Google) requires an
+   * explicit Team-level grant (#access-audit) — a Team with no grants must give its members no
+   * reach into connected third parties.
    */
   {
     type: "integration.github",
-    actions: [
-      ...Object.values(GITHUB_TOOL_IDS),
-      "github.repository.list",
-      "integration.github.read",
-    ],
+    actions: ["integration.github.read"],
     enforcedIn: "tools/github/tools.ts",
   },
-  { type: "integration.slack", actions: ["*"], enforcedIn: "tools/slack/tools.ts" },
-  { type: "integration.google", actions: ["*"], enforcedIn: "tools/google/tools.ts" },
   /** Explicit vocabulary counterpart; authority already comes from the wildcard grant. */
   {
     type: "record",
     actions: [...MEMBER_UNDOMAINED_RECORD_ACTIONS],
     enforcedIn: "resources/tools.ts",
   },
-  { type: "trigger", actions: ["*"], enforcedIn: "triggers/routes.ts" },
 ];
 
 /** Self-owned surfaces stay member-allowed; scoped denies cover other users' records. */
