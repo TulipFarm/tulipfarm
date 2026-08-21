@@ -187,7 +187,7 @@ function markdown(artifact: SurfaceArtifact, context?: SurfaceRenderContext): st
   }
 }
 
-function createGitHubRenderer(
+export function createGitHubRenderer(
   surface: "comment" | "check-run"
 ): SurfaceRenderer<GitHubSurfacePayload> {
   const target = { channel: "github", surface } as const;
@@ -268,3 +268,5 @@ function createGitHubRenderer(
 }
 
 export const githubCommentRenderer = createGitHubRenderer("comment");
+
+export const githubCheckRunRenderer = createGitHubRenderer("check-run");
