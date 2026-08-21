@@ -24,6 +24,7 @@ export type IntegrationSummary = {
   installed: boolean;
   status: McpConnectionStatus;
   errorMessage?: string;
+  updateAvailable?: boolean;
 };
 
 export type RequiredEnvVar = {
@@ -179,6 +180,17 @@ export async function disconnectIntegration(name: string): Promise<{ status: str
     "POST",
     `/api/v1/integrations/${encodeURIComponent(name)}/disconnect`,
     {}
+  );
+}
+
+export async function updateIntegration(
+  name: string,
+  source?: string
+): Promise<{ name: string; source: string; ref: string }> {
+  return apiWrite<{ name: string; source: string; ref: string }>(
+    "POST",
+    `/api/v1/integrations/${encodeURIComponent(name)}/update`,
+    source ? { source } : {}
   );
 }
 

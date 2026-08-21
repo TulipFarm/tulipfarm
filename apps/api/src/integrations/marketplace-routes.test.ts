@@ -734,4 +734,48 @@ describe("integration marketplace routes", () => {
       expect(lock.integrations).toEqual({});
     });
   });
+
+  describe("POST /api/v1/integrations/:name/update", () => {
+    it("updates an installed integration from its source repository", async () => {
+      const repo = await makeTemp({ linear: declarativeManifest("linear") });
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/install",
+        cookies: auth(),
+        headers,
+        payload: { source: `file://${repo}` },
+      });
+
+      // Update repo manifest
+      const updatedManifest = {
+        ...declarativeManifest("linear"),
+        description: "updated linear integration",
+      };
+      const fsP = require("node:fs/promises");
+      const yaml = require("yaml");
+      await fsP.writeFile(
+        require("node:path").join(repo, "integrations", "linear", "manifest.yml"),
+        yaml.stringify(updatedManifest),
+        "utf8"
+      );
+      const cp = require("node:child_process");
+      const { promisify } = require("node:util");
+      const execP = promisify(cp.execFile);
+      await execP("git", ["add", "-A"], { cwd: repo });
+      await execP("git", ["commit", "-q", "-m", "update linear"], { cwd: repo });
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/linear/update",
+        cookies: auth(),
+        headers,
+        payload: {},
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().name).toBe("linear");
+
+      const written = yaml.parse(soul.writer.read("Integration", "linear") ?? "");
+      expect(written.description).toBe("updated linear integration");
+    });
+  });
 });

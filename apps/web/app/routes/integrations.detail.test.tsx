@@ -25,10 +25,11 @@ vi.mock("~/lib/integrations", async (importOriginal) => ({
   disconnectIntegration: vi.fn(),
   disconnectGitHubInstallation: vi.fn(),
   disconnectPersonalIntegration: vi.fn(),
+  updateIntegration: vi.fn(),
 }));
 
 import type { IntegrationDetail } from "~/lib/integrations";
-import { deleteIntegration, disconnectIntegration } from "~/lib/integrations";
+import { deleteIntegration, disconnectIntegration, updateIntegration } from "~/lib/integrations";
 import IntegrationDetailPage from "./_app.integrations.$name";
 
 function detail(over: Partial<IntegrationDetail> = {}): IntegrationDetail {
@@ -257,4 +258,57 @@ test("keeps a personal OAuth step out of the administrator's business setup rail
 
   expect((await screen.findAllByText("Business app")).length).toBeGreaterThan(0);
   expect(screen.queryByText("Connect your GitHub account")).not.toBeInTheDocument();
+});
+
+test("shows update button and update banner when an update is available", async () => {
+  renderDetail(
+    detail({
+      name: "linear",
+      title: "Linear",
+      source: "acme/linear",
+      updateAvailable: true,
+    })
+  );
+
+  expect(await screen.findByText(/update available/i)).toBeInTheDocument();
+  const updateButtons = screen.getAllByRole("button", { name: /^update/i });
+  expect(updateButtons.length).toBeGreaterThan(0);
+});
+
+test("updates through the API when update is clicked", async () => {
+  const user = userEvent.setup();
+  vi.mocked(updateIntegration).mockResolvedValue({
+    name: "linear",
+    source: "acme/linear",
+    ref: "main",
+  });
+
+  renderDetail(
+    detail({
+      name: "linear",
+      title: "Linear",
+      source: "acme/linear",
+      updateAvailable: true,
+    })
+  );
+
+  const updateButton = (await screen.findAllByRole("button", { name: /^update/i }))[0];
+  await user.click(updateButton);
+
+  expect(updateIntegration).toHaveBeenCalledWith("linear", "acme/linear");
+});
+
+test("hides update button from a member even when an update is available", async () => {
+  admin = false;
+  renderDetail(
+    detail({
+      name: "linear",
+      title: "Linear",
+      source: "acme/linear",
+      updateAvailable: true,
+    })
+  );
+
+  expect(await screen.findByText(/update available/i)).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /^update/i })).not.toBeInTheDocument();
 });

@@ -7,15 +7,32 @@ afterEach(() => {
   cleanup();
 });
 
+const admin = true;
+
+vi.mock("~/lib/use-session-user", () => ({
+  useSessionUser: () => ({
+    id: "u1",
+    email: "a@b.dev",
+    name: null,
+    role: admin ? "admin" : "member",
+  }),
+  useIsAdmin: () => admin,
+}));
+
 vi.mock("~/lib/integrations", async (importOriginal) => ({
   ...(await importOriginal<typeof import("~/lib/integrations")>()),
   listIntegrations: vi.fn(),
   inspectIntegrationSource: vi.fn(),
   installIntegration: vi.fn(),
+  updateIntegration: vi.fn(),
 }));
 
 import type { IntegrationSummary } from "~/lib/integrations";
-import { inspectIntegrationSource, installIntegration } from "~/lib/integrations";
+import {
+  inspectIntegrationSource,
+  installIntegration,
+  updateIntegration,
+} from "~/lib/integrations";
 import IntegrationsIndex from "./_app.integrations._index";
 
 function integration(over: Partial<IntegrationSummary> = {}): IntegrationSummary {
@@ -188,4 +205,30 @@ test("names why a repo's integration was refused instead of just disabling it", 
 
   expect(await screen.findByText(/runs a handler module in the host process/)).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /^Install$/ })).toBeDisabled();
+});
+
+test("shows update available badge and update button on catalog row", async () => {
+  const user = userEvent.setup();
+  vi.mocked(updateIntegration).mockResolvedValue({
+    name: "linear",
+    source: "acme/linear",
+    ref: "main",
+  });
+
+  renderCatalog([
+    integration({
+      name: "linear",
+      title: "Linear",
+      installed: true,
+      source: "acme/linear",
+      updateAvailable: true,
+    }),
+  ]);
+
+  expect(await screen.findByText(/update available/i)).toBeInTheDocument();
+  const updateButton = screen.getByRole("button", { name: /update linear/i });
+  expect(updateButton).toBeInTheDocument();
+
+  await user.click(updateButton);
+  expect(updateIntegration).toHaveBeenCalledWith("linear", "acme/linear");
 });
