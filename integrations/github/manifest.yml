@@ -40,6 +40,9 @@ auth:
     description: GitHub builds the App from a definition we send, so there is nothing to fill in
       by hand. The App belongs to this deployment, not to TulipFarm.
     create_url: https://github.com/settings/apps/new?state={state}
+    # Used instead of create_url when the operator names a target org, so the App is created
+    # under that org rather than their personal account.
+    create_url_for_org: https://github.com/organizations/{org}/settings/apps/new?state={state}
     manifest_param: manifest
     delivery: form_post
     manifest:

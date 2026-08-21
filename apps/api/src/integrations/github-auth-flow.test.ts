@@ -278,6 +278,20 @@ describe("github declarative auth flow", () => {
     expect(res.statusCode).toBe(302);
   }
 
+  it("targets the org's manifest-creation URL when the operator names one", async () => {
+    const started = await app.inject({
+      method: "POST",
+      url: "/api/v1/integrations/github/auth/start/0",
+      cookies: auth(),
+      headers,
+      payload: { org: "acme-corp" },
+    });
+    expect(started.statusCode).toBe(200);
+    expect(String(started.json().url)).toContain(
+      "github.com/organizations/acme-corp/settings/apps/new"
+    );
+  });
+
   it("posts the App definition to GitHub instead of asking the operator to fill a form", async () => {
     const started = await startStep(0);
     const body = started.json();

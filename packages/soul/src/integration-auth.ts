@@ -167,6 +167,9 @@ export function validateAuthSteps(manifest: IntegrationManifest): string[] {
         break;
       case "app_manifest":
         if (!step.create_url) issues.push(`${at}: create_url missing`);
+        if (step.create_url_for_org && !step.create_url_for_org.includes("{org}")) {
+          issues.push(`${at}: create_url_for_org must contain {org}`);
+        }
         if (!step.manifest_param) issues.push(`${at}: manifest_param missing`);
         for (const env of Object.values(step.exchange?.map ?? {})) available.add(env);
         for (const env of step.exchange?.secret_envs ?? []) {

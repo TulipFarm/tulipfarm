@@ -101,6 +101,14 @@ export function registerIntegrationAuthRoutes(
               description:
                 "`business` (default) connects the deployment's shared credential and requires an administrator. `user` connects the caller's own credential and requires only authentication; only an oauth2 authorization_code step declaring `personal: true` can issue one.",
             },
+            org: {
+              type: "string",
+              minLength: 1,
+              maxLength: 39,
+              pattern: "^[A-Za-z0-9]([A-Za-z0-9-]{0,37}[A-Za-z0-9])?$",
+              description:
+                "Optional target org login for an app_manifest step, so the provider app is created under that org instead of the caller's personal account. Ignored by steps that do not support org targeting.",
+            },
           },
           additionalProperties: false,
         },
@@ -123,7 +131,9 @@ export function registerIntegrationAuthRoutes(
       const manifest = resolveManifest(name);
       if (!manifest) return reply.code(404).send({ error: `integration not found: ${name}` });
 
-      const scope = (req.body as { scope?: string } | undefined)?.scope ?? "business";
+      const body = req.body as { scope?: string; org?: string } | undefined;
+      const scope = body?.scope ?? "business";
+      const org = body?.org?.trim();
       // Credential owner comes from authenticated request, never the body.
       const caller = req.principal;
       if (caller === undefined) {
@@ -155,6 +165,7 @@ export function registerIntegrationAuthRoutes(
           endpoints,
           repo: deps.repo,
           fetchImpl: deps.fetchImpl,
+          ...(org ? { org } : {}),
           ...(scope === "user" && caller !== undefined
             ? { principal: { kind: caller.kind, id: caller.id } }
             : {}),
