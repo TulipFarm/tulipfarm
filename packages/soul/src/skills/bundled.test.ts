@@ -128,6 +128,11 @@ describe("loadBundledSkills", () => {
     }
   });
 
+  it("ships Routine Forge with canonical examples references", async () => {
+    const routineForge = (await loadBundledSkills(makeLogger())).get("routine-forge");
+    expect(routineForge?.references).toEqual(["canonical-examples.md", "examples.md"]);
+  });
+
   it("ships Agent Forge with the guidance that makes capability restrictions reachable", async () => {
     const agentForge = (await loadBundledSkills(makeLogger())).get("agent-forge");
     const body = agentForge?.body ?? "";

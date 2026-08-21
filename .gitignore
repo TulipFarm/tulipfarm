@@ -17,9 +17,10 @@ tasks/
 !apps/api/src/tasks/
 !packages/storage/src/tasks/
 cookies.txt
-references
+/references
 !/.agents/skills/tulipfarm-design-system/references/
 !/.agents/skills/tulipfarm-design-system/references/design-system.md
+!skills/**/references/
 .absolute-work
 .codex/
 .claude/logs

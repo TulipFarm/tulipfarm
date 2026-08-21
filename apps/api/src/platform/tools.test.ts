@@ -316,6 +316,40 @@ describe("loadSkillReferenceTool", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("loads routine-forge reference examples from the real bundled tree", async () => {
+    const { loadBundledSkills } = await import("@tulipfarm/soul");
+    const bundled = await loadBundledSkills({ info() {}, warn() {}, error() {} });
+    const ctx: PlatformToolContext = {
+      soulWriter: makeSoulWriter(),
+      bundledSkills: bundled,
+    };
+    const examples = await loadSkillReferenceTool.handler(
+      { skill: "routine-forge", reference: "examples.md" },
+      ctx
+    );
+    expect(examples).toMatchObject({
+      success: true,
+      data: {
+        skill: "routine-forge",
+        reference: "examples.md",
+        content: expect.stringContaining("Routine & Trigger Canonical Examples"),
+      },
+    });
+
+    const canonicalExamples = await loadSkillReferenceTool.handler(
+      { skill: "routine-forge", reference: "canonical-examples.md" },
+      ctx
+    );
+    expect(canonicalExamples).toMatchObject({
+      success: true,
+      data: {
+        skill: "routine-forge",
+        reference: "canonical-examples.md",
+        content: expect.stringContaining("Routine & Trigger Canonical Examples"),
+      },
+    });
+  });
 });
 
 // ── delegate_to_agent ─────────────────────────────────────────────────────────
