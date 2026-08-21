@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.13.4](https://github.com/TulipFarm/tulipfarm/compare/v0.13.3...v0.13.4) (2026-08-21)
+
+### Features
+
+* **curator:** deliver task proposals ([#572](https://github.com/TulipFarm/tulipfarm/issues/572)) ([1caff62](https://github.com/TulipFarm/tulipfarm/commit/1caff62dafac90b64a9de20602eb624a31591fb3))
+* **integrations:** add Jira Cloud integration ([#570](https://github.com/TulipFarm/tulipfarm/issues/570)) ([e052874](https://github.com/TulipFarm/tulipfarm/commit/e052874c661bffdf6decd6885d25c74b37af3b5d))
+
+### Bug Fixes
+
+* **chat:** surface model failure diagnostics ([#571](https://github.com/TulipFarm/tulipfarm/issues/571)) ([b1a6e79](https://github.com/TulipFarm/tulipfarm/commit/b1a6e798f0f09358eba296f83b8275e7dd2c13e3))
+
 ## [0.13.3](https://github.com/TulipFarm/tulipfarm/compare/v0.13.2...v0.13.3) (2026-08-21)
 
 ### Features
