@@ -1,9 +1,66 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { UserDoc } from "../auth/users";
+import type { PersistedTurn } from "../conversations/service";
 import { registerConversationRoutes } from "./conversation-routes";
 import type { ConversationDeleteOutcome, ConversationRepo } from "./conversations";
 import type { MessageRepo } from "./messages";
+
+describe("restoring the latest Turn", () => {
+  let app: FastifyInstance;
+  const findLatestTurn = vi.fn(
+    async (): Promise<PersistedTurn | undefined> => ({
+      id: "turn-1",
+      businessId: "default",
+      conversationId: "chat-1",
+      idempotencyKey: "key-1",
+      requestMessageId: "message-1",
+      status: "running",
+      attempt: 1,
+      runId: "run-1",
+      cursor: 3,
+      supersededRunIds: [],
+      createdAt: new Date("2026-08-21T00:00:00.000Z"),
+      updatedAt: new Date("2026-08-21T00:00:01.000Z"),
+    })
+  );
+
+  beforeEach(async () => {
+    app = Fastify();
+    const repo = {
+      findById: async () => ({
+        _id: "chat-1",
+        userId: "user-1",
+        createdAt: new Date("2026-08-21T00:00:00.000Z"),
+        updatedAt: new Date("2026-08-21T00:00:01.000Z"),
+      }),
+    } as unknown as ConversationRepo;
+    registerConversationRoutes(
+      app,
+      { repo, messageRepo: {} as MessageRepo, turnStore: { findLatestTurn } },
+      async (request) => {
+        request.user = { _id: "user-1" } as UserDoc;
+      }
+    );
+    await app.ready();
+  });
+
+  afterEach(async () => {
+    vi.clearAllMocks();
+    await app.close();
+  });
+
+  it("returns the Run needed to rebuild live state", async () => {
+    const response = await app.inject({ method: "GET", url: "/api/v1/chats/chat-1" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().latestTurn).toEqual({
+      id: "turn-1",
+      runId: "run-1",
+      status: "running",
+    });
+  });
+});
 
 describe("conversation deletion route", () => {
   let app: FastifyInstance;

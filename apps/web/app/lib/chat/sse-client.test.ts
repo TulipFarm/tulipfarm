@@ -4,6 +4,7 @@ import {
   modelFailureMessage,
   parseSseFrames,
   postChat,
+  resumeRun,
 } from "~/lib/chat/sse-client";
 
 afterEach(() => {
@@ -124,6 +125,29 @@ test("recovers a dropped stream from the Run's own events without duplicating th
   expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
     headers: expect.objectContaining({ "Last-Event-ID": "1" }),
   });
+});
+
+test("replays a persisted Run from the beginning when a Chat mounts again", async () => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce(
+      streamResponse(
+        'id: 1\nevent: text.delta\ndata: {"text":"Checking"}\n\n' +
+          'id: 2\nevent: tool.call\ndata: {"callId":"c1","name":"record_list","argsDigest":"d1"}\n\n' +
+          'id: 3\nevent: tool.result\ndata: {"callId":"c1","status":"error","errorCode":"timeout"}\n\n' +
+          'id: 4\nevent: turn.finished\ndata: {"status":"failed","reason":"model_timeout"}\n\n'
+      )
+    );
+  vi.stubGlobal("fetch", fetchMock);
+  const events: string[] = [];
+
+  await resumeRun("run-1", { onEvent: (event) => events.push(event.type) });
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    expect.stringContaining("/api/v1/runs/run-1/events?after=0"),
+    expect.objectContaining({ method: "GET", credentials: "include" })
+  );
+  expect(events).toEqual(["text", "tool-call", "tool-result", "error"]);
 });
 
 test("submits the effort preset id in the chat model field", async () => {

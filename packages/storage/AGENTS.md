@@ -22,6 +22,7 @@ publication, approvals, integrations, events, and blob/vector/cache/queue ports.
 | `src/runs/` | Runs, States, Attempts, waits/signals, budgets, concurrency, children, events. |
 | `src/auth/` | Principals, roles, sessions, guests, JIT users, recertification, identities. |
 | `src/integrations/` | Integration install/state and channel inbound/delivery stores. |
+| `src/conversations/` | Conversation Turn read models used to restore Chat state. |
 | `src/approvals/`, `src/events/` | Approval persistence and generic event store. |
 | `src/kill-switches/` | Durable mutation kill switches backing the effect-plane emergency stop. |
 | `src/curator/` | Curator jobs, pinned input manifests and context pins, effect ledger, per-user work queue, daily spend admission, the claim-and-reserve mint transaction, stale-job reconciliation, and the read-only shadow review queries (`review.ts`, which writes nothing by design). |

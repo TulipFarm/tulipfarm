@@ -1,3 +1,4 @@
+import type { ConversationDetail, ConversationTurn } from "@tulipfarm/schema";
 import { apiDelete, apiGet, apiWrite } from "./api";
 
 /*
@@ -15,10 +16,8 @@ export type ConversationSummary = {
   updatedAt: string;
 };
 
-export type Conversation = ConversationSummary & {
-  userId: string | null;
-  model: string | null;
-};
+export type Conversation = ConversationSummary & ConversationDetail;
+export type { ConversationTurn };
 
 export type WireMessagePart =
   | { type: "text"; text: string }

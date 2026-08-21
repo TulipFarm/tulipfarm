@@ -41,6 +41,12 @@ export {
 export type { ValidationBoundary } from "./boundaries";
 export { BOUNDARIES } from "./boundaries";
 export { CANONICAL_HASH_ALGORITHM, canonicalHash, canonicalize } from "./canonicalize";
+export type { ConversationDetail, ConversationTurn } from "./chat";
+export {
+  CONVERSATION_TURN_STATUSES,
+  ConversationDetailSchema,
+  ConversationTurnSchema,
+} from "./chat";
 export type { ModelProfileDenialReason } from "./definitions";
 export * from "./definitions";
 export * as definitions from "./definitions";

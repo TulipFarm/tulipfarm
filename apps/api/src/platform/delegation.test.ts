@@ -84,6 +84,9 @@ class FakeConversationStore implements ConversationStore {
   async findTurn(_b: string, turnId: string) {
     return this.turns.find((turn) => turn.id === turnId);
   }
+  async findLatestTurn(_b: string, conversationId: string) {
+    return [...this.turns].reverse().find((turn) => turn.conversationId === conversationId);
+  }
   async findTurnByRunId(_b: string, runId: string) {
     return this.turns.find((turn) => turn.runId === runId);
   }

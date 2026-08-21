@@ -50,6 +50,12 @@ export class FakeConversationStore implements ConversationStore {
     return this.turns.find((candidate) => candidate.id === turnId);
   }
 
+  async findLatestTurn(_businessId: string, conversationId: string) {
+    return [...this.turns]
+      .reverse()
+      .find((candidate) => candidate.conversationId === conversationId);
+  }
+
   async findTurnByRunId(_businessId: string, runId: string) {
     return this.turns.find((candidate) => candidate.runId === runId);
   }

@@ -5,7 +5,7 @@
  */
 
 import { type NavigateFunction, useNavigate } from "@remix-run/react";
-import { useCallback, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { invokeClientAction, prefillForm } from "~/lib/chat/action-registry";
 import {
   appendUserMessage,
@@ -17,6 +17,7 @@ import type { ChatStreamMeta } from "~/lib/chat/sse-client";
 import {
   postChat,
   postSurfaceInteraction,
+  resumeRun,
   sendApprovalDecision,
   stopChatRun,
 } from "~/lib/chat/sse-client";
@@ -29,6 +30,7 @@ import type {
   ChatTurnOptions,
   ChatTurnSource,
 } from "~/lib/chat/types";
+import { type ConversationTurn, getConversation } from "~/lib/conversations";
 import { clearFeedback, sendFeedback as postFeedback } from "~/lib/feedback";
 import { randomUUID } from "~/lib/uuid";
 
@@ -37,21 +39,41 @@ export type SendOptions = ChatTurnOptions;
 export type UseChatStreamOptions = {
   initialConversationId?: string;
   initialMessages?: ChatMessage[];
+  initialTurn?: ConversationTurn | null;
   onConversationChange?: (conversationId: string | undefined) => void;
 };
 
+function needsRunReplay(opts?: UseChatStreamOptions): boolean {
+  const turn = opts?.initialTurn;
+  if (!turn) return false;
+  return opts?.initialMessages?.at(-1)?.role !== "assistant";
+}
+
 export function seedState(opts?: UseChatStreamOptions): ChatState {
-  if (opts?.initialMessages && opts.initialMessages.length > 0) {
+  const messages = opts?.initialMessages ?? [];
+  const base: ChatState = {
+    messages,
+    pendingApprovals: {},
+    status: "idle",
+    ...(opts?.initialConversationId === undefined
+      ? {}
+      : { conversationId: opts.initialConversationId }),
+  };
+  if (!needsRunReplay(opts)) return base;
+  const turn = opts?.initialTurn;
+  if (!turn) return base;
+  if (turn.status === "start_failed" || (turn.status === "failed" && turn.runId === null)) {
     return {
-      messages: opts.initialMessages,
-      pendingApprovals: {},
-      status: "idle",
-      conversationId: opts.initialConversationId,
+      ...base,
+      status: "error",
+      error: "The response could not be started. Try again.",
     };
   }
-  return opts?.initialConversationId
-    ? { ...initialChatState, conversationId: opts.initialConversationId }
-    : initialChatState;
+  return {
+    ...base,
+    status: "submitted",
+    ...(turn.runId === null ? {} : { runId: turn.runId }),
+  };
 }
 
 type ChatAction =
@@ -140,15 +162,97 @@ export function useChatStream(opts?: UseChatStreamOptions) {
   stateRef.current = state;
   const lastOptsRef = useRef<SendOptions | undefined>(undefined);
   const abortRef = useRef<AbortController | null>(null);
+  const stopRequestedRef = useRef(false);
   const onConversationChangeRef = useRef(opts?.onConversationChange);
   onConversationChangeRef.current = opts?.onConversationChange;
   const navigate = useNavigate();
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
 
+  useEffect(
+    () => () => {
+      abortRef.current?.abort();
+    },
+    []
+  );
+
+  const initialConversationId = opts?.initialConversationId;
+  const initialTurn = opts?.initialTurn;
+  const replayInitialTurn = needsRunReplay(opts);
+
+  useEffect(() => {
+    if (!replayInitialTurn || !initialConversationId || !initialTurn) return;
+    if (
+      initialTurn.status === "start_failed" ||
+      (initialTurn.status === "failed" && initialTurn.runId === null)
+    ) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const conversationId = initialConversationId;
+    const restoredTurn = initialTurn;
+    abortRef.current = controller;
+    stopRequestedRef.current = false;
+
+    async function restore(): Promise<void> {
+      let turn: ConversationTurn = restoredTurn;
+      while (turn.runId === null && turn.status === "pending") {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        if (controller.signal.aborted) return;
+        const conversation = await getConversation(conversationId);
+        if (!conversation.latestTurn) {
+          throw new Error("The response state could not be restored. Try again.");
+        }
+        turn = conversation.latestTurn;
+      }
+
+      if (turn.status === "start_failed" || turn.runId === null) {
+        throw new Error("The response could not be started. Try again.");
+      }
+
+      dispatch({ type: "meta", meta: { runId: turn.runId } });
+      await resumeRun(turn.runId, {
+        signal: controller.signal,
+        onEvent: (event) => {
+          if (event.type === "client-action") {
+            handleClientAction(event.data, navigateRef.current);
+            return;
+          }
+          dispatch(event);
+          if (event.type === "finish") {
+            onConversationChangeRef.current?.(conversationIdRef.current);
+          }
+        },
+        onConnectionState: setConnectionState,
+      });
+    }
+
+    void restore()
+      .catch((error) => {
+        if (controller.signal.aborted) {
+          if (stopRequestedRef.current) dispatch({ type: "stopped" });
+          return;
+        }
+        dispatch({
+          type: "error",
+          data: { message: error instanceof Error ? error.message : "stream failed" },
+        });
+      })
+      .finally(() => {
+        if (abortRef.current === controller) abortRef.current = null;
+        stopRequestedRef.current = false;
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [initialConversationId, initialTurn, replayInitialTurn]);
+
   const runStream = useCallback(async (text: string, opts?: SendOptions) => {
     const controller = new AbortController();
     abortRef.current = controller;
+    stopRequestedRef.current = false;
     const idempotencyKey = randomUUID();
     try {
       await postChat(
@@ -200,6 +304,7 @@ export function useChatStream(opts?: UseChatStreamOptions) {
       }
     } finally {
       abortRef.current = null;
+      stopRequestedRef.current = false;
     }
   }, []);
 
@@ -238,6 +343,7 @@ export function useChatStream(opts?: UseChatStreamOptions) {
   const stop = useCallback(() => {
     const runId = stateRef.current.runId;
     if (runId) void stopChatRun(runId).catch(() => {});
+    stopRequestedRef.current = true;
     abortRef.current?.abort();
   }, []);
 

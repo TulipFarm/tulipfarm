@@ -3,6 +3,7 @@ import { AgentGlyph } from "~/components/agent-glyph";
 import { ConnectionStatus } from "~/components/shell/states";
 import type { ChatMessage, ChatModelSelector } from "~/lib/chat/types";
 import { useChatStream } from "~/lib/chat/use-chat-stream";
+import type { ConversationTurn } from "~/lib/conversations";
 import { errorAction } from "~/lib/error-actions";
 import type { Suggestion } from "~/lib/onboarding";
 import type { Task } from "~/lib/tasks";
@@ -76,6 +77,7 @@ export function ChatPanel({
   businessName,
   initialConversationId,
   initialMessages,
+  initialTurn,
   onConversationChange,
   initialDraft,
   attachFileId,
@@ -87,6 +89,7 @@ export function ChatPanel({
   businessName?: string;
   initialConversationId?: string;
   initialMessages?: ChatMessage[];
+  initialTurn?: ConversationTurn | null;
   onConversationChange?: (conversationId: string | undefined) => void;
   /** A prompt to draft into the composer once, seeded by the onboarding Companion. */
   initialDraft?: string;
@@ -110,6 +113,7 @@ export function ChatPanel({
   } = useChatStream({
     initialConversationId,
     initialMessages,
+    initialTurn,
     onConversationChange,
   });
   const busy = status === "submitted" || status === "streaming";

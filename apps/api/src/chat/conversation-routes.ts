@@ -2,6 +2,7 @@ import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { FileService } from "@tulipfarm/files";
 import type { KnowledgeService } from "@tulipfarm/knowledge";
 import type { MemoryDocumentRepo } from "@tulipfarm/memory";
+import { ConversationDetailSchema } from "@tulipfarm/schema";
 import type { BundledSkill, SoulLoader } from "@tulipfarm/soul";
 import {
   buildSoulCatalogue,
@@ -16,6 +17,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
 import type { ToolRegistry } from "../broker/tool-adapter";
+import type { ConversationStore } from "../conversations/service";
 import { presentationContextFor, surfaceCatalogPromptFor } from "../surfaces/renderer-registry";
 import { githubDisabledSkillNames, githubExcludedToolNames } from "../tools/github/visibility";
 import type { ConversationDoc, ConversationRepo } from "./conversations";
@@ -43,6 +45,7 @@ async function findOwnedConversation(
 /** Read/update routes over conversation metadata + messages (no streaming). */
 export interface ConversationRoutesDeps {
   repo: ConversationRepo;
+  turnStore?: Pick<ConversationStore, "findLatestTurn">;
   /** The conversation owner's Memory Document, so the reconstructed prompt matches the live one. */
   memoryDocuments?: MemoryDocumentRepo;
   messageRepo: MessageRepo;
@@ -79,6 +82,7 @@ export function registerConversationRoutes(
     disabledBundledSkills,
     githubStatus,
     files,
+    turnStore,
   } = deps;
 
   app.get(
@@ -260,7 +264,7 @@ export function registerConversationRoutes(
     {
       preHandler: requireAuth,
       schema: {
-        description: "Fetch a conversation's metadata. Owner-only.",
+        description: "Fetch a conversation's metadata and latest Turn for Chat restoration.",
         tags: ["chat"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         params: {
@@ -269,20 +273,7 @@ export function registerConversationRoutes(
           properties: { id: { type: "string" } },
         },
         response: {
-          200: {
-            type: "object",
-            properties: {
-              id: { type: "string" },
-              userId: { type: ["string", "null"] },
-              agentId: { type: ["string", "null"] },
-              model: { type: ["string", "null"] },
-              title: { type: ["string", "null"] },
-              starred: { type: "boolean" },
-              createdAt: { type: "string" },
-              updatedAt: { type: "string" },
-            },
-            required: ["id", "createdAt", "updatedAt"],
-          },
+          200: ConversationDetailSchema,
           401: ErrorSchema,
           404: ErrorSchema,
         },
@@ -295,6 +286,7 @@ export function registerConversationRoutes(
       if (!convo) {
         return reply.code(404).send({ error: "conversation not found" });
       }
+      const latestTurn = await turnStore?.findLatestTurn(DEPLOYMENT_BUSINESS_ID, id);
       return reply.send({
         id: convo._id,
         userId: convo.userId ?? null,
@@ -304,6 +296,9 @@ export function registerConversationRoutes(
         starred: convo.starred ?? false,
         createdAt: convo.createdAt,
         updatedAt: convo.updatedAt,
+        latestTurn: latestTurn
+          ? { id: latestTurn.id, runId: latestTurn.runId, status: latestTurn.status }
+          : null,
       });
     }
   );

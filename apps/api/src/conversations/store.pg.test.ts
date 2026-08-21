@@ -127,6 +127,26 @@ describe("PgConversationStore", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("finds the newest Turn for a Conversation", async () => {
+    await store.saveTurn(turn({ status: "failed", runId: RUN_ID }));
+    const latest = turn({
+      id: "00000000-0000-4000-8000-000000000010",
+      idempotencyKey: "client-key-2",
+      requestMessageId: "00000000-0000-4000-8000-000000000011",
+      status: "running",
+      runId: "00000000-0000-4000-8000-000000000012",
+      createdAt: new Date("2026-07-26T00:01:00.000Z"),
+      updatedAt: new Date("2026-07-26T00:01:00.000Z"),
+    });
+    await store.saveTurn(latest);
+
+    await expect(store.findLatestTurn(DEPLOYMENT_BUSINESS_ID, CONVERSATION_ID)).resolves.toEqual({
+      id: latest.id,
+      runId: latest.runId,
+      status: latest.status,
+    });
+  });
+
   it("keeps the first outcome an attempt recorded", async () => {
     await store.saveTurn(turn());
     const completion = {

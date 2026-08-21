@@ -25,4 +25,33 @@ describe("seedState", () => {
       "conversation"
     );
   });
+
+  it("restores an active Turn as submitted with its Run", () => {
+    expect(
+      seedState({
+        initialConversationId: "conversation",
+        initialTurn: { id: "turn-1", runId: "run-1", status: "running" },
+      })
+    ).toMatchObject({ status: "submitted", runId: "run-1" });
+  });
+
+  it("surfaces a Turn that failed before a Run was created", () => {
+    expect(
+      seedState({
+        initialConversationId: "conversation",
+        initialTurn: { id: "turn-1", runId: null, status: "start_failed" },
+      })
+    ).toMatchObject({ status: "error", error: "The response could not be started. Try again." });
+  });
+
+  it("does not replay stale active metadata over a persisted assistant reply", () => {
+    const state = seedState({
+      initialConversationId: "conversation",
+      initialMessages: [{ id: "reply", role: "assistant", parts: [], sealed: true }],
+      initialTurn: { id: "turn-1", runId: "run-1", status: "running" },
+    });
+
+    expect(state.status).toBe("idle");
+    expect(state).not.toHaveProperty("runId");
+  });
 });
