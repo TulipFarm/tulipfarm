@@ -154,6 +154,20 @@ describe("CredentialResolver", () => {
     expect(result.use === "denied" && result.reason).toContain("connect");
   });
 
+  it("distinguishes a personal connection from a workspace-level one already in place", async () => {
+    // Regression for #552: a read Tool (e.g. github_repository_list) can succeed off a
+    // service/installation credential while a write Tool is denied for lacking a *personal* one.
+    // The denial must say the two are different credentials, or "but this provider already
+    // works" reads as proof the denial is a bug rather than a separate connection step.
+    const r = resolverFor([oauthProvider]);
+    const result = await r.resolve(human, {
+      name: "acme_search",
+      provider: "acme",
+      credentialMode: "user",
+    });
+    expect(result.use === "denied" && result.reason).toContain("separate from any acme");
+  });
+
   it("refuses rather than downgrading under user_preferred when the provider can issue one", async () => {
     // `preferred` must not silently fall back to the bot for unconnected users.
     const r = resolverFor([oauthProvider]);

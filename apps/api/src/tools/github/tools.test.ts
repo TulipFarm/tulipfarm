@@ -507,6 +507,25 @@ describe("buildGitHubTools", () => {
     expect(await effects.list(BUSINESS_ID)).toEqual([]);
   });
 
+  it("warns that a successful listing does not imply the caller can act on those repos", () => {
+    // Regression for #552: github_repository_list succeeds off the App installation alone, but
+    // every other GitHub Tool also requires the caller's own connected GitHub account. Without
+    // this warning in the description, a model reasonably treats the list as proof GitHub is
+    // fully usable and reports the later denial as an inconsistency rather than a next step.
+    const tooling = buildGitHubTooling({
+      businessId: BUSINESS_ID,
+      integrations: fakeIntegrationStore(),
+      secrets: fakeSecretsService(),
+      http: fakeHttp({ number: 1, title: "t", state: "open" }),
+    });
+    const tools = buildGitHubTools(BUSINESS_ID, { ...tooling, effects: new MemoryEffectStore() });
+    const tool = tools.find((t) => t.name === "github_repository_list");
+    if (tool === undefined) throw new Error("github_repository_list not registered");
+
+    expect(tool.description).toContain("does not mean");
+    expect(tool.description).toContain("connected their own GitHub account");
+  });
+
   it("requires installation-wide authority to list installed repositories", () => {
     const tooling = buildGitHubTooling({
       businessId: BUSINESS_ID,

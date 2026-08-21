@@ -380,7 +380,10 @@ function buildRepositoryListTool(tooling: GitHubTooling): ToolDef {
     mutating: false,
     description:
       "List the GitHub repositories this business has an active installation for. Call this " +
-      "first when the user names no repository, or names one you're not sure is installed.",
+      "first when the user names no repository, or names one you're not sure is installed. This " +
+      "reports only which repositories the workspace's GitHub App can see — it does not mean " +
+      "you personally can act on them. Every other GitHub Tool also requires the calling person " +
+      "to have connected their own GitHub account, separately from that App installation.",
     inputSchema: EMPTY_SCHEMA,
     authorization: {
       action: "github.repository.list",
