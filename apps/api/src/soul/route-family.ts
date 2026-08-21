@@ -126,7 +126,8 @@ export function registerSoulRouteFamily(
               }
             : undefined,
           opts.declarativeTools,
-          opts.auditService
+          opts.auditService,
+          opts.integrationAuth?.tokens
         );
         registerIntegrationMarketplaceRoutes(
           app,

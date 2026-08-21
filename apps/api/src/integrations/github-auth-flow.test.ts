@@ -120,6 +120,7 @@ class FakeSoulRepositoryStore {
 describe("github declarative auth flow", () => {
   let app: FastifyInstance;
   let sid: string;
+  let userId: string;
   let soul: ReturnType<typeof makeSoulWriterDouble>;
   let soulLoader: SoulLoader;
   let secretsService: FakeSecretsService;
@@ -139,6 +140,7 @@ describe("github declarative auth flow", () => {
     // exercise `scope: "business"`, so the fixture must be an administrator. A `member` here
     // would assert a reach the deployment does not grant.
     const user = await createUser(userRepo, "user@example.com", "pass", "admin");
+    userId = user._id;
     sid = await sessions.create(user._id);
 
     soul = makeSoulWriterDouble();
@@ -266,9 +268,23 @@ describe("github declarative auth flow", () => {
     expect(res.statusCode).toBe(302);
   }
 
-  /** Step 2: the operator picks repos; GitHub returns the installation id. */
+  /** Configure personal OAuth, then install the App and capture its installation id. */
   async function installOnRepos(): Promise<void> {
-    const started = await startStep(1);
+    const configured = await app.inject({
+      method: "POST",
+      url: "/api/v1/integrations/github/connect",
+      cookies: auth(),
+      headers,
+      payload: {
+        env: {
+          GITHUB_OAUTH_CLIENT_ID: "oauth-client",
+          GITHUB_OAUTH_CLIENT_SECRET: "oauth-secret",
+        },
+      },
+    });
+    expect(configured.statusCode).toBe(200);
+
+    const started = await startStep(2);
     expect(started.statusCode).toBe(200);
     const state = new URL(started.json().url).searchParams.get("state");
     const res = await app.inject({
@@ -320,7 +336,7 @@ describe("github declarative auth flow", () => {
 
   it("sends the operator to the App it just created, by slug", async () => {
     await createApp();
-    const started = await startStep(1);
+    const started = await startStep(2);
 
     // The slug is sealed; resolving it is the only reason this URL is reachable at all.
     expect(String(started.json().url)).toContain(
@@ -351,5 +367,79 @@ describe("github declarative auth flow", () => {
     for (const secret of [privateKeyPem, "whsec", "cs_shh"]) {
       expect(raw).not.toContain(secret);
     }
+  });
+
+  it("seals a verified personal OAuth token under the authenticated user", async () => {
+    await createApp();
+    await installOnRepos();
+
+    const started = await app.inject({
+      method: "POST",
+      url: "/api/v1/integrations/github/auth/start/3",
+      cookies: auth(),
+      headers,
+      payload: { scope: "user" },
+    });
+    expect(started.statusCode).toBe(200);
+    expect(String(started.json().url)).toContain("github.com/login/oauth/authorize");
+    const state = new URL(started.json().url).searchParams.get("state");
+
+    fetchImpl
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ access_token: "gho_personal" }), {
+          headers: { "content-type": "application/json" },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ login: "octo-user" }), {
+          headers: { "content-type": "application/json" },
+        })
+      );
+    const callback = await app.inject({
+      method: "GET",
+      url: `/api/v1/integrations/auth/callback?state=${state}&code=oauth-code`,
+    });
+
+    expect(callback.statusCode).toBe(302);
+    const token = await principalTokens.find({ kind: "user", id: userId }, "github");
+    expect(token).toMatchObject({ externalSubject: "octo-user", scopes: ["repo", "read:org"] });
+    expect(secretsService.store.get(token?.secretKey ?? "")).toBe("gho_personal");
+
+    const detail = await app.inject({
+      method: "GET",
+      url: "/api/v1/integrations/github",
+      cookies: auth(),
+    });
+    expect(detail.statusCode).toBe(200);
+    expect(detail.json()).toMatchObject({ personalConnected: true });
+  });
+
+  it("lets the signed-in user disconnect only their personal GitHub credential", async () => {
+    const secretKey = "principal.user.personal.github.GITHUB_OAUTH_ACCESS_TOKEN";
+    await secretsService.set(secretKey, "gho_personal");
+    await principalTokens.upsert({
+      principalKind: "user",
+      principalId: userId,
+      provider: "github",
+      secretKey,
+      refreshSecretKey: null,
+      externalSubject: "octo-user",
+      scopes: ["repo"],
+      connectedAt: new Date(),
+      updatedAt: new Date(),
+      expiresAt: null,
+      revokedAt: null,
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/integrations/github/auth/revoke",
+      cookies: auth(),
+      headers,
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(await principalTokens.find({ kind: "user", id: userId }, "github")).toBeNull();
+    expect(secretsService.store.has(secretKey)).toBe(false);
   });
 });

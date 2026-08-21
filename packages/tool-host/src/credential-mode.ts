@@ -31,6 +31,8 @@ export interface CredentialSubject {
 export interface CredentialResolverDeps {
   readonly tokens: PrincipalCredentialReader;
   readonly soulLoader?: SoulLoader;
+  /** Code-owned manifests may be newer than an already-materialized Soul copy. */
+  readonly personalCredentialProviders?: ReadonlySet<string>;
 }
 
 /** Personal support is explicit `personal: true`, never inferred from OAuth grant type. */
@@ -45,7 +47,7 @@ function isHumanTriggered(subject: CredentialSubject): boolean {
 }
 
 function connectPrompt(provider: string, toolName: string): string {
-  return `"${toolName}" acts on ${provider} as you, and you have not connected your ${provider} account — connect it from Settings › Integrations, then try again. Do not retry this call until you have.`;
+  return `"${toolName}" acts on ${provider} as you, and you have not connected your ${provider} account — open Integrations › ${provider} and connect your account, then try again. Do not retry this call until you have.`;
 }
 
 export class CredentialResolver {
@@ -86,7 +88,10 @@ export class CredentialResolver {
     // treated as unable to issue one — the Tool exists, so denying it on a catalog miss would be a
     // refusal the person could do nothing about.
     const integration = this.deps.soulLoader?.integrations.get(provider);
-    if (integration !== undefined && providerSupportsPersonalCredential(integration)) {
+    if (
+      this.deps.personalCredentialProviders?.has(provider) === true ||
+      (integration !== undefined && providerSupportsPersonalCredential(integration))
+    ) {
       return { use: "denied", reason: connectPrompt(provider, tool.name) };
     }
     return { use: "service" };

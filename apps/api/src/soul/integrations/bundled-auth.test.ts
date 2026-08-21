@@ -1,4 +1,5 @@
 import {
+  authFlowSatisfied,
   authSecretEnvNames,
   loadBundledIntegrations,
   nextAuthStep,
@@ -222,6 +223,36 @@ describe("slack manifest", () => {
     for (const grant of resolveGrants(manifest)) {
       expect(grant.description, `${grant.label} has no description`).toBeTruthy();
     }
+  });
+
+  it("uses a separate OAuth App for personal GitHub credentials", async () => {
+    const bundled = await loadBundledIntegrations(logger);
+    const manifest = bundled.get("github")?.manifest;
+    if (!manifest) throw new Error("github is not bundled");
+    const steps = resolveAuthSteps(manifest);
+    const personal = steps.find((step) => step.kind === "oauth2" && step.personal === true);
+    if (personal?.kind !== "oauth2") throw new Error("github has no personal oauth2 step");
+
+    expect(personal.client_id_env).toBe("GITHUB_OAUTH_CLIENT_ID");
+    expect(personal.client_secret_env).toBe("GITHUB_OAUTH_CLIENT_SECRET");
+    expect(personal.token_env).toBe("GITHUB_OAUTH_ACCESS_TOKEN");
+    expect(personal.scopes).toEqual(["repo", "read:org"]);
+    expect(authSecretEnvNames(manifest)).toContain("GITHUB_OAUTH_CLIENT_SECRET");
+
+    const businessEnv = Object.fromEntries(
+      [
+        "GITHUB_APP_ID",
+        "GITHUB_APP_SLUG",
+        "GITHUB_APP_PRIVATE_KEY",
+        "GITHUB_WEBHOOK_SECRET",
+        "GITHUB_CLIENT_ID",
+        "GITHUB_CLIENT_SECRET",
+        "GITHUB_OAUTH_CLIENT_ID",
+        "GITHUB_OAUTH_CLIENT_SECRET",
+        "GITHUB_INSTALLATION_ID",
+      ].map((name) => [name, "set"])
+    );
+    expect(authFlowSatisfied(manifest, businessEnv)).toBe(true);
   });
 
   it("derives Slack's grants from the scopes it actually requests, without duplicates", async () => {

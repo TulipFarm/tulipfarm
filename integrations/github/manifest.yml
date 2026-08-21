@@ -94,7 +94,23 @@ auth:
         - GITHUB_CLIENT_ID
         - GITHUB_CLIENT_SECRET
 
-  # 2. Creating an App does not grant access to anything. Installing it is where the operator picks
+  # 2. Personal OAuth credentials are deliberately separate from the GitHub App credentials.
+  #    The App token belongs to autonomous work; these OAuth App values let each person authorize
+  #    TulipFarm to act with their own GitHub permissions in Chat.
+  - kind: fields
+    title: Configure personal GitHub access
+    description: Create a separate GitHub OAuth App for people who use GitHub Tools in Chat. Set
+      its callback URL to the Integration callback shown in the setup guide.
+    fields:
+      - name: GITHUB_OAUTH_CLIENT_ID
+        label: OAuth App client ID
+        setup_url: https://github.com/settings/developers
+      - name: GITHUB_OAUTH_CLIENT_SECRET
+        label: OAuth App client secret
+        secret: true
+        setup_url: https://github.com/settings/developers
+
+  # 3. Creating an App does not grant access to anything. Installing it is where the operator picks
   #    which repos TulipFarm may touch, and the installation id is what every later API call is
   #    scoped to.
   - kind: install
@@ -104,4 +120,20 @@ auth:
     url: https://github.com/apps/{GITHUB_APP_SLUG}/installations/new?state={state}
     capture:
       installation_id: GITHUB_INSTALLATION_ID
+
+  # 4. This step never contributes to the business connection's completion. It is started only
+  #    with scope=user and its token is sealed under the authenticated principal.
+  - kind: oauth2
+    personal: true
+    title: Connect your GitHub account
+    description: GitHub Tools in Chat use your GitHub permissions. Autonomous work continues to
+      use the GitHub App installation.
+    authorization_url: https://github.com/login/oauth/authorize
+    token_url: https://github.com/login/oauth/access_token
+    scopes:
+      - repo
+      - read:org
+    client_id_env: GITHUB_OAUTH_CLIENT_ID
+    client_secret_env: GITHUB_OAUTH_CLIENT_SECRET
+    token_env: GITHUB_OAUTH_ACCESS_TOKEN
 setup_guide_path: setup-guide.md

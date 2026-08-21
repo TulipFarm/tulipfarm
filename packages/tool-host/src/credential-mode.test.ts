@@ -169,12 +169,37 @@ describe("CredentialResolver", () => {
   });
 
   it("falls back to service under user_preferred when the provider cannot issue a personal credential", async () => {
-    // GitHub today. Refusing here would deny the Tool forever with no way for anyone to recover.
+    // A service-only provider cannot offer a recovery path, so a personal refusal would be stuck.
     const r = resolverFor([installProvider]);
     expect(
       await r.resolve(human, {
         name: "github_create_issue",
         provider: "acme",
+        credentialMode: "user_preferred",
+      })
+    ).toEqual({ use: "service" });
+  });
+
+  it("fails closed for a code-owned personal provider even when the Soul copy is stale", async () => {
+    const r = new CredentialResolver({
+      tokens: new InMemoryPrincipalCredentialReader(),
+      soulLoader: { integrations: new Map([["github", installProvider]]) } as unknown as SoulLoader,
+      personalCredentialProviders: new Set(["github"]),
+    });
+
+    expect(
+      (
+        await r.resolve(human, {
+          name: "github_issue_read",
+          provider: "github",
+          credentialMode: "user_preferred",
+        })
+      ).use
+    ).toBe("denied");
+    expect(
+      await r.resolve(routine, {
+        name: "github_issue_read",
+        provider: "github",
         credentialMode: "user_preferred",
       })
     ).toEqual({ use: "service" });

@@ -17,6 +17,7 @@ import {
   startAuthStep,
 } from "./auth-broker";
 import { mergeConnectionEnv, readConnectionEnv } from "./connection-writer";
+import { resolveGitHubPrincipalSubject } from "./github-principal";
 import { sealPrincipalCredential } from "./principal-connect";
 import type { PrincipalProviderTokenRepo } from "./principal-tokens";
 import { mergeIntegrations } from "./routes";
@@ -76,6 +77,53 @@ export function registerIntegrationAuthRoutes(
     typeof deps.endpoints === "function" ? deps.endpoints() : Promise.resolve(deps.endpoints);
   const resolveManifest = (slug: string): IntegrationManifest | undefined =>
     mergeIntegrations(deps.soulLoader, deps.bundled).get(slug)?.manifest;
+
+  app.post(
+    "/api/v1/integrations/:name/auth/revoke",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description: "Disconnect the caller's personal credential for an integration.",
+        tags: ["integrations"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        params: {
+          type: "object",
+          required: ["name"],
+          properties: { name: { type: "string" } },
+        },
+        response: {
+          200: {
+            type: "object",
+            required: ["status"],
+            properties: { status: { type: "string", enum: ["disconnected"] } },
+          },
+          401: ErrorSchema,
+          404: ErrorSchema,
+          409: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { name } = req.params as { name: string };
+      if (!NAME_RE.test(name) || resolveManifest(name) === undefined) {
+        return reply.code(404).send({ error: `integration not found: ${name}` });
+      }
+      const caller = req.principal;
+      if (caller?.kind !== "user") return reply.code(401).send({ error: "unauthorized" });
+      if (deps.tokens === undefined) {
+        return reply.code(409).send({ error: "this deployment cannot store personal credentials" });
+      }
+      const credential = await deps.tokens.find(caller, name);
+      await deps.tokens.revoke(caller, name);
+      if (credential !== null) {
+        await deps.secrets.delete(credential.secretKey);
+        if (credential.refreshSecretKey !== null) {
+          await deps.secrets.delete(credential.refreshSecretKey);
+        }
+      }
+      return { status: "disconnected" };
+    }
+  );
 
   app.post(
     "/api/v1/integrations/:name/auth/start/:step",
@@ -230,10 +278,15 @@ export function registerIntegrationAuthRoutes(
               outcome.slug
             );
           }
+          const externalSubject =
+            outcome.slug === "github"
+              ? await resolveGitHubPrincipalSubject(outcome, deps.fetchImpl)
+              : null;
           await sealPrincipalCredential({
             outcome,
             secrets: deps.secrets,
             tokens: deps.tokens,
+            externalSubject,
           });
         } else if (manifest && Object.keys(outcome.env).length > 0) {
           const { connectedNow } = await mergeConnectionEnv(deps, {

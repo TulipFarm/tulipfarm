@@ -67,12 +67,13 @@ export async function startHandoff(
   slug: string,
   stepIndex: number,
   newTab = false,
-  org?: string
+  org?: string,
+  scope: "business" | "user" = "business"
 ): Promise<"handed_off" | "completed"> {
-  // Passed only when set, so a call with no org keeps matching call sites that never knew of it.
-  const action = org
-    ? await startAuthStep(slug, stepIndex, org)
-    : await startAuthStep(slug, stepIndex);
+  const action = await startAuthStep(slug, stepIndex, {
+    ...(org ? { org } : {}),
+    ...(scope === "user" ? { scope } : {}),
+  });
   if (action.action === "redirect") {
     if (newTab) window.open(action.url, "_blank", "noopener,noreferrer");
     else window.location.assign(action.url);

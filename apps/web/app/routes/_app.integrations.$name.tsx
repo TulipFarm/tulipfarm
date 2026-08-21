@@ -10,6 +10,7 @@ import {
 import { ArrowLeft, ExternalLink, MoreHorizontal, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { IntegrationAuthFlow, startHandoff } from "~/components/integrations/auth-flow";
+import { GitHubPersonalAccount } from "~/components/integrations/github-personal-account";
 import { IntegrationIcon } from "~/components/integrations/integration-icon";
 import { MarkdownView } from "~/components/markdown-view";
 import { ErrorState, NotFoundState } from "~/components/states";
@@ -228,7 +229,7 @@ export default function IntegrationDetailPage() {
   const [guideOpen, setGuideOpen] = useState(false);
 
   const isAdmin = useIsAdmin();
-  const authSteps = integration.auth ?? [];
+  const authSteps = (integration.auth ?? []).filter((step) => !step.personal);
   const isConnected = integration.connected;
   const installStep = authSteps.find((step) => step.kind === "install");
   const name = displayName(integration);
@@ -442,6 +443,14 @@ export default function IntegrationDetailPage() {
             </p>
             <GrantList grants={integration.grants} />
           </section>
+        )}
+
+        {integration.name === "github" && isConnected && (
+          <GitHubPersonalAccount
+            integration={integration}
+            callbackError={callbackError}
+            onChanged={() => revalidator.revalidate()}
+          />
         )}
 
         {/* Where the GitHub App currently reaches. Provider-shaped state, not part of connecting. */}

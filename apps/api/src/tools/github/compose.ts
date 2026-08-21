@@ -16,9 +16,11 @@ import { InstallationScopeGitHubContextResolver } from "./context";
 import type { GitHubInstallationSelector } from "./credentials";
 import {
   GitHubInstallationTokenProvider,
+  GitHubPersonalTokenProvider,
   githubCompositeSecretProvider,
   githubInstallationSecretRef,
   isGitHubInstallationSecretRef,
+  isGitHubPersonalSecretRef,
 } from "./credentials";
 import type { GitHubInstallationDirectory } from "./installation";
 import { StoreGitHubInstallationDirectory } from "./installation";
@@ -48,11 +50,15 @@ export interface GitHubToolingBundle extends GitHubTooling {
   readonly installationToken: (selector: GitHubInstallationSelector) => Promise<string | undefined>;
 }
 
-/** Default-deny authorizer: only a GitHub installation-token ref may ever lease. */
+/** Default-deny authorizer: only GitHub installation or verified principal refs may lease. */
 const githubOnlyAuthorizer: SecretAuthorizer = {
   authorize(scope) {
-    if (!isGitHubInstallationSecretRef(scope.secretRef))
+    if (
+      !isGitHubInstallationSecretRef(scope.secretRef) &&
+      !isGitHubPersonalSecretRef(scope.secretRef)
+    ) {
       return { allowed: false, reason: "not_authorized" };
+    }
     return { allowed: true, maxTtlMs: 5 * 60 * 1000, maxUses: 1 };
   },
 };
@@ -82,7 +88,8 @@ export function buildGitHubTooling(options: BuildGitHubToolingOptions): GitHubTo
   });
   const provider = githubCompositeSecretProvider(
     secretsServiceProvider({ get: async (key) => (await options.secrets()).get(key) }),
-    tokenProvider
+    tokenProvider,
+    new GitHubPersonalTokenProvider(options.secrets)
   );
   const secretBroker = new SecretBroker({ provider, authorizer: githubOnlyAuthorizer });
   const credentials = new CredentialDispatcher({

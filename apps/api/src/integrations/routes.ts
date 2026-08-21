@@ -5,6 +5,7 @@ import {
   authStepProducesEnv,
   authStepSatisfied,
   type IntegrationManifest,
+  isPersonalCredentialStep,
   isSoulWriteError,
   loadIntegrationRegistry,
   type RegistryEntry,
@@ -29,6 +30,7 @@ import { deleteConnectionSecrets, ForeignSecretRefError } from "./connection-env
 import { mergeConnectionEnv } from "./connection-writer";
 import { isGitHubInstalled } from "./github-status";
 import { readIntegrationLock, serializeIntegrationLock } from "./install";
+import type { PrincipalProviderTokenRepo } from "./principal-tokens";
 
 /**
  * Generic Soul integration connect/disconnect backend; no scan, marketplace, or bespoke OAuth
@@ -131,7 +133,11 @@ async function toCatalog(
   );
 }
 
-async function toDetail(entry: MergedIntegration, listing?: RegistryEntry) {
+async function toDetail(
+  entry: MergedIntegration,
+  listing?: RegistryEntry,
+  personalConnected = false
+) {
   const steps = resolveAuthSteps(entry.manifest);
   const mark = await brandIcon(entry.manifest.icon ?? listing?.icon);
   return {
@@ -168,8 +174,10 @@ async function toDetail(entry: MergedIntegration, listing?: RegistryEntry) {
       fields: step.kind === "fields" ? step.fields : undefined,
       // Only an app_manifest step that declares an org-scoped create_url can honor an org input.
       supportsOrgTarget: step.kind === "app_manifest" && step.create_url_for_org !== undefined,
+      ...(isPersonalCredentialStep(step) ? { personal: true } : {}),
     })),
     connected: entry.connected,
+    personalConnected,
     setupGuide: entry.setupGuide,
   };
 }
@@ -208,7 +216,8 @@ export function registerIntegrationRoutes(
   declarativeTools?: { sync: () => number; countFor: (slug: string) => number },
   // Optional: record connect/disconnect/remove as audit evidence. Connecting an integration grants
   // Agents a new external reach, which is exactly the kind of change an auditor asks about.
-  audit?: AuditService
+  audit?: AuditService,
+  personalTokens?: PrincipalProviderTokenRepo
 ): void {
   const auditWrite = makeSoulAuditWriter(audit);
   // Materialize a bundled-only integration into the soul repo so its connection state has a home.
@@ -320,7 +329,16 @@ export function registerIntegrationRoutes(
       if (name === "github" && githubStatus) {
         entry.connected = await isGitHubInstalled(githubStatus);
       }
-      return await toDetail(entry, (await loadIntegrationRegistry(app.log)).get(name));
+      const principal = req.principal;
+      const personalConnected =
+        principal?.kind === "user" && personalTokens !== undefined
+          ? (await personalTokens.find(principal, name)) !== null
+          : false;
+      return await toDetail(
+        entry,
+        (await loadIntegrationRegistry(app.log)).get(name),
+        personalConnected
+      );
     }
   );
 
