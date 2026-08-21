@@ -3,8 +3,8 @@ import type {
   LanguageModelV4CallOptions,
   LanguageModelV4StreamPart,
 } from "@ai-sdk/provider";
-import { APICallError, LoadAPIKeyError } from "ai";
-import { LlmProviderError } from "./provider-error";
+import { APICallError } from "ai";
+import { classifyProviderError } from "./provider-error";
 
 /** Minimal logger surface for fallback events (pino/console compatible). */
 export interface FallbackLogger {
@@ -22,19 +22,26 @@ export interface ModelResponderRef {
   modelId?: string;
 }
 
+export interface FallbackCallLease {
+  succeeded(): void;
+  failed(reason: string): void;
+  release(): void;
+}
+
+/** Per-link admission control shared across model chains in one process. */
+export interface FallbackCallGate {
+  acquire(provider: string): Promise<FallbackCallLease>;
+}
+
 const noopLogger: FallbackLogger = { warn() {} };
 
 function isAbortError(err: unknown): boolean {
   return err instanceof Error && err.name === "AbortError";
 }
 
-/** Hard failures abort fallback; 429/5xx/timeouts/network/unknown try the next provider. */
+/** Caller cancellation ends the whole request; every model/provider failure advances the chain. */
 export function isHardFailure(err: unknown): boolean {
-  if (isAbortError(err)) return true;
-  if (err instanceof LlmProviderError) return true;
-  if (LoadAPIKeyError.isInstance(err)) return true;
-  if (APICallError.isInstance(err)) return err.isRetryable === false;
-  return false;
+  return isAbortError(err);
 }
 
 function errorReason(err: unknown): string {
@@ -53,7 +60,9 @@ export class FallbackModel implements LanguageModelV4 {
     private readonly models: LanguageModelV4[],
     private readonly logger: FallbackLogger = noopLogger,
     /** Records which link served, so cost is attributed to the model that answered. */
-    private readonly responder?: ModelResponderRef
+    private readonly responder?: ModelResponderRef,
+    private readonly gate?: FallbackCallGate,
+    private readonly providerKeys: readonly string[] = models.map((model) => model.provider)
   ) {
     const primary = models[0];
     if (!primary) throw new Error("FallbackModel requires at least one model");
@@ -67,15 +76,21 @@ export class FallbackModel implements LanguageModelV4 {
 
   async doGenerate(options: LanguageModelV4CallOptions) {
     let lastError: unknown;
-    for (const model of this.models) {
+    for (const [index, model] of this.models.entries()) {
+      let lease: FallbackCallLease | undefined;
       try {
+        lease = await this.gate?.acquire(this.providerKey(index, model));
         const generated = await model.doGenerate(options);
+        lease?.succeeded();
         this.commit(model);
         return generated;
       } catch (err) {
         if (isHardFailure(err)) throw err;
+        lease?.failed(classifyProviderError(err));
         lastError = err;
         this.logFallback(model, err);
+      } finally {
+        lease?.release();
       }
     }
     this.logExhausted(lastError);
@@ -84,47 +99,52 @@ export class FallbackModel implements LanguageModelV4 {
 
   async doStream(options: LanguageModelV4CallOptions) {
     let lastError: unknown;
-    for (const model of this.models) {
+    for (const [index, model] of this.models.entries()) {
+      let lease: FallbackCallLease | undefined;
       let result: Awaited<ReturnType<LanguageModelV4["doStream"]>>;
       try {
+        lease = await this.gate?.acquire(this.providerKey(index, model));
         result = await model.doStream(options);
       } catch (err) {
-        if (isHardFailure(err)) throw err;
+        if (isHardFailure(err)) {
+          lease?.release();
+          throw err;
+        }
+        lease?.failed(classifyProviderError(err));
+        lease?.release();
         lastError = err;
         this.logFallback(model, err);
         continue;
       }
 
       const reader = result.stream.getReader();
-      let firstChunk: Awaited<ReturnType<typeof reader.read>>;
+      const chunks: LanguageModelV4StreamPart[] = [];
       try {
-        firstChunk = await reader.read();
+        while (true) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          chunks.push(chunk.value);
+        }
       } catch (err) {
         reader.cancel().catch(() => {});
-        if (isHardFailure(err)) throw err;
+        if (isHardFailure(err)) {
+          lease?.release();
+          throw err;
+        }
+        lease?.failed(classifyProviderError(err));
+        lease?.release();
         lastError = err;
         this.logFallback(model, err);
         continue;
       }
 
-      // First chunk received — stream is committed, reconstruct with remaining
+      lease?.succeeded();
+      lease?.release();
       this.commit(model);
       const stream = new ReadableStream<LanguageModelV4StreamPart>({
-        async start(controller) {
-          if (!firstChunk.done) controller.enqueue(firstChunk.value);
-          try {
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              controller.enqueue(value);
-            }
-            controller.close();
-          } catch (err) {
-            controller.error(err);
-          }
-        },
-        cancel() {
-          return reader.cancel();
+        start(controller) {
+          for (const chunk of chunks) controller.enqueue(chunk);
+          controller.close();
         },
       });
 
@@ -132,6 +152,10 @@ export class FallbackModel implements LanguageModelV4 {
     }
     this.logExhausted(lastError);
     throw lastError;
+  }
+
+  private providerKey(index: number, model: LanguageModelV4): string {
+    return this.providerKeys[index] ?? model.provider;
   }
 
   private logFallback(model: LanguageModelV4, err: unknown): void {

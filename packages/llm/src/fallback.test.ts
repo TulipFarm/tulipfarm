@@ -1,7 +1,7 @@
 import type { LanguageModelV4, LanguageModelV4CallOptions } from "@ai-sdk/provider";
 import { APICallError, LoadAPIKeyError } from "ai";
 import { describe, expect, it, vi } from "vitest";
-import { FallbackModel, isHardFailure } from "./fallback";
+import { type FallbackCallGate, FallbackModel, isHardFailure } from "./fallback";
 import { LlmProviderError } from "./provider-error";
 
 const opts = {} as LanguageModelV4CallOptions;
@@ -116,19 +116,20 @@ describe("FallbackModel.doStream", () => {
     expect((value as unknown as { textDelta: string }).textDelta).toBe("fallback");
   });
 
-  it("does not fall back after first chunk received", async () => {
+  it("falls back when a model fails after streaming has started", async () => {
     const streamResult = makeStreamResult(
       [{ type: "text-delta", textDelta: "partial" }],
       1 // error after first chunk
     );
     const m1 = makeModel({ doStream: vi.fn().mockResolvedValue(streamResult) });
-    const m2 = makeModel();
+    const fallbackResult = makeStreamResult([{ type: "text-delta", textDelta: "complete" }]);
+    const m2 = makeModel({ doStream: vi.fn().mockResolvedValue(fallbackResult) });
     const fallback = new FallbackModel([m1, m2]);
     const result = await fallback.doStream(opts);
     const reader = result.stream.getReader();
-    await reader.read(); // first chunk ok
-    await expect(reader.read()).rejects.toThrow("stream error");
-    expect(m2.doStream).not.toHaveBeenCalled();
+    const { value } = await reader.read();
+    expect((value as unknown as { textDelta: string }).textDelta).toBe("complete");
+    expect(m2.doStream).toHaveBeenCalledOnce();
   });
 
   it("propagates AbortError immediately in doStream", async () => {
@@ -140,13 +141,14 @@ describe("FallbackModel.doStream", () => {
     expect(m2.doStream).not.toHaveBeenCalled();
   });
 
-  it("aborts without fallback on a hard (401) error before any chunk", async () => {
+  it("falls back on a non-retryable 401 error before any chunk", async () => {
     const err = apiError(401, false);
     const m1 = makeModel({ doStream: vi.fn().mockRejectedValue(err) });
-    const m2 = makeModel({ doStream: vi.fn().mockResolvedValue(makeStreamResult([])) });
+    const result = makeStreamResult([{ type: "text-delta", textDelta: "fallback" }]);
+    const m2 = makeModel({ doStream: vi.fn().mockResolvedValue(result) });
     const fallback = new FallbackModel([m1, m2]);
-    await expect(fallback.doStream(opts)).rejects.toBe(err);
-    expect(m2.doStream).not.toHaveBeenCalled();
+    await expect(fallback.doStream(opts)).resolves.toBeDefined();
+    expect(m2.doStream).toHaveBeenCalledOnce();
   });
 
   it("falls back on a transient (429) stream error before any chunk", async () => {
@@ -162,31 +164,48 @@ describe("FallbackModel.doStream", () => {
 });
 
 describe("FallbackModel error classification", () => {
-  it("aborts without fallback on a 401 auth error", async () => {
+  it("falls back on a 401 auth error", async () => {
     const err = apiError(401, false);
     const m1 = makeModel({ doGenerate: vi.fn().mockRejectedValue(err) });
-    const m2 = makeModel({ doGenerate: vi.fn().mockResolvedValue({}) });
+    const result = { text: "fallback", finishReason: "stop", usage: {}, rawCall: {} };
+    const m2 = makeModel({ doGenerate: vi.fn().mockResolvedValue(result) });
     const fallback = new FallbackModel([m1, m2]);
-    await expect(fallback.doGenerate(opts)).rejects.toBe(err);
-    expect(m2.doGenerate).not.toHaveBeenCalled();
+    await expect(fallback.doGenerate(opts)).resolves.toBe(result);
+    expect(m2.doGenerate).toHaveBeenCalledOnce();
   });
 
-  it("aborts without fallback on a 404 model-not-found error", async () => {
+  it("falls back on a 404 model-not-found error", async () => {
     const err = apiError(404, false);
     const m1 = makeModel({ doGenerate: vi.fn().mockRejectedValue(err) });
-    const m2 = makeModel({ doGenerate: vi.fn().mockResolvedValue({}) });
+    const result = { text: "fallback", finishReason: "stop", usage: {}, rawCall: {} };
+    const m2 = makeModel({ doGenerate: vi.fn().mockResolvedValue(result) });
     const fallback = new FallbackModel([m1, m2]);
-    await expect(fallback.doGenerate(opts)).rejects.toBe(err);
-    expect(m2.doGenerate).not.toHaveBeenCalled();
+    await expect(fallback.doGenerate(opts)).resolves.toBe(result);
+    expect(m2.doGenerate).toHaveBeenCalledOnce();
   });
 
-  it("aborts without fallback on a missing/invalid API key", async () => {
+  it("falls back on a missing or invalid API key", async () => {
     const err = new LoadAPIKeyError({ message: "no key" });
     const m1 = makeModel({ doGenerate: vi.fn().mockRejectedValue(err) });
-    const m2 = makeModel({ doGenerate: vi.fn().mockResolvedValue({}) });
+    const result = { text: "fallback", finishReason: "stop", usage: {}, rawCall: {} };
+    const m2 = makeModel({ doGenerate: vi.fn().mockResolvedValue(result) });
     const fallback = new FallbackModel([m1, m2]);
-    await expect(fallback.doGenerate(opts)).rejects.toBe(err);
-    expect(m2.doGenerate).not.toHaveBeenCalled();
+    await expect(fallback.doGenerate(opts)).resolves.toBe(result);
+    expect(m2.doGenerate).toHaveBeenCalledOnce();
+  });
+
+  it("falls back when the primary subscription has no credit", async () => {
+    const exhausted = new LlmProviderError(
+      "model_billing_inactive",
+      new Error("subscription exhausted")
+    );
+    const result = { text: "fallback", finishReason: "stop", usage: {}, rawCall: {} };
+    const m1 = makeModel({ doGenerate: vi.fn().mockRejectedValue(exhausted) });
+    const m2 = makeModel({ doGenerate: vi.fn().mockResolvedValue(result) });
+    const fallback = new FallbackModel([m1, m2]);
+
+    await expect(fallback.doGenerate(opts)).resolves.toBe(result);
+    expect(m2.doGenerate).toHaveBeenCalledOnce();
   });
 
   it("falls back on a transient (429) rate-limit error", async () => {
@@ -232,28 +251,26 @@ describe("FallbackModel logging", () => {
     expect(messages.some((m) => m.includes("all providers exhausted"))).toBe(true);
   });
 
-  it("does not log a fallback event on a hard error", async () => {
+  it("logs a fallback event for a non-retryable provider error", async () => {
     const m1 = makeModel({ doGenerate: vi.fn().mockRejectedValue(apiError(401, false)) });
+    const m2 = makeModel({ doGenerate: vi.fn().mockResolvedValue({}) });
     const logger = { warn: vi.fn() };
-    const fallback = new FallbackModel([m1], logger);
-    await expect(fallback.doGenerate(opts)).rejects.toBeInstanceOf(APICallError);
-    expect(logger.warn).not.toHaveBeenCalled();
+    const fallback = new FallbackModel([m1, m2], logger);
+    await fallback.doGenerate(opts);
+    expect(logger.warn).toHaveBeenCalledOnce();
   });
 });
 
 describe("isHardFailure", () => {
-  it("classifies abort and credential errors as hard", () => {
+  it("classifies only caller cancellation as hard", () => {
     expect(isHardFailure(new DOMException("aborted", "AbortError"))).toBe(true);
-    expect(isHardFailure(new LoadAPIKeyError({ message: "no key" }))).toBe(true);
+    expect(isHardFailure(new LoadAPIKeyError({ message: "no key" }))).toBe(false);
     expect(
       isHardFailure(new LlmProviderError("model_billing_inactive", new Error("provider response")))
-    ).toBe(true);
-  });
-
-  it("classifies non-retryable API errors (401/404/400) as hard", () => {
-    expect(isHardFailure(apiError(401, false))).toBe(true);
-    expect(isHardFailure(apiError(404, false))).toBe(true);
-    expect(isHardFailure(apiError(400, false))).toBe(true);
+    ).toBe(false);
+    expect(isHardFailure(apiError(401, false))).toBe(false);
+    expect(isHardFailure(apiError(404, false))).toBe(false);
+    expect(isHardFailure(apiError(400, false))).toBe(false);
   });
 
   it("classifies retryable API errors, network and unknown errors as transient", () => {
@@ -261,5 +278,39 @@ describe("isHardFailure", () => {
     expect(isHardFailure(apiError(500, true))).toBe(false);
     expect(isHardFailure(new Error("ECONNREFUSED"))).toBe(false);
     expect(isHardFailure("weird")).toBe(false);
+  });
+});
+
+describe("FallbackModel link health", () => {
+  it("skips a failed primary on later calls and records the fallback separately", async () => {
+    const blocked = new Set<string>();
+    const calls: string[] = [];
+    const gate: FallbackCallGate = {
+      async acquire(provider) {
+        calls.push(provider);
+        if (blocked.has(provider)) throw new Error(`${provider} unavailable`);
+        return {
+          succeeded() {},
+          failed() {
+            blocked.add(provider);
+          },
+          release() {},
+        };
+      },
+    };
+    const sonnet = makeModel({ doGenerate: vi.fn().mockRejectedValue(new Error("no credits")) });
+    const terraResult = { text: "terra", finishReason: "stop", usage: {}, rawCall: {} };
+    const terra = makeModel({ doGenerate: vi.fn().mockResolvedValue(terraResult) });
+    const fallback = new FallbackModel([sonnet, terra], undefined, undefined, gate, [
+      "anthropic",
+      "codex",
+    ]);
+
+    await expect(fallback.doGenerate(opts)).resolves.toBe(terraResult);
+    await expect(fallback.doGenerate(opts)).resolves.toBe(terraResult);
+
+    expect(sonnet.doGenerate).toHaveBeenCalledOnce();
+    expect(terra.doGenerate).toHaveBeenCalledTimes(2);
+    expect(calls).toEqual(["anthropic", "codex", "anthropic", "codex"]);
   });
 });

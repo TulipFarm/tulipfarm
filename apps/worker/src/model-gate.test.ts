@@ -84,16 +84,14 @@ describe("ProviderGate", () => {
     await expect(gate.acquire("openai")).rejects.toBeInstanceOf(ProviderUnavailableError);
   });
 
-  it("does not shed a provider over failures that are the request's fault", async () => {
-    const gate = new ProviderGate({ failureThreshold: 2 });
+  it("sheds a provider after any model failure", async () => {
+    const gate = new ProviderGate();
 
-    for (let i = 0; i < 5; i += 1) {
-      const lease = await gate.acquire("openai");
-      lease.failed("model_not_found");
-      lease.release();
-    }
+    const lease = await gate.acquire("openai");
+    lease.failed("model_billing_inactive");
+    lease.release();
 
-    await expect(gate.acquire("openai")).resolves.toBeDefined();
+    await expect(gate.acquire("openai")).rejects.toBeInstanceOf(ProviderUnavailableError);
   });
 
   it("lets one probe through after the recovery window and reopens on success", async () => {

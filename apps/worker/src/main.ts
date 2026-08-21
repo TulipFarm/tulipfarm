@@ -328,8 +328,8 @@ export async function main(): Promise<void> {
     checkpoints: loopCheckpointStore,
     model: ({ events, budgets, businessId, runId, conversationId }) =>
       new LlmModelPort({
-        model: (selector, requirements, inference, principal) =>
-          llm.resolveModel(selector, requirements, inference, principal),
+        model: (selector, requirements, inference, principal, gate) =>
+          llm.resolveModel(selector, requirements, inference, principal, gate),
         signal,
         gate: modelGate,
         spend: spendSink,
@@ -418,8 +418,8 @@ export async function main(): Promise<void> {
           new LlmModelPort({
             // Through `resolveChain`, so a Routine call is priced by the same authority as a Chat
             // call. Building the resolution inline here is what left Routine spend reported free.
-            model: async (_selector, _requirements, _inference, principal) =>
-              llm.resolveChain(modelIds, routing, principal),
+            model: async (_selector, _requirements, _inference, principal, gate) =>
+              llm.resolveChain(modelIds, routing, principal, gate),
             signal,
             gate: modelGate,
             spend: spendSink,
