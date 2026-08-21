@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.13.1](https://github.com/TulipFarm/tulipfarm/compare/v0.13.0...v0.13.1) (2026-08-21)
+
+### Features
+
+* **skills:** add chat marketplace workflow ([#545](https://github.com/TulipFarm/tulipfarm/issues/545)) ([4352199](https://github.com/TulipFarm/tulipfarm/commit/435219987e00880bfac9b5a9d3bb832efe3052cb))
+
+### Bug Fixes
+
+* **authz:** strip broad tool/soul-write access from default member role ([#539](https://github.com/TulipFarm/tulipfarm/issues/539)) ([afef9d9](https://github.com/TulipFarm/tulipfarm/commit/afef9d9aaeaaf7300df328aee53064d1e6bd495f))
+* **chat:** restore live turns after navigation ([#546](https://github.com/TulipFarm/tulipfarm/issues/546)) ([7bbcc83](https://github.com/TulipFarm/tulipfarm/commit/7bbcc83252a5f331b891e6f2cf6ace00ed4078de))
+* **github:** enforce per-user authentication ([#544](https://github.com/TulipFarm/tulipfarm/issues/544)) ([43e86cf](https://github.com/TulipFarm/tulipfarm/commit/43e86cf5673c69cdef6ed53a2cb61163d1792c84))
+* **llm:** make model fallback sticky ([#547](https://github.com/TulipFarm/tulipfarm/issues/547)) ([459494b](https://github.com/TulipFarm/tulipfarm/commit/459494bb853d118a3576b009a8f22d8f2004592c))
+* **resources:** make record mutations durable ([#542](https://github.com/TulipFarm/tulipfarm/issues/542)) ([e5a9061](https://github.com/TulipFarm/tulipfarm/commit/e5a90617afddada1470b00f690d9cb022bfe3561))
+* **tools:** surface all validation errors, fix routine-forge doc gap ([#541](https://github.com/TulipFarm/tulipfarm/issues/541)) ([7389e16](https://github.com/TulipFarm/tulipfarm/commit/7389e16089b908ade9450ab58c8f369ae9c1f622))
+* **web:** filter navigation by session capabilities ([#543](https://github.com/TulipFarm/tulipfarm/issues/543)) ([871cc4e](https://github.com/TulipFarm/tulipfarm/commit/871cc4e011441fa01d499da844686c2a443f680a))
+
+### Continuous Integration
+
+* temporarily disable architecture job ([#548](https://github.com/TulipFarm/tulipfarm/issues/548)) ([9614167](https://github.com/TulipFarm/tulipfarm/commit/9614167c51e95c4bbe0a4f8317cc9abdf28f2b9d))
+
 ## [0.13.0](https://github.com/TulipFarm/tulipfarm/compare/v0.12.4...v0.13.0) (2026-08-21)
 
 ### Features
