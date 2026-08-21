@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.12.3](https://github.com/TulipFarm/tulipfarm/compare/v0.12.2...v0.12.3) (2026-08-21)
+
+### Bug Fixes
+
+* **storage:** re-assert bundled bucket secret perms every boot ([#532](https://github.com/TulipFarm/tulipfarm/issues/532)) ([23ee09e](https://github.com/TulipFarm/tulipfarm/commit/23ee09e56c643f0a762a22fd85d0b98b6c712fa3))
+
 ## [0.12.2](https://github.com/TulipFarm/tulipfarm/compare/v0.12.1...v0.12.2) (2026-08-20)
 
 ### Bug Fixes
