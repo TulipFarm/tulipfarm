@@ -47,6 +47,7 @@ import {
 import { EFFECT_STORAGE_STATEMENTS } from "@tulipfarm/tool-broker";
 import { APPROVAL_EVIDENCE_STORAGE_STATEMENTS } from "@tulipfarm/tool-host";
 import type { Queryable } from "../db";
+import { RESOURCE_SIDE_EFFECT_STORAGE_STATEMENTS } from "../resources/outbox";
 
 export interface PgMigration {
   version: number;
@@ -2176,5 +2177,10 @@ export const PG_MIGRATIONS: PgMigration[] = [
     version: 77,
     description: "files: the durable Knowledge opt-in a queued index job re-reads before it writes",
     up: applyStatements(FILE_KNOWLEDGE_STATEMENTS),
+  },
+  {
+    version: 78,
+    description: "resources: durable mutation delivery and idempotent Record creation",
+    up: applyStatements(RESOURCE_SIDE_EFFECT_STORAGE_STATEMENTS),
   },
 ];

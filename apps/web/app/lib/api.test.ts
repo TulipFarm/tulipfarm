@@ -116,7 +116,7 @@ test("throws ApiError carrying the status on 401 and 404", async () => {
   await expect(getRecord("ticket", "missing")).rejects.toBeInstanceOf(ApiError);
 });
 
-test("createRecord POSTs a JSON body with Content-Type and credentials:include", async () => {
+test("createRecord POSTs a JSON body with Content-Type, idempotency key, and credentials:include", async () => {
   const fetchFn = mockFetch(201, { id: "TICK-1", version: 1, createdAt: "", updatedAt: "" });
   await createRecord("ticket", { title: "hi", open: true });
   const [url, init] = fetchFn.mock.calls[0];
@@ -124,6 +124,7 @@ test("createRecord POSTs a JSON body with Content-Type and credentials:include",
   expect(init.method).toBe("POST");
   expect(init.credentials).toBe("include");
   expect(init.headers["Content-Type"]).toBe("application/json");
+  expect(init.headers["Idempotency-Key"]).toMatch(/^[0-9a-f-]{36}$/);
   expect(JSON.parse(init.body)).toEqual({ title: "hi", open: true });
 });
 

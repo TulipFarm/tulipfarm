@@ -7,6 +7,7 @@ import type { SurfaceInteraction } from "@tulipfarm/surface";
 export const DOMAIN_EVENTS = {
   RESOURCE_CREATED: "resource.created",
   RESOURCE_UPDATED: "resource.updated",
+  RESOURCE_DELETED: "resource.deleted",
   CONVERSATION_CREATED: "conversation.created",
   CONVERSATION_COMPLETED: "conversation.completed",
   // Observability spine (AI metrics). One LLM_STEP_FINISHED per model step; one TURN_FINISHED per

@@ -2,15 +2,25 @@ import { randomUUID } from "node:crypto";
 import type { EventEmitter } from "node:events";
 import type { HookExecutor } from "@tulipfarm/sandbox";
 import type { SoulLoader } from "@tulipfarm/soul";
-import { DOMAIN_EVENTS, parsePaginationQuery } from "@tulipfarm/storage";
+import { parsePaginationQuery } from "@tulipfarm/storage";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import type { RecordAction, RecordAuthorizer } from "./authorize";
 import { recordPrincipalOf } from "./authorize";
-import { type CounterStore, type ResourceRepoFactory, toApiRecord } from "./repo";
+import {
+  deliverResourceSideEffect,
+  type ResourceMutationKind,
+  type ResourceSideEffect,
+} from "./outbox";
+import {
+  type CounterStore,
+  type ResourceDoc,
+  type ResourceRepo,
+  type ResourceRepoFactory,
+  toApiRecord,
+} from "./repo";
 import {
   loadForWrite,
-  maybeRunAfterHook,
   maybeRunBeforeHook,
   stripImmutable,
   stripReadOnly,
@@ -48,6 +58,51 @@ function parseIfMatch(req: FastifyRequest): number | null {
   if (typeof raw !== "string") return null;
   const n = Number.parseInt(raw.replace(/^"(.*)"$/, "$1"), 10);
   return Number.isNaN(n) ? null : n;
+}
+
+function idempotencyKey(req: FastifyRequest): string | null | undefined {
+  const raw = req.headers["idempotency-key"];
+  if (raw === undefined) return undefined;
+  if (typeof raw !== "string") return null;
+  const key = raw.trim();
+  return key.length > 0 && key.length <= 200 ? key : null;
+}
+
+type HookedResource = {
+  readonly hookSource?: string;
+  readonly hookHash?: string;
+  readonly hooksEnabled?: boolean;
+};
+
+function resourceSideEffect(
+  kind: ResourceMutationKind,
+  resourceDef: HookedResource,
+  type: string,
+  doc: ResourceDoc,
+  actorId?: string
+): ResourceSideEffect {
+  const afterHook =
+    resourceDef.hookSource && resourceDef.hooksEnabled !== false
+      ? { source: resourceDef.hookSource, hash: resourceDef.hookHash }
+      : undefined;
+  return {
+    kind,
+    resourceType: type,
+    resourceId: doc._id,
+    record: toApiRecord(doc),
+    ...(actorId === undefined ? {} : { actorId }),
+    ...(afterHook === undefined ? {} : { afterHook }),
+  };
+}
+
+async function deliverImmediatelyWhenUndurable(
+  repo: ResourceRepo,
+  effect: ResourceSideEffect,
+  hookExecutor: HookExecutor | undefined,
+  events: EventEmitter | undefined
+): Promise<void> {
+  if (repo.durableSideEffects) return;
+  await deliverResourceSideEffect(effect, hookExecutor, events);
 }
 
 export function registerResourceRoutes(
@@ -98,9 +153,15 @@ export function registerResourceRoutes(
         tags: ["resources"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         params: { type: "object", properties: { type: { type: "string" } }, required: ["type"] },
+        headers: {
+          type: "object",
+          properties: { "idempotency-key": { type: "string", minLength: 1, maxLength: 200 } },
+        },
         body: { type: "object", additionalProperties: true },
         response: {
+          200: RecordSchema,
           201: RecordSchema,
+          400: ErrorSchema,
           403: ErrorSchema,
           404: ErrorSchema,
           422: ValidationErrorSchema,
@@ -141,15 +202,21 @@ export function registerResourceRoutes(
 
       const doc = { _id: id, version: 1, createdAt: now, updatedAt: now, ...data };
       const repo = repoFactory.forType(type);
-      await repo.insert(doc);
-      await maybeRunAfterHook(hookExecutor, resourceDef, type, toApiRecord(doc));
-      events?.emit(DOMAIN_EVENTS.RESOURCE_CREATED, {
-        resourceType: type,
-        resourceId: id,
-        record: toApiRecord(doc),
-        actorId: (req.user as { _id: string } | undefined)?._id,
-      });
+      const actorId = (req.user as { _id: string } | undefined)?._id;
+      const effect = resourceSideEffect("create", resourceDef, type, doc, actorId);
+      const key = idempotencyKey(req);
+      if (key === null) return reply.code(400).send({ error: "invalid Idempotency-Key header" });
 
+      if (key !== undefined && repo.createIdempotently) {
+        const result = await repo.createIdempotently(doc, key, effect);
+        if (result.created) {
+          await deliverImmediatelyWhenUndurable(repo, effect, hookExecutor, events);
+        }
+        return reply.code(result.created ? 201 : 200).send(toApiRecord(result.doc));
+      }
+
+      await repo.insert(doc, effect);
+      await deliverImmediatelyWhenUndurable(repo, effect, hookExecutor, events);
       return reply.code(201).send(toApiRecord(doc));
     }
   );
@@ -316,15 +383,16 @@ export function registerResourceRoutes(
         ...data,
       };
 
-      const replaced = await repo.replaceOne(id, existing.version, newDoc, "update");
+      const effect = resourceSideEffect(
+        "update",
+        resourceDef,
+        type,
+        newDoc,
+        (req.user as { _id: string } | undefined)?._id
+      );
+      const replaced = await repo.replaceOne(id, existing.version, newDoc, "update", effect);
       if (!replaced) return reply.code(409).send({ error: "version conflict" });
-      await maybeRunAfterHook(hookExecutor, resourceDef, type, toApiRecord(newDoc));
-      events?.emit(DOMAIN_EVENTS.RESOURCE_UPDATED, {
-        resourceType: type,
-        resourceId: id,
-        record: toApiRecord(newDoc),
-        actorId: (req.user as { _id: string } | undefined)?._id,
-      });
+      await deliverImmediatelyWhenUndurable(repo, effect, hookExecutor, events);
 
       return reply.send(toApiRecord(newDoc));
     }
@@ -411,15 +479,16 @@ export function registerResourceRoutes(
         ...data,
       };
 
-      const replaced = await repo.replaceOne(id, existing.version, newDoc, "update");
+      const effect = resourceSideEffect(
+        "update",
+        resourceDef,
+        type,
+        newDoc,
+        (req.user as { _id: string } | undefined)?._id
+      );
+      const replaced = await repo.replaceOne(id, existing.version, newDoc, "update", effect);
       if (!replaced) return reply.code(409).send({ error: "version conflict" });
-      await maybeRunAfterHook(hookExecutor, resourceDef, type, toApiRecord(newDoc));
-      events?.emit(DOMAIN_EVENTS.RESOURCE_UPDATED, {
-        resourceType: type,
-        resourceId: id,
-        record: toApiRecord(newDoc),
-        actorId: (req.user as { _id: string } | undefined)?._id,
-      });
+      await deliverImmediatelyWhenUndurable(repo, effect, hookExecutor, events);
 
       return reply.send(toApiRecord(newDoc));
     }
@@ -482,9 +551,16 @@ export function registerResourceRoutes(
         deletedAt: now,
       };
 
-      const replaced = await repo.replaceOne(id, existing.version, softDeleted, "delete");
+      const effect = resourceSideEffect(
+        "delete",
+        resourceDef,
+        type,
+        softDeleted,
+        (req.user as { _id: string } | undefined)?._id
+      );
+      const replaced = await repo.replaceOne(id, existing.version, softDeleted, "delete", effect);
       if (!replaced) return reply.code(409).send({ error: "version conflict" });
-      await maybeRunAfterHook(hookExecutor, resourceDef, type, toApiRecord(softDeleted));
+      await deliverImmediatelyWhenUndurable(repo, effect, hookExecutor, events);
       return reply.code(204).send();
     }
   );

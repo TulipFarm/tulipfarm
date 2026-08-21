@@ -1,5 +1,7 @@
 /* Cookie-first resource API client; non-2xx responses throw `ApiError` with status. */
 
+import { randomUUID } from "./uuid";
+
 export const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:4010";
 
 export class ApiError extends Error {
@@ -327,9 +329,14 @@ export async function getRecord(type: string, id: string): Promise<ResourceRecor
 // Create a record. Returns the persisted record (201 body) including the server-assigned id/version.
 export async function createRecord(
   type: string,
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
+  idempotencyKey = randomUUID()
 ): Promise<ResourceRecord> {
-  return apiWrite<ResourceRecord>("POST", `/api/v1/resources/${encodeURIComponent(type)}`, body);
+  return apiCommand<ResourceRecord>(
+    `/api/v1/resources/${encodeURIComponent(type)}`,
+    body,
+    idempotencyKey
+  );
 }
 
 // Full-replace update with optimistic concurrency. `version` is sent as the `If-Match` header; a
