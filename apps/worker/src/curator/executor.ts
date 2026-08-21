@@ -7,12 +7,14 @@ import {
 } from "@tulipfarm/curator";
 import {
   type ArtifactService,
+  INVOKE_STATE_KEY,
   RUN_EXECUTOR_PRINCIPAL_REF,
   type RunSource,
   requestArtifactId,
 } from "@tulipfarm/run-kernel";
 import { CURATOR_REQUEST_SCHEMA_REF } from "@tulipfarm/schema";
-import type { PersistedRun } from "@tulipfarm/storage";
+import type { PersistedRun, RunStore } from "@tulipfarm/storage";
+import { reclaimPendingState, type StateTransitionPort } from "@tulipfarm/turn-executor";
 import { generateText, type LanguageModel } from "ai";
 import type { RunOutcome } from "../run-dispatcher";
 
@@ -53,9 +55,15 @@ export interface CuratorExecutorOptions {
   readonly api: CuratorApiPort;
   readonly models: CuratorModelSource;
   readonly artifacts: Pick<ArtifactService, "read">;
+  readonly runs?: Pick<RunStore, "findState">;
+  readonly transitions?: StateTransitionPort;
   readonly timeoutMs?: number;
   readonly now?: () => Date;
-  readonly log?: { info(message: string): void };
+  readonly log?: {
+    info(message: string): void;
+    warn?(obj: unknown, msg?: string): void;
+    error?(message: string, error?: unknown): void;
+  };
 }
 
 type ResolvedContext = Record<string, unknown> & {
@@ -79,45 +87,128 @@ const CURATOR_REQUIREMENTS: ModelRequirements = {
 export function createCuratorExecutor(
   options: CuratorExecutorOptions
 ): (run: PersistedRun, signal?: AbortSignal) => Promise<RunOutcome> {
-  const { api, models, artifacts, log } = options;
+  const { api, models, artifacts, runs, transitions, log } = options;
   const now = options.now ?? (() => new Date());
 
   return async (run, signal) => {
-    const jobId = await jobIdOf(run, artifacts, now());
-    if (!jobId) return "failed";
+    let stateRunning = false;
 
-    const context = await api.require<ResolvedContext>(
-      "GET",
-      `/api/v1/internal/curator/jobs/${encodeURIComponent(jobId)}/context`
-    );
-    const { contextDigest } = context;
-    if (typeof contextDigest !== "string" || contextDigest.length === 0) return "failed";
+    if (runs && transitions) {
+      const state = await runs.findState(run.businessId, run.id, INVOKE_STATE_KEY);
+      if (state !== null) {
+        if (state.status === "pending") {
+          await reclaimPendingState(transitions, {
+            businessId: run.businessId,
+            runId: run.id,
+            stateKey: INVOKE_STATE_KEY,
+          });
+        }
+        if (state.status === "pending" || state.status === "claimed") {
+          await transitions.transition({
+            businessId: run.businessId,
+            runId: run.id,
+            stateKey: INVOKE_STATE_KEY,
+            from: "claimed",
+            to: "running",
+          });
+          stateRunning = true;
+        } else if (state.status === "running") {
+          stateRunning = true;
+        }
+      }
+    }
 
-    const prompt =
-      context.scope === "business"
-        ? buildBusinessCuratorPrompt(businessInput(context))
-        : buildUserCuratorPrompt(userInput(context));
+    try {
+      const jobId = await jobIdOf(run, artifacts, now());
+      if (!jobId) {
+        if (transitions && stateRunning) {
+          await transitions.transition({
+            businessId: run.businessId,
+            runId: run.id,
+            stateKey: INVOKE_STATE_KEY,
+            from: "running",
+            to: "failed",
+            reason: "missing_job_id",
+          });
+        }
+        return "failed";
+      }
 
-    const model = await models.model(CURATOR_RUNG, CURATOR_REQUIREMENTS);
-    const { text } = await generateText({
-      model,
-      prompt: `${prompt}\n\n${OUTPUT_INSTRUCTION}`,
-      maxOutputTokens: CURATOR_MAX_OUTPUT_TOKENS,
-      abortSignal: boundedSignal(signal, options.timeoutMs ?? CURATOR_TIMEOUT_MS),
-    });
+      const context = await api.require<ResolvedContext>(
+        "GET",
+        `/api/v1/internal/curator/jobs/${encodeURIComponent(jobId)}/context`
+      );
+      const { contextDigest } = context;
+      if (typeof contextDigest !== "string" || contextDigest.length === 0) {
+        if (transitions && stateRunning) {
+          await transitions.transition({
+            businessId: run.businessId,
+            runId: run.id,
+            stateKey: INVOKE_STATE_KEY,
+            from: "running",
+            to: "failed",
+            reason: "missing_context_digest",
+          });
+        }
+        return "failed";
+      }
 
-    // Unparsable output is submitted as the raw string on purpose. The API records it as a
-    // rejection against this job, so a model that cannot hold the contract shows up in the loop's
-    // own metrics instead of vanishing into a Worker-side error.
-    const result = await api.require<{ recorded: number; rejected: number }>(
-      "POST",
-      `/api/v1/internal/curator/jobs/${encodeURIComponent(jobId)}/effects`,
-      { contextDigest, output: extractJson(text) ?? text }
-    );
-    log?.info(
-      `curator job=${jobId} scope=${context.scope ?? "user"} recorded=${result.recorded} rejected=${result.rejected}`
-    );
-    return "succeeded";
+      const prompt =
+        context.scope === "business"
+          ? buildBusinessCuratorPrompt(businessInput(context))
+          : buildUserCuratorPrompt(userInput(context));
+
+      const model = await models.model(CURATOR_RUNG, CURATOR_REQUIREMENTS);
+      const { text } = await generateText({
+        model,
+        prompt: `${prompt}
+
+${OUTPUT_INSTRUCTION}`,
+        maxOutputTokens: CURATOR_MAX_OUTPUT_TOKENS,
+        abortSignal: boundedSignal(signal, options.timeoutMs ?? CURATOR_TIMEOUT_MS),
+      });
+
+      // Unparsable output is submitted as the raw string on purpose. The API records it as a
+      // rejection against this job, so a model that cannot hold the contract shows up in the loop's
+      // own metrics instead of vanishing into a Worker-side error.
+      const result = await api.require<{ recorded: number; rejected: number }>(
+        "POST",
+        `/api/v1/internal/curator/jobs/${encodeURIComponent(jobId)}/effects`,
+        { contextDigest, output: extractJson(text) ?? text }
+      );
+      log?.info(
+        `curator job=${jobId} scope=${context.scope ?? "user"} recorded=${result.recorded} rejected=${result.rejected}`
+      );
+
+      if (transitions && stateRunning) {
+        await transitions.transition({
+          businessId: run.businessId,
+          runId: run.id,
+          stateKey: INVOKE_STATE_KEY,
+          from: "running",
+          to: "succeeded",
+        });
+      }
+
+      return "succeeded";
+    } catch (error) {
+      log?.error?.(`curator run failed for runId=${run.id}`, error);
+      if (transitions && stateRunning) {
+        try {
+          await transitions.transition({
+            businessId: run.businessId,
+            runId: run.id,
+            stateKey: INVOKE_STATE_KEY,
+            from: "running",
+            to: "failed",
+            reason: error instanceof Error ? error.message : "curator_execution_failed",
+          });
+        } catch {
+          // Failure to transition state on error should still return "failed"
+        }
+      }
+      return "failed";
+    }
   };
 }
 
