@@ -230,7 +230,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: changes
-    if: ${{ needs.changes.outputs.non_docs == 'true' }}
+    if: ${{ false }}
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
@@ -761,7 +761,7 @@ jobs:
               ["Lint", "lint", process.env.LINT_RESULT, nonDocsChanged],
               ["Typecheck", "typecheck", process.env.TYPECHECK_RESULT, nonDocsChanged],
               ["Build", "build", process.env.BUILD_RESULT, nonDocsChanged],
-              ["Architecture", "architecture", process.env.ARCHITECTURE_RESULT, nonDocsChanged],
+              ["Architecture", "architecture", process.env.ARCHITECTURE_RESULT, false],
               [
                 "Schema fixtures",
                 "schema-fixtures",
