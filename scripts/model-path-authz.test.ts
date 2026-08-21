@@ -115,13 +115,19 @@ describe("model path — liveness fitness", () => {
     expect(main).toContain("spend: spendSink,\n    log: logger,");
   });
 
-  it("only trips the breaker on failures that indict the provider", () => {
-    // A missing model or a rejected key is a config error. Counting those would shed a healthy
-    // provider for every turn in the process because one Agent named a model that does not exist.
+  it("trips each failed fallback link immediately and holds its lease for that attempt", () => {
+    // A failed primary must move later chats to its fallback after one error, including billing or
+    // credential exhaustion. A higher threshold would make every new chat retry a known-dead link.
     const gate = read("apps/worker/src/model-gate.ts");
-    expect(gate).toContain("INFRASTRUCTURE_FAILURES.has(reason)");
-    // The lease must outlive the call, so the slot is held for as long as the provider is busy.
-    expect(read("apps/worker/src/model.ts")).toContain("lease?.release();");
+    expect(gate).toContain("DEFAULT_FAILURE_THRESHOLD = 1");
+    expect(gate).toContain("failed: () => state.breaker.recordFailure()");
+
+    // Admission belongs inside the chain. A lease around the composite call would attribute a
+    // fallback's success to the failed primary and an open primary would prevent fallback.
+    const fallback = read("packages/llm/src/fallback.ts");
+    expect(fallback).toContain("lease = await this.gate?.acquire(this.providerKey(index, model))");
+    expect(fallback).toContain("lease?.failed(classifyProviderError(err))");
+    expect(fallback).toContain("lease?.release()");
   });
 
   it("forwards the acting principal from every production model port", () => {
