@@ -33,41 +33,6 @@ integrations:
     homepage: https://github.com
     description: Read and write repositories, issues, and pull requests.
 
-  - name: notion
-    title: Notion
-    icon: notion
-    category: docs
-    homepage: https://notion.so
-    description: Search the workspace, read and write pages, and query databases.
-
-  - name: telegram
-    title: Telegram
-    icon: telegram
-    category: chat
-    homepage: https://telegram.org
-    description: Chat with your agents by DM, or @mention them in a group or forum topic.
-
-  - name: confluence
-    title: Confluence
-    icon: confluence
-    category: docs
-    homepage: https://www.atlassian.com/software/confluence
-    description: Search the wiki, read pages, and index them into Knowledge with ACLs intact.
-
-  - name: google-drive
-    title: Google Drive
-    icon: googledrive
-    category: docs
-    homepage: https://drive.google.com
-    description: Search files and read their details, and index them into Knowledge with ACLs intact.
-
-  - name: google-docs
-    title: Google Docs
-    icon: googledocs
-    category: docs
-    homepage: https://docs.google.com
-    description: Read documents, and index them into Knowledge with Drive-backed ACLs intact.
-
   - name: google
     title: Google Workspace
     icon: google

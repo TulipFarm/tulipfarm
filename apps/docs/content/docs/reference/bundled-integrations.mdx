@@ -1,15 +1,15 @@
 ---
 title: Bundled integrations
-description: The eight providers TulipFarm ships manifests for, what agents can do with each, and how you connect them.
+description: The three providers TulipFarm ships manifests for, what agents can do with each, and how you connect them.
 ---
 
-An integration is a connected third party. Eight arrive with every instance, ready to connect. You
+An integration is a connected third party. Three arrive with every instance, ready to connect. You
 do not install them — you connect them, which means giving TulipFarm the credentials it needs.
 
 None of them are connected by default. Nothing leaves your instance until you connect one.
 
-{/* tf-claim kind=integration-slugs value="confluence,github,google,google-docs,google-drive,notion,slack,telegram" */}
-{/* tf-claim kind=integration-count value="8" */}
+{/* tf-claim kind=integration-slugs value="github,google,slack" */}
+{/* tf-claim kind=integration-count value="3" */}
 
 ## What each one is for
 
@@ -17,24 +17,17 @@ None of them are connected by default. Nothing leaves your instance until you co
 | --- | --- |
 | `github` | Triage issues, review and merge pull requests, commit code, and read repositories. |
 | `slack` | Talk to your agents from Slack — direct message them, or mention them in a channel. |
-| `telegram` | Talk to your agents from Telegram — direct message the bot, or mention it in a group. |
-| `notion` | Search your workspace, read and write pages, and query databases. |
-| `confluence` | Search Confluence, read pages, list spaces, and index pages into knowledge. |
 | `google` | One Google sign-in for Gmail (search, read, draft), Calendar (list, create, update, delete events), Drive (search), and Docs (read, create, append). |
-| `google-drive` | Search Drive, read file details, and index files into knowledge. |
-| `google-docs` | Read documents, and index them into knowledge. |
 
 ## Two different jobs
 
 The list above mixes two things that are worth separating, because they answer different questions.
 
-**Places you talk to agents.** Slack and Telegram are surfaces. Connecting one means your agents
-become reachable somewhere other than the TulipFarm web app. Your team can ask a question without
-opening a new tab.
+**Places you talk to agents.** Slack is a surface. Connecting it means your agents become reachable
+somewhere other than the TulipFarm web app. Your team can ask a question without opening a new tab.
 
-**Places agents reach into.** GitHub, Notion, Confluence, Google, Google Drive, and Google Docs are
-sources and destinations. Connecting one means agents can read from it, and in some cases write
-back to it.
+**Places agents reach into.** GitHub and Google Workspace are sources and destinations. Connecting
+one means agents can read from it, and in some cases write back to it.
 
 GitHub is both — you can work pull requests from it, and agents can act on them.
 
@@ -46,8 +39,6 @@ applies.
 | How it works | integrations | What you do |
 | --- | --- | --- |
 | Guided app creation | `github`, `slack` | TulipFarm hands the provider a pre-filled form. You approve it, and the credentials come back automatically. |
-| Copy two values | `telegram` | You create a bot with BotFather and paste what it gives you. |
-| Paste credentials | `notion`, `confluence`, `google-drive`, `google-docs` | You create a token or internal integration on the provider's side and paste it in. |
 | OAuth sign-in | `google` | You create a Google Cloud OAuth client, paste its ID and secret, then authorize the scopes in Google's consent screen. |
 
 Whichever path you take, credentials are stored encrypted in your instance's secret store, not in

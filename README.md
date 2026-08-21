@@ -48,9 +48,8 @@ Once a model is configured, everything below is created by asking for it in chat
   answer.
 - **Skills** — installable capability packages from a git repository, audited before they
   run.
-- **Integrations** — reach your agents where work already happens: GitHub, Slack, Telegram,
-  Notion, Confluence, and Google Workspace ship in the box, and any provider can be added as
-  a manifest.
+- **Integrations** — reach your agents where work already happens: GitHub, Slack, and Google
+  Workspace ship in the box, and any provider can be added as a manifest.
 
 See the [full documentation](https://tulipfarm.site/docs) for a guided tour, or
 [Using TulipFarm](https://tulipfarm.site/docs/using-tulipfarm) for how these fit together.

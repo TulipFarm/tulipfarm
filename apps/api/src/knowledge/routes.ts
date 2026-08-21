@@ -109,8 +109,8 @@ export function registerKnowledgeRoutes(
 
   /**
    * Changing who reads a Page is an ordinary member action — anyone who can read it can reshare it,
-   * as in Confluence and Notion. Declaring it through the gate rather than leaving it implicit is
-   * what makes it auditable, and what lets a deployment tighten it without a code change.
+   * as in most shared document tools. Declaring it through the gate rather than leaving it implicit
+   * is what makes it auditable, and what lets a deployment tighten it without a code change.
    */
   const restrictionWrite = [
     requireAuth,

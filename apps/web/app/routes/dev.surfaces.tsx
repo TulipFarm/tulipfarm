@@ -8,7 +8,6 @@ import { SurfaceView } from "@tulipfarm/surface-web";
 import {
   AlertTriangle,
   Boxes,
-  Code,
   Eye,
   Laptop,
   Layers,
@@ -22,7 +21,6 @@ import { JsonEditor } from "~/components/dev-surfaces/json-editor";
 import { DEFAULT_PRESET, PRESETS } from "~/components/dev-surfaces/presets";
 import { GitHubPreview } from "~/components/dev-surfaces/renderers/github-preview";
 import { SlackPreview } from "~/components/dev-surfaces/renderers/slack-preview";
-import { TelegramPreview } from "~/components/dev-surfaces/renderers/telegram-preview";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Select } from "~/components/ui/select";
@@ -36,7 +34,7 @@ export const meta: MetaFunction = () => [
   },
 ];
 
-type RendererTab = "react" | "slack" | "telegram" | "github";
+type RendererTab = "react" | "slack" | "github";
 type ViewportSize = "desktop" | "tablet" | "mobile";
 
 export default function DevelopmentSurfacesRoute() {
@@ -127,8 +125,7 @@ export default function DevelopmentSurfacesRoute() {
         </h1>
         <p className="max-w-3xl text-sm text-muted-foreground">
           Live testing environment for rendering dynamic AI-generated user interfaces across native
-          React web surfaces, Slack Block Kit, Telegram HTML layouts, and GitHub Check Run/Comment
-          cards.
+          React web surfaces, Slack Block Kit, and GitHub Check Run/Comment cards.
         </p>
       </header>
 
@@ -271,21 +268,6 @@ export default function DevelopmentSurfacesRoute() {
               <button
                 type="button"
                 role="tab"
-                aria-selected={activeTab === "telegram"}
-                onClick={() => setActiveTab("telegram")}
-                className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors focus-visible:ring-2 ${
-                  activeTab === "telegram"
-                    ? "bg-background text-foreground shadow-xs font-semibold"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                <Code className="size-3.5 text-[#2481cc]" />
-                Telegram
-              </button>
-
-              <button
-                type="button"
-                role="tab"
                 aria-selected={activeTab === "github"}
                 onClick={() => setActiveTab("github")}
                 className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors focus-visible:ring-2 ${
@@ -322,13 +304,6 @@ export default function DevelopmentSurfacesRoute() {
                   ) : activeTab === "slack" ? (
                     <div data-testid="slack-renderer-preview">
                       <SlackPreview
-                        artifact={parsedArtifact}
-                        onInteraction={(actionId, payload) => handleInteraction(actionId, payload)}
-                      />
-                    </div>
-                  ) : activeTab === "telegram" ? (
-                    <div data-testid="telegram-renderer-preview">
-                      <TelegramPreview
                         artifact={parsedArtifact}
                         onInteraction={(actionId, payload) => handleInteraction(actionId, payload)}
                       />

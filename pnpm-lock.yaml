@@ -215,9 +215,6 @@ importers:
       '@tulipfarm/surface-slack':
         specifier: workspace:*
         version: link:../../packages/surface-slack
-      '@tulipfarm/surface-telegram':
-        specifier: workspace:*
-        version: link:../../packages/surface-telegram
       '@tulipfarm/surface-web':
         specifier: workspace:*
         version: link:../../packages/surface-web
@@ -534,9 +531,6 @@ importers:
       '@tulipfarm/surface-slack':
         specifier: workspace:*
         version: link:../../packages/surface-slack
-      '@tulipfarm/surface-telegram':
-        specifier: workspace:*
-        version: link:../../packages/surface-telegram
       '@tulipfarm/surface-web':
         specifier: workspace:*
         version: link:../../packages/surface-web
@@ -1484,25 +1478,6 @@ importers:
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.2.0)(@vitest/coverage-v8@4.1.11)(jsdom@30.0.1(@noble/hashes@2.3.0))(vite@8.2.1(@types/node@26.2.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12)(yaml@2.9.0))
 
   packages/surface-slack:
-    dependencies:
-      '@tulipfarm/surface':
-        specifier: workspace:*
-        version: link:../surface
-    devDependencies:
-      '@tulipfarm/tsconfig':
-        specifier: workspace:*
-        version: link:../tsconfig
-      '@types/node':
-        specifier: ^26.2.0
-        version: 26.2.0
-      typescript:
-        specifier: ^7.0.2
-        version: 7.0.2
-      vitest:
-        specifier: ^4.1.11
-        version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.2.0)(@vitest/coverage-v8@4.1.11)(jsdom@30.0.1(@noble/hashes@2.3.0))(vite@8.2.1(@types/node@26.2.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12)(yaml@2.9.0))
-
-  packages/surface-telegram:
     dependencies:
       '@tulipfarm/surface':
         specifier: workspace:*

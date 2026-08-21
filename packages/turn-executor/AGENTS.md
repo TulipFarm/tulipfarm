@@ -51,5 +51,5 @@ Run event emission, Tool-call announcement or preview, or the ports a Turn host 
   survived only on the wire — a reload emptied the reply. `ConversationTurnCompleter.persistReply`
   now runs on the settled *and* the input-required path.
 - **The Turn is the seam that links a Surface to a Conversation, not the Tool.** A Surface can go
-  to Slack, Telegram or a Routine, so `packages/tool-host` has no message repo and must not gain
+  to Slack or a Routine, so `packages/tool-host` has no message repo and must not gain
   one. `TurnCompletionStore.appendSurfaceMessage` writes the `tool`-role link row instead.

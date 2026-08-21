@@ -1,15 +1,12 @@
 import type { SlackKnowledgeApiPort } from "@tulipfarm/integrations";
 import type { LiveSourceAuthorizationPort } from "@tulipfarm/knowledge";
 import type { SecretsService } from "@tulipfarm/secrets";
-import type { SoulLoader } from "@tulipfarm/soul";
 import type { IntegrationStore } from "@tulipfarm/storage";
 import type { ExternalIdentityRepo } from "../identity/external-links";
-import { integrationSecretKey, resolveConnectionEnv } from "../integrations/connection-env";
-import { GoogleDriveHttpKnowledgeApi } from "./google-http";
+import { integrationSecretKey } from "../integrations/connection-env";
 import { SlackHttpKnowledgeApi } from "./slack-http";
 
 const SLACK_PROVIDER = "slack";
-const DRIVE_PROVIDER = "google-drive";
 
 /** Live Slack auth allows current members; unreadable/provider errors return denied `undefined`. */
 export class SlackLiveSourceAuthorization implements LiveSourceAuthorizationPort {
@@ -87,58 +84,6 @@ export class CompositeLiveSourceAuthorization implements LiveSourceAuthorization
     for (const port of this.ports) {
       const result = await port.check(input);
       if (result !== undefined) return result;
-    }
-    return undefined;
-  }
-}
-
-export class GoogleDriveTenantLiveAuthorization implements LiveSourceAuthorizationPort {
-  constructor(
-    private readonly soulLoader: SoulLoader,
-    private readonly secrets: SecretsService,
-    private readonly identity: ExternalIdentityRepo
-  ) {}
-
-  async check(
-    input: Parameters<LiveSourceAuthorizationPort["check"]>[0]
-  ): ReturnType<LiveSourceAuthorizationPort["check"]> {
-    if (input.provider !== DRIVE_PROVIDER) return undefined;
-
-    for (const [slug, integration] of this.soulLoader.integrations) {
-      const isDrive = slug === DRIVE_PROVIDER || integration.sourceIntegration === DRIVE_PROVIDER;
-      if (!isDrive || integration.connection?.enabled !== true || !integration.connection.env) {
-        continue;
-      }
-      const env = await resolveConnectionEnv(integration.connection.env, this.secrets).catch(
-        () => undefined
-      );
-      const token = env?.GOOGLE_DRIVE_ACCESS_TOKEN;
-      const tenantId = env?.GOOGLE_DRIVE_TENANT_ID ?? env?.GOOGLE_WORKSPACE_ID;
-      if (!token || !tenantId) continue;
-
-      const api = new GoogleDriveHttpKnowledgeApi({
-        accessToken: token,
-        tenantId,
-        ...(env?.GOOGLE_DRIVE_BASE_URL ? { baseUrl: env.GOOGLE_DRIVE_BASE_URL } : {}),
-      });
-      const permissions = await api.getPermissions(input.externalId).catch(() => undefined);
-      if (permissions === undefined) return undefined;
-      const subjects = new Set(
-        permissions
-          .filter((permission) => permission.type !== "anyone")
-          .map((permission) => permission.externalSubject)
-      );
-      const now = Date.now();
-      for (const principal of input.principals) {
-        if (principal.kind !== "user") continue;
-        const mappings = await this.identity.listProvenMappingsForUser(principal.id);
-        for (const mapping of mappings) {
-          if (mapping.provider !== DRIVE_PROVIDER) continue;
-          if (mapping.expiresAt && mapping.expiresAt.getTime() <= now) continue;
-          if (subjects.has(mapping.externalSubject)) return { allowed: true };
-        }
-      }
-      return { allowed: false };
     }
     return undefined;
   }

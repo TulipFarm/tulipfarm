@@ -9,11 +9,11 @@ import {
 describe("Surface renderer registry", () => {
   it("keeps renderer-owned component support isolated by target", () => {
     const web = surfaceCatalogFor({ channel: "web", surface: "chat" });
-    const telegram = surfaceCatalogFor({ channel: "telegram", surface: "message" });
+    const slack = surfaceCatalogFor({ channel: "slack", surface: "message" });
 
     expect(web.some((component) => component.name === "ForceGraph")).toBe(true);
-    expect(telegram.some((component) => component.name === "ForceGraph")).toBe(false);
-    expect(telegram.some((component) => component.name === "RecordTable")).toBe(true);
+    expect(slack.some((component) => component.name === "ForceGraph")).toBe(false);
+    expect(slack.some((component) => component.name === "RecordTable")).toBe(true);
   });
 
   it("derives Agent capabilities from the registered renderer manifest", () => {

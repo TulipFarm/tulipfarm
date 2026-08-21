@@ -50,10 +50,10 @@ describe("target-aware Tool projection", () => {
     ]);
   });
 
-  it("keeps presentation Tools but excludes browser vocabulary for Telegram", () => {
+  it("keeps presentation Tools but excludes browser vocabulary for Slack", () => {
     const allowed = allowedToolNamesFor(registry(), undefined, {
-      target: { channel: "telegram", surface: "message" },
-      destination: "chat:1",
+      target: { channel: "slack", surface: "message" },
+      destination: "channel:C1",
       rendererCapabilities: [],
     });
     expect([...(allowed ?? [])]).toEqual(

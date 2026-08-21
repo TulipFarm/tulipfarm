@@ -1,33 +1,32 @@
 ---
 title: Surfaces
-description: How the same agent output renders natively in the web app, Slack, GitHub, or Telegram, and why buttons still work wherever you press them.
+description: How the same agent output renders natively in the web app, Slack, or GitHub, and why buttons still work wherever you press them.
 ---
 
 {/* tf-page: track: using-tulipfarm  requires: ["surface:*"] */}
 
-An agent does not write a Slack message, a web page, and a Telegram message separately. It produces
+An agent does not write a Slack message, a web page, and a GitHub comment separately. It produces
 one **artifact** — a single thing it made, such as a table, a form, a chart, or a message — and
 describes what that thing *is* and what you can do with it.
 
 TulipFarm then renders that artifact natively wherever it is delivered. This is what a **surface**
 means: a place your agents' output can appear.
 
-## The same answer, four native forms
+## The same answer, three native forms
 
 | Where it appears | What you see |
 | --- | --- |
 | The web app | Real components in the TulipFarm interface |
 | Slack | A native Slack message with real Slack buttons |
 | GitHub | A pull request comment or a check result |
-| Telegram | A native Telegram message |
 
 Nobody gets a worse version. A Slack user is not reading a link back to the web app; they are
 reading Slack.
 
 <Callout>
 A surface decides how output **looks** on a channel. Actually reaching that channel is a separate
-thing — an [integration](/docs/administration/how-integrations-work). Telegram ships with both, so
-you can [connect Telegram](/docs/administration/connect-telegram) today.
+thing — an [integration](/docs/administration/how-integrations-work). Slack ships with both, so
+you can [connect Slack](/docs/administration/connect-slack) today.
 </Callout>
 
 ## Buttons work wherever you press them

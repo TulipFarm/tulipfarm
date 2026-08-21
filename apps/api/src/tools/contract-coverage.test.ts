@@ -1,7 +1,5 @@
 /** Ratchet: every registered Tool must declare authority or the build fails. */
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import {
   type EgressHttpPort,
   GITHUB_TOOL_CONTRACTS,
@@ -20,7 +18,6 @@ import {
 import type { ToolDef } from "@tulipfarm/tool-host";
 import { ledgerOwnsCall } from "@tulipfarm/tool-host";
 import { describe, expect, it } from "vitest";
-import { parse as parseYaml } from "yaml";
 import type { ToolRegistry } from "../broker/tool-adapter";
 import type { IntegrationConversationsRepo } from "../ingress/repo";
 import { DeclarativeToolSync } from "./declarative/sync";
@@ -36,7 +33,13 @@ type RegistryServices = Parameters<typeof buildToolRegistry>[0];
 const BUSINESS_ID = "fitness-check-business";
 const RESOURCE_GRAMMAR = new RegExp(RESOURCE_NAME_PATTERN);
 const INVALID_REF_FRAGMENTS = ["undefined", "null"] as const;
-const GOOGLE_DOCS_READ_DOCUMENT_TOOL_NAME = declarativeToolName("google-docs", "read_document");
+// A synthetic manifest-driven integration exercises the declarative sync path without depending on
+// any shipped integration, so removing a bundled provider cannot silently drop this coverage.
+const DECLARATIVE_FITNESS_SLUG = "fitness-docs";
+const DECLARATIVE_READ_DOCUMENT_TOOL_NAME = declarativeToolName(
+  DECLARATIVE_FITNESS_SLUG,
+  "read_document"
+);
 
 const ALWAYS_ON_TOOL_NAMES = [
   "get_client_context",
@@ -178,7 +181,10 @@ const EXPECTED_FAMILY_TOOL_NAMES = [
       "gmail_search",
     ],
   },
-  { family: "declarative/google-docs", names: [GOOGLE_DOCS_READ_DOCUMENT_TOOL_NAME] },
+  {
+    family: `declarative/${DECLARATIVE_FITNESS_SLUG}`,
+    names: [DECLARATIVE_READ_DOCUMENT_TOOL_NAME],
+  },
 ] as const;
 
 const EXPECTED_TOTAL_TOOL_COUNT =
@@ -188,7 +194,7 @@ const EXPECTED_TOTAL_TOOL_COUNT =
 const EXPECTED_CREDENTIAL_MODES_BY_PROVIDER = {
   github: "user_preferred",
   google: "service",
-  "google-docs": "service",
+  [DECLARATIVE_FITNESS_SLUG]: "service",
   slack: "service",
 } as const;
 
@@ -264,24 +270,42 @@ function buildGoogleFitnessTools(): readonly ToolDef[] {
   });
 }
 
-function readGoogleDocsIntegration(): SoulIntegration {
-  const integrationDir = join(process.cwd(), "../../integrations/google-docs");
-  const manifest = parseYaml(readFileSync(join(integrationDir, "manifest.yml"), "utf8"));
-  if (manifest === null || typeof manifest !== "object" || Array.isArray(manifest)) {
-    throw new Error("google-docs fixture manifest must be a YAML mapping");
-  }
-  const egressSpec: unknown = JSON.parse(
-    readFileSync(join(integrationDir, "openapi.json"), "utf8")
-  );
-  return {
-    slug: "google-docs",
-    sourceIntegration: "google-docs",
-    manifest: manifest as SoulIntegration["manifest"],
-    connection: {
-      enabled: true,
-      env: { GOOGLE_DOCS_ACCESS_TOKEN: "secret://integrations/google-docs/token" },
+const DECLARATIVE_FITNESS_SPEC = {
+  openapi: "3.0.3",
+  servers: [{ url: "https://api.fitness-docs.test/v1" }],
+  paths: {
+    "/documents/{document_id}": {
+      get: {
+        operationId: "readDocument",
+        parameters: [
+          { name: "document_id", in: "path", required: true, schema: { type: "string" } },
+        ],
+        responses: { "200": { content: { "application/json": { schema: { type: "object" } } } } },
+      },
     },
-    egressSpec,
+  },
+};
+
+/** An inline manifest-driven integration, so the declarative sync path is covered on its own terms. */
+function buildDeclarativeFitnessIntegration(): SoulIntegration {
+  return {
+    slug: DECLARATIVE_FITNESS_SLUG,
+    sourceIntegration: DECLARATIVE_FITNESS_SLUG,
+    manifest: {
+      name: DECLARATIVE_FITNESS_SLUG,
+      version: "1.0.0",
+      description: "",
+      egress: {
+        type: "openapi",
+        spec: "spec.json",
+        operations: [
+          { operation: "readDocument", name: "read_document", description: "Read one document." },
+        ],
+        auth: { token_env: "FITNESS_DOCS_TOKEN" },
+      },
+    } as SoulIntegration["manifest"],
+    connection: { enabled: true, env: {} },
+    egressSpec: DECLARATIVE_FITNESS_SPEC,
   };
 }
 
@@ -308,7 +332,7 @@ function registerAllFamilies(): CoveredTools {
   };
   const sync = new DeclarativeToolSync({
     registry: registry as ToolRegistry,
-    integrations: () => [readGoogleDocsIntegration()],
+    integrations: () => [buildDeclarativeFitnessIntegration()],
     businessId: BUSINESS_ID,
     effects: new MemoryEffectStore(),
     secrets: async () => inert<SecretsService>(),
@@ -433,8 +457,8 @@ function expectedCredentialModeFor(provider: string): string | undefined {
       return EXPECTED_CREDENTIAL_MODES_BY_PROVIDER.github;
     case "google":
       return EXPECTED_CREDENTIAL_MODES_BY_PROVIDER.google;
-    case "google-docs":
-      return EXPECTED_CREDENTIAL_MODES_BY_PROVIDER["google-docs"];
+    case DECLARATIVE_FITNESS_SLUG:
+      return EXPECTED_CREDENTIAL_MODES_BY_PROVIDER[DECLARATIVE_FITNESS_SLUG];
     case "slack":
       return EXPECTED_CREDENTIAL_MODES_BY_PROVIDER.slack;
     default:
@@ -453,7 +477,7 @@ describe("tool contract coverage", () => {
     );
     expect(duplicateNames, "duplicate Tool registrations").toEqual([]);
     expect(coverage.declarativeProblems, "declarative Tool fixture failed to publish").toEqual([]);
-    expect(coverage.declarativeCount, "declarative/google-docs published Tool count").toBe(1);
+    expect(coverage.declarativeCount, "declarative fixture published Tool count").toBe(1);
 
     for (const name of ALWAYS_ON_TOOL_NAMES) {
       expect(toolNames.has(name), `always-on Tool missing: ${name}`).toBe(true);

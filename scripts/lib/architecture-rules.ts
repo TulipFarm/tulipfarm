@@ -181,7 +181,6 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
     surface: ["schema"],
     "surface-web": ["surface"],
     "surface-slack": ["surface"],
-    "surface-telegram": ["surface"],
     "surface-github": ["surface"],
     integrations: ["schema", "authz", "audit", "tool-broker", "storage", "observability"],
     "agent-runtime": [
@@ -236,7 +235,6 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
       "surface",
       "surface-web",
       "surface-slack",
-      "surface-telegram",
       "surface-github",
       "integrations",
       "storage",

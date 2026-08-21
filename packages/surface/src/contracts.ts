@@ -17,10 +17,6 @@ export const SurfaceTargetSchema = Type.Union([
     { additionalProperties: false }
   ),
   Type.Object(
-    { channel: Type.Literal("telegram"), surface: Type.Literal("message") },
-    { additionalProperties: false }
-  ),
-  Type.Object(
     {
       channel: Type.Literal("github"),
       surface: Type.Union([Type.Literal("comment"), Type.Literal("check-run")]),

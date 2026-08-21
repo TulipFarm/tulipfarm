@@ -10,7 +10,6 @@ import {
 } from "@tulipfarm/surface";
 import { githubCheckRunManifest, githubCommentManifest } from "@tulipfarm/surface-github/manifest";
 import { slackMessageManifest, slackModalManifest } from "@tulipfarm/surface-slack/manifest";
-import { telegramManifest } from "@tulipfarm/surface-telegram/manifest";
 import { surfaceWebManifest } from "@tulipfarm/surface-web/manifest";
 import type { SurfacePresentationPort } from "@tulipfarm/tool-host";
 
@@ -18,7 +17,6 @@ export const SURFACE_RENDERER_MANIFESTS: readonly SurfaceRendererManifest[] = Ob
   surfaceWebManifest,
   slackMessageManifest,
   slackModalManifest,
-  telegramManifest,
   githubCommentManifest,
   githubCheckRunManifest,
 ]);

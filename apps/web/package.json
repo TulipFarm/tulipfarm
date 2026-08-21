@@ -35,7 +35,6 @@
     "@tulipfarm/surface": "workspace:*",
     "@tulipfarm/surface-github": "workspace:*",
     "@tulipfarm/surface-slack": "workspace:*",
-    "@tulipfarm/surface-telegram": "workspace:*",
     "@tulipfarm/surface-web": "workspace:*",
     "@xyflow/react": "^12.11.3",
     "chart.js": "^4.5.1",

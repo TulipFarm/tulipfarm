@@ -28,7 +28,6 @@ export {
   type ConnectorStateRepo,
   PgConnectorStateRepo,
 } from "./connectors/state-repo";
-export { GoogleDocsConnector, NotionConnector } from "./connectors/stubs";
 export {
   CONNECTOR_SYNC_CRON,
   CONNECTOR_SYNC_QUEUE,

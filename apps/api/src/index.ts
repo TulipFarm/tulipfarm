@@ -174,19 +174,14 @@ import { PageReadGate } from "./knowledge/page-access";
 import { ReaderDirectory } from "./knowledge/reader-directory";
 import { SubjectDirectory } from "./knowledge/subject-directory";
 import { PgSlackKnowledgeCheckpointStore } from "./knowledge-sources/checkpoint-store";
-import { PgConfluenceKnowledgeCheckpointStore } from "./knowledge-sources/confluence-checkpoint-store";
-import { registerConfluenceKnowledgeSync } from "./knowledge-sources/confluence-sync-schedule";
 import { PgKnowledgeEmissionSink } from "./knowledge-sources/emission-sink";
 import { PgKnowledgeIndexStore } from "./knowledge-sources/index-store";
-import { registerK3KnowledgeSync } from "./knowledge-sources/k3-sync-schedule";
 import {
   CompositeLiveSourceAuthorization,
-  GoogleDriveTenantLiveAuthorization,
   SlackTenantLiveAuthorization,
 } from "./knowledge-sources/live-authorization";
 import { registerSlackKnowledgeSync } from "./knowledge-sources/slack-sync-schedule";
 import { PgKnowledgeSourceStore } from "./knowledge-sources/source-store";
-import { PgProviderKnowledgeCheckpointStore } from "./knowledge-sources/sync-checkpoint-store";
 import { registerLlmReload } from "./llm-reload";
 import { buildMemoryServices } from "./memory/composition";
 import { parseObservabilityConfig } from "./observability/config";
@@ -647,7 +642,6 @@ async function boot() {
         index: knowledgeIndexStore,
         live: new CompositeLiveSourceAuthorization([
           new SlackTenantLiveAuthorization(integrationStore, secretsService, externalIdentityRepo),
-          new GoogleDriveTenantLiveAuthorization(soulLoader, secretsService, externalIdentityRepo),
         ]),
         now: () => new Date(),
       },
@@ -1290,24 +1284,6 @@ async function boot() {
       registry: buildDefaultRegistry(),
       state: new PgConnectorStateRepo(pool),
       service: knowledgeService,
-      activity: activityService,
-    });
-    await registerConfluenceKnowledgeSync(boss, {
-      soulLoader,
-      secrets: secretsService,
-      checkpoints: new PgConfluenceKnowledgeCheckpointStore(pool),
-      sink: new PgKnowledgeEmissionSink(knowledgeSourceStore, knowledgeIndexStore),
-      sources: knowledgeSourceStore,
-      identity: new ExternalLinkKnowledgeIdentityMap(externalIdentityRepo),
-      activity: activityService,
-    });
-    await registerK3KnowledgeSync(boss, {
-      soulLoader,
-      secrets: secretsService,
-      checkpoints: (provider) => new PgProviderKnowledgeCheckpointStore(pool, provider),
-      sink: new PgKnowledgeEmissionSink(knowledgeSourceStore, knowledgeIndexStore),
-      sources: knowledgeSourceStore,
-      identity: new ExternalLinkKnowledgeIdentityMap(externalIdentityRepo),
       activity: activityService,
     });
     await registerSlackKnowledgeSync(boss, {

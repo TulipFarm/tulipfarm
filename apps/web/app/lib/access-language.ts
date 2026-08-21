@@ -429,11 +429,7 @@ function humanize(value: string): string {
 const PROVIDER_NAMES: Readonly<Record<string, string>> = {
   github: "GitHub",
   slack: "Slack",
-  telegram: "Telegram",
-  discord: "Discord",
-  google_docs: "Google Docs",
-  googledocs: "Google Docs",
-  confluence: "Confluence",
+  google: "Google Workspace",
 };
 
 function providerName(slug: string): string {

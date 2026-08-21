@@ -3,9 +3,8 @@ title: Connect an integration
 description: Install one of the bundled integrations and connect its credentials.
 ---
 
-This guide connects a bundled [integration](/docs/administration/how-integrations-work). TulipFarm ships seven
-bundled integrations today: `github`, `slack`, `telegram`, `notion`, `confluence`, `google-drive`,
-and `google-docs`.
+This guide connects a bundled [integration](/docs/administration/how-integrations-work). TulipFarm ships three
+bundled integrations today: `github`, `slack`, and `google`.
 
 ## Outcome
 
@@ -23,7 +22,7 @@ repository.
     you have already connected grouped first.
   </Step>
   <Step>
-    Choose **github**, **slack**, or **notion**.
+    Choose **github**, **slack**, or **google**.
   </Step>
 </Steps>
 
@@ -31,11 +30,10 @@ Use the dedicated guides for provider-specific setup:
 
 - [Connect GitHub](/docs/administration/connect-github)
 - [Connect Slack](/docs/administration/connect-slack)
-- [Connect Notion](/docs/administration/connect-notion)
 
 ## Install from a git repository
 
-Integrations are not limited to the seven above. An integration is a data file — a manifest
+Integrations are not limited to the three above. An integration is a data file — a manifest
 describing how to connect and which provider API calls agents may make — so one can be installed
 from any git repository.
 
@@ -67,8 +65,8 @@ integration manifest. Secret fields are encrypted in the secrets store; non-secr
 stay as integration config in the soul.
 
 For Slack, this is the Socket Mode app token, bot token, and team id. For GitHub, the
-flow is GitHub App installation rather than a pasted OAuth token. For Notion, it is a single
-internal integration token.
+flow is GitHub App installation rather than a pasted OAuth token. For Google Workspace, it is an
+OAuth sign-in that authorizes the Gmail, Calendar, Drive, and Docs scopes.
 
 ## Verify
 

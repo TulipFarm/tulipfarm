@@ -54,9 +54,6 @@ export async function presentationContextForAuthority(
   if (delivery?.provider === "slack") {
     return surfaces.contextFor({ channel: "slack", surface: "message" }, delivery.destination);
   }
-  if (delivery?.provider === "telegram") {
-    return surfaces.contextFor({ channel: "telegram", surface: "message" }, delivery.destination);
-  }
   return surfaces.contextFor(
     { channel: "web", surface: "chat" },
     `conversation:${authority.turn.conversationId}`

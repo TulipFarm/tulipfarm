@@ -21,7 +21,7 @@ right human — product or engineering).
 | # | Action | Expected |
 | --- | --- | --- |
 | 1 | In chat, describe the Auto SWE agent (classify Implement/Plan/Clarify; build + PR only for small tasks; never self-merge) and ask it to set up as far as possible without GitHub OAuth | `wait-until` terminal turn (max 90s); answer any clarifying prompt (autonomy level) |
-| 2 | `expect` an `agent_create` tool call, and the final response names GitHub as the blocker for branches/commits/PRs | Honest gap-reporting, like `journey-jira-pm.md` S2.3 |
+| 2 | `expect` an `agent_create` tool call, and the final response names GitHub as the blocker for branches/commits/PRs | Honest gap-reporting rather than fabricated tool access |
 | 3 | `navigate /agents/<created-agent-slug>` | Config renders with a classification-oriented role/constraints |
 | 4 | `capture` screenshot | — |
 

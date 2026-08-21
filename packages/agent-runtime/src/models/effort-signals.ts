@@ -15,7 +15,7 @@ const DESIGN_KEYWORDS =
 
 /** Platform terms imply Tool Broker work, so they argue upward even in short prompts. */
 const PLATFORM_KEYWORDS =
-  /\b(?:routines?|agents?|skills?|resources?|integrat\w*|tools?|webhooks?|oauth|api|slack|telegram|github|connect(?:ed|ion|ions)?|sync(?:ed|ing)?|automat\w*|schedul\w*)\b/;
+  /\b(?:routines?|agents?|skills?|resources?|integrat\w*|tools?|webhooks?|oauth|api|slack|github|connect(?:ed|ion|ions)?|sync(?:ed|ing)?|automat\w*|schedul\w*)\b/;
 
 const LOOKUP_OPENER =
   /^(?:(?:what|who|when|where|which)\s+(?:is|are|was|were|does|do|did)\b|how (?:many|much)\b|list\b|show me\b|find\b|look up\b|define\b|search for\b)/;

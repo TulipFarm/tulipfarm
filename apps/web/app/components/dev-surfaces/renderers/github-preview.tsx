@@ -1,8 +1,8 @@
 import type { SurfaceArtifact, SurfaceRenderContext } from "@tulipfarm/surface";
 import {
-  createGitHubRenderer,
   type GitHubCheckRunPayload,
   type GitHubCommentPayload,
+  githubCheckRunRenderer,
   githubCommentRenderer,
 } from "@tulipfarm/surface-github";
 import {
@@ -25,8 +25,6 @@ export interface GitHubPreviewProps {
   readonly artifact: SurfaceArtifact;
   readonly onInteraction?: (actionId: string, payload: Record<string, unknown>) => void;
 }
-
-const checkRunRenderer = createGitHubRenderer("check-run");
 
 export function GitHubPreview({ artifact, onInteraction }: GitHubPreviewProps) {
   const [surfaceType, setSurfaceType] = useState<"comment" | "check-run">("comment");
@@ -63,7 +61,7 @@ export function GitHubPreview({ artifact, onInteraction }: GitHubPreviewProps) {
         ...artifact,
         target: { channel: "github", surface: "check-run" },
       };
-      const res = checkRunRenderer.render(projectedCheckRunArtifact, context);
+      const res = githubCheckRunRenderer.render(projectedCheckRunArtifact, context);
       return { checkRunPayload: res as GitHubCheckRunPayload, checkRunError: null };
     } catch (err) {
       return {

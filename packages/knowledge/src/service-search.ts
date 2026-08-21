@@ -183,15 +183,7 @@ async function searchKnowledgeSources(
       title:
         candidate.provider === "slack"
           ? "Slack conversation"
-          : candidate.provider === "confluence"
-            ? "Confluence page"
-            : candidate.provider === "notion"
-              ? "Notion page"
-              : candidate.provider === "google-docs"
-                ? "Google Doc"
-                : candidate.provider === "google-drive"
-                  ? "Google Drive file"
-                  : `${candidate.provider} knowledge source`,
+          : `${candidate.provider} knowledge source`,
       snippet: candidate.snippet,
       source: candidate.provider === "slack" ? "conversation" : "resource",
       origin: "knowledge_source",

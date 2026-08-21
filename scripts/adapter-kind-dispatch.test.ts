@@ -103,7 +103,6 @@ describe("adapter-kind dispatch", () => {
       expect.arrayContaining([
         "OpenApiToolAdapter",
         "GitHubAdapter",
-        "JiraAdapter",
         "SlackToolAdapter",
         "SandboxToolAdapter",
       ])
