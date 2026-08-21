@@ -305,4 +305,13 @@ describe("createChatExecutor", () => {
     expect(recorded.messages).toEqual([]);
     expect(recorded.completions).toEqual([]);
   });
+
+  it("aborts execution when the Run is already cancelled", async () => {
+    const { execute, recorded } = harness({ run: { ...RUN, status: "cancelled" } });
+
+    await expect(execute()).resolves.toBe("cancelled");
+
+    expect(recorded.messages).toEqual([]);
+    expect(recorded.completions).toEqual([]);
+  });
 });
