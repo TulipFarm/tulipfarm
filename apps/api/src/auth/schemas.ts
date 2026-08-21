@@ -18,15 +18,29 @@ export const PublicUserSchema = {
   required: ["id", "email", "name", "role", "status"],
 } as const;
 
+/** The single capability payload the shell reads instead of probing every page's API. */
+export const SessionNavigationSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    visiblePaths: { type: "array", items: { type: "string" } },
+  },
+  required: ["visiblePaths"],
+} as const;
+
 /**
- * The caller's own account plus whether it holds admin authority right now. `role` is the account's
+ * The caller's own account, admin authority, and allowed navigation paths. `role` is the account's
  * own level and a Role grant never rewrites it, so a client deriving "is an admin" from `role`
  * hides every admin surface from a granted `Owner` (#408).
  */
 export const SessionUserSchema = {
   type: "object",
-  properties: { ...PublicUserSchema.properties, isAdmin: { type: "boolean" } },
-  required: [...PublicUserSchema.required, "isAdmin"],
+  properties: {
+    ...PublicUserSchema.properties,
+    isAdmin: { type: "boolean" },
+    navigation: SessionNavigationSchema,
+  },
+  required: [...PublicUserSchema.required, "isAdmin", "navigation"],
 } as const;
 
 /**

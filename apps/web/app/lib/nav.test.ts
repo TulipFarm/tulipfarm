@@ -1,5 +1,12 @@
 import { expect, test } from "vitest";
-import { MODE_SECTIONS, type NavItem, titleForPath } from "./nav";
+import {
+  destinationForMode,
+  MODE_SECTIONS,
+  type NavItem,
+  titleForPath,
+  visibleModes,
+  visibleSections,
+} from "./nav";
 
 function everyNavItem(): NavItem[] {
   return Object.values(MODE_SECTIONS).flatMap((sections) =>
@@ -32,4 +39,28 @@ test("a child route keeps its parent page's identity", () => {
 /* `/business/people` redirects in-shell, so its transient label must stay explicit. */
 test("a retired page still names its destination while it redirects", () => {
   expect(titleForPath("/business/people")).toBe(titleForPath("/business/access"));
+});
+
+test("hides every denied destination and collapses its empty groups", () => {
+  const sections = visibleSections("operate", {
+    isDev: false,
+    visiblePaths: ["/business/activities"],
+  });
+
+  expect(sections).toEqual([
+    expect.objectContaining({
+      heading: "Work",
+      items: [expect.objectContaining({ label: "Activities" })],
+    }),
+  ]);
+});
+
+test("hides a mode with no visible destinations", () => {
+  expect(visibleModes({ isDev: false, visiblePaths: [] })).toEqual(["chat"]);
+});
+
+test("sends a visible mode to its first allowed destination", () => {
+  expect(
+    destinationForMode("operate", { isDev: false, visiblePaths: ["/business/activities"] })
+  ).toBe("/business/activities");
 });

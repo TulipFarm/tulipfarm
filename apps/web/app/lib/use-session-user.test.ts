@@ -9,6 +9,7 @@ function user(overrides: Partial<SessionUser>): SessionUser {
     name: null,
     role: "member",
     status: "active",
+    navigation: { visiblePaths: [] },
     ...overrides,
   };
 }

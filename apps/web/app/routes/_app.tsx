@@ -7,7 +7,6 @@ import { ApprovalsProvider } from "~/lib/approvals-context";
 import { CompanionProvider } from "~/lib/companion-context";
 import { ConversationsProvider } from "~/lib/conversations-context";
 import { getSetupStatus } from "~/lib/setup";
-import { isBusinessAdmin } from "~/lib/use-session-user";
 
 // Auth gate for the whole app shell: every /app/* route runs this parent loader first.
 // Checks setup status first: if the instance needs first-run setup, redirect to /setup.
@@ -49,7 +48,7 @@ export default function AppLayout() {
     <ApprovalsProvider>
       <ConversationsProvider>
         <CompanionProvider>
-          <AppShell isAdmin={isBusinessAdmin(user)} user={user}>
+          <AppShell user={user}>
             <a
               href="#main-content"
               className="fixed left-2 top-2 z-[100] -translate-y-16 bg-background px-3 py-2 text-sm focus:translate-y-0"

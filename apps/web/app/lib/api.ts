@@ -198,6 +198,9 @@ export type SessionUser = {
    * admin routes are behind rather than by `role`, which a granted access level never rewrites.
    */
   isAdmin?: boolean;
+  navigation: {
+    visiblePaths: string[];
+  };
 };
 
 // Establish a session: POST credentials to the API, which sets the httpOnly session cookie + the

@@ -20,13 +20,16 @@ import { logout, type SessionUser } from "~/lib/api";
 import { useApprovals } from "~/lib/approvals-context";
 import { useConversations } from "~/lib/conversations-context";
 import {
+  destinationForMode,
   hasContextPanel,
   iconForPath,
   MODE_META,
+  type NavigationVisibility,
   type ProductMode as NavProductMode,
   modeForPath as navModeForPath,
   PRIMARY_MODES,
   titleForPath,
+  visibleModes,
   visibleSections,
 } from "~/lib/nav";
 import { isBusinessAdmin } from "~/lib/use-session-user";
@@ -78,8 +81,8 @@ function SignOutButton({ compact = false }: { compact?: boolean }) {
  * depends on color alone, and the shared Tooltip replaces the native `title` delay for these
  * icon-only targets.
  */
-function RailLink({ mode, active }: { mode: ProductMode; active: boolean }) {
-  const { label, to, icon: Icon } = MODE_META[mode];
+function RailLink({ mode, active, to }: { mode: ProductMode; active: boolean; to: string }) {
+  const { label, icon: Icon } = MODE_META[mode];
   return (
     <Tooltip content={label}>
       <Link
@@ -101,7 +104,15 @@ function RailLink({ mode, active }: { mode: ProductMode; active: boolean }) {
   );
 }
 
-function Rail({ mode }: { mode: ProductMode }) {
+function Rail({
+  mode,
+  modes,
+  visibility,
+}: {
+  mode: ProductMode;
+  modes: readonly ProductMode[];
+  visibility: NavigationVisibility;
+}) {
   return (
     <div className="flex w-14 shrink-0 flex-col items-center border-r border-sidebar-border bg-background">
       <div className={cn(HEADER_ROW, "w-full justify-center border-b border-sidebar-border")}>
@@ -110,14 +121,31 @@ function Rail({ mode }: { mode: ProductMode }) {
         </Link>
       </div>
       <nav aria-label="Product modes" className="flex flex-1 flex-col items-center gap-1 py-3">
-        {PRIMARY_MODES.map((item) => (
-          <RailLink key={item} mode={item} active={mode === item} />
+        {PRIMARY_MODES.filter((item) => modes.includes(item)).map((item) => (
+          <RailLink
+            key={item}
+            mode={item}
+            to={destinationForMode(item, visibility)}
+            active={mode === item}
+          />
         ))}
       </nav>
       <div className="flex flex-col items-center gap-1 pb-3">
         <Separator className="mb-2 w-6" />
-        <RailLink mode="farm" active={mode === "farm"} />
-        <RailLink mode="settings" active={mode === "settings"} />
+        {modes.includes("farm") ? (
+          <RailLink
+            mode="farm"
+            to={destinationForMode("farm", visibility)}
+            active={mode === "farm"}
+          />
+        ) : null}
+        {modes.includes("settings") ? (
+          <RailLink
+            mode="settings"
+            to={destinationForMode("settings", visibility)}
+            active={mode === "settings"}
+          />
+        ) : null}
         <span className="flex size-10 items-center justify-center">
           <ThemeToggle iconOnly />
         </span>
@@ -215,14 +243,14 @@ function ChatContext({ onNavigate }: { onNavigate: () => void }) {
 function LinkList({
   mode,
   onNavigate,
-  isAdmin,
+  visibility,
 }: {
   mode: "build" | "operate" | "settings";
   onNavigate: () => void;
-  isAdmin: boolean;
+  visibility: NavigationVisibility;
 }) {
   const { count } = useApprovals();
-  const sections = visibleSections(mode, { isAdmin, isDev: import.meta.env.DEV });
+  const sections = visibleSections(mode, visibility);
   return (
     <nav aria-label={`${mode} navigation`} className="flex flex-col gap-5 px-2">
       {sections.map((section, index) => (
@@ -251,11 +279,11 @@ function LinkList({
 function ContextPanel({
   mode,
   onNavigate,
-  isAdmin,
+  visibility,
 }: {
   mode: ProductMode;
   onNavigate: () => void;
-  isAdmin: boolean;
+  visibility: NavigationVisibility;
 }) {
   const { label, icon: Icon } = MODE_META[mode];
   return (
@@ -263,7 +291,9 @@ function ContextPanel({
       <div className={cn(HEADER_ROW, "gap-2 border-b border-sidebar-border px-4")}>
         <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
         <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{label}</h2>
-        {mode === "knowledge" ? (
+        {mode === "knowledge" &&
+        (visibility.visiblePaths === undefined ||
+          visibility.visiblePaths.includes("/knowledge")) ? (
           <Tooltip content="New space">
             <Link
               to="/knowledge/spaces/new"
@@ -280,19 +310,22 @@ function ContextPanel({
         {mode === "chat" ? <ChatContext onNavigate={onNavigate} /> : null}
         {mode === "knowledge" ? (
           <>
-            <nav aria-label="knowledge navigation" className="flex flex-col gap-1 px-2 pb-3">
-              <ContextLink
-                to="/knowledge/files"
-                label="Files"
-                icon={Paperclip}
-                onNavigate={onNavigate}
-              />
-            </nav>
+            {visibility.visiblePaths === undefined ||
+            visibility.visiblePaths.includes("/knowledge/files") ? (
+              <nav aria-label="knowledge navigation" className="flex flex-col gap-1 px-2 pb-3">
+                <ContextLink
+                  to="/knowledge/files"
+                  label="Files"
+                  icon={Paperclip}
+                  onNavigate={onNavigate}
+                />
+              </nav>
+            ) : null}
             <KnowledgeTree />
           </>
         ) : null}
         {mode === "build" || mode === "operate" || mode === "settings" ? (
-          <LinkList mode={mode} onNavigate={onNavigate} isAdmin={isAdmin} />
+          <LinkList mode={mode} onNavigate={onNavigate} visibility={visibility} />
         ) : null}
       </div>
     </div>
@@ -303,16 +336,18 @@ export function AppSidebar({
   open = false,
   onClose = () => {},
   collapsed = false,
-  isAdmin = false,
+  navigation,
 }: {
   open?: boolean;
   onClose?: () => void;
   collapsed?: boolean;
-  isAdmin?: boolean;
+  navigation?: SessionUser["navigation"];
 } = {}) {
   const { pathname } = useLocation();
   const mode = modeForPath(pathname);
-  const showContext = hasContextPanel(mode);
+  const visibility = { isDev: import.meta.env.DEV, visiblePaths: navigation?.visiblePaths };
+  const modes = visibleModes(visibility);
+  const showContext = hasContextPanel(mode) && modes.includes(mode);
   const [persistent, setPersistent] = useState(true);
 
   useEffect(() => {
@@ -347,7 +382,7 @@ export function AppSidebar({
           (collapsed || !showContext) && "lg:w-14"
         )}
       >
-        <Rail mode={mode} />
+        <Rail mode={mode} modes={modes} visibility={visibility} />
         {showContext ? (
           <div
             className={cn(
@@ -356,7 +391,7 @@ export function AppSidebar({
               collapsed && "lg:hidden"
             )}
           >
-            <ContextPanel mode={mode} onNavigate={onClose} isAdmin={isAdmin} />
+            <ContextPanel mode={mode} onNavigate={onClose} visibility={visibility} />
           </div>
         ) : null}
       </aside>
@@ -397,9 +432,17 @@ function AccountChip({ user }: { user?: SessionUser }) {
  * The parent crumb only earns its place when it points somewhere else and says something else,
  * so the trail never repeats the page or links to it.
  */
-function Breadcrumb({ pathname, pageTitle }: { pathname: string; pageTitle: string }) {
+function Breadcrumb({
+  pathname,
+  pageTitle,
+  visibility,
+}: {
+  pathname: string;
+  pageTitle: string;
+  visibility: NavigationVisibility;
+}) {
   const mode = modeForPath(pathname);
-  const parent = MODE_META[mode];
+  const parent = { ...MODE_META[mode], to: destinationForMode(mode, visibility) };
   const PageIcon = iconForPath(pathname);
   const showParent = mode !== "chat" && parent.to !== pathname && parent.label !== pageTitle;
   return (
@@ -430,15 +473,7 @@ function Breadcrumb({ pathname, pageTitle }: { pathname: string; pageTitle: stri
   );
 }
 
-export function AppShell({
-  children,
-  isAdmin = false,
-  user,
-}: {
-  children: ReactNode;
-  isAdmin?: boolean;
-  user?: SessionUser;
-}) {
+export function AppShell({ children, user }: { children: ReactNode; user?: SessionUser }) {
   const [open, setOpen] = useState(false);
   // Seeded from the [data-sidebar] the pre-hydration script in root.tsx already resolved, so the
   // real shell adopts the persisted width on its first render — matching the HydrateFallback
@@ -450,6 +485,9 @@ export function AppShell({
   const openerRef = useRef<HTMLButtonElement>(null);
   const { activeChatTitle } = useConversations();
   const isConversation = pathname === "/" || pathname.startsWith("/chat/");
+  const currentMode = modeForPath(pathname);
+  const visibility = { isDev: import.meta.env.DEV, visiblePaths: user?.navigation?.visiblePaths };
+  const modes = visibleModes(visibility);
   const pageTitle = isConversation
     ? (activeChatTitle ?? (pathname === "/" ? "New chat" : "Chat"))
     : titleForPath(pathname);
@@ -482,7 +520,7 @@ export function AppShell({
         open={open}
         onClose={() => setOpen(false)}
         collapsed={collapsed}
-        isAdmin={isAdmin}
+        navigation={user?.navigation}
       />
       <div className="flex min-w-0 flex-1 flex-col lg:h-svh">
         <header
@@ -499,7 +537,7 @@ export function AppShell({
             <Menu className="size-5" aria-hidden />
           </button>
           <span className="hidden shrink-0 lg:flex">
-            {hasContextPanel(modeForPath(pathname)) ? (
+            {hasContextPanel(currentMode) && modes.includes(currentMode) ? (
               <Tooltip content={collapsed ? "Expand sidebar" : "Collapse sidebar"}>
                 <button
                   type="button"
@@ -517,7 +555,7 @@ export function AppShell({
             ) : null}
           </span>
           <Separator orientation="vertical" className="mx-1 hidden h-5 lg:block" />
-          <Breadcrumb pathname={pathname} pageTitle={pageTitle} />
+          <Breadcrumb pathname={pathname} pageTitle={pageTitle} visibility={visibility} />
           <div className="ml-auto flex shrink-0 items-center gap-1 pl-2">
             <span className="sm:hidden">
               <CompanionMobileTrigger />

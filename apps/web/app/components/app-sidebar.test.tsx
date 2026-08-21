@@ -20,6 +20,14 @@ vi.mock("~/lib/conversations-context", () => ({ useConversations: vi.fn() }));
 const useConversations = vi.mocked(conversationsContext.useConversations);
 
 const SidebarStub = createRemixStub([{ path: "*", Component: AppSidebar }]);
+const RestrictedSidebarStub = createRemixStub([
+  {
+    path: "*",
+    Component: () => (
+      <AppSidebar navigation={{ visiblePaths: ["/resources", "/business/activities"] }} />
+    ),
+  },
+]);
 const ShellStub = createRemixStub([
   {
     path: "*",
@@ -35,13 +43,13 @@ const AccountShellStub = createRemixStub([
     path: "*",
     Component: () => (
       <AppShell
-        isAdmin
         user={{
           id: "u1",
           email: "priya.nair@northgate.dev",
           name: null,
           role: "admin",
           status: "active",
+          navigation: { visiblePaths: [] },
         }}
       >
         <p>Page content</p>
@@ -174,6 +182,21 @@ test("renders Operate destinations and the live Inbox badge", () => {
   for (const label of ["Inbox", "Runs", "Integrations", "Operations"]) {
     expect(screen.getByRole("link", { name: new RegExp(label, "i") })).toBeInTheDocument();
   }
+});
+
+test("hides denied destinations and sends Operate to the first allowed page", () => {
+  render(<RestrictedSidebarStub initialEntries={["/business/activities"]} />);
+
+  const rail = screen.getByRole("navigation", { name: "Product modes" });
+  expect(within(rail).getByRole("link", { name: "Operate" })).toHaveAttribute(
+    "href",
+    "/business/activities"
+  );
+  expect(screen.getByRole("link", { name: "Activities" })).toBeInTheDocument();
+  for (const label of ["Inbox", "Runs", "Operations", "Soul", "Models"]) {
+    expect(screen.queryByRole("link", { name: new RegExp(label, "i") })).not.toBeInTheDocument();
+  }
+  expect(within(rail).queryByRole("link", { name: "Knowledge" })).not.toBeInTheDocument();
 });
 
 test("renders only personal destinations under Settings", () => {
