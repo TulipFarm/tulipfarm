@@ -151,14 +151,102 @@ test("bounds the model call and honours shutdown", async () => {
   expect(signal.aborted).toBe(true);
 });
 
-// A throwing executor is parked for reconciliation, which is what frees the target again.
-test("propagates a transient API failure instead of reporting success", async () => {
+// Transient failures fail the Run without throwing, preventing parking in needs_reconciliation.
+test("returns failed on transient API failure instead of throwing", async () => {
   const api = {
     require: vi.fn(async () => {
       throw new Error("connection reset");
     }) as never,
   };
-  await expect(
-    createCuratorExecutor({ api, models, artifacts: JOB_ARTIFACT })(RUN)
-  ).rejects.toThrow("connection reset");
+  const outcome = await createCuratorExecutor({ api, models, artifacts: JOB_ARTIFACT })(RUN);
+  expect(outcome).toBe("failed");
+});
+
+test("progresses invoke state from pending to succeeded when transitions are provided", async () => {
+  const stateTransitions: { from: string; to: string; reason?: string }[] = [];
+  const fakeRuns = {
+    findState: vi.fn(async () => ({
+      businessId: "biz-1",
+      runId: "run-1",
+      key: "invoke",
+      definitionRef: "published:curator:reason",
+      resolvedInput: {},
+      status: "pending" as const,
+      version: 1,
+      createdAt: "2026-08-19T01:00:00.000Z",
+      startedAt: null,
+      finishedAt: null,
+      resultArtifactId: null,
+      errorEvidenceRef: null,
+    })),
+  };
+  const fakeTransitions = {
+    transition: vi.fn(async (input: { from: string; to: string; reason?: string }) => {
+      stateTransitions.push({ from: input.from, to: input.to, reason: input.reason });
+    }),
+  };
+
+  const api = makeApi();
+  const outcome = await createCuratorExecutor({
+    api,
+    models,
+    artifacts: JOB_ARTIFACT,
+    runs: fakeRuns,
+    transitions: fakeTransitions as never,
+  })(RUN);
+
+  expect(outcome).toBe("succeeded");
+  expect(stateTransitions).toEqual([
+    { from: "pending", to: "ready", reason: undefined },
+    { from: "ready", to: "claimed", reason: undefined },
+    { from: "claimed", to: "running", reason: undefined },
+    { from: "running", to: "succeeded", reason: undefined },
+  ]);
+});
+
+test("progresses invoke state from pending to failed when execution fails", async () => {
+  const stateTransitions: { from: string; to: string; reason?: string }[] = [];
+  const fakeRuns = {
+    findState: vi.fn(async () => ({
+      businessId: "biz-1",
+      runId: "run-1",
+      key: "invoke",
+      definitionRef: "published:curator:reason",
+      resolvedInput: {},
+      status: "pending" as const,
+      version: 1,
+      createdAt: "2026-08-19T01:00:00.000Z",
+      startedAt: null,
+      finishedAt: null,
+      resultArtifactId: null,
+      errorEvidenceRef: null,
+    })),
+  };
+  const fakeTransitions = {
+    transition: vi.fn(async (input: { from: string; to: string; reason?: string }) => {
+      stateTransitions.push({ from: input.from, to: input.to, reason: input.reason });
+    }),
+  };
+
+  const api = {
+    require: vi.fn(async () => {
+      throw new Error("provider timed out");
+    }) as never,
+  };
+
+  const outcome = await createCuratorExecutor({
+    api,
+    models,
+    artifacts: JOB_ARTIFACT,
+    runs: fakeRuns,
+    transitions: fakeTransitions as never,
+  })(RUN);
+
+  expect(outcome).toBe("failed");
+  expect(stateTransitions).toEqual([
+    { from: "pending", to: "ready", reason: undefined },
+    { from: "ready", to: "claimed", reason: undefined },
+    { from: "claimed", to: "running", reason: undefined },
+    { from: "running", to: "failed", reason: "provider timed out" },
+  ]);
 });

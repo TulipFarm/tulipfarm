@@ -364,6 +364,8 @@ export async function main(): Promise<void> {
       api: internalApi,
       models: { model: (selector, requirements) => llm.model(selector, requirements) },
       artifacts: artifactService,
+      runs: runStore,
+      transitions: new RunStoreStateTransitions(runStore),
       log: logger,
     })
   );
