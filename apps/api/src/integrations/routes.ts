@@ -166,6 +166,8 @@ async function toDetail(entry: MergedIntegration, listing?: RegistryEntry) {
       // walkthrough: a step that writes nothing is satisfied before it is started.
       producesEnv: authStepProducesEnv(step),
       fields: step.kind === "fields" ? step.fields : undefined,
+      // Only an app_manifest step that declares an org-scoped create_url can honor an org input.
+      supportsOrgTarget: step.kind === "app_manifest" && step.create_url_for_org !== undefined,
     })),
     connected: entry.connected,
     setupGuide: entry.setupGuide,

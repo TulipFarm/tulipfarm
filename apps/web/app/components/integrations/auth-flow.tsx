@@ -66,9 +66,13 @@ function postForm(url: string, field: string, value: string, newTab: boolean): v
 export async function startHandoff(
   slug: string,
   stepIndex: number,
-  newTab = false
+  newTab = false,
+  org?: string
 ): Promise<"handed_off" | "completed"> {
-  const action = await startAuthStep(slug, stepIndex);
+  // Passed only when set, so a call with no org keeps matching call sites that never knew of it.
+  const action = org
+    ? await startAuthStep(slug, stepIndex, org)
+    : await startAuthStep(slug, stepIndex);
   if (action.action === "redirect") {
     if (newTab) window.open(action.url, "_blank", "noopener,noreferrer");
     else window.location.assign(action.url);
@@ -247,6 +251,7 @@ function ActiveStep({
   const [blank, setBlank] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [org, setOrg] = useState("");
 
   async function submitFields(e: React.FormEvent) {
     e.preventDefault();
@@ -276,7 +281,12 @@ function ActiveStep({
     setBusy(true);
     setError(undefined);
     try {
-      const outcome = await startHandoff(slug, step.index, !step.producesEnv);
+      const outcome = await startHandoff(
+        slug,
+        step.index,
+        !step.producesEnv,
+        org.trim() || undefined
+      );
       if (outcome === "completed") {
         onAdvance();
         setBusy(false);
@@ -327,16 +337,40 @@ function ActiveStep({
           </div>
         </form>
       ) : (
-        <div>
-          <Button type="button" disabled={busy} onClick={handoff}>
-            {busy
-              ? step.kind === "webhook"
-                ? "Registering…"
-                : "Opening…"
-              : `${HANDOFF_VERB[step.kind]} ${providerLabel}`}
-            {/* No external-link affordance for a step that never leaves the app. */}
-            {step.kind !== "webhook" && <ExternalLink aria-hidden />}
-          </Button>
+        <div className="flex flex-col gap-4">
+          {step.kind === "app_manifest" && step.supportsOrgTarget && (
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium text-foreground" htmlFor="auth-org-target">
+                Organization (optional)
+              </label>
+              <p className="text-xs text-muted-foreground">
+                Leave blank to create the app under your personal account, or enter an organization
+                login to create it there instead.
+              </p>
+              <Input
+                id="auth-org-target"
+                name="org"
+                type="text"
+                value={org}
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="e.g. acme-corp"
+                className="max-w-xs font-mono text-sm"
+                onChange={(e) => setOrg(e.target.value)}
+              />
+            </div>
+          )}
+          <div>
+            <Button type="button" disabled={busy} onClick={handoff}>
+              {busy
+                ? step.kind === "webhook"
+                  ? "Registering…"
+                  : "Opening…"
+                : `${HANDOFF_VERB[step.kind]} ${providerLabel}`}
+              {/* No external-link affordance for a step that never leaves the app. */}
+              {step.kind !== "webhook" && <ExternalLink aria-hidden />}
+            </Button>
+          </div>
         </div>
       )}
     </>

@@ -85,6 +85,8 @@ export type AuthStepSummary = {
   producesEnv: boolean;
   /** Present only for `fields` steps. */
   fields?: RequiredEnvVar[];
+  /** Whether an `app_manifest` step can create the app under a caller-named org. */
+  supportsOrgTarget?: boolean;
 };
 
 /** UI switches on broker `action`, not provider name, to avoid per-provider branches. */
@@ -95,11 +97,15 @@ export type AuthStartAction =
   /** The server already did the work — there is no handoff, only a refresh. */
   | { action: "completed" };
 
-export async function startAuthStep(name: string, step: number): Promise<AuthStartAction> {
+export async function startAuthStep(
+  name: string,
+  step: number,
+  org?: string
+): Promise<AuthStartAction> {
   return apiWrite<AuthStartAction>(
     "POST",
     `/api/v1/integrations/${encodeURIComponent(name)}/auth/start/${step}`,
-    {}
+    org ? { org } : {}
   );
 }
 

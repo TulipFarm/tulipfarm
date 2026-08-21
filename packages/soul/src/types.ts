@@ -182,6 +182,8 @@ export interface AuthAppManifestStep {
   title?: string;
   description?: string;
   create_url: string;
+  /** Alternate `create_url` template used when the caller names a target org; must contain `{org}`. */
+  create_url_for_org?: string;
   delivery: "form_post" | "query_param";
   manifest_param: string;
   manifest: Record<string, unknown>;

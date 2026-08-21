@@ -58,6 +58,8 @@ export interface StartAuthStepInput {
   /** User-scoped connect is allowed only for personal OAuth2 steps; never downgrade to shared. */
   fetchImpl?: typeof globalThis.fetch;
   principal?: { readonly kind: string; readonly id: string };
+  /** Target org login for an `app_manifest` step; ignored by steps with no `create_url_for_org`. */
+  org?: string;
 }
 
 function stepAt(manifest: IntegrationManifest, index: number): AuthStep {
@@ -195,8 +197,12 @@ export async function startAuthStep(input: StartAuthStepInput): Promise<AuthStar
 
     case "app_manifest": {
       const state = await issueState(input, null);
+      const org = input.org?.trim();
       const vars = integrationAuthEndpointVars(input.endpoints, input.env);
-      const url = renderTemplate(step.create_url, { ...vars, state });
+      // An org can only be targeted through a template the step opts into; a step with no
+      // create_url_for_org silently falls back to its personal-account create_url.
+      const createUrl = org && step.create_url_for_org ? step.create_url_for_org : step.create_url;
+      const url = renderTemplate(createUrl, { ...vars, state, ...(org ? { org } : {}) });
       const value = JSON.stringify(renderDeep(step.manifest, vars));
       if (step.delivery === "query_param") {
         const withParam = new URL(url);

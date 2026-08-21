@@ -39,6 +39,9 @@ function authUrls(step: AuthStep): { label: string; url: string }[] {
     case "app_manifest":
       return [
         { label: "auth.app_manifest.create_url", url: step.create_url },
+        ...(step.create_url_for_org
+          ? [{ label: "auth.app_manifest.create_url_for_org", url: step.create_url_for_org }]
+          : []),
         ...(step.exchange
           ? [{ label: "auth.app_manifest.exchange.url", url: step.exchange.url }]
           : []),
