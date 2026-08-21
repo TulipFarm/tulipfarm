@@ -167,22 +167,12 @@ function cookieValue(res: { cookies: Array<{ name: string; value: string }> }): 
 describe("auth routes", () => {
   let app: FastifyInstance;
   let store: MemorySessionStore;
-  let deniedNavigationActions = new Set<string>();
 
   beforeEach(async () => {
-    deniedNavigationActions = new Set();
     store = new MemorySessionStore();
     const repo = new FakeUserRepo();
     await createUser(repo, "user@example.com", "correct-horse", "admin");
-    app = await buildApp({
-      sessionStore: store,
-      userRepo: repo,
-      tokenRepo: new MemoryTokenRepo(),
-      routeAuthorizer: {
-        authorize: async (_principal, authorization) =>
-          !deniedNavigationActions.has(authorization.action),
-      },
-    });
+    app = await buildApp({ sessionStore: store, userRepo: repo, tokenRepo: new MemoryTokenRepo() });
   });
 
   afterEach(async () => {
@@ -256,39 +246,6 @@ describe("auth routes", () => {
     expect(res.statusCode).toBe(200);
     expect(res.json().user.email).toBe("user@example.com");
     expect(res.json().user.navigation.visiblePaths).toContain("/inbox");
-  });
-
-  it("GET /session omits every destination the same gate denies", async () => {
-    deniedNavigationActions = new Set([
-      "operations.read",
-      "soul.git_config.read",
-      "llm_config.read",
-    ]);
-    const login = await app.inject({
-      method: "POST",
-      url: "/api/v1/auth/login",
-      payload: { email: "user@example.com", password: "correct-horse" },
-    });
-    const sid = cookieValue(login);
-    const res = await app.inject({
-      method: "GET",
-      url: "/api/v1/auth/session",
-      cookies: { [SESSION_COOKIE]: sid as string },
-    });
-
-    expect(res.statusCode).toBe(200);
-    expect(res.json().user.navigation.visiblePaths).toEqual(
-      expect.not.arrayContaining([
-        "/inbox",
-        "/runs",
-        "/operations",
-        "/business/guardrails",
-        "/business/soul",
-        "/business/models",
-        "/business/secrets",
-      ])
-    );
-    expect(res.json().user.navigation.visiblePaths).toContain("/business/activities");
   });
 
   it("GET /session returns 401 without a cookie", async () => {

@@ -1,5 +1,6 @@
+import { withSessionNav } from "@tulipfarm/authz";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { AuthorizationCheck, RouteAuthorization } from "../../authz/route-gate";
+import type { AuthorizationCheck } from "../../authz/route-gate";
 import { makeAuthorizationCheck } from "../../authz/route-gate";
 import { userPrincipal } from "../../identity/principal";
 import { sessionCookieOptions } from "../cookie-security";
@@ -31,7 +32,6 @@ import {
   type UserDoc,
   type UserRepo,
 } from "../users";
-import { USER_MANAGE } from "./users";
 
 // Precomputed lazily and reused: verifying against a dummy hash on unknown-user
 // login keeps response timing similar to the known-user path (no user enumeration).
@@ -44,79 +44,6 @@ function getDummyHash(): Promise<string> {
 }
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
-
-type NavigationRequirement = {
-  path: string;
-  authorizations: readonly RouteAuthorization[];
-};
-
-const AUTHENTICATED_NAVIGATION: RouteAuthorization = {
-  action: "auth_session.read",
-  resourceType: "auth_session",
-  fallback: "authenticated",
-};
-
-const OPERATIONS_READ: RouteAuthorization = {
-  action: "operations.read",
-  resourceType: "operations",
-  fallback: "admin",
-};
-
-/** Server-owned visibility requirements for every static destination in the product shell. */
-const NAVIGATION_REQUIREMENTS: readonly NavigationRequirement[] = [
-  { path: "/farm", authorizations: [AUTHENTICATED_NAVIGATION] },
-  { path: "/resources", authorizations: [AUTHENTICATED_NAVIGATION] },
-  { path: "/agents", authorizations: [AUTHENTICATED_NAVIGATION] },
-  { path: "/skills", authorizations: [AUTHENTICATED_NAVIGATION] },
-  { path: "/routines", authorizations: [AUTHENTICATED_NAVIGATION] },
-  { path: "/knowledge", authorizations: [AUTHENTICATED_NAVIGATION] },
-  { path: "/knowledge/files", authorizations: [AUTHENTICATED_NAVIGATION] },
-  { path: "/inbox", authorizations: [OPERATIONS_READ] },
-  { path: "/runs", authorizations: [OPERATIONS_READ] },
-  { path: "/business/activities", authorizations: [AUTHENTICATED_NAVIGATION] },
-  { path: "/operations", authorizations: [OPERATIONS_READ] },
-  {
-    path: "/business/observability",
-    authorizations: [
-      { action: "observability.read", resourceType: "observability", fallback: "admin" },
-    ],
-  },
-  { path: "/business/profile", authorizations: [AUTHENTICATED_NAVIGATION] },
-  {
-    path: "/business/models",
-    authorizations: [
-      { action: "llm_config.read", resourceType: "llm_config", fallback: "admin" },
-      { action: "secret.read", resourceType: "secret", fallback: "authenticated" },
-    ],
-  },
-  {
-    path: "/business/secrets",
-    authorizations: [
-      { action: "secret.read", resourceType: "secret", fallback: "authenticated" },
-      { action: "llm_config.read", resourceType: "llm_config", fallback: "admin" },
-    ],
-  },
-  { path: "/integrations", authorizations: [AUTHENTICATED_NAVIGATION] },
-  {
-    path: "/business/soul",
-    authorizations: [
-      { action: "soul.git_config.read", resourceType: "soul.git_config", fallback: "admin" },
-    ],
-  },
-  { path: "/business/guardrails", authorizations: [OPERATIONS_READ] },
-  { path: "/business/access", authorizations: [OPERATIONS_READ] },
-  { path: "/business/about", authorizations: [AUTHENTICATED_NAVIGATION] },
-  { path: "/settings/profile", authorizations: [AUTHENTICATED_NAVIGATION] },
-  { path: "/settings/appearance", authorizations: [AUTHENTICATED_NAVIGATION] },
-  {
-    path: "/settings/auth",
-    authorizations: [
-      { action: "api_token.read", resourceType: "api_token", fallback: "authenticated" },
-    ],
-  },
-  { path: "/settings/instructions", authorizations: [AUTHENTICATED_NAVIGATION] },
-  { path: "/design-guide", authorizations: [AUTHENTICATED_NAVIGATION] },
-];
 
 /** A denial is opaque on the wire; log which cause it was, keyed by a hash prefix, not the token. */
 function logInviteDenial(req: FastifyRequest, at: string, err: InviteDeniedError, token: string) {
@@ -158,27 +85,7 @@ export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDe
    * own session is how the app boots, and every admin surface is gated again on its own request.
    */
   async function sessionUser(user: UserDoc) {
-    const principal = userPrincipal(user, "session");
-    const [isAdmin, visiblePaths] = await Promise.all([
-      authorizationCheck(principal, USER_MANAGE).catch(() => false),
-      Promise.all(
-        NAVIGATION_REQUIREMENTS.map(async ({ path, authorizations }) => {
-          const allowed = await Promise.all(
-            authorizations.map((authorization) => authorizationCheck(principal, authorization))
-          ).catch(() => []);
-          return allowed.length === authorizations.length && allowed.every(Boolean)
-            ? path
-            : undefined;
-        })
-      ),
-    ]);
-    return {
-      ...toPublicUser(user),
-      isAdmin,
-      navigation: {
-        visiblePaths: visiblePaths.filter((path): path is string => path !== undefined),
-      },
-    };
+    return withSessionNav(toPublicUser(user), userPrincipal(user, "session"), authorizationCheck);
   }
   const loginPreHandlers = [rateLimitHook, loginRateLimitHook].filter(
     (hook): hook is PreHandler => hook !== undefined
