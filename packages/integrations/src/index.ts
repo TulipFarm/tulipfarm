@@ -203,6 +203,23 @@ export {
   signAppJwt,
 } from "./github";
 export type {
+  GmailMimeMessage,
+  GooglePortResolver,
+  GoogleService,
+  GoogleToolAdapterDeps,
+  GoogleToolId,
+} from "./google";
+export {
+  buildGmailMime,
+  encodeGmailRaw,
+  GOOGLE_ADAPTER_REF,
+  GOOGLE_DESTINATION,
+  GOOGLE_SERVICES,
+  GOOGLE_TOOL_CONTRACTS,
+  GOOGLE_TOOL_IDS,
+  GoogleToolAdapter,
+} from "./google";
+export type {
   GoogleDocsApiPort,
   GoogleDocsChange,
   GoogleDocsDocument,

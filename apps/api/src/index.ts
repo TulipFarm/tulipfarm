@@ -44,6 +44,7 @@ import {
   PgSecretRepo,
   SecretsService,
 } from "@tulipfarm/secrets";
+import type { AuthOAuth2Step } from "@tulipfarm/soul";
 import {
   ActiveRoutineCatalog,
   type CommitActor,
@@ -55,6 +56,7 @@ import {
   loadBundledSkills,
   loadDisabledBundledSkills,
   PgBundleStore,
+  resolveAuthSteps,
   resolveSoulPath,
   runSoulMigrations,
   SoulLoader,
@@ -254,6 +256,8 @@ import { apiSurfacePresentation, surfaceRendererRegistry } from "./surfaces/rend
 import { DeclarativeToolSync } from "./tools/declarative/sync";
 import { buildGitHubTooling } from "./tools/github/compose";
 import { buildGitHubTools } from "./tools/github/tools";
+import { buildGoogleTooling } from "./tools/google/compose";
+import { buildGoogleTools } from "./tools/google/tools";
 import { buildToolRegistry } from "./tools/setup";
 import { buildSlackTooling } from "./tools/slack/compose";
 import { buildSlackTools } from "./tools/slack/tools";
@@ -695,6 +699,30 @@ async function boot() {
       mutationGuard,
     });
 
+    // Google Workspace chat tool family: registered unconditionally (like Slack); each tool's own
+    // credential lease fails closed when no Google account is connected.
+    const googleTooling = buildGoogleTooling({
+      secrets: async () => secretsService,
+      // Supplies the OAuth step + connection env so the leased access token refreshes itself before
+      // expiry. Read live from the loaded Soul so a reconnect is picked up without an API restart.
+      connection: async () => {
+        const integration = soulLoader.integrations.get("google");
+        const env = integration?.connection?.env;
+        const manifest = integration?.manifest;
+        if (env === undefined || manifest === undefined) return undefined;
+        const step = resolveAuthSteps(manifest).find(
+          (candidate): candidate is AuthOAuth2Step => candidate.kind === "oauth2"
+        );
+        return step === undefined ? undefined : { step, env };
+      },
+    });
+    const googleEffects = new PgEffectStore(runTransactions);
+    const googleTools = buildGoogleTools(DEPLOYMENT_BUSINESS_ID, {
+      ...googleTooling,
+      effects: googleEffects,
+      mutationGuard,
+    });
+
     // (resource records/types, agents, skills, platform tools). Without this, a chat turn only
     const delegationConversations = new PgConversationStore(pool);
     const childLinks = new ChildLinkAncestryStore(pool);
@@ -748,6 +776,7 @@ async function boot() {
       },
       github: githubTools,
       slack: slackTools,
+      google: googleTools,
       tasks: { businessId: DEPLOYMENT_BUSINESS_ID, tasks: taskRepo },
       platform: {
         events: domainEventEmitter,

@@ -67,3 +67,11 @@ integrations:
     category: docs
     homepage: https://docs.google.com
     description: Read documents, and index them into Knowledge with Drive-backed ACLs intact.
+
+  - name: google
+    title: Google Workspace
+    icon: google
+    category: productivity
+    homepage: https://workspace.google.com
+    description: One Google sign-in for Gmail, Calendar, Drive, and Docs — read and write across all
+      of them from a single connection.

@@ -1,0 +1,86 @@
+name: google
+version: "1.0.0"
+description: One Google sign-in for your agents — Gmail, Calendar, Drive, and Docs on a single
+  connection. The tools that use this login are code-backed (like Slack), so they can span every
+  Google service and compose email, which a declarative integration cannot.
+maintainer: TulipFarm
+icon: google
+capabilities:
+  - Gmail — search and read mail, compose drafts, send
+  - Calendar — list, create, update, and delete events
+  - Drive — search and read files, create files
+  - Docs — read documents, create and edit them
+grants:
+  - label: gmail
+    description: Read mail, and create drafts or send on your behalf.
+  - label: calendar
+    description: Read your calendar and create, update, or delete events.
+  - label: drive
+    description: Read files and create new ones.
+  - label: docs
+    description: Read documents and edit them.
+
+# Code-backed: the Google Tools are hand-written (see apps/api/src/tools/google and
+# packages/integrations/src/google), so egress is `none` here. A code adapter is not pinned to one
+# host the way declarative OpenAPI egress is, which is exactly why a single login can reach Gmail,
+# Calendar, Drive, and Docs at once — and why email composition (MIME assembly) is possible.
+egress:
+  type: none
+
+auth:
+  # 1. Paste an OAuth client the operator creates once in their own Google Cloud project — the same
+  #    two values Slack asks for. Google has no "create app from a manifest" API, so this is manual.
+  - kind: fields
+    title: Add your Google OAuth client
+    description: Create one OAuth client in your own Google Cloud project, then paste its two values
+      here. The setup guide is a ~10-minute, one-time walkthrough.
+    fields:
+      - name: GOOGLE_CLIENT_ID
+        label: OAuth Client ID
+        description: From Google Cloud Console → APIs & Services → Credentials → your OAuth client.
+        secret: false
+        setup_url: https://console.cloud.google.com/apis/credentials
+        steps:
+          - In Google Cloud Console, open the project serving this deployment and enable the Gmail,
+            Google Calendar, Google Drive, and Google Docs APIs from the API Library. One OAuth
+            client and one token cover all of them — enabling each API is the only per-product step.
+          - On the OAuth consent screen, pick User type "Internal" if this is a Google Workspace
+            org; otherwise pick "External", keep it in "Testing", and add your own account under
+            Test users (restricted scopes then work with no verification).
+          - Create an OAuth client of type "Web application" and set its Authorized redirect URI to
+            the callback URL shown on this connect screen, exactly (default local dev value is
+            http://localhost:4010/api/v1/integrations/auth/callback).
+          - Copy the Client ID and paste it below.
+      - name: GOOGLE_CLIENT_SECRET
+        label: OAuth Client Secret
+        description: The client secret Google issued alongside the Client ID.
+        secret: true
+        setup_url: https://console.cloud.google.com/apis/credentials
+        steps:
+          - On the same OAuth client page, copy the Client Secret and paste it below.
+
+  # 2. One click signs in with Google and stores a self-refreshing token. `access_type=offline` +
+  #    `prompt=consent` make Google return a refresh token, so background routines keep running.
+  #    All scopes the planned tools need are requested up front, so attaching Calendar/Drive/Docs
+  #    tools later needs no re-consent. Shared (not `personal`) — one business credential, like the
+  #    Slack workspace token.
+  - kind: oauth2
+    title: Sign in with Google
+    description: Approve access in Google and TulipFarm stores a self-refreshing token — nothing to
+      paste back.
+    authorization_url: https://accounts.google.com/o/oauth2/v2/auth
+    token_url: https://oauth2.googleapis.com/token
+    client_id_env: GOOGLE_CLIENT_ID
+    client_secret_env: GOOGLE_CLIENT_SECRET
+    token_env: GOOGLE_ACCESS_TOKEN
+    authorize_params:
+      access_type: offline
+      prompt: consent
+    scopes:
+      - https://www.googleapis.com/auth/gmail.modify
+      - https://www.googleapis.com/auth/gmail.send
+      - https://www.googleapis.com/auth/calendar
+      - https://www.googleapis.com/auth/drive
+      - https://www.googleapis.com/auth/documents
+
+setup_guide_path: setup-guide.md
