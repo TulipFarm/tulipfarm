@@ -114,11 +114,12 @@ jobs:
             echo "- [ ] Required PR checks pass"
             echo "- [ ] Version and changelog are approved"
           } > "$BODY_FILE"
-          gh pr create \
+          pr_url="$(gh pr create \
             --base main \
             --head "$branch" \
             --title "chore(release): v$VERSION" \
-            --body-file "$BODY_FILE"
+            --body-file "$BODY_FILE")"
+          gh pr merge "$pr_url" --auto --squash
       - name: Start CI when using the workflow token
         if: ${{ env.RELEASE_TOKEN == '' }}
         run: |
@@ -139,5 +140,5 @@ jobs:
           {
             echo "## Release v$VERSION proposed"
             echo
-            echo "Review and merge the release PR. Publication starts automatically after merge."
+            echo "Auto-merge is enabled on the release PR. Publication starts automatically after merge."
           } >> "$GITHUB_STEP_SUMMARY"
