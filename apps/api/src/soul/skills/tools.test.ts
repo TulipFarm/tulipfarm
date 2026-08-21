@@ -2,6 +2,7 @@ import type { LlmService } from "@tulipfarm/llm";
 import { LlmNotConfiguredError } from "@tulipfarm/schema";
 import type {
   GitSyncService,
+  SkillMarketplaceFlow,
   SoulLoader,
   SoulSkill,
   SoulWriteRequest,
@@ -9,7 +10,6 @@ import type {
 } from "@tulipfarm/soul";
 import { SoulChangesetValidationError, SoulWriteError } from "@tulipfarm/soul";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { SkillMarketplaceFlow } from "./marketplace";
 import { SKILL_TOOLS, type SkillToolContext } from "./tools";
 
 type SkillTool = (typeof SKILL_TOOLS)[number];

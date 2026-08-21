@@ -1,36 +1,18 @@
 import { createHash, randomUUID } from "node:crypto";
-import { readdir, readFile, readlink, realpath } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative } from "node:path";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
-import { withGitSourceClone } from "@tulipfarm/integrations";
-import type { LlmService } from "@tulipfarm/llm";
-import { SandboxRuntimeProfileRegistry, shellTsPythonV1 } from "@tulipfarm/sandbox";
-import {
-  DEFINITION_REGISTRATIONS,
-  LlmNotConfiguredError,
-  SchemaRegistry,
-  type SkillDefinition,
-  unstorableArtifactPaths,
-  validateSkill,
-} from "@tulipfarm/schema";
-import {
-  artifactWriteTarget,
-  type BundledSkill,
-  type CommitActor,
-  convertLegacySkill,
-  type GitSyncService,
-  mergedSkills,
-  parseFrontmatter,
-  type SkillScanFile,
-  type SoulLoader,
-  type SoulWrite,
-  type SoulWriter,
-  scanSkill,
-  skillTrustLevel,
-  sourceType,
-} from "@tulipfarm/soul";
-import { stripUrlCredentials } from "../../audit/soul-write";
-import { buildAudit } from "./audit";
+import { unstorableArtifactPaths, validateSkill } from "@tulipfarm/schema";
+import type { CommitActor } from "../commit-signing";
+import { convertLegacySkill } from "../converters/legacy-definitions";
+import { sourceType } from "../git-source";
+import type { GitSyncService } from "../git-sync";
+import { parseFrontmatter, type SoulLoader } from "../published-loader";
+import { artifactWriteTarget, type SoulWrite, type SoulWriter } from "../writer";
+import type { BundledSkill } from "./bundled";
+import { type SkillScanFile, type SkillTrustLevel, scanSkill, skillTrustLevel } from "./guard";
+import { collectSkillFiles, discoverSkills } from "./marketplace-files";
+import { mergedSkills } from "./registry";
 
 type ScanEntry = {
   source: string;
@@ -63,6 +45,8 @@ export interface DiscoveredSkill {
   content: string;
   files: SkillScanFile[];
 }
+
+export type MarketplaceAuditScan = ReturnType<typeof scanSkill> & { trustLevel: SkillTrustLevel };
 
 export interface SkillMarketplaceBrowse {
   scanId: string;
@@ -110,9 +94,7 @@ export class SkillMarketplaceError extends Error {
 export interface SkillMarketplaceFlow {
   browse(): Promise<SkillMarketplaceBrowse>;
   scan(input: { source: string; actorId: string }): Promise<SkillMarketplaceScan>;
-  audit(input: { scanId: string; name: string; skillPath?: string }): Promise<{
-    report: Awaited<ReturnType<typeof buildAudit>>;
-  }>;
+  audit(input: { scanId: string; name: string; skillPath?: string }): Promise<{ report: unknown }>;
   install(input: {
     scanId: string;
     names?: string[];
@@ -126,12 +108,17 @@ export interface SkillMarketplaceDeps {
   gitSync: GitSyncService;
   soulLoader: SoulLoader;
   soulWriter: SoulWriter;
-  llmService: LlmService;
   bundledSkills?: ReadonlyMap<string, BundledSkill>;
   disabledBundledSkills?: ReadonlySet<string>;
+  cloneSource<T>(
+    source: string,
+    options: { prefix: string; actorId: string },
+    action: (clone: { dir: string; ref: string }) => Promise<T>
+  ): Promise<T>;
+  audit(skill: DiscoveredSkill, deterministicScan: MarketplaceAuditScan): Promise<unknown>;
+  executablePackageBlocker(skill: DiscoveredSkill): string | undefined;
 }
 
-const NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const SCAN_TTL_MS = 10 * 60 * 1000;
 const MAX_SCANS = 25;
 const STRUCTURAL_INSTALL_BLOCKERS = new Set([
@@ -141,7 +128,17 @@ const STRUCTURAL_INSTALL_BLOCKERS = new Set([
   "symlink_escape",
   "too_many_files",
 ]);
-const definitionRegistry = new SchemaRegistry(DEFINITION_REGISTRATIONS);
+
+function stripUrlCredentials(source: string): string {
+  try {
+    const url = new URL(source);
+    url.username = "";
+    url.password = "";
+    return url.toString();
+  } catch {
+    return source.replace(/\/\/[^/@]+@/, "//");
+  }
+}
 
 export function createSkillMarketplaceFlow(deps: SkillMarketplaceDeps): SkillMarketplaceFlow {
   const scans = new Map<string, ScanEntry>();
@@ -194,7 +191,7 @@ export function createSkillMarketplaceFlow(deps: SkillMarketplaceDeps): SkillMar
         }),
       };
     }
-    await withGitSourceClone(
+    await deps.cloneSource(
       source,
       { prefix: "skill-scan-", actorId: "system:marketplace" },
       async ({ dir, ref }) => {
@@ -218,7 +215,7 @@ export function createSkillMarketplaceFlow(deps: SkillMarketplaceDeps): SkillMar
   }
 
   async function scan(input: { source: string; actorId: string }): Promise<SkillMarketplaceScan> {
-    return withGitSourceClone(
+    return deps.cloneSource(
       input.source,
       { prefix: "skill-scan-", actorId: input.actorId },
       async ({ dir, ref }) => {
@@ -253,28 +250,13 @@ export function createSkillMarketplaceFlow(deps: SkillMarketplaceDeps): SkillMar
 
   async function audit(input: { scanId: string; name: string; skillPath?: string }) {
     const { entry, skill } = selected(input.scanId, input.name, input.skillPath);
-    const { body } = parseFrontmatter(skill.content);
     const deterministicScan = {
       ...scanSkill(skill.files),
       trustLevel: skillTrustLevel(entry.source),
     };
-    try {
-      const report = await buildAudit(
-        deps.llmService.effortModel("balanced"),
-        { name: skill.name, description: skill.description, body },
-        deterministicScan
-      );
-      entry.audited.add(skill.skillPath);
-      return { report };
-    } catch (error) {
-      if (error instanceof LlmNotConfiguredError) {
-        throw new SkillMarketplaceError(
-          422,
-          "SkillAudit needs an LLM provider — configure one in Operate → Business → Models."
-        );
-      }
-      throw error;
-    }
+    const report = await deps.audit(skill, deterministicScan);
+    entry.audited.add(skill.skillPath);
+    return { report };
   }
 
   async function install(input: {
@@ -328,7 +310,7 @@ export function createSkillMarketplaceFlow(deps: SkillMarketplaceDeps): SkillMar
         `audit required before install: ${unaudited.map((skill) => skill.name).join(", ")}`
       );
     }
-    for (const skill of chosen) validateInstallable(skill);
+    for (const skill of chosen) validateInstallable(skill, deps.executablePackageBlocker);
     const changes: SoulWrite[] = [];
     for (const skill of chosen)
       changes.push(...(await skillInstallChanges(deps.gitSync.path, skill)));
@@ -440,7 +422,10 @@ async function skillInstallChanges(root: string, skill: DiscoveredSkill): Promis
   return changes;
 }
 
-function validateInstallable(skill: DiscoveredSkill): void {
+function validateInstallable(
+  skill: DiscoveredSkill,
+  executablePackageBlocker: (skill: DiscoveredSkill) => string | undefined
+): void {
   const { frontmatter, body } = parseFrontmatter(skill.content);
   const validation = validateSkill({ name: skill.name, frontmatter, body, content: skill.content });
   if (!validation.valid) {
@@ -475,132 +460,6 @@ function validateInstallable(skill: DiscoveredSkill): void {
       `Skill "${skill.name}" cannot be published: ${executableBlocker}`
     );
   }
-}
-
-function runtimeStatus(runtimeProfile: string, requiredCommands: readonly string[]) {
-  if (process.env.NODE_ENV === "production") {
-    return {
-      runtimeAvailable: false,
-      blocker: "an attested production sandbox backend is not configured",
-    };
-  }
-  const configuredImage = process.env.SANDBOX_RUNTIME_IMAGE;
-  const digest =
-    process.env.SANDBOX_RUNTIME_IMAGE_DIGEST ??
-    configuredImage?.match(/@(sha256:[0-9a-f]{64})$/)?.[1];
-  if (!digest || !/^sha256:[0-9a-f]{64}$/.test(digest)) {
-    return { runtimeAvailable: false, blocker: "sandbox runtime image digest is not configured" };
-  }
-  const registry = new SandboxRuntimeProfileRegistry([shellTsPythonV1(digest)]);
-  try {
-    registry.require(runtimeProfile, requiredCommands);
-    return { runtimeAvailable: true };
-  } catch (error) {
-    return {
-      runtimeAvailable: false,
-      blocker: error instanceof Error ? error.message : "sandbox runtime is unavailable",
-    };
-  }
-}
-
-function executablePackageBlocker(skill: DiscoveredSkill): string | undefined {
-  const definitionFile = skill.files.find(
-    (file) => file.path === "skill.yaml" || file.path === "skill.yml"
-  );
-  if (definitionFile === undefined) return undefined;
-  let definition: SkillDefinition;
-  try {
-    definition = definitionRegistry.validateYaml(definitionFile.content)
-      .document as SkillDefinition;
-  } catch (error) {
-    return error instanceof Error ? error.message : "invalid skill definition";
-  }
-  const paths = new Set(skill.files.map((file) => file.path));
-  for (const command of definition.spec.commands ?? []) {
-    if (!paths.has(command.entrypoint)) {
-      return `command ${command.name} entrypoint is not present in the Skill package`;
-    }
-    const status = runtimeStatus(command.runtimeProfile, command.requiredCommands ?? []);
-    if (!status.runtimeAvailable) {
-      return `command ${command.name}: ${status.blocker ?? "sandbox runtime is unavailable"}`;
-    }
-    if ((command.integrationBindings?.length ?? 0) > 1) {
-      return `command ${command.name} declares more than one Integration credential`;
-    }
-  }
-  return undefined;
-}
-
-async function collectSkillFiles(skillDirectory: string): Promise<SkillScanFile[]> {
-  const files: SkillScanFile[] = [];
-  const root = await realpath(skillDirectory);
-  async function walk(directory: string, depth: number): Promise<void> {
-    if (depth > 6) return;
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
-      if (entry.name === ".git" || entry.name === "node_modules") continue;
-      const full = join(directory, entry.name);
-      const path = relative(skillDirectory, full);
-      if (entry.isDirectory()) {
-        await walk(full, depth + 1);
-        continue;
-      }
-      if (entry.isSymbolicLink()) {
-        const symlinkTarget = await readlink(full);
-        let symlinkEscapes = true;
-        try {
-          const resolved = await realpath(full);
-          const fromRoot = relative(root, resolved);
-          symlinkEscapes = fromRoot.startsWith("..") || isAbsolute(fromRoot);
-        } catch {
-          // Fail closed: an unresolvable symlink stays flagged as escaping the root.
-        }
-        files.push({
-          path,
-          content: symlinkTarget,
-          size: Buffer.byteLength(symlinkTarget),
-          symlinkTarget,
-          symlinkEscapes,
-        });
-        continue;
-      }
-      if (entry.isFile()) {
-        const content = await readFile(full);
-        files.push({ path, content: content.toString("utf8"), size: content.byteLength });
-      }
-    }
-  }
-  await walk(skillDirectory, 0);
-  return files.sort((left, right) => left.path.localeCompare(right.path));
-}
-
-export async function discoverSkills(root: string): Promise<DiscoveredSkill[]> {
-  const discovered: DiscoveredSkill[] = [];
-  async function walk(directory: string, depth: number): Promise<void> {
-    if (depth > 6) return;
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
-      if (entry.name === ".git" || entry.name === "node_modules") continue;
-      const full = join(directory, entry.name);
-      if (entry.isDirectory()) {
-        await walk(full, depth + 1);
-        continue;
-      }
-      if (entry.name !== "SKILL.md") continue;
-      const content = await readFile(full, "utf8");
-      const { frontmatter } = parseFrontmatter(content);
-      const name = basename(dirname(full));
-      if (!NAME_RE.test(name)) continue;
-      discovered.push({
-        name,
-        description: asString(frontmatter.description),
-        category: categoryFromSkillPath(relative(root, full)),
-        skillPath: relative(root, full),
-        content,
-        files: await collectSkillFiles(dirname(full)),
-      });
-    }
-  }
-  await walk(root, 0);
-  return discovered;
 }
 
 async function readLock(soulPath: string): Promise<SkillsLock> {
@@ -653,10 +512,4 @@ async function readManifest(dir: string): Promise<Map<string, MarketplaceManifes
     // marketplace.json is optional metadata; discovery is authoritative without it.
   }
   return byName;
-}
-
-function categoryFromSkillPath(skillPath: string): string | undefined {
-  const parts = skillPath.split(/[\\/]/).slice(0, -2);
-  if (parts[0] === "skills") parts.shift();
-  return parts[0];
 }

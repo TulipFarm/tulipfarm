@@ -251,6 +251,16 @@ export type {
   SkillTrustLevel,
 } from "./skills/guard";
 export { GUARD_VERSION, scanSkill, skillTrustLevel, THREAT_PATTERNS } from "./skills/guard";
+export type {
+  DiscoveredSkill,
+  SkillMarketplaceBrowse,
+  SkillMarketplaceDeps,
+  SkillMarketplaceFlow,
+  SkillMarketplaceInstall,
+  SkillMarketplaceScan,
+} from "./skills/marketplace";
+export { createSkillMarketplaceFlow, SkillMarketplaceError } from "./skills/marketplace";
+export { collectSkillFiles, discoverSkills } from "./skills/marketplace-files";
 export type { AvailableSkill, EagerSkill } from "./skills/registry";
 export {
   listAvailableSkills,
