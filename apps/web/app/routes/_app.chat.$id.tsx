@@ -59,11 +59,13 @@ export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
     agentId,
     defaultModel,
     messages: messagesToTimeline(messages, votes),
+    latestTurn: convo.latestTurn,
   };
 }
 
 export default function ChatConversationRoute() {
-  const { id, title, agentId, defaultModel, messages } = useLoaderData<typeof clientLoader>();
+  const { id, title, agentId, defaultModel, messages, latestTurn } =
+    useLoaderData<typeof clientLoader>();
   const { refresh, setActiveChatTitle } = useConversations();
   // The top bar names the conversation. Publish the loader's title so it is right immediately, and
   // stays right for chats older than the sidebar's Recent list.
@@ -77,6 +79,7 @@ export default function ChatConversationRoute() {
       defaultModel={defaultModel}
       initialConversationId={id}
       initialMessages={messages}
+      initialTurn={latestTurn}
       onConversationChange={refresh}
     />
   );

@@ -40,6 +40,7 @@ test("clientLoader hydrates the conversation transcript", async () => {
     starred: false,
     createdAt: "t",
     updatedAt: "t",
+    latestTurn: null,
   });
   vi.mocked(conversations.getConversationMessages).mockResolvedValue([
     { _id: "m1", conversationId: "c1", role: "user", content: "hello world", createdAt: "t" },

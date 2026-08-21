@@ -13,6 +13,7 @@ Run event/request vocabularies, canonical hashes, Secret references, and resourc
 | Path | Owns |
 | --- | --- |
 | `src/index.ts` | Public exports; do not mirror the list here. |
+| `src/chat.ts` | Chat metadata and resumable Turn wire contracts. |
 | `src/definitions/` | TypeBox Soul definition schemas and file snapshots. |
 | `src/artifacts.ts` | `ARTIFACT_LAYOUTS`: Soul paths, companions, temporal class. |
 | `src/registry.ts` | Strict `apiVersion`/`kind` dispatch and fail-closed YAML parsing. |

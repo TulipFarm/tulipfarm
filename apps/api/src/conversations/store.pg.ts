@@ -1,6 +1,6 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { normalizeMessageContent } from "@tulipfarm/schema";
-import { recordCuratorWork } from "@tulipfarm/storage";
+import { findLatestConversationTurn, recordCuratorWork } from "@tulipfarm/storage";
 import type { Queryable } from "../db";
 import { withTransaction } from "../db";
 import type {
@@ -163,6 +163,11 @@ export class PgConversationStore implements ConversationStore {
     );
     const row = rows[0] as unknown as TurnRow | undefined;
     return row ? toTurn(row) : undefined;
+  }
+
+  async findLatestTurn(businessId: string, conversationId: string) {
+    assertDeploymentBusiness(businessId);
+    return findLatestConversationTurn(this.q, conversationId);
   }
 
   async findTurnByRunId(businessId: string, runId: string): Promise<PersistedTurn | undefined> {

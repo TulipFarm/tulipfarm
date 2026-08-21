@@ -354,32 +354,62 @@ async function postTurnStream(
   });
 
   const map = createRunEventMapper();
-  let outcome = await consumeSse(res, handlers, 0, map);
-  if (outcome.terminal || !runId) return;
+  if (!runId) {
+    await consumeSse(res, handlers, 0, map);
+    return;
+  }
+  await consumeRunStream(runId, res, handlers, 0, map);
+}
 
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    handlers.onConnectionState?.("reconnecting");
-    const headers = mutationHeaders();
-    delete headers["Content-Type"];
-    headers.Accept = "text/event-stream";
-    headers["Last-Event-ID"] = String(outcome.lastSequence);
-    const resumed = await fetch(
-      `${API_BASE}/api/v1/runs/${encodeURIComponent(runId)}/events?after=${outcome.lastSequence}`,
-      {
-        method: "GET",
-        credentials: "include",
-        headers,
-        signal,
-      }
-    );
-    if (!resumed.ok) throw await readChatError(resumed);
-    outcome = await consumeSse(resumed, handlers, outcome.lastSequence, map);
+async function fetchRunEvents(
+  runId: string,
+  after: number,
+  signal?: AbortSignal
+): Promise<Response> {
+  const headers = mutationHeaders();
+  delete headers["Content-Type"];
+  headers.Accept = "text/event-stream";
+  headers["Last-Event-ID"] = String(after);
+  const response = await fetch(
+    `${API_BASE}/api/v1/runs/${encodeURIComponent(runId)}/events?after=${after}`,
+    {
+      method: "GET",
+      credentials: "include",
+      headers,
+      signal,
+    }
+  );
+  if (!response.ok) throw await readChatError(response);
+  return response;
+}
+
+async function consumeRunStream(
+  runId: string,
+  response: Response,
+  handlers: PostChatHandlers,
+  after: number,
+  map: (frame: ParsedFrame) => ChatEvent[]
+): Promise<void> {
+  let currentResponse = response;
+  let cursor = after;
+
+  for (let attempt = 0; attempt <= 3; attempt++) {
+    const outcome = await consumeSse(currentResponse, handlers, cursor, map);
+    cursor = outcome.lastSequence;
     if (outcome.terminal) {
-      handlers.onConnectionState?.("online");
+      if (attempt > 0) handlers.onConnectionState?.("online");
       return;
     }
+    if (attempt === 3) break;
+    handlers.onConnectionState?.("reconnecting");
+    currentResponse = await fetchRunEvents(runId, cursor, handlers.signal);
   }
   throw new ApiError(503, "The stream could not be recovered from its persisted cursor.");
+}
+
+export async function resumeRun(runId: string, handlers: PostChatHandlers): Promise<void> {
+  const response = await fetchRunEvents(runId, 0, handlers.signal);
+  await consumeRunStream(runId, response, handlers, 0, createRunEventMapper());
 }
 
 async function consumeSse(

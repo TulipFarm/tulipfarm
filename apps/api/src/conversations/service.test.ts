@@ -35,6 +35,13 @@ class FakeStore implements ConversationStore {
     return this.turns.find((turn) => turn.id === turnId);
   }
 
+  async findLatestTurn(
+    _businessId: string,
+    conversationId: string
+  ): Promise<PersistedTurn | undefined> {
+    return [...this.turns].reverse().find((turn) => turn.conversationId === conversationId);
+  }
+
   async findTurnByRunId(_businessId: string, runId: string): Promise<PersistedTurn | undefined> {
     return this.turns.find((turn) => turn.runId === runId);
   }

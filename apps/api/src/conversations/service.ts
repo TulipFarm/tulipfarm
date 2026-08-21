@@ -1,6 +1,7 @@
 /** SPEC §10/§18: persist the Turn before dispatch; stream resumes from its durable cursor. */
 
 import {
+  type ConversationTurn,
   contentText,
   type MessageContent,
   type MessageFilePart,
@@ -8,7 +9,7 @@ import {
 } from "@tulipfarm/schema";
 import type { CuratorWorkRef } from "@tulipfarm/storage";
 
-export type TurnStatus = "pending" | "running" | "start_failed" | "succeeded" | "failed";
+export type TurnStatus = ConversationTurn["status"];
 
 export interface PersistedMessage {
   readonly id: string;
@@ -56,6 +57,7 @@ export interface PersistedTurn {
 export interface ConversationStore {
   findTurnByIdempotencyKey(businessId: string, key: string): Promise<PersistedTurn | undefined>;
   findTurn(businessId: string, turnId: string): Promise<PersistedTurn | undefined>;
+  findLatestTurn(businessId: string, conversationId: string): Promise<ConversationTurn | undefined>;
   /** Live Run→Turn mapping; `same_turn` retries supersede stale executors. */
   findTurnByRunId(businessId: string, runId: string): Promise<PersistedTurn | undefined>;
   appendMessage(message: PersistedMessage): Promise<void>;
