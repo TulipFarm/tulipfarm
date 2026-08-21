@@ -281,12 +281,36 @@ test("turns allowlisted model failures into actionable participant-safe messages
       data: {
         message:
           "The model provider's API billing is inactive. Activate billing or use another Provider Credential.",
+        details: { reason: "model_billing_inactive" },
       },
     },
   ]);
   expect(modelFailureMessage("untrusted_provider_detail")).toBe(
     "The model request failed. Try again."
   );
+  expect(
+    map({
+      seq: 2,
+      type: "turn.finished",
+      data: {
+        status: "failed",
+        reason: "model_error",
+        modelFailure: { requestId: "run-1:invoke:1", modelId: "gpt-5.6-terra" },
+      },
+    })
+  ).toEqual([
+    {
+      type: "error",
+      data: {
+        message: "The model request failed. Try again.",
+        details: {
+          reason: "model_error",
+          requestId: "run-1:invoke:1",
+          modelId: "gpt-5.6-terra",
+        },
+      },
+    },
+  ]);
   // An instance with no `llm:` config denies routing with `unknown_profile`. That must not land on
   // the generic default above: it is the one failure the reader can actually fix themselves.
   expect(modelFailureMessage("model_not_configured")).toBe(

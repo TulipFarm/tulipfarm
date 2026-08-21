@@ -25,9 +25,9 @@ import type { ResolvedLimits } from "@tulipfarm/run-kernel";
 import {
   asEffortPreset,
   contentText,
-  type EffortPreset,
   type EffortRung,
   isEffortRung,
+  LlmNotConfiguredError,
   type RunEventEffortInference,
   type RunEventPayloads,
 } from "@tulipfarm/schema";
@@ -118,13 +118,23 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
   async *stream(request: ModelInvocationRequest): AsyncIterable<ModelStreamChunk> {
     const requirements = deriveModelRequirements(request, request.policy ?? this.options.policy);
     const inference = await this.inferEffort(request, requirements);
-    const resolution = await this.options.model(
-      request.modelProfileId,
-      requirements,
-      inference,
-      request.principal,
-      this.options.gate
-    );
+    let resolution: LlmModelResolution;
+    try {
+      resolution = await this.options.model(
+        request.modelProfileId,
+        requirements,
+        inference,
+        request.principal,
+        this.options.gate
+      );
+    } catch (error) {
+      throw new ModelInvocationError(
+        error instanceof LlmNotConfiguredError
+          ? "model_not_configured"
+          : classifyProviderError(error),
+        error
+      );
+    }
     if (resolution.kind === "available" && resolution.budgetLimits !== undefined) {
       await this.options.budgets?.open(resolution.budgetLimits);
     }
@@ -134,7 +144,10 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
       `model:${request.requestId}`
     );
     if (resolution.kind === "denied") {
-      throw new Error(denialMessage(resolution.routing, requirements));
+      throw new ModelInvocationError(
+        resolution.routing.reason === "unknown_profile" ? "model_not_configured" : "model_error",
+        new Error(denialMessage(resolution.routing, requirements))
+      );
     }
 
     try {
@@ -258,8 +271,13 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
         );
       }
       throw error instanceof ModelInvocationError
-        ? new ModelInvocationError(error.reason, error.cause, partial)
-        : new ModelInvocationError(classifyProviderError(error), error, partial);
+        ? new ModelInvocationError(error.reason, error.cause, partial, error.modelId)
+        : new ModelInvocationError(
+            classifyProviderError(error),
+            error,
+            partial,
+            resolution.attemptedModelId?.()
+          );
     } finally {
       watchdog.close();
     }

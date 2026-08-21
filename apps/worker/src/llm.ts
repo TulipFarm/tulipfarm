@@ -3,6 +3,7 @@ import { selectModelProfile } from "@tulipfarm/agent-runtime";
 import type {
   CostBasis,
   FallbackCallGate,
+  ModelAttemptRef,
   ModelPrice,
   ModelResponderRef,
   PrincipalRef,
@@ -52,6 +53,8 @@ export type LlmModelResolution =
        * call is about to be made against.
        */
       readonly provider?: string;
+      /** The last chain link that a provider call actually entered. */
+      attemptedModelId?(): string | undefined;
       /**
        * Prices this call against whichever chain link actually answered.
        *
@@ -161,13 +164,22 @@ export class SoulLlm {
   ): Promise<LlmModelResolution> {
     await this.sync();
     const responder: ModelResponderRef = {};
+    const attempted: ModelAttemptRef = {};
     return {
       kind: "available",
-      model: await this.service.chainModelFor(modelIds, principal, undefined, responder, gate),
+      model: await this.service.chainModelFor(
+        modelIds,
+        principal,
+        undefined,
+        responder,
+        gate,
+        attempted
+      ),
       ...(this.providerOf(modelIds[0]) === undefined
         ? {}
         : { provider: this.providerOf(modelIds[0]) }),
       routing,
+      attemptedModelId: () => attempted.modelId,
       price: (tokensIn, tokensOut) => this.priceFor(responder.modelId, tokensIn, tokensOut),
     };
   }
@@ -183,6 +195,7 @@ export class SoulLlm {
 
     const resolved = this.resolveSelector(selector, inference);
     if (resolved.kind === "raw_model") {
+      const attempted: ModelAttemptRef = {};
       return {
         kind: "available",
         model: await this.service.chainModelFor(
@@ -190,7 +203,8 @@ export class SoulLlm {
           principal,
           undefined,
           undefined,
-          gate
+          gate,
+          attempted
         ),
         ...(this.providerOf(resolved.modelId) === undefined
           ? {}
@@ -201,6 +215,7 @@ export class SoulLlm {
           resolution: "raw_model_id",
           modelId: resolved.modelId,
         },
+        attemptedModelId: () => attempted.modelId,
         // A raw model id names exactly one model; nothing else could answer.
         price: (tokensIn, tokensOut) => this.priceFor(resolved.modelId, tokensIn, tokensOut),
       };
@@ -269,10 +284,18 @@ export class SoulLlm {
     }
 
     const responder: ModelResponderRef = {};
+    const attempted: ModelAttemptRef = {};
 
     return {
       kind: "available",
-      model: await this.service.chainModelFor(chain, principal, undefined, responder, gate),
+      model: await this.service.chainModelFor(
+        chain,
+        principal,
+        undefined,
+        responder,
+        gate,
+        attempted
+      ),
       ...(this.providerOf(chain[0]) === undefined ? {} : { provider: this.providerOf(chain[0]) }),
       ...(budgetEvidence === undefined ? {} : { budgetLimits }),
       // Attributed to the link that answered: a chain that rate-limits through to a cheaper model
@@ -292,6 +315,7 @@ export class SoulLlm {
         ...(budgetEvidence === undefined ? {} : { budgetLimits: budgetEvidence }),
         ...evidence,
       },
+      attemptedModelId: () => attempted.modelId,
     };
   }
 

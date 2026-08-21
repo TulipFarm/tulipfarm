@@ -7,20 +7,37 @@ import type { Suggestion } from "~/lib/onboarding";
 // ChatPanel drives the conversation through useChatStream; mock it so the empty-state surface
 // renders deterministically and `send` is observable.
 const send = vi.fn();
+const regenerate = vi.fn();
+let stream = {
+  messages: [],
+  status: "ready",
+  error: null,
+  errorDetails: undefined,
+  send,
+  approve: vi.fn(),
+  regenerate,
+  reset: vi.fn(),
+  sendSurfaceInteraction: vi.fn(),
+};
 vi.mock("~/lib/chat/use-chat-stream", () => ({
-  useChatStream: () => ({
+  useChatStream: () => stream,
+}));
+
+beforeEach(() => {
+  send.mockClear();
+  regenerate.mockClear();
+  stream = {
     messages: [],
     status: "ready",
     error: null,
+    errorDetails: undefined,
     send,
     approve: vi.fn(),
-    regenerate: vi.fn(),
+    regenerate,
     reset: vi.fn(),
     sendSurfaceInteraction: vi.fn(),
-  }),
-}));
-
-beforeEach(() => send.mockClear());
+  };
+});
 
 const SUGGESTIONS: Suggestion[] = [
   {
@@ -64,4 +81,26 @@ test("an explicitly selected Agent is identified above the Chat", () => {
   render(<ChatPanel agentId="InventoryPlanner" />);
   expect(screen.getByRole("heading", { name: "Chat with InventoryPlanner" })).toBeInTheDocument();
   expect(screen.getByText("This Chat is using a user-created Agent.")).toBeInTheDocument();
+});
+
+test("shows a safe model-failure reference and retries a temporary model failure", async () => {
+  const user = userEvent.setup();
+  stream = {
+    ...stream,
+    status: "error",
+    error: "The model provider is temporarily unavailable. Try again shortly.",
+    errorDetails: {
+      reason: "model_provider_unavailable",
+      requestId: "run-1:invoke:1",
+      modelId: "gpt-5.6-terra",
+    },
+  };
+
+  render(<ChatPanel />);
+
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "Class: model_provider_unavailable · Model: gpt-5.6-terra · Reference: run-1:invoke:1"
+  );
+  await user.click(screen.getByRole("button", { name: "Retry" }));
+  expect(regenerate).toHaveBeenCalledOnce();
 });

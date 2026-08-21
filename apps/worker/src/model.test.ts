@@ -11,7 +11,12 @@ import {
   ModelInvocationError,
 } from "@tulipfarm/agent-runtime";
 import { type CostBasis, FallbackModel, LlmProviderError } from "@tulipfarm/llm";
-import { type EffortRung, type RunEventEffortInference, textContent } from "@tulipfarm/schema";
+import {
+  type EffortRung,
+  LlmNotConfiguredError,
+  type RunEventEffortInference,
+  textContent,
+} from "@tulipfarm/schema";
 import { APICallError, type LanguageModel } from "ai";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
@@ -136,12 +141,14 @@ describe("LlmModelPort", () => {
           resolution: "raw_model_id",
           modelId: selector,
         },
+        attemptedModelId: () => "gpt-5.6-terra",
       }),
     });
 
     await expect(port.invoke(request())).rejects.toMatchObject({
       name: "ModelInvocationError",
       reason: "model_billing_inactive",
+      modelId: "gpt-5.6-terra",
     });
   });
 
@@ -441,6 +448,19 @@ describe("LlmModelPort", () => {
     expect(port.latestModelCallReceipt()).toBeUndefined();
   });
 
+  it("preserves an unconfigured model route as a participant-safe failure", async () => {
+    const port = new LlmModelPort({
+      model: async () => {
+        throw new LlmNotConfiguredError();
+      },
+    });
+
+    await expect(port.invoke(request({ modelProfileId: "auto" }))).rejects.toMatchObject({
+      name: "ModelInvocationError",
+      reason: "model_not_configured",
+    });
+  });
+
   it("emits denial evidence before refusing a model call", async () => {
     const emitted: unknown[] = [];
     const port = new LlmModelPort({
@@ -462,9 +482,11 @@ describe("LlmModelPort", () => {
       },
     });
 
-    await expect(port.invoke(request({ modelProfileId: "balanced" }))).rejects.toThrow(
-      'model profile "primary" denied: tools_unsupported'
-    );
+    await expect(port.invoke(request({ modelProfileId: "balanced" }))).rejects.toMatchObject({
+      name: "ModelInvocationError",
+      reason: "model_error",
+      cause: new Error('model profile "primary" denied: tools_unsupported'),
+    });
     expect(emitted).toEqual([
       {
         outcome: "denied",

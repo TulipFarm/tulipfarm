@@ -15,7 +15,12 @@ import { contentText, type MessageContent, normalizeMessageContent } from "@tuli
  */
 
 import { randomUUID } from "node:crypto";
-import type { ModelMessage, ModelUsage, ToolDispatchPort } from "@tulipfarm/agent-runtime";
+import {
+  ModelInvocationError,
+  type ModelMessage,
+  type ModelUsage,
+  type ToolDispatchPort,
+} from "@tulipfarm/agent-runtime";
 import { INVOKE_STATE_KEY } from "@tulipfarm/run-kernel";
 import type { PersistedRun } from "@tulipfarm/storage";
 import {
@@ -286,6 +291,12 @@ async function runOneTurn(
     const port = options.binding.create(options.evalCase);
     const metered = {
       invoke: async (request: Parameters<typeof port.invoke>[0]) => {
+        if (options.evalCase.fault === "model") {
+          throw new ModelInvocationError(
+            "model_not_configured",
+            new Error(`eval fault: Model is unavailable for Case ${options.evalCase.id}`)
+          );
+        }
         const result = await port.invoke(request);
         spend = addSpend(spend, result.usage);
         options.onUsage?.(result.usage);

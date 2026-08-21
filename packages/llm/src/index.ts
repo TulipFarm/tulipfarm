@@ -18,6 +18,7 @@ export {
   type FallbackLogger,
   FallbackModel,
   isHardFailure,
+  type ModelAttemptRef,
   type ModelResponderRef,
 } from "./fallback";
 export type { LlmLogger, ResolvedModelEntry } from "./llm-service";

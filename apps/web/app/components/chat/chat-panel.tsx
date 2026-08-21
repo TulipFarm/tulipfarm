@@ -100,6 +100,7 @@ export function ChatPanel({
     messages,
     status,
     error,
+    errorDetails,
     currentAgent,
     conversationId,
     send,
@@ -133,6 +134,10 @@ export function ChatPanel({
   const hasMessages = messages.length > 0;
   // Actionable errors (e.g. "LLM not configured") get a deep-link CTA to where the user fixes them.
   const errorCta = status === "error" ? errorAction(error) : null;
+  const retryableFailure =
+    errorDetails?.reason === "model_rate_limited" ||
+    errorDetails?.reason === "model_provider_unavailable" ||
+    errorDetails?.reason === "model_error";
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
@@ -194,6 +199,22 @@ export function ChatPanel({
                 {errorCta.label}
               </Link>
             </>
+          ) : null}
+          {retryableFailure ? (
+            <button
+              type="button"
+              onClick={() => void regenerate()}
+              className="ml-2 min-h-11 font-medium underline underline-offset-2 hover:text-foreground"
+            >
+              Retry
+            </button>
+          ) : null}
+          {errorDetails ? (
+            <p className="mt-1 font-mono text-xs text-muted-foreground">
+              Class: {errorDetails.reason ?? "unknown"}
+              {errorDetails.modelId ? ` · Model: ${errorDetails.modelId}` : ""}
+              {errorDetails.requestId ? ` · Reference: ${errorDetails.requestId}` : ""}
+            </p>
           ) : null}
         </div>
       ) : null}
