@@ -7,14 +7,14 @@ maintainer: TulipFarm
 icon: google
 capabilities:
   - Gmail — search and read mail, compose drafts, send
-  - Calendar — list events and create events
+  - Calendar — list, create, update, and delete events
   - Drive — search and read files, create files
   - Docs — read documents, create and edit them
 grants:
   - label: gmail
     description: Read mail, and create drafts or send on your behalf.
   - label: calendar
-    description: Read your calendar and create events.
+    description: Read your calendar and create, update, or delete events.
   - label: drive
     description: Read files and create new ones.
   - label: docs

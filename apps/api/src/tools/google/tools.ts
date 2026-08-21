@@ -67,6 +67,19 @@ const GOOGLE_TOOL_SPECS: Record<GoogleToolId, GoogleToolSpec> = {
       "(2026-03-01T14:00:00Z) or an all-day date (2026-03-01). Optionally set description, " +
       "location, and attendee emails. Defaults to the primary calendar.",
   },
+  [GOOGLE_TOOL_IDS.calendarUpdateEvent]: {
+    name: "calendar_update_event",
+    description:
+      "Update an existing Google Calendar event by id (from calendar_list_events). Only the fields " +
+      "you pass change; omit a field to leave it as-is. Pass start and end together to reschedule, " +
+      "and attendees to replace the guest list. Defaults to the primary calendar.",
+  },
+  [GOOGLE_TOOL_IDS.calendarDeleteEvent]: {
+    name: "calendar_delete_event",
+    description:
+      "Delete a Google Calendar event by id (from calendar_list_events). This cancels the event and " +
+      "notifies guests. Defaults to the primary calendar.",
+  },
   [GOOGLE_TOOL_IDS.driveSearch]: {
     name: "drive_search",
     description:

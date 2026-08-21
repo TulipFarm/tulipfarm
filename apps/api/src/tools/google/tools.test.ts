@@ -311,6 +311,61 @@ describe("buildGoogleTools", () => {
     });
   });
 
+  it("patches only the supplied fields when updating an event", async () => {
+    let method = "";
+    let body: unknown;
+    const http = {
+      async send(request: IntegrationHttpRequest) {
+        if (request.path === "/calendars/primary/events/evt-1") {
+          method = request.method;
+          body = request.body;
+          return { status: 200, headers: {}, body: { id: "evt-1", status: "confirmed" } };
+        }
+        throw new Error(`unexpected ${request.path}`);
+      },
+    };
+    const tool = toolsWith(http).find((candidate) => candidate.name === "calendar_update_event");
+    if (tool === undefined) throw new Error("calendar_update_event not registered");
+
+    const result = await tool.execute(
+      {
+        eventId: "evt-1",
+        summary: "Renamed",
+        start: "2026-03-01T10:00:00Z",
+        end: "2026-03-01T10:30:00Z",
+      },
+      context()
+    );
+    expect(method).toBe("PATCH");
+    expect(body).toEqual({
+      summary: "Renamed",
+      start: { dateTime: "2026-03-01T10:00:00Z" },
+      end: { dateTime: "2026-03-01T10:30:00Z" },
+    });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data).toEqual({ eventId: "evt-1", status: "confirmed" });
+  });
+
+  it("deletes an event and reports it, treating 204 No Content as success", async () => {
+    let method = "";
+    const http = {
+      async send(request: IntegrationHttpRequest) {
+        if (request.path === "/calendars/primary/events/evt-7") {
+          method = request.method;
+          return { status: 204, headers: {}, body: undefined };
+        }
+        throw new Error(`unexpected ${request.path}`);
+      },
+    };
+    const tool = toolsWith(http).find((candidate) => candidate.name === "calendar_delete_event");
+    if (tool === undefined) throw new Error("calendar_delete_event not registered");
+
+    const result = await tool.execute({ eventId: "evt-7" }, context());
+    expect(method).toBe("DELETE");
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data).toEqual({ eventId: "evt-7", deleted: true });
+  });
+
   it("searches Drive, wrapping a plain keyword into a fullText query", async () => {
     let queried = "";
     const http = {

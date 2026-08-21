@@ -161,6 +161,10 @@ export class GoogleToolAdapter implements ToolAdapter {
         return this.listEvents(args, credential);
       case GOOGLE_TOOL_IDS.calendarCreateEvent:
         return this.createEvent(args, credential);
+      case GOOGLE_TOOL_IDS.calendarUpdateEvent:
+        return this.updateEvent(args, credential);
+      case GOOGLE_TOOL_IDS.calendarDeleteEvent:
+        return this.deleteEvent(args, credential);
       case GOOGLE_TOOL_IDS.driveSearch:
         return this.searchDrive(args, credential);
       case GOOGLE_TOOL_IDS.docsRead:
@@ -357,6 +361,67 @@ export class GoogleToolAdapter implements ToolAdapter {
       ...(typeof created.htmlLink === "string" ? { htmlLink: created.htmlLink } : {}),
       ...(typeof created.status === "string" ? { status: created.status } : {}),
     };
+  }
+
+  /** Partial update: only the fields supplied are sent, so omitted fields keep their value. */
+  private async updateEvent(args: Record<string, unknown>, credential: string): Promise<unknown> {
+    const calendarId = optionalString(args, "calendarId") ?? "primary";
+    const eventId = requireString(args, "eventId");
+
+    const body: Record<string, unknown> = {};
+    const summary = optionalString(args, "summary");
+    if (summary !== undefined) body.summary = summary;
+    const description = optionalString(args, "description");
+    if (description !== undefined) body.description = description;
+    const location = optionalString(args, "location");
+    if (location !== undefined) body.location = location;
+    const start = optionalString(args, "start");
+    if (start !== undefined) body.start = calendarTime(start);
+    const end = optionalString(args, "end");
+    if (end !== undefined) body.end = calendarTime(end);
+    if (Array.isArray(args.attendees)) {
+      body.attendees = args.attendees
+        .filter((email): email is string => typeof email === "string")
+        .map((email) => ({ email }));
+    }
+
+    const updated = asRecord(
+      await this.request(
+        "calendar",
+        {
+          method: "PATCH",
+          path: `/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,
+          body,
+        },
+        credential,
+        true
+      )
+    );
+    const id = updated.id;
+    if (typeof id !== "string") {
+      throw new AdapterDispatchError("after_dispatch", "invalid_response", false);
+    }
+    return {
+      eventId: id,
+      ...(typeof updated.htmlLink === "string" ? { htmlLink: updated.htmlLink } : {}),
+      ...(typeof updated.status === "string" ? { status: updated.status } : {}),
+    };
+  }
+
+  private async deleteEvent(args: Record<string, unknown>, credential: string): Promise<unknown> {
+    const calendarId = optionalString(args, "calendarId") ?? "primary";
+    const eventId = requireString(args, "eventId");
+    // Google answers a successful delete with 204 No Content, which classifies as success.
+    await this.request(
+      "calendar",
+      {
+        method: "DELETE",
+        path: `/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,
+      },
+      credential,
+      true
+    );
+    return { eventId, deleted: true };
   }
 
   // --- Drive ----------------------------------------------------------------------------------

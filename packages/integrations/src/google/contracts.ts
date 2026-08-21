@@ -15,6 +15,8 @@ export const GOOGLE_TOOL_IDS = {
   gmailDraft: "google.gmail.draft",
   calendarListEvents: "google.calendar.list_events",
   calendarCreateEvent: "google.calendar.create_event",
+  calendarUpdateEvent: "google.calendar.update_event",
+  calendarDeleteEvent: "google.calendar.delete_event",
   driveSearch: "google.drive.search",
   docsRead: "google.docs.read",
   docsCreate: "google.docs.create",
@@ -313,6 +315,57 @@ const calendarCreateOutputSchema = {
   },
 } as const;
 
+const calendarUpdateInputSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["eventId"],
+  properties: {
+    eventId: {
+      type: "string",
+      minLength: 1,
+      maxLength: 1024,
+      description: "The event id, as returned by calendar_list_events or calendar_create_event.",
+    },
+    calendarId: { type: "string", maxLength: 256 },
+    // Only the fields you pass are changed; omit a field to leave it as-is (a partial update).
+    summary: { type: "string", minLength: 1, maxLength: 500 },
+    description: { type: "string", maxLength: 8192 },
+    location: { type: "string", maxLength: 500 },
+    start: {
+      type: "string",
+      description: "RFC 3339 dateTime or an all-day date. Pass with end to move the event.",
+    },
+    end: { type: "string", description: "Same format as start; required when start is set." },
+    attendees: {
+      type: "array",
+      maxItems: 50,
+      uniqueItems: true,
+      items: { type: "string", minLength: 3, maxLength: 320 },
+      description: "Replaces the full attendee list.",
+    },
+  },
+} as const;
+
+const calendarDeleteInputSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["eventId"],
+  properties: {
+    eventId: { type: "string", minLength: 1, maxLength: 1024 },
+    calendarId: { type: "string", maxLength: 256 },
+  },
+} as const;
+
+const calendarDeleteOutputSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["eventId", "deleted"],
+  properties: {
+    eventId: { type: "string" },
+    deleted: { type: "boolean" },
+  },
+} as const;
+
 // --- Drive ------------------------------------------------------------------------------------
 
 const driveSearchInputSchema = {
@@ -459,6 +512,49 @@ const calendarCreateEvent = publish(
   "google-calendar-create-event"
 );
 
+const calendarUpdateEvent = publish(
+  {
+    toolId: GOOGLE_TOOL_IDS.calendarUpdateEvent,
+    toolVersion: TOOL_VERSION,
+    action: GOOGLE_TOOL_IDS.calendarUpdateEvent,
+    inputSchema: calendarUpdateInputSchema,
+    outputSchema: calendarCreateOutputSchema,
+    riskClass: "medium",
+    mutating: true,
+    dataClasses: GMAIL_DATA_CLASSES,
+    allowedDestinations: [GOOGLE_DESTINATION],
+    idempotency: { strategy: "provider" },
+    timeout: { wallClockMs: 15_000 },
+    retry: { maxAttempts: 1, safeToRetry: false },
+    dryRun: false,
+    adapter: { kind: "integration", ref: GOOGLE_ADAPTER_REF },
+  },
+  "aaaaaaaa-0005-4000-8000-000000000010",
+  "google-calendar-update-event"
+);
+
+const calendarDeleteEvent = publish(
+  {
+    toolId: GOOGLE_TOOL_IDS.calendarDeleteEvent,
+    toolVersion: TOOL_VERSION,
+    action: GOOGLE_TOOL_IDS.calendarDeleteEvent,
+    inputSchema: calendarDeleteInputSchema,
+    outputSchema: calendarDeleteOutputSchema,
+    riskClass: "medium",
+    mutating: true,
+    dataClasses: GMAIL_DATA_CLASSES,
+    allowedDestinations: [GOOGLE_DESTINATION],
+    // Deleting is naturally idempotent — a second delete is a provider 404 the ledger absorbs.
+    idempotency: { strategy: "provider" },
+    timeout: { wallClockMs: 15_000 },
+    retry: { maxAttempts: 1, safeToRetry: false },
+    dryRun: false,
+    adapter: { kind: "integration", ref: GOOGLE_ADAPTER_REF },
+  },
+  "aaaaaaaa-0005-4000-8000-000000000011",
+  "google-calendar-delete-event"
+);
+
 const driveSearch = publish(
   {
     toolId: GOOGLE_TOOL_IDS.driveSearch,
@@ -549,6 +645,8 @@ export const GOOGLE_TOOL_CONTRACTS: readonly ToolContractDefinition[] = [
   gmailDraft,
   calendarListEvents,
   calendarCreateEvent,
+  calendarUpdateEvent,
+  calendarDeleteEvent,
   driveSearch,
   docsRead,
   docsCreate,

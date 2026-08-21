@@ -162,7 +162,9 @@ const EXPECTED_FAMILY_TOOL_NAMES = [
     family: "google",
     names: [
       "calendar_create_event",
+      "calendar_delete_event",
       "calendar_list_events",
+      "calendar_update_event",
       "docs_append",
       "docs_create",
       "docs_read",
