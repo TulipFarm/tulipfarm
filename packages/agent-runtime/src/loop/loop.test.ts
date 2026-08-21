@@ -1000,6 +1000,7 @@ describe("AgentLoop concurrent dispatch", () => {
 describe("AgentLoop skill-scoped tool narrowing", () => {
   const catalog = [
     { name: "load_skill", inputSchema: { type: "object" } },
+    { name: "load_skill_reference", inputSchema: { type: "object" } },
     { name: "complete_task", inputSchema: { type: "object" } },
     { name: "routine_forge", inputSchema: { type: "object" } },
     { name: "record_search", inputSchema: { type: "object" } },
@@ -1037,7 +1038,12 @@ describe("AgentLoop skill-scoped tool narrowing", () => {
     expect(model.toolNamesByRequest[0]).toEqual(catalog.map((t) => t.name));
     // Iteration 2 is narrowed to the declared scope plus the always-exposed baseline.
     expect(model.toolNamesByRequest[1]).toEqual(
-      expect.arrayContaining(["load_skill", "complete_task", "routine_forge"])
+      expect.arrayContaining([
+        "load_skill",
+        "load_skill_reference",
+        "complete_task",
+        "routine_forge",
+      ])
     );
     expect(model.toolNamesByRequest[1]).not.toContain("record_search");
     expect(model.toolNamesByRequest[1]).not.toContain("agent_list");

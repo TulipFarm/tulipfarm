@@ -240,7 +240,8 @@ const ROUTINE_FORGE_SCHEMA: Record<string, unknown> = {
     },
     definition: {
       type: "object",
-      description: "Canonical published Routine definition. metadata.slug must match name.",
+      description:
+        "Canonical published Routine definition. metadata.slug must match name. spec.states must be an array of State objects [{ name, type, ... }].",
     },
     triggers: {
       type: "array",
@@ -261,7 +262,8 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
     "not skill_create, whenever the user asks to 'create a routine' / 'automate X' / 'every " +
     "morning do Y' / 'when X happens do Y'. `definition` MUST be a canonical published Routine " +
     "document: apiVersion `tulipfarm.ai/v1`, kind `Routine`, and metadata with id, slug (matching " +
-    "name), schemaVersion, authoredVersion, and lifecycle `published`. `triggers` MUST contain " +
+    "name), schemaVersion, authoredVersion, and lifecycle `published`. `definition.spec.states` " +
+    "MUST be an array of State objects with name and type (not an object/map). `triggers` MUST contain " +
     "canonical published Trigger documents with their own metadata and a spec.routineRef naming this " +
     "Routine at its authored version. Use a `manual` Trigger when the user needs to run it from the " +
     "Routines UI; cron, interval, and datetime Triggers schedule themselves. Load the routine-forge " +

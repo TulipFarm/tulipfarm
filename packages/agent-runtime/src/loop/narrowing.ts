@@ -12,6 +12,7 @@ import type { ExposedTool } from "./contract";
  */
 const ALWAYS_EXPOSED_TOOL_NAMES: ReadonlySet<string> = new Set([
   "load_skill",
+  "load_skill_reference",
   "complete_task",
   "delegate_to_agent",
   "present",
