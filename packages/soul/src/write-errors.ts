@@ -38,7 +38,7 @@ export function soulWriteHttpError(error: SoulWriteError): SoulWriteHttpError {
           error:
             error.issues.length > 0
               ? `invalid soul definition: ${error.issues.map((i) => `${i.path} ${i.code}${i.field ? ` at ${i.field}` : ""}`).join("; ")}`
-              : "invalid soul definition",
+              : `invalid soul definition: ${reason(error)}`,
         },
       };
     case "CONFLICT":

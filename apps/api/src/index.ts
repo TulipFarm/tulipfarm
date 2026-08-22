@@ -394,8 +394,9 @@ async function boot() {
       console
     );
     let gitSync: GitSyncService;
+    const soulTreeReader = new GitSoulTreeReader(soulPath);
     const soulPublisher = new SoulPublisher({
-      treeReader: new GitSoulTreeReader(soulPath),
+      treeReader: soulTreeReader,
       compiler: compileExecutionBundle,
       signer: soulBundleSigner,
       coordinator: soulPublications,
@@ -457,6 +458,7 @@ async function boot() {
       gitSync,
       reload: () => soulLoader.load(),
       publisher: soulPublisher,
+      treeReader: soulTreeReader,
     });
     const bundledSkills = await loadBundledSkills(console);
     const disabledBundledSkills = await loadDisabledBundledSkills(soulPath, console);
