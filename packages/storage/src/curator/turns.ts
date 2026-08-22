@@ -32,7 +32,7 @@ export class PgCuratorTurnReader {
     const { rows } = await this.db.query<Row>(
       `SELECT m.turn_id, m.role, m.content
          FROM messages m
-        WHERE m.turn_id = ANY($1::text[])
+        WHERE m.turn_id = ANY($1::uuid[])
           AND (
             m.role = 'user'
             OR (m.role = 'assistant' AND EXISTS (

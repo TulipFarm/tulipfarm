@@ -40,4 +40,19 @@ describe("shared ajv instance", () => {
     };
     expect(() => ajv.compile(draft2020Schema)).not.toThrow();
   });
+
+  it("validates date-time format on compiled schemas", () => {
+    const dateTimeSchema = {
+      type: "object",
+      properties: {
+        remindAt: { type: "string", format: "date-time" },
+      },
+      required: ["remindAt"],
+    };
+    const validate = ajv.compile(dateTimeSchema);
+    expect(validate({ remindAt: "2026-08-22T12:00:00Z" })).toBe(true);
+    expect(validate({ remindAt: "2026-08-22T12:00:00.123+05:30" })).toBe(true);
+    expect(validate({ remindAt: "not-a-date" })).toBe(false);
+    expect(validate({ remindAt: "2026-02-31T12:00:00Z" })).toBe(false);
+  });
 });

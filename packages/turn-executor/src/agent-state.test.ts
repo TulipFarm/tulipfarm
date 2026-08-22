@@ -157,6 +157,33 @@ describe("AgentStateRunner", () => {
     expect(result).toMatchObject({ status: "needs_reconciliation" });
   });
 
+  it("still reports needs_reconciliation when transition to needs_reconciliation hits a state conflict", async () => {
+    const agentState = new AgentStateRunner({
+      loop: {
+        run: async () => {
+          throw new Error("worker crashed");
+        },
+      },
+      transitions: {
+        transition: async (input) => {
+          if (input.to === "needs_reconciliation") {
+            throw new StateTransitionConflictError(
+              input.runId,
+              input.stateKey,
+              "running",
+              "needs_reconciliation"
+            );
+          }
+        },
+      },
+      waits: { register: async () => ({ waitId: "wait-1" }) },
+    });
+
+    await expect(agentState.execute(request(), LOOP_INPUT)).resolves.toEqual({
+      status: "needs_reconciliation",
+    });
+  });
+
   it("refuses to start from a terminal State status and never runs the loop", async () => {
     const harness = runner({ status: "completed", output: null, ...counters });
 
