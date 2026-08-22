@@ -6,9 +6,11 @@ import {
   GITHUB_TOOL_IDS,
   issueInput,
   issueNumberProperty,
+  legacySearchInput,
   PR_DATA_CLASSES,
   publish,
   repositoryProperty,
+  SEARCH_TOOL_VERSION,
   searchInput,
   TOOL_VERSION,
 } from "./core";
@@ -61,45 +63,49 @@ const pullRequestRead = publish(
   "github-pull-request-read"
 );
 
-const pullRequestSearch = publish(
+const pullRequestSearchProperties = {
+  query: {
+    type: "string",
+    maxLength: 256,
+    description:
+      "Free-text search terms. Omit or pass an empty string to list every result matching " +
+      "only `state`, instead of filtering by text.",
+  },
+  state: { type: "string", enum: ["open", "closed", "all"] },
+  limit: { type: "integer", minimum: 1, maximum: 50 },
+} as const;
+
+const pullRequestSearchOutputSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["totalCount", "items"],
+  properties: {
+    totalCount: { type: "integer", minimum: 0 },
+    items: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["repository", "number", "title", "state", "htmlUrl"],
+        properties: {
+          repository: repositoryProperty,
+          number: issueNumberProperty,
+          title: { type: "string" },
+          state: { type: "string" },
+          htmlUrl: { type: "string" },
+        },
+      },
+    },
+  },
+} as const;
+
+const pullRequestSearchV1 = publish(
   {
     toolId: GITHUB_TOOL_IDS.pullRequestSearch,
     toolVersion: TOOL_VERSION,
     action: GITHUB_TOOL_IDS.pullRequestSearch,
-    inputSchema: searchInput({
-      query: {
-        type: "string",
-        maxLength: 256,
-        description:
-          "Free-text search terms. Omit or pass an empty string to list every result matching " +
-          "only `state`, instead of filtering by text.",
-      },
-      state: { type: "string", enum: ["open", "closed", "all"] },
-      limit: { type: "integer", minimum: 1, maximum: 50 },
-    }),
-    outputSchema: {
-      type: "object",
-      additionalProperties: false,
-      required: ["totalCount", "items"],
-      properties: {
-        totalCount: { type: "integer", minimum: 0 },
-        items: {
-          type: "array",
-          items: {
-            type: "object",
-            additionalProperties: false,
-            required: ["repository", "number", "title", "state", "htmlUrl"],
-            properties: {
-              repository: repositoryProperty,
-              number: issueNumberProperty,
-              title: { type: "string" },
-              state: { type: "string" },
-              htmlUrl: { type: "string" },
-            },
-          },
-        },
-      },
-    },
+    inputSchema: legacySearchInput(pullRequestSearchProperties),
+    outputSchema: pullRequestSearchOutputSchema,
     riskClass: "low",
     mutating: false,
     dataClasses: PR_DATA_CLASSES,
@@ -112,6 +118,16 @@ const pullRequestSearch = publish(
   },
   "aaaaaaaa-0008-4000-8000-000000000008",
   "github-pull-request-search"
+);
+
+const pullRequestSearch = publish(
+  {
+    ...pullRequestSearchV1.spec,
+    toolVersion: SEARCH_TOOL_VERSION,
+    inputSchema: searchInput(pullRequestSearchProperties),
+  },
+  "aaaaaaaa-0008-4000-8000-000000000018",
+  "github-pull-request-search-v2"
 );
 
 const pullRequestCreate = publish(
@@ -270,6 +286,7 @@ const pullRequestMerge = publish(
 
 export const PULL_REQUEST_TOOL_CONTRACTS: readonly ToolContractDefinition[] = [
   pullRequestRead,
+  pullRequestSearchV1,
   pullRequestSearch,
   pullRequestCreate,
   pullRequestComment,

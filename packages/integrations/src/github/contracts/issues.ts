@@ -8,8 +8,10 @@ import {
   issueInput,
   issueNumberProperty,
   issueOutputSchema,
+  legacySearchInput,
   publish,
   repositoryProperty,
+  SEARCH_TOOL_VERSION,
   searchInput,
   TOOL_VERSION,
 } from "./core";
@@ -35,45 +37,49 @@ const issueRead = publish(
   "github-issue-read"
 );
 
-const issueSearch = publish(
+const issueSearchProperties = {
+  query: {
+    type: "string",
+    maxLength: 256,
+    description:
+      "Free-text search terms. Omit or pass an empty string to list every result matching " +
+      "only `state`, instead of filtering by text.",
+  },
+  state: { type: "string", enum: ["open", "closed", "all"] },
+  limit: { type: "integer", minimum: 1, maximum: 50 },
+} as const;
+
+const issueSearchOutputSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["totalCount", "items"],
+  properties: {
+    totalCount: { type: "integer", minimum: 0 },
+    items: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["repository", "number", "title", "state", "htmlUrl"],
+        properties: {
+          repository: repositoryProperty,
+          number: issueNumberProperty,
+          title: { type: "string" },
+          state: { type: "string" },
+          htmlUrl: { type: "string" },
+        },
+      },
+    },
+  },
+} as const;
+
+const issueSearchV1 = publish(
   {
     toolId: GITHUB_TOOL_IDS.issueSearch,
     toolVersion: TOOL_VERSION,
     action: GITHUB_TOOL_IDS.issueSearch,
-    inputSchema: searchInput({
-      query: {
-        type: "string",
-        maxLength: 256,
-        description:
-          "Free-text search terms. Omit or pass an empty string to list every result matching " +
-          "only `state`, instead of filtering by text.",
-      },
-      state: { type: "string", enum: ["open", "closed", "all"] },
-      limit: { type: "integer", minimum: 1, maximum: 50 },
-    }),
-    outputSchema: {
-      type: "object",
-      additionalProperties: false,
-      required: ["totalCount", "items"],
-      properties: {
-        totalCount: { type: "integer", minimum: 0 },
-        items: {
-          type: "array",
-          items: {
-            type: "object",
-            additionalProperties: false,
-            required: ["repository", "number", "title", "state", "htmlUrl"],
-            properties: {
-              repository: repositoryProperty,
-              number: issueNumberProperty,
-              title: { type: "string" },
-              state: { type: "string" },
-              htmlUrl: { type: "string" },
-            },
-          },
-        },
-      },
-    },
+    inputSchema: legacySearchInput(issueSearchProperties),
+    outputSchema: issueSearchOutputSchema,
     riskClass: "low",
     mutating: false,
     dataClasses: ISSUE_DATA_CLASSES,
@@ -86,6 +92,16 @@ const issueSearch = publish(
   },
   "aaaaaaaa-0002-4000-8000-000000000002",
   "github-issue-search"
+);
+
+const issueSearch = publish(
+  {
+    ...issueSearchV1.spec,
+    toolVersion: SEARCH_TOOL_VERSION,
+    inputSchema: searchInput(issueSearchProperties),
+  },
+  "aaaaaaaa-0002-4000-8000-000000000012",
+  "github-issue-search-v2"
 );
 
 const issueCreate = publish(
@@ -300,6 +316,7 @@ const issueClose = publish(
 
 export const ISSUE_TOOL_CONTRACTS: readonly ToolContractDefinition[] = [
   issueRead,
+  issueSearchV1,
   issueSearch,
   issueCreate,
   issueComment,

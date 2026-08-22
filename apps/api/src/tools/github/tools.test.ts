@@ -598,6 +598,7 @@ describe("buildGitHubTools", () => {
       if (tool === undefined) throw new Error(`${name} not registered`);
       expect(tool.description, name).toContain("github_repository_list");
       expect(tool.inputSchema, name).toMatchObject({ required: ["repository"] });
+      expect(tool.definition?.version, name).toBe("2.0.0");
     }
   });
 

@@ -262,16 +262,50 @@ describe("GitHubAdapter reads", () => {
     expect(http.calls[0]?.query?.q).toContain("is:pr");
   });
 
-  it("authorizes a search against only its explicit repository", async () => {
+  it("keeps a v1 multi-repository search executable for pinned Runs", async () => {
+    resolved = context({
+      installation: {
+        ...context().installation,
+        repositories: ["tulip/farm", "tulip/canary"],
+      },
+      grants: [
+        {
+          ...grant(ALL_ACTIONS),
+          spec: {
+            ...grant(ALL_ACTIONS).spec,
+            externalTargets: [
+              { type: GITHUB_REPOSITORY_TARGET, ids: ["tulip/farm", "tulip/canary"] },
+            ],
+          },
+        },
+      ],
+    });
     http.route("GET", "/search/issues", {
       status: 200,
       headers: {},
       body: { total_count: 0, items: [] },
     });
 
-    await dispatch(intent(GITHUB_TOOL_IDS.issueSearch, { repository: "tulip/farm" }));
+    await dispatch(
+      intent(GITHUB_TOOL_IDS.issueSearch, { repositories: ["tulip/farm", "tulip/canary"] })
+    );
 
-    expect(http.calls[0]?.query?.q).toBe("repo:tulip/farm is:issue state:open");
+    expect(http.calls[0]?.query?.q).toBe("repo:tulip/farm repo:tulip/canary is:issue state:open");
+  });
+
+  it("denies an explicit search outside its AccessGrant before the provider call", async () => {
+    resolved = context({
+      installation: {
+        ...context().installation,
+        repositories: ["tulip/farm", "tulip/canary"],
+      },
+    });
+
+    await expect(
+      dispatch(intent(GITHUB_TOOL_IDS.issueSearch, { repository: "tulip/canary" }))
+    ).rejects.toMatchObject({ phase: "before_dispatch", code: "integration_access_denied" });
+
+    expect(http.calls).toHaveLength(0);
   });
 });
 

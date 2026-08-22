@@ -52,6 +52,7 @@ export const GITHUB_RECONCILIATION_OPERATIONS = {
 } as const;
 
 export const TOOL_VERSION = "1.0.0";
+export const SEARCH_TOOL_VERSION = "2.0.0";
 export const GITHUB_DESTINATION = "github";
 export const ISSUE_DATA_CLASSES = ["source_content"];
 export const PR_DATA_CLASSES = ["source_content"];
@@ -77,7 +78,31 @@ export function issueInput(properties: Record<string, unknown>, required: string
   };
 }
 
-/** Search stays on one explicit repository so live per-user entitlement has one concrete target. */
+/** The immutable v1 search shape retained for Runs pinned before repository-scoped entitlement. */
+export function legacySearchInput(properties: Record<string, unknown>) {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: [],
+    properties: {
+      repository: repositoryProperty,
+      repositories: {
+        type: "array",
+        minItems: 1,
+        maxItems: 25,
+        uniqueItems: true,
+        items: repositoryProperty,
+        description:
+          "Search multiple repositories in one call instead of one `github_issue_search`/" +
+          "`github_pull_request_search` call per repository. Omit both `repository` and " +
+          "`repositories` to search every repository this business has installed GitHub for.",
+      },
+      ...properties,
+    },
+  };
+}
+
+/** Current searches stay on one repository so live entitlement has one concrete target. */
 export function searchInput(properties: Record<string, unknown>) {
   return {
     type: "object",

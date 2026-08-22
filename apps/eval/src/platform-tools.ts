@@ -1,5 +1,9 @@
 import type { ExposedTool } from "@tulipfarm/agent-runtime";
 import { FILE_TOOLS } from "@tulipfarm/files";
+import {
+  GITHUB_REPOSITORY_LIST_DECLARATION,
+  GITHUB_TOOL_DECLARATIONS,
+} from "@tulipfarm/integrations";
 import { SKILL_MARKETPLACE_TOOL_DECLARATIONS } from "@tulipfarm/schema";
 import { SKILL_REFERENCE_TOOL_DECLARATIONS } from "@tulipfarm/soul";
 import type { EvalCase } from "./case.ts";
@@ -21,6 +25,8 @@ const SHIPPED: readonly ExposedTool[] = [
   ...FILE_TOOLS,
   ...SKILL_MARKETPLACE_TOOL_DECLARATIONS,
   ...SKILL_REFERENCE_TOOL_DECLARATIONS,
+  GITHUB_REPOSITORY_LIST_DECLARATION,
+  ...GITHUB_TOOL_DECLARATIONS,
 ].map((tool) => ({
   name: tool.name,
   description: tool.description,

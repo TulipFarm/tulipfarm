@@ -64,12 +64,12 @@ export async function pullRequestState(
 
 export async function searchPullRequests(
   api: GitHubApi,
-  repository: string,
+  repositories: readonly string[],
   source: Arguments,
   credential: string
 ): Promise<unknown> {
   const state = typeof source.state === "string" ? source.state : "open";
-  const qualifiers = [`repo:${repository}`, "is:pr"];
+  const qualifiers = [...repositories.map((repository) => `repo:${repository}`), "is:pr"];
   if (state !== "all") qualifiers.push(`state:${state}`);
   const query = optionalStringArg(source, "query");
   if (query.length > 0) qualifiers.push(query);

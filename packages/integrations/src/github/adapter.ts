@@ -40,7 +40,15 @@ import {
 } from "./operations/pull-requests";
 import { reconcileGitHubEffect } from "./operations/reconcile";
 import { createRepository, pushCommit } from "./operations/repository";
-import { args, type GitHubApi, numberArg, stringArg } from "./operations/shared";
+import {
+  type Arguments,
+  args,
+  type GitHubApi,
+  numberArg,
+  optionalStringArg,
+  stringArg,
+  stringListArg,
+} from "./operations/shared";
 import {
   assertAccountInScope,
   assertRepositoryInScope,
@@ -113,22 +121,19 @@ export class GitHubAdapter implements ToolAdapter, ToolReconciliationAdapter {
     const source = args(intent);
     const mutating = MUTATING_TOOLS.has(intent.action);
 
-    // Search requires one concrete repository, like every other repository-scoped action.
     if (intent.action === GITHUB_TOOL_IDS.issueSearch) {
-      const repository = stringArg(source, "repository");
-      await this.authorize(intent, repository, mutating);
+      const repositories = await this.resolveSearchRepositories(intent, source, mutating);
       if (credential === undefined || credential.length === 0) {
         throw new AdapterDispatchError("before_dispatch", "credential_missing", false);
       }
-      return searchIssues(this.api, repository, source, credential);
+      return searchIssues(this.api, repositories, source, credential);
     }
     if (intent.action === GITHUB_TOOL_IDS.pullRequestSearch) {
-      const repository = stringArg(source, "repository");
-      await this.authorize(intent, repository, mutating);
+      const repositories = await this.resolveSearchRepositories(intent, source, mutating);
       if (credential === undefined || credential.length === 0) {
         throw new AdapterDispatchError("before_dispatch", "credential_missing", false);
       }
-      return searchPullRequests(this.api, repository, source, credential);
+      return searchPullRequests(this.api, repositories, source, credential);
     }
 
     // Creating a repo targets an org, not an existing repo — it cannot go through the
@@ -264,6 +269,37 @@ export class GitHubAdapter implements ToolAdapter, ToolReconciliationAdapter {
       }
       throw error;
     }
+  }
+
+  /** V1 keeps its pinned multi-repository behavior; v2 always arrives with one repository. */
+  private async resolveSearchRepositories(
+    intent: ToolIntent,
+    source: Arguments,
+    mutating: boolean
+  ): Promise<string[]> {
+    const single = optionalStringArg(source, "repository");
+    if (single.length > 0) {
+      await this.authorize(intent, single, mutating);
+      return [single];
+    }
+
+    const rawList = source.repositories;
+    if (Array.isArray(rawList) && rawList.length > 0) {
+      const repositories = stringListArg(source, "repositories");
+      for (const repository of repositories) await this.authorize(intent, repository, mutating);
+      return repositories;
+    }
+
+    const context = await this.deps.context.resolve(intent);
+    if (context === undefined) {
+      throw new AdapterDispatchError("before_dispatch", "integration_context_unresolved", false);
+    }
+    if (context.installation.repositories === "all") {
+      throw new AdapterDispatchError("before_dispatch", "repository_list_required", false);
+    }
+    const repositories = [...context.installation.repositories];
+    for (const repository of repositories) await this.authorize(intent, repository, mutating);
+    return repositories;
   }
 
   private async call(
