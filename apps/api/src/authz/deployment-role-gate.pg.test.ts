@@ -37,10 +37,16 @@ function principal(id: string, role: "admin" | "member"): RequestPrincipal {
   };
 }
 
-const SECRET_READ = {
-  action: "secret.read",
-  resourceType: "secret",
+const INTEGRATION_READ = {
+  action: "integration.read",
+  resourceType: "integration",
   fallback: "authenticated",
+} as const;
+
+const INTEGRATION_CONNECT = {
+  action: "integration.connect",
+  resourceType: "integration",
+  fallback: "admin",
 } as const;
 
 const SECRET_WRITE = {
@@ -111,7 +117,7 @@ describe("deployment roles under the live route gate", () => {
   it("refuses a member every declared surface until the boot sync runs", async () => {
     const decide = check();
 
-    expect(await decide(member, SECRET_READ)).toBe(false);
+    expect(await decide(member, INTEGRATION_READ)).toBe(false);
   });
 
   it("grants the member allow-list once the boot sync has run", async () => {
@@ -120,16 +126,16 @@ describe("deployment roles under the live route gate", () => {
 
     const decide = check();
 
-    expect(await decide(member, SECRET_READ)).toBe(true);
-    expect(await decide(admin, SECRET_READ)).toBe(true);
+    expect(await decide(member, INTEGRATION_READ)).toBe(true);
+    expect(await decide(admin, INTEGRATION_READ)).toBe(true);
   });
 
   it("still refuses a member the admin-only half of the same resource type", async () => {
     await syncDeploymentRoles(new PgRoleRepo(transactionPort(db)));
     const decide = check();
 
-    expect(await decide(member, SECRET_WRITE)).toBe(false);
-    expect(await decide(admin, SECRET_WRITE)).toBe(true);
+    expect(await decide(member, INTEGRATION_CONNECT)).toBe(false);
+    expect(await decide(admin, INTEGRATION_CONNECT)).toBe(true);
   });
 
   it("authorizes every action the member allow-list declares", async () => {

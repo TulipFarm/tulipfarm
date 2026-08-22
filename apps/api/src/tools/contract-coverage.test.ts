@@ -136,7 +136,6 @@ const EXPECTED_FAMILY_TOOL_NAMES = [
       "guardrail_forge",
       "routine_delete",
       "routine_forge",
-      "routine_delete",
       "routine_picker",
       "soul_repo_push",
       "trigger_routine",

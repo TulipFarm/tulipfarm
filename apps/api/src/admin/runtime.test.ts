@@ -158,12 +158,11 @@ describe("runtime operational API", () => {
     const roles = await api.getRoles(grant);
     expect(roles.items.map((role) => role.id)).toEqual(["owner", "admin", "member"]);
     expect(roles.revision).toMatch(/^[a-f0-9]{64}$/);
-    // Per-action, not a blanket `deny any action on secret`. `GET /api/v1/secrets/status` is
-    // guarded by `requireAuth` alone (only PUT and DELETE check `role !== "admin"`), so a member
-    // really can list secret metadata. Writing is simply absent from the allow-list rather than
-    // spelled as a deny, because a deny would also veto any Role granted on top of member.
+    // Secret actions are absent from the member allow-list rather than spelled as an explicit
+    // deny, because a deny would veto any exact secret grants configured on top of member.
     const member = roles.items.find((role) => role.id === "member");
-    expect(member?.grants).toContain("allow secret.read on secret");
+    expect(member?.grants).toContain("allow network.read on network in any domain");
+    expect(member?.grants).not.toContain("allow secret.read on secret");
     expect(member?.grants).not.toContain("allow secret.write on secret");
     expect(member?.grants).not.toContain("allow secret.delete on secret");
   });
