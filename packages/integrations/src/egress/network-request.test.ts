@@ -78,6 +78,10 @@ describe("sendGovernedRequest", () => {
   });
 });
 
+it("returns a string for a response that carried no body", () => {
+  expect(readableWebContent(undefined, undefined)).toBe("");
+});
+
 it("removes executable HTML while preserving readable content", () => {
   expect(
     readableWebContent(

@@ -17,6 +17,21 @@ describe("FetchEgressHttp", () => {
     });
   });
 
+  it("carries the cause of a network fault instead of an empty 503", async () => {
+    const timeout = Object.assign(new Error("timed out"), { name: "TimeoutError" });
+    const http = new FetchEgressHttp({
+      fetch: (async () => {
+        throw timeout;
+      }) as typeof globalThis.fetch,
+      timeoutMs: 1_000,
+    });
+    await expect(http.send(request)).resolves.toEqual({
+      status: 503,
+      headers: { "content-type": "application/json" },
+      body: { error: "network_timeout", message: "the destination did not answer in 1000ms" },
+    });
+  });
+
   it("keeps redirects manual so the caller can reauthorize the next origin", async () => {
     const fetch = vi.fn(
       async () =>

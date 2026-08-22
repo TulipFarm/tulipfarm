@@ -53,9 +53,16 @@ export class FetchEgressHttp implements EgressHttpPort {
         signal: AbortSignal.timeout(this.timeoutMs),
         ...(dispatcher === undefined ? {} : { dispatcher }),
       } as RequestInit);
-    } catch {
+    } catch (error) {
       await dispatcher?.close();
-      return { status: 503, headers: {}, body: undefined };
+      // A network fault must not masquerade as an empty successful response. Readers downstream
+      // treat a 503 with no body as content, and a caller can only choose between retrying and
+      // reporting if the cause survives the transport boundary.
+      return {
+        status: 503,
+        headers: { "content-type": "application/json" },
+        body: networkFault(error, this.timeoutMs),
+      };
     }
 
     try {
@@ -75,6 +82,24 @@ export class FetchEgressHttp implements EgressHttpPort {
 }
 
 const RESPONSE_TOO_LARGE = Symbol("response_too_large");
+
+/** Names a transport fault in terms a caller can act on; provider internals never travel with it. */
+function networkFault(
+  error: unknown,
+  timeoutMs: number
+): { readonly error: string; readonly message: string } {
+  const name = error instanceof Error ? error.name : "";
+  if (name === "TimeoutError") {
+    return {
+      error: "network_timeout",
+      message: `the destination did not answer in ${timeoutMs}ms`,
+    };
+  }
+  if (name === "AbortError") {
+    return { error: "network_aborted", message: "the request was cancelled before it answered" };
+  }
+  return { error: "network_unreachable", message: "the destination could not be reached" };
+}
 
 async function parseBody(response: Response, maxBytes: number): Promise<unknown> {
   const declaredLength = Number(response.headers.get("content-length"));
