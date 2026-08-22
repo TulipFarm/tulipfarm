@@ -233,6 +233,41 @@ describe("routine_forge", () => {
     expect(soulWriter.apply).not.toHaveBeenCalled();
   });
 
+  it("returns mixed schema and consistency issues with original Trigger indexes", async () => {
+    const result = await routineForgeTool.handler(
+      {
+        name: "daily-report",
+        definition: {
+          ...VALID_ROUTINE,
+          metadata: { ...VALID_ROUTINE.metadata, lifecycle: "draft" },
+        },
+        triggers: [
+          {
+            ...trigger("daily-report-manual"),
+            metadata: { ...trigger().metadata, authoredVersion: "1" },
+          },
+          {
+            ...trigger("daily-report-nightly"),
+            metadata: { ...trigger("daily-report-nightly").metadata, lifecycle: "draft" },
+            spec: {
+              ...trigger("daily-report-nightly").spec,
+              routineRef: { name: "other-report", version: "2" },
+            },
+          },
+        ],
+      },
+      ctx()
+    );
+
+    const message = JSON.stringify(result);
+    expect(message).toContain("Routine definition /metadata/lifecycle");
+    expect(message).toContain("Trigger triggers[0] /metadata/authoredVersion");
+    expect(message).toContain("Trigger triggers[1] /metadata/lifecycle");
+    expect(message).toContain("Trigger triggers[1] /spec/routineRef/name");
+    expect(message).toContain("Trigger triggers[1] /spec/routineRef/version");
+    expect(soulWriter.apply).not.toHaveBeenCalled();
+  });
+
   it("maps writer failures without reporting a routine as committed", async () => {
     soulWriter.apply.mockRejectedValueOnce(
       new SoulWriteError(
@@ -246,6 +281,21 @@ describe("routine_forge", () => {
     );
     expect(result).toMatchObject({ success: false, error: { code: "unavailable" } });
     expect(onRoutinesChanged).not.toHaveBeenCalled();
+  });
+
+  it("redacts unexpected writer failures", async () => {
+    soulWriter.apply.mockRejectedValueOnce(new Error("EACCES: /private/soul/routines"));
+
+    const result = await routineForgeTool.handler(
+      { name: "daily-report", definition: VALID_ROUTINE, triggers: [trigger()] },
+      ctx()
+    );
+
+    expect(result).toMatchObject({
+      success: false,
+      error: { code: "internal_error", message: "Routine could not be written to the Soul." },
+    });
+    expect(JSON.stringify(result)).not.toContain("/private/soul");
   });
 
   it("refuses to report a committed but unpublished Routine as forged", async () => {
@@ -262,7 +312,7 @@ describe("routine_forge", () => {
       ctx()
     );
     expect(result).toMatchObject({ success: false, error: { code: "internal_error" } });
-    expect(JSON.stringify(result)).toContain("bundle storage unavailable");
+    expect(JSON.stringify(result)).not.toContain("bundle storage unavailable");
     expect(onRoutinesChanged).not.toHaveBeenCalled();
   });
 

@@ -6,6 +6,7 @@ import { parseFrontmatter } from "../published-loader";
 import { repoDir } from "../repo-dir";
 import type { Logger, SoulSkill } from "../types";
 import { expandForgeExecutionContract } from "./forge-execution-contract";
+import { createSkillReferenceReader } from "./references";
 
 const IMAGE_SKILLS_DIR = "/app/skills";
 /** Records which *shipped* Skills an operator switched off. Not an authored artifact. */
@@ -41,33 +42,6 @@ export async function loadBundledSkills(
 ): Promise<Map<string, BundledSkill>> {
   const skills = new Map<string, BundledSkill>();
   const categoryDescriptions = new Map<string, string>();
-
-  async function listReferences(skillDirectory: string): Promise<string[]> {
-    const referencesRoot = join(skillDirectory, "references");
-    const references: string[] = [];
-
-    async function walkReferences(directory: string): Promise<void> {
-      let entries: Dirent[];
-      try {
-        entries = await readdir(directory, { withFileTypes: true });
-      } catch (error) {
-        if (!isNotFound(error)) throw error;
-        return;
-      }
-      entries.sort((left, right) => left.name.localeCompare(right.name));
-      for (const entry of entries) {
-        const path = join(directory, entry.name);
-        if (entry.isDirectory()) {
-          await walkReferences(path);
-        } else if (entry.isFile()) {
-          references.push(relative(referencesRoot, path).split(sep).join("/"));
-        }
-      }
-    }
-
-    await walkReferences(referencesRoot);
-    return references;
-  }
 
   async function walk(directory: string): Promise<void> {
     let entries: Dirent[];
@@ -135,7 +109,9 @@ export async function loadBundledSkills(
           category,
           categoryDescription: "",
           directory,
-          references: await listReferences(directory),
+          references: await createSkillReferenceReader({
+            directory: join(directory, "references"),
+          }).list(),
         });
       } catch (error) {
         logger.error(

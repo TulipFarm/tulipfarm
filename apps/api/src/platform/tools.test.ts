@@ -300,6 +300,28 @@ describe("loadSkillReferenceTool", () => {
     }
   });
 
+  it("redacts filesystem paths from unexpected reference inventory failures", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "skill-ref-redaction-"));
+    await mkdir(join(dir, "skills", "foo"), { recursive: true });
+    await writeFile(join(dir, "skills", "foo", "references"), "not a directory", "utf8");
+    try {
+      const res = await loadSkillTool.handler(
+        { name: "foo" },
+        makeCtx({ foo: makeSkill("foo") }, {}, dir)
+      );
+      expect(res).toMatchObject({
+        success: false,
+        error: {
+          code: "internal_error",
+          message: 'Skill "foo" references are temporarily unavailable.',
+        },
+      });
+      expect(JSON.stringify(res)).not.toContain(dir);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("returns validation_error for missing args", async () => {
     const res = await loadSkillReferenceTool.handler({ skill: "foo" }, makeCtx());
     expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
