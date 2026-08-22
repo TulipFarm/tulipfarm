@@ -436,6 +436,78 @@ export const routinePickerTool = defineApiTool<PlatformToolContext>({
   },
 });
 
+const ROUTINE_DELETE_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["name"],
+  properties: {
+    name: { type: "string", minLength: 1, description: "Routine name to delete." },
+  },
+};
+const validateRoutineDelete = ajv.compile(ROUTINE_DELETE_SCHEMA);
+
+export const routineDeleteTool = defineApiTool<PlatformToolContext>({
+  name: "routine_delete",
+  requiresAmbient: ["soul"],
+  description:
+    "Delete a routine from the soul repo, along with every Trigger that still references it. Commits atomically to the soul repo.",
+  mutating: true,
+  tier: "platform",
+  inputSchema: ROUTINE_DELETE_SCHEMA,
+  authorization: {
+    action: "platform.routine.delete",
+    resources: ["soul.routine"],
+    targets: (args) => soulTarget(SOUL_ROUTINE_TARGET, args, "name"),
+    dataClasses: ["soul_definition"],
+  },
+  requiresApproval: false,
+  handler: async (args, ctx) => {
+    if (!validateRoutineDelete(args))
+      return err("validation_error", firstError(validateRoutineDelete.errors));
+    const { name } = args as { name: string };
+
+    if (!ctx.soulLoader?.routines?.has(name)) return err("not_found", `routine not found: ${name}`);
+
+    let triggerSlugs: string[] = [];
+    if (ctx.routineCatalog) {
+      try {
+        const listed = await ctx.routineCatalog.list();
+        triggerSlugs = listed.find((r) => r.slug === name)?.triggers.map((t) => t.slug) ?? [];
+      } catch (e) {
+        return err("internal_error", e instanceof Error ? e.message : String(e));
+      }
+    }
+
+    try {
+      await ctx.soulWriter.apply({
+        subject: `soul: remove routine ${name}`,
+        source: "agent",
+        actor: ctx.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        changes: [
+          { op: "deleteArtifact", kind: "Routine", slug: name },
+          ...triggerSlugs.map((slug) => ({
+            op: "deleteArtifact" as const,
+            kind: "Trigger" as const,
+            slug,
+          })),
+        ],
+      });
+    } catch (e) {
+      if (e instanceof SoulWriteError) return mapSoulWriteError(e);
+      return err("internal_error", e instanceof Error ? e.message : String(e));
+    }
+
+    try {
+      await ctx.onRoutinesChanged?.();
+    } catch (e) {
+      return err("internal_error", e instanceof Error ? e.message : String(e));
+    }
+
+    return ok({ name, deleted: true, triggersDeleted: triggerSlugs });
+  },
+});
+
 const SOUL_REPO_PUSH_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
@@ -530,6 +602,7 @@ export const PLATFORM_TOOLS: ApiToolDefinition<PlatformToolContext>[] = [
   triggerRoutineTool,
   routineForgeTool,
   routinePickerTool,
+  routineDeleteTool,
   guardrailForgeTool,
   soulRepoPushTool,
   callSkillTool,

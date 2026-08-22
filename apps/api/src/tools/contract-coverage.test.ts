@@ -133,6 +133,7 @@ const EXPECTED_FAMILY_TOOL_NAMES = [
       "load_skill",
       "load_skill_reference",
       "guardrail_forge",
+      "routine_delete",
       "routine_forge",
       "routine_picker",
       "soul_repo_push",
