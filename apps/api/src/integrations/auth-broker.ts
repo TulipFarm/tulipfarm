@@ -11,6 +11,7 @@ import {
   renderTemplate,
 } from "@tulipfarm/integrations";
 import type {
+  AuthFieldsStep,
   AuthOAuth2Step,
   AuthStep,
   AuthWebhookStep,
@@ -179,6 +180,18 @@ async function readJsonBody(response: Response): Promise<Record<string, unknown>
   }
 }
 
+/** Names the `fields` step that owns a missing oauth2 credential, instead of its raw env var. */
+function missingCredentialsMessage(input: StartAuthStepInput, step: AuthOAuth2Step): string {
+  const owner = resolveAuthSteps(input.manifest).find(
+    (candidate): candidate is AuthFieldsStep =>
+      candidate.kind === "fields" &&
+      candidate.fields.some((field) => field.name === step.client_id_env)
+  );
+  return owner?.title
+    ? `Complete "${owner.title}" first — it supplies this step's credentials.`
+    : "An earlier setup step must be completed before this one.";
+}
+
 /** Prepares one step, persisting the one-use state any provider round trip will come back with. */
 export async function startAuthStep(input: StartAuthStepInput): Promise<AuthStartAction> {
   const step = stepAt(input.manifest, input.stepIndex);
@@ -224,10 +237,7 @@ export async function startAuthStep(input: StartAuthStepInput): Promise<AuthStar
     case "oauth2": {
       const clientId = input.env[step.client_id_env];
       if (!clientId) {
-        throw new AuthBrokerError(
-          "missing_credentials",
-          `${step.client_id_env} is not set; an earlier auth step must supply it`
-        );
+        throw new AuthBrokerError("missing_credentials", missingCredentialsMessage(input, step));
       }
       const usePkce = step.pkce !== false;
       const codeVerifier = usePkce ? randomBytes(32).toString("base64url") : null;

@@ -56,6 +56,8 @@ export type ToolMeta = {
   durationMs?: number;
   errorCode?: string;
   summary?: string;
+  /** UI-only deep link to a connect page; never sent to the model. */
+  connectUrl?: string;
 };
 
 export type PlanStep = { id: string; label: string; status: StepStatus };

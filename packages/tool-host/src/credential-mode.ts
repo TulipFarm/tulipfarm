@@ -20,8 +20,11 @@ export type CredentialResolution =
       readonly use: "principal";
       readonly principal: { readonly kind: string; readonly id: string };
     }
-  /** The call may not proceed; `reason` is user- and model-facing. */
-  | { readonly use: "denied"; readonly reason: string };
+  /**
+   * The call may not proceed; `reason` is user- and model-facing. `connectUrl`, when present, is
+   * UI-only — a relative path to the provider's connect page for a person who can act on it.
+   */
+  | { readonly use: "denied"; readonly reason: string; readonly connectUrl?: string };
 
 export interface CredentialSubject {
   readonly kind: string;
@@ -93,7 +96,13 @@ export class CredentialResolver {
     if (token !== null)
       return { use: "principal", principal: { kind: subject.kind, id: subject.id } };
 
-    if (strict) return { use: "denied", reason: connectPrompt(provider, tool.name) };
+    if (strict) {
+      return {
+        use: "denied",
+        reason: connectPrompt(provider, tool.name),
+        connectUrl: `/integrations/${provider}`,
+      };
+    }
 
     // `user_preferred`: refuse only where connecting is possible. An unresolvable integration is
     // treated as unable to issue one — the Tool exists, so denying it on a catalog miss would be a
@@ -103,7 +112,11 @@ export class CredentialResolver {
       this.deps.personalCredentialProviders?.has(provider) === true ||
       (integration !== undefined && providerSupportsPersonalCredential(integration))
     ) {
-      return { use: "denied", reason: connectPrompt(provider, tool.name) };
+      return {
+        use: "denied",
+        reason: connectPrompt(provider, tool.name),
+        connectUrl: `/integrations/${provider}`,
+      };
     }
     return { use: "service" };
   }

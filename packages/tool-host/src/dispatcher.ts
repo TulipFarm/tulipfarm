@@ -356,7 +356,11 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
     // Resolve credentials before approval; do not ask humans to approve calls that cannot run.
     const credential = await this.resolveCredential(authority, definition);
     if (credential.use === "denied") {
-      return { status: "denied", reason: credential.reason };
+      return {
+        status: "denied",
+        reason: credential.reason,
+        ...(credential.connectUrl === undefined ? {} : { connectUrl: credential.connectUrl }),
+      };
     }
 
     const denial = await this.entitlementDenial(authority, definition, call);
