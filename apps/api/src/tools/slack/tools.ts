@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
-import { SLACK_TOOL_CONTRACTS, SLACK_TOOL_IDS, type SlackToolId } from "@tulipfarm/integrations";
+import {
+  SLACK_TOOL_CONTRACTS,
+  SLACK_TOOL_DECLARATIONS,
+  SLACK_TOOL_IDS,
+  type SlackToolId,
+} from "@tulipfarm/integrations";
 import type { MutationGuard } from "@tulipfarm/observability";
 import type { ChannelMentionedThreadStore } from "@tulipfarm/storage";
 import {
@@ -30,26 +35,7 @@ import { SLACK_BOT_TOKEN_SECRET_REF } from "./credentials";
 
 const SLACK_CATALOG = ToolCatalog.load(SLACK_TOOL_CONTRACTS);
 const SLACK_RESOURCE = "integration.slack";
-const SLACK_CHANNEL_TARGET = "slack.channel";
-const SLACK_UNRESOLVED_CHANNEL_NAME_TARGET = "slack.channel_name";
-
-interface SlackToolSpec {
-  readonly name: string;
-  readonly description: string;
-}
-
-const SLACK_TOOL_SPECS: Record<SlackToolId, SlackToolSpec> = {
-  [SLACK_TOOL_IDS.sendMessage]: {
-    name: "send_slack_message",
-    description:
-      "Send a message to a Slack channel the bot has joined. Accepts a channel name (with or " +
-      "without a leading '#') or a raw channel ID. A human reply in the resulting thread " +
-      "continues this same conversation. To notify a specific person, write '@' followed by " +
-      "their Slack name or first name (e.g. 'hi @mohit') — this is converted into a real, " +
-      "clickable, notifying Slack mention before sending. Writing the name with no '@' sends " +
-      "it as plain text and does not notify or tag anyone.",
-  },
-};
+const SLACK_ALL_CHANNELS_TARGET_ID = "all-channels";
 
 /** Dresses a digest as an RFC 4122 v4 uuid for durable effect ids. */
 function derivedId(...parts: readonly string[]): string {
@@ -120,6 +106,10 @@ function slackChannelTargets(args: unknown): readonly ToolTargetRef[] {
   return name.length === 0 ? [] : [{ type: SLACK_AUTHZ_RESOURCE, id: `channel-name:${name}` }];
 }
 
+function allSlackChannelsTarget(): readonly ToolTargetRef[] {
+  return [{ type: SLACK_AUTHZ_RESOURCE, id: SLACK_ALL_CHANNELS_TARGET_ID }];
+}
+
 export interface SlackToolingContext extends SlackTooling {
   readonly effects: EffectStore;
   readonly threads: IntegrationConversationsRepo;
@@ -136,19 +126,23 @@ function buildToolDef(
   if (contract === undefined) {
     throw new Error(`slack tool contract not published: ${toolId}`);
   }
-  const spec = SLACK_TOOL_SPECS[toolId];
+  const declaration = SLACK_TOOL_DECLARATIONS.find((candidate) => candidate.toolId === toolId);
+  if (declaration === undefined) {
+    throw new Error(`slack tool declaration not published: ${toolId}`);
+  }
 
   const definition = defineApiTool<RequestContext>({
-    name: spec.name,
+    name: declaration.name,
     tier: "integration",
     mutating: contract.mutating,
-    description: spec.description,
+    description: declaration.description,
     inputSchema: contract.inputSchema,
     outputSchema: contract.outputSchema,
     authorization: {
       action: contract.action,
       resources: [SLACK_RESOURCE],
-      targets: slackChannelTargets,
+      targets:
+        toolId === SLACK_TOOL_IDS.listChannels ? allSlackChannelsTarget : slackChannelTargets,
       dataClasses: contract.dataClasses,
       allowedDestinations: contract.allowedDestinations,
     },

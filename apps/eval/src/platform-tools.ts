@@ -3,6 +3,7 @@ import { FILE_TOOLS } from "@tulipfarm/files";
 import {
   GITHUB_REPOSITORY_LIST_DECLARATION,
   GITHUB_TOOL_DECLARATIONS,
+  SLACK_TOOL_DECLARATIONS,
 } from "@tulipfarm/integrations";
 import { SKILL_MARKETPLACE_TOOL_DECLARATIONS } from "@tulipfarm/schema";
 import { SKILL_REFERENCE_TOOL_DECLARATIONS } from "@tulipfarm/soul";
@@ -27,6 +28,7 @@ const SHIPPED: readonly ExposedTool[] = [
   ...SKILL_REFERENCE_TOOL_DECLARATIONS,
   GITHUB_REPOSITORY_LIST_DECLARATION,
   ...GITHUB_TOOL_DECLARATIONS,
+  ...SLACK_TOOL_DECLARATIONS,
 ].map((tool) => ({
   name: tool.name,
   description: tool.description,

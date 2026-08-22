@@ -6,8 +6,8 @@ import { SLACK_ADAPTER_REF, SLACK_TOOL_CONTRACTS, SLACK_TOOL_IDS } from "./contr
 const byId = new Map(SLACK_TOOL_CONTRACTS.map((c) => [c.spec.toolId, c]));
 
 describe("SLACK_TOOL_CONTRACTS", () => {
-  it("publishes the send Tool", () => {
-    expect([...byId.keys()]).toEqual([SLACK_TOOL_IDS.sendMessage]);
+  it("publishes channel discovery and send Tools", () => {
+    expect([...byId.keys()]).toEqual([SLACK_TOOL_IDS.listChannels, SLACK_TOOL_IDS.sendMessage]);
   });
 
   it("loads into the Tool catalog as a published contract", () => {
@@ -30,6 +30,16 @@ describe("SLACK_TOOL_CONTRACTS", () => {
     expect(send.spec.riskClass).toBe("medium");
     expect(send.spec.idempotency.strategy).not.toBe("none");
     expect(send.spec.retry?.safeToRetry).toBe(false);
+  });
+
+  it("makes channel discovery read-only, low risk, and safe to retry", () => {
+    const list = byId.get(SLACK_TOOL_IDS.listChannels);
+    if (list === undefined) expect.unreachable("list contract missing");
+    expect(list.spec.mutating).toBe(false);
+    expect(list.spec.riskClass).toBe("low");
+    expect(list.spec.dataClasses).toEqual(["directory"]);
+    expect(list.spec.idempotency.strategy).toBe("none");
+    expect(list.spec.retry?.safeToRetry).toBe(true);
   });
 
   it("declares a chat.delete compensation with a reconciliation lookup", () => {

@@ -66,7 +66,10 @@ function fakeHttp(ts: string) {
         return {
           status: 200,
           headers: {},
-          body: { ok: true, channels: [{ id: "C123", name: "slack-bot-test" }] },
+          body: {
+            ok: true,
+            channels: [{ id: "C123", name: "slack-bot-test", is_member: true }],
+          },
         };
       }
       if (request.path === "/chat.postMessage") {
@@ -164,6 +167,76 @@ describe("buildSlackTools", () => {
     if (result.success) {
       expect(result.data).toEqual({ channelId: "C123", ts: "100.001", threadId: "100.001" });
     }
+  });
+
+  it("lists joined channels and then sends by the returned stable channel id", async () => {
+    let listCalls = 0;
+    const http = {
+      async send(request: IntegrationHttpRequest) {
+        if (request.path === "/conversations.list") {
+          listCalls += 1;
+          return {
+            status: 200,
+            headers: {},
+            body: {
+              ok: true,
+              channels: [
+                { id: "C1234567890", name: "release-updates", is_member: true },
+                { id: "C0987654321", name: "visible-only", is_member: false },
+              ],
+            },
+          };
+        }
+        if (request.path === "/chat.postMessage") {
+          expect(request.body).toMatchObject({ channel: "C1234567890", text: "deployed" });
+          return { status: 200, headers: {}, body: { ok: true, ts: "100.006" } };
+        }
+        if (request.path === "/users.list") {
+          return { status: 200, headers: {}, body: { ok: true, members: [] } };
+        }
+        throw new Error(`unexpected request: ${request.path}`);
+      },
+    };
+    const tooling = buildSlackTooling({ secrets: fakeSecretsService(), http });
+    const tools = buildSlackTools(BUSINESS_ID, {
+      ...tooling,
+      effects: new MemoryEffectStore(),
+      threads: fakeThreads(),
+      mentionedThreads: fakeMentionedThreads(),
+    });
+    const list = tools.find((tool) => tool.name === "slack_channel_list");
+    const send = tools.find((tool) => tool.name === "send_slack_message");
+    if (list === undefined || send === undefined) throw new Error("Slack Tools not registered");
+
+    const listed = await list.execute({}, context({ toolCallId: "list-call" }));
+    expect(listed).toEqual({
+      success: true,
+      data: { channels: [{ id: "C1234567890", name: "release-updates" }] },
+    });
+    const sent = await send.execute(
+      { channel: "C1234567890", text: "deployed" },
+      context({ toolCallId: "send-call" })
+    );
+
+    expect(sent.success).toBe(true);
+    expect(listCalls).toBe(1);
+  });
+
+  it("requires directory-wide authority to list joined channels", () => {
+    const tooling = buildSlackTooling({ secrets: fakeSecretsService(), http: fakeHttp("100.007") });
+    const tools = buildSlackTools(BUSINESS_ID, {
+      ...tooling,
+      effects: new MemoryEffectStore(),
+      threads: fakeThreads(),
+      mentionedThreads: fakeMentionedThreads(),
+    });
+    const tool = tools.find((candidate) => candidate.name === "slack_channel_list");
+    if (tool?.definition === undefined) throw new Error("slack_channel_list not registered");
+
+    expect(tool.mutating).toBe(false);
+    expect(tool.definition.targetsFor({})).toEqual([
+      { type: "integration.slack", id: "all-channels" },
+    ]);
   });
 
   it("marks the sent thread as mentioned so a reply passes the ingress mention-gate", async () => {
