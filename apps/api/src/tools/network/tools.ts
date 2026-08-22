@@ -1,4 +1,4 @@
-import type { IntegrationHttpMethod } from "@tulipfarm/integrations";
+import type { IntegrationHttpMethod, IntegrationHttpResponse } from "@tulipfarm/integrations";
 import {
   classifyGraphqlOperation,
   type EgressHttpPort,
@@ -13,6 +13,8 @@ import { SecretUnavailableError } from "@tulipfarm/secrets";
 import { defineApiTool, err, ok } from "@tulipfarm/tool-host";
 
 const MAX_MODEL_CONTENT_CHARS = 100_000;
+/** Enough of a failing server's own words for the model to choose a next step, not a second page. */
+const MAX_FAILURE_DETAIL_CHARS = 500;
 const FORBIDDEN_HEADERS = new Set([
   "connection",
   "content-length",
@@ -188,6 +190,71 @@ async function performApiRequest(
   );
 }
 
+function isReadableContentType(contentType: string): boolean {
+  return (
+    contentType.includes("text/") ||
+    contentType.includes("application/json") ||
+    contentType.includes("application/problem+json")
+  );
+}
+
+/**
+ * Why this fetch produced no readable text, or `undefined` when it did. A refused fetch is an
+ * answer the model has to reason about — a different URL, a different Tool, or telling the person
+ * it cannot be read — so it is Tool output rather than a Tool error: an error reaches the model
+ * stripped of the status, the destination and the server's own explanation, and the codes that
+ * would carry it are the ones that spend the repair budget on arguments that were never wrong.
+ */
+function unroutableWebResult(
+  requestedUrl: string,
+  result: Exclude<GovernedHttpResult, { readonly kind: "response" }>
+): Record<string, unknown> {
+  if (result.kind === "cross_origin_redirect") {
+    return {
+      fetched: false,
+      url: requestedUrl,
+      reason: "cross_origin_redirect",
+      detail: `${result.from} redirected to ${result.to}, which is a different site; fetch that URL directly if it is the one you want`,
+    };
+  }
+  return {
+    fetched: false,
+    url: result.url,
+    reason: "redirect_limit",
+    detail: "this URL redirects in a loop and never settles on a page",
+  };
+}
+
+function unreadableWebResponse(
+  url: string,
+  response: IntegrationHttpResponse
+): Record<string, unknown> | undefined {
+  const contentType = response.headers["content-type"]?.toLowerCase();
+  if (response.status >= 400) {
+    const served = readableWebContent(contentType, response.body).trim();
+    return {
+      fetched: false,
+      url,
+      status: response.status,
+      reason: "http_error",
+      detail:
+        served.length === 0
+          ? `the server answered ${response.status}`
+          : `the server answered ${response.status}: ${served.slice(0, MAX_FAILURE_DETAIL_CHARS)}`,
+    };
+  }
+  if (contentType !== undefined && !isReadableContentType(contentType)) {
+    return {
+      fetched: false,
+      url,
+      status: response.status,
+      reason: "unsupported_content_type",
+      detail: `this URL served ${contentType}, which has no readable text`,
+    };
+  }
+  return undefined;
+}
+
 export const webFetchTool = defineApiTool<NetworkToolContext>({
   ...WEB_FETCH_TOOL_DECLARATION,
   tier: "platform",
@@ -204,37 +271,48 @@ export const webFetchTool = defineApiTool<NetworkToolContext>({
     destination: normalizedPublicUrl(asApiInput(args).url).origin,
   }),
   handler: async (args, context) => {
+    const input = args as { readonly url: string; readonly prompt: string };
+    // The URL is the only part of this call the model can repair, so it is the only failure that
+    // may spend the repair budget. Everything after it is the network's answer, and asking the
+    // model to reword arguments that were never malformed just burns the budget on retries that
+    // reproduce the same result.
     try {
-      const input = args as { readonly url: string; readonly prompt: string };
       context.assertSkillDestination(normalizedPublicUrl(input.url).origin);
+    } catch (error) {
+      return err("validation_error", error instanceof Error ? error.message : "URL is invalid");
+    }
+    try {
       const result = await sendGovernedRequest(context.http, {
         url: input.url,
         method: "GET",
         headers: { accept: "text/html, text/markdown, text/plain, application/json" },
       });
-      if (result.kind !== "response") return ok(result);
+      if (result.kind !== "response") return ok(unroutableWebResult(input.url, result));
+      const unreadable = unreadableWebResponse(result.url, result.response);
+      if (unreadable !== undefined) return ok(unreadable);
       const contentType = result.response.headers["content-type"]?.toLowerCase();
-      if (
-        contentType !== undefined &&
-        !contentType.includes("text/") &&
-        !contentType.includes("application/json") &&
-        !contentType.includes("application/problem+json")
-      ) {
-        return err("validation_error", `unsupported web content type: ${contentType}`);
+      const content = readableWebContent(contentType, result.response.body)
+        .trim()
+        .slice(0, MAX_MODEL_CONTENT_CHARS);
+      if (content.length === 0) {
+        return ok({
+          fetched: false,
+          url: result.url,
+          status: result.response.status,
+          reason: "empty_response",
+          detail: "the destination answered but carried no readable text",
+        });
       }
-      const content = readableWebContent(contentType, result.response.body).slice(
-        0,
-        MAX_MODEL_CONTENT_CHARS
-      );
       const extracted = await context.extract({ url: result.url, prompt: input.prompt, content });
       return ok({
+        fetched: true,
         url: result.url,
         status: result.response.status,
         contentType: contentType ?? "unknown",
         extracted,
       });
     } catch (error) {
-      return err("validation_error", error instanceof Error ? error.message : "web fetch failed");
+      return err("internal_error", error instanceof Error ? error.message : "web fetch failed");
     }
   },
 });

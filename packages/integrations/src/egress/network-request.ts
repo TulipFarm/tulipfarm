@@ -157,7 +157,9 @@ const HTML_ENTITIES: Readonly<Record<string, string>> = {
 
 /** Bounded, dependency-free readable text for model extraction; scripts and styles never survive. */
 export function readableWebContent(contentType: string | undefined, body: unknown): string {
-  const raw = typeof body === "string" ? body : JSON.stringify(body, null, 2);
+  // `JSON.stringify(undefined)` is `undefined`, not a string: an empty or failed response would
+  // otherwise return a non-string from a `string` signature and crash every caller that slices it.
+  const raw = typeof body === "string" ? body : (JSON.stringify(body, null, 2) ?? "");
   if (!contentType?.toLowerCase().includes("text/html")) return raw;
   return raw
     .replace(/<(script|style|noscript|template)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")

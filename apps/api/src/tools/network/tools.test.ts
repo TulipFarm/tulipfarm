@@ -131,6 +131,62 @@ describe("network Tool handlers", () => {
     expect(result).toMatchObject({ success: true });
   });
 
+  it("answers an unreachable destination without spending the model's repair budget", async () => {
+    const ctx = context({
+      http: {
+        send: vi.fn(async () => ({
+          status: 503,
+          headers: { "content-type": "application/json" },
+          body: { error: "network_timeout", message: "the destination did not answer in 30000ms" },
+        })),
+      },
+    });
+    const result = await webFetchTool.handler(
+      { url: "https://docs.example.com/release", prompt: "What version is this?" },
+      ctx
+    );
+    expect(result).toMatchObject({
+      success: true,
+      data: { fetched: false, status: 503, reason: "http_error" },
+    });
+    expect(JSON.stringify(result)).toContain("network_timeout");
+    expect(ctx.extract).not.toHaveBeenCalled();
+  });
+
+  it("answers an empty response instead of raising on a missing body", async () => {
+    const ctx = context({
+      http: { send: vi.fn(async () => ({ status: 204, headers: {}, body: undefined })) },
+    });
+    await expect(
+      webFetchTool.handler({ url: "https://docs.example.com/release", prompt: "Summarize" }, ctx)
+    ).resolves.toMatchObject({ success: true, data: { fetched: false, reason: "empty_response" } });
+    expect(ctx.extract).not.toHaveBeenCalled();
+  });
+
+  it("answers an unreadable content type rather than rejecting the arguments", async () => {
+    const ctx = context({
+      http: {
+        send: vi.fn(async () => ({
+          status: 200,
+          headers: { "content-type": "application/pdf" },
+          body: "%PDF-1.7",
+        })),
+      },
+    });
+    await expect(
+      webFetchTool.handler({ url: "https://docs.example.com/manual.pdf", prompt: "Summarize" }, ctx)
+    ).resolves.toMatchObject({
+      success: true,
+      data: { fetched: false, reason: "unsupported_content_type" },
+    });
+  });
+
+  it("still asks the model to repair a URL it can act on", async () => {
+    await expect(
+      webFetchTool.handler({ url: "not-a-url", prompt: "Summarize" }, context())
+    ).resolves.toMatchObject({ success: false, error: { code: "validation_error" } });
+  });
+
   it("returns a UI-only Secrets setup link when the Credential is missing", async () => {
     const ctx = context({
       useCredential: vi.fn(async () => {
