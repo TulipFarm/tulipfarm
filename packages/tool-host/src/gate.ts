@@ -95,6 +95,9 @@ export class LiveToolGate implements ToolGate {
       targetRefs,
       arguments: request.arguments,
       idempotencyKey: `gate:${request.runId}:${request.stateId}:${definition.name}`,
+      ...(definition.effectiveDestination === undefined
+        ? {}
+        : { destination: definition.effectiveDestination }),
     });
 
     const layers =
@@ -118,7 +121,13 @@ export class LiveToolGate implements ToolGate {
   }
 
   private contractFor(definition: ApiToolDefinition<unknown>): PublishedToolContract | undefined {
-    const key = `${definition.name}@${definition.version}`;
+    const key = [
+      `${definition.name}@${definition.version}`,
+      definition.authorization.action,
+      definition.mutating ? "write" : "read",
+      definition.riskClass,
+      definition.idempotency,
+    ].join(":");
     if (this.contracts.has(key)) return this.contracts.get(key);
     let contract: PublishedToolContract | undefined;
     try {

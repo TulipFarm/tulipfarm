@@ -308,29 +308,36 @@ export async function buildApp(opts: AppOptions = {}) {
       });
     }
     if (opts.secretsService) {
-      registerSecretsRoutes(app, opts.secretsService, requireAuth, requireAuthorization, {
-        onSecretDeleted:
-          opts.soulLoader && opts.soulWriter && opts.llmService
-            ? makeLlmCascadeOnSecretDelete(
-                opts.soulLoader,
-                opts.soulWriter,
-                opts.llmService,
-                opts.secretsService,
-                app.log
-              )
-            : undefined,
-        onSecretSet:
-          opts.soulLoader && opts.soulWriter && opts.llmService
-            ? makeLlmCascadeOnSecretSet(
-                opts.soulLoader,
-                opts.soulWriter,
-                opts.llmService,
-                opts.secretsService,
-                app.log,
-                opts.triggerCuratorSweep
-              )
-            : undefined,
-      });
+      registerSecretsRoutes(
+        app,
+        opts.secretsService,
+        requireAuth,
+        requireAuthorization,
+        authorizationCheck,
+        {
+          onSecretDeleted:
+            opts.soulLoader && opts.soulWriter && opts.llmService
+              ? makeLlmCascadeOnSecretDelete(
+                  opts.soulLoader,
+                  opts.soulWriter,
+                  opts.llmService,
+                  opts.secretsService,
+                  app.log
+                )
+              : undefined,
+          onSecretSet:
+            opts.soulLoader && opts.soulWriter && opts.llmService
+              ? makeLlmCascadeOnSecretSet(
+                  opts.soulLoader,
+                  opts.soulWriter,
+                  opts.llmService,
+                  opts.secretsService,
+                  app.log,
+                  opts.triggerCuratorSweep
+                )
+              : undefined,
+        }
+      );
     }
     if (opts.triggerInvoke) {
       registerTriggerRoutes(app, opts.triggerInvoke, requireAuth, opts.rateLimiter);

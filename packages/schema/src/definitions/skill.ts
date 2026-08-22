@@ -18,6 +18,18 @@ const safeRelativePathSchema = Type.String({
   pattern: "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$",
 });
 
+const secretKeySchema = Type.String({
+  minLength: 1,
+  maxLength: 128,
+  pattern: "^[A-Z][A-Z0-9_]*$",
+});
+
+const exactDomainSchema = Type.String({
+  minLength: 1,
+  maxLength: 253,
+  pattern: "^(?!.*\\*)(?!.*://)(?!.*[/@])[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::[0-9]{1,5})?$",
+});
+
 const skillCommandSchema = Type.Object(
   {
     name: Type.String({
@@ -117,6 +129,12 @@ const skillSpecSchema = Type.Object(
     dependencies: Type.Optional(refListSchema),
     // Tool *abilities the Skill requires* — a declaration of need, never a grant of a Tool.
     requiredToolAbilities: Type.Optional(refListSchema),
+    requiredSecrets: Type.Optional(
+      Type.Array(secretKeySchema, { maxItems: 32, uniqueItems: true })
+    ),
+    allowedDomains: Type.Optional(
+      Type.Array(exactDomainSchema, { maxItems: 64, uniqueItems: true })
+    ),
     trustTier: Type.Unsafe<DefinitionTrustTier>({
       type: "string",
       enum: [...DEFINITION_TRUST_TIERS],

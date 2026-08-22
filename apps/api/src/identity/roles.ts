@@ -188,7 +188,11 @@ export const MEMBER_ALLOWED_SURFACES: readonly {
   },
   { type: "onboarding", actions: ["*"], enforcedIn: "onboarding/routes.ts" },
   { type: "preference", actions: ["*"], enforcedIn: "preferences/routes.ts" },
-  { type: "secret", actions: ["secret.read"], enforcedIn: "secrets/routes.ts" },
+  {
+    type: "network",
+    actions: ["network.read"],
+    enforcedIn: "tools/network/tools.ts",
+  },
   { type: "soul", actions: ["*"], enforcedIn: "soul/routes.ts" },
   { type: "soul.guardrails", actions: ["*"], enforcedIn: "platform/guardrail-tool.ts" },
   { type: "soul.repo", actions: ["*"], enforcedIn: "platform/tools.ts" },
@@ -286,6 +290,7 @@ export const DEPLOYMENT_ROLES: readonly Role[] = [
     parentRoleIds: [],
     grants: [
       ...surfaceGrants(MEMBER_ALLOWED_SURFACES, "allow"),
+      { action: "network.read", resourceType: "network", domain: "*", effect: "allow" },
       ...MEMBER_UNDOMAINED_RECORD_ACTIONS.map(
         (action): AccessGrant => ({ action, resourceType: "*", effect: "allow" })
       ),

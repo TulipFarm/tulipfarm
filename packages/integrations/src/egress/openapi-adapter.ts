@@ -18,6 +18,8 @@ export interface EgressHttpRequest {
   readonly method: IntegrationHttpMethod;
   readonly headers: Readonly<Record<string, string>>;
   readonly body?: unknown;
+  /** Public DNS answers validated by the destination cage and pinned to this connection. */
+  readonly pinnedAddresses?: readonly string[];
 }
 
 export interface EgressHttpPort {

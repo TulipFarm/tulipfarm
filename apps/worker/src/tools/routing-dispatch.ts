@@ -52,6 +52,9 @@ export class RoutingToolDispatch implements ToolDispatchPort {
       callId: request.callId,
       name: request.name,
       arguments: request.arguments,
+      ...(request.activeSkillName === undefined
+        ? {}
+        : { activeSkillName: request.activeSkillName }),
     });
     return withCallId(request.callId, result);
   }

@@ -140,4 +140,22 @@ describe("validateSkill", () => {
     });
     expect(result).toMatchObject({ valid: true });
   });
+
+  it("accepts exact Secret requirements and domains", () => {
+    expect(
+      validate({
+        ...VALID_FRONTMATTER,
+        requiredSecrets: ["GITHUB_PAT"],
+        allowedDomains: ["api.github.com"],
+      })
+    ).toMatchObject({ valid: true });
+  });
+
+  it.each([
+    ["wildcard domain", { allowedDomains: ["*.example.com"] }],
+    ["URL instead of domain", { allowedDomains: ["https://example.com"] }],
+    ["invalid Secret key", { requiredSecrets: ["github-token"] }],
+  ])("rejects a non-exact network declaration: %s", (_label, fields) => {
+    expect(validate({ ...VALID_FRONTMATTER, ...fields })).toMatchObject({ valid: false });
+  });
 });

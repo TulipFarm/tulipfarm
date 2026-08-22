@@ -4,6 +4,7 @@ import { ajv } from "@tulipfarm/schema";
 import type { SoulLoader } from "@tulipfarm/soul";
 import {
   type CompositeToolEntitlement,
+  definitionForToolCall,
   type EffectStore,
   NOT_APPLICABLE,
   type ToolAuthorizationDenialReason,
@@ -12,6 +13,7 @@ import {
 import {
   type ApprovalDemand,
   AUTONOMY_APPROVAL_DEMAND,
+  DECLARED_TOOL_APPROVAL_DEMAND,
   UNATTRIBUTED_APPROVAL_DEMAND,
 } from "./approvals/evidence";
 import type {
@@ -311,12 +313,13 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
     const availableTools = this.options.registry
       .getAll()
       .filter((tool: ToolDef) => allowed.has(tool.name));
-    const definition = this.options.registry
+    const registeredDefinition = this.options.registry
       .getAll()
       .find((tool: ToolDef) => tool.name === call.name);
-    if (definition === undefined || !allowed.has(definition.name)) {
+    if (registeredDefinition === undefined || !allowed.has(registeredDefinition.name)) {
       return { status: "denied", reason: `tool "${call.name}" is not available to this turn` };
     }
+    let definition: ToolDef = registeredDefinition;
 
     // Re-check co-location admission at dispatch, not only at composition: a Tool this process
     // cannot fully authorize must be refused here rather than pass a thinner gate.
@@ -333,6 +336,25 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
     const validate = ajv.compile(definition.inputSchema);
     if (!validate(call.arguments)) {
       return { status: "invalid_arguments", reason: argumentErrors(validate) };
+    }
+
+    if (definition.definition !== undefined) {
+      try {
+        const effective = definitionForToolCall(definition.definition, call.arguments);
+        if (effective !== definition.definition) {
+          definition = {
+            ...definition,
+            mutating: effective.mutating,
+            requiresApproval: effective.requiresApproval,
+            definition: effective,
+          };
+        }
+      } catch (error) {
+        return {
+          status: "invalid_arguments",
+          reason: error instanceof Error ? error.message : "could not classify Tool call",
+        };
+      }
     }
 
     const capabilityDenial = agentCapabilityDenial(
@@ -368,7 +390,9 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
 
     // Ask after validation and before `execute`, so no invalid call or effect reaches approval.
     const approvalRequired =
-      verdict.decision === "approval" || autonomyDemandsApproval(definition, autonomy);
+      verdict.decision === "approval" ||
+      definition.requiresApproval === true ||
+      autonomyDemandsApproval(definition, autonomy);
     if (approvalRequired && this.options.approvals === undefined) {
       // Missing approval plumbing must deny, not convert "not yet" into "yes".
       return {
@@ -389,10 +413,15 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
         demand:
           verdict.decision === "approval"
             ? verdict.demand
-            : {
-                ...AUTONOMY_APPROVAL_DEMAND,
-                guardrailRevision: this.options.guardrails?.revision ?? "none",
-              },
+            : definition.requiresApproval === true
+              ? {
+                  ...DECLARED_TOOL_APPROVAL_DEMAND,
+                  guardrailRevision: this.options.guardrails?.revision ?? "none",
+                }
+              : {
+                  ...AUTONOMY_APPROVAL_DEMAND,
+                  guardrailRevision: this.options.guardrails?.revision ?? "none",
+                },
       });
       if (decision.status === "pending") {
         return { status: "awaiting_approval", approvalId: decision.approvalId };
@@ -441,6 +470,7 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
       runId: authority.runId,
       toolCallId: call.callId,
       agentId: agent.name,
+      ...(call.activeSkillName === undefined ? {} : { activeSkillName: call.activeSkillName }),
       autonomy,
       guardrailRevision: this.options.guardrails?.revision ?? "none",
       surfaceStore: this.options.surfaceStore,
@@ -467,6 +497,9 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
         arguments: call.arguments,
         targetRefs: this.ledgerTargets(definition, call),
         guardrailRevision: this.options.guardrails?.revision ?? "none",
+        ...(definition.definition.effectiveDestination === undefined
+          ? {}
+          : { destination: definition.definition.effectiveDestination }),
       });
       if (reserved.outcome === "duplicate") return replayedEffect(call.name, reserved.state);
       if (reserved.outcome === "conflict") {

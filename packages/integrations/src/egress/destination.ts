@@ -43,7 +43,13 @@ function isPrivateIpv4(address: string): boolean {
     (first === 100 && second >= 64 && second <= 127) ||
     (first === 169 && second === 254) ||
     (first === 172 && second >= 16 && second <= 31) ||
+    (first === 192 && second === 0) ||
     (first === 192 && second === 168) ||
+    (first === 192 && second === 88) ||
+    (first === 192 && second === 0 && octets[2] === 2) ||
+    (first === 198 && (second === 18 || second === 19)) ||
+    (first === 198 && second === 51 && octets[2] === 100) ||
+    (first === 203 && second === 0 && octets[2] === 113) ||
     first >= 224
   );
 }
@@ -53,6 +59,8 @@ function isPrivateIpv6(address: string): boolean {
   if (normalized === "::" || normalized === "::1") return true;
   if (normalized.startsWith("fc") || normalized.startsWith("fd")) return true;
   if (/^fe[89ab]/.test(normalized)) return true;
+  if (normalized.startsWith("ff") || normalized.startsWith("2001:db8:")) return true;
+  if (normalized === "100::" || normalized.startsWith("100:0:0:0:")) return true;
   const mappedIpv4 = normalized.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/)?.[1];
   if (mappedIpv4 !== undefined) return isPrivateIpv4(mappedIpv4);
   // `new URL()` rewrites `::ffff:127.0.0.1` to `::ffff:7f00:1`, so the dotted form is not the
@@ -96,11 +104,6 @@ export function assertPublicEgressUrl(url: URL, destination: string): void {
  * Request-time check on what a hostname actually resolves to. Denies unless every answer is
  * public, so a single private address in a round-robin cannot be the one dialled.
  *
- * This narrows the window rather than closing it: the addresses are not pinned to the socket the
- * transport then opens, so a DNS answer that changes between this call and the connection is not
- * caught. Pinning needs a custom connector; until there is one, this stops the static cases —
- * `metadata.google.internal`, a name whose A record is `10.x`, an attacker's always-private zone.
- *
  * @throws EgressDestinationError when nothing resolves or any answer is private.
  */
 export function assertPublicAddresses(
@@ -143,7 +146,10 @@ export interface GuardedEgressHttpOptions {
 export class GuardedEgressHttp implements EgressHttpPort {
   private readonly resolve: HostResolver;
   private readonly ttlMs: number;
-  private readonly checked = new Map<string, number>();
+  private readonly checked = new Map<
+    string,
+    { readonly checkedAt: number; readonly addresses: readonly string[] }
+  >();
 
   constructor(
     private readonly inner: EgressHttpPort,
@@ -155,15 +161,15 @@ export class GuardedEgressHttp implements EgressHttpPort {
 
   async send(request: EgressHttpRequest): Promise<IntegrationHttpResponse> {
     try {
-      await this.assertPublicDestination(request.url);
+      const addresses = await this.publicAddressesFor(request.url);
+      return this.inner.send({ ...request, pinnedAddresses: addresses });
     } catch (error) {
       if (!(error instanceof EgressDestinationError)) throw error;
       return { status: 403, headers: {}, body: { error: error.denial } };
     }
-    return this.inner.send(request);
   }
 
-  private async assertPublicDestination(rawUrl: string): Promise<void> {
+  private async publicAddressesFor(rawUrl: string): Promise<readonly string[]> {
     let url: URL;
     try {
       url = new URL(rawUrl);
@@ -171,14 +177,17 @@ export class GuardedEgressHttp implements EgressHttpPort {
       throw new EgressDestinationError("no_host", rawUrl);
     }
     const hostname = url.hostname.startsWith("[") ? url.hostname.slice(1, -1) : url.hostname;
-    const checkedAt = this.checked.get(hostname);
-    if (checkedAt !== undefined && Date.now() - checkedAt < this.ttlMs) return;
+    const cached = this.checked.get(hostname);
+    if (cached !== undefined && Date.now() - cached.checkedAt < this.ttlMs) {
+      return cached.addresses;
+    }
 
     // A literal address needs no lookup, and asking a resolver about one invites an answer that
     // vouches for it. Check the literal itself.
     const addresses =
       isIP(hostname) === 0 ? await this.resolve(hostname).catch(() => []) : [hostname];
-    assertPublicAddresses(addresses, hostname);
-    this.checked.set(hostname, Date.now());
+    const publicAddresses = assertPublicAddresses(addresses, hostname);
+    this.checked.set(hostname, { checkedAt: Date.now(), addresses: publicAddresses });
+    return publicAddresses;
   }
 }

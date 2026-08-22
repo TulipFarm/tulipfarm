@@ -22,6 +22,7 @@ Run event/request vocabularies, canonical hashes, Secret references, and resourc
 | `src/llm.ts`, `src/model-catalog.ts` | LLM config schema and ModelProfile derivation. |
 | `src/guardrails.ts` | Guardrail policy schema with strict per-stage guard unions. |
 | `src/integration-manifest.ts` | Integration manifest and egress authoring schemas. |
+| `src/network-tools.ts` | Model-visible declarations for governed web and API Tools. |
 | `src/canonicalize.ts` | Deterministic canonical JSON and lowercase SHA-256 hashing. |
 | `src/transforms/` | `x-id-strategy`, `x-normalize`, `x-computed` handling. |
 | `src/validate.ts`, `src/ajv.ts` | Shared AJV 2020 validation and tagged errors. |
@@ -42,6 +43,7 @@ Run event/request vocabularies, canonical hashes, Secret references, and resourc
 - Optional Run event fields must be omitted, never `undefined`; schemas reject extras.
 - Run events pair by id (`callId`), not stream position; readers must not guess call/approval order.
 - Secret-bearing fields must use `secretReferenceSchema` or `SECRET_REFERENCE_PATTERN`.
+- Skill `requiredSecrets` names references only; `allowedDomains` accepts exact hosts, never URLs or wildcards.
 - Invocation gateways must compile `INVOCATION_REQUEST_SCHEMAS` and deny unregistered refs.
 - `applyTransforms` order is `x-id-strategy` -> `x-normalize` -> `x-computed`; normalizer and
   computed keys are closed sets and must be added beside their implementation maps.

@@ -53,6 +53,8 @@ export function buildToolRegistry(services: {
   slack?: readonly ToolDef[];
   /** Google Workspace chat ToolDefs from `tools/google/tools.ts`. */
   google?: readonly ToolDef[];
+  /** Governed public web and structured API ToolDefs. */
+  network?: readonly ToolDef[];
 }): ToolRegistry {
   const registry = new ToolRegistry({ defaultDeny: true });
 
@@ -168,6 +170,7 @@ export function buildToolRegistry(services: {
     ...(services.github ?? []),
     ...(services.slack ?? []),
     ...(services.google ?? []),
+    ...(services.network ?? []),
   ]) {
     registry.register(tool);
   }

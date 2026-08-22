@@ -1023,6 +1023,9 @@ importers:
       '@tulipfarm/tool-broker':
         specifier: workspace:*
         version: link:../tool-broker
+      undici:
+        specifier: ^7.29.0
+        version: 7.29.0
     devDependencies:
       '@tulipfarm/tsconfig':
         specifier: workspace:*

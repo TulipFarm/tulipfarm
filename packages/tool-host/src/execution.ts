@@ -93,6 +93,13 @@ export async function runToolAttempts(input: ToolAttemptInput): Promise<HostedTo
   if (result.error.code === "validation_error") {
     return { status: "invalid_arguments", reason: result.error.message };
   }
+  if (result.error.code === "credential_required") {
+    return {
+      status: "denied",
+      reason: result.error.message,
+      ...(result.error.connectUrl === undefined ? {} : { connectUrl: result.error.connectUrl }),
+    };
+  }
   // Exhausted infra faults are machinery failures, not repairable argument failures.
   return isInfrastructureFault(result.error.code)
     ? { status: "failed", reason: `tool "${call.name}" is temporarily unavailable; try again` }

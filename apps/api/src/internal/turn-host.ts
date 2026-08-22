@@ -118,6 +118,7 @@ export interface HostedToolCall {
   readonly callId: string;
   readonly name: string;
   readonly arguments: unknown;
+  readonly activeSkillName?: string;
 }
 
 /** Mirrors the loop's `ToolDispatchResult`, minus the `callId` the caller already holds. */

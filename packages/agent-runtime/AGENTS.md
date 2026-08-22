@@ -37,6 +37,8 @@ orchestration. It owns prompt assembly and runtime control, not model providers.
   `DEFAULT_GUARDRAILS`, and digest checks depend on `config` returning the validated policy.
 - If `ModelPort.stream` exists, a missing `completed` chunk fails the turn. `AgentLoopEvent`
   carries model text only; Tool args/output stay with `ToolDispatchPort`.
+- After `load_skill`, every dispatch carries `activeSkillName`; the Tool Host consumes it as
+  authorization context, while model-visible Tool narrowing remains presentation-only.
 - A Turn sends a File once, on the Turn it was attached to. `file_read` is the only Tool the loop
   knows by name for bytes: its `attached` result names a File, and `LoopAttachmentPort` fetches it
   *every* iteration, because that fetch is the authorization check — a revoked share has to stop

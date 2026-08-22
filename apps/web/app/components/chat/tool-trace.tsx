@@ -149,7 +149,9 @@ function detailOf(part: ToolPart, status: "running" | "done" | "error") {
       )}
       {connectUrl === undefined ? null : (
         <Link to={connectUrl} className="block text-primary hover:underline">
-          Connect your account →
+          {connectUrl.startsWith("/business/secrets")
+            ? "Add the required Credential →"
+            : "Connect your account →"}
         </Link>
       )}
       {inspectable ? <ToolInspector part={part} /> : null}

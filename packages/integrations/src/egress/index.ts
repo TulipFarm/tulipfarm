@@ -21,6 +21,17 @@ export {
   type GraphqlOperationBinding,
 } from "./graphql-compile";
 export {
+  classifyGraphqlOperation,
+  type GovernedHttpRequest,
+  type GovernedHttpResult,
+  type GraphqlOperationKind,
+  NETWORK_READ_METHODS,
+  NETWORK_REDIRECT_STATUSES,
+  normalizedPublicUrl,
+  readableWebContent,
+  sendGovernedRequest,
+} from "./network-request";
+export {
   type EgressHttpPort,
   type EgressHttpRequest,
   OpenApiToolAdapter,

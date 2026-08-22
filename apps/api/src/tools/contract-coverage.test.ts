@@ -16,7 +16,7 @@ import {
   type ToolAdapter,
 } from "@tulipfarm/tool-broker";
 import type { ToolDef } from "@tulipfarm/tool-host";
-import { ledgerOwnsCall } from "@tulipfarm/tool-host";
+import { ledgerOwnsCall, toToolDef } from "@tulipfarm/tool-host";
 import { describe, expect, it } from "vitest";
 import type { ToolRegistry } from "../broker/tool-adapter";
 import type { IntegrationConversationsRepo } from "../ingress/repo";
@@ -25,6 +25,7 @@ import { declarativeToolName } from "./declarative/tools";
 import type { GitHubInstallationDirectory } from "./github/installation";
 import { buildGitHubTools, GITHUB_REPOSITORY_LIST_TOOL_NAME } from "./github/tools";
 import { buildGoogleTools } from "./google/tools";
+import { NETWORK_TOOLS } from "./network/tools";
 import { buildToolRegistry } from "./setup";
 import { buildSlackTools } from "./slack/tools";
 
@@ -141,6 +142,7 @@ const EXPECTED_FAMILY_TOOL_NAMES = [
       "validate_artifact",
     ],
   },
+  { family: "network", names: ["api_request", "web_fetch"] },
   {
     family: "github",
     names: [
@@ -323,6 +325,7 @@ function registerAllFamilies(): CoveredTools {
     github: buildGitHubFitnessTools(),
     slack: buildSlackFitnessTools(),
     google: buildGoogleFitnessTools(),
+    network: NETWORK_TOOLS.map((definition) => toToolDef(definition, () => inert<never>())),
   });
 
   const declarativeProblems: string[] = [];

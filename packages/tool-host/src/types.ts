@@ -10,6 +10,7 @@ export type ToolErrorCode =
   /** Well-formed request, refused by policy. The reason stays server-side — see `err`'s callers. */
   | "write_denied"
   | "audit_required"
+  | "credential_required"
   /**
    * A transient failure of the machinery, not of the request: git index contention, a provider 503,
    * a lease lost to a concurrent writer. Distinct from `internal_error`, which is deterministic — a
@@ -44,6 +45,7 @@ export const TOOL_FAULT_CLASS: Readonly<
   not_found: "business",
   write_denied: "business",
   audit_required: "business",
+  credential_required: "business",
   internal_error: "business",
   unavailable: "infrastructure",
   indeterminate: "indeterminate",
@@ -60,13 +62,16 @@ export function isIndeterminateFault(code: ToolErrorCode): boolean {
 
 export type ToolCallResult =
   | { success: true; data: unknown }
-  | { success: false; error: { code: ToolErrorCode; message: string } };
+  | {
+      success: false;
+      error: { code: ToolErrorCode; message: string; connectUrl?: string };
+    };
 
 export const ok = (data: unknown): ToolCallResult => ({ success: true, data });
 
-export const err = (code: ToolErrorCode, message: string): ToolCallResult => ({
+export const err = (code: ToolErrorCode, message: string, connectUrl?: string): ToolCallResult => ({
   success: false,
-  error: { code, message },
+  error: { code, message, ...(connectUrl === undefined ? {} : { connectUrl }) },
 });
 
 export type ChatAutonomy = "full" | "supervised" | "approval-required" | "manual";
@@ -96,6 +101,8 @@ export interface RequestContext {
   toolCallId?: string;
   events?: EventEmitter;
   agentId?: string;
+  /** Skill that was explicitly loaded before this call; never inferred from Tool arguments. */
+  activeSkillName?: string;
   autonomy?: ChatAutonomy;
   clientContext?: ClientContext;
   contextRead?: { value: boolean };

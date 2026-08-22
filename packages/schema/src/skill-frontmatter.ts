@@ -24,6 +24,22 @@ export const SkillFrontmatterSchema = {
     version: { type: "string" },
     author: { type: "string" },
     license: { type: "string" },
+    requiredSecrets: {
+      type: "array",
+      maxItems: 32,
+      uniqueItems: true,
+      items: { type: "string", pattern: "^[A-Z][A-Z0-9_]{0,127}$" },
+    },
+    allowedDomains: {
+      type: "array",
+      maxItems: 64,
+      uniqueItems: true,
+      items: {
+        type: "string",
+        maxLength: 253,
+        pattern: "^(?!.*\\*)(?!.*://)(?!.*[/@])[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::[0-9]{1,5})?$",
+      },
+    },
     _pendingAudit: { type: "boolean" },
   },
 } as const;
@@ -36,6 +52,8 @@ export interface SkillFrontmatter {
   version?: string;
   author?: string;
   license?: string;
+  requiredSecrets?: string[];
+  allowedDomains?: string[];
   _pendingAudit?: boolean;
   [key: string]: unknown;
 }

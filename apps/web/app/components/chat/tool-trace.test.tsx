@@ -1,3 +1,4 @@
+import { createRemixStub } from "@remix-run/testing";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -123,6 +124,37 @@ describe("ToolTrace", () => {
       "true"
     );
     expect(screen.getByText("channel_not_found")).toBeInTheDocument();
+  });
+
+  it("links a missing Credential to its setup page", () => {
+    const Stub = createRemixStub([
+      {
+        path: "/",
+        Component: () => (
+          <ToolTrace
+            onApprove={() => undefined}
+            foldable={false}
+            pending={false}
+            parts={[
+              call({
+                toolCallId: "a",
+                toolName: "api_request",
+                outcome: "error",
+                meta: {
+                  errorCode: "credential_required",
+                  connectUrl: "/business/secrets?required=EXAMPLE_TOKEN",
+                },
+              }),
+            ]}
+          />
+        ),
+      },
+    ]);
+    render(<Stub />);
+    expect(screen.getByRole("link", { name: "Add the required Credential →" })).toHaveAttribute(
+      "href",
+      "/business/secrets?required=EXAMPLE_TOKEN"
+    );
   });
 
   it("reports progress the reader can check against the rows", () => {

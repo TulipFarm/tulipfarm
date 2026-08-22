@@ -154,6 +154,37 @@ describe("route gate", () => {
     await gate({ ...READ, domain: "hr" })(request(principal("admin")), reply);
     expect(sent.code).toBe(403);
   });
+
+  it("carries an exact record id into Secret metadata decisions", async () => {
+    const check = makeAuthorizationCheck(
+      new LiveRouteAuthorizer(
+        resolverOf([
+          {
+            action: "secret.read",
+            resourceType: "secret",
+            recordSelector: "VISIBLE_TOKEN",
+            effect: "allow",
+          },
+        ])
+      )
+    );
+    await expect(
+      check(principal("member"), {
+        action: "secret.read",
+        resourceType: "secret",
+        recordId: "VISIBLE_TOKEN",
+        fallback: "admin",
+      })
+    ).resolves.toBe(true);
+    await expect(
+      check(principal("member"), {
+        action: "secret.read",
+        resourceType: "secret",
+        recordId: "HIDDEN_TOKEN",
+        fallback: "admin",
+      })
+    ).resolves.toBe(false);
+  });
 });
 
 /**

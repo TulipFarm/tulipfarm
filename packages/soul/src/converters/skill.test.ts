@@ -17,6 +17,8 @@ describe("convertLegacySkill", () => {
     frontmatter: {
       trustTier: "first_party",
       requiredToolAbilities: ["read_file"],
+      requiredSecrets: ["PDF_API_TOKEN"],
+      allowedDomains: ["api.example.com"],
     },
     body: "# PDF Summarizer\n\nSummarizes PDFs.",
   };
@@ -37,10 +39,12 @@ describe("convertLegacySkill", () => {
     const validated = registry.validateYaml(skillYaml(result));
     expect(validated.kind).toBe("Skill");
     const document = validated.document as unknown as {
-      spec: { trustTier: string };
+      spec: { trustTier: string; requiredSecrets: string[]; allowedDomains: string[] };
       metadata: { slug: string };
     };
     expect(document.spec.trustTier).toBe("first_party");
+    expect(document.spec.requiredSecrets).toEqual(["PDF_API_TOKEN"]);
+    expect(document.spec.allowedDomains).toEqual(["api.example.com"]);
     expect(document.metadata.slug).toBe("pdf-summarizer");
   });
 

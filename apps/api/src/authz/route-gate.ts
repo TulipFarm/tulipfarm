@@ -16,6 +16,7 @@ import type { RequestPrincipal } from "../identity/principal";
 export interface RouteAuthorization {
   readonly action: string;
   readonly resourceType: string;
+  readonly recordId?: string;
   readonly domain?: string;
   readonly dataClass?: string;
   /**
@@ -121,6 +122,7 @@ export class LiveRouteAuthorizer implements RouteAuthorizer {
       {
         action: request.action,
         resourceType: request.resourceType,
+        ...(request.recordId === undefined ? {} : { recordId: request.recordId }),
         ...(request.domain === undefined ? {} : { domain: request.domain }),
         ...(request.dataClass === undefined ? {} : { dataClass: request.dataClass }),
         ...(request.conditions === undefined ? {} : { conditions: request.conditions }),

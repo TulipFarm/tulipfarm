@@ -79,7 +79,8 @@ describe("describeDeploymentRoles", () => {
     expect(grants).toContain("allow identity.external_link.read on identity");
     expect(grants).toContain("allow record.create on any resource");
     expect(grants).toContain("allow record.update on any resource");
-    expect(grants).toContain("allow secret.read on secret");
+    expect(grants).toContain("allow network.read on network in any domain");
+    expect(grants).not.toContain("allow secret.read on secret");
   });
 
   /* Reading the LLM config names every provider, model and api_key_ref, so it is operator-only. */

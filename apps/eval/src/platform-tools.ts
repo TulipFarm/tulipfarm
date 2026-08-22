@@ -5,7 +5,7 @@ import {
   GITHUB_TOOL_DECLARATIONS,
   SLACK_TOOL_DECLARATIONS,
 } from "@tulipfarm/integrations";
-import { SKILL_MARKETPLACE_TOOL_DECLARATIONS } from "@tulipfarm/schema";
+import { NETWORK_TOOL_DECLARATIONS, SKILL_MARKETPLACE_TOOL_DECLARATIONS } from "@tulipfarm/schema";
 import { SKILL_REFERENCE_TOOL_DECLARATIONS } from "@tulipfarm/soul";
 import type { EvalCase } from "./case.ts";
 
@@ -29,10 +29,12 @@ const SHIPPED: readonly ExposedTool[] = [
   GITHUB_REPOSITORY_LIST_DECLARATION,
   ...GITHUB_TOOL_DECLARATIONS,
   ...SLACK_TOOL_DECLARATIONS,
+  ...NETWORK_TOOL_DECLARATIONS,
 ].map((tool) => ({
   name: tool.name,
   description: tool.description,
   inputSchema: tool.inputSchema as ExposedTool["inputSchema"],
+  ...(!("mutating" in tool) || tool.mutating === undefined ? {} : { mutating: tool.mutating }),
 }));
 
 const BY_NAME: ReadonlyMap<string, ExposedTool> = new Map(SHIPPED.map((tool) => [tool.name, tool]));
