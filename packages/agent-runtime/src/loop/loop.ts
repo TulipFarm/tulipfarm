@@ -47,6 +47,13 @@ import {
 
 const ITERATION_BUDGET_KEY = "iterations";
 
+/**
+ * How many times one Tool may answer with the same rejection before the loop stops treating it as
+ * an argument the model can repair. Two, so the model still gets one deliberate correction at a
+ * reason it has seen: a genuine schema complaint usually moves on the first retry.
+ */
+const REPEATED_REJECTION_LIMIT = 2;
+
 export class AgentLoop {
   constructor(private readonly deps: AgentLoopDependencies) {}
 
@@ -79,6 +86,10 @@ export class AgentLoop {
     let reread: readonly RereadFile[] = recovered?.rereadFiles ?? [];
     // A report cannot describe an effect that lands after it, so a reported Turn may not write.
     let reported = recovered?.reported ?? false;
+    // How often each Tool has answered with the same rejection this attempt. Deliberately not
+    // checkpointed: a resume replays the transcript, so the model can see the repetition itself,
+    // and `repairs` — which is persisted — still bounds what a resumed Turn may spend.
+    const rejectionCounts = new Map<string, number>();
 
     const toolsForIteration = (): readonly ExposedTool[] =>
       narrowToolsToSkill(input.tools, activeSkillName, input.skillToolScopes);
@@ -235,6 +246,31 @@ export class AgentLoop {
         }
 
         if (dispatched.status === "invalid_arguments") {
+          const signature = `${call.name} ${dispatched.reason}`;
+          const seen = (rejectionCounts.get(signature) ?? 0) + 1;
+          rejectionCounts.set(signature, seen);
+          // A rejection the model has now provoked past the limit is not tracking its arguments:
+          // it changed them and the answer did not move. Repairing again can only reproduce it,
+          // and spending the rest of the budget doing so is how a Tool that is broken — or simply
+          // reporting an obstacle in the wrong shape — ends the Turn as `repair_budget_exhausted`
+          // instead of letting the model route around it. Past the limit it is data the model must
+          // reason about, like any other failure.
+          if (seen > REPEATED_REJECTION_LIMIT) {
+            this.deps.log?.warn(
+              {
+                event: "agent_loop.rejection_not_repairable",
+                runId: input.runId,
+                stateId: input.stateId,
+                iteration: counters.iterations,
+                callId: call.callId,
+                toolName: call.name,
+                occurrences: seen,
+              },
+              "tool rejection repeated unchanged; handing it to the model as a failure"
+            );
+            messages.push(toolMessage(call.callId, { error: "failed", detail: dispatched.reason }));
+            return { kind: "continue" };
+          }
           counters.repairs += 1;
           if (counters.repairs > input.limits.maxRepairAttempts) {
             return { kind: "fail", reason: "repair_budget_exhausted" };
