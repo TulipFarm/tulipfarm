@@ -256,9 +256,9 @@ describe("AgentLoop", () => {
 
   it("fails closed once the repair budget is spent", async () => {
     const tools = dispatcher(
-      { status: "invalid_arguments", callId: "call-1", reason: "invalid_arguments" },
-      { status: "invalid_arguments", callId: "call-2", reason: "invalid_arguments" },
-      { status: "invalid_arguments", callId: "call-3", reason: "invalid_arguments" }
+      { status: "invalid_arguments", callId: "call-1", reason: "body is required" },
+      { status: "invalid_arguments", callId: "call-2", reason: "body must be a string" },
+      { status: "invalid_arguments", callId: "call-3", reason: "body is too long" }
     );
     const outcome = await loop({
       model: scriptedModel(
@@ -270,6 +270,66 @@ describe("AgentLoop", () => {
     }).run(input());
 
     expect(outcome).toMatchObject({ status: "failed", reason: "repair_budget_exhausted" });
+  });
+
+  it("stops repairing a rejection that does not move when the arguments do", async () => {
+    const warn = vi.fn();
+    const tools = dispatcher(
+      { status: "invalid_arguments", callId: "call-1", reason: "the destination is unreachable" },
+      { status: "invalid_arguments", callId: "call-2", reason: "the destination is unreachable" },
+      { status: "invalid_arguments", callId: "call-3", reason: "the destination is unreachable" }
+    );
+    const outcome = await loop({
+      model: scriptedModel(
+        toolCallResult([
+          { callId: "call-1", name: "github.issue.comment", arguments: { body: "a" } },
+        ]),
+        toolCallResult([
+          { callId: "call-2", name: "github.issue.comment", arguments: { body: "b" } },
+        ]),
+        toolCallResult([
+          { callId: "call-3", name: "github.issue.comment", arguments: { body: "c" } },
+        ]),
+        textResult("that destination cannot be reached")
+      ),
+      tools,
+      log: { warn },
+    }).run(input());
+
+    // The third identical rejection is data, not a repair, so the Turn reports the obstacle
+    // instead of dying on a budget it spent proving the answer would not change.
+    expect(outcome).toMatchObject({ status: "completed", repairs: 2 });
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "agent_loop.rejection_not_repairable",
+        callId: "call-3",
+        occurrences: 3,
+      }),
+      expect.any(String)
+    );
+  });
+
+  it("keeps repairing when the same Tool rejects for a different reason each time", async () => {
+    const tools = dispatcher(
+      { status: "invalid_arguments", callId: "call-1", reason: "body is required" },
+      { status: "invalid_arguments", callId: "call-2", reason: "body must be a string" },
+      { status: "succeeded", callId: "call-3", output: {} }
+    );
+    const outcome = await loop({
+      model: scriptedModel(
+        toolCallResult([{ callId: "call-1", name: "github.issue.comment", arguments: {} }]),
+        toolCallResult([
+          { callId: "call-2", name: "github.issue.comment", arguments: { body: 1 } },
+        ]),
+        toolCallResult([
+          { callId: "call-3", name: "github.issue.comment", arguments: { body: "hi" } },
+        ]),
+        textResult("fixed")
+      ),
+      tools,
+    }).run(input());
+
+    expect(outcome).toMatchObject({ status: "completed", repairs: 2 });
   });
 
   it("retries a blank final completion within the repair budget", async () => {

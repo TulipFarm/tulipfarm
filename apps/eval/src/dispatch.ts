@@ -43,6 +43,13 @@ export function toolDispatcher(evalCase: EvalCase) {
             reason: `the Eval Case scripts no result for Tool "${request.name}"`,
           };
         }
+        if (result.invalidArguments !== undefined) {
+          return {
+            status: "invalid_arguments",
+            callId: request.callId,
+            reason: result.invalidArguments,
+          };
+        }
         return result.error === undefined
           ? { status: "succeeded", callId: request.callId, output: result.output ?? {} }
           : { status: "failed", callId: request.callId, reason: result.error };

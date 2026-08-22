@@ -1,0 +1,72 @@
+{
+  "id": "support-stops-repairing-an-unchanging-rejection",
+  "tier": "l2",
+  "agent": "support",
+  "context": {
+    "governancePages": []
+  },
+  "input": [
+    {
+      "role": "user",
+      "content": "Summarize https://docs.example.com/releases/2.0 for me"
+    }
+  ],
+  "platformTools": ["web_fetch"],
+  "toolResults": [
+    {
+      "name": "web_fetch",
+      "invalidArguments": "the destination could not be reached"
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "c1",
+          "name": "web_fetch",
+          "arguments": {
+            "url": "https://docs.example.com/releases/2.0",
+            "prompt": "Summarize this page."
+          }
+        }
+      ]
+    },
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "c2",
+          "name": "web_fetch",
+          "arguments": {
+            "url": "https://docs.example.com/releases/2.0",
+            "prompt": "Summarize the key points and conclusions of this page."
+          }
+        }
+      ]
+    },
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "c3",
+          "name": "web_fetch",
+          "arguments": {
+            "url": "https://docs.example.com/releases/2.0",
+            "prompt": "Read this page."
+          }
+        }
+      ]
+    },
+    {
+      "kind": "text",
+      "text": "I could not read that page - the destination could not be reached. Please check the link or paste the text here."
+    }
+  ],
+  "expect": [
+    { "kind": "tool_called", "name": "web_fetch" },
+    { "kind": "tool_call_count", "count": 3 },
+    { "kind": "output_contains", "text": "could not be reached" },
+    { "kind": "loop_status", "status": "completed" }
+  ]
+}

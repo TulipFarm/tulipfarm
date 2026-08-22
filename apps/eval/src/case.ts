@@ -126,6 +126,12 @@ export interface ScriptedToolResult {
   readonly output?: unknown;
   /** Present to script a Tool that fails, so refusal and recovery behaviour can be measured. */
   readonly error?: string;
+  /**
+   * Present to script a Tool that rejects the call's arguments. Distinct from `error`: only this
+   * outcome reaches the loop's repair path, so it is the only way a Case can measure what the
+   * model is asked to correct — and what the loop stops asking it to correct.
+   */
+  readonly invalidArguments?: string;
 }
 
 /**
