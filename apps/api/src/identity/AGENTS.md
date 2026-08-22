@@ -6,7 +6,7 @@ API clients, external identity mappings, and channel bind links.
 ## Read on / Skip
 
 - **Read on if** you touch `req.principal`, OIDC, MFA/step-up, service identities, external
-  identity mappings, or Slack/Telegram-style channel account binding.
+  identity mappings, or Slack-style channel account binding.
 - **Skip if** you touch passwords, sessions, CSRF, invites, users, or user API tokens; read
   [`../auth/AGENTS.md`](../auth/AGENTS.md) instead.
 

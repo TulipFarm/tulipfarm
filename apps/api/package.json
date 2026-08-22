@@ -46,7 +46,6 @@
     "@tulipfarm/surface": "workspace:*",
     "@tulipfarm/surface-github": "workspace:*",
     "@tulipfarm/surface-slack": "workspace:*",
-    "@tulipfarm/surface-telegram": "workspace:*",
     "@tulipfarm/surface-web": "workspace:*",
     "@tulipfarm/tool-broker": "workspace:*",
     "@tulipfarm/tool-host": "workspace:*",

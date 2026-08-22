@@ -451,7 +451,7 @@ export class SoulWriter {
     for (const file of files) {
       if (!isBundledDefinitionPath(file.path)) continue;
       const location = classifySoulPath(file.path);
-      if (location) touched.add(`${location.kind} ${location.slug ?? ""}`);
+      if (location) touched.add(`${location.kind}\u0000${location.slug ?? ""}`);
     }
 
     const existing = isUnbornBase(baseCommit)
@@ -459,7 +459,7 @@ export class SoulWriter {
       : await this.treeReader.readDefinitions(baseCommit);
     const kept = existing.filter((doc) => {
       const def = asAuthored(doc);
-      return def === undefined || !touched.has(`${def.kind} ${def.slug}`);
+      return def === undefined || !touched.has(`${def.kind}\u0000${def.slug}`);
     });
     const proposed = parsed.flatMap((file) => (file.definition ? [file.definition.document] : []));
 

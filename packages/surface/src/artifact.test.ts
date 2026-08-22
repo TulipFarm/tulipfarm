@@ -28,22 +28,22 @@ describe("SurfaceArtifact", () => {
   it("isolates web-only components from other target catalogs", () => {
     const registry = createSurfaceRegistry([
       {
-        renderer: "test/telegram",
-        targets: [{ channel: "telegram", surface: "message" }],
+        renderer: "test/github",
+        targets: [{ channel: "github", surface: "comment" }],
         components: { RecordTable: ["1.0"] },
         providerLimits: {},
         interactionCapabilities: [],
       },
     ]);
-    const telegram = registry.catalogFor({ channel: "telegram", surface: "message" });
-    expect(telegram.some((component) => component.name === "Chart")).toBe(false);
-    expect(telegram.some((component) => component.name === "RecordTable")).toBe(true);
+    const github = registry.catalogFor({ channel: "github", surface: "comment" });
+    expect(github.some((component) => component.name === "Chart")).toBe(false);
+    expect(github.some((component) => component.name === "RecordTable")).toBe(true);
   });
 
   it("rejects components omitted by the selected renderer manifest", () => {
     const manifest = {
-      renderer: "test/telegram",
-      targets: [{ channel: "telegram", surface: "message" }],
+      renderer: "test/github",
+      targets: [{ channel: "github", surface: "comment" }],
       components: { RecordTable: ["1.0"] },
       providerLimits: {},
       interactionCapabilities: [],
@@ -54,7 +54,7 @@ describe("SurfaceArtifact", () => {
         id: "artifact-chart",
         component: { name: "Chart", version: "1.0" },
         props: { kind: "bar", labels: ["A", "B"], series: [{ label: "Value", values: [1, 2] }] },
-        target: { channel: "telegram", surface: "message" },
+        target: { channel: "github", surface: "comment" },
         audience: ["user:1"],
         classification: "internal",
         rendererManifest: manifest,

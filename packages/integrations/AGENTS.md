@@ -18,10 +18,9 @@ Owns adapter contracts, event normalization, source ACLs, sync checkpoints, and 
 | `src/egress/` | Manifest-to-ToolContract compiler, adapter, fetch transport, destination cage. |
 | `src/git-source/` | Pre-clone Git source cage and the bounded, sanitised clone helper. |
 | `src/import/`, `src/ingress/`, `src/external-protocol/` | Import and ingress protocols. |
-| `src/github/`, `src/jira/` | Tool adapters and provider contracts. |
-| `src/slack/`, `src/telegram/` | Messaging Tool adapters and provider contracts. |
-| `src/google-drive/`, `src/google-docs/` | Knowledge sync with provider ACLs. |
-| `src/notion/`, `src/confluence/`, `src/slack/knowledge/` | Knowledge sync adapters. |
+| `src/github/` | GitHub Tool adapters and provider contracts. |
+| `src/slack/`, `src/slack/knowledge/` | Slack messaging Tool adapters, contracts, and Knowledge sync. |
+| `src/google/` | Google Workspace (Gmail/Drive/Docs/Calendar) Tool adapters and contracts. |
 | `src/knowledge/` | Provider-neutral Knowledge emission and identity-map contracts. |
 | `src/channels/`, `src/generic/`, `src/model/` | Shared security, adapters, routing. |
 
@@ -36,7 +35,6 @@ Owns adapter contracts, event normalization, source ACLs, sync checkpoints, and 
   and never surface its stderr. `GIT_SOURCE_ALLOWED_HOSTS` widens the host allowlist;
   `GIT_SOURCE_ALLOW_LOCAL_PATHS=1` (fixtures only) re-enables `file://`.
 - `collectPages` must throw `PaginationBoundError` rather than silently truncate a paged read.
-- Jira creates use `tulipfarm-effect-<hash>` labels and must read provider state before writing.
 - Integration events must resolve external principals; never borrow Conversation owner identity.
 - Knowledge sync: preserve ACLs, explicit domain identity mappings, live-authorize sensitive data.
 - Unreadable/unverifiable permissions remove or suppress content; never leak it.

@@ -71,7 +71,5 @@ propagation. This is the sole accountable owner for source ACL enforcement.
   model output. Extraction takes one chunk at a time for exactly that reason.
 - `@tulipfarm/llm` is not importable here, so both models arrive as ports
   (`GraphExtractionPort`, `GraphSummaryPort`, `GlobalAnswerPort`).- Nothing about a withheld source may reach candidates, citations, or audit payloads.
-- Confluence uses the same `knowledge_source_*` ports as Slack. Missing or stale captured ACL
-  snapshots deny; re-sync/deletion removes indexed chunks before content can reappear.
-- Notion, Google Docs, and Google Drive use the same ACL path. Link-shared Google content is not a
-  wildcard grant; domain shares need explicit mappings; unverifiable Notion readers deny.
+- Slack syncs through the `knowledge_source_*` ports. Missing or stale captured ACL snapshots deny;
+  re-sync/deletion removes indexed chunks before content can reappear.

@@ -39,7 +39,7 @@ const TARGET = {
   additionalProperties: false,
   required: ["channel", "surface"],
   properties: {
-    channel: { enum: ["web", "slack", "telegram", "github"] },
+    channel: { enum: ["web", "slack", "github"] },
     surface: { enum: ["chat", "message", "modal", "comment", "check-run"] },
   },
 };
@@ -86,7 +86,6 @@ const DEFINITION = {
         default: VIEW,
         web: VIEW,
         slack: VIEW,
-        telegram: VIEW,
         github: VIEW,
       },
     },

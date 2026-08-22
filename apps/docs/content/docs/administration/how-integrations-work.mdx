@@ -3,9 +3,9 @@ title: Integrations
 description: The bundled integrations, what they enable, and current limits.
 ---
 
-Integrations connect TulipFarm to external systems. Nine ship bundled: **GitHub**, **Slack**,
-**Telegram**, **Notion**, **Confluence**, **Google Drive**, **Google Docs**, **Jira**, and **Linear**. All appear in the
-integrations UI and store their configuration through the soul and secrets store.
+Integrations connect TulipFarm to external systems. Five ship bundled: **GitHub**, **Slack**,
+**Google Workspace**, **Jira**, and **Linear**. All appear in the integrations UI and store their
+configuration through the soul and secrets store.
 
 You are not limited to those. An integration is a data file — a manifest describing how to
 connect and which provider API calls agents may make — so one can be installed from any git
@@ -37,39 +37,22 @@ cursor.
 
 Use [Connect Slack](/docs/administration/connect-slack) for setup.
 
-## Telegram
+## Google Workspace
 
-The Telegram integration lets your team talk to agents from Telegram — direct messages, group
-chats, and forum topics. Each forum topic and each reply chain is its own chat, so several
-conversations can run in one group without merging.
+The Google Workspace integration is one Google sign-in that spans Gmail, Calendar, Drive, and Docs.
+Agents can search, read, and draft Gmail; list, create, update, and delete Calendar events; search
+Drive; and read, create, and append Google Docs. A single OAuth connection carries the scopes for
+all four services, and each tool fails closed when no Google account is connected.
 
-It ships no provider-specific code. The manifest names the API calls to publish and describes how
-an inbound update becomes a chat, including how TulipFarm registers the webhook with Telegram and
-generates the secret that proves a delivery is genuine.
+Access follows the connected account's own Google permissions, so an agent reaches only what that
+account can. Use [Connect Google Workspace](/docs/administration/connect-an-integration) for setup.
 
-Use [Connect Telegram](/docs/administration/connect-telegram) for setup.
+## Jira
 
-## Notion
-
-The Notion integration lets agents search the workspace, read page properties and body content,
-create and update pages, append content, and read and query databases. Access is per-page: the
-integration reaches only what you explicitly share with it in Notion.
-
-It ships no provider-specific code. The manifest names the operations to publish and the runtime
-compiles them into tools — the same path any integration installed from a git repository takes.
-
-Use [Connect Notion](/docs/administration/connect-notion) for setup.
-
-## Confluence, Google Drive, and Google Docs
-
-These three are read-only. Agents can search Confluence and read a page, search Drive and read a
-file's details, and read a Google Doc's body. There are no write tools: the scopes they ask for are
-read scopes, and a write tool against a read token would report an edit that never happened.
-
-All three also index into knowledge, and that path preserves per-user access rather than flattening
-it — a page you cannot see in Confluence is not one an agent will cite to you. Access is resolved
-through external identity mappings, so an unmapped account grants nothing. Link-sharing in Drive is
-not treated as everyone.
+The Jira integration lets agents search Jira Cloud issues with JQL, read issue details and changelogs,
+list priorities and transitions, create and update issues, and move issues through workflow transitions
+after approval. It uses an Atlassian OAuth access token and Cloud ID that you connect through
+**Integrations → Jira**.
 
 ## Linear
 

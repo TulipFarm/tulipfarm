@@ -90,7 +90,7 @@ sibling `AGENTS.md`.
 | [`packages/secrets`](packages/secrets/AGENTS.md) | Encrypted secret storage, key rotation |
 | [`packages/integrations`](packages/integrations/AGENTS.md) | Adapter contracts, event normalization, identity mapping |
 | [`packages/surface`](packages/surface/AGENTS.md) | Tulip Surface Protocol contracts, catalog, Artifacts |
-| [`packages/surface-web`](packages/surface-web/AGENTS.md) · [`-slack`](packages/surface-slack/AGENTS.md) · [`-telegram`](packages/surface-telegram/AGENTS.md) · [`-github`](packages/surface-github/AGENTS.md) | Channel-native TSP renderers |
+| [`packages/surface-web`](packages/surface-web/AGENTS.md) · [`-slack`](packages/surface-slack/AGENTS.md) · [`-github`](packages/surface-github/AGENTS.md) | Channel-native TSP renderers |
 | [`packages/sandbox`](packages/sandbox/AGENTS.md) | Isolated execution contract, backend ports |
 | [`packages/observability`](packages/observability/AGENTS.md) | OTel conventions, metrics, health/readiness, redaction |
 | [`packages/editor`](packages/editor/AGENTS.md) | Shared rich-text editor |

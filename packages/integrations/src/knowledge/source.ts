@@ -78,25 +78,6 @@ export interface KnowledgeIdentityMapPort {
   }): Promise<readonly EmittedPrincipalRef[] | undefined>;
 }
 
-const CLASSIFICATION_RANK: Readonly<Record<string, number>> = {
-  public: 0,
-  internal: 1,
-  confidential: 2,
-  restricted: 3,
-};
-
-/** Strongest classification present. An unknown label ranks above every known one (fail-closed). */
-export function strongestClassification(values: readonly string[]): string {
-  return values.reduce(
-    (strongest, value) =>
-      (CLASSIFICATION_RANK[value] ?? Number.MAX_SAFE_INTEGER) >
-      (CLASSIFICATION_RANK[strongest] ?? Number.MAX_SAFE_INTEGER)
-        ? value
-        : strongest,
-    values[0] ?? "restricted"
-  );
-}
-
 /** Deterministic, collision-free source id: provider plus the provider-local identifier. */
 export function knowledgeSourceId(provider: string, externalId: string): string {
   return `${provider}:${externalId}`;

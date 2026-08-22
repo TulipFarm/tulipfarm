@@ -51,7 +51,7 @@ describe("/dev/surfaces - Tulip Surface Protocol Sandbox", () => {
     expect(within(preview()).getByText("Deployment Triggered")).toBeInTheDocument();
   });
 
-  it("S2: switches between multi-renderer tabs (React, Slack, Telegram, GitHub) cleanly", async () => {
+  it("S2: switches between multi-renderer tabs (React, Slack, GitHub) cleanly", async () => {
     const user = userEvent.setup();
     render(<DevelopmentSurfacesRoute />);
 
@@ -69,13 +69,6 @@ describe("/dev/surfaces - Tulip Surface Protocol Sandbox", () => {
     const slackPreview = screen.getByTestId("slack-renderer-preview");
     expect(slackPreview).toBeInTheDocument();
     expect(within(slackPreview).getByText(/Slack Block Kit/i)).toBeInTheDocument();
-
-    // Switch to Telegram
-    const telegramTab = screen.getByRole("tab", { name: /Telegram/i });
-    await user.click(telegramTab);
-    const telegramPreview = screen.getByTestId("telegram-renderer-preview");
-    expect(telegramPreview).toBeInTheDocument();
-    expect(within(telegramPreview).getByText(/Telegram Bot API/i)).toBeInTheDocument();
 
     // Switch to GitHub
     const githubTab = screen.getByRole("tab", { name: /GitHub/i });
@@ -106,17 +99,10 @@ describe("/dev/surfaces - Tulip Surface Protocol Sandbox", () => {
     expect(screen.getByText("1 event logged")).toBeInTheDocument();
     expect(screen.getByText("ticket.create")).toBeInTheDocument();
 
-    // 2. Telegram Inline Keyboard Interaction
+    // 2. GitHub Check Run Action Interaction
     fireEvent.change(screen.getByLabelText("Template preset selector"), {
       target: { value: "choices-actions" },
     });
-    await user.click(screen.getByRole("tab", { name: /Telegram/i }));
-    const tgButton = screen.getByRole("button", { name: /Canary Rollout/i });
-    await user.click(tgButton);
-
-    expect(screen.getByText("2 events logged")).toBeInTheDocument();
-
-    // 3. GitHub Check Run Action Interaction
     await user.click(screen.getByRole("tab", { name: /GitHub/i }));
     await user.click(screen.getByRole("button", { name: /Check Run Card/i }));
     const githubPreview = screen.getByTestId("github-renderer-preview");

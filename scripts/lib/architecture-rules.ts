@@ -181,7 +181,6 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
     surface: ["schema"],
     "surface-web": ["surface"],
     "surface-slack": ["surface"],
-    "surface-telegram": ["surface"],
     "surface-github": ["surface"],
     integrations: ["schema", "authz", "audit", "tool-broker", "storage", "observability"],
     "agent-runtime": [
@@ -236,7 +235,6 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
       "surface",
       "surface-web",
       "surface-slack",
-      "surface-telegram",
       "surface-github",
       "integrations",
       "storage",
@@ -291,7 +289,7 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
       "observability",
     ],
     // `apps/web` uses shared wire schemas and presentation-only packages.
-    web: ["files", "schema", "surface", "surface-web", "editor"],
+    web: ["files", "schema", "surface", "surface-web", "surface-slack", "surface-github", "editor"],
     // `apps/eval` drives the real Agent loop and Context assembler against a versioned Corpus.
     // It is an app, not a package, because a package may not import from `apps/*` and the L3
     // tier has to reach the same executor a real turn runs through.
@@ -326,6 +324,8 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
       "storage",
       "run-kernel",
       "tool-host",
+      "curator",
+      "curator-host",
       // `files` so a Case can name a shipped platform Tool instead of copying its declaration. A
       // copy would measure the model against a description no deployment sends.
       "files",

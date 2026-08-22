@@ -6,7 +6,6 @@ import type { EmbeddingPort } from "@tulipfarm/knowledge";
 import {
   type Connector,
   ConnectorRegistry,
-  GoogleDocsConnector,
   KnowledgeService,
   PageRetrievalService,
   PgConnectorStateRepo,
@@ -131,17 +130,6 @@ describe("connector sync (SampleConnector)", () => {
     expect(still?.source).toBe("authored");
     expect(still?.content).toBe("hand-authored body");
     expect(still?.version).toBe(authored.version); // untouched by the sync
-  });
-
-  it("keeps Google Docs in the ACL-preserving Knowledge source pipeline, not flat-page sync", async () => {
-    await state.ensure("google-docs");
-    await state.setEnabled("google-docs", true);
-    const registry = new ConnectorRegistry([new GoogleDocsConnector()]);
-    const result = await syncConnector(new GoogleDocsConnector(), { registry, state, service });
-    expect(result).toEqual({ connector: "google-docs", synced: 0 });
-    const row = await state.get("google-docs");
-    expect(row?.lastError).toBeNull();
-    expect(row?.cursor).toBeNull();
   });
 
   it("isolates a per-record failure: syncs the good records and still advances the cursor", async () => {

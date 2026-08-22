@@ -26,6 +26,8 @@ const IGNORED_DIRS = new Set([
   ".turbo",
   ".vitest-reports",
   ".git",
+  ".claude",
+  ".worktrees",
 ]);
 
 function repoRoot(): string {

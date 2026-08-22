@@ -38,24 +38,6 @@ export type {
   ChannelRunStarter,
 } from "./channels";
 export type {
-  ConfluenceApiPort,
-  ConfluenceChange,
-  ConfluenceKnowledgeSyncDeps,
-  ConfluenceKnowledgeSyncOptions,
-  ConfluenceKnowledgeSyncResult,
-  ConfluencePage,
-  ConfluencePagePermission,
-  ConfluenceSyncCheckpoint,
-  ConfluenceSyncCheckpointStore,
-  ConfluenceSyncFailureCode,
-} from "./confluence";
-export {
-  CONFLUENCE_PROVIDER,
-  confluenceSourceId,
-  InMemoryConfluenceCheckpointStore,
-  syncConfluenceKnowledge,
-} from "./confluence";
-export type {
   CompiledEgressTool,
   CompiledGraphqlTool,
   CompileGraphqlEgressInput,
@@ -240,44 +222,6 @@ export {
   GoogleToolAdapter,
 } from "./google";
 export type {
-  GoogleDocsApiPort,
-  GoogleDocsChange,
-  GoogleDocsDocument,
-  GoogleDocsKnowledgeSyncDeps,
-  GoogleDocsKnowledgeSyncOptions,
-  GoogleDocsKnowledgeSyncResult,
-  GoogleDocsPermission,
-  GoogleDocsSyncCheckpoint,
-  GoogleDocsSyncCheckpointStore,
-  GoogleDocsSyncFailureCode,
-} from "./google-docs";
-export {
-  GOOGLE_DOCS_PROVIDER,
-  googleDocsSourceId,
-  InMemoryGoogleDocsCheckpointStore,
-  syncGoogleDocsKnowledge,
-} from "./google-docs";
-export type {
-  DriveApiPort,
-  DriveChange,
-  DriveExtractionDecision,
-  DriveExtractionRequest,
-  DriveFile,
-  DriveKnowledgeSyncDeps,
-  DriveKnowledgeSyncOptions,
-  DriveKnowledgeSyncResult,
-  DrivePermission,
-  DriveSyncCheckpoint,
-  DriveSyncCheckpointStore,
-  DriveSyncFailureCode,
-} from "./google-drive";
-export {
-  DRIVE_PROVIDER,
-  decideDriveExtraction,
-  InMemoryDriveCheckpointStore,
-  syncDriveKnowledge,
-} from "./google-drive";
-export type {
   IntegrationAccessDecision,
   IntegrationAccessDenialReason,
   IntegrationAccessRequest,
@@ -326,33 +270,6 @@ export {
 export type { IngressDecision } from "./ingress";
 export { parseDecision } from "./ingress";
 export type {
-  JiraAdapterDeps,
-  JiraContextResolver,
-  JiraEffectContext,
-  JiraIssueKey,
-  JiraPermissionLevel,
-  JiraPermissionNeed,
-  JiraScopeDenialReason,
-  JiraSiteScope,
-  JiraToolId,
-} from "./jira";
-export {
-  assertProjectInScope,
-  JIRA_ADAPTER_REF,
-  JIRA_ISSUE_TARGET,
-  JIRA_PROJECT_TARGET,
-  JIRA_RECONCILIATION_OPERATIONS,
-  JIRA_TOOL_CONTRACTS,
-  JIRA_TOOL_IDS,
-  JiraAdapter,
-  JiraScopeDeniedError,
-  jiraEffectLabel,
-  jiraExternalSubject,
-  jiraIssueUrl,
-  parseIssueKey,
-  resolveJiraActor,
-} from "./jira";
-export type {
   EmittedAccessControl,
   EmittedAclSnapshot,
   EmittedLiveAccessControl,
@@ -366,7 +283,7 @@ export type {
   KnowledgeIdentityMapPort,
   KnowledgeSourceEmission,
 } from "./knowledge";
-export { knowledgeSourceId, strongestClassification } from "./knowledge";
+export { knowledgeSourceId } from "./knowledge";
 export type {
   ChannelApp,
   ChannelIntegration,
@@ -378,24 +295,6 @@ export type {
   ResolvedChannelRoute,
 } from "./model";
 export { ChannelRouteDeniedError, resolveChannelRoute } from "./model";
-export type {
-  NotionApiPort,
-  NotionChange,
-  NotionKnowledgeSyncDeps,
-  NotionKnowledgeSyncOptions,
-  NotionKnowledgeSyncResult,
-  NotionPage,
-  NotionPagePermission,
-  NotionSyncCheckpoint,
-  NotionSyncCheckpointStore,
-  NotionSyncFailureCode,
-} from "./notion";
-export {
-  InMemoryNotionCheckpointStore,
-  NOTION_PROVIDER,
-  notionSourceId,
-  syncNotionKnowledge,
-} from "./notion";
 export type {
   SlackChannelAdapterDeps,
   SlackChannelKind,
@@ -434,16 +333,3 @@ export {
   SlackToolAdapter,
   syncSlackKnowledge,
 } from "./slack";
-export type {
-  TelegramChannelAdapterDeps,
-  TelegramChat,
-  TelegramDeliveryAdapterDeps,
-  TelegramDeliveryRequest,
-  TelegramMedia,
-  TelegramMessage,
-  TelegramPhotoSize,
-  TelegramReceiveResult,
-  TelegramUpdate,
-  TelegramUser,
-} from "./telegram";
-export { TelegramChannelAdapter, TelegramDeliveryAdapter, TelegramDeliveryError } from "./telegram";

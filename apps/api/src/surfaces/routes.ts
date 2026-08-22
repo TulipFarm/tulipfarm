@@ -33,7 +33,6 @@ function targetFromQuery(query: Record<string, unknown>): SurfaceTarget | null {
   if (channel === "slack" && (surface === "message" || surface === "modal")) {
     return { channel, surface };
   }
-  if (channel === "telegram" && surface === "message") return { channel, surface };
   if (channel === "github" && (surface === "comment" || surface === "check-run")) {
     return { channel, surface };
   }
@@ -62,7 +61,7 @@ export function registerSurfaceRoutes(
           additionalProperties: false,
           required: ["channel", "surface"],
           properties: {
-            channel: { enum: ["web", "slack", "telegram", "github"] },
+            channel: { enum: ["web", "slack", "github"] },
             surface: { enum: ["chat", "message", "modal", "comment", "check-run"] },
           },
         },

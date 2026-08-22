@@ -42,7 +42,8 @@ client data loading, schema-driven resource UI, and browser rendering of Surface
 - Use Remix `<Link>` / `<NavLink>`, not raw `<a>` for app navigation.
 - All API calls go through `app/lib/api.ts`; never call `fetch` ad hoc from routes.
 - Gate admin UI on `isBusinessAdmin` / `useIsAdmin`, never on `user.role`: an access level granted
-  from People & access confers admin authority without rewriting the account role.
+  from People & access confers admin authority without rewriting the account role. Operate items
+  except Inbox are `adminOnly`; visibility comes from that session flag, not a GET per section.
 - A section page's one `h1` comes from `SectionShell` and is `sr-only`, because the top bar already
   names the page. A route drilled into from a section names itself instead; `_app.business.access`
   covers its own tab children.

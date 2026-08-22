@@ -86,7 +86,7 @@ const queryKnowledge = defineApiTool<KnowledgeToolContext>({
   name: "query_knowledge",
   requiresAmbient: ["soul", "provider-credentials"],
   description:
-    "Search the shared knowledge base by meaning (vector) with a lexical fallback. Returns ranked OKF wiki pages and authorized indexed source snippets from every connected source — including synced Slack channel history, Confluence pages, and other connectors — each labelled with its origin. Use this (not a messaging tool) to answer questions about what was said in a Slack channel or any other connected source. Read OKF pages with `get_page` before answering; source snippets are already the retrievable excerpt. Pass `spaceId` to scope the search to a single space (wiki only).",
+    "Search the shared knowledge base by meaning (vector) with a lexical fallback. Returns ranked OKF wiki pages and authorized indexed source snippets from every connected source — including synced Slack channel history and other connectors — each labelled with its origin. Use this (not a messaging tool) to answer questions about what was said in a Slack channel or any other connected source. Read OKF pages with `get_page` before answering; source snippets are already the retrievable excerpt. Pass `spaceId` to scope the search to a single space (wiki only).",
   tier: "platform",
   mutating: false,
   inputSchema: QUERY_SCHEMA,
