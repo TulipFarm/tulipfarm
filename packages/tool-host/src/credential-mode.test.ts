@@ -152,6 +152,8 @@ describe("CredentialResolver", () => {
     expect(result.use).toBe("denied");
     // The refusal has to tell them how to fix it, or the model retries a call that cannot succeed.
     expect(result.use === "denied" && result.reason).toContain("connect");
+    // A person behind this call can act on a UI-only deep link to the provider's connect page.
+    expect(result.use === "denied" && result.connectUrl).toBe("/integrations/acme");
   });
 
   it("distinguishes a personal connection from a workspace-level one already in place", async () => {
@@ -171,15 +173,13 @@ describe("CredentialResolver", () => {
   it("refuses rather than downgrading under user_preferred when the provider can issue one", async () => {
     // `preferred` must not silently fall back to the bot for unconnected users.
     const r = resolverFor([oauthProvider]);
-    expect(
-      (
-        await r.resolve(human, {
-          name: "acme_search",
-          provider: "acme",
-          credentialMode: "user_preferred",
-        })
-      ).use
-    ).toBe("denied");
+    const result = await r.resolve(human, {
+      name: "acme_search",
+      provider: "acme",
+      credentialMode: "user_preferred",
+    });
+    expect(result.use).toBe("denied");
+    expect(result.use === "denied" && result.connectUrl).toBe("/integrations/acme");
   });
 
   it("falls back to service under user_preferred when the provider cannot issue a personal credential", async () => {
@@ -249,6 +249,8 @@ describe("CredentialResolver", () => {
       credentialMode: "user",
     });
     expect(result.use).toBe("denied");
+    // No person is behind this call, so there is no one to send a connect link to.
+    expect(result.use === "denied" && result.connectUrl).toBeUndefined();
   });
 
   it("stops spending a personal credential the moment it is revoked", async () => {

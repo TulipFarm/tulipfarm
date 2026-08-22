@@ -77,6 +77,7 @@ type RunEventData = {
   status?: string;
   summary?: string;
   errorCode?: string;
+  connectUrl?: string;
   intentId?: string;
   stage?: string;
   reason?: string;
@@ -199,6 +200,7 @@ export function createRunEventMapper(): (frame: ParsedFrame) => ChatEvent[] {
                 durationMs: data.durationMs,
                 errorCode: data.errorCode,
                 summary: data.summary,
+                connectUrl: data.connectUrl,
               }),
             }),
           },

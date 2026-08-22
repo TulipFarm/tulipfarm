@@ -46,7 +46,7 @@ export interface HostedToolCall {
 /** Mirrors the loop's `ToolDispatchResult`, minus the `callId` the caller already holds. */
 export type HostedToolResult =
   | { readonly status: "succeeded"; readonly output: unknown }
-  | { readonly status: "denied"; readonly reason: string }
+  | { readonly status: "denied"; readonly reason: string; readonly connectUrl?: string }
   | { readonly status: "invalid_arguments"; readonly reason: string }
   | { readonly status: "failed"; readonly reason: string }
   | { readonly status: "awaiting_approval"; readonly approvalId: string };

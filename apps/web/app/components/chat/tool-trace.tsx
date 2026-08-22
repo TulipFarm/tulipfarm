@@ -1,3 +1,4 @@
+import { Link } from "@remix-run/react";
 import { PenLine } from "lucide-react";
 import { Fragment } from "react";
 import { Trace, TraceStep } from "~/components/ui/trace";
@@ -125,7 +126,14 @@ function detailOf(part: ToolPart, status: "running" | "done" | "error") {
   const hint = status === "done" ? describeToolResult(part) : undefined;
   const duration = formatDuration(part.meta?.durationMs);
   const inspectable = toolHasDetails(part);
-  if (code === undefined && hint === undefined && duration === undefined && !inspectable) {
+  const connectUrl = status === "error" ? part.meta?.connectUrl : undefined;
+  if (
+    code === undefined &&
+    hint === undefined &&
+    duration === undefined &&
+    connectUrl === undefined &&
+    !inspectable
+  ) {
     return undefined;
   }
   return (
@@ -138,6 +146,11 @@ function detailOf(part: ToolPart, status: "running" | "done" | "error") {
             <span className="font-mono tabular-nums">{duration}</span>
           )}
         </span>
+      )}
+      {connectUrl === undefined ? null : (
+        <Link to={connectUrl} className="block text-primary hover:underline">
+          Connect your account →
+        </Link>
       )}
       {inspectable ? <ToolInspector part={part} /> : null}
     </div>

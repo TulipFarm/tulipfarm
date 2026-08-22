@@ -131,6 +131,7 @@ const TOOL_RESULT_SCHEMA = {
     errorCode: { type: "string", minLength: 1 },
     resultPreview: TOOL_PREVIEW_SCHEMA,
     durationMs: { type: "integer", minimum: 0 },
+    connectUrl: { type: "string", minLength: 1 },
   },
 } as const;
 
@@ -472,6 +473,8 @@ export interface RunEventPayloads {
     readonly errorCode?: string;
     readonly resultPreview?: RunEventToolPreview;
     readonly durationMs?: number;
+    /** UI-only deep link to a connect page; never surfaced to the model. */
+    readonly connectUrl?: string;
   };
   readonly "surface.emitted": { readonly artifactId: string; readonly componentId?: string };
   readonly "approval.requested": {

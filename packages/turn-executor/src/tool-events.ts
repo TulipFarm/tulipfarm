@@ -83,6 +83,9 @@ export function announceToolCalls(
               summary: result.reason,
               errorCode: result.status,
               durationMs,
+              ...(result.status === "denied" && result.connectUrl !== undefined
+                ? { connectUrl: result.connectUrl }
+                : {}),
             },
         `tool:result:${request.callId}`
       );

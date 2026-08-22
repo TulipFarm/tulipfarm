@@ -39,7 +39,7 @@ export interface TaskReconcileSignals {
 /** A dispatch outcome as the host reports it: the caller already holds the `callId`. */
 type RemoteToolResult =
   | { readonly status: "succeeded"; readonly output: unknown }
-  | { readonly status: "denied"; readonly reason: string }
+  | { readonly status: "denied"; readonly reason: string; readonly connectUrl?: string }
   | { readonly status: "invalid_arguments"; readonly reason: string }
   | { readonly status: "failed"; readonly reason: string }
   | { readonly status: "awaiting_approval"; readonly approvalId: string };
@@ -51,6 +51,8 @@ function withCallId(callId: string, result: RemoteToolResult): ToolDispatchResul
       return { status: "succeeded", callId, output: result.output };
     case "awaiting_approval":
       return { status: "awaiting_approval", callId, approvalId: result.approvalId };
+    case "denied":
+      return { status: "denied", callId, reason: result.reason, connectUrl: result.connectUrl };
     default:
       return { status: result.status, callId, reason: result.reason };
   }
