@@ -80,26 +80,40 @@ export function makeLlmCascadeOnSecretSet(
       },
     };
 
-    const { content: currentManifest, baseCommit } = await soulWriter.readWithBase("Settings");
-    await soulWriter.apply({
-      subject: `soul: auto-connect ${owner.label} (secret ${setKey} added)`,
-      source: "api",
-      actor,
-      businessId: DEPLOYMENT_BUSINESS_ID,
-      expectedBaseCommit: baseCommit,
-      changes: [
-        {
-          op: "put",
-          target: { kind: "Settings" },
-          content: mergeLlmConfigIntoSoulYaml(currentManifest, nextConfig),
-        },
-      ],
-    });
-    await soulLoader.reload();
-    await llmService.init(soulLoader.llmConfig, secretsService, logger);
+    const maxAttempts = 3;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const { content: currentManifest, baseCommit } = await soulWriter.readWithBase("Settings");
+      try {
+        await soulWriter.apply({
+          subject: `soul: auto-connect ${owner.label} (secret ${setKey} added)`,
+          source: "api",
+          actor,
+          businessId: DEPLOYMENT_BUSINESS_ID,
+          expectedBaseCommit: baseCommit,
+          changes: [
+            {
+              op: "put",
+              target: { kind: "Settings" },
+              content: mergeLlmConfigIntoSoulYaml(currentManifest, nextConfig),
+            },
+          ],
+        });
+        await soulLoader.reload();
+        await llmService.init(soulLoader.llmConfig, secretsService, logger);
 
-    await kickCuratorSweep(triggerCuratorSweep, logger, `${owner.id} auto-connect`);
+        await kickCuratorSweep(triggerCuratorSweep, logger, `${owner.id} auto-connect`);
 
-    logger.info(`[llm] ${owner.id} auto-connected after secret ${setKey} added`);
+        logger.info(`[llm] ${owner.id} auto-connected after secret ${setKey} added`);
+        return;
+      } catch (err) {
+        const isConflict =
+          err instanceof Error &&
+          (err.message.includes("tree changed") || (err as { code?: string }).code === "CONFLICT");
+        if (isConflict && attempt < maxAttempts - 1) {
+          continue;
+        }
+        throw err;
+      }
+    }
   };
 }

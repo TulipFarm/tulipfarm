@@ -33,27 +33,41 @@ export function makeLlmCascadeOnSecretDelete(
 
     const commitMsg = `soul: remove ${owner.id} provider (secret ${deletedKey} deleted)`;
 
-    const { content: currentManifest, baseCommit } = await soulWriter.readWithBase("Settings");
-    const nextManifest =
-      result.action === "update"
-        ? mergeLlmConfigIntoSoulYaml(currentManifest, result.config)
-        : // Pruning left a tier empty; remove the `llm:` key for a clean unconfigured state.
-          removeLlmConfigFromSoulYaml(currentManifest);
-    if (nextManifest === null) return;
+    const maxAttempts = 3;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const { content: currentManifest, baseCommit } = await soulWriter.readWithBase("Settings");
+      const nextManifest =
+        result.action === "update"
+          ? mergeLlmConfigIntoSoulYaml(currentManifest, result.config)
+          : // Pruning left a tier empty; remove the `llm:` key for a clean unconfigured state.
+            removeLlmConfigFromSoulYaml(currentManifest);
+      if (nextManifest === null) return;
 
-    await soulWriter.apply({
-      subject: commitMsg,
-      source: "api",
-      actor,
-      businessId: DEPLOYMENT_BUSINESS_ID,
-      expectedBaseCommit: baseCommit,
-      changes: [{ op: "put", target: { kind: "Settings" }, content: nextManifest }],
-    });
-    await soulLoader.reload();
-    await llmService.init(soulLoader.llmConfig, secretsService, logger);
+      try {
+        await soulWriter.apply({
+          subject: commitMsg,
+          source: "api",
+          actor,
+          businessId: DEPLOYMENT_BUSINESS_ID,
+          expectedBaseCommit: baseCommit,
+          changes: [{ op: "put", target: { kind: "Settings" }, content: nextManifest }],
+        });
+        await soulLoader.reload();
+        await llmService.init(soulLoader.llmConfig, secretsService, logger);
 
-    logger.info(
-      `[llm] config ${result.action === "update" ? "pruned" : "removed"} after secret ${deletedKey} deleted`
-    );
+        logger.info(
+          `[llm] config ${result.action === "update" ? "pruned" : "removed"} after secret ${deletedKey} deleted`
+        );
+        return;
+      } catch (err) {
+        const isConflict =
+          err instanceof Error &&
+          (err.message.includes("tree changed") || (err as { code?: string }).code === "CONFLICT");
+        if (isConflict && attempt < maxAttempts - 1) {
+          continue;
+        }
+        throw err;
+      }
+    }
   };
 }

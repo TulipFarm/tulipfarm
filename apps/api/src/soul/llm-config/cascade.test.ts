@@ -67,4 +67,31 @@ describe("makeLlmCascadeOnSecretDelete", () => {
       { op: "put", target: { kind: "Settings" }, content: expect.stringContaining("llm") },
     ]);
   });
+
+  it("retries when the Soul write fails due to a tree conflict", async () => {
+    const d = deps();
+    let calls = 0;
+    const origApply = d.soul.writer.apply.bind(d.soul.writer);
+    d.soul.writer.apply = vi.fn(async (params) => {
+      calls++;
+      if (calls === 1) {
+        throw new Error("Soul write: the tree changed under this write");
+      }
+      return origApply(params);
+    });
+
+    const cascade = makeLlmCascadeOnSecretDelete(
+      d.soulLoader,
+      d.soul.writer,
+      d.llmService,
+      d.secretsService,
+      d.logger
+    );
+
+    await cascade("anthropic-api-key", ACTOR);
+
+    expect(calls).toBe(2);
+    expect(d.soulLoader.reload).toHaveBeenCalledTimes(1);
+    expect(d.llmService.init).toHaveBeenCalledTimes(1);
+  });
 });

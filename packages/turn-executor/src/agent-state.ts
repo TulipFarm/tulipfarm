@@ -78,7 +78,11 @@ export class AgentStateRunner {
       outcome = await this.options.loop.run(input);
     } catch {
       // Effects may or may not have landed; reconciliation decides, not the worker.
-      await this.move(request, "running", "needs_reconciliation", "agent_loop_error");
+      try {
+        await this.move(request, "running", "needs_reconciliation", "agent_loop_error");
+      } catch (error) {
+        if (!(error instanceof StateTransitionConflictError)) throw error;
+      }
       return { status: "needs_reconciliation" };
     }
 
