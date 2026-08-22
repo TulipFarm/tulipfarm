@@ -99,57 +99,59 @@ export default function PageDetailRoute() {
   }
 
   return (
-    <article className="flex w-full flex-col gap-4 px-6 py-8">
-      <nav
-        aria-label="Breadcrumb"
-        className="flex items-center gap-1 text-[0.625rem] font-medium uppercase tracking-[0.2em] text-muted-foreground"
-      >
-        <Link to={base} className="transition-colors hover:text-foreground">
-          {space.name}
-        </Link>
-        {path.split("/").map((seg, i, all) => (
-          <span key={all.slice(0, i + 1).join("/")} className="flex items-center gap-1">
-            <span aria-hidden className="opacity-40">
-              /
+    <div className="h-full min-h-0 overflow-y-auto">
+      <article className="flex w-full flex-col gap-4 px-6 py-8">
+        <nav
+          aria-label="Breadcrumb"
+          className="flex items-center gap-1 text-[0.625rem] font-medium uppercase tracking-[0.2em] text-muted-foreground"
+        >
+          <Link to={base} className="transition-colors hover:text-foreground">
+            {space.name}
+          </Link>
+          {path.split("/").map((seg, i, all) => (
+            <span key={all.slice(0, i + 1).join("/")} className="flex items-center gap-1">
+              <span aria-hidden className="opacity-40">
+                /
+              </span>
+              <span className={i === all.length - 1 ? "text-foreground" : ""}>{seg}</span>
             </span>
-            <span className={i === all.length - 1 ? "text-foreground" : ""}>{seg}</span>
-          </span>
-        ))}
-      </nav>
-      {error ? <p className="text-sm text-destructive">error: {error}</p> : null}
-      <div className="flex justify-end">
-        <Button type="button" variant="ghost" onClick={() => void openShare()}>
-          <Users aria-hidden className="size-4" /> Who can read this
-        </Button>
-      </div>
-      {visibility && directory ? (
-        <RestrictDialog
-          open={sharing}
-          subjectLabel={doc.title}
-          visibility={visibility}
-          directory={directory}
-          onRestrict={async (subjects) => {
-            await restrictPage(doc.id, subjects);
-            refresh();
-          }}
-          onClear={async () => {
-            await unrestrictPage(doc.id);
-            refresh();
-          }}
-          onClose={() => setSharing(false)}
+          ))}
+        </nav>
+        {error ? <p className="text-sm text-destructive">error: {error}</p> : null}
+        <div className="flex justify-end">
+          <Button type="button" variant="ghost" onClick={() => void openShare()}>
+            <Users aria-hidden className="size-4" /> Who can read this
+          </Button>
+        </div>
+        {visibility && directory ? (
+          <RestrictDialog
+            open={sharing}
+            subjectLabel={doc.title}
+            visibility={visibility}
+            directory={directory}
+            onRestrict={async (subjects) => {
+              await restrictPage(doc.id, subjects);
+              refresh();
+            }}
+            onClear={async () => {
+              await unrestrictPage(doc.id);
+              refresh();
+            }}
+            onClose={() => setSharing(false)}
+          />
+        ) : null}
+        <PageDetail
+          spaceId={space.id}
+          doc={doc}
+          path={path}
+          editTo={`/knowledge/pages/${encodeURIComponent(doc.id)}/edit`}
+          onDelete={onDelete}
+          deleting={deleting}
+          backlinks={backlinks}
+          resolver={resolver}
         />
-      ) : null}
-      <PageDetail
-        spaceId={space.id}
-        doc={doc}
-        path={path}
-        editTo={`/knowledge/pages/${encodeURIComponent(doc.id)}/edit`}
-        onDelete={onDelete}
-        deleting={deleting}
-        backlinks={backlinks}
-        resolver={resolver}
-      />
-    </article>
+      </article>
+    </div>
   );
 }
 

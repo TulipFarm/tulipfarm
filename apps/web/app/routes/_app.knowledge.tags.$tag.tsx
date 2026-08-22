@@ -28,49 +28,51 @@ export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
 export default function TagListing() {
   const { tag, items } = useLoaderData<typeof clientLoader>();
   return (
-    <article className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-6 py-8">
-      <header className="flex flex-wrap items-center gap-2">
-        <span className="tf-tag-chip">#{tag}</span>
-        <h1 className="text-base font-bold text-foreground">tagged pages</h1>
-      </header>
-      {items.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No pages tagged #{tag}.</p>
-      ) : (
-        <ul className="flex flex-col divide-y divide-border rounded-sm border border-border">
-          {items.map((d) => {
-            const to = d.spaceId && d.path ? pageHref(d.id, d.path) : null;
-            return (
-              <li key={d.id} className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
-                {to ? (
-                  <Link
-                    to={to}
-                    className="cursor-pointer text-primary underline underline-offset-2 hover:opacity-80"
-                  >
-                    {d.title}
-                  </Link>
-                ) : (
-                  <span className="text-foreground">{d.title}</span>
-                )}
-                <AgentAuthoredBadge authorKind={d.authorKind} />
-                {d.tags.length ? (
-                  <span className="text-xs text-muted-foreground">
-                    {d.tags.map((t) => `#${t}`).join(" ")}
-                  </span>
-                ) : null}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-      <p className="text-xs text-muted-foreground">
-        <Link
-          to="/knowledge"
-          className="cursor-pointer underline underline-offset-2 hover:text-foreground"
-        >
-          ← knowledge
-        </Link>
-      </p>
-    </article>
+    <div className="h-full min-h-0 overflow-y-auto">
+      <article className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-6 py-8">
+        <header className="flex flex-wrap items-center gap-2">
+          <span className="tf-tag-chip">#{tag}</span>
+          <h1 className="text-base font-bold text-foreground">tagged pages</h1>
+        </header>
+        {items.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No pages tagged #{tag}.</p>
+        ) : (
+          <ul className="flex flex-col divide-y divide-border rounded-sm border border-border">
+            {items.map((d) => {
+              const to = d.spaceId && d.path ? pageHref(d.id, d.path) : null;
+              return (
+                <li key={d.id} className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
+                  {to ? (
+                    <Link
+                      to={to}
+                      className="cursor-pointer text-primary underline underline-offset-2 hover:opacity-80"
+                    >
+                      {d.title}
+                    </Link>
+                  ) : (
+                    <span className="text-foreground">{d.title}</span>
+                  )}
+                  <AgentAuthoredBadge authorKind={d.authorKind} />
+                  {d.tags.length ? (
+                    <span className="text-xs text-muted-foreground">
+                      {d.tags.map((t) => `#${t}`).join(" ")}
+                    </span>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        <p className="text-xs text-muted-foreground">
+          <Link
+            to="/knowledge"
+            className="cursor-pointer underline underline-offset-2 hover:text-foreground"
+          >
+            ← knowledge
+          </Link>
+        </p>
+      </article>
+    </div>
   );
 }
 

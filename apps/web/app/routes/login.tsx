@@ -39,55 +39,57 @@ export default function Login() {
   }
 
   return (
-    <section className="mx-auto flex min-h-svh max-w-sm flex-col justify-center px-6 py-16">
-      <p className="text-[0.625rem] font-medium uppercase tracking-[0.2em] text-primary">
-        [ SIGN IN ]
-      </p>
-      <h1 className="mt-1 text-2xl font-semibold text-foreground">tulipfarm</h1>
-      <p className="mt-1 text-sm text-muted-foreground">Sign in to this tenant.</p>
+    <div className="h-full min-h-0 overflow-y-auto">
+      <section className="mx-auto flex min-h-full max-w-sm flex-col justify-center px-6 py-16">
+        <p className="text-[0.625rem] font-medium uppercase tracking-[0.2em] text-primary">
+          [ SIGN IN ]
+        </p>
+        <h1 className="mt-1 text-2xl font-semibold text-foreground">tulipfarm</h1>
+        <p className="mt-1 text-sm text-muted-foreground">Sign in to this tenant.</p>
 
-      <form onSubmit={onSubmit} className="mt-8 flex flex-col gap-3">
-        {error ? (
-          <p
-            role="alert"
-            className="rounded-sm border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+        <form onSubmit={onSubmit} className="mt-8 flex flex-col gap-3">
+          {error ? (
+            <p
+              role="alert"
+              className="rounded-sm border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+            >
+              error: {error}
+            </p>
+          ) : null}
+
+          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+            email
+            <input
+              type="email"
+              autoComplete="username"
+              className={inputClass}
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              aria-label="email"
+            />
+          </label>
+
+          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+            password
+            <input
+              type="password"
+              autoComplete="current-password"
+              className={inputClass}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              aria-label="password"
+            />
+          </label>
+
+          <Button
+            type="submit"
+            className="mt-1 rounded-sm"
+            disabled={busy || email.trim().length === 0 || password.length === 0}
           >
-            error: {error}
-          </p>
-        ) : null}
-
-        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-          email
-          <input
-            type="email"
-            autoComplete="username"
-            className={inputClass}
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            aria-label="email"
-          />
-        </label>
-
-        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-          password
-          <input
-            type="password"
-            autoComplete="current-password"
-            className={inputClass}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            aria-label="password"
-          />
-        </label>
-
-        <Button
-          type="submit"
-          className="mt-1 rounded-sm"
-          disabled={busy || email.trim().length === 0 || password.length === 0}
-        >
-          {busy ? "Signing in…" : "Sign in"}
-        </Button>
-      </form>
-    </section>
+            {busy ? "Signing in…" : "Sign in"}
+          </Button>
+        </form>
+      </section>
+    </div>
   );
 }

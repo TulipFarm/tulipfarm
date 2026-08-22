@@ -54,76 +54,78 @@ const GUIDE_LINKS = [
 
 export default function DesignGuideRoute() {
   return (
-    <div className="mx-auto w-full max-w-6xl px-5 py-8 sm:px-8">
-      <header className="max-w-3xl pb-6">
-        <Badge variant="primary">Internal reference</Badge>
-        <h1 className="mt-3 text-3xl font-semibold tracking-tight">TulipFarm design guide</h1>
-        <p className="mt-2 text-base text-muted-foreground">
-          The live showcase for tokens, typography, reusable components, and composition patterns.
-        </p>
-      </header>
+    <div className="h-full min-h-0 overflow-y-auto">
+      <div className="mx-auto w-full max-w-6xl px-5 py-8 sm:px-8">
+        <header className="max-w-3xl pb-6">
+          <Badge variant="primary">Internal reference</Badge>
+          <h1 className="mt-3 text-3xl font-semibold tracking-tight">TulipFarm design guide</h1>
+          <p className="mt-2 text-base text-muted-foreground">
+            The live showcase for tokens, typography, reusable components, and composition patterns.
+          </p>
+        </header>
 
-      <nav
-        aria-label="Design guide sections"
-        className="grid gap-1 rounded-md border border-border p-2 sm:grid-cols-2 lg:grid-cols-3"
-      >
-        {GUIDE_LINKS.map(([id, label], index) => (
-          <a
-            key={id}
-            href={`#${id}`}
-            className="rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-          >
-            <span className="mr-2 font-mono text-xs text-primary">{index + 1}.</span>
-            {label}
-          </a>
-        ))}
-      </nav>
-
-      <GuideSection
-        id="principles"
-        title="Design principles"
-        description="Work-surface first, neutral by default, reusable at the correct layer, and accessible in every state."
-      >
-        <ul className="grid gap-3 text-sm sm:grid-cols-2">
-          {[
-            "Use one clear primary action per view.",
-            "Build hierarchy with type, spacing, and structure.",
-            "Reserve coral for brand, selection, focus, and primary action.",
-            "Treat keyboard, contrast, motion, and long content as component states.",
-          ].map((item) => (
-            <li key={item} className="rounded-md border border-border bg-card px-4 py-3">
-              {item}
-            </li>
+        <nav
+          aria-label="Design guide sections"
+          className="grid gap-1 rounded-md border border-border p-2 sm:grid-cols-2 lg:grid-cols-3"
+        >
+          {GUIDE_LINKS.map(([id, label], index) => (
+            <a
+              key={id}
+              href={`#${id}`}
+              className="rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <span className="mr-2 font-mono text-xs text-primary">{index + 1}.</span>
+              {label}
+            </a>
           ))}
-        </ul>
-      </GuideSection>
+        </nav>
 
-      <GuideSection
-        id="stack"
-        title="Tech stack"
-        description="Remix SPA, React 19, TypeScript, Tailwind v4, CVA, Lucide, and app-local shadcn-style primitives."
-      >
-        <p className="max-w-3xl font-mono text-sm text-muted-foreground">
-          Remix · React · TypeScript · Tailwind CSS · Vitest · Testing Library
+        <GuideSection
+          id="principles"
+          title="Design principles"
+          description="Work-surface first, neutral by default, reusable at the correct layer, and accessible in every state."
+        >
+          <ul className="grid gap-3 text-sm sm:grid-cols-2">
+            {[
+              "Use one clear primary action per view.",
+              "Build hierarchy with type, spacing, and structure.",
+              "Reserve coral for brand, selection, focus, and primary action.",
+              "Treat keyboard, contrast, motion, and long content as component states.",
+            ].map((item) => (
+              <li key={item} className="rounded-md border border-border bg-card px-4 py-3">
+                {item}
+              </li>
+            ))}
+          </ul>
+        </GuideSection>
+
+        <GuideSection
+          id="stack"
+          title="Tech stack"
+          description="Remix SPA, React 19, TypeScript, Tailwind v4, CVA, Lucide, and app-local shadcn-style primitives."
+        >
+          <p className="max-w-3xl font-mono text-sm text-muted-foreground">
+            Remix · React · TypeScript · Tailwind CSS · Vitest · Testing Library
+          </p>
+        </GuideSection>
+
+        <ColorSections />
+        <FoundationsSections />
+        <AgentRunSections />
+        <TraceSections />
+        <DecisionSections />
+        <BrandOnboardingSections />
+
+        <FarmSections />
+        <ComponentSections />
+        <CompositionSections />
+        <ReferenceSections />
+
+        <Separator />
+        <p className="py-6 font-mono text-xs text-muted-foreground">
+          Update this page whenever the public component vocabulary changes.
         </p>
-      </GuideSection>
-
-      <ColorSections />
-      <FoundationsSections />
-      <AgentRunSections />
-      <TraceSections />
-      <DecisionSections />
-      <BrandOnboardingSections />
-
-      <FarmSections />
-      <ComponentSections />
-      <CompositionSections />
-      <ReferenceSections />
-
-      <Separator />
-      <p className="py-6 font-mono text-xs text-muted-foreground">
-        Update this page whenever the public component vocabulary changes.
-      </p>
+      </div>
     </div>
   );
 }

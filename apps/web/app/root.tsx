@@ -42,7 +42,7 @@ function Document({ children }: { children: ReactNode }) {
   return (
     // suppressHydrationWarning: the pre-hydration themeInit script sets [data-theme] on <html>
     // before React hydrates, which would otherwise log a hydration mismatch and be stripped.
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" className="h-full overflow-hidden" suppressHydrationWarning>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -51,7 +51,7 @@ function Document({ children }: { children: ReactNode }) {
         {/* biome-ignore lint/security/noDangerouslySetInnerHtml: no-flash theme init must run pre-hydration */}
         <script dangerouslySetInnerHTML={{ __html: themeInit }} />
       </head>
-      <body>
+      <body className="h-full overflow-hidden">
         {children}
         <ScrollRestoration />
         <Scripts />
