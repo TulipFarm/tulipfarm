@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.13.6](https://github.com/TulipFarm/tulipfarm/compare/v0.13.5...v0.13.6) (2026-08-22)
+
+### Maintenance
+
+* **integrations:** keep only Slack, GitHub, and Google Workspace ([#569](https://github.com/TulipFarm/tulipfarm/issues/569)) ([33c7b31](https://github.com/TulipFarm/tulipfarm/commit/33c7b3191c83c74d18e07122c3ea96d6920aea76))
+
 ## [0.13.5](https://github.com/TulipFarm/tulipfarm/compare/v0.13.4...v0.13.5) (2026-08-22)
 
 ### Features
