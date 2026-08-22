@@ -22,6 +22,7 @@ import {
   type FallbackCallGate,
   type FallbackLogger,
   FallbackModel,
+  type ModelAttemptRef,
   type ModelResponderRef,
 } from "./fallback";
 import { createModel, type PrincipalCredentialResolver, type PrincipalRef } from "./provider";
@@ -235,10 +236,11 @@ export class LlmService {
     principal: PrincipalRef | undefined,
     logger: FallbackLogger = this.logger,
     responder?: ModelResponderRef,
-    gate?: FallbackCallGate
+    gate?: FallbackCallGate,
+    attempted?: ModelAttemptRef
   ): Promise<LanguageModel> {
     if (principal === undefined || this.credentials === undefined) {
-      return this.chainModel(modelIds, logger, responder, gate);
+      return this.chainModel(modelIds, logger, responder, gate, attempted);
     }
     const built = (
       await Promise.all(
@@ -255,7 +257,8 @@ export class LlmService {
       logger,
       responder,
       gate,
-      built.map((link) => this.entryByModelId.get(link.id)?.provider ?? link.model.provider)
+      built.map((link) => this.entryByModelId.get(link.id)?.provider ?? link.model.provider),
+      attempted
     );
   }
 
@@ -300,7 +303,8 @@ export class LlmService {
     modelIds: readonly string[],
     logger: FallbackLogger = this.logger,
     responder?: ModelResponderRef,
-    gate?: FallbackCallGate
+    gate?: FallbackCallGate,
+    attempted?: ModelAttemptRef
   ): LanguageModel {
     if (!this.configured) throw new LlmNotConfiguredError();
     const built = modelIds.flatMap((id) => {
@@ -323,7 +327,8 @@ export class LlmService {
       logger,
       responder,
       gate,
-      built.map((link) => this.entryByModelId.get(link.id)?.provider ?? link.model.provider)
+      built.map((link) => this.entryByModelId.get(link.id)?.provider ?? link.model.provider),
+      attempted
     );
   }
 }

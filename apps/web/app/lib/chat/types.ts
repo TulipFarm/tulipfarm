@@ -30,6 +30,12 @@ export type StepStatus = "pending" | "running" | "done" | "error";
 /** Which layer a Tool belongs to. Mirrors the registry's tiering, not a rendering hint. */
 export type ToolTier = "system" | "platform" | "integration";
 
+export type ChatFailureDetails = {
+  reason?: string;
+  requestId?: string;
+  modelId?: string;
+};
+
 /**
  * The bounded, redaction-aware view of a Tool's arguments or output that the wire carries.
  * `json` is already redacted and already truncated when it arrives; the client never un-redacts
@@ -50,6 +56,8 @@ export type ToolMeta = {
   durationMs?: number;
   errorCode?: string;
   summary?: string;
+  /** UI-only deep link to a connect page; never sent to the model. */
+  connectUrl?: string;
 };
 
 export type PlanStep = { id: string; label: string; status: StepStatus };
@@ -118,7 +126,7 @@ export type ChatEvent =
         receipt?: ModelReceipt;
       };
     }
-  | { type: "error"; data: { message: string } };
+  | { type: "error"; data: { message: string; details?: ChatFailureDetails } };
 
 export type ParsedFrame = { seq: number; type: string; data: unknown };
 
@@ -223,6 +231,7 @@ export type ChatState = {
   runId?: string;
   currentAgent?: string;
   error?: string;
+  errorDetails?: ChatFailureDetails;
 };
 
 import type { ResolvedSurfaceViewNode, SurfaceArtifact } from "@tulipfarm/surface";

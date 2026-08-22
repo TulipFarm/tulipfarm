@@ -1,0 +1,154 @@
+name: linear
+version: "1.0.0"
+description: Let TulipFarm agents read, create, update, and comment on Linear issues with a scoped
+  Linear API key.
+maintainer: TulipFarm
+icon: linear
+capabilities:
+  - List teams and issues available to the connected Linear API key
+  - Read individual issues before changing them
+  - Create, update, and comment on issues after approval
+grants:
+  - label: Linear teams and issues
+    access: read
+    description: Read the teams and issues available to the connected API key.
+  - label: Linear issues and comments
+    access: write
+    description: Create and update issues or add comments in teams the connected API key can edit.
+
+# Each document is fixed in this manifest. Agents can supply only values for the declared variables,
+# never arbitrary GraphQL text, endpoint paths, or mutation names.
+egress:
+  type: graphql
+  url: https://api.linear.app/graphql
+  auth:
+    token_env: LINEAR_API_KEY
+    # Linear personal API keys are the complete Authorization value, not Bearer tokens.
+    format: "{token}"
+  operations:
+    - name: list_teams
+      description: List Linear teams available to this integration. Use this before creating an
+        issue when you do not know the exact team ID.
+      operation: ListTeams
+      document: |
+        query ListTeams {
+          teams {
+            nodes { id name key }
+          }
+        }
+      variables_schema:
+        type: object
+        additionalProperties: false
+        properties: {}
+    - name: list_issues
+      description: List Linear issues visible to this integration. Use the returned IDs before
+        reading, updating, or commenting on a specific issue.
+      operation: ListIssues
+      document: |
+        query ListIssues($first: Int!, $after: String) {
+          issues(first: $first, after: $after) {
+            nodes { id identifier title description url updatedAt state { id name } team { id name key } }
+            pageInfo { hasNextPage endCursor }
+          }
+        }
+      variables_schema:
+        type: object
+        additionalProperties: false
+        required: [first]
+        properties:
+          first: { type: integer, minimum: 1, maximum: 50 }
+          after: { type: string }
+    - name: read_issue
+      description: Read one Linear issue by its ID or identifier. Use this before changing an issue
+        so the requested edit is based on its current title, description, state, and team.
+      operation: ReadIssue
+      document: |
+        query ReadIssue($id: String!) {
+          issue(id: $id) {
+            id identifier title description url updatedAt
+            state { id name }
+            team { id name key }
+          }
+        }
+      variables_schema:
+        type: object
+        additionalProperties: false
+        required: [id]
+        properties:
+          id: { type: string, minLength: 1 }
+    - name: create_issue
+      description: Create one Linear issue in a team. Read list_teams first for the team ID; this
+        changes Linear and requires approval.
+      operation: CreateIssue
+      document: |
+        mutation CreateIssue($teamId: String!, $title: String!, $description: String) {
+          issueCreate(input: { teamId: $teamId, title: $title, description: $description }) {
+            success
+            issue { id identifier title url }
+          }
+        }
+      variables_schema:
+        type: object
+        additionalProperties: false
+        required: [teamId, title]
+        properties:
+          teamId: { type: string, minLength: 1 }
+          title: { type: string, minLength: 1 }
+          description: { type: string }
+    - name: update_issue
+      description: Update an existing Linear issue title or description. Read the issue first; this
+        changes Linear and requires approval.
+      operation: UpdateIssue
+      document: |
+        mutation UpdateIssue($id: String!, $title: String, $description: String) {
+          issueUpdate(id: $id, input: { title: $title, description: $description }) {
+            success
+            issue { id identifier title description url state { id name } }
+          }
+        }
+      variables_schema:
+        type: object
+        additionalProperties: false
+        required: [id]
+        properties:
+          id: { type: string, minLength: 1 }
+          title: { type: string, minLength: 1 }
+          description: { type: string }
+    - name: create_comment
+      description: Add one comment to a Linear issue. Read the issue first to verify its ID and
+        context; this changes Linear and requires approval.
+      operation: CreateComment
+      document: |
+        mutation CreateComment($issueId: String!, $body: String!) {
+          commentCreate(input: { issueId: $issueId, body: $body }) {
+            success
+            comment { id body createdAt }
+          }
+        }
+      variables_schema:
+        type: object
+        additionalProperties: false
+        required: [issueId, body]
+        properties:
+          issueId: { type: string, minLength: 1 }
+          body: { type: string, minLength: 1 }
+
+auth:
+  - kind: fields
+    title: Connect Linear
+    description: Create a scoped Linear personal API key and paste it here. The key stays encrypted
+      in TulipFarm and is leased only while an agent calls a declared Linear tool.
+    fields:
+      - name: LINEAR_API_KEY
+        label: Linear API Key
+        description: A Linear personal API key with only the team access and permissions this
+          integration needs.
+        secret: true
+        setup_url: https://linear.app/settings/security
+        steps:
+          - In Linear, open Settings → Security & access → Personal API keys and create a new key.
+          - Limit the key to the teams and Read, Write, Create issues, or Create comments permissions
+            this integration needs.
+          - Copy the key once, then paste it below. Linear does not show it again.
+
+setup_guide_path: setup-guide.md

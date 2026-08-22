@@ -3,9 +3,9 @@ title: Integrations
 description: The bundled integrations, what they enable, and current limits.
 ---
 
-Integrations connect TulipFarm to external systems. Three ship bundled: **GitHub**, **Slack**, and
-**Google Workspace**. All appear in the integrations UI and store their configuration through the
-soul and secrets store.
+Integrations connect TulipFarm to external systems. Five ship bundled: **GitHub**, **Slack**,
+**Google Workspace**, **Jira**, and **Linear**. All appear in the integrations UI and store their
+configuration through the soul and secrets store.
 
 You are not limited to those. An integration is a data file — a manifest describing how to
 connect and which provider API calls agents may make — so one can be installed from any git
@@ -46,6 +46,22 @@ all four services, and each tool fails closed when no Google account is connecte
 
 Access follows the connected account's own Google permissions, so an agent reaches only what that
 account can. Use [Connect Google Workspace](/docs/administration/connect-an-integration) for setup.
+
+## Jira
+
+The Jira integration lets agents search Jira Cloud issues with JQL, read issue details and changelogs,
+list priorities and transitions, create and update issues, and move issues through workflow transitions
+after approval. It uses an Atlassian OAuth access token and Cloud ID that you connect through
+**Integrations → Jira**.
+
+## Linear
+
+The Linear integration lets agents list teams and issues, read issue details, and—after approval—
+create or update issues and add comments. It uses a scoped Linear API key that you connect through
+**Integrations → Linear**.
+
+Each action is fixed by the integration. Agents provide issue details such as an ID or title, but
+cannot choose an API address or send their own query.
 
 ## Current limits
 

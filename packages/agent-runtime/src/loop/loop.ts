@@ -510,7 +510,22 @@ export class AgentLoop {
         if (error instanceof ModelInvocationError && error.usage !== undefined) {
           await chargeUsage(error.usage);
         }
-        return finish({ status: "failed", reason, ...counters }, "failed");
+        return finish(
+          {
+            status: "failed",
+            reason,
+            ...(error instanceof ModelInvocationError
+              ? {
+                  modelFailure: {
+                    requestId: request.requestId,
+                    ...(error.modelId === undefined ? {} : { modelId: error.modelId }),
+                  },
+                }
+              : {}),
+            ...counters,
+          },
+          "failed"
+        );
       }
 
       const spend = await chargeUsage(result.usage);

@@ -1,5 +1,6 @@
 /** Complete by `(turnId, attempt)`; redelivery is idempotent and stale attempts cannot win. */
 
+import type { ModelFailureDiagnostic } from "@tulipfarm/agent-runtime";
 import type { ParticipantToolCall } from "@tulipfarm/schema";
 
 export type TurnCompletionStatus = "succeeded" | "failed";
@@ -54,7 +55,11 @@ export interface TurnSurfaceLink {
 
 export type TurnOutcome =
   | { readonly status: "succeeded"; readonly text: string }
-  | { readonly status: "failed"; readonly reason: string }
+  | {
+      readonly status: "failed";
+      readonly reason: string;
+      readonly modelFailure?: ModelFailureDiagnostic;
+    }
   | { readonly status: "input_required"; readonly text: string }
   | { readonly status: "waiting"; readonly waitId: string };
 
@@ -76,7 +81,11 @@ export interface CompleteTurnInput {
 
 export type CompleteTurnResult =
   | { readonly status: "succeeded"; readonly messageId: string | null }
-  | { readonly status: "failed"; readonly reason: string }
+  | {
+      readonly status: "failed";
+      readonly reason: string;
+      readonly modelFailure?: ModelFailureDiagnostic;
+    }
   | { readonly status: "waiting"; readonly waitId: string }
   | { readonly status: "stale" };
 
@@ -114,6 +123,9 @@ export class ConversationTurnCompleter {
         : {
             status: "failed",
             reason: input.outcome.status === "failed" ? input.outcome.reason : "",
+            ...(input.outcome.status === "failed" && input.outcome.modelFailure !== undefined
+              ? { modelFailure: input.outcome.modelFailure }
+              : {}),
           };
     }
 
@@ -124,7 +136,13 @@ export class ConversationTurnCompleter {
         cursor: input.cursor,
         messageId: null,
       });
-      return { status: "failed", reason: input.outcome.reason };
+      return {
+        status: "failed",
+        reason: input.outcome.reason,
+        ...(input.outcome.modelFailure === undefined
+          ? {}
+          : { modelFailure: input.outcome.modelFailure }),
+      };
     }
 
     // A Turn that stops to ask is not a Turn that said nothing: it has run Tools, written prose and

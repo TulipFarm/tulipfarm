@@ -288,6 +288,7 @@ export type {
   EgressAuth,
   EgressConfig,
   EgressOperation,
+  GraphqlEgressOperation,
   HmacWebhookSecurity,
   IngressConfig,
   IntegrationConnection,

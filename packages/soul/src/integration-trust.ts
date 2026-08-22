@@ -103,6 +103,11 @@ function transportIssues(manifest: IntegrationManifest): string[] {
     if (issue) issues.push(`egress.base_url ${issue} (got "${manifest.egress.base_url}")`);
   }
 
+  if (manifest.egress?.type === "graphql") {
+    const issue = urlIssue(manifest.egress.url);
+    if (issue) issues.push(`egress.url ${issue} (got "${manifest.egress.url}")`);
+  }
+
   return issues;
 }
 

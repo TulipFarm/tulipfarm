@@ -1,8 +1,11 @@
 import { createHash } from "node:crypto";
 import {
   type CompiledEgressTool,
+  type CompiledGraphqlTool,
+  compileGraphqlEgress,
   compileOpenApiEgress,
   type EgressHttpPort,
+  GraphqlToolAdapter,
   OpenApiToolAdapter,
 } from "@tulipfarm/integrations";
 import type { MutationGuard } from "@tulipfarm/observability";
@@ -224,13 +227,15 @@ function appendTarget(
   targets.push({ type, id });
 }
 
+type CompiledDeclarativeTool = CompiledEgressTool | CompiledGraphqlTool;
+
 function declarativeTargets(
-  compiled: CompiledEgressTool,
+  compiled: CompiledDeclarativeTool,
   slug: string,
   args: unknown
 ): readonly ToolTargetRef[] {
   const fields = new Set([
-    ...compiled.binding.params.map((param) => param.name),
+    ...("params" in compiled.binding ? compiled.binding.params.map((param) => param.name) : []),
     ...Object.keys(TARGET_FIELD_KINDS),
   ]);
   const targets: ToolTargetRef[] = [];
@@ -291,7 +296,7 @@ export interface DeclarativeToolingDeps {
 
 interface CompiledIntegration {
   readonly slug: string;
-  readonly tools: readonly CompiledEgressTool[];
+  readonly tools: readonly CompiledDeclarativeTool[];
   readonly credentialMode: ToolCredentialMode;
   /** Absent for a genuinely public API that declares no credential. */
   readonly credential?: {
@@ -306,7 +311,10 @@ function compileIntegration(integration: SoulIntegration): CompiledIntegration {
   const { manifest, slug } = integration;
   const credentialMode = credentialModeFor(integration);
   // Callers filter out manifest-less (bundled) integrations before reaching here.
-  if (manifest === undefined || manifest.egress?.type !== "openapi") {
+  if (
+    manifest === undefined ||
+    (manifest.egress?.type !== "openapi" && manifest.egress?.type !== "graphql")
+  ) {
     return { slug, tools: [], credentialMode };
   }
 
@@ -316,12 +324,15 @@ function compileIntegration(integration: SoulIntegration): CompiledIntegration {
   const env = Object.fromEntries(
     Object.entries(integration.connection?.env ?? {}).filter(([, value]) => !isSecretRef(value))
   );
-  const tools = compileOpenApiEgress({
-    slug,
-    egress: manifest.egress,
-    document: integration.egressSpec,
-    env,
-  });
+  const tools =
+    manifest.egress.type === "openapi"
+      ? compileOpenApiEgress({
+          slug,
+          egress: manifest.egress,
+          document: integration.egressSpec,
+          env,
+        })
+      : compileGraphqlEgress({ slug, egress: manifest.egress });
   const tokenEnv = manifest.egress.auth?.token_env;
   if (tokenEnv === undefined) return { slug, tools, credentialMode };
   return {
@@ -337,7 +348,7 @@ function compileIntegration(integration: SoulIntegration): CompiledIntegration {
 }
 
 function buildToolDef(
-  compiled: CompiledEgressTool,
+  compiled: CompiledDeclarativeTool,
   integration: CompiledIntegration,
   deps: DeclarativeToolingDeps,
   dispatcher: EffectDispatcher
@@ -433,12 +444,16 @@ function buildToolDef(
  * and guessing one is how a Tool reaches a backend nobody authorized.
  */
 function adapterFor(
-  tool: CompiledEgressTool,
+  tool: CompiledDeclarativeTool,
   deps: DeclarativeToolingDeps
 ): ToolAdapter | undefined {
   switch (tool.contract.spec.adapter.kind) {
     case "openapi":
+      if (!("pathTemplate" in tool.binding)) return undefined;
       return new OpenApiToolAdapter({ binding: tool.binding, http: deps.http });
+    case "graphql":
+      if (!("document" in tool.binding)) return undefined;
+      return new GraphqlToolAdapter({ binding: tool.binding, http: deps.http });
     default:
       return undefined;
   }

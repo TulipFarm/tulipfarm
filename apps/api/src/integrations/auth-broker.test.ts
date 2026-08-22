@@ -180,6 +180,45 @@ describe("startAuthStep", () => {
     ).rejects.toMatchObject({ reason: "missing_credentials" });
   });
 
+  it("names the fields step that owns the missing client id, not the raw env var", async () => {
+    await expect(
+      startAuthStep({
+        slug: "notion",
+        manifest: manifestWith([
+          {
+            kind: "fields",
+            title: "Configure personal Notion access",
+            fields: [{ name: "NOTION_CLIENT_ID", label: "Client ID" }],
+          },
+          oauthStep,
+        ]),
+        stepIndex: 1,
+        env: {},
+        endpoints,
+        repo: new MemoryAuthRequestRepo(),
+      })
+    ).rejects.toMatchObject({
+      reason: "missing_credentials",
+      message: expect.stringContaining('"Configure personal Notion access"'),
+    });
+  });
+
+  it("falls back to a generic message when no fields step owns the missing client id", async () => {
+    await expect(
+      startAuthStep({
+        slug: "notion",
+        manifest: manifestWith([oauthStep]),
+        stepIndex: 0,
+        env: {},
+        endpoints,
+        repo: new MemoryAuthRequestRepo(),
+      })
+    ).rejects.toMatchObject({
+      reason: "missing_credentials",
+      message: expect.not.stringContaining("NOTION_CLIENT_ID"),
+    });
+  });
+
   it("rejects a step index the manifest does not declare", async () => {
     await expect(
       startAuthStep({

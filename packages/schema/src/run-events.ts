@@ -131,6 +131,7 @@ const TOOL_RESULT_SCHEMA = {
     errorCode: { type: "string", minLength: 1 },
     resultPreview: TOOL_PREVIEW_SCHEMA,
     durationMs: { type: "integer", minimum: 0 },
+    connectUrl: { type: "string", minLength: 1 },
   },
 } as const;
 
@@ -177,6 +178,15 @@ const TURN_FINISHED_SCHEMA = {
     status: { type: "string", enum: ["succeeded", "failed", "cancelled"] },
     messageId: { type: ["string", "null"] },
     reason: { type: "string" },
+    modelFailure: {
+      type: "object",
+      required: ["requestId"],
+      additionalProperties: false,
+      properties: {
+        requestId: { type: "string", minLength: 1 },
+        modelId: { type: "string", minLength: 1 },
+      },
+    },
     modelId: { type: "string", minLength: 1 },
     effortPreset: { type: "string", enum: EFFORT_PRESETS },
     effortApplied: { type: "string", enum: EFFORT_RUNGS },
@@ -463,6 +473,8 @@ export interface RunEventPayloads {
     readonly errorCode?: string;
     readonly resultPreview?: RunEventToolPreview;
     readonly durationMs?: number;
+    /** UI-only deep link to a connect page; never surfaced to the model. */
+    readonly connectUrl?: string;
   };
   readonly "surface.emitted": { readonly artifactId: string; readonly componentId?: string };
   readonly "approval.requested": {
@@ -480,6 +492,7 @@ export interface RunEventPayloads {
     readonly status: "succeeded" | "failed" | "cancelled";
     readonly messageId?: string | null;
     readonly reason?: string;
+    readonly modelFailure?: { readonly requestId: string; readonly modelId?: string };
     readonly modelId?: string;
     readonly effortPreset?: EffortPreset;
     readonly effortApplied?: EffortRung;

@@ -42,7 +42,7 @@ export interface OpenApiEgress {
  * `egress` block unchanged and get an empty result rather than having to discriminate first.
  */
 export interface UnsupportedEgress {
-  readonly type: "mcp" | "ts-code" | "none";
+  readonly type: "graphql" | "mcp" | "ts-code" | "none";
 }
 
 export type EgressInput = OpenApiEgress | UnsupportedEgress;

@@ -39,7 +39,13 @@ describe("bundled integrations", () => {
   });
 
   it("finds the integrations that ship in this repo", () => {
-    expect(entries.map((entry) => entry.slug)).toEqual(["github", "google", "slack"]);
+    expect(entries.map((entry) => entry.slug)).toEqual([
+      "github",
+      "google",
+      "jira",
+      "linear",
+      "slack",
+    ]);
   });
 
   it("declares a connect flow the loader accepts", () => {

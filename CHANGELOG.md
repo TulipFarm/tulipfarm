@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.13.5](https://github.com/TulipFarm/tulipfarm/compare/v0.13.4...v0.13.5) (2026-08-22)
+
+### Features
+
+* **integrations:** add declarative GraphQL egress ([#573](https://github.com/TulipFarm/tulipfarm/issues/573)) ([3200037](https://github.com/TulipFarm/tulipfarm/commit/3200037d25fff7f5cb5cf21f0306a996f81567e1))
+
+### Bug Fixes
+
+* personal GitHub connect — clickable link, correct gating, clearer error ([#575](https://github.com/TulipFarm/tulipfarm/issues/575)) ([7ebb1e5](https://github.com/TulipFarm/tulipfarm/commit/7ebb1e50f69d25b236b4714d1b65deb8554ea5c3))
+* **soul:** validate cross-definition refs before commit in SoulWriter ([#576](https://github.com/TulipFarm/tulipfarm/issues/576)) ([3636569](https://github.com/TulipFarm/tulipfarm/commit/36365693ce7022912008480ce5763012684c4266))
+
+## [0.13.4](https://github.com/TulipFarm/tulipfarm/compare/v0.13.3...v0.13.4) (2026-08-21)
+
+### Features
+
+* **curator:** deliver task proposals ([#572](https://github.com/TulipFarm/tulipfarm/issues/572)) ([1caff62](https://github.com/TulipFarm/tulipfarm/commit/1caff62dafac90b64a9de20602eb624a31591fb3))
+* **integrations:** add Jira Cloud integration ([#570](https://github.com/TulipFarm/tulipfarm/issues/570)) ([e052874](https://github.com/TulipFarm/tulipfarm/commit/e052874c661bffdf6decd6885d25c74b37af3b5d))
+
+### Bug Fixes
+
+* **chat:** surface model failure diagnostics ([#571](https://github.com/TulipFarm/tulipfarm/issues/571)) ([b1a6e79](https://github.com/TulipFarm/tulipfarm/commit/b1a6e798f0f09358eba296f83b8275e7dd2c13e3))
+
+## [0.13.3](https://github.com/TulipFarm/tulipfarm/compare/v0.13.2...v0.13.3) (2026-08-21)
+
+### Features
+
+* **dev:** implement surface protocol sandbox for /dev/surfaces ([#411](https://github.com/TulipFarm/tulipfarm/issues/411)) ([#562](https://github.com/TulipFarm/tulipfarm/issues/562)) ([186606e](https://github.com/TulipFarm/tulipfarm/commit/186606e0e1832374062d67b65813ce0624dfe257))
+* **integrations:** add one-click update button for integrations with updates ([#156](https://github.com/TulipFarm/tulipfarm/issues/156)) ([#566](https://github.com/TulipFarm/tulipfarm/issues/566)) ([92eba63](https://github.com/TulipFarm/tulipfarm/commit/92eba63c1c9faf80d2c36b7c8738a84e683bc0ae))
+
+### Bug Fixes
+
+* **skills:** enable marketplace browse and github install tools for chat ([#460](https://github.com/TulipFarm/tulipfarm/issues/460)) ([#567](https://github.com/TulipFarm/tulipfarm/issues/567)) ([7cef0d4](https://github.com/TulipFarm/tulipfarm/commit/7cef0d4a1c1e03f565ad142daae90cdb03694a68))
+* **turn-executor:** abort pending actions when confirmation is cancelled ([#458](https://github.com/TulipFarm/tulipfarm/issues/458)) ([#565](https://github.com/TulipFarm/tulipfarm/issues/565)) ([bbf3d33](https://github.com/TulipFarm/tulipfarm/commit/bbf3d33eee319f6913fc4918a881c93f14c3e26f))
+
 ## [0.13.2](https://github.com/TulipFarm/tulipfarm/compare/v0.13.1...v0.13.2) (2026-08-21)
 
 ### Features

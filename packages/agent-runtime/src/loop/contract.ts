@@ -63,7 +63,13 @@ export interface ToolDispatchRequest {
 
 export type ToolDispatchResult =
   | { readonly status: "succeeded"; readonly callId: string; readonly output: unknown }
-  | { readonly status: "denied"; readonly callId: string; readonly reason: string }
+  | {
+      readonly status: "denied";
+      readonly callId: string;
+      readonly reason: string;
+      /** UI-only deep link to the provider's connect page; never surfaced to the model. */
+      readonly connectUrl?: string;
+    }
   | { readonly status: "invalid_arguments"; readonly callId: string; readonly reason: string }
   | { readonly status: "failed"; readonly callId: string; readonly reason: string }
   | {
@@ -123,6 +129,12 @@ export type AgentLoopFailureReason =
   | ModelInvocationFailureReason
   | "empty_model_output";
 
+/** Participant-safe evidence for a failed model call; provider error bodies never cross this seam. */
+export interface ModelFailureDiagnostic {
+  readonly requestId: string;
+  readonly modelId?: string;
+}
+
 export type AgentLoopOutcome =
   | {
       readonly status: "completed";
@@ -134,6 +146,7 @@ export type AgentLoopOutcome =
   | {
       readonly status: "failed";
       readonly reason: AgentLoopFailureReason;
+      readonly modelFailure?: ModelFailureDiagnostic;
       readonly iterations: number;
       readonly toolCalls: number;
       readonly repairs: number;

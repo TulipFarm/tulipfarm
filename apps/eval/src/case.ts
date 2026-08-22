@@ -88,7 +88,9 @@ export type Expectation =
    */
   | { readonly kind: "generated_file_readable_by"; readonly grantee: string }
   /** L3 only. The counterpart: the audience widened this far and no further. */
-  | { readonly kind: "generated_file_not_readable_by"; readonly grantee: string };
+  | { readonly kind: "generated_file_not_readable_by"; readonly grantee: string }
+  /** L3 only. A validated Curator Proposal reached its participant as a Task. */
+  | { readonly kind: "curator_task_visible"; readonly title: string };
 
 /** Expectations that read persisted state, which only the L3 tier can observe. */
 const PERSISTED_KINDS: ReadonlySet<string> = new Set([
@@ -100,6 +102,7 @@ const PERSISTED_KINDS: ReadonlySet<string> = new Set([
   "soul_published",
   "generated_file_readable_by",
   "generated_file_not_readable_by",
+  "curator_task_visible",
 ]);
 
 export function isPersisted(expectation: Expectation): boolean {
@@ -239,6 +242,8 @@ export interface EvalCase {
   /** What feeds the real Context assembler. The assembler's output is what the model sees. */
   readonly context: AssembleContext;
   readonly input: readonly ModelMessage[];
+  /** A deterministic Curator response applied after the L3 Chat Turn settles. */
+  readonly curator?: { readonly output: unknown };
   /**
    * The Files resolved for *this* Turn, as the Context assembler would resolve them.
    *
@@ -288,9 +293,10 @@ export interface EvalCase {
    * Every tier otherwise hands the executor working ports, which means the Corpus can only observe
    * a Turn that got as far as the loop. A Turn abandoned *before* the loop — Context unreadable,
    * Soul unreachable — is the one failure a participant can neither see nor retry, so it is worth
-   * the one knob it takes to reach it. `"context"` fails Context resolution.
+   * the one knob it takes to reach it. `"context"` fails Context resolution; `"model"` fails the
+   * Model Port.
    */
-  readonly fault?: "context";
+  readonly fault?: "context" | "model";
   /**
    * L3 only. Roles an admin has assigned this Case's Agent, seeded as `role_assignments` rows.
    *

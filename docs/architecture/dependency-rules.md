@@ -68,8 +68,8 @@ the Agent runtime. Applications register implementations during composition.
 | `apps/api` | `schema`, `soul`, `constants`, `files`, `authz`, `audit`, `secrets`, `run-kernel`, `tool-broker`, `agent-runtime`, `knowledge`, `memory`, `curator`, `curator-host`, `surface`, `surface-web`, `surface-slack`, `surface-github`, `sandbox`, `integrations`, `storage`, `observability`, `tool-host`, `kv`, `platform-tools`, `resources` |
 | `apps/worker` | `schema`, `constants`, `authz`, `audit`, `secrets`, `soul`, `run-kernel`, `tool-broker`, `agent-runtime`, `knowledge`, `memory`, `curator`, `surface`, `integrations`, `sandbox`, `storage`, `observability`, `tool-host`, `kv`, `platform-tools`, `files`, `turn-executor`, `model-adapter` |
 | `apps/integration-worker` | `schema`, `authz`, `audit`, `run-kernel`, `tool-broker`, `integrations`, `storage`, `observability` |
-| `apps/web` | `schema`, `files`, `surface`, `surface-web`, and presentation-only packages such as `ui`/`editor` |
-| `apps/eval` | `agent-runtime`, `turn-executor`, `model-adapter`, `llm`, `schema`, `secrets`, `soul`, `storage`, `run-kernel`, `tool-host`, `files` |
+| `apps/web` | `schema`, `files`, `surface`, `surface-web`, `surface-slack`, `surface-github`, and presentation-only packages such as `ui`/`editor` |
+| `apps/eval` | `agent-runtime`, `turn-executor`, `model-adapter`, `llm`, `schema`, `secrets`, `soul`, `storage`, `run-kernel`, `tool-host`, `curator`, `curator-host`, `files` |
 
 `packages/constants` is a dependency-free leaf holding non-sensitive deployment defaults. The API
 and the worker must resolve the same business scope or the worker claims nothing, and an app may

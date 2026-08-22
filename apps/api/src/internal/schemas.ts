@@ -241,6 +241,7 @@ export const InternalTurnToolResultResponseSchema = {
     output: {},
     reason: { type: "string" },
     approvalId: { type: "string" },
+    connectUrl: { type: "string", minLength: 1 },
   },
 } as const;
 

@@ -90,6 +90,8 @@ function withCallId(callId: string, result: HostedToolResult): ToolDispatchResul
       return { status: "succeeded", callId, output: result.output };
     case "awaiting_approval":
       return { status: "awaiting_approval", callId, approvalId: result.approvalId };
+    case "denied":
+      return { status: "denied", callId, reason: result.reason, connectUrl: result.connectUrl };
     default:
       return { status: result.status, callId, reason: result.reason };
   }

@@ -1,14 +1,18 @@
 import { beforeEach, expect, test, vi } from "vitest";
-import { sweepCurator } from "./sweep";
+import { CURATOR_DELIVERY_PATH, sweepCurator } from "./sweep";
 
 const backlog = vi.fn();
 const log = { info: vi.fn(), error: vi.fn() };
 
 const RECONCILE = "/api/v1/internal/curator/reconcile";
 
-function makeApi(mint: unknown = { outcome: "minted" }, repair: unknown = {}) {
+function makeApi(
+  mint: unknown = { outcome: "minted" },
+  repair: unknown = {},
+  delivery: unknown = {}
+) {
   const require = vi.fn(async (_method: string, path: string, _body?: unknown) =>
-    path === RECONCILE ? repair : mint
+    path === RECONCILE ? repair : path === CURATOR_DELIVERY_PATH ? delivery : mint
   );
   return { require: require as never };
 }
@@ -20,7 +24,7 @@ function allCalls(api: { require: unknown }) {
 /** The bodies of the mint posts only, so a test asserts fan-out without restating the repair. */
 function mintBodies(api: { require: unknown }) {
   return allCalls(api)
-    .filter(([, path]) => path !== RECONCILE)
+    .filter(([, path]) => path !== RECONCILE && path !== CURATOR_DELIVERY_PATH)
     .map(([, , body]) => body);
 }
 
@@ -41,6 +45,20 @@ test("mints one job per user with a backlog, then one for the business", async (
     { scope: "business" },
   ]);
   expect(result.minted).toBe(3);
+});
+
+test("delivers pending Proposal Tasks before reconciling and minting", async () => {
+  const order: string[] = [];
+  const api = {
+    require: vi.fn(async (_method: string, path: string) => {
+      order.push(path);
+      return path === RECONCILE ? {} : { outcome: "minted" };
+    }) as never,
+  };
+
+  await sweepCurator({ businessId: "biz", backlog, api });
+
+  expect(order.slice(0, 2)).toEqual([CURATOR_DELIVERY_PATH, RECONCILE]);
 });
 
 // The business half is what keeps knowledge promotion alive when nobody has chatted.
@@ -95,7 +113,9 @@ test("says nothing when the sweep found nothing to do", async () => {
 test("repairs stalled jobs before reading the backlog, so a freed target mints this tick", async () => {
   const order: string[] = [];
   const require = vi.fn(async (_method: string, path: string) => {
-    order.push(path === RECONCILE ? "reconcile" : "mint");
+    order.push(
+      path === CURATOR_DELIVERY_PATH ? "deliver" : path === RECONCILE ? "reconcile" : "mint"
+    );
     return path === RECONCILE ? { recovered: 2, abandoned: 1 } : { outcome: "minted" };
   });
   backlog.mockImplementation(async () => {
@@ -109,7 +129,7 @@ test("repairs stalled jobs before reading the backlog, so a freed target mints t
     api: { require: require as never },
   });
 
-  expect(order).toEqual(["reconcile", "backlog", "mint", "mint"]);
+  expect(order).toEqual(["deliver", "reconcile", "backlog", "mint", "mint"]);
   expect(result.recovered).toBe(2);
   expect(result.abandoned).toBe(1);
 });

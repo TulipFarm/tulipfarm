@@ -3,11 +3,13 @@ import {
   type ArtifactKind,
   artifactDirectory,
   artifactLayout,
+  classifySoulPath,
   companionPath,
   definitionPath,
   legacyDefinitionPaths,
 } from "@tulipfarm/schema";
 import {
+  isUnbornBase,
   type SoulChangeset,
   type SoulChangesetSource,
   SoulChangesetValidationError,
@@ -18,7 +20,12 @@ import {
 import type { CommitActor, CommitApproval } from "./commit-signing";
 import type { SoulCommitResult, SoulGitStore } from "./git-store";
 import { SoulGitStoreError } from "./git-store";
+import type { SoulTreeReader } from "./publication";
+import { asAuthored, SoulSemanticValidationError } from "./refs";
+import { validateSoulSemantics } from "./semantic";
+import { isBundledDefinitionPath } from "./tree-reader";
 import type { Logger } from "./types";
+import { validateChangesetFiles } from "./validate";
 
 /**
  * Which file a write addresses. Callers name the *artifact*, never a path — the layout registry
@@ -170,7 +177,14 @@ export class SoulWriter {
     private readonly logger: Logger,
     private readonly push?: SoulPushPort,
     private readonly reload?: SoulReloadPort,
-    private readonly publisher?: SoulBundlePublishPort
+    private readonly publisher?: SoulBundlePublishPort,
+    /**
+     * Reads the authored tree at a commit, so a changeset's cross-definition references (a
+     * Routine's `agentRef`/`toolRef`/`formRef`/`child_routine.routineRef`, an Agent's `roles`, …)
+     * can be checked before committing. Without it, a bad reference still lands in the Soul commit
+     * and is only discovered later — as an opaque post-commit publication failure.
+     */
+    private readonly treeReader?: Pick<SoulTreeReader, "readDefinitions">
   ) {}
 
   /** Whether a collection artifact currently exists (its definition file is present). */
@@ -234,6 +248,7 @@ export class SoulWriter {
     this.checkPreconditions(request.preconditions ?? []);
 
     const currentBaseCommit = await this.store.baseCommit();
+    await this.checkReferences(files, currentBaseCommit);
     const expectedBaseCommit = request.expectedBaseCommit ?? currentBaseCommit;
     const changeset: SoulChangeset = {
       id: randomUUID(),
@@ -414,6 +429,54 @@ export class SoulWriter {
     }
   }
 
+  /**
+   * Reject an unresolvable cross-definition reference before it is committed. Malformed content is
+   * left to {@link validateSoulChangeset} — this only re-checks reference edges of files that
+   * already parse, against the tree those files are about to land on.
+   *
+   * Uses the same `treeReader.readDefinitions` source as {@link SoulPublisher}'s post-commit
+   * compiler, so it shares that source's blind spot: a still-legacy-format definition (`AGENT.md`,
+   * `schema.yml`, `manifest.yml`) is invisible to both. This check is exactly as accurate as the
+   * bundle compiler that would otherwise catch the same reference later — no less, no more.
+   */
+  private async checkReferences(
+    files: readonly SoulFileChange[],
+    baseCommit: string
+  ): Promise<void> {
+    if (this.treeReader === undefined) return;
+    const { files: parsed, issues } = validateChangesetFiles(files);
+    if (issues.length > 0) return;
+
+    const touched = new Set<string>();
+    for (const file of files) {
+      if (!isBundledDefinitionPath(file.path)) continue;
+      const location = classifySoulPath(file.path);
+      if (location) touched.add(`${location.kind}\u0000${location.slug ?? ""}`);
+    }
+
+    const existing = isUnbornBase(baseCommit)
+      ? []
+      : await this.treeReader.readDefinitions(baseCommit);
+    const kept = existing.filter((doc) => {
+      const def = asAuthored(doc);
+      return def === undefined || !touched.has(`${def.kind}\u0000${def.slug}`);
+    });
+    const proposed = parsed.flatMap((file) => (file.definition ? [file.definition.document] : []));
+
+    try {
+      validateSoulSemantics([...kept, ...proposed]);
+    } catch (error) {
+      if (!(error instanceof SoulSemanticValidationError)) throw error;
+      throw new SoulWriteError(
+        "VALIDATION_FAILED",
+        `Soul write: ${describeSemanticIssues(error)}`,
+        {
+          cause: error,
+        }
+      );
+    }
+  }
+
   private async publish(changesetId: string): Promise<boolean> {
     if (this.push === undefined || !this.push.hasRemote) return false;
     try {
@@ -501,4 +564,12 @@ function toWriteError(error: unknown): SoulWriteError {
 
 function errText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function describeSemanticIssues(error: SoulSemanticValidationError): string {
+  const described = error.issues.map(
+    (issue) =>
+      `${issue.subject} ${issue.code}${issue.ref ? ` (${issue.ref})` : ""}${issue.field ? ` at ${issue.field}` : ""}`
+  );
+  return `${error.message}: ${described.join("; ")}`;
 }

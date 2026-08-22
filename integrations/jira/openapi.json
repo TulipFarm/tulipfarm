@@ -1,0 +1,186 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Jira Cloud REST API",
+    "version": "3"
+  },
+  "paths": {
+    "/search/jql": {
+      "post": {
+        "operationId": "searchIssues",
+        "summary": "Search for issues using JQL",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["jql"],
+                "properties": {
+                  "jql": { "type": "string", "minLength": 1 },
+                  "maxResults": { "type": "integer", "minimum": 1, "maximum": 100 },
+                  "nextPageToken": { "type": "string" },
+                  "fields": { "type": "array", "items": { "type": "string" } },
+                  "expand": { "type": "string" }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Matching issues" }
+        }
+      }
+    },
+    "/issue/{issueIdOrKey}": {
+      "get": {
+        "operationId": "getIssue",
+        "summary": "Get issue",
+        "parameters": [
+          {
+            "name": "issueIdOrKey",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "schema": { "type": "string" },
+            "description": "Comma-separated field names."
+          },
+          {
+            "name": "expand",
+            "in": "query",
+            "schema": { "type": "string" },
+            "description": "Use changelog to retrieve status-change history."
+          }
+        ],
+        "responses": {
+          "200": { "description": "Issue details" }
+        }
+      },
+      "put": {
+        "operationId": "editIssue",
+        "summary": "Edit issue",
+        "parameters": [
+          {
+            "name": "issueIdOrKey",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "fields": { "type": "object", "additionalProperties": true },
+                  "update": { "type": "object", "additionalProperties": true }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": { "description": "Issue updated" }
+        }
+      }
+    },
+    "/issue": {
+      "post": {
+        "operationId": "createIssue",
+        "summary": "Create issue",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["fields"],
+                "properties": {
+                  "fields": { "type": "object", "additionalProperties": true },
+                  "update": { "type": "object", "additionalProperties": true }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Issue created" }
+        }
+      }
+    },
+    "/priority": {
+      "get": {
+        "operationId": "getPriorities",
+        "summary": "Get priorities",
+        "responses": {
+          "200": { "description": "Available priorities" }
+        }
+      }
+    },
+    "/issue/{issueIdOrKey}/transitions": {
+      "get": {
+        "operationId": "getTransitions",
+        "summary": "Get transitions",
+        "parameters": [
+          {
+            "name": "issueIdOrKey",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Available transitions" }
+        }
+      },
+      "post": {
+        "operationId": "doTransition",
+        "summary": "Transition issue",
+        "parameters": [
+          {
+            "name": "issueIdOrKey",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["transition"],
+                "properties": {
+                  "transition": {
+                    "type": "object",
+                    "required": ["id"],
+                    "properties": {
+                      "id": { "type": "string", "minLength": 1 }
+                    },
+                    "additionalProperties": true
+                  },
+                  "fields": { "type": "object", "additionalProperties": true },
+                  "update": { "type": "object", "additionalProperties": true }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": { "description": "Issue transitioned" }
+        }
+      }
+    }
+  }
+}

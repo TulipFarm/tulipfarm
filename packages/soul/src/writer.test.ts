@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CommitActor, CommitSigner } from "./commit-signing";
 import { SoulGitStore } from "./git-store";
+import { GitSoulTreeReader } from "./tree-reader";
 import type { Logger } from "./types";
 import { artifactWriteTarget, type SoulWrite, SoulWriteError, SoulWriter } from "./writer";
 
@@ -66,6 +67,62 @@ function skillDoc(slug: string): string {
     "  instructions:",
     "    path: SKILL.md",
     "  trustTier: business_authored",
+    "",
+  ].join("\n");
+}
+
+function routineDoc(slug: string, agentRefName: string): string {
+  return [
+    "apiVersion: tulipfarm.ai/v1",
+    "kind: Routine",
+    "metadata:",
+    "  id: 01HQ2X8G3K4M5N6P7Q8R9S0TEF",
+    `  slug: ${slug}`,
+    "  schemaVersion: 1",
+    "  authoredVersion: 1",
+    "  lifecycle: draft",
+    "spec:",
+    "  owner: ada@example.com",
+    "  input:",
+    "    type: object",
+    "    additionalProperties: false",
+    "  output:",
+    "    type: object",
+    "    additionalProperties: false",
+    "  start: Classify",
+    "  states:",
+    "    - type: agent",
+    "      name: Classify",
+    "      agentRef:",
+    `        name: ${agentRefName}`,
+    "        version: latest",
+    "      output:",
+    "        type: object",
+    "        additionalProperties: false",
+    "      end: true",
+    "",
+  ].join("\n");
+}
+
+function modelProfileDoc(slug: string): string {
+  return [
+    "apiVersion: tulipfarm.ai/v1",
+    "kind: ModelProfile",
+    "metadata:",
+    "  id: 01HQ2X8G3K4M5N6P7Q8R9S0TGH",
+    `  slug: ${slug}`,
+    "  schemaVersion: 1",
+    "  authoredVersion: 1",
+    "  lifecycle: published",
+    "spec:",
+    "  provider: openai",
+    "  model: gpt-5.6-sol",
+    "  reasoning: high",
+    "  supports:",
+    "    tools: true",
+    "    structuredOutput: true",
+    "    contextWindowTokens: 400000",
+    "  allowCaching: false",
     "",
   ].join("\n");
 }
@@ -232,6 +289,157 @@ describe("SoulWriter.apply — validation gate", () => {
     await expect(apply([put("dup"), put("dup")])).rejects.toMatchObject({
       code: "INVALID_TARGET",
     });
+  });
+});
+
+describe("SoulWriter.apply — cross-definition reference checking", () => {
+  it("rejects a Routine whose agentRef names an Agent that does not exist", async () => {
+    const withTreeReader = new SoulWriter(
+      store,
+      logger,
+      { hasRemote: true, push: async () => {} },
+      { reload: async () => {} },
+      undefined,
+      new GitSoulTreeReader(soulPath)
+    );
+
+    await expect(
+      withTreeReader.apply({
+        subject: "soul: add routine",
+        source: "api",
+        actor: ACTOR,
+        businessId: "biz-1",
+        changes: [
+          {
+            op: "put",
+            target: { kind: "Routine", slug: "greet" },
+            content: routineDoc("greet", "ghost-agent"),
+          },
+        ],
+      })
+    ).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+
+    expect(await store.baseCommit()).toBe("0".repeat(40));
+    expect(existsSync(join(soulPath, "routines/greet/routine.yaml"))).toBe(false);
+  });
+
+  it("accepts the same Routine once its agentRef resolves", async () => {
+    const withTreeReader = new SoulWriter(
+      store,
+      logger,
+      { hasRemote: true, push: async () => {} },
+      { reload: async () => {} },
+      undefined,
+      new GitSoulTreeReader(soulPath)
+    );
+
+    const result = await withTreeReader.apply({
+      subject: "soul: add routine",
+      source: "api",
+      actor: ACTOR,
+      businessId: "biz-1",
+      changes: [
+        {
+          op: "put",
+          target: { kind: "ModelProfile", slug: "default" },
+          content: modelProfileDoc("default"),
+        },
+        { op: "put", target: { kind: "Agent", slug: "triager" }, content: agentDoc("triager") },
+        {
+          op: "put",
+          target: { kind: "Routine", slug: "greet" },
+          content: routineDoc("greet", "triager"),
+        },
+      ],
+    });
+
+    expect(result.paths).toContain("routines/greet/routine.yaml");
+  });
+
+  it("resolves an agentRef against an Agent committed in an earlier write", async () => {
+    const withTreeReader = new SoulWriter(
+      store,
+      logger,
+      { hasRemote: true, push: async () => {} },
+      { reload: async () => {} },
+      undefined,
+      new GitSoulTreeReader(soulPath)
+    );
+
+    await withTreeReader.apply({
+      subject: "soul: add agent",
+      source: "api",
+      actor: ACTOR,
+      businessId: "biz-1",
+      changes: [
+        {
+          op: "put",
+          target: { kind: "ModelProfile", slug: "default" },
+          content: modelProfileDoc("default"),
+        },
+        { op: "put", target: { kind: "Agent", slug: "triager" }, content: agentDoc("triager") },
+      ],
+    });
+
+    const result = await withTreeReader.apply({
+      subject: "soul: add routine",
+      source: "api",
+      actor: ACTOR,
+      businessId: "biz-1",
+      changes: [
+        {
+          op: "put",
+          target: { kind: "Routine", slug: "greet" },
+          content: routineDoc("greet", "triager"),
+        },
+      ],
+    });
+
+    expect(result.paths).toContain("routines/greet/routine.yaml");
+  });
+
+  it("does not validate a Routine edit against its own stale prior version", async () => {
+    const withTreeReader = new SoulWriter(
+      store,
+      logger,
+      { hasRemote: true, push: async () => {} },
+      { reload: async () => {} },
+      undefined,
+      new GitSoulTreeReader(soulPath)
+    );
+
+    await withTreeReader.apply({
+      subject: "soul: add routine",
+      source: "api",
+      actor: ACTOR,
+      businessId: "biz-1",
+      changes: [
+        {
+          op: "put",
+          target: { kind: "ModelProfile", slug: "default" },
+          content: modelProfileDoc("default"),
+        },
+        { op: "put", target: { kind: "Agent", slug: "triager" }, content: agentDoc("triager") },
+        {
+          op: "put",
+          target: { kind: "Routine", slug: "greet" },
+          content: routineDoc("greet", "triager"),
+        },
+      ],
+    });
+
+    // Renaming the same Routine's only state must not collide with the state name the prior
+    // committed version of this same Routine still carries.
+    const renamed = routineDoc("greet", "triager").replace(/Classify/g, "Triage");
+    const result = await withTreeReader.apply({
+      subject: "soul: rename routine state",
+      source: "api",
+      actor: ACTOR,
+      businessId: "biz-1",
+      changes: [{ op: "put", target: { kind: "Routine", slug: "greet" }, content: renamed }],
+    });
+
+    expect(result.paths).toContain("routines/greet/routine.yaml");
   });
 });
 

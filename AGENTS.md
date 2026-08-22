@@ -153,6 +153,12 @@ pnpm build
 pnpm reset:dev                   # wipe local db + soul, re-run setup
 ```
 
+For manual/browser verification, start all four with `pnpm dev`, not a subset. Chat Turn
+execution runs in the Worker, not the API — API-only (`dev:api` + `dev:web`) leaves a Run stuck
+mid-stream, which triggers reconnect paths that are otherwise never exercised in normal dev and
+can surface unrelated latent bugs (e.g. a CORS header gap on the SSE resume route) that look
+branch-specific but are not.
+
 Single workspace: `pnpm --filter @tulipfarm/api <script>` — **the default for `test` and
 `typecheck`**.
 

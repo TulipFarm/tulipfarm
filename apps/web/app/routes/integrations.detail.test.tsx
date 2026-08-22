@@ -231,6 +231,70 @@ test("offers every signed-in user their own GitHub connect action", async () => 
   expect(screen.getByText(/never fall back to the business's GitHub App/i)).toBeInTheDocument();
 });
 
+test("hides the personal connect button until the fields step it depends on is satisfied", async () => {
+  admin = false;
+  renderDetail(
+    detail({
+      // `connected` reflects App-install status (a different, later step) and must not gate this.
+      connected: true,
+      status: "connected",
+      auth: [
+        {
+          index: 1,
+          kind: "fields",
+          title: "Configure personal GitHub access",
+          satisfied: false,
+          producesEnv: true,
+          fields: [{ name: "GITHUB_OAUTH_CLIENT_ID", label: "Client ID" }],
+        },
+        {
+          index: 3,
+          kind: "oauth2",
+          personal: true,
+          satisfied: false,
+          producesEnv: true,
+        },
+      ],
+    })
+  );
+
+  await screen.findByRole("heading", { level: 1 });
+  expect(
+    screen.queryByRole("button", { name: "Connect your GitHub account" })
+  ).not.toBeInTheDocument();
+});
+
+test("shows the personal connect button once the fields step it depends on is satisfied", async () => {
+  admin = false;
+  renderDetail(
+    detail({
+      connected: false,
+      status: "disconnected",
+      auth: [
+        {
+          index: 1,
+          kind: "fields",
+          title: "Configure personal GitHub access",
+          satisfied: true,
+          producesEnv: true,
+          fields: [{ name: "GITHUB_OAUTH_CLIENT_ID", label: "Client ID" }],
+        },
+        {
+          index: 3,
+          kind: "oauth2",
+          personal: true,
+          satisfied: false,
+          producesEnv: true,
+        },
+      ],
+    })
+  );
+
+  expect(
+    await screen.findByRole("button", { name: "Connect your GitHub account" })
+  ).toBeInTheDocument();
+});
+
 test("keeps a personal OAuth step out of the administrator's business setup rail", async () => {
   renderDetail(
     detail({

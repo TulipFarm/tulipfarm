@@ -193,6 +193,21 @@ describe("run event vocabulary", () => {
     expect(accepts("turn.finished", { status: "cancelled", messageId: null })).toBe(true);
   });
 
+  it("carries a UI-only connect link on a denied tool.result, and rejects it once trimmed", () => {
+    // A person behind a denied call gets a deep link to fix it; the field must survive validation.
+    expect(
+      accepts("tool.result", {
+        callId: "c1",
+        status: "error",
+        errorCode: "denied",
+        connectUrl: "/integrations/github",
+      })
+    ).toBe(true);
+    expect(
+      accepts("tool.result", { callId: "c1", status: "error", errorCode: "denied", connectUrl: "" })
+    ).toBe(false);
+  });
+
   it("rejects a payload missing a field its reader depends on", () => {
     expect(accepts("text.delta", { text: "hello" })).toBe(false);
     expect(accepts("turn.started", { turnId: "t1", attempt: 0 })).toBe(false);
