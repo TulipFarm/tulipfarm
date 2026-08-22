@@ -358,6 +358,9 @@ importers:
       '@tulipfarm/files':
         specifier: workspace:*
         version: link:../../packages/files
+      '@tulipfarm/integrations':
+        specifier: workspace:*
+        version: link:../../packages/integrations
       '@tulipfarm/llm':
         specifier: workspace:*
         version: link:../../packages/llm

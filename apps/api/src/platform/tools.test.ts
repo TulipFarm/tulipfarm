@@ -211,6 +211,52 @@ describe("loadSkillTool", () => {
     });
   });
 
+  it("returns normalized available reference names for Soul and bundled Skills", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "skill-list-"));
+    await mkdir(join(dir, "skills", "research", "references", "nested"), { recursive: true });
+    await writeFile(join(dir, "skills", "research", "references", "z-last.md"), "last", "utf8");
+    await writeFile(
+      join(dir, "skills", "research", "references", "nested", "first.md"),
+      "first",
+      "utf8"
+    );
+    try {
+      const soulResult = await loadSkillTool.handler(
+        { name: "research" },
+        makeCtx({ research: makeSkill("research") }, {}, dir)
+      );
+      expect(soulResult).toMatchObject({
+        success: true,
+        data: { references: ["nested/first.md", "z-last.md"] },
+      });
+
+      const bundled: BundledSkill = {
+        ...makeBundledSkill("bundled-research"),
+        references: ["z-last.md", "nested\\first.md"],
+      };
+      const bundledResult = await loadSkillTool.handler(
+        { name: "bundled-research" },
+        { soulWriter: makeSoulWriter(), bundledSkills: new Map([[bundled.name, bundled]]) }
+      );
+      expect(bundledResult).toMatchObject({
+        success: true,
+        data: { references: ["nested/first.md", "z-last.md"] },
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("tells models to request only references advertised by load_skill", () => {
+    expect(loadSkillTool.description).toContain("available reference filenames");
+    expect(loadSkillReferenceTool.description).toContain(
+      "only a filename advertised by load_skill"
+    );
+    expect(JSON.stringify(loadSkillReferenceTool.inputSchema)).toContain(
+      "only a name advertised by load_skill"
+    );
+  });
+
   it("returns validation_error for missing name", async () => {
     const res = await loadSkillTool.handler({}, makeCtx());
     expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
@@ -229,11 +275,51 @@ describe("loadSkillReferenceTool", () => {
   });
 
   it("returns not_found for a missing reference file", async () => {
-    const res = await loadSkillReferenceTool.handler(
-      { skill: "foo", reference: "missing.md" },
-      makeCtx({}, {}, "/nonexistent/soul")
+    const dir = await mkdtemp(join(tmpdir(), "skill-ref-missing-"));
+    await mkdir(join(dir, "skills", "foo", "references", "nested"), { recursive: true });
+    await writeFile(join(dir, "skills", "foo", "references", "guide.md"), "guide", "utf8");
+    await writeFile(
+      join(dir, "skills", "foo", "references", "nested", "details.md"),
+      "details",
+      "utf8"
     );
-    expect(res).toMatchObject({ success: false, error: { code: "not_found" } });
+    try {
+      const res = await loadSkillReferenceTool.handler(
+        { skill: "foo", reference: "missing.md" },
+        makeCtx({ foo: makeSkill("foo") }, {}, dir)
+      );
+      expect(res).toMatchObject({
+        success: false,
+        error: {
+          code: "not_found",
+          message: expect.stringContaining("guide.md, nested/details.md"),
+        },
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("redacts filesystem paths from unexpected reference inventory failures", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "skill-ref-redaction-"));
+    await mkdir(join(dir, "skills", "foo"), { recursive: true });
+    await writeFile(join(dir, "skills", "foo", "references"), "not a directory", "utf8");
+    try {
+      const res = await loadSkillTool.handler(
+        { name: "foo" },
+        makeCtx({ foo: makeSkill("foo") }, {}, dir)
+      );
+      expect(res).toMatchObject({
+        success: false,
+        error: {
+          code: "internal_error",
+          message: 'Skill "foo" references are temporarily unavailable.',
+        },
+      });
+      expect(JSON.stringify(res)).not.toContain(dir);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("returns validation_error for missing args", async () => {
@@ -269,7 +355,7 @@ describe("loadSkillReferenceTool", () => {
     try {
       const top = await loadSkillReferenceTool.handler(
         { skill: "research", reference: "guide.md" },
-        makeCtx({}, {}, dir)
+        makeCtx({ research: makeSkill("research") }, {}, dir)
       );
       expect(top).toEqual({
         success: true,
@@ -277,7 +363,7 @@ describe("loadSkillReferenceTool", () => {
       });
       const deep = await loadSkillReferenceTool.handler(
         { skill: "research", reference: "sub/deep.md" },
-        makeCtx({}, {}, dir)
+        makeCtx({ research: makeSkill("research") }, {}, dir)
       );
       expect(deep).toMatchObject({ success: true, data: { content: "deep guide" } });
     } finally {

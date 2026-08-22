@@ -1,0 +1,85 @@
+{
+  "id": "github-discovers-repository-before-search",
+  "tier": "l2",
+  "agent": "triage",
+  "context": {
+    "governancePages": []
+  },
+  "input": [
+    {
+      "role": "user",
+      "content": "Find open GitHub issues about login failures. I do not know which repository contains them."
+    }
+  ],
+  "platformTools": ["github_repository_list", "github_issue_search"],
+  "toolResults": [
+    {
+      "name": "github_repository_list",
+      "output": {
+        "repositories": [{ "repository": "TulipFarm/tulipfarm", "account": "TulipFarm" }]
+      }
+    },
+    {
+      "name": "github_issue_search",
+      "output": {
+        "totalCount": 1,
+        "items": [
+          {
+            "repository": "TulipFarm/tulipfarm",
+            "number": 581,
+            "title": "Login fails after session renewal",
+            "state": "open",
+            "htmlUrl": "https://github.com/TulipFarm/tulipfarm/issues/581"
+          }
+        ]
+      }
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        { "callId": "list-repositories", "name": "github_repository_list", "arguments": {} }
+      ]
+    },
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "search-issues",
+          "name": "github_issue_search",
+          "arguments": {
+            "repository": "TulipFarm/tulipfarm",
+            "query": "login failures",
+            "state": "open"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "text",
+      "text": "Found open issue #581: Login fails after session renewal."
+    }
+  ],
+  "expect": [
+    { "kind": "tool_called", "name": "github_repository_list" },
+    { "kind": "tool_called", "name": "github_issue_search" },
+    {
+      "kind": "tool_call_order",
+      "names": ["github_repository_list", "github_issue_search"]
+    },
+    {
+      "kind": "tool_argument_equals",
+      "name": "github_issue_search",
+      "path": "repository",
+      "value": "TulipFarm/tulipfarm"
+    },
+    {
+      "kind": "tool_argument_equals",
+      "name": "github_issue_search",
+      "path": "query",
+      "value": "login failures"
+    },
+    { "kind": "loop_status", "status": "completed" }
+  ]
+}

@@ -23,7 +23,7 @@ import type { IntegrationConversationsRepo } from "../ingress/repo";
 import { DeclarativeToolSync } from "./declarative/sync";
 import { declarativeToolName } from "./declarative/tools";
 import type { GitHubInstallationDirectory } from "./github/installation";
-import { buildGitHubTools } from "./github/tools";
+import { buildGitHubTools, GITHUB_REPOSITORY_LIST_TOOL_NAME } from "./github/tools";
 import { buildGoogleTools } from "./google/tools";
 import { buildToolRegistry } from "./setup";
 import { buildSlackTools } from "./slack/tools";
@@ -165,7 +165,7 @@ const EXPECTED_FAMILY_TOOL_NAMES = [
       "github_repository_list",
     ],
   },
-  { family: "slack", names: ["send_slack_message"] },
+  { family: "slack", names: ["send_slack_message", "slack_channel_list"] },
   {
     family: "google",
     names: [
@@ -659,7 +659,10 @@ describe("tool contract coverage", () => {
     const offenders = tools.flatMap((tool) => {
       const definition = tool.definition;
       if (definition?.provider === undefined) return [];
-      const expected = expectedCredentialModeFor(definition.provider);
+      const expected =
+        tool.name === GITHUB_REPOSITORY_LIST_TOOL_NAME
+          ? "service"
+          : expectedCredentialModeFor(definition.provider);
       if (expected === undefined) {
         return [`${tool.name}: provider ${definition.provider} has no expected credential mode`];
       }
@@ -705,13 +708,24 @@ describe("tool contract coverage", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("does not collapse all-repository GitHub searches to no target", () => {
+  it("keeps GitHub searches on one explicit repository target", () => {
     const offenders = tools
       .filter(
         (tool) => tool.name === "github_issue_search" || tool.name === "github_pull_request_search"
       )
-      .filter((tool) => (tool.definition?.targetsFor({}) ?? []).length === 0)
-      .map((tool) => `${tool.name}: omitting repository searches all installed repositories`);
+      .flatMap((tool) => {
+        const targets = tool.definition?.targetsFor({ repository: "acme/api" }) ?? [];
+        const schema = record(tool.inputSchema);
+        const required = schema?.required;
+        const properties = record(schema?.properties);
+        return targets.length === 1 &&
+          targetRefProblem(targets[0]) === undefined &&
+          Array.isArray(required) &&
+          required.includes("repository") &&
+          properties?.repositories === undefined
+          ? []
+          : [`${tool.name}: search must require one repository and derive one target`];
+      });
     expect(offenders).toEqual([]);
   });
 });

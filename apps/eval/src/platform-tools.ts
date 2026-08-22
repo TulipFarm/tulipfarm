@@ -1,6 +1,12 @@
 import type { ExposedTool } from "@tulipfarm/agent-runtime";
 import { FILE_TOOLS } from "@tulipfarm/files";
+import {
+  GITHUB_REPOSITORY_LIST_DECLARATION,
+  GITHUB_TOOL_DECLARATIONS,
+  SLACK_TOOL_DECLARATIONS,
+} from "@tulipfarm/integrations";
 import { SKILL_MARKETPLACE_TOOL_DECLARATIONS } from "@tulipfarm/schema";
+import { SKILL_REFERENCE_TOOL_DECLARATIONS } from "@tulipfarm/soul";
 import type { EvalCase } from "./case.ts";
 
 /**
@@ -16,13 +22,18 @@ import type { EvalCase } from "./case.ts";
  * So a Case names the Tool and gets the shipped object. Removing or renaming one fails the Corpus
  * load rather than quietly leaving a Case asserting nothing.
  */
-const SHIPPED: readonly ExposedTool[] = [...FILE_TOOLS, ...SKILL_MARKETPLACE_TOOL_DECLARATIONS].map(
-  (tool) => ({
-    name: tool.name,
-    description: tool.description,
-    inputSchema: tool.inputSchema as ExposedTool["inputSchema"],
-  })
-);
+const SHIPPED: readonly ExposedTool[] = [
+  ...FILE_TOOLS,
+  ...SKILL_MARKETPLACE_TOOL_DECLARATIONS,
+  ...SKILL_REFERENCE_TOOL_DECLARATIONS,
+  GITHUB_REPOSITORY_LIST_DECLARATION,
+  ...GITHUB_TOOL_DECLARATIONS,
+  ...SLACK_TOOL_DECLARATIONS,
+].map((tool) => ({
+  name: tool.name,
+  description: tool.description,
+  inputSchema: tool.inputSchema as ExposedTool["inputSchema"],
+}));
 
 const BY_NAME: ReadonlyMap<string, ExposedTool> = new Map(SHIPPED.map((tool) => [tool.name, tool]));
 

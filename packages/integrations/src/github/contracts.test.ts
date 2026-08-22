@@ -1,9 +1,20 @@
 import { ajv } from "@tulipfarm/schema";
 import { ToolCatalog } from "@tulipfarm/tool-broker";
 import { describe, expect, it } from "vitest";
-import { GITHUB_ADAPTER_REF, GITHUB_TOOL_CONTRACTS, GITHUB_TOOL_IDS } from "./contracts";
+import {
+  GITHUB_ADAPTER_REF,
+  GITHUB_TOOL_CONTRACTS,
+  GITHUB_TOOL_DECLARATIONS,
+  GITHUB_TOOL_IDS,
+} from "./contracts";
 
 const byId = new Map(GITHUB_TOOL_CONTRACTS.map((c) => [c.spec.toolId, c]));
+const byRef = new Map(
+  GITHUB_TOOL_CONTRACTS.map((contract) => [
+    `${contract.spec.toolId}@${contract.spec.toolVersion}`,
+    contract,
+  ])
+);
 
 describe("GITHUB_TOOL_CONTRACTS", () => {
   it("publishes typed read, comment, label, assign, and close Tools", () => {
@@ -84,6 +95,42 @@ describe("GITHUB_TOOL_CONTRACTS", () => {
     expect(validate({ repository: "tulip/farm", issueNumber: 7, body: "x".repeat(65_537) })).toBe(
       false
     );
+  });
+
+  it("requires exactly one explicit repository for issue and pull request searches", () => {
+    for (const toolId of [GITHUB_TOOL_IDS.issueSearch, GITHUB_TOOL_IDS.pullRequestSearch]) {
+      const search = byId.get(toolId);
+      if (search === undefined) expect.unreachable(`${toolId} contract missing`);
+      const validate = ajv.compile(search.spec.inputSchema);
+
+      expect(validate({ repository: "tulip/farm", query: "crash" }), toolId).toBe(true);
+      expect(validate({ query: "crash" }), toolId).toBe(false);
+      expect(validate({ repositories: ["tulip/farm", "tulip/canary"] }), toolId).toBe(false);
+      expect(search.spec.inputSchema).not.toHaveProperty("properties.repositories");
+    }
+  });
+
+  it("keeps v1 search contracts resolvable while declarations select v2", () => {
+    for (const toolId of [GITHUB_TOOL_IDS.issueSearch, GITHUB_TOOL_IDS.pullRequestSearch]) {
+      const v1 = byRef.get(`${toolId}@1.0.0`);
+      const v2 = byRef.get(`${toolId}@2.0.0`);
+      const declaration = GITHUB_TOOL_DECLARATIONS.find((candidate) => candidate.toolId === toolId);
+      if (v1 === undefined || v2 === undefined || declaration === undefined) {
+        expect.unreachable(`${toolId} versioned contracts missing`);
+      }
+
+      const validateV1 = ajv.compile(v1.spec.inputSchema);
+      const validateV2 = ajv.compile(v2.spec.inputSchema);
+      expect(validateV1({ query: "crash" }), `${toolId} v1 installation search`).toBe(true);
+      expect(
+        validateV1({ repositories: ["tulip/farm", "tulip/canary"] }),
+        `${toolId} v1 multi-repository search`
+      ).toBe(true);
+      expect(validateV2({ query: "crash" }), `${toolId} v2 missing repository`).toBe(false);
+      expect(validateV2({ repository: "tulip/farm", query: "crash" }), `${toolId} v2`).toBe(true);
+      expect(declaration.toolVersion).toBe("2.0.0");
+      expect(declaration.inputSchema).toBe(v2.spec.inputSchema);
+    }
   });
 
   it("bounds label fan-out", () => {

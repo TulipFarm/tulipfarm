@@ -1,15 +1,18 @@
 import type { EventEmitter } from "node:events";
-import { readFile } from "node:fs/promises";
-import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { DelegateToAgentInput, DelegationOutcome } from "@tulipfarm/agent-runtime";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { PLATFORM_RUNTIME_TOOLS } from "@tulipfarm/platform-tools";
-import { ajv, definitions } from "@tulipfarm/schema";
+import { ajv } from "@tulipfarm/schema";
 import type { BundledSkill } from "@tulipfarm/soul";
 import {
+  createSkillReferenceReader,
   type GitSyncService,
+  LOAD_SKILL_INPUT_SCHEMA,
+  LOAD_SKILL_REFERENCE_INPUT_SCHEMA,
   type RoutineCatalog,
   resolveSkill,
+  SKILL_REFERENCE_TOOL_DECLARATIONS,
+  SkillReferenceError,
   type SoulAgent,
   type SoulLoader,
   type SoulRoutine,
@@ -25,6 +28,7 @@ import { SYSTEM_SOUL_COMMIT_ACTOR } from "../runtime/soul-writer";
 import { mapSoulWriteError, soulCommitError } from "../tools/soul-faults";
 import { delegateToAgentTool } from "./delegate-tool";
 import { guardrailForgeTool } from "./guardrail-tool";
+import { validateRoutineForgeDefinitions } from "./routine-forge-validation";
 import { firstError, SOUL_ROUTINE_TARGET, SOUL_SKILL_TARGET, soulTarget } from "./tool-args";
 import { err, ok } from "./tool-result";
 
@@ -71,24 +75,40 @@ function wholeSoulRepoTarget() {
   return [{ type: SOUL_REPO_TARGET, id: SOUL_REPO_ALL_TARGET_ID }];
 }
 
-const LOAD_SKILL_SCHEMA: Record<string, unknown> = {
-  type: "object",
-  additionalProperties: false,
-  required: ["name"],
-  properties: {
-    name: { type: "string", minLength: 1, description: "Skill name as registered in the soul." },
-  },
-};
-const validateLoadSkill = ajv.compile(LOAD_SKILL_SCHEMA);
+const validateLoadSkill = ajv.compile(LOAD_SKILL_INPUT_SCHEMA);
+
+function referenceReader(
+  ctx: PlatformToolContext,
+  skillName: string,
+  soulSkill: SoulSkill | undefined,
+  bundledSkill: BundledSkill | undefined
+): ReturnType<typeof createSkillReferenceReader> | undefined {
+  if (!soulSkill && bundledSkill) {
+    return createSkillReferenceReader({
+      directory: `${bundledSkill.directory}/references`,
+      advertisedNames: bundledSkill.references,
+    });
+  }
+  return ctx.soulPath
+    ? createSkillReferenceReader({ directory: `${ctx.soulPath}/skills/${skillName}/references` })
+    : undefined;
+}
+
+function missingReferenceMessage(skill: string, reference: string, available: readonly string[]) {
+  const availability =
+    available.length === 0
+      ? "No reference files are available."
+      : `Available references: ${available.join(", ")}.`;
+  return `Reference "${reference}" not found for Skill "${skill}". ${availability}`;
+}
 
 export const loadSkillTool = defineApiTool<PlatformToolContext>({
   name: "load_skill",
   requiresAmbient: ["soul"],
-  description:
-    "Load a Skill's frontmatter and body by name so the agent can apply its instructions. Resolves Soul Skills before the read-only bundled overlay. Graceful not_found when the Skill is absent.",
+  description: SKILL_REFERENCE_TOOL_DECLARATIONS[0].description,
   mutating: false,
   tier: "platform",
-  inputSchema: LOAD_SKILL_SCHEMA,
+  inputSchema: LOAD_SKILL_INPUT_SCHEMA,
   authorization: {
     action: "platform.skill.load",
     resources: ["soul.skill"],
@@ -105,41 +125,39 @@ export const loadSkillTool = defineApiTool<PlatformToolContext>({
       ctx.bundledSkills,
       ctx.disabledBundledSkills
     );
-    if (skill) return ok({ name: skill.name, frontmatter: skill.frontmatter, body: skill.body });
+    if (skill) {
+      const soulSkill = ctx.soulLoader?.skills.get(name);
+      const bundledSkill = soulSkill
+        ? undefined
+        : ctx.disabledBundledSkills?.has(name)
+          ? undefined
+          : ctx.bundledSkills?.get(name);
+      try {
+        const references =
+          (await referenceReader(ctx, name, soulSkill, bundledSkill)?.list()) ?? [];
+        return ok({
+          name: skill.name,
+          frontmatter: skill.frontmatter,
+          body: skill.body,
+          references,
+        });
+      } catch {
+        return err("internal_error", `Skill "${name}" references are temporarily unavailable.`);
+      }
+    }
     return err("not_found", `Skill "${name}" not found.`);
   },
 });
 
-const LOAD_SKILL_REFERENCE_SCHEMA: Record<string, unknown> = {
-  type: "object",
-  additionalProperties: false,
-  required: ["skill", "reference"],
-  properties: {
-    skill: {
-      type: "string",
-      minLength: 1,
-      maxLength: 64,
-      pattern: "^[a-z0-9][a-z0-9._-]*$",
-      description: "Skill name as registered in the Soul or bundled overlay.",
-    },
-    reference: {
-      type: "string",
-      minLength: 1,
-      description:
-        "Reference filename (e.g. 'migration-playbook.md') within the skill's references/ directory.",
-    },
-  },
-};
-const validateLoadSkillRef = ajv.compile(LOAD_SKILL_REFERENCE_SCHEMA);
+const validateLoadSkillRef = ajv.compile(LOAD_SKILL_REFERENCE_INPUT_SCHEMA);
 
 export const loadSkillReferenceTool = defineApiTool<PlatformToolContext>({
   name: "load_skill_reference",
   requiresAmbient: ["soul"],
-  description:
-    "Load a reference file from a skill's references/ directory. Use this to pull in supporting material (playbooks, templates) that are too large to include in the skill body.",
+  description: SKILL_REFERENCE_TOOL_DECLARATIONS[1].description,
   mutating: false,
   tier: "platform",
-  inputSchema: LOAD_SKILL_REFERENCE_SCHEMA,
+  inputSchema: LOAD_SKILL_REFERENCE_INPUT_SCHEMA,
   authorization: {
     action: "platform.skill_reference.load",
     resources: ["soul.skill"],
@@ -154,26 +172,28 @@ export const loadSkillReferenceTool = defineApiTool<PlatformToolContext>({
     const bundledSkill = ctx.disabledBundledSkills?.has(skill)
       ? undefined
       : ctx.bundledSkills?.get(skill);
-    const base =
-      !soulSkill && bundledSkill
-        ? resolve(bundledSkill.directory, "references")
-        : ctx.soulPath
-          ? resolve(ctx.soulPath, "skills", skill, "references")
-          : undefined;
-    if (!base) return err("not_found", `Skill "${skill}" references directory not available.`);
-    // `reference` is model-controlled; contain reads to the selected Skill references directory.
-    const refPath = resolve(base, reference);
-    const rel = relative(base, refPath);
-    if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel))
-      return err(
-        "validation_error",
-        `Reference "${reference}" escapes the skill references directory.`
-      );
+    const selectedBundledSkill = soulSkill ? undefined : bundledSkill;
+    const reader = referenceReader(ctx, skill, soulSkill, selectedBundledSkill);
+    let references: readonly string[];
     try {
-      const content = await readFile(refPath, "utf8");
-      return ok({ skill, reference, content });
+      references = (await reader?.list()) ?? [];
     } catch {
-      return err("not_found", `Reference "${reference}" not found for skill "${skill}".`);
+      return err("internal_error", `Skill "${skill}" references are temporarily unavailable.`);
+    }
+    if (!reader) return err("not_found", missingReferenceMessage(skill, reference, references));
+    try {
+      const content = await reader.read(reference);
+      return ok({ skill, reference, content });
+    } catch (error) {
+      if (error instanceof SkillReferenceError) {
+        if (error.code === "INVALID_NAME") {
+          return err("validation_error", `Reference "${reference}" is not a valid reference name.`);
+        }
+        if (error.code === "NOT_FOUND") {
+          return err("not_found", missingReferenceMessage(skill, reference, references));
+        }
+      }
+      return err("internal_error", `Skill "${skill}" references are temporarily unavailable.`);
     }
   },
 });
@@ -288,41 +308,11 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
     };
     if (!ROUTINE_NAME_RE.test(name)) return err("validation_error", "invalid routine name");
 
-    let routine: definitions.routine.RoutineDefinition;
-    let triggerDefinitions: definitions.trigger.TriggerDefinition[];
-    try {
-      routine = definitions.routine.validateRoutineDefinition(definition).document;
-      triggerDefinitions = triggers.map(
-        (trigger) => definitions.trigger.validateTriggerDefinition(trigger).document
-      );
-    } catch (error) {
-      return err("validation_error", error instanceof Error ? error.message : String(error));
-    }
-    if (routine.metadata.slug !== name)
-      return err("validation_error", "definition.metadata.slug must match name");
-    if (routine.metadata.lifecycle !== "published")
-      return err("validation_error", "definition.metadata.lifecycle must be published");
+    const validation = validateRoutineForgeDefinitions({ name, definition, triggers });
+    if (!validation.ok) return err("validation_error", validation.message);
+    const { routine, triggers: triggerDefinitions } = validation;
     const unresolved = unresolvedRoutineResourceTypes(routine.spec, ctx.soulLoader?.resources);
     if (unresolved !== undefined) return err(unresolved.code, unresolved.message);
-    if (
-      new Set(triggerDefinitions.map((trigger) => trigger.metadata.slug)).size !==
-      triggerDefinitions.length
-    ) {
-      return err("validation_error", "triggers must have unique metadata.slug values");
-    }
-    for (const trigger of triggerDefinitions) {
-      if (trigger.metadata.lifecycle !== "published")
-        return err("validation_error", "trigger metadata.lifecycle must be published");
-      if (
-        trigger.spec.routineRef.name !== name ||
-        trigger.spec.routineRef.version !== String(routine.metadata.authoredVersion)
-      ) {
-        return err(
-          "validation_error",
-          "trigger spec.routineRef must match the Routine name and authored version"
-        );
-      }
-    }
 
     let write: Awaited<ReturnType<SoulWriter["apply"]>>;
     try {
@@ -346,7 +336,7 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
       });
     } catch (e) {
       if (e instanceof SoulWriteError) return mapSoulWriteError(e);
-      return soulCommitError(e, e instanceof Error ? e.message : String(e));
+      return soulCommitError(e, "Routine could not be written to the Soul.");
     }
 
     // Committed is not published: the Routines surface and every Run read the active bundle, so a
@@ -355,17 +345,15 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
     if (!write.published) {
       return err(
         "internal_error",
-        `Routine ${name} was committed to the Soul but its runtime bundle publication failed, so it is not published and will not appear in Routines${
-          write.publicationError === undefined ? "" : ` — ${write.publicationError}`
-        }`
+        `Routine ${name} was committed to the Soul but its runtime bundle publication failed, so it is not published and will not appear in Routines.`
       );
     }
 
     // The gateway reloads the catalog but does not reschedule cron triggers.
     try {
       await ctx.onRoutinesChanged?.();
-    } catch (e) {
-      return err("internal_error", e instanceof Error ? e.message : String(e));
+    } catch {
+      return err("internal_error", `Routine ${name} could not be activated after publication.`);
     }
 
     const invisible = await routineMissingFromCatalog(ctx.routineCatalog, name);
@@ -396,9 +384,8 @@ async function routineMissingFromCatalog(
     return listed.some((routine) => routine.slug === slug)
       ? undefined
       : `Routine ${slug} was committed and published but does not appear on the Routines surface, so it is not available to run or edit`;
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    return `Routine ${slug} was committed and published but the Routines surface could not be read back, so it cannot be reported as available — ${reason}`;
+  } catch {
+    return `Routine ${slug} was committed and published but the Routines surface could not be read back, so it cannot be reported as available`;
   }
 }
 

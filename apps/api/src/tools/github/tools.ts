@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
-import { GITHUB_TOOL_CONTRACTS, GITHUB_TOOL_IDS, type GitHubToolId } from "@tulipfarm/integrations";
+import {
+  GITHUB_REPOSITORY_LIST_DECLARATION,
+  GITHUB_TOOL_CONTRACTS,
+  GITHUB_TOOL_DECLARATIONS,
+  GITHUB_TOOL_IDS,
+  type GitHubToolId,
+} from "@tulipfarm/integrations";
 import type { MutationGuard } from "@tulipfarm/observability";
 import {
   EffectDispatcher,
@@ -32,89 +38,6 @@ import {
 const GITHUB_CATALOG = ToolCatalog.load(GITHUB_TOOL_CONTRACTS);
 const GITHUB_ALL_REPOSITORIES_TARGET_ID = "all-repositories";
 const GITHUB_RESOURCE = "integration.github";
-
-interface GitHubToolSpec {
-  readonly name: string;
-  readonly description: string;
-}
-
-const GITHUB_TOOL_SPECS: Record<GitHubToolId, GitHubToolSpec> = {
-  [GITHUB_TOOL_IDS.issueRead]: {
-    name: "github_issue_read",
-    description: "Read one GitHub issue's title, body, state, labels, and assignees.",
-  },
-  [GITHUB_TOOL_IDS.issueSearch]: {
-    name: "github_issue_search",
-    description: "Search a GitHub repository's issues by query and state.",
-  },
-  [GITHUB_TOOL_IDS.issueCreate]: {
-    name: "github_issue_create",
-    description: "Open a new GitHub issue, optionally with labels and assignees.",
-  },
-  [GITHUB_TOOL_IDS.issueComment]: {
-    name: "github_issue_comment",
-    description: "Post a comment on a GitHub issue.",
-  },
-  [GITHUB_TOOL_IDS.issueLabel]: {
-    name: "github_issue_label",
-    description: "Set the labels on a GitHub issue.",
-  },
-  [GITHUB_TOOL_IDS.issueAssign]: {
-    name: "github_issue_assign",
-    description: "Set the assignees on a GitHub issue.",
-  },
-  [GITHUB_TOOL_IDS.issueClose]: {
-    name: "github_issue_close",
-    description: "Close a GitHub issue, optionally with a state reason.",
-  },
-  [GITHUB_TOOL_IDS.pullRequestRead]: {
-    name: "github_pull_request_read",
-    description: "Read one GitHub pull request's title, body, state, and branches.",
-  },
-  [GITHUB_TOOL_IDS.pullRequestSearch]: {
-    name: "github_pull_request_search",
-    description: "Search a GitHub repository's pull requests by query and state.",
-  },
-  [GITHUB_TOOL_IDS.pullRequestCreate]: {
-    name: "github_pull_request_create",
-    description: "Open a new GitHub pull request from a head branch into a base branch.",
-  },
-  [GITHUB_TOOL_IDS.pullRequestComment]: {
-    name: "github_pull_request_comment",
-    description: "Post a comment on a GitHub pull request.",
-  },
-  [GITHUB_TOOL_IDS.pullRequestReview]: {
-    name: "github_pull_request_review",
-    description: "Submit a review (approve, request changes, or comment) on a GitHub pull request.",
-  },
-  [GITHUB_TOOL_IDS.pullRequestMerge]: {
-    name: "github_pull_request_merge",
-    description: "Merge a GitHub pull request.",
-  },
-  [GITHUB_TOOL_IDS.checkRunRead]: {
-    name: "github_check_run_read",
-    description: "Read one GitHub check run's status and conclusion.",
-  },
-  [GITHUB_TOOL_IDS.repoPush]: {
-    name: "github_repo_push",
-    description: "Commit one or more files to a GitHub branch.",
-  },
-  [GITHUB_TOOL_IDS.repositoryCreate]: {
-    name: "github_repository_create",
-    description:
-      "Create a new GitHub repository under an org this installation covers. Requires the App's " +
-      "administration:write permission, which is not granted by default — if this fails, ask an " +
-      "org admin to upgrade the GitHub App's permissions from the installation's settings page.",
-  },
-  [GITHUB_TOOL_IDS.contentRead]: {
-    name: "github_content_read",
-    description: "Read a file's contents from a GitHub repository.",
-  },
-  [GITHUB_TOOL_IDS.contentList]: {
-    name: "github_content_list",
-    description: "List a directory's contents in a GitHub repository (or the repository root).",
-  },
-};
 
 /** Dresses a digest as an RFC 4122 v4 uuid for durable effect ids. */
 function derivedId(...parts: readonly string[]): string {
@@ -197,14 +120,7 @@ const repositoryRef = (id: string) => ({ type: GITHUB_AUTHZ_RESOURCE, id: `repo:
 function repositoryTargets(args: unknown): readonly ToolTargetRef[] {
   const source = recordArgs(args);
   const repository = stringValue(source, "repository");
-  if (repository !== undefined) return [repositoryRef(repository)];
-
-  const repositories = source.repositories;
-  if (!Array.isArray(repositories)) return [];
-  if (repositories.some((candidate) => typeof candidate !== "string")) return [];
-  return repositories
-    .filter((candidate): candidate is string => typeof candidate === "string")
-    .map((candidate) => repositoryRef(candidate));
+  return repository === undefined ? [] : [repositoryRef(repository)];
 }
 
 function allRepositoriesTarget(): readonly ToolTargetRef[] {
@@ -212,24 +128,12 @@ function allRepositoriesTarget(): readonly ToolTargetRef[] {
   return [{ type: GITHUB_AUTHZ_RESOURCE, id: `installation:${GITHUB_ALL_REPOSITORIES_TARGET_ID}` }];
 }
 
-function searchRepositoryTargets(args: unknown): readonly ToolTargetRef[] {
-  const source = recordArgs(args);
-  const repository = stringValue(source, "repository");
-  if (repository !== undefined) return [repositoryRef(repository)];
-
-  const repositories = source.repositories;
-  if (Array.isArray(repositories) && repositories.length > 0) return repositoryTargets(source);
-
-  // Missing repository selectors become installation-wide search; repo grants must not satisfy it.
-  return allRepositoriesTarget();
-}
-
 function repositoryCreateTargets(args: unknown): readonly ToolTargetRef[] {
   const owner = stringValue(recordArgs(args), "owner");
   return owner === undefined ? [] : [{ type: GITHUB_AUTHZ_RESOURCE, id: `org:${owner}` }];
 }
 
-/** Resolve the covering installation credential; installation-wide search requires exactly one. */
+/** Resolve the installation credential that covers the Tool's explicit target. */
 function githubCredentialSelector(toolId: GitHubToolId, args: unknown): GitHubInstallationSelector {
   const source = recordArgs(args);
   if (toolId === GITHUB_TOOL_IDS.repositoryCreate) {
@@ -239,23 +143,11 @@ function githubCredentialSelector(toolId: GitHubToolId, args: unknown): GitHubIn
   const repository = stringValue(source, "repository");
   if (repository !== undefined) return { kind: "repository", repository };
 
-  const repositories = source.repositories;
-  if (Array.isArray(repositories)) {
-    const named = repositories.filter((entry): entry is string => typeof entry === "string");
-    // Multi-repo calls require all repositories to resolve to the same installation.
-    const first = named[0];
-    if (first !== undefined && named.every((entry) => entry === first)) {
-      return { kind: "repository", repository: first };
-    }
-  }
   return { kind: "any" };
 }
 
 function githubTargets(toolId: GitHubToolId, args: unknown): readonly ToolTargetRef[] {
   if (toolId === GITHUB_TOOL_IDS.repositoryCreate) return repositoryCreateTargets(args);
-  if (toolId === GITHUB_TOOL_IDS.issueSearch || toolId === GITHUB_TOOL_IDS.pullRequestSearch) {
-    return searchRepositoryTargets(args);
-  }
   return repositoryTargets(args);
 }
 
@@ -264,17 +156,20 @@ function buildToolDef(
   businessId: string,
   tooling: GitHubToolingContext
 ): ToolDef {
-  const contract = GITHUB_CATALOG.get(toolId, "1.0.0");
+  const declaration = GITHUB_TOOL_DECLARATIONS.find((candidate) => candidate.toolId === toolId);
+  if (declaration === undefined) {
+    throw new Error(`github tool declaration not published: ${toolId}`);
+  }
+  const contract = GITHUB_CATALOG.get(toolId, declaration.toolVersion);
   if (contract === undefined) {
     throw new Error(`github tool contract not published: ${toolId}`);
   }
-  const spec = GITHUB_TOOL_SPECS[toolId];
 
   const definition = defineApiTool<RequestContext>({
-    name: spec.name,
+    name: declaration.name,
     tier: "integration",
     mutating: contract.mutating,
-    description: spec.description,
+    description: declaration.description,
     inputSchema: contract.inputSchema,
     outputSchema: contract.outputSchema,
     authorization: {
@@ -364,13 +259,7 @@ function buildToolDef(
   return toToolDef(definition, (ctx) => ctx);
 }
 
-const EMPTY_SCHEMA: Record<string, unknown> = {
-  type: "object",
-  additionalProperties: false,
-  properties: {},
-};
-
-export const GITHUB_REPOSITORY_LIST_TOOL_NAME = "github_repository_list";
+export const GITHUB_REPOSITORY_LIST_TOOL_NAME = GITHUB_REPOSITORY_LIST_DECLARATION.name;
 
 /** Local-only repository discovery; no GitHub API call or effect ledger reservation. */
 function buildRepositoryListTool(tooling: GitHubTooling): ToolDef {
@@ -378,13 +267,8 @@ function buildRepositoryListTool(tooling: GitHubTooling): ToolDef {
     name: GITHUB_REPOSITORY_LIST_TOOL_NAME,
     tier: "integration",
     mutating: false,
-    description:
-      "List the GitHub repositories this business has an active installation for. Call this " +
-      "first when the user names no repository, or names one you're not sure is installed. This " +
-      "reports only which repositories the workspace's GitHub App can see — it does not mean " +
-      "you personally can act on them. Every other GitHub Tool also requires the calling person " +
-      "to have connected their own GitHub account, separately from that App installation.",
-    inputSchema: EMPTY_SCHEMA,
+    description: GITHUB_REPOSITORY_LIST_DECLARATION.description,
+    inputSchema: GITHUB_REPOSITORY_LIST_DECLARATION.inputSchema,
     authorization: {
       action: "github.repository.list",
       resources: [GITHUB_RESOURCE],
@@ -393,7 +277,7 @@ function buildRepositoryListTool(tooling: GitHubTooling): ToolDef {
       // Listing enumerates every installed repository, so require installation-wide authority.
       targets: allRepositoriesTarget,
     },
-    credentialMode: "user_preferred",
+    credentialMode: "service",
     provider: "github",
     idempotency: "none",
     async handler(): Promise<ToolCallResult> {
@@ -420,8 +304,8 @@ export interface GitHubToolingContext extends GitHubTooling {
 export function buildGitHubTools(businessId: string, tooling: GitHubToolingContext): ToolDef[] {
   return [
     buildRepositoryListTool(tooling),
-    ...GITHUB_TOOL_CONTRACTS.map((contract) =>
-      buildToolDef(contract.spec.toolId as GitHubToolId, businessId, tooling)
+    ...GITHUB_TOOL_DECLARATIONS.map((declaration) =>
+      buildToolDef(declaration.toolId, businessId, tooling)
     ),
   ];
 }
@@ -429,5 +313,5 @@ export function buildGitHubTools(businessId: string, tooling: GitHubToolingConte
 /** GitHub chat tool names, computable without live tooling composition. */
 export const GITHUB_TOOL_NAMES: ReadonlySet<string> = new Set([
   GITHUB_REPOSITORY_LIST_TOOL_NAME,
-  ...Object.values(GITHUB_TOOL_SPECS).map((spec) => spec.name),
+  ...GITHUB_TOOL_DECLARATIONS.map((declaration) => declaration.name),
 ]);

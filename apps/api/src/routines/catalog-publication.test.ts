@@ -187,7 +187,7 @@ describe("routine_forge → Soul publication → Routines catalog", () => {
       success: false,
       error: { code: "internal_error" },
     });
-    expect(JSON.stringify(result)).toContain("bundle storage unavailable");
+    expect(JSON.stringify(result)).not.toContain("bundle storage unavailable");
     expect(await catalog.list()).toEqual([]);
   });
 });

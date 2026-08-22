@@ -70,8 +70,6 @@ export async function searchIssues(
   credential: string
 ): Promise<unknown> {
   const state = typeof source.state === "string" ? source.state : "open";
-  // Repeated `repo:` qualifiers OR together (an issue lives in exactly one repo, so ANDing them
-  // could never match) — this is what turns N per-repo calls into a single search.
   const qualifiers = [...repositories.map((repository) => `repo:${repository}`), "is:issue"];
   if (state !== "all") qualifiers.push(`state:${state}`);
   const query = optionalStringArg(source, "query");

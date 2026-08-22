@@ -261,6 +261,19 @@ export type {
 } from "./skills/marketplace";
 export { createSkillMarketplaceFlow, SkillMarketplaceError } from "./skills/marketplace";
 export { collectSkillFiles, discoverSkills } from "./skills/marketplace-files";
+export type {
+  SkillReferenceErrorCode,
+  SkillReferenceReader,
+  SkillReferenceReaderOptions,
+} from "./skills/references";
+export {
+  createSkillReferenceReader,
+  LOAD_SKILL_INPUT_SCHEMA,
+  LOAD_SKILL_REFERENCE_INPUT_SCHEMA,
+  normalizeSkillReferenceNames,
+  SKILL_REFERENCE_TOOL_DECLARATIONS,
+  SkillReferenceError,
+} from "./skills/references";
 export type { AvailableSkill, EagerSkill } from "./skills/registry";
 export {
   listAvailableSkills,
