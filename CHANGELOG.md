@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.13.5](https://github.com/TulipFarm/tulipfarm/compare/v0.13.4...v0.13.5) (2026-08-22)
+
+### Features
+
+* **integrations:** add declarative GraphQL egress ([#573](https://github.com/TulipFarm/tulipfarm/issues/573)) ([3200037](https://github.com/TulipFarm/tulipfarm/commit/3200037d25fff7f5cb5cf21f0306a996f81567e1))
+
+### Bug Fixes
+
+* personal GitHub connect — clickable link, correct gating, clearer error ([#575](https://github.com/TulipFarm/tulipfarm/issues/575)) ([7ebb1e5](https://github.com/TulipFarm/tulipfarm/commit/7ebb1e50f69d25b236b4714d1b65deb8554ea5c3))
+* **soul:** validate cross-definition refs before commit in SoulWriter ([#576](https://github.com/TulipFarm/tulipfarm/issues/576)) ([3636569](https://github.com/TulipFarm/tulipfarm/commit/36365693ce7022912008480ce5763012684c4266))
+
 ## [0.13.4](https://github.com/TulipFarm/tulipfarm/compare/v0.13.3...v0.13.4) (2026-08-21)
 
 ### Features
