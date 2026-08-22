@@ -20,7 +20,8 @@ export const SLACK_RECONCILIATION_OPERATIONS = {
   sendMessage: "slack.message.send.lookup",
 } as const;
 
-const TOOL_VERSION = "1.0.0";
+const LIST_CHANNELS_TOOL_VERSION = "1.0.0";
+const SEND_MESSAGE_TOOL_VERSION = "1.0.0";
 const SLACK_DESTINATION = "slack";
 const MESSAGE_DATA_CLASSES = ["source_content"];
 const CHANNEL_DIRECTORY_DATA_CLASSES = ["directory"];
@@ -38,13 +39,14 @@ const listChannelsOutputSchema = {
   properties: {
     channels: {
       type: "array",
+      maxItems: 4_000,
       items: {
         type: "object",
         additionalProperties: false,
         required: ["id", "name"],
         properties: {
-          id: { type: "string" },
-          name: { type: "string" },
+          id: { type: "string", minLength: 1 },
+          name: { type: "string", minLength: 1 },
         },
       },
     },
@@ -102,7 +104,7 @@ function publish(spec: ToolContractSpec, id: string, slug: string): ToolContract
 const sendMessage = publish(
   {
     toolId: SLACK_TOOL_IDS.sendMessage,
-    toolVersion: TOOL_VERSION,
+    toolVersion: SEND_MESSAGE_TOOL_VERSION,
     action: SLACK_TOOL_IDS.sendMessage,
     inputSchema: sendMessageInputSchema,
     outputSchema: sendMessageOutputSchema,
@@ -127,7 +129,7 @@ const sendMessage = publish(
 const listChannels = publish(
   {
     toolId: SLACK_TOOL_IDS.listChannels,
-    toolVersion: TOOL_VERSION,
+    toolVersion: LIST_CHANNELS_TOOL_VERSION,
     action: SLACK_TOOL_IDS.listChannels,
     inputSchema: listChannelsInputSchema,
     outputSchema: listChannelsOutputSchema,
@@ -150,6 +152,7 @@ export const SLACK_TOOL_CONTRACTS: readonly ToolContractDefinition[] = [listChan
 export const SLACK_TOOL_DECLARATIONS = [
   {
     toolId: SLACK_TOOL_IDS.listChannels,
+    toolVersion: LIST_CHANNELS_TOOL_VERSION,
     name: "slack_channel_list",
     description:
       "List the Slack channels the bot has joined. Use this before send_slack_message when the " +
@@ -158,6 +161,7 @@ export const SLACK_TOOL_DECLARATIONS = [
   },
   {
     toolId: SLACK_TOOL_IDS.sendMessage,
+    toolVersion: SEND_MESSAGE_TOOL_VERSION,
     name: "send_slack_message",
     description:
       "Send a message to a Slack channel the bot has joined. Accepts a channel name (with or " +

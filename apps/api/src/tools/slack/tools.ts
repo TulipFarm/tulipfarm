@@ -119,14 +119,17 @@ export interface SlackToolingContext extends SlackTooling {
 
 function buildToolDef(
   toolId: SlackToolId,
+  toolVersion: string,
   businessId: string,
   tooling: SlackToolingContext
 ): ToolDef {
-  const contract = SLACK_CATALOG.get(toolId, "1.0.0");
+  const contract = SLACK_CATALOG.get(toolId, toolVersion);
   if (contract === undefined) {
     throw new Error(`slack tool contract not published: ${toolId}`);
   }
-  const declaration = SLACK_TOOL_DECLARATIONS.find((candidate) => candidate.toolId === toolId);
+  const declaration = SLACK_TOOL_DECLARATIONS.find(
+    (candidate) => candidate.toolId === toolId && candidate.toolVersion === toolVersion
+  );
   if (declaration === undefined) {
     throw new Error(`slack tool declaration not published: ${toolId}`);
   }
@@ -244,6 +247,11 @@ function buildToolDef(
 
 export function buildSlackTools(businessId: string, tooling: SlackToolingContext): ToolDef[] {
   return SLACK_TOOL_CONTRACTS.map((contract) =>
-    buildToolDef(contract.spec.toolId as SlackToolId, businessId, tooling)
+    buildToolDef(
+      contract.spec.toolId as SlackToolId,
+      contract.spec.toolVersion,
+      businessId,
+      tooling
+    )
   );
 }

@@ -1,7 +1,12 @@
 import { ajv } from "@tulipfarm/schema";
 import { ToolCatalog } from "@tulipfarm/tool-broker";
 import { describe, expect, it } from "vitest";
-import { SLACK_ADAPTER_REF, SLACK_TOOL_CONTRACTS, SLACK_TOOL_IDS } from "./contracts";
+import {
+  SLACK_ADAPTER_REF,
+  SLACK_TOOL_CONTRACTS,
+  SLACK_TOOL_DECLARATIONS,
+  SLACK_TOOL_IDS,
+} from "./contracts";
 
 const byId = new Map(SLACK_TOOL_CONTRACTS.map((c) => [c.spec.toolId, c]));
 
@@ -15,6 +20,17 @@ describe("SLACK_TOOL_CONTRACTS", () => {
     for (const contract of SLACK_TOOL_CONTRACTS) {
       expect(catalog.get(contract.spec.toolId, contract.spec.toolVersion)).toBeDefined();
     }
+  });
+
+  it("selects each declaration by its independently published Tool version", () => {
+    expect(
+      SLACK_TOOL_DECLARATIONS.map(({ toolId, toolVersion }) => ({ toolId, toolVersion }))
+    ).toEqual(
+      SLACK_TOOL_CONTRACTS.map(({ spec }) => ({
+        toolId: spec.toolId,
+        toolVersion: spec.toolVersion,
+      }))
+    );
   });
 
   it("binds to the governed integration adapter, never a raw HTTP passthrough", () => {
@@ -40,6 +56,24 @@ describe("SLACK_TOOL_CONTRACTS", () => {
     expect(list.spec.dataClasses).toEqual(["directory"]);
     expect(list.spec.idempotency.strategy).toBe("none");
     expect(list.spec.retry?.safeToRetry).toBe(true);
+  });
+
+  it("publishes the bounded, non-empty channel directory output", () => {
+    const list = byId.get(SLACK_TOOL_IDS.listChannels);
+    if (list === undefined) expect.unreachable("list contract missing");
+    const validate = ajv.compile(list.spec.outputSchema);
+
+    expect(validate({ channels: [{ id: "C1234567890", name: "general" }] })).toBe(true);
+    expect(validate({ channels: [{ id: "", name: "general" }] })).toBe(false);
+    expect(validate({ channels: [{ id: "C1234567890", name: "" }] })).toBe(false);
+    expect(
+      validate({
+        channels: Array.from({ length: 4_001 }, (_, index) => ({
+          id: `C${index}`,
+          name: `channel-${index}`,
+        })),
+      })
+    ).toBe(false);
   });
 
   it("declares a chat.delete compensation with a reconciliation lookup", () => {
