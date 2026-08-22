@@ -159,6 +159,80 @@ describe("routine_forge", () => {
     expect(soulWriter.apply).not.toHaveBeenCalled();
   });
 
+  it("returns every canonical Routine and Trigger issue in one actionable error", async () => {
+    const result = await routineForgeTool.handler(
+      {
+        name: "daily-report",
+        definition: {
+          ...VALID_ROUTINE,
+          metadata: {
+            ...VALID_ROUTINE.metadata,
+            authoredVersion: "1",
+            displayName: "Daily report",
+          },
+          spec: { ...VALID_ROUTINE.spec, states: { Decide: VALID_ROUTINE.spec.states[0] } },
+        },
+        triggers: [
+          {
+            ...trigger("daily-report-manual"),
+            metadata: { ...trigger().metadata, authoredVersion: "1" },
+          },
+          {
+            ...trigger("daily-report-nightly"),
+            metadata: {
+              ...trigger("daily-report-nightly").metadata,
+              unknownField: "Nightly",
+            },
+          },
+        ],
+      },
+      ctx()
+    );
+
+    expect(result).toMatchObject({ success: false, error: { code: "validation_error" } });
+    const message = JSON.stringify(result);
+    expect(message).toContain("Routine definition /metadata");
+    expect(message).toContain("Routine definition /metadata/authoredVersion");
+    expect(message).toContain("Routine definition /spec/states");
+    expect(message).toContain("Trigger triggers[0] /metadata/authoredVersion");
+    expect(message).toContain("Trigger triggers[1] /metadata");
+    expect(soulWriter.apply).not.toHaveBeenCalled();
+  });
+
+  it("returns every cross-document consistency issue in one actionable error", async () => {
+    const result = await routineForgeTool.handler(
+      {
+        name: "daily-report",
+        definition: {
+          ...VALID_ROUTINE,
+          metadata: { ...VALID_ROUTINE.metadata, slug: "other-report", lifecycle: "draft" },
+        },
+        triggers: [
+          {
+            ...trigger("daily-report-manual"),
+            metadata: { ...trigger().metadata, lifecycle: "draft" },
+          },
+          {
+            ...trigger("daily-report-nightly"),
+            spec: {
+              ...trigger("daily-report-nightly").spec,
+              routineRef: { name: "other-report", version: "2" },
+            },
+          },
+        ],
+      },
+      ctx()
+    );
+
+    expect(result).toMatchObject({ success: false, error: { code: "validation_error" } });
+    const message = JSON.stringify(result);
+    expect(message).toContain("Routine definition /metadata/slug");
+    expect(message).toContain("Routine definition /metadata/lifecycle");
+    expect(message).toContain("Trigger triggers[0] /metadata/lifecycle");
+    expect(message).toContain("Trigger triggers[1] /spec/routineRef");
+    expect(soulWriter.apply).not.toHaveBeenCalled();
+  });
+
   it("maps writer failures without reporting a routine as committed", async () => {
     soulWriter.apply.mockRejectedValueOnce(
       new SoulWriteError(

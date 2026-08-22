@@ -121,7 +121,12 @@ const CREATE_SCHEMA = {
       minLength: 1,
       description: "Resource type name (e.g. 'ticket'). Lowercase, alphanumeric + hyphens.",
     },
-    schema: { type: "string", minLength: 1, description: "JSON Schema as a YAML string." },
+    schema: {
+      type: "string",
+      minLength: 1,
+      description:
+        'JSON Schema as a YAML string. For a link field, use exactly x-links: { target: "customer" }, where "customer" is an existing Resource type name.',
+    },
   },
 } as const;
 

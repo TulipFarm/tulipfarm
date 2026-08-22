@@ -1,10 +1,11 @@
 import type { EventEmitter } from "node:events";
-import { readFile } from "node:fs/promises";
+import type { Dirent } from "node:fs";
+import { readdir, readFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { DelegateToAgentInput, DelegationOutcome } from "@tulipfarm/agent-runtime";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { PLATFORM_RUNTIME_TOOLS } from "@tulipfarm/platform-tools";
-import { ajv, definitions } from "@tulipfarm/schema";
+import { ajv, definitions, SchemaValidationError } from "@tulipfarm/schema";
 import type { BundledSkill } from "@tulipfarm/soul";
 import {
   type GitSyncService,
@@ -81,11 +82,74 @@ const LOAD_SKILL_SCHEMA: Record<string, unknown> = {
 };
 const validateLoadSkill = ajv.compile(LOAD_SKILL_SCHEMA);
 
+function normalizedReferenceNames(references: readonly string[]): string[] {
+  return [...new Set(references.map((reference) => reference.replaceAll("\\", "/")))].sort(
+    (left, right) => left.localeCompare(right)
+  );
+}
+
+function isNotFound(error: unknown): boolean {
+  return (
+    error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT"
+  );
+}
+
+async function listReferenceFiles(base: string): Promise<string[]> {
+  const references: string[] = [];
+
+  async function walk(directory: string): Promise<void> {
+    let entries: Dirent[];
+    try {
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch (error) {
+      if (isNotFound(error)) return;
+      throw error;
+    }
+    for (const entry of entries) {
+      const path = resolve(directory, entry.name);
+      if (entry.isDirectory()) await walk(path);
+      else if (entry.isFile()) references.push(relative(base, path));
+    }
+  }
+
+  await walk(base);
+  return normalizedReferenceNames(references);
+}
+
+function referenceBase(
+  ctx: PlatformToolContext,
+  skillName: string,
+  soulSkill: SoulSkill | undefined,
+  bundledSkill: BundledSkill | undefined
+): string | undefined {
+  if (!soulSkill && bundledSkill) return resolve(bundledSkill.directory, "references");
+  return ctx.soulPath ? resolve(ctx.soulPath, "skills", skillName, "references") : undefined;
+}
+
+async function availableReferences(
+  base: string | undefined,
+  bundledSkill: BundledSkill | undefined
+): Promise<string[]> {
+  return bundledSkill
+    ? normalizedReferenceNames(bundledSkill.references)
+    : base
+      ? listReferenceFiles(base)
+      : [];
+}
+
+function missingReferenceMessage(skill: string, reference: string, available: readonly string[]) {
+  const availability =
+    available.length === 0
+      ? "No reference files are available."
+      : `Available references: ${available.join(", ")}.`;
+  return `Reference "${reference}" not found for Skill "${skill}". ${availability}`;
+}
+
 export const loadSkillTool = defineApiTool<PlatformToolContext>({
   name: "load_skill",
   requiresAmbient: ["soul"],
   description:
-    "Load a Skill's frontmatter and body by name so the agent can apply its instructions. Resolves Soul Skills before the read-only bundled overlay. Graceful not_found when the Skill is absent.",
+    "Load a Skill's frontmatter, body, and normalized available reference filenames by name so the agent can apply its instructions. Request only those advertised filenames with load_skill_reference. Resolves Soul Skills before the read-only bundled overlay. Graceful not_found when the Skill is absent.",
   mutating: false,
   tier: "platform",
   inputSchema: LOAD_SKILL_SCHEMA,
@@ -105,7 +169,33 @@ export const loadSkillTool = defineApiTool<PlatformToolContext>({
       ctx.bundledSkills,
       ctx.disabledBundledSkills
     );
-    if (skill) return ok({ name: skill.name, frontmatter: skill.frontmatter, body: skill.body });
+    if (skill) {
+      const soulSkill = ctx.soulLoader?.skills.get(name);
+      const bundledSkill = soulSkill
+        ? undefined
+        : ctx.disabledBundledSkills?.has(name)
+          ? undefined
+          : ctx.bundledSkills?.get(name);
+      try {
+        const references = await availableReferences(
+          referenceBase(ctx, name, soulSkill, bundledSkill),
+          bundledSkill
+        );
+        return ok({
+          name: skill.name,
+          frontmatter: skill.frontmatter,
+          body: skill.body,
+          references,
+        });
+      } catch (error) {
+        return err(
+          "internal_error",
+          `Skill "${name}" references could not be listed: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+      }
+    }
     return err("not_found", `Skill "${name}" not found.`);
   },
 });
@@ -126,7 +216,7 @@ const LOAD_SKILL_REFERENCE_SCHEMA: Record<string, unknown> = {
       type: "string",
       minLength: 1,
       description:
-        "Reference filename (e.g. 'migration-playbook.md') within the skill's references/ directory.",
+        "Reference filename within the Skill's references/ directory; use only a name advertised by load_skill.",
     },
   },
 };
@@ -136,7 +226,7 @@ export const loadSkillReferenceTool = defineApiTool<PlatformToolContext>({
   name: "load_skill_reference",
   requiresAmbient: ["soul"],
   description:
-    "Load a reference file from a skill's references/ directory. Use this to pull in supporting material (playbooks, templates) that are too large to include in the skill body.",
+    "Load a reference file from a Skill's references/ directory. Request only a filename advertised by load_skill. Use this to pull in supporting material that is too large to include in the Skill body.",
   mutating: false,
   tier: "platform",
   inputSchema: LOAD_SKILL_REFERENCE_SCHEMA,
@@ -154,13 +244,20 @@ export const loadSkillReferenceTool = defineApiTool<PlatformToolContext>({
     const bundledSkill = ctx.disabledBundledSkills?.has(skill)
       ? undefined
       : ctx.bundledSkills?.get(skill);
-    const base =
-      !soulSkill && bundledSkill
-        ? resolve(bundledSkill.directory, "references")
-        : ctx.soulPath
-          ? resolve(ctx.soulPath, "skills", skill, "references")
-          : undefined;
-    if (!base) return err("not_found", `Skill "${skill}" references directory not available.`);
+    const selectedBundledSkill = soulSkill ? undefined : bundledSkill;
+    const base = referenceBase(ctx, skill, soulSkill, selectedBundledSkill);
+    let references: string[];
+    try {
+      references = await availableReferences(base, selectedBundledSkill);
+    } catch (error) {
+      return err(
+        "internal_error",
+        `Skill "${skill}" references could not be listed: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+    if (!base) return err("not_found", missingReferenceMessage(skill, reference, references));
     // `reference` is model-controlled; contain reads to the selected Skill references directory.
     const refPath = resolve(base, reference);
     const rel = relative(base, refPath);
@@ -172,8 +269,16 @@ export const loadSkillReferenceTool = defineApiTool<PlatformToolContext>({
     try {
       const content = await readFile(refPath, "utf8");
       return ok({ skill, reference, content });
-    } catch {
-      return err("not_found", `Reference "${reference}" not found for skill "${skill}".`);
+    } catch (error) {
+      if (!isNotFound(error)) {
+        return err(
+          "internal_error",
+          `Reference "${reference}" for Skill "${skill}" could not be read: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+      }
+      return err("not_found", missingReferenceMessage(skill, reference, references));
     }
   },
 });
@@ -254,6 +359,13 @@ const ROUTINE_FORGE_SCHEMA: Record<string, unknown> = {
 };
 const validateRoutineForge = ajv.compile(ROUTINE_FORGE_SCHEMA);
 
+function canonicalValidationIssues(label: string, error: unknown): string[] {
+  if (error instanceof SchemaValidationError) {
+    return error.issues.map((issue) => `${label} ${issue.path || "/"}: ${issue.message}`);
+  }
+  return [`${label}: ${error instanceof Error ? error.message : String(error)}`];
+}
+
 export const routineForgeTool = defineApiTool<PlatformToolContext>({
   name: "routine_forge",
   requiresAmbient: ["soul"],
@@ -288,41 +400,64 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
     };
     if (!ROUTINE_NAME_RE.test(name)) return err("validation_error", "invalid routine name");
 
-    let routine: definitions.routine.RoutineDefinition;
-    let triggerDefinitions: definitions.trigger.TriggerDefinition[];
+    let routine: definitions.routine.RoutineDefinition | undefined;
+    const triggerDefinitions: definitions.trigger.TriggerDefinition[] = [];
+    const canonicalIssues: string[] = [];
     try {
       routine = definitions.routine.validateRoutineDefinition(definition).document;
-      triggerDefinitions = triggers.map(
-        (trigger) => definitions.trigger.validateTriggerDefinition(trigger).document
-      );
     } catch (error) {
-      return err("validation_error", error instanceof Error ? error.message : String(error));
+      canonicalIssues.push(...canonicalValidationIssues("Routine definition", error));
     }
-    if (routine.metadata.slug !== name)
-      return err("validation_error", "definition.metadata.slug must match name");
-    if (routine.metadata.lifecycle !== "published")
-      return err("validation_error", "definition.metadata.lifecycle must be published");
-    const unresolved = unresolvedRoutineResourceTypes(routine.spec, ctx.soulLoader?.resources);
-    if (unresolved !== undefined) return err(unresolved.code, unresolved.message);
+    for (const [index, trigger] of triggers.entries()) {
+      try {
+        triggerDefinitions.push(definitions.trigger.validateTriggerDefinition(trigger).document);
+      } catch (error) {
+        canonicalIssues.push(...canonicalValidationIssues(`Trigger triggers[${index}]`, error));
+      }
+    }
+    if (canonicalIssues.length > 0) {
+      return err(
+        "validation_error",
+        `Canonical definition validation failed:\n- ${canonicalIssues.join("\n- ")}`
+      );
+    }
+    if (routine === undefined || triggerDefinitions.length !== triggers.length) {
+      return err("internal_error", "Canonical definition validation produced no document.");
+    }
+    const consistencyIssues: string[] = [];
+    if (routine.metadata.slug !== name) {
+      consistencyIssues.push("Routine definition /metadata/slug: must match the Tool name");
+    }
+    if (routine.metadata.lifecycle !== "published") {
+      consistencyIssues.push("Routine definition /metadata/lifecycle: must be published");
+    }
     if (
       new Set(triggerDefinitions.map((trigger) => trigger.metadata.slug)).size !==
       triggerDefinitions.length
     ) {
-      return err("validation_error", "triggers must have unique metadata.slug values");
+      consistencyIssues.push("Trigger definitions /metadata/slug: values must be unique");
     }
-    for (const trigger of triggerDefinitions) {
-      if (trigger.metadata.lifecycle !== "published")
-        return err("validation_error", "trigger metadata.lifecycle must be published");
+    for (const [index, trigger] of triggerDefinitions.entries()) {
+      if (trigger.metadata.lifecycle !== "published") {
+        consistencyIssues.push(`Trigger triggers[${index}] /metadata/lifecycle: must be published`);
+      }
       if (
         trigger.spec.routineRef.name !== name ||
         trigger.spec.routineRef.version !== String(routine.metadata.authoredVersion)
       ) {
-        return err(
-          "validation_error",
-          "trigger spec.routineRef must match the Routine name and authored version"
+        consistencyIssues.push(
+          `Trigger triggers[${index}] /spec/routineRef: must match the Routine name and authored version`
         );
       }
     }
+    if (consistencyIssues.length > 0) {
+      return err(
+        "validation_error",
+        `Canonical definition consistency failed:\n- ${consistencyIssues.join("\n- ")}`
+      );
+    }
+    const unresolved = unresolvedRoutineResourceTypes(routine.spec, ctx.soulLoader?.resources);
+    if (unresolved !== undefined) return err(unresolved.code, unresolved.message);
 
     let write: Awaited<ReturnType<SoulWriter["apply"]>>;
     try {

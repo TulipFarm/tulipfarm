@@ -624,6 +624,13 @@ describe("resource_hooks_delete", () => {
 // ── RESOURCE_TYPE_TOOLS export ────────────────────────────────────────────────
 
 describe("RESOURCE_TYPE_TOOLS", () => {
+  it("gives create_resource_type an exact canonical x-links.target example", () => {
+    const inputSchema = createTool.inputSchema as {
+      properties: { schema: { description: string } };
+    };
+    expect(inputSchema.properties.schema.description).toContain('x-links: { target: "customer" }');
+  });
+
   it("exports 7 tools with correct mutating flags", () => {
     expect(RESOURCE_TYPE_TOOLS).toHaveLength(7);
     const byName = Object.fromEntries(RESOURCE_TYPE_TOOLS.map((t) => [t.name, t]));

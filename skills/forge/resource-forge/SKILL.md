@@ -56,6 +56,10 @@ Ask whether this Resource type references existing types. Encode each as `x-link
 field points at the target type's Record by `_id`. Links are validated on write (the target must
 exist) and orphaned (not cascaded) on delete.
 
+Use exactly `x-links: { target: "customer" }` on the referencing field, where `customer` is the
+existing Resource type name. `target` must be a non-empty string; never leave it blank or use an
+object.
+
 ### Step 4 — Generate Schema
 
 Construct a JSON Schema 2020-12 object:
