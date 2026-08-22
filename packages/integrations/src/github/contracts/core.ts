@@ -77,24 +77,18 @@ export function issueInput(properties: Record<string, unknown>, required: string
   };
 }
 
-/** Search accepts one repo, up to 25 repos, or adapter-resolved installation repos. */
-export function searchInput(properties: Record<string, unknown>, required: string[]) {
+/** Search stays on one explicit repository so live per-user entitlement has one concrete target. */
+export function searchInput(properties: Record<string, unknown>) {
   return {
     type: "object",
     additionalProperties: false,
-    required,
+    required: ["repository"],
     properties: {
-      repository: repositoryProperty,
-      repositories: {
-        type: "array",
-        minItems: 1,
-        maxItems: 25,
-        uniqueItems: true,
-        items: repositoryProperty,
+      repository: {
+        ...repositoryProperty,
         description:
-          "Search multiple repositories in one call instead of one `github_issue_search`/" +
-          "`github_pull_request_search` call per repository. Omit both `repository` and " +
-          "`repositories` to search every repository this business has installed GitHub for.",
+          "One explicit owner/name repository. Call `github_repository_list` first if you do " +
+          "not know which repository is installed.",
       },
       ...properties,
     },

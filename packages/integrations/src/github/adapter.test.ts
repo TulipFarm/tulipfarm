@@ -262,81 +262,16 @@ describe("GitHubAdapter reads", () => {
     expect(http.calls[0]?.query?.q).toContain("is:pr");
   });
 
-  it("ORs an explicit repositories list into one search call", async () => {
-    resolved = context({
-      installation: {
-        ...context().installation,
-        repositories: ["tulip/farm", "tulip/canary"],
-      },
-      grants: [
-        {
-          ...grant(ALL_ACTIONS),
-          spec: {
-            ...grant(ALL_ACTIONS).spec,
-            externalTargets: [
-              { type: GITHUB_REPOSITORY_TARGET, ids: ["tulip/farm", "tulip/canary"] },
-            ],
-          },
-        },
-      ],
-    });
+  it("authorizes a search against only its explicit repository", async () => {
     http.route("GET", "/search/issues", {
       status: 200,
       headers: {},
       body: { total_count: 0, items: [] },
     });
 
-    await dispatch(
-      intent(GITHUB_TOOL_IDS.issueSearch, { repositories: ["tulip/farm", "tulip/canary"] })
-    );
-
-    expect(http.calls[0]?.query?.q).toBe("repo:tulip/farm repo:tulip/canary is:issue state:open");
-  });
-
-  it("denies a multi-repository search before any provider call when one repo isn't granted", async () => {
-    resolved = context({
-      installation: {
-        ...context().installation,
-        repositories: ["tulip/farm", "tulip/canary"],
-      },
-      // Grant only covers tulip/farm — tulip/canary must still deny, fail-closed.
-    });
-
-    await expect(
-      dispatch(
-        intent(GITHUB_TOOL_IDS.issueSearch, { repositories: ["tulip/farm", "tulip/canary"] })
-      )
-    ).rejects.toThrow(AdapterDispatchError);
-    expect(http.calls).toHaveLength(0);
-  });
-
-  it("searches every installed repository when neither repository nor repositories is given", async () => {
-    resolved = context({
-      installation: {
-        ...context().installation,
-        repositories: ["tulip/farm"],
-      },
-    });
-    http.route("GET", "/search/issues", {
-      status: 200,
-      headers: {},
-      body: { total_count: 0, items: [] },
-    });
-
-    await dispatch(intent(GITHUB_TOOL_IDS.issueSearch, {}));
+    await dispatch(intent(GITHUB_TOOL_IDS.issueSearch, { repository: "tulip/farm" }));
 
     expect(http.calls[0]?.query?.q).toBe("repo:tulip/farm is:issue state:open");
-  });
-
-  it("requires an explicit repositories list for an account-wide installation, rather than widening", async () => {
-    resolved = context({
-      installation: { ...context().installation, repositories: "all" },
-    });
-
-    await expect(dispatch(intent(GITHUB_TOOL_IDS.issueSearch, {}))).rejects.toThrow(
-      AdapterDispatchError
-    );
-    expect(http.calls).toHaveLength(0);
   });
 });
 

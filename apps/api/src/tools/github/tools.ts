@@ -45,7 +45,9 @@ const GITHUB_TOOL_SPECS: Record<GitHubToolId, GitHubToolSpec> = {
   },
   [GITHUB_TOOL_IDS.issueSearch]: {
     name: "github_issue_search",
-    description: "Search a GitHub repository's issues by query and state.",
+    description:
+      "Search one explicitly named GitHub repository's issues by query and state. Call " +
+      "github_repository_list first if the repository is unknown.",
   },
   [GITHUB_TOOL_IDS.issueCreate]: {
     name: "github_issue_create",
@@ -73,7 +75,9 @@ const GITHUB_TOOL_SPECS: Record<GitHubToolId, GitHubToolSpec> = {
   },
   [GITHUB_TOOL_IDS.pullRequestSearch]: {
     name: "github_pull_request_search",
-    description: "Search a GitHub repository's pull requests by query and state.",
+    description:
+      "Search one explicitly named GitHub repository's pull requests by query and state. Call " +
+      "github_repository_list first if the repository is unknown.",
   },
   [GITHUB_TOOL_IDS.pullRequestCreate]: {
     name: "github_pull_request_create",
@@ -197,14 +201,7 @@ const repositoryRef = (id: string) => ({ type: GITHUB_AUTHZ_RESOURCE, id: `repo:
 function repositoryTargets(args: unknown): readonly ToolTargetRef[] {
   const source = recordArgs(args);
   const repository = stringValue(source, "repository");
-  if (repository !== undefined) return [repositoryRef(repository)];
-
-  const repositories = source.repositories;
-  if (!Array.isArray(repositories)) return [];
-  if (repositories.some((candidate) => typeof candidate !== "string")) return [];
-  return repositories
-    .filter((candidate): candidate is string => typeof candidate === "string")
-    .map((candidate) => repositoryRef(candidate));
+  return repository === undefined ? [] : [repositoryRef(repository)];
 }
 
 function allRepositoriesTarget(): readonly ToolTargetRef[] {
@@ -212,24 +209,12 @@ function allRepositoriesTarget(): readonly ToolTargetRef[] {
   return [{ type: GITHUB_AUTHZ_RESOURCE, id: `installation:${GITHUB_ALL_REPOSITORIES_TARGET_ID}` }];
 }
 
-function searchRepositoryTargets(args: unknown): readonly ToolTargetRef[] {
-  const source = recordArgs(args);
-  const repository = stringValue(source, "repository");
-  if (repository !== undefined) return [repositoryRef(repository)];
-
-  const repositories = source.repositories;
-  if (Array.isArray(repositories) && repositories.length > 0) return repositoryTargets(source);
-
-  // Missing repository selectors become installation-wide search; repo grants must not satisfy it.
-  return allRepositoriesTarget();
-}
-
 function repositoryCreateTargets(args: unknown): readonly ToolTargetRef[] {
   const owner = stringValue(recordArgs(args), "owner");
   return owner === undefined ? [] : [{ type: GITHUB_AUTHZ_RESOURCE, id: `org:${owner}` }];
 }
 
-/** Resolve the covering installation credential; installation-wide search requires exactly one. */
+/** Resolve the installation credential that covers the Tool's explicit target. */
 function githubCredentialSelector(toolId: GitHubToolId, args: unknown): GitHubInstallationSelector {
   const source = recordArgs(args);
   if (toolId === GITHUB_TOOL_IDS.repositoryCreate) {
@@ -239,23 +224,11 @@ function githubCredentialSelector(toolId: GitHubToolId, args: unknown): GitHubIn
   const repository = stringValue(source, "repository");
   if (repository !== undefined) return { kind: "repository", repository };
 
-  const repositories = source.repositories;
-  if (Array.isArray(repositories)) {
-    const named = repositories.filter((entry): entry is string => typeof entry === "string");
-    // Multi-repo calls require all repositories to resolve to the same installation.
-    const first = named[0];
-    if (first !== undefined && named.every((entry) => entry === first)) {
-      return { kind: "repository", repository: first };
-    }
-  }
   return { kind: "any" };
 }
 
 function githubTargets(toolId: GitHubToolId, args: unknown): readonly ToolTargetRef[] {
   if (toolId === GITHUB_TOOL_IDS.repositoryCreate) return repositoryCreateTargets(args);
-  if (toolId === GITHUB_TOOL_IDS.issueSearch || toolId === GITHUB_TOOL_IDS.pullRequestSearch) {
-    return searchRepositoryTargets(args);
-  }
   return repositoryTargets(args);
 }
 
@@ -393,7 +366,7 @@ function buildRepositoryListTool(tooling: GitHubTooling): ToolDef {
       // Listing enumerates every installed repository, so require installation-wide authority.
       targets: allRepositoriesTarget,
     },
-    credentialMode: "user_preferred",
+    credentialMode: "service",
     provider: "github",
     idempotency: "none",
     async handler(): Promise<ToolCallResult> {

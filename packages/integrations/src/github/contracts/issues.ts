@@ -40,20 +40,17 @@ const issueSearch = publish(
     toolId: GITHUB_TOOL_IDS.issueSearch,
     toolVersion: TOOL_VERSION,
     action: GITHUB_TOOL_IDS.issueSearch,
-    inputSchema: searchInput(
-      {
-        query: {
-          type: "string",
-          maxLength: 256,
-          description:
-            "Free-text search terms. Omit or pass an empty string to list every result matching " +
-            "only `state`, instead of filtering by text.",
-        },
-        state: { type: "string", enum: ["open", "closed", "all"] },
-        limit: { type: "integer", minimum: 1, maximum: 50 },
+    inputSchema: searchInput({
+      query: {
+        type: "string",
+        maxLength: 256,
+        description:
+          "Free-text search terms. Omit or pass an empty string to list every result matching " +
+          "only `state`, instead of filtering by text.",
       },
-      []
-    ),
+      state: { type: "string", enum: ["open", "closed", "all"] },
+      limit: { type: "integer", minimum: 1, maximum: 50 },
+    }),
     outputSchema: {
       type: "object",
       additionalProperties: false,

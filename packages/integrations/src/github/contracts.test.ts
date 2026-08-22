@@ -86,6 +86,19 @@ describe("GITHUB_TOOL_CONTRACTS", () => {
     );
   });
 
+  it("requires exactly one explicit repository for issue and pull request searches", () => {
+    for (const toolId of [GITHUB_TOOL_IDS.issueSearch, GITHUB_TOOL_IDS.pullRequestSearch]) {
+      const search = byId.get(toolId);
+      if (search === undefined) expect.unreachable(`${toolId} contract missing`);
+      const validate = ajv.compile(search.spec.inputSchema);
+
+      expect(validate({ repository: "tulip/farm", query: "crash" }), toolId).toBe(true);
+      expect(validate({ query: "crash" }), toolId).toBe(false);
+      expect(validate({ repositories: ["tulip/farm", "tulip/canary"] }), toolId).toBe(false);
+      expect(search.spec.inputSchema).not.toHaveProperty("properties.repositories");
+    }
+  });
+
   it("bounds label fan-out", () => {
     const label = byId.get(GITHUB_TOOL_IDS.issueLabel);
     if (label === undefined) expect.unreachable("label contract missing");

@@ -1,9 +1,17 @@
 import { generateKeyPairSync } from "node:crypto";
 import { GITHUB_TOOL_CONTRACTS, type IntegrationHttpRequest } from "@tulipfarm/integrations";
+import type { ArtifactService } from "@tulipfarm/run-kernel";
 import { principalSecretKey, type SecretsService } from "@tulipfarm/secrets";
 import type { IntegrationStore, PersistedRoutingSnapshot } from "@tulipfarm/storage";
 import { MemoryEffectStore } from "@tulipfarm/tool-broker";
-import type { RequestContext } from "@tulipfarm/tool-host";
+import {
+  CredentialResolver,
+  InMemoryToolCatalog,
+  LiveToolGate,
+  RegistryToolDispatcher,
+  type RequestContext,
+  type TurnAuthority,
+} from "@tulipfarm/tool-host";
 import { describe, expect, it } from "vitest";
 import { buildGitHubTooling } from "./compose";
 import { buildGitHubTools, GITHUB_REPOSITORY_LIST_TOOL_NAME } from "./tools";
@@ -246,7 +254,7 @@ describe("buildGitHubTools", () => {
     }
   });
 
-  it("uses an installation-scoped target for all-repository searches", () => {
+  it("derives one concrete repository target for searches", () => {
     const tooling = buildGitHubTooling({
       businessId: BUSINESS_ID,
       integrations: fakeIntegrationStore(),
@@ -258,23 +266,14 @@ describe("buildGitHubTools", () => {
     for (const name of ["github_issue_search", "github_pull_request_search"]) {
       const tool = tools.find((candidate) => candidate.name === name);
       if (tool?.definition === undefined) throw new Error(`${name} not registered`);
-      const targets = tool.definition.targetsFor({ query: "is:open" });
+      const targets = tool.definition.targetsFor({ repository: "tulip/farm", query: "is:open" });
 
-      expect(targets, name).toEqual([
-        { type: "integration.github", id: "installation:all-repositories" },
-      ]);
-      // A concrete repository grant must not satisfy an installation-wide search. Since both now
-      // live under `integration.github`, the separation is carried by the id prefix, so that is
-      // what this asserts — checking the old `github.repository` type would be vacuous.
-      expect(
-        targets.filter((target) => target.id?.startsWith("repo:")),
-        name
-      ).toEqual([]);
+      expect(targets, name).toEqual([{ type: "integration.github", id: "repo:tulip/farm" }]);
       expectNoNullishTargetText(targets);
     }
   });
 
-  it("mirrors the adapter's all-repository search fallback for malformed selectors", () => {
+  it("derives no widened search target for malformed selectors", () => {
     const tooling = buildGitHubTooling({
       businessId: BUSINESS_ID,
       integrations: fakeIntegrationStore(),
@@ -282,31 +281,23 @@ describe("buildGitHubTools", () => {
       http: fakeHttp({ number: 1, title: "t", state: "open" }),
     });
     const tools = buildGitHubTools(BUSINESS_ID, { ...tooling, effects: new MemoryEffectStore() });
-    const allRepositoriesTarget = [
-      { type: "integration.github", id: "installation:all-repositories" },
-    ];
     const cases: unknown[] = [
-      { query: "is:open", repositories: [] },
+      { query: "is:open" },
       { query: "is:open", repository: 42 },
       { query: "is:open", repository: null },
       { query: "is:open", repository: "" },
-      { query: "is:open", repositories: "tulip/farm" },
+      { query: "is:open", repositories: ["tulip/farm"] },
     ];
 
     for (const name of ["github_issue_search", "github_pull_request_search"]) {
       const tool = tools.find((candidate) => candidate.name === name);
       if (tool?.definition === undefined) throw new Error(`${name} not registered`);
       for (const args of cases) {
-        expect(tool.definition.targetsFor(args), `${name} ${JSON.stringify(args)}`).toEqual(
-          allRepositoriesTarget
-        );
+        expect(tool.definition.targetsFor(args), `${name} ${JSON.stringify(args)}`).toEqual([]);
       }
       expect(tool.definition.targetsFor({ query: "is:open", repository: "tulip/farm" })).toEqual([
         { type: "integration.github", id: "repo:tulip/farm" },
       ]);
-      expect(
-        tool.definition.targetsFor({ query: "is:open", repositories: ["tulip/farm"] })
-      ).toEqual([{ type: "integration.github", id: "repo:tulip/farm" }]);
     }
   });
 
@@ -507,6 +498,72 @@ describe("buildGitHubTools", () => {
     expect(await effects.list(BUSINESS_ID)).toEqual([]);
   });
 
+  it("lets hosted dispatch list repositories for a user with no personal GitHub account", async () => {
+    const tooling = buildGitHubTooling({
+      businessId: BUSINESS_ID,
+      integrations: fakeIntegrationStore(),
+      secrets: fakeSecretsService(),
+      http: fakeHttp({ number: 1, title: "t", state: "open" }),
+    });
+    const repositoryList = buildGitHubTools(BUSINESS_ID, {
+      ...tooling,
+      effects: new MemoryEffectStore(),
+    }).find((tool) => tool.name === GITHUB_REPOSITORY_LIST_TOOL_NAME);
+    if (repositoryList === undefined) throw new Error("github_repository_list not registered");
+
+    const registry = new InMemoryToolCatalog();
+    registry.register(repositoryList);
+    let personalCredentialLookups = 0;
+    const dispatcher = new RegistryToolDispatcher({
+      registry,
+      artifacts: {
+        read: async () => ({ content: { autonomy: "full" } }),
+      } as unknown as ArtifactService,
+      gate: new LiveToolGate(),
+      authorityLayers: {
+        resolvePrincipalLayer: async (name) => ({
+          name,
+          grants: [
+            {
+              action: "github.repository.list",
+              resourceType: "integration.github",
+              effect: "allow",
+            },
+          ],
+        }),
+      },
+      credentials: new CredentialResolver({
+        tokens: {
+          find: async () => {
+            personalCredentialLookups += 1;
+            return null;
+          },
+        },
+        personalCredentialProviders: new Set(["github"]),
+      }),
+    });
+    const authority: TurnAuthority = {
+      businessId: BUSINESS_ID,
+      runId: "run-list",
+      turn: { id: "turn-list", conversationId: "conversation-list", attempt: 1 },
+      subject: { kind: "user", id: "unlinked-user" },
+      source: "chat",
+      bundleDigest: "sha256:bundle",
+    };
+
+    const result = await dispatcher.dispatch(authority, {
+      callId: "call-list",
+      name: GITHUB_REPOSITORY_LIST_TOOL_NAME,
+      arguments: {},
+    });
+
+    expect(result).toMatchObject({
+      status: "succeeded",
+      output: { repositories: [{ repository: "tulip/farm", account: "tulip" }] },
+    });
+    expect(personalCredentialLookups).toBe(0);
+  });
+
   it("warns that a successful listing does not imply the caller can act on those repos", () => {
     // Regression for #552: github_repository_list succeeds off the App installation alone, but
     // every other GitHub Tool also requires the caller's own connected GitHub account. Without
@@ -524,6 +581,24 @@ describe("buildGitHubTools", () => {
 
     expect(tool.description).toContain("does not mean");
     expect(tool.description).toContain("connected their own GitHub account");
+    expect(tool.definition?.credentialMode).toBe("service");
+  });
+
+  it("tells the model to discover a repository before searching", () => {
+    const tooling = buildGitHubTooling({
+      businessId: BUSINESS_ID,
+      integrations: fakeIntegrationStore(),
+      secrets: fakeSecretsService(),
+      http: fakeHttp({ number: 1, title: "t", state: "open" }),
+    });
+    const tools = buildGitHubTools(BUSINESS_ID, { ...tooling, effects: new MemoryEffectStore() });
+
+    for (const name of ["github_issue_search", "github_pull_request_search"]) {
+      const tool = tools.find((candidate) => candidate.name === name);
+      if (tool === undefined) throw new Error(`${name} not registered`);
+      expect(tool.description, name).toContain("github_repository_list");
+      expect(tool.inputSchema, name).toMatchObject({ required: ["repository"] });
+    }
   });
 
   it("requires installation-wide authority to list installed repositories", () => {
