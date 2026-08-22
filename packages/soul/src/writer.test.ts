@@ -441,6 +441,45 @@ describe("SoulWriter.apply — cross-definition reference checking", () => {
 
     expect(result.paths).toContain("routines/greet/routine.yaml");
   });
+
+  it("does not block an unrelated write on a pre-existing broken reference elsewhere in the tree", async () => {
+    // Seed a Routine that already references a nonexistent Agent, bypassing SoulWriter so the
+    // tree starts in the same broken state a stale ref left it in.
+    mkdirSync(join(soulPath, "routines/greet"), { recursive: true });
+    writeFileSync(
+      join(soulPath, "routines/greet/routine.yaml"),
+      routineDoc("greet", "ghost-agent")
+    );
+    git("add", "routines/greet/routine.yaml");
+    git("commit", "--quiet", "-m", "seed broken routine");
+
+    const withTreeReader = new SoulWriter(
+      store,
+      logger,
+      { hasRemote: true, push: async () => {} },
+      { reload: async () => {} },
+      undefined,
+      new GitSoulTreeReader(soulPath)
+    );
+
+    const result = await withTreeReader.apply({
+      subject: "soul: add unrelated agent",
+      source: "api",
+      actor: ACTOR,
+      businessId: "biz-1",
+      changes: [
+        {
+          op: "put",
+          target: { kind: "ModelProfile", slug: "default" },
+          content: modelProfileDoc("default"),
+        },
+        { op: "put", target: { kind: "Agent", slug: "triager" }, content: agentDoc("triager") },
+      ],
+    });
+
+    expect(result.paths).toContain("agents/triager/agent.yaml");
+    expect(existsSync(join(soulPath, "routines/greet/routine.yaml"))).toBe(true);
+  });
 });
 
 describe("SoulWriter.apply — atomicity", () => {

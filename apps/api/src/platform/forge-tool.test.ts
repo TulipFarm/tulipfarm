@@ -1,10 +1,10 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
-import type { SoulWriter } from "@tulipfarm/soul";
+import type { RoutineCatalog, SoulRoutine, SoulWriter } from "@tulipfarm/soul";
 import { SoulWriteError, type SoulWriteErrorCode } from "@tulipfarm/soul";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { parse as parseYaml } from "yaml";
 import type { PlatformToolContext } from "./tools";
-import { routineForgeTool } from "./tools";
+import { routineDeleteTool, routineForgeTool } from "./tools";
 
 const VALID_ROUTINE = {
   apiVersion: "tulipfarm.ai/v1",
@@ -229,5 +229,80 @@ describe("routine_forge", () => {
   it("describes canonical Routine and Trigger requirements", () => {
     expect(routineForgeTool.description).toContain("canonical published Routine");
     expect(routineForgeTool.description).toContain("canonical published Trigger");
+  });
+});
+
+describe("routine_delete", () => {
+  let soulWriter: ReturnType<typeof makeSoulWriter>;
+  let onRoutinesChanged: (() => Promise<void>) & ReturnType<typeof vi.fn>;
+  let routineCatalog: RoutineCatalog & { list: ReturnType<typeof vi.fn> };
+
+  beforeEach(() => {
+    soulWriter = makeSoulWriter();
+    onRoutinesChanged = vi.fn(async () => {}) as typeof onRoutinesChanged;
+    routineCatalog = { list: vi.fn().mockResolvedValue([]) };
+  });
+
+  function ctx(routines: Map<string, SoulRoutine> = new Map()): PlatformToolContext {
+    return {
+      soulWriter,
+      onRoutinesChanged,
+      routineCatalog,
+      soulLoader: { skills: new Map(), agents: new Map(), routines },
+    };
+  }
+
+  function soulRoutine(name: string): SoulRoutine {
+    return { name, config: {}, hasHooks: false };
+  }
+
+  it("reports not_found for a Routine the Soul does not have", async () => {
+    const result = await routineDeleteTool.handler({ name: "ghost" }, ctx());
+
+    expect(result).toMatchObject({ success: false, error: { code: "not_found" } });
+    expect(soulWriter.apply).not.toHaveBeenCalled();
+  });
+
+  it("deletes a Routine and every Trigger the catalog still lists for it", async () => {
+    routineCatalog.list.mockResolvedValue([
+      {
+        id: "1",
+        slug: "daily-report",
+        displayName: null,
+        authoredVersion: 1,
+        triggers: [{ slug: "daily-report-manual", type: "manual", summary: "manual" }],
+      },
+    ]);
+
+    const result = await routineDeleteTool.handler(
+      { name: "daily-report" },
+      ctx(new Map([["daily-report", soulRoutine("daily-report")]]))
+    );
+
+    expect(result).toMatchObject({
+      success: true,
+      data: { name: "daily-report", deleted: true, triggersDeleted: ["daily-report-manual"] },
+    });
+    expect(soulWriter.apply).toHaveBeenCalledOnce();
+    const request = soulWriter.apply.mock.calls[0][0] as { changes: unknown[] };
+    expect(request.changes).toEqual([
+      { op: "deleteArtifact", kind: "Routine", slug: "daily-report" },
+      { op: "deleteArtifact", kind: "Trigger", slug: "daily-report-manual" },
+    ]);
+    expect(onRoutinesChanged).toHaveBeenCalledOnce();
+  });
+
+  it("maps a rejected delete onto the Tool's error vocabulary", async () => {
+    soulWriter.apply.mockRejectedValueOnce(
+      new SoulWriteError("CONFLICT" as SoulWriteErrorCode, "Soul write: base commit stale")
+    );
+
+    const result = await routineDeleteTool.handler(
+      { name: "daily-report" },
+      ctx(new Map([["daily-report", soulRoutine("daily-report")]]))
+    );
+
+    expect(result).toMatchObject({ success: false, error: { code: "unavailable" } });
+    expect(onRoutinesChanged).not.toHaveBeenCalled();
   });
 });

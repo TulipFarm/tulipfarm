@@ -467,11 +467,18 @@ export class SoulWriter {
       validateSoulSemantics([...kept, ...proposed]);
     } catch (error) {
       if (!(error instanceof SoulSemanticValidationError)) throw error;
+      // A pre-existing definition elsewhere in the tree can already be broken (e.g. a Routine left
+      // pointing at a deleted Agent). That is not this changeset's fault, and blocking an unrelated
+      // write on it leaves the operator unable to fix anything through chat. Only reject when the
+      // changeset itself touches the definition an issue is reported against.
+      const relevant = error.issues.filter((issue) => touched.has(issue.subject.replace(":", " ")));
+      if (relevant.length === 0) return;
+      const relevantError = new SoulSemanticValidationError(relevant);
       throw new SoulWriteError(
         "VALIDATION_FAILED",
-        `Soul write: ${describeSemanticIssues(error)}`,
+        `Soul write: ${describeSemanticIssues(relevantError)}`,
         {
-          cause: error,
+          cause: relevantError,
         }
       );
     }
