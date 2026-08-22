@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.14.1](https://github.com/TulipFarm/tulipfarm/compare/v0.14.0...v0.14.1) (2026-08-22)
+
+### Bug Fixes
+
+* **curator:** repair UUID cast, date-time schema validation, and concurrency handling ([#585](https://github.com/TulipFarm/tulipfarm/issues/585)) ([23a32ae](https://github.com/TulipFarm/tulipfarm/commit/23a32ae9ddbd982345c53477c1fc6f9faed35ac0))
+
 ## [0.14.0](https://github.com/TulipFarm/tulipfarm/compare/v0.13.6...v0.14.0) (2026-08-22)
 
 ### Features
