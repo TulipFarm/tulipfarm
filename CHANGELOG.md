@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.2](https://github.com/TulipFarm/tulipfarm/compare/v0.14.1...v0.14.2) (2026-08-22)
+
+### Bug Fixes
+
+* **agent-runtime:** stop repairing a rejection that never changes ([#588](https://github.com/TulipFarm/tulipfarm/issues/588)) ([42f384f](https://github.com/TulipFarm/tulipfarm/commit/42f384ffc5350525b731296bca198101284d93f5))
+* **tools:** return web fetch faults as answers the Agent can act on ([#587](https://github.com/TulipFarm/tulipfarm/issues/587)) ([4bd10ee](https://github.com/TulipFarm/tulipfarm/commit/4bd10ee29c3f30d4f8d76b4f6d23b5adae16fd3a))
+
 ## [0.14.1](https://github.com/TulipFarm/tulipfarm/compare/v0.14.0...v0.14.1) (2026-08-22)
 
 ### Bug Fixes
