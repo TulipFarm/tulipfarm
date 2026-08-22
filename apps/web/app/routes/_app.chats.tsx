@@ -122,110 +122,112 @@ export default function ChatsRoute() {
   const recent = sorted.filter((chat) => !chat.starred);
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col px-4 py-8 sm:px-6 sm:py-10">
-      <header className="flex flex-col gap-5 border-b border-border pb-7 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-sm font-medium text-primary">Chat history</p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight">Your chats</h1>
-          <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
-            Return to previous work, pin important chats, or rename them for easier scanning.
-          </p>
-        </div>
-        <Button asChild className="self-start sm:self-auto">
-          <Link to="/">
-            <Plus aria-hidden />
-            New chat
-          </Link>
-        </Button>
-      </header>
-
-      <section aria-label="Chat history" className="pt-6">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <label className="relative block min-w-0 flex-1">
-            <span className="sr-only">Search chats</span>
-            <Search
-              aria-hidden
-              className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-            />
-            <input
-              type="search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search by title"
-              aria-label="search chats"
-              className={inputClass}
-            />
-          </label>
-          <p aria-live="polite" className="shrink-0 text-xs text-muted-foreground tabular-nums">
-            {searching
-              ? "Searching…"
-              : `${sorted.length} ${sorted.length === 1 ? "chat" : "chats"}`}
-          </p>
-        </div>
-
-        {error ? (
-          <p
-            role="alert"
-            className="mt-4 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive"
-          >
-            Request failed. {error}
-          </p>
-        ) : null}
-
-        {sorted.length === 0 ? (
-          <div className="mt-8 flex flex-col items-start rounded-md bg-muted/50 px-5 py-8">
-            <MessageSquare aria-hidden className="size-5 text-muted-foreground" />
-            <h2 className="mt-4 text-base font-semibold">
-              {query.trim() ? "No matching chats" : "No chats yet"}
-            </h2>
-            <p className="mt-1 max-w-md text-sm leading-6 text-muted-foreground">
-              {query.trim()
-                ? "Try a different title or clear the search."
-                : "Start a chat and it will appear here for you to revisit."}
+    <div className="h-full min-h-0 overflow-y-auto">
+      <div className="mx-auto flex w-full max-w-5xl flex-col px-4 py-8 sm:px-6 sm:py-10">
+        <header className="flex flex-col gap-5 border-b border-border pb-7 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-sm font-medium text-primary">Chat history</p>
+            <h1 className="mt-2 text-3xl font-semibold tracking-tight">Your chats</h1>
+            <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
+              Return to previous work, pin important chats, or rename them for easier scanning.
             </p>
-            {!query.trim() ? (
-              <Link to="/" className="mt-4 text-sm font-medium text-primary hover:underline">
-                Start a new chat
-              </Link>
-            ) : null}
           </div>
-        ) : (
-          <div className="mt-8 space-y-8">
-            {starred.length > 0 ? (
-              <ChatGroup
-                title="Starred"
-                items={starred}
-                renamingId={renamingId}
-                onRename={onRename}
-                onCancelRename={() => setRenamingId(null)}
-                onToggleStar={onToggleStar}
-                onStartRename={setRenamingId}
-                onDelete={setPendingDelete}
+          <Button asChild className="self-start sm:self-auto">
+            <Link to="/">
+              <Plus aria-hidden />
+              New chat
+            </Link>
+          </Button>
+        </header>
+
+        <section aria-label="Chat history" className="pt-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <label className="relative block min-w-0 flex-1">
+              <span className="sr-only">Search chats</span>
+              <Search
+                aria-hidden
+                className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
               />
-            ) : null}
-            {recent.length > 0 ? (
-              <ChatGroup
-                title="Recent"
-                items={recent}
-                renamingId={renamingId}
-                onRename={onRename}
-                onCancelRename={() => setRenamingId(null)}
-                onToggleStar={onToggleStar}
-                onStartRename={setRenamingId}
-                onDelete={setPendingDelete}
+              <input
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search by title"
+                aria-label="search chats"
+                className={inputClass}
               />
-            ) : null}
+            </label>
+            <p aria-live="polite" className="shrink-0 text-xs text-muted-foreground tabular-nums">
+              {searching
+                ? "Searching…"
+                : `${sorted.length} ${sorted.length === 1 ? "chat" : "chats"}`}
+            </p>
           </div>
-        )}
-      </section>
-      <ConfirmModal
-        open={pendingDelete !== null}
-        onClose={() => setPendingDelete(null)}
-        onConfirm={() => void onDelete()}
-        title="Delete chat"
-        description={`Permanently delete “${pendingDelete?.title ?? "New chat"}” and all of its messages? This cannot be undone.`}
-        busy={deleting}
-      />
+
+          {error ? (
+            <p
+              role="alert"
+              className="mt-4 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive"
+            >
+              Request failed. {error}
+            </p>
+          ) : null}
+
+          {sorted.length === 0 ? (
+            <div className="mt-8 flex flex-col items-start rounded-md bg-muted/50 px-5 py-8">
+              <MessageSquare aria-hidden className="size-5 text-muted-foreground" />
+              <h2 className="mt-4 text-base font-semibold">
+                {query.trim() ? "No matching chats" : "No chats yet"}
+              </h2>
+              <p className="mt-1 max-w-md text-sm leading-6 text-muted-foreground">
+                {query.trim()
+                  ? "Try a different title or clear the search."
+                  : "Start a chat and it will appear here for you to revisit."}
+              </p>
+              {!query.trim() ? (
+                <Link to="/" className="mt-4 text-sm font-medium text-primary hover:underline">
+                  Start a new chat
+                </Link>
+              ) : null}
+            </div>
+          ) : (
+            <div className="mt-8 space-y-8">
+              {starred.length > 0 ? (
+                <ChatGroup
+                  title="Starred"
+                  items={starred}
+                  renamingId={renamingId}
+                  onRename={onRename}
+                  onCancelRename={() => setRenamingId(null)}
+                  onToggleStar={onToggleStar}
+                  onStartRename={setRenamingId}
+                  onDelete={setPendingDelete}
+                />
+              ) : null}
+              {recent.length > 0 ? (
+                <ChatGroup
+                  title="Recent"
+                  items={recent}
+                  renamingId={renamingId}
+                  onRename={onRename}
+                  onCancelRename={() => setRenamingId(null)}
+                  onToggleStar={onToggleStar}
+                  onStartRename={setRenamingId}
+                  onDelete={setPendingDelete}
+                />
+              ) : null}
+            </div>
+          )}
+        </section>
+        <ConfirmModal
+          open={pendingDelete !== null}
+          onClose={() => setPendingDelete(null)}
+          onConfirm={() => void onDelete()}
+          title="Delete chat"
+          description={`Permanently delete “${pendingDelete?.title ?? "New chat"}” and all of its messages? This cannot be undone.`}
+          busy={deleting}
+        />
+      </div>
     </div>
   );
 }

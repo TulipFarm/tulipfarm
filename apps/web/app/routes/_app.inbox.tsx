@@ -24,29 +24,31 @@ export default function InboxRoute() {
     );
   }
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-4 px-4 py-6 sm:px-6">
-      <header>
-        <h1 className="text-lg font-semibold">Inbox</h1>
-        <p className="text-xs text-muted-foreground">
-          Exact server-authorized decisions and waiting work.
-        </p>
-      </header>
-      {items.map((item) => (
-        <InboxItem
-          key={item.id}
-          item={item}
-          busy={busyId === item.id}
-          onDecision={async (decision) => {
-            setBusyId(item.id);
-            try {
-              await decideApproval(item, decision);
-              revalidator.revalidate();
-            } finally {
-              setBusyId(undefined);
-            }
-          }}
-        />
-      ))}
+    <div className="h-full min-h-0 overflow-y-auto">
+      <div className="mx-auto flex max-w-4xl flex-col gap-4 px-4 py-6 sm:px-6">
+        <header>
+          <h1 className="text-lg font-semibold">Inbox</h1>
+          <p className="text-xs text-muted-foreground">
+            Exact server-authorized decisions and waiting work.
+          </p>
+        </header>
+        {items.map((item) => (
+          <InboxItem
+            key={item.id}
+            item={item}
+            busy={busyId === item.id}
+            onDecision={async (decision) => {
+              setBusyId(item.id);
+              try {
+                await decideApproval(item, decision);
+                revalidator.revalidate();
+              } finally {
+                setBusyId(undefined);
+              }
+            }}
+          />
+        ))}
+      </div>
     </div>
   );
 }

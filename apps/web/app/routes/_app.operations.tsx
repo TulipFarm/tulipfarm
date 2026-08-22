@@ -32,16 +32,18 @@ export default function OperationsRoute() {
     }
   }
   return (
-    <div className="mx-auto max-w-6xl space-y-4 px-4 py-6 sm:px-6">
-      {killSwitches ? (
-        <KillSwitchPanel model={killSwitches} onChanged={() => revalidator.revalidate()} />
-      ) : null}
-      <OperationsConsole
-        model={model}
-        busy={busy}
-        onCommand={command}
-        onRefresh={() => revalidator.revalidate()}
-      />
+    <div className="h-full min-h-0 overflow-y-auto">
+      <div className="mx-auto max-w-6xl space-y-4 px-4 py-6 sm:px-6">
+        {killSwitches ? (
+          <KillSwitchPanel model={killSwitches} onChanged={() => revalidator.revalidate()} />
+        ) : null}
+        <OperationsConsole
+          model={model}
+          busy={busy}
+          onCommand={command}
+          onRefresh={() => revalidator.revalidate()}
+        />
+      </div>
     </div>
   );
 }

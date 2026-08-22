@@ -568,7 +568,7 @@ export function AppShell({ children, user }: { children: ReactNode; user?: Sessi
             </span>
           </div>
         </header>
-        <main id="main-content" tabIndex={-1} className="min-h-0 min-w-0 flex-1 overflow-auto">
+        <main id="main-content" tabIndex={-1} className="min-h-0 min-w-0 flex-1 overflow-hidden">
           {children}
         </main>
       </div>

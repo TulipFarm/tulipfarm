@@ -30,21 +30,23 @@ export default function SpaceGraphRoute() {
   const base = `/knowledge/spaces/${encodeURIComponent(space.id)}`;
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 px-6 py-8">
-      <nav
-        aria-label="Breadcrumb"
-        className="flex items-center gap-1 text-[0.625rem] font-medium uppercase tracking-[0.2em] text-muted-foreground"
-      >
-        <Link to={base} className="transition-colors hover:text-foreground">
-          {space.name}
-        </Link>
-        <span aria-hidden className="opacity-40">
-          /
-        </span>
-        <span className="text-foreground">graph</span>
-      </nav>
-      <h1 className="text-base font-bold text-foreground">Cross-link graph</h1>
-      <SpaceGraphView graph={graph} pages={pages} />
+    <div className="h-full min-h-0 overflow-y-auto">
+      <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 px-6 py-8">
+        <nav
+          aria-label="Breadcrumb"
+          className="flex items-center gap-1 text-[0.625rem] font-medium uppercase tracking-[0.2em] text-muted-foreground"
+        >
+          <Link to={base} className="transition-colors hover:text-foreground">
+            {space.name}
+          </Link>
+          <span aria-hidden className="opacity-40">
+            /
+          </span>
+          <span className="text-foreground">graph</span>
+        </nav>
+        <h1 className="text-base font-bold text-foreground">Cross-link graph</h1>
+        <SpaceGraphView graph={graph} pages={pages} />
+      </div>
     </div>
   );
 }

@@ -78,73 +78,75 @@ export default function AcceptInvite() {
   }
 
   return (
-    <section className="mx-auto flex min-h-svh max-w-sm flex-col justify-center px-6 py-16">
-      <p className="text-[0.625rem] font-medium uppercase tracking-[0.2em] text-primary">
-        [ ACCEPT INVITE ]
-      </p>
-      <h1 className="mt-1 text-2xl font-semibold text-foreground">Choose your password</h1>
+    <div className="h-full min-h-0 overflow-y-auto">
+      <section className="mx-auto flex min-h-full max-w-sm flex-col justify-center px-6 py-16">
+        <p className="text-[0.625rem] font-medium uppercase tracking-[0.2em] text-primary">
+          [ ACCEPT INVITE ]
+        </p>
+        <h1 className="mt-1 text-2xl font-semibold text-foreground">Choose your password</h1>
 
-      {loading ? (
-        <p className="mt-1 text-sm text-muted-foreground">Checking this link…</p>
-      ) : dead ? (
-        <>
-          <p role="alert" className="mt-1 text-sm text-destructive">
-            error: {error}
-          </p>
-          <p className="mt-3 text-sm text-muted-foreground">
-            Invite links are single-use and expire. Ask an admin for a new one.
-          </p>
-        </>
-      ) : (
-        <>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Setting the password for <strong className="text-foreground">{email}</strong>.
-          </p>
+        {loading ? (
+          <p className="mt-1 text-sm text-muted-foreground">Checking this link…</p>
+        ) : dead ? (
+          <>
+            <p role="alert" className="mt-1 text-sm text-destructive">
+              error: {error}
+            </p>
+            <p className="mt-3 text-sm text-muted-foreground">
+              Invite links are single-use and expire. Ask an admin for a new one.
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Setting the password for <strong className="text-foreground">{email}</strong>.
+            </p>
 
-          <form onSubmit={onSubmit} className="mt-8 flex flex-col gap-3">
-            {error ? (
-              <p
-                role="alert"
-                className="rounded-sm border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+            <form onSubmit={onSubmit} className="mt-8 flex flex-col gap-3">
+              {error ? (
+                <p
+                  role="alert"
+                  className="rounded-sm border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                >
+                  error: {error}
+                </p>
+              ) : null}
+
+              <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                password
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  className={inputClass}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  aria-label="password"
+                />
+              </label>
+
+              <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                confirm password
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  className={inputClass}
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  aria-label="confirm password"
+                />
+              </label>
+
+              <Button
+                type="submit"
+                className="mt-1 rounded-sm"
+                disabled={busy || password.length === 0 || confirmPassword.length === 0}
               >
-                error: {error}
-              </p>
-            ) : null}
-
-            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-              password
-              <input
-                type="password"
-                autoComplete="new-password"
-                className={inputClass}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                aria-label="password"
-              />
-            </label>
-
-            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-              confirm password
-              <input
-                type="password"
-                autoComplete="new-password"
-                className={inputClass}
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                aria-label="confirm password"
-              />
-            </label>
-
-            <Button
-              type="submit"
-              className="mt-1 rounded-sm"
-              disabled={busy || password.length === 0 || confirmPassword.length === 0}
-            >
-              {busy ? "Setting password…" : "Set password and sign in"}
-            </Button>
-          </form>
-        </>
-      )}
-    </section>
+                {busy ? "Setting password…" : "Set password and sign in"}
+              </Button>
+            </form>
+          </>
+        )}
+      </section>
+    </div>
   );
 }

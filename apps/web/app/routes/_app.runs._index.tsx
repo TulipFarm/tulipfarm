@@ -44,39 +44,43 @@ export default function RunsRoute() {
   }
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-6 sm:px-6">
-      <h1 className="text-sm font-medium uppercase tracking-[0.2em] text-muted-foreground">Runs</h1>
-      <ul className="divide-y divide-border border border-border bg-card">
-        {runs.map((run) => (
-          <li key={run.id}>
-            <Link
-              to={`/runs/${encodeURIComponent(run.id)}`}
-              className="grid gap-1 px-3 py-2 text-xs hover:bg-muted sm:grid-cols-4 sm:items-center"
-            >
-              <span className="rounded-sm border border-border px-2 py-1 text-center">
-                {run.status}
-              </span>
-              <strong className="truncate">
-                {run.routineId}@{run.routineVersion}
-              </strong>
-              <code className="truncate text-muted-foreground">{run.id}</code>
-              <span className="text-muted-foreground sm:text-right">
-                {timestamp(run.createdAt)}
-              </span>
-            </Link>
-          </li>
-        ))}
-      </ul>
-      {cursor ? (
-        <button
-          type="button"
-          disabled={busy}
-          onClick={loadMore}
-          className="self-start rounded-sm border border-border px-2.5 py-1.5 text-xs hover:bg-muted disabled:opacity-60"
-        >
-          {busy ? "Loading…" : "Load more"}
-        </button>
-      ) : null}
+    <div className="h-full min-h-0 overflow-y-auto">
+      <div className="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-6 sm:px-6">
+        <h1 className="text-sm font-medium uppercase tracking-[0.2em] text-muted-foreground">
+          Runs
+        </h1>
+        <ul className="divide-y divide-border border border-border bg-card">
+          {runs.map((run) => (
+            <li key={run.id}>
+              <Link
+                to={`/runs/${encodeURIComponent(run.id)}`}
+                className="grid gap-1 px-3 py-2 text-xs hover:bg-muted sm:grid-cols-4 sm:items-center"
+              >
+                <span className="rounded-sm border border-border px-2 py-1 text-center">
+                  {run.status}
+                </span>
+                <strong className="truncate">
+                  {run.routineId}@{run.routineVersion}
+                </strong>
+                <code className="truncate text-muted-foreground">{run.id}</code>
+                <span className="text-muted-foreground sm:text-right">
+                  {timestamp(run.createdAt)}
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+        {cursor ? (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={loadMore}
+            className="self-start rounded-sm border border-border px-2.5 py-1.5 text-xs hover:bg-muted disabled:opacity-60"
+          >
+            {busy ? "Loading…" : "Load more"}
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }

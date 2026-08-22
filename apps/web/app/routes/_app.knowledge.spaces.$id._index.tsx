@@ -54,91 +54,93 @@ export default function SpaceHome() {
   }
 
   return (
-    <article className="mx-auto flex w-full max-w-3xl flex-col gap-5 px-6 py-8">
-      <header className="flex flex-col gap-2">
-        <h1 className="text-2xl font-bold tracking-tight text-foreground">{space.name}</h1>
-        {space.description ? (
-          <p className="text-sm text-muted-foreground">{space.description}</p>
-        ) : null}
-      </header>
+    <div className="h-full min-h-0 overflow-y-auto">
+      <article className="mx-auto flex w-full max-w-3xl flex-col gap-5 px-6 py-8">
+        <header className="flex flex-col gap-2">
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">{space.name}</h1>
+          {space.description ? (
+            <p className="text-sm text-muted-foreground">{space.description}</p>
+          ) : null}
+        </header>
 
-      <div className="flex flex-wrap items-center gap-1.5 border-y border-border py-2.5">
-        <Button asChild size="sm" className="cursor-pointer">
-          <Link to={`${base}/pages/new`}>
-            <Plus aria-hidden />
-            New page
-          </Link>
-        </Button>
-        <Button asChild variant="ghost" size="sm" className="cursor-pointer">
-          <Link to={`${base}/pages/new?path=index`}>
-            <Pencil aria-hidden />
-            Edit front page
-          </Link>
-        </Button>
-        <Button asChild variant="ghost" size="sm" className="cursor-pointer">
-          <Link to={`${base}/graph`}>
-            <Network aria-hidden />
-            Graph
-          </Link>
-        </Button>
-
-        <div className="ml-auto flex items-center gap-1">
-          <Button
-            asChild
-            variant="ghost"
-            size="icon"
-            className="size-8 cursor-pointer"
-            aria-label="Space settings"
-            title="Space settings"
-          >
-            <Link to={`${base}/edit`}>
-              <Settings aria-hidden />
+        <div className="flex flex-wrap items-center gap-1.5 border-y border-border py-2.5">
+          <Button asChild size="sm" className="cursor-pointer">
+            <Link to={`${base}/pages/new`}>
+              <Plus aria-hidden />
+              New page
+            </Link>
+          </Button>
+          <Button asChild variant="ghost" size="sm" className="cursor-pointer">
+            <Link to={`${base}/pages/new?path=index`}>
+              <Pencil aria-hidden />
+              Edit front page
+            </Link>
+          </Button>
+          <Button asChild variant="ghost" size="sm" className="cursor-pointer">
+            <Link to={`${base}/graph`}>
+              <Network aria-hidden />
+              Graph
             </Link>
           </Button>
 
-          <Divider />
-          {confirming ? (
-            <>
-              <Button
-                variant="destructive"
-                size="sm"
-                className="cursor-pointer"
-                onClick={onDelete}
-                disabled={deleting}
-              >
-                {deleting ? "deleting…" : "Confirm delete"}
-              </Button>
+          <div className="ml-auto flex items-center gap-1">
+            <Button
+              asChild
+              variant="ghost"
+              size="icon"
+              className="size-8 cursor-pointer"
+              aria-label="Space settings"
+              title="Space settings"
+            >
+              <Link to={`${base}/edit`}>
+                <Settings aria-hidden />
+              </Link>
+            </Button>
+
+            <Divider />
+            {confirming ? (
+              <>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className="cursor-pointer"
+                  onClick={onDelete}
+                  disabled={deleting}
+                >
+                  {deleting ? "deleting…" : "Confirm delete"}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="cursor-pointer"
+                  onClick={() => setConfirming(false)}
+                  disabled={deleting}
+                >
+                  Cancel
+                </Button>
+              </>
+            ) : (
               <Button
                 variant="ghost"
                 size="sm"
-                className="cursor-pointer"
-                onClick={() => setConfirming(false)}
-                disabled={deleting}
+                className="cursor-pointer text-destructive hover:bg-destructive/10 hover:text-destructive"
+                onClick={() => setConfirming(true)}
               >
-                Cancel
+                <Trash2 aria-hidden />
+                Delete
               </Button>
-            </>
-          ) : (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="cursor-pointer text-destructive hover:bg-destructive/10 hover:text-destructive"
-              onClick={() => setConfirming(true)}
-            >
-              <Trash2 aria-hidden />
-              Delete
-            </Button>
-          )}
+            )}
+          </div>
         </div>
-      </div>
 
-      {error ? <p className="text-sm text-destructive">error: {error}</p> : null}
+        {error ? <p className="text-sm text-destructive">error: {error}</p> : null}
 
-      {/* wikiLinks: the rewritten `/knowledge/...` page links render as in-SPA <Link>s, not new tabs. */}
-      <MarkdownView wikiLinks>
-        {rewriteOkfLinks(listing, space.id, buildPageResolver(pages))}
-      </MarkdownView>
-    </article>
+        {/* wikiLinks: the rewritten `/knowledge/...` page links render as in-SPA <Link>s, not new tabs. */}
+        <MarkdownView wikiLinks>
+          {rewriteOkfLinks(listing, space.id, buildPageResolver(pages))}
+        </MarkdownView>
+      </article>
+    </div>
   );
 }
 

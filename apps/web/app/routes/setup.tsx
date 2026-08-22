@@ -154,65 +154,67 @@ export default function SetupRoute() {
   const disabled = question === 2 ? password.length < 8 : values[question]?.trim().length === 0;
 
   return (
-    <main className="flex min-h-svh flex-col items-center justify-center gap-10 px-6 py-12">
-      <TulipGrowth stage={stage} />
-      <p role="status" className="sr-only">
-        {question} of 4 answered
-      </p>
+    <main className="h-full min-h-0 overflow-y-auto">
+      <div className="flex min-h-full flex-col items-center justify-center gap-10 px-6 py-12">
+        <TulipGrowth stage={stage} />
+        <p role="status" className="sr-only">
+          {question} of 4 answered
+        </p>
 
-      <div className="flex w-full max-w-sm flex-col gap-6">
-        <h1
-          ref={headingRef}
-          tabIndex={-1}
-          className="text-center text-xl font-semibold text-foreground outline-none"
-        >
-          Let's get your account set up
-        </h1>
+        <div className="flex w-full max-w-sm flex-col gap-6">
+          <h1
+            ref={headingRef}
+            tabIndex={-1}
+            className="text-center text-xl font-semibold text-foreground outline-none"
+          >
+            Let's get your account set up
+          </h1>
 
-        {error && <ErrorAlert message={error} />}
+          {error && <ErrorAlert message={error} />}
 
-        <form onSubmit={onSubmit} className="flex flex-col gap-4">
-          <PromptField
-            ref={inputRef}
-            label={current.label}
-            hint={current.hint}
-            type={current.type}
-            autoComplete={current.autoComplete}
-            controlClassName={controlClass}
-            value={values[question] ?? ""}
-            onChange={setValue}
-          />
-          <div className={cn("flex gap-2", question === 0 && "justify-end")}>
-            {question > 0 ? (
+          <form onSubmit={onSubmit} className="flex flex-col gap-4">
+            <PromptField
+              ref={inputRef}
+              label={current.label}
+              hint={current.hint}
+              type={current.type}
+              autoComplete={current.autoComplete}
+              controlClassName={controlClass}
+              value={values[question] ?? ""}
+              onChange={setValue}
+            />
+            <div className={cn("flex gap-2", question === 0 && "justify-end")}>
+              {question > 0 ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11 px-4 active:translate-y-px sm:h-10"
+                  onClick={back}
+                  disabled={busy}
+                >
+                  <ArrowLeft aria-hidden />
+                  Back
+                </Button>
+              ) : null}
               <Button
-                type="button"
-                variant="outline"
-                className="h-11 px-4 active:translate-y-px sm:h-10"
-                onClick={back}
-                disabled={busy}
+                type="submit"
+                className="h-11 flex-1 active:translate-y-px sm:h-10"
+                disabled={busy || disabled}
               >
-                <ArrowLeft aria-hidden />
-                Back
+                {busy ? (
+                  <>
+                    <Loader2 aria-hidden className="size-4 motion-safe:animate-spin" />
+                    Setting things up…
+                  </>
+                ) : question === LAST_QUESTION ? (
+                  "Finish"
+                ) : (
+                  "Continue"
+                )}
               </Button>
-            ) : null}
-            <Button
-              type="submit"
-              className="h-11 flex-1 active:translate-y-px sm:h-10"
-              disabled={busy || disabled}
-            >
-              {busy ? (
-                <>
-                  <Loader2 aria-hidden className="size-4 motion-safe:animate-spin" />
-                  Setting things up…
-                </>
-              ) : question === LAST_QUESTION ? (
-                "Finish"
-              ) : (
-                "Continue"
-              )}
-            </Button>
-          </div>
-        </form>
+            </div>
+          </form>
+        </div>
       </div>
     </main>
   );
