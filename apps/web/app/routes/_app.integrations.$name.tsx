@@ -70,7 +70,7 @@ const CALLBACK_REASON: Record<string, string> = {
   unknown_step: "That setup step no longer exists. Reload the page and start again.",
   invalid_state: "This setup link expired or was already used. Start the step again.",
   missing_credentials:
-    "A credential from an earlier step is missing. Complete the earlier steps first.",
+    "An earlier setup step is missing its credentials. Complete that step first.",
   exchange_failed: "The provider rejected the request. Start the step again.",
 };
 
@@ -234,6 +234,12 @@ export default function IntegrationDetailPage() {
   const authSteps = (integration.auth ?? []).filter((step) => !step.personal);
   const isConnected = integration.connected;
   const installStep = authSteps.find((step) => step.kind === "install");
+  const personalStep = integration.auth?.find((step) => step.personal);
+  const personalStepReady =
+    personalStep !== undefined &&
+    (integration.auth ?? [])
+      .filter((step) => step.index < personalStep.index && !step.personal)
+      .every((step) => step.satisfied);
   const name = displayName(integration);
 
   // The single auth callback returns here with the outcome of the step the operator just left for.
@@ -486,7 +492,7 @@ export default function IntegrationDetailPage() {
           </section>
         )}
 
-        {integration.name === "github" && isConnected && (
+        {integration.name === "github" && personalStepReady && (
           <GitHubPersonalAccount
             integration={integration}
             callbackError={callbackError}
