@@ -1,0 +1,68 @@
+{
+  "id": "slack-discovers-channel-before-send",
+  "tier": "l2",
+  "agent": "support",
+  "context": {
+    "customInstructions": "Use stable external IDs when a directory Tool provides them.",
+    "governancePages": []
+  },
+  "input": [
+    {
+      "role": "user",
+      "content": "Send 'Deployment complete' to our release updates Slack channel. I am not sure of its exact channel name."
+    }
+  ],
+  "platformTools": ["slack_channel_list", "send_slack_message"],
+  "toolResults": [
+    {
+      "name": "slack_channel_list",
+      "output": {
+        "channels": [
+          { "id": "C0123456789", "name": "release-updates" },
+          { "id": "C9876543210", "name": "engineering" }
+        ]
+      }
+    },
+    {
+      "name": "send_slack_message",
+      "output": {
+        "channelId": "C0123456789",
+        "ts": "1700000000.000100",
+        "threadId": "1700000000.000100"
+      }
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [{ "callId": "list", "name": "slack_channel_list", "arguments": {} }]
+    },
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "send",
+          "name": "send_slack_message",
+          "arguments": { "channel": "C0123456789", "text": "Deployment complete" }
+        }
+      ]
+    },
+    { "kind": "text", "text": "Sent Deployment complete to #release-updates." }
+  ],
+  "expect": [
+    {
+      "kind": "tool_call_order",
+      "names": ["slack_channel_list", "send_slack_message"]
+    },
+    {
+      "kind": "tool_argument_equals",
+      "name": "send_slack_message",
+      "path": "channel",
+      "value": "C0123456789"
+    },
+    { "kind": "tool_call_count", "count": 2 },
+    { "kind": "output_contains", "text": "release-updates" },
+    { "kind": "guardrail_allowed", "stage": "tool_call" },
+    { "kind": "loop_status", "status": "completed" }
+  ]
+}

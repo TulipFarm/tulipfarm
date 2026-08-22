@@ -9,6 +9,7 @@ import {
 export const SLACK_ADAPTER_REF = "integration:slack";
 
 export const SLACK_TOOL_IDS = {
+  listChannels: "slack.channel.list",
   sendMessage: "slack.message.send",
 } as const;
 
@@ -19,9 +20,38 @@ export const SLACK_RECONCILIATION_OPERATIONS = {
   sendMessage: "slack.message.send.lookup",
 } as const;
 
-const TOOL_VERSION = "1.0.0";
+const LIST_CHANNELS_TOOL_VERSION = "1.0.0";
+const SEND_MESSAGE_TOOL_VERSION = "1.0.0";
 const SLACK_DESTINATION = "slack";
 const MESSAGE_DATA_CLASSES = ["source_content"];
+const CHANNEL_DIRECTORY_DATA_CLASSES = ["directory"];
+
+const listChannelsInputSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {},
+} as const;
+
+const listChannelsOutputSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["channels"],
+  properties: {
+    channels: {
+      type: "array",
+      maxItems: 4_000,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "name"],
+        properties: {
+          id: { type: "string", minLength: 1 },
+          name: { type: "string", minLength: 1 },
+        },
+      },
+    },
+  },
+} as const;
 
 const sendMessageInputSchema = {
   type: "object",
@@ -74,7 +104,7 @@ function publish(spec: ToolContractSpec, id: string, slug: string): ToolContract
 const sendMessage = publish(
   {
     toolId: SLACK_TOOL_IDS.sendMessage,
-    toolVersion: TOOL_VERSION,
+    toolVersion: SEND_MESSAGE_TOOL_VERSION,
     action: SLACK_TOOL_IDS.sendMessage,
     inputSchema: sendMessageInputSchema,
     outputSchema: sendMessageOutputSchema,
@@ -96,4 +126,51 @@ const sendMessage = publish(
   "slack-message-send"
 );
 
-export const SLACK_TOOL_CONTRACTS: readonly ToolContractDefinition[] = [sendMessage];
+const listChannels = publish(
+  {
+    toolId: SLACK_TOOL_IDS.listChannels,
+    toolVersion: LIST_CHANNELS_TOOL_VERSION,
+    action: SLACK_TOOL_IDS.listChannels,
+    inputSchema: listChannelsInputSchema,
+    outputSchema: listChannelsOutputSchema,
+    riskClass: "low",
+    mutating: false,
+    dataClasses: CHANNEL_DIRECTORY_DATA_CLASSES,
+    allowedDestinations: [SLACK_DESTINATION],
+    idempotency: { strategy: "none" },
+    timeout: { wallClockMs: 15_000 },
+    retry: { maxAttempts: 3, safeToRetry: true },
+    dryRun: false,
+    adapter: { kind: "integration", ref: SLACK_ADAPTER_REF },
+  },
+  "aaaaaaaa-0004-4000-8000-000000000002",
+  "slack-channel-list"
+);
+
+export const SLACK_TOOL_CONTRACTS: readonly ToolContractDefinition[] = [listChannels, sendMessage];
+
+export const SLACK_TOOL_DECLARATIONS = [
+  {
+    toolId: SLACK_TOOL_IDS.listChannels,
+    toolVersion: LIST_CHANNELS_TOOL_VERSION,
+    name: "slack_channel_list",
+    description:
+      "List the Slack channels the bot has joined. Use this before send_slack_message when the " +
+      "channel is uncertain, then send with the returned stable channel ID.",
+    inputSchema: listChannelsInputSchema,
+  },
+  {
+    toolId: SLACK_TOOL_IDS.sendMessage,
+    toolVersion: SEND_MESSAGE_TOOL_VERSION,
+    name: "send_slack_message",
+    description:
+      "Send a message to a Slack channel the bot has joined. Accepts a channel name (with or " +
+      "without a leading '#') or a raw channel ID. If the channel is uncertain, first call " +
+      "slack_channel_list and then send with its stable channel ID. A human reply in the " +
+      "resulting thread continues this same conversation. To notify a specific person, write " +
+      "'@' followed by their Slack name or first name (e.g. 'hi @mohit') — this is converted " +
+      "into a real, clickable, notifying Slack mention before sending. Writing the name with no " +
+      "'@' sends it as plain text and does not notify or tag anyone.",
+    inputSchema: sendMessageInputSchema,
+  },
+] as const;

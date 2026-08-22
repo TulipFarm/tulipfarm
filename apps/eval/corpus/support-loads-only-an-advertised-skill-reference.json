@@ -1,0 +1,66 @@
+{
+  "id": "support-loads-only-an-advertised-skill-reference",
+  "tier": "l2",
+  "agent": "support",
+  "context": {
+    "governancePages": []
+  },
+  "input": [
+    {
+      "role": "user",
+      "content": "Load the data-analyst Skill, then read the first reference it advertises before answering."
+    }
+  ],
+  "platformTools": ["load_skill", "load_skill_reference"],
+  "toolResults": [
+    {
+      "name": "load_skill",
+      "output": {
+        "name": "data-analyst",
+        "frontmatter": { "description": "Analyze business data." },
+        "body": "Read one advertised reference before answering.",
+        "references": ["canonical-examples.md"]
+      }
+    },
+    {
+      "name": "load_skill_reference",
+      "output": {
+        "skill": "data-analyst",
+        "reference": "canonical-examples.md",
+        "content": "Canonical analysis starts by checking the source and date range."
+      }
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [{ "callId": "load", "name": "load_skill", "arguments": { "name": "data-analyst" } }]
+    },
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "reference",
+          "name": "load_skill_reference",
+          "arguments": { "skill": "data-analyst", "reference": "canonical-examples.md" }
+        }
+      ]
+    },
+    {
+      "kind": "text",
+      "text": "I loaded the Skill and checked its canonical example. Start by checking the source and date range."
+    }
+  ],
+  "expect": [
+    { "kind": "tool_call_order", "names": ["load_skill", "load_skill_reference"] },
+    {
+      "kind": "tool_argument_equals",
+      "name": "load_skill_reference",
+      "path": "reference",
+      "value": "canonical-examples.md"
+    },
+    { "kind": "tool_call_count", "count": 2 },
+    { "kind": "output_contains", "text": "source and date range" },
+    { "kind": "loop_status", "status": "completed" }
+  ]
+}

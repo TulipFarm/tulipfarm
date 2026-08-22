@@ -19,7 +19,7 @@ import {
 } from "./credentials";
 
 /**
- * Composes the `send_slack_message` chat Tool's adapter map and `CredentialDispatcher`. Mirrors
+ * Composes the Slack chat Tools' adapter map and `CredentialDispatcher`. Mirrors
  * `../github/compose.ts`'s `buildGitHubTooling`.
  */
 

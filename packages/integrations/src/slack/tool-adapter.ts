@@ -1,7 +1,12 @@
 import type { ChannelRunDeliveryStore } from "@tulipfarm/storage";
 import type { ToolAdapter, ToolAdapterRequest } from "@tulipfarm/tool-broker";
 import { AdapterDispatchError } from "@tulipfarm/tool-broker";
-import { classifyHttpFailure, type IntegrationHttpPort } from "../http";
+import {
+  classifyHttpFailure,
+  collectPages,
+  type IntegrationHttpPort,
+  PaginationBoundError,
+} from "../http";
 import { SLACK_TOOL_IDS } from "./contracts";
 import { encodeMentionsInText, type SlackUserLookupPort } from "./mentions";
 
@@ -19,8 +24,9 @@ export interface SlackToolAdapterDeps {
 }
 
 interface SlackApiChannel {
-  readonly id: string;
-  readonly name: string;
+  readonly id?: unknown;
+  readonly name?: unknown;
+  readonly is_member?: unknown;
 }
 
 interface SlackApiUser {
@@ -72,12 +78,19 @@ export class SlackToolAdapter implements ToolAdapter {
   constructor(private readonly deps: SlackToolAdapterDeps) {}
 
   async dispatch(request: ToolAdapterRequest, credential?: string): Promise<unknown> {
-    if (request.intent.toolId !== SLACK_TOOL_IDS.sendMessage) {
+    if (
+      request.intent.toolId !== SLACK_TOOL_IDS.listChannels &&
+      request.intent.toolId !== SLACK_TOOL_IDS.sendMessage
+    ) {
       throw new AdapterDispatchError("before_dispatch", "unsupported_tool", false);
     }
     if (credential === undefined) {
       throw new AdapterDispatchError("before_dispatch", "credential_missing", false);
     }
+    if (request.intent.toolId === SLACK_TOOL_IDS.listChannels) {
+      return { channels: await this.listChannels(credential) };
+    }
+
     const { channel, text } = args(request.intent);
     const channelId = isChannelId(channel)
       ? channel
@@ -212,8 +225,10 @@ export class SlackToolAdapter implements ToolAdapter {
         throw new AdapterDispatchError("before_dispatch", "channel_lookup_failed", false);
       }
       const channels = Array.isArray(body.channels) ? (body.channels as SlackApiChannel[]) : [];
-      const match = channels.find((c) => c.name === name);
-      if (match !== undefined) return match.id;
+      const match = channels.find(
+        (channel) => channel.name === name && typeof channel.id === "string"
+      );
+      if (match !== undefined && typeof match.id === "string") return match.id;
 
       const metadata = asRecord(body.response_metadata);
       const nextCursor = metadata.next_cursor;
@@ -221,5 +236,60 @@ export class SlackToolAdapter implements ToolAdapter {
       cursor = nextCursor;
     }
     throw new AdapterDispatchError("before_dispatch", "channel_not_found", false);
+  }
+
+  private async listChannels(credential: string): Promise<{ id: string; name: string }[]> {
+    try {
+      const channels = await collectPages<SlackApiChannel>(
+        async (cursor) => {
+          const response = await this.deps.http.send(
+            {
+              method: "GET",
+              path: "/conversations.list",
+              query: {
+                types: "public_channel,private_channel",
+                exclude_archived: "true",
+                limit: "200",
+                ...(cursor === undefined ? {} : { cursor }),
+              },
+            },
+            credential
+          );
+          const body = asRecord(response.body);
+          const failure = classifyHttpFailure(response, false);
+          if (failure !== null || body.ok !== true) {
+            const code =
+              typeof body.error === "string" ? body.error : (failure?.code ?? "provider_error");
+            throw new AdapterDispatchError(
+              failure?.phase ?? "before_dispatch",
+              code,
+              failure?.retryable ?? false
+            );
+          }
+          const items = Array.isArray(body.channels) ? (body.channels as SlackApiChannel[]) : [];
+          const metadata = asRecord(body.response_metadata);
+          const nextCursor = metadata.next_cursor;
+          return {
+            items,
+            ...(typeof nextCursor === "string" && nextCursor.length > 0 ? { nextCursor } : {}),
+          };
+        },
+        { maxPages: 20, maxItems: 4_000 }
+      );
+      return channels.flatMap((channel) =>
+        channel.is_member === true &&
+        typeof channel.id === "string" &&
+        channel.id.length > 0 &&
+        typeof channel.name === "string" &&
+        channel.name.length > 0
+          ? [{ id: channel.id, name: channel.name }]
+          : []
+      );
+    } catch (error) {
+      if (error instanceof PaginationBoundError) {
+        throw new AdapterDispatchError("before_dispatch", "pagination_bound_exceeded", false);
+      }
+      throw error;
+    }
   }
 }

@@ -133,6 +133,11 @@ describe("loadBundledSkills", () => {
     expect(routineForge?.references).toEqual(["canonical-examples.md", "examples.md"]);
   });
 
+  it("ships Resource Forge with an exact canonical x-links.target example", async () => {
+    const resourceForge = (await loadBundledSkills(makeLogger())).get("resource-forge");
+    expect(resourceForge?.body).toContain('x-links: { target: "customer" }');
+  });
+
   it("ships Agent Forge with the guidance that makes capability restrictions reachable", async () => {
     const agentForge = (await loadBundledSkills(makeLogger())).get("agent-forge");
     const body = agentForge?.body ?? "";

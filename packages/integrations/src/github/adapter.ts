@@ -121,7 +121,6 @@ export class GitHubAdapter implements ToolAdapter, ToolReconciliationAdapter {
     const source = args(intent);
     const mutating = MUTATING_TOOLS.has(intent.action);
 
-    // Search alone may span more than one repository; every other action stays single-repo.
     if (intent.action === GITHUB_TOOL_IDS.issueSearch) {
       const repositories = await this.resolveSearchRepositories(intent, source, mutating);
       if (credential === undefined || credential.length === 0) {
@@ -272,9 +271,7 @@ export class GitHubAdapter implements ToolAdapter, ToolReconciliationAdapter {
     }
   }
 
-  /**
-   * Authorize every searched repo individually; account-wide installs must name repos explicitly.
-   */
+  /** V1 keeps its pinned multi-repository behavior; v2 always arrives with one repository. */
   private async resolveSearchRepositories(
     intent: ToolIntent,
     source: Arguments,
