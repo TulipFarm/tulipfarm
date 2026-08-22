@@ -23,6 +23,10 @@ export interface SecretScope {
   readonly runId: string;
   readonly stateId?: string;
   readonly purpose: string;
+  readonly principalKind?: string;
+  readonly principalId?: string;
+  readonly destination?: string;
+  readonly activeSkillName?: string;
 }
 
 /** Denial evidence: a reason code plus the lease id. Never the Credential or its value. */

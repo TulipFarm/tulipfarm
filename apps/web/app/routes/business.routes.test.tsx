@@ -70,10 +70,10 @@ const llmConfig = {
   },
 };
 
-function renderWithData(node: ReactElement, data: unknown) {
+function renderWithData(node: ReactElement, data: unknown, initialEntry = "/") {
   vi.mocked(remix.useLoaderData).mockReturnValue(data);
   const Stub = createRemixStub([{ path: "/", Component: () => node }]);
-  render(<Stub initialEntries={["/"]} />);
+  render(<Stub initialEntries={[initialEntry]} />);
 }
 
 afterEach(() => {
@@ -81,6 +81,15 @@ afterEach(() => {
 });
 
 const meta = { type: "user-provided" as const, createdAt: "x", updatedAt: "y" };
+
+test("prefills a custom Credential requested by a denied Tool", () => {
+  renderWithData(
+    <BusinessSecrets />,
+    { secrets: [], providers: PROVIDERS, config: {} },
+    "/?required=JIRA_API_TOKEN"
+  );
+  expect(screen.getByLabelText("Key")).toHaveValue("JIRA_API_TOKEN");
+});
 
 test("groups a provider's stored fields into one collapsible row and shows config values", async () => {
   renderWithData(<BusinessSecrets />, {

@@ -167,6 +167,11 @@ export {
   isEffortRung,
   resolveEffortPreset,
 } from "./model-catalog";
+export {
+  API_REQUEST_TOOL_DECLARATION,
+  NETWORK_TOOL_DECLARATIONS,
+  WEB_FETCH_TOOL_DECLARATION,
+} from "./network-tools";
 export type { PrincipalKind } from "./principals";
 export { PRINCIPAL_KINDS } from "./principals";
 export type {

@@ -1,0 +1,57 @@
+{
+  "id": "support-fetches-a-url-with-web-fetch",
+  "tier": "l2",
+  "agent": "support",
+  "context": {
+    "governancePages": []
+  },
+  "input": [
+    {
+      "role": "user",
+      "content": "Summarize the release date from https://docs.example.com/releases/2.0"
+    }
+  ],
+  "platformTools": ["web_fetch"],
+  "toolResults": [
+    {
+      "name": "web_fetch",
+      "output": {
+        "url": "https://docs.example.com/releases/2.0",
+        "status": 200,
+        "contentType": "text/html",
+        "extracted": "Release 2.0 launches on September 14."
+      }
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "c1",
+          "name": "web_fetch",
+          "arguments": {
+            "url": "https://docs.example.com/releases/2.0",
+            "prompt": "Find and summarize the release date."
+          }
+        }
+      ]
+    },
+    {
+      "kind": "text",
+      "text": "Release 2.0 launches on September 14."
+    }
+  ],
+  "expect": [
+    { "kind": "tool_called", "name": "web_fetch" },
+    {
+      "kind": "tool_argument_equals",
+      "name": "web_fetch",
+      "path": "url",
+      "value": "https://docs.example.com/releases/2.0"
+    },
+    { "kind": "tool_call_count", "count": 1 },
+    { "kind": "output_contains", "text": "September 14" },
+    { "kind": "loop_status", "status": "completed" }
+  ]
+}

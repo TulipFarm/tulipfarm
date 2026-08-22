@@ -32,6 +32,8 @@ credential dispatch, sandbox adaptation, and reconciliation.
 - `deriveContractTargets` refuses; it never returns `[]` for a target it failed to derive. An empty
   list is the gate's signal that a contract declares no per-object target at all, so conflating the
   two silently widens a decision from one object to every object of that type.
+- `definitionForToolCall` is pure over validated arguments. A dynamic network Tool must classify
+  before authorization; static `mutating: true` remains its conservative scheduling ceiling.
 - The barrel lists every export by name. `export *` would republish internals — an adapter that
   performs an effect, a primitive that enforces a policy — the moment a file gains an export;
   `scripts/barrel-exports.test.ts` keeps this package and `integrations` explicit.

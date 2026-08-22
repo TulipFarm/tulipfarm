@@ -77,6 +77,17 @@ export {
   isPrivateNetworkAddress,
   OpenApiToolAdapter,
 } from "./egress";
+export {
+  classifyGraphqlOperation,
+  type GovernedHttpRequest,
+  type GovernedHttpResult,
+  type GraphqlOperationKind,
+  NETWORK_READ_METHODS,
+  NETWORK_REDIRECT_STATUSES,
+  normalizedPublicUrl,
+  readableWebContent,
+  sendGovernedRequest,
+} from "./egress/network-request";
 export type {
   ExternalIntegrationAccessPort,
   ExternalIntegrationAuditEvent,

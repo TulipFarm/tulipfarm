@@ -1,14 +1,16 @@
 import { FILE_TOOLS } from "@tulipfarm/files";
-import { SKILL_MARKETPLACE_TOOL_DECLARATIONS } from "@tulipfarm/schema";
+import { NETWORK_TOOL_DECLARATIONS, SKILL_MARKETPLACE_TOOL_DECLARATIONS } from "@tulipfarm/schema";
 import { describe, expect, it } from "vitest";
 import { platformToolNames, resolvePlatformTool } from "./platform-tools.ts";
 
 describe("platform Tools a Case may name", () => {
-  it("exposes the File family exactly as the product declares it", () => {
+  it("exposes shipped Tool families exactly as the product declares them", () => {
     expect(platformToolNames()).toEqual(
-      [...FILE_TOOLS, ...SKILL_MARKETPLACE_TOOL_DECLARATIONS].map((tool) => tool.name).sort()
+      [...FILE_TOOLS, ...SKILL_MARKETPLACE_TOOL_DECLARATIONS, ...NETWORK_TOOL_DECLARATIONS]
+        .map((tool) => tool.name)
+        .sort()
     );
-    for (const tool of FILE_TOOLS) {
+    for (const tool of [...FILE_TOOLS, ...NETWORK_TOOL_DECLARATIONS]) {
       const resolved = resolvePlatformTool(tool.name);
       expect(resolved?.description).toBe(tool.description);
       expect(resolved?.inputSchema).toEqual(tool.inputSchema);

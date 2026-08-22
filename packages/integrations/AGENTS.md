@@ -30,6 +30,8 @@ Owns adapter contracts, event normalization, source ACLs, sync checkpoints, and 
 - Prefer `src/egress/` over `src/<provider>/` when a manifest can express the provider.
 - Manifest hosts are chat-authored: compile through `assertPublicEgressUrl`, send through
   `GuardedEgressHttp`. Neither subsumes the other — a public name can hold an inward A record.
+- `GuardedEgressHttp` passes validated DNS answers to `FetchEgressHttp`, which pins the connection;
+  never re-resolve a checked hostname at the socket.
 - `openapi-compile.ts` must resolve every `$ref`; survivors can break unrelated Tool registration.
 - Every caller-supplied Git source clones through `withGitSourceClone`; never spawn `git` directly
   and never surface its stderr. `GIT_SOURCE_ALLOWED_HOSTS` widens the host allowlist;

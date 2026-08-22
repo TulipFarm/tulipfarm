@@ -1,0 +1,67 @@
+{
+  "id": "support-translates-curl-to-api-request",
+  "tier": "l2",
+  "agent": "support",
+  "context": {
+    "governancePages": []
+  },
+  "input": [
+    {
+      "role": "user",
+      "content": "Do the equivalent of curl -X GET https://api.example.com/v1/profile using the stored EXAMPLE_API_TOKEN in the authorization header."
+    }
+  ],
+  "platformTools": ["api_request"],
+  "toolResults": [
+    {
+      "name": "api_request",
+      "output": {
+        "kind": "response",
+        "url": "https://api.example.com/v1/profile",
+        "status": 200,
+        "body": "{\"name\":\"Tulip Supply Co\"}"
+      }
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "c1",
+          "name": "api_request",
+          "arguments": {
+            "url": "https://api.example.com/v1/profile",
+            "method": "GET",
+            "credential": {
+              "secret": "EXAMPLE_API_TOKEN",
+              "header": "authorization"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "kind": "text",
+      "text": "The profile belongs to Tulip Supply Co."
+    }
+  ],
+  "expect": [
+    { "kind": "tool_called", "name": "api_request" },
+    {
+      "kind": "tool_argument_equals",
+      "name": "api_request",
+      "path": "method",
+      "value": "GET"
+    },
+    {
+      "kind": "tool_argument_equals",
+      "name": "api_request",
+      "path": "credential.secret",
+      "value": "EXAMPLE_API_TOKEN"
+    },
+    { "kind": "tool_call_count", "count": 1 },
+    { "kind": "output_contains", "text": "Tulip Supply Co" },
+    { "kind": "loop_status", "status": "completed" }
+  ]
+}

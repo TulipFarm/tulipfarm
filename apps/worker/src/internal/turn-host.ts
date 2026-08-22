@@ -149,7 +149,14 @@ export class HttpTurnHost
     const result = await this.client.require<RemoteToolResult>(
       "POST",
       turnPath(request.runId, "/tools"),
-      { callId: request.callId, name: request.name, arguments: request.arguments }
+      {
+        callId: request.callId,
+        name: request.name,
+        arguments: request.arguments,
+        ...(request.activeSkillName === undefined
+          ? {}
+          : { activeSkillName: request.activeSkillName }),
+      }
     );
     return withCallId(request.callId, result);
   }

@@ -11,6 +11,7 @@ Detailed contracts:
 - [Boundaries and owners](boundaries.md)
 - [Dependency rules](dependency-rules.md)
 - [Building an Integration](building-an-integration.md)
+- [Governed network Tools](governed-network-tools.md)
 
 ## Accepted decisions
 
@@ -39,6 +40,7 @@ Detailed contracts:
 | ADR-027 | A user's Memory is one Markdown Memory Document, always injected whole, written by named-entry delta from Tools and by stale-checked section replacement from privileged writers | Removes relevance recall, versioned Assertions, and the confirmation queue as sources of silent omission; the document is current truth, so what the model reads is exactly what was written | `packages/storage`, `apps/api` |
 | ADR-028 | The Curator is one durable Run per user or business that proposes every model-derived effect; deterministic maintenance stays deterministic | Model reasoning cannot execute outside `packages/run-kernel` (ADR-004); one loop replaces four half-built mechanisms for memory, Knowledge, Tasks, and suggestions | `packages/curator`, `apps/worker` |
 | ADR-029 | Curator output names only a closed `kind` and a Run-scoped subject; the server templates every user-visible string, URL, and dedupe key | A Proposal pill inserts its prompt straight into Chat, so model-authored text there is a direct injection path into the user's next turn | `packages/curator`, `apps/api` |
+| ADR-030 | Generic web and API access runs as governed first-party Tools with pure call-level read/write classification | One structured path keeps SSRF controls, exact destination and Secret authority, Approval, and effect recovery intact while allowing REST and GraphQL calls whose risk varies by operation | `packages/tool-host`, `packages/integrations`, `apps/api` |
 
 ## Superseded decisions
 

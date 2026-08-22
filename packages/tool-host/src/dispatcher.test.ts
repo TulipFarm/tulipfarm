@@ -183,6 +183,30 @@ describe("RegistryToolDispatcher", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
+  it("carries a missing-Credential setup link to the Run event path", async () => {
+    const { dispatcher } = makeDispatcher([
+      toolDef({
+        execute: async () =>
+          err(
+            "credential_required",
+            "An administrator must add this Credential.",
+            "/business/secrets?required=EXAMPLE_TOKEN"
+          ),
+      }),
+    ]);
+    await expect(
+      dispatcher.dispatch(AUTHORITY, {
+        callId: "credential-call",
+        name: "echo",
+        arguments: { text: "read profile" },
+      })
+    ).resolves.toEqual({
+      status: "denied",
+      reason: "An administrator must add this Credential.",
+      connectUrl: "/business/secrets?required=EXAMPLE_TOKEN",
+    });
+  });
+
   it("parks a gated mutating call instead of running it, once arguments are known good", async () => {
     const execute = vi.fn(async () => ok({}));
     const approvals = fakeApprovals({ status: "pending", approvalId: "approval-1" });
@@ -199,6 +223,48 @@ describe("RegistryToolDispatcher", () => {
     expect(approvals.decide).toHaveBeenCalledWith(
       expect.objectContaining({ runId: RUN_ID, toolName: "wipe", args: { text: "hi" } })
     );
+  });
+
+  it("uses call-level classification for declared Approval", async () => {
+    const execute = vi.fn(async () => ok({}));
+    const approvals = fakeApprovals({ status: "pending", approvalId: "approval-dynamic" });
+    const definition = defineApiTool<RequestContext>({
+      name: "dynamic_request",
+      description: "request",
+      tier: "platform",
+      mutating: true,
+      inputSchema: {
+        type: "object",
+        required: ["write"],
+        properties: { write: { type: "boolean" } },
+      },
+      authorization: { action: "network.write", resources: ["network"] },
+      idempotency: "reconcile",
+      classify: (args) => {
+        const write = (args as { write: boolean }).write;
+        return {
+          mutating: write,
+          action: write ? "network.write" : "network.read",
+          idempotency: write ? "reconcile" : "none",
+          requiresApproval: write,
+        };
+      },
+      handler: execute,
+    });
+    const { dispatcher } = makeDispatcher(
+      [toToolDef(definition, (context) => context)],
+      fakeArtifacts({ autonomy: "full" }),
+      approvals.service
+    );
+
+    await expect(
+      dispatcher.dispatch(AUTHORITY, {
+        callId: "dynamic-write",
+        name: "dynamic_request",
+        arguments: { write: true },
+      })
+    ).resolves.toEqual({ status: "awaiting_approval", approvalId: "approval-dynamic" });
+    expect(execute).not.toHaveBeenCalled();
   });
 
   // #424/#431: the Agent's own ceiling is what bounds the turn. A permissive per-turn value —

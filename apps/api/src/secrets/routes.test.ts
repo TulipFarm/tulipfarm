@@ -155,7 +155,7 @@ describe("secrets routes", () => {
       expect(res.json()).toEqual({ secrets: [] });
     });
 
-    it("returns keys and metadata but never plaintext values", async () => {
+    it("returns authorized keys and metadata but never plaintext values", async () => {
       // Write a secret directly via the service first
       await secretRepo.upsert("OPENAI_API_KEY", {
         encryptedValue: "encrypted",
@@ -167,7 +167,7 @@ describe("secrets routes", () => {
       const res = await app.inject({
         method: "GET",
         url: "/api/v1/secrets/status",
-        cookies: { [SESSION_COOKIE]: memberSid },
+        cookies: { [SESSION_COOKIE]: adminSid },
       });
       expect(res.statusCode).toBe(200);
       const { secrets } = res.json();
@@ -179,13 +179,20 @@ describe("secrets routes", () => {
       expect(secrets[0]).not.toHaveProperty("authTag");
     });
 
-    it("member can also list secrets (not admin-only)", async () => {
+    it("hides Secret keys from a member with no exact read grant", async () => {
+      await secretRepo.upsert("HIDDEN_TOKEN", {
+        encryptedValue: "encrypted",
+        iv: "iv",
+        authTag: "tag",
+        type: "user-provided",
+      });
       const res = await app.inject({
         method: "GET",
         url: "/api/v1/secrets/status",
         cookies: { [SESSION_COOKIE]: memberSid },
       });
       expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ secrets: [] });
     });
   });
 

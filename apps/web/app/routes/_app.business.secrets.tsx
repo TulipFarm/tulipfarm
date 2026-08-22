@@ -1,4 +1,4 @@
-import { useLoaderData, useRevalidator, useRouteError } from "@remix-run/react";
+import { useLoaderData, useRevalidator, useRouteError, useSearchParams } from "@remix-run/react";
 import { ChevronRight, Trash2 } from "lucide-react";
 import { type FormEvent, useMemo, useState } from "react";
 import { FormStatus } from "~/components/form-status";
@@ -47,13 +47,20 @@ export default function BusinessSecrets() {
   const { secrets, providers, config } = useLoaderData<typeof clientLoader>();
   const isAdmin = useIsAdmin();
   const revalidator = useRevalidator();
+  const [searchParams] = useSearchParams();
+  const requestedKey = searchParams.get("required")?.match(/^[A-Z][A-Z0-9_]{0,127}$/)?.[0];
   const storedKeys = useMemo(() => new Set(secrets.map((s) => s.key)), [secrets]);
+  const requestedProvider = providers.find((provider) =>
+    provider.fields.some((field) => field.key === requestedKey)
+  );
 
-  const [providerId, setProviderId] = useState(providers[0]?.id ?? CUSTOM);
+  const [providerId, setProviderId] = useState(
+    requestedProvider?.id ?? (requestedKey === undefined ? (providers[0]?.id ?? CUSTOM) : CUSTOM)
+  );
   // Id of the configured provider whose editor is open (null = all collapsed).
   const [openId, setOpenId] = useState<string | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
-  const [customKey, setCustomKey] = useState("");
+  const [customKey, setCustomKey] = useState(requestedProvider ? "" : (requestedKey ?? ""));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<{
@@ -155,7 +162,7 @@ export default function BusinessSecrets() {
       {error ? <FormStatus tone="error">{error}</FormStatus> : null}
       {!isAdmin ? (
         <FormStatus tone="error">
-          You can see which credentials exist but only an admin can change them.
+          Only an administrator can view or change stored Credentials.
         </FormStatus>
       ) : null}
 

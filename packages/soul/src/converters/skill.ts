@@ -17,6 +17,8 @@ const SKILL_FRONTMATTER_ALLOWLIST = [
   "commands",
   "dependencies",
   "requiredToolAbilities",
+  "requiredSecrets",
+  "allowedDomains",
   "trustTier",
 ] as const;
 
@@ -50,6 +52,8 @@ export function convertLegacySkill(skill: SoulSkill): ConversionResult {
   if (mapped.requiredToolAbilities !== undefined) {
     spec.requiredToolAbilities = mapped.requiredToolAbilities;
   }
+  if (mapped.requiredSecrets !== undefined) spec.requiredSecrets = mapped.requiredSecrets;
+  if (mapped.allowedDomains !== undefined) spec.allowedDomains = mapped.allowedDomains;
   spec.trustTier = mapped.trustTier;
 
   const document = {

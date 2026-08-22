@@ -14,6 +14,7 @@ import type {
   AgentLoopInput,
   LoopAttachmentPort,
   ToolDispatchPort,
+  ToolDispatchRequest,
   ToolDispatchResult,
 } from "./contract";
 import { AgentLoop } from "./loop";
@@ -123,13 +124,17 @@ function recordingModel(...results: readonly ModelInvocationResult[]): ModelPort
 }
 
 function dispatcher(...results: readonly ToolDispatchResult[]): ToolDispatchPort & {
-  calls: { name: string; arguments: unknown }[];
+  calls: { name: string; arguments: unknown; activeSkillName?: string }[];
 } {
   const queue = [...results];
   const port = {
-    calls: [] as { name: string; arguments: unknown }[],
-    dispatch: async (call: { name: string; arguments: unknown }) => {
-      port.calls.push({ name: call.name, arguments: call.arguments });
+    calls: [] as { name: string; arguments: unknown; activeSkillName?: string }[],
+    dispatch: async (call: ToolDispatchRequest) => {
+      port.calls.push({
+        name: call.name,
+        arguments: call.arguments,
+        ...(call.activeSkillName === undefined ? {} : { activeSkillName: call.activeSkillName }),
+      });
       return queue.shift() ?? { status: "succeeded" as const, callId: "call-1", output: {} };
     },
   };
@@ -1126,6 +1131,8 @@ describe("AgentLoop skill-scoped tool narrowing", () => {
 
     expect(outcome).toMatchObject({ status: "completed" });
     expect(tools.calls.map((c) => c.name)).toEqual(["load_skill", "record_search"]);
+    expect(tools.calls[0]?.activeSkillName).toBeUndefined();
+    expect(tools.calls[1]?.activeSkillName).toBe("routine-forge");
   });
 });
 

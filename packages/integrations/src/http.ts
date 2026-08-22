@@ -1,6 +1,13 @@
 /** HTTP status maps to durability here; mutating 5xx is ambiguous and must reconcile. */
 
-export type IntegrationHttpMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
+export type IntegrationHttpMethod =
+  | "GET"
+  | "HEAD"
+  | "OPTIONS"
+  | "POST"
+  | "PATCH"
+  | "PUT"
+  | "DELETE";
 
 export interface IntegrationHttpRequest {
   readonly method: IntegrationHttpMethod;

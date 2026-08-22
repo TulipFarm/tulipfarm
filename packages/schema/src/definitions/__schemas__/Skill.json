@@ -64,6 +64,17 @@
     "spec": {
       "additionalProperties": false,
       "properties": {
+        "allowedDomains": {
+          "items": {
+            "maxLength": 253,
+            "minLength": 1,
+            "pattern": "^(?!.*\\*)(?!.*://)(?!.*[/@])[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::[0-9]{1,5})?$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "type": "array",
+          "uniqueItems": true
+        },
         "assets": {
           "items": {
             "maxLength": 256,
@@ -262,6 +273,17 @@
             "minLength": 1,
             "type": "string"
           },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "requiredSecrets": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Z][A-Z0-9_]*$",
+            "type": "string"
+          },
+          "maxItems": 32,
           "type": "array",
           "uniqueItems": true
         },

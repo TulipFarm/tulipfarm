@@ -68,6 +68,15 @@ export interface ToolCompensationPolicy {
   readonly reconciliation?: string;
 }
 
+export interface ToolCallClassification {
+  readonly mutating: boolean;
+  readonly action?: string;
+  readonly riskClass?: ToolDefinitionRisk;
+  readonly idempotency?: ToolDefinitionIdempotency;
+  readonly requiresApproval?: boolean;
+  readonly destination?: string;
+}
+
 export interface DefineToolInput<Ctx, Result> {
   readonly name: string;
   readonly description: string;
@@ -87,6 +96,8 @@ export interface DefineToolInput<Ctx, Result> {
   readonly retry?: ToolRetryPolicy;
   readonly timeout?: ToolTimeoutPolicy;
   readonly compensation?: ToolCompensationPolicy;
+  /** Pure call-level policy for Tools whose effect varies by validated arguments. */
+  readonly classify?: (args: unknown, ctx: Ctx | undefined) => ToolCallClassification;
   readonly version?: string;
   readonly requiresApproval?: boolean;
   readonly handler: (args: unknown, ctx: Ctx) => Promise<Result>;
@@ -97,7 +108,55 @@ export interface ToolDefinition<Ctx, Result> extends DefineToolInput<Ctx, Result
   readonly credentialMode: ToolCredentialMode;
   readonly idempotency: ToolDefinitionIdempotency;
   readonly version: string;
+  readonly effectiveDestination?: string;
   targetsFor(args: unknown, ctx?: Ctx): readonly ToolTargetRef[];
+}
+
+/** Resolve the immutable contract that must govern one validated Tool call. */
+export function definitionForToolCall<Ctx, Result>(
+  definition: ToolDefinition<Ctx, Result>,
+  args: unknown,
+  ctx?: Ctx
+): ToolDefinition<Ctx, Result> {
+  if (definition.classify === undefined) return definition;
+
+  let classified: ToolCallClassification;
+  try {
+    classified = definition.classify(args, ctx);
+  } catch (cause) {
+    throw new ToolDefinitionError(
+      definition.name,
+      `call classification failed: ${cause instanceof Error ? cause.message : String(cause)}`
+    );
+  }
+  const action = classified.action ?? definition.authorization.action;
+  if (!ACTION_NAME.test(action)) {
+    throw new ToolDefinitionError(definition.name, `classified action "${action}" is not valid`);
+  }
+  const idempotency =
+    classified.idempotency ?? (classified.mutating ? definition.idempotency : "none");
+  assertIdempotencyCoherent(definition.name, classified.mutating, idempotency);
+
+  return Object.freeze({
+    ...definition,
+    mutating: classified.mutating,
+    authorization: { ...definition.authorization, action },
+    riskClass: classified.riskClass ?? (classified.mutating ? definition.riskClass : "low"),
+    idempotency,
+    ...(classified.requiresApproval === undefined
+      ? {}
+      : { requiresApproval: classified.requiresApproval }),
+    ...(classified.destination === undefined
+      ? {}
+      : {
+          effectiveDestination: classified.destination,
+          authorization: {
+            ...definition.authorization,
+            action,
+            allowedDestinations: [classified.destination],
+          },
+        }),
+  });
 }
 
 /** Derived targets must include every static resource or they can bypass the grant floor. */

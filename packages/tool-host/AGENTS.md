@@ -50,4 +50,6 @@ Individual Tool families (`packages/kv`, `apps/api/src/tools/**`), the model-fac
   stay in the control plane — see `apps/worker/AGENTS.md`.
 - No dependency on `@tulipfarm/agent-runtime` — it depends on this package's consumers' shape, not
   the reverse. Narrow structural types instead.
+- A Tool with call-level classification is validated first; the derived action, mutation state,
+  destination, Approval demand, retry policy, and effect policy govern the same immutable call.
 - `scripts/tool-colocation.test.ts` pins who may host what; it fails the build on drift.

@@ -41,6 +41,7 @@ export interface LedgerCallInput {
   readonly arguments: unknown;
   readonly targetRefs: readonly { readonly type: string; readonly id: string }[];
   readonly guardrailRevision: string;
+  readonly destination?: string;
 }
 
 export type ReserveOutcome =
@@ -68,6 +69,7 @@ function intentFor(input: LedgerCallInput): ToolIntent {
     targetRefs: input.targetRefs.map((ref) => ({ type: ref.type, id: ref.id })),
     arguments: input.arguments,
     idempotencyKey: idempotencyKeyFor(input),
+    ...(input.destination === undefined ? {} : { destination: input.destination }),
   });
 }
 

@@ -23,6 +23,7 @@ export type {
   DefineToolInput,
   ToolAuthorization,
   ToolAvailability,
+  ToolCallClassification,
   ToolCompensationPolicy,
   ToolCredentialMode,
   ToolDefinition,
@@ -36,6 +37,7 @@ export type {
 export {
   ACTION_NAME_PATTERN,
   defineTool,
+  definitionForToolCall,
   publishLocalToolContract,
   RESOURCE_NAME_PATTERN,
   safeToolTargetRef,

@@ -301,6 +301,7 @@ export class AgentLoop {
             callId: call.callId,
             name: call.name,
             arguments: call.arguments,
+            ...(activeSkillName === undefined ? {} : { activeSkillName }),
           });
           counters.toolCalls += 1;
           const outcome = await applyDispatch(call, dispatched);
@@ -345,6 +346,7 @@ export class AgentLoop {
               callId: batched.callId,
               name: batched.name,
               arguments: batched.arguments,
+              ...(activeSkillName === undefined ? {} : { activeSkillName }),
             })
           )
         );

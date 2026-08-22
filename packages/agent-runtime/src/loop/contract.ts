@@ -59,6 +59,8 @@ export interface ToolDispatchRequest {
   readonly callId: string;
   readonly name: string;
   readonly arguments: unknown;
+  /** Skill currently narrowing the loop; absent means the call came directly from Chat. */
+  readonly activeSkillName?: string;
 }
 
 export type ToolDispatchResult =

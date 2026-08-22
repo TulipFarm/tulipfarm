@@ -35,6 +35,8 @@ Credential leases for tool/runtime use.
 - Never log a DEK, recovery KEK, or decrypted value; surface failures as typed errors.
 - `SecretBroker` is default-deny, clamps TTL/uses, resolves values fresh on use, emits metadata
   only, and revokes by Secret, lease, or all.
+- A network lease scope binds the caller, destination, Run, and active Skill as well as the exact
+  Secret reference; scope equality is exact across every field.
 - `SecretLease` is not serializable; plaintext may exist only inside `lease.use(cb)`. Returning it
   throws `SecretLeakError`; callback errors are re-thrown redacted.
 

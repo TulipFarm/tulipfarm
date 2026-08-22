@@ -85,7 +85,11 @@ function sameScope(a: SecretScope, b: SecretScope): boolean {
     a.targetId === b.targetId &&
     a.runId === b.runId &&
     a.stateId === b.stateId &&
-    a.purpose === b.purpose
+    a.purpose === b.purpose &&
+    a.principalKind === b.principalKind &&
+    a.principalId === b.principalId &&
+    a.destination === b.destination &&
+    a.activeSkillName === b.activeSkillName
   );
 }
 

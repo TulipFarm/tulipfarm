@@ -4,7 +4,7 @@ import { InvalidSecretKeyError } from "@tulipfarm/secrets";
 import type { CommitActor } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
-import type { RequireAuthorization } from "../authz/route-gate";
+import type { AuthorizationCheck, RequireAuthorization } from "../authz/route-gate";
 import { commitActorFromRequest } from "../soul/commit-actor";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
@@ -18,13 +18,6 @@ const SecretMetaSchema = {
     updatedAt: { type: "string", format: "date-time" },
   },
   required: ["key", "type", "createdAt", "updatedAt"],
-} as const;
-
-/** Keys and metadata only; values never leave the service, so listing them stays member-visible. */
-const SECRET_READ = {
-  action: "secret.read",
-  resourceType: "secret",
-  fallback: "authenticated",
 } as const;
 
 const SECRET_WRITE = {
@@ -44,6 +37,7 @@ export function registerSecretsRoutes(
   secretsService: SecretsService,
   requireAuth: PreHandler,
   requireAuthorization: RequireAuthorization,
+  authorizationCheck: AuthorizationCheck,
   opts?: {
     /** Called after a successful delete; errors are caught and logged — never surface to the caller. */
     onSecretDeleted?: (key: string, actor: CommitActor) => Promise<void>;
@@ -54,9 +48,9 @@ export function registerSecretsRoutes(
   app.get(
     "/api/v1/secrets/status",
     {
-      preHandler: [requireAuth, requireAuthorization(SECRET_READ)],
+      preHandler: [requireAuth],
       schema: {
-        description: "List all secret keys and metadata. Values are never returned.",
+        description: "List authorized secret keys and metadata. Values are never returned.",
         tags: ["secrets"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         response: {
@@ -71,9 +65,22 @@ export function registerSecretsRoutes(
         },
       },
     },
-    async (_req, reply) => {
+    async (req, reply) => {
+      const principal = req.principal;
+      if (principal === undefined)
+        return reply.code(401).send({ error: "authentication required" });
       const secrets = await secretsService.list();
-      return reply.send({ secrets });
+      const visible = [];
+      for (const secret of secrets) {
+        const allowed = await authorizationCheck(principal, {
+          action: "secret.read",
+          resourceType: "secret",
+          recordId: secret.key,
+          fallback: "admin",
+        });
+        if (allowed) visible.push(secret);
+      }
+      return reply.send({ secrets: visible });
     }
   );
 

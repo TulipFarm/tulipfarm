@@ -255,6 +255,7 @@ import { buildGitHubTooling } from "./tools/github/compose";
 import { buildGitHubTools } from "./tools/github/tools";
 import { buildGoogleTooling } from "./tools/google/compose";
 import { buildGoogleTools } from "./tools/google/tools";
+import { composeNetworkTools } from "./tools/network/compose";
 import { buildToolRegistry } from "./tools/setup";
 import { buildSlackTooling } from "./tools/slack/compose";
 import { buildSlackTools } from "./tools/slack/tools";
@@ -754,6 +755,12 @@ async function boot() {
       bundledSkills,
       disabledBundledSkills
     );
+    const networkTools = composeNetworkTools({
+      secrets: secretsService,
+      soulLoader,
+      authorityLayers: authorityLayerResolver,
+      llm: llmService,
+    });
     const toolRegistry = buildToolRegistry({
       memoryDocuments,
       kv: kvService,
@@ -775,6 +782,7 @@ async function boot() {
       github: githubTools,
       slack: slackTools,
       google: googleTools,
+      network: networkTools,
       tasks: { businessId: DEPLOYMENT_BUSINESS_ID, tasks: taskRepo },
       platform: {
         events: domainEventEmitter,

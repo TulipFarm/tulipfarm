@@ -20,8 +20,9 @@ export interface ConversionResult {
   readonly warnings: readonly ConversionWarning[];
 }
 
-/** Field-name pattern that always excludes a legacy value, even if it collides with an allowlisted name. */
+/** Field-name pattern that excludes legacy Secret values, even if a name is accidentally allowlisted. */
 const SECRET_FIELD_PATTERN = /secret|token|password|credential|apikey|api_key/i;
+const SECRET_REFERENCE_FIELDS = new Set(["requiredSecrets"]);
 
 /** Fixed namespace so the same (kind, name) always derives the same id. */
 const ID_NAMESPACE = "tulipfarm.ai/soul/legacy-definition/v1";
@@ -69,7 +70,7 @@ export function mapAllowlistedFields(
   const warnings: ConversionWarning[] = [];
 
   for (const [field, value] of Object.entries(frontmatter)) {
-    if (SECRET_FIELD_PATTERN.test(field)) {
+    if (SECRET_FIELD_PATTERN.test(field) && !SECRET_REFERENCE_FIELDS.has(field)) {
       warnings.push({ code: "SECRET_FIELD_DROPPED", field });
       continue;
     }

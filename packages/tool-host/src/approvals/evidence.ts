@@ -11,7 +11,7 @@ import type { ApprovalDemandEvidence } from "@tulipfarm/tool-broker";
  * named rather than folded into the Guardrail cases so the record never claims a rule fired.
  */
 export interface ApprovalGuardrailEvidence {
-  readonly demandedBy: ApprovalDemandEvidence["requiredBy"] | "autonomy_policy";
+  readonly demandedBy: ApprovalDemandEvidence["requiredBy"] | "autonomy_policy" | "tool_contract";
   /** Guardrail revision the demanding evaluation ran against; "none" when none was bound. */
   readonly guardrailRevision: string;
   readonly reason: string;
@@ -33,6 +33,11 @@ export type ApprovalDemand = Pick<
 export const AUTONOMY_APPROVAL_DEMAND: Pick<ApprovalDemand, "demandedBy" | "reason"> = {
   demandedBy: "autonomy_policy",
   reason: "autonomy_requires_approval",
+};
+
+export const DECLARED_TOOL_APPROVAL_DEMAND: Pick<ApprovalDemand, "demandedBy" | "reason"> = {
+  demandedBy: "tool_contract",
+  reason: "tool_requires_approval",
 };
 
 /**
