@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.14.0](https://github.com/TulipFarm/tulipfarm/compare/v0.13.6...v0.14.0) (2026-08-22)
+
+### Features
+
+* **tools:** add governed web fetch and API requests ([#583](https://github.com/TulipFarm/tulipfarm/issues/583)) ([52dc591](https://github.com/TulipFarm/tulipfarm/commit/52dc59186bdf60b61aa9d4deff252b1213b23765))
+
+### Bug Fixes
+
+* **soul:** scope pre-commit ref validation to the changeset, add routine_delete ([#580](https://github.com/TulipFarm/tulipfarm/issues/580)) ([841b5e7](https://github.com/TulipFarm/tulipfarm/commit/841b5e7494c99aa7e6f55771adcfc654c0186277))
+* **tools:** repair staging discovery and authoring failures ([#582](https://github.com/TulipFarm/tulipfarm/issues/582)) ([a6f3a1b](https://github.com/TulipFarm/tulipfarm/commit/a6f3a1b67610d66d2b533951046146f2331e7641))
+* **web:** prevent chat multi-scroll and empty bottom void ([#581](https://github.com/TulipFarm/tulipfarm/issues/581)) ([e7cef62](https://github.com/TulipFarm/tulipfarm/commit/e7cef6291db58bc0fdc7279c6400ca9fcbf1f5d5))
+
 ## [0.13.6](https://github.com/TulipFarm/tulipfarm/compare/v0.13.5...v0.13.6) (2026-08-22)
 
 ### Maintenance
