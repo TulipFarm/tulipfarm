@@ -6,6 +6,7 @@ import {
   type Logger,
   type SoulBundlePublishPort,
   SoulGitStore,
+  type SoulTreeReader,
   SoulWriter,
 } from "@tulipfarm/soul";
 import { resolveSigningKey, type SigningKeyStore } from "../identity/signed-token";
@@ -60,6 +61,8 @@ export interface SoulWriterDeps {
    * composition that forgets this leaves the Runtime executing the previous tree.
    */
   readonly publisher: SoulBundlePublishPort;
+  /** Checks a changeset's cross-definition references against the tree before it is committed. */
+  readonly treeReader: Pick<SoulTreeReader, "readDefinitions">;
 }
 
 export function createSoulWriter(deps: SoulWriterDeps): SoulWriter {
@@ -76,6 +79,7 @@ export function createSoulWriter(deps: SoulWriterDeps): SoulWriter {
       push: () => deps.gitSync.push(),
     },
     { reload: deps.reload },
-    deps.publisher
+    deps.publisher,
+    deps.treeReader
   );
 }
