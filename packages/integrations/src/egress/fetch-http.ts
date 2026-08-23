@@ -33,8 +33,16 @@ export class FetchEgressHttp implements EgressHttpPort {
         ? undefined
         : new Agent({
             connect: {
-              lookup: (_hostname, _options, callback) => {
-                callback(null, pinned, pinned.includes(":") ? 6 : 4);
+              // undici's connector requests `{ all: true }` and expects an address array back in
+              // that case; handing back a bare string makes it throw `Invalid IP address:
+              // undefined`, which this class then reports as a spurious `network_unreachable`.
+              lookup: (_hostname, options, callback) => {
+                const family = pinned.includes(":") ? 6 : 4;
+                if (options.all) {
+                  callback(null, [{ address: pinned, family }]);
+                } else {
+                  callback(null, pinned, family);
+                }
               },
             },
           });

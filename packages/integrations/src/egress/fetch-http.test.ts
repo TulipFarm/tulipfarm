@@ -1,3 +1,5 @@
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { describe, expect, it, vi } from "vitest";
 import { FetchEgressHttp } from "./fetch-http";
 
@@ -49,5 +51,26 @@ describe("FetchEgressHttp", () => {
       request.url,
       expect.objectContaining({ redirect: "manual" })
     );
+  });
+
+  it("connects over a pinned address instead of reporting a spurious network fault", async () => {
+    const server = createServer((_req, res) => res.end("ok"));
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as AddressInfo).port;
+    try {
+      const http = new FetchEgressHttp();
+      // A named host, pinned to a resolved address the way GuardedEgressHttp does it — undici's
+      // connector only exercises the custom `lookup` when the URL host isn't already a literal IP.
+      await expect(
+        http.send({
+          url: `http://pinned.invalid:${port}/`,
+          method: "GET",
+          headers: {},
+          pinnedAddresses: ["127.0.0.1"],
+        })
+      ).resolves.toMatchObject({ status: 200 });
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
 });
