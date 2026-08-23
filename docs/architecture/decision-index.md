@@ -13,6 +13,10 @@ Detailed contracts:
 - [Building an Integration](building-an-integration.md)
 - [Governed network Tools](governed-network-tools.md)
 
+Drafts under review (not accepted):
+
+- [RFC: Open Integrations Framework](rfc-open-integrations-framework.md)
+
 ## Accepted decisions
 
 | ID | Decision | Rationale and consequence | Accountable owner |
