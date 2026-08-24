@@ -116,7 +116,7 @@ describe("FallbackModel.doStream", () => {
     expect((value as unknown as { textDelta: string }).textDelta).toBe("fallback");
   });
 
-  it("falls back when a model fails after streaming has started", async () => {
+  it("ends the call when a model fails after output has been committed", async () => {
     const streamResult = makeStreamResult(
       [{ type: "text-delta", textDelta: "partial" }],
       1 // error after first chunk
@@ -127,9 +127,80 @@ describe("FallbackModel.doStream", () => {
     const fallback = new FallbackModel([m1, m2]);
     const result = await fallback.doStream(opts);
     const reader = result.stream.getReader();
+
+    const { value } = await reader.read();
+    expect((value as unknown as { textDelta: string }).textDelta).toBe("partial");
+    // Switching links here would splice two different answers into one reply.
+    await expect(reader.read()).rejects.toThrow("stream error");
+    expect(m2.doStream).not.toHaveBeenCalled();
+  });
+
+  /** The regression guard: draining first made time-to-first-token the provider's last token. */
+  it("forwards the first output part before the provider has finished", async () => {
+    let release = (): void => {};
+    const stillWorking = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let sent = 0;
+    const stream = new ReadableStream({
+      async pull(controller) {
+        if (sent === 0) {
+          sent += 1;
+          controller.enqueue({ type: "text-delta", textDelta: "first" });
+          return;
+        }
+        await stillWorking;
+        controller.enqueue({ type: "text-delta", textDelta: "last" });
+        controller.close();
+      },
+    });
+    const m1 = makeModel({
+      doStream: vi
+        .fn()
+        .mockResolvedValue({ stream, rawCall: { rawPrompt: null, rawSettings: {} } }),
+    });
+    const fallback = new FallbackModel([m1]);
+
+    const result = await fallback.doStream(opts);
+    const reader = result.stream.getReader();
+    const first = await reader.read();
+    expect((first.value as unknown as { textDelta: string }).textDelta).toBe("first");
+
+    release();
+    const last = await reader.read();
+    expect((last.value as unknown as { textDelta: string }).textDelta).toBe("last");
+    await expect(reader.read()).resolves.toMatchObject({ done: true });
+  });
+
+  it("still falls back when only metadata arrived before the failure", async () => {
+    const streamResult = makeStreamResult(
+      [{ type: "stream-start", warnings: [] }],
+      1 // error after the metadata part, before any output
+    );
+    const m1 = makeModel({ doStream: vi.fn().mockResolvedValue(streamResult) });
+    const fallbackResult = makeStreamResult([{ type: "text-delta", textDelta: "complete" }]);
+    const m2 = makeModel({ doStream: vi.fn().mockResolvedValue(fallbackResult) });
+    const fallback = new FallbackModel([m1, m2]);
+    const result = await fallback.doStream(opts);
+    const reader = result.stream.getReader();
+
     const { value } = await reader.read();
     expect((value as unknown as { textDelta: string }).textDelta).toBe("complete");
     expect(m2.doStream).toHaveBeenCalledOnce();
+  });
+
+  it("forwards held-back metadata ahead of the output it preceded", async () => {
+    const streamResult = makeStreamResult([
+      { type: "stream-start", warnings: [] },
+      { type: "text-delta", textDelta: "hi" },
+    ]);
+    const m1 = makeModel({ doStream: vi.fn().mockResolvedValue(streamResult) });
+    const fallback = new FallbackModel([m1]);
+    const result = await fallback.doStream(opts);
+
+    const seen: string[] = [];
+    for await (const part of result.stream) seen.push((part as { type: string }).type);
+    expect(seen).toEqual(["stream-start", "text-delta"]);
   });
 
   it("propagates AbortError immediately in doStream", async () => {
@@ -312,5 +383,101 @@ describe("FallbackModel link health", () => {
     expect(sonnet.doGenerate).toHaveBeenCalledOnce();
     expect(terra.doGenerate).toHaveBeenCalledTimes(2);
     expect(calls).toEqual(["anthropic", "codex", "anthropic", "codex"]);
+  });
+});
+
+describe("FallbackModel lease settlement after commit", () => {
+  function recordingGate() {
+    const outcomes: string[] = [];
+    let released = 0;
+    const gate: FallbackCallGate = {
+      async acquire() {
+        return {
+          succeeded() {
+            outcomes.push("succeeded");
+          },
+          failed(reason: string) {
+            outcomes.push(`failed:${reason}`);
+          },
+          release() {
+            released += 1;
+          },
+        };
+      },
+    };
+    return { gate, outcomes, releases: () => released };
+  }
+
+  function openStreamModel(): LanguageModelV4 {
+    return makeModel({
+      doStream: vi.fn().mockResolvedValue({
+        stream: new ReadableStream({
+          start(controller) {
+            controller.enqueue({ type: "text-delta", id: "1", delta: "hi" });
+          },
+          pull: () => new Promise<void>(() => {}),
+        }),
+      }),
+    });
+  }
+
+  it("settles the lease exactly once when a committed stream is cancelled", async () => {
+    const { gate, outcomes, releases } = recordingGate();
+    const fallback = new FallbackModel([openStreamModel()], undefined, undefined, gate, [
+      "anthropic",
+    ]);
+
+    const { stream } = await fallback.doStream(opts);
+    const reader = stream.getReader();
+    await reader.read();
+    await reader.cancel("caller done");
+
+    expect(outcomes).toEqual(["succeeded"]);
+    expect(releases()).toBe(1);
+  });
+
+  it("releases the lease when the caller's signal aborts mid-stream", async () => {
+    const { gate, outcomes, releases } = recordingGate();
+    const fallback = new FallbackModel([openStreamModel()], undefined, undefined, gate, [
+      "anthropic",
+    ]);
+    const controller = new AbortController();
+
+    const { stream } = await fallback.doStream({
+      abortSignal: controller.signal,
+    } as LanguageModelV4CallOptions);
+    const reader = stream.getReader();
+    await reader.read();
+    controller.abort();
+    await Promise.resolve();
+
+    expect(outcomes).toEqual(["succeeded"]);
+    expect(releases()).toBe(1);
+  });
+
+  it("does not mark the provider down when the caller aborts after commit", async () => {
+    const { gate, outcomes, releases } = recordingGate();
+    const aborted = Object.assign(new Error("aborted"), { name: "AbortError" });
+    const model = makeModel({
+      doStream: vi.fn().mockResolvedValue({
+        stream: new ReadableStream({
+          start(controller) {
+            controller.enqueue({ type: "text-delta", id: "1", delta: "hi" });
+          },
+          pull(controller) {
+            controller.error(aborted);
+          },
+        }),
+      }),
+    });
+    const fallback = new FallbackModel([model], undefined, undefined, gate, ["anthropic"]);
+
+    const { stream } = await fallback.doStream(opts);
+    const reader = stream.getReader();
+    await reader.read();
+    await expect(reader.read()).rejects.toThrow("aborted");
+
+    expect(outcomes).toEqual(["succeeded"]);
+    expect(releases()).toBe(1);
   });
 });

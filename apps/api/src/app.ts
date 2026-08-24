@@ -38,6 +38,7 @@ import { registerKvRoutes } from "./kv/routes";
 import { registerMemoryDocumentRoute } from "./memory/document-routes";
 import { createLogTeeStream } from "./observability/log-stream";
 import { registerObservabilityRoutes } from "./observability/routes";
+import { readCustomInstructions } from "./preferences/custom-instructions";
 import { registerPreferenceRoutes } from "./preferences/routes";
 import { registerResourceRoutes } from "./resources/routes";
 import { registerRoutineAuthoringRoutes } from "./routines/authoring-routes";
@@ -475,6 +476,7 @@ export async function buildApp(opts: AppOptions = {}) {
           ...(opts.fileService === undefined ? {} : { files: opts.fileService }),
           knowledge: opts.knowledgeService,
         });
+      const kvForInstructions = opts.kvService;
       registerConversationRoutes(
         app,
         {
@@ -482,6 +484,14 @@ export async function buildApp(opts: AppOptions = {}) {
           messageRepo: opts.messageRepo,
           ...(opts.conversationStore === undefined ? {} : { turnStore: opts.conversationStore }),
           soulLoader: opts.soulLoader,
+          ...(opts.authorityLayers === undefined ? {} : { authorityLayers: opts.authorityLayers }),
+          ...(opts.memoryDocuments === undefined ? {} : { memory: opts.memoryDocuments }),
+          ...(kvForInstructions === undefined
+            ? {}
+            : {
+                customInstructions: (userId: string) =>
+                  readCustomInstructions(kvForInstructions, userId),
+              }),
           ...(opts.fileService === undefined ? {} : { files: opts.fileService }),
         },
         requireAuth

@@ -198,6 +198,7 @@ import { createObservabilityTelemetryPort } from "./observability/telemetry-port
 import { OtlpTracesExporter } from "./observability/traces";
 import { runPgMigrations } from "./pg-migrate";
 import { createAgentDelegation, startChildConversation } from "./platform/delegation";
+import { readCustomInstructions } from "./preferences/custom-instructions";
 import { PgRateLimiter } from "./rate-limit";
 import { LiveRecordAuthorizer } from "./resources/authorize";
 import { startDelivery } from "./resources/outbox";
@@ -860,6 +861,13 @@ async function boot() {
           }),
           telemetry: memoryTelemetry,
           files: fileService,
+          // The Soul reminder is a disclosure decision, so it is narrowed off the same live
+          // resolver the Tool gate uses rather than a copy of the rules.
+          authorityLayers: authorityLayerResolver,
+          // The same two reads `get_memory` performs, so the reminder and the Tool cannot disagree
+          // about what is on file for this person.
+          memory: memoryDocuments,
+          customInstructions: (userId: string) => readCustomInstructions(kvService, userId),
         }),
         files: fileService,
         tools: buildDelegatedToolDispatch({
@@ -981,6 +989,7 @@ async function boot() {
       resourceRepoFactory,
       counterStore,
       recordAuthorizer: new LiveRecordAuthorizer(soulLoader, authorityLayerResolver),
+      authorityLayers: authorityLayerResolver,
       routeAuthorizer,
       authorizationGate: gateOptions,
       reconcileResources,

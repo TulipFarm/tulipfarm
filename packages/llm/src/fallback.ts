@@ -55,6 +55,56 @@ function errorReason(err: unknown): string {
   return String(err);
 }
 
+/**
+ * Stream parts that carry nothing a participant could see.
+ *
+ * They are held back rather than forwarded, which keeps the chain free to switch links right up
+ * to the first part that is real output.
+ */
+const PRELUDE_PARTS: ReadonlySet<string> = new Set(["stream-start", "response-metadata"]);
+
+/**
+ * One terminal outcome per lease.
+ *
+ * `ProviderGate.acquire` consumes the breaker's single half-open probe, and the breaker resolves
+ * it only on `succeeded`/`failed`. Reporting both — which a cancel racing a pending read does —
+ * corrupts the failure count, and reporting neither leaves the probe outstanding forever, wedging
+ * the provider shut with no call in flight to reopen it.
+ */
+function settleOnce(lease: FallbackCallLease | undefined): FallbackCallLease | undefined {
+  if (lease === undefined) return undefined;
+  let outcome = false;
+  let released = false;
+  return {
+    succeeded: () => {
+      if (outcome) return;
+      outcome = true;
+      lease.succeeded();
+    },
+    failed: (reason: string) => {
+      if (outcome) return;
+      outcome = true;
+      lease.failed(reason);
+    },
+    release: () => {
+      if (released) return;
+      released = true;
+      lease.release();
+    },
+  };
+}
+
+function replayStream(
+  parts: readonly LanguageModelV4StreamPart[]
+): ReadableStream<LanguageModelV4StreamPart> {
+  return new ReadableStream<LanguageModelV4StreamPart>({
+    start(controller) {
+      for (const part of parts) controller.enqueue(part);
+      controller.close();
+    },
+  });
+}
+
 export class FallbackModel implements LanguageModelV4 {
   readonly specificationVersion = "v4" as const;
   readonly provider = "fallback";
@@ -85,7 +135,7 @@ export class FallbackModel implements LanguageModelV4 {
     for (const [index, model] of this.models.entries()) {
       let lease: FallbackCallLease | undefined;
       try {
-        lease = await this.gate?.acquire(this.providerKey(index, model));
+        lease = settleOnce(await this.gate?.acquire(this.providerKey(index, model)));
         if ((lease !== undefined || this.gate === undefined) && this.attempted !== undefined) {
           this.attempted.modelId = model.modelId;
         }
@@ -112,7 +162,7 @@ export class FallbackModel implements LanguageModelV4 {
       let lease: FallbackCallLease | undefined;
       let result: Awaited<ReturnType<LanguageModelV4["doStream"]>>;
       try {
-        lease = await this.gate?.acquire(this.providerKey(index, model));
+        lease = settleOnce(await this.gate?.acquire(this.providerKey(index, model)));
         if ((lease !== undefined || this.gate === undefined) && this.attempted !== undefined) {
           this.attempted.modelId = model.modelId;
         }
@@ -130,12 +180,19 @@ export class FallbackModel implements LanguageModelV4 {
       }
 
       const reader = result.stream.getReader();
-      const chunks: LanguageModelV4StreamPart[] = [];
+      const head: LanguageModelV4StreamPart[] = [];
+      let ended = false;
       try {
+        // Read only as far as the first part that is real output. Draining the whole stream here
+        // is what made time-to-first-token equal the provider's time-to-last-token.
         while (true) {
           const chunk = await reader.read();
-          if (chunk.done) break;
-          chunks.push(chunk.value);
+          if (chunk.done) {
+            ended = true;
+            break;
+          }
+          head.push(chunk.value);
+          if (!PRELUDE_PARTS.has(chunk.value.type)) break;
         }
       } catch (err) {
         reader.cancel().catch(() => {});
@@ -150,20 +207,95 @@ export class FallbackModel implements LanguageModelV4 {
         continue;
       }
 
-      lease?.succeeded();
-      lease?.release();
       this.commit(model);
-      const stream = new ReadableStream<LanguageModelV4StreamPart>({
-        start(controller) {
-          for (const chunk of chunks) controller.enqueue(chunk);
-          controller.close();
-        },
-      });
-
-      return { ...result, stream };
+      if (ended) {
+        lease?.succeeded();
+        lease?.release();
+        return { ...result, stream: replayStream(head) };
+      }
+      return { ...result, stream: this.committedStream(head, reader, lease, options.abortSignal) };
     }
     this.logExhausted(lastError);
     throw lastError;
+  }
+
+  /**
+   * The committed link's stream, forwarded as it arrives rather than after it completes.
+   *
+   * The lease is held until the stream ends: it is what bounds in-flight calls per provider, so
+   * releasing it at commit would make the cap count only the wait before the first token. Every
+   * exit — end, failure, cancel, or the caller's signal aborting — has to settle it, or the slot
+   * and the breaker's half-open probe are never returned.
+   */
+  private committedStream(
+    head: readonly LanguageModelV4StreamPart[],
+    reader: ReadableStreamDefaultReader<LanguageModelV4StreamPart>,
+    lease: FallbackCallLease | undefined,
+    signal: AbortSignal | undefined
+  ): ReadableStream<LanguageModelV4StreamPart> {
+    const { logger, modelId } = this;
+    let detachAbort = () => {};
+
+    // The caller walking away says nothing about provider health, but the breaker has only two
+    // verbs and an unsettled half-open probe never reopens on its own. The provider was answering
+    // when we left, so that is what it is told.
+    const abandoned = () => {
+      detachAbort();
+      lease?.succeeded();
+      lease?.release();
+    };
+
+    if (signal?.aborted === true) {
+      abandoned();
+      reader.cancel(signal.reason).catch(() => {});
+    } else if (signal !== undefined) {
+      const onAbort = () => {
+        abandoned();
+        reader.cancel(signal.reason).catch(() => {});
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      detachAbort = () => signal.removeEventListener("abort", onAbort);
+    }
+
+    return new ReadableStream<LanguageModelV4StreamPart>({
+      start(controller) {
+        for (const part of head) controller.enqueue(part);
+      },
+      async pull(controller) {
+        try {
+          const chunk = await reader.read();
+          if (chunk.done) {
+            detachAbort();
+            lease?.succeeded();
+            lease?.release();
+            controller.close();
+            return;
+          }
+          controller.enqueue(chunk.value);
+        } catch (err) {
+          detachAbort();
+          if (isHardFailure(err)) {
+            // The caller aborted us; the provider is not at fault and must not be marked down.
+            lease?.succeeded();
+            lease?.release();
+            controller.error(err);
+            return;
+          }
+          // Output is already downstream, so another link would splice two different answers into
+          // one reply. A failure here ends the call instead of advancing the chain.
+          lease?.failed(classifyProviderError(err));
+          lease?.release();
+          logger.warn(
+            `[llm] stream failed after commit models=${modelId} reason=${errorReason(err)}`
+          );
+          controller.error(err);
+        }
+      },
+      cancel(reason) {
+        abandoned();
+        return reader.cancel(reason);
+      },
+    });
   }
 
   private providerKey(index: number, model: LanguageModelV4): string {

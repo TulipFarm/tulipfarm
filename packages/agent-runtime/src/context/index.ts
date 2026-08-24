@@ -21,3 +21,15 @@ export type {
 export { assembleContext, ContextAssemblyError } from "./manifest";
 export type { InstructionPrecedence } from "./precedence";
 export { INSTRUCTION_PRECEDENCE, NON_COMPACTABLE_PRECEDENCE, precedenceRank } from "./precedence";
+export type {
+  SoulBusinessDetails,
+  SoulReminderCatalogue,
+  SoulReminderEntry,
+  SoulReminderPersonal,
+} from "./soul-reminder";
+export {
+  filterSoulCatalogue,
+  filterSoulPersonal,
+  renderSoulReminder,
+  SOUL_REMINDER_SECTIONS,
+} from "./soul-reminder";

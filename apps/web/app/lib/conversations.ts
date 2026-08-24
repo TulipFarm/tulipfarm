@@ -81,6 +81,7 @@ export async function getConversationMessages(id: string): Promise<ConversationM
 export type DebugContext = {
   conversationId: string;
   systemPrompt: string;
+  soulReminder: string;
   messages: ConversationMessage[];
 };
 
