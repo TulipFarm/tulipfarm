@@ -208,9 +208,7 @@ export function registerSoulRoutes(
     {
       preHandler: requireAuth,
       schema: {
-        description:
-          "Read the business profile recorded in soul.yaml — the same values the agent sees as " +
-          "<business-context>.",
+        description: "Read the business profile recorded in soul.yaml.",
         tags: ["business"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         response: {

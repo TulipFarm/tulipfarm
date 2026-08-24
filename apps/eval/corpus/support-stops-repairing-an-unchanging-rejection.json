@@ -2,9 +2,6 @@
   "id": "support-stops-repairing-an-unchanging-rejection",
   "tier": "l2",
   "agent": "support",
-  "context": {
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",

@@ -84,9 +84,7 @@ describe("the fixture itself", () => {
     const names = await readdir(join(EVAL_SOUL_DIR, "skills"));
 
     expect(names).toContain("ticket-hygiene");
-    expect(soulContext(soul, "support").eagerSkills?.map((s) => s.name)).toEqual([
-      "ticket-hygiene",
-    ]);
+    expect(soul.catalogue.skills.map((s) => s.name)).toContain("ticket-hygiene");
   });
 });
 
@@ -103,25 +101,16 @@ describe("evalSoulHash", () => {
 });
 
 describe("soulContext", () => {
-  it("takes the Agent's identity and body from the Soul, exactly as production does", async () => {
+  it("takes the Agent's body from the Soul, exactly as production does", async () => {
     const ctx = soulContext(soul, "triage");
 
-    expect(ctx.agentId).toBe("triage");
-    expect(ctx.domain).toBe("support");
     expect(ctx.personality).toContain("Never guess a status.");
   });
 
-  it("takes the business from soul.yaml, so no Case restates it", async () => {
-    const ctx = soulContext(soul, "support");
-
-    expect(ctx.business?.name).toBe("Tulip Supply Co");
-  });
-
-  it("carries the catalogue and the Skill index the Soul defines", async () => {
-    const ctx = soulContext(soul, "support");
-
-    expect(ctx.soulCatalogue?.agents.length).toBe(4);
-    expect(ctx.availableSkills?.map((s) => s.name)).toContain("refund-policy");
+  it("contributes the Agent body and nothing else", async () => {
+    // Everything a Soul used to push into the prompt — the business, the catalogue, the Skill
+    // index — is now reached through a Tool. A field reappearing here is a prompt block returning.
+    expect(Object.keys(soulContext(soul, "support"))).toEqual(["personality"]);
   });
 
   it("refuses an Agent the Eval Soul does not define", async () => {
@@ -137,12 +126,5 @@ describe("soulContext", () => {
     const supplied = Object.keys(soulContext(soul, "support")).sort();
 
     expect(supplied).toEqual([...SOUL_OWNED_CONTEXT_KEYS].sort());
-  });
-
-  it("carries the eager Skill body production would render", async () => {
-    const eager = soulContext(soul, "support").eagerSkills ?? [];
-
-    expect(eager.map((s) => s.name)).toContain("ticket-hygiene");
-    expect(eager[0]?.body).toContain("Do not use bullet lists");
   });
 });

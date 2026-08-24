@@ -2,15 +2,6 @@
   "id": "present-record-table-uses-object-component",
   "tier": "l2",
   "agent": "support",
-  "context": {
-    "governancePages": [],
-    "availableTools": [
-      {
-        "name": "present",
-        "description": "Create one non-blocking informational TSP Artifact."
-      }
-    ]
-  },
   "input": [
     {
       "role": "user",

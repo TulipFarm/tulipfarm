@@ -18,7 +18,7 @@ const answering = (text: string): EvalCase => ({
   id: "l3-answer",
   tier: "l3",
   agent: "support",
-  context: { governancePages: [] },
+  context: {},
   input: [{ role: "user", content: textContent("When do you open?") }],
   expect: [],
   script: [{ kind: "text", text }],
@@ -101,7 +101,7 @@ const writing = (content: string): EvalCase => ({
   id: "l3-soul-write",
   tier: "l3",
   agent: "support",
-  context: { governancePages: [] },
+  context: {},
   input: [{ role: "user", content: textContent("Add an agent called billing.") }],
   tools: [
     {
@@ -248,9 +248,11 @@ describe("a journey", () => {
         binding: scriptedBinding(),
       });
 
-      // The prompt is the *second* Turn's, assembled from a Soul reloaded after the first Turn
-      // committed. If the writer commits a path the loader cannot read, this is what notices.
-      expect(turn.systemPrompt).toContain("billing");
+      // No prompt block lists the Soul any more, so the second Turn cannot be asked to name the
+      // new Agent. What it still proves is that the Soul reloaded between Turns and assembled a
+      // prompt from it rather than serving a stale or empty one.
+      expect(turn.systemPrompt).toContain("<agent-personality>");
+      expect(turn.systemPrompt).toContain("Tulip Supply Co");
       expect(turn.answer).toBe("Support and billing.");
       expect(turn.soulCommits).toHaveLength(1);
     },
@@ -423,7 +425,7 @@ const generating = (over: Partial<EvalCase> = {}): EvalCase => ({
   id: "l3-file-create",
   tier: "l3",
   agent: "support",
-  context: { governancePages: [] },
+  context: {},
   input: [{ role: "user", content: textContent("Write the delays up as a PDF.") }],
   platformTools: [FILE_CREATE_TOOL],
   expect: [],

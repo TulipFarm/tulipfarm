@@ -2,10 +2,6 @@
   "id": "support-rereads-a-file-from-an-earlier-turn",
   "tier": "l2",
   "agent": "support",
-  "context": {
-    "customInstructions": "Answer from the documents the person has given you.",
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",

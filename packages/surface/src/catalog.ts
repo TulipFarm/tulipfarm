@@ -321,27 +321,3 @@ export function surfaceComponentFor(
 ): SurfaceComponentDefinition | undefined {
   return SURFACE_CATALOG[`${name}@${version}`];
 }
-
-export function surfaceCatalogPrompt(
-  target: SurfaceTarget,
-  components: readonly SurfaceComponentDefinition[],
-  revision: string
-): string {
-  return [
-    `Tulip Surface Protocol ${targetKey(target)} catalog (${revision}).`,
-    "Prefer a presentation over plain prose when the response contains structured Records, statuses, an important warning, a comparison, actions, choices, or typed input.",
-    "Use at most one brief prose lead-in followed by one presentation. Do not repeat its contents.",
-    "Only use the listed components. Props must match the selected component schema.",
-    "Use present only for non-blocking information. If you ask the user to choose, confirm, or enter anything before continuing, you MUST call request_input instead of present.",
-    "Choices and Form always use request_input. After a successful presentation Tool call, do not call another presentation Tool or repeat the content in prose.",
-    "Selection guide: Alert is for an outage, degradation, urgent warning, or important success; Status is one compact state; Metric is one or more KPIs; Timeline is ordered events; Comparison is an option-by-criteria decision matrix; Breakdown is a proportional split; Gauge is bounded progress; RecordTable is repeated Records sharing fields; Choices is one mutually exclusive decision; Form is typed multi-field input.",
-    'In Choices, set recommend to the value you would pick and give that choice a detail sentence and a confidence. Omit recommend when you genuinely have no preference — it is a recommendation, not a default. Each label becomes the button the reader presses, so write it as the action it takes ("Reorder from cone_king"), never as a bare identifier ("cone_king"). Wrap identifiers, values and settings in backticks in question and detail; they render as inline code.',
-    'Call present or request_input with {"component":{"name":"ComponentName","version":"1.0","props":{...}}}. The server derives input validation for request_input; do not supply an awaitedSchema.',
-    'The component name never contains its version: use "RecordTable", not "RecordTable@1.0".',
-    "All component-specific fields belong inside component.props.",
-    ...components.map(
-      (component) =>
-        `- ${component.name} (version ${component.version}): ${component.description} Props: ${JSON.stringify(component.propsSchema)} Example component: ${JSON.stringify({ name: component.name, version: component.version, props: component.examples[0] })}`
-    ),
-  ].join("\n");
-}

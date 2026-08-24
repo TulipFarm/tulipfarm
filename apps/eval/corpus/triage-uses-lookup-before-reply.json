@@ -2,15 +2,6 @@
   "id": "triage-uses-lookup-before-reply",
   "tier": "l2",
   "agent": "triage",
-  "context": {
-    "governancePages": [],
-    "availableTools": [
-      {
-        "name": "lookup_ticket",
-        "description": "Fetch a ticket by id."
-      }
-    ]
-  },
   "input": [
     {
       "role": "user",
@@ -60,10 +51,6 @@
     }
   ],
   "expect": [
-    {
-      "kind": "prompt_contains",
-      "text": "agentId: triage"
-    },
     {
       "kind": "prompt_contains",
       "text": "Never guess a status."

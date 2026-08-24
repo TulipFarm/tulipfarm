@@ -10,11 +10,29 @@ describe("default chat harness", () => {
 
   it("combines TulipFarm's business-building role with execution discipline", () => {
     expect(DEFAULT_ASSISTANT.body).toContain("## Building the system");
-    expect(DEFAULT_ASSISTANT.body).toContain("## Execution discipline");
-    expect(DEFAULT_ASSISTANT.body).toContain("Do not describe an action you could");
-    expect(DEFAULT_ASSISTANT.body).toContain("verify the result");
-    expect(DEFAULT_ASSISTANT.body).toContain("never invent a successful result");
-    expect(DEFAULT_ASSISTANT.body).toContain("Batch independent reads, searches, and lookups");
-    expect(DEFAULT_ASSISTANT.body).toContain("active autonomy and approval rules");
+    expect(DEFAULT_ASSISTANT.body).toContain("## Acting");
+    expect(DEFAULT_ASSISTANT.body).toContain("Never describe a call you could make");
+    expect(DEFAULT_ASSISTANT.body).toContain("confirm it with the matching read, list, or status");
+    expect(DEFAULT_ASSISTANT.body).toContain(
+      "Issue every independent Tool call in the same response"
+    );
+  });
+
+  /**
+   * The prompt carries no facts, so an instruction to read one from Context would send the model
+   * looking somewhere empty. Every fact the body asks for has to name the Tool that returns it.
+   */
+  it("names the Tool behind every fact it tells the model to know", () => {
+    for (const tool of [
+      "get_business_profile",
+      "get_memory",
+      "get_current_time",
+      "get_current_agent",
+      "list_governance_pages",
+      "list_resource_types",
+    ]) {
+      expect(DEFAULT_ASSISTANT.body).toContain(tool);
+    }
+    expect(DEFAULT_ASSISTANT.body).toContain("Every fact about the business");
   });
 });

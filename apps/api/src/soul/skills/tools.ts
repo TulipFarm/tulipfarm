@@ -47,6 +47,12 @@ export interface SkillToolContext extends MarketplaceSkillToolContext {
   llmService?: LlmService;
   bundledSkills: ReadonlyMap<string, BundledSkill>;
   disabledBundledSkills: Set<string>;
+  /**
+   * Skills hidden for this Turn only. Kept apart from {@link disabledBundledSkills} because that
+   * set is persisted back to `skills/.bundled-disabled.json`; a live gate written into it would
+   * become a permanent delete.
+   */
+  hiddenSkillNames?: () => Promise<ReadonlySet<string>>;
   readonly soulWriter: SoulWriter;
 }
 
@@ -404,13 +410,19 @@ const skillList = defineApiTool<SkillToolContext>({
   requiresApproval: false,
   handler: async (args, ctx) => {
     if (!validateList(args)) return err("validation_error", firstError(validateList.errors));
-    const skills = Array.from(
-      mergedSkills(ctx.soulLoader, ctx.bundledSkills, ctx.disabledBundledSkills).values()
-    ).map(({ name, frontmatter }) => ({
-      name,
-      frontmatter,
-      provenance: ctx.soulLoader.skills.has(name) ? "soul" : "builtin",
-    }));
+    const live = await ctx.hiddenSkillNames?.();
+    const hidden =
+      live === undefined || live.size === 0
+        ? ctx.disabledBundledSkills
+        : new Set([...ctx.disabledBundledSkills, ...live]);
+    const skills = Array.from(mergedSkills(ctx.soulLoader, ctx.bundledSkills, hidden).values())
+      // A Skill installed from an untrusted source stays out of the catalogue until it is audited.
+      .filter(({ frontmatter }) => frontmatter._pendingAudit !== true)
+      .map(({ name, frontmatter }) => ({
+        name,
+        frontmatter,
+        provenance: ctx.soulLoader.skills.has(name) ? "soul" : "builtin",
+      }));
     return ok({ skills });
   },
 });

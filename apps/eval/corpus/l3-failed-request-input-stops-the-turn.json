@@ -2,10 +2,6 @@
   "id": "l3-failed-request-input-stops-the-turn",
   "tier": "l3",
   "agent": "support",
-  "context": {
-    "memoryDocument": "## Operating profile\nThe operator must choose the operating profile before an Agent is created.",
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",

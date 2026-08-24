@@ -46,6 +46,7 @@ describe("knowledge tools", () => {
       "get_page",
       "get_page_by_path",
       "get_space_graph",
+      "list_governance_pages",
       "list_spaces",
       "navigate_space",
       "query_knowledge",

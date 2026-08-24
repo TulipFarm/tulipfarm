@@ -1,10 +1,7 @@
 {
-  "id": "support-sees-eager-skill-not-lazy-body",
+  "id": "support-standing-rules-not-skill-bodies",
   "tier": "l2",
   "agent": "support",
-  "context": {
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",
@@ -22,14 +19,6 @@
     {
       "kind": "prompt_contains",
       "text": "Do not use bullet lists unless the customer asked for one."
-    },
-    {
-      "kind": "prompt_contains",
-      "text": "refund-policy"
-    },
-    {
-      "kind": "prompt_omits",
-      "text": "customer-service:"
     },
     {
       "kind": "prompt_omits",

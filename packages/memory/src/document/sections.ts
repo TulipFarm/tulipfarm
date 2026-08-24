@@ -18,8 +18,8 @@ export function timezoneFromMemoryDocument(document: string): string | undefined
 }
 
 /**
- * `<memory>` must stay well inside the assembler's 25,600-char ceiling, because an over-budget
- * block is dropped whole — a silent, total memory loss. These caps reject the write instead.
+ * Caps a memory write rather than letting the document grow without bound. Nothing trims it on
+ * read, so an oversized document is only ever the writer's doing.
  */
 export const MEMORY_DOCUMENT_CHAR_BUDGET = 20_000;
 export const MEMORY_SECTION_CHAR_BUDGET = 6_000;

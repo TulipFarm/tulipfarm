@@ -2,10 +2,6 @@
   "id": "support-reads-an-attached-pdf",
   "tier": "l2",
   "agent": "support",
-  "context": {
-    "customInstructions": "Answer from the documents you are given.",
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",

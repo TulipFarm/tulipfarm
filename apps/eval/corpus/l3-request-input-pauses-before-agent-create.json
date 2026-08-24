@@ -2,10 +2,6 @@
   "id": "l3-request-input-pauses-before-agent-create",
   "tier": "l3",
   "agent": "support",
-  "context": {
-    "memoryDocument": "## Operating profile\nThe operator must choose the operating profile before an Agent is created.",
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",

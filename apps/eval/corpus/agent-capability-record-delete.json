@@ -2,9 +2,6 @@
   "id": "agent-capability-record-delete",
   "tier": "l2",
   "agent": "records-readonly",
-  "context": {
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",

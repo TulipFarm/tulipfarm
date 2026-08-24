@@ -8,8 +8,6 @@ import type { AssembleContext } from "@tulipfarm/agent-runtime";
 import {
   buildSoulCatalogue,
   hermeticGitEnv,
-  listAvailableSkills,
-  listEagerSkills,
   type SoulCatalogue,
   SoulLoader,
 } from "@tulipfarm/soul";
@@ -169,32 +167,19 @@ function buildFixtureRepo(path: string): void {
  *
  * `soulContext` returns exactly these — the compiler rejects a field it supplies but does not
  * list, and the Corpus refuses a Case that sets one. Restating the list in the Corpus guard was
- * how `tenantId` came to be supplied by the Soul and still overridable by a Case.
+ * how a Soul-supplied field came to be overridable by a Case.
  */
-export const SOUL_OWNED_CONTEXT_KEYS = [
-  "agentId",
-  "domain",
-  "tenantId",
-  "business",
-  "personality",
-  "soulCatalogue",
-  "availableSkills",
-  "eagerSkills",
-] as const;
+export const SOUL_OWNED_CONTEXT_KEYS = ["personality"] as const;
 
 type SoulOwnedContext = Pick<AssembleContext, (typeof SOUL_OWNED_CONTEXT_KEYS)[number]>;
-
-function text(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
-}
 
 /**
  * The part of the Context an Agent owns, taken from the Eval Soul.
  *
  * The mapping is production's (`apps/api/src/chat/system-prompt.ts`) and must stay production's —
- * an eval that assembled its Agent differently would measure a prompt no real turn ever sees. In
- * particular the AGENT.md body is the `personality` block, not `customInstructions`, which are
- * user-authored standing instructions and therefore a Case's to set.
+ * an eval that assembled its Agent differently would measure a prompt no real turn ever sees. The
+ * AGENT.md body is the `personality` block, and it is the only thing the Soul contributes to a
+ * prompt: everything else an Agent knows now arrives through a Tool.
  *
  * @throws when the Case names an Agent the Eval Soul does not define.
  */
@@ -204,25 +189,5 @@ export function soulContext(soul: EvalSoul, agentName: string): SoulOwnedContext
     const known = [...soul.loader.agents.keys()].sort().join(", ");
     throw new Error(`Eval Soul defines no Agent "${agentName}" — it defines: ${known}`);
   }
-  const manifest = soul.loader.manifest ?? {};
-  const business = {
-    ...(text(manifest.businessName) === undefined ? {} : { name: text(manifest.businessName) }),
-    ...(text(manifest.businessDescription) === undefined
-      ? {}
-      : { description: text(manifest.businessDescription) }),
-    ...(text(manifest.businessWebsite) === undefined
-      ? {}
-      : { website: text(manifest.businessWebsite) }),
-  };
-
-  return {
-    agentId: agent.name,
-    domain: text(agent.frontmatter.domain) ?? null,
-    tenantId: "default",
-    business,
-    personality: agent.body,
-    soulCatalogue: soul.catalogue,
-    availableSkills: listAvailableSkills(soul.loader),
-    eagerSkills: listEagerSkills(soul.loader),
-  };
+  return { personality: agent.body };
 }

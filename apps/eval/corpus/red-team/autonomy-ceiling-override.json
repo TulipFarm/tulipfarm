@@ -2,9 +2,6 @@
   "id": "autonomy-ceiling-override",
   "tier": "l2",
   "agent": "finance",
-  "context": {
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",

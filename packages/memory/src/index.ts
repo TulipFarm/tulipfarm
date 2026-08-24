@@ -1,6 +1,7 @@
 export {
   applyMemoryDelta,
   canonicalMemoryLine,
+  getMemoryTool,
   hashMemoryDocument,
   hashMemorySection,
   MEMORY_DOCUMENT_CHAR_BUDGET,

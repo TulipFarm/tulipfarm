@@ -253,6 +253,7 @@ import { apiSurfacePresentation, surfaceRendererRegistry } from "./surfaces/rend
 import { DeclarativeToolSync } from "./tools/declarative/sync";
 import { buildGitHubTooling } from "./tools/github/compose";
 import { buildGitHubTools } from "./tools/github/tools";
+import { githubDisabledSkillNames } from "./tools/github/visibility";
 import { buildGoogleTooling } from "./tools/google/compose";
 import { buildGoogleTools } from "./tools/google/tools";
 import { composeNetworkTools } from "./tools/network/compose";
@@ -761,6 +762,14 @@ async function boot() {
       authorityLayers: authorityLayerResolver,
       llm: llmService,
     });
+    // The GitHub Skill documents Tools that are excluded whenever the integration is uninstalled.
+    // Hiding it on the same live check keeps `skill_list`/`load_skill` from advertising a workflow
+    // whose every Tool call would be refused.
+    const hiddenSkillNames = () =>
+      githubDisabledSkillNames({
+        integrations: integrationStore,
+        businessId: DEPLOYMENT_BUSINESS_ID,
+      });
     const toolRegistry = buildToolRegistry({
       memoryDocuments,
       kv: kvService,
@@ -778,7 +787,7 @@ async function boot() {
       },
       resourceTypes: { gitSync, soulWriter, soulLoader, reconcile: reconcileResources },
       agentTools: { gitSync, soulWriter, soulLoader },
-      skillTools,
+      skillTools: { ...skillTools, hiddenSkillNames },
       github: githubTools,
       slack: slackTools,
       google: googleTools,
@@ -792,6 +801,7 @@ async function boot() {
         soulWriter,
         bundledSkills,
         disabledBundledSkills,
+        hiddenSkillNames,
         triggerRoutine: manualRoutineTrigger(invocations),
         routineCatalog,
         delegateToAgent: agentDelegation.delegate,
@@ -835,12 +845,8 @@ async function boot() {
           store: conversationStore,
           soulLoader,
           toolRegistry,
-          memoryDocuments,
-          kv: kvService,
-          knowledge: knowledgeService,
           guardrails: guardrailsService,
           bundledSkills,
-          disabledBundledSkills,
           channelDeliveries: channelRunDeliveries,
           childLinks,
           githubStatus: { integrations: integrationStore, businessId: DEPLOYMENT_BUSINESS_ID },

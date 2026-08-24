@@ -20,8 +20,8 @@ Use this Skill when the user wants to find, create, update, or delete business r
 
 ## Workflow
 
-1. Identify the Resource type involved. If its fields are not already present in Context, load its
-   Schema before constructing filters or writes.
+1. Identify the Resource type involved. Nothing tells you its fields up front, so read its Schema
+   with `get_resource_type` before constructing filters or writes.
 2. Search before creating when duplicates would be harmful. Use the narrowest supported filter and
    paginate rather than assuming the first page is complete.
 3. For writes, infer safe values that are clear from the request. Ask one focused question only when

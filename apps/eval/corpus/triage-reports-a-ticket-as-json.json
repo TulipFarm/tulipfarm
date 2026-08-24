@@ -2,10 +2,6 @@
   "id": "triage-reports-a-ticket-as-json",
   "tier": "l2",
   "agent": "triage",
-  "context": {
-    "customInstructions": "Reply with a single JSON object and nothing else. Use exactly the keys ticketId, status and owner, taken from the lookup result.",
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",

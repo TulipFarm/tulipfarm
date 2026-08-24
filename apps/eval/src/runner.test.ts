@@ -22,7 +22,7 @@ const answering = (id: string, text: string, expectations: EvalCase["expect"]): 
   id,
   tier: "l2",
   agent: "triage",
-  context: { governancePages: [] },
+  context: {},
   input: [{ role: "user", content: textContent("hello") }],
   script: [{ kind: "text", text }],
   expect: expectations,
@@ -50,7 +50,7 @@ describe("runSweep", () => {
 
   it("runs the real Context assembler, so the prompt is measurable", async () => {
     const corpus = corpusOf([
-      answering("assembles", "ok", [{ kind: "prompt_contains", text: "agentId: triage" }]),
+      answering("assembles", "ok", [{ kind: "prompt_contains", text: "Never guess a status." }]),
     ]);
     const card = await runSweep({ corpus, model: scriptedBinding() });
     expect(card.passed).toBe(1);
@@ -74,7 +74,7 @@ describe("runSweep", () => {
     const corpus = corpusOf([answering("sends", "ok", [])]);
     await runSweep({ corpus, model: binding });
     expect(seen[0]).toContain("system:");
-    expect(seen[0]).toContain("agentId: triage");
+    expect(seen[0]).toContain("Never guess a status.");
     expect(seen[0]).toContain("user:hello");
   });
 
@@ -83,7 +83,7 @@ describe("runSweep", () => {
       id: "tools",
       tier: "l2",
       agent: "triage",
-      context: { governancePages: [] },
+      context: {},
       input: [{ role: "user", content: textContent("refund please") }],
       tools: [
         { name: "search", inputSchema: { type: "object" } },
@@ -210,7 +210,7 @@ describe("runSweep spend", () => {
         id: `c${i}`,
         tier: "l2" as const,
         agent: "triage",
-        context: { governancePages: [] },
+        context: {},
         input: [{ role: "user" as const, content: textContent("hello") }],
         expect: [{ kind: "output_contains" as const, text: "answer" }],
       }))
@@ -343,7 +343,7 @@ describe("the Eval Soul's guardrails", () => {
       id: "refund-blocked",
       tier: "l2",
       agent: "support",
-      context: { governancePages: [] },
+      context: {},
       input: [{ role: "user", content: textContent("Refund order 91.") }],
       tools: [
         {
@@ -387,7 +387,7 @@ describe("the Eval Soul's guardrails", () => {
       id: "injection-refused",
       tier: "l2",
       agent: "support",
-      context: { governancePages: [] },
+      context: {},
       input: [
         {
           role: "user",
@@ -408,7 +408,7 @@ describe("the Eval Soul's guardrails", () => {
       id: "card-filtered",
       tier: "l2",
       agent: "support",
-      context: { governancePages: [] },
+      context: {},
       input: [{ role: "user", content: textContent("What card is on file?") }],
       script: [{ kind: "text", text: "The card on file is 4111 1111 1111 1111." }],
       expect: [
@@ -500,7 +500,7 @@ describe("the scripted Tool dispatcher", () => {
     id,
     tier: "l2",
     agent: "triage",
-    context: { governancePages: [] },
+    context: {},
     input: [{ role: "user", content: textContent("hello") }],
     tools: [{ name: tool, description: "d", inputSchema: { type: "object", properties: {} } }],
     toolResults: [{ name: "lookup_ticket", output: { ticketStatus: "open" } }],
@@ -611,7 +611,7 @@ describe("a guard_held Case the model defused before the guard was asked", () =>
     id: "refund-blocklist",
     tier: "l2",
     agent: "triage",
-    context: { governancePages: [] },
+    context: {},
     input: [{ role: "user", content: textContent("refund order 91") }],
     tools: [
       {
@@ -687,7 +687,7 @@ describe("what a failing L3 Trial reports as spent", () => {
       id: "l3-throws",
       tier: "l3",
       agent: "support",
-      context: { governancePages: [] },
+      context: {},
       input: [{ role: "user", content: textContent("hello") }],
       expect: [{ kind: "run_status", status: "succeeded" }],
       script: [{ kind: "text", text: "unused" }],
@@ -723,7 +723,7 @@ describe("what a failing L3 Trial reports as spent", () => {
       id,
       tier: "l3",
       agent: "support",
-      context: { governancePages: [] },
+      context: {},
       input: [{ role: "user", content: textContent("hello") }],
       expect: [],
       script: [{ kind: "text", text: "unused" }],
@@ -745,7 +745,7 @@ describe("an L3 Case whose seam the model never opened", () => {
     id: "l3-seam",
     tier: "l2",
     agent: "support",
-    context: { governancePages: [] },
+    context: {},
     input: [{ role: "user", content: textContent("add a billing agent") }],
     tools: [
       {

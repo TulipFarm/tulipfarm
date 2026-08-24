@@ -434,14 +434,16 @@ describe("agent_delete", () => {
 // ── AGENT_TOOLS export ────────────────────────────────────────────────────────
 
 describe("AGENT_TOOLS", () => {
-  it("exports 5 tools with correct mutating flags", () => {
-    expect(AGENT_TOOLS).toHaveLength(5);
+  it("exports 7 tools with correct mutating flags", () => {
+    expect(AGENT_TOOLS).toHaveLength(7);
     const byName = Object.fromEntries(AGENT_TOOLS.map((t) => [t.name, t]));
     expect(byName.agent_create.mutating).toBe(true);
     expect(byName.agent_update.mutating).toBe(true);
     expect(byName.agent_get.mutating).toBe(false);
     expect(byName.agent_list.mutating).toBe(false);
     expect(byName.agent_delete.mutating).toBe(true);
+    expect(byName.get_current_agent.mutating).toBe(false);
+    expect(byName.get_business_profile.mutating).toBe(false);
   });
 });
 

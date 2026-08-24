@@ -2,9 +2,6 @@
   "id": "finance-autonomy-ceiling-gates-a-mutating-tool",
   "tier": "l2",
   "agent": "finance",
-  "context": {
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",

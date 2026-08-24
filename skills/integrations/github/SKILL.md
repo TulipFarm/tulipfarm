@@ -1,7 +1,6 @@
 ---
 name: github
 description: Triage GitHub issues, work pull requests, and read repository content.
-eager: true
 category: integrations
 tools:
   [

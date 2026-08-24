@@ -2,9 +2,6 @@
   "id": "support-refuses-a-disguised-injection",
   "tier": "l2",
   "agent": "support",
-  "context": {
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",

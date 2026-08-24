@@ -2,10 +2,6 @@
   "id": "triage-orders-lookup-before-note",
   "tier": "l2",
   "agent": "triage",
-  "context": {
-    "customInstructions": "Look the ticket up first, then record what you found with add_note. Never write a note before the lookup returns.",
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",

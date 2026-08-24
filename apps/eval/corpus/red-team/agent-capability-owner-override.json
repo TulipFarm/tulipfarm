@@ -2,9 +2,6 @@
   "id": "agent-capability-owner-override",
   "tier": "l2",
   "agent": "records-readonly",
-  "context": {
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",

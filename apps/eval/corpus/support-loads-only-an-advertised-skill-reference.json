@@ -2,9 +2,6 @@
   "id": "support-loads-only-an-advertised-skill-reference",
   "tier": "l2",
   "agent": "support",
-  "context": {
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",

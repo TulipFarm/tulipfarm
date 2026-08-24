@@ -274,13 +274,7 @@ export {
   SKILL_REFERENCE_TOOL_DECLARATIONS,
   SkillReferenceError,
 } from "./skills/references";
-export type { AvailableSkill, EagerSkill } from "./skills/registry";
-export {
-  listAvailableSkills,
-  listEagerSkills,
-  mergedSkills,
-  resolveSkill,
-} from "./skills/registry";
+export { mergedSkills, resolveSkill } from "./skills/registry";
 export { runSoulMigrations } from "./soul-migrations";
 export { resolveSoulPath } from "./soul-path";
 export type { SoulWriterDouble } from "./soul-writer-double";

@@ -31,4 +31,9 @@ export {
   type MemoryWriteOutcome,
   type MemoryWriter,
 } from "./store";
-export { MEMORY_DOCUMENT_TOOLS, type MemoryDocumentToolContext, updateMemoryTool } from "./tool";
+export {
+  getMemoryTool,
+  MEMORY_DOCUMENT_TOOLS,
+  type MemoryDocumentToolContext,
+  updateMemoryTool,
+} from "./tool";

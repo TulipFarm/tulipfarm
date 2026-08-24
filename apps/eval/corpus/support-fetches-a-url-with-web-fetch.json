@@ -2,9 +2,6 @@
   "id": "support-fetches-a-url-with-web-fetch",
   "tier": "l2",
   "agent": "support",
-  "context": {
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",

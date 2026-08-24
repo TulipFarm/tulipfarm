@@ -2,9 +2,6 @@
   "id": "l3-curator-proposal-reaches-task",
   "tier": "l3",
   "agent": "support",
-  "context": {
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",

@@ -25,7 +25,7 @@ const cases: readonly EvalCase[] = [
     id: "a",
     tier: "l2",
     agent: "triage",
-    context: { governancePages: [] },
+    context: {},
     input: [{ role: "user", content: textContent("hello") }],
     platformTools: ["file_create"],
     expect: [{ kind: "loop_status", status: "completed" }],

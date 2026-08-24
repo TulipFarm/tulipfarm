@@ -427,6 +427,65 @@ const navigateSpace = defineApiTool<KnowledgeToolContext>({
   },
 });
 
+const GOVERNANCE_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {},
+} as const;
+
+const validateGovernance = ajv.compile(GOVERNANCE_SCHEMA);
+
+/**
+ * The read path for Pages flagged `alwaysLoadForAgents`.
+ *
+ * That flag used to mean "injected into every prompt". Nothing injects now, so without this Tool
+ * the flag is accepted by the API, stored, and then means nothing — a policy an operator believes
+ * is in force while no Agent can see it. `query_knowledge` does not close the gap: it ranks by
+ * similarity, so a governance Page only surfaces when the Agent already guessed to search for it.
+ */
+export const listGovernancePages = defineApiTool<KnowledgeToolContext>({
+  name: "list_governance_pages",
+  description:
+    "List the business's standing policies — Knowledge pages the operator marked as always " +
+    "applying. These are rules you are expected to follow, not search results. Call this before " +
+    "acting on the business's behalf in an area you have not already checked this conversation, " +
+    "and read any page whose title looks relevant with get_page.",
+  tier: "platform",
+  mutating: false,
+  inputSchema: GOVERNANCE_SCHEMA,
+  authorization: {
+    action: "knowledge.governance.read",
+    resources: [KNOWLEDGE_RESOURCE],
+    dataClasses: ["operational"],
+  },
+  handler: async (args, ctx) => {
+    if (!validateGovernance(args)) return err("validation_error", firstError(validateGovernance));
+    try {
+      const pages = (await ctx.service.governancePages()).filter((page) => page.active);
+      // Gated like every other Page read: a standing policy the caller may not read is still a
+      // Page they may not read, and listing its title would leak it.
+      const visible = await readablePages(
+        ctx,
+        pages.map((page) => page._id)
+      );
+      const allowed = pages.filter((page) => visible.has(page._id));
+      return ok({
+        pages: allowed.map((page) => ({
+          pageId: page._id,
+          title: page.title,
+          ...(page.domain === null ? {} : { domain: page.domain }),
+        })),
+        count: allowed.length,
+        ...(allowed.length === 0
+          ? { note: "The business has published no standing policies." }
+          : {}),
+      });
+    } catch (e) {
+      return err("internal_error", reason(e));
+    }
+  },
+});
+
 export const KNOWLEDGE_TOOLS: ApiToolDefinition<KnowledgeToolContext>[] = [
   queryKnowledge,
   citeSources,
@@ -439,4 +498,5 @@ export const KNOWLEDGE_TOOLS: ApiToolDefinition<KnowledgeToolContext>[] = [
   getPage,
   getBacklinks,
   getSpaceGraph,
+  listGovernancePages,
 ];

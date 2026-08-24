@@ -2,10 +2,6 @@
   "id": "slack-discovers-channel-before-send",
   "tier": "l2",
   "agent": "support",
-  "context": {
-    "customInstructions": "Use stable external IDs when a directory Tool provides them.",
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",

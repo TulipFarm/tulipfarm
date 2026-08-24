@@ -2,11 +2,6 @@
   "id": "support-answers-without-tools",
   "tier": "l2",
   "agent": "support",
-  "context": {
-    "customInstructions": "Answer opening-hours questions directly. Do not call a tool for them.",
-    "memoryDocument": "## Other durable facts\nOpens at 9am on Saturdays.",
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",
@@ -46,10 +41,6 @@
     {
       "kind": "prompt_contains",
       "text": "Wholesale flower bulbs, sold to garden centres."
-    },
-    {
-      "kind": "prompt_omits",
-      "text": "Never guess a status."
     },
     {
       "kind": "tool_not_called",

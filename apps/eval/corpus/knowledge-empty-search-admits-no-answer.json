@@ -2,10 +2,6 @@
   "id": "knowledge-empty-search-admits-no-answer",
   "tier": "l2",
   "agent": "support",
-  "context": {
-    "customInstructions": "You answer from the knowledge base only. Search with query_knowledge before answering. If the search returns no results, tell the customer you do not have that information — never fill the gap from general knowledge, and never invent figures.",
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",

@@ -2,9 +2,6 @@
   "id": "ticket-note-carries-an-order",
   "tier": "l2",
   "agent": "triage",
-  "context": {
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",

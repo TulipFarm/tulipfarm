@@ -303,8 +303,8 @@ async function runTrial(
 
   // The real assembler runs here, over the real Soul. Without either, the tier would measure the
   // Tool loop against a hand-written prompt and would never notice a Context-assembly regression.
-  // The Soul goes first: what an Agent is belongs to the fixture, and a Case may only add the
-  // per-turn material a real turn would carry — memory, tagged Resources, the Tool index.
+  // The Soul goes first: what an Agent is belongs to the fixture, and a Case may only override the
+  // platform instructions.
   const systemPrompt = assembleSystemPrompt({
     ...soulContext(soul, evalCase.agent),
     ...evalCase.context,

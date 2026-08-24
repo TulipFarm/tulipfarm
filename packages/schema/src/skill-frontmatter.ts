@@ -15,7 +15,6 @@ export const SkillFrontmatterSchema = {
       pattern: "^[a-z0-9][a-z0-9._-]*$",
     },
     description: { type: "string", minLength: 1, maxLength: 1024 },
-    eager: { type: "boolean" },
     category: {
       type: "string",
       maxLength: 64,
@@ -47,7 +46,6 @@ export const SkillFrontmatterSchema = {
 export interface SkillFrontmatter {
   name: string;
   description: string;
-  eager?: boolean;
   category?: string;
   version?: string;
   author?: string;

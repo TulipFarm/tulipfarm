@@ -6,6 +6,7 @@ import {
   assembleSystemPrompt,
   type ContextCandidate,
   deriveModelRequirements,
+  formatTemporalContext,
   type GuardContext,
   GuardrailsService,
   InMemoryLoopCheckpointStore,
@@ -214,6 +215,22 @@ function candidatesFor(system: string, question: string): readonly ContextCandid
   ];
 }
 
+/**
+ * Appends the Run's clock to an assembled prompt.
+ *
+ * Chat Agents learn what *now* is by calling `get_current_time`; this State exposes no Tools by
+ * design (see `NO_TOOLS`), so that door is shut and without this the Agent would date-reason from
+ * its training cutoff — "is this overdue?" answered against the wrong year. The block is composed
+ * here rather than in `assembleSystemPrompt` because it is true of this execution path only.
+ *
+ * A Routine State has no participant and therefore no timezone preference to read, so it renders
+ * UTC.
+ */
+function withRunClock(system: string, now: Date): string {
+  const clock = `<run-context>\n${formatTemporalContext({ now })}\n</run-context>`;
+  return system.length === 0 ? clock : `${system}\n${clock}`;
+}
+
 /** A Tool dispatch port that denies everything: this State exposes no Tools, and says so. */
 const NO_TOOLS: ToolDispatchPort = {
   dispatch: async (request) => ({
@@ -257,13 +274,12 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
       autonomy: agent.spec.autonomy,
     };
 
-    const system = assembleSystemPrompt({
-      agentId: plan.agentRef.name,
-      ...(agent.spec.personality === undefined ? {} : { personality: agent.spec.personality }),
-      governancePages: [],
-      // No participant timezone exists; use the Run clock so the Agent does not guess dates.
-      temporal: { now: this.now() },
-    });
+    const system = withRunClock(
+      assembleSystemPrompt(
+        agent.spec.personality === undefined ? {} : { personality: agent.spec.personality }
+      ),
+      this.now()
+    );
     const question = canonicalize(plan.input);
 
     const guardedInput = await guardrails.runInput(question, guardContext);

@@ -2,9 +2,6 @@
   "id": "attached-file-is-screened-like-a-message",
   "tier": "l2",
   "agent": "support",
-  "context": {
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",
