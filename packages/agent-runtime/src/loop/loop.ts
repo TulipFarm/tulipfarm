@@ -7,6 +7,7 @@ import type {
 } from "../ports";
 import { ModelInvocationError } from "../ports";
 import { chargeModelUsage } from "./budget";
+import { type CancelWatch, TurnCancelled, watchForCancel } from "./cancel";
 import type { AgentLoopCheckpoint } from "./checkpoint";
 import type {
   AgentLoopDependencies,
@@ -27,6 +28,8 @@ import {
 } from "./diagnostics";
 import { askFor, distilledPayload, latestAsk } from "./distill";
 import { extractSkillName, narrowToolsToSkill } from "./narrowing";
+import { capToolResult, MAX_TOOL_RESULT_CHARS } from "./oversize";
+import { callSignature, repeatedCall } from "./repeat";
 import {
   extractRereadFile,
   FILE_READ_TOOL,
@@ -94,6 +97,9 @@ export class AgentLoop {
     // checkpointed: a resume replays the transcript, so the model can see the repetition itself,
     // and `repairs` — which is persisted — still bounds what a resumed Turn may spend.
     const rejectionCounts = new Map<string, number>();
+    // How often each Tool has already answered this exact question this attempt. Not checkpointed,
+    // for the same reason: a resume replays the transcript, so the repetition stays visible there.
+    const repeatCounts = new Map<string, number>();
 
     const toolsForIteration = (): readonly ExposedTool[] =>
       narrowToolsToSkill(input.tools, activeSkillName, input.skillToolScopes);
@@ -172,28 +178,57 @@ export class AgentLoop {
     };
 
     /** Streams text deltas; missing `completed` is a model-adapter contract failure. */
-    const callModel = async (request: ModelInvocationRequest): Promise<ModelInvocationResult> => {
-      const stream = this.deps.model.stream?.(request);
-      if (stream === undefined) return this.deps.model.invoke(request);
+    const callModel = async (
+      request: ModelInvocationRequest,
+      watch: CancelWatch
+    ): Promise<ModelInvocationResult> => {
+      // A provider that honours the signal rejects the call; one that ignores it runs to
+      // completion and is caught by these checks instead. Both have to end the Turn the same way,
+      // or a stop would work only against the adapters that chose to implement it.
+      const stopped = () => {
+        if (watch.cancelled()) throw new TurnCancelled();
+      };
 
-      let completed: ModelInvocationResult | undefined;
-      for await (const chunk of stream) {
-        if (chunk.kind === "completed") {
-          completed = chunk.result;
-          continue;
+      try {
+        const stream = this.deps.model.stream?.(request);
+        if (stream === undefined) {
+          const invoked = await this.deps.model.invoke(request);
+          stopped();
+          return invoked;
         }
-        if (chunk.text.length === 0) continue;
-        streamedText += chunk.text;
-        textIndex += 1;
-        try {
-          await emit("text_delta", { text: chunk.text, textIndex });
-        } catch (error) {
-          // Losing a durable write is not the model failing; see the rethrow below.
-          throw new EventSinkFailure(error);
+
+        let completed: ModelInvocationResult | undefined;
+        for await (const chunk of stream) {
+          stopped();
+          if (chunk.kind === "completed") {
+            completed = chunk.result;
+            continue;
+          }
+          if (chunk.text.length === 0) continue;
+          streamedText += chunk.text;
+          textIndex += 1;
+          try {
+            await emit("text_delta", { text: chunk.text, textIndex });
+          } catch (error) {
+            // Losing a durable write is not the model failing; see the rethrow below.
+            throw new EventSinkFailure(error);
+          }
         }
+        stopped();
+        if (completed === undefined) throw new Error("model stream ended without a result");
+        return completed;
+      } catch (error) {
+        // An abort reaches here as whatever the provider chose to throw, so the watch is what says
+        // a stop happened — the error itself cannot be trusted to. A sink failure is never a stop
+        // and must keep its own identity.
+        if (error instanceof EventSinkFailure) throw error;
+        // A stop does not refund what the provider already burned, so whatever partial usage the
+        // failure carried is handed on rather than dropped with the error it came in.
+        if (watch.cancelled()) {
+          throw new TurnCancelled(error instanceof ModelInvocationError ? error.usage : undefined);
+        }
+        throw error;
       }
-      if (completed === undefined) throw new Error("model stream ended without a result");
-      return completed;
     };
 
     /** Charges tokens and cost against the Run budget; shared by the success and failure paths. */
@@ -215,6 +250,40 @@ export class AgentLoop {
       // unattributed message and the model cannot tell it is feedback on its own last action.
       if (!replayed) messages.push(assistantToolCallMessage(calls));
       let approval: { approvalId: string; call: NormalizedToolCall } | undefined;
+      // Which of the declared calls already carry an answer. Tracked by callId rather than by
+      // position because the two dispatch paths leave the cursor in different places — the
+      // sequential path stops *at* the parked call, the concurrent one has already advanced past
+      // the whole batch it is in — so any index arithmetic at park time would be wrong for one of
+      // them.
+      const answered = new Set<string>();
+      // Which of the declared calls actually reached the dispatcher. A call that ran and a call
+      // that never ran need different answers at park time: the first may have left an approval
+      // pending at the broker, so telling the model to re-issue it would ask for a second one.
+      const dispatchedIds = new Set<string>();
+
+      /** Answers one declared call, and records that it now has an answer. */
+      const answer = (callId: string, payload: Record<string, unknown>): void => {
+        const capped = capToolResult(payload, callId);
+        // Shortening changes what the model is given, so it cannot be silent: without this line a
+        // Turn that answered from a truncated result looks, in the logs, exactly like one that saw
+        // the whole thing. The callId ties it to the `tool_call_dispatched` event that names the
+        // Tool.
+        if (capped !== payload) {
+          this.deps.log?.warn(
+            {
+              event: "agent_loop.tool_result_capped",
+              runId: input.runId,
+              stateId: input.stateId,
+              iteration: counters.iterations,
+              callId,
+              maxChars: MAX_TOOL_RESULT_CHARS,
+            },
+            "tool result exceeded the transcript ceiling and was shortened"
+          );
+        }
+        messages.push(toolMessage(callId, capped));
+        answered.add(callId);
+      };
 
       // Applies one dispatched result: records the transcript entry, and reports back either
       // "keep going", the approval this Turn now waits on, or the failure reason that ends it.
@@ -245,7 +314,7 @@ export class AgentLoop {
           if (dispatched.status !== "succeeded") {
             return { kind: "fail", reason: "input_request_failed" };
           }
-          messages.push(toolMessage(call.callId, { output: dispatched.output }));
+          answer(call.callId, { output: dispatched.output });
           return { kind: "input_required", call };
         }
 
@@ -272,39 +341,42 @@ export class AgentLoop {
               },
               "tool rejection repeated unchanged; handing it to the model as a failure"
             );
-            messages.push(toolMessage(call.callId, { error: "failed", detail: dispatched.reason }));
+            answer(call.callId, { error: "failed", detail: dispatched.reason });
             return { kind: "continue" };
           }
           counters.repairs += 1;
           if (counters.repairs > input.limits.maxRepairAttempts) {
             return { kind: "fail", reason: "repair_budget_exhausted" };
           }
-          messages.push(
-            toolMessage(call.callId, { error: "invalid_arguments", detail: dispatched.reason })
-          );
+          answer(call.callId, { error: "invalid_arguments", detail: dispatched.reason });
           return { kind: "continue" };
         }
 
         if (dispatched.status === "succeeded") {
+          const repeatKey = callSignature(call.name, call.arguments);
+          const repeats = repeatKey === undefined ? 1 : (repeatCounts.get(repeatKey) ?? 0) + 1;
+          if (repeatKey !== undefined) repeatCounts.set(repeatKey, repeats);
           // Distilled here rather than inside the Tool: the Tool stays deterministic and
           // replayable, and the model call that shrinks its result lands where every other model
           // call in this Turn already is — budgeted, logged, and visible as second-hand.
-          messages.push(
-            toolMessage(
-              call.callId,
-              await distilledPayload(
-                {
-                  toolName: call.name,
-                  arguments: call.arguments,
-                  output: dispatched.output,
-                  ask: askFor(call.arguments, participantAsk),
-                  policy: input.modelPolicy ?? {},
-                },
-                this.deps.distiller,
-                this.deps.log
-              )
-            )
+          const distilled = await distilledPayload(
+            {
+              toolName: call.name,
+              arguments: call.arguments,
+              output: dispatched.output,
+              ask: askFor(call.arguments, participantAsk),
+              policy: input.modelPolicy ?? {},
+            },
+            this.deps.distiller,
+            this.deps.log
           );
+          // Through `answer` rather than pushed directly, so this call is recorded as answered.
+          // A park later in the same batch backfills whatever is unanswered, and a succeeded call
+          // that never registered would be answered a second time with a contradicting result.
+          answer(call.callId, {
+            ...distilled,
+            ...(repeats === 1 ? {} : { repeatedCall: repeatedCall(repeats) }),
+          });
           if (isReportTool(call.name)) reported = true;
           if (call.name === "load_skill") {
             const loaded = extractSkillName(call.arguments);
@@ -318,9 +390,7 @@ export class AgentLoop {
         }
 
         // Denied and failed calls are data the model must reason about, not a retry signal.
-        messages.push(
-          toolMessage(call.callId, { error: dispatched.status, detail: dispatched.reason })
-        );
+        answer(call.callId, { error: dispatched.status, detail: dispatched.reason });
         return { kind: "continue" };
       };
 
@@ -335,7 +405,7 @@ export class AgentLoop {
           if (isHandoffTool(call.name)) return barrier(call, "handoff_unavailable");
           // A Tool the caller never exposed is refused here; the broker never sees it.
           const outcome = "tool_not_available";
-          messages.push(toolMessage(call.callId, { error: outcome }));
+          answer(call.callId, { error: outcome });
           await emit("tool_call_rejected", { toolName: call.name, callId: call.callId, outcome });
           index += 1;
           continue;
@@ -361,6 +431,7 @@ export class AgentLoop {
             arguments: call.arguments,
             ...(activeSkillName === undefined ? {} : { activeSkillName }),
           });
+          dispatchedIds.add(call.callId);
           counters.toolCalls += 1;
           const outcome = await applyDispatch(call, dispatched);
           if (outcome.kind === "fail") {
@@ -409,6 +480,7 @@ export class AgentLoop {
           )
         );
         counters.toolCalls += runBatch.length;
+        for (const batched of runBatch) dispatchedIds.add(batched.callId);
         index += runBatch.length;
 
         // Every call in the batch has already run: its effect landed and its Tool-call budget
@@ -464,6 +536,38 @@ export class AgentLoop {
       }
 
       if (approval !== undefined) {
+        // The assistant message above declared every call in the batch, and this park is the only
+        // exit that makes that transcript durable. A call sitting after the approved one never
+        // dispatched, so nothing answered it — and a proposed Tool call with no matching result is
+        // a transcript both Anthropic and OpenAI reject outright, which would fail the resumed
+        // Turn at the provider rather than anywhere the loop could repair it. So each one is
+        // answered here, before the checkpoint, with a result the model can act on. The approved
+        // call is excluded: it is replayed on resume and gets its real result there.
+        for (const declared of calls) {
+          if (declared.callId === approval.call.callId) continue;
+          if (answered.has(declared.callId)) continue;
+          // A concurrent batch dispatches every call before any outcome is read, so an unanswered
+          // one here may already have run. Saying it never ran would be a lie the model acts on:
+          // if its own outcome was a second approval, that approval is pending at the broker, and
+          // re-issuing the call asks an operator to clear two of them.
+          answer(
+            declared.callId,
+            dispatchedIds.has(declared.callId)
+              ? {
+                  error: "superseded",
+                  detail:
+                    "this call ran, but the Turn stopped to wait for approval of an earlier call " +
+                    "in the same batch, so its result was not recorded. If it also needed " +
+                    "approval, one is already pending — do not re-issue it.",
+                }
+              : {
+                  error: "not_dispatched",
+                  detail:
+                    "this call never ran: the Turn stopped to wait for approval of an earlier " +
+                    "call in the same batch. Re-issue it if it is still needed.",
+                }
+          );
+        }
         // A parked call has not run: the dispatcher reports `awaiting_approval` strictly before
         // it executes the Tool, so the budget it took on dispatch is given back and spent only
         // by the replay that actually performs the work. Counters and the transcript are made
@@ -530,11 +634,13 @@ export class AgentLoop {
         this.deps.attachments,
         input.runId
       );
+      const watch = watchForCancel(() => this.deps.isCancelled(), this.deps.cancelPollMs);
       const request: ModelInvocationRequest = {
         requestId: `${input.runId}:${input.stateId}:${counters.iterations}`,
         modelProfileId: input.modelProfileId,
         messages,
         tools: toolsForIteration(),
+        signal: watch.signal,
         ...(attachments.length === 0 ? {} : { attachments }),
         ...(input.modelPolicy === undefined ? {} : { policy: input.modelPolicy }),
         ...(input.principal === undefined ? {} : { principal: input.principal }),
@@ -544,12 +650,21 @@ export class AgentLoop {
 
       let result: ModelInvocationResult;
       try {
-        result = await callModel(request);
+        result = await callModel(request, watch);
       } catch (error) {
         // A model that errors is an outcome the loop owns. A sink that cannot record what already
         // happened is not: the caller must reconcile it, so it escapes rather than being recorded
         // as a model failure through the very sink that just failed.
         if (error instanceof EventSinkFailure) throw error.cause;
+        // A stop is something the participant asked for, not something that went wrong. Recording
+        // it as a model failure would put a red Turn in front of them for doing what the button
+        // offered, and would charge a retry budget against it.
+        if (error instanceof TurnCancelled) {
+          // Charged on the way out for the same reason a failed call is: a Run started and stopped
+          // over and over would otherwise spend against a budget it never touches.
+          if (error.usage !== undefined) await chargeUsage(error.usage);
+          return finish({ status: "cancelled", ...counters }, "cancelled");
+        }
         const reason =
           error instanceof ModelInvocationError ? error.reason : ("model_error" as const);
         const diagnostic =
@@ -586,6 +701,9 @@ export class AgentLoop {
           },
           "failed"
         );
+      } finally {
+        // The poll must not outlive the call it watched, whichever way that call ended.
+        watch.stop();
       }
 
       const spend = await chargeUsage(result.usage);

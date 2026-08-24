@@ -1,3 +1,4 @@
+export { CANCEL_POLL_MS, type CancelWatch, TurnCancelled, watchForCancel } from "./cancel";
 export type { AgentLoopCheckpoint, LoopCheckpointStore } from "./checkpoint";
 export { InMemoryLoopCheckpointStore } from "./checkpoint";
 export type {
@@ -37,6 +38,8 @@ export {
   shouldDistill,
 } from "./distill";
 export { AgentLoop } from "./loop";
+export { capToolResult, MAX_TOOL_RESULT_CHARS } from "./oversize";
+export { callSignature, repeatedCall } from "./repeat";
 export {
   extractRereadFile,
   FILE_READ_TOOL,

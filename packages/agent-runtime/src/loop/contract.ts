@@ -205,6 +205,8 @@ export interface AgentLoopDependencies {
   readonly events: AgentLoopEventSink;
   readonly budget: AgentLoopBudgetPort;
   isCancelled(): Promise<boolean>;
+  /** How often `isCancelled` is polled during a model call; see `CANCEL_POLL_MS`. */
+  readonly cancelPollMs?: number;
   /** Diagnostic only — a blank final completion is otherwise invisible in server logs. */
   readonly log?: { warn(obj: unknown, msg?: string): void };
   now?(): Date;

@@ -193,8 +193,16 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
       })
     );
     const startedAt = this.now();
+    // The worker's drain signal was fixed when the port was built; the Turn's own stop rides with
+    // the request. Either one ending this call is reason enough, so the watchdog is given both
+    // rather than letting the later one replace the earlier.
+    const external = [this.options.signal, request.signal].filter(
+      (signal): signal is AbortSignal => signal !== undefined
+    );
     const watchdog = new ModelCallWatchdog({
-      ...(this.options.signal === undefined ? {} : { signal: this.options.signal }),
+      ...(external.length === 0
+        ? {}
+        : { signal: external.length === 1 ? external[0] : AbortSignal.any(external) }),
       ...(this.options.stallTimeoutMs === undefined
         ? {}
         : { stallTimeoutMs: this.options.stallTimeoutMs }),

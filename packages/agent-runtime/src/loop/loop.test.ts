@@ -19,6 +19,8 @@ import type {
 } from "./contract";
 import type { ToolResultDistillerPort } from "./distill";
 import { AgentLoop } from "./loop";
+import { MAX_TOOL_RESULT_CHARS } from "./oversize";
+import { callSignature } from "./repeat";
 
 function textResult(text: string): ModelInvocationResult {
   return {
@@ -142,6 +144,23 @@ function dispatcher(...results: readonly ToolDispatchResult[]): ToolDispatchPort
   return port;
 }
 
+/** Records the prompt it was handed, so the Tool results the model reads back can be inspected. */
+function promptRecordingModel(...results: readonly ModelInvocationResult[]): ModelPort & {
+  prompts: ModelMessage[][];
+} {
+  const queue = [...results];
+  const port = {
+    prompts: [] as ModelMessage[][],
+    invoke: async (request: ModelInvocationRequest) => {
+      port.prompts.push([...request.messages]);
+      const next = queue.shift();
+      if (next === undefined) throw new Error("model called more times than scripted");
+      return next;
+    },
+  };
+  return port;
+}
+
 function input(overrides: Partial<AgentLoopInput> = {}): AgentLoopInput {
   return {
     businessId: "biz-1",
@@ -176,6 +195,7 @@ function loop(options: {
   events?: { append: (event: AgentLoopEvent) => Promise<void> };
   budget?: { consume: (input: { key: string; amount: number }) => Promise<{ outcome: string }> };
   cancelled?: () => Promise<boolean>;
+  cancelPollMs?: number;
   log?: { warn(obj: unknown, msg?: string): void };
   attachments?: LoopAttachmentPort;
   distiller?: ToolResultDistillerPort;
@@ -187,6 +207,7 @@ function loop(options: {
     events: options.events ?? collector().sink,
     budget: options.budget ?? { consume: async () => ({ outcome: "allowed" }) },
     isCancelled: options.cancelled ?? (async () => false),
+    ...(options.cancelPollMs === undefined ? {} : { cancelPollMs: options.cancelPollMs }),
     ...(options.log === undefined ? {} : { log: options.log }),
     ...(options.attachments === undefined ? {} : { attachments: options.attachments }),
     ...(options.distiller === undefined ? {} : { distiller: options.distiller }),
@@ -1352,6 +1373,56 @@ describe("AgentLoop resume after an approval park", () => {
     expect(resumedLowest).toBeGreaterThan(parkedHighest);
   });
 
+  it("answers every declared call before parking, so the resumed transcript is well-formed", async () => {
+    // The assistant message declares both calls, but the park stops dispatch at the first. An
+    // unanswered tool call is a transcript the provider rejects, so the trailing call must still
+    // carry a result by the time the resumed Turn hands it to the model.
+    const checkpoints = new InMemoryLoopCheckpointStore();
+    const tools = [
+      { name: "github.issue.comment", inputSchema: { type: "object" }, mutating: true },
+      { name: "github.issue.read", inputSchema: { type: "object" }, mutating: false },
+    ];
+    const parked = await loop({
+      model: scriptedModel(
+        toolCallResult([
+          { callId: "c1", name: "github.issue.comment", arguments: { body: "ship it" } },
+          { callId: "c2", name: "github.issue.read", arguments: { number: 7 } },
+        ])
+      ),
+      tools: dispatcher({ status: "awaiting_approval", callId: "c1", approvalId: "appr-1" }),
+      checkpoints,
+      events: collector().sink,
+    }).run(input({ tools }));
+
+    expect(parked).toMatchObject({ status: "awaiting_approval", callId: "c1" });
+
+    const model = promptRecordingModel(textResult("commented"));
+    const resumed = await loop({
+      model,
+      tools: dispatcher({ status: "succeeded", callId: "c1", output: { commented: true } }),
+      checkpoints,
+      events: collector().sink,
+    }).run(input({ tools }));
+
+    expect(resumed.status).toBe("completed");
+
+    const transcript = model.prompts.at(0) ?? [];
+    const declared = transcript
+      .filter((message) => message.role === "assistant")
+      .flatMap((message) => {
+        const parsed = JSON.parse(contentText(message.content)) as {
+          toolCalls?: { callId: string }[];
+        };
+        return (parsed.toolCalls ?? []).map((call) => call.callId);
+      });
+    const answered = transcript
+      .filter((message) => message.role === "tool")
+      .map((message) => (JSON.parse(contentText(message.content)) as { callId: string }).callId);
+
+    expect(declared).toEqual(["c1", "c2"]);
+    expect(new Set(answered)).toEqual(new Set(declared));
+  });
+
   it("feeds a denied approval back to the model instead of replaying it forever", async () => {
     const tools = dispatcher({ status: "denied", callId: "c1", reason: "denied by operator" });
     const { resumed, model } = await parkThenResume(tools);
@@ -1496,5 +1567,484 @@ describe("AgentLoop re-reading a File mid-Turn", () => {
 
     expect(outcome.status).toBe("completed");
     expect(model.attachmentsByRequest).toEqual([[], []]);
+  });
+});
+
+describe("AgentLoop oversized Tool results", () => {
+  /** Records the prompt it was handed, so the transcript the model reads back can be inspected. */
+  function promptRecordingModel(...results: readonly ModelInvocationResult[]): ModelPort & {
+    prompts: ModelMessage[][];
+  } {
+    const queue = [...results];
+    const port = {
+      prompts: [] as ModelMessage[][],
+      invoke: async (request: ModelInvocationRequest) => {
+        port.prompts.push([...request.messages]);
+        const next = queue.shift();
+        if (next === undefined) throw new Error("model called more times than scripted");
+        return next;
+      },
+    };
+    return port;
+  }
+
+  const callOnce = toolCallResult([
+    { callId: "call-1", name: "github.issue.comment", arguments: {} },
+  ]);
+
+  const toolText = (prompt: readonly ModelMessage[]): string => {
+    const messages = prompt.filter((message) => message.role === "tool");
+    expect(messages).toHaveLength(1);
+    return contentText(messages[0].content);
+  };
+
+  it("shortens an oversized result before it reaches the transcript", async () => {
+    // A denied or failed call carries its reason straight into the transcript — the distiller only
+    // runs on a succeeded result. So this ceiling is the only thing between a provider dumping a
+    // response body into `reason` and every later iteration of the Turn carrying it, which is the
+    // bytes-times-steps runaway the re-read cap already bounds for Files.
+    const model = promptRecordingModel(callOnce, textResult("summarised"));
+    const warnings: unknown[] = [];
+
+    const outcome = await loop({
+      model,
+      tools: dispatcher({ status: "failed", callId: "call-1", reason: "e".repeat(120_000) }),
+      log: { warn: (obj: unknown) => warnings.push(obj) },
+    }).run(input());
+
+    expect(outcome).toMatchObject({ status: "completed" });
+
+    const raw = toolText(model.prompts[1]);
+    expect(raw.length).toBeLessThanOrEqual(MAX_TOOL_RESULT_CHARS);
+    expect(JSON.parse(raw)).toMatchObject({ callId: "call-1", truncated: true });
+    expect(warnings).toContainEqual(
+      expect.objectContaining({ event: "agent_loop.tool_result_capped", callId: "call-1" })
+    );
+  });
+
+  it("leaves a distilled result alone, so the two ceilings never cut the same bytes twice", async () => {
+    // A succeeded result passes the distiller first, which bounds it well below this ceiling. The
+    // cap has to recognise that as already small enough: cutting a summary a second time would
+    // strip the citations that are the only reason a distilled result is usable at all.
+    const model = promptRecordingModel(callOnce, textResult("summarised"));
+    const warnings: unknown[] = [];
+
+    const outcome = await loop({
+      model,
+      tools: dispatcher({
+        status: "succeeded",
+        callId: "call-1",
+        output: { body: "x".repeat(120_000) },
+      }),
+      log: { warn: (obj: unknown) => warnings.push(obj) },
+    }).run(input());
+
+    expect(outcome).toMatchObject({ status: "completed" });
+
+    const parsed = JSON.parse(toolText(model.prompts[1])) as { output: { truncated?: boolean } };
+    // Bounded by the distiller, under its own key — not by the cap at the payload's top level.
+    expect(parsed.output.truncated).toBe(true);
+    expect(warnings).not.toContainEqual(
+      expect.objectContaining({ event: "agent_loop.tool_result_capped" })
+    );
+  });
+
+  it("hands a result that already fits through exactly as the Tool returned it", async () => {
+    const model = promptRecordingModel(callOnce, textResult("summarised"));
+    const warnings: unknown[] = [];
+
+    await loop({
+      model,
+      tools: dispatcher({ status: "succeeded", callId: "call-1", output: { ok: true } }),
+      log: { warn: (obj: unknown) => warnings.push(obj) },
+    }).run(input());
+
+    expect(JSON.parse(toolText(model.prompts[1]))).toEqual({
+      callId: "call-1",
+      output: { ok: true },
+    });
+    expect(warnings).toEqual([]);
+  });
+});
+
+describe("AgentLoop cancellation while the model is answering", () => {
+  /** A model that answers slowly, so a stop can land while its call is still in flight. */
+  function slowStreamingModel(chunks: number): ModelPort & { yielded: number } {
+    const port = {
+      yielded: 0,
+      invoke: async () => textResult("done"),
+      stream: async function* (): AsyncIterable<ModelStreamChunk> {
+        for (let index = 0; index < chunks; index += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          port.yielded += 1;
+          yield { kind: "text_delta" as const, text: `chunk-${index}` };
+        }
+        yield { kind: "completed" as const, result: textResult("done") };
+      },
+    };
+    return port;
+  }
+
+  it("stops a Turn mid-answer rather than waiting for the model to finish", async () => {
+    // The loop's own check runs at the top of an iteration, so without a poll during the call this
+    // Turn would stream all fifty chunks — and be billed for them — after the stop was asked for.
+    const model = slowStreamingModel(50);
+    let stopping = false;
+    const flip = setTimeout(() => {
+      stopping = true;
+    }, 15);
+
+    const outcome = await loop({
+      model,
+      cancelled: async () => stopping,
+      cancelPollMs: 1,
+    }).run(input());
+
+    clearTimeout(flip);
+    expect(outcome).toMatchObject({ status: "cancelled" });
+    expect(model.yielded).toBeLessThan(50);
+  });
+
+  it("hands the provider a signal, so an adapter that honours it stops at the source", async () => {
+    let seen: AbortSignal | undefined;
+    const model = {
+      invoke: async (request: ModelInvocationRequest) => {
+        seen = request.signal;
+        return textResult("done");
+      },
+    };
+
+    const outcome = await loop({ model }).run(input());
+
+    expect(outcome).toMatchObject({ status: "completed" });
+    expect(seen).toBeInstanceOf(AbortSignal);
+    expect(seen?.aborted).toBe(false);
+  });
+
+  it("reads a provider's abort as a stop, not as a model failure", async () => {
+    // An aborted call rejects with whatever the provider throws. Classified on the error alone it
+    // would be recorded as `model_error`, putting a failed Turn in front of someone who pressed
+    // stop — and charging a repair budget against it.
+    let stopping = false;
+    const model = {
+      invoke: async () => {
+        stopping = true;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        throw new Error("The operation was aborted");
+      },
+    };
+
+    const outcome = await loop({
+      model,
+      cancelled: async () => stopping,
+      cancelPollMs: 1,
+    }).run(input());
+
+    expect(outcome).toMatchObject({ status: "cancelled" });
+  });
+
+  it("leaves an uncancelled Turn to finish normally", async () => {
+    const model = slowStreamingModel(3);
+    const outcome = await loop({ model, cancelPollMs: 1 }).run(input());
+
+    expect(outcome).toMatchObject({ status: "completed" });
+    expect(model.yielded).toBe(3);
+  });
+});
+
+describe("AgentLoop repeated Tool calls inside one Turn", () => {
+  const listCall = (callId: string, args: unknown) =>
+    toolCallResult([{ callId, name: "github.issue.comment", arguments: args }]);
+
+  /** Every Tool result in the final prompt, in the order the model reads them. */
+  const results = (prompt: readonly ModelMessage[]) =>
+    prompt
+      .filter((message) => message.role === "tool")
+      .map((message) => JSON.parse(contentText(message.content)) as Record<string, unknown>);
+
+  it("tells the model when it asks the same question twice", async () => {
+    const model = promptRecordingModel(
+      listCall("call-1", { body: "hi" }),
+      listCall("call-2", { body: "hi" }),
+      textResult("done")
+    );
+
+    await loop({
+      model,
+      tools: dispatcher(
+        { status: "succeeded", callId: "call-1", output: { ok: true } },
+        { status: "succeeded", callId: "call-2", output: { ok: true } }
+      ),
+    }).run(input());
+
+    const [first, second] = results(model.prompts[2]);
+    expect(first.repeatedCall).toBeUndefined();
+    expect(second.repeatedCall).toMatchObject({ count: 2 });
+    expect((second.repeatedCall as { note: string }).note).toContain("call 2");
+  });
+
+  it("matches a repeat whose arguments arrived in a different key order", async () => {
+    const model = promptRecordingModel(
+      listCall("call-1", { body: "hi", title: "t" }),
+      listCall("call-2", { title: "t", body: "hi" }),
+      textResult("done")
+    );
+
+    await loop({
+      model,
+      tools: dispatcher(
+        { status: "succeeded", callId: "call-1", output: { ok: true } },
+        { status: "succeeded", callId: "call-2", output: { ok: true } }
+      ),
+    }).run(input());
+
+    expect(results(model.prompts[2])[1].repeatedCall).toMatchObject({ count: 2 });
+  });
+
+  it("leaves a genuinely different call unmarked", async () => {
+    const model = promptRecordingModel(
+      listCall("call-1", { body: "hi" }),
+      listCall("call-2", { body: "different" }),
+      textResult("done")
+    );
+
+    await loop({
+      model,
+      tools: dispatcher(
+        { status: "succeeded", callId: "call-1", output: { ok: true } },
+        { status: "succeeded", callId: "call-2", output: { ok: true } }
+      ),
+    }).run(input());
+
+    for (const result of results(model.prompts[2])) {
+      expect(result.repeatedCall).toBeUndefined();
+    }
+  });
+
+  it("still dispatches the repeat, so authority is re-checked and the answer is fresh", async () => {
+    // Serving a cached result would skip the broker, and with it the authorization it re-checks on
+    // every call — the same reason a re-read File is fetched again each iteration.
+    const tools = dispatcher(
+      { status: "succeeded", callId: "call-1", output: { ok: true } },
+      { status: "succeeded", callId: "call-2", output: { ok: true } }
+    );
+
+    await loop({
+      model: promptRecordingModel(
+        listCall("call-1", { body: "hi" }),
+        listCall("call-2", { body: "hi" }),
+        textResult("done")
+      ),
+      tools,
+    }).run(input());
+
+    expect(tools.calls).toHaveLength(2);
+  });
+});
+
+describe("AgentLoop park-time answers and cancellation accounting", () => {
+  const readTools = [
+    { name: "github.issue.search", inputSchema: { type: "object" }, mutating: false },
+    { name: "github.pull_request.search", inputSchema: { type: "object" }, mutating: false },
+  ];
+
+  /** The Tool results the resumed Turn hands back to the model, keyed by callId. */
+  async function transcriptAfterPark(
+    parkTools: ToolDispatchPort
+  ): Promise<Record<string, Record<string, unknown>>> {
+    const checkpoints = new InMemoryLoopCheckpointStore();
+    const parked = await loop({
+      model: scriptedModel(
+        toolCallResult([
+          { callId: "c1", name: "github.issue.search", arguments: { q: "a" } },
+          { callId: "c2", name: "github.pull_request.search", arguments: { q: "b" } },
+        ])
+      ),
+      tools: parkTools,
+      checkpoints,
+    }).run(input({ tools: readTools }));
+    expect(parked).toMatchObject({ status: "awaiting_approval", callId: "c1" });
+
+    const model = promptRecordingModel(textResult("done"));
+    await loop({
+      model,
+      tools: dispatcher({ status: "succeeded", callId: "c1", output: {} }),
+      checkpoints,
+    }).run(input({ tools: readTools }));
+
+    return Object.fromEntries(
+      (model.prompts.at(0) ?? [])
+        .filter((message) => message.role === "tool")
+        .map((message) => {
+          const parsed = JSON.parse(contentText(message.content)) as { callId: string };
+          return [parsed.callId, parsed as unknown as Record<string, unknown>];
+        })
+    );
+  }
+
+  it("does not tell the model a superseded approval never ran", async () => {
+    // A concurrent batch dispatches every call before any outcome is read, so `c2` reached the
+    // broker and left a second approval pending there. Calling that "not dispatched" invites the
+    // model to re-issue it, which asks an operator to clear two approvals for one intention.
+    const results = await transcriptAfterPark(
+      dispatcher(
+        { status: "awaiting_approval", callId: "c1", approvalId: "appr-1" },
+        { status: "awaiting_approval", callId: "c2", approvalId: "appr-2" }
+      )
+    );
+
+    expect(results.c2).toMatchObject({ error: "superseded" });
+    expect(results.c2.detail).toContain("do not re-issue");
+  });
+
+  it("still tells the model when a call genuinely never ran", async () => {
+    // A write dispatches alone, so `c2` never reached the broker and re-issuing it is correct.
+    const checkpoints = new InMemoryLoopCheckpointStore();
+    const mixed = [
+      { name: "github.issue.comment", inputSchema: { type: "object" }, mutating: true },
+      { name: "github.issue.read", inputSchema: { type: "object" }, mutating: false },
+    ];
+    await loop({
+      model: scriptedModel(
+        toolCallResult([
+          { callId: "c1", name: "github.issue.comment", arguments: { body: "x" } },
+          { callId: "c2", name: "github.issue.read", arguments: { number: 7 } },
+        ])
+      ),
+      tools: dispatcher({ status: "awaiting_approval", callId: "c1", approvalId: "appr-1" }),
+      checkpoints,
+    }).run(input({ tools: mixed }));
+
+    const model = promptRecordingModel(textResult("done"));
+    await loop({
+      model,
+      tools: dispatcher({ status: "succeeded", callId: "c1", output: {} }),
+      checkpoints,
+    }).run(input({ tools: mixed }));
+
+    const c2 = (model.prompts.at(0) ?? [])
+      .filter((message) => message.role === "tool")
+      .map((message) => JSON.parse(contentText(message.content)) as Record<string, unknown>)
+      .find((result) => result.callId === "c2");
+    expect(c2).toMatchObject({ error: "not_dispatched" });
+  });
+
+  it("does not answer a succeeded call twice when a later call in the batch parks", async () => {
+    // The succeeded path has to record itself as answered. If it pushes its Tool message directly,
+    // the park below sees no answer for it and backfills a second one — leaving two results for
+    // one callId, the later of them contradicting the output the Tool actually returned.
+    const checkpoints = new InMemoryLoopCheckpointStore();
+    const parked = await loop({
+      model: scriptedModel(
+        toolCallResult([
+          { callId: "c1", name: "github.issue.search", arguments: { q: "a" } },
+          { callId: "c2", name: "github.pull_request.search", arguments: { q: "b" } },
+        ])
+      ),
+      tools: dispatcher(
+        { status: "succeeded", callId: "c1", output: { found: 3 } },
+        { status: "awaiting_approval", callId: "c2", approvalId: "appr-1" }
+      ),
+      checkpoints,
+    }).run(input({ tools: readTools }));
+    expect(parked).toMatchObject({ status: "awaiting_approval", callId: "c2" });
+
+    const model = promptRecordingModel(textResult("done"));
+    await loop({
+      model,
+      tools: dispatcher({ status: "succeeded", callId: "c2", output: {} }),
+      checkpoints,
+    }).run(input({ tools: readTools }));
+
+    const forC1 = (model.prompts.at(0) ?? [])
+      .filter((message) => message.role === "tool")
+      .map((message) => JSON.parse(contentText(message.content)) as Record<string, unknown>)
+      .filter((result) => result.callId === "c1");
+
+    expect(forC1).toHaveLength(1);
+    expect(forC1[0]).toMatchObject({ output: { found: 3 } });
+  });
+
+  it("charges what the provider burned before a stop", async () => {
+    // A stop is not a refund. Dropping the partial usage would let a Run that is started and
+    // stopped over and over spend against a budget it never charges.
+    const consumed: { key: string; amount: number }[] = [];
+    let asked = 0;
+    const model: ModelPort = {
+      invoke: async (request: ModelInvocationRequest) => {
+        await new Promise<void>((resolve) => {
+          request.signal?.addEventListener("abort", () => resolve(), { once: true });
+        });
+        throw new ModelInvocationError("model_error", new Error("aborted by caller"), {
+          inputTokens: 100,
+          outputTokens: 20,
+          costUsd: 0.01,
+        });
+      },
+    };
+
+    const outcome = await loop({
+      model,
+      // False once, so the Turn gets past the top-of-iteration check and the model call actually
+      // starts. Stopping before it would spend nothing, which is not the case under test.
+      cancelled: async () => {
+        asked += 1;
+        return asked > 1;
+      },
+      cancelPollMs: 1,
+      budget: {
+        consume: async (charge) => {
+          consumed.push(charge);
+          return { outcome: "allowed" };
+        },
+      },
+    }).run(input());
+
+    expect(outcome.status).toBe("cancelled");
+    expect(consumed).toContainEqual({ key: "tokens", amount: 120 });
+    expect(consumed.some((charge) => charge.key === "costMicros")).toBe(true);
+  });
+
+  it("completes a Turn whose Tool arguments are too deep to sign", async () => {
+    // The repeat marker is advice. Losing it must never cost a Tool result the Run paid for.
+    //
+    // The depth is found at run time rather than hard-coded: both limits below are stack-bound, so
+    // a machine with a different stack moves them together and any fixed number would eventually
+    // sit on the wrong side of one of them.
+    const nest = (levels: number) => {
+      const root: Record<string, unknown> = {};
+      let cursor = root;
+      for (let i = 0; i < levels; i += 1) {
+        const next: Record<string, unknown> = {};
+        cursor.n = next;
+        cursor = next;
+      }
+      return root;
+    };
+    let deep: Record<string, unknown> | undefined;
+    for (let levels = 256; levels <= 65_536; levels *= 2) {
+      const candidate = nest(levels);
+      // The Tool call has to serialize, or the Turn would have died before the annotation ran.
+      try {
+        JSON.stringify(candidate);
+      } catch {
+        break;
+      }
+      if (callSignature("x", candidate) === undefined) {
+        deep = candidate;
+        break;
+      }
+    }
+    expect(deep).toBeDefined();
+
+    const outcome = await loop({
+      model: scriptedModel(
+        toolCallResult([{ callId: "c1", name: "github.issue.comment", arguments: deep }]),
+        textResult("done")
+      ),
+      tools: dispatcher({ status: "succeeded", callId: "c1", output: { ok: true } }),
+    }).run(input());
+
+    expect(outcome).toMatchObject({ status: "completed", toolCalls: 1 });
   });
 });

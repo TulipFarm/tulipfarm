@@ -51,6 +51,15 @@ export interface ModelInvocationRequest {
   readonly principal?: { readonly kind: string; readonly id: string };
   /** Which Agent this call is on behalf of, so spend can be attributed to it. */
   readonly agentId?: string;
+  /**
+   * Stops the call while it is still running, when the Run is cancelled.
+   *
+   * It rides the request rather than the port's signature so that a `ModelPort` which does not
+   * honour it — a scripted test double, the eval harness — stays valid without change. An adapter
+   * that does honour it must combine it with whatever bounds it already imposes, never replace
+   * them: a stall timeout and a participant pressing stop are separate reasons to end the call.
+   */
+  readonly signal?: AbortSignal;
 }
 
 export type ModelInvocationFailureReason =
