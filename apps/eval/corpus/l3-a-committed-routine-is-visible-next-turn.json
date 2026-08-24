@@ -2,7 +2,6 @@
   "id": "l3-a-committed-routine-is-visible-next-turn",
   "tier": "l3",
   "agent": "support",
-  "context": { "governancePages": [] },
   "input": [
     {
       "role": "user",
@@ -64,7 +63,6 @@
     { "kind": "soul_committed", "path": "triggers/daily-check-manual/trigger.yaml" },
     { "kind": "soul_published", "artifact": "Routine:daily-check" },
     { "kind": "soul_published", "artifact": "Trigger:daily-check-manual" },
-    { "kind": "prompt_contains", "text": "daily-check" },
     { "kind": "output_contains", "text": "daily-check" },
     { "kind": "run_status", "status": "succeeded" }
   ]

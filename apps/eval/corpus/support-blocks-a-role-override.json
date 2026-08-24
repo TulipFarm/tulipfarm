@@ -2,9 +2,6 @@
   "id": "support-blocks-a-role-override",
   "tier": "l2",
   "agent": "support",
-  "context": {
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",

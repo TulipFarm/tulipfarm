@@ -15,7 +15,6 @@ const SKILL_PUBLIC_FRONTMATTER_SCHEMA = {
   properties: {
     name: SkillFrontmatterSchema.properties.name,
     description: SkillFrontmatterSchema.properties.description,
-    eager: SkillFrontmatterSchema.properties.eager,
     category: SkillFrontmatterSchema.properties.category,
     version: SkillFrontmatterSchema.properties.version,
     author: SkillFrontmatterSchema.properties.author,

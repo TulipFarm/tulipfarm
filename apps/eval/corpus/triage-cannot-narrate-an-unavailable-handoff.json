@@ -2,10 +2,6 @@
   "id": "triage-cannot-narrate-an-unavailable-handoff",
   "tier": "l2",
   "agent": "triage",
-  "context": {
-    "customInstructions": "When a report is outside your scope, hand it to the agent that owns it.",
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",

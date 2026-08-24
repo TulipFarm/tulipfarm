@@ -20,6 +20,7 @@ import {
 } from "@tulipfarm/tool-host";
 import { firstError } from "../../platform/tool-args";
 import { SYSTEM_SOUL_COMMIT_ACTOR } from "../../runtime/soul-writer";
+import { readSoulConfig } from "../../setup/soul-config";
 import { soulCommitError } from "../../tools/soul-faults";
 
 const NAME_RE = /^[a-z][a-z0-9-]*$/;
@@ -30,6 +31,8 @@ export interface AgentToolContext {
   soulLoader: SoulLoader;
   readonly soulWriter: SoulWriter;
   requestContext?: RequestContext;
+  /** Which Agent is executing this Turn. Absent outside an Agent Turn. */
+  agentId?: string;
 }
 
 function reason(e: unknown): string {
@@ -365,10 +368,123 @@ const agentDelete = defineApiTool<AgentToolContext>({
   },
 });
 
+// ── get_current_agent ─────────────────────────────────────────────────────────
+
+const CURRENT_AGENT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {},
+} as const;
+
+const validateCurrentAgent = ajv.compile(CURRENT_AGENT_SCHEMA);
+
+/**
+ * Which Agent is running.
+ *
+ * Nothing in the prompt names it, and the other Soul Tools cannot substitute: `agent_get` needs a
+ * name it does not have, and `agent_list` returns every Agent without marking which one is asking.
+ */
+const getCurrentAgent = defineApiTool<AgentToolContext>({
+  name: "get_current_agent",
+  description:
+    "Find out which Agent you are — your name, your configured domain, and your description. " +
+    "Call this when you need to identify yourself, decide whether a request is yours to handle, " +
+    "or look up your own definition.",
+  tier: "system",
+  mutating: false,
+  inputSchema: CURRENT_AGENT_SCHEMA,
+  authorization: {
+    action: "soul.agent.read",
+    resources: ["soul.agent"],
+    dataClasses: ["soul_definition"],
+  },
+  requiresApproval: false,
+  handler: async (args, ctx) => {
+    if (!validateCurrentAgent(args))
+      return err("validation_error", firstError(validateCurrentAgent.errors));
+    const name = ctx.agentId;
+    if (name === undefined) {
+      return ok({
+        known: false,
+        note: "This execution is not bound to a named Agent.",
+      });
+    }
+    const agent = ctx.soulLoader.agents.get(name);
+    return ok({
+      known: true,
+      name,
+      // A platform Agent has no soul-repo file, so its frontmatter is legitimately absent; that is
+      // reported rather than hidden, or the model reads "no domain" as "domain unrestricted".
+      ...(agent === undefined
+        ? { note: "You are a built-in Agent with no soul-repo definition." }
+        : { frontmatter: agent.frontmatter }),
+    });
+  },
+});
+
+// ── get_business_profile ──────────────────────────────────────────────────────
+
+const BUSINESS_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {},
+} as const;
+
+const validateBusiness = ajv.compile(BUSINESS_SCHEMA);
+
+/**
+ * The business the instance runs. Read from `soul.yaml`, the same source `GET /api/v1/business`
+ * serves, so an Agent and the settings screen cannot disagree about who the business is.
+ */
+const getBusinessProfile = defineApiTool<AgentToolContext>({
+  name: "get_business_profile",
+  description:
+    "Read the business you work for — its name, what it does, and its website. Nothing else " +
+    "tells you, so call this before naming the business, writing anything in its voice, or " +
+    "assuming what it sells.",
+  tier: "system",
+  mutating: false,
+  inputSchema: BUSINESS_SCHEMA,
+  authorization: {
+    action: "soul.business_profile.read",
+    resources: ["soul"],
+    dataClasses: ["soul_definition"],
+  },
+  requiresApproval: false,
+  handler: async (args, ctx) => {
+    if (!validateBusiness(args))
+      return err("validation_error", firstError(validateBusiness.errors));
+    try {
+      const config = await readSoulConfig(ctx.gitSync.path);
+      const text = (value: unknown): string | undefined =>
+        typeof value === "string" && value.trim().length > 0 ? value : undefined;
+      const name = text(config.businessName);
+      const description = text(config.businessDescription);
+      const website = text(config.businessWebsite);
+      if (name === undefined && description === undefined && website === undefined) {
+        return ok({
+          configured: false,
+          note: "The business profile has not been filled in yet. Offer to set it up.",
+        });
+      }
+      return ok({
+        configured: true,
+        ...(name === undefined ? {} : { name }),
+        ...(description === undefined ? {} : { description }),
+        ...(website === undefined ? {} : { website }),
+      });
+    } catch (e) {
+      return err("internal_error", reason(e));
+    }
+  },
+});
+
 export const AGENT_TOOLS: ApiToolDefinition<AgentToolContext>[] = [
   agentCreate,
   agentUpdate,
   agentGet,
   agentList,
   agentDelete,
+  getCurrentAgent,
+  getBusinessProfile,
 ];

@@ -245,8 +245,14 @@ export interface EvalCase {
    */
   readonly tier: "l2" | "l3";
   readonly agent: string;
-  /** What feeds the real Context assembler. The assembler's output is what the model sees. */
-  readonly context: AssembleContext;
+  /**
+   * What feeds the real Context assembler, beyond what the Eval Soul already supplies.
+   *
+   * Every field a Case could once set is retired — the assembler takes only the Agent's own
+   * personality, and that is the Soul's to write — so this is now omitted in practice. It is kept
+   * so `loadCorpus` can still name a retired field rather than ignore it in silence.
+   */
+  readonly context?: AssembleContext;
   readonly input: readonly ModelMessage[];
   /** A deterministic Curator response applied after the L3 Chat Turn settles. */
   readonly curator?: { readonly output: unknown };

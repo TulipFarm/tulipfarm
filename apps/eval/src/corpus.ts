@@ -46,7 +46,24 @@ const SOUL_OWNED = SOUL_OWNED_CONTEXT_KEYS;
  * as what looks like a regression.
  */
 const RETIRED_CONTEXT: Record<string, string> = {
-  memory: "memoryDocument — a rendered document string, not a list of {key, value} entries",
+  memory: "nothing — Memory is reached through get_memory",
+  memoryDocument: "nothing — Memory is reached through get_memory",
+  business: "nothing — the business is reached through get_business_profile",
+  customInstructions: "nothing — standing instructions come back from get_memory",
+  governancePages: "nothing — governance is reached through list_governance_pages",
+  knowledgeGrounding: "nothing — grounding is stated once in the platform instructions",
+  pinnedKnowledge: "nothing — Knowledge is reached through query_knowledge",
+  availableSkills: "nothing — Skills are reached through load_skill",
+  eagerSkills: "nothing — Skills are reached through load_skill",
+  soulCatalogue:
+    "nothing — Soul artifacts are reached through agent_list / skill_list / list_resource_types",
+  taggedResources: "nothing — Resource schemas are reached through resource_type_schema",
+  availableTools: "the `tools` field — Tools reach the model as native declarations",
+  surfaceCatalog: "nothing — the Surface catalog is validated inside `present`",
+  temporal: "nothing — the clock is reached through get_current_time",
+  agentId: "nothing — an Agent asks get_current_agent which Agent it is",
+  domain: "nothing — an Agent asks get_current_agent for its domain",
+  tenantId: "nothing — the Agent is never told a tenant id",
 };
 
 /**
@@ -131,7 +148,12 @@ function validate(raw: unknown, file: string): EvalCase {
       c.curator !== null &&
       "output" in c.curator, `${file}: "curator" must contain an "output" fixture`);
   }
-  require(typeof c.context === "object" && c.context !== null, `${file}: missing "context"`);
+  // Every field a Case could once set here is retired: the assembler takes only the Agent's own
+  // personality, which the Eval Soul owns. The key stays accepted so the retired-field errors below
+  // still teach, but a Case that omits it is now the normal shape.
+  require(c.context === undefined ||
+    (typeof c.context === "object" &&
+      c.context !== null), `${file}: "context" must be an object when present`);
   require(Array.isArray(c.input) &&
     c.input.length > 0, `${file}: "input" must be a non-empty array`);
   // An empty `expect` would score as a pass — `[].every(...)` is true — and clear the release
@@ -475,12 +497,13 @@ export async function loadCorpus(
       throw new CorpusError(`${name}: invalid JSON — ${(cause as Error).message}`);
     }
     const evalCase = validate(parsed, name);
+    const declared = (evalCase.context ?? {}) as unknown as Record<string, unknown>;
     for (const [field, replacement] of Object.entries(RETIRED_CONTEXT)) {
-      require((evalCase.context as unknown as Record<string, unknown>)[field] ===
+      require(declared[field] ===
         undefined, `${name}: "context.${field}" is retired and the assembler ignores it. Use ${replacement}.`);
     }
     for (const field of SOUL_OWNED) {
-      require((evalCase.context as unknown as Record<string, unknown>)[field] ===
+      require(declared[field] ===
         undefined, `${name}: "context.${field}" is the Eval Soul's to set, not the Case's. Name the Agent ` +
         `with "agent" and edit apps/eval/soul instead.`);
     }

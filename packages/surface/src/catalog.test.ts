@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  SHIPPED_CATALOG_REVISION,
-  SHIPPED_SURFACE_COMPONENTS,
-  surfaceCatalogPrompt,
-} from "./catalog";
+import { SHIPPED_CATALOG_REVISION, SHIPPED_SURFACE_COMPONENTS } from "./catalog";
 import { createSurfaceArtifact, validateSurfaceArtifact } from "./index";
 
 describe("SHIPPED_SURFACE_COMPONENTS", () => {
@@ -104,25 +100,5 @@ describe("SHIPPED_SURFACE_COMPONENTS", () => {
 
   it("bumps the shipped catalog revision", () => {
     expect(SHIPPED_CATALOG_REVISION).toBe("tsp-1.2-data-display-1");
-  });
-});
-
-describe("surfaceCatalogPrompt", () => {
-  it("routes blocking input through request_input and explains semantic selection", () => {
-    const prompt = surfaceCatalogPrompt(
-      { channel: "web", surface: "chat" },
-      SHIPPED_SURFACE_COMPONENTS,
-      "revision"
-    );
-
-    expect(prompt).toContain("MUST call request_input instead of present");
-    expect(prompt).toContain("Choices and Form always use request_input");
-    expect(prompt).toContain("Alert is for an outage, degradation");
-    expect(prompt).toContain("Metric is one or more KPIs");
-    expect(prompt).toContain("Breakdown is a proportional split");
-    expect(prompt).toContain("do not supply an awaitedSchema");
-    expect(prompt).toContain("recommend");
-    // The label becomes the commit button, so a bare identifier leaves the reader pressing a noun.
-    expect(prompt).toContain("never as a bare identifier");
   });
 });

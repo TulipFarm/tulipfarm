@@ -2,9 +2,6 @@
   "id": "linear-fixed-operations-gate-mutations",
   "tier": "l2",
   "agent": "finance",
-  "context": {
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",

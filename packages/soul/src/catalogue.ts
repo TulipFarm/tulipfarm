@@ -7,7 +7,7 @@ export interface SoulCatalogueEntry {
   description: string;
 }
 
-/** L1 Soul catalog used by `<soul-context>`. */
+/** L1 Soul catalog. Reached through `agent_list` / `skill_list` / `list_resource_types`. */
 export interface SoulCatalogue {
   agents: SoulCatalogueEntry[];
   skills: SoulCatalogueEntry[];
@@ -30,7 +30,7 @@ function byName(a: SoulCatalogueEntry, b: SoulCatalogueEntry): number {
   return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
 }
 
-/** Projects all Soul artifact types to the `<soul-context>` L1 catalog. */
+/** Projects all Soul artifact types to the L1 catalog. */
 export function buildSoulCatalogue(soulLoader: SoulLoader | undefined): SoulCatalogue {
   const agents = listAgents(soulLoader)
     .map((a) => ({ name: a.name, description: asDesc(a.frontmatter.description) }))

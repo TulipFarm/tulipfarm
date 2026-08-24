@@ -53,7 +53,7 @@ const ALWAYS_ON_TOOL_NAMES = [
 ] as const;
 
 const EXPECTED_FAMILY_TOOL_NAMES = [
-  { family: "memory", names: ["update_memory"] },
+  { family: "memory", names: ["get_memory", "update_memory"] },
   { family: "kv", names: ["kv_delete", "kv_get", "kv_list", "kv_set"] },
   { family: "files", names: ["file_list", "file_read", "file_create"] },
   {
@@ -61,6 +61,7 @@ const EXPECTED_FAMILY_TOOL_NAMES = [
     names: [
       "cite_sources",
       "create_knowledge_page",
+      "list_governance_pages",
       "create_space",
       "get_backlinks",
       "get_page",
@@ -97,7 +98,15 @@ const EXPECTED_FAMILY_TOOL_NAMES = [
   },
   {
     family: "agents",
-    names: ["agent_create", "agent_delete", "agent_get", "agent_list", "agent_update"],
+    names: [
+      "agent_create",
+      "agent_delete",
+      "agent_get",
+      "agent_list",
+      "agent_update",
+      "get_business_profile",
+      "get_current_agent",
+    ],
   },
   {
     family: "skills",
@@ -497,6 +506,7 @@ describe("tool contract coverage", () => {
 
   it("registers the whole memory family from the document repository alone", () => {
     expect(withoutAlwaysOn(registryNames({ memoryDocuments: inert<never>() }))).toEqual([
+      "get_memory",
       "update_memory",
     ]);
   });

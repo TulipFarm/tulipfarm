@@ -3,10 +3,6 @@
   "tier": "l3",
   "agent": "support",
   "agentRoles": ["support-desk"],
-  "context": {
-    "customInstructions": "When someone asks for a report or a summary they can keep, produce a document rather than a long chat message.",
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",

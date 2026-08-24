@@ -2,10 +2,6 @@
   "id": "knowledge-withheld-page-reads-as-absent",
   "tier": "l2",
   "agent": "support",
-  "context": {
-    "customInstructions": "You answer from the knowledge base. When the customer links a page, read it with get_page using the id in the link. Report only what the tool returns. If the read comes back not found, tell the customer you could not find that page and offer another way to help — do not guess whether it exists or who may read it.",
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",

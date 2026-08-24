@@ -1,5 +1,5 @@
 import { canonicalHash } from "@tulipfarm/schema/canonicalize";
-import { SHIPPED_SURFACE_COMPONENTS, surfaceCatalogPrompt, surfaceComponentFor } from "./catalog";
+import { SHIPPED_SURFACE_COMPONENTS, surfaceComponentFor } from "./catalog";
 import type {
   SurfaceComponentDefinition,
   SurfaceComponentSupport,
@@ -97,17 +97,6 @@ export class SurfaceRegistry implements SurfaceComponentSupport {
         examples: jsonProjection(component.examples),
       })),
     });
-  }
-
-  catalogPrompt(
-    target: SurfaceTarget,
-    extensions: readonly SurfaceCatalogExtension[] = []
-  ): string {
-    return surfaceCatalogPrompt(
-      target,
-      this.catalogFor(target, extensions),
-      this.catalogRevision(target, extensions)
-    );
   }
 
   capabilitiesFor(target: SurfaceTarget): readonly string[] {

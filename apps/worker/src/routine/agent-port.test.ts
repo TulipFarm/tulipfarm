@@ -205,19 +205,16 @@ describe("BundleRoutineAgentPort", () => {
     expect(appended[1]?.payload).toMatchObject({ modelProfileId: "fast" });
   });
 
-  it("names the Run's own clock so the Agent does not date-reason from its training cutoff", async () => {
+  it("names the Run's own clock, because this State can call no clock Tool", async () => {
     const now = new Date("2026-08-08T11:12:00Z");
     await port({ now: () => now }).execute(request());
 
     const invoked = invoke.mock.calls[0]?.[0] as ModelInvocationRequest;
+    const system = contentText(invoked.messages[0]?.content ?? []);
     // A Routine State has no participant, so there is no timezone preference to read: UTC.
-    expect(contentText(invoked.messages[0]?.content ?? [])).toContain("<current-context>");
-    expect(contentText(invoked.messages[0]?.content ?? [])).toContain(
-      "date: Saturday, 08 August 2026"
-    );
-    expect(contentText(invoked.messages[0]?.content ?? [])).toContain(
-      "time: 11:12 (UTC, UTC+00:00)"
-    );
+    expect(system).toContain("<run-context>");
+    expect(system).toContain("date: Saturday, 08 August 2026");
+    expect(system).toContain("time: 11:12 (UTC, UTC+00:00)");
   });
 
   it("exposes no Tools to the Agent, so a Routine's effects stay on its Tool States", async () => {

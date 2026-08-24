@@ -8,6 +8,7 @@ import {
 import { type ApiToolDefinition, defineApiTool } from "@tulipfarm/tool-host";
 import { err, ok } from "../tool-result";
 import { MemoryWriteRejected } from "./document";
+import { timezoneFromMemoryDocument } from "./sections";
 import type { MemoryDocumentRepo } from "./store";
 
 /** Per-turn context for the Memory Document Tool. */
@@ -15,6 +16,14 @@ export interface MemoryDocumentToolContext {
   readonly businessId: string;
   readonly userId: string;
   readonly documents: MemoryDocumentRepo;
+  /**
+   * The user's explicit standing instructions, if the host stores any.
+   *
+   * They ride along with `get_memory` because they answer the same question the Agent is asking —
+   * "what does this person durably expect of me?" — and splitting them across two Tools means an
+   * Agent that calls one and not the other silently ignores half the answer.
+   */
+  readonly customInstructions?: () => Promise<string | undefined>;
   readonly agentId?: string;
   readonly runId?: string;
   readonly now?: () => Date;
@@ -50,16 +59,16 @@ const UPDATE_MEMORY_SCHEMA: Record<string, unknown> = {
     remove: {
       ...ENTRY_LIST,
       description:
-        "Facts to forget. Each string must match an existing line in the section — copy it from " +
-        "the <memory> block exactly. Anything you do not name is left alone.",
+        "Facts to forget. Each string must match an existing line in the section verbatim. " +
+        "Anything you do not name is left alone.",
     },
   },
 };
 
 const validate = ajv.compile(UPDATE_MEMORY_SCHEMA);
 
-function firstError(): string {
-  const detail = validate.errors?.[0];
+function firstError(errors: typeof validate.errors): string {
+  const detail = errors?.[0];
   if (!detail) return "invalid arguments";
   return `${detail.instancePath || "(root)"} ${detail.message ?? "is invalid"}`.trim();
 }
@@ -85,7 +94,7 @@ function memorySectionTarget(args: unknown) {
  */
 export const updateMemoryTool = defineApiTool<MemoryDocumentToolContext>({
   name: "update_memory",
-  description: `Edit the user's durable memory document — the <memory> block you can see, which is loaded into every future conversation with this user.
+  description: `Edit the user's durable memory document, carried across every future conversation with this user.
 
 Call this whenever you learn something durable about the user, without being asked and without asking permission first: who they are, where they work, what they are responsible for, how they want you to reply, a standing rule they just gave you, or a decision they just made. If you would want to know it next week, write it now. Also call it when the user says "remember ...", and when something already recorded turns out to be wrong.
 
@@ -94,7 +103,7 @@ Do not record: anything that stops being true within the hour, anything you infe
 Sections:
 ${SECTION_GUIDE}
 
-Use \`add\` for new facts and \`remove\` for facts that are no longer true. To correct a fact, pass both in one call. \`remove\` only drops the exact lines you name, so copy them from the <memory> block verbatim; everything you do not name is left untouched.`,
+Use \`add\` for new facts and \`remove\` for facts that are no longer true. To correct a fact, pass both in one call. \`remove\` only drops the exact lines you name, and it matches verbatim, so it can only remove a line you have seen; everything you do not name is left untouched.`,
   tier: "platform",
   mutating: true,
   inputSchema: UPDATE_MEMORY_SCHEMA,
@@ -105,7 +114,7 @@ Use \`add\` for new facts and \`remove\` for facts that are no longer true. To c
     dataClasses: ["memory"],
   },
   handler: async (args, ctx) => {
-    if (!validate(args)) return err("validation_error", firstError());
+    if (!validate(args)) return err("validation_error", firstError(validate.errors));
     const { section, add, remove } = args as {
       section: MemorySectionKey;
       add?: string[];
@@ -146,6 +155,63 @@ Use \`add\` for new facts and \`remove\` for facts that are no longer true. To c
   },
 });
 
+const GET_MEMORY_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  properties: {},
+};
+
+const validateGetMemory = ajv.compile(GET_MEMORY_SCHEMA);
+
+/**
+ * The one durable-memory read path.
+ *
+ * Nothing puts Memory in the prompt, so an Agent that does not call this knows nothing durable
+ * about the person it is talking to. It also gates `update_memory`'s `remove`, which matches lines
+ * verbatim and therefore cannot name a line the model has never read.
+ */
+export const getMemoryTool = defineApiTool<MemoryDocumentToolContext>({
+  name: "get_memory",
+  description: `Read everything durable you have recorded about this user — who they are, how they want you to reply, and standing rules they have given you.
+
+Nothing else tells you any of it, so call this at the start of a conversation with a person, before you rely on a preference, and before \`update_memory\` with \`remove\` (which matches lines verbatim, so you must read the line first).
+
+Returns what you have recorded as Markdown in \`document\`, plus any standing instructions the user wrote themselves in \`customInstructions\` — those are the user's own words and outrank your <agent-personality>. If \`timezone\` comes back, pass it to \`get_current_time\`; the clock defaults to UTC and will otherwise date things in the wrong day for this user.`,
+  tier: "platform",
+  mutating: false,
+  inputSchema: GET_MEMORY_SCHEMA,
+  authorization: {
+    action: "memory.document.read",
+    resources: ["platform.memory"],
+    dataClasses: ["memory"],
+  },
+  handler: async (args, ctx) => {
+    if (!validateGetMemory(args))
+      return err("validation_error", firstError(validateGetMemory.errors));
+    const [document, instructions] = await Promise.all([
+      ctx.documents.render(ctx.businessId, ctx.userId),
+      ctx.customInstructions?.() ?? Promise.resolve(undefined),
+    ]);
+    const recalled = document.trim();
+    const standing = instructions?.trim();
+    if (recalled.length === 0 && (standing === undefined || standing.length === 0)) {
+      return ok({
+        document: "",
+        empty: true,
+        note: "Nothing durable is recorded about this user yet.",
+      });
+    }
+    const timezone = timezoneFromMemoryDocument(recalled);
+    return ok({
+      document: recalled,
+      ...(standing === undefined || standing.length === 0 ? {} : { customInstructions: standing }),
+      ...(timezone === undefined ? {} : { timezone }),
+      empty: false,
+    });
+  },
+});
+
 export const MEMORY_DOCUMENT_TOOLS: ApiToolDefinition<MemoryDocumentToolContext>[] = [
+  getMemoryTool,
   updateMemoryTool,
 ];

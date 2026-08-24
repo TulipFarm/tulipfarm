@@ -274,8 +274,13 @@ const presentToolDefinition = defineApiTool<RequestContext>({
   name: "present",
   tier: "platform",
   mutating: false,
-  description:
-    "Create one non-blocking informational TSP Artifact. Do not use this Tool for Choices, Forms, or any response that must wait for the user; use request_input instead. Pass component as separate name, version, and props fields; never combine name and version.",
+  description: `Create one non-blocking informational TSP Artifact.
+
+Prefer a presentation over plain prose whenever the answer contains structured Records, statuses, an important warning, a comparison, actions, or KPIs. Use at most one short prose lead-in and one presentation, and never repeat the presentation's contents in prose.
+
+Which component: Alert for an outage, degradation, urgent warning or important success; Status for one compact state; Metric for one or more KPIs; Timeline for ordered events; Comparison for an option-by-criteria decision matrix; Breakdown for a proportional split; Gauge for bounded progress; RecordTable for repeated Records sharing fields.
+
+Do not use this Tool for Choices, Forms, or any response that must wait for the user — call request_input instead. Only the components in this Tool's schema exist; the schema is narrowed to what this Turn's channel can actually render. Pass name, version and props as separate fields, never a combined "RecordTable@1.0", and put every component-specific field inside props.`,
   inputSchema: PRESENT_SCHEMA,
   inputSchemaFor: (ctx) => ({
     ...PRESENT_SCHEMA,
@@ -425,8 +430,13 @@ const requestInputToolDefinition = defineApiTool<RequestContext>({
   tier: "platform",
   // It makes no external change, but it is a control-flow barrier for the Tool loop.
   mutating: true,
-  description:
-    "Ask the user for a choice or typed response. This is the only Tool to use when the response must wait for user input; it presents the interactive component and pauses agent work until the response starts a later Chat Turn.",
+  description: `Ask the user for a choice or typed response, and pause until they answer.
+
+This is the only Tool to use when the response must wait for the user: Choices for one mutually exclusive decision, Form for typed multi-field input. It presents the component and suspends agent work until the answer starts a later Chat Turn, so do not present the same question as prose as well.
+
+In Choices, set \`recommend\` to the value you would pick and give that choice a \`detail\` sentence and a \`confidence\`; omit \`recommend\` when you genuinely have no preference — it is a recommendation, not a default. Each label becomes the button the reader presses, so write it as the action it takes ("Reorder from cone_king"), not as a bare identifier ("cone_king"). Wrap identifiers, values and settings in backticks in \`question\` and \`detail\`; they render as inline code.
+
+The server derives input validation from the component; do not supply an \`awaitedSchema\`. Pass name, version and props as separate fields, and put every component-specific field inside props.`,
   inputSchema: {
     ...PRESENT_SCHEMA,
   },

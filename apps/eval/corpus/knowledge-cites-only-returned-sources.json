@@ -2,10 +2,6 @@
   "id": "knowledge-cites-only-returned-sources",
   "tier": "l2",
   "agent": "support",
-  "context": {
-    "customInstructions": "You answer from the knowledge base. Search with query_knowledge, then cite the pages you used by calling cite_sources with the pageId from each result you relied on. Only cite pageIds that appeared in the search results; never cite a page the search did not return.",
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",

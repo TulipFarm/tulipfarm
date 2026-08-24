@@ -37,13 +37,80 @@ function highlightJson(json: string): ReactNode[] {
   return out;
 }
 
+/** A line that is nothing but one `<block>` or `</block>` tag, which is how prompt blocks open. */
+const PROMPT_TAG_LINE = /^<\/?[a-z][a-z0-9-]*>$/;
+const PROMPT_INLINE_CODE = /`[^`\n]+`/g;
+
+function highlightInlineCode(line: string, lineIndex: number): ReactNode[] {
+  const out: ReactNode[] = [];
+  let last = 0;
+  let key = 0;
+  PROMPT_INLINE_CODE.lastIndex = 0;
+  for (let m = PROMPT_INLINE_CODE.exec(line); m !== null; m = PROMPT_INLINE_CODE.exec(line)) {
+    if (m.index > last) out.push(line.slice(last, m.index));
+    out.push(
+      <span key={`${lineIndex}:${key}`} className="text-code-string">
+        {m[0]}
+      </span>
+    );
+    key += 1;
+    last = m.index + m[0].length;
+  }
+  if (last < line.length) out.push(line.slice(last));
+  return out;
+}
+
 /**
- * A floating button opens a non-blocking right slide-over that dumps the full raw conversation
- * state — the system prompt the LLM receives (reconstructed server-side) plus every persisted
- * row (all roles, tool calls/results, metadata) — as copyable JSON, so a dev can paste the
- * exact agent context into external pipelines. Gated on `import.meta.env.DEV`: the whole
- * component (and its dynamic imports) dead-code-strips out of the production bundle, and the
- * backing API route is registered only outside production.
+ * Renders the assembled prompt as text rather than as an escaped JSON string, because every
+ * newline in it is what separates one block from the next — collapsed to `\n` the whole prompt
+ * reads as one paragraph and its structure is invisible.
+ */
+function highlightPrompt(text: string): ReactNode[] {
+  const lines = text.split("\n");
+  const out: ReactNode[] = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i] ?? "";
+    const prefix = i === 0 ? "" : "\n";
+    if (PROMPT_TAG_LINE.test(line)) {
+      out.push(
+        <span key={i} className="font-medium text-code-key">
+          {prefix}
+          {line}
+        </span>
+      );
+    } else if (line.startsWith("#")) {
+      out.push(
+        <span key={i} className="font-medium text-code-boolean">
+          {prefix}
+          {line}
+        </span>
+      );
+    } else {
+      out.push(
+        <span key={i}>
+          {prefix}
+          {highlightInlineCode(line, i)}
+        </span>
+      );
+    }
+  }
+  return out;
+}
+
+const TABS = [
+  { id: "prompt", label: "Prompt" },
+  { id: "json", label: "JSON" },
+] as const;
+
+type DebugTab = (typeof TABS)[number]["id"];
+
+/**
+ * A floating button opens a non-blocking right slide-over over the raw conversation state, in two
+ * views: the system prompt the LLM receives (reconstructed server-side) rendered as formatted
+ * text, and every persisted row (all roles, tool calls/results, metadata) as JSON. Either view
+ * copies, so a dev can paste the exact agent context into external pipelines. Gated on
+ * `import.meta.env.DEV`: the whole component (and its dynamic imports) dead-code-strips out of the
+ * production bundle, and the backing API route is registered only outside production.
  */
 export function ChatDebugDrawer({ conversationId }: { conversationId?: string }) {
   if (!import.meta.env.DEV) return null;
@@ -52,6 +119,7 @@ export function ChatDebugDrawer({ conversationId }: { conversationId?: string })
 
 function DebugDrawer({ conversationId }: { conversationId?: string }) {
   const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState<DebugTab>("prompt");
   const [data, setData] = useState<DebugContext | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -112,9 +180,10 @@ function DebugDrawer({ conversationId }: { conversationId?: string }) {
         2
       )
     : "";
+  const copyPayload = tab === "prompt" ? (data?.systemPrompt ?? "") : json;
 
   async function copy() {
-    if (!(await copyText(json))) return;
+    if (!(await copyText(copyPayload))) return;
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   }
@@ -147,6 +216,24 @@ function DebugDrawer({ conversationId }: { conversationId?: string }) {
         >
           <header className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
             <span className="text-xs font-medium text-foreground">Debug — Raw State</span>
+            <div className="flex items-center gap-0.5 rounded-sm border border-border p-0.5">
+              {TABS.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  aria-pressed={tab === t.id}
+                  onClick={() => setTab(t.id)}
+                  className={cn(
+                    "rounded-[0.1875rem] px-2 py-0.5 text-[0.6875rem] transition-colors",
+                    tab === t.id
+                      ? "bg-accent text-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
             <div className="ml-auto flex items-center gap-1">
               <button
                 type="button"
@@ -159,9 +246,9 @@ function DebugDrawer({ conversationId }: { conversationId?: string }) {
               </button>
               <button
                 type="button"
-                aria-label={copied ? "Copied" : "Copy JSON"}
+                aria-label={copied ? "Copied" : "Copy"}
                 onClick={copy}
-                disabled={!json}
+                disabled={!copyPayload}
                 className={iconBtn}
               >
                 {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
@@ -187,7 +274,7 @@ function DebugDrawer({ conversationId }: { conversationId?: string }) {
               <p className="p-3 text-xs text-destructive">[error] {err}</p>
             ) : (
               <pre className="whitespace-pre-wrap break-words p-3 text-[0.6875rem] leading-relaxed text-muted-foreground">
-                {highlightJson(json)}
+                {tab === "prompt" ? highlightPrompt(data?.systemPrompt ?? "") : highlightJson(json)}
               </pre>
             )}
           </div>

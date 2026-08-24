@@ -481,12 +481,7 @@ export async function buildApp(opts: AppOptions = {}) {
           repo: opts.conversationRepo,
           messageRepo: opts.messageRepo,
           ...(opts.conversationStore === undefined ? {} : { turnStore: opts.conversationStore }),
-          knowledge: opts.knowledgeService,
           soulLoader: opts.soulLoader,
-          toolRegistry,
-          bundledSkills: opts.bundledSkills,
-          disabledBundledSkills: opts.disabledBundledSkills,
-          githubStatus: opts.githubStatus,
           ...(opts.fileService === undefined ? {} : { files: opts.fileService }),
         },
         requireAuth

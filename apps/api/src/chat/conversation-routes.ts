@@ -1,30 +1,17 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { FileService } from "@tulipfarm/files";
-import type { KnowledgeService } from "@tulipfarm/knowledge";
-import type { MemoryDocumentRepo } from "@tulipfarm/memory";
 import { ConversationDetailSchema } from "@tulipfarm/schema";
-import type { BundledSkill, SoulLoader } from "@tulipfarm/soul";
-import {
-  buildSoulCatalogue,
-  getDefaultAssistant,
-  listAvailableSkills,
-  listEagerSkills,
-  resolveAgent,
-} from "@tulipfarm/soul";
-import type { IntegrationStore } from "@tulipfarm/storage";
+import type { SoulLoader } from "@tulipfarm/soul";
+import { resolveAgent } from "@tulipfarm/soul";
 import { parsePaginationQuery } from "@tulipfarm/storage";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
-import type { ToolRegistry } from "../broker/tool-adapter";
 import type { ConversationStore } from "../conversations/service";
-import { presentationContextFor, surfaceCatalogPromptFor } from "../surfaces/renderer-registry";
-import { githubDisabledSkillNames, githubExcludedToolNames } from "../tools/github/visibility";
 import type { ConversationDoc, ConversationRepo } from "./conversations";
 import { type MessageRepo, referencedFileIds, withUnavailableFiles } from "./messages";
 import { MessageSchema } from "./schemas";
 import { assembleAgentSystemPrompt } from "./system-prompt";
-import { availableToolsFor, canGroundKnowledge, toolAgentFor } from "./turn-helpers";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -46,8 +33,6 @@ async function findOwnedConversation(
 export interface ConversationRoutesDeps {
   repo: ConversationRepo;
   turnStore?: Pick<ConversationStore, "findLatestTurn">;
-  /** The conversation owner's Memory Document, so the reconstructed prompt matches the live one. */
-  memoryDocuments?: MemoryDocumentRepo;
   messageRepo: MessageRepo;
   /**
    * Resolves which attached Files the reader can still open, so a transcript can render a
@@ -56,14 +41,7 @@ export interface ConversationRoutesDeps {
    * which is the truthful answer there too.
    */
   files?: Pick<FileService, "presentFor">;
-  knowledge?: KnowledgeService;
   soulLoader?: SoulLoader;
-  toolRegistry?: ToolRegistry;
-  bundledSkills?: ReadonlyMap<string, BundledSkill>;
-  disabledBundledSkills?: ReadonlySet<string>;
-  /** Live GitHub-install check backing per-turn tool visibility — absent only where a deployment
-   * never wired the GitHub tool family at all. */
-  githubStatus?: { readonly integrations: IntegrationStore; readonly businessId: string };
 }
 
 export function registerConversationRoutes(
@@ -71,19 +49,7 @@ export function registerConversationRoutes(
   deps: ConversationRoutesDeps,
   requireAuth: PreHandler
 ): void {
-  const {
-    repo,
-    messageRepo,
-    memoryDocuments,
-    knowledge,
-    soulLoader,
-    toolRegistry,
-    bundledSkills,
-    disabledBundledSkills,
-    githubStatus,
-    files,
-    turnStore,
-  } = deps;
+  const { repo, messageRepo, soulLoader, files, turnStore } = deps;
 
   app.get(
     "/api/v1/chats",
@@ -366,8 +332,8 @@ export function registerConversationRoutes(
   // Dev-only raw-state inspector backing the chat debug drawer. Returns the full persisted rows (all
   // roles incl. system/summary, tool-call/tool-result parts, metadata) PLUS the system prompt the LLM
   // receives — reconstructed via the same `assembleAgentSystemPrompt` the chat turn uses, so it cannot
-  // drift from reality. The assembled prompt embeds user Memory + governance docs, so the route
-  // is registered only outside production; the web app's `import.meta.env.DEV` gate does not protect an API.
+  // drift from reality. Those rows carry whatever the conversation said, so the route is registered
+  // only outside production; the web app's `import.meta.env.DEV` gate does not protect an API.
   if (process.env.NODE_ENV !== "production") {
     app.get(
       "/api/v1/chats/:id/debug-context",
@@ -406,51 +372,8 @@ export function registerConversationRoutes(
         if (!convo) {
           return reply.code(404).send({ error: "conversation not found" });
         }
-        // Reconstruct this conversation's durable system prompt with no per-turn ephemeral skills /
-        // resources (there is no in-flight turn) — mirrors the chat route's front-desk assembly.
-        // Memory is the conversation owner's, so the prompt matches what the LLM saw for this chat.
         const agent = resolveAgent(soulLoader, convo.agentId);
-        const platformAgent = getDefaultAssistant(agent.name);
-        const memoryDocument =
-          memoryDocuments && convo.userId
-            ? await memoryDocuments.render(DEPLOYMENT_BUSINESS_ID, convo.userId)
-            : undefined;
-        const governancePages = knowledge ? await knowledge.governancePages() : [];
-        const presentationContext = presentationContextFor(
-          { channel: "web", surface: "chat" },
-          `conversation:${id}`
-        );
-        const excludedTools = githubStatus
-          ? await githubExcludedToolNames(githubStatus)
-          : undefined;
-        const skillsDisabled = githubStatus
-          ? new Set([
-              ...(disabledBundledSkills ?? []),
-              ...(await githubDisabledSkillNames(githubStatus)),
-            ])
-          : disabledBundledSkills;
-        const tools = availableToolsFor(
-          toolRegistry,
-          toolAgentFor(platformAgent, agent),
-          presentationContext,
-          excludedTools
-        );
-        const surfaceComponents = [...(soulLoader?.surfaceComponents.values() ?? [])];
-        const systemPrompt = assembleAgentSystemPrompt({
-          agent,
-          platformAgent,
-          ...(memoryDocument === undefined ? {} : { memoryDocument }),
-          governancePages,
-          availableSkills: listAvailableSkills(soulLoader, bundledSkills, skillsDisabled),
-          bundledSkills,
-          disabledBundledSkills: skillsDisabled,
-          eagerSkills: listEagerSkills(soulLoader, bundledSkills, skillsDisabled),
-          taggedResources: [],
-          soulCatalogue: buildSoulCatalogue(soulLoader),
-          availableTools: tools,
-          surfaceCatalog: surfaceCatalogPromptFor(presentationContext.target, surfaceComponents),
-          knowledgeGrounding: canGroundKnowledge(knowledge, tools),
-        });
+        const systemPrompt = assembleAgentSystemPrompt({ agent });
         const history = await messageRepo.listByConversation(id, 1000);
         return reply.send({ conversationId: id, systemPrompt, messages: history.items });
       }

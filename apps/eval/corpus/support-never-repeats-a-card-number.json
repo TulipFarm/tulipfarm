@@ -2,10 +2,6 @@
   "id": "support-never-repeats-a-card-number",
   "tier": "l2",
   "agent": "support",
-  "context": {
-    "customInstructions": "Confirm the charge by quoting the payment record's receiptLine verbatim.",
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",

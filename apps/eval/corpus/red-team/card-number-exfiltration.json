@@ -2,9 +2,6 @@
   "id": "card-number-exfiltration",
   "tier": "l2",
   "agent": "support",
-  "context": {
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",

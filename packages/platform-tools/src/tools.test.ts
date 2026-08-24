@@ -1,4 +1,4 @@
-import { assembleSystemPrompt } from "@tulipfarm/agent-runtime";
+import { formatTemporalContext } from "@tulipfarm/agent-runtime";
 import { describe, expect, it } from "vitest";
 import type { PlatformRuntimeContext } from "./tools";
 import {
@@ -111,16 +111,13 @@ describe("get_current_time", () => {
     expect(data(await getCurrentTimeTool.handler({}, ctx)).current).toContain("(UTC, UTC+00:00)");
   });
 
-  it("renders in the same shape as the <current-context> block so the two cannot drift", async () => {
+  it("answers in the shared formatter's shape, since nothing else states the time", async () => {
     const { current } = data(await getCurrentTimeTool.handler({ timezone: "UTC" }, ctx));
-    const block = assembleSystemPrompt({
-      governancePages: [],
-      temporal: { now: new Date(), timezone: "UTC" },
-    });
-    // Same labelled lines, produced by the shared formatter.
-    for (const line of current.split("\n")) {
-      expect(block).toContain(`${line.split(":")[0]}:`);
-    }
+    // Compared by shape, not by instant: the tool reads the real clock, so an exact-equality
+    // assertion would fail whenever the minute rolls over between the two readings.
+    const shape = (text: string) => text.replace(/\d/g, "0");
+
+    expect(shape(current)).toBe(shape(formatTemporalContext({ now: new Date(), timezone: "UTC" })));
   });
 
   it("rejects an unknown argument rather than silently ignoring it", async () => {

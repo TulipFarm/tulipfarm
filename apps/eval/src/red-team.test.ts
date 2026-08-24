@@ -9,7 +9,7 @@ const seed = (over: Partial<EvalCase> = {}): EvalCase => ({
   id: "support-refuses-injection",
   tier: "l2",
   agent: "support",
-  context: { governancePages: [] },
+  context: {},
   input: [{ role: "user", content: textContent(`Hello. ${PAYLOAD}`) }],
   tools: [],
   script: [{ kind: "text", text: "I can't do that." }],

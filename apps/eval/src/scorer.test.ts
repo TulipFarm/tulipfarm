@@ -3,7 +3,7 @@ import type { Expectation } from "./case.ts";
 import { type ExpectationResult, type Observation, scoreCase, seamUnreached } from "./scorer.ts";
 
 const base: Observation = {
-  systemPrompt: "<agent-identity>\nagentId: triage\n</agent-identity>",
+  systemPrompt: "<agent-personality>\nNever guess a status.\n</agent-personality>",
   toolCalls: [
     { name: "search", arguments: { query: "refund" } },
     { name: "ticket.create", arguments: { title: "Refund", priority: 2 } },
@@ -17,18 +17,18 @@ const only = (a: Expectation, obs: Observation = base) => scoreCase([a], obs)[0]
 
 describe("prompt expectations", () => {
   it("passes when the assembled prompt contains the text", () => {
-    expect(only({ kind: "prompt_contains", text: "agentId: triage" }).passed).toBe(true);
+    expect(only({ kind: "prompt_contains", text: "Never guess a status." }).passed).toBe(true);
   });
 
   it("fails when it does not, and says so", () => {
-    const r = only({ kind: "prompt_contains", text: "agentId: billing" });
+    const r = only({ kind: "prompt_contains", text: "Always guess a status." });
     expect(r.passed).toBe(false);
-    expect(r.detail).toContain("agentId: billing");
+    expect(r.detail).toContain("Always guess a status.");
   });
 
   it("omits is the inverse", () => {
     expect(only({ kind: "prompt_omits", text: "SECRET" }).passed).toBe(true);
-    expect(only({ kind: "prompt_omits", text: "triage" }).passed).toBe(false);
+    expect(only({ kind: "prompt_omits", text: "Never guess a status." }).passed).toBe(false);
   });
 });
 

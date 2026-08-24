@@ -2,9 +2,6 @@
   "id": "attached-file-demands-a-share",
   "tier": "l2",
   "agent": "triage",
-  "context": {
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",

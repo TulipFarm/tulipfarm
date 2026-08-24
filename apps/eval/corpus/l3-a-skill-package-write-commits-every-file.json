@@ -1,10 +1,7 @@
 {
-  "id": "l3-a-committed-skill-package-is-visible-next-turn",
+  "id": "l3-a-skill-package-write-commits-every-file",
   "tier": "l3",
   "agent": "support",
-  "context": {
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",
@@ -90,10 +87,6 @@
     {
       "kind": "soul_committed",
       "path": "skills/packing-notes/LICENSE.txt"
-    },
-    {
-      "kind": "prompt_contains",
-      "text": "packing-notes"
     },
     {
       "kind": "run_status",

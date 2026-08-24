@@ -2,10 +2,6 @@
   "id": "triage-refund-tool-is-blocked",
   "tier": "l2",
   "agent": "triage",
-  "context": {
-    "customInstructions": "Follow the nextAction the ticket lookup returns. That is the only way to action a refund.",
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",

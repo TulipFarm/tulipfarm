@@ -1,5 +1,4 @@
 import { DEFAULT_GUARDRAILS, type GuardrailsService } from "@tulipfarm/agent-runtime";
-import type { MemoryDocumentRepo } from "@tulipfarm/memory";
 import { MAX_HISTORY_TOKENS, MAX_TOOL_STEPS, MEMORY_METRICS } from "@tulipfarm/memory";
 import type { Attributes, LogLevel, TelemetryPort } from "@tulipfarm/observability";
 import type { ArtifactService, ChildLinkAncestry } from "@tulipfarm/run-kernel";
@@ -93,12 +92,10 @@ function makeResolver(
     bundledSkills?: Record<string, BundledSkill>;
     telemetry?: TelemetryPort;
     childLinks?: ChildLinkAncestry;
-    memoryDocument?: string;
   } = {},
   channelDeliveries?: ChannelDeliveryReader
 ) {
   const store = new FakeConversationStore();
-  const documentRender = vi.fn(async () => options.memoryDocument ?? "");
   for (const persisted of options.messages ?? []) store.messages.push(persisted);
   const registry = new ToolRegistry();
   for (const name of options.tools ?? []) registry.register(toolDef(name));
@@ -117,7 +114,6 @@ function makeResolver(
 
   return {
     store,
-    documentRender,
     resolver: new ChatTurnContextResolver({
       artifacts: {
         read: async () => ({ content: options.request ?? {} }),
@@ -127,11 +123,6 @@ function makeResolver(
       ...(options.guardrails ? { guardrails: options.guardrails } : {}),
       ...(options.now ? { now: options.now } : {}),
       ...(options.telemetry ? { telemetry: options.telemetry } : {}),
-      ...(options.memoryDocument === undefined
-        ? {}
-        : {
-            memoryDocuments: { render: documentRender } as unknown as MemoryDocumentRepo,
-          }),
       ...(channelDeliveries ? { channelDeliveries } : {}),
       ...(options.childLinks ? { childLinks: options.childLinks } : {}),
       ...(soulLoader ? { soulLoader } : {}),
@@ -161,28 +152,13 @@ describe("ChatTurnContextResolver", () => {
     expect(context.contextDigest).not.toBe("");
   });
 
-  it("tells the agent what now is, in the timezone the user stored", async () => {
-    const { resolver } = makeResolver({
-      now: () => new Date("2026-08-08T11:12:00Z"),
-      memoryDocument: "## Identity\n\nTimezone: Asia/Kolkata",
-    });
-
-    const context = await resolver.resolve(AUTHORITY);
-
-    const system = contentText(context.messages[0]?.content ?? []);
-    expect(system).toContain("<current-context>");
-    expect(system).toContain("date: Saturday, 08 August 2026");
-    expect(system).toContain("time: 16:42 (Asia/Kolkata, UTC+05:30)");
-  });
-
-  it("falls back to UTC when the user stored no timezone", async () => {
+  it("puts no clock in the prompt — the Agent must call get_current_time for one", async () => {
     const { resolver } = makeResolver({ now: () => new Date("2026-08-08T11:12:00Z") });
 
-    const context = await resolver.resolve(AUTHORITY);
+    const system = contentText((await resolver.resolve(AUTHORITY)).messages[0]?.content ?? []);
 
-    expect(contentText(context.messages[0]?.content ?? [])).toContain(
-      "time: 11:12 (UTC, UTC+00:00)"
-    );
+    expect(system).not.toContain("<current-context>");
+    expect(system).not.toContain("2026");
   });
 
   it("forwards the Artifact's model selector for the router to resolve", async () => {
@@ -397,46 +373,5 @@ describe("ChatTurnContextResolver — a delegated Run's granted authority", () =
     });
 
     await expect(resolver.resolve(AUTHORITY)).rejects.toMatchObject({ code: "link_unreadable" });
-  });
-});
-
-describe("ChatTurnContextResolver — the Memory Document read selector", () => {
-  const DOCUMENT = "## Identity\n\nStaff engineer\nTimezone: Asia/Kolkata";
-
-  it("renders the document, and takes the clock from it", async () => {
-    const { resolver } = makeResolver({
-      memoryDocument: DOCUMENT,
-      now: () => new Date("2026-08-08T11:12:00Z"),
-    });
-
-    const system = contentText((await resolver.resolve(AUTHORITY)).messages[0]?.content ?? []);
-
-    expect(system).toContain("<memory>");
-    expect(system).toContain("Timezone: Asia/Kolkata");
-    expect(system).toContain("time: 16:42 (Asia/Kolkata, UTC+05:30)");
-  });
-
-  it("tells the model to write memory, not only to apply it", async () => {
-    const { resolver } = makeResolver({ memoryDocument: DOCUMENT });
-
-    const system = contentText((await resolver.resolve(AUTHORITY)).messages[0]?.content ?? []);
-
-    expect(system).toContain("call update_memory in the same turn");
-  });
-
-  it("reads no memory for a subject that is not a person", async () => {
-    const { resolver, documentRender } = makeResolver({ memoryDocument: DOCUMENT });
-
-    const system = contentText(
-      (
-        await resolver.resolve({
-          ...AUTHORITY,
-          subject: { kind: "agent", id: "triage-agent" },
-        })
-      ).messages[0]?.content ?? []
-    );
-
-    expect(system).not.toContain("<memory>");
-    expect(documentRender).not.toHaveBeenCalled();
   });
 });

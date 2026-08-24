@@ -34,7 +34,7 @@ const valid = (id: string): EvalCase => ({
   id,
   tier: "l2",
   agent: "triage",
-  context: { governancePages: [] },
+  context: {},
   input: [{ role: "user", content: textContent("hello") }],
   expect: [{ kind: "loop_status", status: "completed" }],
 });
@@ -219,7 +219,7 @@ describe("loadCorpus grounding", () => {
   it("accepts text the Context gave the model", async () => {
     const dir = corpusDir({
       "a.json": withExpect([{ kind: "output_contains", text: "9am" }], {
-        context: { memoryDocument: "Opens at 9am.", governancePages: [] },
+        context: { platformInstructions: "Opens at 9am." },
       }),
     });
 
@@ -239,7 +239,7 @@ describe("loadCorpus grounding", () => {
   it("checks a pattern against what was given, not only a literal", async () => {
     const dir = corpusDir({
       "grounded.json": withExpect([{ kind: "output_matches", pattern: "9\\s*am" }], {
-        context: { memoryDocument: "Opens at 9am.", governancePages: [] },
+        context: { platformInstructions: "Opens at 9am." },
       }),
     });
     const bare = corpusDir({
@@ -282,7 +282,7 @@ describe("loadCorpus grounding", () => {
         id: "cased",
         tier: "l2",
         agent: "support",
-        context: { memoryDocument: "Opens at 9AM." },
+        context: { platformInstructions: "Opens at 9AM." },
         input: [{ role: "user", content: "when?" }],
         script: [{ kind: "text", text: "9am" }],
         expect: [{ kind: "output_contains", text: "9am" }],
@@ -303,7 +303,7 @@ describe("loadCorpus against the Eval Soul", () => {
   it("refuses a Case that restates what the Eval Soul owns", async () => {
     for (const field of SOUL_OWNED_CONTEXT_KEYS) {
       const dir = corpusDir({
-        "a.json": { ...valid("a"), context: { governancePages: [], [field]: "x" } },
+        "a.json": { ...valid("a"), context: { [field]: "x" } },
       });
 
       await expect(load(dir)).rejects.toThrow(new RegExp(`context.${field}`));
@@ -314,7 +314,7 @@ describe("loadCorpus against the Eval Soul", () => {
     const dir = corpusDir({
       "a.json": {
         ...valid("a"),
-        context: { governancePages: [], memory: [{ key: "hours", value: "Opens at 9am." }] },
+        context: { memory: [{ key: "hours", value: "Opens at 9am." }] },
       },
     });
 

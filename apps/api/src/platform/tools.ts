@@ -63,9 +63,31 @@ export interface PlatformToolContext {
   onGuardrailsChanged?: () => Promise<void>;
   bundledSkills?: ReadonlyMap<string, BundledSkill>;
   disabledBundledSkills?: ReadonlySet<string>;
+  /**
+   * Skills hidden for this Turn only, on top of the persisted tombstones in
+   * {@link PlatformToolContext.disabledBundledSkills}. A Skill documenting an integration that is
+   * not installed belongs here and not there: the tombstone set is written back to
+   * `skills/.bundled-disabled.json`, so a live check added to it would persist as a permanent
+   * delete the moment anything else saved.
+   */
+  hiddenSkillNames?: () => Promise<ReadonlySet<string>>;
   platformAgentNames?: ReadonlySet<string>;
   requestContext?: RequestContext;
   events?: EventEmitter;
+}
+
+/**
+ * The Skills this Turn cannot see: persisted tombstones plus any live gate.
+ *
+ * Every Skill read path must resolve through this. A Skill that `skill_list` hides but
+ * `load_skill` still serves is worse than one that was never hidden, because the Agent reaches it
+ * by name and then calls Tools the same gate excluded.
+ */
+async function hiddenSkills(ctx: PlatformToolContext): Promise<ReadonlySet<string>> {
+  const persisted = ctx.disabledBundledSkills ?? new Set<string>();
+  const live = await ctx.hiddenSkillNames?.();
+  if (live === undefined || live.size === 0) return persisted;
+  return new Set([...persisted, ...live]);
 }
 
 const SOUL_REPO_TARGET = "soul.repo";
@@ -119,17 +141,18 @@ export const loadSkillTool = defineApiTool<PlatformToolContext>({
     if (!validateLoadSkill(args))
       return err("validation_error", firstError(validateLoadSkill.errors));
     const { name } = args as { name: string };
+    const hidden = await hiddenSkills(ctx);
     const skill = resolveSkill(
       name,
       ctx.soulLoader as SoulLoader | undefined,
       ctx.bundledSkills,
-      ctx.disabledBundledSkills
+      hidden
     );
     if (skill) {
       const soulSkill = ctx.soulLoader?.skills.get(name);
       const bundledSkill = soulSkill
         ? undefined
-        : ctx.disabledBundledSkills?.has(name)
+        : hidden.has(name)
           ? undefined
           : ctx.bundledSkills?.get(name);
       try {
@@ -169,7 +192,7 @@ export const loadSkillReferenceTool = defineApiTool<PlatformToolContext>({
       return err("validation_error", firstError(validateLoadSkillRef.errors));
     const { skill, reference } = args as { skill: string; reference: string };
     const soulSkill = ctx.soulLoader?.skills.get(skill);
-    const bundledSkill = ctx.disabledBundledSkills?.has(skill)
+    const bundledSkill = (await hiddenSkills(ctx)).has(skill)
       ? undefined
       : ctx.bundledSkills?.get(skill);
     const selectedBundledSkill = soulSkill ? undefined : bundledSkill;
@@ -568,7 +591,7 @@ export const callSkillTool = defineApiTool<PlatformToolContext>({
       name,
       ctx.soulLoader as SoulLoader | undefined,
       ctx.bundledSkills,
-      ctx.disabledBundledSkills
+      await hiddenSkills(ctx)
     );
     if (!skill) return err("not_found", `Skill "${name}" not found.`);
     return ok({

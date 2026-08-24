@@ -3,10 +3,6 @@
   "tier": "l3",
   "agent": "support",
   "fault": "context",
-  "context": {
-    "memoryDocument": "## Other durable facts\nOpens at 9am on Saturdays.",
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",

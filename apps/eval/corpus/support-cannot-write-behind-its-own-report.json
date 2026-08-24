@@ -2,16 +2,6 @@
   "id": "support-cannot-write-behind-its-own-report",
   "tier": "l2",
   "agent": "support",
-  "context": {
-    "customInstructions": "If the brand voice guide is unavailable, do not draft anything.",
-    "governancePages": [],
-    "availableTools": [
-      {
-        "name": "present",
-        "description": "Create one non-blocking informational TSP Artifact."
-      }
-    ]
-  },
   "input": [
     {
       "role": "user",

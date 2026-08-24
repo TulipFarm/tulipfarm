@@ -16,6 +16,7 @@ import { type ApiToolDefinition, toToolDef } from "@tulipfarm/tool-host";
 import { ToolRegistry } from "../broker/tool-adapter";
 import { FRONTEND_TOOLS } from "../platform/frontend-tools";
 import { PLATFORM_TOOLS, type PlatformToolContext } from "../platform/tools";
+import { readCustomInstructions } from "../preferences/custom-instructions";
 import { RESOURCE_TOOLS, type ResourceServices } from "../resources/tools.js";
 import { AGENT_TOOLS, type AgentToolContext } from "../soul/agents/tools.js";
 import { RESOURCE_TYPE_TOOLS, type ResourceTypeToolContext } from "../soul/resource-types/tools.js";
@@ -29,7 +30,7 @@ import { TASK_TOOLS, type TaskToolContext } from "../tasks/tools";
 
 /** Build the startup ToolRegistry; handlers close over services and receive RequestContext. */
 export function buildToolRegistry(services: {
-  /** The user's Memory Document. Absent leaves `update_memory` unregistered. */
+  /** The user's Memory Document. Absent leaves `get_memory`/`update_memory` unregistered. */
   memoryDocuments?: MemoryDocumentRepo;
   kv?: KvService;
   /** The File library. Absent leaves `file_list`/`file_read` unregistered. */
@@ -70,12 +71,18 @@ export function buildToolRegistry(services: {
 
   if (services.memoryDocuments) {
     const documents = services.memoryDocuments;
+    // Standing instructions live in user-scoped KV, which `get_memory` reads alongside the
+    // document. Without KV wired the field is simply absent, never a failed read.
+    const kvForInstructions = services.kv;
     registerFamily(MEMORY_DOCUMENT_TOOLS, ({ userId, agentId, runId }) => ({
       businessId: DEPLOYMENT_BUSINESS_ID,
       userId,
       documents,
       agentId,
       runId,
+      ...(kvForInstructions === undefined
+        ? {}
+        : { customInstructions: () => readCustomInstructions(kvForInstructions, userId) }),
     }));
   }
 
@@ -133,7 +140,7 @@ export function buildToolRegistry(services: {
 
   if (services.agentTools) {
     const ctx = services.agentTools;
-    registerFamily(AGENT_TOOLS, () => ctx);
+    registerFamily(AGENT_TOOLS, ({ agentId }) => ({ ...ctx, agentId }));
   }
 
   if (services.skillTools) {

@@ -46,13 +46,6 @@ export function surfaceCatalogRevisionFor(
   return surfaceRendererRegistry.catalogRevision(target, surfaceCatalogExtensions(components));
 }
 
-export function surfaceCatalogPromptFor(
-  target: SurfaceTarget,
-  components: readonly SoulSurfaceComponent[] = []
-): string {
-  return surfaceRendererRegistry.catalogPrompt(target, surfaceCatalogExtensions(components));
-}
-
 export function presentationContextFor(
   target: SurfaceTarget,
   destination: string

@@ -2,9 +2,6 @@
   "id": "support-translates-curl-to-api-request",
   "tier": "l2",
   "agent": "support",
-  "context": {
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",

@@ -3,9 +3,6 @@
   "tier": "l3",
   "agent": "support",
   "fault": "model",
-  "context": {
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",

@@ -2,10 +2,6 @@
   "id": "skills-install-from-marketplace",
   "tier": "l2",
   "agent": "support",
-  "context": {
-    "customInstructions": "Use Skills only after their audit has completed.",
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",

@@ -2,10 +2,6 @@
   "id": "support-sees-an-attached-image",
   "tier": "l2",
   "agent": "support",
-  "context": {
-    "customInstructions": "Describe what you are shown.",
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",

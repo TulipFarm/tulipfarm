@@ -1,10 +1,7 @@
 {
-  "id": "l3-a-committed-agent-is-visible-next-turn",
+  "id": "l3-an-agent-write-commits-under-a-real-run",
   "tier": "l3",
   "agent": "support",
-  "context": {
-    "governancePages": []
-  },
   "input": [
     {
       "role": "user",
@@ -72,10 +69,6 @@
     {
       "kind": "soul_committed",
       "path": "agents/billing/AGENT.md"
-    },
-    {
-      "kind": "prompt_contains",
-      "text": "billing"
     },
     {
       "kind": "run_status",

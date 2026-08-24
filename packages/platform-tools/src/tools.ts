@@ -79,9 +79,7 @@ const GET_CURRENT_TIME_SCHEMA: Record<string, unknown> = {
     timezone: {
       type: "string",
       minLength: 1,
-      description:
-        "IANA zone to read the time in (e.g. 'Asia/Kolkata'). Defaults to UTC. Pass the zone shown " +
-        "in <current-context> to stay consistent with the rest of the turn.",
+      description: "IANA zone to read the time in (e.g. 'Asia/Kolkata'). Defaults to UTC.",
     },
   },
 };
@@ -189,9 +187,9 @@ export const completeTaskTool = defineApiTool<PlatformRuntimeContext>({
 export const getCurrentTimeTool = defineApiTool<PlatformRuntimeContext>({
   name: "get_current_time",
   description:
-    "Get the current date, day of week and time. The <current-context> block is read once at the " +
-    "start of the turn, so call this when a long-running turn may have outlived it, or to read the " +
-    "time in a different timezone.",
+    "Get the current date, day of week and time. Nothing else tells you what now is, so call this " +
+    "before any date reasoning — what today is, whether something is overdue, what 'next Tuesday' " +
+    "means — and again if a long turn may have outlived the first reading.",
   mutating: false,
   tier: "platform",
   inputSchema: GET_CURRENT_TIME_SCHEMA,

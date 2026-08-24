@@ -16,13 +16,11 @@ export interface ChatBody {
   autonomy?: "full" | "supervised" | "approval-required" | "manual";
   hasTools?: boolean;
   llmDecision?: boolean;
-  // Per-turn `/skill` + `#resource` tags from the composer (ephemeral, like `model`). Skill names
-  // get their body eagerly injected into `<skills>`; resource type names get their schema injected
-  // into `<eager-resources>` — for THIS turn only. Unknown names are ignored.
+  // Per-turn `/skill`, `#resource` and `~knowledge` tags from the composer. INERT: they used to be
+  // injected as prompt blocks, and nothing reads them since those blocks were removed. The composer
+  // still sends them, so the shape stays until the tags either reach a Tool or leave the UI.
   skills?: string[];
   resources?: string[];
-  // Per-turn `~knowledge` pins from the composer: pageIds whose full page content is injected
-  // into `<pinned-knowledge>` for THIS turn only. Unknown/inactive ids are dropped.
   knowledgePages?: string[];
   // What the user is viewing this Turn — exposed to the Agent via `get_client_context`.
   clientContext?: { route?: string; title?: string };
@@ -126,14 +124,6 @@ function offerable(
     return false;
   }
   return true;
-}
-
-/** Enable knowledge grounding only with a service and scoped cite_sources Tool. */
-export function canGroundKnowledge(
-  knowledge: KnowledgeService | undefined,
-  tools: { name: string }[]
-): boolean {
-  return knowledge != null && tools.some((t) => t.name === CITE_SOURCES_TOOL);
 }
 
 // for a byte-stable prompt prefix. `[]` when no registry → the block is omitted.
