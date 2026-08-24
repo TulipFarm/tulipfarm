@@ -3,15 +3,21 @@
 export const WEB_FETCH_TOOL_DECLARATION = {
   name: "web_fetch",
   description:
-    "Fetch a public HTTPS page and extract only the information requested. HTML, Markdown, text, and JSON are supported; private networks and binary responses are refused.",
+    "Fetch a public HTTPS page and return its full readable content as Markdown, plus the links it carried. HTML, Markdown, text, JSON, and PDF are supported; private networks, images and other binary responses are refused. This Tool reads — it never summarises and never answers. Pass `prompt` to say what you are looking for: a large page is shrunk against it before it reaches you, so a vague prompt loses the detail you wanted. Ask the same URL again with a different prompt whenever you need something else from it — a repeat read is served from cache and costs no request.",
   mutating: false,
   inputSchema: {
     type: "object",
     additionalProperties: false,
-    required: ["url", "prompt"],
+    required: ["url"],
     properties: {
       url: { type: "string", minLength: 1, maxLength: 2_000 },
-      prompt: { type: "string", minLength: 1, maxLength: 4_000 },
+      prompt: {
+        type: "string",
+        minLength: 1,
+        maxLength: 2_000,
+        description:
+          "What to look for in this page, as a self-contained question. Resolve pronouns first: 'who wrote this article?' rather than 'who wrote it?'.",
+      },
     },
   },
 } as const;
@@ -37,7 +43,7 @@ const CREDENTIAL_SCHEMA = {
 export const API_REQUEST_TOOL_DECLARATION = {
   name: "api_request",
   description:
-    "Send a governed REST or GraphQL HTTPS request. Use structured arguments; never run curl or wget. GraphQL subscriptions are unsupported.",
+    "Send a governed REST or GraphQL HTTPS request and return the whole response. Use structured arguments; never run curl or wget. GraphQL subscriptions are unsupported. Pass `prompt` to say what you need from the response: a large one is shrunk against it before it reaches you. Unlike a page read, a repeat request is never cached and may change or repeat an effect, so state everything you need the first time rather than planning to ask again.",
   /** Conservative scheduling declaration; the Tool Host classifies each validated call exactly. */
   mutating: true,
   inputSchema: {
@@ -63,6 +69,13 @@ export const API_REQUEST_TOOL_DECLARATION = {
         },
       },
       credential: CREDENTIAL_SCHEMA,
+      prompt: {
+        type: "string",
+        minLength: 1,
+        maxLength: 2_000,
+        description:
+          "What you need from the response, as a self-contained instruction. Name the fields you want: 'list the title and number of every open issue' rather than 'the issues'.",
+      },
     },
   },
 } as const;

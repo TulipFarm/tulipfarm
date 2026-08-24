@@ -1,14 +1,20 @@
 export {
   assertPublicAddresses,
   assertPublicEgressUrl,
+  EGRESS_DENIAL_REASONS,
   type EgressDestinationDenial,
   EgressDestinationError,
+  egressDenialReason,
   GuardedEgressHttp,
   type GuardedEgressHttpOptions,
   type HostResolver,
   isPrivateNetworkAddress,
 } from "./destination";
-export { type EgressHttpOptions, FetchEgressHttp } from "./fetch-http";
+export {
+  type EgressHttpOptions,
+  FetchEgressHttp,
+  mayHaveReachedDestination,
+} from "./fetch-http";
 export { GraphqlToolAdapter, type GraphqlToolAdapterDeps } from "./graphql-adapter";
 export {
   type CompiledGraphqlTool,
@@ -28,7 +34,6 @@ export {
   NETWORK_READ_METHODS,
   NETWORK_REDIRECT_STATUSES,
   normalizedPublicUrl,
-  readableWebContent,
   sendGovernedRequest,
 } from "./network-request";
 export {
@@ -51,3 +56,11 @@ export {
   type OpenApiParamBinding,
   type UnsupportedEgress,
 } from "./openapi-compile";
+export {
+  decodeHtmlEntities,
+  htmlToMarkdown,
+  type RenderedWebContent,
+  renderWebContent,
+  type WebContentFormat,
+  type WebContentLink,
+} from "./web-content";

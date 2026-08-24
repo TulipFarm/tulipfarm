@@ -364,6 +364,15 @@ function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: 
           };
     }
 
+    case "tool_argument_present": {
+      const call = obs.toolCalls.find((c) => c.name === a.name);
+      if (call === undefined) return { passed: false, detail: `${a.name} was never called` };
+      const read = readPath(call.arguments, a.path);
+      return read.found
+        ? { passed: true, detail: `${a.name}.${a.path} = ${show(read.value)}` }
+        : { passed: false, detail: `${a.name} was called without ${a.path}` };
+    }
+
     case "tool_call_count":
       return obs.toolCalls.length === a.count
         ? { passed: true, detail: `${a.count} Tool calls` }

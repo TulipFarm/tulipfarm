@@ -29,6 +29,14 @@ export type Expectation =
       readonly path: string;
       readonly value: unknown;
     }
+  /**
+   * The Tool was called with this argument, whatever its value.
+   *
+   * `tool_argument_equals` cannot stand in for this on a real model: an argument the model
+   * composes in its own words has no value a Case could name in advance, so pinning one would
+   * fail on phrasing rather than on behaviour.
+   */
+  | { readonly kind: "tool_argument_present"; readonly name: string; readonly path: string }
   | { readonly kind: "output_contains"; readonly text: string; readonly ungrounded?: string }
   | { readonly kind: "output_matches"; readonly pattern: string; readonly ungrounded?: string }
   /** The answer does not contain this text. The one way to assert a guard actually removed

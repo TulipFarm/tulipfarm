@@ -100,6 +100,7 @@ export type {
   GuardrailsConfig,
   PromptInjectionConfig,
   ToolBlocklistConfig,
+  UntrustedContentConfig,
 } from "./guardrails";
 export {
   GUARDRAIL_STAGE_BY_GUARD,

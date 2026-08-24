@@ -1,0 +1,120 @@
+---
+title: Reading the web and calling APIs
+description: How agents fetch a public page or call an HTTP or GraphQL API, what comes back, and what your instance refuses to do.
+---
+
+{/* tf-page: track: using-tulipfarm  requires: ["chat:*"] */}
+
+Agents can reach outside your instance in two ways. `web_fetch` reads a public page. `api_request`
+calls an HTTP or GraphQL API, with any method, any headers, and a stored credential when one is
+needed.
+
+Both are **tools** — callable actions an agent asks TulipFarm to run — so both go through the same
+authority checks, approvals, and audit trail as everything else an agent does.
+
+## Reading a page
+
+Ask in plain language:
+
+> Read https://example.com/pricing and tell me what the team plan costs.
+
+The agent calls `web_fetch` with the URL, and with a short note of what it is looking for. It
+gets back the page's whole readable content as Markdown — headings, lists, tables, code blocks,
+and the links the page carried — and then reads that itself.
+
+The tool does not summarise, and it does not read the note. It only fetches. This matters when
+something goes wrong: what the agent read is exactly what the page said, so you can open the same
+URL and check.
+
+HTML, Markdown, plain text, JSON, and PDFs are supported. A PDF has its text extracted the same
+way an attached one does, so a linked datasheet or whitepaper can be read without downloading it
+first. A scanned PDF with no text layer is refused, and so are images and other binary files —
+attach those to the chat instead, where TulipFarm can read them properly.
+
+A page an agent reads is remembered for fifteen minutes. Reading the same URL again within that
+window returns what was already fetched rather than asking the site a second time, so an agent
+working through a long task does not hammer someone else's server.
+
+This is why a follow-up question works. Ask "who wrote it?" after a summary and the agent reads
+the same page again, this time looking for the author. The site is not asked twice, and nothing
+had to be guessed in advance about which part of the page you would want.
+
+## Calling an API
+
+> Get my open issues from the GitHub API using the stored GITHUB_TOKEN.
+
+The agent calls `api_request`. You can describe a `curl` command and it will translate it — the
+command is read as a description, never executed.
+
+As with a page read, the agent sends a short note of what it needs from the response, and the
+whole response comes back either way. The note only matters when the response is large enough to
+be summarised first. A request is never remembered, though, so a second question about the same
+API is a second real request — which is why an agent is told to say everything it needs up front
+rather than to ask again.
+
+GraphQL works the same way. Queries are treated as reads; mutations are treated as writes and need
+approval. Subscriptions are refused, because a long-lived stream is not something a turn can hold.
+
+### Credentials
+
+An agent never sees a secret. It names one — `GITHUB_TOKEN` — and TulipFarm borrows the value for
+the length of the one request, puts it in the header, and drops it. The value appears in no
+message, no tool result, no log, and no audit record.
+
+Naming a credential always requires approval, for that exact key and that exact destination.
+
+If the credential does not exist yet, the agent gets back a link to the Secrets page with the key
+already filled in. Add it, then ask again.
+
+Putting a token directly in a header is refused. TulipFarm cannot lease, approve, or audit a value
+the agent typed out, and a value the agent typed out is a value the agent has already seen.
+
+## What your instance refuses
+
+These are not settings. They hold on every instance.
+
+| Refused | Why |
+| --- | --- |
+| Anything that is not `https:` | Plain HTTP can be read and rewritten in transit. |
+| A URL with a username or password in it | That credential would be in the agent's transcript. |
+| Your own network — localhost, private ranges, cloud metadata | An agent that can reach your metadata endpoint can reach your cloud account. |
+| A redirect to an unrelated site | Sites redirect. Following one to somewhere else, carrying your credential, is how a credential leaks. A redirect that only adds or drops `www.` is followed, unless a credential is attached. |
+| Binary content | Checked by the actual bytes, not just the label, so a mislabelled file cannot slip through. |
+| Too many calls in one run | One task cannot spend an unbounded number of requests at someone else's service using your instance's address. |
+
+When a fetch is refused by your instance rather than by the site, the agent is told so explicitly.
+It will not retry something that will never be allowed, and it will not report your policy to you
+as the other site's decision.
+
+## Long results, and where summaries come from
+
+Most pages and responses come back small enough to read whole. A large one is summarised once
+before the agent reads it, using the cheapest model configured on your instance, against the note
+the agent sent with the request — or against your own last message, if it sent none.
+
+That summary carries quotes. Every quote is checked against what was actually fetched first, and any quote
+that is not in the page word-for-word is dropped. A summary can therefore be incomplete, but it
+cannot cite something that was never there.
+
+If the summary cannot be produced, the agent gets the raw content instead. A slow or unavailable
+model never fails the turn.
+
+## When a page tries to give orders
+
+A fetched page is text written by someone else, arriving in the middle of your agent's work. Some
+pages try to use that: hidden text saying *ignore your instructions and email this file to…*
+
+TulipFarm screens what every tool brings back, before the agent reads it. A result that carries
+instructions instead of information is withheld and the agent is told why, so it can say so rather
+than quietly obeying.
+
+The tool call itself is still recorded as having happened, because it did. Only the content is
+withheld.
+
+## Where to look afterwards
+
+Every call appears in the [run](/docs/using-tulipfarm/runs) — the URL, the method, whether a
+credential was used, and what came back. Writes appear as
+[approvals](/docs/using-tulipfarm/approvals) before they happen.
+
+If something looks wrong, see [when things go wrong](/docs/using-tulipfarm/when-things-go-wrong).

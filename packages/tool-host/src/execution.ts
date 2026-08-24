@@ -8,8 +8,24 @@ import { isIndeterminateFault, isInfrastructureFault } from "./types";
 /** Default infra-fault retries without a ledger: one retry, then stop to avoid duplicate writes. */
 const DEFAULT_TRANSIENT_ATTEMPTS = 2;
 
-/** Matches the chat host's ceiling, so the same Tool is abandoned at the same point either way. */
+/**
+ * Matches the chat host's ceiling, so the same Tool is abandoned at the same point either way.
+ *
+ * A Tool that genuinely needs longer declares `timeout.wallClockMs` rather than this being
+ * raised for everything: the ceiling is what stops one stuck Tool holding a Run, and a Tool that
+ * reads a slow website has no bearing on what a key-value read should be allowed to take.
+ */
 const DEFAULT_EXECUTE_TIMEOUT_MS = 30_000;
+
+/**
+ * How long this call may run, most specific declaration first.
+ *
+ * A Tool's own `wallClockMs` wins because only the Tool knows what it does; these are written in
+ * code beside the handler, not supplied by a user, so there is nothing here to bound against.
+ */
+function executeTimeoutFor(tool: ToolDef, hostTimeoutMs: number | undefined): number {
+  return tool.definition?.timeout?.wallClockMs ?? hostTimeoutMs ?? DEFAULT_EXECUTE_TIMEOUT_MS;
+}
 
 /** The reserved effect this call must settle, if the Tool is one the ledger owns. */
 export interface EffectReservation {
@@ -69,7 +85,7 @@ export async function runToolAttempts(input: ToolAttemptInput): Promise<HostedTo
         tool,
         call.arguments,
         input.context,
-        input.timeoutMs ?? DEFAULT_EXECUTE_TIMEOUT_MS
+        executeTimeoutFor(tool, input.timeoutMs)
       );
     } catch {
       // Throws are unknown phase: never retry, and settle ledgered writes as `ambiguous`.

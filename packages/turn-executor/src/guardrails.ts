@@ -1,9 +1,13 @@
 import {
   type GuardContext,
   GuardrailsService,
+  isBlocked,
+  REFUSED_TOOL_RESULT_NOTICE,
   type ToolDispatchPort,
   type ToolDispatchRequest,
   type ToolDispatchResult,
+  type ToolResultDistillerPort,
+  toolResultText,
 } from "@tulipfarm/agent-runtime";
 import {
   contentFiles,
@@ -14,6 +18,25 @@ import {
 import type { TurnEventWriter } from "./run-events";
 
 /** Enforces the Context's guardrail policy and refuses digest mismatches before execution. */
+
+/**
+ * A URL rewritten so the screener can read it as the prose a model would read.
+ *
+ * Phrase matching normalises whitespace, but a URL cannot contain any — an injected instruction
+ * arrives as `/Ignore-all-previous-instructions`, which no phrase matches yet a model parses
+ * exactly as written. Percent-encoding hides it a second way. Decoding and turning separators
+ * back into spaces screens the sentence the reader actually sees. Used only to build the text
+ * handed to the guard; the citation itself is never rewritten.
+ */
+function urlScreeningText(url: string): string {
+  let readable = url;
+  try {
+    readable = decodeURIComponent(url);
+  } catch {
+    // Malformed escapes: screen the raw form rather than skipping the value entirely.
+  }
+  return readable.replace(/[^\p{L}\p{N}]+/gu, " ");
+}
 
 /** What a refused turn says when the guard named no message of its own. */
 const DEFAULT_BLOCK_MESSAGE = "I can't help with that request.";
@@ -139,7 +162,13 @@ export class TurnGuardrails {
     return { blocked: true, message: result.message ?? DEFAULT_BLOCK_MESSAGE };
   }
 
-  /** Blocks Tool calls as model-visible denials, not whole-turn refusals. */
+  /**
+   * Blocks Tool calls as model-visible denials, not whole-turn refusals.
+   *
+   * The result is screened as well as the call. A refused result keeps its `succeeded` status and
+   * loses only its content: the Tool ran, and on a mutating call something happened out in the
+   * world, so reporting it as denied would tell the model an effect it caused never landed.
+   */
   guard(tools: ToolDispatchPort, events: TurnEventWriter): ToolDispatchPort {
     return {
       dispatch: async (request: ToolDispatchRequest): Promise<ToolDispatchResult> => {
@@ -169,9 +198,106 @@ export class TurnGuardrails {
           };
         }
         // Execute the guard-approved arguments, not the model's original arguments.
-        return tools.dispatch({ ...request, arguments: result.value.args });
+        const dispatched = await tools.dispatch({ ...request, arguments: result.value.args });
+        return this.screenResult(request, dispatched, events);
       },
     };
+  }
+
+  /**
+   * The `tool-result` stage again, over the summariser's own words.
+   *
+   * The raw result was screened before the summariser read it, but the summariser is a cheaper
+   * model reading bytes a destination controls, and what it writes is new text that lands in the
+   * transcript. Screening only its input would trust it to have not been steered by that input.
+   *
+   * A blocked summary is dropped rather than withheld: the raw result it was shrinking already
+   * passed the same screen, so returning nothing leaves the Turn with that, which is what a Turn
+   * without a summariser would have had.
+   */
+  guardDistiller(
+    distiller: ToolResultDistillerPort,
+    events: TurnEventWriter
+  ): ToolResultDistillerPort {
+    return {
+      distill: async (request, signal) => {
+        const distilled = await distiller.distill(request, signal);
+        if (distilled === undefined || isBlocked(distilled)) return distilled;
+
+        const text = toolResultText([
+          distilled.summary,
+          ...distilled.citations.flatMap((citation) =>
+            citation.url === undefined
+              ? [citation.quote]
+              : [citation.quote, urlScreeningText(citation.url)]
+          ),
+        ]);
+        if (text.trim() === "") return distilled;
+
+        const { service, ctx } = this.require();
+        const screened = await service.runToolResult({ toolName: request.toolName, text }, ctx);
+        if (!screened.blocked) return distilled;
+
+        await this.record(
+          events,
+          "tool_result",
+          screened.guard,
+          screened.reason,
+          `distilled:${request.toolName}`,
+          false
+        );
+        // Not `undefined`: that means "no summary available" and leaves the caller holding the
+        // raw result, which is the content this guard just refused.
+        return { blocked: true };
+      },
+    };
+  }
+
+  /**
+   * The `tool-result` stage: what a Tool brought back, before the model reads it.
+   *
+   * A failed call is screened as well as a succeeded one. Its `reason` is not always this
+   * deployment's own words — a Tool that talks to a destination can quote what the destination
+   * said, so that string is reachable by whoever controls the destination.
+   *
+   * A blocked result never becomes `denied`. The Tool already ran; on a mutating call an effect
+   * has landed. Reporting it as denied would tell the model an effect it caused never happened,
+   * so only what came back is withheld.
+   */
+  private async screenResult(
+    request: ToolDispatchRequest,
+    dispatched: ToolDispatchResult,
+    events: TurnEventWriter
+  ): Promise<ToolDispatchResult> {
+    if (dispatched.status !== "succeeded" && dispatched.status !== "failed") return dispatched;
+    const text =
+      dispatched.status === "succeeded" ? toolResultText(dispatched.output) : dispatched.reason;
+    if (text.trim() === "") return dispatched;
+
+    const { service, ctx } = this.require();
+    const screened = await service.runToolResult({ toolName: request.name, text }, ctx);
+    if (!screened.blocked) return dispatched;
+
+    await this.record(
+      events,
+      "tool_result",
+      screened.guard,
+      screened.reason,
+      `tool_result:${request.callId}`,
+      false
+    );
+
+    return dispatched.status === "succeeded"
+      ? {
+          ...dispatched,
+          output: {
+            withheld: true,
+            tool: request.name,
+            reason: screened.reason,
+            detail: screened.message ?? REFUSED_TOOL_RESULT_NOTICE,
+          },
+        }
+      : { ...dispatched, reason: REFUSED_TOOL_RESULT_NOTICE };
   }
 
   private require(): {

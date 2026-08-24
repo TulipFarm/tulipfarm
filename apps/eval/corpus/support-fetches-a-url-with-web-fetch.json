@@ -13,10 +13,14 @@
     {
       "name": "web_fetch",
       "output": {
+        "fetched": true,
         "url": "https://docs.example.com/releases/2.0",
         "status": 200,
         "contentType": "text/html",
-        "extracted": "Release 2.0 launches on September 14."
+        "format": "markdown",
+        "content": "# Release 2.0\n\nRelease 2.0 launches on September 14.\n\n## Upgrading\n\nRun the migration before you start the new binary.",
+        "truncated": false,
+        "links": []
       }
     }
   ],
@@ -29,7 +33,7 @@
           "name": "web_fetch",
           "arguments": {
             "url": "https://docs.example.com/releases/2.0",
-            "prompt": "Find and summarize the release date."
+            "prompt": "What is the release date of version 2.0?"
           }
         }
       ]
@@ -47,6 +51,7 @@
       "path": "url",
       "value": "https://docs.example.com/releases/2.0"
     },
+    { "kind": "tool_argument_present", "name": "web_fetch", "path": "prompt" },
     { "kind": "tool_call_count", "count": 1 },
     { "kind": "output_contains", "text": "September 14" },
     { "kind": "loop_status", "status": "completed" }

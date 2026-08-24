@@ -1,5 +1,4 @@
 import type { AuthorityLayer } from "@tulipfarm/authz";
-import type { LlmService } from "@tulipfarm/llm";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { SoulLoader } from "@tulipfarm/soul";
 import { describe, expect, it, vi } from "vitest";
@@ -19,9 +18,7 @@ function tools(frontmatter: Record<string, unknown>, grants: AuthorityLayer["gra
     authorityLayers: {
       resolvePrincipalLayer: vi.fn(async () => ({ name: "user", grants })),
     },
-    llm: {} as LlmService,
     http: { send },
-    extract: vi.fn(async () => "extracted"),
   });
   const apiRequest = composed.find((tool) => tool.name === "api_request");
   if (apiRequest === undefined) throw new Error("api_request was not composed");
@@ -33,6 +30,23 @@ const args = {
   method: "GET",
   credential: { secret: "JIRA_API_TOKEN", header: "authorization" },
 };
+
+describe("composed network Tool cancellation", () => {
+  it("carries the host's abort signal through to the transport", async () => {
+    // The host abandons a Tool that outruns its deadline; without this the socket it opened
+    // carries on, and a mutating request can land after the Run recorded it as never having.
+    const abortSignal = new AbortController().signal;
+    const { apiRequest, send } = tools({}, [{ action: "*", resourceType: "*", effect: "allow" }]);
+
+    const result = await apiRequest.execute(
+      { url: "https://api.atlassian.com/me", method: "GET" },
+      { userId: "user-1", runId: "run-1", abortSignal }
+    );
+
+    expect(result).toMatchObject({ success: true });
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ signal: abortSignal }));
+  });
+});
 
 describe("network Skill Secret authority", () => {
   it("intersects the Skill declaration with the caller's exact secret.use grant", async () => {

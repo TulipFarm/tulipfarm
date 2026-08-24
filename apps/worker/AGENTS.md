@@ -15,6 +15,7 @@ reconciliation, turn execution, delivery classification, projections, and outbox
 | Path | Owns |
 | --- | --- |
 | `src/main.ts` | Composition root: run dispatch, wait sweep, outbox loops, probes, shutdown. |
+| `src/tool-result-distiller.ts` | Implements `ToolResultDistillerPort` on the `fast` rung. Drops any citation whose quote is not verbatim in the Tool's own result, so the summary cannot invent a source. |
 | `src/config.ts`, `src/data-dir.ts` | Env/defaults, schema floor, worker credentials/secrets. |
 | `src/db.ts`, `src/preflight.ts`, `src/loop.ts` | Local `pg`, schema check, backing-off loops. |
 | `src/executors.ts`, `src/delivery.ts` | Run source and delivery target registries. |

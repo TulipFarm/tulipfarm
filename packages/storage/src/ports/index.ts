@@ -51,6 +51,7 @@ export {
 } from "./filesystem-blob";
 export { InMemoryAzureBlob } from "./in-memory-azure-blob";
 export { InMemoryS3 } from "./in-memory-s3";
+export { MemoryCache, type MemoryCacheOptions } from "./memory-cache";
 export type { QueueAcceleratorPort, QueueMessage } from "./queue";
 export {
   type S3Api,

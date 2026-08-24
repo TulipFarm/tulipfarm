@@ -163,7 +163,7 @@ const GUARDRAIL_BLOCKED_SCHEMA = {
   required: ["stage", "reason"],
   additionalProperties: false,
   properties: {
-    stage: { type: "string", enum: ["input", "tool_call", "output"] },
+    stage: { type: "string", enum: ["input", "tool_call", "tool_result", "output"] },
     reason: { type: "string", minLength: 1 },
     guard: { type: "string", minLength: 1 },
   },
@@ -369,7 +369,7 @@ const GUARDRAIL_DECISION_SCHEMA = {
   required: ["stage", "guard", "decision"],
   additionalProperties: false,
   properties: {
-    stage: { type: "string", enum: ["input", "tool_call", "output"] },
+    stage: { type: "string", enum: ["input", "tool_call", "tool_result", "output"] },
     guard: { type: "string", minLength: 1 },
     decision: { type: "string", enum: ["pass", "transform", "block"] },
     reason: { type: "string" },
@@ -406,7 +406,7 @@ export const RUN_EVENT_DEFINITIONS: readonly RunEventDefinition[] = [
 ];
 
 /** The three points a guardrail can refuse a turn, shared by the block and decision records. */
-export type RunEventGuardrailStage = "input" | "tool_call" | "output";
+export type RunEventGuardrailStage = "input" | "tool_call" | "tool_result" | "output";
 
 /** Which layer a Tool belongs to. Mirrors the registry's own tiering, not a rendering hint. */
 export type RunEventToolTier = "system" | "platform" | "integration";

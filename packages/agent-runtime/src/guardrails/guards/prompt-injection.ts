@@ -134,23 +134,35 @@ function activePatterns(sensitivity: Sensitivity): readonly InjectionPattern[] {
   return [...PATTERNS.low, ...PATTERNS.medium, ...PATTERNS.high];
 }
 
+/**
+ * The jailbreak category this text matches, or `undefined`.
+ *
+ * Shared with the `tool-result` stage rather than reimplemented there: an attacker's phrasing does
+ * not change with the channel it arrives on, and a second copy of these patterns would be a second
+ * thing to keep current — the copy that fell behind would report a strategy as covered while
+ * letting it through.
+ */
+export function detectInjection(text: string, sensitivity: Sensitivity): string | undefined {
+  const candidates = readings(text);
+  for (const { category, re } of activePatterns(sensitivity)) {
+    if (candidates.some((candidate) => re.test(candidate))) return category;
+  }
+  return undefined;
+}
+
 export function makePromptInjectionGuard(cfg: PromptInjectionConfig): Guard<string> {
-  const patterns = activePatterns(cfg.sensitivity ?? "medium");
+  const sensitivity = cfg.sensitivity ?? "medium";
 
   return {
     name: "prompt_injection",
     run(text: string, _ctx): Verdict<string> {
-      const candidates = readings(text);
-      for (const { category, re } of patterns) {
-        if (candidates.some((candidate) => re.test(candidate))) {
-          return {
-            action: "block",
-            reason: `prompt_injection:${category}`,
-            message: "This request was blocked by a safety guardrail.",
-          };
-        }
-      }
-      return { action: "pass" };
+      const category = detectInjection(text, sensitivity);
+      if (category === undefined) return { action: "pass" };
+      return {
+        action: "block",
+        reason: `prompt_injection:${category}`,
+        message: "This request was blocked by a safety guardrail.",
+      };
     },
   };
 }

@@ -17,6 +17,25 @@ export type {
   ToolDispatchRequest,
   ToolDispatchResult,
 } from "./contract";
+export type {
+  DistillBlocked,
+  DistillCitation,
+  DistilledResult,
+  DistillOutcome,
+  DistillRequest,
+  ToolResultDistillerPort,
+} from "./distill";
+export {
+  askFor,
+  DISTILL_THRESHOLD_CHARS,
+  DISTILL_TIMEOUT_MS,
+  distilledPayload,
+  isBlocked,
+  latestAsk,
+  MAX_RAW_RESULT_CHARS,
+  resultText,
+  shouldDistill,
+} from "./distill";
 export { AgentLoop } from "./loop";
 export {
   extractRereadFile,

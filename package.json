@@ -18,6 +18,7 @@
     "dev:web": "turbo dev --filter=@tulipfarm/web",
     "dev:worker": "turbo dev --filter=@tulipfarm/worker",
     "dev:integration-worker": "turbo dev --filter=@tulipfarm/integration-worker",
+    "dev:kill": "bash scripts/kill-dev-ports.sh",
     "reset:dev": "bash scripts/reset-dev.sh",
     "eval": "pnpm --filter @tulipfarm/eval eval",
     "eval:sonnet": "pnpm --filter @tulipfarm/eval eval:sonnet",

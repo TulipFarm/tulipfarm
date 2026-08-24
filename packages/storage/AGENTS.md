@@ -14,6 +14,7 @@ publication, approvals, integrations, events, and blob/vector/cache/queue ports.
 | `src/index.ts` | Public exports; do not mirror the list here. |
 | `src/ports/` | Transaction/query (incl. `withTransaction`), blob, vector, cache, queue ports. |
 | `src/ports/blob-conformance.ts` | What *any* blob implementation must do; every one runs it. |
+| `src/ports/memory-cache.ts` | Process-local TTL + LRU `CachePort`; advisory only, never a record of truth. |
 | `src/ports/s3-blob.ts`, `s3-api.ts`, `aws-s3-api.ts` | S3 driver, its narrow API port, the SDK adapter. |
 | `src/ports/blob-config.ts` | Which blob store this deployment runs on, read from the environment. |
 | `src/ports/bundled-bucket.ts` | First-boot provisioning of the Compose stack's own S3 server. |

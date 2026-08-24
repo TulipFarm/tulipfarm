@@ -760,7 +760,6 @@ async function boot() {
       secrets: secretsService,
       soulLoader,
       authorityLayers: authorityLayerResolver,
-      llm: llmService,
     });
     // The GitHub Skill documents Tools that are excluded whenever the integration is uninstalled.
     // Hiding it on the same live check keeps `skill_list`/`load_skill` from advertising a workflow
