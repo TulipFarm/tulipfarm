@@ -323,6 +323,35 @@ describe("SoulWriter.apply — cross-definition reference checking", () => {
     expect(existsSync(join(soulPath, "routines/greet/routine.yaml"))).toBe(false);
   });
 
+  // A pointer alone ("UNRESOLVED_REF at /spec/states/0/agentRef") says where the writer stopped but
+  // not what to do about it, and an authoring Agent answers that by guessing until it gives up.
+  it("says what an unresolved reference means, not only where it is", async () => {
+    const withTreeReader = new SoulWriter(
+      store,
+      logger,
+      { hasRemote: true, push: async () => {} },
+      { reload: async () => {} },
+      undefined,
+      new GitSoulTreeReader(soulPath)
+    );
+
+    await expect(
+      withTreeReader.apply({
+        subject: "soul: add routine",
+        source: "api",
+        actor: ACTOR,
+        businessId: "biz-1",
+        changes: [
+          {
+            op: "put",
+            target: { kind: "Routine", slug: "greet" },
+            content: routineDoc("greet", "ghost-agent"),
+          },
+        ],
+      })
+    ).rejects.toThrow(/does not exist in the Soul — create it first/);
+  });
+
   it("accepts the same Routine once its agentRef resolves", async () => {
     const withTreeReader = new SoulWriter(
       store,

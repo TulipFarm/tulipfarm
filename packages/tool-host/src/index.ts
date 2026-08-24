@@ -101,6 +101,7 @@ export type {
 export { type AuthorityPrincipal, principalKindOf } from "./principal";
 export {
   type ChatRequestPayload,
+  findChatRequest,
   presentationContextForAuthority,
   readChatRequest,
 } from "./request";

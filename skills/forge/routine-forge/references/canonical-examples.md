@@ -12,6 +12,19 @@ Every Routine and Trigger published to the Soul must conform to `apiVersion: tul
 - `metadata.lifecycle`: `"published"`
 - All State names (`start`, state `name`, `transition`, branch conditions `transition`, `body`, `forState`, etc.) must match `^[A-Za-z][A-Za-z0-9_]*$`: letters, digits, and underscores only (**no hyphens**). PascalCase or snake_case is standard.
 
+### What a State may reference — read this before writing States
+
+- `agentRef` must name an **Agent that already exists in the Soul**. Check with `agent_list`, and
+  create it with `agent_create` first if it is missing. Prerequisites before dependants, always.
+- `toolRef` must name a Soul **ToolContract** definition (an artifact under `tools/` in the Soul
+  repo). It is **not** the name of a Tool you call during a Turn. `delegate_to_agent`,
+  `record_create`, `record_search`, `kv_set`, `send_slack_message`, `github.issue.read` and every
+  other runtime Tool are hosted by the instance, not defined in the Soul; a `tool` State cannot
+  reach them and `routine_forge` refuses them by name.
+- **Almost every Routine should use `agent` States.** To have a Routine do what a runtime Tool does,
+  give an Agent that Tool in its `allowedTools` and let an `agent` State run it. Reach for a `tool`
+  State only when the Soul genuinely holds a ToolContract for it.
+
 ---
 
 ## 1. Minimal Routine with Manual Trigger
@@ -32,13 +45,12 @@ spec:
   start: RunReport
   states:
     - name: RunReport
-      type: tool
-      toolRef:
-        name: record_search
+      type: agent
+      agentRef:
+        name: report-writer
         version: "1"
-      action: record_search
       input:
-        type: report
+        task: Search the report records and summarise today's numbers.
       end: true
 ```
 
@@ -84,26 +96,16 @@ metadata:
   lifecycle: published
 spec:
   owner: support-ops
-  start: FindStaleTickets
+  start: EvaluateTickets
   states:
-    - name: FindStaleTickets
-      type: tool
-      toolRef:
-        name: record_search
-        version: "1"
-      action: record_search
-      input:
-        type: ticket
-        filter: "status == 'open' && updatedAt < now - 7d"
-      transition: EvaluateTickets
-
     - name: EvaluateTickets
       type: agent
       agentRef:
         name: support-triage
         version: "1"
       input:
-        tickets: "${states.FindStaleTickets.output.records}"
+        task: >-
+          Search open tickets not updated in 7 days and decide whether to close them.
       output:
         type: object
         required: [shouldClose, ticketIds, reason]
@@ -134,17 +136,14 @@ spec:
       transition: CloseStaleTickets
 
     - name: CloseStaleTickets
-      type: tool
-      toolRef:
-        name: record_update
+      type: agent
+      agentRef:
+        name: support-triage
         version: "1"
-      action: record_update
       input:
-        type: ticket
-        ids: "${states.EvaluateTickets.output.ticketIds}"
-        patch:
-          status: closed
-          closureReason: "${states.EvaluateTickets.output.reason}"
+        task: Close these tickets with the given reason.
+        ticketIds: "${states.EvaluateTickets.output.ticketIds}"
+        reason: "${states.EvaluateTickets.output.reason}"
       end: true
 ```
 
@@ -195,28 +194,17 @@ metadata:
   lifecycle: published
 spec:
   owner: engineering
-  start: ReadWebhookPayload
+  start: AnalyzeIssue
   states:
-    - name: ReadWebhookPayload
-      type: tool
-      toolRef:
-        name: github.issue.read
-        version: "1.0.0"
-      action: github.issue.read
-      destination: github
-      credentialRef: secret://integrations/github/app
-      input:
-        repository: "${trigger.repository}"
-        issueNumber: "${trigger.issueNumber}"
-      transition: AnalyzeIssue
-
     - name: AnalyzeIssue
       type: agent
       agentRef:
         name: issue-classifier
         version: "1"
       input:
-        issue: "${states.ReadWebhookPayload.output}"
+        task: Read the issue and choose labels and a reply.
+        repository: "${trigger.repository}"
+        issueNumber: "${trigger.issueNumber}"
       output:
         type: object
         required: [labels, reply]
@@ -230,14 +218,12 @@ spec:
       transition: ApplyLabels
 
     - name: ApplyLabels
-      type: tool
-      toolRef:
-        name: github.issue.label
-        version: "1.0.0"
-      action: github.issue.label
-      destination: github
-      credentialRef: secret://integrations/github/app
+      type: agent
+      agentRef:
+        name: issue-classifier
+        version: "1"
       input:
+        task: Apply these labels to the issue.
         repository: "${trigger.repository}"
         issueNumber: "${trigger.issueNumber}"
         labels: "${states.AnalyzeIssue.output.labels}"
@@ -311,14 +297,18 @@ spec:
 ## 5. State Types Reference & Patterns
 
 ### `tool`
-Calls an exposed or platform tool:
+Calls a **Soul ToolContract** — a definition under `tools/` in the Soul repo, named by its
+`spec.toolId` and `spec.toolVersion`. Runtime Tool names (`send_slack_message`, `record_search`,
+`delegate_to_agent`, …) are not ToolContracts and are refused here; use an `agent` State for those.
+
 ```yaml
 name: SendNotification
 type: tool
 toolRef:
-  name: send_slack_message
+  name: acme.notify.send      # a ToolContract the Soul actually defines
   version: "1"
-action: send_slack_message
+action: send
+destination: acme
 input:
   channel: "#general"
   text: "Routine completed."
@@ -396,13 +386,12 @@ transition: SummaryStep
 ### Error Handling & Retries
 ```yaml
 name: ResilientStep
-type: tool
-toolRef:
-  name: record_search
+type: agent
+agentRef:
+  name: ticket-triage
   version: "1"
-action: record_search
 input:
-  type: ticket
+  task: Search open tickets and triage them.
 retry:
   maxAttempts: 3
   backoffMs: 1000
@@ -441,10 +430,9 @@ Pass the routine `name`, the canonical Routine as `definition`, and all Triggers
       "states": [
         {
           "name": "RunReport",
-          "type": "tool",
-          "toolRef": { "name": "record_search", "version": "1" },
-          "action": "record_search",
-          "input": { "type": "report" },
+          "type": "agent",
+          "agentRef": { "name": "report-writer", "version": "1" },
+          "input": { "task": "Search the report records and summarise today's numbers." },
           "end": true
         }
       ]

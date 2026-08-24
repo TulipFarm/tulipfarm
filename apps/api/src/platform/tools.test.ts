@@ -514,9 +514,13 @@ describe("delegateToAgentTool", () => {
 // ── trigger_routine ───────────────────────────────────────────────────────────
 
 describe("triggerRoutineTool", () => {
+  const CALLER = { kind: "user", id: "user-1" };
+  let seenCaller: { readonly kind: string; readonly id: string } | undefined;
   const withTrigger = (ctx: PlatformToolContext): PlatformToolContext => ({
     ...ctx,
-    triggerRoutine: async (slug) => {
+    requestContext: { userId: CALLER.id, subject: CALLER } as PlatformToolContext["requestContext"],
+    triggerRoutine: async (slug, _inputs, caller) => {
+      seenCaller = caller;
       if (slug === "ghost") {
         const err = new Error(`routine "${slug}" not found`);
         err.name = "RoutineTriggerError";
@@ -546,6 +550,25 @@ describe("triggerRoutineTool", () => {
   it("returns not_found for unknown routine", async () => {
     const res = await triggerRoutineTool.handler({ name: "ghost" }, withTrigger(makeCtx()));
     expect(res).toMatchObject({ success: false, error: { code: "not_found" } });
+  });
+
+  it("starts the Run as the calling principal, so the Routine inherits its grants", async () => {
+    const ctx = withTrigger(
+      makeCtx({}, {}, undefined, { "daily-digest": makeRoutine("daily-digest") })
+    );
+    await triggerRoutineTool.handler({ name: "daily-digest" }, ctx);
+    expect(seenCaller).toEqual(CALLER);
+  });
+
+  it("refuses to trigger without a calling principal, rather than inventing one", async () => {
+    const ctx = withTrigger(
+      makeCtx({}, {}, undefined, { "daily-digest": makeRoutine("daily-digest") })
+    );
+    const res = await triggerRoutineTool.handler(
+      { name: "daily-digest" },
+      { ...ctx, requestContext: undefined }
+    );
+    expect(res).toMatchObject({ success: false, error: { code: "internal_error" } });
   });
 
   it("returns internal_error when the routine engine is unavailable", async () => {

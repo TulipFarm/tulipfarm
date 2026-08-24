@@ -116,6 +116,25 @@ describe("ScheduleDispatcher", () => {
     ]);
   });
 
+  it("starts the Run under the Trigger's authored background identity", async () => {
+    const startRoutine = vi.fn().mockResolvedValue({ runId: "run-1", outcome: "started" });
+    const dispatcher = new ScheduleDispatcher({
+      activeBundle: async () => activeBundleWithDueTrigger(),
+      stateStore: fakeStateStore(),
+      startRoutine,
+      businessId: "biz-1",
+      now: () => NOW_MS,
+    });
+
+    await dispatcher.tick();
+
+    // The identity becomes the Run's effective subject, and a Routine's Agent States authorize
+    // their Tool calls against it — a fixed scheduler name holds no grants.
+    expect(startRoutine).toHaveBeenCalledWith(
+      expect.objectContaining({ identity: { kind: "service", id: "routine-runner" } })
+    );
+  });
+
   it("prunes using the same read tick() already made, rather than re-querying", async () => {
     const existingRow: RoutineScheduleStateRow = {
       routineSlug: "stale-routine",

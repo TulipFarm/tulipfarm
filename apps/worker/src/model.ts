@@ -88,6 +88,11 @@ export interface LlmModelPortOptions {
   readonly spend?: SpendSink;
   /** The Conversation this port serves, for attributing spend. Absent for Routine Runs. */
   readonly conversationId?: string;
+  /**
+   * The Run this port spends on behalf of. Without it a Routine Run's model calls land in the
+   * ledger attributed to nothing, and the Run inspector can only report zero.
+   */
+  readonly runId?: string;
   /** Test hook for deterministic latency measurement. Defaults to `Date.now`. */
   now?(): number;
 }
@@ -377,6 +382,7 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
       ...(this.options.conversationId === undefined
         ? {}
         : { conversationId: this.options.conversationId }),
+      ...(this.options.runId === undefined ? {} : { runId: this.options.runId }),
       ...(request.agentId === undefined ? {} : { agentId: request.agentId }),
       ...(routedModelId(resolution.routing) === undefined
         ? {}

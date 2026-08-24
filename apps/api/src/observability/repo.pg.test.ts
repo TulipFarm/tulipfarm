@@ -48,6 +48,33 @@ describe("ObservabilityService + PgObsRepo", () => {
     expect(r.ts).toBeInstanceOf(Date);
   });
 
+  it("sums one Run's model spend, and only that Run's", async () => {
+    const repo = new PgObsRepo(db);
+    const call = (runId: string, costUsd: number | undefined, tokens: number) =>
+      service.record({
+        type: "llm_call",
+        status: "ok",
+        tokensIn: tokens,
+        tokensOut: 0,
+        ...(costUsd === undefined ? {} : { costUsd }),
+        attributes: { runId },
+      });
+
+    await call("run-a", 0.25, 100);
+    // An unpriced call still spent tokens; leaving it out would understate the Run.
+    await call("run-a", undefined, 50);
+    await call("run-b", 9, 900);
+
+    await expect(repo.costsForRun("run-a")).resolves.toEqual({
+      amountUsd: 0.25,
+      modelTokens: 150,
+    });
+    await expect(repo.costsForRun("run-never-called")).resolves.toEqual({
+      amountUsd: 0,
+      modelTokens: 0,
+    });
+  });
+
   it("defaults optional fields to null / empty attributes", async () => {
     await service.record({ type: "turn", status: "ok" });
     const { rows } = await db.query("SELECT * FROM obs_event WHERE type = 'turn'");

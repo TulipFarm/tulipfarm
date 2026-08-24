@@ -110,57 +110,38 @@ function TriggerForm({
   );
 }
 
-export default function RoutineDetail() {
+export default function RoutineDetailRoute() {
   const { routine, runs } = useLoaderData<typeof clientLoader>();
   const navigate = useNavigate();
   const revalidator = useRevalidator();
 
-  if (!routine.valid) {
-    return (
-      <ResourcePanel crumbs={[{ label: "routines", to: "/routines" }, { label: routine.slug }]}>
-        <p className="text-sm text-destructive">{routine.loadError}</p>
-      </ResourcePanel>
-    );
-  }
-
   const definition = routine.definition;
-  const triggers = definition["x-triggers"];
-  const inputs = definition["x-inputs"] ?? null;
-  const canTriggerManually = triggers.some((trigger) => trigger.type === "manual");
+  const triggers = routine.triggers;
+  const inputs = (definition.spec.input ?? null) as RoutineInputsSchema | null;
+  // A Routine with no Trigger at all is still startable by hand: this button is the manual door,
+  // and a manual Trigger definition is one more way in, not a precondition for this one.
+  const triggerSummary = triggers.map((trigger) => trigger.type).join(", ") || "none";
 
   return (
     <ResourcePanel crumbs={[{ label: "routines", to: "/routines" }, { label: routine.slug }]}>
       <div className="flex flex-col gap-1">
         <div className="flex items-center justify-between gap-2">
-          <h1 className="font-medium text-foreground">{definition.name ?? routine.slug}</h1>
+          <h1 className="font-medium text-foreground">{routine.displayName ?? routine.slug}</h1>
           <Button asChild size="sm" variant="outline">
             <Link to={`/routines/${encodeURIComponent(routine.slug)}/edit`}>author</Link>
           </Button>
         </div>
-        {definition.description ? (
-          <p className="text-muted-foreground text-sm">{definition.description}</p>
-        ) : null}
         <p className="text-xs text-muted-foreground">
-          triggers: {triggers.map((trigger) => trigger.type).join(", ") || "none"}
-          {routine.hasHooks ? " · hooks.ts" : ""}
+          v{routine.authoredVersion} · triggers: {triggerSummary}
         </p>
       </div>
 
-      <RoutineCanvas graph={projectRoutineGraph(definition)} mode="read" />
+      <RoutineCanvas graph={projectRoutineGraph(definition, triggers)} mode="read" />
 
-      {canTriggerManually ? (
-        <TriggerForm
-          routine={{ slug: routine.slug, inputs }}
-          onTriggered={(runId) =>
-            navigate(`/routines/${encodeURIComponent(routine.slug)}/runs/${runId}`)
-          }
-        />
-      ) : (
-        <p className="text-xs text-muted-foreground">
-          This routine has no manual trigger — it starts from{" "}
-          {triggers.map((trigger) => trigger.type).join("/")}.
-        </p>
-      )}
+      <TriggerForm
+        routine={{ slug: routine.slug, inputs }}
+        onTriggered={(runId) => navigate(`/runs/${runId}`)}
+      />
 
       <div className="flex items-center justify-between">
         <p className="text-xs uppercase tracking-[0.15em] text-muted-foreground">run history</p>
@@ -175,7 +156,7 @@ export default function RoutineDetail() {
           {runs.map((run) => (
             <li key={run.id}>
               <Link
-                to={`/routines/${encodeURIComponent(routine.slug)}/runs/${run.id}`}
+                to={`/runs/${run.id}`}
                 className="flex items-center gap-2.5 px-3 py-2 transition-colors hover:bg-accent"
               >
                 <RunStatusBadge status={run.status} />
@@ -183,13 +164,8 @@ export default function RoutineDetail() {
                   {run.id.slice(0, 8)}
                 </span>
                 <span className="text-xs text-muted-foreground">
-                  {run.trigger?.type ?? "?"} · {new Date(run.createdAt).toLocaleString()}
+                  {new Date(run.createdAt).toLocaleString()}
                 </span>
-                {run.currentState ? (
-                  <span className="ml-auto text-xs text-muted-foreground">
-                    at {run.currentState}
-                  </span>
-                ) : null}
               </Link>
             </li>
           ))}

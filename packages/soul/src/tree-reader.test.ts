@@ -29,6 +29,23 @@ async function writeFixture(path: string, content: string): Promise<void> {
   await writeFile(fullPath, content, "utf8");
 }
 
+/** The smallest `soul.yaml` that derives a ModelProfile, which an Agent projection requires. */
+async function writeConfiguredLlm(): Promise<void> {
+  await writeFixture(
+    "soul.yaml",
+    stringifyYaml({
+      llm: {
+        tiers: {
+          quick: { providers: [{ provider: "anthropic", model: "claude-opus-5" }] },
+          standard: { providers: [{ provider: "anthropic", model: "claude-opus-5" }] },
+          complex: { providers: [{ provider: "anthropic", model: "claude-opus-5" }] },
+        },
+        presets: { default: "balanced" },
+      },
+    })
+  );
+}
+
 function documentSubject(document: VersionedSchemaDocument): string {
   const metadata = document.metadata;
   if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)) {
@@ -290,5 +307,92 @@ describe("GitSoulTreeReader", () => {
       documents.map((document) => (document.metadata as Record<string, unknown>)?.slug)
     ).toEqual(["fast", "balanced", "thorough"]);
     expect(JSON.stringify(documents)).not.toContain("stale");
+  });
+
+  // A Routine `agentRef` resolves against this source, and the compiled bundle is built from it.
+  // While `AGENT.md` contributed nothing, no Agent the product can create could ever be named by a
+  // Routine — the reference failed validation and the Worker had no Agent to run.
+  it("projects no Agent while the Soul configures no LLM to reference", async () => {
+    await writeFixture("agents/joke-bot/AGENT.md", "---\nlabel: Joke Bot\n---\nBody\n");
+    const git = simpleGit(TMP);
+    await git.add("-A");
+    await git.commit("test fixture");
+    const sha = await git.revparse(["HEAD"]);
+
+    expect(await new GitSoulTreeReader(TMP).readDefinitions(sha.trim())).toEqual([]);
+  });
+
+  it("projects a legacy AGENT.md into a canonical Agent definition", async () => {
+    await writeConfiguredLlm();
+    await writeFixture(
+      "agents/joke-bot/AGENT.md",
+      "---\nlabel: Joke Bot\ndescription: Tells jokes\nautonomy: supervised\n---\nPost one short joke.\n"
+    );
+    const git = simpleGit(TMP);
+    await git.add("-A");
+    await git.commit("test fixture");
+    const sha = await git.revparse(["HEAD"]);
+
+    const documents = await new GitSoulTreeReader(TMP).readDefinitions(sha.trim());
+
+    expect(documents.map(documentSubject)).toContain("Agent:joke-bot");
+    const agent = documents.filter((document) => document.kind === "Agent")[0];
+    expect(agent.spec).toMatchObject({
+      autonomy: "execute_low_risk",
+      instructions: { path: "AGENT.md" },
+      modelProfile: "balanced",
+      personality: "Post one short joke.",
+      trustTier: "business_authored",
+    });
+    expect(agent.metadata).toMatchObject({ authoredVersion: 1, displayName: "Joke Bot" });
+  });
+
+  it("bundles a legacy AGENT.md as a source file, so its projection's companion resolves", async () => {
+    await writeFixture("agents/joke-bot/AGENT.md", "Post one short joke.\n");
+    const git = simpleGit(TMP);
+    await git.add("-A");
+    await git.commit("test fixture");
+    const sha = await git.revparse(["HEAD"]);
+
+    const files = await new GitSoulTreeReader(TMP).readFiles(sha.trim());
+
+    expect(files.map((file) => file.path)).toEqual(["agents/joke-bot/AGENT.md"]);
+  });
+
+  it("leaves the canonical agent.yaml alone when both formats are present", async () => {
+    await writeConfiguredLlm();
+    await writeFixture("agents/joke-bot/AGENT.md", "Legacy body\n");
+    await writeFixture("agents/joke-bot/instructions.md", "Canonical body\n");
+    await writeFixture(
+      definitionPath("Agent", "joke-bot"),
+      stringifyYaml({
+        apiVersion: "tulipfarm.ai/v1",
+        kind: "Agent",
+        metadata: {
+          id: "77777777-7777-7777-7777-777777777777",
+          slug: "joke-bot",
+          schemaVersion: 1,
+          authoredVersion: 3,
+          lifecycle: "published",
+        },
+        spec: {
+          owner: "ops",
+          instructions: { path: "instructions.md" },
+          modelProfile: "balanced",
+          autonomy: "answer_only",
+          trustTier: "business_authored",
+        },
+      })
+    );
+    const git = simpleGit(TMP);
+    await git.add("-A");
+    await git.commit("test fixture");
+    const sha = await git.revparse(["HEAD"]);
+
+    const documents = await new GitSoulTreeReader(TMP).readDefinitions(sha.trim());
+
+    const agents = documents.filter((document) => document.kind === "Agent");
+    expect(agents.map(documentSubject)).toEqual(["Agent:joke-bot"]);
+    expect(agents[0].metadata).toMatchObject({ authoredVersion: 3 });
   });
 });

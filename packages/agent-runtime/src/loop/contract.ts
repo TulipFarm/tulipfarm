@@ -62,6 +62,11 @@ export interface ToolDispatchRequest {
   readonly arguments: unknown;
   /** Skill currently narrowing the loop; absent means the call came directly from Chat. */
   readonly activeSkillName?: string;
+  /**
+   * The Agent the caller acts as, for a Run whose request states none — a Routine `agent` State
+   * names its Agent per State. The loop never sets this; a caller wraps the port to add it.
+   */
+  readonly agentName?: string;
 }
 
 export type ToolDispatchResult =

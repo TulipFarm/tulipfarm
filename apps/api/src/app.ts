@@ -43,6 +43,7 @@ import { registerPreferenceRoutes } from "./preferences/routes";
 import { registerResourceRoutes } from "./resources/routes";
 import { registerRoutineAuthoringRoutes } from "./routines/authoring-routes";
 import { registerRoutineCatalogRoutes } from "./routines/catalog-routes";
+import { registerRoutineDetailRoutes } from "./routines/detail-routes";
 import { registerRunEventRoutes } from "./runs/events";
 import { registerRunReplayRoutes } from "./runs/replay";
 import { registerSecretsRoutes } from "./secrets/routes";
@@ -351,6 +352,9 @@ export async function buildApp(opts: AppOptions = {}) {
     }
     if (opts.routineCatalog) {
       registerRoutineCatalogRoutes(app, opts.routineCatalog, requireAuth);
+    }
+    if (opts.routineDetail) {
+      registerRoutineDetailRoutes(app, opts.routineDetail, requireAuth, requireAuthorization);
     }
 
     if (opts.curatorReview) {

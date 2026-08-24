@@ -6,7 +6,16 @@ import type {
   RunLineage,
   RunStore,
 } from "@tulipfarm/storage";
+import type { RunCosts } from "../observability/repo";
 import type { RunBudgetReadModel, RunReadModel, RunStateReadModel } from "./routes";
+
+/** Zero for a list page, where per-Run cost is not worth one query per row. */
+const NO_COSTS: RunCosts = { amountUsd: 0, modelTokens: 0 };
+
+/** The one thing the Run inspector needs from the observability ledger. */
+interface ObsCostReader {
+  costsForRun(runId: string): Promise<RunCosts>;
+}
 
 /** Reads Runs through `RunStore`; the API must not query storage-owned tables directly. */
 export interface RunReader {
@@ -56,7 +65,8 @@ function lineageReadModel(link: RunLineage): Record<string, unknown> {
 function runReadModel(
   run: PersistedRun,
   states: readonly RunStateReadModel[],
-  lineage: readonly Record<string, unknown>[]
+  lineage: readonly Record<string, unknown>[],
+  costs: RunCosts
 ): RunReadModel {
   return {
     id: run.id,
@@ -68,19 +78,26 @@ function runReadModel(
     startedAt: run.startedAt,
     finishedAt: run.finishedAt,
     states,
-    // Tool effects, waits, Guardrail decisions, and cost accounting have no writer until the
-    // durable worker dispatches Runs. These are genuinely empty today, not withheld — the
-    // inspector shows an empty section rather than an invented one.
+    // Tool effects, waits and Guardrail decisions still have no writer. These are genuinely
+    // empty today, not withheld — the inspector shows an empty section rather than an invented one.
     effects: [],
     waits: [],
     guardrailDecisions: [],
     lineage,
-    costs: { amountUsd: 0, modelTokens: 0 },
+    costs,
   };
 }
 
 /** List pages omit per-Run detail to stay one round trip. */
-export function createRunReader(runs: RunStore, budgets: Pick<BudgetStore, "usage">): RunReader {
+export function createRunReader(
+  runs: RunStore,
+  budgets: Pick<BudgetStore, "usage">,
+  /**
+   * The spend ledger. Optional so a deployment or test without observability still serves Runs;
+   * costs then read zero, which is what the inspector reported unconditionally before.
+   */
+  costs?: Pick<ObsCostReader, "costsForRun">
+): RunReader {
   return {
     async list(businessId, options) {
       const page = await runs.list({
@@ -89,7 +106,7 @@ export function createRunReader(runs: RunStore, budgets: Pick<BudgetStore, "usag
         ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
       });
       return {
-        items: page.items.map((run) => runReadModel(run, [], [])),
+        items: page.items.map((run) => runReadModel(run, [], [], NO_COSTS)),
         nextCursor: page.nextCursor,
       };
     },
@@ -97,15 +114,17 @@ export function createRunReader(runs: RunStore, budgets: Pick<BudgetStore, "usag
     async get(businessId, runId) {
       const run = await runs.find(businessId, runId);
       if (!run) return null;
-      const [states, attempts, lineage] = await Promise.all([
+      const [states, attempts, lineage, spend] = await Promise.all([
         runs.listStates(businessId, runId),
         runs.countStateAttempts(businessId, runId),
         runs.listLineage(businessId, runId),
+        costs?.costsForRun(runId) ?? Promise.resolve(NO_COSTS),
       ]);
       return runReadModel(
         run,
         states.map((state) => stateReadModel(state, attempts.get(state.key) ?? 0)),
-        lineage.map(lineageReadModel)
+        lineage.map(lineageReadModel),
+        spend
       );
     },
 

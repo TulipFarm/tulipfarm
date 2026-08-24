@@ -1,7 +1,7 @@
-import type { RoutineDefinition } from "@tulipfarm/schema";
-import { API_BASE, apiGet, apiWrite } from "./api";
+import type { routine as routineSchema } from "@tulipfarm/schema";
+import { apiGet, apiWrite } from "./api";
 
-/* Cookie-first routines client; EventSource uses cookies via `withCredentials`. */
+/* Cookie-first routines client. */
 
 export type RoutineTrigger = {
   slug: string;
@@ -17,17 +17,14 @@ export type RoutineSummary = {
   triggers: RoutineTrigger[];
 };
 
-export type RoutineDetail =
-  | {
-      slug: string;
-      valid: true;
-      definition: RoutineDefinition;
-      hash: string;
-      hasHooks: boolean;
-    }
-  | { slug: string; valid: false; loadError: string };
+/** One published Routine, as the verified active bundle carries it. */
+export type RoutineDetail = RoutineSummary & {
+  definition: routineSchema.RoutineDefinition;
+  /** The bundle digest this document came from, so a stale view is detectable. */
+  hash: string;
+};
 
-/** The x-inputs JSON Schema subset the manual-trigger form renders. */
+/** The `spec.input` JSON Schema subset the manual-trigger form renders. */
 export type RoutineInputsSchema = {
   type?: string;
   required?: string[];
@@ -38,43 +35,24 @@ export type RoutineInputsSchema = {
 };
 
 export type RunStatus =
-  | "pending"
+  | "queued"
+  | "claimed"
   | "running"
-  | "sleeping"
-  | "waiting_approval"
+  | "waiting"
   | "succeeded"
   | "failed"
-  | "cancelled";
+  | "cancelling"
+  | "cancelled"
+  | "attention_required"
+  | "needs_reconciliation";
 
 export type RunSummary = {
   id: string;
   routineSlug: string;
   status: RunStatus;
-  currentState?: string | null;
-  trigger?: { type: string; triggerIndex?: number };
-  output?: unknown;
-  error?: { name?: string; message?: string } | null;
   createdAt: string;
-  updatedAt: string;
-  finishedAt?: string | null;
-};
-
-export type RunEvent = {
-  seq: number;
-  type: string;
-  payload?: unknown;
-  createdAt?: string;
-};
-
-export type RunDetail = {
-  run: RunSummary & {
-    context?: Record<string, unknown>;
-    definitionHash?: string;
-    definitionSnapshot: RoutineDefinition;
-    attemptCounts?: Record<string, number>;
-    approvalId?: string | null;
-  };
-  events: RunEvent[];
+  startedAt: string | null;
+  finishedAt: string | null;
 };
 
 export async function listRoutines(): Promise<RoutineSummary[]> {
@@ -93,12 +71,6 @@ export async function listRuns(slug: string, limit = 50): Promise<RunSummary[]> 
   return body.items;
 }
 
-export async function getRun(slug: string, runId: string): Promise<RunDetail> {
-  return apiGet<RunDetail>(
-    `/api/v1/routines/${encodeURIComponent(slug)}/runs/${encodeURIComponent(runId)}`
-  );
-}
-
 export async function triggerRun(
   slug: string,
   inputs: Record<string, unknown>
@@ -106,19 +78,4 @@ export async function triggerRun(
   return apiWrite<{ runId: string }>("POST", `/api/v1/routines/${encodeURIComponent(slug)}/runs`, {
     inputs,
   });
-}
-
-export async function cancelRun(slug: string, runId: string): Promise<void> {
-  await apiWrite(
-    "POST",
-    `/api/v1/routines/${encodeURIComponent(slug)}/runs/${encodeURIComponent(runId)}/cancel`,
-    {}
-  );
-}
-
-export function runEventsUrl(slug: string, runId: string, lastEventId?: number): string {
-  const base = `${API_BASE}/api/v1/routines/${encodeURIComponent(slug)}/runs/${encodeURIComponent(
-    runId
-  )}/events`;
-  return lastEventId ? `${base}?lastEventId=${lastEventId}` : base;
 }

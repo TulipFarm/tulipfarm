@@ -161,7 +161,7 @@ describe("routine_forge → Soul publication → Routines catalog", () => {
   it("refuses to report success for a Routine the Routines surface does not list", async () => {
     const result = await forge({
       soulWriter: writer,
-      routineCatalog: { list: async () => [] },
+      routineCatalog: { list: async () => [], get: async () => undefined },
     });
 
     expect(result).toMatchObject({ success: false, error: { code: "internal_error" } });

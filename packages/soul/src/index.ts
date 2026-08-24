@@ -197,10 +197,19 @@ export {
 export type {
   ActiveBundleReader,
   RoutineCatalog,
+  RoutineCatalogDetail,
   RoutineCatalogItem,
   RoutineCatalogTrigger,
 } from "./routine-catalog";
 export { ActiveRoutineCatalog } from "./routine-catalog";
+export type {
+  KnownSoulDefinitions,
+  RoutineDefinitionRefusal,
+} from "./routines/definition-references";
+export {
+  routineDefinitionReferences,
+  unresolvedRoutineDefinitions,
+} from "./routines/definition-references";
 export type { RoutineResourceRefusal } from "./routines/resource-references";
 export {
   routineResourceTypeReferences,

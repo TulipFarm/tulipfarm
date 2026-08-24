@@ -68,6 +68,7 @@ import type { RateLimiter } from "./rate-limit";
 import type { RecordAuthorizer } from "./resources/authorize";
 import type { CounterStore, ResourceRepoFactory } from "./resources/repo";
 import type { CanonicalRoutineAuthoringService } from "./routines/authoring";
+import type { RoutineDetailDeps } from "./routines/detail-routes";
 import type { RunEventRouteDeps } from "./runs/events";
 import type { RunReplayDeps } from "./runs/replay";
 import type { SetupAdminCreator } from "./setup/first-admin";
@@ -210,6 +211,8 @@ export interface AppOptions {
   observabilityConfig?: ObservabilityConfig;
   routineAuthoring?: CanonicalRoutineAuthoringService;
   routineCatalog?: RoutineCatalog;
+  /** The Routine screen's read and trigger plane; absent leaves `/routines/:slug` unserved. */
+  routineDetail?: RoutineDetailDeps;
   approvalsRepo?: ApprovalsRepo;
   routineApprovals?: RoutineApprovalService;
   toolApprovals?: ToolApprovalService;

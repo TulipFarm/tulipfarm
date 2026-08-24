@@ -54,12 +54,13 @@ export const InternalTurnToolCallBodySchema = {
     name: { type: "string", minLength: 1 },
     arguments: {},
     activeSkillName: { type: "string", minLength: 1, maxLength: 64 },
+    agentName: { type: "string", minLength: 1, maxLength: 128 },
   },
 } as const;
 
 export const InternalTurnAuthorityResponseSchema = {
   type: "object",
-  required: ["businessId", "runId", "turn", "subject", "source", "bundleDigest"],
+  required: ["businessId", "runId", "subject", "source", "bundleDigest"],
   properties: {
     businessId: { type: "string" },
     runId: { type: "string" },
@@ -79,6 +80,7 @@ export const InternalTurnAuthorityResponseSchema = {
     },
     source: { type: "string" },
     bundleDigest: { type: "string" },
+    routineId: { type: "string" },
     /** The Soul-resolved Agent this Run routes to; absent when no Soul answered for it. */
     agent: {
       type: "object",
@@ -88,6 +90,34 @@ export const InternalTurnAuthorityResponseSchema = {
         autonomy: { type: "string" },
         toolAllowlist: { type: "array", items: { type: "string" } },
         capabilityRestrictions: { type: "object", additionalProperties: true },
+      },
+    },
+  },
+} as const;
+
+/** Names the Agent a Turnless Run acts as; the control plane confirms it before honouring it. */
+export const InternalRunAgentQuerySchema = {
+  type: "object",
+  properties: { agent: { type: "string", minLength: 1, maxLength: 128 } },
+} as const;
+
+/** One Tool the acting Agent may be offered, in the shape the Agent loop exposes to the model. */
+export const InternalRunAgentToolsResponseSchema = {
+  type: "object",
+  required: ["tools"],
+  properties: {
+    tools: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["name", "description", "inputSchema"],
+        properties: {
+          name: { type: "string" },
+          description: { type: "string" },
+          inputSchema: { type: "object", additionalProperties: true },
+          tier: { type: "string" },
+          mutating: { type: "boolean" },
+        },
       },
     },
   },

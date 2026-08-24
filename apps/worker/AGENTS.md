@@ -63,7 +63,9 @@ reconciliation, turn execution, delivery classification, projections, and outbox
   grant can name one Record; a declared target the arguments cannot answer refuses the State.
 - No `authorityLayers` source and no adapter map both park; do not add provider side routes here.
 - Routine `agent` States use the authored Agent version, same AgentLoop, and pinned Context.
-- Routine Agent States expose no Tools, use deployment default guardrails, and record null output.
+- Routine Agent States run the same Tool loop as Chat: the catalog comes from the control plane
+  (`GET /internal/runs/:runId/agent-tools`), so a Routine never sees a wider set than the same
+  Agent sees in a conversation. They still use deployment default guardrails and record null output.
 - Agent `instructions.md` is a Soul companion hash, not bundled prompt text; use personality.
 - Approval resume tokens never cross to the worker; replay by wait id and State occurrence.
 - Tools hosted in `src/tools/` must clear `localDispatchRefusal`; boot fails rather than weaken it.

@@ -356,6 +356,7 @@ export async function main(): Promise<void> {
         gate: modelGate,
         spend: spendSink,
         conversationId,
+        runId,
         effort: createEffortInference({
           models: llm,
           pinned: runEventEffortPin(runEventStore, businessId, runId),
@@ -435,10 +436,14 @@ export async function main(): Promise<void> {
       }),
       // Approval resume tokens stay API-side; Worker gets only wait id and later decision.
       approvals: new HttpRoutineApprovalPort(internalApi),
-      // Routine Agent States use the pinned Agent/ModelProfile and expose no Tools.
+      // Routine Agent States use the pinned Agent/ModelProfile, and reach Tools through the same
+      // routed dispatch a Chat Turn uses, naming the State's Agent so the control plane can
+      // confirm it against the Soul before authorizing anything.
       agents: new BundleRoutineAgentPort({
+        tools: toolDispatch,
+        catalog: (runId, agentName) => turnHost.agentTools(runId, agentName),
         // Chain, routing event, and budget are already selected/opened by the Routine port.
-        model: ({ modelIds, routing }) =>
+        model: ({ modelIds, routing, runId }) =>
           new LlmModelPort({
             // Through `resolveChain`, so a Routine call is priced by the same authority as a Chat
             // call. Building the resolution inline here is what left Routine spend reported free.
@@ -447,6 +452,7 @@ export async function main(): Promise<void> {
             signal,
             gate: modelGate,
             spend: spendSink,
+            runId,
           }),
         events: runEventStore,
         budgets: budgetStore,

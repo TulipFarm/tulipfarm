@@ -1,6 +1,6 @@
 import type { EdgeLabel, GraphLabel, NodeLabel } from "@dagrejs/dagre";
 import { Graph, layout } from "@dagrejs/dagre";
-import type { RoutineAction, RoutineDefinition, RoutineState } from "@tulipfarm/schema";
+import type { routine } from "@tulipfarm/schema";
 
 export type RoutineNodeKind = "trigger" | "state" | "end";
 export type RoutineEdgeKind = "start" | "transition" | "end" | "condition" | "default" | "error";
@@ -16,7 +16,8 @@ export interface RoutineGraphNode {
   kind: RoutineNodeKind;
   label: string;
   triggerType?: string;
-  stateType?: RoutineState["type"];
+  /** The canonical State `type`, rendered as text; the canvas does not branch on its value. */
+  stateType?: string;
   actions?: RoutineActionSummary[];
   position?: { x: number; y: number };
 }
@@ -38,24 +39,43 @@ export interface LaidOutRoutineGraph extends RoutineGraph {
   nodes: Array<RoutineGraphNode & { position: { x: number; y: number } }>;
 }
 
+/** What a graph needs from a Trigger; the Routines catalog answers exactly this. */
+export interface RoutineGraphTrigger {
+  slug: string;
+  type: string;
+}
+
+type RoutineState = routine.RoutineState;
+
 const stateId = (name: string) => `state:${encodeURIComponent(name)}`;
 
 function triggerLabel(type: string): string {
   return `${type.charAt(0).toUpperCase()}${type.slice(1)} Trigger`;
 }
 
-function summarizeActions(actions: RoutineAction[]): RoutineActionSummary[] {
-  return actions.map((action) => ({
-    name: action.name ?? action.functionRef.refName,
-    function: action.functionRef.refName,
-    arguments: Object.keys(action.functionRef.arguments ?? {}),
-  }));
-}
-
+/**
+ * What the State does, in the shape the canvas already renders.
+ *
+ * A canonical State is one typed step rather than a list of actions, so each yields at most one
+ * summary — the Agent it runs, or the Tool action it calls.
+ */
 function stateActions(state: RoutineState): RoutineActionSummary[] {
-  return state.type === "operation" || state.type === "foreach"
-    ? summarizeActions(state.actions)
-    : [];
+  if (state.type === "agent") {
+    return [{ name: state.agentRef.name, function: state.agentRef.name, arguments: [] }];
+  }
+  if (state.type === "tool") {
+    return [
+      {
+        name: state.action,
+        function: `${state.toolRef.name}.${state.action}`,
+        arguments: state.destination ? [state.destination] : [],
+      },
+    ];
+  }
+  if (state.type === "child_routine") {
+    return [{ name: state.routineRef.name, function: state.routineRef.name, arguments: [] }];
+  }
+  return [];
 }
 
 function destination(transition: string | undefined, end: boolean | undefined): string | null {
@@ -77,8 +97,8 @@ function stateEdges(state: RoutineState): RoutineGraphEdge[] {
     if (target) edges.push({ id, source, target, kind, label });
   };
 
-  if (state.type === "switch") {
-    for (const [index, condition] of state.dataConditions.entries()) {
+  if (state.type === "branch") {
+    for (const [index, condition] of state.conditions.entries()) {
       add(
         `condition:${state.name}:${index}`,
         "condition",
@@ -87,13 +107,13 @@ function stateEdges(state: RoutineState): RoutineGraphEdge[] {
         condition.end
       );
     }
-    if (state.defaultCondition) {
+    if (state.default) {
       add(
         `default:${state.name}`,
         "default",
         "Default",
-        state.defaultCondition.transition,
-        state.defaultCondition.end
+        state.default.transition,
+        state.default.end
       );
     }
   } else {
@@ -106,21 +126,41 @@ function stateEdges(state: RoutineState): RoutineGraphEdge[] {
     );
   }
 
-  for (const [index, error] of (state.onErrors ?? []).entries()) {
+  // A body or branch is a State the graph must still reach: it is entered by containment, not by
+  // a `transition`, so without these edges those States render as unreachable islands.
+  if (state.type === "parallel") {
+    for (const [index, branch] of state.branches.entries()) {
+      add(`branch:${state.name}:${index}`, "transition", "Branch", branch, undefined);
+    }
+  }
+  if ((state.type === "foreach" || state.type === "repeat_until") && state.body) {
+    add(`body:${state.name}`, "transition", "Body", state.body, undefined);
+  }
+
+  for (const [index, error] of (state.onError ?? []).entries()) {
     add(`error:${state.name}:${index}`, "error", error.errorRef, error.transition, error.end);
   }
   return edges;
 }
 
-export function projectRoutineGraph(definition: RoutineDefinition): RoutineGraph {
-  const nodes: RoutineGraphNode[] = definition["x-triggers"].map((trigger, index) => ({
-    id: `trigger:${index}`,
+/**
+ * Projects one published Routine into the canvas graph.
+ *
+ * Triggers come from the catalog rather than the document: a canonical Routine does not carry its
+ * own Triggers, they are separate definitions that name it.
+ */
+export function projectRoutineGraph(
+  definition: routine.RoutineDefinition,
+  triggers: readonly RoutineGraphTrigger[] = []
+): RoutineGraph {
+  const nodes: RoutineGraphNode[] = triggers.map((trigger) => ({
+    id: `trigger:${trigger.slug}`,
     kind: "trigger",
     label: triggerLabel(trigger.type),
     triggerType: trigger.type,
   }));
   nodes.push(
-    ...definition.states.map((state) => ({
+    ...definition.spec.states.map((state) => ({
       id: stateId(state.name),
       kind: "state" as const,
       label: state.name,
@@ -130,14 +170,14 @@ export function projectRoutineGraph(definition: RoutineDefinition): RoutineGraph
     { id: "end", kind: "end", label: "End" }
   );
 
-  const edges: RoutineGraphEdge[] = definition["x-triggers"].map((_, index) => ({
-    id: `start:${index}`,
-    source: `trigger:${index}`,
-    target: stateId(definition.start),
+  const edges: RoutineGraphEdge[] = triggers.map((trigger) => ({
+    id: `start:${trigger.slug}`,
+    source: `trigger:${trigger.slug}`,
+    target: stateId(definition.spec.start),
     kind: "start",
     label: "Starts",
   }));
-  for (const state of definition.states) edges.push(...stateEdges(state));
+  for (const state of definition.spec.states) edges.push(...stateEdges(state));
   return { nodes, edges };
 }
 

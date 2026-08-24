@@ -82,6 +82,12 @@ export interface ClientContext {
 
 export interface RequestContext {
   userId: string;
+  /**
+   * The Run's effective subject, kind included. `userId` flattens it to an id, which is enough for
+   * ownership checks but not for a Tool that mints work on the caller's behalf: such a Tool must
+   * name the same principal the Run carries, not assume it is a user.
+   */
+  subject?: { readonly kind: string; readonly id: string };
   /** Aborts the active Tool call when its host deadline expires. */
   abortSignal?: AbortSignal;
   actor?: CommitActor;

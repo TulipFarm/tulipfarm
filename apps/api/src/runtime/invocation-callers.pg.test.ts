@@ -195,7 +195,14 @@ describe("non-chat invocation callers", () => {
   });
 
   it("stores a Routine trigger's inputs as its request Artifact", async () => {
-    const { runId } = await manualRoutineTrigger(invocations)("daily-digest", { limit: 5 });
+    const { runId } = await manualRoutineTrigger(invocations)(
+      "daily-digest",
+      { limit: 5 },
+      {
+        kind: "user",
+        id: "user-1",
+      }
+    );
 
     const runs = await db.query<{
       source: string;
@@ -215,7 +222,7 @@ describe("non-chat invocation callers", () => {
     );
     expect(runs.rows[0]?.source).toBe("manual");
     expect(runs.rows[0]?.run_source).toBe("routine");
-    expect(runs.rows[0]?.identity.initiator.id).toBe("assistant");
+    expect(runs.rows[0]?.identity.initiator.id).toBe("user-1");
     expect(runs.rows[0]?.bundle).toEqual({
       digest: expect.stringMatching(/^[0-9a-f]{64}$/),
       routineId: "11111111-1111-4111-8111-111111111111",
@@ -229,17 +236,18 @@ describe("non-chat invocation callers", () => {
       reader().read({
         businessId: DEPLOYMENT_BUSINESS_ID,
         artifactId: `${runId}:request`,
-        reader: "agent:assistant",
+        reader: "user:user-1",
         allowedClassifications: [],
         now: new Date(),
       })
     ).resolves.toMatchObject({ content: { slug: "daily-digest", inputs: { limit: 5 } } });
   });
 
-  it("attributes a schedule-fired Routine to the cron-scheduler identity under the schedule source, distinct from a manual trigger", async () => {
+  it("attributes a schedule-fired Routine to the Trigger's background identity under the schedule source, distinct from a manual trigger", async () => {
     await scheduledRoutineTrigger(invocations)({
       slug: "daily-digest",
       idempotencyKey: "daily-digest:cron:1",
+      identity: { kind: "user", id: "user-1" },
     });
 
     const runs = await db.query<{
@@ -254,7 +262,7 @@ describe("non-chat invocation callers", () => {
     );
     expect(runs.rows[0]?.source).toBe("schedule");
     expect(runs.rows[0]?.run_source).toBe("routine");
-    expect(runs.rows[0]?.identity.initiator).toEqual({ kind: "service", id: "cron-scheduler" });
+    expect(runs.rows[0]?.identity.initiator).toEqual({ kind: "user", id: "user-1" });
   });
 
   it("starts a Routine from a bound Trigger invocation, under the Trigger's background identity", async () => {
@@ -312,9 +320,16 @@ describe("non-chat invocation callers", () => {
   it("mints no Run when a Routine has no active publication", async () => {
     await db.query("DELETE FROM soul_active_bundles");
 
-    await expect(manualRoutineTrigger(invocations)("daily-digest", { limit: 5 })).rejects.toEqual(
-      expect.objectContaining({ code: "unpublished_definition" })
-    );
+    await expect(
+      manualRoutineTrigger(invocations)(
+        "daily-digest",
+        { limit: 5 },
+        {
+          kind: "user",
+          id: "user-1",
+        }
+      )
+    ).rejects.toEqual(expect.objectContaining({ code: "unpublished_definition" }));
 
     const counts = await db.query<{ runs: number; artifacts: number }>(
       "SELECT (SELECT count(*) FROM runs)::int AS runs, (SELECT count(*) FROM artifacts)::int AS artifacts"

@@ -15,6 +15,8 @@ export interface ScheduleDispatcherDeps {
   readonly startRoutine: (input: {
     readonly slug: string;
     readonly idempotencyKey: string;
+    /** The Trigger's authored background identity — the Run's effective subject. */
+    readonly identity: { readonly kind: string; readonly id: string };
   }) => Promise<{ readonly runId: string; readonly outcome: "started" | "duplicate" }>;
   readonly businessId: string;
   readonly now?: () => number;
@@ -85,7 +87,14 @@ export class ScheduleDispatcher {
       let lastScheduledForMs = existing?.lastScheduledForMs ?? null;
       for (const fire of plan.fires) {
         try {
-          await startRoutine({ slug, idempotencyKey: fire.deduplicationKey });
+          await startRoutine({
+            slug,
+            idempotencyKey: fire.deduplicationKey,
+            identity: {
+              kind: trigger.spec.backgroundIdentity.principalKind,
+              id: trigger.spec.backgroundIdentity.principalId,
+            },
+          });
           lastScheduledForMs = fire.scheduledForMs;
         } catch (error) {
           log?.error(`schedule dispatcher: failed to start ${slug}:${triggerIndex}`, error);

@@ -41,13 +41,21 @@ export class TurnAuthorityError extends Error {
 export interface TurnAuthority {
   readonly businessId: string;
   readonly runId: string;
-  readonly turn: PersistedTurn;
+  /** The Turn this Run answers. Absent for a Run that is not a conversation — see the Routine. */
+  readonly turn?: PersistedTurn;
   /** Whom the turn acts as, as recorded when the Run was minted. */
   readonly subject: InvocationPrincipal;
   /** Worker executor kind; determines which Artifact carries the request payload. */
   readonly source: string;
   /** The Run's bundle digest, recorded on the Context manifest as what produced this Context. */
   readonly bundleDigest: string;
+  /**
+   * The Routine this Run executes, when it executes one.
+   *
+   * Routine-only Tools — `complete_state`, `call_skill` — refuse a call that names no Routine, so
+   * a Routine Agent State cannot complete itself without this reaching the Worker.
+   */
+  readonly routineId?: string;
   /**
    * The Agent this Run routes to. Resolved here because only the control plane holds the Soul;
    * the durable runtime hosts Tools without one and would otherwise dispatch them unrestricted.
@@ -119,6 +127,8 @@ export interface HostedToolCall {
   readonly name: string;
   readonly arguments: unknown;
   readonly activeSkillName?: string;
+  /** The Agent a Turnless Run claims to act as; confirmed against the Soul before it is honoured. */
+  readonly agentName?: string;
 }
 
 /** Mirrors the loop's `ToolDispatchResult`, minus the `callId` the caller already holds. */
@@ -154,8 +164,18 @@ export interface InternalTurnHostOptions {
   readonly agentForRun?: (
     businessId: string,
     runId: string,
-    source: string
+    source: string,
+    /** The Agent the caller claims to act as; honoured only where the Soul confirms it. */
+    claimedAgentName?: string
   ) => Promise<HostedAgent | undefined>;
+  /**
+   * The Tools an Agent may be offered, for a Run that assembles its own context.
+   *
+   * A Chat Turn gets this inside `context.resolve`; a Routine Agent State assembles its context in
+   * the durable runtime and needs only the catalog. Composed from the same registry and the same
+   * visibility rules, so a Routine can never see a wider catalog than the same Agent sees in Chat.
+   */
+  readonly agentTools?: (agentName: string | undefined) => readonly HostedAgentTool[];
   /**
    * Serves the bytes of a File this Turn attached. Absent leaves Turns attachment-free.
    *
@@ -174,8 +194,20 @@ export interface InternalTurnHostOptions {
   now?(): Date;
 }
 
+/** One Tool as the Agent loop exposes it to the model. */
+export interface HostedAgentTool {
+  readonly name: string;
+  readonly description: string;
+  readonly inputSchema: Record<string, unknown>;
+  readonly tier?: string;
+  readonly mutating?: boolean;
+}
+
 /** Only running Runs may be controlled; this prevents racing completion from being reopened. */
 const OPERABLE_RUN_STATUS = "running";
+
+/** Run sources that never mint a Turn, so a missing Turn row is their normal shape. */
+const TURNLESS_RUN_SOURCES: ReadonlySet<string> = new Set(["routine"]);
 
 export class InternalTurnHost {
   private readonly newId: () => string;
@@ -187,33 +219,74 @@ export class InternalTurnHost {
   }
 
   /** Resolves Run authority by Run id, so the Worker cannot pick another Turn. */
-  async authority(businessId: string, runId: string): Promise<TurnAuthority> {
+  async authority(
+    businessId: string,
+    runId: string,
+    claimedAgentName?: string
+  ): Promise<TurnAuthority> {
     const run = await this.options.runs.find(businessId, runId);
     if (run === null) throw new TurnAuthorityError("run_not_found");
     if (run.status !== OPERABLE_RUN_STATUS) throw new TurnAuthorityError("run_not_running");
 
     const turn = await this.options.store.findTurnByRunId(businessId, runId);
-    if (turn === undefined) throw new TurnAuthorityError("turn_not_found");
+    // A Routine Run answers no conversation, so it has no Turn row to find. Authority never came
+    // from the Turn; demanding one here is what left Routine States unable to dispatch a Tool.
+    if (turn === undefined && !TURNLESS_RUN_SOURCES.has(run.source)) {
+      throw new TurnAuthorityError("turn_not_found");
+    }
 
-    const agent = await this.options.agentForRun?.(businessId, runId, run.source);
+    const agent = await this.options.agentForRun?.(businessId, runId, run.source, claimedAgentName);
     return {
       businessId,
       runId,
-      turn,
+      ...(turn === undefined ? {} : { turn }),
       subject: run.identity.effectiveSubject,
       source: run.source,
       bundleDigest: run.bundle.digest,
+      // Every Run records a `routineId`, but only a Routine Run's names a Routine: chat and
+      // Curator Runs park their own source name there.
+      ...(run.source === "routine" ? { routineId: run.bundle.routineId } : {}),
       ...(agent === undefined ? {} : { agent }),
     };
   }
 
+  /**
+   * Run authority that is required to name a Turn.
+   *
+   * Everything conversation-shaped — history, attachments, completion, assistant Messages — is
+   * meaningless without one, so those paths refuse rather than inventing a conversation.
+   */
+  private async turnAuthority(
+    businessId: string,
+    runId: string
+  ): Promise<TurnAuthority & { readonly turn: PersistedTurn }> {
+    const authority = await this.authority(businessId, runId);
+    if (authority.turn === undefined) throw new TurnAuthorityError("turn_not_found");
+    return { ...authority, turn: authority.turn };
+  }
+
+  /**
+   * The Tool catalog for a Run acting as `claimedAgentName`.
+   *
+   * Reads authority first so the claim is confirmed against the Soul before it selects anything;
+   * a claim the Soul does not confirm resolves to no Agent and takes the default catalog.
+   */
+  async agentTools(
+    businessId: string,
+    runId: string,
+    claimedAgentName?: string
+  ): Promise<readonly HostedAgentTool[]> {
+    const authority = await this.authority(businessId, runId, claimedAgentName);
+    return this.options.agentTools?.(authority.agent?.name) ?? [];
+  }
+
   async describeTurn(businessId: string, runId: string): Promise<HostedTurnIdentity> {
-    const { turn } = await this.authority(businessId, runId);
+    const { turn } = await this.turnAuthority(businessId, runId);
     return { turnId: turn.id, conversationId: turn.conversationId, attempt: turn.attempt };
   }
 
   async resolveContext(businessId: string, runId: string): Promise<HostedTurnContext> {
-    return this.options.context.resolve(await this.authority(businessId, runId));
+    return this.options.context.resolve(await this.turnAuthority(businessId, runId));
   }
 
   /** Delegates to the File domain, which owns whether this Turn may have these bytes. */
@@ -225,7 +298,7 @@ export class InternalTurnHost {
     const files = this.options.files;
     if (files === undefined) return null;
 
-    const { turn, subject } = await this.authority(businessId, runId);
+    const { turn, subject } = await this.turnAuthority(businessId, runId);
     return readTurnAttachment({
       files,
       messages: await this.options.store.listMessages(businessId, turn.conversationId),
@@ -241,7 +314,10 @@ export class InternalTurnHost {
     runId: string,
     call: HostedToolCall
   ): Promise<HostedToolResult> {
-    return this.options.tools.dispatch(await this.authority(businessId, runId), call);
+    return this.options.tools.dispatch(
+      await this.authority(businessId, runId, call.agentName),
+      call
+    );
   }
 
   /** Registers the approval wait under the Run's minted subject, not Worker-supplied identity. */
@@ -261,7 +337,7 @@ export class InternalTurnHost {
     runId: string,
     attempt: number
   ): Promise<TurnCompletion | undefined> {
-    const { turn } = await this.authority(businessId, runId);
+    const { turn } = await this.turnAuthority(businessId, runId);
     return this.options.store.findCompletion(businessId, turn.id, attempt);
   }
 
@@ -273,7 +349,7 @@ export class InternalTurnHost {
     content: string;
     metadata?: { readonly toolCalls?: readonly ParticipantToolCall[] };
   }): Promise<{ messageId: string }> {
-    const { turn } = await this.authority(input.businessId, input.runId);
+    const { turn } = await this.turnAuthority(input.businessId, input.runId);
     const messageId = this.newId();
     await this.options.store.appendMessage({
       id: messageId,
@@ -298,7 +374,7 @@ export class InternalTurnHost {
     messageId: string | null;
     surfaces?: readonly { artifactId: string; revision: number }[];
   }): Promise<void> {
-    const { turn, subject } = await this.authority(input.businessId, input.runId);
+    const { turn, subject } = await this.turnAuthority(input.businessId, input.runId);
     const now = this.now();
     // The Artifact is already durable; this records that *this* Conversation was shown it, which
     // is the only part a reload has to restore. One tool-role Message keeps the cards in the order

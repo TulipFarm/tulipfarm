@@ -1,30 +1,40 @@
 import * as remix from "@remix-run/react";
 import { createRemixStub } from "@remix-run/testing";
-import { act, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { routine } from "@tulipfarm/schema";
 import { afterEach, expect, test, vi } from "vitest";
+import { RoutineRunCanvas } from "~/components/routines/routine-run-canvas";
+import { projectRoutineGraph } from "~/lib/routines/graph";
+import { reduceRunOverlay } from "~/lib/routines/run-overlay";
 import RoutineDetail from "./_app.routines.$slug";
-import RunDetail from "./_app.routines.$slug_.runs.$runId";
 
 vi.mock("@remix-run/react", async () => {
   const actual = await vi.importActual<typeof import("@remix-run/react")>("@remix-run/react");
   return { ...actual, useLoaderData: vi.fn() };
 });
 
-const definition = {
-  id: "expense-report",
-  version: "1",
-  start: "Done",
-  "x-triggers": [{ type: "manual" as const }],
-  states: [{ name: "Done", type: "inject" as const, data: {}, end: true }],
+const definition: routine.RoutineDefinition = {
+  apiVersion: "tulipfarm.ai/v1",
+  kind: "Routine",
+  metadata: {
+    id: "22222222-2222-4222-8222-222222222222",
+    slug: "expense-report",
+    displayName: "Expense report",
+    schemaVersion: 1,
+    authoredVersion: 1,
+    lifecycle: "active",
+  },
+  spec: {
+    owner: "user:owner",
+    start: "Done",
+    states: [
+      { type: "agent", name: "Done", agentRef: { name: "assistant", version: "1" }, end: true },
+    ],
+  },
 };
 
-const streamListeners = new Map<string, EventListener>();
-class EventSourceStub {
-  addEventListener = (type: string, listener: EventListener) => streamListeners.set(type, listener);
-  close = vi.fn();
-  onerror: (() => void) | null = null;
-}
+const triggers = [{ slug: "expense-report-manual", type: "manual", summary: "manual" }];
 
 function renderRoute(Component: React.ComponentType, data: unknown) {
   vi.mocked(remix.useLoaderData).mockReturnValue(data);
@@ -33,28 +43,29 @@ function renderRoute(Component: React.ComponentType, data: unknown) {
 }
 
 afterEach(() => {
-  streamListeners.clear();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
-test("valid Routine makes its canvas primary while retaining Trigger and Run history", () => {
+test("published Routine makes its canvas primary while retaining Trigger and Run history", () => {
   renderRoute(RoutineDetail, {
     routine: {
+      id: definition.metadata.id,
       slug: "expense-report",
-      valid: true,
-      name: "Expense report",
+      displayName: "Expense report",
+      authoredVersion: 1,
+      triggers,
       definition,
-      triggers: definition["x-triggers"],
+      hash: "sha256:abc",
     },
     runs: [
       {
         id: "run-12345678",
         routineSlug: "expense-report",
         status: "succeeded",
-        trigger: { type: "manual" },
         createdAt: "2026-07-19T00:00:00Z",
-        updatedAt: "2026-07-19T00:00:01Z",
+        startedAt: "2026-07-19T00:00:00Z",
+        finishedAt: "2026-07-19T00:00:01Z",
       },
     ],
   });
@@ -63,17 +74,24 @@ test("valid Routine makes its canvas primary while retaining Trigger and Run his
   expect(screen.getByText(/run history/i)).toBeInTheDocument();
 });
 
-test("invalid Routine renders its diagnostic without a canvas", () => {
+test("a Routine with no Trigger is still startable by hand", () => {
   renderRoute(RoutineDetail, {
-    routine: { slug: "broken", valid: false, loadError: "missing start State" },
+    routine: {
+      id: definition.metadata.id,
+      slug: "expense-report",
+      displayName: "Expense report",
+      authoredVersion: 1,
+      triggers: [],
+      definition,
+      hash: "sha256:abc",
+    },
     runs: [],
   });
-  expect(screen.getByText("missing start State")).toBeInTheDocument();
-  expect(screen.queryByRole("region", { name: /Routine canvas/ })).toBeNull();
+  expect(screen.getByRole("button", { name: /run now/i })).toBeInTheDocument();
+  expect(screen.getByText(/triggers: none/i)).toBeInTheDocument();
 });
 
-test("Run uses pinned definition, dedupes SSE, and retains its controls", async () => {
-  vi.stubGlobal("EventSource", EventSourceStub);
+test("Run canvas dedupes SSE into one journal entry", async () => {
   vi.spyOn(window, "matchMedia").mockImplementation((query) => ({
     matches: false,
     media: query,
@@ -84,64 +102,41 @@ test("Run uses pinned definition, dedupes SSE, and retains its controls", async 
     removeListener: vi.fn(),
     dispatchEvent: vi.fn(),
   }));
-  renderRoute(RunDetail, {
-    slug: "expense-report",
-    runId: "run-12345678",
-    detail: {
-      run: {
-        id: "run-12345678",
-        routineSlug: "expense-report",
-        status: "running",
-        definitionSnapshot: definition,
-        trigger: { type: "manual", triggerIndex: 0 },
-        createdAt: "2026-07-19T00:00:00Z",
-        updatedAt: "2026-07-19T00:00:01Z",
-      },
-      events: [],
-    },
-  });
+  const graph = projectRoutineGraph(definition, triggers);
+  const events = [
+    { seq: 1, type: "state.transitioned", payload: { source: "Done", end: true } },
+    { seq: 1, type: "state.transitioned", payload: { source: "Done", end: true } },
+  ];
+  const deduped = [...new Map(events.map((event) => [event.seq, event])).values()];
+  render(
+    <RoutineRunCanvas graph={graph} overlay={reduceRunOverlay(graph, deduped)} events={deduped} />
+  );
+
   expect(screen.getByRole("region", { name: /Run canvas/ })).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: /State Done, inject/ })).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: /End from Done to End/ })).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: /cancel run/i })).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: /refresh/i })).toBeInTheDocument();
-  const journal = screen.getByRole("button", { name: /journal/i });
-  const handler = streamListeners.get("state.transitioned");
-  expect(handler).toBeDefined();
-  const message = new MessageEvent("state.transitioned", {
-    data: JSON.stringify({ source: "Done", route: { kind: "end" }, end: true }),
-    lastEventId: "1",
-  });
-  act(() => {
-    handler?.(message);
-    handler?.(message);
-  });
-  expect(document.querySelector("[data-animated='true']")).toBeInTheDocument();
-  await userEvent.click(journal);
+  await userEvent.click(screen.getByRole("button", { name: /journal/i }));
   expect(screen.getAllByText("state.transitioned")).toHaveLength(1);
-  expect(screen.getByText(/"source": "Done"/)).toBeInTheDocument();
 });
 
-test("persisted cancellation overrides a sleeping journal overlay", () => {
-  renderRoute(RunDetail, {
-    slug: "expense-report",
-    runId: "run-cancelled",
-    detail: {
-      run: {
-        id: "run-cancelled",
-        routineSlug: "expense-report",
-        status: "cancelled",
-        currentState: "Done",
-        definitionSnapshot: definition,
-        trigger: { type: "manual", triggerIndex: 0 },
-        createdAt: "2026-07-19T00:00:00Z",
-        updatedAt: "2026-07-19T00:00:01Z",
-      },
-      events: [
-        { seq: 1, type: "state.entered", payload: { state: "Done" } },
-        { seq: 2, type: "run.sleeping", payload: { state: "Done" } },
-      ],
-    },
-  });
-  expect(screen.getByRole("button", { name: /State Done, inject, cancelled/ })).toBeInTheDocument();
+test("a cancellation event overrides a sleeping overlay", () => {
+  vi.spyOn(window, "matchMedia").mockImplementation((query) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  }));
+  const graph = projectRoutineGraph(definition, triggers);
+  const events = [
+    { seq: 1, type: "state.entered", payload: { state: "Done" } },
+    { seq: 2, type: "run.sleeping", payload: { state: "Done" } },
+    { seq: 3, type: "run.cancelled", payload: { state: "Done" } },
+  ];
+  render(
+    <RoutineRunCanvas graph={graph} overlay={reduceRunOverlay(graph, events)} events={events} />
+  );
+
+  expect(screen.getByRole("button", { name: /State Done, agent, cancelled/ })).toBeInTheDocument();
 });

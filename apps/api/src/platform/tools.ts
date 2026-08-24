@@ -2,7 +2,7 @@ import type { EventEmitter } from "node:events";
 import type { DelegateToAgentInput, DelegationOutcome } from "@tulipfarm/agent-runtime";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { PLATFORM_RUNTIME_TOOLS } from "@tulipfarm/platform-tools";
-import { ajv } from "@tulipfarm/schema";
+import { ajv, type definitions } from "@tulipfarm/schema";
 import type { BundledSkill } from "@tulipfarm/soul";
 import {
   createSkillReferenceReader,
@@ -19,6 +19,7 @@ import {
   type SoulSkill,
   SoulWriteError,
   type SoulWriter,
+  unresolvedRoutineDefinitions,
   unresolvedRoutineResourceTypes,
 } from "@tulipfarm/soul";
 import type { RequestContext } from "@tulipfarm/tool-host";
@@ -40,12 +41,27 @@ export interface PlatformToolContext {
     /** Read by `routine_forge` so a Routine cannot name a Resource type the Soul does not have. */
     resources?: ReadonlyMap<string, unknown>;
   };
+  /**
+   * Names of the Tools this instance hosts for Agents. Read by `routine_forge` to tell a Routine
+   * `tool` State that names a hosted Tool — which it can never reach — apart from one that names a
+   * ToolContract the Soul is simply missing. The two need opposite corrections.
+   */
+  runtimeToolNames?: () => ReadonlySet<string>;
   soulPath?: string;
   gitSync?: GitSyncService;
   /** The single write gateway for the authored Soul tree (ADR-007). */
   readonly soulWriter: SoulWriter;
   routineContext?: { routineId: string; runId: string };
-  triggerRoutine?: (slug: string, inputs?: Record<string, unknown>) => Promise<{ runId: string }>;
+  /**
+   * Starts a Routine Run as `caller`. The caller is a parameter rather than a fixed identity
+   * because a Routine Run authorizes its Agent States against its own effective subject: minted
+   * under a principal that holds no grants, every Tool call the Routine makes is denied.
+   */
+  triggerRoutine?: (
+    slug: string,
+    inputs: Record<string, unknown> | undefined,
+    caller: { readonly kind: string; readonly id: string }
+  ) => Promise<{ runId: string }>;
   /** The one guarded path that starts a delegated child Run; see `./delegation.ts`. */
   delegateToAgent?: (input: DelegateToAgentInput) => Promise<DelegationOutcome>;
   onRoutinesChanged?: () => Promise<void>;
@@ -256,8 +272,12 @@ export const triggerRoutineTool = defineApiTool<PlatformToolContext>({
     if (!ctx.triggerRoutine) {
       return err("internal_error", "Routine engine is not available.");
     }
+    const caller = ctx.requestContext?.subject;
+    if (!caller) {
+      return err("internal_error", "Cannot trigger a routine without a calling principal.");
+    }
     try {
-      const { runId } = await ctx.triggerRoutine(name, inputs);
+      const { runId } = await ctx.triggerRoutine(name, inputs, caller);
       return ok({ routineId: name, status: "triggered", runId, inputs: inputs ?? null });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
@@ -296,6 +316,30 @@ const ROUTINE_FORGE_SCHEMA: Record<string, unknown> = {
   },
 };
 const validateRoutineForge = ajv.compile(ROUTINE_FORGE_SCHEMA);
+
+/**
+ * Stamps the authoring principal onto a Trigger's `backgroundIdentity`, replacing whatever the
+ * model wrote there.
+ *
+ * A Trigger's background identity is the effective subject of every Run it starts, and a Routine's
+ * Agent States authorize their Tool calls against that subject. A model-invented name such as
+ * `service:routine-runner` matches no row in `principals`, so it holds no grants and every Tool
+ * call the Routine makes is denied. The author is the one principal we know exists and whose
+ * authority the Routine is meant to act within.
+ */
+function authoredBy(
+  trigger: definitions.trigger.TriggerDefinition,
+  author: { readonly kind: string; readonly id: string } | undefined
+): definitions.trigger.TriggerDefinition {
+  if (author === undefined) return trigger;
+  return {
+    ...trigger,
+    spec: {
+      ...trigger.spec,
+      backgroundIdentity: { principalKind: author.kind, principalId: author.id },
+    },
+  };
+}
 
 export const routineForgeTool = defineApiTool<PlatformToolContext>({
   name: "routine_forge",
@@ -336,6 +380,16 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
     const { routine, triggers: triggerDefinitions } = validation;
     const unresolved = unresolvedRoutineResourceTypes(routine.spec, ctx.soulLoader?.resources);
     if (unresolved !== undefined) return err(unresolved.code, unresolved.message);
+    const unreachable = unresolvedRoutineDefinitions(routine.spec, {
+      ...(ctx.soulLoader?.agents === undefined ? {} : { agents: ctx.soulLoader.agents }),
+      // The Routine being forged lands in the same commit, so a self-referencing child_routine
+      // State resolves even though the loader has not seen it yet.
+      ...(ctx.soulLoader?.routines === undefined
+        ? {}
+        : { routines: new Map([...ctx.soulLoader.routines, [name, undefined]]) }),
+      ...(ctx.runtimeToolNames === undefined ? {} : { runtimeToolNames: ctx.runtimeToolNames() }),
+    });
+    if (unreachable !== undefined) return err(unreachable.code, unreachable.message);
 
     let write: Awaited<ReturnType<SoulWriter["apply"]>>;
     try {
@@ -353,7 +407,7 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
           ...triggerDefinitions.map((trigger) => ({
             op: "put" as const,
             target: { kind: "Trigger" as const, slug: trigger.metadata.slug },
-            content: stringifyYaml(trigger),
+            content: stringifyYaml(authoredBy(trigger, ctx.requestContext?.subject)),
           })),
         ],
       });
