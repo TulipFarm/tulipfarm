@@ -2,9 +2,11 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "vitest";
+import { AzureBlobPort } from "./azure-blob";
 import type { BlobPort, BlobRef } from "./blob";
 import { BLOB_CONFORMANCE, TAMPER_CONFORMANCE } from "./blob-conformance";
 import { FileSystemBlobPort } from "./filesystem-blob";
+import { InMemoryAzureBlob } from "./in-memory-azure-blob";
 import { InMemoryS3 } from "./in-memory-s3";
 import { S3BlobPort } from "./s3-blob";
 
@@ -51,6 +53,19 @@ const IMPLEMENTATIONS: readonly {
         blobs: new S3BlobPort(s3),
         corrupt: async (ref) => {
           s3.corrupt(`${ref.hash.slice(0, 2)}/${ref.hash}`, new Uint8Array([1, 2, 3]));
+        },
+      };
+    },
+  },
+  {
+    name: "AzureBlobPort",
+    make: async () => new AzureBlobPort(new InMemoryAzureBlob()),
+    tamperable: async () => {
+      const azure = new InMemoryAzureBlob();
+      return {
+        blobs: new AzureBlobPort(azure),
+        corrupt: async (ref) => {
+          azure.corrupt(`${ref.hash.slice(0, 2)}/${ref.hash}`, new Uint8Array([1, 2, 3]));
         },
       };
     },

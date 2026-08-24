@@ -10,6 +10,9 @@
 /public/install.ps1
 /public/docker-compose.yml
 /public/env.example
+/public/deploy.txt
+/public/kubernetes-values.yaml
+/public/azure-containerapp.yaml
 
 # test & build
 /coverage

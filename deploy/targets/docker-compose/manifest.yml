@@ -1,0 +1,266 @@
+name: docker-compose
+title: Docker Compose
+tier: supported
+description: Run TulipFarm from the published Compose file — one file, every default set, no .env and no key generation required.
+summary: |
+  The [one-line installer](/docs/self-hosting/install) is the fastest path on a machine you have a
+  shell on. When you deploy through a UI instead — Portainer, Coolify, Dokploy, Unraid — you paste a
+  Compose file into a form, and there is no shell to run a script in. TulipFarm's
+  `docker-compose.yml` is written for exactly that: **every variable has a default, and no `.env`
+  is required.**
+
+  The steps below are generated from this platform's manifest, so they cannot drift from the
+  runtime they describe. The Compose file itself is hand-maintained and published byte-identical —
+  the same artifact CI boots — so this page references it rather than printing a copy that could
+  rot.
+
+inputs:
+  - id: database
+    question: Where does PostgreSQL live?
+    options:
+      - { value: bundled, label: The bundled Postgres container, default: true }
+      - { value: managed, label: A managed PostgreSQL 17 I already run }
+  - id: blob
+    question: Where do uploaded and generated files live?
+    options:
+      - { value: bundled, label: The bundled S3 bucket service, default: true }
+      - { value: external, label: An external S3 provider }
+
+steps:
+  - id: download
+    title: Download the Compose file
+    body: |
+      Fetch the published `docker-compose.yml`. It is the same file the installer downloads and
+      the same one CI boots in the `Compose parity` job, so what you run here is what we test.
+
+      Deploying through a UI instead? The same file goes straight into
+      [Coolify](/docs/self-hosting/coolify), [Portainer](/docs/self-hosting/portainer), or
+      [Dokploy, Unraid, Synology, and CasaOS](/docs/self-hosting/other-platforms) — those pages
+      cover only what differs per platform.
+    run: curl -fsSLO {{SITE_URL}}/docker-compose.yml
+    verify:
+      kind: file
+      path: docker-compose.yml
+    on_fail: when-install-fails#download
+
+  - id: bring-up
+    title: Start the stack
+    when: { database: bundled }
+    body: |
+      Four services start: `app` (API, built web UI, and migrations), `worker` (runs, waits,
+      outbox, cron, and maintenance consumers), `integration-worker` (Slack and GitHub ingress,
+      sync, delivery, retries, and reconciliation), and `postgres` (PostgreSQL 17 with pgvector).
+
+      Open `http://localhost:8080` and finish the
+      [setup wizard](/docs/self-hosting/install#finish-setup).
+    run: docker compose up -d
+    verify:
+      kind: http
+      url: http://localhost:8080/readyz
+      expect: 200
+      timeout: 120s
+    on_fail: when-install-fails#readyz
+
+  - id: bring-up-managed
+    title: Start against a managed database
+    when: { database: managed }
+    body: |
+      Point `DATABASE_URL` at your own PostgreSQL 17, set `EXTERNAL_DATASTORE=true`, and start the
+      app, both workers, and the bundled bucket — only `postgres` is then never created.
+
+      ```bash
+      docker compose up -d app worker integration-worker bucket
+      ```
+
+      Full walkthrough, including the extensions your provider must allow:
+      [Use a managed database](/docs/self-hosting/managed-database).
+    verify:
+      kind: http
+      url: http://localhost:8080/readyz
+      expect: 200
+      timeout: 120s
+    on_fail: when-install-fails#readyz
+
+  - id: secrets
+    title: What happens to your secrets
+    body: |
+      TulipFarm needs three secrets: `ENCRYPTION_KEY` (which encrypts every secret the instance
+      stores — LLM keys, integration credentials), `JWT_SECRET`, and `WEBHOOK_SIGNING_SECRET`.
+
+      If you do not supply them, the app **generates them on first boot** and writes them to
+      `/data/secrets.env` inside the `tulipfarm-data` volume, `mode 0600`. Every later boot reads
+      them back from that file, so sessions and encrypted secrets survive restarts and upgrades.
+      The first-boot log prints the path in a banner you cannot miss.
+
+      <Callout type="warn">
+        **Back up the `tulipfarm-data` volume.** It holds the key that decrypts every secret this
+        instance stores. Losing it means losing them — restoring the database alone is not enough,
+        because the database only holds ciphertext.
+
+        If the app starts with a freshly generated `ENCRYPTION_KEY` against a database that already
+        contains encrypted secrets, it **refuses to boot** rather than quietly orphaning them. That
+        error means the data volume was lost: restore it, or set `ENCRYPTION_KEY` back to its
+        original value.
+      </Callout>
+
+      Environment variables always win. Set `ENCRYPTION_KEY` yourself — from your platform's secret
+      store, or `openssl rand -base64 32` — and the file lane is never used. That is what the
+      installer does, and it is what you should do for anything beyond a personal instance: a
+      generated key sits on the same host as the database volume, so a full host compromise yields
+      both.
+    verify:
+      kind: manual
+      look_for: The first-boot log banner naming /data/secrets.env, or an ENCRYPTION_KEY you set yourself taking precedence over it.
+
+  - id: things-worth-changing
+    title: Things worth changing
+    body: |
+      Put these in a `.env` file next to `docker-compose.yml`, or in your platform's environment
+      form. All are optional.
+
+      | Variable | Default | Why you would set it |
+      | --- | --- | --- |
+      | `HOST_PORT` | `8080` | Publish on a different host port. |
+      | `PUBLIC_URL` | `http://localhost:8080` | The address the app assumes until you save the real one in **Business → About**. Drives CORS and the cookie `Secure` flag. |
+      | `PUBLIC_API_URL` | `PUBLIC_URL` | Public origin used for integration OAuth callbacks and webhooks. Set it separately only when the API has a different public origin. |
+      | `PUBLIC_ORIGINS_LOCKED` | `false` | Make environment origins authoritative and read-only in Business → About. |
+      | `POSTGRES_PASSWORD` | `tulipfarm` | Replace the default database password. |
+      | `TULIPFARM_VERSION` | `latest` | Pin one image tag for `app`, `worker`, and `integration-worker` instead of tracking `latest`. |
+
+      <Callout type="warn">
+        The bundled database defaults to the password `tulipfarm`. That is what lets the file run
+        with no prior setup — Postgres demands a password at init time and cannot ask the app for
+        one. It is safe **only** because port 5432 is never published to the host. Do not publish
+        it. On anything reachable from a network you do not control, set `POSTGRES_PASSWORD`.
+      </Callout>
+
+      The public address decides whether session cookies are marked `Secure`: an `https://` origin
+      marks them (correct behind TLS), an `http://` origin does not (browsers discard `Secure`
+      cookies sent over plain HTTP, localhost excepted, so marking them would make login silently
+      fail). `PUBLIC_URL` supplies that address at boot; once you save one under
+      **Business → About**, the saved value takes over without recreating the container. Leave it at
+      the default for a local instance; set `http://<your-lan-ip>:8080` for a LAN box; set
+      `https://your-domain` once TLS is in front.
+    verify:
+      kind: manual
+      look_for: The login page loads at the address you set in PUBLIC_URL, and cookies are marked Secure only when that address is https.
+
+  - id: external-blob
+    title: Use an external S3 provider instead
+    when: { blob: external }
+    body: |
+      The stack ships its own S3 server, the `bucket` service, so uploading an image for an agent
+      to read works with no cloud account. Its access key is generated by `app` on first boot and
+      written to `/data/bucket.env` at `mode 0600`; the bucket publishes no host port, because a
+      file is authorized per request by `app`.
+
+      Amazon S3, Cloudflare R2, Backblaze B2, Wasabi, DigitalOcean Spaces, Ceph and MinIO all speak
+      the same protocol, and TulipFarm has one driver for all of them. Turn the bundled server off
+      by setting `BUCKET_ADMIN_URL` to an empty value, then supply your own:
+
+      ```bash
+      BUCKET_ADMIN_URL=
+      S3_BUCKET=my-bucket
+      S3_REGION=eu-central-1
+      S3_ENDPOINT=https://s3.eu-central-1.amazonaws.com
+      S3_ACCESS_KEY_ID=...
+      S3_SECRET_ACCESS_KEY=...
+      ```
+
+      Start without the bundled server:
+
+      ```bash
+      docker compose up -d app worker integration-worker postgres
+      ```
+
+      Omit `S3_ENDPOINT` for Amazon S3 itself. Path-style addressing turns on automatically whenever
+      `S3_ENDPOINT` is set, which is what MinIO, Ceph and any host reached by IP need.
+
+      <Callout type="warn">
+        **Back up the `tulipfarm-bucket` volume too** when you use the bundled server. It holds the
+        file bytes; the `tulipfarm-data` volume holds the key to reach them; the database holds who
+        may see what. All three are needed to restore an instance.
+      </Callout>
+    verify:
+      kind: manual
+      look_for: An image uploaded in chat opens again, confirming the app reached your S3 provider.
+
+  - id: health
+    title: Health checks
+    body: |
+      Two endpoints, for the two questions an orchestrator asks:
+
+      | Process | Port | Liveness | Readiness |
+      | --- | --- | --- | --- |
+      | `app` | `8080` | `/livez` | `/readyz`; `/health` is an alias. |
+      | `worker` | `4020` | `/livez` | `/readyz`; also checks the schema floor and required consumers. |
+      | `integration-worker` | `4030` | `/livez` | `/readyz`; also checks the schema floor and required consumers. |
+      | `bucket` | — | `garage status` | Same command; the container has no HTTP client to probe with. |
+
+      Only `app` publishes a host port. The worker probe ports are internal to Compose. Give startup
+      probes a generous timeout: database migrations run in `app` before it starts listening, and
+      both workers wait for healthy `app` because they never migrate.
+    verify:
+      kind: http
+      url: http://localhost:8080/livez
+      expect: 200
+
+  - id: update
+    title: Update
+    body: |
+      Migrations apply automatically on boot, and there are **no down-migrations** — read
+      [Updating and rollback](/docs/self-hosting/updating) before your first upgrade.
+    run: docker compose pull && docker compose up -d
+    verify:
+      kind: http
+      url: http://localhost:8080/readyz
+      expect: 200
+      timeout: 120s
+    on_fail: when-install-fails#readyz
+
+  - id: multi-instance
+    title: Running more than one business on one machine
+    body: |
+      Copying `docker-compose.yml` into a second directory does **not** give you a second instance.
+      Compose tells stacks apart by **project name**, not by directory, and the file pins one
+      (`name: tulipfarm`). A second `docker compose up -d` reuses the first stack's containers and
+      volumes, so both businesses end up sharing one database and one soul repo.
+
+      Give each stack its own project name and host port:
+
+      ```bash
+      HOST_PORT=8081 docker compose -p acme up -d
+      HOST_PORT=8082 docker compose -p globex up -d
+      ```
+
+      That produces separate volumes per stack — `acme_tulipfarm-soul`, `globex_tulipfarm-soul`, and
+      so on. Then keep using the same `-p` for every later command; one without it targets
+      `tulipfarm`, not your stack. Setting `COMPOSE_PROJECT_NAME` in each directory's `.env` is the
+      less error-prone option. With the installer, use `TF_PROJECT_NAME` instead.
+
+      <Callout type="warn">
+        Do not rename an **existing** install's project. Volumes are named after it, so the renamed
+        stack starts empty and the old database and soul repo are left orphaned under the previous
+        name.
+      </Callout>
+    verify:
+      kind: manual
+      look_for: Each project name owns its own volumes — `docker volume ls` shows the per-stack prefix you chose.
+
+  - id: scale-out
+    title: Scale-out is not supported
+    body: |
+      Run **exactly one `app` replica**, **one maintenance `worker`**, and **one
+      `integration-worker`**. The `app` owns the soul git worktree and applies migrations. The
+      `worker` executes every turn and owns cron/maintenance consumers through
+      `WORKER_MAINTENANCE=true`. Scale vertically; horizontal scaling is a deliberate design
+      constraint, not a missing feature.
+    verify:
+      kind: manual
+      look_for: One replica of each service is running — horizontal scaling is unsupported by design, not a gap to fill.
+
+artifacts:
+  - id: compose
+    references: docker-compose.yml
+  - id: env-example
+    references: env.example

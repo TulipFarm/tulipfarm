@@ -16,3 +16,12 @@
 
 /env.example
   Content-Type: text/plain; charset=utf-8
+
+/deploy.txt
+  Content-Type: text/plain; charset=utf-8
+
+/kubernetes-values.yaml
+  Content-Type: text/plain; charset=utf-8
+
+/azure-containerapp.yaml
+  Content-Type: text/plain; charset=utf-8

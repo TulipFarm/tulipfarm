@@ -11,6 +11,10 @@ export default function Layout({ children }: LayoutProps<"/">) {
           url: "/docs",
         },
         {
+          text: "deploy",
+          url: "/deploy",
+        },
+        {
           text: <span className="font-medium text-fd-primary">[+] install</span>,
           url: "/#install",
         },

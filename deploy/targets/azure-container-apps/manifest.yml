@@ -1,0 +1,292 @@
+name: azure-container-apps
+title: Azure Container Apps
+tier: community
+description: Deploy TulipFarm to Azure Container Apps against managed PostgreSQL and Azure Blob Storage, from a generated definition.
+summary: |
+  Azure Container Apps runs the published image without a VM or a cluster to maintain. What it does
+  not give you is a **durable disk**, and that single fact shapes every step below: the database and
+  the file bytes must both live outside the app.
+
+  These steps are generated from this platform's manifest, so they cannot drift from the runtime they
+  describe. The container app **definition** is generated too — from the runtime contract — and
+  offered as a download, so every port, probe path, and environment key you feed Azure is grounded in
+  what TulipFarm actually reads.
+
+  <Callout type="warn">
+    **This target is not booted in CI** — it is `community`, not `supported`. Standing it up requires
+    a real Azure subscription, so no automated job proves this path end to end. Treat the definition
+    as a documented, machine-generated contract rather than a tested install path.
+  </Callout>
+
+inputs:
+  - id: database
+    question: Where does PostgreSQL live?
+    options:
+      - value: flexible
+        label: Azure Database for PostgreSQL Flexible Server
+        default: true
+      - value: external
+        label: A PostgreSQL 17 I run somewhere else
+  - id: files
+    question: Where do uploaded and generated files live?
+    options:
+      - value: azure
+        label: Azure Blob Storage
+        default: true
+      - value: s3
+        label: An S3-compatible provider
+
+steps:
+  - id: download-definition
+    title: Download the generated container app definition
+    body: |
+      Fetch the definition TulipFarm generates from its runtime contract. It describes three
+      single-replica workloads — `app` (API, built web UI, and migrations), `worker` (runs, waits,
+      outbox, cron, and maintenance consumers), and `integration-worker` (Slack and GitHub ingress,
+      sync, delivery, retries) — with every port, probe path, and environment key derived from what
+      the runtime reads.
+
+      Only `app` takes external ingress. The workers expose probe-only HTTP servers, so their ingress
+      stays internal; publishing them exposes health endpoints for no benefit.
+    run: curl -fsSLO {{SITE_URL}}/azure-containerapp.yaml
+    verify:
+      kind: file
+      path: azure-containerapp.yaml
+    on_fail: when-install-fails#download
+
+  - id: resource-group
+    title: Create a resource group and environment
+    body: |
+      A Container Apps *environment* is the shared boundary the three workloads live in. Putting all
+      three in one environment lets them reach each other over the internal network and share a
+      Log Analytics workspace.
+
+      ```bash
+      az group create --name tulipfarm --location eastus
+      az containerapp env create --name tulipfarm-env --resource-group tulipfarm --location eastus
+      ```
+    verify:
+      kind: command
+      command: az containerapp env show --name tulipfarm-env --resource-group tulipfarm
+      expect: the environment exists and provisioningState is Succeeded
+
+  - id: database-flexible
+    title: Create Azure Database for PostgreSQL
+    when: { database: flexible }
+    body: |
+      Container Apps will not host your database — there is no durable disk to put it on. Azure
+      Database for PostgreSQL Flexible Server is the managed option, and TulipFarm needs
+      **PostgreSQL 17 with the `vector` and `citext` extensions**.
+
+      Azure gates extensions behind an allow-list, so enabling them is a required step rather than a
+      detail:
+
+      ```bash
+      az postgres flexible-server create \
+        --name tulipfarm-db --resource-group tulipfarm \
+        --version 17 --database-name tulipfarm
+      az postgres flexible-server parameter set \
+        --name azure.extensions --value vector,citext \
+        --server-name tulipfarm-db --resource-group tulipfarm
+      ```
+
+      Then hand the connection string to the app as a secret. Azure requires TLS, so keep
+      `sslmode=require`. Provider-by-provider extension notes live in
+      [Use a managed database](/docs/self-hosting/managed-database).
+    verify:
+      kind: command
+      command: az postgres flexible-server parameter show --name azure.extensions --server-name tulipfarm-db --resource-group tulipfarm
+      expect: the value includes vector and citext
+    on_fail: when-install-fails#database
+
+  - id: database-external
+    title: Point at a PostgreSQL you run elsewhere
+    when: { database: external }
+    body: |
+      A database outside Azure works, but confirm two things before you rely on it: it is
+      **PostgreSQL 17**, and it permits `CREATE EXTENSION vector` and `citext`.
+
+      Container Apps egresses from the environment's outbound addresses, so the database firewall
+      must admit them, and the link must be TLS — put `?sslmode=require` on the URL. Every query in a
+      Run crosses this hop, so prefer a database in the same region.
+    verify:
+      kind: env
+      name: DATABASE_URL
+
+  - id: storage
+    title: Create the storage the files live in
+    when: { files: azure }
+    body: |
+      **This step is not optional on this platform.** Container Apps offers no persistent volume with
+      the durability TulipFarm needs, so the `filesystem` blob driver — the default for Compose —
+      will lose every uploaded and generated file on the next revision. Azure Blob Storage speaks no
+      S3-compatible API, which is why TulipFarm ships a dedicated Azure driver.
+
+      ```bash
+      az storage account create --name tulipfarmfiles --resource-group tulipfarm --sku Standard_LRS
+      az storage container create --name tulipfarm --account-name tulipfarmfiles
+      ```
+
+      Naming the container together with a credential selects the Azure driver. Supply one credential
+      shape — a full connection string, or an account name and key. A connection string wins when
+      both are present.
+    verify:
+      kind: command
+      command: az storage container show --name tulipfarm --account-name tulipfarmfiles
+      expect: the container exists
+
+  - id: storage-s3
+    title: Point at an S3-compatible provider
+    when: { files: s3 }
+    body: |
+      An S3-compatible provider works from Azure as well as Azure Blob does — the requirement is
+      durable object storage, not a particular vendor. Set `S3_BUCKET`, `S3_REGION`, and
+      `S3_ENDPOINT`, and supply the keys as secrets.
+
+      Omit `S3_ENDPOINT` for Amazon S3 itself; setting it turns on path-style addressing, which is
+      what MinIO, Ceph, and any host reached by IP need.
+
+      <Callout type="warn">
+        Whichever you choose, do **not** fall back to the filesystem driver here. A Container Apps
+        revision replaces its container, and anything written to the container's own disk goes with
+        it.
+      </Callout>
+    verify:
+      kind: env
+      name: S3_BUCKET
+
+  - id: secrets
+    title: Create the instance secrets
+    body: |
+      TulipFarm needs three secrets: `ENCRYPTION_KEY` (which encrypts every secret the instance
+      stores — LLM keys, integration credentials), `JWT_SECRET`, and `WEBHOOK_SIGNING_SECRET`.
+      Generate them once and set them on the app; the generated definition references them by their
+      lowercase, dash-separated names.
+
+      ```bash
+      az containerapp secret set --name tulipfarm-app --resource-group tulipfarm \
+        --secrets encryption-key="$(openssl rand -base64 32)" \
+                  jwt-secret="$(openssl rand -base64 32)" \
+                  webhook-signing-secret="$(openssl rand -base64 32)"
+      ```
+
+      <Callout type="warn">
+        **Supply `ENCRYPTION_KEY` yourself from day one.** The Compose fallback — where the app
+        writes a generated key to `/data/secrets.env` — cannot work here, because that disk does not
+        survive a revision. The database holds only ciphertext, so a lost key means lost secrets. If
+        the app boots with a fresh `ENCRYPTION_KEY` against a database that already holds encrypted
+        secrets, it **refuses to start** rather than orphaning them. Back this key up alongside the
+        database.
+      </Callout>
+    verify:
+      kind: command
+      command: az containerapp secret list --name tulipfarm-app --resource-group tulipfarm
+      expect: encryption-key, jwt-secret and webhook-signing-secret are listed
+
+  - id: deploy
+    title: Create the three container apps
+    body: |
+      Apply the generated definition once per workload. Each is single-replica by design — set
+      `minReplicas` and `maxReplicas` to `1` and leave them there. Two copies of `worker` race the
+      soul worktree and the maintenance consumers.
+
+      Set `WORKER_MAINTENANCE=true` on the single `worker`. Start `app` first: it runs database
+      migrations before it listens, and the workers must start only after it is ready.
+
+      ```bash
+      az containerapp create --name tulipfarm-app --resource-group tulipfarm \
+        --environment tulipfarm-env --yaml azure-containerapp.yaml
+      ```
+
+      Give `app` a **generous startup probe**. A fresh database can take minutes to migrate, and a
+      liveness probe that fires during migration kills the container and loops forever — which is why
+      the generated definition sets a high startup `failureThreshold`.
+    verify:
+      kind: command
+      command: az containerapp show --name tulipfarm-app --resource-group tulipfarm
+      expect: runningStatus is Running
+    on_fail: when-install-fails#readyz
+
+  - id: verify-ready
+    title: Confirm the app is ready
+    body: |
+      Container Apps assigns the app an FQDN. Confirm it answers `/readyz` before going further;
+      migrations run before `app` listens, so allow a generous timeout on a fresh database.
+
+      ```bash
+      az containerapp show --name tulipfarm-app --resource-group tulipfarm \
+        --query properties.configuration.ingress.fqdn -o tsv
+      ```
+    verify:
+      kind: manual
+      look_for: The FQDN Azure assigned answers /readyz with 200, allowing several minutes on a fresh database while migrations run.
+    on_fail: when-install-fails#readyz
+
+  - id: domain
+    title: Put it on your own domain
+    body: |
+      Bind a custom domain and let Azure manage the certificate, then set `PUBLIC_URL` to the
+      `https://` origin it serves. `PUBLIC_URL` sets the address at boot; you can change it later
+      under **Business → About** without a redeploy.
+
+      ```bash
+      az containerapp hostname bind --hostname tulipfarm.example.com \
+        --name tulipfarm-app --resource-group tulipfarm
+      ```
+
+      Container Apps does not buffer responses, so chat's Server-Sent Events stream without extra
+      configuration — unlike an nginx ingress, which needs buffering turned off explicitly.
+    verify:
+      kind: manual
+      look_for: The custom domain serves the app over https and chat tokens stream in as they are produced, not all at once.
+
+  - id: first-boot
+    title: Seed the first admin without a browser
+    body: |
+      Set `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and `LLM_API_KEY` together on `app` and the instance seeds
+      itself and skips the setup wizard. See [headless seeding](/docs/self-hosting/headless).
+    verify:
+      kind: manual
+      look_for: You can sign in with the ADMIN_EMAIL and ADMIN_PASSWORD you seeded, with no wizard shown.
+
+  - id: backups
+    title: Back up the three durable things
+    body: |
+      Nothing inside a container app survives a revision, so all three live outside it — and
+      restoring only one is not enough:
+
+      - **PostgreSQL** — every Record, Run, Turn, audit event, and vector index. Flexible Server
+        takes automated backups; confirm the retention window matches what you would accept losing.
+      - **`ENCRYPTION_KEY`** — the database holds only ciphertext without it. Keep it somewhere that
+        is not the container app, such as Key Vault.
+      - **The soul** at `SOUL_PATH` — your entire configuration. On this platform the soul has no
+        durable disk either, so mirror it to a git remote with `SOUL_GIT_REMOTE_URL`.
+
+      See [Updating and rollback](/docs/self-hosting/updating) before your first upgrade.
+    verify:
+      kind: manual
+      look_for: A restore drill brings the instance back with its secrets decryptable — database, encryption key, and soul all restored together.
+
+  - id: update
+    title: Update
+    body: |
+      Pin one image tag; do not track a moving tag. Each update creates a new revision, and
+      migrations apply automatically on boot. There are **no down-migrations**, so a revision
+      rollback does not undo a schema change — read
+      [Updating and rollback](/docs/self-hosting/updating) first.
+
+      ```bash
+      az containerapp update --name tulipfarm-app --resource-group tulipfarm \
+        --image ghcr.io/tulipfarm/tulipfarm:v1.2.3
+      ```
+
+      Update `app` first so migrations land before the workers restart against the new schema.
+    verify:
+      kind: command
+      command: az containerapp show --name tulipfarm-app --resource-group tulipfarm
+      expect: runningStatus is Running on the new revision
+
+artifacts:
+  - id: definition
+    filename: containerapp.yaml
+    from: containerapp

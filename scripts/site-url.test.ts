@@ -76,4 +76,28 @@ describe("published install assets", () => {
       expect(PUBLIC_ASSETS, `${rel} is fetched but not published`).toHaveProperty(served);
     }
   });
+
+  it("serves every published asset as readable text, not a download", () => {
+    // Without an explicit rule Cloudflare Pages guesses from the extension: a .yaml or an
+    // extensionless script downloads instead of rendering, and a .txt without a charset can
+    // be decoded as ISO-8859-1, which mojibakes the em-dashes in deploy.txt.
+    const rules = readFileSync(join(ROOT, "apps/docs/public/_headers"), "utf8");
+    for (const served of Object.keys(PUBLIC_ASSETS)) {
+      expect(rules, `/${served} has no Content-Type rule in public/_headers`).toContain(
+        `/${served}\n  Content-Type: text/plain; charset=utf-8`
+      );
+    }
+  });
+
+  it("re-copies the assets after next build, so no route payload clobbers one", () => {
+    // A static export writes an RSC payload beside every route as `<route>.txt`. The `/deploy`
+    // wizard therefore emits `out/deploy.txt`, which overwrote the published `/deploy.txt`
+    // prompt with React flight data until the build re-copied the assets last.
+    const build = JSON.parse(readFileSync(join(ROOT, "apps/docs/package.json"), "utf8")).scripts
+      .build;
+    const afterNextBuild = build.slice(build.indexOf("next build"));
+    expect(afterNextBuild, "sync-public-assets must run again after next build").toContain(
+      "sync-public-assets.mjs --out"
+    );
+  });
 });

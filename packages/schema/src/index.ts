@@ -51,6 +51,34 @@ export type { ModelProfileDenialReason } from "./definitions";
 export * from "./definitions";
 export * as definitions from "./definitions";
 export { MODEL_PROFILE_DENIAL_REASONS } from "./definitions";
+export type {
+  DeploymentContract,
+  DeploymentContractEnvVar,
+  DeploymentContractService,
+} from "./deployment-contract";
+export {
+  DeploymentContractSchema,
+  deploymentContractIssues,
+  ENV_CONSUMER_VALUES,
+  ENV_ZONE_VALUES,
+  parseDeploymentContract,
+  validateDeploymentContract,
+} from "./deployment-contract";
+export type {
+  DeploymentTarget,
+  DeploymentTargetArtifact,
+  DeploymentTargetInput,
+  DeploymentTargetStep,
+  DeploymentTargetVerify,
+} from "./deployment-target";
+export {
+  DeploymentTargetSchema,
+  deploymentTargetIssues,
+  parseDeploymentTarget,
+  TARGET_TIER_VALUES,
+  VERIFY_KIND_VALUES,
+  validateDeploymentTarget,
+} from "./deployment-target";
 export { TulipFarmValidationError } from "./error";
 export type { SchemaContractErrorCode, SchemaValidationIssue } from "./errors";
 export {

@@ -37,9 +37,6 @@ pnpm dev:integration-worker     # :4030
 
 Do not start them. Do not fall back to `curl`-ing the API to work around a dead web server.
 
-> Port note: `pnpm dev:docs` also uses :4020. If :4020 answers but is the docs site rather than the
-> worker, abort and say so — the worker is not running.
-
 ## S2 — Run identity
 
 | # | Action | Expected |

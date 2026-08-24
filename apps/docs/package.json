@@ -3,8 +3,8 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "build": "node scripts/sync-public-assets.mjs && next build",
-    "dev": "node scripts/sync-public-assets.mjs && next dev -p 4020",
+    "build": "tsx scripts/generate-deploy-docs.ts && node scripts/sync-public-assets.mjs && next build && node scripts/sync-public-assets.mjs --out",
+    "dev": "tsx scripts/generate-deploy-docs.ts && node scripts/sync-public-assets.mjs && next dev -p 5000",
     "start": "serve out",
     "typecheck": "fumadocs-mdx && next typegen && tsc --noEmit",
     "postinstall": "fumadocs-mdx",
@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@tulipfarm/deploy-render": "workspace:*",
+    "@tulipfarm/schema": "workspace:*",
     "fumadocs-core": "16.14.5",
     "fumadocs-mdx": "15.3.0",
     "fumadocs-ui": "16.14.5",
@@ -31,6 +33,7 @@
     "postcss": "^8.5.26",
     "serve": "^14.2.6",
     "tailwindcss": "^4.3.3",
+    "tsx": "^4.23.12",
     "typescript": "^7.0.2"
   }
 }

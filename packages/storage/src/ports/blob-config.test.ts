@@ -65,7 +65,72 @@ describe("resolveBlobStoreConfig", () => {
   });
 
   it("refuses a store it does not have", () => {
-    expect(() => resolveBlobStoreConfig({ BLOB_STORE: "azure" })).toThrow(BlobConfigError);
+    expect(() => resolveBlobStoreConfig({ BLOB_STORE: "unknown-store" })).toThrow(BlobConfigError);
+  });
+
+  it("infers Azure from a connection string alone", () => {
+    const config = resolveBlobStoreConfig({
+      AZURE_STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=https;AccountName=a;AccountKey=k;",
+      AZURE_STORAGE_CONTAINER: "files",
+    });
+
+    expect(config.kind).toBe("azure");
+    expect(config.azure).toEqual({
+      container: "files",
+      connectionString: "DefaultEndpointsProtocol=https;AccountName=a;AccountKey=k;",
+    });
+  });
+
+  it("infers Azure from an account, and carries account and key through", () => {
+    const config = resolveBlobStoreConfig({
+      AZURE_STORAGE_ACCOUNT: "tulipacct",
+      AZURE_STORAGE_KEY: "c2VjcmV0",
+      AZURE_STORAGE_CONTAINER: "files",
+    });
+
+    expect(config.kind).toBe("azure");
+    expect(config.azure).toEqual({
+      container: "files",
+      account: "tulipacct",
+      accountKey: "c2VjcmV0",
+    });
+  });
+
+  it("prefers a connection string over an account when both are set", () => {
+    const config = resolveBlobStoreConfig({
+      AZURE_STORAGE_CONNECTION_STRING: "conn",
+      AZURE_STORAGE_ACCOUNT: "tulipacct",
+      AZURE_STORAGE_KEY: "c2VjcmV0",
+      AZURE_STORAGE_CONTAINER: "files",
+    });
+
+    expect(config.azure).toEqual({ container: "files", connectionString: "conn" });
+  });
+
+  it("refuses Azure that was asked for but not configured, naming what is missing", () => {
+    expect(() => resolveBlobStoreConfig({ BLOB_STORE: "azure" })).toThrow(
+      /AZURE_STORAGE_CONTAINER/
+    );
+    expect(() =>
+      resolveBlobStoreConfig({ BLOB_STORE: "azure", AZURE_STORAGE_CONTAINER: "files" })
+    ).toThrow(/AZURE_STORAGE_CONNECTION_STRING or AZURE_STORAGE_ACCOUNT with AZURE_STORAGE_KEY/);
+    expect(() =>
+      resolveBlobStoreConfig({
+        BLOB_STORE: "azure",
+        AZURE_STORAGE_CONTAINER: "files",
+        AZURE_STORAGE_ACCOUNT: "tulipacct",
+      })
+    ).toThrow(/AZURE_STORAGE_CONNECTION_STRING or AZURE_STORAGE_ACCOUNT with AZURE_STORAGE_KEY/);
+  });
+
+  it("honours an explicit filesystem choice over Azure variables that happen to be set", () => {
+    expect(
+      resolveBlobStoreConfig({
+        BLOB_STORE: "filesystem",
+        AZURE_STORAGE_CONNECTION_STRING: "conn",
+        AZURE_STORAGE_CONTAINER: "files",
+      })
+    ).toEqual({ kind: "filesystem" });
   });
 
   it("honours an explicit filesystem choice over a bucket that happens to be set", () => {

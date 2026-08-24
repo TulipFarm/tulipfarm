@@ -12,6 +12,7 @@ Detailed contracts:
 - [Dependency rules](dependency-rules.md)
 - [Building an Integration](building-an-integration.md)
 - [Governed network Tools](governed-network-tools.md)
+- [Deployment manifest](deployment-manifest.md)
 
 ## Accepted decisions
 

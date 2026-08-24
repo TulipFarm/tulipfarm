@@ -79,6 +79,7 @@ sibling `AGENTS.md`.
 | [`packages/kv`](packages/kv/AGENTS.md) | Agent key-value store and its `kv_*` Tool family |
 | [`packages/platform-tools`](packages/platform-tools/AGENTS.md) | Platform Tools that need no Soul, renderer or credential, so both hosts can run them |
 | [`packages/schema`](packages/schema/AGENTS.md) | Any config shape, TypeBox schema, validator, Run event type |
+| [`packages/deploy-render`](packages/deploy-render/AGENTS.md) | Rendering deployment guidance from `deploy/` — targets, generated pages, prompt, guided flow |
 | [`packages/soul`](packages/soul/AGENTS.md) | Soul artifact loading, git sync |
 | [`packages/storage`](packages/storage/AGENTS.md) | PostgreSQL repositories, outbox/inbox, blob/vector/cache ports |
 | [`packages/resources`](packages/resources/AGENTS.md) | Record write policy, validation, hooks, idempotency, and side-effect orchestration |
@@ -145,7 +146,7 @@ Run from repo root; Turbo fans out.
 pnpm install                     # CI: pnpm install --frozen-lockfile
 pnpm dev                         # api :4010, web :4000, worker :4020, integration-worker :4030
 pnpm dev:api | dev:web | dev:worker | dev:integration-worker
-pnpm dev:docs                    # :4020 — same port as worker; never both at once
+pnpm dev:docs                    # :5000
 pnpm lint                        # biome check, turbo-cached
 pnpm typecheck                   # tsc --noEmit, turbo-cached
 pnpm test                        # UNCACHED, ~5min — prefer --filter

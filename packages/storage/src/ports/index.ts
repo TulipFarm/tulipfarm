@@ -1,5 +1,17 @@
 export { AwsS3Api, createS3Client, type S3Config } from "./aws-s3-api";
 export {
+  AZURE_BLOCK_BYTES,
+  AzureBlobError,
+  type AzureBlobErrorCode,
+  AzureBlobPort,
+} from "./azure-blob";
+export {
+  type AzureBlobApi,
+  AzureBlobNotFoundError,
+  type AzureObjectHead,
+} from "./azure-blob-api";
+export { type AzureConfig, AzureSdkBlobApi, createAzureContainerClient } from "./azure-sdk-blob";
+export {
   type BlobBody,
   type BlobMetadata,
   type BlobPort,
@@ -37,6 +49,7 @@ export {
   type FileSystemBlobErrorCode,
   FileSystemBlobPort,
 } from "./filesystem-blob";
+export { InMemoryAzureBlob } from "./in-memory-azure-blob";
 export { InMemoryS3 } from "./in-memory-s3";
 export type { QueueAcceleratorPort, QueueMessage } from "./queue";
 export {

@@ -1,9 +1,11 @@
 import { AwsS3Api, createS3Client, type S3Config } from "./aws-s3-api";
+import { AzureBlobPort } from "./azure-blob";
+import { type AzureConfig, AzureSdkBlobApi, createAzureContainerClient } from "./azure-sdk-blob";
 import type { BlobPort } from "./blob";
 import { FileSystemBlobPort } from "./filesystem-blob";
 import { S3BlobPort } from "./s3-blob";
 
-export type BlobStoreKind = "filesystem" | "s3";
+export type BlobStoreKind = "filesystem" | "s3" | "azure";
 
 export class BlobConfigError extends Error {
   constructor(message: string) {
@@ -21,29 +23,54 @@ export interface BlobEnv {
   readonly S3_SECRET_ACCESS_KEY?: string;
   readonly S3_FORCE_PATH_STYLE?: string;
   readonly S3_PREFIX?: string;
+  readonly AZURE_STORAGE_CONNECTION_STRING?: string;
+  readonly AZURE_STORAGE_ACCOUNT?: string;
+  readonly AZURE_STORAGE_KEY?: string;
+  readonly AZURE_STORAGE_CONTAINER?: string;
 }
 
 export interface BlobStoreConfig {
   readonly kind: BlobStoreKind;
   readonly s3?: S3Config;
+  readonly azure?: AzureConfig;
   readonly prefix?: string;
 }
 
 /**
  * Reads the store an operator asked for out of the environment.
  *
- * `BLOB_STORE` is optional and inferred: naming a bucket is unambiguous enough to mean it. Setting
- * it to `s3` without the rest is an error rather than a silent fall back to the filesystem, which
- * would put a production deployment's files on a container disk that vanishes on restart.
+ * `BLOB_STORE` is optional and inferred: naming an S3 bucket, or an Azure account or connection
+ * string, is unambiguous enough to mean it. Naming a store explicitly without the rest of its
+ * configuration is an error rather than a silent fall back to the filesystem, which would put a
+ * production deployment's files on a container disk that vanishes on restart.
  */
 export function resolveBlobStoreConfig(env: BlobEnv = process.env): BlobStoreConfig {
   const declared = env.BLOB_STORE?.trim().toLowerCase();
-  if (declared !== undefined && declared !== "" && declared !== "filesystem" && declared !== "s3") {
-    throw new BlobConfigError(`BLOB_STORE must be "filesystem" or "s3", got "${declared}"`);
+  if (
+    declared !== undefined &&
+    declared !== "" &&
+    declared !== "filesystem" &&
+    declared !== "s3" &&
+    declared !== "azure"
+  ) {
+    throw new BlobConfigError(
+      `BLOB_STORE must be "filesystem", "s3" or "azure", got "${declared}"`
+    );
   }
-  const wantsS3 = declared === "s3" || (declared === undefined && hasText(env.S3_BUCKET));
-  if (!wantsS3) return { kind: "filesystem" };
 
+  const wantsS3 = declared === "s3" || (declared === undefined && hasText(env.S3_BUCKET));
+  if (wantsS3) return resolveS3StoreConfig(env);
+
+  const wantsAzure =
+    declared === "azure" ||
+    (declared === undefined &&
+      (hasText(env.AZURE_STORAGE_CONNECTION_STRING) || hasText(env.AZURE_STORAGE_ACCOUNT)));
+  if (wantsAzure) return resolveAzureStoreConfig(env);
+
+  return { kind: "filesystem" };
+}
+
+function resolveS3StoreConfig(env: BlobEnv): BlobStoreConfig {
   const missing = (
     [
       ["S3_BUCKET", env.S3_BUCKET],
@@ -77,6 +104,35 @@ export function resolveBlobStoreConfig(env: BlobEnv = process.env): BlobStoreCon
   };
 }
 
+function resolveAzureStoreConfig(env: BlobEnv): BlobStoreConfig {
+  const container = env.AZURE_STORAGE_CONTAINER;
+  const connectionString = env.AZURE_STORAGE_CONNECTION_STRING;
+  const account = env.AZURE_STORAGE_ACCOUNT;
+  const accountKey = env.AZURE_STORAGE_KEY;
+
+  const missing: string[] = [];
+  if (!hasText(container)) missing.push("AZURE_STORAGE_CONTAINER");
+  // Either credential shape suffices, so name both only when neither is present in full.
+  if (!hasText(connectionString) && !(hasText(account) && hasText(accountKey))) {
+    missing.push("AZURE_STORAGE_CONNECTION_STRING or AZURE_STORAGE_ACCOUNT with AZURE_STORAGE_KEY");
+  }
+  if (missing.length > 0) {
+    throw new BlobConfigError(`Azure blob storage is missing ${missing.join(", ")}`);
+  }
+
+  const azure: AzureConfig = hasText(connectionString)
+    ? {
+        container: (container as string).trim(),
+        connectionString: (connectionString as string).trim(),
+      }
+    : {
+        container: (container as string).trim(),
+        account: (account as string).trim(),
+        accountKey: accountKey as string,
+      };
+  return { kind: "azure", azure };
+}
+
 /**
  * The blob store this deployment runs on.
  *
@@ -85,12 +141,15 @@ export function resolveBlobStoreConfig(env: BlobEnv = process.env): BlobStoreCon
  */
 export function createBlobPort(filesystemRoot: string, env: BlobEnv = process.env): BlobPort {
   const config = resolveBlobStoreConfig(env);
-  if (config.kind === "filesystem" || config.s3 === undefined) {
-    return new FileSystemBlobPort(filesystemRoot);
+  if (config.kind === "s3" && config.s3 !== undefined) {
+    return new S3BlobPort(new AwsS3Api(createS3Client(config.s3), config.s3.bucket), {
+      ...(config.prefix === undefined ? {} : { prefix: config.prefix }),
+    });
   }
-  return new S3BlobPort(new AwsS3Api(createS3Client(config.s3), config.s3.bucket), {
-    ...(config.prefix === undefined ? {} : { prefix: config.prefix }),
-  });
+  if (config.kind === "azure" && config.azure !== undefined) {
+    return new AzureBlobPort(new AzureSdkBlobApi(createAzureContainerClient(config.azure)));
+  }
+  return new FileSystemBlobPort(filesystemRoot);
 }
 
 function hasText(value: string | undefined): boolean {

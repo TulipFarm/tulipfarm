@@ -10,36 +10,39 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+BOOT_LABEL="parity"
+# shellcheck source=scripts/test/lib/boot-harness.sh
+. "${REPO_ROOT}/scripts/test/lib/boot-harness.sh"
+
 IMAGE="ghcr.io/tulipfarm/tulipfarm:ci"
 PORT="${TF_PORT:-8098}"
-TEST_DIR="$(mktemp -d)"
 
 export COMPOSE_PROJECT_NAME="tulipfarm-parity-$$"
 export HOST_PORT="$PORT"
 export TULIPFARM_VERSION="ci"
 
-log() { printf '\033[0;36m[parity]\033[0m %s\n' "$*"; }
-fail() { printf '\033[0;31m[parity] FAIL:\033[0m %s\n' "$*" >&2; exit 1; }
 compose() { (cd "$TEST_DIR" && docker compose "$@"); }
 
-cleanup() {
-  local status=$?
-  if [ -f "${TEST_DIR}/docker-compose.yml" ]; then
-    if [ "$status" -ne 0 ]; then
-      log "capturing stack logs after failure…"
-      compose logs --no-color || true
-    fi
-    log "tearing down stack…"
-    compose down -v >/dev/null 2>&1 || true
-  fi
-  rm -rf "$TEST_DIR"
-  return "$status"
+# The Compose-specific half the harness delegates: only tear down what was actually brought
+# up, and reach for logs the same way.
+boot_capture_logs() {
+  [ -f "${TEST_DIR}/docker-compose.yml" ] || return 0
+  log "capturing stack logs after failure…"
+  compose logs --no-color
 }
-trap cleanup EXIT
+boot_teardown() {
+  [ -f "${TEST_DIR}/docker-compose.yml" ] || return 0
+  log "tearing down stack…"
+  compose down -v >/dev/null 2>&1
+}
 
-command -v docker >/dev/null 2>&1 || fail "docker not on PATH"
-command -v curl >/dev/null 2>&1 || fail "curl not on PATH"
-command -v openssl >/dev/null 2>&1 || fail "openssl not on PATH"
+boot_make_workspace
+TEST_DIR="$BOOT_WORKDIR"
+boot_install_cleanup_trap
+
+require_command docker
+require_command curl
+require_command openssl
 docker compose version >/dev/null 2>&1 || fail "docker compose v2 plugin required"
 
 cp "${REPO_ROOT}/docker-compose.yml" "${TEST_DIR}/docker-compose.yml"
@@ -61,9 +64,8 @@ test ! -f "${TEST_DIR}/.env"
 compose up -d --wait --wait-timeout 180 --pull missing
 
 log "asserting /readyz and /livez on :${PORT}…"
-curl -fsS --max-time 15 --retry 5 --retry-connrefused --retry-delay 3 \
-  "http://localhost:${PORT}/readyz" >/dev/null
-curl -fsS --max-time 15 "http://localhost:${PORT}/livez" >/dev/null
+boot_wait_for_http "http://localhost:${PORT}/readyz"
+boot_check_http "http://localhost:${PORT}/livez"
 
 log "asserting the public API origin follows the published host port…"
 [ "$(compose exec -T app printenv PUBLIC_API_URL)" = "http://localhost:${PORT}" ] \
@@ -134,8 +136,7 @@ EOF
 compose up -d --wait --wait-timeout 180 --pull missing
 
 log "asserting /health and environment-supplied secret behavior…"
-curl -fsS --max-time 15 --retry 5 --retry-connrefused --retry-delay 3 \
-  "http://localhost:${PORT}/health" >/dev/null
+boot_wait_for_http "http://localhost:${PORT}/health"
 compose exec -T app sh -c '! test -f /data/secrets.env' \
   || fail "configured boot wrote /data/secrets.env"
 
