@@ -247,7 +247,11 @@ describe("AgentLoop", () => {
 
     await loop({
       model: scriptedModel(
-        { requestId: "req", output: { kind: "text", text: "" }, usage: {} },
+        {
+          requestId: "req",
+          output: { kind: "text", text: "" },
+          usage: { inputTokens: 5, outputTokens: 0 },
+        },
         toolCallResult([
           { callId: "call-1", name: "web_fetch", arguments: { url: "https://x.example" } },
         ]),

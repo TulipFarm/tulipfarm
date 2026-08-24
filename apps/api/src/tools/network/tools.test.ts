@@ -165,17 +165,12 @@ describe("network Tool handlers", () => {
     // The cache is keyed on the requested URL, but a same-site redirect can leave the content at
     // a different origin. A caller allowed only the requested origin must not inherit the reach
     // of whoever primed the entry.
-    const cache = new Map<string, Record<string, unknown>>();
-    const cachePort = {
-      get: async (key: string) => cache.get(key),
-      set: async (key: string, value: Record<string, unknown>) => void cache.set(key, value),
-      delete: async (key: string) => void cache.delete(key),
-    };
-    cache.set("web_fetch:v1:https://docs.example.com/release", {
-      fetched: true,
-      url: "https://www.example.com/release",
-      content: "secret",
-    });
+    const cachePort = new MemoryCache();
+    await cachePort.set(
+      "web_fetch:v1:https://docs.example.com/release",
+      { fetched: true, url: "https://www.example.com/release", content: "secret" },
+      60_000
+    );
 
     const send = vi.fn(async () => ({
       status: 200,
