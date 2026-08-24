@@ -46,12 +46,7 @@ Run these from the repository root.
 | `pnpm dev:web` | runs only `@tulipfarm/web` (Remix/Vite, default `:4000`). |
 | `pnpm dev:worker` | runs only `@tulipfarm/worker` (health probes default `:4020`). |
 | `pnpm dev:integration-worker` | runs only `@tulipfarm/integration-worker` (health probes default `:4030`). |
-| `pnpm dev:docs` | runs only `@tulipfarm/docs` (`next dev -p 4020`). |
-
-<Callout type="warn">
-`pnpm dev:docs` and `pnpm dev:worker` both use port `4020` by default. Run only one at a time, or
-change the worker's `WORKER_PORT`.
-</Callout>
+| `pnpm dev:docs` | runs only `@tulipfarm/docs` (`next dev -p 5000`). |
 
 ### Build, lint, typecheck, and test
 

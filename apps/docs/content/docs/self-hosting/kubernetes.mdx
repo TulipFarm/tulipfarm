@@ -1,121 +1,274 @@
 ---
 title: Kubernetes
-description: What the TulipFarm image requires from an orchestrator — and why there is no official Helm chart yet.
+description: Deploy TulipFarm to a Kubernetes cluster from generated chart values, against external or managed PostgreSQL.
 ---
+
+{/* Generated from deploy/targets/kubernetes/manifest.yml by @tulipfarm/deploy-render. Edit the manifest, not this file. */}
+{/* tf-claim kind=path-exists value="deploy/targets/kubernetes/manifest.yml" */}
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-<Callout type="warn">
-  **There is no official Helm chart and no published Kubernetes manifests.** Nothing is
-  hosted at an `oci://` or `https://charts…` URL — any command you find that claims
-  otherwise will fail. Kubernetes is not a tested deployment target: CI exercises the
-  [Docker Compose](/docs/self-hosting/docker-compose) stack on every run, and nothing else.
+Kubernetes buys you cluster-native Secrets, Ingress, and managed PostgreSQL. It buys you nothing
+toward scale: TulipFarm runs **exactly one replica of each workload** by design, so this is a
+single-node control plane wearing a cluster's clothes, not a horizontally scaled service.
 
-  This page documents the contract the image expects, so you can write manifests you own
-  and verify. It is not a supported install path.
+These steps are generated from this platform's manifest, so they cannot drift from the runtime
+they describe. The chart **values** are generated too — from the runtime contract — and offered as
+a download, so every port, health path, and environment key you feed a chart is grounded in what
+TulipFarm actually reads.
+
+<Callout type="warn">
+  **TulipFarm ships no official Helm chart yet, and this target is not booted in CI** — it is
+  `community`, not `supported`. The values file below is the machine-generated configuration
+  surface; you supply the chart (or plain manifests) that consumes it. Until a CI job stands this
+  up to a ready state, treat it as a documented contract, not a tested install path.
 </Callout>
 
-If you want a supported deployment today, run the Compose stack on a VM. Kubernetes buys
-you little until you need cluster-native secrets, ingress, or managed PostgreSQL, because
-TulipFarm does **not** scale horizontally.
+## Download the generated chart values
 
-## The hard constraint: one replica per workload
+Fetch the `values.yaml` TulipFarm generates from its runtime contract. Every workload, port,
+health path, and environment key in it is derived from what the runtime reads, so it cannot
+drift from the image. Fill the keys your deployment needs and delete the rest.
 
-Run three workloads from the same image, each with `replicas: 1` and `strategy: Recreate`.
-Do not use `RollingUpdate`: it briefly runs two copies and can race the soul worktree or
-maintenance consumers.
+The three workloads it describes are single-replica by design: `app` (API, built web UI, and
+migrations), `worker` (runs, waits, outbox, cron, and maintenance consumers), and
+`integration-worker` (Slack and GitHub ingress, sync, delivery, retries, and reconciliation).
 
-| Workload | Command | Why it is single-replica |
-| --- | --- | --- |
-| `app` | default `node server.cjs` | Owns the API, built web UI, soul git worktree, and all database migrations. |
-| `worker` | `node worker.cjs` | Executes every turn, wait, outbox loop, cron, and maintenance consumer. Set `WORKER_MAINTENANCE=true` on exactly one copy. |
-| `integration-worker` | `node integration-worker.cjs` | Owns Slack and GitHub ingress, sync, delivery, retries, and reconciliation. |
+```bash
+curl -fsSLO {{SITE_URL}}/kubernetes-values.yaml
+```
 
-## Workload contract
+> **Verify.** `kubernetes-values.yaml` is now in the working directory.
+
+If that check fails, see [what to do next](/docs/self-hosting/when-install-fails#download).
+
+## Create a namespace
+
+Give the instance its own namespace so its Secrets, volumes, and workloads are isolated and
+easy to tear down.
+
+```bash
+kubectl create namespace tulipfarm
+```
+
+> **Verify.** `kubectl get namespace tulipfarm` succeeds — expect the namespace exists.
+
+## Point at a PostgreSQL you run
+
+_Applies when you chose **A PostgreSQL 17 I run myself in or beside the cluster**._
+
+TulipFarm needs **PostgreSQL 17 with the `vector` and `citext` extensions**. If you run your
+own Postgres — a StatefulSet in the cluster, or a box beside it — grant its role permission to
+`CREATE EXTENSION vector` and `citext`, then hand the connection string to the app as a Secret:
+
+```bash
+kubectl -n tulipfarm create secret generic tulipfarm-database \
+  --from-literal=DATABASE_URL='postgresql://user:password@postgres:5432/tulipfarm'
+```
+
+A cluster rarely wants a bundled database, which is why the generated values default
+`dependencies.postgres.external` to `true`. Full extension and permission detail:
+[Use a managed database](/docs/self-hosting/managed-database).
+
+> **Verify.** `kubectl -n tulipfarm get secret tulipfarm-database` succeeds — expect the DATABASE_URL secret exists.
+
+## Point at a cloud-managed PostgreSQL
+
+_Applies when you chose **A cloud-managed PostgreSQL service**._
+
+A managed service — RDS, Cloud SQL, Azure Database, Neon — removes the StatefulSet, but you
+must confirm it offers **PostgreSQL 17** and **allows the `vector` and `citext` extensions**;
+some managed providers gate `vector` behind an allow-list you enable first. Point the app at it
+as a Secret exactly as for a self-run database:
+
+```bash
+kubectl -n tulipfarm create secret generic tulipfarm-database \
+  --from-literal=DATABASE_URL='postgresql://user:password@your-host:5432/tulipfarm?sslmode=require'
+```
+
+The provider-by-provider extension notes live in
+[Use a managed database](/docs/self-hosting/managed-database).
+
+> **Verify.** `kubectl -n tulipfarm get secret tulipfarm-database` succeeds — expect the DATABASE_URL secret exists.
+
+## Create the instance Secrets
+
+TulipFarm needs three secrets: `ENCRYPTION_KEY` (which encrypts every secret the instance
+stores — LLM keys, integration credentials), `JWT_SECRET`, and `WEBHOOK_SIGNING_SECRET`.
+Generate them once and store them in a Kubernetes `Secret` — the `secretRefs` list in the
+values file names exactly these:
+
+```bash
+kubectl -n tulipfarm create secret generic tulipfarm-secrets \
+  --from-literal=ENCRYPTION_KEY="$(openssl rand -base64 32)" \
+  --from-literal=JWT_SECRET="$(openssl rand -base64 32)" \
+  --from-literal=WEBHOOK_SIGNING_SECRET="$(openssl rand -base64 32)"
+```
+
+<Callout type="warn">
+  **Supply `ENCRYPTION_KEY` from a Secret from day one.** In a cluster the Compose fallback —
+  where the app writes a generated key to `/data/secrets.env` — is a trap: it survives only if
+  `/data` is a reliably backed-up, shared volume. Lose that volume and the database, which
+  holds only ciphertext, becomes undecryptable. If the app boots with a fresh `ENCRYPTION_KEY`
+  against a database that already holds encrypted secrets, it **refuses to start** rather than
+  orphaning them. Back the Secret up alongside the database.
+</Callout>
+
+> **Verify.** `kubectl -n tulipfarm get secret tulipfarm-secrets` succeeds — expect the instance secrets exist.
+
+## Configure S3-compatible storage
+
+_Applies when you chose **An S3-compatible provider**._
+
+A cluster has no durable local disk, so uploaded and generated files belong in object storage.
+Amazon S3, Cloudflare R2, Backblaze B2, Wasabi, DigitalOcean Spaces, Ceph, and MinIO all speak
+the same protocol, and TulipFarm has one driver for all of them. Set `S3_BUCKET`, `S3_REGION`,
+and `S3_ENDPOINT` in the values `config`, and put the keys in a Secret:
+
+```bash
+kubectl -n tulipfarm create secret generic tulipfarm-blob \
+  --from-literal=S3_ACCESS_KEY_ID=... \
+  --from-literal=S3_SECRET_ACCESS_KEY=...
+```
+
+Omit `S3_ENDPOINT` for Amazon S3 itself; setting it turns on path-style addressing, which is
+what MinIO, Ceph, and any host reached by IP need.
+
+> **Verify.** `kubectl -n tulipfarm get secret tulipfarm-blob` succeeds — expect the S3 credentials exist.
+
+## Configure Azure Blob Storage
+
+_Applies when you chose **Azure Blob Storage**._
+
+Set `AZURE_STORAGE_CONTAINER` in the values `config`, then supply one credential shape as a
+Secret — either a full connection string, or an account name and key:
+
+```bash
+kubectl -n tulipfarm create secret generic tulipfarm-blob \
+  --from-literal=AZURE_STORAGE_CONNECTION_STRING='...'
+```
+
+Naming the container with a credential selects the Azure driver. A connection string wins over
+an account-and-key pair when both are present.
+
+> **Verify.** `kubectl -n tulipfarm get secret tulipfarm-blob` succeeds — expect the Azure credentials exist.
+
+## Use a persistent volume for files
+
+_Applies when you chose **A persistent volume (single node only)**._
+
+The filesystem driver stores files under `TF_DATA_DIR`. It is correct only for a **single-node**
+test cluster: the volume must be `ReadWriteOnce` and bound to the one node `app` runs on, and
+nothing else can reach those bytes.
+
+<Callout type="warn">
+  Do not use the filesystem driver on a multi-node cluster. A `ReadWriteOnce` volume follows
+  one pod, so a rescheduled `app` loses every stored file. Use `s3` or `azure` for anything
+  beyond a laptop cluster.
+</Callout>
+
+> **Check.** The PersistentVolumeClaim backing TF_DATA_DIR is Bound and ReadWriteOnce.
+
+## Feed the values into a chart and apply
+
+TulipFarm ships no official chart, so point your own chart — or plain manifests — at the
+generated values. Whatever consumes them must honour the workload contract:
 
 | Workload | Container port | Probes | Volumes |
 | --- | --- | --- | --- |
-| `app` | `8080` | `/livez`, `/readyz` | `/opt/tulipfarm/soul` read-write; `/data` read-write. |
-| `worker` | `4020` | `/livez`, `/readyz` | `/data` read-only. |
-| `integration-worker` | `4030` | `/livez`, `/readyz` | `/data` read-only. |
+| `app` | `8080` | `/livez` liveness, `/readyz` readiness | soul at `SOUL_PATH` read-write; `TF_DATA_DIR` read-write |
+| `worker` | `4020` | `/livez` liveness, `/readyz` readiness | `TF_DATA_DIR` read-only |
+| `integration-worker` | `4030` | `/livez` liveness, `/readyz` readiness | `TF_DATA_DIR` read-only |
 
-`/readyz` on `app` checks the datastore. `/readyz` on both workers checks the datastore,
-the required schema floor, and whether required consumers are attached. The workers never
-migrate; they must start only after `app` has applied migrations and become ready.
+Run each workload with `replicas: 1` and `strategy: Recreate`, never `RollingUpdate`: a rolling
+update briefly runs two copies and can race the soul worktree or the maintenance consumers. Set
+`WORKER_MAINTENANCE=true` on the single `worker`. Set `podSecurityContext.fsGroup: 1000`, since
+the image runs as UID `1000` (`node`) and mounted volumes are otherwise not writable.
 
-Give `app` a generous startup probe on `/readyz`. Migrations run before it listens, so a
-fresh database can take minutes on first boot. Without a startup probe, liveness can kill
-`app` mid-migration and loop forever.
+Give `app` a **generous startup probe** on `/readyz`: it runs database migrations before it
+listens, so a fresh database can take minutes on first boot, and without a startup probe
+liveness kills `app` mid-migration and loops forever. The workers never migrate — they must
+start only after `app` is ready.
 
-## Image and storage
+```bash
+helm install tulipfarm ./your-chart -n tulipfarm -f kubernetes-values.yaml
+```
 
-| Requirement | Detail |
-| --- | --- |
-| **Image** | `ghcr.io/tulipfarm/tulipfarm:<tag>` — multi-arch (amd64, arm64). Pin a tag; do not track `latest` in a cluster. |
-| **Soul volume** | Mounted only by `app` at `/opt/tulipfarm/soul`. It is a git working tree, not shared application data. |
-| **Data volume** | Mounted read-write by `app` and read-only by both workers at `/data`. It holds generated bootstrap secrets and service credentials. |
-| **Filesystem group** | The image runs as UID `1000` (`node`). Set `podSecurityContext.fsGroup: 1000` or mounted PVCs may not be writable. |
+```bash
+kubectl -n tulipfarm rollout status deployment/app --timeout=600s
+```
 
-If your storage class cannot mount the same `/data` volume into all three workloads, supply
-`ENCRYPTION_KEY`, `WORKER_API_CREDENTIAL`, and `INTEGRATION_WORKER_API_CREDENTIAL` from
-Kubernetes `Secret` objects instead. The Compose path relies on `app` minting those
-credentials into `/data` on first boot and the workers reading them back.
+> **Verify.** `kubectl -n tulipfarm rollout status deployment/app --timeout=600s` succeeds — expect the app deployment finishes rolling out.
 
-## Required environment
+If that check fails, see [what to do next](/docs/self-hosting/when-install-fails#readyz).
 
-| Workload | Variable | Notes |
-| --- | --- | --- |
-| All | `DATABASE_URL` | PostgreSQL 17 that permits `CREATE EXTENSION vector` and `citext`. See [Managed database](/docs/self-hosting/managed-database). |
-| All | `NODE_ENV` | `production`. |
-| `app` | `PORT` | `8080`. |
-| `app` | `PUBLIC_URL` | The `https://` origin your Ingress serves. Sets the address at boot; change it later under **Business → About** without a rollout. |
-| `app` | `SOUL_PATH` | `/opt/tulipfarm/soul`. |
-| `app` | `TF_DATA_DIR` | `/data`. |
-| `app`, `worker` | `ENCRYPTION_KEY` | Prefer a `Secret`. If unset, `app` generates it in `/data/secrets.env` and `worker` reads it from there. |
-| `app` | `JWT_SECRET`, `WEBHOOK_SIGNING_SECRET` | Prefer `Secret` values. |
-| `worker` | `WORKER_PORT` | `4020`. |
-| `worker` | `WORKER_MAINTENANCE` | `true` on the one worker that owns cron and maintenance consumers. |
-| `worker` | `INTERNAL_API_URL` | URL for the `app` Service, for example `http://app:8080`. |
-| `worker` | `WORKER_API_CREDENTIAL` | Service credential. If unset, read from `/data/worker.env` after `app` mints it. |
-| `worker` | `TF_DATA_DIR` | `/data`. |
-| `integration-worker` | `INTEGRATION_WORKER_PORT` | `4030`. |
-| `integration-worker` | `INTERNAL_API_URL` | URL for the `app` Service, for example `http://app:8080`. |
-| `integration-worker` | `INTEGRATION_WORKER_API_CREDENTIAL` | Service credential. If unset, read from `/data/integration-worker.env` after `app` mints it. |
-| `integration-worker` | `TF_DATA_DIR` | `/data`. |
+## Confirm the app is ready
 
-Every variable is listed in [Environment variables](/docs/reference/environment-variables).
+Port-forward the `app` Service and confirm it answers `/readyz`. Migrations run before `app`
+listens, so allow a generous timeout on a fresh database.
 
-<Callout type="warn">
-  If `ENCRYPTION_KEY` is unset, the app generates one and writes it to `/data/secrets.env`.
-  In a cluster that is a trap unless `/data` is backed up and reliably shared: losing that
-  volume makes the database — which holds only ciphertext — undecryptable. The app detects
-  this and **refuses to boot** rather than orphaning your secrets. Put the key in a
-  `Secret` from day one.
-</Callout>
+```bash
+kubectl -n tulipfarm port-forward svc/app 8080:8080 &
+```
 
-## First boot
+> **Verify.** `http://localhost:8080/readyz` answers `200` within 300s.
 
-There is no browser at first boot in most cluster workflows. Use
-[headless seeding](/docs/self-hosting/headless): set `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and
-`LLM_API_KEY` together on `app`, and the instance seeds itself and skips the wizard.
+If that check fails, see [what to do next](/docs/self-hosting/when-install-fails#readyz).
 
-## Ingress
+## Expose the app through Ingress
 
-Terminate TLS at the Ingress and route only to the `app` Service on port `8080`. Do not
+Terminate TLS at the Ingress and route **only** to the `app` Service on port `8080`. Never
 publish `worker` or `integration-worker`; their HTTP servers are probe-only.
 
-**Disable response buffering.** Chat streams over Server-Sent Events; a buffering ingress
-holds every token until the turn completes and the UI looks frozen. On ingress-nginx:
+**Disable response buffering.** Chat streams over Server-Sent Events; a buffering ingress holds
+every token until the turn completes and the UI looks frozen. On ingress-nginx:
 
 ```yaml
 nginx.ingress.kubernetes.io/proxy-buffering: "off"
 nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
 ```
 
-## Backups
+Set `PUBLIC_URL` in the values `config` to the `https://` origin the Ingress serves. It sets
+the address at boot; you can change it later under **Business → About** without a rollout.
 
-Back up PostgreSQL **and** the persistent storage behind `/data` and
-`/opt/tulipfarm/soul`. `/data` holds the encryption key when you have not supplied one and
-also holds auto-minted worker credentials; the soul holds your entire configuration unless
-it is mirrored to a git remote (`SOUL_GIT_REMOTE_URL`). See
-[Updating and rollback](/docs/self-hosting/updating).
+> **Check.** The Ingress serves the app over https and chat tokens stream in as they are produced, not all at once.
+
+## Seed the first admin without a browser
+
+Most cluster workflows have no browser at first boot. Use
+[headless seeding](/docs/self-hosting/headless): set `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and
+`LLM_API_KEY` together on `app`, and the instance seeds itself and skips the setup wizard.
+
+> **Check.** You can sign in with the ADMIN_EMAIL and ADMIN_PASSWORD you seeded, with no wizard shown.
+
+## Back up the three durable things
+
+Three things must survive a cluster rebuild, and restoring only one is not enough:
+
+- **PostgreSQL** — every Record, Run, Turn, audit event, and vector index.
+- **The Secret behind `ENCRYPTION_KEY`** (and the `TF_DATA_DIR` volume, if you let the app
+  generate the key there) — the database holds only ciphertext without it.
+- **The soul** at `SOUL_PATH` — your entire configuration, unless it is mirrored to a git
+  remote with `SOUL_GIT_REMOTE_URL`.
+
+See [Updating and rollback](/docs/self-hosting/updating) before your first upgrade.
+
+> **Check.** A restore drill brings the instance back with its secrets decryptable — database, encryption key, and soul all restored together.
+
+## Update
+
+Pin one image tag in `image.tag`; do not track a moving tag in a cluster. Migrations apply
+automatically on boot and there are **no down-migrations** — read
+[Updating and rollback](/docs/self-hosting/updating) before your first upgrade.
+
+```bash
+helm upgrade tulipfarm ./your-chart -n tulipfarm -f kubernetes-values.yaml
+```
+
+```bash
+kubectl -n tulipfarm rollout status deployment/app --timeout=600s
+```
+
+> **Verify.** `kubectl -n tulipfarm rollout status deployment/app --timeout=600s` succeeds — expect the app deployment finishes rolling out.
+
+If that check fails, see [what to do next](/docs/self-hosting/when-install-fails#readyz).

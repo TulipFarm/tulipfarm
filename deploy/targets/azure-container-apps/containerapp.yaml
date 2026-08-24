@@ -1,0 +1,362 @@
+# Generated from deploy/contract.yml by @tulipfarm/deploy-render. Edit the contract, not this
+# file. Three Container Apps definitions, one per workload, with every port, probe path and
+# environment key grounded in what the runtime actually reads.
+#
+# Azure Container Apps has no durable persistent volume, so the filesystem blob driver is not
+# an option here: set the Azure Blob driver and point DATABASE_URL at managed PostgreSQL.
+
+# ---- app: API, built web UI, and database migrations ----
+name: tulipfarm-app
+type: Microsoft.App/containerApps
+properties:
+  configuration:
+    ingress:
+      external: true
+      targetPort: 8080
+      transport: auto
+      # Chat streams over SSE. allowInsecure stays false; TLS ends at the ingress.
+      allowInsecure: false
+    # Create each with: az containerapp secret set --secrets <name>=<value>
+    # Never write a value into this file; it is committed and served publicly.
+    secrets:
+      - name: encryption-key
+      - name: jwt-secret
+      - name: webhook-signing-secret
+      - name: admin-password
+      - name: llm-api-key
+      - name: soul-git-credential
+      - name: encryption-key-previous
+      - name: api-token-pepper
+      - name: recovery-key
+      - name: s3-access-key-id
+      - name: s3-secret-access-key
+      - name: azure-storage-connection-string
+      - name: azure-storage-key
+      - name: database-url-migrations
+  template:
+    containers:
+      - name: app
+        image: ghcr.io/tulipfarm/tulipfarm:latest
+        probes:
+          - type: Startup
+            httpGet:
+              path: "/readyz"
+              port: 8080
+            failureThreshold: 60
+            periodSeconds: 10
+          - type: Liveness
+            httpGet:
+              path: "/readyz"
+              port: 8080
+          - type: Readiness
+            httpGet:
+              path: "/readyz"
+              port: 8080
+        env:
+          - name: DATABASE_URL
+            value: ""
+          - name: ENCRYPTION_KEY
+            secretRef: encryption-key
+          - name: JWT_SECRET
+            secretRef: jwt-secret
+          - name: WEBHOOK_SIGNING_SECRET
+            secretRef: webhook-signing-secret
+          - name: SOUL_PATH
+            value: ""
+          - name: SOUL_ROOT
+            value: ""
+          - name: PORT
+            value: ""
+          - name: PUBLIC_URL
+            value: ""
+          - name: PUBLIC_API_URL
+            value: ""
+          - name: PUBLIC_ORIGINS_LOCKED
+            value: ""
+          - name: CORS_ORIGIN
+            value: ""
+          - name: VITE_PORT
+            value: ""
+          - name: WEB_DIST
+            value: ""
+          - name: ADMIN_EMAIL
+            value: ""
+          - name: ADMIN_PASSWORD
+            secretRef: admin-password
+          - name: LLM_API_KEY
+            secretRef: llm-api-key
+          - name: LLM_PROVIDER
+            value: ""
+          - name: BUSINESS_NAME
+            value: ""
+          - name: BUSINESS_DESCRIPTION
+            value: ""
+          - name: NODE_ENV
+            value: ""
+          - name: SOUL_GIT_REMOTE_URL
+            value: ""
+          - name: SOUL_GIT_CREDENTIAL
+            secretRef: soul-git-credential
+          - name: BOT_GIT_NAME
+            value: ""
+          - name: BOT_GIT_EMAIL
+            value: ""
+          - name: BUSINESS_ID
+            value: ""
+          - name: SOUL_BUNDLE_RETENTION_DAYS
+            value: ""
+          - name: TF_DATA_DIR
+            value: ""
+          - name: SESSION_TTL_SECONDS
+            value: ""
+          - name: ENCRYPTION_KEY_PREVIOUS
+            secretRef: encryption-key-previous
+          - name: API_TOKEN_PEPPER
+            secretRef: api-token-pepper
+          - name: RECOVERY_KEY
+            secretRef: recovery-key
+          - name: AUTHZ_MODE
+            value: ""
+          - name: AUTHZ_MODEL_GATE
+            value: ""
+          - name: BLOB_STORE
+            value: ""
+          - name: S3_BUCKET
+            value: ""
+          - name: S3_REGION
+            value: ""
+          - name: S3_ENDPOINT
+            value: ""
+          - name: S3_ACCESS_KEY_ID
+            secretRef: s3-access-key-id
+          - name: S3_SECRET_ACCESS_KEY
+            secretRef: s3-secret-access-key
+          - name: S3_FORCE_PATH_STYLE
+            value: ""
+          - name: S3_PREFIX
+            value: ""
+          - name: AZURE_STORAGE_CONTAINER
+            value: ""
+          - name: AZURE_STORAGE_CONNECTION_STRING
+            secretRef: azure-storage-connection-string
+          - name: AZURE_STORAGE_ACCOUNT
+            value: ""
+          - name: AZURE_STORAGE_KEY
+            secretRef: azure-storage-key
+          - name: BUCKET_ADMIN_URL
+            value: ""
+          - name: DATABASE_URL_MIGRATIONS
+            secretRef: database-url-migrations
+          - name: PG_POOL_MAX
+            value: ""
+          - name: PG_CONNECTION_TIMEOUT_MS
+            value: ""
+          - name: PG_STATEMENT_TIMEOUT_MS
+            value: ""
+          - name: PG_IDLE_TIMEOUT_MS
+            value: ""
+          - name: PG_IDLE_IN_TRANSACTION_TIMEOUT_MS
+            value: ""
+          - name: KNOWLEDGE_TRGM_FALLBACK
+            value: ""
+          - name: MARKETPLACE_SOURCE
+            value: ""
+          - name: GIT_SOURCE_ALLOWED_HOSTS
+            value: ""
+          - name: TULIPFARM_VERSION
+            value: ""
+    scale:
+      # TulipFarm runs exactly one replica of each workload. Never raise these.
+      minReplicas: 1
+      maxReplicas: 1
+
+---
+
+# ---- worker: Run dispatch, waits, outbox delivery, cron, and maintenance consumers ----
+name: tulipfarm-worker
+type: Microsoft.App/containerApps
+properties:
+  configuration:
+    ingress:
+      external: false
+      targetPort: 4020
+      transport: auto
+    # Create each with: az containerapp secret set --secrets <name>=<value>
+    # Never write a value into this file; it is committed and served publicly.
+    secrets:
+      - name: encryption-key
+      - name: worker-api-credential
+      - name: s3-access-key-id
+      - name: s3-secret-access-key
+      - name: azure-storage-connection-string
+      - name: azure-storage-key
+  template:
+    containers:
+      - name: worker
+        image: ghcr.io/tulipfarm/tulipfarm:latest
+        probes:
+          - type: Startup
+            httpGet:
+              path: "/livez"
+              port: 4020
+            failureThreshold: 60
+            periodSeconds: 10
+          - type: Liveness
+            httpGet:
+              path: "/livez"
+              port: 4020
+          - type: Readiness
+            httpGet:
+              path: "/livez"
+              port: 4020
+        env:
+          - name: DATABASE_URL
+            value: ""
+          - name: ENCRYPTION_KEY
+            secretRef: encryption-key
+          - name: SOUL_PATH
+            value: ""
+          - name: SOUL_ROOT
+            value: ""
+          - name: INTERNAL_API_URL
+            value: ""
+          - name: NODE_ENV
+            value: ""
+          - name: BUSINESS_ID
+            value: ""
+          - name: TF_DATA_DIR
+            value: ""
+          - name: WORKER_API_CREDENTIAL
+            secretRef: worker-api-credential
+          - name: WORKER_PORT
+            value: ""
+          - name: WORKER_RUN_POLL_MS
+            value: ""
+          - name: WORKER_WAIT_SWEEP_MS
+            value: ""
+          - name: WORKER_OUTBOX_POLL_MS
+            value: ""
+          - name: WORKER_BATCH_SIZE
+            value: ""
+          - name: WORKER_LEASE_MS
+            value: ""
+          - name: WORKER_RUN_MAX_LIFETIME_MS
+            value: ""
+          - name: WORKER_DRAIN_TIMEOUT_MS
+            value: ""
+          - name: WORKER_MAINTENANCE
+            value: ""
+          - name: BLOB_STORE
+            value: ""
+          - name: S3_BUCKET
+            value: ""
+          - name: S3_REGION
+            value: ""
+          - name: S3_ENDPOINT
+            value: ""
+          - name: S3_ACCESS_KEY_ID
+            secretRef: s3-access-key-id
+          - name: S3_SECRET_ACCESS_KEY
+            secretRef: s3-secret-access-key
+          - name: S3_FORCE_PATH_STYLE
+            value: ""
+          - name: S3_PREFIX
+            value: ""
+          - name: AZURE_STORAGE_CONTAINER
+            value: ""
+          - name: AZURE_STORAGE_CONNECTION_STRING
+            secretRef: azure-storage-connection-string
+          - name: AZURE_STORAGE_ACCOUNT
+            value: ""
+          - name: AZURE_STORAGE_KEY
+            secretRef: azure-storage-key
+          - name: PG_POOL_MAX
+            value: ""
+          - name: PG_CONNECTION_TIMEOUT_MS
+            value: ""
+          - name: PG_STATEMENT_TIMEOUT_MS
+            value: ""
+          - name: PG_IDLE_TIMEOUT_MS
+            value: ""
+          - name: PG_IDLE_IN_TRANSACTION_TIMEOUT_MS
+            value: ""
+    scale:
+      # TulipFarm runs exactly one replica of each workload. Never raise these.
+      minReplicas: 1
+      maxReplicas: 1
+
+---
+
+# ---- integration-worker: Slack and GitHub ingress, sync, delivery, retries, and reconciliation ----
+name: tulipfarm-integration-worker
+type: Microsoft.App/containerApps
+properties:
+  configuration:
+    ingress:
+      external: false
+      targetPort: 4030
+      transport: auto
+    # Create each with: az containerapp secret set --secrets <name>=<value>
+    # Never write a value into this file; it is committed and served publicly.
+    secrets:
+      - name: encryption-key
+      - name: webhook-signing-secret
+      - name: integration-worker-api-credential
+  template:
+    containers:
+      - name: integration-worker
+        image: ghcr.io/tulipfarm/tulipfarm:latest
+        probes:
+          - type: Startup
+            httpGet:
+              path: "/livez"
+              port: 4030
+            failureThreshold: 60
+            periodSeconds: 10
+          - type: Liveness
+            httpGet:
+              path: "/livez"
+              port: 4030
+          - type: Readiness
+            httpGet:
+              path: "/livez"
+              port: 4030
+        env:
+          - name: DATABASE_URL
+            value: ""
+          - name: ENCRYPTION_KEY
+            secretRef: encryption-key
+          - name: WEBHOOK_SIGNING_SECRET
+            secretRef: webhook-signing-secret
+          - name: SOUL_PATH
+            value: ""
+          - name: SOUL_ROOT
+            value: ""
+          - name: INTERNAL_API_URL
+            value: ""
+          - name: NODE_ENV
+            value: ""
+          - name: BUSINESS_ID
+            value: ""
+          - name: TF_DATA_DIR
+            value: ""
+          - name: INTEGRATION_WORKER_API_CREDENTIAL
+            secretRef: integration-worker-api-credential
+          - name: INTEGRATION_WORKER_PORT
+            value: ""
+          - name: INTEGRATION_WORKER_DRAIN_TIMEOUT_MS
+            value: ""
+          - name: PG_POOL_MAX
+            value: ""
+          - name: PG_CONNECTION_TIMEOUT_MS
+            value: ""
+          - name: PG_STATEMENT_TIMEOUT_MS
+            value: ""
+          - name: PG_IDLE_TIMEOUT_MS
+            value: ""
+          - name: PG_IDLE_IN_TRANSACTION_TIMEOUT_MS
+            value: ""
+    scale:
+      # TulipFarm runs exactly one replica of each workload. Never raise these.
+      minReplicas: 1
+      maxReplicas: 1

@@ -173,6 +173,8 @@ function directorySlugs(relativePath: string, marker: string): string[] {
 const verifiers: Record<string, () => string> = {
   "integration-slugs": () => directorySlugs("integrations", "manifest.yml").join(","),
   "integration-count": () => String(directorySlugs("integrations", "manifest.yml").length),
+  "deploy-target-slugs": () => directorySlugs("deploy/targets", "manifest.yml").join(","),
+  "deploy-target-count": () => String(directorySlugs("deploy/targets", "manifest.yml").length),
 };
 
 describe("docs protected facts", () => {

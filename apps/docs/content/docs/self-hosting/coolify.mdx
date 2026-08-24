@@ -1,108 +1,111 @@
 ---
 title: Coolify
-description: Run TulipFarm on Coolify as a Docker Compose resource, with Coolify handling the domain and certificate.
+description: Deploy TulipFarm on Coolify as a Docker Compose resource — only the fields its UI needs and where its proxy and backups differ from plain Compose.
 ---
 
-import { Step, Steps } from "fumadocs-ui/components/steps";
+{/* Generated from deploy/targets/coolify/manifest.yml by @tulipfarm/deploy-render. Edit the manifest, not this file. */}
+{/* tf-claim kind=path-exists value="deploy/targets/coolify/manifest.yml" */}
+
 import { Callout } from "fumadocs-ui/components/callout";
 
-Coolify deploys TulipFarm from its Compose file unchanged. There is nothing to build and
-no repository to connect — Coolify pulls the published image.
+Coolify runs TulipFarm from the **same `docker-compose.yml` as a plain Compose deploy**, so this
+page is deliberately short: it covers only what Coolify does differently — which resource type to
+pick, where its UI wants each value, and how its proxy and backups diverge.
 
-<Callout type="info">
-  There is no TulipFarm entry in the Coolify service template list yet. Use the **Docker
-  Compose** resource type below; it is the same thing a template would do.
+For everything the two share — what the secrets are, why the data volume matters, how updates and
+scale-out behave — follow [Docker Compose](/docs/self-hosting/docker-compose). Nothing here
+repeats it; each step below states the Coolify action and links back for the reasoning.
+
+<Callout type="warn">
+  This target is `community`, not `supported`. Coolify consumes the exact Compose artifact CI
+  boots in the `Compose parity` job, so **the file you paste is tested** — but standing Coolify
+  itself up is not exercised in CI, so the wiring around that file is documented, not booted.
+  Booting a plain Compose stack would prove nothing Coolify-specific, so we do not stamp this
+  integration verified on that basis.
 </Callout>
 
-## Deploy it
+## Create a Docker Compose resource
 
-<Steps>
+Coolify has no TulipFarm template yet, so add a new resource and choose **Docker Compose** —
+it does exactly what a template would. Paste the published
+[`docker-compose.yml`]({{SITE_URL}}/docker-compose.yml) into the editor. No edits are needed
+to start: every variable has a default, and the app generates its own secrets on first boot.
 
-<Step>
+> **Check.** The resource lists the app, worker, integration-worker, and postgres services from the pasted Compose file.
 
-### Create a Docker Compose resource
+## Set the environment variables Coolify should own
 
-In your project, add a new resource and choose **Docker Compose**. Paste the contents of
-TulipFarm's `docker-compose.yml`:
-
-```bash
-curl -fsSL {{SITE_URL}}/docker-compose.yml
-```
-
-No edits are required for it to start — every variable has a default and the app generates
-its own secrets on first boot.
-
-</Step>
-
-<Step>
-
-### Set the environment variables
-
-In the resource's **Environment Variables** tab:
+Open the resource's **Environment Variables** tab. The point of setting these here rather than
+letting the app generate them is that Coolify holds them in its own secret storage instead of
+on the app's `tulipfarm-data` volume:
 
 | Variable | Value | Why |
 | --- | --- | --- |
-| `PUBLIC_URL` | `https://tulip.example.com` | Optional environment fallback for headless/IaC setup. |
-| `POSTGRES_PASSWORD` | a generated password | Replaces the file's `tulipfarm` default. |
-| `ENCRYPTION_KEY` | `openssl rand -base64 32` | Recommended. Keeps the key in Coolify's secret storage instead of on the app's data volume. |
+| `ENCRYPTION_KEY` | `openssl rand -base64 32` | Keeps the key in Coolify, off the data volume. Set it **before the first deploy** — a key introduced after the app has generated its own cannot decrypt existing secrets, and the app refuses to boot rather than orphan them. |
+| `POSTGRES_PASSWORD` | a password of your own | Replaces the file's `tulipfarm` default. |
+| `PUBLIC_URL` | `https://tulip.example.com` | The public address the app assumes until you save the real one in **Business → About**. |
 | `TULIPFARM_VERSION` | e.g. `v0.1.0` | Optional. Pin a tag instead of tracking `latest`. |
 
-Set `ENCRYPTION_KEY` **before the first deploy** — introducing one after the app has already
-generated its own means the new key cannot decrypt existing secrets, and the app will refuse
-to boot rather than orphan them.
+Every other variable and its default lives on
+[Docker Compose → Things worth changing](/docs/self-hosting/docker-compose#things-worth-changing);
+this table is only the handful Coolify's secret storage should hold.
 
-</Step>
+> **Check.** ENCRYPTION_KEY is set in the Environment Variables tab before the first deploy, not after it.
 
-<Step>
-
-### Attach the domain
+## Attach the domain through Coolify's proxy
 
 Point a domain at the `app` service on port `8080`. Coolify's proxy terminates TLS and
-requests the certificate.
+requests the certificate, so you do not run [the TLS setup](/docs/self-hosting/tls) yourself.
 
-Two things to get right:
+Two Coolify-specific things to get right:
 
-- **Disable response buffering** for the service if your proxy configuration offers it. Chat
-  streams over Server-Sent Events; a buffering proxy holds every token until the turn ends.
-- After setup, open **Business → About** and save the exact public domain. TulipFarm then uses it
-  for cookies, OAuth callbacks, webhooks, and shared links without a redeploy. Set
-  `PUBLIC_ORIGINS_LOCKED=true` only if the environment should remain authoritative.
+- **Disable response buffering** on the service if the proxy configuration offers it. Chat
+  streams over Server-Sent Events, and a buffering proxy holds every token until the turn
+  ends, so the reply looks frozen and then arrives all at once.
+- After the first boot, open **Business → About** and save the exact public domain. TulipFarm
+  then uses it for cookies, OAuth callbacks, webhooks, and shared links with no redeploy. Set
+  `PUBLIC_ORIGINS_LOCKED=true` only if the environment values should stay authoritative.
 
-</Step>
+> **Check.** The domain serves the app over https and chat tokens stream in as they are produced, not all at once at the end of the turn.
 
-<Step>
+## Deploy and finish setup
 
-### Deploy and finish setup
-
-Deploy, then watch the logs until the health check passes. Open your domain — the app
-redirects to `/setup`, where you create the first admin account. Walk through
+Deploy the resource, then watch the logs until the health check on `/readyz` passes — first
+boot runs database migrations, so give it a minute. Open your domain: the app redirects to
+`/setup`, where you create the first admin account. Walk through
 [Finish setup](/docs/self-hosting/install#finish-setup).
 
-</Step>
+> **Check.** The app's health check passes in Coolify and your domain opens the /setup wizard.
 
-</Steps>
+## Back up the volumes through Coolify
 
-## Persistence
-
-Coolify manages the four named volumes from the Compose file (`tulipfarm-postgres`,
-`tulipfarm-soul`, `tulipfarm-data`, `tulipfarm-bucket`). Include all four in your Coolify
-backup configuration, or use a [managed database](/docs/self-hosting/managed-database) and back
-up `tulipfarm-soul`, `tulipfarm-data` and `tulipfarm-bucket` only.
+Coolify manages the four named volumes from the Compose file — `tulipfarm-postgres`,
+`tulipfarm-soul`, `tulipfarm-data`, and `tulipfarm-bucket`. Add all four to Coolify's backup
+configuration, or use a [managed database](/docs/self-hosting/managed-database) and back up
+`tulipfarm-soul`, `tulipfarm-data`, and `tulipfarm-bucket` only.
 
 <Callout type="warn">
-  `tulipfarm-data` holds the generated `ENCRYPTION_KEY` unless you set one yourself. Lose
-  that volume without a backup and every stored secret — LLM keys, integration credentials —
-  becomes unrecoverable, because the database holds only ciphertext.
+  `tulipfarm-data` holds the generated `ENCRYPTION_KEY` unless you set one yourself, and
+  `tulipfarm-bucket` holds every uploaded and generated file. The database stores only
+  ciphertext, so losing either volume loses the secrets or files it guards — see
+  [what happens to your secrets](/docs/self-hosting/docker-compose#what-happens-to-your-secrets).
 </Callout>
 
-## Updating
+> **Check.** All four named volumes appear in Coolify's backup configuration, or the three non-database volumes do when you use a managed database.
 
-Redeploy the resource. If `TULIPFARM_VERSION` is unset, that pulls the newest `latest`;
-if it is pinned, bump it first. Migrations run automatically on boot — read
-[Updating and rollback](/docs/self-hosting/updating) before the first one.
+## Update
 
-## Do not scale it
+Redeploy the resource. With `TULIPFARM_VERSION` unset that pulls the newest `latest`; if you
+pinned a tag, bump it first. Migrations run automatically on boot and have **no down-path** —
+read [Updating and rollback](/docs/self-hosting/updating) before the first one.
 
-Keep `app`, `worker`, and `integration-worker` at **one replica each**. The `app` owns the
-soul git worktree and migrations; the `worker` owns turn execution plus cron/maintenance.
-See [Deploy](/docs/self-hosting#what-every-deployment-needs).
+> **Check.** The redeployed resource comes back healthy on the image tag you expected.
+
+## Keep one replica of each service
+
+Leave `app`, `worker`, and `integration-worker` at **one replica each**. Coolify's scale
+control will corrupt the soul git worktree on `app` or duplicate maintenance work on
+`worker`. Scale vertically; horizontal scaling is a deliberate design constraint. The
+reasoning is the same everywhere — [Deploy](/docs/self-hosting#what-every-deployment-needs).
+
+> **Check.** Each of app, worker, and integration-worker runs exactly one replica in Coolify.

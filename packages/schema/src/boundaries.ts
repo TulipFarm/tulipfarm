@@ -6,6 +6,7 @@ export const BOUNDARIES = [
   "llm",
   "event",
   "integration",
+  "deployment",
 ] as const;
 
 export type ValidationBoundary = (typeof BOUNDARIES)[number];

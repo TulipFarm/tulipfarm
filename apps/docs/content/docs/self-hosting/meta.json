@@ -9,6 +9,7 @@
     "portainer",
     "other-platforms",
     "kubernetes",
+    "azure-container-apps",
     "---Make it production-ready---",
     "production-checklist",
     "tls",

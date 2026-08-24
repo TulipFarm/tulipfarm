@@ -96,7 +96,9 @@ jobs:
           bash -n \
             scripts/install.sh \
             scripts/uninstall.sh \
+            scripts/test/lib/boot-harness.sh \
             scripts/test/compose-parity.sh \
+            scripts/test/kubernetes-boot.sh \
             scripts/test/installer-smoke.sh
 
   # The one amd64 build. Its output tarball is the input to every downstream job.

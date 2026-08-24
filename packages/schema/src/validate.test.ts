@@ -54,8 +54,8 @@ describe("validate", () => {
     expect(() => validate("resource", SchemaWithXKeywords, { id: "TICK-1" })).not.toThrow();
   });
 
-  it("BOUNDARIES contains all 7 entries", () => {
-    expect(BOUNDARIES).toHaveLength(7);
+  it("BOUNDARIES contains all 8 entries", () => {
+    expect(BOUNDARIES).toHaveLength(8);
     expect(BOUNDARIES).toContain("soul");
     expect(BOUNDARIES).toContain("resource");
     expect(BOUNDARIES).toContain("api");
@@ -63,5 +63,6 @@ describe("validate", () => {
     expect(BOUNDARIES).toContain("llm");
     expect(BOUNDARIES).toContain("event");
     expect(BOUNDARIES).toContain("integration");
+    expect(BOUNDARIES).toContain("deployment");
   });
 });

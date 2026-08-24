@@ -8,7 +8,7 @@ emits a fully static site to `out/`, deployed separately from the app.
 ## Commands
 
 ```bash
-pnpm --filter @tulipfarm/docs dev        # dev server on http://localhost:4020
+pnpm --filter @tulipfarm/docs dev        # dev server on http://localhost:5000
 pnpm --filter @tulipfarm/docs build      # static export to apps/docs/out/
 pnpm --filter @tulipfarm/docs start      # serve the built out/ locally
 pnpm --filter @tulipfarm/docs lint       # biome check

@@ -1,0 +1,142 @@
+# Generated from deploy/contract.yml by @tulipfarm/deploy-render. Edit the contract, not this
+# file. TulipFarm ships no official chart yet: these are the machine-generated configuration
+# values — every key grounded in the runtime contract — to feed the chart you supply.
+
+image:
+  repository: ghcr.io/tulipfarm/tulipfarm
+  # Pin a tag in a cluster; never track a moving tag.
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+# One replica each — TulipFarm does not scale horizontally, so use strategy: Recreate.
+workloads:
+  app:
+    replicas: 1
+    port: 8080
+    role: "API, built web UI, and database migrations"
+    healthProbe:
+      path: "/readyz"
+      expect: 200
+  worker:
+    replicas: 1
+    port: 4020
+    role: "Run dispatch, waits, outbox delivery, cron, and maintenance consumers"
+    healthProbe:
+      path: "/livez"
+      expect: 200
+  integration-worker:
+    replicas: 1
+    port: 4030
+    role: "Slack and GitHub ingress, sync, delivery, retries, and reconciliation"
+    healthProbe:
+      path: "/livez"
+      expect: 200
+
+dependencies:
+  postgres:
+    # A cluster rarely wants a bundled database. Point DATABASE_URL at managed PostgreSQL 17
+    # (pgvector + citext) and supply it from a Secret; see secretRefs below.
+    external: true
+  blob:
+    # One of: filesystem, s3, azure. A cluster has no durable local disk, so filesystem suits
+    # only a single-node test; use s3 or azure for anything real.
+    driver: "s3"
+
+# Durable state that must survive restart and upgrade. The contract names these symbolically
+# (by the variable that points at them); the chart maps each to a PersistentVolumeClaim.
+persistence:
+  - path: "TF_DATA_DIR"
+    holds: "Generated secrets.env, worker.env, integration-worker.env, and bucket.env"
+  - path: "SOUL_PATH"
+    holds: "The live soul git checkout — Resource schemas, Agents, Skills, Routines, Integrations"
+  - path: "postgres data directory"
+    holds: "Every Record, Run, Turn, audit event, and vector index"
+
+# Non-secret configuration. Every key is a real environment variable; see the reference for
+# what each does and its default. Fill the ones your deployment needs and delete the rest.
+config:
+  # Required boot configuration
+  DATABASE_URL: ""
+  SOUL_PATH: ""
+  SOUL_ROOT: ""
+  # Networking and URLs
+  PORT: ""
+  PUBLIC_URL: ""
+  PUBLIC_API_URL: ""
+  PUBLIC_ORIGINS_LOCKED: ""
+  CORS_ORIGIN: ""
+  VITE_PORT: ""
+  VITE_API_URL: ""
+  WEB_DIST: ""
+  INTERNAL_API_URL: ""
+  # Headless seeding
+  ADMIN_EMAIL: ""
+  LLM_PROVIDER: ""
+  BUSINESS_NAME: ""
+  BUSINESS_DESCRIPTION: ""
+  NODE_ENV: ""
+  # Soul and git
+  SOUL_GIT_REMOTE_URL: ""
+  BOT_GIT_NAME: ""
+  BOT_GIT_EMAIL: ""
+  BUSINESS_ID: ""
+  SOUL_BUNDLE_RETENTION_DAYS: ""
+  # Workers and service credentials
+  TF_DATA_DIR: ""
+  WORKER_PORT: ""
+  WORKER_RUN_POLL_MS: ""
+  WORKER_WAIT_SWEEP_MS: ""
+  WORKER_OUTBOX_POLL_MS: ""
+  WORKER_BATCH_SIZE: ""
+  WORKER_LEASE_MS: ""
+  WORKER_RUN_MAX_LIFETIME_MS: ""
+  WORKER_DRAIN_TIMEOUT_MS: ""
+  WORKER_MAINTENANCE: ""
+  INTEGRATION_WORKER_PORT: ""
+  INTEGRATION_WORKER_DRAIN_TIMEOUT_MS: ""
+  # Sessions, Secrets, and limits
+  SESSION_TTL_SECONDS: ""
+  AUTHZ_MODE: ""
+  AUTHZ_MODEL_GATE: ""
+  # File storage
+  BLOB_STORE: ""
+  S3_BUCKET: ""
+  S3_REGION: ""
+  S3_ENDPOINT: ""
+  S3_FORCE_PATH_STYLE: ""
+  S3_PREFIX: ""
+  AZURE_STORAGE_CONTAINER: ""
+  AZURE_STORAGE_ACCOUNT: ""
+  BUCKET_ADMIN_URL: ""
+  # Database and knowledge tuning
+  PG_POOL_MAX: ""
+  PG_CONNECTION_TIMEOUT_MS: ""
+  PG_STATEMENT_TIMEOUT_MS: ""
+  PG_IDLE_TIMEOUT_MS: ""
+  PG_IDLE_IN_TRANSACTION_TIMEOUT_MS: ""
+  KNOWLEDGE_TRGM_FALLBACK: ""
+  # Skills, sandbox, and install sources
+  MARKETPLACE_SOURCE: ""
+  GIT_SOURCE_ALLOWED_HOSTS: ""
+  TULIPFARM_VERSION: ""
+
+# These variables hold key material. Create a Kubernetes Secret and reference it here by name;
+# never write a value into this file. The reference lists the generate recipe for each.
+secretRefs:
+  - ENCRYPTION_KEY
+  - JWT_SECRET
+  - WEBHOOK_SIGNING_SECRET
+  - VITE_API_TOKEN
+  - ADMIN_PASSWORD
+  - LLM_API_KEY
+  - SOUL_GIT_CREDENTIAL
+  - WORKER_API_CREDENTIAL
+  - INTEGRATION_WORKER_API_CREDENTIAL
+  - ENCRYPTION_KEY_PREVIOUS
+  - API_TOKEN_PEPPER
+  - RECOVERY_KEY
+  - S3_ACCESS_KEY_ID
+  - S3_SECRET_ACCESS_KEY
+  - AZURE_STORAGE_CONNECTION_STRING
+  - AZURE_STORAGE_KEY
+  - DATABASE_URL_MIGRATIONS
