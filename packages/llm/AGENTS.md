@@ -31,8 +31,15 @@ subscription-CLI model adapters.
   block would take every working chain down with it and leave no page from which to delete it.
 - `chainModel(ids)` must execute the whole selected chain; do not collapse fallback to the head.
 - API-keyed providers read `entry.api_key_ref`: `env://VAR` from env, else `secrets.get(ref)`.
-- Every model/provider failure advances fallback; only caller cancellation stops the chain. A
-  streamed attempt commits only after clean completion, so partial output never mixes providers.
+- Every model/provider failure before the first output part advances fallback; only caller
+  cancellation stops the chain. A streamed attempt commits at its first output part and is then
+  forwarded live, so partial output never mixes providers — a failure after that ends the call
+  rather than switching links. Never drain a stream to completion before returning it: that makes
+  time-to-first-token equal the provider's time-to-last-token for every call.
+- A committed stream holds its gate lease until the stream ends, so **every** exit — end, failure,
+  cancel, or the caller's `abortSignal` — must settle it exactly once. `succeeded`/`failed` are not
+  idempotent and consume the breaker's single half-open probe: reporting both corrupts the failure
+  count, reporting neither wedges the provider shut. Caller cancellation is not a provider fault.
 - Bad Subscription Provider credentials throw `LlmProviderError("model_authentication_failed")`.
 - CLI usage reports are running totals, not deltas; never sum them. A turn's totals come from the
   terminal `result` message where the CLI sends one: an `assistant` message carries the snapshot

@@ -8,6 +8,11 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
 import type { ConversationStore } from "../conversations/service";
+import {
+  type MemoryDocumentReader,
+  resolveSoulReminder,
+  type SubjectAuthorityLayers,
+} from "../soul/reminder";
 import type { ConversationDoc, ConversationRepo } from "./conversations";
 import { type MessageRepo, referencedFileIds, withUnavailableFiles } from "./messages";
 import { MessageSchema } from "./schemas";
@@ -42,6 +47,14 @@ export interface ConversationRoutesDeps {
    */
   files?: Pick<FileService, "presentFor">;
   soulLoader?: SoulLoader;
+  /**
+   * Lets `debug-context` narrow the Soul reminder the same way a Turn does. Absent means the
+   * view reports an empty reminder, which is also what a Turn would send.
+   */
+  authorityLayers?: SubjectAuthorityLayers;
+  /** Fed to the reminder so the drawer shows the same personal blocks the Turn sends. */
+  memory?: MemoryDocumentReader;
+  customInstructions?: (userId: string) => Promise<string | undefined>;
 }
 
 export function registerConversationRoutes(
@@ -49,7 +62,16 @@ export function registerConversationRoutes(
   deps: ConversationRoutesDeps,
   requireAuth: PreHandler
 ): void {
-  const { repo, messageRepo, soulLoader, files, turnStore } = deps;
+  const {
+    repo,
+    messageRepo,
+    soulLoader,
+    files,
+    turnStore,
+    authorityLayers,
+    memory,
+    customInstructions,
+  } = deps;
 
   app.get(
     "/api/v1/chats",
@@ -356,9 +378,10 @@ export function registerConversationRoutes(
               properties: {
                 conversationId: { type: "string" },
                 systemPrompt: { type: "string" },
+                soulReminder: { type: "string" },
                 messages: { type: "array", items: MessageSchema },
               },
-              required: ["conversationId", "systemPrompt", "messages"],
+              required: ["conversationId", "systemPrompt", "soulReminder", "messages"],
             },
             401: ErrorSchema,
             404: ErrorSchema,
@@ -374,8 +397,23 @@ export function registerConversationRoutes(
         }
         const agent = resolveAgent(soulLoader, convo.agentId);
         const systemPrompt = assembleAgentSystemPrompt({ agent });
+        const soulReminder = await resolveSoulReminder({
+          ...(authorityLayers === undefined ? {} : { authorityLayers }),
+          ...(soulLoader === undefined ? {} : { soulLoader }),
+          ...(memory === undefined ? {} : { memory }),
+          ...(customInstructions === undefined ? {} : { customInstructions }),
+          businessId: DEPLOYMENT_BUSINESS_ID,
+          subjectId: user._id,
+          subjectKind: "user",
+          now: new Date(),
+        });
         const history = await messageRepo.listByConversation(id, 1000);
-        return reply.send({ conversationId: id, systemPrompt, messages: history.items });
+        return reply.send({
+          conversationId: id,
+          systemPrompt,
+          soulReminder,
+          messages: history.items,
+        });
       }
     );
   }

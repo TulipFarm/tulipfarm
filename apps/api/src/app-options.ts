@@ -71,6 +71,7 @@ import type { CanonicalRoutineAuthoringService } from "./routines/authoring";
 import type { RunEventRouteDeps } from "./runs/events";
 import type { RunReplayDeps } from "./runs/replay";
 import type { SetupAdminCreator } from "./setup/first-admin";
+import type { SubjectAuthorityLayers } from "./soul/reminder";
 import type { SurfaceActionStore } from "./surfaces/action-store";
 import type { SurfaceArtifactStore } from "./surfaces/artifact-store";
 import type { SystemRoutesDeps } from "./system/routes";
@@ -136,6 +137,11 @@ export interface AppOptions {
    * which is what every test and the pre-authorization boot path want; production wires it.
    */
   recordAuthorizer?: RecordAuthorizer;
+  /**
+   * Narrows the Soul reminder in the dev-only `debug-context` view to what the reader may reach,
+   * so that view reports what a Turn would actually send rather than an unfiltered catalogue.
+   */
+  authorityLayers?: SubjectAuthorityLayers;
   /**
    * Decides route authority for every route carrying a `RouteAuthorization`. Absent falls back to
    * each declaration's own `fallback`, so a deployment or test without it is never widened.

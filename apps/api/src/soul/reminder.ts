@@ -1,0 +1,120 @@
+import {
+  filterSoulCatalogue,
+  filterSoulPersonal,
+  renderSoulReminder,
+  type SoulBusinessDetails,
+  type SoulReminderPersonal,
+} from "@tulipfarm/agent-runtime";
+import type { AuthorityLayer } from "@tulipfarm/authz";
+import { buildSoulCatalogue, type SoulLoader } from "@tulipfarm/soul";
+import { type AuthorityPrincipal, principalKindOf } from "@tulipfarm/tool-host";
+
+/**
+ * The one layer read the Soul reminder needs; `LiveAuthorityLayerResolver` satisfies it.
+ *
+ * Declared as a port rather than taking the class, so callers depend on the question they ask and
+ * not on how the durable answer is assembled.
+ */
+export interface SubjectAuthorityLayers {
+  resolvePrincipalLayer(name: string, principal: AuthorityPrincipal): Promise<AuthorityLayer>;
+}
+
+/** The Memory read the reminder needs; `MemoryDocumentRepo` satisfies it. */
+export interface MemoryDocumentReader {
+  render(businessId: string, userId: string): Promise<string>;
+}
+
+export interface SoulReminderInput {
+  readonly authorityLayers?: SubjectAuthorityLayers;
+  readonly soulLoader?: SoulLoader;
+  /** Absent leaves `<user-memory>` empty rather than failing the Turn. */
+  readonly memory?: MemoryDocumentReader;
+  /** Absent leaves `<custom-instructions>` empty rather than failing the Turn. */
+  readonly customInstructions?: (userId: string) => Promise<string | undefined>;
+  readonly businessId: string;
+  readonly subjectId: string;
+  readonly subjectKind: string;
+  readonly now: Date;
+}
+
+/** Reads a manifest field as non-blank text, so an unset key and a blank one behave alike. */
+function text(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+/**
+ * Projects `soul.yaml` to the business block.
+ *
+ * Reads the manifest the loader already parsed rather than the file, so the reminder cannot
+ * disagree with the Soul the rest of the Turn is running against. The keys are the ones
+ * `get_business_profile` and `GET /api/v1/business` read, so all three tell the same story.
+ */
+function businessFrom(soulLoader: SoulLoader | undefined): SoulBusinessDetails | undefined {
+  const manifest = soulLoader?.manifest;
+  if (!manifest) return undefined;
+  const name = text(manifest.businessName);
+  const description = text(manifest.businessDescription);
+  const website = text(manifest.businessWebsite);
+  if (name === undefined && description === undefined && website === undefined) return undefined;
+  return {
+    ...(name === undefined ? {} : { name }),
+    ...(description === undefined ? {} : { description }),
+    ...(website === undefined ? {} : { website }),
+  };
+}
+
+/**
+ * Reads the subject's Memory and standing instructions.
+ *
+ * A failed read yields an empty block, never a failed Turn: this reminder is an optimisation over
+ * `get_memory`, and losing it must cost the conversation nothing more than a Tool call.
+ */
+async function personalFor(input: SoulReminderInput): Promise<SoulReminderPersonal> {
+  const [memory, customInstructions] = await Promise.all([
+    input.memory?.render(input.businessId, input.subjectId).catch(() => undefined),
+    input.customInstructions?.(input.subjectId).catch(() => undefined),
+  ]);
+  return {
+    ...(memory === undefined ? {} : { memory }),
+    ...(customInstructions === undefined ? {} : { customInstructions }),
+  };
+}
+
+/**
+ * Renders the Soul reminder for one subject, or `""` when no layer resolver is composed.
+ *
+ * Lives outside the Turn resolver because two callers must agree on it exactly: the Turn, which
+ * sends it to the model, and `/chats/:id/debug-context`, which claims to show what the model got.
+ * A second implementation there would drift, and a debug view that drifts is worse than none.
+ *
+ * Only the subject's own layer is intersected, not the Agent's. `ModelSelectorGate` runs its
+ * user+agent intersection in shadow mode precisely because no Role grants an Agent principal
+ * anything today, so enforcing that layer here would empty the reminder for everyone. This block
+ * is a disclosure into the participant's chat, so the participant's authority is the right
+ * boundary; every action it might tempt an Agent into is still gated by the full intersection at
+ * the Tool.
+ *
+ * A subject kind that maps to no principal renders nothing, rather than intersecting an empty set,
+ * which a careless reader could take for "allowed".
+ */
+export async function resolveSoulReminder(input: SoulReminderInput): Promise<string> {
+  const resolver = input.authorityLayers;
+  if (resolver === undefined) return "";
+  const kind = principalKindOf(input.subjectKind);
+  if (kind === undefined) return "";
+  const layer = await resolver.resolvePrincipalLayer("user", {
+    id: input.subjectId,
+    businessId: input.businessId,
+    kind,
+  });
+  const business = businessFrom(input.soulLoader);
+  const catalogue = {
+    ...buildSoulCatalogue(input.soulLoader),
+    ...(business === undefined ? {} : { business }),
+  };
+  const personal = await personalFor(input);
+  return renderSoulReminder(
+    filterSoulCatalogue(catalogue, [layer], input.now),
+    filterSoulPersonal(personal, [layer], input.now)
+  );
+}

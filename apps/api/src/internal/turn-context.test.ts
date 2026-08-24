@@ -1,4 +1,5 @@
 import { DEFAULT_GUARDRAILS, type GuardrailsService } from "@tulipfarm/agent-runtime";
+import type { AccessGrant } from "@tulipfarm/authz";
 import { MAX_HISTORY_TOKENS, MAX_TOOL_STEPS, MEMORY_METRICS } from "@tulipfarm/memory";
 import type { Attributes, LogLevel, TelemetryPort } from "@tulipfarm/observability";
 import type { ArtifactService, ChildLinkAncestry } from "@tulipfarm/run-kernel";
@@ -19,8 +20,16 @@ import {
   TURN_ID,
   turn,
 } from "../test/turn-host-fixtures";
+import type { SubjectAuthorityLayers } from "./turn-context";
 import { type ChannelDeliveryReader, ChatTurnContextResolver } from "./turn-context";
-import type { TurnAuthority } from "./turn-host";
+import type { HostedTurnContext, TurnAuthority } from "./turn-host";
+
+/** A layer resolver that hands back one fixed layer, standing in for the durable Role read. */
+function layers(grants: AccessGrant[]): SubjectAuthorityLayers {
+  return { resolvePrincipalLayer: async (name) => ({ name, grants }) };
+}
+
+const CAN_DO_ANYTHING: AccessGrant[] = [{ action: "*", resourceType: "*", effect: "allow" }];
 
 const AUTHORITY: TurnAuthority = {
   businessId: BUSINESS_ID,
@@ -92,6 +101,12 @@ function makeResolver(
     bundledSkills?: Record<string, BundledSkill>;
     telemetry?: TelemetryPort;
     childLinks?: ChildLinkAncestry;
+    agents?: readonly { name: string; description?: string }[];
+    manifest?: Record<string, unknown>;
+    memory?: string;
+    memoryFails?: boolean;
+    customInstructions?: string;
+    authorityLayers?: SubjectAuthorityLayers;
   } = {},
   channelDeliveries?: ChannelDeliveryReader
 ) {
@@ -100,12 +115,18 @@ function makeResolver(
   const registry = new ToolRegistry();
   for (const name of options.tools ?? []) registry.register(toolDef(name));
   const soulLoader =
-    options.skills === undefined
+    options.skills === undefined && options.agents === undefined && options.manifest === undefined
       ? undefined
       : ({
-          skills: new Map(options.skills.map((skill) => [skill.name, skill])),
-          agents: new Map(),
+          skills: new Map((options.skills ?? []).map((skill) => [skill.name, skill])),
+          agents: new Map(
+            (options.agents ?? []).map((agent) => [
+              agent.name,
+              { name: agent.name, frontmatter: { description: agent.description ?? "" }, body: "" },
+            ])
+          ),
           surfaceComponents: new Map(),
+          manifest: options.manifest ?? null,
         } as unknown as SoulLoader);
   const bundledSkills =
     options.bundledSkills === undefined
@@ -127,6 +148,22 @@ function makeResolver(
       ...(options.childLinks ? { childLinks: options.childLinks } : {}),
       ...(soulLoader ? { soulLoader } : {}),
       ...(bundledSkills ? { bundledSkills } : {}),
+      ...(options.authorityLayers ? { authorityLayers: options.authorityLayers } : {}),
+      ...(options.memory === undefined
+        ? {}
+        : { memory: { render: async () => options.memory as string } }),
+      ...(options.memoryFails === true
+        ? {
+            memory: {
+              render: async () => {
+                throw new Error("postgres is down");
+              },
+            },
+          }
+        : {}),
+      ...(options.customInstructions === undefined
+        ? {}
+        : { customInstructions: async () => options.customInstructions }),
     }),
   };
 }
@@ -373,5 +410,131 @@ describe("ChatTurnContextResolver — a delegated Run's granted authority", () =
     });
 
     await expect(resolver.resolve(AUTHORITY)).rejects.toMatchObject({ code: "link_unreadable" });
+  });
+});
+
+describe("ChatTurnContextResolver — the Soul reminder", () => {
+  function reminderIn(messages: HostedTurnContext["messages"]): string | undefined {
+    const found = messages.find((m) => contentText(m.content).startsWith("<system-reminder>"));
+    return found === undefined ? undefined : contentText(found.content);
+  }
+
+  it("tells the Agent what the Soul holds, right after the system prompt", async () => {
+    const { resolver } = makeResolver({
+      agents: [{ name: "triage", description: "Routes tickets" }],
+      authorityLayers: layers(CAN_DO_ANYTHING),
+      messages: [message({ id: "message-1", content: "hello" })],
+    });
+
+    const context = await resolver.resolve(AUTHORITY);
+
+    expect(context.messages[0]?.role).toBe("system");
+    expect(context.messages[1]?.role).toBe("user");
+    expect(contentText(context.messages[1]?.content)).toContain(
+      "<available-agents>\ntriage: Routes tickets\n</available-agents>"
+    );
+    // The reminder is standing context, so history still follows it in order.
+    expect(contentText(context.messages[2]?.content)).toBe("hello");
+  });
+
+  it("hides the one Agent this subject is denied and keeps the rest", async () => {
+    const { resolver } = makeResolver({
+      agents: [
+        { name: "ceo-assistant", description: "Runs the CEO's day" },
+        { name: "triage", description: "Routes tickets" },
+      ],
+      authorityLayers: layers([
+        ...CAN_DO_ANYTHING,
+        {
+          action: "*",
+          resourceType: "soul.agent",
+          recordSelector: "ceo-assistant",
+          effect: "deny",
+        },
+      ]),
+    });
+
+    const reminder = reminderIn((await resolver.resolve(AUTHORITY)).messages);
+
+    expect(reminder).toContain("triage");
+    expect(reminder).not.toContain("ceo-assistant");
+  });
+
+  it("says (none) rather than nothing for a subject whose Roles grant nothing", async () => {
+    const { resolver } = makeResolver({
+      agents: [{ name: "triage", description: "Routes tickets" }],
+      authorityLayers: layers([]),
+    });
+
+    const context = await resolver.resolve(AUTHORITY);
+
+    const reminder = reminderIn(context.messages);
+    expect(reminder).toContain("<available-agents>\n(none)\n</available-agents>");
+    expect(reminder).not.toContain("triage");
+    expect(context.messages.map((m) => m.role)).toEqual(["system", "user"]);
+  });
+
+  it("leaves the Turn untouched when no layer resolver is composed", async () => {
+    const { resolver } = makeResolver({
+      agents: [{ name: "triage", description: "Routes tickets" }],
+    });
+
+    expect(reminderIn((await resolver.resolve(AUTHORITY)).messages)).toBeUndefined();
+  });
+
+  it("carries the business, the Memory and the standing instructions into the Turn", async () => {
+    const { resolver } = makeResolver({
+      manifest: {
+        businessName: "TulipFarm Dev",
+        businessDescription: "A test instance",
+        businessWebsite: "https://tulip.test",
+      },
+      memory: "## Preferences\n\n- Likes cricket",
+      customInstructions: "Reply in Marathi.",
+      authorityLayers: layers(CAN_DO_ANYTHING),
+    });
+
+    const reminder = reminderIn((await resolver.resolve(AUTHORITY)).messages);
+
+    expect(reminder).toContain(
+      "<business-details>\nname: TulipFarm Dev\ndescription: A test instance\nwebsite: https://tulip.test\n</business-details>"
+    );
+    expect(reminder).toContain("<user-memory>\n## Preferences\n\n- Likes cricket\n</user-memory>");
+    expect(reminder).toContain("<custom-instructions>\nReply in Marathi.\n</custom-instructions>");
+  });
+
+  it("renders the personal blocks as (none) when the deployment wired neither reader", async () => {
+    const { resolver } = makeResolver({ authorityLayers: layers(CAN_DO_ANYTHING) });
+
+    const reminder = reminderIn((await resolver.resolve(AUTHORITY)).messages);
+
+    expect(reminder).toContain("<user-memory>\n(none)\n</user-memory>");
+    expect(reminder).toContain("<custom-instructions>\n(none)\n</custom-instructions>");
+  });
+
+  it("still runs the Turn when the Memory read fails", async () => {
+    // The reminder is an optimisation over `get_memory`; losing it must cost a Tool call, not the
+    // conversation.
+    const { resolver } = makeResolver({
+      memoryFails: true,
+      authorityLayers: layers(CAN_DO_ANYTHING),
+    });
+
+    const reminder = reminderIn((await resolver.resolve(AUTHORITY)).messages);
+
+    expect(reminder).toContain("<user-memory>\n(none)\n</user-memory>");
+  });
+
+  it("changes the Context digest, so the reminder is recorded evidence and not a free rider", async () => {
+    const withReminder = await makeResolver({
+      agents: [{ name: "triage", description: "Routes tickets" }],
+      authorityLayers: layers(CAN_DO_ANYTHING),
+    }).resolver.resolve(AUTHORITY);
+    const without = await makeResolver({
+      agents: [{ name: "triage", description: "Routes tickets" }],
+      authorityLayers: layers([]),
+    }).resolver.resolve(AUTHORITY);
+
+    expect(withReminder.contextDigest).not.toBe(without.contextDigest);
   });
 });

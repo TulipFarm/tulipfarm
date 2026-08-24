@@ -32,6 +32,11 @@ import { assembleAgentSystemPrompt } from "../chat/system-prompt";
 import { availableToolsFor, toolAgentFor } from "../chat/turn-helpers";
 import type { ConversationStore, PersistedMessage } from "../conversations/service";
 import {
+  type MemoryDocumentReader,
+  resolveSoulReminder,
+  type SubjectAuthorityLayers,
+} from "../soul/reminder";
+import {
   presentationContextFor,
   surfaceCatalogFor,
   surfaceCatalogRevisionFor,
@@ -98,6 +103,7 @@ export async function readChatRequest(
   return artifact.content as ChatRequestPayload;
 }
 
+export type { SubjectAuthorityLayers } from "../soul/reminder";
 export interface ChatTurnContextResolverOptions {
   readonly artifacts: ArtifactService;
   readonly store: ConversationStore;
@@ -119,9 +125,23 @@ export interface ChatTurnContextResolverOptions {
    */
   readonly modelGate?: ModelSelectorGate;
   /**
+   * Resolves the live authority layers that narrow the Soul reminder to this subject.
+   *
+   * Absent renders no reminder, which is what every Turn did before it existed — the catalogue
+   * stays reachable through `skill_list`, `agent_list` and the rest, as it always was.
+   */
+  readonly authorityLayers?: SubjectAuthorityLayers /**
    * Where a thinned-Context signal is emitted. Absent leaves the degradation silent, which is what
    * every turn did before this existed; a deployment wires it to measure the rate.
+   */;
+  /**
+   * The subject's Memory Document and standing instructions, for the reminder's personal blocks.
+   *
+   * Absent renders both blocks `(none)`, which is honest — the Turn genuinely carries neither —
+   * and leaves `get_memory` as the way to reach them, exactly as before.
    */
+  readonly memory?: MemoryDocumentReader;
+  readonly customInstructions?: (userId: string) => Promise<string | undefined>;
   readonly telemetry?: TelemetryPort;
   /**
    * Reads the Files this Turn attached, so their authorization can be checked again here.
@@ -156,6 +176,7 @@ export class ChatTurnContextResolver implements TurnContextResolver {
       authority.turn.conversationId
     );
     const system = assembleAgentSystemPrompt({ agent });
+    const soulReminder = await this.soulReminder(authority);
 
     // Every Turn now resolves a presentation target (Channel destination, or the web chat surface
     // keyed by conversation), so the presentation Tools are offered for every channel alike.
@@ -201,7 +222,7 @@ export class ChatTurnContextResolver implements TurnContextResolver {
       businessId: authority.businessId,
       runId: authority.runId,
       stateId: INVOKE_STATE_KEY,
-      candidates: candidatesFor(system, history),
+      candidates: candidatesFor(system, soulReminder, history),
       guardrailDigest,
       bundleDigest: authority.bundleDigest,
       budgetTokens: MAX_HISTORY_TOKENS,
@@ -215,6 +236,11 @@ export class ChatTurnContextResolver implements TurnContextResolver {
     const messages = [
       ...(system.length > 0 && !dropped.has(SYSTEM_SOURCE_ID)
         ? [{ role: "system", content: textContent(system) }]
+        : []),
+      // Sits before all history so the cached prompt prefix stays stable across a conversation,
+      // and reads as standing context rather than as something the participant just said.
+      ...(soulReminder.length > 0 && !dropped.has(SOUL_REMINDER_SOURCE_ID)
+        ? [{ role: "user", content: textContent(soulReminder) }]
         : []),
       ...history
         .filter((message) => !dropped.has(message.id))
@@ -254,6 +280,24 @@ export class ChatTurnContextResolver implements TurnContextResolver {
       compacted: dropped.size > 0,
       ...(skillToolScopes === undefined ? {} : { skillToolScopes }),
     };
+  }
+
+  /** What this instance's Soul holds, narrowed to what this Turn's subject may reach. */
+  private async soulReminder(authority: TurnAuthority): Promise<string> {
+    return resolveSoulReminder({
+      ...(this.options.authorityLayers === undefined
+        ? {}
+        : { authorityLayers: this.options.authorityLayers }),
+      ...(this.options.soulLoader === undefined ? {} : { soulLoader: this.options.soulLoader }),
+      ...(this.options.memory === undefined ? {} : { memory: this.options.memory }),
+      ...(this.options.customInstructions === undefined
+        ? {}
+        : { customInstructions: this.options.customInstructions }),
+      businessId: authority.businessId,
+      subjectId: authority.subject.id,
+      subjectKind: authority.subject.kind,
+      now: this.now(),
+    });
   }
 
   /** Delegates to the File domain, which owns which Files a Turn may send. */
@@ -317,6 +361,14 @@ const MAX_REPAIR_ATTEMPTS = 2;
 const SYSTEM_SOURCE_ID = "system";
 
 /**
+ * The Soul reminder's manifest identity.
+ *
+ * `skill_instructions` ranks it below the Agent's own instructions and leaves it compactable, so a
+ * Context that will not fit drops the whole block rather than a truncated half of it.
+ */
+const SOUL_REMINDER_SOURCE_ID = "soul_reminder";
+
+/**
  * The Agent's authored model governance, read from validated `AGENT.md` frontmatter.
  *
  * The Soul loader has already validated the frontmatter against `AgentFrontmatterSchema`, so an
@@ -352,6 +404,7 @@ function buildSkillToolScopes(
 
 function candidatesFor(
   system: string,
+  soulReminder: string,
   history: readonly PersistedMessage[]
 ): readonly ContextCandidate[] {
   const allow = { decision: "allow" } as const;
@@ -366,8 +419,25 @@ function candidatesFor(
     tokens: estimateTokens(system),
     digest: canonicalHash({ system }),
   };
+  const reminder: ContextCandidate[] =
+    soulReminder.length === 0
+      ? []
+      : [
+          {
+            sourceId: SOUL_REMINDER_SOURCE_ID,
+            kind: "instruction",
+            precedence: "skill_instructions",
+            version: "1",
+            classification: "internal",
+            taint: "trusted",
+            authorization: allow,
+            tokens: estimateTokens(soulReminder),
+            digest: canonicalHash({ soulReminder }),
+          },
+        ];
   return [
     instruction,
+    ...reminder,
     ...[...history].reverse().map(
       (message): ContextCandidate => ({
         sourceId: message.id,

@@ -13,7 +13,7 @@ orchestration. It owns prompt assembly and runtime control, not model providers.
 | --- | --- |
 | `src/ports/model.ts` | Provider-neutral `ModelPort`; `stream` is optional. |
 | `src/models/` | ModelProfile selection, Effort routing, model requirements. |
-| `src/context/` | Instruction precedence, Context manifests, prompt assembly. |
+| `src/context/` | Instruction precedence, Context manifests, prompt assembly, and the Soul reminder — the one per-Turn message telling an Agent what its Soul holds, narrowed to what the subject may reach. |
 | `src/guardrails/` | The four guard stages — `input`, `tool-call`, `tool-result`, `output` — and `DEFAULT_GUARDRAILS`. `tool-result` screens what a Tool brought back, which is attacker-controlled whenever the Tool talked to the network. |
 | `src/skills/` | Exact-version Skill resolution, trust tiers, scanning, ability intersection. |
 | `src/loop/` | Bounded durable Tool loop; the broker is the only effect path. `reread.ts` puts a File an Agent read mid-Turn back in front of the model. `diagnostics.ts` owns the barrier identities — a Tool named there ends the Turn on its *identity*, with no repair path, so a hand-off or a pause can never be narrated as done, and a write can never land behind a report the participant already keeps. `narrowing.ts` narrows the offer to a Skill's scope but never hides a mutating Tool. `distill.ts` declares `ToolResultDistillerPort` and decides when a large Tool result is summarised before the model reads it — the port is implemented in `apps/worker`, because this package may not import `@tulipfarm/llm`. |

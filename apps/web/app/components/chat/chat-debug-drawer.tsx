@@ -1,100 +1,66 @@
 import { Bug, Check, Copy, RefreshCw, X } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { CodeBlock, CollapsibleSection } from "~/components/chat/debug-code";
 import { copyText } from "~/lib/clipboard";
 import { type DebugContext, getDebugContext } from "~/lib/conversations";
 import { cn } from "~/lib/utils";
 
-const JSON_TOKEN =
-  /"(?:\\.|[^"\\])*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|\btrue\b|\bfalse\b|\bnull\b/g;
-
-function highlightJson(json: string): ReactNode[] {
-  const out: ReactNode[] = [];
-  let last = 0;
-  let key = 0;
-  JSON_TOKEN.lastIndex = 0;
-  for (let m = JSON_TOKEN.exec(json); m !== null; m = JSON_TOKEN.exec(json)) {
-    const tok = m[0];
-    if (m.index > last) out.push(json.slice(last, m.index));
-    let cls: string;
-    if (tok[0] === '"') {
-      cls = /^\s*:/.test(json.slice(m.index + tok.length)) ? "text-code-key" : "text-code-string";
-    } else if (tok === "true" || tok === "false") {
-      cls = "text-code-boolean";
-    } else if (tok === "null") {
-      cls = "text-code-null";
-    } else {
-      cls = "text-code-number tabular-nums";
-    }
-    out.push(
-      <span key={key} className={cls}>
-        {tok}
-      </span>
-    );
-    key += 1;
-    last = m.index + tok.length;
-  }
-  if (last < json.length) out.push(json.slice(last));
-  return out;
-}
-
 /** A line that is nothing but one `<block>` or `</block>` tag, which is how prompt blocks open. */
-const PROMPT_TAG_LINE = /^<\/?[a-z][a-z0-9-]*>$/;
-const PROMPT_INLINE_CODE = /`[^`\n]+`/g;
+const PROMPT_TAG_LINE = /^<(\/?)([a-z][a-z0-9-]*)>$/;
 
-function highlightInlineCode(line: string, lineIndex: number): ReactNode[] {
-  const out: ReactNode[] = [];
-  let last = 0;
-  let key = 0;
-  PROMPT_INLINE_CODE.lastIndex = 0;
-  for (let m = PROMPT_INLINE_CODE.exec(line); m !== null; m = PROMPT_INLINE_CODE.exec(line)) {
-    if (m.index > last) out.push(line.slice(last, m.index));
-    out.push(
-      <span key={`${lineIndex}:${key}`} className="text-code-string">
-        {m[0]}
-      </span>
-    );
-    key += 1;
-    last = m.index + m[0].length;
-  }
-  if (last < line.length) out.push(line.slice(last));
-  return out;
+interface PromptBlock {
+  readonly tag: string;
+  readonly body: string;
 }
+
+/** One row of the message list as the drawer shows it — persisted rows plus the synthetic ones. */
+type DebugRow = {
+  _id: string;
+  role: string;
+  content: unknown;
+  metadata?: Record<string, unknown>;
+  createdAt: string | null;
+};
 
 /**
- * Renders the assembled prompt as text rather than as an escaped JSON string, because every
- * newline in it is what separates one block from the next — collapsed to `\n` the whole prompt
- * reads as one paragraph and its structure is invisible.
+ * Splits the assembled prompt into its top-level `<block>` sections.
+ *
+ * The prompt is only ever a sequence of whole-line-delimited blocks, so this needs no parser. Text
+ * outside any block — which `assembleSystemPrompt` does not currently emit — is kept under a
+ * `(untagged)` heading rather than dropped, because a debug view that hides part of its subject is
+ * worse than an ugly one.
  */
-function highlightPrompt(text: string): ReactNode[] {
-  const lines = text.split("\n");
-  const out: ReactNode[] = [];
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i] ?? "";
-    const prefix = i === 0 ? "" : "\n";
-    if (PROMPT_TAG_LINE.test(line)) {
-      out.push(
-        <span key={i} className="font-medium text-code-key">
-          {prefix}
-          {line}
-        </span>
-      );
-    } else if (line.startsWith("#")) {
-      out.push(
-        <span key={i} className="font-medium text-code-boolean">
-          {prefix}
-          {line}
-        </span>
-      );
-    } else {
-      out.push(
-        <span key={i}>
-          {prefix}
-          {highlightInlineCode(line, i)}
-        </span>
-      );
+export function splitPromptBlocks(text: string): PromptBlock[] {
+  const blocks: PromptBlock[] = [];
+  let tag: string | null = null;
+  let buffer: string[] = [];
+  const flush = (name: string) => {
+    if (buffer.length > 0 || name !== "(untagged)") {
+      blocks.push({ tag: name, body: buffer.join("\n").trim() });
     }
+    buffer = [];
+  };
+  for (const line of text.split("\n")) {
+    const match = PROMPT_TAG_LINE.exec(line);
+    if (match && match[1] === "" && tag === null) {
+      if (buffer.some((l) => l.trim().length > 0)) flush("(untagged)");
+      buffer = [];
+      tag = match[2] ?? null;
+      continue;
+    }
+    if (match && match[1] === "/" && tag === match[2]) {
+      flush(`<${tag}>`);
+      tag = null;
+      continue;
+    }
+    buffer.push(line);
   }
-  return out;
+  if (buffer.some((l) => l.trim().length > 0)) flush(tag === null ? "(untagged)" : `<${tag}>`);
+  return blocks;
+}
+
+function tokenCount(text: string): string {
+  return `${text.length.toLocaleString()} chars`;
 }
 
 const TABS = [
@@ -106,11 +72,12 @@ type DebugTab = (typeof TABS)[number]["id"];
 
 /**
  * A floating button opens a non-blocking right slide-over over the raw conversation state, in two
- * views: the system prompt the LLM receives (reconstructed server-side) rendered as formatted
- * text, and every persisted row (all roles, tool calls/results, metadata) as JSON. Either view
- * copies, so a dev can paste the exact agent context into external pipelines. Gated on
- * `import.meta.env.DEV`: the whole component (and its dynamic imports) dead-code-strips out of the
- * production bundle, and the backing API route is registered only outside production.
+ * views: the messages the LLM receives (the reconstructed system prompt plus the Soul reminder)
+ * rendered as highlighted Markdown, and every persisted row (all roles, tool calls/results,
+ * metadata) as highlighted JSON. Both views are collapsible per block, and either copies whole, so
+ * a dev can paste the exact agent context into external pipelines. Gated on `import.meta.env.DEV`:
+ * the whole component (and its dynamic imports) dead-code-strips out of the production bundle, and
+ * the backing API route is registered only outside production.
  */
 export function ChatDebugDrawer({ conversationId }: { conversationId?: string }) {
   if (!import.meta.env.DEV) return null;
@@ -161,26 +128,40 @@ function DebugDrawer({ conversationId }: { conversationId?: string }) {
     };
   }, [open]);
 
-  const json = data
-    ? JSON.stringify(
+  // Mirrors the message list a Turn actually sends: the system prompt, then the Soul reminder as
+  // the user-role message it really is, then the persisted rows. Neither synthetic row is stored,
+  // so a view that showed only the table would omit half of what the model was given.
+  const rows: DebugRow[] = data
+    ? [
         {
-          conversationId: data.conversationId,
-          messages: [
-            {
-              _id: "system-prompt",
-              role: "system",
-              content: data.systemPrompt,
-              metadata: { synthetic: true },
-              createdAt: null,
-            },
-            ...data.messages,
-          ],
+          _id: "system-prompt",
+          role: "system",
+          content: data.systemPrompt,
+          metadata: { synthetic: true },
+          createdAt: null,
         },
-        null,
-        2
-      )
+        ...(data.soulReminder
+          ? [
+              {
+                _id: "soul-reminder",
+                role: "user",
+                content: data.soulReminder,
+                metadata: { synthetic: true },
+                createdAt: null,
+              },
+            ]
+          : []),
+        ...data.messages,
+      ]
+    : [];
+
+  const json = data
+    ? JSON.stringify({ conversationId: data.conversationId, messages: rows }, null, 2)
     : "";
-  const copyPayload = tab === "prompt" ? (data?.systemPrompt ?? "") : json;
+  const promptText = data
+    ? [data.systemPrompt, data.soulReminder].filter((part) => part.length > 0).join("\n")
+    : "";
+  const copyPayload = tab === "prompt" ? promptText : json;
 
   async function copy() {
     if (!(await copyText(copyPayload))) return;
@@ -272,14 +253,68 @@ function DebugDrawer({ conversationId }: { conversationId?: string }) {
               <p className="p-3 text-xs text-muted-foreground">loading…</p>
             ) : err ? (
               <p className="p-3 text-xs text-destructive">[error] {err}</p>
+            ) : tab === "prompt" ? (
+              <PromptView data={data} />
             ) : (
-              <pre className="whitespace-pre-wrap break-words p-3 text-[0.6875rem] leading-relaxed text-muted-foreground">
-                {tab === "prompt" ? highlightPrompt(data?.systemPrompt ?? "") : highlightJson(json)}
-              </pre>
+              <JsonView conversationId={data?.conversationId ?? ""} rows={rows} />
             )}
           </div>
         </aside>
       ) : null}
     </>
+  );
+}
+
+function PromptView({ data }: { data: DebugContext | null }) {
+  if (!data) return null;
+  const blocks = splitPromptBlocks(data.systemPrompt);
+  return (
+    <div>
+      {blocks.map((block, i) => (
+        <CollapsibleSection
+          key={`${i}:${block.tag}`}
+          title={block.tag}
+          meta={tokenCount(block.body)}
+        >
+          <CodeBlock code={block.body} lang="markdown" />
+        </CollapsibleSection>
+      ))}
+      {data.soulReminder ? (
+        <CollapsibleSection
+          title="<system-reminder> (injected as a user message)"
+          meta={tokenCount(data.soulReminder)}
+        >
+          <CodeBlock code={data.soulReminder} lang="markdown" />
+        </CollapsibleSection>
+      ) : (
+        <p className="px-2 py-1.5 text-[0.6875rem] text-muted-foreground">
+          No Soul reminder for this reader.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function JsonView({ conversationId, rows }: { conversationId: string; rows: DebugRow[] }) {
+  return (
+    <div>
+      <p className="border-b border-border px-2 py-1.5 font-mono text-[0.625rem] text-muted-foreground">
+        conversationId: {conversationId}
+      </p>
+      {rows.map((row, i) => {
+        const body = JSON.stringify(row, null, 2);
+        const synthetic = (row.metadata as { synthetic?: boolean } | undefined)?.synthetic === true;
+        return (
+          <CollapsibleSection
+            key={row._id}
+            title={`[${i}] ${row.role}${synthetic ? " · synthetic" : ""}`}
+            meta={tokenCount(body)}
+            defaultOpen={!synthetic}
+          >
+            <CodeBlock code={body} lang="json" />
+          </CollapsibleSection>
+        );
+      })}
+    </div>
   );
 }
