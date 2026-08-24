@@ -104,9 +104,29 @@ describe("ActiveRoutineCatalog", () => {
     ]);
   });
 
+  it("serves one published Routine with the document the bundle carries", async () => {
+    const catalog = new ActiveRoutineCatalog(async () => bundle());
+
+    const detail = await catalog.get("daily-wait");
+
+    expect(detail?.definition).toEqual(bundle().get("Routine", "daily-wait")?.document);
+    expect(detail?.bundleDigest).toBe("bundle-digest");
+    expect(detail?.triggers).toEqual([
+      { slug: "daily-wait-cron", type: "cron", summary: "cron 0 9 * * *" },
+    ]);
+  });
+
+  it("hides a Routine the bundle carries but does not publish", async () => {
+    const catalog = new ActiveRoutineCatalog(async () => bundle());
+
+    await expect(catalog.get("draft-routine")).resolves.toBeUndefined();
+    await expect(catalog.get("no-such-routine")).resolves.toBeUndefined();
+  });
+
   it("returns an empty catalogue when no active bundle exists", async () => {
     const catalog = new ActiveRoutineCatalog(async () => undefined);
 
     await expect(catalog.list()).resolves.toEqual([]);
+    await expect(catalog.get("daily-wait")).resolves.toBeUndefined();
   });
 });

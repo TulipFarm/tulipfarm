@@ -18,7 +18,14 @@ export interface HostedTurnRef {
 export interface TurnAuthority {
   readonly businessId: string;
   readonly runId: string;
-  readonly turn: HostedTurnRef;
+  /**
+   * The Turn this Run answers, when it answers one.
+   *
+   * Absent for a Run that is not a conversation — a Routine Run has no participant and no Turn
+   * row. Authorization never depended on the Turn; only presentation and conversation-scoped Tool
+   * context did, and both treat its absence as "no conversation" rather than "not authorized".
+   */
+  readonly turn?: HostedTurnRef;
   /** Whom the turn acts as, as recorded when the Run was minted. */
   readonly subject: InvocationPrincipal;
   /** Worker executor kind; determines which Artifact carries the request payload. */
@@ -35,6 +42,13 @@ export interface TurnAuthority {
    * unrestricted default. A process that resolves the Agent locally ignores this and uses its own.
    */
   readonly agent?: HostedAgent;
+  /**
+   * The Routine this Run executes, when it executes one.
+   *
+   * Routine-only Tools — `complete_state`, `call_skill` — refuse a call that names no Routine, so
+   * without this an Agent State could reach them in its catalog and never use them.
+   */
+  readonly routineId?: string;
 }
 
 export interface HostedToolCall {
@@ -42,6 +56,14 @@ export interface HostedToolCall {
   readonly name: string;
   readonly arguments: unknown;
   readonly activeSkillName?: string;
+  /**
+   * The Agent the caller is acting as, for a Run whose request Artifact does not name one — today
+   * a Routine `agent` State, whose Agent is chosen per State rather than per Run.
+   *
+   * A claim, not authority: the control plane accepts it only after finding it named by a State of
+   * the Run's own Routine, so an unrecognised name resolves to no Agent and narrows the call.
+   */
+  readonly agentName?: string;
 }
 
 /** Mirrors the loop's `ToolDispatchResult`, minus the `callId` the caller already holds. */

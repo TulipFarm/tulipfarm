@@ -14,8 +14,24 @@ canonical published Soul definitions, not the retired Serverless Workflow format
 For complete schema templates, Cron/interval/webhook trigger examples, and State patterns, call
 `load_skill_reference` with `skill: "routine-forge"` and `reference: "examples.md"` (or `"canonical-examples.md"`).
 
-1. Ask only for missing business choices: the owner, the Trigger type and schedule, and any Tool
-   or Agent reference. Do not invent a destination, principal, or credential.
+## What a State may reference
+
+A Routine reaches the outside world through an **`agent` State**, not a `tool` State.
+
+- `agentRef` names an **Agent** that already exists in the Soul. Check with `agent_list`; if it is
+  missing, create it with `agent_create` **before** calling `routine_forge`. A Routine referencing
+  an Agent that does not exist is refused.
+- `toolRef` names a Soul **ToolContract** definition — an artifact under `tools/` in the Soul repo.
+  It is **not** the name of a Tool you can call in Chat. `delegate_to_agent`, `record_create`,
+  `record_search`, `kv_set`, `send_slack_message` and every other Tool you invoke during a Turn are
+  hosted by the runtime, not defined in the Soul, so a `tool` State can never reach them and
+  `routine_forge` refuses them by name.
+- To make a Routine do the work one of those Tools does, give the work to an Agent: create or pick
+  an Agent whose `allowedTools` include it, then use an `agent` State. That is the supported path,
+  and it is what the worked example below does.
+
+1. Ask only for missing business choices: the owner, the Trigger type and schedule, and which Agent
+   runs the work. Do not invent a destination, principal, or credential.
 2. Build a canonical `Routine` document with `apiVersion: tulipfarm.ai/v1`, `kind: Routine`, and
    `metadata` with exactly these keys — no others, the schema rejects additional properties:
    - `id`: a fresh UUID or ULID (`8f14e...` / `01ARZ3...`), **never** the routine slug or a
@@ -50,6 +66,9 @@ For complete schema templates, Cron/interval/webhook trigger examples, and State
 
 ## Worked example — "post a joke every 5 minutes"
 
+First confirm the Agent exists (`agent_list`). If it does not, create it with `agent_create` and
+give it the Tools the task needs — here, posting to Slack — then forge the Routine.
+
 Routine (`spec.owner` is a placeholder; ask the user for the real owner):
 
 ```yaml
@@ -65,12 +84,13 @@ spec:
   owner: ops-team
   start: PostJoke
   states:
-    - type: tool
+    - type: agent
       name: PostJoke
-      toolRef:
-        name: send_slack_message
+      agentRef:
+        name: joke-bot
         version: "1"
-      action: send_message
+      input:
+        task: Post one short engineering joke to the team Slack channel.
       end: true
 ```
 

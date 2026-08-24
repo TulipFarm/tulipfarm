@@ -1,6 +1,15 @@
-import type { ArtifactService } from "@tulipfarm/run-kernel";
+import {
+  type ArtifactService,
+  RUN_EXECUTOR_PRINCIPAL_REF,
+  requestArtifactId,
+} from "@tulipfarm/run-kernel";
 import type { AgentCapabilityRestrictions } from "@tulipfarm/schema";
-import { getDefaultAssistant, resolveAgent, type SoulLoader } from "@tulipfarm/soul";
+import {
+  getDefaultAssistant,
+  resolveAgent,
+  routineDefinitionReferences,
+  type SoulLoader,
+} from "@tulipfarm/soul";
 import {
   type AgentResolver,
   agentCanBeOfferedTool,
@@ -48,9 +57,26 @@ export function hostedAgentResolver(soulLoader: SoulLoader | undefined): AgentRe
 export function agentForRunResolver(
   soulLoader: SoulLoader | undefined,
   artifacts: ArtifactService
-): (businessId: string, runId: string, source: string) => Promise<HostedAgent | undefined> {
+): (
+  businessId: string,
+  runId: string,
+  source: string,
+  claimedAgentName?: string
+) => Promise<HostedAgent | undefined> {
   const resolver = hostedAgentResolver(soulLoader);
-  return async (businessId, runId, source) => {
+  return async (businessId, runId, source, claimedAgentName) => {
+    if (source === ROUTINE_SOURCE) {
+      const named = await routineAgentName(
+        soulLoader,
+        artifacts,
+        businessId,
+        runId,
+        claimedAgentName
+      );
+      // An unrecognised claim names no Agent, so the host falls back to its own default rather
+      // than to whatever the caller asked for. A bad claim narrows; it never widens.
+      return named === undefined ? undefined : resolver.resolve(named);
+    }
     const request = await readChatRequest(
       artifacts,
       { businessId, runId, source },
@@ -58,6 +84,43 @@ export function agentForRunResolver(
     ).catch(() => undefined);
     return resolver.resolve(request?.agentId);
   };
+}
+
+/** Run source whose Agent is chosen per State, so the Run's own request Artifact names none. */
+const ROUTINE_SOURCE = "routine";
+
+/**
+ * The claimed Agent, but only once a State of this Run's own Routine is found naming it.
+ *
+ * The caller is the durable runtime, which holds the pinned bundle and could name any Agent it
+ * liked. Confirming the name against the Soul's copy of the Routine is what keeps the acting
+ * identity derived from authored config rather than from the process asking.
+ */
+async function routineAgentName(
+  soulLoader: SoulLoader | undefined,
+  artifacts: ArtifactService,
+  businessId: string,
+  runId: string,
+  claimed: string | undefined
+): Promise<string | undefined> {
+  if (claimed === undefined || soulLoader === undefined) return undefined;
+  const artifact = await artifacts
+    .read({
+      businessId,
+      artifactId: requestArtifactId(runId),
+      reader: RUN_EXECUTOR_PRINCIPAL_REF,
+      allowedClassifications: [],
+      now: new Date(),
+    })
+    .catch(() => undefined);
+  const slug = (artifact?.content as { slug?: unknown } | undefined)?.slug;
+  if (typeof slug !== "string") return undefined;
+  const routine = soulLoader.routines.get(slug);
+  if (routine === undefined) return undefined;
+  const named = routineDefinitionReferences(routine.config.spec).some(
+    (reference) => reference.kind === "Agent" && reference.name === claimed
+  );
+  return named ? claimed : undefined;
 }
 
 /**

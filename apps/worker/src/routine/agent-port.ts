@@ -6,6 +6,7 @@ import {
   assembleSystemPrompt,
   type ContextCandidate,
   deriveModelRequirements,
+  type ExposedTool,
   formatTemporalContext,
   type GuardContext,
   GuardrailsService,
@@ -33,7 +34,7 @@ import { canonicalHash, canonicalize, textContent } from "@tulipfarm/schema";
 import type { RuntimeBundle } from "@tulipfarm/soul";
 import type { RunStore } from "@tulipfarm/storage";
 import type { RunEventAppendPort } from "@tulipfarm/turn-executor";
-import { TurnEventWriter } from "@tulipfarm/turn-executor";
+import { announceToolCalls, TurnEventWriter } from "@tulipfarm/turn-executor";
 import { type ModelBudgetEvidence, openModelProfileRunBudget } from "../model-budget";
 
 /** Routine Agent authority: read pinned bundles, run chat-equivalent guards, expose no Tools. */
@@ -82,6 +83,18 @@ export interface RoutineAgentPort {
 export interface BundleRoutineAgentPortOptions {
   /** Bind to the already-selected pinned-bundle chain; do not re-resolve via live config. */
   model(selection: RoutineModelSelection): ModelPort;
+  /**
+   * Where this State's Tool calls execute. Absent leaves the State unable to call any Tool, which
+   * is what it could do before: a deployment that wires no host fails closed rather than open.
+   */
+  readonly tools?: ToolDispatchPort;
+  /**
+   * The Tools the acting Agent may be offered, answered by the control plane's registry.
+   *
+   * Fetched rather than derived here because this process has no Soul and no Tool registry, and a
+   * catalog it invented would not be the one the same Agent gets in Chat.
+   */
+  readonly catalog?: (runId: string, agentName: string) => Promise<readonly ExposedTool[]>;
   readonly events: RunEventAppendPort;
   readonly budgets: RunBudgetStore;
   readonly runs: Pick<RunStore, "find">;
@@ -102,6 +115,8 @@ export interface RoutineModelSelection {
   readonly modelIds: readonly string[];
   /** The routing evidence already emitted for this State, so the port need not re-derive it. */
   readonly routing: RunEventPayloads["model.routed"];
+  /** The spending Run, so this State's model calls reach the ledger attributed to it. */
+  readonly runId: string;
 }
 
 /** Run statuses that mean the question must stop being asked. */
@@ -127,8 +142,17 @@ export function isRetryableAgentFailure(reason: string): boolean {
   return RETRYABLE_AGENT_FAILURES.has(reason);
 }
 
-/** Routine Agent exposes no Tools; one model call plus authored repair attempts. */
-const MAX_ITERATIONS = 1;
+/**
+ * Model calls one Routine Agent State may take.
+ *
+ * A State that can call Tools needs room to call one and then answer with what it returned; at 1
+ * the model could only ever describe the call it wanted. Matches the Chat Turn ceiling, so the
+ * same Agent behaves the same in a Routine as in a conversation.
+ */
+const MAX_ITERATIONS = 12;
+
+/** Tool calls one State may make. Same ceiling as the iteration budget, as in Chat. */
+const MAX_TOOL_CALLS = 12;
 
 const SYSTEM_SOURCE_ID = "system";
 const REQUEST_SOURCE_ID = "request";
@@ -359,12 +383,14 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
       "context"
     );
 
+    const exposed = await this.exposedTools(request, plan.agentRef.name);
     const loop = new AgentLoop({
       model: this.options.model({
         modelIds: selection.chain.map((profile) => profile.model),
         routing,
+        runId: request.runId,
       }),
-      tools: NO_TOOLS,
+      tools: exposed.length === 0 ? NO_TOOLS : this.toolPort(plan.agentRef.name, events),
       checkpoints: this.options.checkpoints ?? new InMemoryLoopCheckpointStore(),
       events,
       budget: this.budget(request),
@@ -387,8 +413,8 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
         { role: "system", content: textContent(system) },
         { role: "user", content: textContent(guardedInput.value) },
       ],
-      tools: [],
-      limits: this.limits(plan),
+      tools: exposed,
+      limits: this.limits(plan, exposed.length),
       ...(request.outputSchema === undefined ? {} : { outputSchema: request.outputSchema }),
     });
 
@@ -417,10 +443,50 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
     return { kind: "succeeded", output: outcome.output };
   }
 
-  private limits(plan: AgentInvocationPlan): AgentLoopLimits {
+  /**
+   * The Tools this State may call, or none when no host is wired or the control plane offers none.
+   *
+   * A catalog read that fails leaves the State Tool-less rather than failing it: the model can
+   * still answer, and the State's own outcome says whether that answer was enough.
+   */
+  private async exposedTools(
+    request: RoutineAgentRequest,
+    agentName: string
+  ): Promise<readonly ExposedTool[]> {
+    const { tools, catalog } = this.options;
+    if (tools === undefined || catalog === undefined) return [];
+    try {
+      return await catalog(request.runId, agentName);
+    } catch (error) {
+      this.options.log.warn(
+        { err: error, runId: request.runId, agent: agentName },
+        "routine agent tool catalog unavailable; running without Tools"
+      );
+      return [];
+    }
+  }
+
+  /**
+   * Names the acting Agent on every call, so the control plane can confirm it against the Soul.
+   *
+   * Wrapped in `announceToolCalls` for the same reason Chat wraps it: without it a Routine State's
+   * Tool calls leave no `tool.call`/`tool.result` Run events, so a denied call is invisible to the
+   * Runs view and the only record of it is whatever the model chose to say in prose.
+   */
+  private toolPort(agentName: string, events: TurnEventWriter): ToolDispatchPort {
+    const tools = this.options.tools ?? NO_TOOLS;
+    return announceToolCalls(
+      { dispatch: (call) => tools.dispatch({ ...call, agentName }) },
+      events
+    );
+  }
+
+  private limits(plan: AgentInvocationPlan, toolCount: number): AgentLoopLimits {
     return {
       maxIterations: MAX_ITERATIONS,
-      maxToolCalls: 0,
+      // Zero when the State is offered nothing, so a deployment with no Tool host keeps the exact
+      // single-call shape this port had before.
+      maxToolCalls: toolCount === 0 ? 0 : MAX_TOOL_CALLS,
       maxRepairAttempts: plan.maxRepairAttempts ?? 0,
     };
   }

@@ -139,6 +139,8 @@ export interface ListRunsInput {
   readonly limit: number;
   /** Opaque cursor returned as `nextCursor` by a previous page. */
   readonly cursor?: string;
+  /** Keeps only Runs executing this Routine, as pinned in `bundle.routineId`. */
+  readonly routineId?: string;
 }
 
 export interface RunPage {
@@ -414,10 +416,17 @@ export class RunStore {
       const params: unknown[] = [input.businessId, limit + 1];
       if (cursor) params.push(cursor.createdAt, cursor.id);
       const keyset = cursor ? "AND (created_at, id) < ($3::timestamptz, $4::uuid)" : "";
+      let filter = "";
+      if (input.routineId !== undefined) {
+        params.push(input.routineId);
+        // `bundle` is the pinned publication, so this is the Routine the Run actually executes —
+        // not the Routine that carried the slug when the request was made.
+        filter = `AND bundle->>'routineId' = $${params.length}`;
+      }
       const result = await transaction.query<RunRow>(
         `SELECT ${RUN_COLUMNS}
            FROM runs
-          WHERE business_id = $1 ${keyset}
+          WHERE business_id = $1 ${keyset} ${filter}
           ORDER BY created_at DESC, id DESC
           LIMIT $2`,
         params

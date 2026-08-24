@@ -88,7 +88,8 @@ function profile(
 }
 
 function bundle(
-  documents: readonly { kind: string; slug: string; authoredVersion?: number; document: unknown }[]
+  documents: readonly { kind: string; slug: string; authoredVersion?: number; document: unknown }[],
+  assets: readonly { ownerDefinitionId: string; path: string; content: string }[] = []
 ): RuntimeBundle {
   const definitions = documents.map((entry, index) => ({
     kind: entry.kind,
@@ -106,10 +107,13 @@ function bundle(
     changesetId: "changeset-1",
     commitSha: "d".repeat(40),
     definitions,
-    assets: [],
+    assets: assets.map((asset) => ({ ...asset, digest: "e".repeat(64) })),
     get: (kind, slug) => definitions.find((d) => d.kind === kind && d.slug === slug),
     getById: (id) => definitions.find((d) => d.id === id),
-    asset: () => undefined,
+    asset: (ownerDefinitionId, path) =>
+      assets
+        .map((asset) => ({ ...asset, digest: "e".repeat(64) }))
+        .find((asset) => asset.ownerDefinitionId === ownerDefinitionId && asset.path === path),
   };
 }
 

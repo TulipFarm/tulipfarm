@@ -8,7 +8,7 @@ import type { LocalToolHost } from "./local-host";
 
 /** Fetches the Run-derived authority for one Turn. Only the control plane may answer this. */
 export interface TurnAuthoritySource {
-  authority(runId: string): Promise<TurnAuthority | undefined>;
+  authority(runId: string, agentName?: string): Promise<TurnAuthority | undefined>;
 }
 
 /**
@@ -36,7 +36,7 @@ export class RoutingToolDispatch implements ToolDispatchPort {
       return this.remote.dispatch(request);
     }
 
-    const authority = await this.authorityFor(request.runId);
+    const authority = await this.authorityFor(request.runId, request.agentName);
     if (authority === undefined) {
       // The Run no longer names a Turn we may act for. The control plane owns that answer.
       return this.remote.dispatch(request);
@@ -59,17 +59,23 @@ export class RoutingToolDispatch implements ToolDispatchPort {
     return withCallId(request.callId, result);
   }
 
-  /** One authority read per Run, so N co-located calls cost one round trip rather than N. */
-  private authorityFor(runId: string): Promise<TurnAuthority | undefined> {
-    const cached = this.authorities.get(runId);
+  /**
+   * One authority read per Run and acting Agent, so N co-located calls cost one round trip.
+   *
+   * The Agent is part of the key because a Routine Run may run several States under different
+   * Agents; caching by Run alone would let the first State's authority answer for the next one's.
+   */
+  private authorityFor(runId: string, agentName?: string): Promise<TurnAuthority | undefined> {
+    const key = authorityKey(runId, agentName);
+    const cached = this.authorities.get(key);
     if (cached !== undefined) return cached;
-    const pending = this.source.authority(runId).catch((error: unknown) => {
+    const pending = this.source.authority(runId, agentName).catch((error: unknown) => {
       // A failed read must not be cached, and must not deny: fall back to the control plane.
-      this.authorities.delete(runId);
+      this.authorities.delete(key);
       this.log.warn({ err: error, runId }, "authority read failed; dispatching over the API");
       return undefined;
     });
-    this.authorities.set(runId, pending);
+    this.authorities.set(key, pending);
     return pending;
   }
 
@@ -83,8 +89,15 @@ export class RoutingToolDispatch implements ToolDispatchPort {
    * extra read, but it is the reason the hook is at the dispatch boundary and not inside a Tool.
    */
   forget(runId: string): void {
-    this.authorities.delete(runId);
+    for (const key of this.authorities.keys()) {
+      if (key === runId || key.startsWith(`${runId}\u0000`)) this.authorities.delete(key);
+    }
   }
+}
+
+/** Keys one cached authority. `\u0000` cannot occur in a Run id or an Agent name. */
+function authorityKey(runId: string, agentName?: string): string {
+  return agentName === undefined ? runId : `${runId}\u0000${agentName}`;
 }
 
 function withCallId(callId: string, result: HostedToolResult): ToolDispatchResult {

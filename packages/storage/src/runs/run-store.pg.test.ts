@@ -587,6 +587,21 @@ describe("RunStore (PostgreSQL)", () => {
     expect(third.nextCursor).toBeNull();
   });
 
+  it("keeps only Runs executing the named Routine, read from the pinned bundle", async () => {
+    await store.start(run());
+    await store.start(
+      run({
+        id: "00000000-0000-4000-8000-000000000002",
+        createdAt: "2026-07-24T10:02:00.000Z",
+        bundle: { digest: "sha256:bundle-2", routineId: "routine-2", routineVersion: "1" },
+      })
+    );
+
+    const page = await store.list({ businessId: "business-1", limit: 10, routineId: "routine-2" });
+
+    expect(page.items.map((item) => item.id)).toEqual(["00000000-0000-4000-8000-000000000002"]);
+  });
+
   it("scopes the Run page to one business and rejects a malformed cursor", async () => {
     await store.start(run());
     expect(await store.list({ businessId: "business-2", limit: 10 })).toEqual({

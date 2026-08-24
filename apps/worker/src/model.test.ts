@@ -986,7 +986,11 @@ describe("LlmModelPort — reporting spend", () => {
     };
   }
 
-  function portWith(parts: StreamPart[], sink: SpendSink): LlmModelPort {
+  function portWith(
+    parts: StreamPart[],
+    sink: SpendSink,
+    identity: { conversationId?: string; runId?: string } = { conversationId: "conv-1" }
+  ): LlmModelPort {
     const mock = new MockLanguageModelV4({
       doStream: async () => ({ stream: simulateReadableStream<StreamPart>({ chunks: parts }) }),
     });
@@ -1008,7 +1012,7 @@ describe("LlmModelPort — reporting spend", () => {
         },
       }),
       spend: sink,
-      conversationId: "conv-1",
+      ...identity,
     });
   }
 
@@ -1037,6 +1041,27 @@ describe("LlmModelPort — reporting spend", () => {
       model: "claude-opus-5",
       usage: { inputTokens: 11, outputTokens: 4 },
     });
+  });
+
+  it("attributes a Routine Run's call to its Run, which carries no conversation", async () => {
+    const { calls, sink } = spy();
+    const port = portWith(
+      [
+        { type: "text-start", id: "1" },
+        { type: "text-delta", id: "1", delta: "hi" },
+        { type: "text-end", id: "1" },
+        FINISH,
+      ],
+      sink,
+      { runId: "run-1" }
+    );
+
+    await collect(port.stream(request({ agentId: "support" })));
+
+    // Without the Run id the ledger row exists but names nothing, so the Run inspector could only
+    // ever report zero for a Routine.
+    expect(calls[0]).toMatchObject({ runId: "run-1" });
+    expect(calls[0]?.conversationId).toBeUndefined();
   });
 
   it("reports a failed call, not only a successful one", async () => {

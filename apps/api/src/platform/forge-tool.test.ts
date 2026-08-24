@@ -1,5 +1,5 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
-import type { RoutineCatalog, SoulRoutine, SoulWriter } from "@tulipfarm/soul";
+import type { RoutineCatalog, SoulAgent, SoulRoutine, SoulWriter } from "@tulipfarm/soul";
 import { SoulWriteError, type SoulWriteErrorCode } from "@tulipfarm/soul";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { parse as parseYaml } from "yaml";
@@ -73,6 +73,29 @@ function routineOverRecords(resourceType: string) {
   };
 }
 
+function soulAgent(name: string): SoulAgent {
+  return { name, frontmatter: {}, body: "" } as SoulAgent;
+}
+
+function routineOverAgent(agent: string) {
+  return {
+    ...VALID_ROUTINE,
+    spec: {
+      owner: "operations",
+      start: "Run",
+      states: [
+        {
+          name: "Run",
+          type: "agent",
+          agentRef: { name: agent, version: "1" },
+          input: { task: "Post one joke." },
+          end: true,
+        },
+      ],
+    },
+  };
+}
+
 function makeSoulWriter(): SoulWriter & { apply: ReturnType<typeof vi.fn> } {
   return {
     apply: vi.fn().mockResolvedValue({
@@ -120,6 +143,30 @@ describe("routine_forge", () => {
     expect(parseYaml(request.changes[0]?.content)).toMatchObject(VALID_ROUTINE);
     expect(parseYaml(request.changes[1]?.content)).toMatchObject(trigger());
     expect(onRoutinesChanged).toHaveBeenCalledOnce();
+  });
+
+  it("stamps the authoring principal onto the Trigger, replacing whatever the model wrote", async () => {
+    const result = await routineForgeTool.handler(
+      { name: "daily-report", definition: VALID_ROUTINE, triggers: [trigger()] },
+      {
+        ...ctx(),
+        requestContext: {
+          userId: "user-1",
+          subject: { kind: "user", id: "user-1" },
+        } as PlatformToolContext["requestContext"],
+      }
+    );
+
+    expect(result).toMatchObject({ success: true });
+    const request = soulWriter.apply.mock.calls[0][0] as {
+      changes: Array<{ content: string }>;
+    };
+    // The Trigger's background identity is the effective subject of every Run it starts, so an
+    // invented `service:routine-runner` would leave the Routine with no grants and every Tool
+    // call denied.
+    expect(parseYaml(request.changes[1]?.content)).toMatchObject({
+      spec: { backgroundIdentity: { principalKind: "user", principalId: "user-1" } },
+    });
   });
 
   it("rejects unpublished, mismatched, and duplicate documents before writing", async () => {
@@ -350,6 +397,70 @@ describe("routine_forge", () => {
     expect(soulWriter.apply).toHaveBeenCalledOnce();
   });
 
+  // The Agent that hits this has already written a whole Routine; a bare UNRESOLVED_REF pointer from
+  // the Soul writer sends it guessing at the reference's shape until its repair budget is gone.
+  it("refuses a Routine naming an Agent the Soul does not have, and names agent_create", async () => {
+    const result = await routineForgeTool.handler(
+      { name: "daily-report", definition: routineOverAgent("joke-bot"), triggers: [trigger()] },
+      {
+        ...ctx(),
+        soulLoader: {
+          skills: new Map(),
+          agents: new Map([["support", soulAgent("support")]]),
+          resources: new Map(),
+        },
+      }
+    );
+
+    expect(result).toMatchObject({ success: false, error: { code: "validation_error" } });
+    expect(JSON.stringify(result)).toContain("agent_create");
+    expect(JSON.stringify(result)).toContain("support");
+    expect(soulWriter.apply).not.toHaveBeenCalled();
+  });
+
+  it("commits a Routine whose referenced Agent exists", async () => {
+    const result = await routineForgeTool.handler(
+      { name: "daily-report", definition: routineOverAgent("joke-bot"), triggers: [trigger()] },
+      {
+        ...ctx(),
+        soulLoader: {
+          skills: new Map(),
+          agents: new Map([["joke-bot", soulAgent("joke-bot")]]),
+          resources: new Map(),
+        },
+      }
+    );
+
+    expect(result).toMatchObject({ success: true, data: { name: "daily-report" } });
+    expect(soulWriter.apply).toHaveBeenCalledOnce();
+  });
+
+  // A Routine `tool` State resolves against Soul ToolContracts, which no runtime Tool is. Saying so
+  // by name is the only answer that redirects the caller instead of inviting another attempt.
+  it("refuses a tool State naming a Tool the runtime hosts", async () => {
+    const result = await routineForgeTool.handler(
+      {
+        name: "daily-report",
+        definition: routineOverRecords("ticket"),
+        triggers: [trigger()],
+      },
+      {
+        ...ctx(),
+        soulLoader: {
+          skills: new Map(),
+          agents: new Map(),
+          resources: new Map([["ticket", {}]]),
+        },
+        runtimeToolNames: () => new Set(["record_search", "record_update", "delegate_to_agent"]),
+      }
+    );
+
+    expect(result).toMatchObject({ success: false, error: { code: "validation_error" } });
+    expect(JSON.stringify(result)).toContain("record_search");
+    expect(JSON.stringify(result)).toContain("agent");
+    expect(soulWriter.apply).not.toHaveBeenCalled();
+  });
+
   it("describes canonical Routine and Trigger requirements", () => {
     expect(routineForgeTool.description).toContain("canonical published Routine");
     expect(routineForgeTool.description).toContain("canonical published Trigger");
@@ -364,7 +475,10 @@ describe("routine_delete", () => {
   beforeEach(() => {
     soulWriter = makeSoulWriter();
     onRoutinesChanged = vi.fn(async () => {}) as typeof onRoutinesChanged;
-    routineCatalog = { list: vi.fn().mockResolvedValue([]) };
+    routineCatalog = {
+      list: vi.fn().mockResolvedValue([]),
+      get: vi.fn().mockResolvedValue(undefined),
+    };
   });
 
   function ctx(routines: Map<string, SoulRoutine> = new Map()): PlatformToolContext {

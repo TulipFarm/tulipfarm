@@ -257,6 +257,7 @@ export function registerInternalTurnRoutes(
         tags: ["internal"],
         security: [{ bearerToken: [] }],
         params: InternalSchemas.InternalRunParamsSchema,
+        querystring: InternalSchemas.InternalRunAgentQuerySchema,
         response: {
           200: InternalSchemas.InternalTurnAuthorityResponseSchema,
           401: ErrorSchema,
@@ -268,23 +269,58 @@ export function registerInternalTurnRoutes(
     },
     async (req, reply) => {
       const { runId } = req.params as { runId: string };
+      const { agent: claimedAgent } = req.query as { agent?: string };
       const authority = await guard(reply, () =>
-        deps.host.authority(DEPLOYMENT_BUSINESS_ID, runId)
+        deps.host.authority(DEPLOYMENT_BUSINESS_ID, runId, claimedAgent)
       );
       if (authority !== undefined)
         return reply.send({
           businessId: authority.businessId,
           runId: authority.runId,
-          turn: {
-            id: authority.turn.id,
-            conversationId: authority.turn.conversationId,
-            attempt: authority.turn.attempt,
-          },
+          ...(authority.turn === undefined
+            ? {}
+            : {
+                turn: {
+                  id: authority.turn.id,
+                  conversationId: authority.turn.conversationId,
+                  attempt: authority.turn.attempt,
+                },
+              }),
           subject: authority.subject,
           source: authority.source,
           bundleDigest: authority.bundleDigest,
+          ...(authority.routineId === undefined ? {} : { routineId: authority.routineId }),
           ...(authority.agent === undefined ? {} : { agent: authority.agent }),
         });
+    }
+  );
+
+  app.get(
+    "/api/v1/internal/runs/:runId/agent-tools",
+    {
+      preHandler,
+      schema: {
+        description: "List the Tools the Run's acting Agent may be offered.",
+        tags: ["internal"],
+        security: [{ bearerToken: [] }],
+        params: InternalSchemas.InternalRunParamsSchema,
+        querystring: InternalSchemas.InternalRunAgentQuerySchema,
+        response: {
+          200: InternalSchemas.InternalRunAgentToolsResponseSchema,
+          401: ErrorSchema,
+          403: ErrorSchema,
+          404: ErrorSchema,
+          409: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { runId } = req.params as { runId: string };
+      const { agent } = req.query as { agent?: string };
+      const tools = await guard(reply, () =>
+        deps.host.agentTools(DEPLOYMENT_BUSINESS_ID, runId, agent)
+      );
+      if (tools !== undefined) return reply.send({ tools });
     }
   );
 

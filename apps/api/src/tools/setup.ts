@@ -161,10 +161,18 @@ export function buildToolRegistry(services: {
   if (services.platform !== undefined) {
     const ctx = services.platform;
     // `routineContext` is per-call; merge it so routine Tools see their Run.
+    // Read lazily: the registry is still being filled while this closure is created, and
+    // `routine_forge` needs the finished set to name a hosted Tool a Routine cannot reach.
+    const runtimeToolNames = () => new Set(registry.getAll().map((tool) => tool.name));
     registerFamily(PLATFORM_TOOLS, (reqCtx) =>
       reqCtx.routineContext
-        ? { ...ctx, routineContext: reqCtx.routineContext, requestContext: reqCtx }
-        : { ...ctx, requestContext: reqCtx }
+        ? {
+            ...ctx,
+            runtimeToolNames,
+            routineContext: reqCtx.routineContext,
+            requestContext: reqCtx,
+          }
+        : { ...ctx, runtimeToolNames, requestContext: reqCtx }
     );
   }
 

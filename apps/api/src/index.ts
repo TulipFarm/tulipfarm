@@ -52,6 +52,7 @@ import {
   compileExecutionBundle,
   GitSoulTreeReader,
   GitSyncService,
+  getDefaultAssistant,
   loadBundledIntegrations,
   loadBundledSkills,
   loadDisabledBundledSkills,
@@ -127,6 +128,7 @@ import {
 import { AuthzAdminService } from "./authz/service";
 import { PgConversationRepo } from "./chat/conversations";
 import { PgMessageRepo } from "./chat/messages";
+import { allowedToolNamesFor } from "./chat/turn-helpers";
 import { PgConversationStore } from "./conversations/store.pg";
 import { buildCurator } from "./curator/compose";
 import { CURATOR_SWEEP_QUEUE, registerCuratorSweepSchedule } from "./curator/sweep-schedule";
@@ -537,7 +539,8 @@ async function boot() {
     const feedbackRepo = new FeedbackRepo(pool);
     const surfaceArtifactStore = new PgSurfaceArtifactStore(pool);
     const surfaceActionStore = new PgSurfaceActionStore(pool);
-    const observabilityService = new ObservabilityService(new PgObsRepo(pool));
+    const obsRepo = new PgObsRepo(pool);
+    const observabilityService = new ObservabilityService(obsRepo);
     // Built after observability so embedding spend lands in the same table as every other call.
     const embeddingService = new EmbeddingService({
       usage: createEmbeddingUsageSink(observabilityService, () => obsConfig.pricingOverrides),
@@ -839,6 +842,20 @@ async function boot() {
         runs: runStore,
         store: conversationStore,
         agentForRun: agentForRunResolver(soulLoader, runArtifacts),
+        // No presentation context: a Run that assembles its own context has no surface, so the
+        // Tools that require one are filtered out here rather than refused at dispatch.
+        agentTools: (agentName) => {
+          const allowed = allowedToolNamesFor(toolRegistry, getDefaultAssistant(agentName ?? ""));
+          return (toolRegistry?.getAll() ?? [])
+            .filter((tool) => allowed === undefined || allowed.has(tool.name))
+            .map((tool) => ({
+              name: tool.name,
+              description: tool.description,
+              inputSchema: tool.inputSchema as Record<string, unknown>,
+              ...(tool.tier === undefined ? {} : { tier: tool.tier }),
+              ...(tool.mutating === undefined ? {} : { mutating: tool.mutating }),
+            }));
+        },
         messages: messageRepo,
         context: new ChatTurnContextResolver({
           artifacts: runArtifacts,
@@ -1050,6 +1067,27 @@ async function boot() {
       approvalsRepo,
       routineApprovals,
       routineCatalog,
+      routineDetail: {
+        catalog: routineCatalog,
+        runs: {
+          listByRoutine: async ({ routineId, routineSlug, limit }) => {
+            const page = await runStore.list({
+              businessId: DEPLOYMENT_BUSINESS_ID,
+              limit,
+              routineId,
+            });
+            return page.items.map((run) => ({
+              id: run.id,
+              routineSlug,
+              status: run.status,
+              createdAt: run.createdAt,
+              startedAt: run.startedAt,
+              finishedAt: run.finishedAt,
+            }));
+          },
+        },
+        trigger: manualRoutineTrigger(invocations),
+      },
       toolApprovals,
       channels: (log: FastifyBaseLogger) => ({
         store: conversationStore,
@@ -1094,7 +1132,7 @@ async function boot() {
         activity: activityService,
         approvals: approvalsRepo,
         toolApprovals,
-        runs: createRunReader(runStore, budgetStore),
+        runs: createRunReader(runStore, budgetStore, obsRepo),
         healthProbes: [
           postgresProbe(pool),
           queueProbe(boss),

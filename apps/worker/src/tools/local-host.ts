@@ -94,7 +94,10 @@ function hostedFamilies(options: LocalToolHostOptions): readonly HostedFamily<ne
   };
   const platformFamily: HostedFamily<PlatformRuntimeContext> = {
     definitions: PLATFORM_RUNTIME_TOOLS,
-    context: () => ({}),
+    // `complete_state` refuses a call that names no Routine, so dropping the RequestContext here
+    // made it unreachable from the very Routine Agent States that exist to call it.
+    context: (ctx) =>
+      ctx.routineContext === undefined ? {} : { routineContext: ctx.routineContext },
   };
   const documents = new MemoryDocumentRepo(options.transactions);
   // The Memory Document is stored and returned whole, so nothing here ranks by embedding: this

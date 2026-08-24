@@ -448,6 +448,32 @@ describe("/api/v1/internal/turns", () => {
     expect(res.json().agent).toEqual(hostedAgent);
   });
 
+  it("names the Routine a Routine Run executes", async () => {
+    runs = fakeRuns({ source: "routine", subject: { kind: "user", id: "user-1" } });
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v1/internal/turns/${RUN_ID}/authority`,
+      headers: asWorker(),
+    });
+
+    expect(res.statusCode).toBe(200);
+    // Routine-only Tools — `complete_state`, `call_skill` — refuse a call that names no Routine,
+    // so dropping this in the projection leaves a Routine Agent State unable to complete itself.
+    expect(res.json().routineId).toBe("routine-id");
+  });
+
+  it("omits the Routine for a Run that executes none", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v1/internal/turns/${RUN_ID}/authority`,
+      headers: asWorker(),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().routineId).toBeUndefined();
+  });
+
   it("omits the Agent when the control plane cannot name one", async () => {
     const res = await app.inject({
       method: "GET",

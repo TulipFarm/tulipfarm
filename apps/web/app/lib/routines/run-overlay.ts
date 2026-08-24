@@ -1,5 +1,12 @@
-import type { RunEvent } from "../routines";
 import type { RoutineGraph, RoutineGraphEdge } from "./graph";
+
+/** One persisted Run event, in the shape the overlay and the journal read. */
+export type RunEvent = {
+  seq: number;
+  type: string;
+  payload?: unknown;
+  createdAt?: string;
+};
 
 export type RunNodeStatus =
   | "running"

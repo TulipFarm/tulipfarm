@@ -21,7 +21,7 @@ import type { CommitActor, CommitApproval } from "./commit-signing";
 import type { SoulCommitResult, SoulGitStore } from "./git-store";
 import { SoulGitStoreError } from "./git-store";
 import type { SoulTreeReader } from "./publication";
-import { asAuthored, SoulSemanticValidationError } from "./refs";
+import { asAuthored, type SoulSemanticIssue, SoulSemanticValidationError } from "./refs";
 import { validateSoulSemantics } from "./semantic";
 import { isBundledDefinitionPath } from "./tree-reader";
 import type { Logger } from "./types";
@@ -573,10 +573,35 @@ function errText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * What an issue code means for the caller. A pointer alone ("UNRESOLVED_REF at /spec/states/0") says
+ * where the writer stopped but not what to do, and an authoring Agent answers that by guessing at
+ * the reference's shape until its repair budget is gone. Naming the cause ends the guessing.
+ */
+const ISSUE_REMEDIES: Partial<Record<SoulSemanticIssue["code"], string>> = {
+  UNRESOLVED_REF:
+    "the referenced definition does not exist in the Soul — create it first, then write the " +
+    "definition that references it",
+  VERSION_UNSATISFIED:
+    "the referenced definition exists at a different authored version — reference the version it " +
+    "actually has",
+  ROUTINE_START_UNKNOWN: "spec.start must name one of spec.states",
+  ROUTINE_TRANSITION_UNKNOWN: "a transition names a State that does not exist",
+};
+
 function describeSemanticIssues(error: SoulSemanticValidationError): string {
   const described = error.issues.map(
     (issue) =>
       `${issue.subject} ${issue.code}${issue.ref ? ` (${issue.ref})` : ""}${issue.field ? ` at ${issue.field}` : ""}`
   );
-  return `${error.message}: ${described.join("; ")}`;
+  const remedies = [
+    ...new Set(
+      error.issues.flatMap((issue) => {
+        const remedy = ISSUE_REMEDIES[issue.code];
+        return remedy === undefined ? [] : [`${issue.code}: ${remedy}`];
+      })
+    ),
+  ];
+  const detail = `${error.message}: ${described.join("; ")}`;
+  return remedies.length === 0 ? detail : `${detail}. ${remedies.join(". ")}.`;
 }

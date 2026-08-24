@@ -188,6 +188,12 @@ export const MEMBER_ALLOWED_SURFACES: readonly {
   },
   { type: "onboarding", actions: ["*"], enforcedIn: "onboarding/routes.ts" },
   { type: "preference", actions: ["*"], enforcedIn: "preferences/routes.ts" },
+  /** Reading a published Routine and starting one; authoring stays admin-only. */
+  {
+    type: "routine",
+    actions: ["routine.read", "routine.trigger"],
+    enforcedIn: "routines/detail-routes.ts",
+  },
   {
     type: "network",
     actions: ["network.read"],

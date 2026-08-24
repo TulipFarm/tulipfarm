@@ -40,7 +40,7 @@ import type {
   ToolVisibilityPort,
 } from "./ports";
 import { type AuthorityPrincipal, principalKindOf } from "./principal";
-import { presentationContextForAuthority, readChatRequest } from "./request";
+import { findChatRequest, presentationContextForAuthority } from "./request";
 import type { SurfaceActionStore, SurfaceArtifactStore } from "./surface-ports";
 import type { RequestContext, ToolDef } from "./types";
 
@@ -281,15 +281,20 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
   }
 
   async dispatch(authority: TurnAuthority, call: HostedToolCall): Promise<HostedToolResult> {
-    const request = await readChatRequest(this.options.artifacts, authority, this.now());
+    // Absent for a Run that fixes no turn parameters — a Routine Run states its Agent per State,
+    // and the control plane already resolved it onto `authority.agent`.
+    const request = await findChatRequest(this.options.artifacts, authority, this.now());
     // A process with a Soul resolves the Agent itself. One without a Soul — the durable runtime —
     // has only what the Run carried, and takes it rather than defaulting to unrestricted.
-    const agent = this.options.agents?.resolve(request.agentId) ?? authority.agent ?? DEFAULT_AGENT;
+    const agent =
+      request === undefined
+        ? (authority.agent ?? DEFAULT_AGENT)
+        : (this.options.agents?.resolve(request.agentId) ?? authority.agent ?? DEFAULT_AGENT);
     // The routed Agent's configured autonomy is an authority ceiling, so the turn runs at the more
     // restrictive of it and whatever this request asked for. Reading `request.autonomy` alone made
     // the ceiling shown on the Agent advisory: any caller that supplied a permissive per-turn value
     // — or hardcoded one, as the Channel path did — dispatched above it.
-    const autonomy = autonomyCeiling(agent.autonomy, request.autonomy);
+    const autonomy = autonomyCeiling(agent.autonomy, request?.autonomy);
     const presentationContext = await presentationContextForAuthority(
       authority,
       this.options.surfaces,
@@ -461,12 +466,16 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
         : {};
     const context: RequestContext = {
       userId: authority.subject.id,
+      subject: { kind: authority.subject.kind, id: authority.subject.id },
       actor: {
         principalId: `${authority.subject.kind}:${authority.subject.id}`,
         name: authority.subject.id,
         email: "",
       },
-      conversationId: authority.turn.conversationId,
+      ...(authority.turn === undefined ? {} : { conversationId: authority.turn.conversationId }),
+      ...(authority.routineId === undefined
+        ? {}
+        : { routineContext: { routineId: authority.routineId, runId: authority.runId } }),
       runId: authority.runId,
       toolCallId: call.callId,
       agentId: agent.name,

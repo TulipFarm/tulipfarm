@@ -46,6 +46,7 @@ import { githubExcludedToolNames } from "../tools/github/visibility";
 import { ModelSelectorDeniedError, type ModelSelectorGate } from "./model-authz";
 import { resolveModelSelector } from "./model-selector";
 import type { HostedTurnContext, TurnAuthority, TurnContextResolver } from "./turn-host";
+import { TurnAuthorityError } from "./turn-host";
 
 /** Narrow read of one Run's Channel delivery correlation — just enough to resolve a target. */
 export interface ChannelDeliveryReader {
@@ -57,7 +58,7 @@ export interface ChannelDeliveryReader {
 
 /** Resolves the presentation target from channel delivery correlation, falling back to web chat. */
 export async function presentationContextForAuthority(
-  authority: TurnAuthority,
+  authority: ChatTurnAuthority,
   channelDeliveries?: ChannelDeliveryReader
 ): Promise<PresentationContext> {
   const delivery = await channelDeliveries?.find(authority.businessId, authority.runId);
@@ -69,6 +70,12 @@ export async function presentationContextForAuthority(
     `conversation:${authority.turn.conversationId}`
   );
 }
+
+/**
+ * Run authority that names a Turn. Everything a Chat Turn assembles is conversation-scoped, so a
+ * Run without one is refused rather than given an invented conversation.
+ */
+type ChatTurnAuthority = TurnAuthority & { readonly turn: NonNullable<TurnAuthority["turn"]> };
 
 /** Resolves Worker Context from durable transcript and immutable request Artifacts. */
 
@@ -87,7 +94,7 @@ const CHAT_SOURCE = "chat";
 /** Reads Chat Run parameters from the immutable request or derived chat-request Artifact. */
 export async function readChatRequest(
   artifacts: ArtifactService,
-  authority: TurnAuthority,
+  authority: ChatTurnAuthority,
   now: Date
 ): Promise<ChatRequestPayload> {
   const artifact = await artifacts.read({
@@ -159,7 +166,12 @@ export class ChatTurnContextResolver implements TurnContextResolver {
     this.now = options.now ?? (() => new Date());
   }
 
-  async resolve(authority: TurnAuthority): Promise<HostedTurnContext> {
+  async resolve(turnAuthority: TurnAuthority): Promise<HostedTurnContext> {
+    const { turn } = turnAuthority;
+    // A Chat Turn is assembled entirely from its conversation; a Run without one has nothing here
+    // to assemble, and inventing a conversation for it would attach its Messages to a stranger's.
+    if (turn === undefined) throw new TurnAuthorityError("turn_not_found");
+    const authority: ChatTurnAuthority = { ...turnAuthority, turn };
     const request = await readChatRequest(this.options.artifacts, authority, this.now());
     const agent = resolveAgent(this.options.soulLoader, request.agentId);
     const platformAgent = getDefaultAssistant(agent.name);
@@ -302,7 +314,7 @@ export class ChatTurnContextResolver implements TurnContextResolver {
 
   /** Delegates to the File domain, which owns which Files a Turn may send. */
   private async resolveAttachments(
-    authority: TurnAuthority,
+    authority: ChatTurnAuthority,
     history: readonly PersistedMessage[]
   ): Promise<TurnAttachmentRef[]> {
     const files = this.options.files;
@@ -334,7 +346,7 @@ export class ChatTurnContextResolver implements TurnContextResolver {
    * reported and the selector still resolves. Enforcement is a separate, evidenced flip.
    */
   private async authorizeModelSelector(
-    authority: TurnAuthority,
+    authority: ChatTurnAuthority,
     agent: ReturnType<typeof resolveAgent>,
     request: ChatRequestPayload
   ): Promise<string> {

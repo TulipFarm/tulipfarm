@@ -3,7 +3,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 type PreHandler = (request: FastifyRequest, reply: FastifyReply) => Promise<unknown>;
 
-const security: { [securityLabel: string]: readonly string[] }[] = [
+/** Shared with `detail-routes.ts`, which serves the same Routines surface. */
+export const security: { [securityLabel: string]: readonly string[] }[] = [
   { sessionCookie: [] },
   { bearerToken: [] },
 ];
@@ -23,7 +24,7 @@ const triggerSchema = {
   },
 } as const;
 
-const routineSchema = {
+export const routineSchema = {
   type: "object",
   required: ["id", "slug", "displayName", "authoredVersion", "triggers"],
   properties: {

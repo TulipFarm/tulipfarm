@@ -1,7 +1,6 @@
 import { useState } from "react";
-import type { RunEvent } from "~/lib/routines";
 import type { RoutineGraph } from "~/lib/routines/graph";
-import type { RunOverlay } from "~/lib/routines/run-overlay";
+import type { RunEvent, RunOverlay } from "~/lib/routines/run-overlay";
 import { RoutineCanvas } from "./routine-canvas";
 
 type Props = { graph: RoutineGraph; overlay: RunOverlay; events: RunEvent[] };

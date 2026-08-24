@@ -17,8 +17,18 @@ export interface RoutineCatalogItem {
   triggers: RoutineCatalogTrigger[];
 }
 
+/** One published Routine, with the canonical document the browser renders it from. */
+export interface RoutineCatalogDetail extends RoutineCatalogItem {
+  /** The canonical Routine document, exactly as the active bundle carries it. */
+  definition: Record<string, unknown>;
+  /** Content address of the bundle this document came from, so a stale view is detectable. */
+  bundleDigest: string;
+}
+
 export interface RoutineCatalog {
   list(): Promise<RoutineCatalogItem[]>;
+  /** `undefined` when no bundle is active, or the bundle publishes no such Routine. */
+  get(slug: string): Promise<RoutineCatalogDetail | undefined>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -38,6 +48,29 @@ function triggerSummary(spec: Record<string, unknown>): string {
   return typeof spec.type === "string" ? spec.type.replaceAll("_", " ") : "unknown";
 }
 
+function isPublished(definition: RuntimeBundle["definitions"][number]): boolean {
+  const metadata = isRecord(definition.document.metadata)
+    ? definition.document.metadata
+    : undefined;
+  return metadata?.lifecycle === "published";
+}
+
+function catalogItem(
+  definition: RuntimeBundle["definitions"][number],
+  triggers: RoutineCatalogTrigger[]
+): RoutineCatalogItem {
+  const metadata = isRecord(definition.document.metadata)
+    ? definition.document.metadata
+    : undefined;
+  return {
+    id: definition.id,
+    slug: definition.slug,
+    displayName: typeof metadata?.displayName === "string" ? metadata.displayName : null,
+    authoredVersion: definition.authoredVersion,
+    triggers,
+  };
+}
+
 /** Browser read model sourced only from the verified active Soul publication. */
 export class ActiveRoutineCatalog implements RoutineCatalog {
   constructor(private readonly activeBundle: ActiveBundleReader) {}
@@ -45,7 +78,25 @@ export class ActiveRoutineCatalog implements RoutineCatalog {
   async list(): Promise<RoutineCatalogItem[]> {
     const bundle = await this.activeBundle();
     if (!bundle) return [];
+    const triggersByRoutine = this.triggersByRoutine(bundle);
+    return bundle.definitions
+      .filter((definition) => definition.kind === "Routine" && isPublished(definition))
+      .map((definition) => catalogItem(definition, triggersByRoutine.get(definition.slug) ?? []))
+      .sort((a, b) => a.slug.localeCompare(b.slug));
+  }
 
+  async get(slug: string): Promise<RoutineCatalogDetail | undefined> {
+    const bundle = await this.activeBundle();
+    const definition = bundle?.get("Routine", slug);
+    if (!bundle || !definition || !isPublished(definition)) return undefined;
+    return {
+      ...catalogItem(definition, this.triggersByRoutine(bundle).get(slug) ?? []),
+      definition: definition.document as Record<string, unknown>,
+      bundleDigest: bundle.digest,
+    };
+  }
+
+  private triggersByRoutine(bundle: RuntimeBundle): Map<string, RoutineCatalogTrigger[]> {
     const triggersByRoutine = new Map<string, RoutineCatalogTrigger[]>();
     for (const definition of bundle.definitions) {
       if (definition.kind !== "Trigger") continue;
@@ -69,29 +120,9 @@ export class ActiveRoutineCatalog implements RoutineCatalog {
       });
       triggersByRoutine.set(routineRef.name, triggers);
     }
-
-    return bundle.definitions
-      .filter((definition) => {
-        if (definition.kind !== "Routine") return false;
-        const metadata = isRecord(definition.document.metadata)
-          ? definition.document.metadata
-          : undefined;
-        return metadata?.lifecycle === "published";
-      })
-      .map((definition) => {
-        const metadata = isRecord(definition.document.metadata)
-          ? definition.document.metadata
-          : undefined;
-        return {
-          id: definition.id,
-          slug: definition.slug,
-          displayName: typeof metadata?.displayName === "string" ? metadata.displayName : null,
-          authoredVersion: definition.authoredVersion,
-          triggers: (triggersByRoutine.get(definition.slug) ?? []).sort((a, b) =>
-            a.slug.localeCompare(b.slug)
-          ),
-        };
-      })
-      .sort((a, b) => a.slug.localeCompare(b.slug));
+    for (const triggers of triggersByRoutine.values()) {
+      triggers.sort((a, b) => a.slug.localeCompare(b.slug));
+    }
+    return triggersByRoutine;
   }
 }

@@ -77,8 +77,17 @@ export interface TraceEvent {
   attributes: Record<string, unknown>;
 }
 
+/** What one Run spent on model calls, summed from the ledger rows those calls wrote. */
+export interface RunCosts {
+  /** Priced calls only; an unpriced call adds tokens without adding dollars. */
+  amountUsd: number;
+  modelTokens: number;
+}
+
 export interface ObsRepo {
   insert(row: ObsEventRow): Promise<void>;
+  /** Model spend attributed to one Run. A Run that made no model call sums to zero. */
+  costsForRun(runId: string): Promise<RunCosts>;
   summarize(opts: SummarizeOpts): Promise<ObsSummary>;
   /** Prune rows older than the cutoff (retention). Returns the number deleted. */
   deleteOlderThan(cutoff: Date): Promise<number>;
@@ -120,6 +129,18 @@ export class PgObsRepo implements ObsRepo {
         row.createdAt,
       ]
     );
+  }
+
+  async costsForRun(runId: string): Promise<RunCosts> {
+    const result = await this.q.query<{ cost: string; tokens: string }>(
+      `SELECT COALESCE(SUM(cost_usd), 0) AS cost,
+              COALESCE(SUM(COALESCE(tokens_in, 0) + COALESCE(tokens_out, 0)), 0) AS tokens
+         FROM obs_event
+        WHERE type = 'llm_call' AND attributes->>'runId' = $1`,
+      [runId]
+    );
+    const row = result.rows[0];
+    return { amountUsd: num(row?.cost), modelTokens: num(row?.tokens) };
   }
 
   async summarize({ since, bucket }: SummarizeOpts): Promise<ObsSummary> {

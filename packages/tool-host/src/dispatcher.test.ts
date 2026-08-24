@@ -136,6 +136,7 @@ describe("RegistryToolDispatcher", () => {
     expect(seen).toEqual([
       {
         userId: "user-1",
+        subject: { kind: "user", id: "user-1" },
         // Soul writes commit as the Run subject, not the API service principal.
         actor: { principalId: "user:user-1", name: "user-1", email: "" },
         conversationId: CONVERSATION_ID,

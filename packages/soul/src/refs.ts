@@ -235,7 +235,7 @@ const PLAIN_REF_EDGES: ReadonlyArray<readonly [string, string, string]> = [
 ];
 
 /** Routine State type → the versioned ref field it carries and that field's target kind. */
-const ROUTINE_STATE_REF_EDGES: Record<string, readonly [string, string]> = {
+export const ROUTINE_STATE_REF_EDGES: Record<string, readonly [string, string]> = {
   agent: ["agentRef", "Agent"],
   tool: ["toolRef", "ToolContract"],
   form: ["formRef", "Form"],

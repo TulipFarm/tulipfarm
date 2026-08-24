@@ -1,4 +1,5 @@
 import type {
+  ExposedTool,
   ToolDispatchPort,
   ToolDispatchRequest,
   ToolDispatchResult,
@@ -141,8 +142,23 @@ export class HttpTurnHost
    * The Run-derived authority for this Run's Turn, so Tools hosted in this process execute under
    * what the Run recorded rather than under anything this process decided for itself.
    */
-  async authority(runId: string): Promise<TurnAuthority | undefined> {
-    return this.client.find<TurnAuthority>("GET", turnPath(runId, "/authority"), [404, 409]);
+  async authority(runId: string, agentName?: string): Promise<TurnAuthority | undefined> {
+    const suffix = agentName === undefined ? "" : `?agent=${encodeURIComponent(agentName)}`;
+    return this.client.find<TurnAuthority>(
+      "GET",
+      `${turnPath(runId, "/authority")}${suffix}`,
+      [404, 409]
+    );
+  }
+
+  /** The Tools the Run's acting Agent may be offered, resolved by the control plane's registry. */
+  async agentTools(runId: string, agentName?: string): Promise<readonly ExposedTool[]> {
+    const suffix = agentName === undefined ? "" : `?agent=${encodeURIComponent(agentName)}`;
+    const body = await this.client.require<{ tools: readonly ExposedTool[] }>(
+      "GET",
+      `/api/v1/internal/runs/${encodeURIComponent(runId)}/agent-tools${suffix}`
+    );
+    return body.tools;
   }
 
   async dispatch(request: ToolDispatchRequest): Promise<ToolDispatchResult> {
@@ -156,6 +172,7 @@ export class HttpTurnHost
         ...(request.activeSkillName === undefined
           ? {}
           : { activeSkillName: request.activeSkillName }),
+        ...(request.agentName === undefined ? {} : { agentName: request.agentName }),
       }
     );
     return withCallId(request.callId, result);

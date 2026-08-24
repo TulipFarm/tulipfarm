@@ -15,6 +15,7 @@ describe("Routine catalogue routes", () => {
         triggers: [{ slug: "daily-wait-manual", type: "manual", summary: "manual" }],
       },
     ]),
+    get: vi.fn<RoutineCatalog["get"]>(async () => undefined),
   };
 
   beforeEach(async () => {

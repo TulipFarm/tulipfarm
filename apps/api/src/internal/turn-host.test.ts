@@ -70,7 +70,7 @@ describe("InternalTurnHost", () => {
     for (const authority of [...seen.context, ...seen.tools]) {
       expect(authority.subject).toEqual({ kind: "integration", id: "slack" });
       expect(authority.bundleDigest).toBe("bundle-9");
-      expect(authority.turn.id).toBe(TURN_ID);
+      expect(authority.turn?.id).toBe(TURN_ID);
     }
   });
 
