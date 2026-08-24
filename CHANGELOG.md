@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.15.0](https://github.com/TulipFarm/tulipfarm/compare/v0.14.2...v0.15.0) (2026-08-24)
+
+### Features
+
+* **agent-runtime:** complete Tool answers, bound results, cancel mid-stream ([#594](https://github.com/TulipFarm/tulipfarm/issues/594)) ([246cbc6](https://github.com/TulipFarm/tulipfarm/commit/246cbc6a3bbdb576a6612fbac792f1ee29613dcc))
+* **agent-runtime:** reach Soul facts through Tools, not prompt blocks ([#591](https://github.com/TulipFarm/tulipfarm/issues/591)) ([1e01204](https://github.com/TulipFarm/tulipfarm/commit/1e01204057b9993f3adbf64fceb3117f39048236))
+* **chat:** add Soul system-reminder and stream replies incrementally ([#595](https://github.com/TulipFarm/tulipfarm/issues/595)) ([a37e0bd](https://github.com/TulipFarm/tulipfarm/commit/a37e0bd080ff721a2f52de2d389c077d55559e5d))
+* **deploy:** render one deployment manifest into docs, a prompt, and a wizard ([#592](https://github.com/TulipFarm/tulipfarm/issues/592)) ([72b79fc](https://github.com/TulipFarm/tulipfarm/commit/72b79fc6056de6e760b69934e62d5e65d075ce0f))
+* **tools:** add governed web_fetch and api_request network tools ([#593](https://github.com/TulipFarm/tulipfarm/issues/593)) ([08bb81d](https://github.com/TulipFarm/tulipfarm/commit/08bb81d6b1ed0cb3aa45a866844112e3c5866c2c))
+
+### Bug Fixes
+
+* **integrations:** pin egress connections to resolved addresses correctly ([#590](https://github.com/TulipFarm/tulipfarm/issues/590)) ([4e58782](https://github.com/TulipFarm/tulipfarm/commit/4e587827bb8c34917136506c1546920520c4f470))
+* **routines:** add detail/trigger routes, real Run spend, and safe retries ([#596](https://github.com/TulipFarm/tulipfarm/issues/596)) ([5a1cd1d](https://github.com/TulipFarm/tulipfarm/commit/5a1cd1d8cef7f13a3592680d889ca9d093ca7fb0))
+
 ## [0.14.2](https://github.com/TulipFarm/tulipfarm/compare/v0.14.1...v0.14.2) (2026-08-22)
 
 ### Bug Fixes
