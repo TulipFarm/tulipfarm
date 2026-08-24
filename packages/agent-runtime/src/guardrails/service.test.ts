@@ -19,6 +19,7 @@ describe("GuardrailsService.init(null) — default policy", () => {
     expect(DEFAULT_GUARDRAILS).toEqual({
       input: [{ guard: "prompt_injection", sensitivity: "medium" }],
       "tool-call": [{ guard: "tool_blocklist", block: ["run_command"] }],
+      "tool-result": [{ guard: "untrusted_content", sensitivity: "medium" }],
       output: [{ guard: "content_filter", patterns: ["credit_card", "ssn", "api_key", "email"] }],
     });
   });

@@ -3,6 +3,7 @@ import { DEFAULT_GUARDRAILS } from "./default-policy";
 import { makeContentFilterGuard } from "./guards/content-filter";
 import { makePromptInjectionGuard } from "./guards/prompt-injection";
 import { makeToolBlocklistGuard, type ToolCallInput } from "./guards/tool-blocklist";
+import { makeUntrustedContentGuard, type ToolResultInput } from "./guards/untrusted-content";
 import type { Guard, GuardContext, StageResult } from "./pipeline";
 import { runStage } from "./pipeline";
 
@@ -10,11 +11,12 @@ type ServiceLogger = { warn: (obj: unknown, msg?: string) => void };
 
 const NOOP_LOGGER: ServiceLogger = { warn() {} };
 
-/** Owns the three guard stages; invalid or absent config falls back to defaults. */
+/** Owns the four guard stages; invalid or absent config falls back to defaults. */
 export class GuardrailsService {
   private log: ServiceLogger = NOOP_LOGGER;
   private input: Guard<string>[] = [];
   private toolCall: Guard<ToolCallInput>[] = [];
+  private toolResult: Guard<ToolResultInput>[] = [];
   private output: Guard<string>[] = [];
   private configValue: GuardrailsConfig = DEFAULT_GUARDRAILS;
   private revisionValue = canonicalHash(DEFAULT_GUARDRAILS);
@@ -45,10 +47,12 @@ export class GuardrailsService {
 
     const input = (cfg.input ?? []).map((c) => makePromptInjectionGuard(c));
     const toolCall = (cfg["tool-call"] ?? []).map((c) => makeToolBlocklistGuard(c));
+    const toolResult = (cfg["tool-result"] ?? []).map((c) => makeUntrustedContentGuard(c));
     const output = (cfg.output ?? []).map((c) => makeContentFilterGuard(c));
 
     this.input = input;
     this.toolCall = toolCall;
+    this.toolResult = toolResult;
     this.output = output;
     this.configValue = cfg;
     this.revisionValue = canonicalHash(cfg);
@@ -60,6 +64,10 @@ export class GuardrailsService {
 
   runToolCall(input: ToolCallInput, ctx: GuardContext): Promise<StageResult<ToolCallInput>> {
     return runStage(this.toolCall, input, ctx, this.log);
+  }
+
+  runToolResult(input: ToolResultInput, ctx: GuardContext): Promise<StageResult<ToolResultInput>> {
+    return runStage(this.toolResult, input, ctx, this.log);
   }
 
   runOutput(text: string, ctx: GuardContext): Promise<StageResult<string>> {

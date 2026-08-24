@@ -83,6 +83,7 @@ import { BrokerRoutineToolPort } from "./routine/tool-port";
 import { RunDispatcher } from "./run-dispatcher";
 import { GuardedWorkerSecretsService } from "./secrets-guard";
 import { type DrainableLoop, drain } from "./shutdown";
+import { createToolResultDistiller } from "./tool-result-distiller";
 import { buildLocalToolHost } from "./tools/local-host";
 import { RoutingToolDispatch } from "./tools/routing-dispatch";
 import { SoulEmbeddings } from "./tools/soul-embeddings";
@@ -315,8 +316,29 @@ export async function main(): Promise<void> {
   // and reports nothing, so every cost view showed zero.
   const spendSink = new PgSpendSink(pool, logger);
 
+  // The intermediary the network Tools deliberately do not contain: `web_fetch` and `api_request`
+  // return whole responses, and the judgement about which parts matter happens once, here, on the
+  // cheapest rung, against what the Turn actually asked.
+  // Built per Turn, not once: this is a real provider call, and the case for making it here
+  // rather than inside the Tool rests on it being attributed and gated like any other.
+  const toolResultDistiller = ({
+    runId,
+    conversationId,
+  }: {
+    runId: string;
+    conversationId: string;
+  }) =>
+    createToolResultDistiller({
+      models: llm,
+      log: logger,
+      spend: spendSink,
+      gate: modelGate,
+      attribution: { runId, conversationId },
+    });
+
   const chatExecutor = createChatExecutor({
     host: turnHost,
+    distiller: toolResultDistiller,
     tools: toolDispatch,
     context: turnHost,
     attachments: turnHost,

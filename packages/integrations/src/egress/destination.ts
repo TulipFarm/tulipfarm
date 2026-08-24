@@ -19,6 +19,43 @@ export type EgressDestinationDenial =
   | "private_destination"
   | "unresolved_destination";
 
+/** Every denial `GuardedEgressHttp` can answer with, so a caller can tell its 403 from a server's. */
+export const EGRESS_DENIAL_REASONS: ReadonlySet<string> = new Set<EgressDestinationDenial>([
+  "not_https",
+  "embedded_credentials",
+  "no_host",
+  "private_destination",
+  "unresolved_destination",
+]);
+
+/**
+ * The mark `GuardedEgressHttp` puts on its own refusals.
+ *
+ * A Symbol rather than a field, because the alternative is asking a body whether it is a policy
+ * refusal — and the body is the destination's to write. A public server answering `403` with
+ * `{"error":"private_destination"}` would otherwise be reported to the Agent, and to the person,
+ * as this deployment's own refusal, complete with the claim that the site was never contacted. A
+ * Symbol cannot be forged by anything that arrived as JSON off a socket.
+ */
+const EGRESS_DENIAL = Symbol.for("tulipfarm.egress.denial");
+
+/**
+ * Whether this response is the destination cage refusing, rather than the destination answering.
+ *
+ * Both are `403`, and an Agent told only "forbidden" will retry a request that this deployment
+ * will never allow, or report a policy refusal to a person as the provider's decision.
+ */
+export function egressDenialReason(
+  status: number,
+  body: unknown
+): EgressDestinationDenial | undefined {
+  if (status !== 403 || typeof body !== "object" || body === null) return undefined;
+  const marked = (body as Record<symbol, unknown>)[EGRESS_DENIAL];
+  return typeof marked === "string" && EGRESS_DENIAL_REASONS.has(marked)
+    ? (marked as EgressDestinationDenial)
+    : undefined;
+}
+
 export class EgressDestinationError extends Error {
   readonly name = "EgressDestinationError";
 
@@ -59,16 +96,28 @@ function isPrivateIpv6(address: string): boolean {
   if (normalized === "::" || normalized === "::1") return true;
   if (normalized.startsWith("fc") || normalized.startsWith("fd")) return true;
   if (/^fe[89ab]/.test(normalized)) return true;
+  // `fec0::/10`, site-local. Deprecated by RFC 3879 and so not reachable on the public internet,
+  // but still routed inside plenty of networks — which is exactly what an SSRF wants.
+  if (/^fe[c-f]/.test(normalized)) return true;
   if (normalized.startsWith("ff") || normalized.startsWith("2001:db8:")) return true;
   if (normalized === "100::" || normalized.startsWith("100:0:0:0:")) return true;
+  // Transition and translation ranges each carry an IPv4 address inside an IPv6 literal, so a
+  // private v4 destination can be spelled as a v6 one that no v4 rule ever inspects. All are
+  // deprecated or infrastructure-only, so refusing the whole range costs no real destination:
+  // 6to4 (RFC 7526), Teredo, NAT64 (RFC 6052), benchmarking, and documentation.
+  if (/^(2002:|2001:0{0,4}:|64:ff9b:|2001:2:0:|3fff:|5f00:)/.test(normalized)) return true;
   const mappedIpv4 = normalized.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/)?.[1];
   if (mappedIpv4 !== undefined) return isPrivateIpv4(mappedIpv4);
   // `new URL()` rewrites `::ffff:127.0.0.1` to `::ffff:7f00:1`, so the dotted form is not the
   // only spelling that reaches here.
   const hextets = normalized.match(/^::ffff:([\da-f]{1,4}):([\da-f]{1,4})$/);
-  if (hextets === null) return false;
-  const [high, low] = [Number.parseInt(hextets[1], 16), Number.parseInt(hextets[2], 16)];
-  return isPrivateIpv4(`${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`);
+  if (hextets !== null) {
+    const [high, low] = [Number.parseInt(hextets[1], 16), Number.parseInt(hextets[2], 16)];
+    return isPrivateIpv4(`${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`);
+  }
+  // IPv4-compatible `::a.b.c.d` (RFC 4291, deprecated). `::7f00:1` is 127.0.0.1 wearing a v6
+  // spelling, and unlike `::ffff:` it carries no marker to catch it on.
+  return /^::(\d+\.\d+\.\d+\.\d+|[\da-f]{1,4}:[\da-f]{1,4})$/.test(normalized);
 }
 
 /** Loopback, link-local, RFC 1918, CGNAT, multicast and IPv4-mapped IPv6 all count as private. */
@@ -165,7 +214,13 @@ export class GuardedEgressHttp implements EgressHttpPort {
       return this.inner.send({ ...request, pinnedAddresses: addresses });
     } catch (error) {
       if (!(error instanceof EgressDestinationError)) throw error;
-      return { status: 403, headers: {}, body: { error: error.denial } };
+      // `error` stays for anything reading the body as data; the Symbol is what `egressDenialReason`
+      // trusts, because only this line can set it.
+      return {
+        status: 403,
+        headers: {},
+        body: { error: error.denial, [EGRESS_DENIAL]: error.denial },
+      };
     }
   }
 

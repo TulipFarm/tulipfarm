@@ -6,6 +6,7 @@ import type {
   ResolvedAttachment,
 } from "../ports";
 import type { LoopCheckpointStore } from "./checkpoint";
+import type { ToolResultDistillerPort } from "./distill";
 
 /** What a caller of the bounded Tool loop supplies, implements, and receives back. */
 
@@ -195,6 +196,11 @@ export interface AgentLoopDependencies {
   readonly tools: ToolDispatchPort;
   /** Bytes for Files re-read mid-Turn; absent leaves `file_read` able to return text only. */
   readonly attachments?: LoopAttachmentPort;
+  /**
+   * Shrinks an oversized Tool result against what the Turn asked. Absent leaves large results
+   * raw but bounded, which is what a deterministic replay or the offline eval harness needs.
+   */
+  readonly distiller?: ToolResultDistillerPort;
   readonly checkpoints: LoopCheckpointStore;
   readonly events: AgentLoopEventSink;
   readonly budget: AgentLoopBudgetPort;

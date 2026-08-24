@@ -17,6 +17,7 @@ import type {
   ToolDispatchRequest,
   ToolDispatchResult,
 } from "./contract";
+import type { ToolResultDistillerPort } from "./distill";
 import { AgentLoop } from "./loop";
 
 function textResult(text: string): ModelInvocationResult {
@@ -177,6 +178,7 @@ function loop(options: {
   cancelled?: () => Promise<boolean>;
   log?: { warn(obj: unknown, msg?: string): void };
   attachments?: LoopAttachmentPort;
+  distiller?: ToolResultDistillerPort;
 }) {
   return new AgentLoop({
     model: options.model,
@@ -187,10 +189,90 @@ function loop(options: {
     isCancelled: options.cancelled ?? (async () => false),
     ...(options.log === undefined ? {} : { log: options.log }),
     ...(options.attachments === undefined ? {} : { attachments: options.attachments }),
+    ...(options.distiller === undefined ? {} : { distiller: options.distiller }),
   });
 }
 
 describe("AgentLoop", () => {
+  it("summarises a Tool result against the prompt the Agent wrote, not the words the person typed", async () => {
+    // A follow-up Message is written for someone who has been reading along: "who wrote it?"
+    // names no subject. The Agent resolves that into a self-contained prompt, and the Tool
+    // carries it past itself to the summariser — which is the only thing that reads it.
+    const asks: string[] = [];
+    const distiller: ToolResultDistillerPort = {
+      distill: async (request) => {
+        asks.push(request.ask);
+        return { summary: "Vicent Marti wrote it.", citations: [] };
+      },
+    };
+    const tools = dispatcher({
+      status: "succeeded",
+      callId: "call-1",
+      output: { url: "https://x.example", content: "By Vicent Marti. ".repeat(500) },
+    });
+
+    await loop({
+      model: scriptedModel(
+        toolCallResult([
+          {
+            callId: "call-1",
+            name: "web_fetch",
+            arguments: { url: "https://x.example", prompt: "who wrote this article?" },
+          },
+        ]),
+        textResult("Vicent Marti.")
+      ),
+      tools,
+      distiller,
+    }).run(
+      input({
+        messages: [{ role: "user", content: textContent("who wrote it?") }],
+        tools: [{ name: "web_fetch", inputSchema: { type: "object", required: ["url"] } }],
+      })
+    );
+
+    expect(asks).toEqual(["who wrote this article?"]);
+  });
+
+  it("never summarises a result against the loop's own repair prompt", async () => {
+    // A repair prompt is pushed onto the transcript as a `user` Message, so reading the live
+    // transcript for "the latest ask" would summarise a page against the loop's own JSON.
+    const asks: string[] = [];
+    const distiller: ToolResultDistillerPort = {
+      distill: async (request) => {
+        asks.push(request.ask);
+        return { summary: "It ships in September.", citations: [] };
+      },
+    };
+
+    await loop({
+      model: scriptedModel(
+        {
+          requestId: "req",
+          output: { kind: "text", text: "" },
+          usage: { inputTokens: 5, outputTokens: 0 },
+        },
+        toolCallResult([
+          { callId: "call-1", name: "web_fetch", arguments: { url: "https://x.example" } },
+        ]),
+        textResult("It ships in September.")
+      ),
+      tools: dispatcher({
+        status: "succeeded",
+        callId: "call-1",
+        output: { url: "https://x.example", content: "Ships in September. ".repeat(500) },
+      }),
+      distiller,
+    }).run(
+      input({
+        messages: [{ role: "user", content: textContent("when does it ship?") }],
+        tools: [{ name: "web_fetch", inputSchema: { type: "object", required: ["url"] } }],
+      })
+    );
+
+    expect(asks).toEqual(["when does it ship?"]);
+  });
+
   it("returns the model answer without dispatching a Tool", async () => {
     const tools = dispatcher();
     const outcome = await loop({ model: scriptedModel(textResult("done")), tools }).run(input());

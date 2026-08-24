@@ -12,6 +12,27 @@ export interface GovernedHttpRequest {
   readonly method: IntegrationHttpMethod;
   readonly headers?: Readonly<Record<string, string>>;
   readonly body?: unknown;
+  /**
+   * Whether these headers carry a leased Secret.
+   *
+   * Declared by the caller, never guessed from a header name: a Credential may name any header
+   * the destination asks for, so `X-Service-Key` is as real a Secret as `authorization`. Guessing
+   * would silently widen the redirect rule for exactly the requests it must not widen for.
+   */
+  readonly carriesCredential?: boolean;
+  /**
+   * Re-checks every hop against whatever narrowed this request beyond the deployment's own cage —
+   * a Skill's declared destinations, for instance. Throws to refuse.
+   *
+   * Checking only the URL the caller passed would let a page under a declared origin redirect to
+   * its `www.` variant, which is a host that Skill never declared and which can be taken over
+   * independently of the apex.
+   */
+  readonly assertDestination?: (origin: string) => void;
+  /** Hand back undecoded bytes for a non-text response, for a caller that can extract them. */
+  readonly acceptBinary?: boolean;
+  /** The caller's deadline, so abandoning the call also abandons the redirect walk under way. */
+  readonly signal?: AbortSignal;
 }
 
 export type GovernedHttpResult =
@@ -102,6 +123,19 @@ export function classifyGraphqlOperation(
   return operations[0]?.kind ?? "query";
 }
 
+/**
+ * The one place a caller-supplied URL becomes the URL this deployment will actually use.
+ *
+ * `http:` is rewritten to `https:` here rather than at a Tool, so that authorization, the Skill
+ * destination check, the audit target and the request itself all reason about the same origin. A
+ * Tool that upgraded privately would be authorized against `http://host` and then fetch
+ * `https://host`, which is the shape of an authorization bypass even when both resolve alike.
+ *
+ * Only this scheme is rewritten, and only here: a manifest's declared `base_url` goes through
+ * `assertPublicEgressUrl` directly, so writing `http://` into config still fails loudly instead of
+ * being silently corrected. Upgrading a redirect target has the same justification as upgrading
+ * the first hop — a destination answering `301 http://…` is asking to have TLS stripped.
+ */
 export function normalizedPublicUrl(rawUrl: string): URL {
   if (rawUrl.length > 2_000) throw new Error("URL exceeds 2000 characters");
   let url: URL;
@@ -110,11 +144,40 @@ export function normalizedPublicUrl(rawUrl: string): URL {
   } catch {
     throw new Error("URL is invalid");
   }
+  if (url.protocol === "http:") url.protocol = "https:";
   assertPublicEgressUrl(url, rawUrl);
   return url;
 }
 
-/** Follow only same-origin redirects; every new URL still traverses the destination cage. */
+/**
+ * Whether a redirect only adds or drops the `www.` label of the same site.
+ *
+ * `https://example.com` answering `301 https://www.example.com` is the single most common
+ * redirect on the web, and refusing it made `web_fetch` unable to read a large share of the
+ * internet. Scheme and port must still match exactly, so this never downgrades or re-ports.
+ */
+function isWwwVariant(current: URL, next: URL): boolean {
+  if (current.protocol !== next.protocol || current.port !== next.port) return false;
+  const strip = (host: string) => (host.startsWith("www.") ? host.slice(4) : host);
+  return current.hostname !== next.hostname && strip(current.hostname) === strip(next.hostname);
+}
+
+/**
+ * A backstop for a caller that attached something authenticating and did not say so.
+ *
+ * `carriesCredential` is the authoritative answer, because a Credential may name any header. This
+ * only catches the obvious spellings, so forgetting the flag fails closed for the common case
+ * instead of silently widening the redirect rule.
+ */
+function hasAuthHeader(headers: Readonly<Record<string, string>> | undefined): boolean {
+  return Object.keys(headers ?? {}).some((name) =>
+    /(^|[-_])(authorization|authentication|cookie|api[-_]?key|token|secret|credential)([-_]|$)/i.test(
+      name
+    )
+  );
+}
+
+/** Follow only same-site redirects; every new URL still traverses the destination cage. */
 export async function sendGovernedRequest(
   http: EgressHttpPort,
   input: GovernedHttpRequest,
@@ -127,6 +190,8 @@ export async function sendGovernedRequest(
       method: input.method,
       headers: input.headers ?? {},
       ...(input.body === undefined ? {} : { body: input.body }),
+      ...(input.acceptBinary === true ? { acceptBinary: true } : {}),
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
     const location = response.headers.location ?? response.headers.Location;
     if (!NETWORK_REDIRECT_STATUSES.has(response.status) || location === undefined) {
@@ -134,7 +199,14 @@ export async function sendGovernedRequest(
     }
     if (redirects >= maxRedirects) return { kind: "redirect_limit", url: current.href };
     const next = normalizedPublicUrl(new URL(location, current).href);
-    if (next.origin !== current.origin) {
+    // A `www.` host is a different host, and a subdomain can be taken over independently of its
+    // apex. Following the redirect is safe for an anonymous read and not safe while holding
+    // someone else's Secret, so the widening applies only to an unauthenticated request.
+    const authenticated = input.carriesCredential === true || hasAuthHeader(input.headers);
+    const sameSite =
+      next.origin === current.origin || (isWwwVariant(current, next) && !authenticated);
+    if (sameSite && next.origin !== current.origin) input.assertDestination?.(next.origin);
+    if (!sameSite) {
       return {
         kind: "cross_origin_redirect",
         from: current.origin,
@@ -144,34 +216,4 @@ export async function sendGovernedRequest(
     }
     current = next;
   }
-}
-
-const HTML_ENTITIES: Readonly<Record<string, string>> = {
-  amp: "&",
-  apos: "'",
-  gt: ">",
-  lt: "<",
-  nbsp: " ",
-  quot: '"',
-};
-
-/** Bounded, dependency-free readable text for model extraction; scripts and styles never survive. */
-export function readableWebContent(contentType: string | undefined, body: unknown): string {
-  // `JSON.stringify(undefined)` is `undefined`, not a string: an empty or failed response would
-  // otherwise return a non-string from a `string` signature and crash every caller that slices it.
-  const raw = typeof body === "string" ? body : (JSON.stringify(body, null, 2) ?? "");
-  if (!contentType?.toLowerCase().includes("text/html")) return raw;
-  return raw
-    .replace(/<(script|style|noscript|template)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
-    .replace(/<\/(p|div|section|article|header|footer|main|aside|li|h[1-6]|tr)>/gi, "\n")
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&(#x[\da-f]+|#\d+|[a-z]+);/gi, (_entity, code: string) => {
-      if (code.startsWith("#x")) return String.fromCodePoint(Number.parseInt(code.slice(2), 16));
-      if (code.startsWith("#")) return String.fromCodePoint(Number.parseInt(code.slice(1), 10));
-      return HTML_ENTITIES[code.toLowerCase()] ?? " ";
-    })
-    .replace(/[ \t]+/g, " ")
-    .replace(/\n\s*\n\s*\n+/g, "\n\n")
-    .trim();
 }

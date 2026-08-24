@@ -5,6 +5,7 @@ import {
   type LoopCheckpointStore,
   type ModelPort,
   type ToolDispatchPort,
+  type ToolResultDistillerPort,
 } from "@tulipfarm/agent-runtime";
 import {
   LIMIT_KEYS,
@@ -46,6 +47,16 @@ export interface ChatExecutorOptions {
   readonly context: TurnContextPort;
   /** Fetches attached File bytes. Absent leaves every Turn attachment-free. */
   readonly attachments?: TurnAttachmentPort;
+  /**
+   * Shrinks an oversized Tool result against what the Turn asked. Declared, never constructed:
+   * this package must not reach a provider. Absent leaves large results raw but bounded.
+   *
+   * Takes a factory for the same reason `model` does: this is a real model call, and it is only
+   * chargeable to the Turn that caused it if the Turn's identity reaches whatever makes it.
+   */
+  readonly distiller?:
+    | ToolResultDistillerPort
+    | ((input: ChatModelFactoryInput) => ToolResultDistillerPort);
   readonly runs: Pick<RunStore, "find" | "findState">;
   readonly events: RunEventAppendPort;
   readonly budgets: RunBudgetStore;
@@ -186,6 +197,22 @@ async function executeTurn(
     // The same port the Context's own attachments come from: a File re-read mid-Turn is fetched
     // and re-authorized exactly as one the person attached, through one gate rather than two.
     ...(options.attachments === undefined ? {} : { attachments: options.attachments }),
+    ...(options.distiller === undefined
+      ? {}
+      : {
+          distiller: guardrails.guardDistiller(
+            typeof options.distiller === "function"
+              ? options.distiller({
+                  events: writer,
+                  budgets: new RunBudgetManager(options.budgets),
+                  businessId: run.businessId,
+                  runId: run.id,
+                  conversationId: identity.conversationId,
+                })
+              : options.distiller,
+            writer
+          ),
+        }),
     ...(options.now === undefined ? {} : { now: options.now }),
   });
 

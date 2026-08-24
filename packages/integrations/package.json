@@ -13,11 +13,14 @@
     "@tulipfarm/schema": "workspace:*",
     "@tulipfarm/storage": "workspace:*",
     "@tulipfarm/tool-broker": "workspace:*",
+    "turndown": "^7.2.4",
+    "turndown-plugin-gfm": "^1.0.2",
     "undici": "^7.28.0"
   },
   "devDependencies": {
     "@tulipfarm/tsconfig": "workspace:*",
     "@types/node": "^26.2.0",
+    "@types/turndown": "^5.0.6",
     "typescript": "^7.0.2"
   }
 }

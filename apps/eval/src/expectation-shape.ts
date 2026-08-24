@@ -3,7 +3,7 @@ import { FILE_GRANTEE_KINDS } from "@tulipfarm/files";
 type FieldType = "string" | "number" | "strings" | "any" | readonly string[];
 
 /** The three points a guard can refuse, mirroring `RunEventGuardrailStage`. */
-const GUARD_STAGES = ["input", "tool_call", "output"] as const;
+const GUARD_STAGES = ["input", "tool_call", "tool_result", "output"] as const;
 
 /**
  * Every guard `validateGuardrailsConfig` accepts.
@@ -12,7 +12,12 @@ const GUARD_STAGES = ["input", "tool_call", "output"] as const;
  * runtime array to read. A guard added there and not here fails Corpus load with a clear message,
  * which is the safe direction: the alternative is a Case naming a guard that can never fire.
  */
-const GUARD_NAMES = ["prompt_injection", "tool_blocklist", "content_filter"] as const;
+const GUARD_NAMES = [
+  "prompt_injection",
+  "tool_blocklist",
+  "content_filter",
+  "untrusted_content",
+] as const;
 
 /**
  * The fields each Expectation kind needs, and what each field must look like.
@@ -35,6 +40,10 @@ const EXPECTATION_FIELDS: Record<string, readonly [string, FieldType][]> = {
     ["name", "string"],
     ["path", "string"],
     ["value", "any"],
+  ],
+  tool_argument_present: [
+    ["name", "string"],
+    ["path", "string"],
   ],
   output_contains: [["text", "string"]],
   output_matches: [["pattern", "string"]],

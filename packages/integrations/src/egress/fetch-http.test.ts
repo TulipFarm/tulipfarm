@@ -19,6 +19,44 @@ describe("FetchEgressHttp", () => {
     });
   });
 
+  it("aborts the socket when the caller's own deadline fires", async () => {
+    // Without this the request outlives the Tool that issued it: the caller has already been
+    // told the call failed while a mutating request is still on the wire.
+    const caller = new AbortController();
+    const http = new FetchEgressHttp({
+      fetch: ((_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener(
+            "abort",
+            () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })),
+            { once: true }
+          );
+        })) as unknown as typeof globalThis.fetch,
+      timeoutMs: 60_000,
+    });
+
+    const sent = http.send({ ...request, signal: caller.signal });
+    caller.abort();
+
+    await expect(sent).resolves.toMatchObject({ status: 503 });
+  });
+
+  it("still bounds a caller that passes no signal", async () => {
+    const http = new FetchEgressHttp({
+      fetch: ((_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener(
+            "abort",
+            () => reject(Object.assign(new Error("aborted"), { name: "TimeoutError" })),
+            { once: true }
+          );
+        })) as unknown as typeof globalThis.fetch,
+      timeoutMs: 20,
+    });
+
+    await expect(http.send(request)).resolves.toMatchObject({ status: 503 });
+  });
+
   it("carries the cause of a network fault instead of an empty 503", async () => {
     const timeout = Object.assign(new Error("timed out"), { name: "TimeoutError" });
     const http = new FetchEgressHttp({

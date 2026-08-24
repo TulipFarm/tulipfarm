@@ -62,6 +62,26 @@ describe("isPrivateNetworkAddress", () => {
     expect(isPrivateNetworkAddress("::ffff:8.8.8.8")).toBe(false);
   });
 
+  // Every one of these carries an IPv4 address inside an IPv6 literal, so a v4-only rule never
+  // sees the destination it is meant to refuse. `fec0::/10` is the same idea without the v4.
+  it("denies site-local and the transition ranges that hide an IPv4 destination", () => {
+    for (const address of [
+      "fec0::1",
+      "feff::1",
+      "2002:7f00:1::",
+      "64:ff9b::7f00:1",
+      "2001:0:53aa:64c:1:2:3:4",
+      "::7f00:1",
+      "3fff::1",
+      "5f00::1",
+    ]) {
+      expect(isPrivateNetworkAddress(address), address).toBe(true);
+    }
+    for (const address of ["2606:4700:4700::1111", "2a00:1450:4009:80e::200e"]) {
+      expect(isPrivateNetworkAddress(address), address).toBe(false);
+    }
+  });
+
   // `new URL()` rewrites the dotted mapped form to hextets, so both spellings reach a guard.
   it("denies an IPv4-mapped address written as hextets", () => {
     for (const address of ["::ffff:7f00:1", "::ffff:a00:5", "::ffff:c0a8:1", "::ffff:a9fe:a9fe"]) {

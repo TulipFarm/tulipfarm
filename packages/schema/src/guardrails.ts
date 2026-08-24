@@ -31,6 +31,24 @@ const ToolBlocklistGuard = Type.Object(
   { additionalProperties: false }
 );
 
+/**
+ * Screens what a Tool brought back, which is the one stage no other guard covers.
+ *
+ * `input` sees what the person wrote and `tool-call` sees what the model proposed; neither sees a
+ * fetched page, an API body or a Knowledge excerpt. That content is attacker-controlled whenever
+ * the destination is, and it reaches the model as a transcript entry the model has every reason to
+ * treat as trustworthy — the widest indirect-injection channel a Turn has.
+ */
+const UntrustedContentGuard = Type.Object(
+  {
+    guard: Type.Literal("untrusted_content"),
+    sensitivity: Type.Optional(
+      Type.Unsafe<(typeof SENSITIVITY)[number]>({ type: "string", enum: [...SENSITIVITY] })
+    ),
+  },
+  { additionalProperties: false }
+);
+
 const ContentFilterGuard = Type.Object(
   {
     guard: Type.Literal("content_filter"),
@@ -49,6 +67,7 @@ export const GuardrailsConfigSchema = Type.Object(
   {
     input: Type.Optional(Type.Array(PromptInjectionGuard)),
     "tool-call": Type.Optional(Type.Array(ToolBlocklistGuard)),
+    "tool-result": Type.Optional(Type.Array(UntrustedContentGuard)),
     output: Type.Optional(Type.Array(ContentFilterGuard)),
   },
   { additionalProperties: false }
@@ -57,6 +76,7 @@ export const GuardrailsConfigSchema = Type.Object(
 export type GuardrailsConfig = Static<typeof GuardrailsConfigSchema>;
 export type PromptInjectionConfig = Static<typeof PromptInjectionGuard>;
 export type ToolBlocklistConfig = Static<typeof ToolBlocklistGuard>;
+export type UntrustedContentConfig = Static<typeof UntrustedContentGuard>;
 export type ContentFilterConfig = Static<typeof ContentFilterGuard>;
 
 export type GuardrailStage = keyof GuardrailsConfig;
@@ -71,6 +91,7 @@ export type GuardrailStage = keyof GuardrailsConfig;
 export const GUARDRAIL_STAGE_BY_GUARD = {
   prompt_injection: "input",
   tool_blocklist: "tool-call",
+  untrusted_content: "tool-result",
   content_filter: "output",
 } as const satisfies Record<string, GuardrailStage>;
 

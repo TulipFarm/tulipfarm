@@ -20,6 +20,22 @@ export interface EgressHttpRequest {
   readonly body?: unknown;
   /** Public DNS answers validated by the destination cage and pinned to this connection. */
   readonly pinnedAddresses?: readonly string[];
+  /**
+   * Hand back undecoded bytes when the response is not text.
+   *
+   * Off by default because a manifest operation describes a JSON API and every caller of one
+   * expects a parsed value. Only a reader that can do something with the bytes — extract a PDF's
+   * text, say — should ask, since decoding a binary as UTF-8 destroys it irreversibly and leaves
+   * a caller guessing from the replacement characters that survive.
+   */
+  readonly acceptBinary?: boolean;
+  /**
+   * The caller's own deadline, honoured alongside the transport's.
+   *
+   * Without it the socket answers only to its own clock, so a caller that has already given up —
+   * a Tool abandoned at its ceiling — leaves a request in flight that can still land a write.
+   */
+  readonly signal?: AbortSignal;
 }
 
 export interface EgressHttpPort {

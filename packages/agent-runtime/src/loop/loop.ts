@@ -25,6 +25,7 @@ import {
   isReportTool,
   REQUEST_INPUT_TOOL,
 } from "./diagnostics";
+import { askFor, distilledPayload, latestAsk } from "./distill";
 import { extractSkillName, narrowToolsToSkill } from "./narrowing";
 import {
   extractRereadFile,
@@ -72,6 +73,9 @@ export class AgentLoop {
     // added — proposed Tool calls and their results — is missing from it.
     const recovered = resumed?.resume;
     const messages: ModelMessage[] = [...input.messages, ...(recovered?.messages ?? [])];
+    // Resolved before the loop appends anything. `messages` grows to hold this loop's own repair
+    // prompts, which carry the `user` role and would otherwise become the summariser's ask.
+    const participantAsk = latestAsk(input.messages);
     let sequence = recovered?.sequence ?? 0;
     // The most recently *successfully* loaded Skill, per the `load_skill` dispatch — a switch
     // replaces it rather than unioning, since the model has moved on and a union only re-grows
@@ -282,7 +286,25 @@ export class AgentLoop {
         }
 
         if (dispatched.status === "succeeded") {
-          messages.push(toolMessage(call.callId, { output: dispatched.output }));
+          // Distilled here rather than inside the Tool: the Tool stays deterministic and
+          // replayable, and the model call that shrinks its result lands where every other model
+          // call in this Turn already is — budgeted, logged, and visible as second-hand.
+          messages.push(
+            toolMessage(
+              call.callId,
+              await distilledPayload(
+                {
+                  toolName: call.name,
+                  arguments: call.arguments,
+                  output: dispatched.output,
+                  ask: askFor(call.arguments, participantAsk),
+                  policy: input.modelPolicy ?? {},
+                },
+                this.deps.distiller,
+                this.deps.log
+              )
+            )
+          );
           if (isReportTool(call.name)) reported = true;
           if (call.name === "load_skill") {
             const loaded = extractSkillName(call.arguments);

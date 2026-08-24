@@ -68,13 +68,16 @@ export {
   assertPublicEgressUrl,
   compileGraphqlEgress,
   compileOpenApiEgress,
+  EGRESS_DENIAL_REASONS,
   EgressCompileError,
   EgressDestinationError,
+  egressDenialReason,
   FetchEgressHttp,
   GraphqlCompileError,
   GraphqlToolAdapter,
   GuardedEgressHttp,
   isPrivateNetworkAddress,
+  mayHaveReachedDestination,
   OpenApiToolAdapter,
 } from "./egress";
 export {
@@ -85,9 +88,16 @@ export {
   NETWORK_READ_METHODS,
   NETWORK_REDIRECT_STATUSES,
   normalizedPublicUrl,
-  readableWebContent,
   sendGovernedRequest,
 } from "./egress/network-request";
+export {
+  decodeHtmlEntities,
+  htmlToMarkdown,
+  type RenderedWebContent,
+  renderWebContent,
+  type WebContentFormat,
+  type WebContentLink,
+} from "./egress/web-content";
 export type {
   ExternalIntegrationAccessPort,
   ExternalIntegrationAuditEvent,

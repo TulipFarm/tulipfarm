@@ -9,3 +9,6 @@ output:
   - guard: content_filter
     patterns:
       - credit_card
+tool-result:
+  - guard: untrusted_content
+    sensitivity: high

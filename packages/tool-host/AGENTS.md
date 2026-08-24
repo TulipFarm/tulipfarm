@@ -42,6 +42,11 @@ Individual Tool families (`packages/kv`, `apps/api/src/tools/**`), the model-fac
   Tool against a bare timer; the loser keeps mutating and its result is lost. `timeout.ts` aborts,
   waits `CANCELLATION_GRACE_MS` for an acknowledgement, and reports unacknowledged mutating work as
   `indeterminate`, which nothing may retry and `dispatcher.ts` settles `ambiguous`.
+- **A Tool that needs longer declares it; the default is never raised for everyone.**
+  `execution.ts` takes `definition.timeout.wallClockMs` over the host's option and over
+  `DEFAULT_EXECUTE_TIMEOUT_MS`, because only the Tool knows what it does and these are written in
+  code beside the handler. A Tool holding a socket must also pass `RequestContext.abortSignal` to
+  its transport, or the ceiling abandons the Tool while its request stays on the wire.
 - **`eligibility.ts` fails closed.** A process without a live Soul, a renderer registry or
   provider credential leases must not authorize a Tool that needs them. Widening the rule needs a
   reason why the weaker check is still the same check.

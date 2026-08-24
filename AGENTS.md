@@ -147,6 +147,7 @@ pnpm install                     # CI: pnpm install --frozen-lockfile
 pnpm dev                         # api :4010, web :4000, worker :4020, integration-worker :4030
 pnpm dev:api | dev:web | dev:worker | dev:integration-worker
 pnpm dev:docs                    # :5000
+pnpm dev:kill                    # free ports 4000/4010/4020/4030 left bound by a dead run
 pnpm lint                        # biome check, turbo-cached
 pnpm typecheck                   # tsc --noEmit, turbo-cached
 pnpm test                        # UNCACHED, ~5min — prefer --filter
@@ -165,8 +166,18 @@ Single workspace: `pnpm --filter @tulipfarm/api <script>` — **the default for 
 
 ## Verifying your work
 
-Match the check to the blast radius of the diff. Escalate through the tiers; reach Tier 3 once,
-at the end. Tests are **Vitest**, colocated `*.test.ts`.
+**Wait to be asked.** Do not run tests, `pnpm lint` or `pnpm typecheck` off your own bat — they
+cost minutes of the author's time for a signal they did not ask for yet, and an agent that
+verifies after every edit spends most of a session waiting. Make the change, say what you changed
+and what you believe it needs, then stop. Run a check when the author asks for one, or when they
+have said to work to completion unattended.
+
+Two things stay yours to run unprompted, because they are sub-second and stop bad code reaching
+the author at all: `pnpm exec biome check --write <changed dir>`, and a single test file you just
+wrote or changed, to prove it fails before your change and passes after.
+
+When you are asked to verify, match the check to the blast radius of the diff. Escalate through
+the tiers; reach Tier 3 once, at the end. Tests are **Vitest**, colocated `*.test.ts`.
 
 | Tier | When | Command |
 | --- | --- | --- |
