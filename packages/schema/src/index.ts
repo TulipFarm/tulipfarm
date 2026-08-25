@@ -118,6 +118,8 @@ export type {
   CuratorUserRequest,
   CuratorWorkReason,
   InvocationRequestSchema,
+  SubagentAnswer,
+  SubagentRequest,
 } from "./invocation";
 export {
   CHAT_REQUEST_SCHEMA,
@@ -130,6 +132,12 @@ export {
   INVOCATION_REQUEST_SCHEMAS,
   MANUAL_REQUEST_SCHEMA,
   MANUAL_REQUEST_SCHEMA_REF,
+  RUN_ARTIFACT_SCHEMAS,
+  SUBAGENT_ANSWER_SCHEMA,
+  SUBAGENT_ANSWER_SCHEMA_REF,
+  SUBAGENT_MAX_TOOLS,
+  SUBAGENT_REQUEST_SCHEMA,
+  SUBAGENT_REQUEST_SCHEMA_REF,
 } from "./invocation";
 export type {
   EmbeddingProviderEntry,

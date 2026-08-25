@@ -249,7 +249,10 @@ export class AgentLoop {
       // alongside the result it provoked — without this, a validation error arrives as an
       // unattributed message and the model cannot tell it is feedback on its own last action.
       if (!replayed) messages.push(assistantToolCallMessage(calls));
-      let approval: { approvalId: string; call: NormalizedToolCall } | undefined;
+      let park:
+        | { kind: "approval"; approvalId: string; call: NormalizedToolCall }
+        | { kind: "child"; childRunId: string; waitId: string; call: NormalizedToolCall }
+        | undefined;
       // Which of the declared calls already carry an answer. Tracked by callId rather than by
       // position because the two dispatch paths leave the cursor in different places — the
       // sequential path stops *at* the parked call, the concurrent one has already advanced past
@@ -293,6 +296,7 @@ export class AgentLoop {
       ): Promise<
         | { kind: "continue" }
         | { kind: "approval"; approvalId: string; call: NormalizedToolCall }
+        | { kind: "child"; childRunId: string; waitId: string; call: NormalizedToolCall }
         | { kind: "input_required"; call: NormalizedToolCall }
         | { kind: "fail"; reason: AgentLoopFailureReason }
       > => {
@@ -304,6 +308,15 @@ export class AgentLoop {
 
         if (dispatched.status === "awaiting_approval") {
           return { kind: "approval", approvalId: dispatched.approvalId, call };
+        }
+
+        if (dispatched.status === "awaiting_child") {
+          return {
+            kind: "child",
+            childRunId: dispatched.childRunId,
+            waitId: dispatched.waitId,
+            call,
+          };
         }
 
         // The barrier is the question, not the answer: once this Turn has asked the operator to
@@ -438,7 +451,16 @@ export class AgentLoop {
             return finish({ status: "failed", reason: outcome.reason, ...counters }, "failed");
           }
           if (outcome.kind === "approval") {
-            approval = { approvalId: outcome.approvalId, call: outcome.call };
+            park = { kind: "approval", approvalId: outcome.approvalId, call: outcome.call };
+            break;
+          }
+          if (outcome.kind === "child") {
+            park = {
+              kind: "child",
+              childRunId: outcome.childRunId,
+              waitId: outcome.waitId,
+              call: outcome.call,
+            };
             break;
           }
           if (outcome.kind === "input_required") return askedForInput(outcome.call.callId);
@@ -490,6 +512,7 @@ export class AgentLoop {
         // in call order wins, matching what a sequential batch would have produced.
         let decision:
           | { kind: "approval"; approvalId: string; call: NormalizedToolCall }
+          | { kind: "child"; childRunId: string; waitId: string; call: NormalizedToolCall }
           | { kind: "input_required"; call: NormalizedToolCall }
           | { kind: "fail"; reason: AgentLoopFailureReason }
           | undefined;
@@ -527,7 +550,15 @@ export class AgentLoop {
         }
         if (decision?.kind === "input_required") return askedForInput(decision.call.callId);
         if (decision !== undefined) {
-          approval = { approvalId: decision.approvalId, call: decision.call };
+          park =
+            decision.kind === "approval"
+              ? { kind: "approval", approvalId: decision.approvalId, call: decision.call }
+              : {
+                  kind: "child",
+                  childRunId: decision.childRunId,
+                  waitId: decision.waitId,
+                  call: decision.call,
+                };
           break;
         }
         // A batch clipped by budget leaves its remainder at `index`; the next pass re-enters this
@@ -535,56 +566,81 @@ export class AgentLoop {
         // rather than ever dispatching past the limit.
       }
 
-      if (approval !== undefined) {
+      if (park !== undefined) {
+        // Why this Turn stopped, in words the model can act on. Both parks replay the parked call
+        // on resume, so the distinction the sibling calls need is only what is already pending on
+        // their behalf: an operator decision, or a Run that is already doing the work.
+        const parked =
+          park.kind === "approval"
+            ? {
+                waitingFor: "approval of an earlier call",
+                alsoPending:
+                  "If it also needed approval, one is already pending — do not re-issue it.",
+              }
+            : {
+                waitingFor: "a child Run started by an earlier call",
+                alsoPending:
+                  "If it also started a child Run, that Run is already going — do not re-issue it.",
+              };
         // The assistant message above declared every call in the batch, and this park is the only
-        // exit that makes that transcript durable. A call sitting after the approved one never
+        // exit that makes that transcript durable. A call sitting after the parked one never
         // dispatched, so nothing answered it — and a proposed Tool call with no matching result is
         // a transcript both Anthropic and OpenAI reject outright, which would fail the resumed
         // Turn at the provider rather than anywhere the loop could repair it. So each one is
-        // answered here, before the checkpoint, with a result the model can act on. The approved
+        // answered here, before the checkpoint, with a result the model can act on. The parked
         // call is excluded: it is replayed on resume and gets its real result there.
         for (const declared of calls) {
-          if (declared.callId === approval.call.callId) continue;
+          if (declared.callId === park.call.callId) continue;
           if (answered.has(declared.callId)) continue;
           // A concurrent batch dispatches every call before any outcome is read, so an unanswered
           // one here may already have run. Saying it never ran would be a lie the model acts on:
-          // if its own outcome was a second approval, that approval is pending at the broker, and
-          // re-issuing the call asks an operator to clear two of them.
+          // if its own outcome was a second park, that park is already outstanding, and
+          // re-issuing the call duplicates whatever it left behind.
           answer(
             declared.callId,
             dispatchedIds.has(declared.callId)
               ? {
                   error: "superseded",
                   detail:
-                    "this call ran, but the Turn stopped to wait for approval of an earlier call " +
-                    "in the same batch, so its result was not recorded. If it also needed " +
-                    "approval, one is already pending — do not re-issue it.",
+                    `this call ran, but the Turn stopped to wait for ${parked.waitingFor} ` +
+                    `in the same batch, so its result was not recorded. ${parked.alsoPending}`,
                 }
               : {
                   error: "not_dispatched",
                   detail:
-                    "this call never ran: the Turn stopped to wait for approval of an earlier " +
-                    "call in the same batch. Re-issue it if it is still needed.",
+                    `this call never ran: the Turn stopped to wait for ${parked.waitingFor} ` +
+                    "in the same batch. Re-issue it if it is still needed.",
                 }
           );
         }
-        // A parked call has not run: the dispatcher reports `awaiting_approval` strictly before
-        // it executes the Tool, so the budget it took on dispatch is given back and spent only
-        // by the replay that actually performs the work. Counters and the transcript are made
-        // durable together, so the resumed Turn is charged for exactly what it can still see.
+        // The parked call is replayed on resume and charged there, so the budget it took on
+        // dispatch is given back here — leaving the total at exactly one charge either way. For an
+        // approval the call provably never ran, since the dispatcher reports `awaiting_approval`
+        // strictly before executing the Tool. For a child it did run and spawned, so its replay
+        // must be idempotent on `(runId, callId)` — see `ToolDispatchResult.awaiting_child`.
+        // Counters and the transcript are made durable together, so the resumed Turn is charged
+        // for exactly what it can still see.
         counters.toolCalls -= 1;
-        await checkpoint(approval.call);
-        await emit("awaiting_approval");
+        await checkpoint(park.call);
+        await emit(park.kind === "approval" ? "awaiting_approval" : "awaiting_child");
         // Saved again for one reason only: to carry the sequence that event just consumed, so the
         // resumed attempt numbers its events past this one instead of colliding with it. The save
         // above stays first, because a crash between the two must still find durable counters.
-        await checkpoint(approval.call);
-        return {
-          status: "awaiting_approval",
-          approvalId: approval.approvalId,
-          callId: approval.call.callId,
-          ...counters,
-        };
+        await checkpoint(park.call);
+        return park.kind === "approval"
+          ? {
+              status: "awaiting_approval",
+              approvalId: park.approvalId,
+              callId: park.call.callId,
+              ...counters,
+            }
+          : {
+              status: "awaiting_child",
+              childRunId: park.childRunId,
+              waitId: park.waitId,
+              callId: park.call.callId,
+              ...counters,
+            };
       }
       // Checkpointed after every dispatched batch, so a Turn that dies here resumes with the
       // Tool results it already paid for rather than re-running them.

@@ -1,14 +1,14 @@
 import { DEFAULT_GUARDRAILS, type GuardrailsService } from "@tulipfarm/agent-runtime";
 import type { AccessGrant } from "@tulipfarm/authz";
-import { MAX_HISTORY_TOKENS, MAX_TOOL_STEPS, MEMORY_METRICS } from "@tulipfarm/memory";
-import type { Attributes, LogLevel, TelemetryPort } from "@tulipfarm/observability";
+import { MAX_HISTORY_TOKENS, MAX_TOOL_STEPS } from "@tulipfarm/memory";
+import type { TelemetryPort } from "@tulipfarm/observability";
 import type { ArtifactService, ChildLinkAncestry } from "@tulipfarm/run-kernel";
 import { canonicalHash, contentText, textContent } from "@tulipfarm/schema";
 import type { BundledSkill, SoulLoader, SoulSkill } from "@tulipfarm/soul";
 import { DEFAULT_ASSISTANT_NAME } from "@tulipfarm/soul";
 import type { ToolAvailability } from "@tulipfarm/tool-broker";
 import { ok, type ToolDef } from "@tulipfarm/tool-host";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { ToolRegistry } from "../broker/tool-adapter";
 import type { PersistedMessage } from "../conversations/service";
 import {
@@ -371,6 +371,8 @@ describe("ChatTurnContextResolver — a delegated Run's granted authority", () =
       classifications: ["business_record"],
       limits: { maxToolCalls: 2, delegationDeadlineEpochMs: Date.parse("2030-01-01T00:00:00Z") },
     },
+    resume: null,
+    callId: null,
     detachedAt: null,
     createdAt: "2026-01-01T00:00:00.000Z",
   };

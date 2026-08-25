@@ -8,7 +8,6 @@ import { extractText } from "@tulipfarm/files";
 import type { ParticipantToolCall } from "@tulipfarm/schema";
 import type { TurnAuthority } from "@tulipfarm/tool-host";
 import type {
-  ApprovalWaitPort,
   ResolvedTurnContext,
   TurnAttachmentPort,
   TurnCompletionRecord,
@@ -17,6 +16,7 @@ import type {
   TurnCompletionStore,
   TurnContextPort,
   TurnRequest,
+  TurnWaitPort,
 } from "@tulipfarm/turn-executor";
 import type { InternalApiClient } from "./client";
 
@@ -43,7 +43,12 @@ type RemoteToolResult =
   | { readonly status: "denied"; readonly reason: string; readonly connectUrl?: string }
   | { readonly status: "invalid_arguments"; readonly reason: string }
   | { readonly status: "failed"; readonly reason: string }
-  | { readonly status: "awaiting_approval"; readonly approvalId: string };
+  | { readonly status: "awaiting_approval"; readonly approvalId: string }
+  | {
+      readonly status: "awaiting_child";
+      readonly childRunId: string;
+      readonly waitId: string;
+    };
 
 /** Re-attaches the `callId` by hand: spreading a union would lose which variant this is. */
 function withCallId(callId: string, result: RemoteToolResult): ToolDispatchResult {
@@ -52,6 +57,13 @@ function withCallId(callId: string, result: RemoteToolResult): ToolDispatchResul
       return { status: "succeeded", callId, output: result.output };
     case "awaiting_approval":
       return { status: "awaiting_approval", callId, approvalId: result.approvalId };
+    case "awaiting_child":
+      return {
+        status: "awaiting_child",
+        callId,
+        childRunId: result.childRunId,
+        waitId: result.waitId,
+      };
     case "denied":
       return { status: "denied", callId, reason: result.reason, connectUrl: result.connectUrl };
     default:
@@ -69,7 +81,7 @@ export class HttpTurnHost
     TurnAttachmentPort,
     TurnCompletionStore,
     ToolDispatchPort,
-    ApprovalWaitPort
+    TurnWaitPort
 {
   constructor(private readonly client: InternalApiClient) {}
 
@@ -169,6 +181,7 @@ export class HttpTurnHost
         callId: request.callId,
         name: request.name,
         arguments: request.arguments,
+        stateId: request.stateId,
         ...(request.activeSkillName === undefined
           ? {}
           : { activeSkillName: request.activeSkillName }),

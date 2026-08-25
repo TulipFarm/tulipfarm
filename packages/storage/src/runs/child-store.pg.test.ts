@@ -1,8 +1,9 @@
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { Queryable, TransactionPort } from "../ports";
-import { CHILD_STORAGE_STATEMENTS, ChildLinkStore } from "./child-store";
+import { CHILD_STORAGE_STATEMENTS, ChildLinkAncestryStore, ChildLinkStore } from "./child-store";
 import { RUN_STORAGE_STATEMENTS, RunStore, type StartRunInput } from "./run-store";
+import { WAIT_STORAGE_STATEMENTS, WaitStore } from "./wait-store";
 
 const BUSINESS = "business-1";
 const PARENT_ID = "00000000-0000-4000-8000-000000000001";
@@ -44,15 +45,25 @@ describe("ChildLinkStore", () => {
   let database: PGlite;
   let store: ChildLinkStore;
   let runs: RunStore;
+  let waits: WaitStore;
+  let ancestry: ChildLinkAncestryStore;
 
   beforeAll(async () => {
     database = new PGlite();
-    for (const statement of [...RUN_STORAGE_STATEMENTS, ...CHILD_STORAGE_STATEMENTS]) {
+    for (const statement of [
+      ...RUN_STORAGE_STATEMENTS,
+      ...CHILD_STORAGE_STATEMENTS,
+      ...WAIT_STORAGE_STATEMENTS,
+    ]) {
       await database.exec(statement);
     }
     const transactions = transactionPort(database);
     store = new ChildLinkStore(transactions);
     runs = new RunStore(transactions);
+    waits = new WaitStore(transactions);
+    ancestry = new ChildLinkAncestryStore({
+      query: (text, values) => database.query(text, values as unknown[]) as never,
+    });
   });
 
   afterAll(async () => {
@@ -82,6 +93,8 @@ describe("ChildLinkStore", () => {
       parentRunId: PARENT_ID,
       childRunId: CHILD_ID,
       authority: AUTHORITY,
+      resume: null,
+      callId: null,
       detachedAt: null,
       createdAt: CREATED_AT,
     });
@@ -155,6 +168,110 @@ describe("ChildLinkStore", () => {
         `UPDATE run_child_links SET detached_at = NULL WHERE child_run_id = '${CHILD_ID}'`
       )
     ).rejects.toThrow(/run_child_link_detach_final/);
+  });
+
+  describe("listUnsignalledCompletions", () => {
+    const WAIT_ID = "00000000-0000-4000-8000-0000000000aa";
+
+    async function park(childRunId = CHILD_ID, waitId = WAIT_ID) {
+      await waits.create({
+        id: waitId,
+        businessId: BUSINESS,
+        runId: PARENT_ID,
+        stateKey: "apply",
+        kind: "event",
+        aggregation: "first",
+        schemaRef: "tulipfarm.run.child_completion.v1",
+        allowedPrincipals: [`run:${childRunId}`],
+        expectedSignals: 1,
+        quorum: null,
+        tokenHash: `hash-${childRunId}`,
+        deadlineAt: "2026-07-25T12:00:00.000Z",
+        createdAt: CREATED_AT,
+      });
+      await store.link({
+        businessId: BUSINESS,
+        parentRunId: PARENT_ID,
+        childRunId,
+        authority: AUTHORITY,
+        resume: { waitId, token: "plaintext" },
+        createdAt: CREATED_AT,
+      });
+    }
+
+    async function settle(childRunId: string, status: string) {
+      const child = await runs.find(BUSINESS, childRunId);
+      if (child === null) throw new Error("missing child");
+      await runs.transitionRun(BUSINESS, childRunId, {
+        expectedVersion: child.version,
+        expectedStatus: child.status,
+        status: status as never,
+        finishedAt: "2026-07-25T10:30:00.000Z",
+        leaseOwner: null,
+        leaseExpiresAt: null,
+      });
+    }
+
+    it.each([["succeeded"], ["failed"], ["cancelled"]])(
+      "finds a %s child whose parent is still parked",
+      async (status) => {
+        await park();
+        await settle(CHILD_ID, status);
+
+        await expect(ancestry.listUnsignalledCompletions(BUSINESS, 10)).resolves.toEqual([
+          { childRunId: CHILD_ID, status, finishedAt: "2026-07-25T10:30:00.000Z" },
+        ]);
+      }
+    );
+
+    it("ignores a child that has not finished", async () => {
+      await park();
+
+      await expect(ancestry.listUnsignalledCompletions(BUSINESS, 10)).resolves.toEqual([]);
+    });
+
+    it("ignores a completion whose signal already satisfied the wait", async () => {
+      await park();
+      await settle(CHILD_ID, "succeeded");
+      await database.query(
+        `UPDATE run_waits
+            SET status = 'satisfied', resolved_at = now(), token_consumed_at = now()
+          WHERE id = $1`,
+        [WAIT_ID]
+      );
+
+      await expect(ancestry.listUnsignalledCompletions(BUSINESS, 10)).resolves.toEqual([]);
+    });
+
+    it("ignores a child the parent detached from", async () => {
+      await park();
+      await settle(CHILD_ID, "succeeded");
+      await store.detach(BUSINESS, PARENT_ID, CHILD_ID, DETACHED_AT);
+
+      await expect(ancestry.listUnsignalledCompletions(BUSINESS, 10)).resolves.toEqual([]);
+    });
+
+    it("ignores a fire-and-forget child, which granted no resume", async () => {
+      await link();
+      await settle(CHILD_ID, "succeeded");
+
+      await expect(ancestry.listUnsignalledCompletions(BUSINESS, 10)).resolves.toEqual([]);
+    });
+
+    it("bounds the batch and returns the longest-waiting child first", async () => {
+      await park(CHILD_ID, WAIT_ID);
+      await park(OTHER_CHILD_ID, "00000000-0000-4000-8000-0000000000ab");
+      await settle(OTHER_CHILD_ID, "succeeded");
+      await database.query("UPDATE runs SET finished_at = $1 WHERE id = $2", [
+        "2026-07-25T10:29:00.000Z",
+        OTHER_CHILD_ID,
+      ]);
+      await settle(CHILD_ID, "failed");
+
+      const found = await ancestry.listUnsignalledCompletions(BUSINESS, 1);
+
+      expect(found.map((row) => row.childRunId)).toEqual([OTHER_CHILD_ID]);
+    });
   });
 
   it("refuses to widen a persisted authority in place", async () => {

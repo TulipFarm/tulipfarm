@@ -139,6 +139,8 @@ function childLink(parentRunId: string, childRunId: string, detachedAt: string |
     parentRunId,
     childRunId,
     authority: { tools: [], classifications: [], limits: {} },
+    callId: null,
+    resume: null,
     detachedAt,
     createdAt: NOW,
   };

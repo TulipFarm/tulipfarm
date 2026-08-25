@@ -14,7 +14,7 @@ import {
   type RunBudgetStore,
 } from "@tulipfarm/run-kernel";
 import type { PersistedRun, RunStore } from "@tulipfarm/storage";
-import { AgentStateRunner, type ApprovalWaitPort, type StateTransitionPort } from "./agent-state";
+import { AgentStateRunner, type StateTransitionPort, type TurnWaitPort } from "./agent-state";
 import { ConversationTurnCompleter, type TurnCompletionStore } from "./conversation-turn";
 import {
   type TurnAttachmentPort,
@@ -61,7 +61,7 @@ export interface ChatExecutorOptions {
   readonly events: RunEventAppendPort;
   readonly budgets: RunBudgetStore;
   readonly transitions: StateTransitionPort;
-  readonly waits: ApprovalWaitPort;
+  readonly waits: TurnWaitPort;
   /**
    * Durable Agent-loop counters, so an approval park cannot reset `maxToolCalls`/`maxRepairAttempts`
    * by re-entering with a fresh store. Defaults to in-memory for tests; production injects the

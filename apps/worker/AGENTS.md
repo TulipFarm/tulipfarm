@@ -22,6 +22,7 @@ reconciliation, turn execution, delivery classification, projections, and outbox
 | `src/turn/` | Integration turn executor. Chat Turn execution moved to [`packages/turn-executor`](../../packages/turn-executor/AGENTS.md). |
 | `src/routine/` | Routine executor plus Tool, Agent, and approval ports. |
 | `src/curator/` | Curator Run executor (resolve pinned context, reason once, submit raw output) and the `curator-sweep` fan-out. |
+| `src/subagent/` | Ad-hoc sub-agent Run executor: the chat executor with its Conversation swapped for an answer Artifact. |
 | `src/internal/` | HTTP ports back to `/api/v1/internal/*`; Run identity is re-derived by API. |
 | `src/tools/` | In-process Tool host for co-locatable families, and the routing dispatcher. |
 | `src/files/`, `src/knowledge/` | The worker's own `FileService` and `KnowledgeService`, and the `file-index` job that extracts a File's text into Knowledge. |
@@ -41,7 +42,7 @@ reconciliation, turn execution, delivery classification, projections, and outbox
 - Never migrate here; API owns `schema_version`; raise `REQUIRED_SCHEMA_VERSION` when needed.
 - Boot fails closed with `process.exit(1)`; unsafe drain timeout exits non-zero.
 - Leases/CAS are the only claim; recover expired leases, never force statuses.
-- Registered Run sources are `chat`, `integration`, `routine`, and `curator`; unknown sources
+- Registered Run sources are `chat`, `integration`, `routine`, `curator`, and `subagent`; unknown sources
   reconcile.
 - The Curator executor holds no judgement: it never chooses inputs, validates output, or applies
   effects. The API re-derives all of that from the job's own manifest.
@@ -69,6 +70,9 @@ reconciliation, turn execution, delivery classification, projections, and outbox
 - Agent `instructions.md` is a Soul companion hash, not bundled prompt text; use personality.
 - Approval resume tokens never cross to the worker; replay by wait id and State occurrence.
 - Tools hosted in `src/tools/` must clear `localDispatchRefusal`; boot fails rather than weaken it.
+- A dispatch carries the `stateId` it was raised under, and both hosts must forward it as
+  `RequestContext.stateKey`. A Tool that parks its Run needs the State to resume, and Chat Turns
+  and Routine Agent States do not share one key — never hardcode `"invoke"`.
 - The File family is hosted here so `file_create` renders model-authored content outside the
   process serving people's requests. Omitting `imagePolicy` is unreachable, not degraded: the
   context `Pick` cannot reach `upload`, its only reader.

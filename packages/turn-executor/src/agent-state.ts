@@ -26,7 +26,7 @@ export interface StateTransitionPort {
   }): Promise<void>;
 }
 
-export interface ApprovalWaitPort {
+export interface TurnWaitPort {
   register(input: {
     businessId: string;
     runId: string;
@@ -43,7 +43,7 @@ export interface AgentLoopRunner {
 export interface AgentStateRunnerOptions {
   readonly loop: AgentLoopRunner;
   readonly transitions: StateTransitionPort;
-  readonly waits: ApprovalWaitPort;
+  readonly waits: TurnWaitPort;
 }
 
 export type AgentStateResult =
@@ -55,9 +55,18 @@ export type AgentStateResult =
     }
   | {
       readonly status: "waiting";
+      readonly reason: "approval_required";
       readonly waitId: string;
       readonly approvalId: string;
       /** The Tool call being held, so a reader can show the decision against that call. */
+      readonly callId: string;
+    }
+  | {
+      readonly status: "waiting";
+      readonly reason: "child_running";
+      readonly waitId: string;
+      readonly childRunId: string;
+      /** The Tool call being held, so a reader can show the child against that call. */
       readonly callId: string;
     }
   | { readonly status: "input_required"; readonly text: string }
@@ -110,11 +119,27 @@ export class AgentStateRunner {
         await this.move(request, "running", "waiting", "approval_required");
         return {
           status: "waiting",
+          reason: "approval_required",
           waitId,
           approvalId: outcome.approvalId,
           callId: outcome.callId,
         };
       }
+
+      case "awaiting_child":
+        // No registration here: the wait is already durable, registered by the dispatcher at
+        // spawn so the child cannot finish before its resume grant exists.
+        // A child that finishes while this Run is still `running` spends its signal against a Run
+        // that cannot be requeued. Claiming that resolution has to wait until the Run is durably
+        // `waiting`, which happens only after this returns, so the Run dispatcher does it.
+        await this.move(request, "running", "waiting", "child_running");
+        return {
+          status: "waiting",
+          reason: "child_running",
+          waitId: outcome.waitId,
+          childRunId: outcome.childRunId,
+          callId: outcome.callId,
+        };
 
       case "input_required":
         await this.move(request, "running", "succeeded");

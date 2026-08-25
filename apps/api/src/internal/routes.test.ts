@@ -32,7 +32,7 @@ import {
   type HostedRunReader,
   type HostedToolCall,
   InternalTurnHost,
-  type TurnAuthority,
+  type RunAuthority,
 } from "./turn-host";
 
 const TEST_CSRF = "a".repeat(64);
@@ -84,8 +84,8 @@ describe("/api/v1/internal/turns", () => {
   let runs: HostedRunReader;
   let llmConfig: unknown;
   let pricingOverrides: Record<string, { in: number; out: number }> = {};
-  let dispatched: { authority: TurnAuthority; call: HostedToolCall }[];
-  let parked: { authority: TurnAuthority; stateKey: string; approvalId: string }[];
+  let dispatched: { authority: RunAuthority; call: HostedToolCall }[];
+  let parked: { authority: RunAuthority; stateKey: string; approvalId: string }[];
   let hostedAgent: HostedAgent | undefined;
 
   beforeEach(async () => {

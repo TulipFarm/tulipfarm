@@ -94,6 +94,27 @@ describe("AgentStateRunner", () => {
     expect(result).toMatchObject({ status: "waiting", waitId: "wait-1" });
   });
 
+  it("parks on a child without registering a second wait for one already minted at spawn", async () => {
+    const harness = runner({
+      status: "awaiting_child",
+      childRunId: "child-run-1",
+      waitId: "wait-child-1",
+      callId: "call-1",
+      ...counters,
+    });
+    const result = await harness.agentState.execute(request(), LOOP_INPUT);
+
+    expect(harness.waits).toEqual([]);
+    expect(harness.transitions.at(-1)).toEqual({ from: "running", to: "waiting" });
+    expect(result).toEqual({
+      status: "waiting",
+      reason: "child_running",
+      waitId: "wait-child-1",
+      childRunId: "child-run-1",
+      callId: "call-1",
+    });
+  });
+
   it("settles the State when input is required for a later Chat Turn", async () => {
     const harness = runner({
       status: "input_required",

@@ -26,9 +26,9 @@ import { CuratorHost, CuratorTaskDelivery } from "@tulipfarm/curator-host";
 import { INVOKE_STATE_KEY } from "@tulipfarm/run-kernel";
 import { CuratorRepo, type PersistedRun, TaskRepo } from "@tulipfarm/storage";
 import {
-  type ApprovalWaitPort,
   createChatExecutor,
   RunStoreStateTransitions,
+  type TurnWaitPort,
 } from "@tulipfarm/turn-executor";
 import type { EvalCase, JourneyTurn } from "../case.ts";
 import { toolDispatcher } from "../dispatch.ts";
@@ -70,10 +70,11 @@ export interface ToolCall {
  * out with no verdict, so this refuses loudly instead. Approvals are a Tool-broker concern the L2
  * tier already covers through the guard path.
  */
-const NO_APPROVALS: ApprovalWaitPort = {
+const NO_APPROVALS: TurnWaitPort = {
   register: async () => {
     throw new Error("the L3 tier does not run approval waits; use an L2 guardrail Case");
   },
+  // No Run here ever parks on a child, so there is never a resolution to claim.
 };
 
 /** What one L3 Trial persisted, as a Case may assert on it. */

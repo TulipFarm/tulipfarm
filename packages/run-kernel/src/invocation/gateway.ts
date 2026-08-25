@@ -13,8 +13,16 @@ export const INVOCATION_SOURCES = [
 
 export type InvocationSource = (typeof INVOCATION_SOURCES)[number];
 
-export const RUN_SOURCES = ["chat", "integration", "routine", "curator"] as const;
+export const RUN_SOURCES = ["chat", "integration", "routine", "curator", "subagent"] as const;
 export type RunSource = (typeof RUN_SOURCES)[number];
+
+/**
+ * The Run source of an ad-hoc sub-agent, which has no Conversation and answers into an Artifact.
+ *
+ * Named once because several boundaries branch on it — Turn authority, Context resolution, request
+ * Artifact lookup and completion signalling — and a typo in any one of them fails open.
+ */
+export const SUBAGENT_RUN_SOURCE: RunSource = "subagent";
 
 export interface InvocationPrincipal {
   readonly kind: string;

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
+import type { ChatEffectLedger } from "./effect-ledger";
 import { runToolAttempts } from "./execution";
-import type { RequestContext, ToolDef } from "./types";
-import { ok } from "./types";
+import type { ParkableToolDef, RequestContext, ToolDef } from "./types";
+import { ok, parked } from "./types";
 
 const CONTEXT = {} as RequestContext;
 const CALL = { callId: "call-1", name: "slow", arguments: {} };
@@ -70,5 +71,81 @@ describe("execute deadline", () => {
 
     expect(settled).toMatchObject({ status: "succeeded" });
     expect(Date.now() - started).toBeLessThan(2_000);
+  });
+});
+
+describe("a parked call", () => {
+  const PARK = { kind: "child_run", childRunId: "child-1", waitId: "wait-1" } as const;
+
+  function parkingTool(attempts: { count: number }): ParkableToolDef {
+    return {
+      name: "spawn",
+      tier: "platform",
+      mutating: true,
+      description: "spawns a child Run",
+      inputSchema: { type: "object" },
+      execute: async () => {
+        attempts.count += 1;
+        return parked(PARK);
+      },
+    };
+  }
+
+  function recordingLedger(states: string[]) {
+    return {
+      finishAttempt: async (
+        _businessId: string,
+        _effectId: string,
+        _attempt: number,
+        outcome: { state: string }
+      ) => {
+        states.push(outcome.state);
+      },
+    } as unknown as ChatEffectLedger;
+  }
+
+  it("reports the child and the wait the Turn must park on", async () => {
+    const attempts = { count: 0 };
+
+    const settled = await runToolAttempts({
+      businessId: "business-1",
+      tool: parkingTool(attempts),
+      call: CALL,
+      context: CONTEXT,
+    });
+
+    expect(settled).toEqual({
+      status: "awaiting_child",
+      childRunId: "child-1",
+      waitId: "wait-1",
+    });
+  });
+
+  it("runs the Tool exactly once, because the spawn already happened", async () => {
+    const attempts = { count: 0 };
+
+    await runToolAttempts({
+      businessId: "business-1",
+      tool: parkingTool(attempts),
+      call: CALL,
+      context: CONTEXT,
+    });
+
+    expect(attempts.count).toBe(1);
+  });
+
+  it("confirms the effect, so reconciliation cannot read the park as a lost write", async () => {
+    const states: string[] = [];
+
+    await runToolAttempts({
+      businessId: "business-1",
+      tool: parkingTool({ count: 0 }),
+      call: CALL,
+      context: CONTEXT,
+      ledger: recordingLedger(states),
+      reservation: { effectId: "effect-1", attempt: 1 },
+    });
+
+    expect(states).toEqual(["confirmed"]);
   });
 });

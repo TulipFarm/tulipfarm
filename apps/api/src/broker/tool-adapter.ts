@@ -5,9 +5,10 @@ import {
   autonomyDemandsApproval,
   err,
   executeToolWithTimeout,
+  type ParkableToolDef,
   type RequestContext,
+  refuseParkedResult,
   type ToolCallResult,
-  type ToolDef,
 } from "@tulipfarm/tool-host";
 import { jsonSchema, type ToolSet, tool } from "ai";
 import type { BatchCoordinator } from "../tools/batch-executor";
@@ -19,7 +20,7 @@ export type ToolGuardOutcome =
   | { blocked: true; reason: string }
   | { blocked: false; args: unknown };
 export type RunToolCallGuard = (input: {
-  tool: ToolDef;
+  tool: ParkableToolDef;
   args: unknown;
   ctx: RequestContext;
   toolCallId: string;
@@ -43,10 +44,10 @@ function presentsToSurface(toolDefinition: { definition?: { availableTo?: ToolAv
 
 /** Default-deny adapter: callers must pass the exact authorized Tool allowlist. */
 export class ToolRegistry {
-  private readonly tools = new Map<string, ToolDef>();
+  private readonly tools = new Map<string, ParkableToolDef>();
   constructor(private readonly options: { defaultDeny?: boolean } = {}) {}
 
-  register(tool: ToolDef, options: { replace?: boolean } = {}): void {
+  register(tool: ParkableToolDef, options: { replace?: boolean } = {}): void {
     ajv.compile(tool.inputSchema);
     if (this.tools.has(tool.name) && options.replace !== true) {
       throw new Error(`Tool "${tool.name}" is already registered`);
@@ -58,7 +59,7 @@ export class ToolRegistry {
     this.tools.delete(name);
   }
 
-  getAll(): ToolDef[] {
+  getAll(): ParkableToolDef[] {
     return [...this.tools.values()];
   }
 
@@ -158,9 +159,10 @@ export class ToolRegistry {
             try {
               const executeTool = () =>
                 executeToolWithTimeout(t, effectiveArgs, ctx, TOOL_TIMEOUT_MS);
-              full = await (coordinator
-                ? coordinator.schedule(executeTool, t.mutating)
-                : executeTool());
+              full = refuseParkedResult(
+                await (coordinator ? coordinator.schedule(executeTool, t.mutating) : executeTool()),
+                t.name
+              );
             } catch {
               full = err(
                 "internal_error",

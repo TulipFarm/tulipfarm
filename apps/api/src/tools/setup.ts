@@ -12,7 +12,7 @@ import { KV_TOOLS } from "@tulipfarm/kv";
 import type { MemoryDocumentRepo } from "@tulipfarm/memory";
 import { MEMORY_DOCUMENT_TOOLS } from "@tulipfarm/memory";
 import type { RequestContext, ToolDef } from "@tulipfarm/tool-host";
-import { type ApiToolDefinition, toToolDef } from "@tulipfarm/tool-host";
+import { type ParkableApiToolDefinition, toToolDef } from "@tulipfarm/tool-host";
 import { ToolRegistry } from "../broker/tool-adapter";
 import { FRONTEND_TOOLS } from "../platform/frontend-tools";
 import { PLATFORM_TOOLS, type PlatformToolContext } from "../platform/tools";
@@ -61,7 +61,7 @@ export function buildToolRegistry(services: {
 
   /** Register a family while binding per-request context; declarations travel with each Tool. */
   function registerFamily<Ctx>(
-    definitions: readonly ApiToolDefinition<Ctx>[],
+    definitions: readonly ParkableApiToolDefinition<Ctx>[],
     contextFor: (ctx: RequestContext) => Ctx
   ): void {
     for (const definition of definitions) {

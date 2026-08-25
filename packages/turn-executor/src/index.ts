@@ -3,8 +3,8 @@ export type {
   AgentStateRequest,
   AgentStateResult,
   AgentStateRunnerOptions,
-  ApprovalWaitPort,
   StateTransitionPort,
+  TurnWaitPort,
 } from "./agent-state";
 export { AgentStateRunner } from "./agent-state";
 export type { ChatExecutorHost, ChatExecutorOptions, ChatModelFactoryInput } from "./chat-executor";

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { ModelRequirementsPolicy } from "@tulipfarm/agent-runtime";
 import { readTurnAttachment, type TurnAttachmentStore } from "@tulipfarm/files";
-import type { InvocationPrincipal } from "@tulipfarm/run-kernel";
+import { type InvocationPrincipal, SUBAGENT_RUN_SOURCE } from "@tulipfarm/run-kernel";
 import { type MessageContent, type ParticipantToolCall, textContent } from "@tulipfarm/schema";
 import type { HostedAgent } from "@tulipfarm/tool-host";
 import { fromToolResult, type MessageRepo } from "../chat/messages";
@@ -13,6 +13,8 @@ import type {
 } from "../conversations/service";
 
 /** Internal Worker host for Conversation, Tool, Memory, and completion ports. */
+
+/** The Run source whose Context comes from a request Artifact rather than a Conversation. */
 
 /** Narrow read of one Run. `@tulipfarm/storage`'s `RunStore` satisfies it. */
 export interface HostedRunReader {
@@ -37,12 +39,14 @@ export class TurnAuthorityError extends Error {
   }
 }
 
-/** What one Run may do, taken from the Run itself rather than from whoever asked. */
-export interface TurnAuthority {
+/**
+ * What every Run-scoped internal call may rely on. Deliberately Conversation-free: a Routine Run
+ * and a sub-agent Run both have no Turn, so a path that does not need one must not be typed as if
+ * it did.
+ */
+export interface RunAuthority {
   readonly businessId: string;
   readonly runId: string;
-  /** The Turn this Run answers. Absent for a Run that is not a conversation — see the Routine. */
-  readonly turn?: PersistedTurn;
   /** Whom the turn acts as, as recorded when the Run was minted. */
   readonly subject: InvocationPrincipal;
   /** Worker executor kind; determines which Artifact carries the request payload. */
@@ -61,6 +65,18 @@ export interface TurnAuthority {
    * the durable runtime hosts Tools without one and would otherwise dispatch them unrestricted.
    */
   readonly agent?: HostedAgent;
+  /**
+   * The Conversation Turn this Run answers, absent only for a Run whose source has none.
+   *
+   * Optional here and required on {@link TurnAuthority}, so a path that genuinely needs a Turn
+   * states that in its type rather than reaching for one that may not exist.
+   */
+  readonly turn?: PersistedTurn;
+}
+
+/** A Run that is answering a Conversation Turn. The Turn is what makes it a *Turn* authority. */
+export interface TurnAuthority extends RunAuthority {
+  readonly turn: PersistedTurn;
 }
 
 /** Everything the model needs for one turn. Mirrors the Worker's `ResolvedTurnContext`. */
@@ -115,6 +131,11 @@ export interface TurnContextResolver {
   resolve(authority: TurnAuthority): Promise<HostedTurnContext>;
 }
 
+/** Assembles the Context for a Conversation-less sub-agent Run from its request Artifact. */
+export interface SubagentContextResolver {
+  resolve(authority: RunAuthority): Promise<HostedTurnContext>;
+}
+
 /** Identifies the Turn and attempt this Run answers; the Worker holds only the Run id. */
 export interface HostedTurnIdentity {
   readonly turnId: string;
@@ -126,6 +147,8 @@ export interface HostedToolCall {
   readonly callId: string;
   readonly name: string;
   readonly arguments: unknown;
+  /** The Run State this call executes in; a Tool that parks registers its wait against it. */
+  readonly stateId?: string;
   readonly activeSkillName?: string;
   /** The Agent a Turnless Run claims to act as; confirmed against the Soul before it is honoured. */
   readonly agentName?: string;
@@ -137,16 +160,22 @@ export type HostedToolResult =
   | { readonly status: "denied"; readonly reason: string; readonly connectUrl?: string }
   | { readonly status: "invalid_arguments"; readonly reason: string }
   | { readonly status: "failed"; readonly reason: string }
-  | { readonly status: "awaiting_approval"; readonly approvalId: string };
+  | { readonly status: "awaiting_approval"; readonly approvalId: string }
+  | {
+      /** The Tool spawned a child Run and registered the wait that resumes this Turn. */
+      readonly status: "awaiting_child";
+      readonly childRunId: string;
+      readonly waitId: string;
+    };
 
 export interface TurnToolDispatcher {
-  dispatch(authority: TurnAuthority, call: HostedToolCall): Promise<HostedToolResult>;
+  dispatch(authority: RunAuthority, call: HostedToolCall): Promise<HostedToolResult>;
 }
 
 /** Parks a Run only after the Worker has stopped executing and requested approval. */
 export interface TurnApprovalRegistrar {
   registerWait(
-    authority: TurnAuthority,
+    authority: RunAuthority,
     input: { readonly stateKey: string; readonly approvalId: string }
   ): Promise<{ waitId: string }>;
 }
@@ -155,6 +184,8 @@ export interface InternalTurnHostOptions {
   readonly runs: HostedRunReader;
   readonly store: ConversationStore;
   readonly context: TurnContextResolver;
+  /** Absent leaves a deployment unable to execute sub-agent Runs, rather than silently unguarded. */
+  readonly subagentContext?: SubagentContextResolver;
   readonly tools: TurnToolDispatcher;
   readonly approvals?: TurnApprovalRegistrar;
   /**
@@ -207,7 +238,7 @@ export interface HostedAgentTool {
 const OPERABLE_RUN_STATUS = "running";
 
 /** Run sources that never mint a Turn, so a missing Turn row is their normal shape. */
-const TURNLESS_RUN_SOURCES: ReadonlySet<string> = new Set(["routine"]);
+const TURNLESS_RUN_SOURCES: ReadonlySet<string> = new Set(["routine", SUBAGENT_RUN_SOURCE]);
 
 export class InternalTurnHost {
   private readonly newId: () => string;
@@ -218,19 +249,26 @@ export class InternalTurnHost {
     this.now = options.now ?? (() => new Date());
   }
 
-  /** Resolves Run authority by Run id, so the Worker cannot pick another Turn. */
+  /**
+   * Resolves Run authority by Run id, so the Worker cannot pick another Turn.
+   *
+   * Turn-optional by design: a Routine Run answers no conversation and a sub-agent Run answers
+   * into an Artifact, so neither has a Turn row to find. Authority never came from the Turn, and
+   * demanding one here is what left Routine States and sub-agents unable to dispatch a Tool.
+   */
   async authority(
     businessId: string,
     runId: string,
     claimedAgentName?: string
-  ): Promise<TurnAuthority> {
+  ): Promise<RunAuthority> {
     const run = await this.options.runs.find(businessId, runId);
     if (run === null) throw new TurnAuthorityError("run_not_found");
     if (run.status !== OPERABLE_RUN_STATUS) throw new TurnAuthorityError("run_not_running");
 
+    // Every other source is Conversation-backed, so a missing Turn is a broken Run rather than a
+    // Run that never had one. Failing open here would silently widen the Turn-free path to Runs
+    // that are meant to be denied.
     const turn = await this.options.store.findTurnByRunId(businessId, runId);
-    // A Routine Run answers no conversation, so it has no Turn row to find. Authority never came
-    // from the Turn; demanding one here is what left Routine States unable to dispatch a Tool.
     if (turn === undefined && !TURNLESS_RUN_SOURCES.has(run.source)) {
       throw new TurnAuthorityError("turn_not_found");
     }
@@ -256,10 +294,7 @@ export class InternalTurnHost {
    * Everything conversation-shaped — history, attachments, completion, assistant Messages — is
    * meaningless without one, so those paths refuse rather than inventing a conversation.
    */
-  private async turnAuthority(
-    businessId: string,
-    runId: string
-  ): Promise<TurnAuthority & { readonly turn: PersistedTurn }> {
+  private async turnAuthority(businessId: string, runId: string): Promise<TurnAuthority> {
     const authority = await this.authority(businessId, runId);
     if (authority.turn === undefined) throw new TurnAuthorityError("turn_not_found");
     return { ...authority, turn: authority.turn };
@@ -286,6 +321,14 @@ export class InternalTurnHost {
   }
 
   async resolveContext(businessId: string, runId: string): Promise<HostedTurnContext> {
+    const base = await this.authority(businessId, runId);
+    if (base.source === SUBAGENT_RUN_SOURCE) {
+      const subagent = this.options.subagentContext;
+      if (subagent === undefined) {
+        throw new TurnAuthorityError("turn_not_found");
+      }
+      return subagent.resolve(base);
+    }
     return this.options.context.resolve(await this.turnAuthority(businessId, runId));
   }
 
@@ -314,6 +357,7 @@ export class InternalTurnHost {
     runId: string,
     call: HostedToolCall
   ): Promise<HostedToolResult> {
+    // `authority`, not `turnAuthority`: a sub-agent Run holds Tools but no Conversation Turn.
     return this.options.tools.dispatch(
       await this.authority(businessId, runId, call.agentName),
       call

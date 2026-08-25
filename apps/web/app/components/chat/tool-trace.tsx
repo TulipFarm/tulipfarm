@@ -4,6 +4,7 @@ import { Fragment } from "react";
 import { Trace, TraceStep } from "~/components/ui/trace";
 import type { TimelinePart } from "~/lib/chat/types";
 import { ApprovalCard } from "./approval-card";
+import { SubagentPanel, traceOf } from "./subagent-panel";
 import { ToolInspector, toolHasDetails } from "./tool-inspector";
 import {
   describeToolCall,
@@ -127,11 +128,13 @@ function detailOf(part: ToolPart, status: "running" | "done" | "error") {
   const duration = formatDuration(part.meta?.durationMs);
   const inspectable = toolHasDetails(part);
   const connectUrl = status === "error" ? part.meta?.connectUrl : undefined;
+  const subagent = traceOf(part);
   if (
     code === undefined &&
     hint === undefined &&
     duration === undefined &&
     connectUrl === undefined &&
+    subagent === undefined &&
     !inspectable
   ) {
     return undefined;
@@ -154,6 +157,12 @@ function detailOf(part: ToolPart, status: "running" | "done" | "error") {
             : "Connect your account →"}
         </Link>
       )}
+      {/*
+       * Above the verbatim panes, not inside them. A helper's work is the substance of this step,
+       * whereas Input/Output are the evidence behind it, and a reader should not have to read JSON
+       * to find out what ran on their behalf.
+       */}
+      {subagent === undefined ? null : <SubagentPanel part={part} />}
       {inspectable ? <ToolInspector part={part} /> : null}
     </div>
   );

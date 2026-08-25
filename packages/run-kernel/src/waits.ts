@@ -82,6 +82,8 @@ export interface WaitSignalResult {
 export interface DurableWaitStore {
   create(input: CreateWaitInput): Promise<PersistedWait>;
   find(businessId: string, waitId: string): Promise<PersistedWait | null>;
+  /** Whether this Run still holds a wait that something could signal. */
+  hasPendingWait(businessId: string, runId: string): Promise<boolean>;
   listSignals(businessId: string, waitId: string): Promise<readonly PersistedWaitSignal[]>;
   deliverSignal(input: WaitSignalInput, policy: WaitSignalPolicy): Promise<WaitDeliveryResult>;
 }
@@ -212,6 +214,26 @@ export class DurableWaitManager {
 
   async find(businessId: string, waitId: string): Promise<PersistedWait | null> {
     return this.store.find(businessId, waitId);
+  }
+
+  /**
+   * Requeues a Run that is parked but has nothing left to park on.
+   *
+   * Every way a Run parks — a child, an approval, a timer — registers a `run_waits` row, and a
+   * Run is woken either by that row being signalled or by the deadline sweeper, which only ever
+   * looks at `pending` rows. So a `waiting` Run holding no `pending` wait is unreachable by both:
+   * its wait resolved during the window between registering it and the Run durably becoming
+   * `waiting`, and that resolution found a Run that was still `running` and requeued nothing.
+   *
+   * Asking whether any wait is still pending, rather than re-checking one wait id, is what makes
+   * this correct for a Run that has parked before: an older satisfied wait cannot trigger a
+   * spurious requeue, because the question is only ever about what remains outstanding now.
+   *
+   * @returns whether this call is what requeued the Run.
+   */
+  async resumeIfUnblocked(businessId: string, runId: string): Promise<boolean> {
+    if (await this.store.hasPendingWait(businessId, runId)) return false;
+    return this.resume.resume(businessId, runId);
   }
 
   async listSignals(businessId: string, waitId: string): Promise<readonly PersistedWaitSignal[]> {

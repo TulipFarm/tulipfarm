@@ -1,15 +1,47 @@
 import type { Queryable, TransactionPort } from "../ports";
 
+/**
+ * Mirrors `ChildTerminalStatus` and `UnsignalledChildCompletion` in `@tulipfarm/run-kernel`, which
+ * storage may not import. The sweeper's port is structural, so the shapes bind at the call site.
+ */
+type ChildTerminalStatus = "succeeded" | "failed" | "cancelled" | "expired";
+
+export interface UnsignalledChildCompletion {
+  readonly childRunId: string;
+  readonly status: ChildTerminalStatus;
+  readonly finishedAt: string;
+}
+
+/** The child Run statuses a parent parked on one is entitled to be woken by. */
+const SWEEPABLE_CHILD_STATUSES: readonly string[] = ["succeeded", "failed", "cancelled"];
+
 export interface ChildAuthorityRecord {
   readonly tools: readonly string[];
   readonly classifications: readonly string[];
   readonly limits: Readonly<Record<string, number>>;
 }
 
+/**
+ * How a finished child resumes the parent parked on it.
+ *
+ * The token is minted once by `DurableWaitManager.register` and returned to the registrant only,
+ * so it has to be persisted somewhere the *child's* completion can reach — the child knows its
+ * parent through this row and nothing else. Approvals solve the same problem the same way, by
+ * keeping the grant on the row whose settlement redeems it (`apps/api/src/approvals`).
+ */
+export interface ChildResumeGrant {
+  readonly waitId: string;
+  readonly token: string;
+}
+
 export interface PersistedChildLink {
   readonly parentRunId: string;
   readonly childRunId: string;
   readonly authority: ChildAuthorityRecord;
+  /** Absent for a detached child, which no parent is waiting on. */
+  readonly resume: ChildResumeGrant | null;
+  /** The parent Tool call that spawned this child; absent when nothing spawned it from a call. */
+  readonly callId: string | null;
   readonly detachedAt: string | null;
   readonly createdAt: string;
 }
@@ -19,6 +51,8 @@ export interface LinkChildInput {
   readonly parentRunId: string;
   readonly childRunId: string;
   readonly authority: ChildAuthorityRecord;
+  readonly resume?: ChildResumeGrant;
+  readonly callId?: string;
   readonly createdAt: string;
 }
 
@@ -36,11 +70,19 @@ export const CHILD_STORAGE_STATEMENTS: readonly string[] = [
     FOREIGN KEY (business_id, child_run_id) REFERENCES runs(business_id, id),
     CHECK (parent_run_id <> child_run_id)
   )`,
+  "ALTER TABLE run_child_links ADD COLUMN IF NOT EXISTS resume jsonb",
+  "ALTER TABLE run_child_links ADD COLUMN IF NOT EXISTS call_id text",
   `CREATE OR REPLACE FUNCTION reject_run_child_link_change()
     RETURNS trigger LANGUAGE plpgsql AS $$
     BEGIN
       IF OLD.authority IS DISTINCT FROM NEW.authority THEN
         RAISE EXCEPTION 'run_child_link_authority_immutable';
+      END IF;
+      IF OLD.resume IS DISTINCT FROM NEW.resume THEN
+        RAISE EXCEPTION 'run_child_link_resume_immutable';
+      END IF;
+      IF OLD.call_id IS DISTINCT FROM NEW.call_id THEN
+        RAISE EXCEPTION 'run_child_link_call_immutable';
       END IF;
       IF OLD.created_at IS DISTINCT FROM NEW.created_at THEN
         RAISE EXCEPTION 'run_child_link_authority_immutable';
@@ -57,12 +99,19 @@ export const CHILD_STORAGE_STATEMENTS: readonly string[] = [
     FOR EACH ROW EXECUTE FUNCTION reject_run_child_link_change()`,
   `CREATE INDEX IF NOT EXISTS run_child_links_child_idx
     ON run_child_links (business_id, child_run_id)`,
+  // One Tool call spawns at most one child, which is what lets a replayed call find the child it
+  // already made instead of spawning a second one.
+  `CREATE UNIQUE INDEX IF NOT EXISTS run_child_links_call_idx
+    ON run_child_links (business_id, parent_run_id, call_id)
+    WHERE call_id IS NOT NULL`,
 ];
 
 interface ChildLinkRow {
   parent_run_id: string;
   child_run_id: string;
   authority: ChildAuthorityRecord;
+  resume: ChildResumeGrant | null;
+  call_id: string | null;
   detached_at: Date | string | null;
   created_at: Date | string;
 }
@@ -76,12 +125,15 @@ function persistedChildLink(row: ChildLinkRow): PersistedChildLink {
     parentRunId: row.parent_run_id,
     childRunId: row.child_run_id,
     authority: row.authority,
+    resume: row.resume ?? null,
+    callId: row.call_id ?? null,
     detachedAt: row.detached_at === null ? null : timestamp(row.detached_at),
     createdAt: timestamp(row.created_at),
   };
 }
 
-const CHILD_LINK_COLUMNS = "parent_run_id, child_run_id, authority, detached_at, created_at";
+const CHILD_LINK_COLUMNS =
+  "parent_run_id, child_run_id, authority, resume, call_id, detached_at, created_at";
 
 /**
  * Reverse lookup over the link table: what one Run was granted when it was delegated.
@@ -93,6 +145,47 @@ const CHILD_LINK_COLUMNS = "parent_run_id, child_run_id, authority, detached_at,
 export class ChildLinkAncestryStore {
   constructor(private readonly q: Queryable) {}
 
+  /**
+   * Children that are durably terminal while the parent parked on them is still waiting.
+   *
+   * Joining `runs` to `run_waits` is what makes this a reconciliation rather than a queue: it asks
+   * the two durable facts directly, so a completion whose signal was lost to a crash, or one no
+   * signalling path owns at all, is found by the same query on the next sweep.
+   */
+  async listUnsignalledCompletions(
+    businessId: string,
+    limit: number
+  ): Promise<readonly UnsignalledChildCompletion[]> {
+    const { rows } = await this.q.query<{
+      child_run_id: string;
+      status: string;
+      finished_at: Date | string;
+    }>(
+      `SELECT link.child_run_id, child.status, child.finished_at
+         FROM run_child_links link
+         JOIN runs child
+           ON child.business_id = link.business_id
+          AND child.id = link.child_run_id
+         JOIN run_waits wait
+           ON wait.business_id = link.business_id
+          AND wait.id = (link.resume ->> 'waitId')::uuid
+        WHERE link.business_id = $1
+          AND link.detached_at IS NULL
+          AND link.resume IS NOT NULL
+          AND child.status = ANY($2::text[])
+          AND child.finished_at IS NOT NULL
+          AND wait.status = 'pending'
+        ORDER BY child.finished_at, link.child_run_id
+        LIMIT $3`,
+      [businessId, [...SWEEPABLE_CHILD_STATUSES], limit]
+    );
+    return rows.map((row) => ({
+      childRunId: row.child_run_id,
+      status: row.status as ChildTerminalStatus,
+      finishedAt: timestamp(row.finished_at),
+    }));
+  }
+
   async parentLink(businessId: string, childRunId: string): Promise<PersistedChildLink | null> {
     const { rows } = await this.q.query<ChildLinkRow>(
       `SELECT ${CHILD_LINK_COLUMNS}
@@ -101,6 +194,28 @@ export class ChildLinkAncestryStore {
         ORDER BY created_at
         LIMIT 1`,
       [businessId, childRunId]
+    );
+    const row = rows[0];
+    return row === undefined ? null : persistedChildLink(row);
+  }
+
+  /**
+   * The child a given parent Tool call already spawned, if any.
+   *
+   * A parked Tool call is re-dispatched when its Run resumes, so without this a replay would
+   * spawn a second child and wait on it forever. `call_id` is stable across the replay; the
+   * child Run id is not.
+   */
+  async callLink(
+    businessId: string,
+    parentRunId: string,
+    callId: string
+  ): Promise<PersistedChildLink | null> {
+    const { rows } = await this.q.query<ChildLinkRow>(
+      `SELECT ${CHILD_LINK_COLUMNS}
+         FROM run_child_links
+        WHERE business_id = $1 AND parent_run_id = $2 AND call_id = $3`,
+      [businessId, parentRunId, callId]
     );
     const row = rows[0];
     return row === undefined ? null : persistedChildLink(row);
@@ -116,8 +231,8 @@ export class ChildLinkStore {
     return this.transactions.withTransaction(async (transaction) => {
       const inserted = await transaction.query<ChildLinkRow>(
         `INSERT INTO run_child_links (
-           business_id, parent_run_id, child_run_id, authority, created_at
-         ) VALUES ($1, $2, $3, $4::jsonb, $5::timestamptz)
+           business_id, parent_run_id, child_run_id, authority, resume, call_id, created_at
+         ) VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7::timestamptz)
          ON CONFLICT (business_id, parent_run_id, child_run_id) DO NOTHING
          RETURNING ${CHILD_LINK_COLUMNS}`,
         [
@@ -125,6 +240,8 @@ export class ChildLinkStore {
           input.parentRunId,
           input.childRunId,
           JSON.stringify(input.authority),
+          input.resume === undefined ? null : JSON.stringify(input.resume),
+          input.callId ?? null,
           input.createdAt,
         ]
       );

@@ -42,7 +42,7 @@ import type {
 import { type AuthorityPrincipal, principalKindOf } from "./principal";
 import { findChatRequest, presentationContextForAuthority } from "./request";
 import type { SurfaceActionStore, SurfaceArtifactStore } from "./surface-ports";
-import type { RequestContext, ToolDef } from "./types";
+import type { ParkableToolDef, RequestContext } from "./types";
 
 /**
  * Used when no `AgentResolver` was composed. It carries no `toolAllowlist`, which means the whole
@@ -134,8 +134,8 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
   private async authorize(
     authority: TurnAuthority,
     agentId: string,
-    tool: ToolDef,
-    available: readonly ToolDef[],
+    tool: ParkableToolDef,
+    available: readonly ParkableToolDef[],
     call: HostedToolCall,
     autonomy: string | undefined
   ): Promise<AuthorizeVerdict> {
@@ -207,7 +207,7 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
   /** Provider entitlement checks run for human calls, even with personal credentials. */
   private async entitlementDenial(
     authority: TurnAuthority,
-    tool: ToolDef,
+    tool: ParkableToolDef,
     call: HostedToolCall
   ): Promise<string | undefined> {
     const { entitlements } = this.options;
@@ -251,7 +251,7 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
   }
 
   /** Ledger target derivation failures become empty audit annotations, not refused writes. */
-  private ledgerTargets(tool: ToolDef, call: HostedToolCall): readonly ToolTargetRef[] {
+  private ledgerTargets(tool: ParkableToolDef, call: HostedToolCall): readonly ToolTargetRef[] {
     if (tool.definition === undefined) return [];
     try {
       return tool.definition.targetsFor(
@@ -266,7 +266,7 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
 
   private async resolveCredential(
     authority: TurnAuthority,
-    tool: ToolDef
+    tool: ParkableToolDef
   ): Promise<CredentialResolution> {
     const { credentials } = this.options;
     if (credentials === undefined || tool.definition === undefined) return { use: "service" };
@@ -317,14 +317,14 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
     // Use registered Tools, not summaries; authority compiles from definitions.
     const availableTools = this.options.registry
       .getAll()
-      .filter((tool: ToolDef) => allowed.has(tool.name));
+      .filter((tool: ParkableToolDef) => allowed.has(tool.name));
     const registeredDefinition = this.options.registry
       .getAll()
-      .find((tool: ToolDef) => tool.name === call.name);
+      .find((tool: ParkableToolDef) => tool.name === call.name);
     if (registeredDefinition === undefined || !allowed.has(registeredDefinition.name)) {
       return { status: "denied", reason: `tool "${call.name}" is not available to this turn` };
     }
-    let definition: ToolDef = registeredDefinition;
+    let definition: ParkableToolDef = registeredDefinition;
 
     // Re-check co-location admission at dispatch, not only at composition: a Tool this process
     // cannot fully authorize must be refused here rather than pass a thinner gate.
@@ -478,6 +478,7 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
         : { routineContext: { routineId: authority.routineId, runId: authority.runId } }),
       runId: authority.runId,
       toolCallId: call.callId,
+      ...(call.stateId === undefined ? {} : { stateKey: call.stateId }),
       agentId: agent.name,
       ...(call.activeSkillName === undefined ? {} : { activeSkillName: call.activeSkillName }),
       autonomy,

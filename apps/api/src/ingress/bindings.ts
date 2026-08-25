@@ -1,6 +1,6 @@
 import type { ToolBinding } from "@tulipfarm/soul";
 import type { ChatAutonomy, ToolCallResult } from "@tulipfarm/tool-host";
-import { autonomyDemandsApproval } from "@tulipfarm/tool-host";
+import { autonomyDemandsApproval, refuseParkedResult } from "@tulipfarm/tool-host";
 import type { ToolRegistry } from "../broker/tool-adapter";
 import { declarativeToolName } from "../tools/declarative/tools";
 import { dotPath, renderVarTemplate } from "./template";
@@ -39,12 +39,13 @@ export async function executeToolBinding(
     return { success: false, error: { code: "write_denied", message } };
   }
   const args = renderArgs(binding.args, vars) as Record<string, unknown>;
-  return tool.execute(args, {
+  const result = await tool.execute(args, {
     userId: INGRESS_ACTOR,
     ...(context.autonomy === undefined ? {} : { autonomy: context.autonomy }),
     runId: context.runId,
     toolCallId: context.toolCallId,
   });
+  return refuseParkedResult(result, name);
 }
 
 /** Reads dot-paths from data, `structuredContent`, then parseable JSON text blocks. */

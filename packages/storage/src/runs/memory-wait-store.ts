@@ -75,6 +75,15 @@ export class MemoryWaitStore {
     return stored ? clone(stored.wait) : null;
   }
 
+  async hasPendingWait(businessId: string, runId: string): Promise<boolean> {
+    return [...this.waits.values()].some(
+      (stored) =>
+        stored.wait.businessId === businessId &&
+        stored.wait.runId === runId &&
+        stored.wait.status === "pending"
+    );
+  }
+
   async listSignals(businessId: string, waitId: string): Promise<readonly PersistedWaitSignal[]> {
     return [...this.signals.values()]
       .filter((signal) => signal.businessId === businessId && signal.waitId === waitId)

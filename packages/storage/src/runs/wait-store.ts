@@ -313,6 +313,21 @@ export class WaitStore {
     });
   }
 
+  async hasPendingWait(businessId: string, runId: string): Promise<boolean> {
+    return this.transactions.withTransaction(async (transaction) => {
+      const result = await transaction.query<{ one: number }>(
+        `SELECT 1 AS one
+           FROM run_waits
+          WHERE business_id = $1
+            AND run_id = $2
+            AND status = 'pending'
+          LIMIT 1`,
+        [businessId, runId]
+      );
+      return result.rows.length === 1;
+    });
+  }
+
   async listSignals(businessId: string, waitId: string): Promise<readonly PersistedWaitSignal[]> {
     return this.transactions.withTransaction(async (transaction) => {
       const result = await transaction.query<SignalRow>(

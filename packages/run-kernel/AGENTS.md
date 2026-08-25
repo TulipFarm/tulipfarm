@@ -17,6 +17,8 @@ typed outputs, Artifacts, limits, budgets, and concurrency.
 | `src/{waits,timers,resume}.ts` | Durable waits, deadline sweeps, one-use resume tokens. |
 | `src/{limits,budgets,concurrency}.ts` | Limits, budget ledgers, concurrency admission. |
 | `src/{children,cancel,reconcile-state}.ts` | Child Runs, cancellation, reconciliation. |
+| `src/child-completion.ts` | Signalling a parent's durable wait when its child Run terminates. |
+| `src/child-sweep.ts` | Reconciling child completions whose signal never landed, including cancellations. |
 | `src/resilience/` | Crash/duplicate/recovery proofs over `SimulatedRunStore`. |
 
 ## Rules
@@ -41,3 +43,10 @@ typed outputs, Artifacts, limits, budgets, and concurrency.
   nothing (`scripts/routine-limit-coverage.test.ts`).
 - Child authority never broadens; detach must be explicit. Cancellation parks in-flight effects.
   Ambiguous effect evidence never becomes `cancelled`.
+- A child link carries the `callId` that spawned it, so a replayed Tool call adopts the child it
+  already made. `conversationId` is not a substitute — it is minted fresh on every replay.
+- A parent waits on its child through the durable wait on the link (`resume`), never by polling.
+  `signalChildCompletion` is its only resolver and must tolerate `not_awaited`: a detached child
+  has no parent to wake.
+- `resumeIfResolved` takes the caller's own `runId`, not just a wait id, and refuses a wait naming
+  another Run. Holding a wait id must never be enough to requeue somebody else's Run.

@@ -1,6 +1,7 @@
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import {
+  CHILD_STORAGE_STATEMENTS,
   EVENT_STORAGE_STATEMENTS,
   type PersistedRun,
   type Queryable,
@@ -38,6 +39,7 @@ export async function startScratchDatabase(schemaVersion: number): Promise<Scrat
   for (const statement of [
     ...RUN_STORAGE_STATEMENTS,
     ...WAIT_STORAGE_STATEMENTS,
+    ...CHILD_STORAGE_STATEMENTS,
     ...EVENT_STORAGE_STATEMENTS,
   ]) {
     await database.exec(statement);

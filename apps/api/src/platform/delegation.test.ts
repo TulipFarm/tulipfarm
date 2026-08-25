@@ -4,7 +4,12 @@ import {
   type ChildLink,
   DurableInvocationGateway,
   type DurableInvocationRecord,
+  type RegisteredWait,
+  type RegisterWaitInput,
+  type SignalWaitInput,
+  signalChildCompletion,
   TypedOutputValidator,
+  type WaitSignalResult,
 } from "@tulipfarm/run-kernel";
 import { INVOCATION_REQUEST_SCHEMAS, textContent } from "@tulipfarm/schema";
 import type { Queryable, QueryResult, TransactionPort } from "@tulipfarm/storage";
@@ -29,6 +34,8 @@ class FakeLinkTable implements Queryable, TransactionPort {
     parent_run_id: string;
     child_run_id: string;
     authority: ChildLink["authority"];
+    resume: ChildLink["resume"];
+    call_id: string | null;
     detached_at: string | null;
     created_at: string;
   }[] = [];
@@ -43,8 +50,10 @@ class FakeLinkTable implements Queryable, TransactionPort {
         parent_run_id: String(params[1]),
         child_run_id: String(params[2]),
         authority: JSON.parse(String(params[3])) as ChildLink["authority"],
+        resume: params[4] === null ? null : (JSON.parse(String(params[4])) as ChildLink["resume"]),
+        call_id: params[5] === null ? null : String(params[5]),
         detached_at: null,
-        created_at: String(params[4]),
+        created_at: String(params[6]),
       };
       const existing = this.rows.find(
         (r) => r.parent_run_id === row.parent_run_id && r.child_run_id === row.child_run_id
@@ -52,6 +61,13 @@ class FakeLinkTable implements Queryable, TransactionPort {
       if (existing) return { rows: [] as Row[] };
       this.rows.push(row);
       return { rows: [row] as Row[] };
+    }
+    if (text.includes("FROM run_child_links") && text.includes("call_id = $3")) {
+      const found = this.rows.filter(
+        (r) =>
+          r.business_id === params[0] && r.parent_run_id === params[1] && r.call_id === params[2]
+      );
+      return { rows: found as Row[] };
     }
     if (text.includes("FROM run_child_links") && text.includes("child_run_id = $2")) {
       const found = this.rows.filter(
@@ -74,6 +90,8 @@ class FakeLinkTable implements Queryable, TransactionPort {
 }
 
 class FakeConversationStore implements ConversationStore {
+  /** Fires once, on the first lookup by Run id, so a test can make a helper win the link race. */
+  onFirstRunLookup?: (runId: string) => void;
   readonly turns: PersistedTurn[] = [];
   readonly messages: PersistedMessage[] = [];
   private readonly completions: TurnCompletion[] = [];
@@ -88,6 +106,9 @@ class FakeConversationStore implements ConversationStore {
     return [...this.turns].reverse().find((turn) => turn.conversationId === conversationId);
   }
   async findTurnByRunId(_b: string, runId: string) {
+    const hook = this.onFirstRunLookup;
+    this.onFirstRunLookup = undefined;
+    hook?.(runId);
     return this.turns.find((turn) => turn.runId === runId);
   }
   async appendMessage(message: PersistedMessage) {
@@ -140,14 +161,39 @@ class FakeConversationStore implements ConversationStore {
   }
 }
 
+/** Records what the delegating turn parked on, so a test can redeem the grant the child gets. */
+class FakeWaits {
+  readonly registered: { id: string; runId: string; stateKey: string; kind: string }[] = [];
+  readonly signalled: { id: string; token: string; digest: string; principal: string }[] = [];
+
+  async register(input: RegisterWaitInput): Promise<RegisteredWait> {
+    this.registered.push({
+      id: input.id,
+      runId: input.runId,
+      stateKey: input.stateKey,
+      kind: input.kind,
+    });
+    return { wait: { id: input.id } as RegisteredWait["wait"], token: `token-for-${input.id}` };
+  }
+
+  async signal(input: SignalWaitInput): Promise<WaitSignalResult> {
+    this.signalled.push({
+      id: input.id,
+      token: input.token,
+      digest: input.signalDigest,
+      principal: input.principal,
+    });
+    return { outcome: "resumed", wait: { id: input.id }, signalCount: 1 } as WaitSignalResult;
+  }
+}
+
 function harness(
-  options: {
-    waitMs?: number;
-    parentToolNames?: (agentId: string | undefined) => readonly string[] | undefined;
-  } = {}
+  options: { parentToolNames?: (agentId: string | undefined) => readonly string[] | undefined } = {}
 ) {
   const links = new FakeLinkTable();
   const store = new FakeConversationStore();
+  const waits = new FakeWaits();
+  let waitIds = 0;
   const created: { id: string; agentId?: string }[] = [];
   const persisted: DurableInvocationRecord[] = [];
   const cancelled: string[] = [];
@@ -164,10 +210,11 @@ function harness(
     validator,
     nextId: newId,
   });
+  const ancestry = new ChildLinkAncestryStore(links);
   const delegation = createAgentDelegation({
     businessId: DEPLOYMENT_BUSINESS_ID,
     links: new ChildLinkStore(links),
-    ancestry: new ChildLinkAncestryStore(links),
+    ancestry,
     startChildConversation: startChildConversation({
       conversations: {
         create: async (doc) => {
@@ -188,10 +235,10 @@ function harness(
       { name: "record_create", mutating: true, dataClasses: ["business_record"] },
     ],
     ...(options.parentToolNames === undefined ? {} : { parentToolNames: options.parentToolNames }),
-    waitMs: options.waitMs ?? 200,
-    pollMs: 5,
+    waits,
+    newWaitId: () => `wait-${++waitIds}`,
   });
-  return { delegation, links, store, created, persisted, cancelled };
+  return { delegation, links, store, created, persisted, cancelled, waits, ancestry };
 }
 
 describe("ChildLinkAncestryStore", () => {
@@ -204,22 +251,32 @@ describe("ChildLinkAncestryStore", () => {
 
 describe("createAgentDelegation", () => {
   let context: ReturnType<typeof harness>;
+  let callIds = 0;
+  const nextCallId = () => `call-${++callIds}`;
 
   beforeEach(() => {
     context = harness();
+    callIds = 0;
   });
 
-  it("mints a child chat Run for the target agent and links it under the parent", async () => {
-    const settled = context.delegation.delegate({
-      parentRunId: PARENT_RUN,
-      agentId: "researcher",
-      task: "Summarise the open issues",
+  /** The delegating call, as the Tool makes it: one call id, parked on the parent's own State. */
+  function delegate(
+    ctx: ReturnType<typeof harness>,
+    input: { parentRunId?: string; callId?: string; agentId?: string; task?: string } = {}
+  ) {
+    return ctx.delegation.delegate({
+      parentRunId: input.parentRunId ?? PARENT_RUN,
+      parentStateKey: "invoke",
+      callId: input.callId ?? nextCallId(),
+      agentId: input.agentId ?? "researcher",
+      task: input.task ?? "Summarise the open issues",
     });
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    const [record] = context.persisted;
-    context.store.settle(record.runId, "succeeded", "Three issues are open.");
-    const outcome = await settled;
+  }
 
+  it("mints a child chat Run for the target agent and links it under the parent", async () => {
+    const outcome = await delegate(context);
+
+    const [record] = context.persisted;
     expect(record.runSource).toBe("chat");
     expect(record.state.definitionRef).toBe("published:agent:researcher");
     expect(context.created).toEqual([{ id: outcome.conversationId, agentId: "researcher" }]);
@@ -228,20 +285,101 @@ describe("createAgentDelegation", () => {
       parent_run_id: PARENT_RUN,
       child_run_id: outcome.childRunId,
     });
-    expect(outcome.status).toBe("succeeded");
-    expect(outcome.result).toBe("Three issues are open.");
     expect(outcome.depth).toBe(1);
   });
 
-  it("records a bounded delegation deadline the chain can only narrow", async () => {
-    const settled = context.delegation.delegate({
-      parentRunId: PARENT_RUN,
-      agentId: "researcher",
-      task: "Look",
+  it("parks the delegating turn on a durable wait instead of answering for the helper", async () => {
+    const outcome = await delegate(context);
+
+    expect(outcome.status).toBe("awaiting");
+    expect(outcome.result).toBeNull();
+    expect(outcome.waitId).not.toBeNull();
+    expect(context.waits.registered).toEqual([
+      { id: outcome.waitId, runId: PARENT_RUN, stateKey: "invoke", kind: "child_run" },
+    ]);
+  });
+
+  it("persists the resume grant on the link before the helper can finish", async () => {
+    const outcome = await delegate(context);
+
+    // The child's completion is detected by a process that never held the token, so the only
+    // way it can resume the parent is by reading this back off the row the spawn wrote.
+    expect(context.links.rows[0].resume).toEqual({
+      waitId: outcome.waitId,
+      token: `token-for-${outcome.waitId}`,
     });
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    context.store.settle(context.persisted[0].runId, "succeeded", "done");
-    const outcome = await settled;
+  });
+
+  it("resumes a helper that outlives the old fixed wait rather than dead-ending it", async () => {
+    const outcome = await delegate(context);
+    expect(outcome.status).toBe("awaiting");
+
+    // Far past the 60s the poll used to give up at.
+    const finishedAt = new Date(Date.now() + 5 * 60_000).toISOString();
+    context.store.settle(context.persisted[0].runId, "succeeded", "Three issues are open.");
+    const signalled = await signalChildCompletion(
+      { ancestry: context.ancestry, waits: context.waits },
+      {
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        childRunId: outcome.childRunId,
+        status: "succeeded",
+        completedAt: finishedAt,
+      }
+    );
+
+    expect(signalled).toMatchObject({ kind: "signalled", parentRunId: PARENT_RUN });
+    expect(context.waits.signalled).toEqual([
+      {
+        id: outcome.waitId,
+        token: `token-for-${outcome.waitId}`,
+        digest: "succeeded",
+        principal: `run:${outcome.childRunId}`,
+      },
+    ]);
+  });
+
+  it("answers the replayed call from the helper it already spawned", async () => {
+    const callId = nextCallId();
+    const first = await delegate(context, { callId });
+    context.store.settle(context.persisted[0].runId, "succeeded", "Three issues are open.");
+
+    const replay = await delegate(context, { callId });
+
+    expect(replay.status).toBe("succeeded");
+    expect(replay.result).toBe("Three issues are open.");
+    expect(replay.childRunId).toBe(first.childRunId);
+    // The whole point of keying on the call: a resumed turn must not start a second helper.
+    expect(context.persisted).toHaveLength(1);
+    expect(context.links.rows).toHaveLength(1);
+  });
+
+  it("keeps the replayed call parked while its helper is still running", async () => {
+    const callId = nextCallId();
+    const first = await delegate(context, { callId });
+
+    const replay = await delegate(context, { callId });
+
+    expect(replay.status).toBe("awaiting");
+    expect(replay.waitId).toBe(first.waitId);
+    expect(context.persisted).toHaveLength(1);
+  });
+
+  it("answers directly when the helper finished before its link was written", async () => {
+    // The child Run is claimable the moment it is minted, so it can beat its own link row. A
+    // parent that parked here would wait on a completion that was signalled before the grant
+    // existed to receive it.
+    context.store.onFirstRunLookup = (runId) =>
+      context.store.settle(runId, "succeeded", "Already done.");
+
+    const outcome = await delegate(context);
+
+    expect(outcome.status).toBe("succeeded");
+    expect(outcome.result).toBe("Already done.");
+    expect(outcome.waitId).toBeNull();
+  });
+
+  it("records a bounded delegation deadline the chain can only narrow", async () => {
+    const outcome = await delegate(context);
 
     const recorded = context.links.rows[0].authority.limits[DELEGATION_DEADLINE_LIMIT_KEY];
     expect(recorded).toBe(Date.parse(outcome.deadlineAt));
@@ -249,16 +387,15 @@ describe("createAgentDelegation", () => {
   });
 
   it("does not let transfer to a laxer Agent exceed the delegating Agent's restrictions", async () => {
-    const settled = context.delegation.delegate({
+    await context.delegation.delegate({
       parentRunId: PARENT_RUN,
+      parentStateKey: "invoke",
+      callId: nextCallId(),
       parentAgentId: "reporter",
       parentToolAllowlist: ["record_list"],
       agentId: "mutator",
       task: "Delete the oldest ticket.",
     });
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    context.store.settle(context.persisted[0].runId, "succeeded", "I cannot delete it.");
-    await settled;
 
     expect(context.links.rows[0].authority.tools).toEqual(["record_list"]);
     expect(context.links.rows[0].authority.tools).not.toContain("record_create");
@@ -266,58 +403,40 @@ describe("createAgentDelegation", () => {
 
   it("narrows the root authority from the delegating Agent's own restrictions", async () => {
     const scoped = harness({
-      waitMs: 200,
       parentToolNames: (agentId) => (agentId === "reporter" ? ["record_list"] : undefined),
     });
-    const settled = scoped.delegation.delegate({
+    await scoped.delegation.delegate({
       parentRunId: PARENT_RUN,
+      parentStateKey: "invoke",
+      callId: nextCallId(),
       parentAgentId: "reporter",
       agentId: "mutator",
       task: "Delete the oldest ticket.",
     });
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    scoped.store.settle(scoped.persisted[0].runId, "succeeded", "I cannot delete it.");
-    await settled;
 
     expect(scoped.links.rows[0].authority.tools).toEqual(["record_list"]);
   });
 
   it("leaves the root authority whole for a delegating Agent that authored no restrictions", async () => {
-    const scoped = harness({ waitMs: 200, parentToolNames: () => undefined });
-    const settled = scoped.delegation.delegate({
+    const scoped = harness({ parentToolNames: () => undefined });
+    await scoped.delegation.delegate({
       parentRunId: PARENT_RUN,
+      parentStateKey: "invoke",
+      callId: nextCallId(),
       parentAgentId: "plain",
       agentId: "researcher",
       task: "Look",
     });
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    scoped.store.settle(scoped.persisted[0].runId, "succeeded", "done");
-    await settled;
 
     expect(scoped.links.rows[0].authority.tools).toContain("record_list");
   });
 
-  it("reports the helper as running rather than answering for it when it does not settle", async () => {
-    const outcome = await harness({ waitMs: 30 }).delegation.delegate({
-      parentRunId: PARENT_RUN,
-      agentId: "researcher",
-      task: "Take your time",
-    });
-
-    expect(outcome.status).toBe("running");
-    expect(outcome.result).toBeNull();
-    expect(outcome.childRunId).not.toBe("");
-  });
-
   it("reports a failed helper as failed and returns no answer", async () => {
-    const settled = context.delegation.delegate({
-      parentRunId: PARENT_RUN,
-      agentId: "researcher",
-      task: "Break",
-    });
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    const callId = nextCallId();
+    await delegate(context, { callId, task: "Break" });
     context.store.settle(context.persisted[0].runId, "failed");
-    const outcome = await settled;
+
+    const outcome = await delegate(context, { callId, task: "Break" });
 
     expect(outcome.status).toBe("failed");
     expect(outcome.result).toBeNull();
@@ -326,20 +445,12 @@ describe("createAgentDelegation", () => {
   it("refuses the hop past the depth ceiling instead of minting another Run", async () => {
     let parentRunId = PARENT_RUN;
     for (let hop = 0; hop < 3; hop += 1) {
-      const settled = context.delegation.delegate({
-        parentRunId,
-        agentId: "researcher",
-        task: `hop ${hop}`,
-      });
-      await new Promise((resolve) => setTimeout(resolve, 20));
-      const record = context.persisted[context.persisted.length - 1];
-      context.store.settle(record.runId, "succeeded", "ok");
-      parentRunId = (await settled).childRunId;
+      parentRunId = (await delegate(context, { parentRunId, task: `hop ${hop}` })).childRunId;
     }
 
-    await expect(
-      context.delegation.delegate({ parentRunId, agentId: "researcher", task: "one too many" })
-    ).rejects.toThrow(DelegationError);
+    await expect(delegate(context, { parentRunId, task: "one too many" })).rejects.toThrow(
+      DelegationError
+    );
     expect(context.persisted).toHaveLength(3);
     expect(context.links.rows).toHaveLength(3);
   });

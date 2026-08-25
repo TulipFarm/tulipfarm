@@ -14,10 +14,19 @@ export type RequestedChildAuthority = {
   readonly limits?: Readonly<Record<string, number>>;
 };
 
+export interface ChildResumeGrant {
+  readonly waitId: string;
+  readonly token: string;
+}
+
 export interface ChildLink {
   readonly parentRunId: string;
   readonly childRunId: string;
   readonly authority: ChildAuthority;
+  /** How this child's completion resumes its parent; absent when nothing is waiting on it. */
+  readonly resume: ChildResumeGrant | null;
+  /** The parent Tool call that spawned this child; absent when nothing spawned it from a call. */
+  readonly callId: string | null;
   readonly detachedAt: string | null;
   readonly createdAt: string;
 }
@@ -42,6 +51,8 @@ export class ChildRunError extends Error {
  */
 export interface ChildLinkAncestry {
   parentLink(businessId: string, childRunId: string): Promise<ChildLink | null>;
+  /** The child a parent Tool call already spawned, so a replayed call adopts it (see `spawn`). */
+  callLink?(businessId: string, parentRunId: string, callId: string): Promise<ChildLink | null>;
 }
 
 export interface ChildLinkStore {
@@ -50,6 +61,8 @@ export interface ChildLinkStore {
     parentRunId: string;
     childRunId: string;
     authority: ChildAuthority;
+    resume?: ChildResumeGrant;
+    callId?: string;
     createdAt: string;
   }): Promise<ChildLink>;
   detach(
@@ -67,6 +80,10 @@ export interface SpawnChildInput {
   readonly childRunId: string;
   readonly parentAuthority: ChildAuthority;
   readonly requestedAuthority: RequestedChildAuthority;
+  /** Set when the parent parks on this child; omitted for a detached spawn. */
+  readonly resume?: ChildResumeGrant;
+  /** The parent Tool call this child answers; unique per parent, so a replay adopts this child. */
+  readonly callId?: string;
   readonly now: string;
 }
 
@@ -157,6 +174,8 @@ export class ChildRunManager {
       parentRunId: input.parentRunId,
       childRunId: input.childRunId,
       authority,
+      resume: input.resume,
+      callId: input.callId,
       createdAt: input.now,
     });
   }

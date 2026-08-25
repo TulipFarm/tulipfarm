@@ -239,6 +239,14 @@ export class TurnDriver {
     }
 
     if (result.status === "waiting") {
+      if (result.reason === "child_running") {
+        await events.emit(
+          "child.started",
+          { waitId: result.waitId, childRunId: result.childRunId, callId: result.callId },
+          "child"
+        );
+        return "waiting";
+      }
       await events.emit(
         "approval.requested",
         { waitId: result.waitId, intentId: result.approvalId, callId: result.callId },

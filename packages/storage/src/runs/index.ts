@@ -8,6 +8,7 @@ export type {
 export { BUDGET_STORAGE_STATEMENTS, BudgetStore } from "./budget-store";
 export type {
   ChildAuthorityRecord,
+  ChildResumeGrant,
   LinkChildInput,
   PersistedChildLink,
 } from "./child-store";

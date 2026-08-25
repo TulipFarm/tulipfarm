@@ -9,7 +9,7 @@ import {
   type ToolAdapter,
   toolContractSpecOf,
 } from "@tulipfarm/tool-broker";
-import type { ToolDef } from "@tulipfarm/tool-host";
+import type { ParkableToolDef, ToolDef } from "@tulipfarm/tool-host";
 import { CHAT_DLP_RULES } from "@tulipfarm/tool-host";
 import { describe, expect, it } from "vitest";
 import { DEPLOYMENT_ROLES } from "../identity/roles";
@@ -69,7 +69,10 @@ function inert<T>(): T {
   ) as T;
 }
 
-function definitionsFrom(family: string, tools: readonly ToolDef[]): readonly LabeledDefinition[] {
+function definitionsFrom(
+  family: string,
+  tools: readonly ParkableToolDef[]
+): readonly LabeledDefinition[] {
   return tools.flatMap((tool) =>
     tool.definition === undefined ? [] : [{ family, definition: tool.definition }]
   );

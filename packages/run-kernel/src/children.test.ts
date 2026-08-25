@@ -4,6 +4,7 @@ import {
   type ChildLink,
   type ChildLinkAncestry,
   type ChildLinkStore,
+  type ChildResumeGrant,
   ChildRunError,
   ChildRunManager,
   narrowChildAuthority,
@@ -27,6 +28,8 @@ class FakeChildLinkStore implements ChildLinkStore {
     parentRunId: string;
     childRunId: string;
     authority: ChildAuthority;
+    resume?: ChildResumeGrant;
+    callId?: string;
     createdAt: string;
   }): Promise<ChildLink> {
     const existing = this.links.find(
@@ -38,6 +41,8 @@ class FakeChildLinkStore implements ChildLinkStore {
       parentRunId: input.parentRunId,
       childRunId: input.childRunId,
       authority: input.authority,
+      callId: input.callId ?? null,
+      resume: input.resume ?? null,
       detachedAt: null,
       createdAt: input.createdAt,
     };
@@ -267,6 +272,8 @@ describe("ChildRunManager.ancestors", () => {
         parentRunId: chainId(1),
         childRunId: chainId(0),
         authority: PARENT,
+        callId: null,
+        resume: null,
         detachedAt: null,
         createdAt: "2026-07-25T10:00:00.000Z",
       },
@@ -274,6 +281,8 @@ describe("ChildRunManager.ancestors", () => {
         parentRunId: chainId(0),
         childRunId: chainId(1),
         authority: PARENT,
+        callId: null,
+        resume: null,
         detachedAt: null,
         createdAt: "2026-07-25T10:00:00.000Z",
       }

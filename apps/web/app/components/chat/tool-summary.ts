@@ -52,7 +52,12 @@ export function toolFamily(toolName: string): ToolFamily {
     return "surface";
   }
   if (name === "get_current_time") return "time";
-  if (name === "call_skill" || name.startsWith("delegate") || name.startsWith("transfer")) {
+  if (
+    name === "call_skill" ||
+    name === "spawn_subagent" ||
+    name.startsWith("delegate") ||
+    name.startsWith("transfer")
+  ) {
     return "delegation";
   }
   return "generic";
@@ -69,6 +74,7 @@ const VERB_BY_SUFFIX: readonly (readonly [RegExp, string])[] = [
   [/^read_page$/, "Read page"],
   [/^get_current_time$/, "Checked the time"],
   [/^call_skill$/, "Called skill"],
+  [/^spawn_subagent$/, "Spawned helper"],
   [/^complete_state$/, "Completed step"],
   [/^send_slack_message$/, "Sent Slack message"],
   [/_search$/, "Searched"],

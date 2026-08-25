@@ -3,7 +3,7 @@
  * broken ones.
  */
 
-import type { ToolDef } from "@tulipfarm/tool-host";
+import type { ParkableToolDef } from "@tulipfarm/tool-host";
 
 /** Copied from RoleSchema; tests guard drift without TypeBox runtime coupling. */
 export const AUTHORABLE_ACTION = /^[a-z][a-z0-9_-]*(?:\.[a-z][a-z0-9_-]*)+$/;
@@ -123,7 +123,7 @@ interface Accumulated {
 }
 
 /** Key by action so multiple Tools requiring the same action become one grantable capability. */
-export function buildCapabilityCatalog(tools: readonly ToolDef[]): CapabilityCatalog {
+export function buildCapabilityCatalog(tools: readonly ParkableToolDef[]): CapabilityCatalog {
   const byAction = new Map<string, Accumulated>();
   const unavailable = new Map<string, UnavailableCapability>();
 

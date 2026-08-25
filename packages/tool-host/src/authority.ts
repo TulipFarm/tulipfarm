@@ -19,11 +19,13 @@ export interface TurnAuthority {
   readonly businessId: string;
   readonly runId: string;
   /**
-   * The Turn this Run answers, when it answers one.
+   * The Conversation Turn this Run answers, when it answers one.
    *
-   * Absent for a Run that is not a conversation — a Routine Run has no participant and no Turn
-   * row. Authorization never depended on the Turn; only presentation and conversation-scoped Tool
-   * context did, and both treat its absence as "no conversation" rather than "not authorized".
+   * Absent for a Run that is not a Conversation — a Routine Run has no participant and no Turn
+   * row, and a sub-agent Run reasons into an Artifact instead. Authorization never depended on
+   * the Turn; only presentation and conversation-scoped Tool context did. A Tool that needs
+   * somewhere to speak must handle its absence rather than assume a Turn, since inventing a
+   * Conversation id here would let a Tool write into a Conversation nobody can read.
    */
   readonly turn?: HostedTurnRef;
   /** Whom the turn acts as, as recorded when the Run was minted. */
@@ -55,6 +57,8 @@ export interface HostedToolCall {
   readonly callId: string;
   readonly name: string;
   readonly arguments: unknown;
+  /** The Run State this call executes in; a Tool that parks registers its wait against it. */
+  readonly stateId?: string;
   readonly activeSkillName?: string;
   /**
    * The Agent the caller is acting as, for a Run whose request Artifact does not name one — today
@@ -72,7 +76,13 @@ export type HostedToolResult =
   | { readonly status: "denied"; readonly reason: string; readonly connectUrl?: string }
   | { readonly status: "invalid_arguments"; readonly reason: string }
   | { readonly status: "failed"; readonly reason: string }
-  | { readonly status: "awaiting_approval"; readonly approvalId: string };
+  | { readonly status: "awaiting_approval"; readonly approvalId: string }
+  | {
+      /** The Tool spawned a child Run and registered the wait that resumes this Turn. */
+      readonly status: "awaiting_child";
+      readonly childRunId: string;
+      readonly waitId: string;
+    };
 
 export interface TurnToolDispatcher {
   dispatch(authority: TurnAuthority, call: HostedToolCall): Promise<HostedToolResult>;

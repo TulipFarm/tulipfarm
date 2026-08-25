@@ -2,7 +2,7 @@ import type { AgentCapabilityRestrictions } from "@tulipfarm/schema";
 import type { PresentationContext } from "@tulipfarm/surface";
 import type { ToolAvailability } from "@tulipfarm/tool-broker";
 import { agentCanBeOfferedTool } from "./capability-restrictions";
-import type { ToolDef } from "./types";
+import type { ParkableToolDef } from "./types";
 
 /**
  * The read surface the Tool host needs from a registry. Deliberately narrower than any concrete
@@ -11,19 +11,19 @@ import type { ToolDef } from "./types";
  * model SDK the control plane's streaming path uses.
  */
 export interface ToolCatalog {
-  getAll(): ToolDef[];
+  getAll(): ParkableToolDef[];
 }
 
 /** A catalog assembled at composition time. Registering a duplicate name is a wiring bug. */
 export class InMemoryToolCatalog implements ToolCatalog {
-  private readonly tools = new Map<string, ToolDef>();
+  private readonly tools = new Map<string, ParkableToolDef>();
 
-  register(tool: ToolDef): void {
+  register(tool: ParkableToolDef): void {
     if (this.tools.has(tool.name)) throw new Error(`Tool "${tool.name}" is already registered`);
     this.tools.set(tool.name, tool);
   }
 
-  getAll(): ToolDef[] {
+  getAll(): ParkableToolDef[] {
     return [...this.tools.values()];
   }
 }

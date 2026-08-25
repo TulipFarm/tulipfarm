@@ -1,4 +1,9 @@
-import { err, type RequestContext, type ToolCallResult, type ToolDef } from "./types";
+import {
+  err,
+  type ParkableToolCallResult,
+  type ParkableToolDef,
+  type RequestContext,
+} from "./types";
 
 /**
  * How long an aborted operation is given to acknowledge its cancellation before its outcome is
@@ -94,7 +99,7 @@ export async function runWithCancellation<T>(
 
 export interface ToolTimeoutOptions {
   readonly graceMs?: number;
-  readonly onLateSettlement?: (settlement: LateSettlement<ToolCallResult>) => void;
+  readonly onLateSettlement?: (settlement: LateSettlement<ParkableToolCallResult>) => void;
 }
 
 /** Written for the model, so it says what to do rather than inviting the retry that duplicates. */
@@ -107,12 +112,12 @@ export const INDETERMINATE_TIMEOUT_MESSAGE =
  * mutating Tool that ignored its abort as `indeterminate` rather than a failure a caller may retry.
  */
 export async function executeToolWithTimeout(
-  tool: ToolDef,
+  tool: ParkableToolDef,
   args: unknown,
   context: RequestContext,
   timeoutMs: number,
   options: ToolTimeoutOptions = {}
-): Promise<ToolCallResult> {
+): Promise<ParkableToolCallResult> {
   const outcome = await runWithCancellation(
     (abortSignal) => tool.execute(args, { ...context, abortSignal }),
     timeoutMs,

@@ -53,3 +53,8 @@ Run event emission, Tool-call announcement or preview, or the ports a Turn host 
 - **The Turn is the seam that links a Surface to a Conversation, not the Tool.** A Surface can go
   to Slack or a Routine, so `packages/tool-host` has no message repo and must not gain
   one. `TurnCompletionStore.appendSurfaceMessage` writes the `tool`-role link row instead.
+- **A State parking on a child claims its wait *after* the transition, never before.** The child is
+  live while the parent is still `running`, so it can resolve the wait against a Run that cannot be
+  requeued. `TurnWaitPort.resumeIfResolved` closes that window and only means anything once the Run
+  is `waiting`. Approvals need no such claim: their wait is registered here, and a human cannot
+  answer one before it exists.

@@ -12,7 +12,7 @@ import {
   targetKey,
 } from "@tulipfarm/surface";
 import type { RequestContext, ToolDef } from "@tulipfarm/tool-host";
-import { defineApiTool, err, ok, toToolDef } from "@tulipfarm/tool-host";
+import { defineApiTool, err, ok, refuseParkedResult, toToolDef } from "@tulipfarm/tool-host";
 import { surfaceRendererRegistry } from "./renderer-registry";
 
 async function createActionHandles(
@@ -480,7 +480,7 @@ The server derives input validation from the component; do not supply an \`await
       { ...value, component: normalized.component, awaitedSchema },
       ctx
     );
-    if (!presented.success) return presented;
+    if (!presented.success) return refuseParkedResult(presented, "surface_present");
     return ok({
       ...(presented.data as Record<string, unknown>),
       awaitedSchema,

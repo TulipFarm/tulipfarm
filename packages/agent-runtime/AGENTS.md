@@ -17,13 +17,21 @@ orchestration. It owns prompt assembly and runtime control, not model providers.
 | `src/guardrails/` | The four guard stages — `input`, `tool-call`, `tool-result`, `output` — and `DEFAULT_GUARDRAILS`. `tool-result` screens what a Tool brought back, which is attacker-controlled whenever the Tool talked to the network. |
 | `src/skills/` | Exact-version Skill resolution, trust tiers, scanning, ability intersection. |
 | `src/loop/` | Bounded durable Tool loop; the broker is the only effect path. `reread.ts` puts a File an Agent read mid-Turn back in front of the model. `diagnostics.ts` owns the barrier identities — a Tool named there ends the Turn on its *identity*, with no repair path, so a hand-off or a pause can never be narrated as done, and a write can never land behind a report the participant already keeps. `narrowing.ts` narrows the offer to a Skill's scope but never hides a mutating Tool. `distill.ts` declares `ToolResultDistillerPort` and decides when a large Tool result is summarised before the model reads it — the port is implemented in `apps/worker`, because this package may not import `@tulipfarm/llm`. |
-| `src/delegation/` | Helper Agents as child Runs: depth, deadline and authority narrowing (`delegate.ts`), and the composition that mints and awaits the child (`composition.ts`). |
+| `src/delegation/` | Helper Agents as child Runs: depth, deadline and authority narrowing (`delegate.ts`), the composition that mints and awaits a Soul-defined helper (`composition.ts`), and ad-hoc helpers whose persona the caller writes inline (`subagent.ts`). |
 | `test/security/` | Injection and non-amplification corpus. |
 
 ## Rules
 - May import only schema, authz, audit, run-kernel, tool-broker, knowledge, memory, and
   observability packages; see [dependency rules](../../docs/architecture/dependency-rules.md).
 - Submit child-Run commands through `run-kernel` public ports; `run-kernel` never imports this.
+- `composition.delegate` must re-read the child's status *after* writing the link. The child is
+  claimable the moment it is minted, so it can finish before the link exists; a helper that already
+  terminated is answered directly rather than parked on a signal nothing can now raise.
+- `createSubagentSpawning` always sends `tools` explicitly, empty list included. Omitting it makes
+  `narrowChildAuthority` inherit the parent's whole read-only set, and a caller that named no Tools
+  must get a helper that holds none — which is also what the API's Context resolver offers it.
+- An ad-hoc persona is what a helper is *told*, never what it may *do*. Keep it out of the
+  authority path, or a model widens its own reach by writing itself kinder instructions.
 - `selectModelProfile` is the only product model-selection path; keep
   `deriveModelRequirements` pure so Run replay routes identically.
 - Effort `auto` uses pure signal scoring first; classifier calls happen only near thresholds.

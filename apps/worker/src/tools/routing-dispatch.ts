@@ -52,6 +52,7 @@ export class RoutingToolDispatch implements ToolDispatchPort {
       callId: request.callId,
       name: request.name,
       arguments: request.arguments,
+      stateId: request.stateId,
       ...(request.activeSkillName === undefined
         ? {}
         : { activeSkillName: request.activeSkillName }),
@@ -106,6 +107,13 @@ function withCallId(callId: string, result: HostedToolResult): ToolDispatchResul
       return { status: "succeeded", callId, output: result.output };
     case "awaiting_approval":
       return { status: "awaiting_approval", callId, approvalId: result.approvalId };
+    case "awaiting_child":
+      return {
+        status: "awaiting_child",
+        callId,
+        childRunId: result.childRunId,
+        waitId: result.waitId,
+      };
     case "denied":
       return { status: "denied", callId, reason: result.reason, connectUrl: result.connectUrl };
     default:
