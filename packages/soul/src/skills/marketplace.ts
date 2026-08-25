@@ -1,17 +1,26 @@
 import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
+
 import { join } from "node:path";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { unstorableArtifactPaths, validateSkill } from "@tulipfarm/schema";
 import type { CommitActor } from "../commit-signing";
 import { convertLegacySkill } from "../converters/legacy-definitions";
-import { sourceType } from "../git-source";
 import type { GitSyncService } from "../git-sync";
 import { parseFrontmatter, type SoulLoader } from "../published-loader";
 import { artifactWriteTarget, type SoulWrite, type SoulWriter } from "../writer";
 import type { BundledSkill } from "./bundled";
 import { type SkillScanFile, type SkillTrustLevel, scanSkill, skillTrustLevel } from "./guard";
-import { collectSkillFiles, discoverSkills } from "./marketplace-files";
+import {
+  installedSourceType,
+  marketplaceSource,
+  readSkillsLock,
+  type SkillsLock,
+  serializeSkillsLock,
+  skillVersionFromFiles,
+} from "./lock";
+import { mutateSkillsLock } from "./lock-write";
+import { collectSkillFiles, discoverSkills, skillDirectoryHash } from "./marketplace-files";
 import { mergedSkills } from "./registry";
 
 type ScanEntry = {
@@ -21,14 +30,6 @@ type ScanEntry = {
   audited: Set<string>;
   expires: number;
 };
-type LockEntry = {
-  sourceUrl?: string;
-  sourceType?: string;
-  skillPath?: string;
-  ref?: string;
-  hash?: string;
-};
-type SkillsLock = { version: number; skills: Record<string, LockEntry> };
 type MarketplaceManifestEntry = {
   skillId?: string;
   name?: string;
@@ -164,7 +165,7 @@ export function createSkillMarketplaceFlow(deps: SkillMarketplaceDeps): SkillMar
     const cached = marketplaceCache.get(source);
     const cachedScan = cached ? scans.get(cached.scanId) : undefined;
     if (cached && cached.expires > now && cachedScan) {
-      const lock = await readLock(deps.gitSync.path);
+      const lock = await readSkillsLock(deps.gitSync.path);
       return {
         scanId: cached.scanId,
         source,
@@ -223,7 +224,7 @@ export function createSkillMarketplaceFlow(deps: SkillMarketplaceDeps): SkillMar
         if (discovered.length === 0) {
           throw new SkillMarketplaceError(400, "no SKILL.md files found in repo");
         }
-        const lock = await readLock(deps.gitSync.path);
+        const lock = await readSkillsLock(deps.gitSync.path);
         const scanId = randomUUID();
         pruneScans(Date.now());
         scans.set(scanId, {
@@ -311,30 +312,32 @@ export function createSkillMarketplaceFlow(deps: SkillMarketplaceDeps): SkillMar
       );
     }
     for (const skill of chosen) validateInstallable(skill, deps.executablePackageBlocker);
-    const changes: SoulWrite[] = [];
-    for (const skill of chosen)
-      changes.push(...(await skillInstallChanges(deps.gitSync.path, skill)));
-    const lock = await readLock(deps.gitSync.path);
-    for (const skill of chosen) {
-      lock.skills[skill.name] = {
-        sourceUrl: stripUrlCredentials(entry.source),
-        sourceType: sourceType(entry.source),
-        skillPath: skill.skillPath,
-        ref: entry.ref,
-        hash: skillDirectoryHash(skill.files),
+    await mutateSkillsLock(deps.soulWriter, deps.gitSync.path, async (lock) => {
+      const changes: SoulWrite[] = [];
+      for (const skill of chosen)
+        changes.push(...(await skillInstallChanges(deps.gitSync.path, skill)));
+      for (const skill of chosen) {
+        lock.skills[skill.name] = {
+          sourceType: installedSourceType(entry.source),
+          version: skillVersionFromFiles(skill.files),
+          sourceUrl: stripUrlCredentials(entry.source),
+          skillPath: skill.skillPath,
+          ref: entry.ref,
+          hash: skillDirectoryHash(skill.files),
+        };
+      }
+      changes.push({
+        op: "put",
+        target: { kind: "SkillsLock" },
+        content: serializeSkillsLock(lock),
+      });
+      return {
+        subject: `soul: install skill(s) ${chosen.map((skill) => skill.name).join(", ")}`,
+        source: input.source ?? "agent",
+        actor: input.actor,
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        changes,
       };
-    }
-    changes.push({
-      op: "put",
-      target: { kind: "SkillsLock" },
-      content: `${JSON.stringify(lock, null, 2)}\n`,
-    });
-    await deps.soulWriter.apply({
-      subject: `soul: install skill(s) ${chosen.map((skill) => skill.name).join(", ")}`,
-      source: input.source ?? "agent",
-      actor: input.actor,
-      businessId: DEPLOYMENT_BUSINESS_ID,
-      changes,
     });
     await deps.soulLoader.reload();
     return {
@@ -361,17 +364,6 @@ export function createSkillMarketplaceFlow(deps: SkillMarketplaceDeps): SkillMar
 
 function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function skillDirectoryHash(files: readonly SkillScanFile[]): string {
-  const hash = createHash("sha256");
-  for (const file of [...files].sort((left, right) => left.path.localeCompare(right.path))) {
-    hash.update(file.path);
-    hash.update("\0");
-    hash.update(file.content);
-    hash.update("\0");
-  }
-  return hash.digest("hex");
 }
 
 function generatedSkillDefinition(skill: DiscoveredSkill): string | undefined {
@@ -462,17 +454,6 @@ function validateInstallable(
   }
 }
 
-async function readLock(soulPath: string): Promise<SkillsLock> {
-  try {
-    const parsed = JSON.parse(
-      await readFile(join(soulPath, "skills-lock.json"), "utf8")
-    ) as SkillsLock;
-    return { version: parsed.version ?? 1, skills: parsed.skills ?? {} };
-  } catch {
-    return { version: 1, skills: {} };
-  }
-}
-
 function installStatus(
   skill: DiscoveredSkill,
   lock: SkillsLock,
@@ -481,20 +462,20 @@ function installStatus(
   disabledBundledSkills: ReadonlySet<string>
 ) {
   const installed = mergedSkills(soulLoader, bundledSkills, disabledBundledSkills).has(skill.name);
-  const lockedHash = lock.skills[skill.name]?.hash;
+  const locked = lock.skills[skill.name];
+  const lockedHash = locked?.hash;
   const legacyContentHash = createHash("sha256").update(skill.content).digest("hex");
   return {
     installed,
     updateAvailable:
       installed &&
+      // A shipped Skill's lock hash describes the image, not this catalog, so comparing them would
+      // offer an "update" that replaces a built-in with an unrelated same-named marketplace Skill.
+      locked?.sourceType !== "bundled" &&
       !!lockedHash &&
       lockedHash !== skillDirectoryHash(skill.files) &&
       lockedHash !== legacyContentHash,
   };
-}
-
-function marketplaceSource(): string {
-  return process.env.MARKETPLACE_SOURCE ?? "tulipfarm/skills";
 }
 
 async function readManifest(dir: string): Promise<Map<string, MarketplaceManifestEntry>> {

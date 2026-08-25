@@ -1,9 +1,11 @@
+import { SKILL_SOURCE_TYPES } from "@tulipfarm/soul";
 import { SKILL_AUDIT_REPORT_SCHEMA } from "./audit";
 
 const SkillSummaryPropertiesSchema = {
   name: { type: "string" },
   description: { type: "string" },
-  provenance: { type: "string", enum: ["builtin", "marketplace", "user"] },
+  provenance: { type: "string", enum: SKILL_SOURCE_TYPES },
+  version: { type: "string" },
   source: { type: "string" },
   pendingAudit: { type: "boolean" },
 } as const;

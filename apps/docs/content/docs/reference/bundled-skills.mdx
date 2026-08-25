@@ -1,12 +1,12 @@
 ---
 title: Bundled skills
-description: The ten skills every TulipFarm instance ships with, what each one lets agents do, and where they live.
+description: The seven skills every TulipFarm instance ships with, what each one lets agents do, and where they live.
 ---
 
-A skill is a capability package an agent can use. Every instance ships with ten of them, already
+A skill is a capability package an agent can use. Every instance ships with seven of them, already
 installed. You do not have to add these, and you can ask an agent to build more.
 
-They arrive in three groups.
+They arrive in two groups.
 
 ## Core skills
 
@@ -15,10 +15,8 @@ about the business.
 
 | Skill | What it lets an agent do |
 | --- | --- |
-| `business-records` | Inspect schemas, find records, and make verified changes to business data. |
 | `knowledge-research` | Research stored knowledge, reconcile sources, and cite the pages it used. |
-| `structured-results` | Present lists, metrics, comparisons, and forms as clear structured output rather than a wall of text. |
-| `onboarding` | run guided first-time setup and generate a starter soul for a new business. |
+| `onboarding` | Run guided first-time setup and generate a starter soul for a new business. |
 
 ## Forge skills
 
@@ -33,19 +31,13 @@ type, agent, routine, skill, or component, a forge skill is what does the work.
 | `skill-forge` | A new skill, or an improvement to an existing one. |
 | `surface-component-forge` | A business component that agents can render in a reply. |
 
-## Integration skills
-
-Abilities that only make sense once a provider is connected.
-
-| Skill | What it lets an agent do | Needs |
-| --- | --- | --- |
-| `github` | Triage issues, work on pull requests, and read repository content. | The GitHub integration |
-
 ## Where they live
 
-Bundled skills are files in your soul, under `skills/`, grouped into `core/`, `forge/`, and
-`integrations/`. Because the soul is a git repository, every change to a skill is a commit you can
-read.
+Bundled skills are copied into your soul at startup, under `skills/`. Because the soul is a git
+repository, every change to a skill is a commit you can read.
+
+Edit one and it becomes yours: startup stops overwriting a skill whose content no longer matches
+what was installed, so an upgrade never silently discards your changes.
 
 You never have to edit those files by hand. Ask an agent in chat to change a skill and it edits
 them for you, which is what `skill-forge` is for.

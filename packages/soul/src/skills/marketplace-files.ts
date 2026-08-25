@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readdir, readFile, readlink, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import { parseFrontmatter } from "../published-loader";
@@ -5,6 +6,18 @@ import type { SkillScanFile } from "./guard";
 import type { DiscoveredSkill } from "./marketplace";
 
 const NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+
+/** Path-and-content digest of a Skill package, used to detect drift between two copies of it. */
+export function skillDirectoryHash(files: readonly SkillScanFile[]): string {
+  const hash = createHash("sha256");
+  for (const file of [...files].sort((left, right) => left.path.localeCompare(right.path))) {
+    hash.update(file.path);
+    hash.update("\0");
+    hash.update(file.content);
+    hash.update("\0");
+  }
+  return hash.digest("hex");
+}
 
 export async function collectSkillFiles(skillDirectory: string): Promise<SkillScanFile[]> {
   const files: SkillScanFile[] = [];

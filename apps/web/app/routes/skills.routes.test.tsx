@@ -45,7 +45,7 @@ test("index lists skills with provenance, tab nav, and a marketplace entry", () 
         provenance: "marketplace",
         source: "owner/repo",
       },
-      { name: "my-skill", description: "Mine.", provenance: "user" },
+      { name: "my-skill", description: "Mine.", provenance: "curated" },
     ],
   });
   expect(screen.getByText("2 skills")).toBeInTheDocument();

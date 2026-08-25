@@ -67,8 +67,8 @@ client data loading, schema-driven resource UI, and browser rendering of Surface
   `Math.random`. The canvas is `aria-hidden`, so `CropLegend` is the accessible counterpart and must
   keep publishing the same links.
 - Only what the **business** made earns a tulip. Two API fields lie about this: every shipped skill
-  reports `provenance: "builtin"` and every shipped integration reports `installed: true`. Count
-  skills with `provenance !== "builtin"` and integrations with `status === "connected"`, or a brand
+  reports `provenance: "bundled"` and every shipped integration reports `installed: true`. Count
+  skills with `provenance !== "bundled"` and integrations with `status === "connected"`, or a brand
   new instance claims a farm it never planted.
 - `/farm`'s skyline — treeline, windmill, barn — is scenery, not data: it is drawn only in
   `--muted-foreground`, never a crop colour. The two facts it does carry are the business name on

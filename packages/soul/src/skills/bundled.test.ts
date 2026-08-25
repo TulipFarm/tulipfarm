@@ -103,14 +103,11 @@ describe("loadBundledSkills", () => {
 
     expect([...skills.keys()].sort()).toEqual([
       "agent-forge",
-      "business-records",
-      "github",
       "knowledge-research",
       "onboarding",
       "resource-forge",
       "routine-forge",
       "skill-forge",
-      "structured-results",
       "surface-component-forge",
     ]);
     for (const name of [

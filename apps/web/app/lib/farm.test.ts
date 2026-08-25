@@ -130,7 +130,7 @@ describe("fetchFarm", () => {
   test("turns every crop into a planting with a stable id and a reachable href", async () => {
     mocks.resourceTypes.mockResolvedValue([{ name: "ticket", schema: "{}", hasHooks: false }]);
     mocks.agents.mockResolvedValue([{ name: "triage", label: "Triage", domain: "support" }]);
-    mocks.skills.mockResolvedValue([{ name: "forecasting", provenance: "user" }]);
+    mocks.skills.mockResolvedValue([{ name: "forecasting", provenance: "curated" }]);
     mocks.spaces.mockResolvedValue({
       items: [
         {
@@ -163,9 +163,9 @@ describe("fetchFarm", () => {
 
   test("plants what this business built, not what ships with every instance", async () => {
     mocks.skills.mockResolvedValue([
-      { name: "business-records", provenance: "builtin" },
-      { name: "onboarding", provenance: "builtin" },
-      { name: "forecasting", provenance: "user" },
+      { name: "knowledge-research", provenance: "bundled" },
+      { name: "onboarding", provenance: "bundled" },
+      { name: "forecasting", provenance: "curated" },
       { name: "invoicing", provenance: "marketplace" },
     ]);
     // Every manifest bundled with the deployment reports `installed: true` on a brand-new
@@ -218,7 +218,7 @@ describe("fetchFarm", () => {
       { name: "notion", type: "mcp", installed: false, status: "disconnected" },
       { name: "slack", type: "mcp", installed: true, status: "disconnected" },
     ]);
-    mocks.skills.mockResolvedValue([{ name: "onboarding", provenance: "builtin" }]);
+    mocks.skills.mockResolvedValue([{ name: "onboarding", provenance: "bundled" }]);
 
     const farm = await fetchFarm();
     expect(farm.total).toBe(0);
@@ -226,7 +226,7 @@ describe("fetchFarm", () => {
   });
 
   test("keeps the rest of the field when one crop fails", async () => {
-    mocks.skills.mockResolvedValue([{ name: "forecasting", provenance: "user" }]);
+    mocks.skills.mockResolvedValue([{ name: "forecasting", provenance: "curated" }]);
     mocks.spaces.mockRejectedValue(new Error("knowledge is down"));
 
     const farm = await fetchFarm();
@@ -244,8 +244,8 @@ describe("fetchFarm", () => {
 
   test("orders plantings by seed, so crops interleave instead of banding by kind", async () => {
     mocks.skills.mockResolvedValue([
-      { name: "a", provenance: "user" },
-      { name: "b", provenance: "user" },
+      { name: "a", provenance: "curated" },
+      { name: "b", provenance: "curated" },
     ]);
     mocks.agents.mockResolvedValue([{ name: "a" }, { name: "b" }]);
 

@@ -27,6 +27,22 @@ Loader, compiler, publisher, and git-sync engine for Soul artifacts. Root `soul/
 - `skills/bundled.ts` and `integrations/bundled.ts` locate the repo-root `skills/` and
   `integrations/` directories by counting `__dirname` levels. Moving either file changes that
   depth; the fallback chain hides a wrong path in production, so re-check it on any move.
+- `skills/lock.ts` owns `skills-lock.json`: the `SkillSourceType` vocabulary
+  (`bundled` | `marketplace` | `public` | `curated`) and per-entry Skill versions. Never hand-roll a
+  lock shape. Entries predating the vocabulary recorded git URL *shape* (`"github"`/`"git"`) and are
+  reclassified on read.
+- **Mutate the lock only through `skills/lock-write.ts`, never a bare `soulWriter.apply`.** It is a
+  whole-file read-modify-write, so two writers on one revision each commit a lock missing the
+  other's entry, erasing a Skill's provenance. `mutateSkillsLock` queues per Soul *and* commits
+  against the revision it read. A path that cannot use the gateway — `skill_update` materializing a
+  bundled Skill — still joins the queue via `serializeSkillsLockWrites`.
+- `skills/sync-bundled.ts` seeds every shipped Skill into `soul/skills/<name>/` at API boot and
+  claims it in the lock as `bundled`. It rewrites a copy only while that copy still hashes to the
+  locked value, so an operator or Agent edit permanently opts the Skill out of image updates. The
+  same pass reaps retired Skills, persists the normalized vocabulary, and records anything else on
+  disk as `curated`, so the lock is a complete inventory. Copy `SKILL.md` verbatim apart from the
+  forge-contract expansion: converting to `skill.yaml` would silently drop `tools`/`category`,
+  which `SkillSpec` cannot carry.
 - `SoulLoader` reads `agents/*/AGENT.md`, `skills/*/SKILL.md`, `resources/*/schema.yml`,
   `routines/*/routine.yaml`, `integrations/*/manifest.yml`, root `soul.yaml`, `guardrails.yaml`;
   resource schemas must pass `validateResourceSchema()` on load.

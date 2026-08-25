@@ -260,6 +260,24 @@ export type {
   SkillTrustLevel,
 } from "./skills/guard";
 export { GUARD_VERSION, scanSkill, skillTrustLevel, THREAT_PATTERNS } from "./skills/guard";
+export type { SkillLockEntry, SkillSourceType, SkillsLock } from "./skills/lock";
+export {
+  bumpPatch,
+  DEFAULT_SKILL_VERSION,
+  installedSourceType,
+  isSkillSourceType,
+  isSkillVersion,
+  marketplaceSource,
+  readSkillsLock,
+  SKILL_SOURCE_TYPES,
+  SKILLS_LOCK_FILE,
+  sameLockEntry,
+  serializeSkillsLock,
+  skillVersion,
+  skillVersionFromFiles,
+} from "./skills/lock";
+export type { SkillsLockWriteRequest, SkillsLockWriter } from "./skills/lock-write";
+export { mutateSkillsLock, serializeSkillsLockWrites } from "./skills/lock-write";
 export type {
   DiscoveredSkill,
   SkillMarketplaceBrowse,
@@ -269,7 +287,7 @@ export type {
   SkillMarketplaceScan,
 } from "./skills/marketplace";
 export { createSkillMarketplaceFlow, SkillMarketplaceError } from "./skills/marketplace";
-export { collectSkillFiles, discoverSkills } from "./skills/marketplace-files";
+export { collectSkillFiles, discoverSkills, skillDirectoryHash } from "./skills/marketplace-files";
 export type {
   SkillReferenceErrorCode,
   SkillReferenceReader,
@@ -284,6 +302,8 @@ export {
   SkillReferenceError,
 } from "./skills/references";
 export { mergedSkills, resolveSkill } from "./skills/registry";
+export type { BundledSkillSyncInput, BundledSkillSyncResult } from "./skills/sync-bundled";
+export { syncBundledSkillsIntoSoul } from "./skills/sync-bundled";
 export { runSoulMigrations } from "./soul-migrations";
 export { resolveSoulPath } from "./soul-path";
 export type { SoulWriterDouble } from "./soul-writer-double";
