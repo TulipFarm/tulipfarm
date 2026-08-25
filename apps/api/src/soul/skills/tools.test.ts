@@ -23,8 +23,8 @@ vi.mock("node:fs/promises", () => ({
 
 // Mock buildAudit so tests don't hit a real LLM.
 const mockBuildAudit = vi.fn();
-vi.mock("./audit", async (orig) => {
-  const actual = await orig<typeof import("./audit")>();
+vi.mock("@tulipfarm/built-in-agents", async (orig) => {
+  const actual = await orig<typeof import("@tulipfarm/built-in-agents")>();
   return { ...actual, buildAudit: (...args: unknown[]) => mockBuildAudit(...args) };
 });
 

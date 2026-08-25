@@ -5,6 +5,7 @@
     "---What ships with it---",
     "bundled-skills",
     "bundled-integrations",
+    "tool-catalog",
     "---Settings---",
     "environment-variables",
     "routine-triggers",

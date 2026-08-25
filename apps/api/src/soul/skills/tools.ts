@@ -1,5 +1,6 @@
 import { cp, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { buildAudit } from "@tulipfarm/built-in-agents";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { LlmService } from "@tulipfarm/llm";
 import {
@@ -51,7 +52,6 @@ import {
 import { firstError } from "../../platform/tool-args";
 import { SYSTEM_SOUL_COMMIT_ACTOR } from "../../runtime/soul-writer";
 import { soulCommitError } from "../../tools/soul-faults";
-import { buildAudit } from "./audit.js";
 
 export interface SkillToolContext extends MarketplaceSkillToolContext {
   gitSync: GitSyncService;

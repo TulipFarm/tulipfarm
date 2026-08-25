@@ -1,21 +1,23 @@
 import { createHash } from "node:crypto";
+import {
+  generatePersonalized,
+  type OnboardingSoulState,
+  type Personalized,
+} from "@tulipfarm/built-in-agents";
 import type { KvService } from "@tulipfarm/kv";
 import type { LlmService } from "@tulipfarm/llm";
-import { ajv } from "@tulipfarm/schema";
 import type { SoulLoader } from "@tulipfarm/soul";
-import { generateObject, jsonSchema } from "ai";
 import type { FastifyBaseLogger } from "fastify";
-import type { Suggestion } from "./suggestions";
 
-/* Caches one quick-tier LLM personalization per business-description plus soul-name hash. */
+/*
+ * Caching around the `onboarding_personalizer` BuiltInAgent.
+ *
+ * The prompt, the output schema and the model call live in `@tulipfarm/built-in-agents`. What
+ * stays here is what this app owns: the KV cache keyed on business description plus soul state,
+ * the in-flight de-duplication, and the rule that no request ever waits on the model.
+ */
 
 const KV_NAMESPACE = "onboarding";
-
-/** LLM output: both onboarding surfaces in one shot. Shapes match the static `Suggestion`. */
-export interface Personalized {
-  suggestions: Suggestion[];
-  recommendations: Suggestion[];
-}
 
 /** The soul slice this module reads for the LLM context + cache key. */
 export type PersonalizeSoulSlice = Pick<SoulLoader, "resources" | "agents" | "skills" | "manifest">;
@@ -26,60 +28,7 @@ export interface PersonalizeDeps {
   logger?: FastifyBaseLogger;
 }
 
-// Plain JSON Schema (TypeBox is not importable in apps/api). Fed to AJV for post-validation and to
-// the AI SDK's `jsonSchema()` to constrain the model's structured output.
-const ITEM_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  required: ["id", "label", "prompt"],
-  properties: {
-    id: { type: "string" },
-    label: { type: "string" },
-    prompt: { type: "string" },
-  },
-} as const;
-
-export const PERSONALIZED_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  required: ["suggestions", "recommendations"],
-  properties: {
-    suggestions: { type: "array", items: ITEM_SCHEMA },
-    recommendations: { type: "array", items: ITEM_SCHEMA },
-  },
-} as const;
-
-export const SYSTEM_PROMPT = [
-  "You are TulipFarm's onboarding guide for an AI-native business",
-  "operating system. Given a business and what it has already built in its soul, propose the most",
-  "useful next things to create.",
-  "",
-  "Return two lists:",
-  "- `suggestions`: 3-4 empty-state starter chips — the resource types / building blocks this",
-  "  business should set up first.",
-  "- `recommendations`: 2-3 contextual next steps given what ALREADY exists (e.g. an agent to",
-  "  manage an existing resource, a skill to extend an existing agent, knowledge to ground it).",
-  "",
-  "For every item:",
-  '- `id`: short kebab-case slug (e.g. "tickets", "agent-for-tickets").',
-  '- `label`: short chip text, question style (e.g. "Set up ticket management?").',
-  '- `prompt`: the chat message that seeds the build flow (e.g. "Help me set up ticket management.").',
-  "",
-  "Return raw JSON only. Do not wrap the response in Markdown or a code fence.",
-  "Never propose something that already exists in the soul. Be specific to the business domain.",
-].join("\n");
-
-const validatePersonalized = ajv.compile(PERSONALIZED_SCHEMA);
-
-type LlmModel = ReturnType<LlmService["effortModel"]>;
-
-interface SoulState {
-  resources: string[];
-  agents: string[];
-  skills: string[];
-}
-
-function readSoulState(soul: PersonalizeSoulSlice): SoulState {
+function readSoulState(soul: PersonalizeSoulSlice): OnboardingSoulState {
   return {
     resources: [...soul.resources.keys()].sort(),
     agents: [...soul.agents.keys()].sort(),
@@ -88,45 +37,11 @@ function readSoulState(soul: PersonalizeSoulSlice): SoulState {
 }
 
 /** Stable KV key: sha256 of business description plus sorted soul names. */
-export function buildStateKey(businessDescription: string, state: SoulState): string {
+export function buildStateKey(businessDescription: string, state: OnboardingSoulState): string {
   const hash = createHash("sha256")
     .update(JSON.stringify({ d: businessDescription, ...state }))
     .digest("hex");
   return `suggestions:${hash}`;
-}
-
-async function repairFencedJson({ text }: { text: string }): Promise<string | null> {
-  const match = /^\s*```(?:json)?\s*\n([\s\S]*?)\n```\s*$/i.exec(text);
-  return match?.[1]?.trim() ?? null;
-}
-
-/** Run the LLM call and return a validated {@link Personalized}. Throws on malformed output. */
-export async function generatePersonalized(
-  model: LlmModel,
-  ctx: { businessName?: string; businessDescription: string; state: SoulState }
-): Promise<Personalized> {
-  const { object } = await generateObject({
-    model,
-    schema: jsonSchema<Personalized>(PERSONALIZED_SCHEMA),
-    experimental_repairText: repairFencedJson,
-    system: SYSTEM_PROMPT,
-    prompt: [
-      `Business name: ${ctx.businessName ?? "(unnamed)"}`,
-      `Business description: ${ctx.businessDescription}`,
-      "",
-      "Already in the soul:",
-      `- resource types: ${ctx.state.resources.join(", ") || "(none)"}`,
-      `- agents: ${ctx.state.agents.join(", ") || "(none)"}`,
-      `- skills: ${ctx.state.skills.join(", ") || "(none)"}`,
-    ].join("\n"),
-  });
-
-  if (!validatePersonalized(object)) {
-    throw new Error(
-      `Onboarding personalization produced invalid output: ${ajv.errorsText(validatePersonalized.errors)}`
-    );
-  }
-  return object;
 }
 
 function stringField(manifest: Record<string, unknown> | null, key: string): string | undefined {
@@ -138,7 +53,7 @@ function stringField(manifest: Record<string, unknown> | null, key: string): str
 function resolveRequest(
   soul: PersonalizeSoulSlice,
   deps: PersonalizeDeps
-): { key: string; businessDescription: string; state: SoulState } | null {
+): { key: string; businessDescription: string; state: OnboardingSoulState } | null {
   const businessDescription = stringField(soul.manifest, "businessDescription");
   if (!businessDescription || !deps.llmService || !deps.kvService) return null;
 

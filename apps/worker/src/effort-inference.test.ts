@@ -1,9 +1,9 @@
 import type { ModelRequirements } from "@tulipfarm/agent-runtime";
+import { classifierRequirements } from "@tulipfarm/built-in-agents";
 import type { RunEventEffortInference } from "@tulipfarm/schema";
 import type { PersistedRunEvent } from "@tulipfarm/storage";
 import type { LanguageModel } from "ai";
 import { describe, expect, it, vi } from "vitest";
-import { classifierRequirements } from "./effort-classifier";
 import {
   createEffortInference,
   recordedEffortInference,

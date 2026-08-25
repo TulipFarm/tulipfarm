@@ -44,6 +44,7 @@ An omitted edge is forbidden.
 | `packages/kv` | `packages/schema`, `packages/storage`, `packages/tool-host` |
 | `packages/files` | `packages/constants`, `packages/schema`, `packages/storage`, `packages/tool-host` |
 | `packages/platform-tools` | `packages/schema`, `packages/tool-host`, `packages/agent-runtime` |
+| `packages/built-in-agents` | `packages/schema`, `packages/soul`, `packages/agent-runtime` |
 | `packages/surface` | `packages/schema` |
 | `packages/surface-web` | `packages/surface` |
 | `packages/surface-slack` | `packages/surface` |
@@ -65,8 +66,8 @@ the Agent runtime. Applications register implementations during composition.
 
 | Consumer | May import from |
 | --- | --- |
-| `apps/api` | `schema`, `soul`, `constants`, `files`, `authz`, `audit`, `secrets`, `run-kernel`, `tool-broker`, `agent-runtime`, `knowledge`, `memory`, `curator`, `curator-host`, `surface`, `surface-web`, `surface-slack`, `surface-github`, `sandbox`, `integrations`, `storage`, `observability`, `tool-host`, `kv`, `platform-tools`, `resources` |
-| `apps/worker` | `schema`, `constants`, `authz`, `audit`, `secrets`, `soul`, `run-kernel`, `tool-broker`, `agent-runtime`, `knowledge`, `memory`, `curator`, `surface`, `integrations`, `sandbox`, `storage`, `observability`, `tool-host`, `kv`, `platform-tools`, `files`, `turn-executor`, `model-adapter` |
+| `apps/api` | `schema`, `soul`, `constants`, `files`, `authz`, `audit`, `secrets`, `run-kernel`, `tool-broker`, `agent-runtime`, `knowledge`, `memory`, `curator`, `curator-host`, `surface`, `surface-web`, `surface-slack`, `surface-github`, `sandbox`, `integrations`, `storage`, `observability`, `tool-host`, `kv`, `platform-tools`, `built-in-agents`, `resources` |
+| `apps/worker` | `schema`, `constants`, `authz`, `audit`, `secrets`, `soul`, `run-kernel`, `tool-broker`, `agent-runtime`, `knowledge`, `memory`, `curator`, `surface`, `integrations`, `sandbox`, `storage`, `observability`, `tool-host`, `kv`, `platform-tools`, `built-in-agents`, `files`, `turn-executor`, `model-adapter` |
 | `apps/integration-worker` | `schema`, `authz`, `audit`, `run-kernel`, `tool-broker`, `integrations`, `storage`, `observability` |
 | `apps/web` | `schema`, `files`, `surface`, `surface-web`, `surface-slack`, `surface-github`, and presentation-only packages such as `ui`/`editor` |
 | `apps/eval` | `agent-runtime`, `turn-executor`, `model-adapter`, `llm`, `schema`, `secrets`, `soul`, `storage`, `run-kernel`, `tool-host`, `curator`, `curator-host`, `files` |

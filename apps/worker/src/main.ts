@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
+import { createToolResultDistiller } from "@tulipfarm/built-in-agents";
 import {
   BatchingLogSink,
   describeError,
@@ -92,7 +93,7 @@ import { RunDispatcher } from "./run-dispatcher";
 import { GuardedWorkerSecretsService } from "./secrets-guard";
 import { type DrainableLoop, drain } from "./shutdown";
 import { createSubagentExecutor } from "./subagent/executor";
-import { createToolResultDistiller } from "./tool-result-distiller";
+
 import { buildLocalToolHost } from "./tools/local-host";
 import { RoutingToolDispatch } from "./tools/routing-dispatch";
 import { SoulEmbeddings } from "./tools/soul-embeddings";
