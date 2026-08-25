@@ -67,7 +67,13 @@ export {
   type PrincipalCredentialReader,
   providerSupportsPersonalCredential,
 } from "./credential-mode";
-export { type ApiToolDefinition, defineApiTool, toToolDef } from "./define";
+export {
+  type ApiToolDefinition,
+  defineApiTool,
+  defineParkableApiTool,
+  type ParkableApiToolDefinition,
+  toToolDef,
+} from "./define";
 export { RegistryToolDispatcher, type RegistryToolDispatcherOptions } from "./dispatcher";
 export { ChatEffectLedger, ledgerOwnsCall } from "./effect-ledger";
 export {
@@ -131,11 +137,17 @@ export {
   err,
   isIndeterminateFault,
   isInfrastructureFault,
+  isParked,
   ok,
+  type ParkableToolCallResult,
+  type ParkableToolDef,
+  parked,
   type RequestContext,
+  refuseParkedResult,
   TOOL_FAULT_CLASS,
   type ToolCallResult,
   type ToolDef,
   type ToolErrorCode,
+  type ToolPark,
   type ToolTier,
 } from "./types";

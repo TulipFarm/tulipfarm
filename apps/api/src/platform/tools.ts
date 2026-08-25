@@ -1,5 +1,10 @@
 import type { EventEmitter } from "node:events";
-import type { DelegateToAgentInput, DelegationOutcome } from "@tulipfarm/agent-runtime";
+import type {
+  DelegateToAgentInput,
+  DelegationOutcome,
+  SpawnSubagentInput,
+  SpawnSubagentOutcome,
+} from "@tulipfarm/agent-runtime";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { PLATFORM_RUNTIME_TOOLS } from "@tulipfarm/platform-tools";
 import { ajv, type definitions } from "@tulipfarm/schema";
@@ -23,13 +28,18 @@ import {
   unresolvedRoutineResourceTypes,
 } from "@tulipfarm/soul";
 import type { RequestContext } from "@tulipfarm/tool-host";
-import { type ApiToolDefinition, defineApiTool } from "@tulipfarm/tool-host";
+import {
+  type ApiToolDefinition,
+  defineApiTool,
+  type ParkableApiToolDefinition,
+} from "@tulipfarm/tool-host";
 import { stringify as stringifyYaml } from "yaml";
 import { SYSTEM_SOUL_COMMIT_ACTOR } from "../runtime/soul-writer";
 import { mapSoulWriteError, soulCommitError } from "../tools/soul-faults";
 import { delegateToAgentTool } from "./delegate-tool";
 import { guardrailForgeTool } from "./guardrail-tool";
 import { validateRoutineForgeDefinitions } from "./routine-forge-validation";
+import { spawnSubagentTool } from "./spawn-tool";
 import { firstError, SOUL_ROUTINE_TARGET, SOUL_SKILL_TARGET, soulTarget } from "./tool-args";
 import { err, ok } from "./tool-result";
 
@@ -64,6 +74,8 @@ export interface PlatformToolContext {
   ) => Promise<{ runId: string }>;
   /** The one guarded path that starts a delegated child Run; see `./delegation.ts`. */
   delegateToAgent?: (input: DelegateToAgentInput) => Promise<DelegationOutcome>;
+  /** Spawns an ad-hoc helper the caller defines inline; absent leaves `spawn_subagent` unavailable. */
+  spawnSubagent?: (input: SpawnSubagentInput) => Promise<SpawnSubagentOutcome>;
   onRoutinesChanged?: () => Promise<void>;
   /**
    * The Routines surface's own read model. `routine_forge` reports success only once the Routine
@@ -659,10 +671,11 @@ export const callSkillTool = defineApiTool<PlatformToolContext>({
 
 /** Fresh stateless clock Tool shares the turn-context format to avoid conflicting time facts. */
 
-export const PLATFORM_TOOLS: ApiToolDefinition<PlatformToolContext>[] = [
+export const PLATFORM_TOOLS: ParkableApiToolDefinition<PlatformToolContext>[] = [
   loadSkillTool,
   loadSkillReferenceTool,
   delegateToAgentTool,
+  spawnSubagentTool,
   triggerRoutineTool,
   routineForgeTool,
   routinePickerTool,

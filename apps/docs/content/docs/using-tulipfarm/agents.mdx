@@ -74,8 +74,9 @@ capabilityRestrictions:
 
 A restricted tool is not offered to the model, and a call to it is refused at dispatch even if the
 model makes it anyway — including when someone claims in chat to be authorizing an exception. A
-read-only agent also cannot use `delegate_to_agent` to have a less restricted agent do the work,
-because delegated authority is the intersection of the two. `present`, `request_input`,
+read-only agent also cannot use `delegate_to_agent` or `spawn_subagent` to have a less restricted
+helper do the work, because a helper's authority is the intersection of the two. `present`,
+`request_input`,
 `complete_task` and `complete_state` are never withdrawn, so a restricted agent can still finish
 its turn and explain itself. An agent with no `capabilityRestrictions` is unrestricted.
 
@@ -83,6 +84,14 @@ Risk is otherwise managed through guardrails, approvals, SkillAudit, and role-ba
 
 ## Delegation
 
-`delegate_to_agent` starts helper work as a child run and returns results to the current agent. It
-is the only hand-off an agent can perform; use it for scoped work. To change who owns a chat, the
-participant `@mentions` the agent they want, which re-targets the chat from that message on.
+`delegate_to_agent` starts helper work as a child run and returns results to the current agent.
+Use it for scoped work that one of your configured agents is already right for.
+
+`spawn_subagent` covers the case where none is. The agent writes the helper's instructions inline
+and gives it a single task, so nothing has to be configured first. The helper gets no chat and no
+history — only the task it was handed — and it answers once. What it was told, what it was allowed
+to use, and what it answered are all shown inside that step in the chat.
+
+A helper of either kind can only ever hold a subset of what the agent that started it holds, so
+starting one is never a way around a restriction. Neither changes who owns the chat: to do that,
+the participant `@mentions` the agent they want, which re-targets the chat from that message on.

@@ -60,6 +60,20 @@ export function isIndeterminateFault(code: ToolErrorCode): boolean {
   return TOOL_FAULT_CLASS[code] === "indeterminate";
 }
 
+/**
+ * Durable work a call started instead of returning a value, and the wait that will settle it.
+ *
+ * `kind` leaves room for future park reasons without reopening this contract.
+ */
+export interface ToolPark {
+  readonly kind: "child_run";
+  readonly childRunId: string;
+  readonly waitId: string;
+}
+
+/**
+ * A Tool call's verdict. Unchanged for the overwhelming majority of Tools, which cannot park.
+ */
 export type ToolCallResult =
   | { success: true; data: unknown }
   | {
@@ -67,7 +81,45 @@ export type ToolCallResult =
       error: { code: ToolErrorCode; message: string; connectUrl?: string };
     };
 
+/**
+ * What the *host* may receive back from any Tool: a verdict, or a park.
+ *
+ * The parked member deliberately carries no `success`, because a park is neither. Leaving it
+ * absent makes every `if (result.success)` fall through to the failure branch, where the missing
+ * `error` is a compile error rather than a silent read of `undefined`.
+ *
+ * Only Tools declared with `defineParkableApiTool` can produce one, so a Tool that cannot park
+ * keeps the two-member `ToolCallResult` and narrows exactly as it always did.
+ */
+export type ParkableToolCallResult = ToolCallResult | { success?: never; parked: ToolPark };
+
 export const ok = (data: unknown): ToolCallResult => ({ success: true, data });
+
+/** The call's side effect is done and durable; only its *result* is still outstanding. */
+export const parked = (park: ToolPark): ParkableToolCallResult => ({ parked: park });
+
+/** `in` alone widens to `unknown` here, because no verdict member declares `parked`. */
+export function isParked(
+  result: ParkableToolCallResult
+): result is { success?: never; parked: ToolPark } {
+  return "parked" in result;
+}
+
+/**
+ * Collapses a park into a refusal for a caller that has no Run to suspend.
+ *
+ * Ingress, the direct model adapter and nested Tool calls all execute Tools outside a parkable
+ * Turn. Returning the park to them would strand durable work nothing will ever resume, so it is
+ * reported as a fault instead — the same reasoning these paths already apply to approvals.
+ */
+export function refuseParkedResult(
+  result: ParkableToolCallResult,
+  toolName: string
+): ToolCallResult {
+  return isParked(result)
+    ? err("internal_error", `tool "${toolName}" cannot suspend a Turn on this path`)
+    : result;
+}
 
 export const err = (code: ToolErrorCode, message: string, connectUrl?: string): ToolCallResult => ({
   success: false,
@@ -102,6 +154,8 @@ export interface RequestContext {
   surfaceActionStore?: SurfaceActionStore;
   guardrailRevision?: string;
   runId?: string;
+  /** The Run State this call executes in, so a parking Tool registers its wait against it. */
+  stateKey?: string;
   /** The hosted loop's call id for this invocation — used by Tools that need a stable per-call
    * occurrence key (e.g. integration-tier effect idempotency), not just the Run. */
   toolCallId?: string;
@@ -122,7 +176,14 @@ export interface RequestContext {
   credentialPrincipal?: { readonly kind: string; readonly id: string };
 }
 
-export interface ToolDef {
+/**
+ * A Tool ready to execute.
+ *
+ * `Result` defaults to the narrow verdict, so the overwhelming majority of Tools — which cannot
+ * park — still narrow on `success` with no guard. Only a host that can actually suspend a Turn
+ * declares `ParkableToolDef`, and `ToolDef` widens into it by return-type covariance.
+ */
+export interface ToolDef<Result extends ParkableToolCallResult = ToolCallResult> {
   name: string;
   tier: ToolTier;
   mutating: boolean;
@@ -130,7 +191,7 @@ export interface ToolDef {
   inputSchema: Record<string, unknown>;
   /** Builds a target-scoped schema without exposing cross-channel component vocabulary. */
   inputSchemaFor?: (ctx: RequestContext) => Record<string, unknown>;
-  execute: (args: unknown, ctx: RequestContext) => Promise<ToolCallResult>;
+  execute: (args: unknown, ctx: RequestContext) => Promise<Result>;
   requiresApproval?: boolean;
   /**
    * The Tool's own declaration of what authority it needs (`defineTool`). Present on every Tool
@@ -139,6 +200,9 @@ export interface ToolDef {
    */
   definition?: ApiToolDefinition<unknown>;
 }
+
+/** A Tool a parking-capable host dispatches; only such a host may declare this. */
+export type ParkableToolDef = ToolDef<ParkableToolCallResult>;
 
 export type ApprovalDecision =
   | { outcome: "approved" }

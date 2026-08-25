@@ -14,6 +14,7 @@ import {
   type HostedRunReader,
   type HostedToolResult,
   InternalTurnHost,
+  type RunAuthority,
   type TurnAuthority,
 } from "./turn-host";
 
@@ -21,7 +22,7 @@ const NOW = new Date("2026-07-27T00:01:00.000Z");
 
 function makeHost(options: { runs?: HostedRunReader; store?: FakeConversationStore } = {}) {
   const store = options.store ?? new FakeConversationStore();
-  const seen: { context: TurnAuthority[]; tools: TurnAuthority[] } = { context: [], tools: [] };
+  const seen: { context: TurnAuthority[]; tools: RunAuthority[] } = { context: [], tools: [] };
   let issued = 0;
   const host = new InternalTurnHost({
     runs: options.runs ?? fakeRuns(),
@@ -94,6 +95,30 @@ describe("InternalTurnHost", () => {
     await expect(superseded.host.resolveContext(BUSINESS_ID, RUN_ID)).rejects.toMatchObject({
       code: "turn_not_found",
     });
+  });
+
+  it.each([["chat"], ["curator"]])(
+    "refuses Tool dispatch for a %s Run whose Turn is missing",
+    async (source) => {
+      // Only a Routine or sub-agent Run is legitimately Conversation-less. Letting a
+      // Conversation-backed source through without a Turn would hand it the Conversation-free
+      // path it was never granted.
+      const { host, seen } = makeHost({ runs: fakeRuns({ source }) });
+
+      await expect(
+        host.dispatchTool(BUSINESS_ID, RUN_ID, { callId: "c1", name: "noop", arguments: {} })
+      ).rejects.toMatchObject({ code: "turn_not_found" });
+      expect(seen.tools).toEqual([]);
+    }
+  );
+
+  it("dispatches Tools for a sub-agent Run that has no Turn at all", async () => {
+    const { host, seen } = makeHost({ runs: fakeRuns({ source: "subagent" }) });
+
+    await host.dispatchTool(BUSINESS_ID, RUN_ID, { callId: "c1", name: "noop", arguments: {} });
+
+    expect(seen.tools).toHaveLength(1);
+    expect(seen.tools[0]?.turn).toBeUndefined();
   });
 
   it("writes the reply before any completion names it", async () => {

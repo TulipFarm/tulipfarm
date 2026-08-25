@@ -84,6 +84,23 @@ export type ToolDispatchResult =
       readonly status: "awaiting_approval";
       readonly callId: string;
       readonly approvalId: string;
+    }
+  | {
+      /**
+       * The Tool spawned a child Run and the Turn must park until it finishes. Unlike an
+       * approval, the Tool *did* act, so the replay after resume must be idempotent — the
+       * dispatcher is required to key the spawn on `(runId, callId)` and return the finished
+       * child's result the second time rather than spawning again.
+       */
+      readonly status: "awaiting_child";
+      readonly callId: string;
+      readonly childRunId: string;
+      /**
+       * The wait the dispatcher already registered. Registration happens at spawn, not here — a
+       * fast child can reach a terminal status before this result is even read, and its resume
+       * grant has to be durable on the link row before that.
+       */
+      readonly waitId: string;
     };
 
 export interface ToolDispatchPort {
@@ -96,6 +113,7 @@ export type AgentLoopEventType =
   | "tool_call_dispatched"
   | "tool_call_rejected"
   | "awaiting_approval"
+  | "awaiting_child"
   | "completed"
   | "failed"
   | "cancelled";
@@ -162,6 +180,16 @@ export type AgentLoopOutcome =
   | {
       readonly status: "awaiting_approval";
       readonly approvalId: string;
+      readonly callId: string;
+      readonly iterations: number;
+      readonly toolCalls: number;
+      readonly repairs: number;
+    }
+  | {
+      /** Parked on a spawned child Run; resumed by that Run reaching a terminal status. */
+      readonly status: "awaiting_child";
+      readonly childRunId: string;
+      readonly waitId: string;
       readonly callId: string;
       readonly iterations: number;
       readonly toolCalls: number;

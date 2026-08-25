@@ -1,6 +1,7 @@
 import type {
   ChildAuthority,
   ChildLink,
+  ChildResumeGrant,
   ChildRunManager,
   RequestedChildAuthority,
 } from "@tulipfarm/run-kernel";
@@ -31,12 +32,23 @@ export interface DelegationRequest {
   /** Applies only when the parent Run is itself unlinked; a linked parent uses its own row. */
   readonly rootAuthority: ChildAuthority;
   readonly requested: RequestedDelegation;
+  /** The parent Tool call this helper answers, so a replayed call adopts it instead of respawning. */
+  readonly callId?: string;
+  /**
+   * Mints the grant that lets this child's completion resume its parent.
+   *
+   * Called between minting the child Run and writing its link, because the grant names the child
+   * and the link is what the child's completion reads it back from. A child that finishes inside
+   * that window is caught by the caller's post-link status re-read, not by this hook.
+   */
+  readonly resumeFor?: (childRunId: string) => Promise<ChildResumeGrant>;
   readonly now: string;
 }
 
 export interface DelegatedHelper {
   readonly childRunId: string;
-  readonly conversationId: string;
+  /** Absent for a helper that has no Conversation, as an ad-hoc sub-agent Run does not. */
+  readonly conversationId?: string;
   readonly authority: ChildAuthority;
   readonly mode: DelegationMode;
   readonly depth: number;
@@ -47,7 +59,9 @@ export interface DelegatedHelper {
 export type DelegationErrorCode =
   | "depth_limit_exceeded"
   | "deadline_amplification"
-  | "deadline_unbounded";
+  | "deadline_unbounded"
+  /** A helper was minted without the Conversation its answer would have to be read from. */
+  | "child_conversation_missing";
 
 /** Delegation denial carrying the reason code and offending field only. */
 export class DelegationError extends Error {
@@ -84,7 +98,7 @@ export interface StartChildRunInput {
 export interface ChildRunStarter {
   start(
     input: StartChildRunInput
-  ): Promise<{ readonly childRunId: string; readonly conversationId: string }>;
+  ): Promise<{ readonly childRunId: string; readonly conversationId?: string }>;
   cancel(businessId: string, childRunId: string, reason: string): Promise<void>;
 }
 
@@ -154,12 +168,15 @@ export class DelegationCoordinator {
 
     let link: ChildLink;
     try {
+      const resume = await request.resumeFor?.(started.childRunId);
       link = await this.options.children.spawn({
         businessId: request.businessId,
         parentRunId: request.parentRunId,
         childRunId: started.childRunId,
         parentAuthority,
         requestedAuthority: authority,
+        ...(resume === undefined ? {} : { resume }),
+        ...(request.callId === undefined ? {} : { callId: request.callId }),
         now: request.now,
       });
     } catch (error) {
@@ -175,7 +192,7 @@ export class DelegationCoordinator {
 
     return {
       childRunId: started.childRunId,
-      conversationId: started.conversationId,
+      ...(started.conversationId === undefined ? {} : { conversationId: started.conversationId }),
       authority: link.authority,
       mode,
       depth,

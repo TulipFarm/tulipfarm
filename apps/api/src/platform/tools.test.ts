@@ -449,19 +449,27 @@ describe("delegateToAgentTool", () => {
     deadlineAt: "2026-01-01T00:10:00.000Z",
     status: "succeeded" as const,
     result: "done",
+    waitId: null,
   };
 
   it("starts a child Run through the coordinator and returns its outcome", async () => {
     const delegate = vi.fn(async () => delegationOutcome);
     const ctx = makeCtx({}, { worker: makeAgent("worker", "Worker") });
     ctx.delegateToAgent = delegate;
-    ctx.requestContext = { userId: "u1", runId: "parent-run" };
+    ctx.requestContext = {
+      userId: "u1",
+      runId: "parent-run",
+      stateKey: "invoke",
+      toolCallId: "call-1",
+    };
     const res = await delegateToAgentTool.handler(
       { agentId: "worker", task: "Summarise report", context: { reportId: "r1" } },
       ctx
     );
     expect(delegate).toHaveBeenCalledWith({
       parentRunId: "parent-run",
+      parentStateKey: "invoke",
+      callId: "call-1",
       agentId: "worker",
       task: "Summarise report",
       context: { reportId: "r1" },
@@ -481,14 +489,24 @@ describe("delegateToAgentTool", () => {
 
   it("refuses rather than returning a receipt when delegation is not composed", async () => {
     const ctx = makeCtx({}, { worker: makeAgent("worker") });
-    ctx.requestContext = { userId: "u1", runId: "parent-run" };
+    ctx.requestContext = {
+      userId: "u1",
+      runId: "parent-run",
+      stateKey: "invoke",
+      toolCallId: "call-1",
+    };
     const res = await delegateToAgentTool.handler({ agentId: "worker", task: "Do something" }, ctx);
     expect(res).toMatchObject({ success: false, error: { code: "unavailable" } });
   });
 
   it("maps a guard denial to a validation error", async () => {
     const ctx = makeCtx({}, { worker: makeAgent("worker") });
-    ctx.requestContext = { userId: "u1", runId: "parent-run" };
+    ctx.requestContext = {
+      userId: "u1",
+      runId: "parent-run",
+      stateKey: "invoke",
+      toolCallId: "call-1",
+    };
     ctx.delegateToAgent = vi.fn(async () => {
       throw new DelegationError("depth_limit_exceeded", "depth");
     });
@@ -725,6 +743,7 @@ describe("PLATFORM_TOOLS registry", () => {
       "load_skill",
       "load_skill_reference",
       "delegate_to_agent",
+      "spawn_subagent",
       "trigger_routine",
       "routine_forge",
       "routine_picker",

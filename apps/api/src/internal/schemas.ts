@@ -53,6 +53,7 @@ export const InternalTurnToolCallBodySchema = {
     callId: { type: "string", minLength: 1 },
     name: { type: "string", minLength: 1 },
     arguments: {},
+    stateId: { type: "string", minLength: 1, maxLength: 128 },
     activeSkillName: { type: "string", minLength: 1, maxLength: 64 },
     agentName: { type: "string", minLength: 1, maxLength: 128 },
   },

@@ -4,7 +4,6 @@ export {
   type AgentStateResult,
   AgentStateRunner,
   type AgentStateRunnerOptions,
-  type ApprovalWaitPort,
   type ChatExecutorOptions,
   type CompleteTurnInput,
   type CompleteTurnResult,
@@ -22,6 +21,7 @@ export {
   type TurnCompletionStatus,
   type TurnCompletionStore,
   type TurnOutcome,
+  type TurnWaitPort,
 } from "@tulipfarm/turn-executor";
 export {
   loadConfig,

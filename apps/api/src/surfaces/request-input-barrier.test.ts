@@ -122,7 +122,14 @@ async function runTurn(props: Record<string, unknown>, alsoInSameBatch: readonly
               callId: request.callId,
               approvalId: result.approvalId,
             }
-          : { status: result.status, callId: request.callId, reason: result.reason };
+          : result.status === "awaiting_child"
+            ? {
+                status: "awaiting_child",
+                callId: request.callId,
+                childRunId: result.childRunId,
+                waitId: result.waitId,
+              }
+            : { status: result.status, callId: request.callId, reason: result.reason };
     },
   };
 

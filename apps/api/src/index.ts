@@ -1,7 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { join } from "node:path";
-import { delegationCatalogOf, GuardrailsService } from "@tulipfarm/agent-runtime";
+import {
+  createSubagentSpawning,
+  delegationCatalogOf,
+  GuardrailsService,
+} from "@tulipfarm/agent-runtime";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { FileService, PgFileRepo } from "@tulipfarm/files";
 import { FetchEgressHttp, GuardedEgressHttp, PublicOriginsService } from "@tulipfarm/integrations";
@@ -36,7 +40,7 @@ import {
   RunResumeGateway,
   TypedOutputValidator,
 } from "@tulipfarm/run-kernel";
-import { INVOCATION_REQUEST_SCHEMAS } from "@tulipfarm/schema";
+import { RUN_ARTIFACT_SCHEMAS } from "@tulipfarm/schema";
 import {
   loadEncryptionKeys,
   loadOrProvisionActiveDek,
@@ -167,6 +171,7 @@ import { PgPrincipalProviderTokenRepo } from "./integrations/principal-tokens";
 import { IngressDeliveryHost } from "./internal/delivery-host";
 import { ModelSelectorGate, modelGateModeFromEnv } from "./internal/model-authz";
 import { InternalRoutineApprovalHost } from "./internal/routine-approval-host";
+import { SubagentTurnContextResolver } from "./internal/subagent-context";
 import { buildDelegatedToolDispatch } from "./internal/tool-dispatch";
 import { ChatTurnContextResolver } from "./internal/turn-context";
 import { InternalTurnHost } from "./internal/turn-host";
@@ -201,6 +206,8 @@ import { createObservabilityTelemetryPort } from "./observability/telemetry-port
 import { OtlpTracesExporter } from "./observability/traces";
 import { runPgMigrations } from "./pg-migrate";
 import { createAgentDelegation, startChildConversation } from "./platform/delegation";
+import { subagentAnswers } from "./platform/subagent-answers";
+import { startSubagentRun } from "./platform/subagent-run";
 import { readCustomInstructions } from "./preferences/custom-instructions";
 import { PgRateLimiter } from "./rate-limit";
 import { LiveRecordAuthorizer } from "./resources/authorize";
@@ -505,7 +512,7 @@ async function boot() {
       console
     );
     const rateLimiter = new PgRateLimiter(pool);
-    const invocationValidator = new TypedOutputValidator(INVOCATION_REQUEST_SCHEMAS);
+    const invocationValidator = new TypedOutputValidator(RUN_ARTIFACT_SCHEMAS);
     /** Every Artifact reader is the same service over a different transaction scope. */
     const artifactsOver = (transactions: ConstructorParameters<typeof ArtifactStore>[0]) =>
       new ArtifactService(new ArtifactStore(transactions), invocationValidator);
@@ -762,6 +769,23 @@ async function boot() {
       cancelRun: runCancel.cancel,
       catalog: delegationCatalog,
       parentToolNames: (agentId) => delegableToolNames(soulLoader, agentId, toolRegistry.getAll()),
+      waits: runWaits,
+      newWaitId: randomUUID,
+    });
+    const runArtifacts = artifactsOver(runTransactions);
+    // Beside delegation, sharing its coordinator: an invented helper is bound by the same depth
+    // ceiling, the same narrowing-only deadline and the same read-only default as a Soul one.
+    const subagentSpawning = createSubagentSpawning({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      links: new ChildLinkStore(runTransactions),
+      ancestry: childLinks,
+      startSubagentRun: startSubagentRun({ invocations }),
+      answers: subagentAnswers({ runs: runStore, artifacts: runArtifacts }),
+      cancelRun: runCancel.cancel,
+      catalog: delegationCatalog,
+      parentToolNames: (agentId) => delegableToolNames(soulLoader, agentId, toolRegistry.getAll()),
+      waits: runWaits,
+      newWaitId: randomUUID,
     });
     // One gate for the whole process: routes and Agent Tools must not diverge on who may read a Page.
     const knowledgePageGate = new PageReadGate(pool);
@@ -826,6 +850,7 @@ async function boot() {
         triggerRoutine: manualRoutineTrigger(invocations),
         routineCatalog,
         delegateToAgent: agentDelegation.delegate,
+        spawnSubagent: subagentSpawning.spawn,
         onRoutinesChanged: async () => {
           await soulLoader.reload();
           // Ticks immediately so a newly-authored/edited schedule is reconciled without waiting up
@@ -854,7 +879,6 @@ async function boot() {
 
     // with, so a worker credential is a key to a Run rather than a principal of its own.
     const conversationStore = new PgConversationStore(pool);
-    const runArtifacts = artifactsOver(runTransactions);
     const internalTurns = {
       host: new InternalTurnHost({
         runs: runStore,
@@ -875,6 +899,12 @@ async function boot() {
             }));
         },
         messages: messageRepo,
+        subagentContext: new SubagentTurnContextResolver({
+          artifacts: runArtifacts,
+          toolRegistry,
+          guardrails: guardrailsService,
+          childLinks,
+        }),
         context: new ChatTurnContextResolver({
           artifacts: runArtifacts,
           store: conversationStore,

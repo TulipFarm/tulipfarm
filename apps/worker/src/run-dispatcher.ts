@@ -9,6 +9,21 @@ export interface RunDispatcherOptions {
   businessId: string;
   owner: string;
   handler: (run: PersistedRun) => Promise<RunOutcome>;
+  /**
+   * Fired after a Run durably reaches `succeeded` or `failed`, so a parent parked on it can be
+   * resumed. Never fired for `waiting`, `cancelled`, or `needs_reconciliation` — those Runs are
+   * still live and belong to the cancellation manager or the reconciler.
+   */
+  onTerminal?: (run: PersistedRun, status: "succeeded" | "failed") => Promise<void>;
+  /**
+   * Fired after a Run durably reaches `waiting`, so a wait that resolved while it was still
+   * `running` can be claimed.
+   *
+   * Ordering is the whole point: a requeue is guarded on `runs.status = 'waiting'`, so anything
+   * that tries to wake a Run before this transition commits silently requeues nothing. This is
+   * the first moment the Run is reachable, which makes it the only safe place to ask.
+   */
+  onWaiting?: (run: PersistedRun) => Promise<void>;
   now: () => Date;
   leaseDurationMs?: number;
   batchSize?: number;
@@ -82,6 +97,12 @@ export class RunDispatcher {
         if (outcome === "succeeded") dispatched += 1;
         else if (outcome === "waiting") waiting += 1;
         else failed += 1;
+        if (outcome === "succeeded" || outcome === "failed") {
+          await this.notifyTerminal(started.run, outcome);
+        }
+        if (outcome === "waiting") {
+          await this.notifyWaiting(started.run);
+        }
       } catch {
         await this.options.leases.release({
           businessId: this.options.businessId,
@@ -95,5 +116,31 @@ export class RunDispatcher {
     }
 
     return { reclaimed: reclaimed.length, claimed: claimed.length, dispatched, waiting, failed };
+  }
+
+  /**
+   * The Run is already durably terminal here, so a throwing hook must not reopen it — the parked
+   * parent degrades to expiring on its own deadline, which the wait sweeper already handles.
+   */
+  private async notifyTerminal(run: PersistedRun, status: "succeeded" | "failed"): Promise<void> {
+    if (!this.options.onTerminal) return;
+    try {
+      await this.options.onTerminal(run, status);
+    } catch {
+      // Intentionally swallowed; see above.
+    }
+  }
+
+  /**
+   * The Run is durably parked here, so a throwing hook leaves it parked rather than breaking it.
+   * That degrades to the wait's own deadline, which is the same floor every other park has.
+   */
+  private async notifyWaiting(run: PersistedRun): Promise<void> {
+    if (!this.options.onWaiting) return;
+    try {
+      await this.options.onWaiting(run);
+    } catch {
+      // Intentionally swallowed; see above.
+    }
   }
 }

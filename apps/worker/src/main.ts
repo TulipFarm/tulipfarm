@@ -11,15 +11,18 @@ import {
 } from "@tulipfarm/observability";
 import {
   ArtifactService,
+  ChildCompletionSweeper,
   DurableWaitManager,
   RoutineStateScheduler,
   RunLeaseManager,
   RunResumeGateway,
   type RunSource,
+  SUBAGENT_RUN_SOURCE,
+  signalChildCompletion,
   TypedOutputValidator,
   WaitTimerSweeper,
 } from "@tulipfarm/run-kernel";
-import { INVOCATION_REQUEST_SCHEMAS } from "@tulipfarm/schema";
+import { RUN_ARTIFACT_SCHEMAS } from "@tulipfarm/schema";
 import {
   loadActiveDek,
   loadEncryptionKeys,
@@ -31,6 +34,7 @@ import { PgBundleStore } from "@tulipfarm/soul";
 import {
   ArtifactStore,
   BudgetStore,
+  ChildLinkAncestryStore,
   createBlobPort,
   EventStore,
   IntegrationStore,
@@ -46,7 +50,11 @@ import {
   WaitStore,
 } from "@tulipfarm/storage";
 import { PgEffectStore } from "@tulipfarm/tool-broker";
-import { createChatExecutor, RunStoreStateTransitions } from "@tulipfarm/turn-executor";
+import {
+  type ChatExecutorOptions,
+  createChatExecutor,
+  RunStoreStateTransitions,
+} from "@tulipfarm/turn-executor";
 import { config as loadEnv } from "dotenv";
 import { loadConfig, REQUIRED_SCHEMA_VERSION, type WorkerConfig } from "./config";
 import { CURATOR_RUN_SOURCE, createCuratorExecutor } from "./curator/executor";
@@ -83,6 +91,7 @@ import { BrokerRoutineToolPort } from "./routine/tool-port";
 import { RunDispatcher } from "./run-dispatcher";
 import { GuardedWorkerSecretsService } from "./secrets-guard";
 import { type DrainableLoop, drain } from "./shutdown";
+import { createSubagentExecutor } from "./subagent/executor";
 import { createToolResultDistiller } from "./tool-result-distiller";
 import { buildLocalToolHost } from "./tools/local-host";
 import { RoutingToolDispatch } from "./tools/routing-dispatch";
@@ -212,6 +221,7 @@ export async function main(): Promise<void> {
   const eventStore = new EventStore(transactions, randomUUID);
   const runEventStore = new RunEventStore(transactions);
   const budgetStore = new BudgetStore(transactions);
+  const childAncestry = new ChildLinkAncestryStore(pool);
   // Durable Agent-loop counters: the one store both Agent-loop sites share, so an approval park
   // reloads spent Tool-call and repair budget instead of restarting it at zero.
   const loopCheckpointStore = new RunLoopCheckpointStore(transactions);
@@ -229,7 +239,7 @@ export async function main(): Promise<void> {
   const blobs = createBlobPort(join(resolveDataDir() ?? ".tulipfarm", "blobs"));
   const artifactService = new ArtifactService(
     new ArtifactStore(transactions),
-    new TypedOutputValidator(INVOCATION_REQUEST_SCHEMAS),
+    new TypedOutputValidator(RUN_ARTIFACT_SCHEMAS),
     blobs
   );
 
@@ -238,6 +248,10 @@ export async function main(): Promise<void> {
   const sweeper = new WaitTimerSweeper(waitStore, resume);
   // Routine timers open here; the same sweeper resolves them.
   const waits = new DurableWaitManager(waitStore, resume);
+  const childSweeper = new ChildCompletionSweeper(childAncestry, {
+    ancestry: childAncestry,
+    waits,
+  });
 
   // API mints keys; Worker only loads the active DEK and memoizes the secret service.
   let secretsService: Promise<SecretsService> | undefined;
@@ -336,8 +350,7 @@ export async function main(): Promise<void> {
       attribution: { runId, conversationId },
     });
 
-  const chatExecutor = createChatExecutor({
-    host: turnHost,
+  const chatExecutorOptions = {
     distiller: toolResultDistiller,
     tools: toolDispatch,
     context: turnHost,
@@ -378,8 +391,16 @@ export async function main(): Promise<void> {
       }),
     spend: spendSink,
     log: logger,
-  });
+  } satisfies Omit<ChatExecutorOptions, "host">;
+
+  const chatExecutor = createChatExecutor({ ...chatExecutorOptions, host: turnHost });
   executors.register(CHAT_RUN_SOURCE, chatExecutor);
+
+  // The same wiring as chat, so a sub-agent cannot end up less guarded than a Turn is.
+  executors.register(
+    SUBAGENT_RUN_SOURCE,
+    createSubagentExecutor({ chat: chatExecutorOptions, artifacts: artifactService })
+  );
 
   executors.register(
     CURATOR_RUN_SOURCE,
@@ -483,8 +504,30 @@ export async function main(): Promise<void> {
     now: () => new Date(),
     leaseDurationMs: config.leaseDurationMs,
     batchSize: config.batchSize,
+    onTerminal: async (run, status) => {
+      const outcome = await signalChildCompletion(
+        { ancestry: childAncestry, waits },
+        {
+          businessId: config.businessId,
+          childRunId: run.id,
+          status,
+          completedAt: new Date().toISOString(),
+        }
+      );
+      if (outcome.kind === "signalled") {
+        logger.info(
+          `child completion signalled child=${run.id} parent=${outcome.parentRunId} status=${status} outcome=${outcome.result.outcome}`
+        );
+      }
+    },
+    onWaiting: async (run) => {
+      // A wait that resolved while this Run was still `running` requeued nothing, because a
+      // requeue is guarded on `runs.status = 'waiting'`. This is the first moment it can land.
+      if (await waits.resumeIfUnblocked(config.businessId, run.id)) {
+        logger.info(`parked run requeued on an already-resolved wait run=${run.id}`);
+      }
+    },
   });
-
   const outboxDispatcher = new EventOutboxDispatcher({
     outbox: eventStore,
     businessId: config.businessId,
@@ -520,6 +563,21 @@ export async function main(): Promise<void> {
           await sweeper.sweep({
             businessId: config.businessId,
             now: new Date(),
+            limit: config.batchSize,
+          });
+        },
+        signal,
+        logger,
+      }),
+    },
+    {
+      name: "child-completion-sweep",
+      settled: runLoop({
+        name: "child-completion-sweep",
+        intervalMs: config.waitSweepMs,
+        tick: async () => {
+          await childSweeper.sweep({
+            businessId: config.businessId,
             limit: config.batchSize,
           });
         },

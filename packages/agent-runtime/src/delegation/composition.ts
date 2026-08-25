@@ -1,10 +1,18 @@
-import type { ChildAuthority, ChildLinkAncestry, ChildLinkStore } from "@tulipfarm/run-kernel";
-import { ChildRunManager } from "@tulipfarm/run-kernel";
+import type {
+  ChildAuthority,
+  ChildLink,
+  ChildLinkAncestry,
+  ChildLinkStore,
+  RegisteredWait,
+  RegisterWaitInput,
+} from "@tulipfarm/run-kernel";
+import { CHILD_COMPLETION_SCHEMA_REF, ChildRunManager } from "@tulipfarm/run-kernel";
 import { contentText, type MessageContent } from "@tulipfarm/schema";
 import {
   type ChildRunStarter,
   DELEGATION_DEADLINE_LIMIT_KEY,
   DelegationCoordinator,
+  DelegationError,
   type StartChildRunInput,
 } from "./delegate";
 
@@ -12,22 +20,29 @@ import {
 export const DELEGATION_MAX_DEPTH = 3;
 /** How long a root delegation chain may run before every descendant's deadline has passed. */
 export const DELEGATION_MAX_DURATION_MS = 10 * 60_000;
-/** How long a delegating turn holds its Tool call open waiting for the helper's answer. */
-export const DELEGATION_WAIT_MS = 60_000;
-const DELEGATION_POLL_MS = 500;
-
 export interface DelegationOutcome {
   readonly agentId: string;
   readonly childRunId: string;
   readonly conversationId: string;
   readonly depth: number;
   readonly deadlineAt: string;
-  readonly status: "succeeded" | "failed" | "running";
+  /**
+   * `awaiting` means the helper is still running and the caller must park on `waitId`. It is not
+   * a failure and carries no answer — the previous `running` said the same thing but arrived only
+   * after a fixed 60s of polling, which silently truncated every helper slower than that.
+   */
+  readonly status: "succeeded" | "failed" | "awaiting";
   readonly result: string | null;
+  /** Present only for `awaiting`: the durable wait the child's completion will signal. */
+  readonly waitId: string | null;
 }
 
 export interface DelegateToAgentInput {
   readonly parentRunId: string;
+  /** The Run State the delegating call runs in; the parent's resume wait is registered on it. */
+  readonly parentStateKey: string;
+  /** The delegating Tool call. Stable across a replay, which is what makes the spawn idempotent. */
+  readonly callId: string;
   readonly parentAgentId?: string;
   readonly parentToolAllowlist?: readonly string[];
   readonly agentId: string;
@@ -40,7 +55,7 @@ export interface DelegationConversationReader {
   findTurnByRunId(
     businessId: string,
     runId: string
-  ): Promise<{ readonly status: string } | null | undefined>;
+  ): Promise<{ readonly status: string; readonly conversationId: string } | null | undefined>;
   listMessages(
     businessId: string,
     conversationId: string
@@ -80,9 +95,18 @@ export interface AgentDelegationDeps {
    * mutation it was itself refused (#461). Resolved per call, because the Agent is per call.
    */
   readonly parentToolNames?: (agentId: string | undefined) => readonly string[] | undefined;
+  /**
+   * The durable wait the parent parks on. Registered between minting the child Run and writing
+   * its link, so the grant the child's completion reads back exists before the child can finish.
+   */
+  readonly waits: DelegationWaitPort;
+  readonly newWaitId: () => string;
   readonly now?: () => Date;
-  readonly waitMs?: number;
-  readonly pollMs?: number;
+}
+
+/** The slice of `DurableWaitManager` delegation needs. */
+export interface DelegationWaitPort {
+  register(input: RegisterWaitInput): Promise<RegisteredWait>;
 }
 
 /** The helper's answer is the last assistant Message its own Conversation received. */
@@ -159,19 +183,25 @@ export function createAgentDelegation(deps: AgentDelegationDeps): {
       await deps.cancelRun({ businessId, runId: childRunId, reason });
     },
   };
+  const children = new ChildRunManager(deps.links, deps.ancestry);
   const coordinator = new DelegationCoordinator({
-    children: new ChildRunManager(deps.links, deps.ancestry),
+    children,
     tools: { isReadOnly: isReadOnlyTool },
     starter,
     policy: { maxDepth: DELEGATION_MAX_DEPTH },
   });
-  const waitMs = deps.waitMs ?? DELEGATION_WAIT_MS;
-  const pollMs = deps.pollMs ?? DELEGATION_POLL_MS;
   const businessId = deps.businessId;
 
   return {
     delegate: async (input) => {
       const startedAt = now();
+
+      // A parked Tool call is re-dispatched when the Run resumes, so the first thing to ask is
+      // whether this call already has a helper. Spawning a second one would double the work and
+      // park on a child nothing is waiting for.
+      const existing = await deps.ancestry.callLink?.(businessId, input.parentRunId, input.callId);
+      if (existing) return adopt(existing, input.agentId);
+
       const parentToolAllowlist =
         input.parentToolAllowlist ?? deps.parentToolNames?.(input.parentAgentId);
       const helper = await coordinator.delegate({
@@ -179,6 +209,7 @@ export function createAgentDelegation(deps: AgentDelegationDeps): {
         parentRunId: input.parentRunId,
         agentId: input.agentId,
         task: input.task,
+        callId: input.callId,
         ...(input.context === undefined ? {} : { context: input.context }),
         // Only consulted when the parent Run is unlinked, i.e. it is itself the root of the chain.
         rootAuthority: rootDelegationAuthority(
@@ -188,36 +219,108 @@ export function createAgentDelegation(deps: AgentDelegationDeps): {
           startedAt.getTime() + DELEGATION_MAX_DURATION_MS
         ),
         requested: { mode: "read_only" },
+        resumeFor: async (childRunId) => {
+          const registered = await deps.waits.register({
+            id: deps.newWaitId(),
+            businessId,
+            runId: input.parentRunId,
+            stateKey: input.parentStateKey,
+            kind: "child_run",
+            aggregation: "first",
+            schemaRef: CHILD_COMPLETION_SCHEMA_REF,
+            // Only the child this grant was minted for may report its own completion.
+            allowedPrincipals: [`run:${childRunId}`],
+            expectedSignals: 1,
+            quorum: null,
+            deadlineAt: new Date(startedAt.getTime() + DELEGATION_MAX_DURATION_MS).toISOString(),
+            createdAt: startedAt.toISOString(),
+          });
+          return { waitId: registered.wait.id, token: registered.token };
+        },
         now: startedAt.toISOString(),
       });
 
-      const settleBy = Math.min(startedAt.getTime() + waitMs, Date.parse(helper.deadlineAt));
-      let status: DelegationOutcome["status"] = "running";
-      while (now().getTime() < settleBy) {
-        await new Promise((resolve) => setTimeout(resolve, pollMs));
-        const turn = await deps.conversations.findTurnByRunId(businessId, helper.childRunId);
-        if (turn?.status === "succeeded" || turn?.status === "failed") {
-          status = turn.status;
-          break;
-        }
-        if (turn?.status === "start_failed") {
-          status = "failed";
-          break;
-        }
+      const waitId = helper.link.resume?.waitId ?? null;
+
+      // Every Soul-agent helper is minted with a Conversation of its own, and its answer is read
+      // out of that Conversation. One without is a corrupted spawn, not a helper to park on.
+      const conversationId = helper.conversationId;
+      if (conversationId === undefined) {
+        throw new DelegationError("child_conversation_missing", "conversationId");
+      }
+
+      // The child Run is claimable from the moment it is minted, so it can reach a terminal
+      // status before its link — and therefore its resume grant — is durable. Re-reading here
+      // closes that window: a helper that already finished is answered now rather than parked on
+      // a signal that was raised before anything could receive it.
+      const settled = await terminalStatusOf(helper.childRunId);
+      if (settled !== null) {
+        return {
+          agentId: input.agentId,
+          childRunId: helper.childRunId,
+          conversationId,
+          depth: helper.depth,
+          deadlineAt: helper.deadlineAt,
+          status: settled,
+          waitId: null,
+          result:
+            settled === "succeeded"
+              ? await lastAssistantMessage(deps.conversations, businessId, conversationId)
+              : null,
+        };
       }
 
       return {
         agentId: input.agentId,
         childRunId: helper.childRunId,
-        conversationId: helper.conversationId,
+        conversationId,
         depth: helper.depth,
         deadlineAt: helper.deadlineAt,
-        status,
-        result:
-          status === "succeeded"
-            ? await lastAssistantMessage(deps.conversations, businessId, helper.conversationId)
-            : null,
+        status: "awaiting",
+        waitId,
+        result: null,
       };
     },
   };
+
+  /** A child's terminal status, or `null` while it is still running. */
+  async function terminalStatusOf(childRunId: string): Promise<"succeeded" | "failed" | null> {
+    const turn = await deps.conversations.findTurnByRunId(businessId, childRunId);
+    if (turn?.status === "succeeded") return "succeeded";
+    if (turn?.status === "failed" || turn?.status === "start_failed") return "failed";
+    return null;
+  }
+
+  /**
+   * Answers a replayed call from the helper it already spawned.
+   *
+   * Depth and deadline are re-derived from the persisted chain rather than remembered, because
+   * the replay is a different process from the one that spawned the child and the link row is
+   * the only thing both of them can agree on.
+   */
+  async function adopt(link: ChildLink, agentId: string): Promise<DelegationOutcome> {
+    const childRunId = link.childRunId;
+    const turn = await deps.conversations.findTurnByRunId(businessId, childRunId);
+    const settled =
+      turn?.status === "succeeded"
+        ? "succeeded"
+        : turn?.status === "failed" || turn?.status === "start_failed"
+          ? "failed"
+          : null;
+    const chain = await children.ancestors(businessId, childRunId, DELEGATION_MAX_DEPTH + 1);
+    const deadlineMs = link.authority.limits[DELEGATION_DEADLINE_LIMIT_KEY];
+    return {
+      agentId,
+      childRunId,
+      conversationId: turn?.conversationId ?? "",
+      depth: chain.length,
+      deadlineAt: deadlineMs === undefined ? "" : new Date(deadlineMs).toISOString(),
+      status: settled ?? "awaiting",
+      waitId: settled === null ? (link.resume?.waitId ?? null) : null,
+      result:
+        settled === "succeeded" && turn
+          ? await lastAssistantMessage(deps.conversations, businessId, turn.conversationId)
+          : null,
+    };
+  }
 }

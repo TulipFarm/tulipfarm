@@ -18,8 +18,8 @@ Individual Tool families (`packages/kv`, `apps/api/src/tools/**`), the model-fac
 
 | Path | Owns |
 | --- | --- |
-| `src/types.ts` | `ToolDef`, `RequestContext`, `ToolCallResult`, `ToolErrorCode`, fault classes |
-| `src/define.ts` | `defineApiTool` / `toToolDef` — declaration plus bound per-request context |
+| `src/types.ts` | `ToolDef`, `RequestContext`, `ToolCallResult`, `ToolPark`, `ToolErrorCode`, faults |
+| `src/define.ts` | `defineApiTool` / `defineParkableApiTool` / `toToolDef` — declaration plus bound context |
 | `src/dispatcher.ts` | `RegistryToolDispatcher`: authorize → credential → entitlement → approve → execute |
 | `src/timeout.ts`, `src/execution.ts` | Deadline and abort delivery; the attempt loop and effect settlement |
 | `src/gate.ts` | `LiveToolGate`, autonomy mapping, agent authority layer, DLP rules |
@@ -53,6 +53,15 @@ Individual Tool families (`packages/kv`, `apps/api/src/tools/**`), the model-fac
 - **`ToolApprovalPort` exposes `decide` and `consume` only.** `consume` spends the one-use decision
   at the dispatch that executes it (I-13); `registerWait` mints a one-use resume token and must
   stay in the control plane — see `apps/worker/AGENTS.md`.
+- **Parking is opt-in, and a park is not a verdict.** `ToolCallResult` stays two-membered so most
+  Tools narrow on `success` unguarded; one that suspends its Turn declares `defineParkableApiTool`
+  and returns `parked(...)`, and only a host that can resume types its Tools `ParkableToolDef`. The
+  parked member omits `success` rather than setting a string, because a truthy value would let
+  `if (result.success)` read `undefined` as data. A path with no Run to suspend — ingress, the
+  model adapter, a nested call — calls `refuseParkedResult`.
+- **A park settles its effect `confirmed` and is never retried.** The effect committed and the
+  resume wait is registered; only the answer is outstanding. Anything else lets reconciliation
+  read a merely-waiting Turn as a lost write.
 - No dependency on `@tulipfarm/agent-runtime` — it depends on this package's consumers' shape, not
   the reverse. Narrow structural types instead.
 - A Tool with call-level classification is validated first; the derived action, mutation state,

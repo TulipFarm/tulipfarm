@@ -26,6 +26,7 @@ export const RUN_EVENT_TYPES = [
   "tool.result",
   "surface.emitted",
   "approval.requested",
+  "child.started",
   "guardrail.blocked",
   "turn.finished",
   "context.assembled",
@@ -154,6 +155,20 @@ const APPROVAL_REQUESTED_SCHEMA = {
     waitId: { type: "string", minLength: 1 },
     intentId: { type: "string", minLength: 1 },
     callId: { type: "string", minLength: 1 },
+    summary: { type: "string" },
+  },
+} as const;
+
+const CHILD_STARTED_SCHEMA = {
+  type: "object",
+  required: ["waitId", "childRunId"],
+  additionalProperties: false,
+  properties: {
+    waitId: { type: "string", minLength: 1 },
+    childRunId: { type: "string", minLength: 1 },
+    callId: { type: "string", minLength: 1 },
+    /** Who the child is running as, for a reader who cannot open the child Run. */
+    agentId: { type: "string", minLength: 1 },
     summary: { type: "string" },
   },
 } as const;
@@ -396,6 +411,7 @@ export const RUN_EVENT_DEFINITIONS: readonly RunEventDefinition[] = [
   { type: "tool.result", audience: "participant", schema: TOOL_RESULT_SCHEMA },
   { type: "surface.emitted", audience: "participant", schema: SURFACE_EMITTED_SCHEMA },
   { type: "approval.requested", audience: "participant", schema: APPROVAL_REQUESTED_SCHEMA },
+  { type: "child.started", audience: "participant", schema: CHILD_STARTED_SCHEMA },
   { type: "guardrail.blocked", audience: "participant", schema: GUARDRAIL_BLOCKED_SCHEMA },
   { type: "turn.finished", audience: "participant", schema: TURN_FINISHED_SCHEMA },
   { type: "context.assembled", audience: "operator", schema: CONTEXT_ASSEMBLED_SCHEMA },
@@ -481,6 +497,13 @@ export interface RunEventPayloads {
     readonly waitId: string;
     readonly intentId: string;
     readonly callId?: string;
+    readonly summary?: string;
+  };
+  readonly "child.started": {
+    readonly waitId: string;
+    readonly childRunId: string;
+    readonly callId?: string;
+    readonly agentId?: string;
     readonly summary?: string;
   };
   readonly "guardrail.blocked": {

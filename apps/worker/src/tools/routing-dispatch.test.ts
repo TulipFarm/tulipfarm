@@ -71,7 +71,9 @@ describe("RoutingToolDispatch", () => {
     const result = await routing.dispatch(request("kv_set"));
 
     expect(result).toEqual({ status: "succeeded", callId: "call-kv_set", output: "local" });
-    expect(local.calls).toEqual([{ callId: "call-kv_set", name: "kv_set", arguments: { a: 1 } }]);
+    expect(local.calls).toEqual([
+      { callId: "call-kv_set", name: "kv_set", arguments: { a: 1 }, stateId: "invoke" },
+    ]);
     expect(remote.calls).toEqual([]);
   });
 

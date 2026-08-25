@@ -1,7 +1,7 @@
 import { RunLeaseManager, type RunLeaseStore } from "@tulipfarm/run-kernel";
 import type { PersistedRun, PersistedRunStatus } from "@tulipfarm/storage";
 import { describe, expect, it } from "vitest";
-import { RunDispatcher } from "./run-dispatcher";
+import { RunDispatcher, type RunDispatcherOptions, type RunOutcome } from "./run-dispatcher";
 
 const BUSINESS_ID = "business-1";
 
@@ -190,6 +190,162 @@ describe("RunDispatcher", () => {
       dispatched: 0,
       waiting: 0,
       failed: 1,
+    });
+  });
+
+  describe("onTerminal", () => {
+    function dispatcherWith(
+      outcome: RunOutcome,
+      onTerminal: RunDispatcherOptions["onTerminal"],
+      releaseResult = true
+    ) {
+      const store = new FakeRunStore();
+      store.claimBatchResult = [persistedRun()];
+      store.releaseResult = releaseResult;
+      return new RunDispatcher({
+        leases: new RunLeaseManager(store),
+        businessId: BUSINESS_ID,
+        owner: "worker-1",
+        now: () => new Date("2026-07-24T10:00:00.000Z"),
+        handler: async () => outcome,
+        onTerminal,
+      });
+    }
+
+    it.each([["succeeded"], ["failed"]] as const)(
+      "fires for a Run that durably reached %s",
+      async (outcome) => {
+        const seen: string[] = [];
+        const dispatcher = dispatcherWith(outcome, async (run, status) => {
+          seen.push(`${run.id}:${status}`);
+        });
+
+        await dispatcher.dispatchBatch();
+
+        expect(seen).toEqual([`${persistedRun().id}:${outcome}`]);
+      }
+    );
+
+    it.each([["waiting"], ["cancelled"]] as const)(
+      "does not fire for a %s Run, which is still live",
+      async (outcome) => {
+        const seen: string[] = [];
+        const dispatcher = dispatcherWith(outcome, async (run, status) => {
+          seen.push(`${run.id}:${status}`);
+        });
+
+        await dispatcher.dispatchBatch();
+
+        expect(seen).toEqual([]);
+      }
+    );
+
+    it("does not fire when the terminal compare-and-swap lost the lease", async () => {
+      const seen: string[] = [];
+      const dispatcher = dispatcherWith(
+        "succeeded",
+        async (run, status) => {
+          seen.push(`${run.id}:${status}`);
+        },
+        false
+      );
+
+      await dispatcher.dispatchBatch();
+
+      expect(seen).toEqual([]);
+    });
+
+    it("keeps the Run terminal when the hook throws", async () => {
+      const dispatcher = dispatcherWith("succeeded", async () => {
+        throw new Error("signal transport down");
+      });
+
+      await expect(dispatcher.dispatchBatch()).resolves.toEqual({
+        reclaimed: 0,
+        claimed: 1,
+        dispatched: 1,
+        waiting: 0,
+        failed: 0,
+      });
+    });
+  });
+
+  describe("onWaiting", () => {
+    function dispatcherWith(
+      outcome: RunOutcome,
+      onWaiting: RunDispatcherOptions["onWaiting"],
+      releaseResult = true
+    ) {
+      const store = new FakeRunStore();
+      store.claimBatchResult = [persistedRun()];
+      store.releaseResult = releaseResult;
+      return {
+        store,
+        dispatcher: new RunDispatcher({
+          leases: new RunLeaseManager(store),
+          businessId: BUSINESS_ID,
+          owner: "worker-1",
+          now: () => new Date("2026-07-24T10:00:00.000Z"),
+          handler: async () => outcome,
+          onWaiting,
+        }),
+      };
+    }
+
+    it("fires only after the Run is durably waiting", async () => {
+      // Requeuing is guarded on `runs.status = 'waiting'`, so a hook that ran before the release
+      // committed would requeue nothing and leave a Run holding a resolved wait parked forever.
+      const releasesAtHook: number[] = [];
+      const { store, dispatcher } = dispatcherWith("waiting", async () => {
+        releasesAtHook.push(store.releaseCalls.length);
+      });
+
+      await dispatcher.dispatchBatch();
+
+      expect(releasesAtHook).toEqual([1]);
+    });
+
+    it.each([["succeeded"], ["failed"], ["cancelled"]] as const)(
+      "does not fire for a %s Run, which is not parked",
+      async (outcome) => {
+        const seen: string[] = [];
+        const { dispatcher } = dispatcherWith(outcome, async (run) => {
+          seen.push(run.id);
+        });
+
+        await dispatcher.dispatchBatch();
+
+        expect(seen).toEqual([]);
+      }
+    );
+
+    it("does not fire when the release to waiting lost the lease", async () => {
+      const seen: string[] = [];
+      const { dispatcher } = dispatcherWith(
+        "waiting",
+        async (run) => {
+          seen.push(run.id);
+        },
+        false
+      );
+
+      await dispatcher.dispatchBatch();
+
+      expect(seen).toEqual([]);
+    });
+
+    it("leaves the Run parked when the hook throws", async () => {
+      const { dispatcher } = dispatcherWith("waiting", async () => {
+        throw new Error("wait store down");
+      });
+
+      await expect(dispatcher.dispatchBatch()).resolves.toEqual({
+        reclaimed: 0,
+        claimed: 1,
+        dispatched: 0,
+        waiting: 1,
+        failed: 0,
+      });
     });
   });
 });

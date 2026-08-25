@@ -213,6 +213,62 @@ describe("DurableWaitManager", () => {
     expect(result.wait.status).toBe("satisfied");
   });
 
+  describe("resumeIfUnblocked", () => {
+    it("requeues a Run that parked after its only wait had already resolved", async () => {
+      // The child signals while the parent is still `running`, so nothing is requeued...
+      const { token } = await manager.register(waitInput());
+      runs.waiting.clear();
+      expect((await manager.signal(signalInput(token))).outcome).toBe("resolved_without_resume");
+
+      // ...then the parent reaches `waiting` and claims the resolution it slept through.
+      runs.waiting.add(`${BUSINESS}:${RUN}`);
+
+      await expect(manager.resumeIfUnblocked(BUSINESS, RUN)).resolves.toBe(true);
+      expect(runs.requeued).toEqual([`${BUSINESS}:${RUN}`]);
+    });
+
+    it("leaves a still-pending wait alone, which is the ordinary park", async () => {
+      await manager.register(waitInput());
+
+      await expect(manager.resumeIfUnblocked(BUSINESS, RUN)).resolves.toBe(false);
+      expect(runs.requeued).toEqual([]);
+    });
+
+    it("leaves a Run holding a second, still-pending wait parked", async () => {
+      const { token } = await manager.register(waitInput());
+      await manager.register(
+        waitInput({ id: "00000000-0000-4000-8000-0000000000a2", stateKey: "await-timer" })
+      );
+      runs.waiting.clear();
+      await manager.signal(signalInput(token));
+      runs.waiting.add(`${BUSINESS}:${RUN}`);
+
+      await expect(manager.resumeIfUnblocked(BUSINESS, RUN)).resolves.toBe(false);
+      expect(runs.requeued).toEqual([]);
+    });
+
+    it("ignores a resolved wait belonging to a different Run", async () => {
+      const other = "00000000-0000-4000-8000-0000000000ff";
+      const { token } = await manager.register(waitInput({ runId: other }));
+      runs.waiting.add(`${BUSINESS}:${other}`);
+      await manager.signal(signalInput(token, { runId: other }));
+      runs.requeued.length = 0;
+
+      // Requeuing is scoped to the Run asking, never to whoever else has settled.
+      await expect(manager.resumeIfUnblocked(BUSINESS, other)).resolves.toBe(false);
+      expect(runs.requeued).toEqual([]);
+    });
+
+    it("does not requeue twice when the signal already resumed the Run", async () => {
+      const { token } = await manager.register(waitInput());
+      expect((await manager.signal(signalInput(token))).outcome).toBe("resumed");
+
+      // The Run left `waiting` when it was requeued, so the claim finds nothing to do.
+      await expect(manager.resumeIfUnblocked(BUSINESS, RUN)).resolves.toBe(false);
+      expect(runs.requeued).toHaveLength(1);
+    });
+  });
+
   it.each([
     ["timer aggregation", { kind: "timer" as const, aggregation: "all" as const }],
     ["missing principals", { allowedPrincipals: [] }],

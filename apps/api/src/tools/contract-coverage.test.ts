@@ -15,7 +15,7 @@ import {
   RESOURCE_NAME_PATTERN,
   type ToolAdapter,
 } from "@tulipfarm/tool-broker";
-import type { ToolDef } from "@tulipfarm/tool-host";
+import type { ParkableToolDef, ToolDef } from "@tulipfarm/tool-host";
 import { ledgerOwnsCall, toToolDef } from "@tulipfarm/tool-host";
 import { describe, expect, it } from "vitest";
 import type { ToolRegistry } from "../broker/tool-adapter";
@@ -147,6 +147,7 @@ const EXPECTED_FAMILY_TOOL_NAMES = [
       "routine_forge",
       "routine_picker",
       "soul_repo_push",
+      "spawn_subagent",
       "trigger_routine",
       "validate_artifact",
     ],
@@ -322,7 +323,7 @@ function buildDeclarativeFitnessIntegration(): SoulIntegration {
 }
 
 interface CoveredTools {
-  readonly tools: readonly ToolDef[];
+  readonly tools: readonly ParkableToolDef[];
   readonly declarativeCount: number;
   readonly declarativeProblems: readonly string[];
 }
@@ -357,7 +358,7 @@ function registerAllFamilies(): CoveredTools {
   return { tools: registry.getAll(), declarativeCount, declarativeProblems };
 }
 
-function sortedToolNames(tools: readonly ToolDef[]): readonly string[] {
+function sortedToolNames(tools: readonly ParkableToolDef[]): readonly string[] {
   return tools.map((tool) => tool.name).sort();
 }
 
@@ -413,7 +414,7 @@ interface Probe {
   readonly args: unknown;
 }
 
-function targetProbesFor(tool: ToolDef): readonly Probe[] {
+function targetProbesFor(tool: ParkableToolDef): readonly Probe[] {
   const fieldNames = [...collectSchemaFieldNames(tool.inputSchema)].sort();
   const probes: Probe[] = [
     { label: "empty-object", args: {} },

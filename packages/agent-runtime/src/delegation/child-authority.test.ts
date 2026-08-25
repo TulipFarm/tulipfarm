@@ -34,6 +34,8 @@ function linkedTo(granted: ChildAuthority, runId = "child"): ChildLinkAncestry {
             parentRunId: "parent",
             childRunId,
             authority: granted,
+            resume: null,
+            callId: null,
             detachedAt: null,
             createdAt: "2026-01-01T00:00:00.000Z",
           },

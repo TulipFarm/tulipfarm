@@ -1,7 +1,7 @@
 import { DelegationError } from "@tulipfarm/agent-runtime";
 import { ChildRunError } from "@tulipfarm/run-kernel";
 import { ajv } from "@tulipfarm/schema";
-import { defineApiTool } from "@tulipfarm/tool-host";
+import { defineParkableApiTool, parked } from "@tulipfarm/tool-host";
 import { firstError, SOUL_AGENT_TARGET, soulTarget } from "./tool-args";
 import { err, ok } from "./tool-result";
 import type { PlatformToolContext } from "./tools";
@@ -25,11 +25,11 @@ const DELEGATE_TO_AGENT_SCHEMA: Record<string, unknown> = {
 };
 const validateDelegate = ajv.compile(DELEGATE_TO_AGENT_SCHEMA);
 
-export const delegateToAgentTool = defineApiTool<PlatformToolContext>({
+export const delegateToAgentTool = defineParkableApiTool<PlatformToolContext>({
   name: "delegate_to_agent",
   requiresAmbient: ["soul"],
   description:
-    "Delegate a sub-task to another agent. Starts a child Run under the delegating Run: authority, deadline, and delegation depth may only narrow, and cancelling the parent cancels the child. Waits briefly for the helper's answer and otherwise returns the child run and chat ids to follow.",
+    "Delegate a sub-task to another agent. Starts a child Run under the delegating Run: authority, deadline, and delegation depth may only narrow, and cancelling the parent cancels the child. Suspends this turn until the helper answers, then returns its answer.",
   mutating: true,
   tier: "platform",
   inputSchema: DELEGATE_TO_AGENT_SCHEMA,
@@ -53,9 +53,18 @@ export const delegateToAgentTool = defineApiTool<PlatformToolContext>({
     if (!ctx.delegateToAgent || parentRunId === undefined) {
       return err("unavailable", "Delegation is not available outside a durable Run.");
     }
+    // The parent parks on a wait registered against its own State, and the spawn is made
+    // idempotent by this call id. Without both, a resumed turn would spawn a second helper.
+    const parentStateKey = ctx.requestContext?.stateKey;
+    const callId = ctx.requestContext?.toolCallId;
+    if (parentStateKey === undefined || callId === undefined) {
+      return err("unavailable", "Delegation is not available outside a durable Run.");
+    }
     try {
       const outcome = await ctx.delegateToAgent({
         parentRunId,
+        parentStateKey,
+        callId,
         ...(ctx.requestContext?.agentId === undefined
           ? {}
           : { parentAgentId: ctx.requestContext.agentId }),
@@ -63,6 +72,13 @@ export const delegateToAgentTool = defineApiTool<PlatformToolContext>({
         task,
         ...(context === undefined ? {} : { context }),
       });
+      if (outcome.status === "awaiting" && outcome.waitId !== null) {
+        return parked({
+          kind: "child_run",
+          childRunId: outcome.childRunId,
+          waitId: outcome.waitId,
+        });
+      }
       return ok({ ...outcome, task });
     } catch (e) {
       if (e instanceof DelegationError) return err("validation_error", e.message);

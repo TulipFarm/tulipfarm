@@ -2,8 +2,13 @@ import { retryDelayMs } from "@tulipfarm/tool-broker";
 import type { HostedToolCall, HostedToolResult } from "./authority";
 import type { ChatEffectLedger } from "./effect-ledger";
 import { executeToolWithTimeout } from "./timeout";
-import type { RequestContext, ToolDef, ToolErrorCode } from "./types";
-import { isIndeterminateFault, isInfrastructureFault } from "./types";
+import type {
+  ParkableToolCallResult,
+  ParkableToolDef,
+  RequestContext,
+  ToolErrorCode,
+} from "./types";
+import { isIndeterminateFault, isInfrastructureFault, isParked } from "./types";
 
 /** Default infra-fault retries without a ledger: one retry, then stop to avoid duplicate writes. */
 const DEFAULT_TRANSIENT_ATTEMPTS = 2;
@@ -23,7 +28,7 @@ const DEFAULT_EXECUTE_TIMEOUT_MS = 30_000;
  * A Tool's own `wallClockMs` wins because only the Tool knows what it does; these are written in
  * code beside the handler, not supplied by a user, so there is nothing here to bound against.
  */
-function executeTimeoutFor(tool: ToolDef, hostTimeoutMs: number | undefined): number {
+function executeTimeoutFor(tool: ParkableToolDef, hostTimeoutMs: number | undefined): number {
   return tool.definition?.timeout?.wallClockMs ?? hostTimeoutMs ?? DEFAULT_EXECUTE_TIMEOUT_MS;
 }
 
@@ -35,7 +40,7 @@ export interface EffectReservation {
 
 export interface ToolAttemptInput {
   readonly businessId: string;
-  readonly tool: ToolDef;
+  readonly tool: ParkableToolDef;
   readonly call: HostedToolCall;
   readonly context: RequestContext;
   readonly timeoutMs?: number;
@@ -44,7 +49,7 @@ export interface ToolAttemptInput {
 }
 
 /** Retry only infrastructure faults with budget; mutating Tools need explicit `safeToRetry`. */
-function mayRetryFault(tool: ToolDef, code: ToolErrorCode, attempt: number): boolean {
+function mayRetryFault(tool: ParkableToolDef, code: ToolErrorCode, attempt: number): boolean {
   if (!isInfrastructureFault(code)) return false;
   // Provider Tools already spent their ledger retry budget; do not start a second effect.
   if (tool.definition?.provider !== undefined) return false;
@@ -78,8 +83,9 @@ export async function runToolAttempts(input: ToolAttemptInput): Promise<HostedTo
     });
   };
 
-  let result: Awaited<ReturnType<ToolDef["execute"]>>;
+  let failure: Extract<ParkableToolCallResult, { success: false }>;
   for (let attempt = 1; ; attempt += 1) {
+    let result: ParkableToolCallResult;
     try {
       result = await executeToolWithTimeout(
         tool,
@@ -96,28 +102,43 @@ export async function runToolAttempts(input: ToolAttemptInput): Promise<HostedTo
       await settle("confirmed");
       return { status: "succeeded", output: result.data };
     }
-    if (!mayRetryFault(tool, result.error.code, attempt)) break;
+    if (isParked(result)) {
+      // The spawn committed and its wait is registered, so the effect is done — only the *answer*
+      // is outstanding. Settling `confirmed` is what stops reconciliation later reading a Turn
+      // that is merely waiting as a write that never landed. Never retried, because a park is by
+      // definition a side effect that already happened.
+      await settle("confirmed");
+      return {
+        status: "awaiting_child",
+        childRunId: result.parked.childRunId,
+        waitId: result.parked.waitId,
+      };
+    }
+    if (!mayRetryFault(tool, result.error.code, attempt)) {
+      failure = result;
+      break;
+    }
     await wait(retryDelayMs(attempt));
   }
-  if (isIndeterminateFault(result.error.code)) {
+  if (isIndeterminateFault(failure.error.code)) {
     await settle("ambiguous", "tool_timeout");
-    return { status: "failed", reason: `tool "${call.name}" ${result.error.message}` };
+    return { status: "failed", reason: `tool "${call.name}" ${failure.error.message}` };
   }
   // Structured errors have a known phase; there is nothing to reconcile.
-  await settle("failed", result.error.code);
+  await settle("failed", failure.error.code);
   // Schema-shaped rejections count against the model repair budget.
-  if (result.error.code === "validation_error") {
-    return { status: "invalid_arguments", reason: result.error.message };
+  if (failure.error.code === "validation_error") {
+    return { status: "invalid_arguments", reason: failure.error.message };
   }
-  if (result.error.code === "credential_required") {
+  if (failure.error.code === "credential_required") {
     return {
       status: "denied",
-      reason: result.error.message,
-      ...(result.error.connectUrl === undefined ? {} : { connectUrl: result.error.connectUrl }),
+      reason: failure.error.message,
+      ...(failure.error.connectUrl === undefined ? {} : { connectUrl: failure.error.connectUrl }),
     };
   }
   // Exhausted infra faults are machinery failures, not repairable argument failures.
-  return isInfrastructureFault(result.error.code)
+  return isInfrastructureFault(failure.error.code)
     ? { status: "failed", reason: `tool "${call.name}" is temporarily unavailable; try again` }
-    : { status: "failed", reason: result.error.message };
+    : { status: "failed", reason: failure.error.message };
 }

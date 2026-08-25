@@ -3,6 +3,7 @@ import {
   chatRequestArtifactId,
   RUN_EXECUTOR_PRINCIPAL_REF,
   requestArtifactId,
+  SUBAGENT_RUN_SOURCE,
 } from "@tulipfarm/run-kernel";
 import type { PresentationContext } from "@tulipfarm/surface";
 import type { TurnAuthority } from "./authority";
@@ -17,7 +18,13 @@ export interface ChatRequestPayload {
   readonly llmDecision?: boolean;
 }
 
-/** Which Run source states its turn parameters directly, rather than through a derived Artifact. */
+/**
+ * Which Run sources state their turn parameters directly, rather than through a derived Artifact.
+ *
+ * A sub-agent joins chat here because its spawner publishes the request Artifact under the same id
+ * — which is how the helper inherits the spawning Agent's capability restrictions rather than
+ * falling back to the default assistant, whose authority is wider than the Agent that spawned it.
+ */
 const CHAT_SOURCE = "chat";
 
 /** Reads the immutable request Artifact that fixed this turn's parameters. */
@@ -29,7 +36,7 @@ export async function readChatRequest(
   const artifact = await artifacts.read({
     businessId: authority.businessId,
     artifactId:
-      authority.source === CHAT_SOURCE
+      authority.source === CHAT_SOURCE || authority.source === SUBAGENT_RUN_SOURCE
         ? requestArtifactId(authority.runId)
         : chatRequestArtifactId(authority.runId),
     reader: RUN_EXECUTOR_PRINCIPAL_REF,
@@ -69,7 +76,9 @@ export async function presentationContextForAuthority(
   if (delivery?.provider === "slack") {
     return surfaces.contextFor({ channel: "slack", surface: "message" }, delivery.destination);
   }
-  // A Run with no Turn has no conversation to draw into, and web chat is keyed by one.
+  // A Run with no Turn has no Conversation, and web chat is keyed by one. A sub-agent Run reasons
+  // into an Artifact, so it gets no presentation target rather than one naming a Conversation
+  // that does not exist.
   if (authority.turn === undefined) return undefined;
   return surfaces.contextFor(
     { channel: "web", surface: "chat" },

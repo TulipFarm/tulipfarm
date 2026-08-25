@@ -36,6 +36,7 @@ The web UI can start a turn with a selected agent. A running agent can also move
 | Tool | Meaning |
 | --- | --- |
 | `delegate_to_agent` | Starts helper work as a child run while the current agent keeps ownership of the chat. |
+| `spawn_subagent` | Starts a one-off helper the agent defines itself, for a single task. No separate chat is created; the helper's instructions, task and answer appear inside the tool step in the trace. |
 
 Delegation is for scoped help. To change the actor responsible for the chat, `@mention` the agent
 you want; the chat stays with that agent until a different one is mentioned.

@@ -28,7 +28,6 @@ export {
   createAgentDelegation,
   DELEGATION_MAX_DEPTH,
   DELEGATION_MAX_DURATION_MS,
-  DELEGATION_WAIT_MS,
   delegationCatalogFrom,
   delegationCatalogOf,
   rootDelegationAuthority,
@@ -49,3 +48,12 @@ export {
   DelegationCoordinator,
   DelegationError,
 } from "./delegate";
+export type {
+  SpawnSubagentInput,
+  SpawnSubagentOutcome,
+  StartSubagentRun,
+  SubagentAnswerReader,
+  SubagentPersona,
+  SubagentSpawningDeps,
+} from "./subagent";
+export { createSubagentSpawning } from "./subagent";

@@ -433,6 +433,11 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
       // Routine Agents expose no Surface-capable Tools, so this outcome cannot be resumed here.
       return { kind: "failed", reason: "input_required_without_surface", retryable: false };
     }
+    if (outcome.status === "awaiting_child") {
+      // Same impossibility as above: a Routine Agent exposes no Tool that can spawn a child, so
+      // reaching here means the Tool surface changed without this State learning how to park.
+      return { kind: "failed", reason: "child_spawn_without_wait_support", retryable: false };
+    }
 
     // Last zero-cost refusal point: no State is settled and no downstream effect has run.
     const guardedOutput = await guardrails.runOutput(answerText(outcome.output), guardContext);

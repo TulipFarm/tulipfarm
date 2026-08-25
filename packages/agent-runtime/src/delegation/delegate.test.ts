@@ -34,6 +34,8 @@ class FakeChildLinkStore implements ChildLinkStore {
       parentRunId: input.parentRunId,
       childRunId: input.childRunId,
       authority: input.authority,
+      resume: null,
+      callId: null,
       detachedAt: null,
       createdAt: input.createdAt,
     };
