@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { buildAudit } from "@tulipfarm/built-in-agents";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { gitSourceHttpError, withGitSourceClone } from "@tulipfarm/integrations";
 import type { LlmService } from "@tulipfarm/llm";
@@ -42,7 +43,6 @@ import type { AuditService } from "../../audit/service";
 import { makeSoulAuditWriter, redactRemoteUrl } from "../../audit/soul-write";
 import { ErrorSchema } from "../../auth/schemas";
 import { commitActorFromRequest } from "../commit-actor";
-import { buildAudit } from "./audit";
 import {
   SkillAuditBodySchema,
   SkillAuditResponseSchema,

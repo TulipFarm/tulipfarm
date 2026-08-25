@@ -30,7 +30,7 @@
     "reachability:check": "node scripts/reachability-check.ts",
     "check:secure-context": "bash scripts/test/check-secure-context-apis.sh && vitest run scripts/test/check-secure-context-apis.test.ts",
     "architecture:test": "vitest run scripts/*.test.ts scripts/lib test/security",
-    "docs:test": "vitest run scripts/site-url.test.ts scripts/docs-fitness.test.ts scripts/docs-control-evidence.test.ts scripts/deploy-prompt.test.ts scripts/deploy-wizard.test.ts",
+    "docs:test": "vitest run scripts/site-url.test.ts scripts/docs-fitness.test.ts scripts/docs-control-evidence.test.ts scripts/docs-tool-catalog.test.ts scripts/deploy-prompt.test.ts scripts/deploy-wizard.test.ts",
     "test:e2e:browser": "node scripts/test/browser-smoke.mjs",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck && pnpm typecheck:e2e",

@@ -1,7 +1,7 @@
 import type { LanguageModelV3 } from "@ai-sdk/provider";
 import type { LanguageModel } from "ai";
 import { describe, expect, it, vi } from "vitest";
-import { buildAndStoreTitle, buildConversationTitle, fallbackTitle, sanitizeTitle } from "./title";
+import { buildAndStoreTitle } from "./title";
 
 const silentLog = { warn: () => undefined };
 
@@ -32,44 +32,6 @@ function makeTitleModel(text: string | null): LanguageModel {
     }),
   } as unknown as LanguageModelV3 as unknown as LanguageModel;
 }
-
-describe("sanitizeTitle", () => {
-  it("strips surrounding quotes, collapses whitespace, drops trailing punctuation", () => {
-    expect(sanitizeTitle('  "Inventory   Planning Help."\n')).toBe("Inventory Planning Help");
-  });
-
-  it("bounds the length to 80 chars", () => {
-    expect(sanitizeTitle("x".repeat(120))).toHaveLength(80);
-  });
-});
-
-describe("fallbackTitle", () => {
-  it("uses the first non-empty line, truncated to 60 chars", () => {
-    expect(fallbackTitle("\n\nhelp me plan inventory\nsecond line")).toBe("help me plan inventory");
-    expect(fallbackTitle("y".repeat(90))).toHaveLength(60);
-  });
-
-  it("returns 'New chat' for an empty prompt", () => {
-    expect(fallbackTitle("   \n  ")).toBe("New chat");
-  });
-});
-
-describe("buildConversationTitle", () => {
-  it("returns the sanitized model output", async () => {
-    const title = await buildConversationTitle(makeTitleModel('"Q3 Inventory Plan"'), "...");
-    expect(title).toBe("Q3 Inventory Plan");
-  });
-
-  it("falls back to the truncated prompt when the model throws", async () => {
-    const title = await buildConversationTitle(makeTitleModel(null), "help me plan inventory");
-    expect(title).toBe("help me plan inventory");
-  });
-
-  it("falls back when the model returns blank text", async () => {
-    const title = await buildConversationTitle(makeTitleModel("   "), "fix the budget sheet");
-    expect(title).toBe("fix the budget sheet");
-  });
-});
 
 describe("buildAndStoreTitle", () => {
   it("persists the generated title", async () => {

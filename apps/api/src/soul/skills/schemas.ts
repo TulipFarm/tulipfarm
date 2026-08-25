@@ -1,5 +1,5 @@
+import { SKILL_AUDIT_REPORT_SCHEMA } from "@tulipfarm/built-in-agents";
 import { SKILL_SOURCE_TYPES } from "@tulipfarm/soul";
-import { SKILL_AUDIT_REPORT_SCHEMA } from "./audit";
 
 const SkillSummaryPropertiesSchema = {
   name: { type: "string" },

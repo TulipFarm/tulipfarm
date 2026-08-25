@@ -1,11 +1,15 @@
 import type { EffortRoutingLogger, ModelRequirements } from "@tulipfarm/agent-runtime";
 import { route } from "@tulipfarm/agent-runtime";
+import type { BuiltInAgentModelSource } from "@tulipfarm/built-in-agents";
+import { classifierRequirements, createEffortClassifier } from "@tulipfarm/built-in-agents";
+import type { FallbackCallGate } from "@tulipfarm/llm";
 import type { RunEventEffortInference, RunEventPayloads } from "@tulipfarm/schema";
 import type { PersistedRunEvent, RunEventStore } from "@tulipfarm/storage";
-import type { EffortClassifierModelSource } from "./effort-classifier";
-import { classifierRequirements, createEffortClassifier } from "./effort-classifier";
 
 /** Composes per-Run effort routing; ambiguous `auto` decisions replay from `model.routed`. */
+
+/** Resolves a rung to an executable model. Satisfied by `SoulLlm.model`. */
+export type EffortClassifierModelSource = BuiltInAgentModelSource<FallbackCallGate>;
 
 /** Infers the rung for a turn that asked for `auto`. */
 export interface EffortInferencePort {

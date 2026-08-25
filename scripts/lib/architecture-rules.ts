@@ -175,6 +175,10 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
     ],
     kv: ["schema", "storage", "tool-host"],
     "platform-tools": ["schema", "tool-host", "agent-runtime"],
+    // The internal single-shot prompts the runtime owns. It imports `agent-runtime` for the
+    // ports it satisfies and never the reverse, so no cycle exists. It deliberately does not
+    // import `llm`: every model arrives injected, which is what keeps the edge one-way.
+    "built-in-agents": ["schema", "soul", "agent-runtime"],
     // Record write policy is a domain module. Dynamic table selection stays in the API adapter;
     // this package receives only repository, catalog, and hook ports.
     resources: ["schema", "storage"],
@@ -242,6 +246,7 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
       "tool-host",
       "kv",
       "platform-tools",
+      "built-in-agents",
       "resources",
     ],
     worker: [
@@ -268,6 +273,7 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
       "tool-host",
       "kv",
       "platform-tools",
+      "built-in-agents",
       // `files` renders Agent-authored documents. That is untrusted-input processing, so it runs
       // in the durable runtime rather than the process serving people's requests.
       "files",

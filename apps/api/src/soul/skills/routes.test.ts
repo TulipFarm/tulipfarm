@@ -28,8 +28,8 @@ import { createUser, type UserDoc, type UserRepo } from "../../auth/users";
 
 // Keep the report schema real (used in the route's response schema); mock only the LLM call.
 const buildAudit = vi.fn();
-vi.mock("./audit", async (orig) => {
-  const actual = await orig<typeof import("./audit")>();
+vi.mock("@tulipfarm/built-in-agents", async (orig) => {
+  const actual = await orig<typeof import("@tulipfarm/built-in-agents")>();
   return { ...actual, buildAudit: (...args: unknown[]) => buildAudit(...args) };
 });
 

@@ -6,6 +6,7 @@
     "@anthropic-ai/claude-agent-sdk": "0.3.235",
     "@openai/codex": "0.148.0",
     "@tulipfarm/agent-runtime": "workspace:*",
+    "@tulipfarm/built-in-agents": "workspace:*",
     "@tulipfarm/constants": "workspace:*",
     "@tulipfarm/curator": "workspace:*",
     "@tulipfarm/files": "workspace:*",

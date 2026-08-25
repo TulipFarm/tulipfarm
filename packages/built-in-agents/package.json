@@ -1,0 +1,25 @@
+{
+  "name": "@tulipfarm/built-in-agents",
+  "version": "0.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "scripts": {
+    "lint": "biome check --no-errors-on-unmatched .",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@tulipfarm/agent-runtime": "workspace:*",
+    "@tulipfarm/schema": "workspace:*",
+    "@tulipfarm/soul": "workspace:*",
+    "ai": "^7.0.68",
+    "ajv": "^8.17.1"
+  },
+  "devDependencies": {
+    "@ai-sdk/provider": "^4.0.7",
+    "@tulipfarm/tsconfig": "workspace:*",
+    "@types/node": "^26.2.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
+  }
+}

@@ -25,6 +25,7 @@
     "@tulipfarm/agent-runtime": "workspace:*",
     "@tulipfarm/audit": "workspace:*",
     "@tulipfarm/authz": "workspace:*",
+    "@tulipfarm/built-in-agents": "workspace:*",
     "@tulipfarm/constants": "workspace:*",
     "@tulipfarm/curator": "workspace:*",
     "@tulipfarm/curator-host": "workspace:*",
