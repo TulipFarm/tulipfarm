@@ -30,10 +30,10 @@ to confirm** before generating.
 
 ### 3. Generate (one at a time, in dependency order)
 
-1. **Resource types** — for each entity: `load_skill("resource-forge")`, follow it,
+1. **Resource types** — for each entity: `skill("resource-forge")`, follow it,
    `create_resource_type`.
-2. **Skills** — `load_skill("skill-forge")`, follow it, `skill_create` (+ `skill_activate`).
-3. **Agents** — `load_skill("agent-forge")`, follow it, `agent_create` (reference the Resource
+2. **Skills** — `skill("skill-forge")`, follow it, `skill_create` (+ `skill_activate`).
+3. **Agents** — `skill("agent-forge")`, follow it, `agent_create` (reference the Resource
    types and Skills just built).
 
 A Schema must exist before an Agent references it. If a forge hits a dead end after retries, build a

@@ -153,6 +153,28 @@ export const SKILL_SCANNED_INSTALL_SCHEMA = {
   properties: SKILL_SCANNED_SELECTION_PROPERTIES,
 } as const;
 
+export const SKILL_INSTALL_SCHEMA = {
+  type: "object",
+  required: ["source"],
+  additionalProperties: false,
+  properties: {
+    source: {
+      type: "string",
+      minLength: 1,
+      maxLength: 512,
+      description:
+        "Where the Skill lives: a skills.sh page URL, a GitHub repository or tree URL, or an owner/repo slug. Add #branch or #tag to pin a ref.",
+    },
+    name: {
+      type: "string",
+      minLength: 1,
+      maxLength: 64,
+      description:
+        "Which Skill to install. Only needed when the source holds several and the URL did not name one; the error lists the choices.",
+    },
+  },
+} as const;
+
 export const SKILL_MARKETPLACE_BROWSE_DESCRIPTION =
   "Browse the configured Skill marketplace. Returns a scanId and the exact skillPath for every available Skill; use those exact values to audit and install a package.";
 
@@ -165,7 +187,15 @@ export const SKILL_SCANNED_AUDIT_DESCRIPTION =
 export const SKILL_SCANNED_INSTALL_DESCRIPTION =
   "Install one audited Skill from a scan into the soul repository. Supply the exact scanId, name, and skillPath returned by the scan; the result preserves its source and resolved ref as provenance.";
 
+export const SKILL_INSTALL_DESCRIPTION =
+  "Install a Skill from a URL in one step. Accepts a skills.sh page URL, a GitHub repository or tree URL, or an owner/repo slug, then scans the source, audits the selected package and installs it. Prefer this over scanning and installing by hand; drop to skill_source_scan only to look through a source without installing.";
+
 export const SKILL_MARKETPLACE_TOOL_DECLARATIONS = [
+  {
+    name: "skill_install",
+    description: SKILL_INSTALL_DESCRIPTION,
+    inputSchema: SKILL_INSTALL_SCHEMA,
+  },
   {
     name: "skill_marketplace_browse",
     description: SKILL_MARKETPLACE_BROWSE_DESCRIPTION,

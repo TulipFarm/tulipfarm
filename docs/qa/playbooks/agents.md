@@ -106,7 +106,7 @@ No UI create route exists (confirmed in S0 preamble) — this only works through
 | --- | --- | --- |
 | 1 | `navigate /` (fresh chat) | Empty state renders |
 | 2 | Send `qa-<run-id> create an agent named qa-<run-id>-tester in domain support, autonomy supervised, with a one-line description, whose job is to answer FAQ questions` | Turn starts |
-| 3 | `wait-until` streaming stops (max 60s) | Transcript shows a `[tool: load_skill]` row (loading `agent-forge`) followed by a `[tool: agent_create]` row, both resolved (not stuck `running…`) |
+| 3 | `wait-until` streaming stops (max 60s) | Transcript shows a `[tool: skill]` row (loading `agent-forge`) followed by a `[tool: agent_create]` row, both resolved (not stuck `running…`) |
 | 4 | `expect` no error banner; response indicates the agent was created (assert on shape/intent, not wording — per the nondeterminism rule in `chat.md`) | Non-empty, coherent |
 | 5 | `navigate /agents/qa-<run-id>-tester` | Loads; label/domain/autonomy/description reflect what was requested |
 | 6 | `expect` no Governance card (per S3) | Absent |
@@ -153,7 +153,7 @@ boundary.
 **6a — Per-Skill tool-offer narrowing is a context-size optimization, not authorization.**
 `packages/agent-runtime/src/loop/loop.ts:53-58` (commit `e64e178`) narrows which tools the loop
 **offers** the model on an iteration where a Skill is active, to that Skill's declared `tools:`
-scope, plus a fixed always-exposed set (`load_skill`, `complete_task`, `delegate_to_agent`,
+scope, plus a fixed always-exposed set (`skill`, `complete_task`, `delegate_to_agent`,
 `present`, `request_input`, `update_presentation`), plus every mutating Tool the Agent holds
 (#419 — a Skill scope may hide a read and never a write). Seeing any of these alongside a narrowed
 scope is correct, not a leak. The doc comment is explicit: **"context-size optimization

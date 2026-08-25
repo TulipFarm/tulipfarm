@@ -22,7 +22,6 @@ describe("toolFamily", () => {
     expect(toolFamily("read_page")).toBe("knowledge");
     expect(toolFamily("present")).toBe("surface");
     expect(toolFamily("get_current_time")).toBe("time");
-    expect(toolFamily("call_skill")).toBe("delegation");
   });
 
   it("does not read a prefixed name as a bare suffix", () => {

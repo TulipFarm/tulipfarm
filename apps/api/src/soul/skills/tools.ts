@@ -191,7 +191,7 @@ const skillCreate = defineApiTool<SkillToolContext>({
         actor: ctx.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
         businessId: DEPLOYMENT_BUSINESS_ID,
         changes: [
-          { op: "put", target: { kind: "Skill", slug: name, companion: "SKILL.md" }, content },
+          { op: "put", target: { kind: "Skill", slug: name }, content },
           curatedLockWrite(lock, name, version),
         ],
       }));
@@ -319,7 +319,7 @@ const skillUpdate = defineApiTool<SkillToolContext>({
     const validation = validateSkill({ name, frontmatter: newFm, body: newBody, content });
     if (!validation.valid) return err("validation_error", validation.error);
 
-    // A pure Soul-skill edit is a single SKILL.md companion write — route it through the gateway.
+    // A pure Soul-skill edit is a single SKILL.md definition write — route it through the gateway.
     // Materializing a bundled Skill (copying its companion tree) or clearing a bundled tombstone
     // (`skills/.bundled-disabled.json`, which is not an addressable Soul artifact) cannot be
     // expressed as an artifact-addressed changeset, so those keep the git-sync commit below.
@@ -331,7 +331,7 @@ const skillUpdate = defineApiTool<SkillToolContext>({
           actor: ctx.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
           businessId: DEPLOYMENT_BUSINESS_ID,
           changes: [
-            { op: "put", target: { kind: "Skill", slug: name, companion: "SKILL.md" }, content },
+            { op: "put", target: { kind: "Skill", slug: name }, content },
             curatedLockWrite(lock, name, version),
           ],
         }));
@@ -629,9 +629,7 @@ const skillActivate = defineApiTool<SkillToolContext>({
         source: "agent",
         actor: ctx.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
         businessId: DEPLOYMENT_BUSINESS_ID,
-        changes: [
-          { op: "put", target: { kind: "Skill", slug: name, companion: "SKILL.md" }, content },
-        ],
+        changes: [{ op: "put", target: { kind: "Skill", slug: name }, content }],
       });
     } catch (e) {
       if (e instanceof SoulWriteError) {

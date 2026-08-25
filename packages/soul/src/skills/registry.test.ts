@@ -18,7 +18,7 @@ function bundled(name: string, body = ""): BundledSkill {
     category: "core",
     categoryDescription: "Core",
     directory: `skills/core/${name}`,
-    references: [],
+    files: [],
   };
 }
 

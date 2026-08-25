@@ -1,16 +1,11 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { buildAudit } from "@tulipfarm/built-in-agents";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { gitSourceHttpError, withGitSourceClone } from "@tulipfarm/integrations";
 import type { LlmService } from "@tulipfarm/llm";
 import { SandboxRuntimeProfileRegistry, shellTsPythonV1 } from "@tulipfarm/sandbox";
-import {
-  DEFINITION_REGISTRATIONS,
-  LlmNotConfiguredError,
-  SchemaRegistry,
-  type SkillDefinition,
-} from "@tulipfarm/schema";
+import { LlmNotConfiguredError, type SkillDefinition } from "@tulipfarm/schema";
 import {
   type BundledSkill,
   collectSkillFiles,
@@ -35,6 +30,7 @@ import {
   type SoulWrite,
   type SoulWriter,
   serializeSkillsLock,
+  skillDocumentFromMarkdown,
   soulWriteHttpError,
 } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -81,7 +77,6 @@ type SkillSummary = {
   pendingAudit: boolean;
 };
 const NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
-const definitionRegistry = new SchemaRegistry(DEFINITION_REGISTRATIONS);
 function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
@@ -111,6 +106,28 @@ function runtimeStatus(
     };
   }
 }
+/**
+ * Commands a Skill package declares, projected from its `SKILL.md` frontmatter.
+ *
+ * `invalid` distinguishes "declares no commands" from "declares commands the canonical Skill schema
+ * rejects"; the projection collapses both to no document, and only the second is an operator fault.
+ */
+function packageCommands(
+  slug: string,
+  files: readonly SkillScanFile[]
+): { commands: SkillDefinition["spec"]["commands"]; invalid: boolean } {
+  const markdown = files.find((file) => file.path === "SKILL.md");
+  if (markdown === undefined) return { commands: undefined, invalid: false };
+  const document = skillDocumentFromMarkdown(slug, markdown.content, "SKILL.md");
+  if (document === undefined) {
+    return {
+      commands: undefined,
+      invalid: parseFrontmatter(markdown.content).frontmatter.commands !== undefined,
+    };
+  }
+  return { commands: (document as unknown as SkillDefinition).spec.commands, invalid: false };
+}
+
 async function skillPackageDetail(directory: string | undefined): Promise<SkillPackageDetail> {
   if (directory === undefined) return { files: [], commands: [] };
   let files: SkillScanFile[];
@@ -119,21 +136,9 @@ async function skillPackageDetail(directory: string | undefined): Promise<SkillP
   } catch {
     return { files: [], commands: [] };
   }
-  const definitionFile = files.find(
-    (file) => file.path === "skill.yaml" || file.path === "skill.yml"
-  );
-  let definition: SkillDefinition | undefined;
-  if (definitionFile !== undefined) {
-    try {
-      definition = definitionRegistry.validateYaml(definitionFile.content)
-        .document as unknown as SkillDefinition;
-    } catch {
-      // A malformed skill.yaml is reported to the operator as an unreadable definition, not here.
-    }
-  }
   return {
     files: files.map((file) => ({ path: file.path, size: file.size ?? 0 })),
-    commands: (definition?.spec.commands ?? []).map((command) => ({
+    commands: (packageCommands(basename(directory), files).commands ?? []).map((command) => ({
       name: command.name,
       toolRef: command.toolRef,
       runtimeProfile: command.runtimeProfile,
@@ -144,19 +149,10 @@ async function skillPackageDetail(directory: string | undefined): Promise<SkillP
   };
 }
 function executablePackageBlocker(skill: DiscoveredSkill): string | undefined {
-  const definitionFile = skill.files.find(
-    (file) => file.path === "skill.yaml" || file.path === "skill.yml"
-  );
-  if (definitionFile === undefined) return undefined;
-  let definition: SkillDefinition;
-  try {
-    definition = definitionRegistry.validateYaml(definitionFile.content)
-      .document as unknown as SkillDefinition;
-  } catch (error) {
-    return error instanceof Error ? error.message : "invalid skill definition";
-  }
+  const { commands, invalid } = packageCommands(skill.name, skill.files);
+  if (invalid) return "SKILL.md declares commands but is not a valid Skill definition";
   const paths = new Set(skill.files.map((file) => file.path));
-  for (const command of definition.spec.commands ?? []) {
+  for (const command of commands ?? []) {
     if (!paths.has(command.entrypoint))
       return `command ${command.name} entrypoint is not present in the Skill package`;
     const status = runtimeStatus(command.runtimeProfile, command.requiredCommands ?? []);

@@ -27,7 +27,7 @@ import {
   REQUEST_INPUT_TOOL,
 } from "./diagnostics";
 import { askFor, distilledPayload, latestAsk } from "./distill";
-import { extractSkillName, narrowToolsToSkill } from "./narrowing";
+import { extractSkillName, narrowToolsToSkill, SKILL_TOOL } from "./narrowing";
 import { capToolResult, MAX_TOOL_RESULT_CHARS } from "./oversize";
 import { callSignature, repeatedCall } from "./repeat";
 import {
@@ -80,7 +80,7 @@ export class AgentLoop {
     // prompts, which carry the `user` role and would otherwise become the summariser's ask.
     const participantAsk = latestAsk(input.messages);
     let sequence = recovered?.sequence ?? 0;
-    // The most recently *successfully* loaded Skill, per the `load_skill` dispatch — a switch
+    // The most recently *successfully* loaded Skill, per the `skill` dispatch — a switch
     // replaces it rather than unioning, since the model has moved on and a union only re-grows
     // the catalog this exists to shrink.
     let activeSkillName: string | undefined = recovered?.activeSkillName;
@@ -391,7 +391,7 @@ export class AgentLoop {
             ...(repeats === 1 ? {} : { repeatedCall: repeatedCall(repeats) }),
           });
           if (isReportTool(call.name)) reported = true;
-          if (call.name === "load_skill") {
+          if (call.name === SKILL_TOOL) {
             const loaded = extractSkillName(call.arguments);
             if (loaded !== undefined) activeSkillName = loaded;
           }

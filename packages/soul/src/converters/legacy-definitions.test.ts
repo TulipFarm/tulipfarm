@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { SoulAgent, SoulSkill } from "../types";
+import type { SoulAgent } from "../types";
 import { convertLegacyDefinitions } from "./legacy-definitions";
 
 describe("convertLegacyDefinitions (batch)", () => {
-  it("aggregates files and warnings across agents and skills", () => {
+  it("aggregates files and warnings across agents", () => {
     const agents: SoulAgent[] = [
       {
         name: "Support Bot",
@@ -16,22 +16,12 @@ describe("convertLegacyDefinitions (batch)", () => {
         body: "agent body",
       },
     ];
-    const skills: SoulSkill[] = [
-      {
-        name: "PDF Summarizer",
-        frontmatter: { trustTier: "first_party" },
-        body: "skill body",
-      },
-    ];
-
-    const result = convertLegacyDefinitions({ agents, skills });
+    const result = convertLegacyDefinitions({ agents });
 
     expect(result.warnings).toEqual([]);
     expect(result.files.map((f) => f.path).sort()).toEqual([
       "agents/support-bot/agent.yaml",
       "agents/support-bot/instructions.md",
-      "skills/pdf-summarizer/SKILL.md",
-      "skills/pdf-summarizer/skill.yaml",
     ]);
   });
 

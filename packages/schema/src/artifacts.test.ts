@@ -244,7 +244,7 @@ describe("path builders", () => {
   // An installer has to know which files it cannot write before it writes any of them: the gateway
   // rejects the whole changeset on the first unaddressable path, so a per-file answer is the only
   // way the operator can be told which file is the problem.
-  it("reports which of a package's own files the layout cannot address", () => {
+  it("stores whatever shape a third-party Skill package ships", () => {
     expect(
       unstorableArtifactPaths("Skill", "triage", [
         "SKILL.md",
@@ -252,8 +252,15 @@ describe("path builders", () => {
         "LICENSE.txt",
         "notes.rst",
         "src/index.ts",
+        "agents/openai.yaml",
       ])
-    ).toEqual(["notes.rst", "src/index.ts"]);
+    ).toEqual([]);
+  });
+
+  it("refuses a dotfile so a credential never reaches the Soul's git history", () => {
+    expect(
+      unstorableArtifactPaths("Skill", "triage", [".env", ".github/workflows/ci.yml", "notes.rst"])
+    ).toEqual([".env", ".github/workflows/ci.yml"]);
   });
 
   it("treats every path as unstorable when the slug or kind cannot hold one", () => {

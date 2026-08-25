@@ -47,8 +47,8 @@ export interface TurnAuthority {
   /**
    * The Routine this Run executes, when it executes one.
    *
-   * Routine-only Tools — `complete_state`, `call_skill` — refuse a call that names no Routine, so
-   * without this an Agent State could reach them in its catalog and never use them.
+   * The Routine-only Tool `complete_state` refuses a call that names no Routine, so without this
+   * an Agent State could reach it in its catalog and never use it.
    */
   readonly routineId?: string;
 }

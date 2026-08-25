@@ -92,11 +92,7 @@ export type {
   ConversionWarningCode,
   LegacyDefinitionBatch,
 } from "./converters/legacy-definitions";
-export {
-  convertLegacyAgent,
-  convertLegacyDefinitions,
-  convertLegacySkill,
-} from "./converters/legacy-definitions";
+export { convertLegacyAgent, convertLegacyDefinitions } from "./converters/legacy-definitions";
 export { hermeticGitEnv } from "./git-env";
 export { sourceType, splitSourceRef } from "./git-source";
 export type { SoulCommitRequest, SoulCommitResult, SoulGitStoreErrorCode } from "./git-store";
@@ -237,6 +233,7 @@ export {
   RuntimeSkillCommandError,
   resolveRuntimeSkillCommands,
 } from "./skill-commands";
+export { skillDocumentFromMarkdown } from "./skill-documents";
 export type { BundledSkill } from "./skills/bundled";
 export {
   bundledSkillsDir,
@@ -245,6 +242,20 @@ export {
   loadDisabledBundledSkills,
   persistDisabledBundledSkills,
 } from "./skills/bundled";
+export type {
+  SkillFileErrorCode,
+  SkillFileReader,
+  SkillFileReaderOptions,
+} from "./skills/files";
+export {
+  createSkillFileReader,
+  isAddressableSkillFile,
+  normalizeSkillFilePaths,
+  SKILL_TOOL_DECLARATION,
+  SKILL_TOOL_INPUT_SCHEMA,
+  SKILL_TOOL_NAME,
+  SkillFileError,
+} from "./skills/files";
 export {
   expandForgeExecutionContract,
   FORGE_EXECUTION_CONTRACT,
@@ -287,21 +298,14 @@ export type {
   SkillMarketplaceScan,
 } from "./skills/marketplace";
 export { createSkillMarketplaceFlow, SkillMarketplaceError } from "./skills/marketplace";
-export { collectSkillFiles, discoverSkills, skillDirectoryHash } from "./skills/marketplace-files";
-export type {
-  SkillReferenceErrorCode,
-  SkillReferenceReader,
-  SkillReferenceReaderOptions,
-} from "./skills/references";
 export {
-  createSkillReferenceReader,
-  LOAD_SKILL_INPUT_SCHEMA,
-  LOAD_SKILL_REFERENCE_INPUT_SCHEMA,
-  normalizeSkillReferenceNames,
-  SKILL_REFERENCE_TOOL_DECLARATIONS,
-  SkillReferenceError,
-} from "./skills/references";
+  collectSkillFiles,
+  discoverSkills,
+  skillDirectoryHash,
+} from "./skills/marketplace-files";
 export { mergedSkills, resolveSkill } from "./skills/registry";
+export type { ResolvedSkillSource } from "./skills/source-url";
+export { resolveSkillSource } from "./skills/source-url";
 export type { BundledSkillSyncInput, BundledSkillSyncResult } from "./skills/sync-bundled";
 export { syncBundledSkillsIntoSoul } from "./skills/sync-bundled";
 export { runSoulMigrations } from "./soul-migrations";

@@ -29,7 +29,7 @@ export const CONTENT_MODES = [
 ] as const;
 export type ContentMode = (typeof CONTENT_MODES)[number];
 
-/** Definition companion; `match` is an exact name, directory prefix, or extension glob. */
+/** Definition companion; `match` is an exact name, directory prefix, extension glob, or `**`. */
 export interface ArtifactCompanion {
   readonly match: string;
   readonly modes: readonly ContentMode[];
@@ -120,21 +120,24 @@ const ARTIFACT_LAYOUT_ENTRIES = [
     temporalClass: "pinned",
     scope: "collection",
     directory: "skills",
-    definitionFile: "skill.yaml",
-    definitionModes: ["definition"],
+    // Skills are `SKILL.md` everywhere in the ecosystem, so that file is the definition rather
+    // than prose pointed at by an envelope. Its frontmatter carries the configuration; the
+    // canonical document the bundle needs is derived from it on read, never written to the tree.
+    definitionFile: "SKILL.md",
+    // Frontmatter makes it a definition; without frontmatter the same file is only prose.
+    definitionModes: ["legacy", "prose"],
     legacyDefinitionFiles: [],
     companions: [
-      // `SKILL.md` is legacy with frontmatter and prose without it.
-      { match: "SKILL.md", modes: ["legacy", "prose"] },
-      { match: "assets/", modes: ["prose"] },
-      { match: "references/", modes: ["prose"] },
-      { match: "schemas/", modes: ["prose"] },
+      // `scripts/` is the one companion the layout has an opinion about; everything else in a
+      // Skill package is content-addressed prose.
       { match: "scripts/", modes: ["executable"] },
-      // Real Skill packages ship provenance and dependency notes beside `SKILL.md` (`LICENSE.txt`,
-      // `requirements.txt`, `README.md`). Without these the package is only partly addressable, and
-      // a writer that must name every file it installs cannot install it at all.
-      { match: "*.md", modes: ["prose"] },
-      { match: "*.txt", modes: ["prose"] },
+      // A Skill is a third-party package, so the layout cannot enumerate what it ships. Refusing
+      // unlisted filenames rejected real packages whole over one file — `agents/openai.yaml`,
+      // `requirements.txt` — and bought no safety: SkillAudit already scans every collected file
+      // and bounds symlink escapes, binaries, file size, package size and file count, while
+      // `containedPath` still refuses traversal. Whatever survives that is the operator's own risk
+      // to accept at the install confirmation.
+      { match: "**", modes: ["prose"] },
     ],
   },
   {
@@ -376,6 +379,7 @@ export interface ClassifiedSoulPath {
 }
 
 function matchesCompanion(companion: ArtifactCompanion, relative: string): boolean {
+  if (companion.match === "**") return true;
   if (companion.match.endsWith("/")) return relative.startsWith(companion.match);
   if (companion.match.startsWith("*.")) {
     return !relative.includes("/") && relative.endsWith(companion.match.slice(1));
@@ -411,6 +415,11 @@ export function classifySoulPath(path: string): ClassifiedSoulPath | null {
   if (layout.legacyDefinitionFiles.includes(relative)) {
     return { kind: layout.kind, slug, definition: true, modes: ["legacy"], layout };
   }
+  // A dot-leading segment is tooling state, not artifact content — `.env`, `.npmrc`, `.git/`. The
+  // Soul is a git repo cloned on every boot, so storing one commits a credential forever, and the
+  // Skill reader would then hand it straight to a model. No layout names such a companion, so the
+  // refusal costs nothing and closes the one shape a catch-all companion would otherwise admit.
+  if (rest.some((segment) => segment.startsWith("."))) return null;
   for (const companion of layout.companions) {
     if (matchesCompanion(companion, relative)) {
       const definition = companion.modes.includes("legacy");

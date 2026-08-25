@@ -60,7 +60,7 @@ export type SoulWrite =
  *
  * An installer holds a package's relative paths, not targets, and the definition file is the one
  * path the gateway refuses as a companion. Deciding it here keeps every installer from re-deriving
- * which filename a layout calls its definition — a package that ships its own `skill.yaml` was
+ * which filename a layout calls its definition — a package that ships its own `SKILL.md` was
  * otherwise rejected whole.
  */
 export function artifactWriteTarget(

@@ -1,5 +1,7 @@
 import {
   ajv,
+  SKILL_INSTALL_DESCRIPTION,
+  SKILL_INSTALL_SCHEMA,
   SKILL_MARKETPLACE_BROWSE_DESCRIPTION,
   SKILL_MARKETPLACE_BROWSE_SCHEMA,
   SKILL_SCANNED_AUDIT_DESCRIPTION,
@@ -165,7 +167,40 @@ const scannedInstall = defineApiTool<MarketplaceSkillToolContext>({
   },
 });
 
+const validateSkillInstall = ajv.compile(SKILL_INSTALL_SCHEMA);
+const skillInstall = defineApiTool<MarketplaceSkillToolContext>({
+  name: "skill_install",
+  description: SKILL_INSTALL_DESCRIPTION,
+  tier: "system",
+  mutating: true,
+  inputSchema: SKILL_INSTALL_SCHEMA,
+  authorization: {
+    action: "soul.skill.create",
+    resources: ["soul.skill"],
+    targets: skillTargets,
+    dataClasses: ["soul_definition"],
+  },
+  requiresApproval: false,
+  handler: async (args, ctx) => {
+    if (!validateSkillInstall(args)) return validationError(validateSkillInstall.errors);
+    const { source, name } = args as { source: string; name?: string };
+    try {
+      return ok(
+        await ctx.marketplace.installFromSource({
+          source,
+          name,
+          actor: ctx.requestContext?.actor ?? SYSTEM_MARKETPLACE_ACTOR,
+          actorId: ctx.requestContext?.actor?.principalId ?? SYSTEM_MARKETPLACE_ACTOR.principalId,
+        })
+      );
+    } catch (error) {
+      return marketplaceError(error);
+    }
+  },
+});
+
 export const MARKETPLACE_SKILL_TOOLS: readonly ApiToolDefinition<MarketplaceSkillToolContext>[] = [
+  skillInstall,
   marketplaceBrowse,
   sourceScan,
   scannedAudit,

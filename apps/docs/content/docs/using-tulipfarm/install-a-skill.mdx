@@ -13,6 +13,28 @@ real install flow is always **scan → SkillAudit → install**.
 At the end, the skills you chose are copied into the soul, pinned to the exact version you
 reviewed, and available for agents to load on demand.
 
+## Install from a URL in chat
+
+When you already know which skill you want, paste its address:
+
+```prompt
+Install this skill - https://www.skills.sh/mattpocock/skills/grill-me
+```
+
+The assistant resolves the address, scans the source, runs SkillAudit on that one package, and
+installs it. Three kinds of address work:
+
+| Address | Example |
+| --- | --- |
+| A skills.sh page | `https://www.skills.sh/mattpocock/skills/grill-me` |
+| A GitHub repository or folder | `https://github.com/example/acme-skills/tree/main/skills/triage` |
+| An `owner/repo` slug | `example/acme-skills` |
+
+Add `#branch` or `#tag` to any of them to pin a ref. If the source holds several skills and the
+address does not name one, the assistant lists them and asks which you meant.
+
+The audit still runs — a one-line request is a shortcut through the steps below, not around them.
+
 ## Ask where to start
 
 If you know the repository but not which skills it contains, start in chat:
@@ -32,7 +54,7 @@ skills UI so an operator can review the audit report before anything is installe
     Open **Skills → Marketplace** or **Skills → Install**.
   </Step>
   <Step>
-    Enter a git repository URL. A `#branch` suffix is supported when you need a specific
+    Enter a git repository or skills.sh URL. A `#branch` suffix is supported when you need a specific
     branch.
   </Step>
   <Step>

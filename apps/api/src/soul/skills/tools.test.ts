@@ -145,7 +145,7 @@ function bundledSkill(name: string): BundledSkill {
     category: "forge",
     categoryDescription: "Forge Skills.",
     directory: `/app/skills/forge/${name}`,
-    references: ["guide.md"],
+    files: ["references/guide.md"],
   };
 }
 
@@ -215,12 +215,12 @@ describe("skill_create", () => {
         auditReport: FAKE_REPORT,
       },
     });
-    // The SKILL.md companion and the ownership record land atomically through the write gateway.
+    // The SKILL.md definition and the ownership record land atomically through the write gateway.
     expect(lastApply(ctx.soulWriter)).toMatchObject({
       subject: "soul: add skill code-review",
       source: "agent",
       changes: [
-        { op: "put", target: { kind: "Skill", slug: "code-review", companion: "SKILL.md" } },
+        { op: "put", target: { kind: "Skill", slug: "code-review" } },
         { op: "put", target: { kind: "SkillsLock" } },
       ],
     });
@@ -441,9 +441,7 @@ describe("skill_activate", () => {
     expect(lastApply(ctx.soulWriter)).toMatchObject({
       subject: "soul: activate skill code-review",
       source: "agent",
-      changes: [
-        { op: "put", target: { kind: "Skill", slug: "code-review", companion: "SKILL.md" } },
-      ],
+      changes: [{ op: "put", target: { kind: "Skill", slug: "code-review" } }],
     });
     const content = appliedContent(ctx.soulWriter);
     expect(content).not.toContain("_pendingAudit");
@@ -519,7 +517,7 @@ describe("skill_update", () => {
       subject: "soul: update skill code-review",
       source: "agent",
       changes: [
-        { op: "put", target: { kind: "Skill", slug: "code-review", companion: "SKILL.md" } },
+        { op: "put", target: { kind: "Skill", slug: "code-review" } },
         { op: "put", target: { kind: "SkillsLock" } },
       ],
     });
@@ -986,7 +984,7 @@ describe("skill_delete", () => {
 
 describe("SKILL_TOOLS", () => {
   it("exports marketplace scan, audit, and install tools with correct mutating flags", () => {
-    expect(SKILL_TOOLS).toHaveLength(10);
+    expect(SKILL_TOOLS).toHaveLength(11);
     const byName = Object.fromEntries(SKILL_TOOLS.map((t) => [t.name, t]));
     expect(byName.skill_create.mutating).toBe(true);
     expect(byName.skill_update.mutating).toBe(true);
@@ -998,6 +996,7 @@ describe("SKILL_TOOLS", () => {
     expect(byName.skill_source_scan.mutating).toBe(false);
     expect(byName.skill_scanned_audit.mutating).toBe(false);
     expect(byName.skill_scanned_install.mutating).toBe(true);
+    expect(byName.skill_install.mutating).toBe(true);
   });
 });
 

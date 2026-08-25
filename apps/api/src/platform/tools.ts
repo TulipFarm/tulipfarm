@@ -10,14 +10,14 @@ import { PLATFORM_RUNTIME_TOOLS } from "@tulipfarm/platform-tools";
 import { ajv, type definitions } from "@tulipfarm/schema";
 import type { BundledSkill } from "@tulipfarm/soul";
 import {
-  createSkillReferenceReader,
+  createSkillFileReader,
   type GitSyncService,
-  LOAD_SKILL_INPUT_SCHEMA,
-  LOAD_SKILL_REFERENCE_INPUT_SCHEMA,
   type RoutineCatalog,
   resolveSkill,
-  SKILL_REFERENCE_TOOL_DECLARATIONS,
-  SkillReferenceError,
+  SKILL_TOOL_DECLARATION,
+  SKILL_TOOL_INPUT_SCHEMA,
+  SKILL_TOOL_NAME,
+  SkillFileError,
   type SoulAgent,
   type SoulLoader,
   type SoulRoutine,
@@ -108,7 +108,7 @@ export interface PlatformToolContext {
  * The Skills this Turn cannot see: persisted tombstones plus any live gate.
  *
  * Every Skill read path must resolve through this. A Skill that `skill_list` hides but
- * `load_skill` still serves is worse than one that was never hidden, because the Agent reaches it
+ * the `skill` Tool still serves is worse than one that was never hidden, because the Agent reaches it
  * by name and then calls Tools the same gate excluded.
  */
 async function hiddenSkills(ctx: PlatformToolContext): Promise<ReadonlySet<string>> {
@@ -125,40 +125,46 @@ function wholeSoulRepoTarget() {
   return [{ type: SOUL_REPO_TARGET, id: SOUL_REPO_ALL_TARGET_ID }];
 }
 
-const validateLoadSkill = ajv.compile(LOAD_SKILL_INPUT_SCHEMA);
-
-function referenceReader(
+function skillFileReader(
   ctx: PlatformToolContext,
   skillName: string,
   soulSkill: SoulSkill | undefined,
   bundledSkill: BundledSkill | undefined
-): ReturnType<typeof createSkillReferenceReader> | undefined {
+): ReturnType<typeof createSkillFileReader> | undefined {
   if (!soulSkill && bundledSkill) {
-    return createSkillReferenceReader({
-      directory: `${bundledSkill.directory}/references`,
-      advertisedNames: bundledSkill.references,
+    return createSkillFileReader({
+      directory: bundledSkill.directory,
+      advertisedPaths: bundledSkill.files,
     });
   }
   return ctx.soulPath
-    ? createSkillReferenceReader({ directory: `${ctx.soulPath}/skills/${skillName}/references` })
+    ? createSkillFileReader({ directory: `${ctx.soulPath}/skills/${skillName}` })
     : undefined;
 }
 
-function missingReferenceMessage(skill: string, reference: string, available: readonly string[]) {
+function missingFileMessage(skill: string, file: string, available: readonly string[]) {
   const availability =
     available.length === 0
-      ? "No reference files are available."
-      : `Available references: ${available.join(", ")}.`;
-  return `Reference "${reference}" not found for Skill "${skill}". ${availability}`;
+      ? "No supporting files are available."
+      : `Available files: ${available.join(", ")}.`;
+  return `File "${file}" not found for Skill "${skill}". ${availability}`;
 }
 
-export const loadSkillTool = defineApiTool<PlatformToolContext>({
-  name: "load_skill",
+const validateSkillTool = ajv.compile(SKILL_TOOL_INPUT_SCHEMA);
+
+/**
+ * The one door to a Skill: `{ name }` loads it, `{ name, file }` reads one of the files it
+ * advertised — reference, schema, asset or script alike. Both modes resolve the Skill first, so a
+ * Skill hidden from `skill_list` cannot be reached by naming one of its files, and reads are
+ * confined to paths the artifact layout can address inside that Skill's own directory.
+ */
+export const skillTool = defineApiTool<PlatformToolContext>({
+  name: SKILL_TOOL_NAME,
   requiresAmbient: ["soul"],
-  description: SKILL_REFERENCE_TOOL_DECLARATIONS[0].description,
+  description: SKILL_TOOL_DECLARATION.description,
   mutating: false,
   tier: "platform",
-  inputSchema: LOAD_SKILL_INPUT_SCHEMA,
+  inputSchema: SKILL_TOOL_INPUT_SCHEMA,
   authorization: {
     action: "platform.skill.load",
     resources: ["soul.skill"],
@@ -166,9 +172,10 @@ export const loadSkillTool = defineApiTool<PlatformToolContext>({
     dataClasses: ["soul_definition"],
   },
   handler: async (args, ctx) => {
-    if (!validateLoadSkill(args))
-      return err("validation_error", firstError(validateLoadSkill.errors));
-    const { name } = args as { name: string };
+    if (!validateSkillTool(args))
+      return err("validation_error", firstError(validateSkillTool.errors));
+    const { name, file } = args as { name: string; file?: string };
+
     const hidden = await hiddenSkills(ctx);
     const skill = resolveSkill(
       name,
@@ -176,75 +183,46 @@ export const loadSkillTool = defineApiTool<PlatformToolContext>({
       ctx.bundledSkills,
       hidden
     );
-    if (skill) {
-      const soulSkill = ctx.soulLoader?.skills.get(name);
-      const bundledSkill = soulSkill
-        ? undefined
-        : hidden.has(name)
-          ? undefined
-          : ctx.bundledSkills?.get(name);
-      try {
-        const references =
-          (await referenceReader(ctx, name, soulSkill, bundledSkill)?.list()) ?? [];
-        return ok({
-          name: skill.name,
-          frontmatter: skill.frontmatter,
-          body: skill.body,
-          references,
-        });
-      } catch {
-        return err("internal_error", `Skill "${name}" references are temporarily unavailable.`);
-      }
-    }
-    return err("not_found", `Skill "${name}" not found.`);
-  },
-});
+    if (!skill) return err("not_found", `Skill "${name}" not found.`);
 
-const validateLoadSkillRef = ajv.compile(LOAD_SKILL_REFERENCE_INPUT_SCHEMA);
+    const soulSkill = ctx.soulLoader?.skills.get(name);
+    // `resolveSkill` already applied `hidden`, so a bundled hit here is one this Turn may see.
+    const bundledSkill = soulSkill ? undefined : ctx.bundledSkills?.get(name);
+    const reader = skillFileReader(ctx, name, soulSkill, bundledSkill);
 
-export const loadSkillReferenceTool = defineApiTool<PlatformToolContext>({
-  name: "load_skill_reference",
-  requiresAmbient: ["soul"],
-  description: SKILL_REFERENCE_TOOL_DECLARATIONS[1].description,
-  mutating: false,
-  tier: "platform",
-  inputSchema: LOAD_SKILL_REFERENCE_INPUT_SCHEMA,
-  authorization: {
-    action: "platform.skill_reference.load",
-    resources: ["soul.skill"],
-    targets: (args) => soulTarget(SOUL_SKILL_TARGET, args, "skill"),
-    dataClasses: ["soul_definition"],
-  },
-  handler: async (args, ctx) => {
-    if (!validateLoadSkillRef(args))
-      return err("validation_error", firstError(validateLoadSkillRef.errors));
-    const { skill, reference } = args as { skill: string; reference: string };
-    const soulSkill = ctx.soulLoader?.skills.get(skill);
-    const bundledSkill = (await hiddenSkills(ctx)).has(skill)
-      ? undefined
-      : ctx.bundledSkills?.get(skill);
-    const selectedBundledSkill = soulSkill ? undefined : bundledSkill;
-    const reader = referenceReader(ctx, skill, soulSkill, selectedBundledSkill);
-    let references: readonly string[];
+    let files: readonly string[];
     try {
-      references = (await reader?.list()) ?? [];
+      files = (await reader?.list()) ?? [];
     } catch {
-      return err("internal_error", `Skill "${skill}" references are temporarily unavailable.`);
+      return err("internal_error", `Skill "${name}" files are temporarily unavailable.`);
     }
-    if (!reader) return err("not_found", missingReferenceMessage(skill, reference, references));
+
+    if (file === undefined) {
+      return ok({
+        name: skill.name,
+        frontmatter: skill.frontmatter,
+        body: skill.body,
+        files,
+      });
+    }
+
+    if (!reader) return err("not_found", missingFileMessage(name, file, files));
     try {
-      const content = await reader.read(reference);
-      return ok({ skill, reference, content });
+      const content = await reader.read(file);
+      return ok({ name, file, content });
     } catch (error) {
-      if (error instanceof SkillReferenceError) {
-        if (error.code === "INVALID_NAME") {
-          return err("validation_error", `Reference "${reference}" is not a valid reference name.`);
+      if (error instanceof SkillFileError) {
+        if (error.code === "INVALID_PATH") {
+          return err(
+            "validation_error",
+            `File "${file}" is not a readable path inside Skill "${name}".`
+          );
         }
         if (error.code === "NOT_FOUND") {
-          return err("not_found", missingReferenceMessage(skill, reference, references));
+          return err("not_found", missingFileMessage(name, file, files));
         }
       }
-      return err("internal_error", `Skill "${skill}" references are temporarily unavailable.`);
+      return err("internal_error", `Skill "${name}" files are temporarily unavailable.`);
     }
   },
 });
@@ -619,61 +597,10 @@ export const soulRepoPushTool = defineApiTool<PlatformToolContext>({
   },
 });
 
-const CALL_SKILL_SCHEMA: Record<string, unknown> = {
-  type: "object",
-  additionalProperties: false,
-  required: ["name"],
-  properties: {
-    name: { type: "string", minLength: 1, description: "Skill name to invoke." },
-    args: {
-      type: "object",
-      description: "Optional arguments to pass to the skill.",
-    },
-  },
-};
-const validateCallSkill = ajv.compile(CALL_SKILL_SCHEMA);
-
-export const callSkillTool = defineApiTool<PlatformToolContext>({
-  name: "call_skill",
-  requiresAmbient: ["soul"],
-  description:
-    "Load and invoke a skill within the current routine execution context. Only callable from a routine-spawned agent turn.",
-  mutating: false,
-  tier: "platform",
-  inputSchema: CALL_SKILL_SCHEMA,
-  authorization: {
-    action: "platform.skill.call",
-    resources: ["soul.skill"],
-    targets: (args) => soulTarget(SOUL_SKILL_TARGET, args, "name"),
-    dataClasses: ["operational"],
-  },
-  handler: async (args, ctx) => {
-    if (!validateCallSkill(args))
-      return err("validation_error", firstError(validateCallSkill.errors));
-    if (!ctx.routineContext)
-      return err("internal_error", "call_skill is only callable from a routine context.");
-    const { name, args: skillArgs } = args as { name: string; args?: Record<string, unknown> };
-    const skill = resolveSkill(
-      name,
-      ctx.soulLoader as SoulLoader | undefined,
-      ctx.bundledSkills,
-      await hiddenSkills(ctx)
-    );
-    if (!skill) return err("not_found", `Skill "${name}" not found.`);
-    return ok({
-      name: skill.name,
-      frontmatter: skill.frontmatter,
-      body: skill.body,
-      args: skillArgs ?? null,
-    });
-  },
-});
-
 /** Fresh stateless clock Tool shares the turn-context format to avoid conflicting time facts. */
 
 export const PLATFORM_TOOLS: ParkableApiToolDefinition<PlatformToolContext>[] = [
-  loadSkillTool,
-  loadSkillReferenceTool,
+  skillTool,
   delegateToAgentTool,
   spawnSubagentTool,
   triggerRoutineTool,
@@ -682,7 +609,6 @@ export const PLATFORM_TOOLS: ParkableApiToolDefinition<PlatformToolContext>[] = 
   routineDeleteTool,
   guardrailForgeTool,
   soulRepoPushTool,
-  callSkillTool,
   // Context-free Tools the durable runtime also hosts; `PlatformRuntimeContext` is a subset of
   // `PlatformToolContext`, so the control plane registers the same definitions.
   ...(PLATFORM_RUNTIME_TOOLS as ApiToolDefinition<PlatformToolContext>[]),

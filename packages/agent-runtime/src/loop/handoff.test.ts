@@ -69,7 +69,7 @@ function dispatcher(...results: readonly ToolDispatchResult[]): ToolDispatchPort
 
 /** The Support Triage Agent's catalog: reads, plus the one write that files a Ticket. */
 const TRIAGE_CATALOG = [
-  { name: "load_skill", inputSchema: { type: "object" }, mutating: false },
+  { name: "skill", inputSchema: { type: "object" }, mutating: false },
   { name: "query_knowledge", inputSchema: { type: "object" }, mutating: false },
   { name: "record_create", inputSchema: { type: "object" }, mutating: true },
   { name: "present", inputSchema: { type: "object" }, mutating: false },
@@ -147,7 +147,7 @@ describe("AgentLoop hand-off barrier", () => {
 describe("AgentLoop Skill narrowing across the read/write boundary", () => {
   const loadResearch = { status: "succeeded" as const, callId: "call-1", output: {} };
 
-  it("keeps the Skill's own read reachable after load_skill", async () => {
+  it("keeps the Skill's own read reachable after a skill load", async () => {
     const events: AgentLoopEvent[] = [];
     const tools = dispatcher(loadResearch, {
       status: "succeeded",
@@ -156,7 +156,7 @@ describe("AgentLoop Skill narrowing across the read/write boundary", () => {
     });
     const model = recordingModel(
       toolCallResult([
-        { callId: "call-1", name: "load_skill", arguments: { name: "knowledge-research" } },
+        { callId: "call-1", name: "skill", arguments: { name: "knowledge-research" } },
       ]),
       toolCallResult([{ callId: "call-2", name: "query_knowledge", arguments: {} }]),
       textResult("A reset link lasts 24 hours.")
@@ -177,7 +177,7 @@ describe("AgentLoop Skill narrowing across the read/write boundary", () => {
     });
     const model = recordingModel(
       toolCallResult([
-        { callId: "call-1", name: "load_skill", arguments: { name: "knowledge-research" } },
+        { callId: "call-1", name: "skill", arguments: { name: "knowledge-research" } },
       ]),
       toolCallResult([
         { callId: "call-2", name: "record_create", arguments: { type: "ticket", kind: "bug" } },
@@ -189,14 +189,14 @@ describe("AgentLoop Skill narrowing across the read/write boundary", () => {
 
     expect(outcome).toMatchObject({ status: "completed" });
     expect(model.toolNamesByRequest[1]).toContain("record_create");
-    expect(tools.calls.map((call) => call.name)).toEqual(["load_skill", "record_create"]);
+    expect(tools.calls.map((call) => call.name)).toEqual(["skill", "record_create"]);
   });
 
   it("still hides a read the active Skill did not declare", async () => {
     const events: AgentLoopEvent[] = [];
     const model = recordingModel(
       toolCallResult([
-        { callId: "call-1", name: "load_skill", arguments: { name: "knowledge-research" } },
+        { callId: "call-1", name: "skill", arguments: { name: "knowledge-research" } },
       ]),
       textResult("done")
     );

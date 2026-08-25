@@ -2,7 +2,7 @@
 name: routine-forge
 description: "Forge a canonical Routine and its Triggers."
 category: forge
-tools: [routine_forge, routine_picker, trigger_routine, load_skill_reference, agent_list, agent_get, record_search, record_get, send_slack_message, present, request_input]
+tools: [routine_forge, routine_picker, trigger_routine, skill, agent_list, agent_get, record_search, record_get, send_slack_message, present, request_input]
 ---
 # Routine Forge Workflow
 
@@ -12,7 +12,7 @@ canonical published Soul definitions, not the retired Serverless Workflow format
 {{FORGE_EXECUTION_CONTRACT}}
 
 For complete schema templates, Cron/interval/webhook trigger examples, and State patterns, call
-`load_skill_reference` with `skill: "routine-forge"` and `reference: "examples.md"` (or `"canonical-examples.md"`).
+`skill` with `name: "routine-forge"` and `file: "references/examples.md"` (or `"references/canonical-examples.md"`).
 
 ## What a State may reference
 

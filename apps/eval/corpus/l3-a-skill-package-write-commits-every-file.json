@@ -11,7 +11,7 @@
   "tools": [
     {
       "name": "soul_write",
-      "description": "Commit a Soul artifact to the configuration repository. `kind` is a capitalised singular such as \"Skill\". `slug` is the artifact's directory name. `companion` names a file beside the definition, such as \"SKILL.md\", \"LICENSE.txt\" or \"references/notes.md\"; omit it to write the definition itself. `content` for a Skill's SKILL.md is YAML frontmatter with `name` and `description` keys, delimited by --- lines, followed by the skill's instructions in Markdown.",
+      "description": "Commit a Soul artifact to the configuration repository. `kind` is a capitalised singular such as \"Skill\". `slug` is the artifact's directory name. A Skill's definition is its `SKILL.md`: omit `companion` and pass `definitionMode` \"canonical\" to write it. `companion` names a file beside the definition, such as \"LICENSE.txt\" or \"references/notes.md\". `content` for a Skill's SKILL.md is YAML frontmatter with `name` and `description` keys, delimited by --- lines, followed by the skill's instructions in Markdown.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -22,6 +22,9 @@
             "type": "string"
           },
           "companion": {
+            "type": "string"
+          },
+          "definitionMode": {
             "type": "string"
           },
           "content": {
@@ -42,7 +45,7 @@
           "arguments": {
             "kind": "Skill",
             "slug": "packing-notes",
-            "companion": "SKILL.md",
+            "definitionMode": "canonical",
             "content": "---\nname: packing-notes\ndescription: How Tulip Supply Co packs bulbs for shipping.\n---\n\nPack bulbs in breathable paper, never in sealed plastic."
           }
         },

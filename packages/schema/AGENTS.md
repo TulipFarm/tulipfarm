@@ -40,6 +40,9 @@ Run event/request vocabularies, canonical hashes, Secret references, and resourc
 - Any schema snapshot diff is a compatibility event for existing Soul repos and recorded digests.
 - Consumers must derive Soul paths, companions, bundle membership, and temporal class from
   `ARTIFACT_LAYOUTS`; never copy it into regexes or parallel tables.
+- A Skill's companions end in a `**` catch-all — the layout cannot enumerate what a third-party
+  package ships, so SkillAudit gates content, not filenames. `classifySoulPath` still refuses any
+  dot-leading segment for every kind, so a `.env` never reaches the Soul's git history.
 - Optional Run event fields must be omitted, never `undefined`; schemas reject extras.
 - Run events pair by id (`callId`), not stream position; readers must not guess call/approval order.
 - Secret-bearing fields must use `secretReferenceSchema` or `SECRET_REFERENCE_PATTERN`.

@@ -15,6 +15,7 @@ import { hermeticGitEnv } from "./git-env";
 import { modelProfileDocuments } from "./model-profile-documents";
 import { parseSoulFile } from "./parse";
 import type { SoulTreeReader } from "./publication";
+import { skillDocumentFromMarkdown } from "./skill-documents";
 
 const COMMIT_SHA = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
 const BUNDLED_DEFINITION_CONTENT_MODES = new Set<ContentMode>([
@@ -24,12 +25,16 @@ const BUNDLED_DEFINITION_CONTENT_MODES = new Set<ContentMode>([
 ]);
 const BUNDLED_FILE_CONTENT_MODES = new Set<ContentMode>(["prose", "executable", "delegated"]);
 
-/** The Agent definition a path addresses, by kind and format, or `null` when it addresses none. */
-function agentDefinitionAt(path: string): { slug: string; legacy: boolean } | null {
+/** The definition a path addresses for one kind, by format, or `null` when it addresses none. */
+function definitionAt(path: string, kind: string): { slug: string; legacy: boolean } | null {
   const location = classifySoulPath(path);
-  if (location === null || location.kind !== "Agent" || !location.definition) return null;
+  if (location === null || location.kind !== kind || !location.definition) return null;
   if (location.slug === null || location.slug === undefined) return null;
   return { slug: location.slug, legacy: location.modes.includes("legacy") };
+}
+
+function agentDefinitionAt(path: string): { slug: string; legacy: boolean } | null {
+  return definitionAt(path, "Agent");
 }
 
 // Bundle membership is a distribution decision: only machine-managed state stays out.
@@ -113,6 +118,14 @@ export class GitSoulTreeReader implements SoulTreeReader {
       if (parsed.issue !== undefined) throw invalidDefinitionError(parsed.issue);
       if (parsed.parsed?.definition !== undefined) {
         definitions.push(parsed.parsed.definition.document);
+        continue;
+      }
+      // A Skill projects without a ModelProfile — it names no model — so it is resolved before the
+      // Agent projection's guard rather than after it.
+      const skill = definitionAt(path, "Skill");
+      if (skill !== null) {
+        const projected = skillDocumentFromMarkdown(skill.slug, content, basename(path));
+        if (projected !== undefined) definitions.push(projected);
         continue;
       }
       if (modelProfile === undefined) continue;

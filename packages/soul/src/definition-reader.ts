@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import {
   type ArtifactKind,
+  artifactLayout,
   definitionPath,
   legacyDefinitionCandidates,
   parseFrontmatter,
@@ -16,6 +17,8 @@ export interface ResolvedDefinition {
   readonly content: string;
   /** True when the file is a superseded filename still carrying configuration. */
   readonly legacy: boolean;
+  /** True when the configuration lives in frontmatter rather than a canonical YAML envelope. */
+  readonly frontmatter: boolean;
 }
 
 /** Reads a file, returning `undefined` for ENOENT and rethrowing anything else. */
@@ -39,11 +42,20 @@ export async function resolveDefinition(
 ): Promise<ResolvedDefinition | undefined> {
   const canonical = definitionPath(kind, slug);
   const content = await readIfPresent(soulPath, join(soulPath, canonical));
-  if (content !== undefined) return { path: canonical, content, legacy: false };
+  // A kind whose canonical file admits no `definition` mode keeps its configuration in
+  // frontmatter — `SKILL.md` — so the reader must not look for an envelope that is never written.
+  const canonicalIsFrontmatter = !(
+    artifactLayout(kind)?.definitionModes.includes("definition") ?? true
+  );
+  if (content !== undefined) {
+    return { path: canonical, content, legacy: false, frontmatter: canonicalIsFrontmatter };
+  }
 
   for (const path of legacyDefinitionCandidates(kind, slug)) {
     const legacyContent = await readIfPresent(soulPath, join(soulPath, path));
-    if (legacyContent !== undefined) return { path, content: legacyContent, legacy: true };
+    if (legacyContent !== undefined) {
+      return { path, content: legacyContent, legacy: true, frontmatter: true };
+    }
   }
   return undefined;
 }
@@ -65,7 +77,7 @@ export async function readFrontmatterArtifact(
   _slug: string,
   definition: ResolvedDefinition
 ): Promise<FrontmatterArtifact> {
-  if (definition.legacy) {
+  if (definition.frontmatter) {
     const { frontmatter, body } = parseFrontmatter(definition.content);
     return { frontmatter, body };
   }

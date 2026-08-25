@@ -458,7 +458,7 @@ describe("/api/v1/internal/turns", () => {
     });
 
     expect(res.statusCode).toBe(200);
-    // Routine-only Tools — `complete_state`, `call_skill` — refuse a call that names no Routine,
+    // The Routine-only Tool `complete_state` refuses a call that names no Routine,
     // so dropping this in the projection leaves a Routine Agent State unable to complete itself.
     expect(res.json().routineId).toBe("routine-id");
   });

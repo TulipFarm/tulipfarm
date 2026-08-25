@@ -3,6 +3,14 @@ import type { ExposedTool } from "./contract";
 /** Skill narrowing: which exposed Tools the model is shown. Never an authorization decision. */
 
 /**
+ * The Tool that loads a Skill, and so the one whose call switches which Skill is active.
+ *
+ * Declared here rather than imported from `@tulipfarm/soul`, which this package may not depend on;
+ * `apps/api/src/tools/contract-coverage.test.ts` pins the two spellings together.
+ */
+export const SKILL_TOOL = "skill";
+
+/**
  * Structural Tools cannot be hidden by Skill narrowing.
  *
  * Every name here is a way a Turn *ends* — it answers, asks, or hands the work on. `delegate_to_agent`
@@ -11,8 +19,7 @@ import type { ExposedTool } from "./contract";
  * once some host offers it.
  */
 const ALWAYS_EXPOSED_TOOL_NAMES: ReadonlySet<string> = new Set([
-  "load_skill",
-  "load_skill_reference",
+  SKILL_TOOL,
   "complete_task",
   "delegate_to_agent",
   "present",
@@ -28,7 +35,7 @@ const ALWAYS_EXPOSED_TOOL_NAMES: ReadonlySet<string> = new Set([
  * alternative it can work without — it still holds the Skill's own reads, and can answer or say
  * it cannot. Hiding a *write* takes away the only way the Turn can do the thing it was asked to
  * do, and does it silently: the Tool is absent rather than refused, the system prompt assembled
- * before the `load_skill` still lists it, and no result comes back for the model to reason about.
+ * before the `skill` load still lists it, and no result comes back for the model to reason about.
  * The only completion left is text, which is how a Turn that filed nothing ends by claiming it
  * did (#419). `mutating === true` and not `!== false` on purpose: dispatch treats an undeclared
  * Tool as a write because that fails safe, whereas narrowing is a visibility choice, so it acts
@@ -46,7 +53,11 @@ export function narrowToolsToSkill(
   );
 }
 
-/** `load_skill`'s only argument is `{ name: string }` — the Skill this call switched into. */
+/**
+ * `skill`'s Skill-identifying argument is `name`, in both its modes: `{ name }` loads the Skill,
+ * `{ name, reference }` reads one of the files that Skill advertised. A reference read therefore
+ * switches to the Skill it names, which is the same Skill the model is working in.
+ */
 export function extractSkillName(callArguments: unknown): string | undefined {
   if (typeof callArguments !== "object" || callArguments === null) return undefined;
   const name = (callArguments as { name?: unknown }).name;

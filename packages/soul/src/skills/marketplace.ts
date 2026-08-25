@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { unstorableArtifactPaths, validateSkill } from "@tulipfarm/schema";
 import type { CommitActor } from "../commit-signing";
-import { convertLegacySkill } from "../converters/legacy-definitions";
+import { sourceType } from "../git-source";
 import type { GitSyncService } from "../git-sync";
 import { parseFrontmatter, type SoulLoader } from "../published-loader";
 import { artifactWriteTarget, type SoulWrite, type SoulWriter } from "../writer";
@@ -22,6 +22,7 @@ import {
 import { mutateSkillsLock } from "./lock-write";
 import { collectSkillFiles, discoverSkills, skillDirectoryHash } from "./marketplace-files";
 import { mergedSkills } from "./registry";
+import { resolveSkillSource } from "./source-url";
 
 type ScanEntry = {
   source: string;
@@ -92,6 +93,11 @@ export class SkillMarketplaceError extends Error {
   }
 }
 
+export interface SkillMarketplaceSourceInstall extends SkillMarketplaceInstall {
+  /** The audit that cleared this package; the install refuses to run without one. */
+  report: unknown;
+}
+
 export interface SkillMarketplaceFlow {
   browse(): Promise<SkillMarketplaceBrowse>;
   scan(input: { source: string; actorId: string }): Promise<SkillMarketplaceScan>;
@@ -103,6 +109,13 @@ export interface SkillMarketplaceFlow {
     actor: CommitActor;
     source?: "agent" | "api";
   }): Promise<SkillMarketplaceInstall>;
+  installFromSource(input: {
+    source: string;
+    name?: string;
+    actor: CommitActor;
+    actorId: string;
+    writeSource?: "agent" | "api";
+  }): Promise<SkillMarketplaceSourceInstall>;
 }
 
 export interface SkillMarketplaceDeps {
@@ -216,8 +229,11 @@ export function createSkillMarketplaceFlow(deps: SkillMarketplaceDeps): SkillMar
   }
 
   async function scan(input: { source: string; actorId: string }): Promise<SkillMarketplaceScan> {
+    // Resolving here rather than only in `installFromSource` means a catalogue URL pasted into the
+    // scan box behaves the same as one handed to an Agent, and provenance records the real remote.
+    const source = resolveSkillSource(input.source).source;
     return deps.cloneSource(
-      input.source,
+      source,
       { prefix: "skill-scan-", actorId: input.actorId },
       async ({ dir, ref }) => {
         const discovered = await discoverSkills(dir);
@@ -228,7 +244,7 @@ export function createSkillMarketplaceFlow(deps: SkillMarketplaceDeps): SkillMar
         const scanId = randomUUID();
         pruneScans(Date.now());
         scans.set(scanId, {
-          source: input.source,
+          source,
           ref,
           skills: discovered,
           audited: new Set(),
@@ -236,7 +252,7 @@ export function createSkillMarketplaceFlow(deps: SkillMarketplaceDeps): SkillMar
         });
         return {
           scanId,
-          source: input.source,
+          source,
           ref,
           skills: discovered.map((skill) => ({
             name: skill.name,
@@ -359,33 +375,72 @@ export function createSkillMarketplaceFlow(deps: SkillMarketplaceDeps): SkillMar
     return { entry, skill };
   }
 
-  return { browse, scan, audit, install };
+  /** The Skill directory a catalogue URL names, which need not equal the `name` in its frontmatter. */
+  function directoryOf(skillPath: string): string {
+    const segments = skillPath.split("/");
+    return segments.length > 1 ? segments[segments.length - 2] : "";
+  }
+
+  async function installFromSource(input: {
+    source: string;
+    name?: string;
+    actor: CommitActor;
+    actorId: string;
+    writeSource?: "agent" | "api";
+  }): Promise<SkillMarketplaceSourceInstall> {
+    const resolved = resolveSkillSource(input.source);
+    // `scan` resolves too; passing the resolved source keeps the two paths on one spelling.
+    const scanned = await scan({ source: resolved.source, actorId: input.actorId });
+    const wanted = input.name ?? resolved.skillHint;
+
+    const matches = wanted
+      ? scanned.skills.filter(
+          (skill) => skill.name === wanted || directoryOf(skill.skillPath) === wanted
+        )
+      : scanned.skills;
+
+    if (matches.length === 0) {
+      throw new SkillMarketplaceError(
+        400,
+        `"${wanted}" is not in ${resolved.source}. It offers: ${scanned.skills
+          .map((skill) => skill.name)
+          .join(", ")}`
+      );
+    }
+    if (matches.length > 1) {
+      throw new SkillMarketplaceError(
+        400,
+        `${resolved.source} offers more than one Skill, so name the one to install: ${matches
+          .map((skill) => skill.name)
+          .join(", ")}`
+      );
+    }
+
+    const chosen = matches[0];
+    // `install` refuses a package this flow has not audited, so the audit cannot be skipped. Note
+    // it gates on having been audited, not on the verdict: a `high` report still installs, and the
+    // report is returned for the caller to act on. Structural findings are the blocking set, and
+    // `validateInstallable` enforces those separately.
+    const { report } = await audit({
+      scanId: scanned.scanId,
+      name: chosen.name,
+      skillPath: chosen.skillPath,
+    });
+    const installed = await install({
+      scanId: scanned.scanId,
+      names: [chosen.name],
+      paths: [chosen.skillPath],
+      actor: input.actor,
+      source: input.writeSource,
+    });
+    return { ...installed, report };
+  }
+
+  return { browse, scan, audit, install, installFromSource };
 }
 
 function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function generatedSkillDefinition(skill: DiscoveredSkill): string | undefined {
-  if (skill.files.some((file) => file.path === "skill.yaml" || file.path === "skill.yml")) {
-    return undefined;
-  }
-  const { frontmatter, body } = parseFrontmatter(skill.content);
-  const paths = skill.files.map((file) => file.path);
-  const result = convertLegacySkill({
-    name: skill.name,
-    body,
-    frontmatter: {
-      ...frontmatter,
-      trustTier: frontmatter.trustTier ?? "third_party",
-      references: paths.filter((path) => path.startsWith("references/")),
-      assets: paths.filter((path) => path.startsWith("assets/")),
-      schemas: paths.filter((path) => path.startsWith("schemas/")),
-      scripts: paths.filter((path) => path.startsWith("scripts/")),
-    },
-  });
-  const definition = result.files.find((file) => file.path.endsWith("/skill.yaml"));
-  return definition?.operation === "upsert" ? definition.content : undefined;
 }
 
 async function skillInstallChanges(root: string, skill: DiscoveredSkill): Promise<SoulWrite[]> {
@@ -397,11 +452,6 @@ async function skillInstallChanges(root: string, skill: DiscoveredSkill): Promis
   };
   for (const file of skill.files)
     if (file.symlinkTarget === undefined) put(file.path, file.content);
-  const generated = generatedSkillDefinition(skill);
-  if (generated !== undefined) {
-    changes.push({ op: "put", target: { kind: "Skill", slug: skill.name }, content: generated });
-    written.add("skill.yaml");
-  }
   try {
     for (const file of await collectSkillFiles(join(root, "skills", skill.name))) {
       if (!written.has(file.path)) {

@@ -6,13 +6,11 @@ import type { BundledSkill, SoulAgent, SoulRoutine, SoulSkill, SoulWriter } from
 import { describe, expect, it, vi } from "vitest";
 import { delegateToAgentTool } from "./delegate-tool";
 import {
-  callSkillTool,
-  loadSkillReferenceTool,
-  loadSkillTool,
   PLATFORM_TOOLS,
   type PlatformToolContext,
   routineForgeTool,
   routinePickerTool,
+  skillTool,
   soulRepoPushTool,
   triggerRoutineTool,
 } from "./tools";
@@ -27,7 +25,7 @@ function makeBundledSkill(name: string, directory = `/bundled/core/${name}`): Bu
     category: "core",
     categoryDescription: "Core Skills.",
     directory,
-    references: [],
+    files: [],
   };
 }
 
@@ -102,13 +100,10 @@ function expectNoNullishTargetText(targets: unknown): void {
 
 describe("platform authorization declarations", () => {
   it("uses Soul target types for Soul-backed Skills, Agents, and Routines", () => {
-    expect(loadSkillTool.targetsFor({ name: "research" })).toEqual([
+    expect(skillTool.targetsFor({ name: "research" })).toEqual([
       { type: "soul.skill", id: "research" },
     ]);
-    expect(loadSkillReferenceTool.targetsFor({ skill: "research", reference: "guide.md" })).toEqual(
-      [{ type: "soul.skill", id: "research" }]
-    );
-    expect(callSkillTool.targetsFor({ name: "research" })).toEqual([
+    expect(skillTool.targetsFor({ name: "research", file: "references/guide.md" })).toEqual([
       { type: "soul.skill", id: "research" },
     ]);
     expect(delegateToAgentTool.targetsFor({ agentId: "planner", task: "plan" })).toEqual([
@@ -142,9 +137,7 @@ describe("platform authorization declarations", () => {
 
   it("keeps touched target derivations total for raw model output", () => {
     const tools = [
-      loadSkillTool,
-      loadSkillReferenceTool,
-      callSkillTool,
+      skillTool,
       delegateToAgentTool,
       triggerRoutineTool,
       routineForgeTool,
@@ -168,12 +161,12 @@ describe("platform authorization declarations", () => {
   });
 });
 
-// ── load_skill ────────────────────────────────────────────────────────────────
+// ── skill (load mode) ─────────────────────────────────────────────────────────
 
-describe("loadSkillTool", () => {
+describe("skillTool loading a Skill", () => {
   it("returns skill frontmatter and body for a known skill", async () => {
     const ctx = makeCtx({ "data-analyst": makeSkill("data-analyst") });
-    const res = await loadSkillTool.handler({ name: "data-analyst" }, ctx);
+    const res = await skillTool.handler({ name: "data-analyst" }, ctx);
     expect(res).toMatchObject({
       success: true,
       data: {
@@ -186,12 +179,12 @@ describe("loadSkillTool", () => {
 
   it("returns not_found for an unknown skill", async () => {
     const ctx = makeCtx();
-    const res = await loadSkillTool.handler({ name: "unknown" }, ctx);
+    const res = await skillTool.handler({ name: "unknown" }, ctx);
     expect(res).toMatchObject({ success: false, error: { code: "not_found" } });
   });
 
   it("returns not_found when soulLoader is absent", async () => {
-    const res = await loadSkillTool.handler({ name: "anything" }, { soulWriter: makeSoulWriter() });
+    const res = await skillTool.handler({ name: "anything" }, { soulWriter: makeSoulWriter() });
     expect(res).toMatchObject({ success: false, error: { code: "not_found" } });
   });
 
@@ -200,7 +193,7 @@ describe("loadSkillTool", () => {
       soulWriter: makeSoulWriter(),
       bundledSkills: new Map([["resource-forge", makeBundledSkill("resource-forge")]]),
     };
-    const res = await loadSkillTool.handler({ name: "resource-forge" }, ctx);
+    const res = await skillTool.handler({ name: "resource-forge" }, ctx);
     expect(res).toMatchObject({
       success: true,
       data: {
@@ -211,7 +204,7 @@ describe("loadSkillTool", () => {
     });
   });
 
-  it("returns normalized available reference names for Soul and bundled Skills", async () => {
+  it("returns every addressable file for Soul and bundled Skills", async () => {
     const dir = await mkdtemp(join(tmpdir(), "skill-list-"));
     await mkdir(join(dir, "skills", "research", "references", "nested"), { recursive: true });
     await writeFile(join(dir, "skills", "research", "references", "z-last.md"), "last", "utf8");
@@ -221,60 +214,53 @@ describe("loadSkillTool", () => {
       "utf8"
     );
     try {
-      const soulResult = await loadSkillTool.handler(
+      const soulResult = await skillTool.handler(
         { name: "research" },
         makeCtx({ research: makeSkill("research") }, {}, dir)
       );
       expect(soulResult).toMatchObject({
         success: true,
-        data: { references: ["nested/first.md", "z-last.md"] },
+        data: { files: ["references/nested/first.md", "references/z-last.md"] },
       });
 
       const bundled: BundledSkill = {
         ...makeBundledSkill("bundled-research"),
-        references: ["z-last.md", "nested\\first.md"],
+        files: ["references/z-last.md", "references/nested\\first.md"],
       };
-      const bundledResult = await loadSkillTool.handler(
+      const bundledResult = await skillTool.handler(
         { name: "bundled-research" },
         { soulWriter: makeSoulWriter(), bundledSkills: new Map([[bundled.name, bundled]]) }
       );
       expect(bundledResult).toMatchObject({
         success: true,
-        data: { references: ["nested/first.md", "z-last.md"] },
+        data: { files: ["references/nested/first.md", "references/z-last.md"] },
       });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
   });
 
-  it("tells models to request only references advertised by load_skill", () => {
-    expect(loadSkillTool.description).toContain("available reference filenames");
-    expect(loadSkillReferenceTool.description).toContain(
-      "only a filename advertised by load_skill"
-    );
-    expect(JSON.stringify(loadSkillReferenceTool.inputSchema)).toContain(
-      "only a name advertised by load_skill"
-    );
+  it("tells models both modes, and that every supporting file is behind one argument", () => {
+    expect(skillTool.description).toContain("paths of every supporting file it carries");
+    expect(skillTool.description).toContain("references, schemas, assets and scripts");
+    expect(JSON.stringify(skillTool.inputSchema)).toContain("a path from the Skill's `files` list");
   });
 
   it("returns validation_error for missing name", async () => {
-    const res = await loadSkillTool.handler({}, makeCtx());
+    const res = await skillTool.handler({}, makeCtx());
     expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
   });
 });
 
 // ── complete_task ─────────────────────────────────────────────────────────────
 
-describe("loadSkillReferenceTool", () => {
+describe("skillTool reading a Skill file", () => {
   it("returns not_found when soulPath is not set", async () => {
-    const res = await loadSkillReferenceTool.handler(
-      { skill: "foo", reference: "bar.md" },
-      makeCtx()
-    );
+    const res = await skillTool.handler({ name: "foo", file: "references/bar.md" }, makeCtx());
     expect(res).toMatchObject({ success: false, error: { code: "not_found" } });
   });
 
-  it("returns not_found for a missing reference file", async () => {
+  it("returns not_found for a missing file", async () => {
     const dir = await mkdtemp(join(tmpdir(), "skill-ref-missing-"));
     await mkdir(join(dir, "skills", "foo", "references", "nested"), { recursive: true });
     await writeFile(join(dir, "skills", "foo", "references", "guide.md"), "guide", "utf8");
@@ -284,15 +270,15 @@ describe("loadSkillReferenceTool", () => {
       "utf8"
     );
     try {
-      const res = await loadSkillReferenceTool.handler(
-        { skill: "foo", reference: "missing.md" },
+      const res = await skillTool.handler(
+        { name: "foo", file: "references/missing.md" },
         makeCtx({ foo: makeSkill("foo") }, {}, dir)
       );
       expect(res).toMatchObject({
         success: false,
         error: {
           code: "not_found",
-          message: expect.stringContaining("guide.md, nested/details.md"),
+          message: expect.stringContaining("references/guide.md, references/nested/details.md"),
         },
       });
     } finally {
@@ -300,12 +286,13 @@ describe("loadSkillReferenceTool", () => {
     }
   });
 
-  it("redacts filesystem paths from unexpected reference inventory failures", async () => {
+  it("redacts filesystem paths from unexpected file inventory failures", async () => {
     const dir = await mkdtemp(join(tmpdir(), "skill-ref-redaction-"));
-    await mkdir(join(dir, "skills", "foo"), { recursive: true });
-    await writeFile(join(dir, "skills", "foo", "references"), "not a directory", "utf8");
+    await mkdir(join(dir, "skills"), { recursive: true });
+    // The Skill's own directory is the walk root, so a non-directory there is what fails the listing.
+    await writeFile(join(dir, "skills", "foo"), "not a directory", "utf8");
     try {
-      const res = await loadSkillTool.handler(
+      const res = await skillTool.handler(
         { name: "foo" },
         makeCtx({ foo: makeSkill("foo") }, {}, dir)
       );
@@ -313,7 +300,7 @@ describe("loadSkillReferenceTool", () => {
         success: false,
         error: {
           code: "internal_error",
-          message: 'Skill "foo" references are temporarily unavailable.',
+          message: 'Skill "foo" files are temporarily unavailable.',
         },
       });
       expect(JSON.stringify(res)).not.toContain(dir);
@@ -322,50 +309,72 @@ describe("loadSkillReferenceTool", () => {
     }
   });
 
-  it("returns validation_error for missing args", async () => {
-    const res = await loadSkillReferenceTool.handler({ skill: "foo" }, makeCtx());
+  it("returns validation_error when no Skill is named", async () => {
+    const res = await skillTool.handler({ file: "references/bar.md" }, makeCtx());
     expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
   });
 
-  it("rejects a reference that escapes the references directory (path traversal)", async () => {
-    const res = await loadSkillReferenceTool.handler(
-      { skill: "foo", reference: "../../../../../../../../etc/passwd" },
-      makeCtx({}, {}, "/some/soul")
+  it("rejects a file that escapes the Skill directory (path traversal)", async () => {
+    const res = await skillTool.handler(
+      { name: "foo", file: "../../../../../../../../etc/passwd" },
+      makeCtx({ foo: makeSkill("foo") }, {}, "/some/soul")
     );
     expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
   });
 
   it("rejects an unsafe skill name (path traversal)", async () => {
-    const res = await loadSkillReferenceTool.handler(
-      { skill: "../evil", reference: "guide.md" },
+    const res = await skillTool.handler(
+      { name: "../evil", file: "references/guide.md" },
       makeCtx({}, {}, "/some/soul")
     );
     expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
   });
 
-  it("loads a reference contained in the skill's references/ directory (incl. sub-paths)", async () => {
+  it("reads any companion the Skill layout addresses, not only references", async () => {
     const dir = await mkdtemp(join(tmpdir(), "skill-ref-"));
-    await mkdir(join(dir, "skills", "research", "references", "sub"), { recursive: true });
-    await writeFile(join(dir, "skills", "research", "references", "guide.md"), "top guide", "utf8");
-    await writeFile(
-      join(dir, "skills", "research", "references", "sub", "deep.md"),
-      "deep guide",
-      "utf8"
-    );
+    const skillDir = join(dir, "skills", "research");
+    await mkdir(join(skillDir, "references", "sub"), { recursive: true });
+    await mkdir(join(skillDir, "scripts"), { recursive: true });
+    await mkdir(join(skillDir, "schemas"), { recursive: true });
+    await writeFile(join(skillDir, "references", "guide.md"), "top guide", "utf8");
+    await writeFile(join(skillDir, "references", "sub", "deep.md"), "deep guide", "utf8");
+    await writeFile(join(skillDir, "scripts", "sync.ts"), "export {};", "utf8");
+    await writeFile(join(skillDir, "schemas", "ticket.json"), "{}", "utf8");
     try {
-      const top = await loadSkillReferenceTool.handler(
-        { skill: "research", reference: "guide.md" },
-        makeCtx({ research: makeSkill("research") }, {}, dir)
-      );
+      const ctx = () => makeCtx({ research: makeSkill("research") }, {}, dir);
+      const top = await skillTool.handler({ name: "research", file: "references/guide.md" }, ctx());
       expect(top).toEqual({
         success: true,
-        data: { skill: "research", reference: "guide.md", content: "top guide" },
+        data: { name: "research", file: "references/guide.md", content: "top guide" },
       });
-      const deep = await loadSkillReferenceTool.handler(
-        { skill: "research", reference: "sub/deep.md" },
-        makeCtx({ research: makeSkill("research") }, {}, dir)
+      const deep = await skillTool.handler(
+        { name: "research", file: "references/sub/deep.md" },
+        ctx()
       );
       expect(deep).toMatchObject({ success: true, data: { content: "deep guide" } });
+      const script = await skillTool.handler({ name: "research", file: "scripts/sync.ts" }, ctx());
+      expect(script).toMatchObject({ success: true, data: { content: "export {};" } });
+      const schema = await skillTool.handler(
+        { name: "research", file: "/schemas/ticket.json" },
+        ctx()
+      );
+      expect(schema).toMatchObject({ success: true, data: { content: "{}" } });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a file the Skill layout cannot address, so a stray secret stays unreadable", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "skill-stray-"));
+    await mkdir(join(dir, "skills", "research"), { recursive: true });
+    await writeFile(join(dir, "skills", "research", ".env"), "TOKEN=secret", "utf8");
+    try {
+      const res = await skillTool.handler(
+        { name: "research", file: ".env" },
+        makeCtx({ research: makeSkill("research") }, {}, dir)
+      );
+      expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
+      expect(JSON.stringify(res)).not.toContain("secret");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -381,19 +390,16 @@ describe("loadSkillReferenceTool", () => {
       bundledSkills: new Map([["research", makeBundledSkill("research", skillDirectory)]]),
     };
     try {
-      const loaded = await loadSkillReferenceTool.handler(
-        { skill: "research", reference: "guide.md" },
+      const loaded = await skillTool.handler(
+        { name: "research", file: "references/guide.md" },
         ctx
       );
       expect(loaded).toEqual({
         success: true,
-        data: { skill: "research", reference: "guide.md", content: "bundled guide" },
+        data: { name: "research", file: "references/guide.md", content: "bundled guide" },
       });
 
-      const escaped = await loadSkillReferenceTool.handler(
-        { skill: "research", reference: "../../outside.md" },
-        ctx
-      );
+      const escaped = await skillTool.handler({ name: "research", file: "../../outside.md" }, ctx);
       expect(escaped).toMatchObject({
         success: false,
         error: { code: "validation_error" },
@@ -410,28 +416,28 @@ describe("loadSkillReferenceTool", () => {
       soulWriter: makeSoulWriter(),
       bundledSkills: bundled,
     };
-    const examples = await loadSkillReferenceTool.handler(
-      { skill: "routine-forge", reference: "examples.md" },
+    const examples = await skillTool.handler(
+      { name: "routine-forge", file: "references/examples.md" },
       ctx
     );
     expect(examples).toMatchObject({
       success: true,
       data: {
-        skill: "routine-forge",
-        reference: "examples.md",
+        name: "routine-forge",
+        file: "references/examples.md",
         content: expect.stringContaining("Routine & Trigger Canonical Examples"),
       },
     });
 
-    const canonicalExamples = await loadSkillReferenceTool.handler(
-      { skill: "routine-forge", reference: "canonical-examples.md" },
+    const canonicalExamples = await skillTool.handler(
+      { name: "routine-forge", file: "references/canonical-examples.md" },
       ctx
     );
     expect(canonicalExamples).toMatchObject({
       success: true,
       data: {
-        skill: "routine-forge",
-        reference: "canonical-examples.md",
+        name: "routine-forge",
+        file: "references/canonical-examples.md",
         content: expect.stringContaining("Routine & Trigger Canonical Examples"),
       },
     });
@@ -670,78 +676,13 @@ describe("soulRepoPushTool", () => {
   });
 });
 
-// ── call_skill ────────────────────────────────────────────────────────────────
-
-describe("callSkillTool", () => {
-  const routineCtx = { routineId: "daily-digest", runId: "run-001" };
-
-  it("returns skill definition in routine context", async () => {
-    const ctx: PlatformToolContext = {
-      ...makeCtx({ summarize: makeSkill("summarize") }),
-      routineContext: routineCtx,
-    };
-    const res = await callSkillTool.handler({ name: "summarize" }, ctx);
-    expect(res).toEqual({
-      success: true,
-      data: {
-        name: "summarize",
-        frontmatter: { version: "1.0" },
-        body: "# summarize\nDoes things.",
-        args: null,
-      },
-    });
-  });
-
-  it("passes args through", async () => {
-    const ctx: PlatformToolContext = {
-      ...makeCtx({ summarize: makeSkill("summarize") }),
-      routineContext: routineCtx,
-    };
-    const res = await callSkillTool.handler({ name: "summarize", args: { limit: 10 } }, ctx);
-    expect(res).toMatchObject({ success: true, data: { args: { limit: 10 } } });
-  });
-
-  it("returns internal_error when no routineContext", async () => {
-    const ctx = makeCtx({ summarize: makeSkill("summarize") });
-    const res = await callSkillTool.handler({ name: "summarize" }, ctx);
-    expect(res).toMatchObject({ success: false, error: { code: "internal_error" } });
-  });
-
-  it("returns not_found for unknown skill in routine context", async () => {
-    const ctx: PlatformToolContext = { ...makeCtx(), routineContext: routineCtx };
-    const res = await callSkillTool.handler({ name: "ghost" }, ctx);
-    expect(res).toMatchObject({ success: false, error: { code: "not_found" } });
-  });
-
-  it("loads a bundled Skill in routine context", async () => {
-    const bundled = makeBundledSkill("summarize");
-    const ctx: PlatformToolContext = {
-      soulWriter: makeSoulWriter(),
-      routineContext: routineCtx,
-      bundledSkills: new Map([[bundled.name, bundled]]),
-    };
-    const res = await callSkillTool.handler({ name: "summarize" }, ctx);
-    expect(res).toMatchObject({
-      success: true,
-      data: { name: "summarize", body: bundled.body },
-    });
-  });
-
-  it("returns validation_error for missing name", async () => {
-    const ctx: PlatformToolContext = { ...makeCtx(), routineContext: routineCtx };
-    const res = await callSkillTool.handler({}, ctx);
-    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
-  });
-});
-
 // ── complete_state ────────────────────────────────────────────────────────────
 
 describe("PLATFORM_TOOLS registry", () => {
   it("exports the consolidated platform tool set in order", () => {
     const names = PLATFORM_TOOLS.map((t) => t.name);
     expect(names).toEqual([
-      "load_skill",
-      "load_skill_reference",
+      "skill",
       "delegate_to_agent",
       "spawn_subagent",
       "trigger_routine",
@@ -750,7 +691,6 @@ describe("PLATFORM_TOOLS registry", () => {
       "routine_delete",
       "guardrail_forge",
       "soul_repo_push",
-      "call_skill",
       "validate_artifact",
       "complete_state",
       "complete_task",
@@ -763,7 +703,7 @@ describe("PLATFORM_TOOLS registry", () => {
     expect(byName.trigger_routine).toBe(true);
     expect(byName.routine_picker).toBe(false);
     expect(byName.soul_repo_push).toBe(true);
-    expect(byName.call_skill).toBe(false);
+    expect(byName.skill).toBe(false);
     expect(byName.complete_state).toBe(true);
   });
 });
