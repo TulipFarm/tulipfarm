@@ -2,13 +2,21 @@ import { apiDelete, apiGet, apiWrite } from "./api";
 
 /* Skill installs publish executable commands only after server-side package/runtime gates pass. */
 
-export type SkillProvenance = "builtin" | "marketplace" | "user";
+/**
+ * Where a Skill came from, mirroring `skills-lock.json`.
+ *
+ * `bundled` ships with the app, `marketplace` comes from the official catalog, `public` from any
+ * other source on the internet, and `curated` was authored in this business.
+ */
+export type SkillProvenance = "bundled" | "marketplace" | "public" | "curated";
 
 export type SkillSummary = {
   name: string;
   description?: string;
   provenance: SkillProvenance;
-  // For marketplace skills: the git source (e.g. "owner/repo"). Undefined for builtin/user.
+  /** The Skill's own version, from its SKILL.md. */
+  version?: string;
+  // The git source (e.g. "owner/repo") for an installed Skill. Undefined for bundled/curated.
   source?: string;
 };
 

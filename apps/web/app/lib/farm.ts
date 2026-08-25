@@ -210,7 +210,7 @@ const HARVESTERS: ReadonlyArray<{ kind: CropKind; harvest: () => Promise<Plantin
       (await listSkills())
         // Built-in skills ship with every instance. The farm is what this business built, so a
         // skill only earns a tulip once someone installed or authored it here.
-        .filter((skill) => skill.provenance !== "builtin")
+        .filter((skill) => skill.provenance !== "bundled")
         .map((skill) => ({
           id: `skill:${skill.name}`,
           kind: "skill" as const,

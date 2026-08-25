@@ -65,6 +65,7 @@ function makeSoulWriter(existingCompanions: ReadonlySet<string> = new Set()): So
     readCompanion: vi.fn((_kind: string, slug: string, name: string) =>
       existingCompanions.has(`${slug}/${name}`) ? "existing content" : null
     ),
+    readWithBase: vi.fn().mockResolvedValue({ content: null, baseCommit: "abc1234" }),
   } as unknown as SoulWriter;
 }
 
@@ -79,6 +80,17 @@ function lastApply(soulWriter: SoulWriter): SoulWriteRequest {
 function appliedContent(soulWriter: SoulWriter): string {
   const change = lastApply(soulWriter).changes[0];
   return change.op === "put" ? change.content : "";
+}
+
+/** The Skill's entry in the `skills-lock.json` the last changeset wrote. */
+function lockedEntry(soulWriter: SoulWriter, name: string): unknown {
+  const change = lastApply(soulWriter).changes.find(
+    (c) => c.op === "put" && c.target.kind === "SkillsLock"
+  );
+  const lock = JSON.parse(change?.op === "put" ? change.content : "{}") as {
+    skills?: Record<string, unknown>;
+  };
+  return lock.skills?.[name];
 }
 
 function makeSoulLoader(skills: SoulSkill[] = []): SoulLoader {
@@ -203,13 +215,18 @@ describe("skill_create", () => {
         auditReport: FAKE_REPORT,
       },
     });
-    // A single SKILL.md companion put lands atomically through the write gateway.
+    // The SKILL.md companion and the ownership record land atomically through the write gateway.
     expect(lastApply(ctx.soulWriter)).toMatchObject({
       subject: "soul: add skill code-review",
       source: "agent",
       changes: [
         { op: "put", target: { kind: "Skill", slug: "code-review", companion: "SKILL.md" } },
+        { op: "put", target: { kind: "SkillsLock" } },
       ],
+    });
+    expect(lockedEntry(ctx.soulWriter, "code-review")).toEqual({
+      sourceType: "curated",
+      version: "1.0.0",
     });
     const content = appliedContent(ctx.soulWriter);
     expect(content).toContain("_pendingAudit: true");
@@ -503,7 +520,13 @@ describe("skill_update", () => {
       source: "agent",
       changes: [
         { op: "put", target: { kind: "Skill", slug: "code-review", companion: "SKILL.md" } },
+        { op: "put", target: { kind: "SkillsLock" } },
       ],
+    });
+    // An edit with no version of its own still has to be distinguishable from what it replaced.
+    expect(lockedEntry(ctx.soulWriter, "code-review")).toEqual({
+      sourceType: "curated",
+      version: "1.0.1",
     });
     expect(ctx.gitSync.withSyncPaths).not.toHaveBeenCalled();
     expect(mockBuildAudit).not.toHaveBeenCalled();
@@ -692,6 +715,34 @@ describe("skill_update", () => {
     });
   });
 
+  it("keeps an author's non-semver version when a full frontmatter replacement omits it", async () => {
+    const versioned: SoulSkill = {
+      name: "code-review",
+      frontmatter: frontmatter("code-review", { version: "2.0" }),
+      body: "Old body.",
+    };
+    const res = await updateTool.handler(
+      { name: "code-review", body: "New." },
+      makeCtx([versioned])
+    );
+
+    expect(res).toMatchObject({ success: true, data: { frontmatter: { version: "2.0" } } });
+  });
+
+  it("bumps the patch when the previous version is one it can move", async () => {
+    const versioned: SoulSkill = {
+      name: "code-review",
+      frontmatter: frontmatter("code-review", { version: "2.4.9" }),
+      body: "Old body.",
+    };
+    const res = await updateTool.handler(
+      { name: "code-review", body: "New." },
+      makeCtx([versioned])
+    );
+
+    expect(res).toMatchObject({ success: true, data: { frontmatter: { version: "2.4.10" } } });
+  });
+
   it("preserves a server-set pending audit marker without returning it as public frontmatter", async () => {
     const pending: SoulSkill = {
       name: "code-review",
@@ -772,7 +823,7 @@ describe("skill_update", () => {
     expect(disabled.has("resource-forge")).toBe(false);
     expect(ctx.gitSync.withSyncPaths).toHaveBeenCalledWith(
       "soul: update skill resource-forge",
-      ["skills/resource-forge", "skills/.bundled-disabled.json"],
+      ["skills/resource-forge", "skills/.bundled-disabled.json", "skills-lock.json"],
       undefined
     );
   });
@@ -820,18 +871,18 @@ describe("skill_get", () => {
         name: "planner",
         frontmatter: { tags: ["planning"] },
         body: "Plan.",
-        provenance: "soul",
+        provenance: "curated",
       },
     });
   });
 
-  it("reads a bundled Skill with builtin provenance", async () => {
+  it("reads a bundled Skill with bundled provenance", async () => {
     const bundled = bundledSkill("resource-forge");
     const ctx = makeCtx([], undefined, [bundled]);
     const res = await getTool.handler({ name: bundled.name }, ctx);
     expect(res).toMatchObject({
       success: true,
-      data: { name: bundled.name, body: bundled.body, provenance: "builtin" },
+      data: { name: bundled.name, body: bundled.body, provenance: "bundled" },
     });
   });
 
@@ -869,9 +920,9 @@ describe("skill_list", () => {
     expect(skills).toContainEqual({
       name: "code-review",
       frontmatter: { tags: ["review"] },
-      provenance: "soul",
+      provenance: "curated",
     });
-    expect(skills).toContainEqual({ name: "planner", frontmatter: {}, provenance: "soul" });
+    expect(skills).toContainEqual({ name: "planner", frontmatter: {}, provenance: "curated" });
   });
 });
 

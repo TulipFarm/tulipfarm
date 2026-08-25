@@ -19,16 +19,21 @@ import {
   type GitSyncService,
   isSoulWriteError,
   mergedSkills,
+  mutateSkillsLock,
   parseFrontmatter,
   persistDisabledBundledSkills,
+  readSkillsLock,
   resolveSkill,
   SkillMarketplaceError,
   type SkillMarketplaceFlow,
   type SkillScanFile,
+  type SkillSourceType,
+  type SkillsLock,
   type SoulLoader,
   type SoulSkill,
   type SoulWrite,
   type SoulWriter,
+  serializeSkillsLock,
   soulWriteHttpError,
 } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -65,18 +70,13 @@ type SkillPackageDetail = {
     blocker?: string;
   }[];
 };
-type LockEntry = {
-  sourceUrl?: string;
-  sourceType?: string;
-  skillPath?: string;
-  ref?: string;
-  hash?: string;
-};
-type SkillsLock = { version: number; skills: Record<string, LockEntry> };
 type SkillSummary = {
   name: string;
   description?: string;
-  provenance: "builtin" | "marketplace" | "user";
+  /** Where the Skill came from, read straight from `skills-lock.json`. */
+  provenance: SkillSourceType;
+  /** The Skill's own version, as declared in its `SKILL.md`. */
+  version?: string;
   source?: string;
   pendingAudit: boolean;
 };
@@ -203,23 +203,16 @@ export function createSkillMarketplaceFlow(deps: {
     },
   });
 }
-async function readLock(soulPath: string): Promise<SkillsLock> {
-  try {
-    const parsed = JSON.parse(
-      await readFile(join(soulPath, "skills-lock.json"), "utf8")
-    ) as SkillsLock;
-    return { version: parsed.version ?? 1, skills: parsed.skills ?? {} };
-  } catch {
-    return { version: 1, skills: {} };
-  }
-}
 function toSkillSummary(skill: SoulSkill, lock: SkillsLock, bundledOnly = false): SkillSummary {
   const locked = lock.skills[skill.name];
+  // A Skill only in the image has no Soul entry yet; the boot sync has not run or it is disabled.
+  const provenance: SkillSourceType = bundledOnly ? "bundled" : (locked?.sourceType ?? "curated");
   return {
     name: skill.name,
     description: asString(skill.frontmatter.description),
-    provenance: bundledOnly ? "builtin" : locked ? "marketplace" : "user",
-    source: locked?.sourceUrl,
+    provenance,
+    version: locked?.version ?? asString(skill.frontmatter.version),
+    source: provenance === "bundled" ? undefined : locked?.sourceUrl,
     pendingAudit: skill.frontmatter._pendingAudit === true,
   };
 }
@@ -270,7 +263,7 @@ export function registerSkillRoutes(
       },
     },
     async () => {
-      const lock = await readLock(gitSync.path);
+      const lock = await readSkillsLock(gitSync.path);
       const skills = Array.from(
         mergedSkills(soulLoader, bundledSkills, disabledBundledSkills).values()
       ).map((skill) => toSkillSummary(skill, lock, !soulLoader.skills.has(skill.name)));
@@ -336,7 +329,7 @@ export function registerSkillRoutes(
       const { name } = req.params as { name: string };
       const skill = resolveSkill(name, soulLoader, bundledSkills, disabledBundledSkills);
       if (!skill) return reply.code(404).send({ error: `skill not found: ${name}` });
-      const lock = await readLock(gitSync.path);
+      const lock = await readSkillsLock(gitSync.path);
       const bundled = bundledSkills.get(name);
       const directory = soulLoader.skills.has(name)
         ? join(gitSync.path, "skills", name)
@@ -375,23 +368,24 @@ export function registerSkillRoutes(
         !resolveSkill(name, soulLoader, bundledSkills, disabledBundledSkills)
       )
         return reply.code(404).send({ error: `skill not found: ${name}` });
-      const lock = await readLock(gitSync.path);
-      delete lock.skills[name];
-      const changes: SoulWrite[] = [];
-      if (soulLoader.skills.has(name))
-        changes.push({ op: "deleteArtifact", kind: "Skill", slug: name });
-      changes.push({
-        op: "put",
-        target: { kind: "SkillsLock" },
-        content: `${JSON.stringify(lock, null, 2)}\n`,
-      });
       try {
-        await soulWriter.apply({
-          subject: `soul: remove skill ${name}`,
-          source: "api",
-          actor: commitActorFromRequest(req),
-          businessId: DEPLOYMENT_BUSINESS_ID,
-          changes,
+        await mutateSkillsLock(soulWriter, gitSync.path, (lock) => {
+          delete lock.skills[name];
+          const changes: SoulWrite[] = [];
+          if (soulLoader.skills.has(name))
+            changes.push({ op: "deleteArtifact", kind: "Skill", slug: name });
+          changes.push({
+            op: "put",
+            target: { kind: "SkillsLock" },
+            content: serializeSkillsLock(lock),
+          });
+          return {
+            subject: `soul: remove skill ${name}`,
+            source: "api",
+            actor: commitActorFromRequest(req),
+            businessId: DEPLOYMENT_BUSINESS_ID,
+            changes,
+          };
         });
       } catch (error) {
         return rethrowSoulWriteError(reply, error);

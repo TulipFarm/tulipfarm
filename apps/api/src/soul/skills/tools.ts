@@ -16,16 +16,28 @@ import {
 } from "@tulipfarm/schema";
 import {
   type BundledSkill,
+  bumpPatch,
+  DEFAULT_SKILL_VERSION,
   DISABLED_BUNDLED_SKILLS_FILE,
   type GitSyncService,
+  isSkillVersion,
   mergedSkills,
+  mutateSkillsLock,
   persistDisabledBundledSkills,
+  readSkillsLock,
   resolveSkill,
+  SKILLS_LOCK_FILE,
+  type SkillSourceType,
+  type SkillsLock,
   type SoulLoader,
+  type SoulWrite,
   SoulWriteError,
   type SoulWriter,
   scanSkill,
+  serializeSkillsLock,
+  serializeSkillsLockWrites,
   skillTrustLevel,
+  skillVersion,
 } from "@tulipfarm/soul";
 import {
   type ApiToolDefinition,
@@ -135,9 +147,12 @@ const skillCreate = defineApiTool<SkillToolContext>({
       frontmatter: Record<string, unknown>;
     };
 
-    const pendingFm = { ...frontmatter, _pendingAudit: true };
+    // A Skill is versioned from birth so the lock records something meaningful for every entry.
+    const version = skillVersion(frontmatter);
+    const authoredFm = { ...frontmatter, version };
+    const pendingFm = { ...authoredFm, _pendingAudit: true };
     const content = serializeSkill(pendingFm, body);
-    const validation = validateSkill({ name, frontmatter, body, content });
+    const validation = validateSkill({ name, frontmatter: authoredFm, body, content });
     if (!validation.valid) return err("validation_error", validation.error);
 
     if (
@@ -170,15 +185,16 @@ const skillCreate = defineApiTool<SkillToolContext>({
     // Commit with the _pendingAudit marker so the skill lands committed but inactive until an
     // operator confirms it. One companion put is the whole changeset — atomic through the gateway.
     try {
-      await ctx.soulWriter.apply({
+      await mutateSkillsLock(ctx.soulWriter, ctx.gitSync.path, (lock) => ({
         subject: `soul: add skill ${name}`,
         source: "agent",
         actor: ctx.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
         businessId: DEPLOYMENT_BUSINESS_ID,
         changes: [
           { op: "put", target: { kind: "Skill", slug: name, companion: "SKILL.md" }, content },
+          curatedLockWrite(lock, name, version),
         ],
-      });
+      }));
     } catch (e) {
       if (e instanceof SoulWriteError) {
         return mapSoulWriteError(e, () => err("validation_error", "skill already exists"));
@@ -285,7 +301,19 @@ const skillUpdate = defineApiTool<SkillToolContext>({
         ? existing.body.replaceAll(old_string, new_string)
         : existing.body.replace(old_string, new_string);
     }
-    const newFm = frontmatter ?? existingPublic.frontmatter;
+    // The author owns the version. When they leave it alone an edit still has to be
+    // distinguishable from what it replaced, so the patch moves for them — but only if what is
+    // there is a version we can move; anything else is theirs and survives untouched.
+    const authoredFm = frontmatter ?? existingPublic.frontmatter;
+    const declared = asVersionString(authoredFm.version);
+    const previous = asVersionString(existingPublic.frontmatter.version) ?? DEFAULT_SKILL_VERSION;
+    const version =
+      declared !== undefined && declared !== previous
+        ? declared
+        : isSkillVersion(previous)
+          ? bumpPatch(previous)
+          : previous;
+    const newFm = { ...authoredFm, version };
     const persistedFm = existingPublic.pendingAudit ? { ...newFm, _pendingAudit: true } : newFm;
     const content = serializeSkill(persistedFm, newBody);
     const validation = validateSkill({ name, frontmatter: newFm, body: newBody, content });
@@ -297,15 +325,16 @@ const skillUpdate = defineApiTool<SkillToolContext>({
     // expressed as an artifact-addressed changeset, so those keep the git-sync commit below.
     if (soulSkill && !ctx.disabledBundledSkills.has(name)) {
       try {
-        await ctx.soulWriter.apply({
+        await mutateSkillsLock(ctx.soulWriter, ctx.gitSync.path, (lock) => ({
           subject: `soul: update skill ${name}`,
           source: "agent",
           actor: ctx.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
           businessId: DEPLOYMENT_BUSINESS_ID,
           changes: [
             { op: "put", target: { kind: "Skill", slug: name, companion: "SKILL.md" }, content },
+            curatedLockWrite(lock, name, version),
           ],
-        });
+        }));
       } catch (e) {
         if (e instanceof SoulWriteError) {
           return mapSoulWriteError(e, () => err("not_found", `skill not found: ${name}`));
@@ -316,38 +345,51 @@ const skillUpdate = defineApiTool<SkillToolContext>({
     }
 
     const skillFile = join(ctx.gitSync.path, "skills", name, "SKILL.md");
-    try {
-      if (!soulSkill && bundledSkill) {
-        // soul-write-exception: materialising a bundled Skill copies an arbitrary companion tree
-        // out of the bundle, which is not an artifact-addressed write. The commit below stages
-        // only these paths via `withSyncPaths`, so no unrelated worktree state is swept in.
-        await mkdir(join(ctx.gitSync.path, "skills"), { recursive: true });
-        await cp(bundledSkill.directory, join(ctx.gitSync.path, "skills", name), {
-          recursive: true,
-          errorOnExist: true,
-          force: false,
-        });
+    // This path writes the lock straight to the worktree, so it cannot carry a base revision the
+    // gateway would check. Joining the same queue as every other lock writer is what keeps its
+    // read-modify-write from losing a concurrent entry.
+    const failure = await serializeSkillsLockWrites(ctx.gitSync.path, async () => {
+      try {
+        if (!soulSkill && bundledSkill) {
+          // soul-write-exception: materialising a bundled Skill copies an arbitrary companion tree
+          // out of the bundle, which is not an artifact-addressed write. The commit below stages
+          // only these paths via `withSyncPaths`, so no unrelated worktree state is swept in.
+          await mkdir(join(ctx.gitSync.path, "skills"), { recursive: true });
+          await cp(bundledSkill.directory, join(ctx.gitSync.path, "skills", name), {
+            recursive: true,
+            errorOnExist: true,
+            force: false,
+          });
+        }
+        await writeFile(skillFile, content, "utf8");
+        if (ctx.disabledBundledSkills.delete(name)) {
+          await persistDisabledBundledSkills(ctx.gitSync.path, ctx.disabledBundledSkills);
+        }
+        await writeFile(
+          join(ctx.gitSync.path, SKILLS_LOCK_FILE),
+          curatedLockContent(await readSkillsLock(ctx.gitSync.path), name, version),
+          "utf8"
+        );
+      } catch (e) {
+        return err("internal_error", reason(e));
       }
-      await writeFile(skillFile, content, "utf8");
-      if (ctx.disabledBundledSkills.delete(name)) {
-        await persistDisabledBundledSkills(ctx.gitSync.path, ctx.disabledBundledSkills);
-      }
-    } catch (e) {
-      return err("internal_error", reason(e));
-    }
 
-    try {
-      // Materialising a bundled Skill copies a whole companion tree and clears the bundled
-      // tombstone — neither is an artifact-addressed write, so this path cannot use the gateway.
-      // `withSyncPaths` still names what it stages, so unrelated worktree state is never swept in.
-      await ctx.gitSync.withSyncPaths(
-        `soul: update skill ${name}`,
-        [join("skills", name), join("skills", DISABLED_BUNDLED_SKILLS_FILE)],
-        ctx.requestContext?.actor
-      );
-    } catch (e) {
-      return soulCommitError(e, reason(e));
-    }
+      try {
+        // Materialising a bundled Skill copies a whole companion tree and clears the bundled
+        // tombstone — neither is an artifact-addressed write, so this path cannot use the gateway.
+        // `withSyncPaths` still names what it stages, so unrelated worktree state is never swept
+        // in.
+        await ctx.gitSync.withSyncPaths(
+          `soul: update skill ${name}`,
+          [join("skills", name), join("skills", DISABLED_BUNDLED_SKILLS_FILE), SKILLS_LOCK_FILE],
+          ctx.requestContext?.actor
+        );
+      } catch (e) {
+        return soulCommitError(e, reason(e));
+      }
+      return null;
+    });
+    if (failure !== null) return failure;
 
     try {
       await ctx.soulLoader.reload();
@@ -358,6 +400,38 @@ const skillUpdate = defineApiTool<SkillToolContext>({
     return ok({ name, frontmatter: validation.frontmatter, body: newBody });
   },
 });
+
+function asVersionString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+/**
+ * The lock content that records `name` as this instance's own Skill at `version`.
+ *
+ * Authoring is what makes a Skill yours: an edit to a bundled or installed Skill rewrites its entry
+ * as `curated`, which is also how the boot sync learns to stop refreshing it from upstream.
+ */
+function curatedLockContent(lock: SkillsLock, name: string, version: string): string {
+  // The lock is a comparable inventory, so it only ever holds a real version.
+  lock.skills[name] = { sourceType: "curated", version: skillVersion({ version }) };
+  return serializeSkillsLock(lock);
+}
+
+function curatedLockWrite(lock: SkillsLock, name: string, version: string): SoulWrite {
+  return {
+    op: "put",
+    target: { kind: "SkillsLock" },
+    content: curatedLockContent(lock, name, version),
+  };
+}
+
+/**
+ * Provenance for a Skill an Agent can see. The lock is authoritative; a Skill present only in the
+ * image has no entry because the boot sync has not copied it in yet.
+ */
+function lockProvenance(lock: SkillsLock, name: string, inSoul: boolean): SkillSourceType {
+  return lock.skills[name]?.sourceType ?? (inSoul ? "curated" : "bundled");
+}
 
 // ── skill_get ─────────────────────────────────────────────────────────────────
 
@@ -380,14 +454,14 @@ const skillGet = defineApiTool<SkillToolContext>({
   handler: async (args, ctx) => {
     if (!validateGet(args)) return err("validation_error", firstError(validateGet.errors));
     const { name } = args as { name: string };
-    const soulSkill = ctx.soulLoader.skills.get(name);
     const skill = resolveSkill(name, ctx.soulLoader, ctx.bundledSkills, ctx.disabledBundledSkills);
     if (!skill) return err("not_found", `skill not found: ${name}`);
+    const lock = await readSkillsLock(ctx.gitSync.path);
     return ok({
       name: skill.name,
       frontmatter: skill.frontmatter,
       body: skill.body,
-      provenance: soulSkill ? "soul" : "builtin",
+      provenance: lockProvenance(lock, name, ctx.soulLoader.skills.has(name)),
     });
   },
 });
@@ -415,13 +489,14 @@ const skillList = defineApiTool<SkillToolContext>({
       live === undefined || live.size === 0
         ? ctx.disabledBundledSkills
         : new Set([...ctx.disabledBundledSkills, ...live]);
+    const lock = await readSkillsLock(ctx.gitSync.path);
     const skills = Array.from(mergedSkills(ctx.soulLoader, ctx.bundledSkills, hidden).values())
       // A Skill installed from an untrusted source stays out of the catalogue until it is audited.
       .filter(({ frontmatter }) => frontmatter._pendingAudit !== true)
       .map(({ name, frontmatter }) => ({
         name,
         frontmatter,
-        provenance: ctx.soulLoader.skills.has(name) ? "soul" : "builtin",
+        provenance: lockProvenance(lock, name, ctx.soulLoader.skills.has(name)),
       }));
     return ok({ skills });
   },

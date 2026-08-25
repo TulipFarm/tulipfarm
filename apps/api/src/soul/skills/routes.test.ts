@@ -188,7 +188,7 @@ describe("skills routes", () => {
       push: vi.fn(),
     } as unknown as GitSyncService;
 
-    // Mark one skill as marketplace-installed so provenance differs from the hand-authored one.
+    // Mark one skill as installed from outside so provenance differs from the hand-authored one.
     await writeFile(
       join(soulPath, "skills-lock.json"),
       JSON.stringify({
@@ -207,6 +207,8 @@ describe("skills routes", () => {
       exists: (kind, slug) => writer.exists(kind, slug),
       read: (kind, slug) => writer.read(kind, slug),
       readCompanion: (kind, slug, name) => writer.readCompanion(kind, slug, name),
+      readWithBase: (kind, slug) => writer.readWithBase(kind, slug),
+      readCompanionWithBase: (kind, slug, name) => writer.readCompanionWithBase(kind, slug, name),
       apply: async (request) => {
         const result = await writer.apply(request);
         commits.push(request.subject);
@@ -257,14 +259,15 @@ describe("skills routes", () => {
       expect(skills).toContainEqual({
         name: "installed-skill",
         description: "From the marketplace.",
-        provenance: "marketplace",
+        provenance: "public",
+        version: "1.0.0",
         source: "owner/repo",
         pendingAudit: false,
       });
       expect(skills).toContainEqual({
         name: "my-skill",
         description: "Authored by hand.",
-        provenance: "user",
+        provenance: "curated",
         pendingAudit: false,
       });
     });
@@ -289,7 +292,7 @@ describe("skills routes", () => {
       );
     });
 
-    it("lists bundled Skills with builtin provenance", async () => {
+    it("lists bundled Skills with bundled provenance", async () => {
       const res = await app.inject({
         method: "GET",
         url: "/api/v1/skills",
@@ -300,7 +303,7 @@ describe("skills routes", () => {
       expect(res.json().skills).toContainEqual({
         name: "resource-forge",
         description: "Bundled Resource forge.",
-        provenance: "builtin",
+        provenance: "bundled",
         pendingAudit: false,
       });
     });
@@ -319,7 +322,7 @@ describe("skills routes", () => {
         res
           .json()
           .skills.filter((entry: { name: string }) => entry.name !== "resource-forge")
-          .every((entry: { provenance: string }) => entry.provenance === "user")
+          .every((entry: { provenance: string }) => entry.provenance === "curated")
       ).toBe(true);
     });
   });
@@ -336,7 +339,7 @@ describe("skills routes", () => {
       expect(res.json().body).toContain("Authored by hand");
     });
 
-    it("returns a bundled Skill with builtin provenance", async () => {
+    it("returns a bundled Skill with bundled provenance", async () => {
       const res = await app.inject({
         method: "GET",
         url: "/api/v1/skills/resource-forge",
@@ -346,7 +349,7 @@ describe("skills routes", () => {
       expect(res.statusCode).toBe(200);
       expect(res.json()).toMatchObject({
         name: "resource-forge",
-        provenance: "builtin",
+        provenance: "bundled",
         body: "# resource-forge\nBundled Resource forge.",
       });
     });
@@ -658,7 +661,8 @@ spec:
       // Spec SKL-V1-001: provenance is recorded as (sourceUrl, ref, hash).
       expect(lock.skills["demo-skill"]).toMatchObject({
         sourceUrl: fileUrl,
-        sourceType: "git",
+        sourceType: "public",
+        version: "1.0.0",
         skillPath: join("skills", "demo-skill", "SKILL.md"),
       });
       expect(lock.skills["demo-skill"].hash).toMatch(/^[0-9a-f]{64}$/);
@@ -1645,7 +1649,8 @@ spec:
           skills: {
             "demo-skill": {
               sourceUrl: source,
-              sourceType: "git",
+              sourceType: "public",
+              version: "1.0.0",
               hash: "0".repeat(64),
             },
           },
@@ -1719,7 +1724,8 @@ spec:
           skills: {
             "demo-skill": {
               sourceUrl: "owner/other-catalog",
-              sourceType: "github",
+              sourceType: "public",
+              version: "1.0.0",
               hash: "0".repeat(64),
             },
           },

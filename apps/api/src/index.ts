@@ -63,6 +63,7 @@ import {
   SoulLoader,
   SoulPublicationCoordinator,
   SoulPublisher,
+  syncBundledSkillsIntoSoul,
 } from "@tulipfarm/soul";
 import {
   ArtifactStore,
@@ -462,6 +463,23 @@ async function boot() {
     });
     const bundledSkills = await loadBundledSkills(console);
     const disabledBundledSkills = await loadDisabledBundledSkills(soulPath, console);
+    // Built-in Skills are authored artifacts, not a hidden overlay: seed them into the Soul repo so
+    // they are versioned, inspectable and editable through the product. Never fatal — a Soul that
+    // cannot be written still serves the Skills from the read-only bundled overlay.
+    try {
+      await syncBundledSkillsIntoSoul({
+        soulPath,
+        bundledSkills,
+        disabledBundledSkills,
+        soulWriter,
+        actor: SOUL_SYNC_COMMIT_ACTOR,
+        logger: console,
+      });
+    } catch (err) {
+      console.error(
+        `Soul: seeding built-in skills failed (${err instanceof Error ? err.message : String(err)}) — they remain available from the bundled overlay`
+      );
+    }
     const bundledIntegrations = await loadBundledIntegrations(console);
 
     // Per-type resource tables can't be created lazily (no `db.collection(type)`):

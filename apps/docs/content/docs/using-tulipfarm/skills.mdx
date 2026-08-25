@@ -28,6 +28,19 @@ The install flow scans a repository, runs **SkillAudit** — the product's own s
 a skill would be allowed to do — and then installs only after operator confirmation. Installed
 skills are written to `soul/skills/{name}/` and pinned in `skills-lock.json` with provenance.
 
+Every skill on your instance has an entry in `skills-lock.json` recording where it came from and
+which version is installed:
+
+| `sourceType` | Where it came from |
+| --- | --- |
+| `bundled` | Shipped with TulipFarm and seeded into your soul at startup. |
+| `marketplace` | Installed from the official TulipFarm skills catalog. |
+| `public` | Installed from any other source — a GitHub repository or git remote. |
+| `curated` | Authored on this instance, through chat or the UI. |
+
+Editing a skill makes it yours: the entry is rewritten as `curated`, and TulipFarm stops
+refreshing it from wherever it came from.
+
 The complete selected skill directory is preserved. A canonical `skill.yaml` is generated for a
 compatible `SKILL.md`-only package; an executable package supplies its command declarations and
 sandbox-backed tool contracts explicitly.
