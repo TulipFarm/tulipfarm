@@ -55,22 +55,27 @@ fi
 step "Smoke-testing every runtime in the container"
 smoke_dir="$(mktemp -d)"
 trap 'rm -rf "${smoke_dir}"' EXIT
-mkdir -p "${smoke_dir}/input/entrypoint" "${smoke_dir}/input/artifacts" "${smoke_dir}/output"
+mkdir -p "${smoke_dir}/input/entrypoint" "${smoke_dir}/input/artifacts"
 printf '{"message":"smoke test"}' > "${smoke_dir}/input/artifacts/0-input.json"
 
+# Docker Desktop's virtiofs share invalidates a bind-mounted directory once the host deletes a
+# file the container created, so each probe gets its own output directory rather than a reused one.
+probe_index=0
 for entry in "probe.sh bash" "probe.py python3" "probe.ts tsx" "probe-inline.sh bash"; do
   set -- ${entry}
   file="$1"; interpreter="$2"
+  probe_index=$((probe_index + 1))
+  out_dir="${smoke_dir}/output-${probe_index}"
+  mkdir -p "${out_dir}"
   cp "${FIXTURE_DIR}/skills/skill-runtime-probe/scripts/${file}" "${smoke_dir}/input/entrypoint/${file}"
-  rm -f "${smoke_dir}/output/result.json"
   docker run --rm --read-only --network=none \
     --env TULIP_INPUT_DIR=/tulip/input/artifacts \
     --env TULIP_OUTPUT_DIR=/tulip/output \
     --mount "type=bind,source=${smoke_dir}/input,target=/tulip/input,readonly" \
-    --mount "type=bind,source=${smoke_dir}/output,target=/tulip/output" \
+    --mount "type=bind,source=${out_dir},target=/tulip/output" \
     "${runtime_ref}" "${interpreter}" "/tulip/input/entrypoint/${file}"
-  [[ -f "${smoke_dir}/output/result.json" ]] || { echo "${file} wrote no result.json" >&2; exit 1; }
-  echo "  ${file} -> $(cat "${smoke_dir}/output/result.json")"
+  [[ -f "${out_dir}/result.json" ]] || { echo "${file} wrote no result.json" >&2; exit 1; }
+  echo "  ${file} -> $(cat "${out_dir}/result.json")"
 done
 
 step "Smoke-testing egress: curl and wget through the allowlisting proxy"
@@ -96,20 +101,18 @@ if [[ ! -d "${SOUL_DIR}/.git" ]]; then
   echo "no Soul repo at ${SOUL_DIR}. Run scripts/setup-dev.sh first, or set SOUL_PATH." >&2
   exit 1
 fi
-mkdir -p "${SOUL_DIR}/skills" "${SOUL_DIR}/tools" "${SOUL_DIR}/routines"
+mkdir -p "${SOUL_DIR}/skills" "${SOUL_DIR}/tools"
 rm -rf \
   "${SOUL_DIR}/skills/skill-runtime-probe" \
   "${SOUL_DIR}/tools/skill-runtime-probe-shell" \
   "${SOUL_DIR}/tools/skill-runtime-probe-python" \
   "${SOUL_DIR}/tools/skill-runtime-probe-typescript" \
   "${SOUL_DIR}/tools/skill-runtime-probe-inline" \
-  "${SOUL_DIR}/tools/skill-runtime-probe-network" \
-  "${SOUL_DIR}/routines/skill-runtime-probe"
+  "${SOUL_DIR}/tools/skill-runtime-probe-network"
 cp -R "${FIXTURE_DIR}/skills/skill-runtime-probe" "${SOUL_DIR}/skills/"
 cp -R "${FIXTURE_DIR}/tools/." "${SOUL_DIR}/tools/"
-cp -R "${FIXTURE_DIR}/routines/skill-runtime-probe" "${SOUL_DIR}/routines/"
 
-git -C "${SOUL_DIR}" add skills/skill-runtime-probe tools routines/skill-runtime-probe
+git -C "${SOUL_DIR}" add --all skills/skill-runtime-probe tools
 if git -C "${SOUL_DIR}" diff --cached --quiet; then
   echo "already installed and unchanged"
 else
@@ -122,8 +125,8 @@ cat <<'EOF'
 1. Restart the stack so the API republishes the Soul bundle:  pnpm dev
 2. Open http://localhost:4000/skills -> skill-runtime-probe.
    Each command should report the runtime as available.
-3. Open http://localhost:4000/routines -> skill-runtime-probe and run it.
-   The five tool States run probe.sh, probe.py, probe.ts, probe-inline.sh and probe-network.sh.
+3. In chat, ask the agent to run a declared command, for example:
+   "Run the probe_shell command of the skill-runtime-probe skill and show me the raw result."
 
 To remove it:  scripts/dev/skill-runtime-probe/uninstall.sh
 EOF

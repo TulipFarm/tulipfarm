@@ -514,9 +514,13 @@ async function boot() {
     );
     const rateLimiter = new PgRateLimiter(pool);
     const invocationValidator = new TypedOutputValidator(RUN_ARTIFACT_SCHEMAS);
+    // Same root the Worker derives, so a blob-backed Run Artifact written by either process is
+    // readable by the other. Without it `publishFile` fails with `artifact_blob_unavailable`,
+    // which is how a sandboxed Skill command dies before its container ever starts.
+    const blobs = createBlobPort(join(resolveDataDir() ?? process.cwd(), "blobs"));
     /** Every Artifact reader is the same service over a different transaction scope. */
     const artifactsOver = (transactions: ConstructorParameters<typeof ArtifactStore>[0]) =>
-      new ArtifactService(new ArtifactStore(transactions), invocationValidator);
+      new ArtifactService(new ArtifactStore(transactions), invocationValidator, blobs);
     const invocations = new DurableInvocationGateway({
       store: new PgDurableInvocationStore(runTransactions, (transaction) =>
         artifactsOver(ambientTransactionPort(transaction))
@@ -589,7 +593,7 @@ async function boot() {
       repo: new PgFileRepo(pool),
       rolesOf: (businessId, principalId) =>
         collectHeldRoleIds(fileAuthorityRepos, businessId, principalId, new Date()),
-      blobs: createBlobPort(join(resolveDataDir() ?? process.cwd(), "blobs")),
+      blobs,
       newId: () => randomUUID(),
       // Read per upload from the Soul, so an operator turning downscaling on takes effect on the
       // next upload rather than on the next restart.

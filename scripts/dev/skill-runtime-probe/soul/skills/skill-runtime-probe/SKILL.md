@@ -14,6 +14,51 @@ allowedCommands:
   - "bash --version"
   - "curl:*"
   - "wget:*"
+trustTier: first_party
+scripts:
+  - scripts/probe.sh
+  - scripts/probe.py
+  - scripts/probe.ts
+  - scripts/probe-inline.sh
+  - scripts/probe-network.sh
+commands:
+  - name: probe_shell
+    toolRef: skill-runtime-probe-shell
+    runtimeProfile: shell-ts-python-v1
+    entrypoint: scripts/probe.sh
+    requiredCommands:
+      - bash
+      - jq
+  - name: probe_python
+    toolRef: skill-runtime-probe-python
+    runtimeProfile: shell-ts-python-v1
+    entrypoint: scripts/probe.py
+    requiredCommands:
+      - python3
+  - name: probe_typescript
+    toolRef: skill-runtime-probe-typescript
+    runtimeProfile: shell-ts-python-v1
+    entrypoint: scripts/probe.ts
+    requiredCommands:
+      - tsx
+  - name: probe_network
+    toolRef: skill-runtime-probe-network
+    runtimeProfile: shell-ts-python-v1
+    entrypoint: scripts/probe-network.sh
+    requiredCommands:
+      - bash
+      - curl
+      - jq
+      - wget
+  - name: probe_inline
+    toolRef: skill-runtime-probe-inline
+    runtimeProfile: shell-ts-python-v1
+    entrypoint: scripts/probe-inline.sh
+    requiredCommands:
+      - bash
+      - jq
+      - node
+      - python3
 ---
 
 # Skill runtime probe
