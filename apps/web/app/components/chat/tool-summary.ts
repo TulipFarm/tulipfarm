@@ -218,12 +218,26 @@ function repoNumber(record: Record<string, unknown>): number | undefined {
   return undefined;
 }
 
+/**
+ * `skill` is one Tool with several modes, and only the reading ones are a load.
+ *
+ * Without this, a call that executed a Skill's code in the sandbox would be summarised as
+ * "Loaded skill", claiming a read for a row where something actually ran.
+ */
+function skillRunVerb(toolName: string, args: unknown): ToolVerb | undefined {
+  if (toolName !== "skill") return undefined;
+  if (typeof args !== "object" || args === null || Array.isArray(args)) return undefined;
+  const mode = (args as Record<string, unknown>).mode;
+  if (mode !== "run" && mode !== "shell") return undefined;
+  return { verb: "Ran skill", fallbackObject: "command" };
+}
+
 /** Summary text never asserts outcome; the status glyph owns success/failure. */
 export function describeToolCall(toolName: string, args: unknown, serverSummary?: string): string {
   const trimmed = serverSummary?.trim();
   if (trimmed !== undefined && trimmed.length > 0) return trimmed;
 
-  const verb = verbFor(toolName);
+  const verb = skillRunVerb(toolName, args) ?? verbFor(toolName);
   const subject = toolSubject(args);
 
   if (verb === undefined) {

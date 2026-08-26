@@ -74,6 +74,7 @@ sibling `AGENTS.md`.
 | [`packages/curator-host`](packages/curator-host/AGENTS.md) | Minting a Curator job and its Run, context pinning, output revalidation, crash recovery |
 | [`packages/model-adapter`](packages/model-adapter/AGENTS.md) | Translating `ModelPort` requests, tool calls and usage to and from the AI SDK |
 | [`packages/turn-executor`](packages/turn-executor/AGENTS.md) | Chat Turn execution, Agent States, Turn guardrails, Run events |
+| [`packages/skill-sandbox`](packages/skill-sandbox/AGENTS.md) | Running a Skill's declared commands — sandbox adapters, the single-command runner for Chat |
 | [`packages/tool-broker`](packages/tool-broker/AGENTS.md) | Tool catalog, intent/effect orchestration, approvals |
 | [`packages/tool-host`](packages/tool-host/AGENTS.md) | Tool contract, authorization gate, dispatcher, co-location rule |
 | [`packages/kv`](packages/kv/AGENTS.md) | Agent key-value store and its `kv_*` Tool family |

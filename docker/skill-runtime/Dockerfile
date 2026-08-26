@@ -8,9 +8,9 @@ FROM ${BASE_IMAGE}
 # Package installation belongs to image review/build, never to a Skill Run. The published image is
 # referenced by its resulting OCI digest in SANDBOX_RUNTIME_IMAGE.
 RUN apt-get update \
-  && apt-get install --yes --no-install-recommends bash ca-certificates curl jq python3 \
+  && apt-get install --yes --no-install-recommends bash ca-certificates curl jq python3 wget \
   && rm -rf /var/lib/apt/lists/* \
-  && printf '%s\n' '#!/bin/sh' 'exec node --experimental-transform-types "$@"' > /usr/local/bin/tsx \
+  && printf '%s\n' '#!/bin/sh' 'exec node "$@"' > /usr/local/bin/tsx \
   && chmod 0755 /usr/local/bin/tsx
 
 WORKDIR /tulip

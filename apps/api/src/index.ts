@@ -48,6 +48,7 @@ import {
   PgSecretRepo,
   SecretsService,
 } from "@tulipfarm/secrets";
+import { SkillBashRunner, SkillCommandRunner } from "@tulipfarm/skill-sandbox";
 import type { AuthOAuth2Step } from "@tulipfarm/soul";
 import {
   ActiveRoutineCatalog,
@@ -788,6 +789,12 @@ async function boot() {
       newWaitId: randomUUID,
     });
     // One gate for the whole process: routes and Agent Tools must not diverge on who may read a Page.
+    // Local container execution is dev-only; production leaves this absent so the sandbox Tools
+    // report that execution is unavailable rather than silently reaching for a Docker socket.
+    const sandboxRuntimeImage =
+      process.env.NODE_ENV === "production" || process.env.SANDBOX_RUNTIME_IMAGE === undefined
+        ? {}
+        : { runtimeImage: process.env.SANDBOX_RUNTIME_IMAGE };
     const knowledgePageGate = new PageReadGate(pool);
     // Refusing a taken path is the one bit the gate cannot hide, so every refused write is recorded.
     const knowledgeDenialSink = makeKnowledgeDenialSink(auditService);
@@ -848,6 +855,16 @@ async function boot() {
         disabledBundledSkills,
         hiddenSkillNames,
         triggerRoutine: manualRoutineTrigger(invocations),
+        skillCommands: new SkillCommandRunner({
+          artifacts: runArtifacts,
+          bundle: () => soulPublications.activeBundle(DEPLOYMENT_BUSINESS_ID, soulBundleVerifier),
+          ...sandboxRuntimeImage,
+        }),
+        skillBash: new SkillBashRunner({
+          artifacts: runArtifacts,
+          bundle: () => soulPublications.activeBundle(DEPLOYMENT_BUSINESS_ID, soulBundleVerifier),
+          ...sandboxRuntimeImage,
+        }),
         routineCatalog,
         delegateToAgent: agentDelegation.delegate,
         spawnSubagent: subagentSpawning.spawn,

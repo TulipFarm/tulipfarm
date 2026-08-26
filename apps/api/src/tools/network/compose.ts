@@ -29,7 +29,8 @@ export interface NetworkToolingDeps {
   readonly cache?: CachePort;
 }
 
-function declaredStringList(value: unknown): readonly string[] {
+/** Read a frontmatter list defensively; authored YAML is untyped until it is checked. */
+export function declaredStringList(value: unknown): readonly string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === "string") ? value : [];
 }
 

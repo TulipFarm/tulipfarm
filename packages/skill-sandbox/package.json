@@ -1,0 +1,28 @@
+{
+  "name": "@tulipfarm/skill-sandbox",
+  "version": "0.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "scripts": {
+    "lint": "biome check --no-errors-on-unmatched .",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --noEmit",
+    "verify:skill-command-run": "tsx scripts/verify-skill-command-run.mts",
+    "verify:skill-bash": "tsx scripts/verify-skill-bash.mts"
+  },
+  "dependencies": {
+    "@tulipfarm/run-kernel": "workspace:*",
+    "@tulipfarm/sandbox": "workspace:*",
+    "@tulipfarm/schema": "workspace:*",
+    "@tulipfarm/soul": "workspace:*",
+    "@tulipfarm/tool-broker": "workspace:*"
+  },
+  "devDependencies": {
+    "@tulipfarm/tsconfig": "workspace:*",
+    "@types/node": "^26.2.0",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11",
+    "yaml": "^2.8.1"
+  }
+}

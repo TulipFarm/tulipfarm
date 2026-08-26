@@ -94,8 +94,15 @@ function commandFor(fileName: string): string {
   }
 }
 
+/**
+ * Builds one `--env` line, refusing anything that could break out of it.
+ *
+ * Lowercase names are accepted because the proxy variables require them: `wget` reads only
+ * `http_proxy`/`https_proxy`, and `curl` deliberately ignores an uppercase `HTTP_PROXY` so a CGI
+ * `Proxy:` header cannot redirect it. Rejecting lowercase would leave both unproxied.
+ */
 function environmentLine(name: string, value: string): string {
-  if (!/^[A-Z][A-Z0-9_]*$/.test(name) || value.includes("\n") || value.includes("\0")) {
+  if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(name) || value.includes("\n") || value.includes("\0")) {
     throw new SandboxProtocolError("unsafe_request_shape");
   }
   return `${name}=${value}`;
@@ -250,6 +257,10 @@ export class DevelopmentContainerSandboxExecutor {
         dockerArgs.push(`--network=${egress.networkName}`);
         environment.push(environmentLine("HTTPS_PROXY", egress.httpsProxy));
         environment.push(environmentLine("HTTP_PROXY", egress.httpsProxy));
+        // curl ignores an uppercase HTTP_PROXY by design, and wget reads only the lowercase
+        // names, so the uppercase pair alone would leave both CLI clients unproxied.
+        environment.push(environmentLine("https_proxy", egress.httpsProxy));
+        environment.push(environmentLine("http_proxy", egress.httpsProxy));
       }
       await writeFile(environmentPath, `${environment.join("\n")}\n`, { mode: 0o600 });
       await chmod(outputRoot, 0o700);

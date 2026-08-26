@@ -6,6 +6,7 @@ import {
   type DevelopmentSandboxArtifactReader,
   type DevelopmentSandboxCredentialReader,
   type DevelopmentSandboxOutputPublisher,
+  DockerNetworkEgressPort,
   type ResolvedSkillArtifact,
   SandboxRuntimeProfileRegistry,
   SkillExecutionCoordinator,
@@ -19,7 +20,22 @@ import {
   SandboxToolAdapter,
   type ToolAdapter,
 } from "@tulipfarm/tool-broker";
-import type { RoutineToolRequest } from "./tool-port";
+
+/**
+ * The minimum a caller must name to run a Skill command: whose deployment, which Run and State the
+ * work is attributed to, and the exact verified bundle the command is resolved from.
+ *
+ * Structural rather than the Routine's own request type, because a Chat Turn reaches the same
+ * adapters with no dispatch plan and no authority layers of its own.
+ */
+export interface SandboxToolingRequest {
+  readonly businessId: string;
+  readonly runId: string;
+  /** Durable State occurrence key; the ledger's `state_id`. */
+  readonly stateKey: string;
+  /** The exact pinned bundle — the only source of commands, contracts and policy. */
+  readonly bundle: RuntimeBundle;
+}
 
 const WORKER_READER = "service:worker";
 const MAX_TIMEOUT_MS = 30_000;
@@ -27,6 +43,16 @@ const MAX_OUTPUT_BYTES = 16_000_000;
 const MAX_WORKSPACE_BYTES = 64_000_000;
 const MAX_MEMORY_BYTES = 256_000_000;
 const MAX_EGRESS_BYTES = 10_000_000;
+
+/** The ceilings every sandbox entry point shares; a caller may ask for less, never more. */
+export const SANDBOX_LIMITS = {
+  timeoutMs: MAX_TIMEOUT_MS,
+  outputBytes: MAX_OUTPUT_BYTES,
+  workspaceBytes: MAX_WORKSPACE_BYTES,
+  memoryBytes: MAX_MEMORY_BYTES,
+  egressBytes: MAX_EGRESS_BYTES,
+  requestLifetimeMs: 60_000,
+} as const;
 const IMAGE = /^(.+)@(sha256:[0-9a-f]{64})$/;
 const PACKAGE_INSTALL = /(?:^|\s)(?:npm|pnpm|yarn|pip|pip3|apt|apk|brew)\s+(?:add|i|install)\b/m;
 const DIRECT_NETWORK_MUTATION =
@@ -186,6 +212,45 @@ function outputScanner(bridge: ArtifactBridge, leases: OneUseCredentialLeases): 
   };
 }
 
+function scanAssetContent(content: string) {
+  return {
+    rejected: PACKAGE_INSTALL.test(content),
+    findings: DIRECT_NETWORK_MUTATION.test(content)
+      ? (["direct_network_mutation"] as const)
+      : ([] as const),
+  };
+}
+
+/**
+ * Publish content the runtime generated rather than read from a bundle. The caller derives
+ * `expectedDigest` from these exact bytes, so re-hashing here is a self-check that the generator
+ * and the pinned bundle it handed the coordinator never drifted apart.
+ */
+async function publishSyntheticAsset(
+  context: ArtifactContext,
+  path: string,
+  expectedDigest: string,
+  content: string
+): Promise<ResolvedSkillArtifact> {
+  const bytes = new TextEncoder().encode(content);
+  const digest = createHash("sha256").update(bytes).digest("hex");
+  if (digest !== expectedDigest) throw new Error("sandbox_asset_digest_mismatch");
+  const scan = scanAssetContent(content);
+  const id = stableId("synthetic", path, digest, context.runId, context.stateKey);
+  await context.artifacts.publishFile({
+    id,
+    bytes,
+    mediaType: "text/plain",
+    fileName: basename(path),
+    ...fileMetadata(context),
+  });
+  return {
+    artifactRef: artifactRef(id),
+    digest,
+    scan: { verdict: scan.rejected ? "rejected" : "clean", findings: scan.findings },
+  };
+}
+
 function resolvedAsset(
   bundle: RuntimeBundle,
   context: ArtifactContext,
@@ -196,11 +261,19 @@ function resolvedAsset(
     (candidate) => candidate.path === path && candidate.digest === expectedDigest
   );
   if (asset === undefined) throw new Error("sandbox_asset_not_found");
-  const rejected = PACKAGE_INSTALL.test(asset.content);
-  const findings = DIRECT_NETWORK_MUTATION.test(asset.content)
-    ? (["direct_network_mutation"] as const)
-    : [];
-  const id = stableId(bundle.digest, asset.ownerDefinitionId, asset.path, asset.digest);
+  const { rejected, findings } = scanAssetContent(asset.content);
+  // Scoped to the execution, not just the content. Artifact rows are append-only and
+  // `artifactMatchesInput` compares `createdAt`, `retention` and `producer`, all of which move
+  // between executions — so a purely content-addressed id makes the second run of any command
+  // fail with `artifact_conflict`. The blob store still dedupes the bytes by content hash.
+  const id = stableId(
+    bundle.digest,
+    asset.ownerDefinitionId,
+    asset.path,
+    asset.digest,
+    context.runId,
+    context.stateKey
+  );
   return context.artifacts
     .publishFile({
       id,
@@ -223,14 +296,41 @@ export interface BundleSandboxToolingOptions {
   readonly now?: () => Date;
 }
 
-/** Build only verified-bundle command adapters; no dev image means park on `adapter_not_found`. */
-export function buildBundleSandboxAdapters(
-  request: RoutineToolRequest,
-  options: BundleSandboxToolingOptions
-): ReadonlyMap<string, ToolAdapter> {
-  if (options.runtimeImage === undefined) return new Map();
+export interface SandboxStack {
+  readonly context: ArtifactContext;
+  readonly bridge: ArtifactBridge;
+  readonly leases: OneUseCredentialLeases;
+  readonly runtimes: SandboxRuntimeProfileRegistry;
+  readonly coordinator: SkillExecutionCoordinator;
+  readonly runtimeProfileId: string;
+  readonly imageDigest: string;
+  readonly now: () => Date;
+}
+
+export interface SandboxStackOverrides {
+  /** Destinations the container may reach; anything else keeps it on `--network=none`. */
+  readonly allowedEgressDestinationIds: (bundle: RuntimeBundle) => readonly string[];
+  /**
+   * Content for entrypoints that are generated rather than published, keyed by asset path. A
+   * verified bundle never needs this; an inline `skill` shell command has no bundle asset to
+   * resolve, so the runner supplies the exact bytes it hashed the digest from.
+   */
+  readonly syntheticAssets?: ReadonlyMap<string, string>;
+}
+
+/**
+ * Assemble the executor, coordinator and artifact plumbing shared by every sandbox entry point.
+ * Returns `undefined` when no usable `repository@sha256:...` image is configured, which is the
+ * signal to disable sandbox execution rather than fail a call.
+ */
+export function createSandboxStack(
+  request: SandboxToolingRequest,
+  options: BundleSandboxToolingOptions,
+  overrides: SandboxStackOverrides
+): SandboxStack | undefined {
+  if (options.runtimeImage === undefined) return undefined;
   const image = IMAGE.exec(options.runtimeImage);
-  if (image === null || image[2] === undefined) return new Map();
+  if (image === null || image[2] === undefined) return undefined;
   const digest = image[2];
   const now = options.now ?? (() => new Date());
   const context: ArtifactContext = {
@@ -244,13 +344,6 @@ export function buildBundleSandboxAdapters(
   const leases = new OneUseCredentialLeases(() => now().getTime());
   const runtime = shellTsPythonV1(digest);
   const runtimes = new SandboxRuntimeProfileRegistry([runtime]);
-  const commands = resolveRuntimeSkillCommands(request.bundle);
-  const byTool = new Map(
-    commands.map((command) => [
-      `${command.tool.spec.toolId}\0${command.tool.spec.toolVersion}`,
-      command,
-    ])
-  );
   const sandbox = new DevelopmentContainerSandboxExecutor({
     guardrail: {
       maxRequestLifetimeMs: 60_000,
@@ -261,9 +354,7 @@ export function buildBundleSandboxAdapters(
         memoryBytes: MAX_MEMORY_BYTES,
         outputBytes: MAX_OUTPUT_BYTES,
       },
-      allowedEgressDestinationIds: [
-        ...new Set(commands.flatMap((command) => command.tool.spec.allowedDestinations ?? [])),
-      ],
+      allowedEgressDestinationIds: overrides.allowedEgressDestinationIds(request.bundle),
       maxEgressBytes: MAX_EGRESS_BYTES,
       allowedRuntimeProfiles: { [runtime.id]: runtime.imageDigest },
       maxCredentialBindings: 1,
@@ -273,12 +364,20 @@ export function buildBundleSandboxAdapters(
     artifacts: bridge,
     credentials: leases,
     outputs: bridge,
+    // Only reached when a command's ToolContract declares `allowedDestinations` and the caller
+    // names one; every other Run stays on `--network=none`.
+    egress: new DockerNetworkEgressPort({ image: options.runtimeImage }),
     now: () => now().getTime(),
   });
   const coordinator = new SkillExecutionCoordinator({
     assets: {
-      resolve: ({ path, expectedDigest }) =>
-        resolvedAsset(request.bundle, context, path, expectedDigest),
+      resolve: ({ path, expectedDigest }) => {
+        const synthetic = overrides.syntheticAssets?.get(path);
+        if (synthetic !== undefined) {
+          return publishSyntheticAsset(context, path, expectedDigest, synthetic);
+        }
+        return resolvedAsset(request.bundle, context, path, expectedDigest);
+      },
     },
     sandbox,
     outputScanner: outputScanner(bridge, leases),
@@ -295,6 +394,42 @@ export function buildBundleSandboxAdapters(
       async release() {},
     },
   });
+  return {
+    context,
+    bridge,
+    leases,
+    runtimes,
+    coordinator,
+    runtimeProfileId: runtime.id,
+    imageDigest: runtime.imageDigest,
+    now,
+  };
+}
+
+/** Build only verified-bundle command adapters; no dev image means park on `adapter_not_found`. */
+export function buildBundleSandboxAdapters(
+  request: SandboxToolingRequest,
+  options: BundleSandboxToolingOptions
+): ReadonlyMap<string, ToolAdapter> {
+  if (options.runtimeImage === undefined) return new Map();
+  const stack = createSandboxStack(request, options, {
+    allowedEgressDestinationIds: (bundle) => [
+      ...new Set(
+        resolveRuntimeSkillCommands(bundle).flatMap(
+          (command) => command.tool.spec.allowedDestinations ?? []
+        )
+      ),
+    ],
+  });
+  if (stack === undefined) return new Map();
+  const { context, bridge, leases, runtimes, coordinator, now } = stack;
+  const commands = resolveRuntimeSkillCommands(request.bundle);
+  const byTool = new Map(
+    commands.map((command) => [
+      `${command.tool.spec.toolId}\0${command.tool.spec.toolVersion}`,
+      command,
+    ])
+  );
   const adapters = new Map<string, ToolAdapter>();
   for (const runtimeCommand of commands) {
     const { command, tool } = runtimeCommand;

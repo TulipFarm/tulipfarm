@@ -497,6 +497,152 @@ describe("skillTool reading a Skill file", () => {
   });
 });
 
+// ── skill (run + shell modes) ─────────────────────────────────────────────────
+
+function runnerCtx(
+  overrides: {
+    skill?: SoulSkill;
+    bashRun?: (request: unknown) => Promise<unknown>;
+    commandRun?: (request: unknown) => Promise<unknown>;
+    commandList?: () => Promise<readonly unknown[]>;
+    runId?: string | undefined;
+  } = {}
+): PlatformToolContext {
+  const skill = overrides.skill ?? {
+    name: "probe",
+    frontmatter: { allowedCommands: ["node -e:*"] },
+    body: "# probe",
+  };
+  const runId = "runId" in overrides ? overrides.runId : "run-1";
+  return {
+    soulLoader: {
+      skills: new Map([[skill.name, skill]]),
+      agents: new Map(),
+      routines: new Map(),
+    },
+    soulWriter: makeSoulWriter(),
+    ...(runId === undefined ? {} : { requestContext: { runId, toolCallId: "call-1" } }),
+    skillBash: {
+      run: overrides.bashRun ?? (async () => ({ exitCode: 0, stdout: "5\n", stderr: "" })),
+    },
+    skillCommands: {
+      run: overrides.commandRun ?? (async () => ({ exitCode: 0, stdout: "ok\n", stderr: "" })),
+      list: overrides.commandList ?? (async () => []),
+    },
+  } as unknown as PlatformToolContext;
+}
+
+describe("skillTool executing a Skill", () => {
+  it("charges run and shell modes against platform.skill.run, not .load", () => {
+    expect(skillTool.classify?.({ name: "probe" }, undefined).action).toBe("platform.skill.load");
+    expect(skillTool.classify?.({ name: "probe", mode: "inspect" }, undefined).action).toBe(
+      "platform.skill.load"
+    );
+    // Reading a Skill and executing its code are different authorities; a grant for one must not
+    // silently confer the other.
+    expect(
+      skillTool.classify?.({ name: "probe", mode: "run", command: "probe_shell" }, undefined).action
+    ).toBe("platform.skill.run");
+    expect(
+      skillTool.classify?.({ name: "probe", mode: "shell", command: "node -e 1" }, undefined).action
+    ).toBe("platform.skill.run");
+  });
+
+  it("never reports an executing call as mutating", () => {
+    expect(skillTool.classify?.({ name: "probe", mode: "shell" }, undefined).mutating).toBe(false);
+  });
+
+  it("hands the Skill's own allowedCommands to the shell runner", async () => {
+    const bashRun = vi.fn(async () => ({ exitCode: 0, stdout: "5\n", stderr: "" }));
+    const res = await skillTool.handler(
+      { name: "probe", mode: "shell", command: 'node -e "console.log(5)"' },
+      runnerCtx({ bashRun })
+    );
+    expect(res).toMatchObject({ success: true, data: { stdout: "5\n" } });
+    expect(bashRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skill: "probe",
+        command: 'node -e "console.log(5)"',
+        allowedCommands: ["node -e:*"],
+      })
+    );
+  });
+
+  it("passes arguments through to a declared command", async () => {
+    const commandRun = vi.fn(async () => ({ exitCode: 0, stdout: "ok\n", stderr: "" }));
+    const res = await skillTool.handler(
+      { name: "probe", mode: "run", command: "probe_shell", arguments: { n: 2 } },
+      runnerCtx({ commandRun })
+    );
+    expect(res).toMatchObject({ success: true });
+    expect(commandRun).toHaveBeenCalledWith(
+      expect.objectContaining({ skill: "probe", command: "probe_shell", arguments: { n: 2 } })
+    );
+  });
+
+  it("narrows shell egress to destinations the Skill already declared", async () => {
+    const bashRun = vi.fn(async () => ({ exitCode: 0, stdout: "", stderr: "" }));
+    await skillTool.handler(
+      { name: "probe", mode: "shell", command: "curl https://x.example" },
+      runnerCtx({
+        bashRun,
+        commandList: async () => [
+          { skill: "probe", allowedDestinations: ["probe-host"] },
+          { skill: "other", allowedDestinations: ["not-this-one"] },
+        ],
+      })
+    );
+    expect(bashRun).toHaveBeenCalledWith(
+      expect.objectContaining({ allowedDestinations: ["probe-host"] })
+    );
+  });
+
+  it("rejects a run mode that names no command", async () => {
+    const res = await skillTool.handler({ name: "probe", mode: "shell" }, runnerCtx());
+    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
+  });
+
+  it("refuses to combine a file read with a run mode", async () => {
+    const res = await skillTool.handler(
+      { name: "probe", mode: "run", command: "probe_shell", file: "scripts/probe.sh" },
+      runnerCtx()
+    );
+    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
+  });
+
+  it("resolves the Skill before running, so a missing Skill never reaches the sandbox", async () => {
+    const bashRun = vi.fn(async () => ({ exitCode: 0, stdout: "", stderr: "" }));
+    const res = await skillTool.handler(
+      { name: "absent", mode: "shell", command: "node -e 1" },
+      runnerCtx({ bashRun })
+    );
+    expect(res).toMatchObject({ success: false, error: { code: "not_found" } });
+    expect(bashRun).not.toHaveBeenCalled();
+  });
+
+  it("cannot run outside a Run, because execution is Run-scoped state", async () => {
+    const res = await skillTool.handler(
+      { name: "probe", mode: "shell", command: "node -e 1" },
+      runnerCtx({ runId: undefined })
+    );
+    expect(res).toMatchObject({ success: false, error: { code: "internal_error" } });
+  });
+
+  it("reports execution as unavailable when no runner is configured", async () => {
+    const ctx = runnerCtx();
+    const res = await skillTool.handler({ name: "probe", mode: "shell", command: "node -e 1" }, {
+      ...ctx,
+      skillBash: undefined,
+    } as PlatformToolContext);
+    expect(res).toMatchObject({ success: false, error: { code: "internal_error" } });
+  });
+
+  it("still loads normally when no mode is given", async () => {
+    const res = await skillTool.handler({ name: "probe" }, runnerCtx());
+    expect(res).toMatchObject({ success: true, data: { name: "probe", body: "# probe" } });
+  });
+});
+
 // ── delegate_to_agent ─────────────────────────────────────────────────────────
 
 describe("delegateToAgentTool", () => {
@@ -756,6 +902,9 @@ describe("PLATFORM_TOOLS registry", () => {
     expect(byName.trigger_routine).toBe(true);
     expect(byName.routine_picker).toBe(false);
     expect(byName.soul_repo_push).toBe(true);
+    // Executing a Skill command changes nothing durable: the sandbox is read-only, ephemeral and
+    // networkless unless the ToolContract declares a destination, so every `skill` mode is
+    // non-mutating.
     expect(byName.skill).toBe(false);
     expect(byName.complete_state).toBe(true);
   });

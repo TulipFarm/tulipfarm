@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { EventEmitter } from "node:events";
 import type {
   DelegateToAgentInput,
@@ -8,6 +9,13 @@ import type {
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { PLATFORM_RUNTIME_TOOLS } from "@tulipfarm/platform-tools";
 import { ajv, type definitions } from "@tulipfarm/schema";
+import {
+  type CommandRefusalReason,
+  SkillBashRunError,
+  type SkillBashRunner,
+  SkillCommandRunError,
+  type SkillCommandRunner,
+} from "@tulipfarm/skill-sandbox";
 import type { BundledSkill } from "@tulipfarm/soul";
 import {
   createSkillFileReader,
@@ -34,9 +42,11 @@ import {
   type ApiToolDefinition,
   defineApiTool,
   type ParkableApiToolDefinition,
+  type ToolCallResult,
 } from "@tulipfarm/tool-host";
 import { stringify as stringifyYaml } from "yaml";
 import { SYSTEM_SOUL_COMMIT_ACTOR } from "../runtime/soul-writer";
+import { declaredStringList } from "../tools/network/compose";
 import { mapSoulWriteError, soulCommitError } from "../tools/soul-faults";
 import { delegateToAgentTool } from "./delegate-tool";
 import { guardrailForgeTool } from "./guardrail-tool";
@@ -59,6 +69,16 @@ export interface PlatformToolContext {
    * ToolContract the Soul is simply missing. The two need opposite corrections.
    */
   runtimeToolNames?: () => ReadonlySet<string>;
+  /**
+   * Executes a Skill's declared command in the sandbox. Absent — no runtime image is configured —
+   * leaves `skill` in `run` mode reporting that execution is unavailable rather than missing.
+   */
+  skillCommands?: SkillCommandRunner;
+  /**
+   * Executes a command a Skill documented in a fenced block. Absent — no runtime image — leaves
+   * `skill` in `shell` mode reporting that execution is unavailable rather than missing.
+   */
+  skillBash?: SkillBashRunner;
   soulPath?: string;
   gitSync?: GitSyncService;
   /** The single write gateway for the authored Soul tree (ADR-007). */
@@ -152,7 +172,149 @@ function missingFileMessage(skill: string, file: string, available: readonly str
   return `File "${file}" not found for Skill "${skill}". ${availability}`;
 }
 
+interface SkillToolArgs {
+  name: string;
+  file?: string;
+  mode?: string;
+  command?: string;
+  arguments?: Record<string, unknown>;
+  destination?: string;
+}
+
+/** Executing modes, which `classify` charges against `platform.skill.run` rather than `.load`. */
+function isRunMode(mode: string | undefined): mode is "run" | "shell" {
+  return mode === "run" || mode === "shell";
+}
+
 const validateSkillTool = ajv.compile(SKILL_TOOL_INPUT_SCHEMA);
+
+const SKILL_COMMAND_RUN_FAILURES: Record<
+  string,
+  { code: "not_found" | "write_denied"; text: string }
+> = {
+  skill_not_found: {
+    code: "not_found",
+    text: "No Skill declares runnable commands under that name.",
+  },
+  command_not_found: { code: "not_found", text: "That Skill declares no command with that name." },
+  destination_denied: {
+    code: "write_denied",
+    text: "The command's ToolContract does not allow that destination.",
+  },
+};
+
+const SKILL_BASH_FAILURES: Record<CommandRefusalReason, string> = {
+  no_allowlist: "That Skill declares no `allowedCommands`, so it can run nothing.",
+  not_allowed: "That Skill's `allowedCommands` do not cover this command.",
+  command_chaining:
+    "A command may not chain or pipe into another one; run the single command the Skill documents.",
+  unterminated_heredoc: "The heredoc opened on the first line is never closed by its delimiter.",
+};
+
+/**
+ * Runs a command the Skill packaged as a script and declared with a ToolContract.
+ *
+ * A Skill is an instruction package, so its scripts are inert text until something runs them. A
+ * model asked what `probe.ts` prints can only compute the answer itself, which silently diverges
+ * from the real one as soon as the code reads a clock, a random value, a file or the network.
+ */
+async function runDeclaredCommand(
+  ctx: PlatformToolContext,
+  input: {
+    skill: string;
+    command: string;
+    runId: string;
+    arguments?: Record<string, unknown>;
+    destination?: string;
+  }
+): Promise<ToolCallResult> {
+  if (!ctx.skillCommands)
+    return err("internal_error", "Skill command execution is not configured.");
+  try {
+    const result = await ctx.skillCommands.run({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      runId: input.runId,
+      // The per-call id keeps each occurrence distinct. Input Artifacts are keyed by
+      // run + state + argument digest and are append-only, so a stateKey fixed per command
+      // makes a second identical call in the same Run collide with the first.
+      stateKey: `skill-command:${input.skill}:${input.command}:${ctx.requestContext?.toolCallId ?? randomUUID()}`,
+      skill: input.skill,
+      command: input.command,
+      ...(input.arguments === undefined ? {} : { arguments: input.arguments }),
+      ...(input.destination === undefined ? {} : { destination: input.destination }),
+    });
+    return ok(result);
+  } catch (e) {
+    if (e instanceof SkillCommandRunError) {
+      if (e.code === "sandbox_unavailable")
+        return err(
+          "internal_error",
+          "No sandbox runtime image is configured, so Skill commands cannot run."
+        );
+      const failure = SKILL_COMMAND_RUN_FAILURES[e.code];
+      // Every `SkillCommandRunError` code is mapped; the fallback keeps the union exhaustive
+      // without asserting on a value the compiler already narrowed.
+      if (failure !== undefined) {
+        const options = e.available.length === 0 ? "" : ` Available: ${e.available.join(", ")}.`;
+        return err(failure.code, `${failure.text}${options}`);
+      }
+    }
+    return err("internal_error", e instanceof Error ? e.message : String(e));
+  }
+}
+
+/**
+ * Runs a command the Skill wrote into its instructions rather than packaged as a file.
+ *
+ * `mode: "run"` covers code a Skill shipped as a script with a ToolContract. Most Skills teach by
+ * example instead, putting the command in a fenced block in `SKILL.md` — which the model can read
+ * but, without this, only ever narrate. The Skill's `allowedCommands` frontmatter says which of
+ * those commands may actually run, and the sandbox bounds what running one can do.
+ */
+async function runShellCommand(
+  ctx: PlatformToolContext,
+  skill: SoulSkill | BundledSkill,
+  input: { skill: string; command: string; runId: string; destination?: string }
+): Promise<ToolCallResult> {
+  if (!ctx.skillBash) return err("internal_error", "Skill command execution is not configured.");
+  const allowedCommands = declaredStringList(skill.frontmatter.allowedCommands);
+  // A command may only reach a destination the same Skill already declared on a command of its
+  // own, so inline code never widens the Skill's egress beyond what its ToolContracts allow.
+  const allowedDestinations = [
+    ...new Set(
+      (await ctx.skillCommands?.list())
+        ?.filter((candidate) => candidate.skill === input.skill)
+        .flatMap((candidate) => candidate.allowedDestinations) ?? []
+    ),
+  ];
+  try {
+    const result = await ctx.skillBash.run({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      runId: input.runId,
+      stateKey: `skill-bash:${input.skill}:${ctx.requestContext?.toolCallId ?? randomUUID()}`,
+      skill: input.skill,
+      command: input.command,
+      allowedCommands,
+      allowedDestinations,
+      ...(input.destination === undefined ? {} : { destination: input.destination }),
+    });
+    return ok(result);
+  } catch (e) {
+    if (e instanceof SkillBashRunError) {
+      if (e.code === "sandbox_unavailable")
+        return err(
+          "internal_error",
+          "No sandbox runtime image is configured, so commands cannot run."
+        );
+      const options = e.available.length === 0 ? "" : ` Declared: ${e.available.join(", ")}.`;
+      if (e.code === "destination_denied")
+        return err("write_denied", `That Skill does not allow that destination.${options}`);
+      const reason = e.reason === undefined ? "" : SKILL_BASH_FAILURES[e.reason];
+      return err("write_denied", `${reason}${options}`);
+    }
+    return err("internal_error", e instanceof Error ? e.message : String(e));
+  }
+}
 
 /**
  * The one door to a Skill. `{ name }` loads it, `{ name, file }` reads one of the files it
@@ -166,6 +328,10 @@ const validateSkillTool = ajv.compile(SKILL_TOOL_INPUT_SCHEMA);
  * auditing Turn has to read the exact bytes of a Skill it is about to patch, verify or judge —
  * frequently one it does not trust yet — and loading to do that would both hand those bytes to
  * the model as instructions and re-narrow the offer away from the Skill the Turn is working in.
+ *
+ * `run` and `shell` execute rather than read, so `classify` raises the authorized action to
+ * `platform.skill.run`: a grant that lets a principal read a Skill must not also let it run the
+ * Skill's code.
  */
 export const skillTool = defineApiTool<PlatformToolContext>({
   name: SKILL_TOOL_NAME,
@@ -180,10 +346,23 @@ export const skillTool = defineApiTool<PlatformToolContext>({
     targets: (args) => soulTarget(SOUL_SKILL_TARGET, args, "name"),
     dataClasses: ["soul_definition"],
   },
+  classify: (args) => ({
+    mutating: false,
+    action: isRunMode((args as { mode?: string }).mode)
+      ? "platform.skill.run"
+      : "platform.skill.load",
+  }),
   handler: async (args, ctx) => {
     if (!validateSkillTool(args))
       return err("validation_error", firstError(validateSkillTool.errors));
-    const { name, file, mode } = args as { name: string; file?: string; mode?: string };
+    const {
+      name,
+      file,
+      mode,
+      command,
+      arguments: commandArgs,
+      destination,
+    } = args as SkillToolArgs;
 
     const hidden = await hiddenSkills(ctx);
     const skill = resolveSkill(
@@ -193,6 +372,31 @@ export const skillTool = defineApiTool<PlatformToolContext>({
       hidden
     );
     if (!skill) return err("not_found", `Skill "${name}" not found.`);
+
+    if (isRunMode(mode)) {
+      if (command === undefined)
+        return err("validation_error", `\`mode: "${mode}"\` requires \`command\`.`);
+      if (file !== undefined)
+        return err(
+          "validation_error",
+          "`file` reads a Skill's files and cannot be combined with a run mode."
+        );
+      const runId = ctx.routineContext?.runId ?? ctx.requestContext?.runId;
+      if (runId === undefined)
+        return err("internal_error", "Cannot run a Skill command outside a Run.");
+      const shared = {
+        skill: name,
+        command,
+        runId,
+        ...(destination === undefined ? {} : { destination }),
+      };
+      return mode === "run"
+        ? runDeclaredCommand(ctx, {
+            ...shared,
+            ...(commandArgs === undefined ? {} : { arguments: commandArgs }),
+          })
+        : runShellCommand(ctx, skill, shared);
+    }
 
     const soulSkill = ctx.soulLoader?.skills.get(name);
     // `resolveSkill` already applied `hidden`, so a bundled hit here is one this Turn may see.

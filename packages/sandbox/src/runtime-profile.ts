@@ -89,6 +89,6 @@ export function shellTsPythonV1(imageDigest: string): SandboxRuntimeProfile {
     id: "shell-ts-python-v1",
     imageDigest,
     languages: ["shell", "typescript", "python"],
-    commands: ["bash", "curl", "jq", "node", "python3", "tsx"],
+    commands: ["bash", "curl", "jq", "node", "python3", "tsx", "wget"],
   });
 }
