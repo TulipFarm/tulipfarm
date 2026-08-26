@@ -14,6 +14,7 @@ execution, and egress/compute controls.
 | `src/ports/`, `src/{backend,attestation}.ts` | SandboxPort and production checks. |
 | `src/{request,runtime-profile,development-container}.ts` | Requests and runtime models. |
 | `src/{skill-execution,guardrail}.ts` | Skill execution and sandbox guardrails. |
+| `src/development-egress*.ts` | Development egress: internal Docker network plus allowlisting proxy. |
 | `src/hooks/` | Shared isolated-vm Hook executor. |
 | `test/security/` | Sandbox security checks. |
 
@@ -30,4 +31,17 @@ execution, and egress/compute controls.
   capability.
 - `src/hooks/protocol.ts` is a cross-thread/bundle wire contract; changing it is breaking.
 - `analyzeHook` is only a cheap pre-filter, not the isolation boundary.
+- A workload reaches the network only via `DevelopmentSandboxEgressPort`. Never give it a route of
+  its own: `DockerNetworkEgressPort` attaches it to an `--internal` network whose sole peer is the
+  proxy, so an undeclared destination is refused off-host rather than trusted to the script.
+- Proxy containers and networks are named from a hash of the destination set and outlive one
+  execution on purpose, so repeated calls reuse a warm proxy instead of paying setup each time.
+  One survives per distinct destination set until `close()` removes it; nothing on the request
+  path calls it, so a long-lived dev host keeps them. Reap with
+  `docker rm -f $(docker ps -aq --filter name=tulip-egress-proxy)`.
+- Both `HTTPS_PROXY`/`HTTP_PROXY` and `https_proxy`/`http_proxy` are set. `curl` ignores an
+  uppercase `HTTP_PROXY` by design and `wget` reads only lowercase, so either case alone leaves a
+  CLI client unproxied — and therefore unreachable, since the network is `--internal`.
+- `EGRESS_PROXY_SOURCE` is embedded text with no template literals, so it survives embedding
+  unescaped and needs no packaging or repository path at run time.
 - `resolveHookWorkerPath(dir, basename)` prefers bundled `.cjs`, then `.ts` under `tsx`.

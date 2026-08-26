@@ -1,0 +1,44 @@
+apiVersion: tulipfarm.ai/v1
+kind: ToolContract
+metadata:
+  id: 1457516e-6dc5-49be-964d-2eaeb6ee389c
+  slug: skill-runtime-probe-inline
+  displayName: Skill runtime probe (inline code)
+  schemaVersion: 1
+  authoredVersion: 1
+  lifecycle: active
+spec:
+  toolId: skill-runtime-probe-inline
+  toolVersion: "1"
+  description: Run inline JavaScript and Python from a shell entrypoint, using -e, -c and heredocs.
+  action: probe
+  riskClass: low
+  mutating: false
+  dryRun: false
+  idempotency:
+    strategy: none
+  timeout:
+    activeMs: 60000
+  inputSchema:
+    type: object
+    additionalProperties: false
+    properties:
+      message:
+        type: string
+        maxLength: 256
+  outputSchema:
+    type: object
+    additionalProperties: true
+    properties:
+      ok:
+        type: boolean
+      runtime:
+        type: string
+      echoed:
+        type: string
+      inline:
+        type: object
+        additionalProperties: true
+  adapter:
+    kind: sandbox
+    ref: skill:skill-runtime-probe/probe_inline

@@ -1,0 +1,43 @@
+apiVersion: tulipfarm.ai/v1
+kind: ToolContract
+metadata:
+  id: 09528f57-a847-430c-b910-b70617379035
+  slug: skill-runtime-probe-typescript
+  displayName: Skill runtime probe (TypeScript)
+  schemaVersion: 1
+  authoredVersion: 1
+  lifecycle: active
+spec:
+  toolId: skill-runtime-probe-typescript
+  toolVersion: "1"
+  description: Run the skill-runtime-probe TypeScript entrypoint in the sandbox and echo its argument back.
+  action: probe
+  riskClass: low
+  mutating: false
+  dryRun: false
+  idempotency:
+    strategy: none
+  timeout:
+    activeMs: 60000
+  inputSchema:
+    type: object
+    additionalProperties: false
+    properties:
+      message:
+        type: string
+        maxLength: 256
+  outputSchema:
+    type: object
+    additionalProperties: true
+    properties:
+      ok:
+        type: boolean
+      runtime:
+        type: string
+      interpreter:
+        type: string
+      echoed:
+        type: string
+  adapter:
+    kind: sandbox
+    ref: skill:skill-runtime-probe/probe_typescript

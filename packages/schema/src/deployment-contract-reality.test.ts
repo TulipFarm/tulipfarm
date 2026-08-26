@@ -84,6 +84,20 @@ const REVERSE_EXCLUSIONS: Readonly<Record<string, string>> = {
     "A sandbox mount path written into the launched container, read inside it, never by a service.",
   TULIP_OUTPUT_DIR:
     "A sandbox mount path written into the launched container, read inside it, never by a service.",
+  TULIP_CODE:
+    "Handed to the result writer inside a `skill` shell-mode container to carry the command's exit code.",
+  TULIP_OUT:
+    "A temp-file path inside a `skill` shell-mode container holding the captured stdout, never a service knob.",
+  TULIP_ERR:
+    "A temp-file path inside a `skill` shell-mode container holding the captured stderr, never a service knob.",
+  TULIP_LIMIT:
+    "The per-stream byte cap passed to the result writer inside a `skill` shell-mode container.",
+  TULIP_ALLOWED_HOSTS:
+    "Written into the egress proxy container the sandbox launches, read by its own entrypoint.",
+  TULIP_PROXY_PORT:
+    "Written into the egress proxy container the sandbox launches, read by its own entrypoint.",
+  TULIP_IDLE_TIMEOUT_SECONDS:
+    "Written into the egress proxy container the sandbox launches, read by its own entrypoint.",
   SLACK_BOT_TOKEN:
     "An Integration connection secret read from a connection.yaml `env` block, not from process.env.",
   TF_CODEX_BIN:

@@ -38,6 +38,7 @@ An omitted edge is forbidden.
 | `packages/run-kernel` | `packages/schema`, `packages/audit`, `packages/storage`, `packages/observability` |
 | `packages/sandbox` | `packages/schema`, `packages/authz`, `packages/audit`, `packages/storage`, `packages/observability` |
 | `packages/tool-broker` | `packages/schema`, `packages/authz`, `packages/audit`, `packages/secrets`, `packages/sandbox`, `packages/storage`, `packages/observability` |
+| `packages/skill-sandbox` | `packages/schema`, `packages/soul`, `packages/run-kernel`, `packages/sandbox`, `packages/tool-broker` |
 | `packages/knowledge` | `packages/schema`, `packages/authz`, `packages/audit`, `packages/storage`, `packages/observability`, `packages/constants`, `packages/llm`, `packages/tool-host` |
 | `packages/memory` | `packages/schema`, `packages/authz`, `packages/audit`, `packages/storage`, `packages/observability`, `packages/constants`, `packages/tool-host` |
 | `packages/tool-host` | `packages/schema`, `packages/authz`, `packages/soul`, `packages/run-kernel`, `packages/tool-broker`, `packages/surface`, `packages/storage`, `packages/observability` |
@@ -66,8 +67,8 @@ the Agent runtime. Applications register implementations during composition.
 
 | Consumer | May import from |
 | --- | --- |
-| `apps/api` | `schema`, `soul`, `constants`, `files`, `authz`, `audit`, `secrets`, `run-kernel`, `tool-broker`, `agent-runtime`, `knowledge`, `memory`, `curator`, `curator-host`, `surface`, `surface-web`, `surface-slack`, `surface-github`, `sandbox`, `integrations`, `storage`, `observability`, `tool-host`, `kv`, `platform-tools`, `built-in-agents`, `resources` |
-| `apps/worker` | `schema`, `constants`, `authz`, `audit`, `secrets`, `soul`, `run-kernel`, `tool-broker`, `agent-runtime`, `knowledge`, `memory`, `curator`, `surface`, `integrations`, `sandbox`, `storage`, `observability`, `tool-host`, `kv`, `platform-tools`, `built-in-agents`, `files`, `turn-executor`, `model-adapter` |
+| `apps/api` | `schema`, `soul`, `skill-sandbox`, `constants`, `files`, `authz`, `audit`, `secrets`, `run-kernel`, `tool-broker`, `agent-runtime`, `knowledge`, `memory`, `curator`, `curator-host`, `surface`, `surface-web`, `surface-slack`, `surface-github`, `sandbox`, `integrations`, `storage`, `observability`, `tool-host`, `kv`, `platform-tools`, `built-in-agents`, `resources` |
+| `apps/worker` | `schema`, `constants`, `skill-sandbox`, `authz`, `audit`, `secrets`, `soul`, `run-kernel`, `tool-broker`, `agent-runtime`, `knowledge`, `memory`, `curator`, `surface`, `integrations`, `sandbox`, `storage`, `observability`, `tool-host`, `kv`, `platform-tools`, `built-in-agents`, `files`, `turn-executor`, `model-adapter` |
 | `apps/integration-worker` | `schema`, `authz`, `audit`, `run-kernel`, `tool-broker`, `integrations`, `storage`, `observability` |
 | `apps/web` | `schema`, `files`, `surface`, `surface-web`, `surface-slack`, `surface-github`, and presentation-only packages such as `ui`/`editor` |
 | `apps/eval` | `agent-runtime`, `turn-executor`, `model-adapter`, `llm`, `schema`, `secrets`, `soul`, `storage`, `run-kernel`, `tool-host`, `curator`, `curator-host`, `files` |

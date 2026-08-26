@@ -27,6 +27,8 @@ export type {
   DevelopmentSandboxOutputPublisher,
 } from "./development-container";
 export { DevelopmentContainerSandboxExecutor } from "./development-container";
+export type { DockerNetworkEgressOptions } from "./development-egress";
+export { DockerNetworkEgressPort } from "./development-egress";
 export type { SandboxGuardrail } from "./guardrail";
 export {
   assertSandboxResultWithinRequest,

@@ -42,6 +42,7 @@
     "@tulipfarm/sandbox": "workspace:*",
     "@tulipfarm/schema": "workspace:*",
     "@tulipfarm/secrets": "workspace:*",
+    "@tulipfarm/skill-sandbox": "workspace:*",
     "@tulipfarm/soul": "workspace:*",
     "@tulipfarm/storage": "workspace:*",
     "@tulipfarm/surface": "workspace:*",

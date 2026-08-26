@@ -1,9 +1,8 @@
-import type { ArtifactService, ToolDispatchPlan } from "@tulipfarm/run-kernel";
+import type { ArtifactService } from "@tulipfarm/run-kernel";
 import type { SkillDefinition, ToolContractDefinition } from "@tulipfarm/schema";
 import type { BundleAsset, BundleDefinition, RuntimeBundle } from "@tulipfarm/soul";
 import { describe, expect, it } from "vitest";
-import { buildBundleSandboxAdapters } from "./sandbox-tooling";
-import type { RoutineToolRequest } from "./tool-port";
+import { buildBundleSandboxAdapters, type SandboxToolingRequest } from "./sandbox-tooling";
 
 const DIGEST = `sha256:${"a".repeat(64)}`;
 
@@ -100,22 +99,12 @@ function runtimeBundle(): RuntimeBundle {
   };
 }
 
-function request(): RoutineToolRequest {
-  const plan: ToolDispatchPlan = {
-    toolRef: { name: tool.spec.toolId, version: tool.spec.toolVersion },
-    action: tool.spec.action,
-    arguments: {},
-    idempotencyKey: "routine:run-1:state-1",
-    effectId: "effect-1",
-    logicalEffectOrdinal: 1,
-  };
+function request(): SandboxToolingRequest {
   return {
     businessId: "business-1",
     runId: "run-1",
     stateKey: "state-1",
-    plan,
     bundle: runtimeBundle(),
-    authorityLayers: [],
   };
 }
 

@@ -31,6 +31,7 @@ import {
   PgSecretRepo,
   type SecretsService,
 } from "@tulipfarm/secrets";
+import { buildBundleSandboxAdapters } from "@tulipfarm/skill-sandbox";
 import { PgBundleStore } from "@tulipfarm/soul";
 import {
   ArtifactStore,
@@ -87,7 +88,6 @@ import { HttpRoutineApprovalPort } from "./routine/approval-port";
 import { WorkerRoutineDefinitionLoader } from "./routine/definition-loader";
 import { createRoutineExecutor } from "./routine/executor";
 import { WorkerPinnedDefinitionReader } from "./routine/pinned-definitions";
-import { buildBundleSandboxAdapters } from "./routine/sandbox-tooling";
 import { BrokerRoutineToolPort } from "./routine/tool-port";
 import { RunDispatcher } from "./run-dispatcher";
 import { GuardedWorkerSecretsService } from "./secrets-guard";

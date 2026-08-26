@@ -1,4 +1,4 @@
-import { lstat, mkdir, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { DevelopmentContainerSandboxExecutor, type IsolatedSandboxExecutionRequest } from "./index";
@@ -46,6 +46,45 @@ function request(): IsolatedSandboxExecutionRequest {
           maxBytes: 1_000,
         },
       ],
+    },
+  };
+}
+
+function baseOptions() {
+  return {
+    guardrail: {
+      maxRequestLifetimeMs: 60_000,
+      maxWorkspaceBytes: 10_000_000,
+      maxCompute: {
+        timeoutMs: 10_000,
+        cpuMillis: 5_000,
+        memoryBytes: 128_000_000,
+        outputBytes: 20_000,
+      },
+      allowedRuntimeProfiles: { "shell-ts-python-v1": DIGEST },
+      allowedEgressDestinationIds: ["example.com"],
+      maxEgressBytes: 1_000_000,
+      maxCredentialBindings: 1,
+      maxFileOutputs: 4,
+    },
+    images: { [DIGEST]: `ghcr.io/tulipfarm/sandbox@${DIGEST}` },
+    artifacts: {
+      async read(ref: string) {
+        if (ref === "artifact://entrypoint/v1") {
+          return { fileName: "run.ts", bytes: new TextEncoder().encode("export {};") };
+        }
+        return { fileName: "input.json", bytes: new TextEncoder().encode("{}") };
+      },
+    },
+    credentials: {
+      async read() {
+        return "unused";
+      },
+    },
+    outputs: {
+      async publish(input: { readonly name: string }) {
+        return `artifact://${input.name}/v1`;
+      },
     },
   };
 }
@@ -124,5 +163,44 @@ describe("DevelopmentContainerSandboxExecutor", () => {
     expect(args).toContain(`ghcr.io/tulipfarm/sandbox@${DIGEST}`);
     expect(workspace).toBeDefined();
     await expect(lstat(workspace ?? "")).rejects.toThrow();
+  });
+
+  it("proxies egress through both upper and lower case proxy variables", async () => {
+    let envFile = "";
+    const run = vi.fn(async ({ args }: { readonly args: readonly string[] }) => {
+      const path = args
+        .find((value) => value.startsWith("--env-file="))
+        ?.slice("--env-file=".length);
+      envFile = await readFile(path ?? "", "utf8");
+      const output = outputMount(args);
+      await mkdir(join(output, "files"), { recursive: true });
+      await writeFile(join(output, "result.json"), '{"ok":true}');
+      await writeFile(join(output, "files/report.txt"), "ready");
+      return { exitCode: 0, timedOut: false, stdout: new Uint8Array(), stderr: new Uint8Array() };
+    });
+    const executor = new DevelopmentContainerSandboxExecutor({
+      ...baseOptions(),
+      egress: {
+        async prepare() {
+          return { networkName: "tulip-egress-1", httpsProxy: "http://tulip-egress-proxy:8888" };
+        },
+      },
+      run,
+      now: () => NOW,
+    });
+
+    await executor.execute({
+      ...request(),
+      egress: { destinationIds: ["example.com"], maxBytes: 1_000 },
+    });
+
+    const lines = envFile.split("\n");
+    expect(lines).toContain("HTTPS_PROXY=http://tulip-egress-proxy:8888");
+    expect(lines).toContain("HTTP_PROXY=http://tulip-egress-proxy:8888");
+    expect(lines).toContain("https_proxy=http://tulip-egress-proxy:8888");
+    expect(lines).toContain("http_proxy=http://tulip-egress-proxy:8888");
+    const args = run.mock.calls[0]?.[0].args ?? [];
+    expect(args).toContain("--network=tulip-egress-1");
+    expect(args).not.toContain("--network=none");
   });
 });

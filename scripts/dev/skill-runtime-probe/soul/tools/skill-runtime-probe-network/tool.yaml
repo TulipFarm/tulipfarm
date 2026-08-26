@@ -1,0 +1,53 @@
+apiVersion: tulipfarm.ai/v1
+kind: ToolContract
+metadata:
+  id: a6346ab8-ba05-4ff0-b609-6c92f6d6d33b
+  slug: skill-runtime-probe-network
+  displayName: Skill runtime probe (curl and wget)
+  schemaVersion: 1
+  authoredVersion: 1
+  lifecycle: active
+spec:
+  toolId: skill-runtime-probe-network
+  toolVersion: "1"
+  description: Fetch a declared destination with curl and wget through the sandbox egress proxy.
+  action: probe
+  riskClass: low
+  mutating: false
+  dryRun: false
+  idempotency:
+    strategy: none
+  allowedDestinations:
+    - example.com
+  timeout:
+    activeMs: 60000
+  inputSchema:
+    type: object
+    additionalProperties: false
+    properties:
+      host:
+        type: string
+        maxLength: 253
+  outputSchema:
+    type: object
+    additionalProperties: true
+    properties:
+      ok:
+        type: boolean
+      runtime:
+        type: string
+      host:
+        type: string
+      proxy:
+        type: string
+      curl:
+        type: object
+        additionalProperties: true
+      wget:
+        type: object
+        additionalProperties: true
+      undeclaredDestination:
+        type: string
+  adapter:
+    kind: sandbox
+    ref: skill:skill-runtime-probe/probe_network
