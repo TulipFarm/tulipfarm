@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { parse } from "yaml";
 import { ArtifactService } from "../../run-kernel/src/artifacts";
 import { TypedOutputValidator } from "../../run-kernel/src/outputs";
+import { skillDocumentFromMarkdown } from "../../soul/src/skill-documents";
 import { MemoryArtifactStore } from "../../storage/src/artifacts/memory-artifact-store";
 import { SkillCommandRunner } from "../src/index";
 
@@ -61,8 +62,25 @@ function memoryBlobStore() {
   };
 }
 
+/**
+ * Projected from `SKILL.md` rather than read from a standalone `skill.yaml`, because the reader
+ * treats `SKILL.md` frontmatter as the only Skill definition. Reading a sidecar here would let the
+ * fixture pass this check while publishing zero runnable commands to the real bundle.
+ */
+function loadSkillDefinition() {
+  const markdown = readFileSync(join(SKILL_DIR, "SKILL.md"), "utf8");
+  const skill = skillDocumentFromMarkdown("skill-runtime-probe", markdown, "SKILL.md");
+  if (skill === undefined) {
+    throw new Error("SKILL.md frontmatter does not project a valid Skill definition");
+  }
+  return skill as unknown as {
+    metadata: { id: string; slug: string; authoredVersion: number };
+    spec: { scripts: string[]; commands: { name: string }[] };
+  };
+}
+
 function loadBundle() {
-  const skill = parse(readFileSync(join(SKILL_DIR, "skill.yaml"), "utf8"));
+  const skill = loadSkillDefinition();
   const toolsDir = join(FIXTURE, "tools");
   const tools = readdirSync(toolsDir).map((slug) =>
     parse(readFileSync(join(toolsDir, slug, "tool.yaml"), "utf8"))

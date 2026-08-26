@@ -24,8 +24,7 @@ Then restart `pnpm dev` so the API republishes the Soul bundle.
 
 | Soul path | Purpose |
 | --- | --- |
-| `skills/skill-runtime-probe/SKILL.md` | Model-facing instructions, the `allowedDomains` that gate `web_fetch` / `api_request`, the `allowedCommands` that gate `skill` in `shell` mode, and the fenced blocks it runs. |
-| `skills/skill-runtime-probe/skill.yaml` | Five commands: `probe_shell`, `probe_python`, `probe_typescript`, `probe_inline`, `probe_network`. |
+| `skills/skill-runtime-probe/SKILL.md` | Model-facing instructions, the five `commands` (`probe_shell`, `probe_python`, `probe_typescript`, `probe_inline`, `probe_network`), the `allowedDomains` that gate `web_fetch` / `api_request`, the `allowedCommands` that gate `skill` in `shell` mode, and the fenced blocks it runs. |
 | `skills/skill-runtime-probe/scripts/probe.{sh,py,ts}` | One entrypoint per language. |
 | `skills/skill-runtime-probe/scripts/probe-inline.sh` | Runs `node -e`, `node <<'JS'`, `python3 -c` and `python3 <<'PY'`. |
 | `skills/skill-runtime-probe/scripts/probe-network.sh` | Fetches a declared host with `curl` and `wget`. |
@@ -33,9 +32,23 @@ Then restart `pnpm dev` so the API republishes the Soul bundle.
 
 ## Verify by hand
 
+0. Confirm the installed Soul actually publishes the commands — this is what `skill` in `run` mode
+   reads, and a Skill whose commands never reach the bundle fails in chat with the misleading
+   "No Skill declares runnable commands under that name":
+
+   ```bash
+   pnpm --filter @tulipfarm/soul exec tsx \
+     "$PWD/scripts/dev/skill-runtime-probe/verify-bundle-commands.mts"
+   ```
+
+   Expect `runnable commands 5`. Zero means the Soul was not reinstalled, or the commands were
+   authored somewhere the reader no longer looks — `SKILL.md` frontmatter is the only source.
+
 1. `http://localhost:4000/skills` -> `skill-runtime-probe`. Each command should report the runtime
    as available. A blocker here means `SANDBOX_RUNTIME_IMAGE` is missing or not digest-pinned.
-2. From chat, ask an Agent to run each command through the `skill` Tool in `run` mode:
+2. From chat, ask an Agent to run each command through the `skill` Tool in `run` mode. Name the
+   **declared command** (`probe_shell`), never its file path (`scripts/probe.sh`) — a path reaches
+   no command and is refused:
 
    - "Run the `probe_shell` command of the `skill-runtime-probe` skill and show me the raw result."
    - Repeat for `probe_python`, `probe_typescript`, `probe_inline`, `probe_network`.
