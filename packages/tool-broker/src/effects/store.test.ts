@@ -1,6 +1,6 @@
 import { PGlite } from "@electric-sql/pglite";
 import type { TransactionPort } from "@tulipfarm/storage";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { EffectLedgerError, type ReserveEffectInput } from "./model";
 import { EFFECT_STORAGE_STATEMENTS, EffectLedger, MemoryEffectStore, PgEffectStore } from "./store";
 
@@ -90,6 +90,10 @@ describe("PgEffectStore", () => {
       withTransaction: (operation) => database.transaction(operation),
     };
     store = new PgEffectStore(transactions);
+  });
+
+  afterEach(async () => {
+    await database.close();
   });
 
   it("enforces one matching intent per business idempotency key", async () => {
