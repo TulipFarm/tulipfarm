@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.5.6",
+    "@electric-sql/pglite": "^0.5.7",
     "@tulipfarm/storage": "workspace:*",
     "@tulipfarm/tsconfig": "workspace:*",
     "@types/node": "^26.2.0",
