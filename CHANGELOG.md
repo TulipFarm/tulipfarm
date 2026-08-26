@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.16.0](https://github.com/TulipFarm/tulipfarm/compare/v0.15.0...v0.16.0) (2026-08-26)
+
+### Features
+
+* **agent-runtime:** spawn ad-hoc sub-agents with in-chat traces ([#599](https://github.com/TulipFarm/tulipfarm/issues/599)) ([97a78ee](https://github.com/TulipFarm/tulipfarm/commit/97a78ee67e8f5a492533f8618a299980c89f6171))
+* **built-in-agents:** consolidate the runtime's single-shot prompts ([#600](https://github.com/TulipFarm/tulipfarm/issues/600)) ([ae5384b](https://github.com/TulipFarm/tulipfarm/commit/ae5384be12904cdcad3ee9e4e1a6e5ad953025ef))
+* **skill-forge:** search the catalogues before authoring a Skill ([#606](https://github.com/TulipFarm/tulipfarm/issues/606)) ([9eb7796](https://github.com/TulipFarm/tulipfarm/commit/9eb7796abb2f9bbb848b55439bcbf4752da482c0))
+* **skill:** load and install with audit ([#602](https://github.com/TulipFarm/tulipfarm/issues/602)) ([4aea5b5](https://github.com/TulipFarm/tulipfarm/commit/4aea5b57bd4e6b45484d9601ceb2def9d6ca3670))
+* **skill:** run declared and documented commands in a sandbox ([#604](https://github.com/TulipFarm/tulipfarm/issues/604)) ([5d21243](https://github.com/TulipFarm/tulipfarm/commit/5d21243da62518cd282beb3754ba7ced78464299))
+* **skills:** seed bundled Skills into the Soul and version the lock ([#598](https://github.com/TulipFarm/tulipfarm/issues/598)) ([6441c6a](https://github.com/TulipFarm/tulipfarm/commit/6441c6a2af5211c2e4279385c3487f3c7b99e0ef))
+
+### Bug Fixes
+
+* **skill:** give the API a blob port and move commands to SKILL.md ([#605](https://github.com/TulipFarm/tulipfarm/issues/605)) ([6cbff89](https://github.com/TulipFarm/tulipfarm/commit/6cbff8960aa37c7d77830e161b5a9cad78dc6016))
+
 ## [0.15.0](https://github.com/TulipFarm/tulipfarm/compare/v0.14.2...v0.15.0) (2026-08-24)
 
 ### Features
