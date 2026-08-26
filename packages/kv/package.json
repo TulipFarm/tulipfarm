@@ -14,7 +14,7 @@
     "@tulipfarm/tool-host": "workspace:*"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.5.5",
+    "@electric-sql/pglite": "^0.5.6",
     "@tulipfarm/tsconfig": "workspace:*",
     "@types/node": "^26.2.0",
     "typescript": "^7.0.2",

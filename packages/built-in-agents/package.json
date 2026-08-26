@@ -12,7 +12,7 @@
     "@tulipfarm/agent-runtime": "workspace:*",
     "@tulipfarm/schema": "workspace:*",
     "@tulipfarm/soul": "workspace:*",
-    "ai": "^7.0.68",
+    "ai": "^7.0.77",
     "ajv": "^8.17.1"
   },
   "devDependencies": {
