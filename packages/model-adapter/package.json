@@ -12,7 +12,7 @@
     "@tulipfarm/agent-runtime": "workspace:*",
     "@tulipfarm/llm": "workspace:*",
     "@tulipfarm/schema": "workspace:*",
-    "ai": "^7.0.68"
+    "ai": "^7.0.77"
   },
   "devDependencies": {
     "@tulipfarm/tsconfig": "workspace:*",
