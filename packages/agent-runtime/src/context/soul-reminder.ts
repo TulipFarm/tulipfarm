@@ -103,9 +103,7 @@ export const SOUL_REMINDER_SECTIONS: readonly SoulReminderSection[] = [
       "soul.skill.create",
       "soul.skill.update",
       "soul.skill.delete",
-      "soul.skill.activate",
       "platform.skill.load",
-      "platform.skill.call",
     ],
   },
   {

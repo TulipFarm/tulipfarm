@@ -11,6 +11,7 @@ Loader, compiler, publisher, and git-sync engine for Soul artifacts. Root `soul/
 | `src/index.ts` | Public exports; do not mirror the list here. |
 | `src/repo-dir.ts` | Locates the checkout for the dev-only bundled Skill/integration fallbacks. |
 | `src/soul-loader.ts`, `src/tree-reader.ts`, `src/soul-path.ts` | Disk and tree reads. |
+| `src/{agent,skill,model-profile}-documents.ts` | Canonical definitions projected on read from the authored file. |
 | `src/compiler.ts`, `src/bundle.ts`, `src/bundle-retention.ts`, `src/published-loader.ts` | Runtime bundles. |
 | `src/signatures.ts`, `src/publication.ts`, `src/publisher.ts` | Publish flow. |
 | `src/routine-catalog.ts`, `src/routines/` | Routines browse model; Routine reference validation. |
@@ -41,8 +42,14 @@ Loader, compiler, publisher, and git-sync engine for Soul artifacts. Root `soul/
   locked value, so an operator or Agent edit permanently opts the Skill out of image updates. The
   same pass reaps retired Skills, persists the normalized vocabulary, and records anything else on
   disk as `curated`, so the lock is a complete inventory. Copy `SKILL.md` verbatim apart from the
-  forge-contract expansion: converting to `skill.yaml` would silently drop `tools`/`category`,
-  which `SkillSpec` cannot carry.
+  token expansion in `skills/tokens.ts`: converting to `skill.yaml` would silently drop
+  `tools`/`category`, which `SkillSpec` cannot carry.
+- **`skills/audit-taxonomy.ts` is the code-owned security rubric.** One text, two consumers: the
+  `skill_audit` BuiltInAgent's system prompt (which gates `skill_create` and every marketplace
+  install) and the bundled `skill-forge` Skill, via `{{SKILL_AUDIT_TAXONOMY}}` — so an Agent
+  authors against the same rules it is then scored against. It lives in code, not the Soul, because
+  a Soul copy is writable through `skill_update`, which would let an Agent rewrite the rules that
+  gate its own installs. Expanded on the way in, never read back out.
 - `SoulLoader` reads `agents/*/AGENT.md`, `skills/*/SKILL.md`, `resources/*/schema.yml`,
   `routines/*/routine.yaml`, `integrations/*/manifest.yml`, root `soul.yaml`, `guardrails.yaml`;
   resource schemas must pass `validateResourceSchema()` on load.
@@ -50,6 +57,9 @@ Loader, compiler, publisher, and git-sync engine for Soul artifacts. Root `soul/
   integration, so writers must copy the spec beside `manifest.yml`.
 - Add artifact kinds to `@tulipfarm/schema` `ARTIFACT_LAYOUTS` first and derive paths, companions,
   bundle membership and temporal class from it — no custom regex/table.
+- A Skill is defined by its `SKILL.md` frontmatter; there is no second definition file. Bundles get
+  a canonical Skill document from `skill-documents.ts`, projected on read — never write one to the
+  tree. `AGENT.md` works the same way via `agent-documents.ts`.
 - Pinned reads refuse `live` kinds (`Role`, `AccessGrant`) and unknown kinds; `temporalClass` means
   which digest to read, not whether the artifact is bundled.
 - `SoulWriter.apply()` is the only authored-tree write path: validate, commit atomically, publish,

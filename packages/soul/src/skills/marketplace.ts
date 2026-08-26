@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { unstorableArtifactPaths, validateSkill } from "@tulipfarm/schema";
 import type { CommitActor } from "../commit-signing";
-import { convertLegacySkill } from "../converters/legacy-definitions";
+import { sourceType } from "../git-source";
 import type { GitSyncService } from "../git-sync";
 import { parseFrontmatter, type SoulLoader } from "../published-loader";
 import { artifactWriteTarget, type SoulWrite, type SoulWriter } from "../writer";
@@ -22,6 +22,7 @@ import {
 import { mutateSkillsLock } from "./lock-write";
 import { collectSkillFiles, discoverSkills, skillDirectoryHash } from "./marketplace-files";
 import { mergedSkills } from "./registry";
+import { resolveSkillSource } from "./source-url";
 
 type ScanEntry = {
   source: string;
@@ -92,6 +93,18 @@ export class SkillMarketplaceError extends Error {
   }
 }
 
+/** A scanned and audited package, held for a decision. Nothing has been written yet. */
+export interface SkillMarketplacePrepared {
+  /** Hand back to `install` to go ahead; the scan expires, so this is not a durable handle. */
+  scanId: string;
+  /** The resolved git remote, which a catalogue URL is not. */
+  source: string;
+  name: string;
+  skillPath: string;
+  report: unknown;
+  warnings: readonly string[];
+}
+
 export interface SkillMarketplaceFlow {
   browse(): Promise<SkillMarketplaceBrowse>;
   scan(input: { source: string; actorId: string }): Promise<SkillMarketplaceScan>;
@@ -102,6 +115,18 @@ export interface SkillMarketplaceFlow {
     paths?: string[];
     actor: CommitActor;
     source?: "agent" | "api";
+  }): Promise<SkillMarketplaceInstall>;
+  prepareFromSource(input: {
+    source: string;
+    name?: string;
+    actorId: string;
+  }): Promise<SkillMarketplacePrepared>;
+  installPrepared(input: {
+    scanId: string;
+    source: string;
+    name?: string;
+    actor: CommitActor;
+    writeSource?: "agent" | "api";
   }): Promise<SkillMarketplaceInstall>;
 }
 
@@ -122,13 +147,36 @@ export interface SkillMarketplaceDeps {
 
 const SCAN_TTL_MS = 10 * 60 * 1000;
 const MAX_SCANS = 25;
-const STRUCTURAL_INSTALL_BLOCKERS = new Set([
+/**
+ * Package shapes an operator should see before deciding, not reasons to refuse. They describe risk
+ * — a binary blob, a package that will bloat the Soul's git history, a symlink pointing out of the
+ * package — and risk is the operator's call to accept on their own instance. Refusing them here
+ * rejected whole packages over one file and taught nobody anything; surfacing them at the
+ * confirmation does. What genuinely cannot work (`validateInstallable`) still refuses.
+ */
+const SEVERE_PACKAGE_FINDINGS = new Set([
   "binary_file",
   "oversized_file",
   "oversized_skill",
   "symlink_escape",
   "too_many_files",
 ]);
+
+/** Findings worth stopping an operator on, phrased for a confirmation prompt. */
+export function packageWarnings(files: readonly SkillScanFile[]): string[] {
+  return scanSkill(files)
+    .findings.filter(
+      (finding) =>
+        SEVERE_PACKAGE_FINDINGS.has(finding.patternId) ||
+        finding.severity === "critical" ||
+        finding.severity === "high"
+    )
+    .map((finding) =>
+      finding.file === "(directory)"
+        ? `${finding.severity}: ${finding.description}`
+        : `${finding.severity}: ${finding.description} (${finding.file}:${finding.line})`
+    );
+}
 
 function stripUrlCredentials(source: string): string {
   try {
@@ -216,8 +264,11 @@ export function createSkillMarketplaceFlow(deps: SkillMarketplaceDeps): SkillMar
   }
 
   async function scan(input: { source: string; actorId: string }): Promise<SkillMarketplaceScan> {
+    // Resolving here rather than only in `prepareFromSource` means a catalogue URL pasted into the
+    // scan box behaves the same as one handed to an Agent, and provenance records the real remote.
+    const source = resolveSkillSource(input.source).source;
     return deps.cloneSource(
-      input.source,
+      source,
       { prefix: "skill-scan-", actorId: input.actorId },
       async ({ dir, ref }) => {
         const discovered = await discoverSkills(dir);
@@ -228,7 +279,7 @@ export function createSkillMarketplaceFlow(deps: SkillMarketplaceDeps): SkillMar
         const scanId = randomUUID();
         pruneScans(Date.now());
         scans.set(scanId, {
-          source: input.source,
+          source,
           ref,
           skills: discovered,
           audited: new Set(),
@@ -236,7 +287,7 @@ export function createSkillMarketplaceFlow(deps: SkillMarketplaceDeps): SkillMar
         });
         return {
           scanId,
-          source: input.source,
+          source,
           ref,
           skills: discovered.map((skill) => ({
             name: skill.name,
@@ -359,33 +410,114 @@ export function createSkillMarketplaceFlow(deps: SkillMarketplaceDeps): SkillMar
     return { entry, skill };
   }
 
-  return { browse, scan, audit, install };
+  /** The Skill directory a catalogue URL names, which need not equal the `name` in its frontmatter. */
+  function directoryOf(skillPath: string): string {
+    const segments = skillPath.split("/");
+    return segments.length > 1 ? segments[segments.length - 2] : "";
+  }
+
+  /** Narrows a source to the single Skill it names, or explains what the caller has to choose from. */
+  function selectOne<T extends { name: string; skillPath: string }>(
+    skills: readonly T[],
+    wanted: string | undefined,
+    sourceLabel: string
+  ): T {
+    const matches = wanted
+      ? skills.filter((skill) => skill.name === wanted || directoryOf(skill.skillPath) === wanted)
+      : skills;
+    if (matches.length === 0) {
+      throw new SkillMarketplaceError(
+        400,
+        `"${wanted}" is not in ${sourceLabel}. It offers: ${skills
+          .map((skill) => skill.name)
+          .join(", ")}`
+      );
+    }
+    if (matches.length > 1) {
+      throw new SkillMarketplaceError(
+        400,
+        `${sourceLabel} offers more than one Skill, so name the one to install: ${matches
+          .map((skill) => skill.name)
+          .join(", ")}`
+      );
+    }
+    return matches[0];
+  }
+
+  /**
+   * Everything up to the decision: resolve the URL, scan it, pick the one Skill it names, and audit
+   * it. Writes nothing. The caller shows `report` and `warnings` to a human, who then calls
+   * `install` with the returned `scanId` to go ahead. Splitting it this way is what lets an audit
+   * be advice rather than a gate — the operator sees the risk before anything reaches the Soul.
+   */
+  async function prepareFromSource(input: {
+    source: string;
+    name?: string;
+    actorId: string;
+  }): Promise<SkillMarketplacePrepared> {
+    const resolved = resolveSkillSource(input.source);
+    // `scan` resolves too; passing the resolved source keeps the two paths on one spelling.
+    const scanned = await scan({ source: resolved.source, actorId: input.actorId });
+    const wanted = input.name ?? resolved.skillHint;
+
+    const chosen = selectOne(scanned.skills, wanted, resolved.source);
+    // Refuse what cannot work here rather than at the write, so nobody is asked to approve an
+    // install that was never going to land.
+    validateInstallable(
+      selected(scanned.scanId, chosen.name, chosen.skillPath).skill,
+      deps.executablePackageBlocker
+    );
+    const { report } = await audit({
+      scanId: scanned.scanId,
+      name: chosen.name,
+      skillPath: chosen.skillPath,
+    });
+    const { skill } = selected(scanned.scanId, chosen.name, chosen.skillPath);
+    return {
+      scanId: scanned.scanId,
+      source: resolved.source,
+      name: chosen.name,
+      skillPath: chosen.skillPath,
+      report,
+      warnings: packageWarnings(skill.files),
+    };
+  }
+
+  /**
+   * The other half of `prepareFromSource`: goes ahead with the package that scan already audited.
+   * It reapplies the same selection to the cached scan rather than trusting the caller to echo the
+   * Skill back, so what lands is necessarily what was audited and shown.
+   */
+  async function installPrepared(input: {
+    scanId: string;
+    source: string;
+    name?: string;
+    actor: CommitActor;
+    writeSource?: "agent" | "api";
+  }): Promise<SkillMarketplaceInstall> {
+    const entry = scans.get(input.scanId);
+    if (!entry) {
+      throw new SkillMarketplaceError(
+        404,
+        "that confirmation has expired; audit the source again before installing"
+      );
+    }
+    const resolved = resolveSkillSource(input.source);
+    const chosen = selectOne(entry.skills, input.name ?? resolved.skillHint, resolved.source);
+    return install({
+      scanId: input.scanId,
+      names: [chosen.name],
+      paths: [chosen.skillPath],
+      actor: input.actor,
+      source: input.writeSource,
+    });
+  }
+
+  return { browse, scan, audit, install, prepareFromSource, installPrepared };
 }
 
 function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function generatedSkillDefinition(skill: DiscoveredSkill): string | undefined {
-  if (skill.files.some((file) => file.path === "skill.yaml" || file.path === "skill.yml")) {
-    return undefined;
-  }
-  const { frontmatter, body } = parseFrontmatter(skill.content);
-  const paths = skill.files.map((file) => file.path);
-  const result = convertLegacySkill({
-    name: skill.name,
-    body,
-    frontmatter: {
-      ...frontmatter,
-      trustTier: frontmatter.trustTier ?? "third_party",
-      references: paths.filter((path) => path.startsWith("references/")),
-      assets: paths.filter((path) => path.startsWith("assets/")),
-      schemas: paths.filter((path) => path.startsWith("schemas/")),
-      scripts: paths.filter((path) => path.startsWith("scripts/")),
-    },
-  });
-  const definition = result.files.find((file) => file.path.endsWith("/skill.yaml"));
-  return definition?.operation === "upsert" ? definition.content : undefined;
 }
 
 async function skillInstallChanges(root: string, skill: DiscoveredSkill): Promise<SoulWrite[]> {
@@ -397,11 +529,6 @@ async function skillInstallChanges(root: string, skill: DiscoveredSkill): Promis
   };
   for (const file of skill.files)
     if (file.symlinkTarget === undefined) put(file.path, file.content);
-  const generated = generatedSkillDefinition(skill);
-  if (generated !== undefined) {
-    changes.push({ op: "put", target: { kind: "Skill", slug: skill.name }, content: generated });
-    written.add("skill.yaml");
-  }
   try {
     for (const file of await collectSkillFiles(join(root, "skills", skill.name))) {
       if (!written.has(file.path)) {
@@ -432,17 +559,6 @@ function validateInstallable(
     throw new SkillMarketplaceError(
       400,
       `Skill "${skill.name}" contains files the soul cannot store: ${unstorable.join(", ")}`
-    );
-  }
-  const blockers = scanSkill(skill.files).findings.filter((finding) =>
-    STRUCTURAL_INSTALL_BLOCKERS.has(finding.patternId)
-  );
-  if (blockers.length > 0) {
-    throw new SkillMarketplaceError(
-      400,
-      `Skill "${skill.name}" contains unsupported package files: ${[
-        ...new Set(blockers.map((finding) => finding.patternId)),
-      ].join(", ")}`
     );
   }
   const executableBlocker = executablePackageBlocker(skill);

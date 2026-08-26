@@ -359,6 +359,75 @@ describe("GitSoulTreeReader", () => {
     expect(files.map((file) => file.path)).toEqual(["agents/joke-bot/AGENT.md"]);
   });
 
+  it("projects a SKILL.md into a canonical Skill definition", async () => {
+    await writeFixture(
+      "skills/reporting/SKILL.md",
+      [
+        "---",
+        "name: reporting",
+        "description: Reports on the week.",
+        "trustTier: first_party",
+        "scripts:",
+        "  - scripts/report.py",
+        "commands:",
+        "  - name: generate",
+        "    toolRef: report.generate",
+        "    runtimeProfile: shell-ts-python-v1",
+        "    entrypoint: scripts/report.py",
+        "---",
+        "Summarize the week.",
+        "",
+      ].join("\n")
+    );
+    await writeFixture("skills/reporting/scripts/report.py", "print('ok')\n");
+    const git = simpleGit(TMP);
+    await git.add("-A");
+    await git.commit("test fixture");
+    const sha = await git.revparse(["HEAD"]);
+
+    const documents = await new GitSoulTreeReader(TMP).readDefinitions(sha.trim());
+
+    expect(documents.map(documentSubject)).toContain("Skill:reporting");
+    const skill = documents.filter((document) => document.kind === "Skill")[0];
+    expect(skill.spec).toMatchObject({
+      instructions: { path: "SKILL.md" },
+      trustTier: "first_party",
+      commands: [{ name: "generate", toolRef: "report.generate" }],
+    });
+  });
+
+  // A Skill names no ModelProfile, so it must project in a Soul that configures no LLM at all —
+  // the state a freshly scaffolded Soul is in before its first provider key is set.
+  it("projects a Skill even while the Soul configures no LLM", async () => {
+    await writeFixture(
+      "skills/packing/SKILL.md",
+      "---\nname: packing\ndescription: Packs bulbs.\n---\nPack carefully.\n"
+    );
+    const git = simpleGit(TMP);
+    await git.add("-A");
+    await git.commit("test fixture");
+    const sha = await git.revparse(["HEAD"]);
+
+    const documents = await new GitSoulTreeReader(TMP).readDefinitions(sha.trim());
+
+    expect(documents.map(documentSubject)).toContain("Skill:packing");
+  });
+
+  it("bundles SKILL.md as a source file, so its projection's companion resolves", async () => {
+    await writeFixture(
+      "skills/packing/SKILL.md",
+      "---\nname: packing\ndescription: Packs bulbs.\n---\nPack carefully.\n"
+    );
+    const git = simpleGit(TMP);
+    await git.add("-A");
+    await git.commit("test fixture");
+    const sha = await git.revparse(["HEAD"]);
+
+    const files = await new GitSoulTreeReader(TMP).readFiles(sha.trim());
+
+    expect(files.map((file) => file.path)).toEqual(["skills/packing/SKILL.md"]);
+  });
+
   it("leaves the canonical agent.yaml alone when both formats are present", async () => {
     await writeConfiguredLlm();
     await writeFixture("agents/joke-bot/AGENT.md", "Legacy body\n");

@@ -20,7 +20,7 @@ that is `agent-runtime` and `turn-executor`.
 | `src/agents/tool-result-distiller/` | Compresses an oversized Tool result; `grounding.ts` validates citations against the sent bytes |
 | `src/agents/effort-classifier/` | Resolves `auto` effort to a rung |
 | `src/agents/chat-title/` | Names a Conversation from its first Turn; `sanitize.ts` is the pure fallback path |
-| `src/agents/skill-audit/` | Reads a proposed Skill for intent before it may be activated |
+| `src/agents/skill-audit/` | Reads a proposed Skill for intent before it may be written |
 | `src/agents/onboarding-personalizer/` | Turns a Soul's shape into onboarding suggestions |
 
 One directory per agent, and inside it the same shape every time: `index.ts` holds the spec and
@@ -38,6 +38,8 @@ the bound it claims is then a diff in two files, not a paragraph nobody re-read.
 - **Never import `@tulipfarm/llm`.** Models arrive injected as a `BuiltInAgentModelSource<TGate>`;
   the gate type is a parameter for the same reason. The import scanner counts type-only imports.
 - **`agents/skill-audit/` guards Soul writes.** It sits beside a Conversation-naming prompt, but it
-  is the one prompt here whose failure has consequences. Review it as such.
+  is the one prompt here whose failure has consequences. Review it as such. Its rubric is
+  `SKILL_AUDIT_TAXONOMY` from `@tulipfarm/soul`, shared with the bundled `skill-forge` Skill — edit
+  the taxonomy there, not a paraphrase here, or the forge authors against rules this never checks.
 - Curator is deliberately not here: it is a two-process trust boundary, not a single-shot call.
   See `packages/curator` and `packages/curator-host`.

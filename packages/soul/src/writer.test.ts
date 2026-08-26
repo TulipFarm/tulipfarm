@@ -55,18 +55,12 @@ function agentDoc(slug: string, personality = "Answers questions."): string {
 
 function skillDoc(slug: string): string {
   return [
-    "apiVersion: tulipfarm.ai/v1",
-    "kind: Skill",
-    "metadata:",
-    "  id: 01HQ2X8G3K4M5N6P7Q8R9S0TCD",
-    `  slug: ${slug}`,
-    "  schemaVersion: 1",
-    "  authoredVersion: 1",
-    "  lifecycle: draft",
-    "spec:",
-    "  instructions:",
-    "    path: SKILL.md",
-    "  trustTier: business_authored",
+    "---",
+    `name: ${slug}`,
+    `description: The ${slug} skill.`,
+    "trustTier: business_authored",
+    "---",
+    `# ${slug}`,
     "",
   ].join("\n");
 }
@@ -222,7 +216,7 @@ describe("SoulWriter.apply", () => {
       ],
     });
 
-    expect(result.paths).toEqual(["agents/a/agent.yaml", "skills/b/skill.yaml"]);
+    expect(result.paths).toEqual(["agents/a/agent.yaml", "skills/b/SKILL.md"]);
   });
 
   it("records commit provenance so a write can be attributed after the fact", async () => {
@@ -786,7 +780,7 @@ describe("SoulWriter — regressions", () => {
     ]);
 
     expect(result.paths).toEqual([
-      "skills/packing/skill.yaml",
+      "skills/packing/SKILL.md",
       "skills/packing/references/bulbs.md",
       "skills/packing/scripts/pack.py",
       "skills/packing/LICENSE.txt",
@@ -1061,7 +1055,7 @@ describe("SoulWriter — degraded dependencies", () => {
 
 describe("artifactWriteTarget", () => {
   it("addresses a layout's definition file as the definition, not as a companion", () => {
-    expect(artifactWriteTarget("Skill", "packing", "skill.yaml")).toEqual({
+    expect(artifactWriteTarget("Skill", "packing", "SKILL.md")).toEqual({
       kind: "Skill",
       slug: "packing",
     });
@@ -1072,7 +1066,7 @@ describe("artifactWriteTarget", () => {
   });
 
   it("addresses every other package file as a companion", () => {
-    for (const path of ["SKILL.md", "references/bulbs.md", "scripts/convert.py", "LICENSE.txt"]) {
+    for (const path of ["README.md", "references/bulbs.md", "scripts/convert.py", "LICENSE.txt"]) {
       expect(artifactWriteTarget("Skill", "packing", path)).toEqual({
         kind: "Skill",
         slug: "packing",

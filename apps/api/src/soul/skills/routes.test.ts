@@ -8,7 +8,6 @@ import { LlmNotConfiguredError } from "@tulipfarm/schema";
 import type { BundledSkill } from "@tulipfarm/soul";
 import {
   type CommitSigner,
-  convertLegacySkill,
   type GitSyncService,
   type Logger,
   SoulGitStore,
@@ -174,7 +173,7 @@ describe("skills routes", () => {
           category: "forge",
           categoryDescription: "Forge Skills.",
           directory: "/app/skills/forge/resource-forge",
-          references: [],
+          files: [],
         },
       ],
     ]);
@@ -262,34 +261,12 @@ describe("skills routes", () => {
         provenance: "public",
         version: "1.0.0",
         source: "owner/repo",
-        pendingAudit: false,
       });
       expect(skills).toContainEqual({
         name: "my-skill",
         description: "Authored by hand.",
         provenance: "curated",
-        pendingAudit: false,
       });
-    });
-
-    it("marks forge-created skills with pendingAudit: true", async () => {
-      // Add a pending skill to the soul loader.
-      (soulLoader.skills as Map<string, SoulSkill>).set("pending-skill", {
-        name: "pending-skill",
-        frontmatter: { _pendingAudit: true, description: "Pending." },
-        body: "Pending body.",
-      });
-      const res = await app.inject({
-        method: "GET",
-        url: "/api/v1/skills",
-        cookies: auth(),
-        headers,
-      });
-      expect(res.statusCode).toBe(200);
-      const { skills } = res.json();
-      expect(skills).toContainEqual(
-        expect.objectContaining({ name: "pending-skill", pendingAudit: true })
-      );
     });
 
     it("lists bundled Skills with bundled provenance", async () => {
@@ -304,7 +281,6 @@ describe("skills routes", () => {
         name: "resource-forge",
         description: "Bundled Resource forge.",
         provenance: "bundled",
-        pendingAudit: false,
       });
     });
 
@@ -357,34 +333,27 @@ describe("skills routes", () => {
     it("returns package files and executable command runtime status", async () => {
       const directory = join(soulPath, "skills", "reporting");
       await mkdir(join(directory, "scripts"), { recursive: true });
-      await writeFile(join(directory, "SKILL.md"), "# Reporting", "utf8");
-      await writeFile(join(directory, "scripts", "report.py"), "print('ok')\n", "utf8");
       await writeFile(
-        join(directory, "skill.yaml"),
-        `apiVersion: tulipfarm.ai/v1
-kind: Skill
-metadata:
-  id: 22222222-2222-2222-2222-222222222222
-  slug: reporting
-  schemaVersion: 1
-  authoredVersion: 1
-  lifecycle: draft
-spec:
-  instructions:
-    path: SKILL.md
-  scripts:
-    - scripts/report.py
-  commands:
-    - name: generate
-      toolRef: report.generate
-      runtimeProfile: shell-ts-python-v1
-      entrypoint: scripts/report.py
-      requiredCommands:
-        - python3
-  trustTier: first_party
+        join(directory, "SKILL.md"),
+        `---
+name: reporting
+description: Reports.
+trustTier: first_party
+scripts:
+  - scripts/report.py
+commands:
+  - name: generate
+    toolRef: report.generate
+    runtimeProfile: shell-ts-python-v1
+    entrypoint: scripts/report.py
+    requiredCommands:
+      - python3
+---
+# Reporting
 `,
         "utf8"
       );
+      await writeFile(join(directory, "scripts", "report.py"), "print('ok')\n", "utf8");
       soulLoader.skills.set("reporting", skill("reporting", "Reports."));
       const previous = process.env.SANDBOX_RUNTIME_IMAGE_DIGEST;
       process.env.SANDBOX_RUNTIME_IMAGE_DIGEST = `sha256:${"a".repeat(64)}`;
@@ -647,13 +616,10 @@ spec:
 
       const written = await readFile(join(soulPath, "skills", "demo-skill", "SKILL.md"), "utf8");
       expect(written).toContain("Do the demo.");
-      const definition = await readFile(
-        join(soulPath, "skills", "demo-skill", "skill.yaml"),
-        "utf8"
-      );
-      expect(definition).toContain("kind: Skill");
-      expect(definition).toContain("trustTier: third_party");
-      expect(definition).toContain("scripts/run.py");
+      // `SKILL.md` is the whole definition; nothing derives a second file beside it.
+      await expect(
+        readFile(join(soulPath, "skills", "demo-skill", "skill.yaml"), "utf8")
+      ).rejects.toThrow();
       await expect(
         readFile(join(soulPath, "skills", "demo-skill", "scripts", "run.py"), "utf8")
       ).resolves.toBe("print('ok')\n");
@@ -956,7 +922,7 @@ spec:
 
     // A real marketplace Skill is a package: reference material, helper scripts, and the licence
     // and dependency files its author shipped. Every file has to reach the soul, or the operator
-    // installs a Skill whose `load_skill_reference` targets are simply missing.
+    // installs a Skill whose `skill` reference targets are simply missing.
     it("installs a Skill package's references, scripts and root provenance files", async () => {
       const remote = await makeRemoteRepo();
       temps.push(remote);
@@ -1014,7 +980,7 @@ spec:
     });
 
     // A 200 from install is not the claim that matters; the claim is that the package is usable.
-    // `load_skill_reference` reaches a companion only once `SoulLoader` has resolved the Skill it
+    // A `skill` reference read reaches a companion only once `SoulLoader` has resolved the Skill it
     // sits under, so a tree that committed but quarantines — or whose companions never landed —
     // is an install that reported success and delivered nothing a Turn can read. The fixture is
     // the shape of the packages #446 reported: `LICENSE.txt` and `requirements.txt` beside the
@@ -1068,7 +1034,7 @@ spec:
       await reader.load();
       expect(reader.quarantined.filter((entry) => entry.name === "demo-skill")).toEqual([]);
       expect(reader.skills.get("demo-skill")).toBeDefined();
-      // The exact resolution `load_skill_reference` performs beside the loaded Skill.
+      // The exact resolution a `skill` reference read performs beside the loaded Skill.
       const base = join(soulPath, "skills", "demo-skill");
       await expect(readFile(join(base, "references", "01-playbook.md"), "utf8")).resolves.toBe(
         "# Playbook\n"
@@ -1079,21 +1045,16 @@ spec:
       await expect(readFile(join(base, "LICENSE.txt"), "utf8")).resolves.toBe("MIT\n");
     });
 
-    // A canonical-format package ships its own `skill.yaml`. That file is the Skill's definition,
-    // not a companion, so installing it has to address it as one — otherwise the whole package is
-    // rejected and none of its references or scripts ever reach the soul.
-    it("installs a Skill package that ships its own skill.yaml definition", async () => {
+    // `SKILL.md` is the Skill's definition, not a companion, so installing a package has to address
+    // it as one — otherwise the whole package is rejected and none of its references or scripts
+    // ever reach the soul.
+    it("installs a Skill package whose SKILL.md is the definition file", async () => {
       const remote = await makeRemoteRepo();
       temps.push(remote);
       const skillDir = join(remote, "skills", "demo-skill");
-      const definition = convertLegacySkill({
-        name: "demo-skill",
-        frontmatter: { trustTier: "third_party", references: ["references/playbook.md"] },
-        body: "Do the demo.",
-      }).files.find((file) => file.path.endsWith("skill.yaml"));
-      if (definition?.operation !== "upsert") throw new Error("no skill.yaml fixture");
+      const definition = `---\nname: demo-skill\ndescription: Demo skill.\ntrustTier: third_party\nreferences:\n  - references/playbook.md\n---\nDo the demo.\n`;
       await mkdir(join(skillDir, "references"), { recursive: true });
-      await writeFile(join(skillDir, "skill.yaml"), definition.content, "utf8");
+      await writeFile(join(skillDir, "SKILL.md"), definition, "utf8");
       await writeFile(join(skillDir, "references", "playbook.md"), "# Playbook\n", "utf8");
       await execFileP("git", ["add", "-A"], { cwd: remote });
       await execFileP("git", ["commit", "-q", "-m", "add canonical package"], { cwd: remote });
@@ -1131,20 +1092,26 @@ spec:
 
       expect(installRes.statusCode).toBe(200);
       const installed = join(soulPath, "skills", "demo-skill");
-      await expect(readFile(join(installed, "skill.yaml"), "utf8")).resolves.toBe(
-        definition.content
-      );
+      await expect(readFile(join(installed, "SKILL.md"), "utf8")).resolves.toBe(definition);
       await expect(readFile(join(installed, "references", "playbook.md"), "utf8")).resolves.toBe(
         "# Playbook\n"
       );
     });
 
-    it("names the offending file when a package carries something the soul cannot store", async () => {
+    // A Skill is a third-party package, so the layout cannot enumerate what it ships. SkillAudit,
+    // not the filename, is what decides whether the package is safe to install.
+    it("installs a package that ships files the layout has no opinion about", async () => {
       const remote = await makeRemoteRepo();
       temps.push(remote);
       await writeFile(join(remote, "skills", "demo-skill", "notes.rst"), "notes\n", "utf8");
+      await mkdir(join(remote, "skills", "demo-skill", "agents"), { recursive: true });
+      await writeFile(
+        join(remote, "skills", "demo-skill", "agents", "openai.yaml"),
+        "model: gpt\n",
+        "utf8"
+      );
       await execFileP("git", ["add", "-A"], { cwd: remote });
-      await execFileP("git", ["commit", "-q", "-m", "add unstorable file"], { cwd: remote });
+      await execFileP("git", ["commit", "-q", "-m", "add unconventional files"], { cwd: remote });
 
       const scanRes = await app.inject({
         method: "POST",
@@ -1177,9 +1144,12 @@ spec:
         payload: { scanId, names: ["demo-skill"] },
       });
 
-      expect(installRes.statusCode).toBe(400);
-      expect(installRes.json().error).toContain("notes.rst");
-      expect(commits).toEqual([]);
+      expect(installRes.statusCode).toBe(200);
+      const installed = join(soulPath, "skills", "demo-skill");
+      await expect(readFile(join(installed, "notes.rst"), "utf8")).resolves.toBe("notes\n");
+      await expect(readFile(join(installed, "agents", "openai.yaml"), "utf8")).resolves.toBe(
+        "model: gpt\n"
+      );
     });
 
     // A Skill's name is its soul directory, so two same-named packages in one source cannot both

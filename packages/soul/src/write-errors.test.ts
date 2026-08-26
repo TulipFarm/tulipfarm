@@ -7,14 +7,14 @@ describe("soulWriteHttpError", () => {
   it("names the rejected target instead of answering with a bare code", () => {
     const error = new SoulWriteError(
       "INVALID_TARGET",
-      "Soul write: skills/demo/skill.yaml is a definition file, not a companion"
+      "Soul write: skills/demo/SKILL.md is a definition file, not a companion"
     );
 
     expect(soulWriteHttpError(error)).toEqual({
       status: 400,
       body: {
         error:
-          "invalid soul write target: skills/demo/skill.yaml is a definition file, not a companion",
+          "invalid soul write target: skills/demo/SKILL.md is a definition file, not a companion",
       },
     });
   });

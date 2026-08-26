@@ -13,8 +13,9 @@ references, assets, schemas, and scripts.
 ## Progressive disclosure
 
 Skills load in layers. The name and description are visible so the agent can decide whether the
-skill applies. The `SKILL.md` body is loaded with `load_skill` when needed. Reference files are
-loaded later with `load_skill_reference` only when the skill asks for them.
+skill applies. The `SKILL.md` body is loaded with the `skill` tool when needed. Supporting files —
+references, schemas, assets, and scripts — are loaded later by calling `skill` again with a `file`
+path, only when the skill asks for them.
 
 That keeps normal turns small while still allowing deep instructions for specialized work.
 
@@ -41,9 +42,9 @@ which version is installed:
 Editing a skill makes it yours: the entry is rewritten as `curated`, and TulipFarm stops
 refreshing it from wherever it came from.
 
-The complete selected skill directory is preserved. A canonical `skill.yaml` is generated for a
-compatible `SKILL.md`-only package; an executable package supplies its command declarations and
-sandbox-backed tool contracts explicitly.
+The complete selected skill directory is preserved. A skill is defined entirely by its
+`SKILL.md` — its frontmatter carries the configuration, including the command declarations and
+sandbox-backed tool contracts an executable package needs. No second definition file is written.
 
 ## Executable commands
 
@@ -75,8 +76,11 @@ configuration, not a setting shown to normal users.
 ## SkillAudit is advisory
 
 SkillAudit is an LLM safety review that reports what the skill asks agents to do, suspicious
-instructions, and risk level. The audit report is not an authorization boundary. A low-risk report
-does not auto-install a skill. Executable files also pass deterministic package, runtime, tool
-Broker, approval, Credential, sandbox, and output gates when applicable.
+instructions, and risk level. The audit report is not an authorization boundary: it never installs
+a skill and never refuses one. What it does is make sure you see the risk before you decide — a
+high-risk report is shown to you and the choice stays yours, and a low-risk report still does not
+auto-install. Whether you install from chat or from the skills UI, the audit runs and a human
+approves the write. Executable files also pass deterministic package, runtime, tool Broker,
+approval, Credential, sandbox, and output gates when applicable.
 
 Use [Install a skill](/docs/using-tulipfarm/install-a-skill) for the install flow.

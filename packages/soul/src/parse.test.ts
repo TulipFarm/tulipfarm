@@ -82,7 +82,7 @@ describe("parseSoulFile admits what the runtime actually writes", () => {
     expect(result.parsed?.slug).toBe("ada");
   });
 
-  it("reads a prose SKILL.md as prose once a canonical skill.yaml owns the config", () => {
+  it("reads a SKILL.md with no frontmatter as prose rather than as configuration", () => {
     const result = parseSoulFile(
       upsert("skills/triage/SKILL.md", "Just the body, no frontmatter.")
     );

@@ -5,8 +5,8 @@ import { validateSkill } from "@tulipfarm/schema";
 import { parseFrontmatter } from "../published-loader";
 import { repoDir } from "../repo-dir";
 import type { Logger, SoulSkill } from "../types";
-import { expandForgeExecutionContract } from "./forge-execution-contract";
-import { createSkillReferenceReader } from "./references";
+import { createSkillFileReader } from "./files";
+import { expandBundledSkillTokens } from "./tokens";
 
 const IMAGE_SKILLS_DIR = "/app/skills";
 /** Records which *shipped* Skills an operator switched off. Not an authored artifact. */
@@ -16,7 +16,7 @@ export interface BundledSkill extends SoulSkill {
   category: string;
   categoryDescription: string;
   directory: string;
-  references: readonly string[];
+  files: readonly string[];
 }
 
 export function bundledSkillsDir(): string {
@@ -89,7 +89,7 @@ export async function loadBundledSkills(
 
       const name = basename(directory);
       try {
-        const content = expandForgeExecutionContract(await readFile(path, "utf8"));
+        const content = expandBundledSkillTokens(await readFile(path, "utf8"));
         const { frontmatter, body } = parseFrontmatter(content);
         const validation = validateSkill({ name, frontmatter, body, content });
         if (!validation.valid) {
@@ -109,9 +109,7 @@ export async function loadBundledSkills(
           category,
           categoryDescription: "",
           directory,
-          references: await createSkillReferenceReader({
-            directory: join(directory, "references"),
-          }).list(),
+          files: await createSkillFileReader({ directory }).list(),
         });
       } catch (error) {
         logger.error(

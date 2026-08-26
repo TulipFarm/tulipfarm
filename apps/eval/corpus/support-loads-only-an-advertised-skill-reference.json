@@ -8,22 +8,22 @@
       "content": "Load the data-analyst Skill, then read the first reference it advertises before answering."
     }
   ],
-  "platformTools": ["load_skill", "load_skill_reference"],
+  "platformTools": ["skill"],
   "toolResults": [
     {
-      "name": "load_skill",
+      "name": "skill",
       "output": {
         "name": "data-analyst",
         "frontmatter": { "description": "Analyze business data." },
         "body": "Read one advertised reference before answering.",
-        "references": ["canonical-examples.md"]
+        "files": ["references/canonical-examples.md"]
       }
     },
     {
-      "name": "load_skill_reference",
+      "name": "skill",
       "output": {
-        "skill": "data-analyst",
-        "reference": "canonical-examples.md",
+        "name": "data-analyst",
+        "file": "references/canonical-examples.md",
         "content": "Canonical analysis starts by checking the source and date range."
       }
     }
@@ -31,15 +31,15 @@
   "script": [
     {
       "kind": "tool_calls",
-      "calls": [{ "callId": "load", "name": "load_skill", "arguments": { "name": "data-analyst" } }]
+      "calls": [{ "callId": "load", "name": "skill", "arguments": { "name": "data-analyst" } }]
     },
     {
       "kind": "tool_calls",
       "calls": [
         {
-          "callId": "reference",
-          "name": "load_skill_reference",
-          "arguments": { "skill": "data-analyst", "reference": "canonical-examples.md" }
+          "callId": "file",
+          "name": "skill",
+          "arguments": { "name": "data-analyst", "file": "references/canonical-examples.md" }
         }
       ]
     },
@@ -49,12 +49,12 @@
     }
   ],
   "expect": [
-    { "kind": "tool_call_order", "names": ["load_skill", "load_skill_reference"] },
+    { "kind": "tool_call_order", "names": ["skill", "skill"] },
     {
       "kind": "tool_argument_equals",
-      "name": "load_skill_reference",
-      "path": "reference",
-      "value": "canonical-examples.md"
+      "name": "skill",
+      "path": "file",
+      "value": "references/canonical-examples.md"
     },
     { "kind": "tool_call_count", "count": 2 },
     { "kind": "output_contains", "text": "source and date range" },

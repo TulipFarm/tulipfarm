@@ -4,7 +4,7 @@ import type { LoopAttachmentPort } from "./contract";
 /**
  * The Tool whose success puts a File in front of the model for the rest of this Turn.
  *
- * The loop knows this name for the same reason it knows `load_skill`: a Tool result is JSON with
+ * The loop knows this name for the same reason it knows `skill`: a Tool result is JSON with
  * no binary channel, so a Tool can say a File should be seen but cannot itself deliver the bytes.
  * The alternative — a general "attach anything" verb on the dispatch result — would let any Tool
  * push arbitrary bytes into a prompt, which is a far larger surface than one named read.

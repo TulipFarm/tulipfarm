@@ -121,8 +121,8 @@ function parseLegacy(content: string, location: ClassifiedSoulPath, path: string
       }
       case "Skill": {
         const { frontmatter, body } = parseFrontmatter(content);
-        // No frontmatter means this is the prose body a canonical `skill.yaml` points at, not a
-        // legacy definition. Only the definition form carries configuration worth validating.
+        // No frontmatter means the file is prose a reader renders, not configuration. Only the
+        // frontmatter form carries configuration worth validating.
         if (Object.keys(frontmatter).length === 0) return admitted(content, location, "prose");
         const result = validateSkill({
           name: location.slug ?? "",

@@ -37,7 +37,6 @@ export function buildSoulCatalogue(soulLoader: SoulLoader | undefined): SoulCata
     .sort(byName);
 
   const skills = values(soulLoader?.skills)
-    .filter((s) => s.frontmatter._pendingAudit !== true)
     .map((s) => ({ name: s.name, description: asDesc(s.frontmatter.description) }))
     .sort(byName);
 

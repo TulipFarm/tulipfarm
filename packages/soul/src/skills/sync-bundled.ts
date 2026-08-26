@@ -4,7 +4,6 @@ import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { CommitActor } from "../commit-signing";
 import { artifactWriteTarget, type SoulWrite, type SoulWriter } from "../writer";
 import type { BundledSkill } from "./bundled";
-import { expandForgeExecutionContract } from "./forge-execution-contract";
 import type { SkillScanFile } from "./guard";
 import {
   type SkillLockEntry,
@@ -14,6 +13,7 @@ import {
 } from "./lock";
 import { mutateSkillsLock } from "./lock-write";
 import { collectSkillFiles, skillDirectoryHash } from "./marketplace-files";
+import { expandBundledSkillTokens } from "./tokens";
 
 interface SyncLogger {
   info: (message: string) => void;
@@ -232,8 +232,8 @@ function syncSubject(
 
 /**
  * The shipped package exactly as the Soul should hold it. `SKILL.md` is expanded here because the
- * Soul loader does not run the forge-contract expansion — an unexpanded copy would ship the raw
- * token to the model.
+ * Soul loader does not run token expansion — an unexpanded copy would ship a raw token to the
+ * model.
  */
 async function readBundledPackage(skill: BundledSkill): Promise<SkillScanFile[]> {
   const files = await collectSkillFiles(skill.directory);
@@ -241,7 +241,7 @@ async function readBundledPackage(skill: BundledSkill): Promise<SkillScanFile[]>
     .filter((file) => file.symlinkTarget === undefined)
     .map((file) => {
       if (file.path !== "SKILL.md") return file;
-      const content = expandForgeExecutionContract(file.content);
+      const content = expandBundledSkillTokens(file.content);
       return { ...file, content, size: Buffer.byteLength(content) };
     });
 }

@@ -56,8 +56,8 @@ export interface RunAuthority {
   /**
    * The Routine this Run executes, when it executes one.
    *
-   * Routine-only Tools — `complete_state`, `call_skill` — refuse a call that names no Routine, so
-   * a Routine Agent State cannot complete itself without this reaching the Worker.
+   * The Routine-only Tool `complete_state` refuses a call that names no Routine, so a Routine
+   * Agent State cannot complete itself without this reaching the Worker.
    */
   readonly routineId?: string;
   /**
@@ -123,7 +123,7 @@ export interface HostedTurnContext {
     readonly maxRepairAttempts: number;
   };
   readonly compacted: boolean;
-  /** Narrows later tool offers after a successful `load_skill` for a listed Skill. */
+  /** Narrows later tool offers after a successful `skill` load for a listed Skill. */
   readonly skillToolScopes?: Record<string, readonly string[]>;
 }
 

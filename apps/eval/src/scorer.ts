@@ -350,25 +350,29 @@ function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: 
     }
 
     case "tool_argument_equals": {
-      const call = obs.toolCalls.find((c) => c.name === a.name);
-      if (call === undefined) return { passed: false, detail: `${a.name} was never called` };
-      const read = readPath(call.arguments, a.path);
-      if (!read.found) {
+      const named = obs.toolCalls.filter((c) => c.name === a.name);
+      if (named.length === 0) return { passed: false, detail: `${a.name} was never called` };
+      // Any call, not the first: one Tool name can serve several call sites — `skill` loads a
+      // Skill with `{ name }` and reads one of its files with `{ name, reference }` — so pinning
+      // the first call would assert against whichever mode the model happened to reach for first.
+      const reads = named.map((c) => readPath(c.arguments, a.path)).filter((r) => r.found);
+      if (reads.length === 0) {
         return { passed: false, detail: `${a.name} arguments have no path ${a.path}` };
       }
-      return equal(read.value, a.value)
+      const hit = reads.find((r) => equal(r.value, a.value));
+      return hit !== undefined
         ? { passed: true, detail: `${a.name}.${a.path} = ${show(a.value)}` }
         : {
             passed: false,
-            detail: `${a.name}.${a.path} was ${show(read.value)}, expected ${show(a.value)}`,
+            detail: `${a.name}.${a.path} was ${reads.map((r) => show(r.value)).join(", ")}, expected ${show(a.value)}`,
           };
     }
 
     case "tool_argument_present": {
-      const call = obs.toolCalls.find((c) => c.name === a.name);
-      if (call === undefined) return { passed: false, detail: `${a.name} was never called` };
-      const read = readPath(call.arguments, a.path);
-      return read.found
+      const named = obs.toolCalls.filter((c) => c.name === a.name);
+      if (named.length === 0) return { passed: false, detail: `${a.name} was never called` };
+      const read = named.map((c) => readPath(c.arguments, a.path)).find((r) => r.found);
+      return read !== undefined
         ? { passed: true, detail: `${a.name}.${a.path} = ${show(read.value)}` }
         : { passed: false, detail: `${a.name} was called without ${a.path}` };
     }

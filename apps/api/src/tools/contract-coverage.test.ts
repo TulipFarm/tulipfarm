@@ -111,10 +111,9 @@ const EXPECTED_FAMILY_TOOL_NAMES = [
   {
     family: "skills",
     names: [
-      "skill_activate",
       "skill_create",
       "skill_delete",
-      "skill_get",
+      "skill_install",
       "skill_list",
       "skill_marketplace_browse",
       "skill_scanned_audit",
@@ -135,17 +134,15 @@ const EXPECTED_FAMILY_TOOL_NAMES = [
   {
     family: "platform",
     names: [
-      "call_skill",
       "complete_state",
       "complete_task",
       "delegate_to_agent",
       "get_current_time",
-      "load_skill",
-      "load_skill_reference",
       "guardrail_forge",
       "routine_delete",
       "routine_forge",
       "routine_picker",
+      "skill",
       "soul_repo_push",
       "spawn_subagent",
       "trigger_routine",

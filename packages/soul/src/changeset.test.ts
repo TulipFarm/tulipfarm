@@ -220,7 +220,7 @@ describe("validateSoulChangeset", () => {
       files: [
         {
           operation: "upsert",
-          path: "skills/general-assistant/skill.yaml",
+          path: "resources/general-assistant/resource.yaml",
           content: stringify(agent),
         },
       ],

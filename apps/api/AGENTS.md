@@ -75,6 +75,12 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
 - Every write to the authored Soul tree goes through `SoulWriter.apply()` (ADR-007) — routes, Tools
   and installers alike. There is no other door, and `scripts/soul-write-gateway.test.ts` fails CI on
   a new bypass. Raw `fs` writes plus a commit are not an alternative.
+- **Every Tool that writes a Skill is two calls: audit, then confirm.** The first validates, runs
+  SkillAudit and parks the exact bytes in `soul/skills/drafts.ts`, writing nothing; the second takes
+  only the name and that one-use token, and `classify` makes it the call that mutates and asks a
+  human. Never let the confirming call re-read a body — an Agent would then have benign text audited
+  and different text written under the approval the report earned. `skill_create`, `skill_update`
+  and `skill_install` all share this shape.
 - Third-party provider Tools come from Integration manifest `egress`, not handwritten TypeScript;
   `tools/github/` and `tools/slack/` are exceptions.
 - Every `EffectDispatcher` built here is given the `MutationKillSwitchGuard` from `src/index.ts`.

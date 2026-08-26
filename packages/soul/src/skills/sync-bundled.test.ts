@@ -81,7 +81,13 @@ function lockWrite(changes: readonly SoulWrite[]): string | undefined {
   return change?.op === "put" ? change.content : undefined;
 }
 
-function writeFor(changes: readonly SoulWrite[], slug: string, companion?: string) {
+/**
+ * `SKILL.md` is the definition, so the writer addresses it as the artifact itself with no
+ * companion. Mapping the name here keeps call sites reading like the paths they assert, and keeps
+ * the negative assertions meaningful — matching on a companion that cannot exist always passes.
+ */
+function writeFor(changes: readonly SoulWrite[], slug: string, file?: string) {
+  const companion = file === "SKILL.md" ? undefined : file;
   return changes.find(
     (change) =>
       change.op === "put" &&
@@ -112,7 +118,7 @@ describe("syncBundledSkillsIntoSoul", () => {
     const skillMd = writeFor(changes, "widget-forge", "SKILL.md");
     expect(skillMd?.op === "put" && skillMd.content).toContain(FORGE_EXECUTION_CONTRACT);
     expect(skillMd?.op === "put" && skillMd.content).not.toContain(FORGE_EXECUTION_CONTRACT_TOKEN);
-    // Frontmatter the canonical `skill.yaml` spec cannot carry must survive the copy verbatim.
+    // Frontmatter the canonical Skill spec cannot carry must survive the copy verbatim.
     expect(skillMd?.op === "put" && skillMd.content).toContain("tools: [widget_create]");
     expect(writeFor(changes, "widget-forge", "references/examples.md")).toBeDefined();
     expect(writeFor(changes, "note-taker", "SKILL.md")).toBeDefined();

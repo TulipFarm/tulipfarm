@@ -53,8 +53,8 @@ const RETIRED_CONTEXT: Record<string, string> = {
   governancePages: "nothing — governance is reached through list_governance_pages",
   knowledgeGrounding: "nothing — grounding is stated once in the platform instructions",
   pinnedKnowledge: "nothing — Knowledge is reached through query_knowledge",
-  availableSkills: "nothing — Skills are reached through load_skill",
-  eagerSkills: "nothing — Skills are reached through load_skill",
+  availableSkills: "nothing — Skills are reached through the skill Tool",
+  eagerSkills: "nothing — Skills are reached through the skill Tool",
   soulCatalogue:
     "nothing — Soul artifacts are reached through agent_list / skill_list / list_resource_types",
   taggedResources: "nothing — Resource schemas are reached through resource_type_schema",

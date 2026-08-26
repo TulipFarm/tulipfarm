@@ -808,7 +808,7 @@ async function boot() {
       authorityLayers: authorityLayerResolver,
     });
     // The GitHub Skill documents Tools that are excluded whenever the integration is uninstalled.
-    // Hiding it on the same live check keeps `skill_list`/`load_skill` from advertising a workflow
+    // Hiding it on the same live check keeps `skill_list`/`skill` from advertising a workflow
     // whose every Tool call would be refused.
     const hiddenSkillNames = () =>
       githubDisabledSkillNames({

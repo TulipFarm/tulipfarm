@@ -18,9 +18,9 @@ import {
  * and reports what it would steer an Agent toward.
  *
  * It is advisory: a natural-language Skill is not a sandboxable boundary, and this report is
- * evidence for the person deciding, not a gate that holds by itself. The gate is the two-step one
- * around it — `skill_create` writes a Skill marked pending, and only `skill_activate` switches it
- * on.
+ * evidence for the person deciding, not a gate that holds by itself. The gate is the two-phase
+ * write around it — `skill_create` and `skill_update` audit a draft and write nothing, and the
+ * operator-confirmed second call is what puts it in the Soul.
  *
  * Of every BuiltInAgent this is the one whose input is *presumed* hostile: the file it reads is
  * the file it exists to be suspicious of. See `./prompt.ts` for how that file and the scanner's

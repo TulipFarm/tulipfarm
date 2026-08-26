@@ -184,3 +184,11 @@ export function sameLockEntry(left: SkillLockEntry, right: SkillLockEntry): bool
   for (const key of keys) if (left[key] !== right[key]) return false;
   return true;
 }
+
+/**
+ * Provenance for a Skill an Agent can see. The lock is authoritative; a Skill present only in the
+ * image has no entry because the boot sync has not copied it in yet.
+ */
+export function lockProvenance(lock: SkillsLock, name: string, inSoul: boolean): SkillSourceType {
+  return lock.skills[name]?.sourceType ?? (inSoul ? "curated" : "bundled");
+}

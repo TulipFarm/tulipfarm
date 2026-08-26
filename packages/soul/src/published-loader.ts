@@ -215,7 +215,7 @@ export class SoulLoader {
       try {
         const definition = await resolveDefinition(this.soulPath, "Skill", name);
         if (definition === undefined) {
-          this.quarantine("skill", name, "no skill.yaml or SKILL.md in the directory");
+          this.quarantine("skill", name, "no SKILL.md in the directory");
           continue;
         }
         const { frontmatter, body } = await readFrontmatterArtifact(

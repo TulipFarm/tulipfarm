@@ -90,7 +90,7 @@ describe("loadBundledSkills", () => {
       category: "core",
       categoryDescription: "Essential bundled workflows.",
       directory: join(root, "core", "valid-skill"),
-      references: ["guide.md", "nested/deep.md"],
+      files: ["references/guide.md", "references/nested/deep.md"],
     });
     expect(logger.error).toHaveBeenCalledWith(
       expect.stringContaining('Bundled Skill "invalid-skill" skipped')
@@ -127,7 +127,10 @@ describe("loadBundledSkills", () => {
 
   it("ships Routine Forge with canonical examples references", async () => {
     const routineForge = (await loadBundledSkills(makeLogger())).get("routine-forge");
-    expect(routineForge?.references).toEqual(["canonical-examples.md", "examples.md"]);
+    expect(routineForge?.files).toEqual([
+      "references/canonical-examples.md",
+      "references/examples.md",
+    ]);
   });
 
   it("ships Resource Forge with an exact canonical x-links.target example", async () => {

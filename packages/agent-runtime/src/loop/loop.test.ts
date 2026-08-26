@@ -972,6 +972,76 @@ describe("AgentLoop concurrent dispatch", () => {
     expect(tools.maxConcurrent).toBe(2);
   });
 
+  // A model that batches "load the forge Skill" twice would otherwise be handed the same SKILL.md
+  // body twice, at full token cost. Within one batch nothing can have changed between the two, so
+  // the second dispatch is pure waste — unlike a repeat in a later iteration, which `repeat.ts`
+  // deliberately re-runs because the answer may have moved.
+  it("dispatches an exactly repeated read in one batch only once", async () => {
+    const tools = trackingDispatcher();
+    const outcome = await loop({
+      model: scriptedModel(
+        toolCallResult([
+          { callId: "c1", name: "github.issue.search", arguments: { q: "open" } },
+          { callId: "c2", name: "github.issue.search", arguments: { q: "open" } },
+        ]),
+        textResult("done")
+      ),
+      tools,
+    }).run(
+      input({
+        tools: readTools,
+        limits: { maxIterations: 5, maxToolCalls: 5, maxRepairAttempts: 2 },
+      })
+    );
+
+    expect(outcome).toMatchObject({ status: "completed" });
+    expect(tools.calls).toEqual(["github.issue.search"]);
+  });
+
+  // Key order is the provider's choice, not the model's meaning, so it must not decide whether a
+  // duplicate is spotted.
+  it("collapses a repeat whose arguments were serialized in a different key order", async () => {
+    const tools = trackingDispatcher();
+    await loop({
+      model: scriptedModel(
+        toolCallResult([
+          { callId: "c1", name: "github.issue.search", arguments: { a: 1, b: 2 } },
+          { callId: "c2", name: "github.issue.search", arguments: { b: 2, a: 1 } },
+        ]),
+        textResult("done")
+      ),
+      tools,
+    }).run(
+      input({
+        tools: readTools,
+        limits: { maxIterations: 5, maxToolCalls: 5, maxRepairAttempts: 2 },
+      })
+    );
+
+    expect(tools.calls).toEqual(["github.issue.search"]);
+  });
+
+  it("still dispatches reads that differ only by argument", async () => {
+    const tools = trackingDispatcher();
+    await loop({
+      model: scriptedModel(
+        toolCallResult([
+          { callId: "c1", name: "github.issue.search", arguments: { q: "open" } },
+          { callId: "c2", name: "github.issue.search", arguments: { q: "closed" } },
+        ]),
+        textResult("done")
+      ),
+      tools,
+    }).run(
+      input({
+        tools: readTools,
+        limits: { maxIterations: 5, maxToolCalls: 5, maxRepairAttempts: 2 },
+      })
+    );
+
+    expect(tools.calls).toEqual(["github.issue.search", "github.issue.search"]);
+  });
+
   it("keeps mutating Tool calls strictly sequential even when interleaved with reads", async () => {
     const tools = trackingDispatcher();
     const mixedTools = [
@@ -1171,8 +1241,7 @@ describe("AgentLoop concurrent dispatch", () => {
 
 describe("AgentLoop skill-scoped tool narrowing", () => {
   const catalog = [
-    { name: "load_skill", inputSchema: { type: "object" } },
-    { name: "load_skill_reference", inputSchema: { type: "object" } },
+    { name: "skill", inputSchema: { type: "object" } },
     { name: "complete_task", inputSchema: { type: "object" } },
     { name: "routine_forge", inputSchema: { type: "object" } },
     { name: "record_search", inputSchema: { type: "object" } },
@@ -1186,16 +1255,14 @@ describe("AgentLoop skill-scoped tool narrowing", () => {
     expect(model.toolNamesByRequest[0]).toEqual(catalog.map((t) => t.name));
   });
 
-  it("narrows to a Skill's declared tools (plus the always-exposed baseline) after load_skill succeeds", async () => {
+  it("narrows to a Skill's declared tools (plus the always-exposed baseline) after a skill load succeeds", async () => {
     const tools = dispatcher({
       status: "succeeded",
       callId: "call-1",
       output: { name: "routine-forge" },
     });
     const model = recordingModel(
-      toolCallResult([
-        { callId: "call-1", name: "load_skill", arguments: { name: "routine-forge" } },
-      ]),
+      toolCallResult([{ callId: "call-1", name: "skill", arguments: { name: "routine-forge" } }]),
       textResult("done")
     );
     const outcome = await loop({ model, tools }).run(
@@ -1206,19 +1273,39 @@ describe("AgentLoop skill-scoped tool narrowing", () => {
     );
 
     expect(outcome).toMatchObject({ status: "completed" });
-    // Iteration 1 (before load_skill resolves) still sees everything.
+    // Iteration 1 (before the skill load resolves) still sees everything.
     expect(model.toolNamesByRequest[0]).toEqual(catalog.map((t) => t.name));
     // Iteration 2 is narrowed to the declared scope plus the always-exposed baseline.
     expect(model.toolNamesByRequest[1]).toEqual(
-      expect.arrayContaining([
-        "load_skill",
-        "load_skill_reference",
-        "complete_task",
-        "routine_forge",
-      ])
+      expect.arrayContaining(["skill", "complete_task", "routine_forge"])
     );
     expect(model.toolNamesByRequest[1]).not.toContain("record_search");
     expect(model.toolNamesByRequest[1]).not.toContain("agent_list");
+  });
+
+  it("inspecting a Skill neither narrows nor becomes the active Skill", async () => {
+    const tools = dispatcher(
+      { status: "succeeded", callId: "call-1", output: { name: "routine-forge", inspected: true } },
+      { status: "succeeded", callId: "call-2", output: { ok: true } }
+    );
+    const model = recordingModel(
+      toolCallResult([
+        { callId: "call-1", name: "skill", arguments: { name: "routine-forge", mode: "inspect" } },
+      ]),
+      toolCallResult([{ callId: "call-2", name: "record_search", arguments: {} }]),
+      textResult("done")
+    );
+    await loop({ model, tools }).run(
+      input({
+        tools: catalog,
+        skillToolScopes: new Map([["routine-forge", ["routine_forge"]]]),
+      })
+    );
+
+    // An inspected Skill is material, not instructions: the offer stays whole and no later
+    // dispatch is tagged as acting under the Skill that was merely read.
+    expect(model.toolNamesByRequest[1]).toEqual(catalog.map((t) => t.name));
+    expect(tools.calls[1]?.activeSkillName).toBeUndefined();
   });
 
   it("does not narrow when the active Skill has no declared scope", async () => {
@@ -1228,9 +1315,7 @@ describe("AgentLoop skill-scoped tool narrowing", () => {
       output: { name: "no-scope-skill" },
     });
     const model = recordingModel(
-      toolCallResult([
-        { callId: "call-1", name: "load_skill", arguments: { name: "no-scope-skill" } },
-      ]),
+      toolCallResult([{ callId: "call-1", name: "skill", arguments: { name: "no-scope-skill" } }]),
       textResult("done")
     );
     await loop({ model, tools }).run(
@@ -1249,12 +1334,8 @@ describe("AgentLoop skill-scoped tool narrowing", () => {
       { status: "succeeded", callId: "call-2", output: { name: "agent-forge" } }
     );
     const model = recordingModel(
-      toolCallResult([
-        { callId: "call-1", name: "load_skill", arguments: { name: "routine-forge" } },
-      ]),
-      toolCallResult([
-        { callId: "call-2", name: "load_skill", arguments: { name: "agent-forge" } },
-      ]),
+      toolCallResult([{ callId: "call-1", name: "skill", arguments: { name: "routine-forge" } }]),
+      toolCallResult([{ callId: "call-2", name: "skill", arguments: { name: "agent-forge" } }]),
       textResult("done")
     );
     await loop({ model, tools }).run(
@@ -1268,7 +1349,7 @@ describe("AgentLoop skill-scoped tool narrowing", () => {
     );
 
     expect(model.toolNamesByRequest[2]).toEqual(
-      expect.arrayContaining(["load_skill", "complete_task", "agent_list"])
+      expect.arrayContaining(["skill", "complete_task", "agent_list"])
     );
     expect(model.toolNamesByRequest[2]).not.toContain("routine_forge");
   });
@@ -1279,9 +1360,7 @@ describe("AgentLoop skill-scoped tool narrowing", () => {
       { status: "succeeded", callId: "call-2", output: { ok: true } }
     );
     const model = scriptedModel(
-      toolCallResult([
-        { callId: "call-1", name: "load_skill", arguments: { name: "routine-forge" } },
-      ]),
+      toolCallResult([{ callId: "call-1", name: "skill", arguments: { name: "routine-forge" } }]),
       toolCallResult([{ callId: "call-2", name: "record_search", arguments: {} }]),
       textResult("done")
     );
@@ -1293,7 +1372,7 @@ describe("AgentLoop skill-scoped tool narrowing", () => {
     );
 
     expect(outcome).toMatchObject({ status: "completed" });
-    expect(tools.calls.map((c) => c.name)).toEqual(["load_skill", "record_search"]);
+    expect(tools.calls.map((c) => c.name)).toEqual(["skill", "record_search"]);
     expect(tools.calls[0]?.activeSkillName).toBeUndefined();
     expect(tools.calls[1]?.activeSkillName).toBe("routine-forge");
   });

@@ -27,7 +27,7 @@ import {
   REQUEST_INPUT_TOOL,
 } from "./diagnostics";
 import { askFor, distilledPayload, latestAsk } from "./distill";
-import { extractSkillName, narrowToolsToSkill } from "./narrowing";
+import { extractSkillName, narrowToolsToSkill, SKILL_TOOL } from "./narrowing";
 import { capToolResult, MAX_TOOL_RESULT_CHARS } from "./oversize";
 import { callSignature, repeatedCall } from "./repeat";
 import {
@@ -80,7 +80,7 @@ export class AgentLoop {
     // prompts, which carry the `user` role and would otherwise become the summariser's ask.
     const participantAsk = latestAsk(input.messages);
     let sequence = recovered?.sequence ?? 0;
-    // The most recently *successfully* loaded Skill, per the `load_skill` dispatch — a switch
+    // The most recently *successfully* loaded Skill, per the `skill` dispatch — a switch
     // replaces it rather than unioning, since the model has moved on and a union only re-grows
     // the catalog this exists to shrink.
     let activeSkillName: string | undefined = recovered?.activeSkillName;
@@ -391,7 +391,7 @@ export class AgentLoop {
             ...(repeats === 1 ? {} : { repeatedCall: repeatedCall(repeats) }),
           });
           if (isReportTool(call.name)) reported = true;
-          if (call.name === "load_skill") {
+          if (call.name === SKILL_TOOL) {
             const loaded = extractSkillName(call.arguments);
             if (loaded !== undefined) activeSkillName = loaded;
           }
@@ -488,8 +488,31 @@ export class AgentLoop {
           return finish({ status: "failed", reason: "tool_call_limit", ...counters }, "failed");
         }
         const runBatch = batch.slice(0, available);
-        const dispatched = await Promise.all(
-          runBatch.map((batched) =>
+
+        // Two identical reads in one batch are one read. They would resolve concurrently against
+        // the same state, so the second dispatch re-checks an authorization that cannot have
+        // changed since the first, and returns bytes the model is already being handed. This is
+        // narrower than the repeat rule in `repeat.ts`, which deliberately re-runs a call repeated
+        // in a *later* iteration precisely because the answer may have moved by then; within one
+        // batch nothing can have moved. Both calls are still answered, charged, and counted as
+        // repeats, so the model sees that it asked twice.
+        const firstOfSignature = new Map<string, number>();
+        const unique: typeof runBatch = [];
+        const resultOf: number[] = [];
+        for (const batched of runBatch) {
+          const signature = callSignature(batched.name, batched.arguments);
+          const seen = signature === undefined ? undefined : firstOfSignature.get(signature);
+          if (seen !== undefined) {
+            resultOf.push(seen);
+            continue;
+          }
+          if (signature !== undefined) firstOfSignature.set(signature, unique.length);
+          resultOf.push(unique.length);
+          unique.push(batched);
+        }
+
+        const distinct = await Promise.all(
+          unique.map((batched) =>
             this.deps.tools.dispatch({
               businessId: input.businessId,
               runId: input.runId,
@@ -501,6 +524,7 @@ export class AgentLoop {
             })
           )
         );
+        const dispatched = resultOf.map((at) => distinct[at]);
         counters.toolCalls += runBatch.length;
         for (const batched of runBatch) dispatchedIds.add(batched.callId);
         index += runBatch.length;
