@@ -6,7 +6,7 @@ import { parseFrontmatter } from "../published-loader";
 import { repoDir } from "../repo-dir";
 import type { Logger, SoulSkill } from "../types";
 import { createSkillFileReader } from "./files";
-import { expandForgeExecutionContract } from "./forge-execution-contract";
+import { expandBundledSkillTokens } from "./tokens";
 
 const IMAGE_SKILLS_DIR = "/app/skills";
 /** Records which *shipped* Skills an operator switched off. Not an authored artifact. */
@@ -89,7 +89,7 @@ export async function loadBundledSkills(
 
       const name = basename(directory);
       try {
-        const content = expandForgeExecutionContract(await readFile(path, "utf8"));
+        const content = expandBundledSkillTokens(await readFile(path, "utf8"));
         const { frontmatter, body } = parseFrontmatter(content);
         const validation = validateSkill({ name, frontmatter, body, content });
         if (!validation.valid) {

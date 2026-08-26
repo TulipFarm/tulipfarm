@@ -2,7 +2,7 @@
 name: skill-forge
 description: Create, install, and improve safe, reusable Skills.
 category: forge
-tools: [skill_list, skill_get, skill_create, skill_update, skill_activate, skill_marketplace_browse, skill_source_scan, skill_scanned_audit, skill_scanned_install, present, request_input]
+tools: [skill, skill_list, skill_create, skill_update, skill_marketplace_browse, skill_source_scan, skill_scanned_audit, skill_scanned_install, present, request_input]
 ---
 # Skill Forge Skill
 
@@ -28,15 +28,15 @@ Do not use this workflow for:
 ## Prerequisites
 
 - A single task or package with a checkable result.
-- Access to `skill_list`, `skill_get`, `skill_create`, `skill_update`, `skill_activate`, `skill_marketplace_browse`, `skill_source_scan`, `skill_scanned_audit`, and `skill_scanned_install`.
+- Access to `skill`, `skill_list`, `skill_create`, `skill_update`, `skill_marketplace_browse`, `skill_source_scan`, `skill_scanned_audit`, and `skill_scanned_install`.
 - A configured LLM provider for new-Skill and package SkillAudit.
-- Explicit operator confirmation before activating a new Skill or installing a scanned Skill.
+- Explicit operator confirmation before any Skill is written or installed.
 
 ## How to Run
 
 - For marketplace discovery, call `skill_marketplace_browse`, audit with `skill_scanned_audit`, and install with `skill_scanned_install`.
 - For Git/GitHub sources, call `skill_source_scan` with the repository URL, audit with `skill_scanned_audit`, and install with `skill_scanned_install`.
-- For a new Skill, follow the create procedure and stop for operator confirmation after SkillAudit.
+- For a new Skill, call `skill_create` for its audit, then call it again with the `confirm` token it returned once the operator agrees. Nothing is written until that second call.
 - For a small correction, call `skill_update` with `old_string` and `new_string`.
 - For repeated exact text, add `replace_all: true`; otherwise the match must be unique.
 - For a major overhaul, supply a complete `body` and, only when needed, complete `frontmatter`.
@@ -48,18 +48,18 @@ Do not use this workflow for:
 
 | Need | Tool call | Boundary |
 | --- | --- | --- |
-| Find existing Skills | `skill_list` | Inspect before creating |
-| Read one Skill | `skill_get` | Capture exact patch context |
+| Find existing Skills | Read the Context | Already lists every Skill; no Tool call needed |
+| Read one Skill | `skill` + `mode: "inspect"` | Exact patch context, without adopting it |
 | Browse marketplace | `skill_marketplace_browse` | Returns scanId and skillPath for packages |
 | Scan Git source | `skill_source_scan` + `source` | Discovers packages with scanId and skillPath |
 | Audit scanned package | `skill_scanned_audit` + `scanId`/`name`/`skillPath` | Review before installation |
 | Install scanned package | `skill_scanned_install` + `scanId`/`name`/`skillPath` | Preserves source and ref provenance |
-| Create | `skill_create` | Lands pending audit |
+| Audit a new Skill | `skill_create` + `name`/`body`/`frontmatter` | Returns a report and a `confirm` token; writes nothing |
 | Patch one match | `skill_update` + `old_string`/`new_string` | Preferred maintenance path |
 | Patch every match | Add `replace_all: true` | Use only when every occurrence should change |
 | Delete matched text | Set `new_string: ""` | Final body must remain non-empty |
 | Rewrite | `skill_update` + complete `body` | Major changes only |
-| Activate | `skill_activate` | Only after operator reviews SkillAudit |
+| Write the audited Skill | `skill_create`/`skill_update` + `name`/`confirm` | Human approval required; send the token alone, never the body again |
 
 - `name`: lowercase letters, numbers, dots, underscores, or hyphens; maximum 64 characters.
 - `name` must equal the Skill directory name; `description` is required.
@@ -84,17 +84,25 @@ Aim for roughly 100 lines for a simple Skill. Move bulky material into `referenc
 ## Procedure
 
 1. **Classify the artifact.** Confirm repeatable task or package install; switch forge if needed.
-2. **Survey existing or discover external packages.** Call `skill_list` and `skill_get`. For external packages, call `skill_marketplace_browse` or `skill_source_scan` (e.g. `owner/repo` or `https://github.com/...`).
+2. **Survey existing or discover external packages.** The Context already lists every available
+   Skill by name and description; read that first. For one Skill's exact body call `skill` with
+   `mode: "inspect"` — plain `skill` adopts it and replaces the forge as your active Skill. For
+   external packages call `skill_marketplace_browse` or `skill_source_scan`.
 3. **Audit external packages before install.** Call `skill_scanned_audit` with exact `scanId`, `name`, and `skillPath`. Present findings and risk rating to the operator.
 4. **Install audited external package.** Call `skill_scanned_install` with `scanId`, `name`, and `skillPath`. It writes to Soul and pins provenance in `skills-lock.json`.
 5. **Define authored contract.** Write inputs, actions, output, errors, and finish condition.
 6. **Draft frontmatter and body.** Follow section order. List only needed tools under `tools`.
 7. **Choose create, patch, or rewrite.** Use surgical patch for small fixes; rewrite for overhauls.
-8. **Create and audit a new Skill.** Call `skill_create` with `name`, `body`, and `frontmatter`.
+8. **Audit a new Skill.** Call `skill_create` with `name`, `body`, and `frontmatter`. It runs
+    SkillAudit and returns a report plus a `confirm` token. It writes nothing.
 9. **Present audit signals.** Show deterministic findings, source trust, risk rating, and summary.
-10. **Activate only after confirmation.** Once operator confirms, call `skill_activate`.
-11. **Maintain loaded Skills immediately.** Use `skill_update` with `old_string` and `new_string`.
-12. **Verify the durable result.** Read back with `skill_get` or `skill_list` to confirm status.
+10. **Write only after confirmation.** Call `skill_create` again with `name` and that `confirm`
+    token. Send the token alone — repeating the body would write text nobody audited. The Tool
+    requires human approval, so never describe a Skill as created until the call returns.
+11. **Maintain loaded Skills the same way.** `skill_update` with `old_string` and `new_string`
+    audits the edit and returns a token; the Skill changes only when you confirm it. A token is
+    single-use and expires, so re-audit rather than reusing one.
+12. **Verify the durable result.** Read the written body back with `skill` + `mode: "inspect"`.
 
 ## Pitfalls
 
@@ -107,7 +115,23 @@ Aim for roughly 100 lines for a simple Skill. Move bulky material into `referenc
 7. **Accidental rewrites.** Do not submit a complete body for a one-line correction.
 8. **Broken structure after deletion.** An empty `new_string` is valid, but body must remain valid.
 9. **Audit overclaiming.** Neither deterministic patterns nor an LLM rating guarantees safety.
-10. **Premature activation.** A new Skill stays pending until the operator reviews and confirms it.
+10. **Claiming a write that has not happened.** The first call returns a report, not a Skill.
+    Nothing exists until the confirmed second call returns.
+11. **Abandoning a draft.** Stopping after the audit leaves the Skill uncreated and the edit
+    unapplied. Carry every audit through to a confirmation or an explicit refusal.
+
+## Security rules
+
+These are the rules `SkillAudit` scores against. They bind you twice over: never author a Skill
+that trips one, and never install a package that does. A Skill is natural-language instruction an
+Agent follows with its full Tool authority, so a capability written into it is a capability
+granted — there is no sandbox between the two.
+
+When you author, read each family below as a prohibition, and give the Skill the narrowest reach
+its stated purpose can justify. When you review a scanned package, read each family as a question
+to answer with a file, a line, and a quote. Do not resolve a finding by weakening the rule.
+
+{{SKILL_AUDIT_TAXONOMY}}
 
 ## Verification
 
@@ -120,5 +144,6 @@ Aim for roughly 100 lines for a simple Skill. Move bulky material into `referenc
 - [ ] The body follows the mandatory section order and has a checkable completion criterion.
 - [ ] A surgical update used an exact unique match or an intentional `replace_all`.
 - [ ] A new Skill returned both deterministic and LLM SkillAudit evidence.
-- [ ] The operator explicitly confirmed before `skill_activate` or scanned install.
+- [ ] The operator explicitly confirmed before the write, and the confirming call sent only the token.
+- [ ] Every security check family was applied — to a Skill authored here, and to any package installed.
 - [ ] The final Skill was read back and matches the requested durable behavior.

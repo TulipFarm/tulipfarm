@@ -70,6 +70,20 @@ const GUARD_SEVERITY_CLASS: Record<
   critical: "border-destructive text-destructive",
 };
 
+/**
+ * The findings worth stopping an operator on. These used to make the API refuse the package
+ * outright; now they install if the operator says so, which is only defensible if the operator
+ * cannot miss them.
+ */
+function severeFindings(
+  report: SkillAuditReport | undefined
+): SkillAuditReport["deterministicScan"]["findings"] {
+  if (!report) return [];
+  return report.deterministicScan.findings.filter(
+    (finding) => finding.severity === "critical" || finding.severity === "high"
+  );
+}
+
 function errMessage(e: unknown): string {
   if (e instanceof ApiError) return e.message;
   return e instanceof Error ? e.message : "request failed";
@@ -191,6 +205,9 @@ export default function SkillsMarketplace() {
   const selectedSkills = (scan?.skills ?? []).filter((s) => selected.has(skillRowKey(s)));
   const allAudited =
     selectedSkills.length > 0 && selectedSkills.every((s) => reports[skillRowKey(s)]);
+  const severeSelected = selectedSkills.flatMap((s) =>
+    severeFindings(reports[skillRowKey(s)]).map((finding) => ({ skillName: s.name, finding }))
+  );
   const catalogGroups = new Map<string, MarketplaceCatalog["skills"]>();
   for (const skill of catalog?.skills ?? []) {
     const category = skill.category ?? "other";
@@ -499,6 +516,30 @@ export default function SkillsMarketplace() {
                   report={reports[skillRowKey(s)]}
                 />
               ))}
+              {severeSelected.length > 0 ? (
+                <div
+                  role="alert"
+                  className="flex flex-col gap-2 rounded-sm border border-destructive bg-destructive/10 px-3 py-2 text-destructive"
+                >
+                  <p className="text-sm font-medium">
+                    {severeSelected.length === 1
+                      ? "1 serious finding in this package"
+                      : `${severeSelected.length} serious findings in these packages`}
+                  </p>
+                  <ul className="flex flex-col gap-1 text-xs">
+                    {severeSelected.map(({ skillName, finding }) => (
+                      <li key={`${skillName}-${finding.patternId}-${finding.file}-${finding.line}`}>
+                        <span className="uppercase tracking-[0.15em]">{finding.severity}</span>{" "}
+                        {skillName}: {finding.description} ({finding.file}:{finding.line})
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="text-xs">
+                    Installing is still your call, but nothing here is sandboxed. Only go ahead if
+                    you trust this source.
+                  </p>
+                </div>
+              ) : null}
               <p className="rounded-sm border border-border bg-muted px-3 py-2 text-xs text-muted-foreground">
                 SkillAudit is <span className="text-foreground">advisory, not a guarantee</span>. A
                 skill is natural-language instruction and cannot be sandboxed — it may read benign
@@ -518,11 +559,16 @@ export default function SkillsMarketplace() {
               ) : null}
               <Button
                 size="sm"
+                variant={severeSelected.length > 0 ? "destructive" : "default"}
                 className="self-start"
                 onClick={() => void onInstall()}
                 disabled={busy !== null}
               >
-                {busy === "install" ? "Installing…" : `Confirm install (${selectedSkills.length})`}
+                {busy === "install"
+                  ? "Installing…"
+                  : severeSelected.length > 0
+                    ? `Install anyway (${selectedSkills.length})`
+                    : `Confirm install (${selectedSkills.length})`}
               </Button>
             </div>
           ) : null}

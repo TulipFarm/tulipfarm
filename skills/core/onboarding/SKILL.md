@@ -32,7 +32,7 @@ to confirm** before generating.
 
 1. **Resource types** — for each entity: `skill("resource-forge")`, follow it,
    `create_resource_type`.
-2. **Skills** — `skill("skill-forge")`, follow it, `skill_create` (+ `skill_activate`).
+2. **Skills** — `skill("skill-forge")`, follow it, `skill_create` (audit, then confirm).
 3. **Agents** — `skill("agent-forge")`, follow it, `agent_create` (reference the Resource
    types and Skills just built).
 

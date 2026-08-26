@@ -261,34 +261,12 @@ describe("skills routes", () => {
         provenance: "public",
         version: "1.0.0",
         source: "owner/repo",
-        pendingAudit: false,
       });
       expect(skills).toContainEqual({
         name: "my-skill",
         description: "Authored by hand.",
         provenance: "curated",
-        pendingAudit: false,
       });
-    });
-
-    it("marks forge-created skills with pendingAudit: true", async () => {
-      // Add a pending skill to the soul loader.
-      (soulLoader.skills as Map<string, SoulSkill>).set("pending-skill", {
-        name: "pending-skill",
-        frontmatter: { _pendingAudit: true, description: "Pending." },
-        body: "Pending body.",
-      });
-      const res = await app.inject({
-        method: "GET",
-        url: "/api/v1/skills",
-        cookies: auth(),
-        headers,
-      });
-      expect(res.statusCode).toBe(200);
-      const { skills } = res.json();
-      expect(skills).toContainEqual(
-        expect.objectContaining({ name: "pending-skill", pendingAudit: true })
-      );
     });
 
     it("lists bundled Skills with bundled provenance", async () => {
@@ -303,7 +281,6 @@ describe("skills routes", () => {
         name: "resource-forge",
         description: "Bundled Resource forge.",
         provenance: "bundled",
-        pendingAudit: false,
       });
     });
 

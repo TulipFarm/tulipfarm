@@ -101,13 +101,17 @@ describe("buildSoulCatalogue", () => {
     expect(cat.integrations[0]?.description).toBe("Integration title");
   });
 
-  it("excludes pending-audit skills from the catalogue", () => {
+  // Skills once landed in the Soul unreviewed and carried `_pendingAudit` until an operator
+  // activated them, so the catalogue filtered them out. A Skill now reaches the Soul only after
+  // its audit is confirmed, leaving nothing to withhold — and a filter kept past its gate hides
+  // Skills from prompt assembly for a reason no code states any more.
+  it("lists every Skill in the Soul, including one carrying the legacy pending marker", () => {
     const cat = buildSoulCatalogue(
       fakeLoader({
-        skills: [skill("live", { description: "ok" }), skill("staged", { _pendingAudit: true })],
+        skills: [skill("live", { description: "ok" }), skill("legacy", { _pendingAudit: true })],
       })
     );
-    expect(cat.skills.map((s) => s.name)).toEqual(["live"]);
+    expect(cat.skills.map((s) => s.name)).toEqual(["legacy", "live"]);
   });
 
   it("still lists the platform agents when the loader is absent, with every other section empty", () => {

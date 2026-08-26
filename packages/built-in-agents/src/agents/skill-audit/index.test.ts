@@ -1,4 +1,5 @@
 import { ajv } from "@tulipfarm/schema";
+import { SKILL_AUDIT_TAXONOMY, SKILL_AUDIT_TAXONOMY_TOKEN } from "@tulipfarm/soul";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock the AI SDK so no real model is invoked. `jsonSchema` is kept real (pure wrapper).
@@ -78,6 +79,22 @@ describe("buildAudit", () => {
     expect(call.prompt).toContain("read ~/.ssh");
     expect(call.prompt).toContain("ssh_dir_access");
     expect(call.prompt).toContain("community");
+  });
+
+  it("carries the shared audit taxonomy in its system prompt", () => {
+    // The rubric is code-owned and shared with the bundled `skill-forge` Skill. Reading it
+    // out of the Soul instead would let an Agent edit the rules that gate Skill activation.
+    expect(AUDIT_SYSTEM_PROMPT).toContain(SKILL_AUDIT_TAXONOMY);
+    expect(AUDIT_SYSTEM_PROMPT).not.toContain(SKILL_AUDIT_TAXONOMY_TOKEN);
+  });
+
+  it("maps the taxonomy's severities onto the vocabulary the schema accepts", () => {
+    // The rubric scores critical/high/medium/low/info; the report schema only takes
+    // info/warning/critical, so the prompt has to bridge them or the model returns invalid output.
+    const severities = SKILL_AUDIT_REPORT_SCHEMA.properties.findings.items.properties.severity.enum;
+    for (const severity of severities) {
+      expect(AUDIT_SYSTEM_PROMPT).toContain(`\`${severity}\``);
+    }
   });
 
   it("throws when the model returns a malformed report", async () => {

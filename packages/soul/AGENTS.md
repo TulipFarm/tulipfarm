@@ -42,8 +42,14 @@ Loader, compiler, publisher, and git-sync engine for Soul artifacts. Root `soul/
   locked value, so an operator or Agent edit permanently opts the Skill out of image updates. The
   same pass reaps retired Skills, persists the normalized vocabulary, and records anything else on
   disk as `curated`, so the lock is a complete inventory. Copy `SKILL.md` verbatim apart from the
-  forge-contract expansion: converting to `skill.yaml` would silently drop `tools`/`category`,
-  which `SkillSpec` cannot carry.
+  token expansion in `skills/tokens.ts`: converting to `skill.yaml` would silently drop
+  `tools`/`category`, which `SkillSpec` cannot carry.
+- **`skills/audit-taxonomy.ts` is the code-owned security rubric.** One text, two consumers: the
+  `skill_audit` BuiltInAgent's system prompt (which gates `skill_create` and every marketplace
+  install) and the bundled `skill-forge` Skill, via `{{SKILL_AUDIT_TAXONOMY}}` — so an Agent
+  authors against the same rules it is then scored against. It lives in code, not the Soul, because
+  a Soul copy is writable through `skill_update`, which would let an Agent rewrite the rules that
+  gate its own installs. Expanded on the way in, never read back out.
 - `SoulLoader` reads `agents/*/AGENT.md`, `skills/*/SKILL.md`, `resources/*/schema.yml`,
   `routines/*/routine.yaml`, `integrations/*/manifest.yml`, root `soul.yaml`, `guardrails.yaml`;
   resource schemas must pass `validateResourceSchema()` on load.

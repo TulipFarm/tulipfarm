@@ -54,12 +54,19 @@ export function narrowToolsToSkill(
 }
 
 /**
- * `skill`'s Skill-identifying argument is `name`, in both its modes: `{ name }` loads the Skill,
- * `{ name, reference }` reads one of the files that Skill advertised. A reference read therefore
+ * `skill`'s Skill-identifying argument is `name`, in both its adopting modes: `{ name }` loads the
+ * Skill, `{ name, file }` reads one of the files that Skill advertised. A reference read therefore
  * switches to the Skill it names, which is the same Skill the model is working in.
+ *
+ * `{ mode: "inspect" }` names a Skill without adopting it, so it must not switch. Inspecting is
+ * how an authoring or auditing Turn reads a Skill it is editing or judging — often one whose
+ * contents it does not trust. Switching there would do two harmful things at once: re-narrow the
+ * offer to the inspected Skill's scope, taking away the authoring Turn's own reads mid-flow, and
+ * tag every later dispatch as acting under a Skill the Turn was only looking at.
  */
 export function extractSkillName(callArguments: unknown): string | undefined {
   if (typeof callArguments !== "object" || callArguments === null) return undefined;
-  const name = (callArguments as { name?: unknown }).name;
+  const { name, mode } = callArguments as { name?: unknown; mode?: unknown };
+  if (mode === "inspect") return undefined;
   return typeof name === "string" ? name : undefined;
 }

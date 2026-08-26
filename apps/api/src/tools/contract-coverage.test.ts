@@ -111,10 +111,8 @@ const EXPECTED_FAMILY_TOOL_NAMES = [
   {
     family: "skills",
     names: [
-      "skill_activate",
       "skill_create",
       "skill_delete",
-      "skill_get",
       "skill_install",
       "skill_list",
       "skill_marketplace_browse",

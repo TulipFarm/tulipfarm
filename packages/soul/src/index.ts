@@ -234,6 +234,11 @@ export {
   resolveRuntimeSkillCommands,
 } from "./skill-commands";
 export { skillDocumentFromMarkdown } from "./skill-documents";
+export {
+  expandSkillAuditTaxonomy,
+  SKILL_AUDIT_TAXONOMY,
+  SKILL_AUDIT_TAXONOMY_TOKEN,
+} from "./skills/audit-taxonomy";
 export type { BundledSkill } from "./skills/bundled";
 export {
   bundledSkillsDir,
@@ -278,6 +283,7 @@ export {
   installedSourceType,
   isSkillSourceType,
   isSkillVersion,
+  lockProvenance,
   marketplaceSource,
   readSkillsLock,
   SKILL_SOURCE_TYPES,
@@ -295,9 +301,14 @@ export type {
   SkillMarketplaceDeps,
   SkillMarketplaceFlow,
   SkillMarketplaceInstall,
+  SkillMarketplacePrepared,
   SkillMarketplaceScan,
 } from "./skills/marketplace";
-export { createSkillMarketplaceFlow, SkillMarketplaceError } from "./skills/marketplace";
+export {
+  createSkillMarketplaceFlow,
+  packageWarnings,
+  SkillMarketplaceError,
+} from "./skills/marketplace";
 export {
   collectSkillFiles,
   discoverSkills,

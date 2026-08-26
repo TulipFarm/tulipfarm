@@ -7,7 +7,6 @@ const SkillSummaryPropertiesSchema = {
   provenance: { type: "string", enum: SKILL_SOURCE_TYPES },
   version: { type: "string" },
   source: { type: "string" },
-  pendingAudit: { type: "boolean" },
 } as const;
 
 const MarketplaceSkillPropertiesSchema = {
@@ -53,7 +52,7 @@ export const SkillListResponseSchema = {
       type: "array",
       items: {
         type: "object",
-        required: ["name", "provenance", "pendingAudit"],
+        required: ["name", "provenance"],
         properties: SkillSummaryPropertiesSchema,
       },
     },
@@ -85,7 +84,7 @@ export const SkillNameParamsSchema = {
 
 export const SkillDetailResponseSchema = {
   type: "object",
-  required: ["name", "provenance", "body", "pendingAudit", "files", "commands"],
+  required: ["name", "provenance", "body", "files", "commands"],
   properties: {
     ...SkillSummaryPropertiesSchema,
     body: { type: "string" },

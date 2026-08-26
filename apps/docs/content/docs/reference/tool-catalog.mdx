@@ -53,11 +53,9 @@ Changing the soul — the git-backed definitions of what your instance is and wh
 | `resource_hooks_get` | No | Get the hooks.ts source for a resource type, or null if none exists. |
 | `resource_type_schema` | No | Get the JSON Schema (as a YAML string) for a single resource type. |
 | `resource_type_update` | Yes | Replace the schema of an existing resource type. |
-| `skill_activate` | Yes | Activate a forge-created skill after the operator has reviewed its SkillAudit report. |
-| `skill_create` | Yes | Create a new skill in the soul repo. |
+| `skill_create` | Yes | Create a new Skill. |
 | `skill_delete` | Yes | Delete a Skill from the merged view. |
-| `skill_get` | No | Get a Skill's frontmatter, markdown body, and provenance from the merged Soul-over-bundled view. |
-| `skill_install` | Yes | Install a Skill from a URL in one step. |
+| `skill_install` | Yes | Install a Skill from a URL. |
 | `skill_list` | No | List Skills from the merged Soul-over-bundled view with provenance. |
 | `skill_marketplace_browse` | No | Browse the configured Skill marketplace. |
 | `skill_scanned_audit` | No | Run SkillAudit on one exact scanned package. |
@@ -132,7 +130,7 @@ How work is handed to another agent, automated, and reported on while it runs.
 | `routine_delete` | Yes | Delete a routine from the soul repo, along with every Trigger that still references it. |
 | `routine_forge` | Yes | Create or update a ROUTINE (a scheduled/triggered automation) in the soul repo — use this, not skill_create, whenever the user asks to 'create a routine' / 'automate X' / 'every morning do Y' / 'when X happens do Y'. |
 | `routine_picker` | No | List all available routines from the soul so the user can pick one to trigger. |
-| `skill` | No | Load a Skill by name and apply its instructions. |
+| `skill` | No | The one door to a Skill. |
 | `soul_repo_push` | Yes | Push committed soul changes to the configured git remote. |
 | `spawn_subagent` | Yes | Spawn a throwaway helper you define yourself, for one task. |
 | `trigger_routine` | Yes | Trigger a routine by name with optional inputs (validated against the routine's x-inputs schema). |

@@ -254,6 +254,59 @@ describe("skillTool loading a Skill", () => {
 
 // ── complete_task ─────────────────────────────────────────────────────────────
 
+describe("skillTool inspecting a Skill", () => {
+  it("returns the same content plus provenance, marked as inspected", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "skill-inspect-"));
+    try {
+      const ctx = makeCtx({ "data-analyst": makeSkill("data-analyst") }, {}, dir);
+      const res = await skillTool.handler({ name: "data-analyst", mode: "inspect" }, ctx);
+      expect(res).toMatchObject({
+        success: true,
+        data: {
+          name: "data-analyst",
+          frontmatter: { version: "1.0" },
+          body: "# data-analyst\nDoes things.",
+          inspected: true,
+          provenance: "curated",
+        },
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reports a bundled Skill as bundled", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "skill-inspect-bundled-"));
+    try {
+      const res = await skillTool.handler(
+        { name: "resource-forge", mode: "inspect" },
+        {
+          ...makeCtx({}, {}, dir),
+          bundledSkills: new Map([["resource-forge", makeBundledSkill("resource-forge")]]),
+        }
+      );
+      expect(res).toMatchObject({ success: true, data: { provenance: "bundled" } });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("loads without provenance so the two modes stay distinguishable in the transcript", async () => {
+    const ctx = makeCtx({ "data-analyst": makeSkill("data-analyst") });
+    const res = await skillTool.handler({ name: "data-analyst" }, ctx);
+    expect(res).toMatchObject({ success: true });
+    const data = (res as { data: Record<string, unknown> }).data;
+    expect(data.provenance).toBeUndefined();
+    expect(data.inspected).toBeUndefined();
+  });
+
+  it("rejects a mode the schema does not define", async () => {
+    const ctx = makeCtx({ "data-analyst": makeSkill("data-analyst") });
+    const res = await skillTool.handler({ name: "data-analyst", mode: "adopt" }, ctx);
+    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
+  });
+});
+
 describe("skillTool reading a Skill file", () => {
   it("returns not_found when soulPath is not set", async () => {
     const res = await skillTool.handler({ name: "foo", file: "references/bar.md" }, makeCtx());

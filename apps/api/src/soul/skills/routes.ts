@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { buildAudit } from "@tulipfarm/built-in-agents";
+import { buildAudit, SKILL_AUDIT } from "@tulipfarm/built-in-agents";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { gitSourceHttpError, withGitSourceClone } from "@tulipfarm/integrations";
 import type { LlmService } from "@tulipfarm/llm";
@@ -74,7 +74,6 @@ type SkillSummary = {
   /** The Skill's own version, as declared in its `SKILL.md`. */
   version?: string;
   source?: string;
-  pendingAudit: boolean;
 };
 const NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 function asString(value: unknown): string | undefined {
@@ -179,7 +178,7 @@ export function createSkillMarketplaceFlow(deps: {
     audit: async (skill, deterministicScan) => {
       try {
         return await buildAudit(
-          deps.llmService.effortModel("balanced"),
+          deps.llmService.effortModel(SKILL_AUDIT.rung),
           {
             name: skill.name,
             description: skill.description,
@@ -209,7 +208,6 @@ function toSkillSummary(skill: SoulSkill, lock: SkillsLock, bundledOnly = false)
     provenance,
     version: locked?.version ?? asString(skill.frontmatter.version),
     source: provenance === "bundled" ? undefined : locked?.sourceUrl,
-    pendingAudit: skill.frontmatter._pendingAudit === true,
   };
 }
 // The operator sees that the catalog is unreachable, never git's stderr or a server temp path.

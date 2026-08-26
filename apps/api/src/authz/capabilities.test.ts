@@ -179,7 +179,6 @@ describe("capabilityLabel", () => {
     ["slack.message.send", "Send message"],
     ["github.repository.list", "See every repository"],
     ["record.delete", "Delete record"],
-    ["soul.skill.activate", "Turn on skill"],
   ])("turns %s into %s", (action, expected) => {
     expect(capabilityLabel(action)).toBe(expected);
   });

@@ -12,7 +12,9 @@ import type { BundledSkill } from "@tulipfarm/soul";
 import {
   createSkillFileReader,
   type GitSyncService,
+  lockProvenance,
   type RoutineCatalog,
+  readSkillsLock,
   resolveSkill,
   SKILL_TOOL_DECLARATION,
   SKILL_TOOL_INPUT_SCHEMA,
@@ -153,10 +155,17 @@ function missingFileMessage(skill: string, file: string, available: readonly str
 const validateSkillTool = ajv.compile(SKILL_TOOL_INPUT_SCHEMA);
 
 /**
- * The one door to a Skill: `{ name }` loads it, `{ name, file }` reads one of the files it
- * advertised — reference, schema, asset or script alike. Both modes resolve the Skill first, so a
- * Skill hidden from `skill_list` cannot be reached by naming one of its files, and reads are
- * confined to paths the artifact layout can address inside that Skill's own directory.
+ * The one door to a Skill. `{ name }` loads it, `{ name, file }` reads one of the files it
+ * advertised — reference, schema, asset or script alike, and `mode: "inspect"` returns the same
+ * content as data, with provenance and without making the Skill active. Every mode resolves the
+ * Skill first, so a Skill hidden from `skill_list` cannot be reached by naming one of its files,
+ * and reads are confined to paths the artifact layout can address inside that Skill's own
+ * directory.
+ *
+ * Inspect exists because reading a Skill and adopting one are different acts. An authoring or
+ * auditing Turn has to read the exact bytes of a Skill it is about to patch, verify or judge —
+ * frequently one it does not trust yet — and loading to do that would both hand those bytes to
+ * the model as instructions and re-narrow the offer away from the Skill the Turn is working in.
  */
 export const skillTool = defineApiTool<PlatformToolContext>({
   name: SKILL_TOOL_NAME,
@@ -174,7 +183,7 @@ export const skillTool = defineApiTool<PlatformToolContext>({
   handler: async (args, ctx) => {
     if (!validateSkillTool(args))
       return err("validation_error", firstError(validateSkillTool.errors));
-    const { name, file } = args as { name: string; file?: string };
+    const { name, file, mode } = args as { name: string; file?: string; mode?: string };
 
     const hidden = await hiddenSkills(ctx);
     const skill = resolveSkill(
@@ -198,18 +207,22 @@ export const skillTool = defineApiTool<PlatformToolContext>({
     }
 
     if (file === undefined) {
+      const loaded = { name: skill.name, frontmatter: skill.frontmatter, body: skill.body, files };
+      if (mode !== "inspect") return ok(loaded);
+      const soulPath = ctx.gitSync?.path ?? ctx.soulPath;
+      const lock = soulPath === undefined ? undefined : await readSkillsLock(soulPath);
       return ok({
-        name: skill.name,
-        frontmatter: skill.frontmatter,
-        body: skill.body,
-        files,
+        ...loaded,
+        inspected: true,
+        provenance:
+          lock === undefined ? "bundled" : lockProvenance(lock, name, soulSkill !== undefined),
       });
     }
 
     if (!reader) return err("not_found", missingFileMessage(name, file, files));
     try {
       const content = await reader.read(file);
-      return ok({ name, file, content });
+      return ok({ name, file, content, ...(mode === "inspect" ? { inspected: true } : {}) });
     } catch (error) {
       if (error instanceof SkillFileError) {
         if (error.code === "INVALID_PATH") {

@@ -21,8 +21,10 @@ When you already know which skill you want, paste its address:
 Install this skill - https://www.skills.sh/mattpocock/skills/grill-me
 ```
 
-The assistant resolves the address, scans the source, runs SkillAudit on that one package, and
-installs it. Three kinds of address work:
+The assistant resolves the address, scans the source and runs SkillAudit on that one package —
+then stops and reports back. Nothing is installed yet. You get the risk rating, the summary and
+every serious finding, and you decide. Say yes and the assistant asks again through an approval
+prompt, which you must approve before anything is written. Three kinds of address work:
 
 | Address | Example |
 | --- | --- |
@@ -33,7 +35,9 @@ installs it. Three kinds of address work:
 Add `#branch` or `#tag` to any of them to pin a ref. If the source holds several skills and the
 address does not name one, the assistant lists them and asks which you meant.
 
-The audit still runs — a one-line request is a shortcut through the steps below, not around them.
+A one-line request is a shortcut through the steps below, not around them: the audit still runs,
+you still see it before deciding, and the write still needs your approval. The assistant cannot
+install a skill on its own judgement, however safe it says the package looks.
 
 ## Ask where to start
 
@@ -44,8 +48,8 @@ I want to install the Skills from https://github.com/example/acme-skills. Help m
 scan them and decide which ones are safe to install.
 ```
 
-The assistant can explain what to expect. The actual install confirmation happens in the
-skills UI so an operator can review the audit report before anything is installed.
+The assistant can explain what to expect, then walk you through the same audit-and-confirm steps
+one skill at a time. To review several at once, use the skills UI below.
 
 ## Scan the repository
 
@@ -70,15 +74,22 @@ review that summarizes intent, risk, tool guidance, and findings for each select
 
 <Callout type="warn">
 SkillAudit is advice, not a guarantee. Read the findings — and the skill's own source — before you
-confirm. Some packaged skills are also blocked automatically for safety, and a clean audit does
-**not** override that block.
+confirm.
+
+Serious findings — a binary in the package, a symlink pointing out of it, a package large enough to
+bloat the soul's git history — are shown in a red panel above the button, and the button changes to
+**Install anyway**. They do not stop you. It is your instance, so it is your call; TulipFarm's job
+is to make sure you saw them.
+
+A package still gets refused when it simply cannot work: a skill whose files the soul cannot
+address, or an executable skill with no entrypoint or no runtime to run it on.
 </Callout>
 
 ## Confirm the install
 
-After every selected skill has an audit report, choose **Confirm install**. TulipFarm writes the
-skills into the soul, records the change, and pins exactly which version came from where — so what
-runs later is what you reviewed now.
+After every selected skill has an audit report, choose **Confirm install** — or **Install anyway**,
+if anything serious turned up. TulipFarm writes the skills into the soul, records the change, and
+pins exactly which version came from where — so what runs later is what you reviewed now.
 
 If the install fails, the reason appears next to **Confirm install** and takes focus, so nothing is
 written and you can correct the selection and try again.

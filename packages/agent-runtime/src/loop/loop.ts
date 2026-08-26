@@ -488,8 +488,31 @@ export class AgentLoop {
           return finish({ status: "failed", reason: "tool_call_limit", ...counters }, "failed");
         }
         const runBatch = batch.slice(0, available);
-        const dispatched = await Promise.all(
-          runBatch.map((batched) =>
+
+        // Two identical reads in one batch are one read. They would resolve concurrently against
+        // the same state, so the second dispatch re-checks an authorization that cannot have
+        // changed since the first, and returns bytes the model is already being handed. This is
+        // narrower than the repeat rule in `repeat.ts`, which deliberately re-runs a call repeated
+        // in a *later* iteration precisely because the answer may have moved by then; within one
+        // batch nothing can have moved. Both calls are still answered, charged, and counted as
+        // repeats, so the model sees that it asked twice.
+        const firstOfSignature = new Map<string, number>();
+        const unique: typeof runBatch = [];
+        const resultOf: number[] = [];
+        for (const batched of runBatch) {
+          const signature = callSignature(batched.name, batched.arguments);
+          const seen = signature === undefined ? undefined : firstOfSignature.get(signature);
+          if (seen !== undefined) {
+            resultOf.push(seen);
+            continue;
+          }
+          if (signature !== undefined) firstOfSignature.set(signature, unique.length);
+          resultOf.push(unique.length);
+          unique.push(batched);
+        }
+
+        const distinct = await Promise.all(
+          unique.map((batched) =>
             this.deps.tools.dispatch({
               businessId: input.businessId,
               runId: input.runId,
@@ -501,6 +524,7 @@ export class AgentLoop {
             })
           )
         );
+        const dispatched = resultOf.map((at) => distinct[at]);
         counters.toolCalls += runBatch.length;
         for (const batched of runBatch) dispatchedIds.add(batched.callId);
         index += runBatch.length;

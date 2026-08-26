@@ -93,9 +93,16 @@ export class SkillMarketplaceError extends Error {
   }
 }
 
-export interface SkillMarketplaceSourceInstall extends SkillMarketplaceInstall {
-  /** The audit that cleared this package; the install refuses to run without one. */
+/** A scanned and audited package, held for a decision. Nothing has been written yet. */
+export interface SkillMarketplacePrepared {
+  /** Hand back to `install` to go ahead; the scan expires, so this is not a durable handle. */
+  scanId: string;
+  /** The resolved git remote, which a catalogue URL is not. */
+  source: string;
+  name: string;
+  skillPath: string;
   report: unknown;
+  warnings: readonly string[];
 }
 
 export interface SkillMarketplaceFlow {
@@ -109,13 +116,18 @@ export interface SkillMarketplaceFlow {
     actor: CommitActor;
     source?: "agent" | "api";
   }): Promise<SkillMarketplaceInstall>;
-  installFromSource(input: {
+  prepareFromSource(input: {
+    source: string;
+    name?: string;
+    actorId: string;
+  }): Promise<SkillMarketplacePrepared>;
+  installPrepared(input: {
+    scanId: string;
     source: string;
     name?: string;
     actor: CommitActor;
-    actorId: string;
     writeSource?: "agent" | "api";
-  }): Promise<SkillMarketplaceSourceInstall>;
+  }): Promise<SkillMarketplaceInstall>;
 }
 
 export interface SkillMarketplaceDeps {
@@ -135,13 +147,36 @@ export interface SkillMarketplaceDeps {
 
 const SCAN_TTL_MS = 10 * 60 * 1000;
 const MAX_SCANS = 25;
-const STRUCTURAL_INSTALL_BLOCKERS = new Set([
+/**
+ * Package shapes an operator should see before deciding, not reasons to refuse. They describe risk
+ * — a binary blob, a package that will bloat the Soul's git history, a symlink pointing out of the
+ * package — and risk is the operator's call to accept on their own instance. Refusing them here
+ * rejected whole packages over one file and taught nobody anything; surfacing them at the
+ * confirmation does. What genuinely cannot work (`validateInstallable`) still refuses.
+ */
+const SEVERE_PACKAGE_FINDINGS = new Set([
   "binary_file",
   "oversized_file",
   "oversized_skill",
   "symlink_escape",
   "too_many_files",
 ]);
+
+/** Findings worth stopping an operator on, phrased for a confirmation prompt. */
+export function packageWarnings(files: readonly SkillScanFile[]): string[] {
+  return scanSkill(files)
+    .findings.filter(
+      (finding) =>
+        SEVERE_PACKAGE_FINDINGS.has(finding.patternId) ||
+        finding.severity === "critical" ||
+        finding.severity === "high"
+    )
+    .map((finding) =>
+      finding.file === "(directory)"
+        ? `${finding.severity}: ${finding.description}`
+        : `${finding.severity}: ${finding.description} (${finding.file}:${finding.line})`
+    );
+}
 
 function stripUrlCredentials(source: string): string {
   try {
@@ -229,7 +264,7 @@ export function createSkillMarketplaceFlow(deps: SkillMarketplaceDeps): SkillMar
   }
 
   async function scan(input: { source: string; actorId: string }): Promise<SkillMarketplaceScan> {
-    // Resolving here rather than only in `installFromSource` means a catalogue URL pasted into the
+    // Resolving here rather than only in `prepareFromSource` means a catalogue URL pasted into the
     // scan box behaves the same as one handed to an Agent, and provenance records the real remote.
     const source = resolveSkillSource(input.source).source;
     return deps.cloneSource(
@@ -381,28 +416,19 @@ export function createSkillMarketplaceFlow(deps: SkillMarketplaceDeps): SkillMar
     return segments.length > 1 ? segments[segments.length - 2] : "";
   }
 
-  async function installFromSource(input: {
-    source: string;
-    name?: string;
-    actor: CommitActor;
-    actorId: string;
-    writeSource?: "agent" | "api";
-  }): Promise<SkillMarketplaceSourceInstall> {
-    const resolved = resolveSkillSource(input.source);
-    // `scan` resolves too; passing the resolved source keeps the two paths on one spelling.
-    const scanned = await scan({ source: resolved.source, actorId: input.actorId });
-    const wanted = input.name ?? resolved.skillHint;
-
+  /** Narrows a source to the single Skill it names, or explains what the caller has to choose from. */
+  function selectOne<T extends { name: string; skillPath: string }>(
+    skills: readonly T[],
+    wanted: string | undefined,
+    sourceLabel: string
+  ): T {
     const matches = wanted
-      ? scanned.skills.filter(
-          (skill) => skill.name === wanted || directoryOf(skill.skillPath) === wanted
-        )
-      : scanned.skills;
-
+      ? skills.filter((skill) => skill.name === wanted || directoryOf(skill.skillPath) === wanted)
+      : skills;
     if (matches.length === 0) {
       throw new SkillMarketplaceError(
         400,
-        `"${wanted}" is not in ${resolved.source}. It offers: ${scanned.skills
+        `"${wanted}" is not in ${sourceLabel}. It offers: ${skills
           .map((skill) => skill.name)
           .join(", ")}`
       );
@@ -410,33 +436,84 @@ export function createSkillMarketplaceFlow(deps: SkillMarketplaceDeps): SkillMar
     if (matches.length > 1) {
       throw new SkillMarketplaceError(
         400,
-        `${resolved.source} offers more than one Skill, so name the one to install: ${matches
+        `${sourceLabel} offers more than one Skill, so name the one to install: ${matches
           .map((skill) => skill.name)
           .join(", ")}`
       );
     }
+    return matches[0];
+  }
 
-    const chosen = matches[0];
-    // `install` refuses a package this flow has not audited, so the audit cannot be skipped. Note
-    // it gates on having been audited, not on the verdict: a `high` report still installs, and the
-    // report is returned for the caller to act on. Structural findings are the blocking set, and
-    // `validateInstallable` enforces those separately.
+  /**
+   * Everything up to the decision: resolve the URL, scan it, pick the one Skill it names, and audit
+   * it. Writes nothing. The caller shows `report` and `warnings` to a human, who then calls
+   * `install` with the returned `scanId` to go ahead. Splitting it this way is what lets an audit
+   * be advice rather than a gate — the operator sees the risk before anything reaches the Soul.
+   */
+  async function prepareFromSource(input: {
+    source: string;
+    name?: string;
+    actorId: string;
+  }): Promise<SkillMarketplacePrepared> {
+    const resolved = resolveSkillSource(input.source);
+    // `scan` resolves too; passing the resolved source keeps the two paths on one spelling.
+    const scanned = await scan({ source: resolved.source, actorId: input.actorId });
+    const wanted = input.name ?? resolved.skillHint;
+
+    const chosen = selectOne(scanned.skills, wanted, resolved.source);
+    // Refuse what cannot work here rather than at the write, so nobody is asked to approve an
+    // install that was never going to land.
+    validateInstallable(
+      selected(scanned.scanId, chosen.name, chosen.skillPath).skill,
+      deps.executablePackageBlocker
+    );
     const { report } = await audit({
       scanId: scanned.scanId,
       name: chosen.name,
       skillPath: chosen.skillPath,
     });
-    const installed = await install({
+    const { skill } = selected(scanned.scanId, chosen.name, chosen.skillPath);
+    return {
       scanId: scanned.scanId,
+      source: resolved.source,
+      name: chosen.name,
+      skillPath: chosen.skillPath,
+      report,
+      warnings: packageWarnings(skill.files),
+    };
+  }
+
+  /**
+   * The other half of `prepareFromSource`: goes ahead with the package that scan already audited.
+   * It reapplies the same selection to the cached scan rather than trusting the caller to echo the
+   * Skill back, so what lands is necessarily what was audited and shown.
+   */
+  async function installPrepared(input: {
+    scanId: string;
+    source: string;
+    name?: string;
+    actor: CommitActor;
+    writeSource?: "agent" | "api";
+  }): Promise<SkillMarketplaceInstall> {
+    const entry = scans.get(input.scanId);
+    if (!entry) {
+      throw new SkillMarketplaceError(
+        404,
+        "that confirmation has expired; audit the source again before installing"
+      );
+    }
+    const resolved = resolveSkillSource(input.source);
+    const chosen = selectOne(entry.skills, input.name ?? resolved.skillHint, resolved.source);
+    return install({
+      scanId: input.scanId,
       names: [chosen.name],
       paths: [chosen.skillPath],
       actor: input.actor,
       source: input.writeSource,
     });
-    return { ...installed, report };
   }
 
-  return { browse, scan, audit, install, installFromSource };
+  return { browse, scan, audit, install, prepareFromSource, installPrepared };
 }
 
 function asString(value: unknown): string | undefined {
@@ -482,17 +559,6 @@ function validateInstallable(
     throw new SkillMarketplaceError(
       400,
       `Skill "${skill.name}" contains files the soul cannot store: ${unstorable.join(", ")}`
-    );
-  }
-  const blockers = scanSkill(skill.files).findings.filter((finding) =>
-    STRUCTURAL_INSTALL_BLOCKERS.has(finding.patternId)
-  );
-  if (blockers.length > 0) {
-    throw new SkillMarketplaceError(
-      400,
-      `Skill "${skill.name}" contains unsupported package files: ${[
-        ...new Set(blockers.map((finding) => finding.patternId)),
-      ].join(", ")}`
     );
   }
   const executableBlocker = executablePackageBlocker(skill);

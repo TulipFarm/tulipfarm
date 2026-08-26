@@ -972,6 +972,76 @@ describe("AgentLoop concurrent dispatch", () => {
     expect(tools.maxConcurrent).toBe(2);
   });
 
+  // A model that batches "load the forge Skill" twice would otherwise be handed the same SKILL.md
+  // body twice, at full token cost. Within one batch nothing can have changed between the two, so
+  // the second dispatch is pure waste — unlike a repeat in a later iteration, which `repeat.ts`
+  // deliberately re-runs because the answer may have moved.
+  it("dispatches an exactly repeated read in one batch only once", async () => {
+    const tools = trackingDispatcher();
+    const outcome = await loop({
+      model: scriptedModel(
+        toolCallResult([
+          { callId: "c1", name: "github.issue.search", arguments: { q: "open" } },
+          { callId: "c2", name: "github.issue.search", arguments: { q: "open" } },
+        ]),
+        textResult("done")
+      ),
+      tools,
+    }).run(
+      input({
+        tools: readTools,
+        limits: { maxIterations: 5, maxToolCalls: 5, maxRepairAttempts: 2 },
+      })
+    );
+
+    expect(outcome).toMatchObject({ status: "completed" });
+    expect(tools.calls).toEqual(["github.issue.search"]);
+  });
+
+  // Key order is the provider's choice, not the model's meaning, so it must not decide whether a
+  // duplicate is spotted.
+  it("collapses a repeat whose arguments were serialized in a different key order", async () => {
+    const tools = trackingDispatcher();
+    await loop({
+      model: scriptedModel(
+        toolCallResult([
+          { callId: "c1", name: "github.issue.search", arguments: { a: 1, b: 2 } },
+          { callId: "c2", name: "github.issue.search", arguments: { b: 2, a: 1 } },
+        ]),
+        textResult("done")
+      ),
+      tools,
+    }).run(
+      input({
+        tools: readTools,
+        limits: { maxIterations: 5, maxToolCalls: 5, maxRepairAttempts: 2 },
+      })
+    );
+
+    expect(tools.calls).toEqual(["github.issue.search"]);
+  });
+
+  it("still dispatches reads that differ only by argument", async () => {
+    const tools = trackingDispatcher();
+    await loop({
+      model: scriptedModel(
+        toolCallResult([
+          { callId: "c1", name: "github.issue.search", arguments: { q: "open" } },
+          { callId: "c2", name: "github.issue.search", arguments: { q: "closed" } },
+        ]),
+        textResult("done")
+      ),
+      tools,
+    }).run(
+      input({
+        tools: readTools,
+        limits: { maxIterations: 5, maxToolCalls: 5, maxRepairAttempts: 2 },
+      })
+    );
+
+    expect(tools.calls).toEqual(["github.issue.search", "github.issue.search"]);
+  });
+
   it("keeps mutating Tool calls strictly sequential even when interleaved with reads", async () => {
     const tools = trackingDispatcher();
     const mixedTools = [
@@ -1211,6 +1281,31 @@ describe("AgentLoop skill-scoped tool narrowing", () => {
     );
     expect(model.toolNamesByRequest[1]).not.toContain("record_search");
     expect(model.toolNamesByRequest[1]).not.toContain("agent_list");
+  });
+
+  it("inspecting a Skill neither narrows nor becomes the active Skill", async () => {
+    const tools = dispatcher(
+      { status: "succeeded", callId: "call-1", output: { name: "routine-forge", inspected: true } },
+      { status: "succeeded", callId: "call-2", output: { ok: true } }
+    );
+    const model = recordingModel(
+      toolCallResult([
+        { callId: "call-1", name: "skill", arguments: { name: "routine-forge", mode: "inspect" } },
+      ]),
+      toolCallResult([{ callId: "call-2", name: "record_search", arguments: {} }]),
+      textResult("done")
+    );
+    await loop({ model, tools }).run(
+      input({
+        tools: catalog,
+        skillToolScopes: new Map([["routine-forge", ["routine_forge"]]]),
+      })
+    );
+
+    // An inspected Skill is material, not instructions: the offer stays whole and no later
+    // dispatch is tagged as acting under the Skill that was merely read.
+    expect(model.toolNamesByRequest[1]).toEqual(catalog.map((t) => t.name));
+    expect(tools.calls[1]?.activeSkillName).toBeUndefined();
   });
 
   it("does not narrow when the active Skill has no declared scope", async () => {

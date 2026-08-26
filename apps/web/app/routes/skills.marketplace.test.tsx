@@ -84,7 +84,13 @@ test("scan → audit → advisory + operator confirm → install", async () => {
   expect(screen.getByText("U+202E (RTL override)")).toBeInTheDocument();
   expect(installSkills).not.toHaveBeenCalled();
 
-  await user.click(screen.getByRole("button", { name: /confirm install/i }));
+  // A critical finding warns loudly and renames the button, but never takes the choice away.
+  const alert = screen.getByRole("alert");
+  expect(alert).toHaveTextContent(/1 serious finding/i);
+  expect(alert).toHaveTextContent(/invisible unicode character RTL override/);
+  expect(screen.queryByRole("button", { name: /confirm install/i })).not.toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: /install anyway/i }));
 
   expect(await screen.findByText(/Installed demo-skill/i)).toBeInTheDocument();
   expect(installSkills).toHaveBeenCalledWith("s1", [

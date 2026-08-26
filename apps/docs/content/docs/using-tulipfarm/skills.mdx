@@ -76,8 +76,11 @@ configuration, not a setting shown to normal users.
 ## SkillAudit is advisory
 
 SkillAudit is an LLM safety review that reports what the skill asks agents to do, suspicious
-instructions, and risk level. The audit report is not an authorization boundary. A low-risk report
-does not auto-install a skill. Executable files also pass deterministic package, runtime, tool
-Broker, approval, Credential, sandbox, and output gates when applicable.
+instructions, and risk level. The audit report is not an authorization boundary: it never installs
+a skill and never refuses one. What it does is make sure you see the risk before you decide — a
+high-risk report is shown to you and the choice stays yours, and a low-risk report still does not
+auto-install. Whether you install from chat or from the skills UI, the audit runs and a human
+approves the write. Executable files also pass deterministic package, runtime, tool Broker,
+approval, Credential, sandbox, and output gates when applicable.
 
 Use [Install a skill](/docs/using-tulipfarm/install-a-skill) for the install flow.
