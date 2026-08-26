@@ -22,8 +22,10 @@ That keeps normal turns small while still allowing deep instructions for special
 ## Built, bundled, or installed
 
 TulipFarm ships bundled forge skills such as `resource-forge`, `agent-forge`, `skill-forge`,
-`routine-forge`, `surface-component-forge`, and `onboarding`. You can author a new skill by chat
-through `skill-forge`, or install skills from a git repository through the marketplace flow.
+`routine-forge`, `surface-component-forge`, and `onboarding`. Ask `skill-forge` for a skill by
+what it does and it searches the official TulipFarm catalog first, then the public skills.sh
+catalog, and writes you a new one only when neither has a match. You can also install from a git
+repository directly.
 
 The install flow scans a repository, runs **SkillAudit** — the product's own safety review of what
 a skill would be allowed to do — and then installs only after operator confirmation. Installed
