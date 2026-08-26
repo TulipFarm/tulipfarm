@@ -1,17 +1,37 @@
 ---
 title: Install a skill
-description: Scan a git repository, review SkillAudit findings, and install selected skills.
+description: Ask for a skill by what it does, review the SkillAudit findings, and install it — from the TulipFarm catalog, skills.sh, or any git repository.
 ---
 
 {/* tf-page: track: using-tulipfarm  requires: ["soul.skill:*"] */}
 
-This guide installs an existing [skill](/docs/using-tulipfarm/skills) from a git repository. The
-real install flow is always **scan → SkillAudit → install**.
+This guide installs an existing [skill](/docs/using-tulipfarm/skills) from a catalog or a git
+repository. However you start, the real install flow is always **find → SkillAudit → install**.
 
 ## Outcome
 
 At the end, the skills you chose are copied into the soul, pinned to the exact version you
 reviewed, and available for agents to load on demand.
+
+## Ask for a skill by what it does
+
+When you know the job but not the skill, describe the job:
+
+```prompt
+Is there a skill for chasing overdue invoices?
+```
+
+The assistant searches two catalogs in order. First the official TulipFarm catalog, which ships
+with the product and needs no reputation check. If nothing there fits, it searches
+[skills.sh](https://skills.sh), the public community catalog, and weighs each candidate on how many
+people have installed it, who published it, and how well-regarded its source repository is.
+
+It comes back with what it found: what each skill does, how many installs it has, and where it
+came from. Nothing is installed yet. Pick one and it runs SkillAudit and asks you to approve the
+write, exactly as below.
+
+If neither catalog has anything that fits, it says so and offers to write the skill for you
+instead. A near-miss is not a match, and the assistant should not install one as though it were.
 
 ## Install from a URL in chat
 

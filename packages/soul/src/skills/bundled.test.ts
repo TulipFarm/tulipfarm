@@ -193,7 +193,11 @@ describe("loadBundledSkills", () => {
 
     const source = await readFile(join(skillForge.directory, "SKILL.md"), "utf8");
     expect(source.split("\n").length).toBeGreaterThanOrEqual(90);
-    expect(source.split("\n").length).toBeLessThanOrEqual(150);
+    // The ceiling bounds what every Turn carries. This file holds the rules that bind every job —
+    // frontmatter limits, section order, the audit-then-confirm discipline, the search ladder —
+    // and each job's procedure lives in `references/`, loaded with `skill` + `file` on demand.
+    // Raise it only for another rule, never for steps that belong in a reference.
+    expect(source.split("\n").length).toBeLessThanOrEqual(185);
   });
 
   it("returns an empty map when the bundled tree does not exist", async () => {
