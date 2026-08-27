@@ -53,5 +53,5 @@ export function scopeKindLabel(kind: string): string {
 /** What the switch stops, in one line, for an operator deciding whether to stand it down. */
 export function describeScope(item: Pick<KillSwitch, "scopeKind" | "scopeValue">): string {
   if (item.scopeKind === "all_mutations") return "Every mutating effect";
-  return `${scopeKindLabel(item.scopeKind)}: ${item.scopeValue ?? "—"}`;
+  return `${scopeKindLabel(item.scopeKind)}: ${item.scopeValue ?? "-"}`;
 }

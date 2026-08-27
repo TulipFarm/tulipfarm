@@ -152,7 +152,7 @@ export function KnowledgeGraphView({ graph }: { graph: KnowledgeGraph }) {
       </p>
       {graph.truncated ? (
         <p data-testid="graph-truncated" className="text-xs text-warning">
-          Showing part of the graph — the corpus is larger than this view draws.
+          Showing part of the graph. The corpus is larger than this view draws.
         </p>
       ) : null}
 
@@ -193,7 +193,7 @@ export function KnowledgeGraphView({ graph }: { graph: KnowledgeGraph }) {
                 <a
                   href={n.href}
                   className="cursor-pointer"
-                  aria-label={n.spaceName ? `${n.title} — ${n.spaceName}` : n.title}
+                  aria-label={n.spaceName ? `${n.title}, ${n.spaceName}` : n.title}
                   onClick={(e) => {
                     e.preventDefault();
                     navigate(n.href);

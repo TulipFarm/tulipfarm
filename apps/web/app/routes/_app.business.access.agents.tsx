@@ -81,7 +81,7 @@ export default function AccessAgents() {
         title="Which team does each agent work for?"
         description={
           "Give an agent a team, and every document that agent writes can be opened by everyone " +
-          "in that team — nobody has to forward it. To let one more person in, such as a manager, " +
+          "in that team. Nobody has to forward it. To let one more person in, such as a manager, " +
           "give that person the same team on the People tab."
         }
       >
@@ -153,7 +153,7 @@ function AgentRow({
         <p className="truncate text-sm text-foreground">{agent.label ?? agent.name}</p>
         <p className="mt-1 text-xs text-muted-foreground">
           {holds.length === 0
-            ? "No team yet — only the person who asks can open what it writes."
+            ? "No team yet, only the person who asks can open what it writes."
             : `Writes for ${holds.map(namer).join(", ")}.`}
         </p>
       </div>

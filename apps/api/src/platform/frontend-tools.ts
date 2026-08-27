@@ -45,7 +45,7 @@ const getClientContextToolDefinition = defineApiTool<RequestContext>({
   tier: "platform",
   mutating: false,
   description:
-    "Read what the user is currently looking at in the app — the current route and page title. Call this to ground answers in the user's view (e.g. the resource record they have open) and BEFORE any navigate / prefill / invoke action.",
+    "Read what the user is currently looking at in the app: the current route and page title. Call this to ground answers in the user's view (e.g. the resource record they have open) and BEFORE any navigate / prefill / invoke action.",
   inputSchema: EMPTY_SCHEMA,
   authorization: {
     action: "frontend.read_context",
@@ -134,7 +134,7 @@ const prefillFormToolDefinition = defineApiTool<RequestContext>({
   tier: "platform",
   mutating: false,
   description:
-    "Pre-fill the form the user currently has open with proposed values (matched by field name) for them to review and confirm — you do not submit. Read get_client_context first to confirm a relevant form is on screen.",
+    "Pre-fill the form the user currently has open with proposed values (matched by field name) for them to review and confirm. You do not submit. Read get_client_context first to confirm a relevant form is on screen.",
   inputSchema: PREFILL_FORM_SCHEMA,
   authorization: {
     action: "frontend.prefill_form",

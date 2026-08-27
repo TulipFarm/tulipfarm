@@ -141,9 +141,9 @@ const GROUP_NOTES: Record<string, string> = {
   "Workers and service credentials":
     "The API can mint worker credentials into `TF_DATA_DIR`. An environment value always wins; the generated file is only a fallback for container installs that share the data volume.",
   "Sessions, Secrets, and limits":
-    "Model configuration can also reach an environment variable directly, through an `env://<NAME>` reference. That escape hatch is not a variable this contract can enumerate — the name is chosen when the model is configured, and it must already be set at that moment.",
+    "Model configuration can also reach an environment variable directly, through an `env://<NAME>` reference. That escape hatch is not a variable this contract can enumerate. The name is chosen when the model is configured, and it must already be set at that moment.",
   "File storage":
-    "Unset, files land on disk under `TF_DATA_DIR` — correct for development, wrong for anything with more than one replica or a container that restarts. The Compose stack points these at its bundled bucket service; see [where uploaded and generated files go](/docs/self-hosting/docker-compose#where-uploaded-and-generated-files-go).",
+    "Unset, files land on disk under `TF_DATA_DIR`, which is correct for development and wrong for anything with more than one replica or a container that restarts. The Compose stack points these at its bundled bucket service; see [where uploaded and generated files go](/docs/self-hosting/docker-compose#where-uploaded-and-generated-files-go).",
 };
 
 const ENV_TABLE_HEAD = [
@@ -171,7 +171,7 @@ function requiredCell(variable: DeploymentContractEnvVar): string {
 function defaultCell(variable: DeploymentContractEnvVar): string {
   if (variable.default !== undefined) return escapeCell(variable.default);
   if (variable.generate) return `Generate: \`${variable.generate}\``;
-  return "—";
+  return "-";
 }
 
 function variableCell(variable: DeploymentContractEnvVar): string {
@@ -264,7 +264,7 @@ function renderVerify(verify: DeploymentTargetVerify): string {
     case "file":
       return `> **Verify.** \`${verify.path}\` is now in the working directory.`;
     case "command": {
-      const expectation = verify.expect ? ` — expect ${verify.expect}` : "";
+      const expectation = verify.expect ? `, expect ${verify.expect}` : "";
       return `> **Verify.** \`${verify.command}\` succeeds${expectation}.`;
     }
     case "env":

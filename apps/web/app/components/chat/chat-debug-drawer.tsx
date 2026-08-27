@@ -178,7 +178,7 @@ function DebugDrawer({ conversationId }: { conversationId?: string }) {
         ref={triggerRef}
         type="button"
         aria-label="Open debug drawer"
-        title={conversationId ? "Debug — raw state" : "Send a message first"}
+        title={conversationId ? "Debug, raw state" : "Send a message first"}
         disabled={!conversationId}
         onClick={() => setOpen((o) => !o)}
         className={cn(
@@ -192,11 +192,11 @@ function DebugDrawer({ conversationId }: { conversationId?: string }) {
       {open ? (
         <aside
           ref={panelRef}
-          aria-label="Debug — Raw State"
+          aria-label="Debug, Raw State"
           className="fixed top-0 right-0 z-50 flex h-svh w-[min(34rem,90vw)] flex-col border-l border-border bg-card shadow-lg motion-safe:animate-in motion-safe:slide-in-from-right motion-safe:duration-200"
         >
           <header className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
-            <span className="text-xs font-medium text-foreground">Debug — Raw State</span>
+            <span className="text-xs font-medium text-foreground">Debug, Raw State</span>
             <div className="flex items-center gap-0.5 rounded-sm border border-border p-0.5">
               {TABS.map((t) => (
                 <button
@@ -247,7 +247,7 @@ function DebugDrawer({ conversationId }: { conversationId?: string }) {
           <div className="min-h-0 flex-1 overflow-auto">
             {!conversationId ? (
               <p className="p-3 text-xs text-muted-foreground">
-                No conversation yet — send a message first.
+                No conversation yet. Send a message first.
               </p>
             ) : loading && !data ? (
               <p className="p-3 text-xs text-muted-foreground">loading…</p>

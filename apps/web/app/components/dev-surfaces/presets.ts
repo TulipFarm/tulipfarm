@@ -18,7 +18,7 @@ export const PRESETS: readonly SandboxPreset[] = [
       props: {
         title: "Customer Profile Card",
         status: "Active",
-        body: "Acme Corp (Enterprise Tier) — renewal date: Nov 2026. Account representative: Jane Doe.",
+        body: "Acme Corp (Enterprise Tier), renewal date: Nov 2026. Account representative: Jane Doe.",
       },
       target: { channel: "web", surface: "chat" },
       audience: ["operator", "developer"],

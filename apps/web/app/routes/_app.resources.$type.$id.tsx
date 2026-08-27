@@ -93,7 +93,7 @@ export default function ResourceDetail() {
       </div>
       {deleteError ? <p className="text-destructive">error: {deleteError}</p> : null}
       {schemaError ? (
-        <p className="text-destructive">error: schema parse failed — {schemaError}</p>
+        <p className="text-destructive">error: schema parse failed, {schemaError}</p>
       ) : (
         <DetailView fields={fields} record={record} linkLabels={linkLabels} />
       )}

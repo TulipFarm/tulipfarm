@@ -387,7 +387,7 @@ const validateCurrentAgent = ajv.compile(CURRENT_AGENT_SCHEMA);
 const getCurrentAgent = defineApiTool<AgentToolContext>({
   name: "get_current_agent",
   description:
-    "Find out which Agent you are — your name, your configured domain, and your description. " +
+    "Find out which Agent you are: your name, your configured domain, and your description. " +
     "Call this when you need to identify yourself, decide whether a request is yours to handle, " +
     "or look up your own definition.",
   tier: "system",
@@ -439,7 +439,7 @@ const validateBusiness = ajv.compile(BUSINESS_SCHEMA);
 const getBusinessProfile = defineApiTool<AgentToolContext>({
   name: "get_business_profile",
   description:
-    "Read the business you work for — its name, what it does, and its website. Nothing else " +
+    "Read the business you work for: its name, what it does, and its website. Nothing else " +
     "tells you, so call this before naming the business, writing anything in its voice, or " +
     "assuming what it sells.",
   tier: "system",

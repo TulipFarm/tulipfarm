@@ -146,7 +146,7 @@ function TraceReplay() {
 
       <p className="mt-4 max-w-2xl text-sm text-muted-foreground">
         Rows arrive when their work starts, the step in flight shows its detail, and finished steps
-        drop back to one line — {done} of {REPLAY.length} settled. When the last one lands the whole
+        drop back to one line, {done} of {REPLAY.length} settled. When the last one lands the whole
         trace folds to its header. Toggle anything by hand and the policy stops steering it, because
         a panel that reopens under the reader is worse than one that never opened.
       </p>
@@ -171,7 +171,7 @@ export function TraceSections() {
       <GuideSection
         id="trace"
         title="Trace"
-        description="A Trace discloses interior work — the steps, the reasoning, the lookups a Turn ran on its way to an answer. It opens itself while the work is in flight, keeps the live step expanded, and folds to one line once everything settles. It is the only presentation interior work gets — live, settled, failed or waiting on a decision. Nothing in a transcript takes a border except the verbatim payload you open on purpose, because narration you are meant to be able to ignore must never outweigh the answer you asked for."
+        description="A Trace discloses interior work: the steps, the reasoning, the lookups a Turn ran on its way to an answer. It opens itself while the work is in flight, keeps the live step expanded, and folds to one line once everything settles. It is the only presentation interior work gets, live, settled, failed or waiting on a decision. Nothing in a transcript takes a border except the verbatim payload you open on purpose, because narration you are meant to be able to ignore must never outweigh the answer you asked for."
       >
         <div className="grid gap-4">
           <TraceReplay />
@@ -251,7 +251,7 @@ export function TraceSections() {
       <GuideSection
         id="tool-chips"
         title="Tool chips"
-        description="A chip carries the object a step acted on, never the step itself — the verb stays readable while the identifier truncates. A file chip adds what changed, and previews the change on hover and on keyboard focus. Added and removed are their own token pair: deleting a line is not an error, so a diff never borrows the run-state tones."
+        description="A chip carries the object a step acted on, never the step itself. The verb stays readable while the identifier truncates. A file chip adds what changed, and previews the change on hover and on keyboard focus. Added and removed are their own token pair: deleting a line is not an error, so a diff never borrows the run-state tones."
       >
         <div className="grid gap-4">
           <div className="grid gap-4 lg:grid-cols-2">
@@ -264,7 +264,7 @@ export function TraceSections() {
               </div>
             </Specimen>
 
-            <Specimen caption="File chips — hover or tab to preview">
+            <Specimen caption="File chips, hover or tab to preview">
               <div className="flex flex-wrap items-center gap-2">
                 <DiffChip file="resources/ticket.yaml" added={13} removed={2} lines={TICKET_DIFF} />
                 <DiffChip file="routines/daily-digest.yaml" added={8} removed={0} />

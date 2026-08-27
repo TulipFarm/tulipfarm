@@ -43,9 +43,8 @@ export default function Farm() {
 
       {mock ? (
         <p className="border-b border-border bg-muted px-6 py-2 font-mono text-xs text-muted-foreground md:px-8">
-          Preview only — {farm.total === 1 ? "this tulip is" : `these ${farm.total} tulips are`}{" "}
-          made up. Change the count with <code>?mock=N</code>, or drop the parameter for the real
-          farm.
+          Preview only, {farm.total === 1 ? "this tulip is" : `these ${farm.total} tulips are`} made
+          up. Change the count with <code>?mock=N</code>, or drop the parameter for the real farm.
         </p>
       ) : null}
 

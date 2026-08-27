@@ -179,7 +179,7 @@ export function AgentRunSections() {
     <GuideSection
       id="agent-run"
       title="Agent run vocabulary"
-      description="A run of Tool calls draws as one Trace — a rail, no border, a step per call. A step names what it did, whether the Tool can write, and how it ended; expanding it separates Input from Output and names every withheld field. Parts tagged contract-only are typed, reduced and rendered, but no backend event emits them yet."
+      description="A run of Tool calls draws as one Trace: a rail, no border, a step per call. A step names what it did, whether the Tool can write, and how it ended; expanding it separates Input from Output and names every withheld field. Parts tagged contract-only are typed, reduced and rendered, but no backend event emits them yet."
     >
       <div className="mb-6 space-y-4">
         {TOOL_SPECIMENS.map(({ caption, part }) => (
@@ -202,7 +202,7 @@ export function AgentRunSections() {
 
         <div>
           <p className="mb-1.5 text-xs text-muted-foreground">
-            The same shape once the Turn moved on — folded to its header
+            The same shape once the Turn moved on, folded to its header
           </p>
           <ToolTrace
             parts={CLUSTER_SPECIMEN}
@@ -221,7 +221,7 @@ export function AgentRunSections() {
 
         <div>
           <p className="mb-1.5 text-xs text-muted-foreground">
-            A run holding a decision — the ask sits on the rail, never behind a disclosure
+            A run holding a decision. The ask sits on the rail, never behind a disclosure
           </p>
           <ToolTrace
             parts={APPROVAL_SPECIMEN}
@@ -286,7 +286,7 @@ export function AgentRunSections() {
         </div>
         <div>
           <p className="mb-1.5 text-xs text-muted-foreground">
-            A step, a handoff and a refusal — all narration, so none of them takes a box
+            A step, a handoff and a refusal, all narration, so none of them takes a box
           </p>
           <MessagePartView
             part={{

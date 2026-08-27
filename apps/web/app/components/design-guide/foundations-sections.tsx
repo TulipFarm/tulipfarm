@@ -16,7 +16,7 @@ export function FoundationsSections() {
           <p className="text-3xl font-semibold">Display · 32/40</p>
           <p className="text-2xl font-semibold">Heading · 24/32</p>
           <p className="text-xl font-semibold">Title · 20/28</p>
-          <p className="text-base">Body · 16/24 — readable product content and instructions.</p>
+          <p className="text-base">Body · 16/24, readable product content and instructions.</p>
           <p className="text-sm font-medium">Label · 14/20</p>
           <p className="font-mono text-xs text-muted-foreground">
             run_01J8M7Q2 · 2026-08-02T10:30Z

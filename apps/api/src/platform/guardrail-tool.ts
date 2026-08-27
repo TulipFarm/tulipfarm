@@ -63,7 +63,7 @@ export const guardrailForgeTool = defineApiTool<PlatformToolContext>({
   name: "guardrail_forge",
   requiresAmbient: ["soul"],
   description:
-    "Add a GUARDRAIL — a limit every agent is checked against — to the Soul's guardrails policy. " +
+    "Add a GUARDRAIL (a limit every agent is checked against) to the Soul's guardrails policy. " +
     "Use this whenever the user asks to 'block a tool', 'stop agents from doing X', 'add a " +
     "guardrail', or 'filter secrets out of replies'. Pass exactly one `guard` object; the stage " +
     "it runs in follows from its `guard` name, so never send a stage. The Tool merges it into the " +

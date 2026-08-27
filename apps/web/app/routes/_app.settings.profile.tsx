@@ -86,11 +86,11 @@ export default function ProfileSettings() {
         description="Administered for you. Ask an admin if either needs to change."
       >
         <dl className="grid gap-4 sm:grid-cols-2">
-          <ReadonlyField label="Email">{user?.email ?? "—"}</ReadonlyField>
-          <ReadonlyField label="Role">{user?.role ?? "—"}</ReadonlyField>
-          <ReadonlyField label="Status">{user?.status ?? "—"}</ReadonlyField>
+          <ReadonlyField label="Email">{user?.email ?? "-"}</ReadonlyField>
+          <ReadonlyField label="Role">{user?.role ?? "-"}</ReadonlyField>
+          <ReadonlyField label="Status">{user?.status ?? "-"}</ReadonlyField>
           <ReadonlyField label="User ID">
-            <span className="font-mono text-xs">{user?.id ?? "—"}</span>
+            <span className="font-mono text-xs">{user?.id ?? "-"}</span>
           </ReadonlyField>
         </dl>
       </Panel>

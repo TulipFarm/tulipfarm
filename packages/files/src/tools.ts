@@ -166,7 +166,7 @@ async function readCapped(body: AsyncIterable<Uint8Array>, ceiling: number): Pro
 
 export const fileListTool = defineApiTool<FileToolContext>({
   name: "file_list",
-  description: `List the Files you are allowed to see — the ones the person owns and the ones shared with them. Returns metadata only; use file_read to get content. ${GUIDANCE}`,
+  description: `List the Files you are allowed to see, the ones the person owns and the ones shared with them. Returns metadata only; use file_read to get content. ${GUIDANCE}`,
   tier: "platform",
   mutating: false,
   inputSchema: LIST_SCHEMA,
@@ -272,7 +272,7 @@ export const fileReadTool = defineApiTool<FileToolContext>({
 export const fileCreateTool = defineApiTool<FileToolContext>({
   name: "file_create",
   description:
-    "Write a document the person can open, download and forward — not another chat message. " +
+    "Write a document the person can open, download and forward, not another chat message. " +
     "Use this whenever you are asked for a report, a summary, an export or 'a PDF'. Write the " +
     "body as Markdown and pick 'pdf' to have it rendered; pick 'markdown', 'text' or 'csv' to " +
     "store exactly what you wrote. The File lands in the person's library and you get its id " +

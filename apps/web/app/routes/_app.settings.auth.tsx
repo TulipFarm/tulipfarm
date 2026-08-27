@@ -161,7 +161,7 @@ function TokensPanel() {
   return (
     <Panel
       title="API tokens"
-      description="For scripts and integrations that act as you. A token carries your full access — revoke one the moment it is no longer needed."
+      description="For scripts and integrations that act as you. A token carries your full access. Revoke one the moment it is no longer needed."
     >
       <div className="space-y-4">
         {error ? <FormStatus tone="error">{error}</FormStatus> : null}

@@ -8,12 +8,12 @@ summary: |
   the file bytes must both live outside the app.
 
   These steps are generated from this platform's manifest, so they cannot drift from the runtime they
-  describe. The container app **definition** is generated too — from the runtime contract — and
+  describe. The container app **definition** is generated too (from the runtime contract) and
   offered as a download, so every port, probe path, and environment key you feed Azure is grounded in
   what TulipFarm actually reads.
 
   <Callout type="warn">
-    **This target is not booted in CI** — it is `community`, not `supported`. Standing it up requires
+    **This target is not booted in CI**. It is `community`, not `supported`. Standing it up requires
     a real Azure subscription, so no automated job proves this path end to end. Treat the definition
     as a documented, machine-generated contract rather than a tested install path.
   </Callout>
@@ -41,10 +41,10 @@ steps:
     title: Download the generated container app definition
     body: |
       Fetch the definition TulipFarm generates from its runtime contract. It describes three
-      single-replica workloads — `app` (API, built web UI, and migrations), `worker` (runs, waits,
-      outbox, cron, and maintenance consumers), and `integration-worker` (Slack and GitHub ingress,
-      sync, delivery, retries) — with every port, probe path, and environment key derived from what
-      the runtime reads.
+      single-replica workloads named `app` (API, built web UI, and migrations), `worker` (runs,
+      waits, outbox, cron, and maintenance consumers), and `integration-worker` (Slack and GitHub
+      ingress, sync, delivery, retries), with every port, probe path, and environment key derived
+      from what the runtime reads.
 
       Only `app` takes external ingress. The workers expose probe-only HTTP servers, so their ingress
       stays internal; publishing them exposes health endpoints for no benefit.
@@ -74,7 +74,7 @@ steps:
     title: Create Azure Database for PostgreSQL
     when: { database: flexible }
     body: |
-      Container Apps will not host your database — there is no durable disk to put it on. Azure
+      Container Apps will not host your database. There is no durable disk to put it on. Azure
       Database for PostgreSQL Flexible Server is the managed option, and TulipFarm needs
       **PostgreSQL 17 with the `vector` and `citext` extensions**.
 
@@ -107,7 +107,7 @@ steps:
       **PostgreSQL 17**, and it permits `CREATE EXTENSION vector` and `citext`.
 
       Container Apps egresses from the environment's outbound addresses, so the database firewall
-      must admit them, and the link must be TLS — put `?sslmode=require` on the URL. Every query in a
+      must admit them, and the link must be TLS. Put `?sslmode=require` on the URL. Every query in a
       Run crosses this hop, so prefer a database in the same region.
     verify:
       kind: env
@@ -118,7 +118,7 @@ steps:
     when: { files: azure }
     body: |
       **This step is not optional on this platform.** Container Apps offers no persistent volume with
-      the durability TulipFarm needs, so the `filesystem` blob driver — the default for Compose —
+      the durability TulipFarm needs, so the `filesystem` blob driver (the default for Compose)
       will lose every uploaded and generated file on the next revision. Azure Blob Storage speaks no
       S3-compatible API, which is why TulipFarm ships a dedicated Azure driver.
 
@@ -128,7 +128,7 @@ steps:
       ```
 
       Naming the container together with a credential selects the Azure driver. Supply one credential
-      shape — a full connection string, or an account name and key. A connection string wins when
+      shape as either a full connection string, or an account name and key. A connection string wins when
       both are present.
     verify:
       kind: command
@@ -139,7 +139,7 @@ steps:
     title: Point at an S3-compatible provider
     when: { files: s3 }
     body: |
-      An S3-compatible provider works from Azure as well as Azure Blob does — the requirement is
+      An S3-compatible provider works from Azure as well as Azure Blob does. The requirement is
       durable object storage, not a particular vendor. Set `S3_BUCKET`, `S3_REGION`, and
       `S3_ENDPOINT`, and supply the keys as secrets.
 
@@ -159,7 +159,7 @@ steps:
     title: Create the instance secrets
     body: |
       TulipFarm needs three secrets: `ENCRYPTION_KEY` (which encrypts every secret the instance
-      stores — LLM keys, integration credentials), `JWT_SECRET`, and `WEBHOOK_SIGNING_SECRET`.
+      stores, including LLM keys and integration credentials), `JWT_SECRET`, and `WEBHOOK_SIGNING_SECRET`.
       Generate them once and set them on the app; the generated definition references them by their
       lowercase, dash-separated names.
 
@@ -171,8 +171,8 @@ steps:
       ```
 
       <Callout type="warn">
-        **Supply `ENCRYPTION_KEY` yourself from day one.** The Compose fallback — where the app
-        writes a generated key to `/data/secrets.env` — cannot work here, because that disk does not
+        **Supply `ENCRYPTION_KEY` yourself from day one.** The Compose fallback (where the app
+        writes a generated key to `/data/secrets.env`) cannot work here, because that disk does not
         survive a revision. The database holds only ciphertext, so a lost key means lost secrets. If
         the app boots with a fresh `ENCRYPTION_KEY` against a database that already holds encrypted
         secrets, it **refuses to start** rather than orphaning them. Back this key up alongside the
@@ -186,7 +186,7 @@ steps:
   - id: deploy
     title: Create the three container apps
     body: |
-      Apply the generated definition once per workload. Each is single-replica by design — set
+      Apply the generated definition once per workload. Each is single-replica by design. Set
       `minReplicas` and `maxReplicas` to `1` and leave them there. Two copies of `worker` race the
       soul worktree and the maintenance consumers.
 
@@ -199,7 +199,7 @@ steps:
       ```
 
       Give `app` a **generous startup probe**. A fresh database can take minutes to migrate, and a
-      liveness probe that fires during migration kills the container and loops forever — which is why
+      liveness probe that fires during migration kills the container and loops forever, which is why
       the generated definition sets a high startup `failureThreshold`.
     verify:
       kind: command
@@ -235,7 +235,7 @@ steps:
       ```
 
       Container Apps does not buffer responses, so chat's Server-Sent Events stream without extra
-      configuration — unlike an nginx ingress, which needs buffering turned off explicitly.
+      configuration, unlike an nginx ingress, which needs buffering turned off explicitly.
     verify:
       kind: manual
       look_for: The custom domain serves the app over https and chat tokens stream in as they are produced, not all at once.
@@ -252,27 +252,27 @@ steps:
   - id: backups
     title: Back up the three durable things
     body: |
-      Nothing inside a container app survives a revision, so all three live outside it — and
+      Nothing inside a container app survives a revision, so all three live outside it, and
       restoring only one is not enough:
 
-      - **PostgreSQL** — every Record, Run, Turn, audit event, and vector index. Flexible Server
+      - **PostgreSQL** stores every Record, Run, Turn, audit event, and vector index. Flexible Server
         takes automated backups; confirm the retention window matches what you would accept losing.
-      - **`ENCRYPTION_KEY`** — the database holds only ciphertext without it. Keep it somewhere that
+      - **`ENCRYPTION_KEY`** is required because the database holds only ciphertext without it. Keep it somewhere that
         is not the container app, such as Key Vault.
-      - **The soul** at `SOUL_PATH` — your entire configuration. On this platform the soul has no
+      - **The soul** at `SOUL_PATH` stores your entire configuration. On this platform the soul has no
         durable disk either, so mirror it to a git remote with `SOUL_GIT_REMOTE_URL`.
 
       See [Updating and rollback](/docs/self-hosting/updating) before your first upgrade.
     verify:
       kind: manual
-      look_for: A restore drill brings the instance back with its secrets decryptable — database, encryption key, and soul all restored together.
+      look_for: A restore drill brings the instance back with its secrets decryptable, with the database, encryption key, and soul all restored together.
 
   - id: update
     title: Update
     body: |
       Pin one image tag; do not track a moving tag. Each update creates a new revision, and
       migrations apply automatically on boot. There are **no down-migrations**, so a revision
-      rollback does not undo a schema change — read
+      rollback does not undo a schema change. Read
       [Updating and rollback](/docs/self-hosting/updating) first.
 
       ```bash

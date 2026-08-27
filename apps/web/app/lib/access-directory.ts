@@ -44,7 +44,7 @@ export function lookupParty(directory: Directory, principalId: string): Party {
     return {
       principalId,
       name: humanize(tail),
-      detail: `${humanize(prefix)} — not a person`,
+      detail: `${humanize(prefix)}, not a person`,
       initials: initialsFor(tail),
       isPerson: false,
     };

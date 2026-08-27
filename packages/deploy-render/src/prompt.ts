@@ -81,7 +81,7 @@ function renderEnvSurface(contract: DeploymentContract): string {
     "Zone tells you whether you may change a variable:",
     ...ZONE_KEY.map(([zone, meaning]) => `  ${zone.padEnd(16)}${meaning}`),
     "",
-    "Every variable is listed, including ones no verified target uses — that is exactly what",
+    "Every variable is listed, including ones no verified target uses. That is exactly what",
     "lets this guide work on a platform we have never booted.",
     "",
     "A variable marked (secret) holds key material: never invent, guess, or hardcode its value.",
@@ -107,7 +107,7 @@ function renderContract(contract: DeploymentContract): string {
     const health = service.health
       ? `; health: GET ${service.health.path} expects ${service.health.expect}`
       : "";
-    return `  - ${service.name} — ${service.role}\n${port}${health}`;
+    return `  - ${service.name}: ${service.role}\n${port}${health}`;
   });
   const dependencies = contract.dependencies.map((dependency) => {
     const drivers = dependency.drivers ? ` (drivers: ${dependency.drivers.join(", ")})` : "";
@@ -115,7 +115,7 @@ function renderContract(contract: DeploymentContract): string {
     return `  - ${dependency.id} [${required}]${drivers}: ${dependency.detail}`;
   });
   const state = contract.state.map(
-    (entry) => `  - ${entry.path} — holds ${entry.holds}\n      if lost: ${entry.consequence}`
+    (entry) => `  - ${entry.path}: holds ${entry.holds}\n      if lost: ${entry.consequence}`
   );
   return [
     "RUNTIME CONTRACT (true on every platform)",
@@ -126,7 +126,7 @@ function renderContract(contract: DeploymentContract): string {
     "Dependencies:",
     ...dependencies,
     "",
-    "Durable state — every path must survive restart and upgrade:",
+    "Durable state: every path must survive restart and upgrade:",
     ...state,
   ].join("\n");
 }
@@ -141,7 +141,7 @@ function promptVerify(verify: DeploymentTargetVerify): string {
     case "file":
       return `Verify (file): \`${verify.path}\` exists in the working directory.`;
     case "command": {
-      const expectation = verify.expect ? ` — expect ${verify.expect}` : "";
+      const expectation = verify.expect ? `, expect ${verify.expect}` : "";
       return `Verify (command): \`${verify.command}\` exits successfully${expectation}.`;
     }
     case "env":
@@ -159,7 +159,7 @@ function branchLabels(target: DeploymentTarget, step: DeploymentTargetStep): str
   return Object.entries(step.when ?? {}).map(([inputId, value]) => {
     const input = target.inputs?.find((candidate) => candidate.id === inputId);
     const option = input?.options.find((candidate) => candidate.value === value);
-    const question = input ? ` — ${input.question}` : "";
+    const question = input ? `, ${input.question}` : "";
     const label = option ? ` → "${option.label}"` : "";
     return `Branch (${inputId} = ${value}${label})${question}`;
   });
@@ -181,7 +181,7 @@ function renderOnFail(onFail: string): string {
 
 function renderStep(target: DeploymentTarget, step: DeploymentTargetStep, index: number): string {
   const header = [
-    `Step ${index} — ${step.title}`,
+    `Step ${index}: ${step.title}`,
     ...branchLabels(target, step).map((label) => `  ${label}`),
   ];
   const action = [step.run ? `  run: ${step.run}` : "", `  ${promptVerify(step.verify)}`];
@@ -194,7 +194,7 @@ function renderStep(target: DeploymentTarget, step: DeploymentTargetStep, index:
 
 function renderTarget(target: DeploymentTarget): string {
   const tier =
-    target.tier === "supported" ? "supported — verified in CI" : "community — not CI-verified";
+    target.tier === "supported" ? "supported: verified in CI" : "community: not CI-verified";
   const header = `Target: ${target.title}  [${tier}]\n${"=".repeat(60)}`;
   const steps = target.steps.map((step, index) => renderStep(target, step, index + 1));
   return [header, sanitizeBody(target.summary), ...steps].join("\n\n");
@@ -221,23 +221,23 @@ export function renderPrompt(contract: DeploymentContract, targets: DeploymentTa
       "for every action.",
     ].join("\n"),
     [
-      "TRUST BOUNDARY — READ FIRST",
+      "TRUST BOUNDARY: READ FIRST",
       "-".repeat(60),
       `Verified targets, booted end to end in TulipFarm's CI: ${verifiedTargets(targets)}.`,
       "Every other platform is UNVERIFIED. On an unverified platform you are adapting the contract",
-      "below to a path nobody has tested — use these facts, but translate them yourself and never",
+      "below to a path nobody has tested. Use these facts, but translate them yourself and never",
       "assume a step worked.",
     ].join("\n"),
     [
       "HOW TO USE THIS FILE",
       "-".repeat(60),
       "1. After EVERY action, run that step's `Verify:` line and confirm it passes before the next",
-      "   step. A `Check:` line has no automated test — inspect for the described signal yourself.",
+      "   step. A `Check:` line has no automated test. Inspect for the described signal yourself.",
       "2. STOP at the first verification that fails. Do not continue and do not report success; fix",
       "   the failing step, or hand back to the human, before proceeding.",
       "3. Steps under a `Branch (input = value)` label are alternatives: exactly one applies. Pick",
       "   the one matching the human's answer to that input's question. Every branch is printed",
-      "   here — never follow one whose condition you did not choose.",
+      "   here. Never follow one whose condition you did not choose.",
       "4. Never invent, guess, or hardcode a value marked `(secret)`. Where a `generate:` recipe is",
       "   shown, run it on the deployment host and keep the output out of this file and any reply.",
       "",

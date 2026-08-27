@@ -70,7 +70,7 @@ describe("SubagentPanel", () => {
   it("says a helper held no tools rather than staying silent about it", () => {
     render(<SubagentPanel part={part()} />);
 
-    expect(screen.getByText("No tools — reasoning only")).toBeTruthy();
+    expect(screen.getByText("No tools: reasoning only")).toBeTruthy();
   });
 
   it("names the tools a helper was given", () => {

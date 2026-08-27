@@ -46,7 +46,7 @@ export function BrandOnboardingSections() {
       <GuideSection
         id="brand-marks"
         title="Brand marks"
-        description="Third-party logos, in the brand's own colour. Not every brand ships a mark, so the monogram fallback is a first-class state — and it carries the colour too, because one grey tile among coloured logos reads as a failed image."
+        description="Third-party logos, in the brand's own colour. Not every brand ships a mark, so the monogram fallback is a first-class state, and it carries the colour too, because one grey tile among coloured logos reads as a failed image."
       >
         <div className="flex flex-wrap items-center gap-4">
           <div className="flex items-center gap-2">
@@ -67,7 +67,7 @@ export function BrandOnboardingSections() {
           </div>
         </div>
         <p className="mt-3 max-w-2xl text-sm text-muted-foreground">
-          A brand hex is the one colour that cannot be a token — it belongs to someone else and
+          A brand hex is the one colour that cannot be a token. It belongs to someone else and
           arrives as runtime data. It is never rendered as authored: <code>brandInk</code> clamps
           its OKLCH lightness per canvas, because GitHub&rsquo;s <code>#181717</code> is invisible
           on the dark canvas and a pale brand is invisible on the light one. Both corrections ship
@@ -78,7 +78,7 @@ export function BrandOnboardingSections() {
       <GuideSection
         id="onboarding"
         title="Onboarding: tulip & Companion"
-        description="Growth reports real answered-input count, not decoration — stage is state, motion is only the transition between stages. The same bloom face, eyes open, is the persistent in-app Companion."
+        description="Growth reports real answered-input count, not decoration. Stage is state, motion is only the transition between stages. The same bloom face, eyes open, is the persistent in-app Companion."
       >
         <div className="flex flex-wrap items-end gap-6">
           {TULIP_STAGES.map((stage) => (
@@ -90,7 +90,7 @@ export function BrandOnboardingSections() {
         </div>
         <p className="mt-4 max-w-2xl text-sm text-muted-foreground">
           Pre-login (<code>/setup</code>) drives this with answered-question count, no step number
-          shown. In-app, stage 3 is fixed — it is the Companion's collapsed glyph, bottom right on{" "}
+          shown. In-app, stage 3 is fixed. It is the Companion's collapsed glyph, bottom right on{" "}
           <code>sm</code>+ and a top-bar icon below it, with a pulsing dot badge (never a popup)
           when a Task is pending.
         </p>

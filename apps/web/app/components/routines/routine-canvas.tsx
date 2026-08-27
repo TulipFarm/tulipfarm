@@ -181,7 +181,7 @@ export function RoutineCanvas({ graph, mode, overlay }: Props) {
           {data?.attempts !== undefined && <p className="mt-2">{data.attempts} attempts</p>}
           {(data?.startedAt || data?.completedAt) && (
             <p className="mt-2 font-mono text-[0.625rem] text-muted-foreground">
-              {data.startedAt} — {data.completedAt}
+              {data.startedAt}, {data.completedAt}
             </p>
           )}
           {data?.inferred && (

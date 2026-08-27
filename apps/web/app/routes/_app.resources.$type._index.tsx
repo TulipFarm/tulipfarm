@@ -149,7 +149,7 @@ export default function ResourceList() {
       />
       {typeError ? <p className="text-destructive">error: {typeError}</p> : null}
       {schemaError ? (
-        <p className="text-destructive">error: schema parse failed — {schemaError}</p>
+        <p className="text-destructive">error: schema parse failed, {schemaError}</p>
       ) : records.length === 0 ? (
         <p className="text-muted-foreground">0 results</p>
       ) : (

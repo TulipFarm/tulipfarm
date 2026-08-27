@@ -174,7 +174,7 @@ export default function BusinessAccessCheck() {
                 <option value="">Choose a person…</option>
                 {users.map((user) => (
                   <option key={user.id} value={user.id}>
-                    {user.name?.trim() ? `${user.name} — ${user.email}` : user.email}
+                    {user.name?.trim() ? `${user.name}, ${user.email}` : user.email}
                   </option>
                 ))}
               </Select>

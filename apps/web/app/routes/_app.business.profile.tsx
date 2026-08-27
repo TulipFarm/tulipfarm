@@ -75,10 +75,10 @@ export default function BusinessProfilePage() {
         description="Only an admin can change these. Ask one if something here is wrong."
       >
         <dl className="grid gap-4 sm:grid-cols-2">
-          <ReadonlyField label="Name">{profile.name || "—"}</ReadonlyField>
-          <ReadonlyField label="Website">{profile.website || "—"}</ReadonlyField>
+          <ReadonlyField label="Name">{profile.name || "-"}</ReadonlyField>
+          <ReadonlyField label="Website">{profile.website || "-"}</ReadonlyField>
           <ReadonlyField label="What it does" className="sm:col-span-2">
-            {profile.description || "—"}
+            {profile.description || "-"}
           </ReadonlyField>
         </dl>
       </Panel>

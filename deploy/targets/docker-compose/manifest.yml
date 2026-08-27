@@ -1,17 +1,17 @@
 name: docker-compose
 title: Docker Compose
 tier: supported
-description: Run TulipFarm from the published Compose file — one file, every default set, no .env and no key generation required.
+description: Run TulipFarm from the published Compose file using one file, every default set, no .env and no key generation required.
 summary: |
   The [one-line installer](/docs/self-hosting/install) is the fastest path on a machine you have a
-  shell on. When you deploy through a UI instead — Portainer, Coolify, Dokploy, Unraid — you paste a
+  shell on. When you deploy through a UI instead (Portainer, Coolify, Dokploy, Unraid), you paste a
   Compose file into a form, and there is no shell to run a script in. TulipFarm's
   `docker-compose.yml` is written for exactly that: **every variable has a default, and no `.env`
   is required.**
 
   The steps below are generated from this platform's manifest, so they cannot drift from the
-  runtime they describe. The Compose file itself is hand-maintained and published byte-identical —
-  the same artifact CI boots — so this page references it rather than printing a copy that could
+  runtime they describe. The Compose file itself is hand-maintained and published byte-identical (the
+  same artifact CI boots), so this page references it rather than printing a copy that could
   rot.
 
 inputs:
@@ -35,7 +35,7 @@ steps:
 
       Deploying through a UI instead? The same file goes straight into
       [Coolify](/docs/self-hosting/coolify), [Portainer](/docs/self-hosting/portainer), or
-      [Dokploy, Unraid, Synology, and CasaOS](/docs/self-hosting/other-platforms) — those pages
+      [Dokploy, Unraid, Synology, and CasaOS](/docs/self-hosting/other-platforms). Those pages
       cover only what differs per platform.
     run: curl -fsSLO {{SITE_URL}}/docker-compose.yml
     verify:
@@ -66,7 +66,7 @@ steps:
     when: { database: managed }
     body: |
       Point `DATABASE_URL` at your own PostgreSQL 17, set `EXTERNAL_DATASTORE=true`, and start the
-      app, both workers, and the bundled bucket — only `postgres` is then never created.
+      app, both workers, and the bundled bucket. Only `postgres` is then never created.
 
       ```bash
       docker compose up -d app worker integration-worker bucket
@@ -85,7 +85,7 @@ steps:
     title: What happens to your secrets
     body: |
       TulipFarm needs three secrets: `ENCRYPTION_KEY` (which encrypts every secret the instance
-      stores — LLM keys, integration credentials), `JWT_SECRET`, and `WEBHOOK_SIGNING_SECRET`.
+      stores, including LLM keys and integration credentials), `JWT_SECRET`, and `WEBHOOK_SIGNING_SECRET`.
 
       If you do not supply them, the app **generates them on first boot** and writes them to
       `/data/secrets.env` inside the `tulipfarm-data` volume, `mode 0600`. Every later boot reads
@@ -94,7 +94,7 @@ steps:
 
       <Callout type="warn">
         **Back up the `tulipfarm-data` volume.** It holds the key that decrypts every secret this
-        instance stores. Losing it means losing them — restoring the database alone is not enough,
+        instance stores. Losing it means losing them. Restoring the database alone is not enough,
         because the database only holds ciphertext.
 
         If the app starts with a freshly generated `ENCRYPTION_KEY` against a database that already
@@ -103,8 +103,8 @@ steps:
         original value.
       </Callout>
 
-      Environment variables always win. Set `ENCRYPTION_KEY` yourself — from your platform's secret
-      store, or `openssl rand -base64 32` — and the file lane is never used. That is what the
+      Environment variables always win. Set `ENCRYPTION_KEY` yourself (from your platform's secret
+      store, or `openssl rand -base64 32`) and the file lane is never used. That is what the
       installer does, and it is what you should do for anything beyond a personal instance: a
       generated key sits on the same host as the database volume, so a full host compromise yields
       both.
@@ -129,7 +129,7 @@ steps:
 
       <Callout type="warn">
         The bundled database defaults to the password `tulipfarm`. That is what lets the file run
-        with no prior setup — Postgres demands a password at init time and cannot ask the app for
+        with no prior setup. Postgres demands a password at init time and cannot ask the app for
         one. It is safe **only** because port 5432 is never published to the host. Do not publish
         it. On anything reachable from a network you do not control, set `POSTGRES_PASSWORD`.
       </Callout>
@@ -195,7 +195,7 @@ steps:
       | `app` | `8080` | `/livez` | `/readyz`; `/health` is an alias. |
       | `worker` | `4020` | `/livez` | `/readyz`; also checks the schema floor and required consumers. |
       | `integration-worker` | `4030` | `/livez` | `/readyz`; also checks the schema floor and required consumers. |
-      | `bucket` | — | `garage status` | Same command; the container has no HTTP client to probe with. |
+      | `bucket` | - | `garage status` | Same command; the container has no HTTP client to probe with. |
 
       Only `app` publishes a host port. The worker probe ports are internal to Compose. Give startup
       probes a generous timeout: database migrations run in `app` before it starts listening, and
@@ -208,7 +208,7 @@ steps:
   - id: update
     title: Update
     body: |
-      Migrations apply automatically on boot, and there are **no down-migrations** — read
+      Migrations apply automatically on boot, and there are **no down-migrations**. Read
       [Updating and rollback](/docs/self-hosting/updating) before your first upgrade.
     run: docker compose pull && docker compose up -d
     verify:
@@ -233,7 +233,7 @@ steps:
       HOST_PORT=8082 docker compose -p globex up -d
       ```
 
-      That produces separate volumes per stack — `acme_tulipfarm-soul`, `globex_tulipfarm-soul`, and
+      That produces separate volumes per stack, such as `acme_tulipfarm-soul`, `globex_tulipfarm-soul`, and
       so on. Then keep using the same `-p` for every later command; one without it targets
       `tulipfarm`, not your stack. Setting `COMPOSE_PROJECT_NAME` in each directory's `.env` is the
       less error-prone option. With the installer, use `TF_PROJECT_NAME` instead.
@@ -245,7 +245,7 @@ steps:
       </Callout>
     verify:
       kind: manual
-      look_for: Each project name owns its own volumes — `docker volume ls` shows the per-stack prefix you chose.
+      look_for: Each project name owns its own volumes. `docker volume ls` shows the per-stack prefix you chose.
 
   - id: scale-out
     title: Scale-out is not supported
@@ -257,7 +257,7 @@ steps:
       constraint, not a missing feature.
     verify:
       kind: manual
-      look_for: One replica of each service is running — horizontal scaling is unsupported by design, not a gap to fill.
+      look_for: One replica of each service is running. Horizontal scaling is unsupported by design, not a gap to fill.
 
 artifacts:
   - id: compose

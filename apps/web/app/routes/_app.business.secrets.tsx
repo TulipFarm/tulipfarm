@@ -168,7 +168,7 @@ export default function BusinessSecrets() {
 
       <Panel
         title="Stored credentials"
-        description="A value is written once and never read back. To rotate one, enter the new value — there is nothing to reveal."
+        description="A value is written once and never read back. To rotate one, enter the new value. There is nothing to reveal."
         flush
       >
         {providerGroups.length === 0 && customSecrets.length === 0 ? (

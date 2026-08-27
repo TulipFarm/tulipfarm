@@ -66,7 +66,7 @@ function TriggerForm({
                 value={String(values[key] ?? "")}
                 onChange={(e) => setValue(key, e.target.value)}
               >
-                <option value="">—</option>
+                <option value="">-</option>
                 {prop.enum.map((opt) => (
                   <option key={String(opt)} value={String(opt)}>
                     {String(opt)}

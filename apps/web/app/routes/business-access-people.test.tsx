@@ -205,7 +205,7 @@ test("surfaces non-human access holders under their own heading", () => {
 
   expect(screen.getByText("Apps and automations")).toBeInTheDocument();
   expect(screen.getByText("Billing api")).toBeInTheDocument();
-  expect(screen.getByText("Service — not a person")).toBeInTheDocument();
+  expect(screen.getByText("Service, not a person")).toBeInTheDocument();
 });
 
 test("shows what a person holds in plain words, not as grant strings", () => {

@@ -377,7 +377,7 @@ function OperationalActivityTable({ items }: { items: readonly OperationalItem[]
                               {compactIdentifier(targetId)}
                             </code>
                           ) : (
-                            <span className="text-muted-foreground">—</span>
+                            <span className="text-muted-foreground">-</span>
                           )}
                         </td>
                         <td className="px-3 py-2.5">
@@ -387,7 +387,7 @@ function OperationalActivityTable({ items }: { items: readonly OperationalItem[]
                           {createdAt ? (
                             <time dateTime={createdAt}>{formatIso(createdAt)}</time>
                           ) : (
-                            "—"
+                            "-"
                           )}
                         </td>
                       </tr>

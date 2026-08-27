@@ -134,7 +134,7 @@ export function MoveDialog({
             <ul className="text-muted-foreground">
               {changedNested.map((d) => (
                 <li key={d.pageId}>
-                  <span className="text-foreground">{d.path}</span> — {d.effect}
+                  <span className="text-foreground">{d.path}</span>, {d.effect}
                 </li>
               ))}
             </ul>

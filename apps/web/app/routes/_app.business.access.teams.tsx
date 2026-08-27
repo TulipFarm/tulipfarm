@@ -139,8 +139,8 @@ export default function AccessTeams() {
       >
         {teams.length === 0 ? (
           <PanelEmpty>
-            No teams yet. You do not need one — you can give a person access directly on the People
-            tab — but a team saves repeating yourself.
+            No teams yet. You do not need one. You can give a person access directly on the People
+            tab, but a team saves repeating yourself.
           </PanelEmpty>
         ) : (
           <>
@@ -164,8 +164,8 @@ export default function AccessTeams() {
               </Field>
               <Field label="Sort teams">
                 <Select value={sort} onChange={(event) => setSort(event.target.value as TeamSort)}>
-                  <option value="name-asc">Name A–Z</option>
-                  <option value="name-desc">Name Z–A</option>
+                  <option value="name-asc">Name A-Z</option>
+                  <option value="name-desc">Name Z-A</option>
                   <option value="members-desc">Most people first</option>
                   <option value="members-asc">Fewest people first</option>
                 </Select>

@@ -80,7 +80,7 @@ export function RunBudgets({ state }: { state: RunBudgetsState }) {
         </p>
       ) : state.budgets.length === 0 ? (
         <p className="px-3 py-3 text-xs text-muted-foreground">
-          No budget ceilings recorded — this Run is unbounded.
+          No budget ceilings recorded. This Run is unbounded.
         </p>
       ) : (
         <ul className="divide-y divide-border">

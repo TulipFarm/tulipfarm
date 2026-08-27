@@ -55,7 +55,7 @@ export function InviteForm({
     >
       <p className="text-sm text-muted-foreground">
         They get a link and choose their own password, so you never handle it. They start with
-        everyday access — give them more once they are in.
+        everyday access. Give them more once they are in.
       </p>
       <Field label="Email" required>
         <Input

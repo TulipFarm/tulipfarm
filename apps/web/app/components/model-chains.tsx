@@ -260,7 +260,7 @@ export function ModelChains({
           >
             {chains[tier.wire].length === 0 ? (
               <PanelEmpty>
-                Nothing configured — {tier.label} turns will fail until a model is added.
+                Nothing configured, {tier.label} turns will fail until a model is added.
               </PanelEmpty>
             ) : (
               <ol>
@@ -295,7 +295,7 @@ export function ModelChains({
 
       <Panel
         title="What each effort means"
-        description="Auto is a request, not an outcome — it resolves to whichever profile you pick below."
+        description="Auto is a request, not an outcome, it resolves to whichever profile you pick below."
         footer={
           <>
             <span className="text-xs text-muted-foreground">

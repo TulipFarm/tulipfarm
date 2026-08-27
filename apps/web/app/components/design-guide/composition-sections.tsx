@@ -110,7 +110,7 @@ export function CompositionSections() {
           <p className="mb-3 text-sm text-muted-foreground">
             One row shape carries both a screenshot and a document. Origin is an icon plus a word,
             never a tint alone, so who made a File survives a greyscale screen. Share and Delete
-            appear only on a File the viewer owns — a recipient cannot share one on and cannot
+            appear only on a File the viewer owns. A recipient cannot share one on and cannot
             destroy it, so neither control ever offers a power the product does not grant. Delete
             carries the destructive tone and opens a confirmation, because it is permanent.
           </p>
@@ -125,10 +125,10 @@ export function CompositionSections() {
         <div className="mb-6">
           <h3 className="mb-2 text-sm font-semibold">A removed attachment</h3>
           <p className="mb-3 text-sm text-muted-foreground">
-            Messages are immutable, so a File that was destroyed — or unshared — cannot be edited
-            out of the Chat that named it. The reference stays and says what happened, next to one
-            that is still there. It never says which of the two occurred: to this reader they are
-            the same fact, and distinguishing them would say whether the File still exists.
+            Messages are immutable, so a File that was destroyed (or unshared) cannot be edited out
+            of the Chat that named it. The reference stays and says what happened, next to one that
+            is still there. It never says which of the two occurred: to this reader they are the
+            same fact, and distinguishing them would say whether the File still exists.
           </p>
           <div className="flex flex-wrap gap-2">
             <RemovedAttachment name="q3-budget.pdf" />

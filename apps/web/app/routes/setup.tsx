@@ -129,8 +129,7 @@ export default function SetupRoute() {
       navigate("/", { replace: true });
     } catch (err) {
       setBusy(false);
-      const message =
-        err instanceof ApiError ? err.message : "Setup failed — is the API reachable?";
+      const message = err instanceof ApiError ? err.message : "Setup failed, is the API reachable?";
       const owner = questionForError(err, adminExists.current);
       if (owner !== null && owner !== question) {
         setQuestion(owner);

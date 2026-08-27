@@ -552,7 +552,7 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
   name: "routine_forge",
   requiresAmbient: ["soul"],
   description:
-    "Create or update a ROUTINE (a scheduled/triggered automation) in the soul repo — use this, " +
+    "Create or update a ROUTINE (a scheduled/triggered automation) in the soul repo. Use this, " +
     "not skill_create, whenever the user asks to 'create a routine' / 'automate X' / 'every " +
     "morning do Y' / 'when X happens do Y'. `definition` MUST be a canonical published Routine " +
     "document: apiVersion `tulipfarm.ai/v1`, kind `Routine`, and metadata with id, slug (matching " +

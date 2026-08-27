@@ -29,7 +29,7 @@ export default function SkillsIndex() {
       </div>
       {skills.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          No skills installed yet — browse the marketplace to add one.
+          No skills installed yet, browse the marketplace to add one.
         </p>
       ) : (
         <ul className="flex flex-col divide-y divide-border rounded-sm border border-border">
