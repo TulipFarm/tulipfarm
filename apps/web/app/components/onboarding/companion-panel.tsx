@@ -28,7 +28,7 @@ function AnswerTask({
       await answerTask(task.id, trimmed);
       onAnswered();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Couldn't save that — try again.");
+      setError(err instanceof ApiError ? err.message : "Couldn't save that, try again.");
       setBusy(false);
     }
   }

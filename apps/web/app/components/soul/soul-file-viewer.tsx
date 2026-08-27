@@ -81,7 +81,7 @@ export function SoulFileViewer({ path }: { path: string | null }) {
             File too large to preview ({formatBytes(file.size)}).
           </p>
         ) : file?.binary ? (
-          <p className="p-4 text-sm text-muted-foreground">Binary file — not shown.</p>
+          <p className="p-4 text-sm text-muted-foreground">Binary file, not shown.</p>
         ) : html ? (
           <div
             className="text-sm [&_pre]:min-h-full [&_pre]:p-4"

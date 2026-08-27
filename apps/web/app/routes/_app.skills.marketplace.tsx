@@ -122,7 +122,7 @@ function AuditReportCard({ name, report }: { name: string; report: SkillAuditRep
                 ◆
               </span>
               <span className="text-muted-foreground">
-                <span className="text-foreground">{f.category}</span> — {f.detail}
+                <span className="text-foreground">{f.category}</span>, {f.detail}
               </span>
             </li>
           ))}
@@ -328,7 +328,7 @@ export default function SkillsMarketplace() {
         </div>
       ) : (
         <>
-          {/* Official marketplace catalog (SKL-V1-005) — reviewing feeds the same select → audit →
+          {/* Official marketplace catalog (SKL-V1-005), reviewing feeds the same select → audit →
               confirm pipeline as a manual scan. Hidden once a scan is active. */}
           {catalog && catalog.skills.length > 0 && !scan ? (
             <div className="flex flex-col gap-3">
@@ -407,7 +407,7 @@ export default function SkillsMarketplace() {
             </div>
           ) : null}
 
-          {/* Step 1 — scan a git repo for installable skills. */}
+          {/* Step 1, scan a git repo for installable skills. */}
           <form
             className="flex flex-col gap-2"
             onSubmit={(e) => {
@@ -436,12 +436,12 @@ export default function SkillsMarketplace() {
             </div>
           </form>
 
-          {/* Step 2 — pick which discovered skills to review. */}
+          {/* Step 2. Pick which discovered skills to review. */}
           {scan ? (
             <div className="flex flex-col gap-3 border-t border-border pt-4">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-xs text-muted-foreground">
-                  {scan.skills.length} discovered — select skills to review
+                  {scan.skills.length} discovered, select skills to review
                 </p>
                 <Button
                   size="sm"
@@ -506,7 +506,7 @@ export default function SkillsMarketplace() {
             </div>
           ) : null}
 
-          {/* Step 3 — advisory reports + explicit operator confirm. */}
+          {/* Step 3. Advisory reports + explicit operator confirm. */}
           {allAudited ? (
             <div className="flex flex-col gap-3 border-t border-border pt-4">
               {selectedSkills.map((s) => (
@@ -542,7 +542,7 @@ export default function SkillsMarketplace() {
               ) : null}
               <p className="rounded-sm border border-border bg-muted px-3 py-2 text-xs text-muted-foreground">
                 SkillAudit is <span className="text-foreground">advisory, not a guarantee</span>. A
-                skill is natural-language instruction and cannot be sandboxed — it may read benign
+                skill is natural-language instruction and cannot be sandboxed. It may read benign
                 yet behave badly in context, and injection can be obscured. Installed skills run
                 with full tool access (no per-skill ACL in V1). Confirming installs these skills
                 into your soul repo.

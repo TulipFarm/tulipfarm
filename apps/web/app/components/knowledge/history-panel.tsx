@@ -64,7 +64,7 @@ export function HistoryDrawer({
       window.dispatchEvent(new Event("okf:space-changed"));
       setConfirmId(null);
       setPreviewId(null);
-      await load(); // the restore itself snapshotted a new revision — refresh the list
+      await load(); // the restore itself snapshotted a new revision, refresh the list
       revalidator.revalidate(); // pull the restored content into the read view
     } catch (e) {
       setError(e instanceof Error ? e.message : "restore failed");

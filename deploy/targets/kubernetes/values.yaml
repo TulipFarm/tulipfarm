@@ -48,7 +48,7 @@ persistence:
   - path: "TF_DATA_DIR"
     holds: "Generated secrets.env, worker.env, integration-worker.env, and bucket.env"
   - path: "SOUL_PATH"
-    holds: "The live soul git checkout — Resource schemas, Agents, Skills, Routines, Integrations"
+    holds: "The live soul git checkout, including Resource schemas, Agents, Skills, Routines, Integrations"
   - path: "postgres data directory"
     holds: "Every Record, Run, Turn, audit event, and vector index"
 

@@ -340,7 +340,7 @@ test("adds a person from a picker of real accounts, excluding current members", 
     .getAllByRole("option")
     .map((option) => option.textContent);
   expect(options).toContain("rahul@cafe.test");
-  expect(options).not.toContain("Priya Sharma — priya@cafe.test");
+  expect(options).not.toContain("Priya Sharma, priya@cafe.test");
 
   await user.selectOptions(picker, RAHUL_ID);
   await user.click(within(formForControl(picker)).getByRole("button", { name: "Add" }));

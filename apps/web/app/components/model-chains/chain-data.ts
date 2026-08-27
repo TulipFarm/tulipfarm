@@ -6,7 +6,7 @@ export function providerLabel(providers: LlmProviderInfo[], id: string): string 
   return providers.find((p) => p.id === id)?.label ?? id;
 }
 
-const perMtok = (n?: number): string => (n != null ? `$${(n * 1_000_000).toFixed(2)}` : "—");
+const perMtok = (n?: number): string => (n != null ? `$${(n * 1_000_000).toFixed(2)}` : "-");
 
 export function specFacts(spec: ModelSpec | undefined): string[] {
   if (!spec) return [];

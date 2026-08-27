@@ -209,7 +209,7 @@ export function TeamSheet({
           <>
             <Button variant="ghost" size="sm" onClick={() => setBuilding(true)}>
               <Plus className="size-4" />
-              None of these fit — make a new level
+              None of these fit. Make a new level
             </Button>
             <LevelBuilder
               open={building}
@@ -271,7 +271,7 @@ export function TeamSheet({
                 <option value="">Choose a person…</option>
                 {addable.map((user) => (
                   <option key={user.id} value={user.id}>
-                    {user.name?.trim() ? `${user.name} — ${user.email}` : user.email}
+                    {user.name?.trim() ? `${user.name}, ${user.email}` : user.email}
                   </option>
                 ))}
               </Select>

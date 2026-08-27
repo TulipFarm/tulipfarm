@@ -31,7 +31,7 @@ export default function Login() {
       navigate(safe ? to : "/", { replace: true });
     } catch (err) {
       setError(
-        err instanceof ApiError ? err.message : "could not reach the API — is it running on :4010?"
+        err instanceof ApiError ? err.message : "could not reach the API, is it running on :4010?"
       );
     } finally {
       setBusy(false);

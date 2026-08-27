@@ -157,7 +157,7 @@ function LayerFaults({ result }: { result: ExplainResult }) {
       <ul className="mt-1 space-y-1">
         {faults.map(([layer, reason]) => (
           <li key={layer} className="text-sm text-muted-foreground">
-            <Code>{layer}</Code> — {LAYER_EMPTY_REASON_LABEL[reason]}
+            <Code>{layer}</Code>, {LAYER_EMPTY_REASON_LABEL[reason]}
           </li>
         ))}
       </ul>

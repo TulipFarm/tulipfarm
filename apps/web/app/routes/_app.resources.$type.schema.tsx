@@ -55,7 +55,7 @@ export default function ResourceTypeEdit() {
     <ResourcePanel crumbs={crumbs}>
       <form onSubmit={onSubmit} className="flex flex-col gap-3">
         <p className="text-xs text-muted-foreground">
-          The full JSON Schema (YAML). Editing here is lossless — relationships (x-links), id
+          The full JSON Schema (YAML). Editing here is lossless: relationships (x-links), id
           strategy, and other extensions are preserved. id/createdAt/updatedAt/version are managed
           by the platform.
         </p>

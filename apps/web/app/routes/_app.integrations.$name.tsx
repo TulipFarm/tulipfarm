@@ -428,7 +428,7 @@ export default function IntegrationDetailPage() {
           <p className="text-sm text-destructive">{integration.errorMessage}</p>
         )}
 
-        {/* Connect — every step comes from the manifest, so there is nothing per-integration here. */}
+        {/* Connect, every step comes from the manifest, so there is nothing per-integration here. */}
         {!isConnected && (
           <section className="flex flex-col gap-3">
             <div className="flex items-center gap-2">
@@ -471,7 +471,7 @@ export default function IntegrationDetailPage() {
               {integration.capabilities.map((capability) => (
                 <li key={capability} className="flex gap-2 text-sm text-foreground">
                   <span aria-hidden className="text-muted-foreground">
-                    —
+                    -
                   </span>
                   <span>{capability}</span>
                 </li>
@@ -486,7 +486,7 @@ export default function IntegrationDetailPage() {
             <p className="max-w-prose text-xs text-muted-foreground">
               {isConnected
                 ? "What this integration can reach today."
-                : "What connecting asks the provider for. These are the provider's own terms — they should match what its consent screen shows you."}
+                : "What connecting asks the provider for. These are the provider's own terms. They should match what its consent screen shows you."}
             </p>
             <GrantList grants={integration.grants} />
           </section>
@@ -590,7 +590,7 @@ export default function IntegrationDetailPage() {
             <SectionHeading>Webhook URL</SectionHeading>
             <p className="max-w-prose text-xs text-muted-foreground">
               Paste this into the provider's event subscription settings (Slack: Event Subscriptions
-              → Request URL). Connect the integration first — the URL only verifies once a signing
+              → Request URL). Connect the integration first, the URL only verifies once a signing
               secret is saved.
             </p>
             <CopyField value={integration.ingress.webhookUrl} label="webhook URL" />

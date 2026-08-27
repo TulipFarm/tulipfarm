@@ -120,9 +120,9 @@ function assigneeTarget(args: unknown): readonly { type: string; id: string }[] 
 export const taskCreateTool = defineApiTool<TaskToolContext>({
   name: "task_create",
   description:
-    "Create a Task — a unit of work the runtime asks a human to do (never a user-facing todo " +
+    "Create a Task, a unit of work the runtime asks a human to do (never a user-facing todo " +
     "item; that is a Resource Type instead). Assignee is a user id or a role (admin/member); the " +
-    "calling Agent may only assign within its own authority. dedupeKey is stable per producer — " +
+    "calling Agent may only assign within its own authority. dedupeKey is stable per producer. " +
     "re-creating the same key for the same assignee upserts instead of duplicating.",
   tier: "system",
   mutating: true,
@@ -178,7 +178,7 @@ export const taskCreateTool = defineApiTool<TaskToolContext>({
 export const taskCloseTool = defineApiTool<TaskToolContext>({
   name: "task_close",
   description:
-    "Close a Task by its dedupeKey — used by the creating Agent to signal the underlying gap is " +
+    "Close a Task by its dedupeKey, used by the creating Agent to signal the underlying gap is " +
     "resolved. A no-op when no live Task has that key.",
   tier: "system",
   mutating: true,

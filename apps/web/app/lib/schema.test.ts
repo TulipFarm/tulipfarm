@@ -136,8 +136,8 @@ test("detailFields lists all properties then the system block, de-duped", () => 
 
 test("renderValue maps every kind to a presentational primitive", () => {
   const fields = Object.fromEntries(deriveFields(ticketSchema()).map((f) => [f.name, f]));
-  expect(renderValue(fields.title, null)).toEqual({ kind: "muted", text: "—" });
-  expect(renderValue(fields.title, "")).toEqual({ kind: "muted", text: "—" });
+  expect(renderValue(fields.title, null)).toEqual({ kind: "muted", text: "-" });
+  expect(renderValue(fields.title, "")).toEqual({ kind: "muted", text: "-" });
   expect(renderValue(fields.title, "Login 500")).toEqual({ kind: "text", text: "Login 500" });
   expect(renderValue(fields.customerId, "CUST-88")).toEqual({
     kind: "link",
@@ -146,7 +146,7 @@ test("renderValue maps every kind to a presentational primitive", () => {
   });
   expect(renderValue(fields.open, true)).toEqual({ kind: "bool", value: true });
   expect(renderValue(fields.tags, ["a", "b"])).toEqual({ kind: "text", text: "a, b" });
-  expect(renderValue(fields.tags, [])).toEqual({ kind: "muted", text: "—" });
+  expect(renderValue(fields.tags, [])).toEqual({ kind: "muted", text: "-" });
   expect(renderValue(fields.meta, { a: 1 })).toEqual({ kind: "json", text: '{"a":1}' });
 });
 

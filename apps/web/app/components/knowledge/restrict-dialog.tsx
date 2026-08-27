@@ -87,7 +87,7 @@ export function RestrictDialog({
 
   function save() {
     if (chosen.length === 0) {
-      setError("Pick at least one person, team, or role — an empty list would lock everyone out.");
+      setError("Pick at least one person, team, or role. An empty list would lock everyone out.");
       return;
     }
     void run(() => onRestrict(chosen));
@@ -146,7 +146,7 @@ export function RestrictDialog({
             {visibility.readers.map((r: NamedReader) => (
               <li key={r.id}>
                 <span className="text-foreground">{r.label}</span>
-                {r.via && <span> — via {r.via.id}</span>}
+                {r.via && <span>, via {r.via.id}</span>}
               </li>
             ))}
           </ul>

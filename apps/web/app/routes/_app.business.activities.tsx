@@ -82,7 +82,7 @@ export default function SettingsActivities() {
     setLoading(true);
     listActivities({ category: category ?? undefined, limit: PAGE_SIZE })
       .then((page) => {
-        if (id !== requestId.current) return; // a newer change superseded this one — drop stale data
+        if (id !== requestId.current) return; // a newer change superseded this one. Drop stale data
         setItems(page.items);
         setCursor(page.nextCursor);
       })
@@ -201,8 +201,8 @@ export default function SettingsActivities() {
             <ReadonlyField label="Actor">{selected.actorId ?? selected.actorType}</ReadonlyField>
             <ReadonlyField label="Target">
               {selected.targetType
-                ? `${selected.targetType}: ${selected.targetId ?? "—"}`
-                : (selected.targetId ?? "—")}
+                ? `${selected.targetType}: ${selected.targetId ?? "-"}`
+                : (selected.targetId ?? "-")}
             </ReadonlyField>
             <ReadonlyField label="Status">{selected.status}</ReadonlyField>
             <ReadonlyField label="When">

@@ -51,7 +51,7 @@ export function SubagentPanel({ part }: { part: ToolPart }) {
        * the trace simply failed to report.
        */}
       <Field label="Could use">
-        {tools.length === 0 ? "No tools — reasoning only" : tools.join(", ")}
+        {tools.length === 0 ? "No tools: reasoning only" : tools.join(", ")}
       </Field>
 
       {trace.answer === undefined || trace.answer.length === 0 ? null : (

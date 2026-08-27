@@ -65,7 +65,7 @@ export default function ResourceEdit() {
   return (
     <ResourcePanel crumbs={crumbs}>
       {schemaError ? (
-        <p className="text-destructive">error: schema parse failed — {schemaError}</p>
+        <p className="text-destructive">error: schema parse failed, {schemaError}</p>
       ) : (
         <ResourceForm
           fields={fields}

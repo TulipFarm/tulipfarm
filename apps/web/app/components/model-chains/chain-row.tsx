@@ -15,7 +15,7 @@ export function NoProvidersPanel() {
           <p className="text-sm font-medium text-foreground">No provider is configured yet</p>
           <p className="text-sm text-muted-foreground">
             Every chain below will fail until at least one provider has its credentials stored.
-            Nothing here needs to change first — add the credential, then come back.
+            Nothing here needs to change first. Add the credential, then come back.
           </p>
           <Button asChild variant="outline" size="sm">
             <Link to="/business/secrets">Add provider credentials</Link>

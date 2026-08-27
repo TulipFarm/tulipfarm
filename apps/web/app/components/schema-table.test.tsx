@@ -75,7 +75,7 @@ test("booleans render ✓/✗ and null cells render a muted dash", () => {
   renderTable();
   expect(screen.getByText("✓")).toBeInTheDocument();
   expect(screen.getByText("✗")).toBeInTheDocument();
-  expect(screen.getAllByText("—").length).toBeGreaterThan(0); // null customerId on row 2
+  expect(screen.getAllByText("-").length).toBeGreaterThan(0); // null customerId on row 2
 });
 
 function renderSortable(sort?: SortState, onToggleSort?: (c: string) => void) {

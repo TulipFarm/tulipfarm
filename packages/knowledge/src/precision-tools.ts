@@ -51,7 +51,7 @@ const validateGetSpace = ajv.compile(GET_SPACE_SCHEMA);
 export const getPageByPath = defineApiTool<KnowledgeToolContext>({
   name: "get_page_by_path",
   description:
-    "Fetch one exact knowledge page by its space id and path (e.g. 'policies/refunds') — a direct lookup with no search/ranking. Use when you know the page's location. Returns its full markdown content.",
+    "Fetch one exact knowledge page by its space id and path (e.g. 'policies/refunds'), a direct lookup with no search/ranking. Use when you know the page's location. Returns its full markdown content.",
   tier: "platform",
   mutating: false,
   inputSchema: GET_PAGE_BY_PATH_SCHEMA,
@@ -150,7 +150,7 @@ export const getBacklinks = defineApiTool<KnowledgeToolContext>({
 export const getSpaceGraph = defineApiTool<KnowledgeToolContext>({
   name: "get_space_graph",
   description:
-    "Get a space's cross-link graph — its page nodes and the links between them — to understand how a space's pages relate. Returns not_found when the space does not exist.",
+    "Get a space's cross-link graph (its page nodes and the links between them) to understand how a space's pages relate. Returns not_found when the space does not exist.",
   tier: "platform",
   mutating: false,
   inputSchema: GET_SPACE_SCHEMA,

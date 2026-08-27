@@ -64,7 +64,7 @@ const GIT_AUTH_FAILURE_PATTERN =
 
 export function friendlyGitError(raw: string): string {
   if (GIT_AUTH_FAILURE_PATTERN.test(raw)) {
-    return "Authentication failed — this remote needs a personal access token with repo access. Add one below.";
+    return "Authentication failed. This remote needs a personal access token with repo access. Add one below.";
   }
   return raw;
 }

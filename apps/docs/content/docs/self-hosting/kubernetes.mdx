@@ -13,12 +13,12 @@ toward scale: TulipFarm runs **exactly one replica of each workload** by design,
 single-node control plane wearing a cluster's clothes, not a horizontally scaled service.
 
 These steps are generated from this platform's manifest, so they cannot drift from the runtime
-they describe. The chart **values** are generated too — from the runtime contract — and offered as
+they describe. The chart **values** are generated too (from the runtime contract) and offered as
 a download, so every port, health path, and environment key you feed a chart is grounded in what
 TulipFarm actually reads.
 
 <Callout type="warn">
-  **TulipFarm ships no official Helm chart yet, and this target is not booted in CI** — it is
+  **TulipFarm ships no official Helm chart yet, and this target is not booted in CI**. It is
   `community`, not `supported`. The values file below is the machine-generated configuration
   surface; you supply the chart (or plain manifests) that consumes it. Until a CI job stands this
   up to a ready state, treat it as a documented contract, not a tested install path.
@@ -51,14 +51,14 @@ easy to tear down.
 kubectl create namespace tulipfarm
 ```
 
-> **Verify.** `kubectl get namespace tulipfarm` succeeds — expect the namespace exists.
+> **Verify.** `kubectl get namespace tulipfarm` succeeds, expect the namespace exists.
 
 ## Point at a PostgreSQL you run
 
 _Applies when you chose **A PostgreSQL 17 I run myself in or beside the cluster**._
 
 TulipFarm needs **PostgreSQL 17 with the `vector` and `citext` extensions**. If you run your
-own Postgres — a StatefulSet in the cluster, or a box beside it — grant its role permission to
+own Postgres (a StatefulSet in the cluster, or a box beside it), grant its role permission to
 `CREATE EXTENSION vector` and `citext`, then hand the connection string to the app as a Secret:
 
 ```bash
@@ -70,13 +70,13 @@ A cluster rarely wants a bundled database, which is why the generated values def
 `dependencies.postgres.external` to `true`. Full extension and permission detail:
 [Use a managed database](/docs/self-hosting/managed-database).
 
-> **Verify.** `kubectl -n tulipfarm get secret tulipfarm-database` succeeds — expect the DATABASE_URL secret exists.
+> **Verify.** `kubectl -n tulipfarm get secret tulipfarm-database` succeeds, expect the DATABASE_URL secret exists.
 
 ## Point at a cloud-managed PostgreSQL
 
 _Applies when you chose **A cloud-managed PostgreSQL service**._
 
-A managed service — RDS, Cloud SQL, Azure Database, Neon — removes the StatefulSet, but you
+A managed service (RDS, Cloud SQL, Azure Database, Neon) removes the StatefulSet, but you
 must confirm it offers **PostgreSQL 17** and **allows the `vector` and `citext` extensions**;
 some managed providers gate `vector` behind an allow-list you enable first. Point the app at it
 as a Secret exactly as for a self-run database:
@@ -89,13 +89,13 @@ kubectl -n tulipfarm create secret generic tulipfarm-database \
 The provider-by-provider extension notes live in
 [Use a managed database](/docs/self-hosting/managed-database).
 
-> **Verify.** `kubectl -n tulipfarm get secret tulipfarm-database` succeeds — expect the DATABASE_URL secret exists.
+> **Verify.** `kubectl -n tulipfarm get secret tulipfarm-database` succeeds, expect the DATABASE_URL secret exists.
 
 ## Create the instance Secrets
 
 TulipFarm needs three secrets: `ENCRYPTION_KEY` (which encrypts every secret the instance
-stores — LLM keys, integration credentials), `JWT_SECRET`, and `WEBHOOK_SIGNING_SECRET`.
-Generate them once and store them in a Kubernetes `Secret` — the `secretRefs` list in the
+stores, including LLM keys and integration credentials), `JWT_SECRET`, and `WEBHOOK_SIGNING_SECRET`.
+Generate them once and store them in a Kubernetes `Secret`. The `secretRefs` list in the
 values file names exactly these:
 
 ```bash
@@ -106,15 +106,15 @@ kubectl -n tulipfarm create secret generic tulipfarm-secrets \
 ```
 
 <Callout type="warn">
-  **Supply `ENCRYPTION_KEY` from a Secret from day one.** In a cluster the Compose fallback —
-  where the app writes a generated key to `/data/secrets.env` — is a trap: it survives only if
+  **Supply `ENCRYPTION_KEY` from a Secret from day one.** In a cluster the Compose fallback (
+  where the app writes a generated key to `/data/secrets.env`) is a trap: it survives only if
   `/data` is a reliably backed-up, shared volume. Lose that volume and the database, which
   holds only ciphertext, becomes undecryptable. If the app boots with a fresh `ENCRYPTION_KEY`
   against a database that already holds encrypted secrets, it **refuses to start** rather than
   orphaning them. Back the Secret up alongside the database.
 </Callout>
 
-> **Verify.** `kubectl -n tulipfarm get secret tulipfarm-secrets` succeeds — expect the instance secrets exist.
+> **Verify.** `kubectl -n tulipfarm get secret tulipfarm-secrets` succeeds, expect the instance secrets exist.
 
 ## Configure S3-compatible storage
 
@@ -134,14 +134,14 @@ kubectl -n tulipfarm create secret generic tulipfarm-blob \
 Omit `S3_ENDPOINT` for Amazon S3 itself; setting it turns on path-style addressing, which is
 what MinIO, Ceph, and any host reached by IP need.
 
-> **Verify.** `kubectl -n tulipfarm get secret tulipfarm-blob` succeeds — expect the S3 credentials exist.
+> **Verify.** `kubectl -n tulipfarm get secret tulipfarm-blob` succeeds, expect the S3 credentials exist.
 
 ## Configure Azure Blob Storage
 
 _Applies when you chose **Azure Blob Storage**._
 
 Set `AZURE_STORAGE_CONTAINER` in the values `config`, then supply one credential shape as a
-Secret — either a full connection string, or an account name and key:
+Secret, either a full connection string, or an account name and key:
 
 ```bash
 kubectl -n tulipfarm create secret generic tulipfarm-blob \
@@ -151,7 +151,7 @@ kubectl -n tulipfarm create secret generic tulipfarm-blob \
 Naming the container with a credential selects the Azure driver. A connection string wins over
 an account-and-key pair when both are present.
 
-> **Verify.** `kubectl -n tulipfarm get secret tulipfarm-blob` succeeds — expect the Azure credentials exist.
+> **Verify.** `kubectl -n tulipfarm get secret tulipfarm-blob` succeeds, expect the Azure credentials exist.
 
 ## Use a persistent volume for files
 
@@ -171,7 +171,7 @@ nothing else can reach those bytes.
 
 ## Feed the values into a chart and apply
 
-TulipFarm ships no official chart, so point your own chart — or plain manifests — at the
+TulipFarm ships no official chart, so point your own chart (or plain manifests) at the
 generated values. Whatever consumes them must honour the workload contract:
 
 | Workload | Container port | Probes | Volumes |
@@ -187,7 +187,7 @@ the image runs as UID `1000` (`node`) and mounted volumes are otherwise not writ
 
 Give `app` a **generous startup probe** on `/readyz`: it runs database migrations before it
 listens, so a fresh database can take minutes on first boot, and without a startup probe
-liveness kills `app` mid-migration and loops forever. The workers never migrate — they must
+liveness kills `app` mid-migration and loops forever. The workers never migrate. They must
 start only after `app` is ready.
 
 ```bash
@@ -198,7 +198,7 @@ helm install tulipfarm ./your-chart -n tulipfarm -f kubernetes-values.yaml
 kubectl -n tulipfarm rollout status deployment/app --timeout=600s
 ```
 
-> **Verify.** `kubectl -n tulipfarm rollout status deployment/app --timeout=600s` succeeds — expect the app deployment finishes rolling out.
+> **Verify.** `kubectl -n tulipfarm rollout status deployment/app --timeout=600s` succeeds, expect the app deployment finishes rolling out.
 
 If that check fails, see [what to do next](/docs/self-hosting/when-install-fails#readyz).
 
@@ -245,20 +245,20 @@ Most cluster workflows have no browser at first boot. Use
 
 Three things must survive a cluster rebuild, and restoring only one is not enough:
 
-- **PostgreSQL** — every Record, Run, Turn, audit event, and vector index.
+- **PostgreSQL** stores every Record, Run, Turn, audit event, and vector index.
 - **The Secret behind `ENCRYPTION_KEY`** (and the `TF_DATA_DIR` volume, if you let the app
-  generate the key there) — the database holds only ciphertext without it.
-- **The soul** at `SOUL_PATH` — your entire configuration, unless it is mirrored to a git
+  generate the key there). The database holds only ciphertext without it.
+- **The soul** at `SOUL_PATH` stores your entire configuration, unless it is mirrored to a git
   remote with `SOUL_GIT_REMOTE_URL`.
 
 See [Updating and rollback](/docs/self-hosting/updating) before your first upgrade.
 
-> **Check.** A restore drill brings the instance back with its secrets decryptable — database, encryption key, and soul all restored together.
+> **Check.** A restore drill brings the instance back with its secrets decryptable, with the database, encryption key, and soul all restored together.
 
 ## Update
 
 Pin one image tag in `image.tag`; do not track a moving tag in a cluster. Migrations apply
-automatically on boot and there are **no down-migrations** — read
+automatically on boot and there are **no down-migrations**. Read
 [Updating and rollback](/docs/self-hosting/updating) before your first upgrade.
 
 ```bash
@@ -269,6 +269,6 @@ helm upgrade tulipfarm ./your-chart -n tulipfarm -f kubernetes-values.yaml
 kubectl -n tulipfarm rollout status deployment/app --timeout=600s
 ```
 
-> **Verify.** `kubectl -n tulipfarm rollout status deployment/app --timeout=600s` succeeds — expect the app deployment finishes rolling out.
+> **Verify.** `kubectl -n tulipfarm rollout status deployment/app --timeout=600s` succeeds, expect the app deployment finishes rolling out.
 
 If that check fails, see [what to do next](/docs/self-hosting/when-install-fails#readyz).

@@ -62,7 +62,7 @@ export function CropLegend({
               />
               <span className="font-medium text-foreground">{crop.label}</span>
               <span className="font-mono tabular-nums text-muted-foreground">
-                {unavailable ? "—" : count}
+                {unavailable ? "-" : count}
               </span>
               {unavailable ? <span className="sr-only">could not be loaded</span> : null}
             </Link>

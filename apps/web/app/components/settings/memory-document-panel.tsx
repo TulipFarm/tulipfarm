@@ -41,7 +41,7 @@ export function MemoryDocumentPanel() {
   return (
     <Panel
       title="Memory"
-      description="What assistants have learned about you, kept as one page. The system writes it, not you — say so in chat if something here is wrong."
+      description="What assistants have learned about you, kept as one page. The system writes it, not you, say so in chat if something here is wrong."
       footer={
         state ? (
           <span className="text-xs text-muted-foreground">

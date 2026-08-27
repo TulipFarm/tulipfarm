@@ -201,7 +201,7 @@ export default function SettingsObservability() {
                   </td>
                   <td className="py-1.5 text-right tabular-nums text-muted-foreground">
                     {m.unpriced ? (
-                      <span title="No price found for this model — add a pricing override in observability.config.yaml">
+                      <span title="No price found for this model. Add a pricing override in observability.config.yaml">
                         unpriced
                       </span>
                     ) : (

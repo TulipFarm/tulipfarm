@@ -278,7 +278,7 @@ const LIST_SPACES_SCHEMA = {
 const createSpace = defineApiTool<KnowledgeToolContext>({
   name: "create_space",
   description:
-    "Create an Open Knowledge Format space — a navigable, cross-linked tree of pages (a wiki). Returns the new space id to author pages into with write_page.",
+    "Create an Open Knowledge Format space, a navigable, cross-linked tree of pages (a wiki). Returns the new space id to author pages into with write_page.",
   tier: "platform",
   mutating: true,
   inputSchema: CREATE_SPACE_SCHEMA,
@@ -446,7 +446,7 @@ const validateGovernance = ajv.compile(GOVERNANCE_SCHEMA);
 export const listGovernancePages = defineApiTool<KnowledgeToolContext>({
   name: "list_governance_pages",
   description:
-    "List the business's standing policies — Knowledge pages the operator marked as always " +
+    "List the business's standing policies, Knowledge pages the operator marked as always " +
     "applying. These are rules you are expected to follow, not search results. Call this before " +
     "acting on the business's behalf in an area you have not already checked this conversation, " +
     "and read any page whose title looks relevant with get_page.",

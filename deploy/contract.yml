@@ -39,8 +39,8 @@ services:
 dependencies:
   - id: postgres
     required: true
-    detail: PostgreSQL 17 with pgvector. The correctness core — transactions, leases, inbox/outbox
-      and recovery all depend on it, so it is not replaceable.
+    detail: PostgreSQL 17 with pgvector. Transactions, leases, inbox/outbox, and recovery all
+      depend on the correctness core, so it is not replaceable.
     drivers:
       - postgres
   - id: blob
@@ -59,7 +59,8 @@ state:
       losing them, because the database holds only ciphertext. Booting a fresh ENCRYPTION_KEY
       against a populated database refuses to start rather than silently orphaning them.
   - path: SOUL_PATH
-    holds: The live soul git checkout — Resource schemas, Agents, Skills, Routines, Integrations
+    holds: The live soul git checkout, including Resource schemas, Agents, Skills, Routines,
+      Integrations
     durability: Must survive restart and upgrade
     consequence: Losing it loses everything the business built, and its git history is the audit
       trail for who changed what.
@@ -471,7 +472,7 @@ env:
     zone: set-these
     consumers: [app]
     default: enforcing
-    description: Set to the exact value shadow to rehearse an authorization change — the engine
+    description: Set to the exact value shadow to rehearse an authorization change. The engine
       still evaluates, but every route falls back to its declared admin or member check.
     consequence: Shadow mode can refuse nobody, so leaving it on means a policy that looks applied
       is not. Every disagreement is logged as authz.divergence; run in shadow until that log is
@@ -843,5 +844,5 @@ env:
     consumers: [installer]
     default: /dev/tty
     description: Where the uninstall script writes its confirmation prompt.
-    consequence: Same failure as TF_TTY_INPUT — uninstall refuses rather than destroying data
+    consequence: Same failure as TF_TTY_INPUT. Uninstall refuses rather than destroying data
       unasked.

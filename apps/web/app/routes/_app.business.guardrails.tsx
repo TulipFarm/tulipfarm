@@ -13,8 +13,8 @@ import { shortRevision } from "~/lib/utils";
  * request into the chat composer rather than posting a policy this screen would have to compose.
  */
 const ADD_GUARDRAIL_DRAFT =
-  "Add a guardrail. Ask me what it should limit — blocking a tool by name, filtering sensitive " +
-  "content out of replies, or screening prompt injection — then create it.";
+  "Add a guardrail. Ask me what it should limit: blocking a tool by name, filtering sensitive " +
+  "content out of replies, or screening prompt injection, then create it.";
 
 export async function clientLoader() {
   return { model: await getGuardrails() };

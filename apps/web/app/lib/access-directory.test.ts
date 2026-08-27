@@ -38,7 +38,7 @@ describe("lookupParty", () => {
   test("names a kind-prefixed principal without pretending it is a person", () => {
     const party = lookupParty(directory, "service:billing-api");
     expect(party.name).toBe("Billing api");
-    expect(party.detail).toBe("Service — not a person");
+    expect(party.detail).toBe("Service, not a person");
     expect(party.isPerson).toBe(false);
   });
 

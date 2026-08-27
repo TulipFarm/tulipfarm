@@ -172,7 +172,7 @@ const validateGetMemory = ajv.compile(GET_MEMORY_SCHEMA);
  */
 export const getMemoryTool = defineApiTool<MemoryDocumentToolContext>({
   name: "get_memory",
-  description: `Read everything durable you have recorded about this user — who they are, how they want you to reply, and standing rules they have given you.
+  description: `Read everything durable you have recorded about this user: who they are, how they want you to reply, and standing rules they have given you.
 
 Nothing else tells you any of it, so call this at the start of a conversation with a person, before you rely on a preference, and before \`update_memory\` with \`remove\` (which matches lines verbatim, so you must read the line first).
 

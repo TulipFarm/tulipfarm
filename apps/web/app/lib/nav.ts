@@ -99,7 +99,7 @@ export const MODE_SECTIONS: Record<"build" | "operate" | "settings", NavSection[
           label: "Activities",
           icon: History,
           description:
-            "Everything that happened in this workspace — records, chats, jobs, and deliveries.",
+            "Everything that happened in this workspace: records, chats, jobs, and deliveries.",
           wide: true,
         },
       ],
@@ -112,7 +112,7 @@ export const MODE_SECTIONS: Record<"build" | "operate" | "settings", NavSection[
           to: "/business/observability",
           label: "Observability",
           icon: Gauge,
-          description: "What your agents are spending and doing — cost, tokens, and reliability.",
+          description: "What your agents are spending and doing: cost, tokens, and reliability.",
           wide: true,
         },
       ],

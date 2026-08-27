@@ -79,7 +79,7 @@ export function ResourcesPanel({ initial }: { initial: ResourceUsage }) {
       title="Resource usage"
       description={
         isCpu
-          ? "CPU per service, as a percentage of one core — a process saturating two cores reads 200%."
+          ? "CPU per service, as a percentage of one core, a process saturating two cores reads 200%."
           : "Resident memory per service."
       }
       actions={

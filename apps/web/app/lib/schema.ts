@@ -235,7 +235,7 @@ export function renderValue(
   value: unknown,
   linkLabels?: Record<string, string>
 ): RenderedCell {
-  if (value === null || value === undefined || value === "") return { kind: "muted", text: "—" };
+  if (value === null || value === undefined || value === "") return { kind: "muted", text: "-" };
 
   switch (field.kind) {
     case "link": {
@@ -253,7 +253,7 @@ export function renderValue(
       return { kind: "text", text: formatDateField(field, String(value)) };
     case "array": {
       const arr = Array.isArray(value) ? value : [value];
-      if (arr.length === 0) return { kind: "muted", text: "—" };
+      if (arr.length === 0) return { kind: "muted", text: "-" };
       return { kind: "text", text: arr.map(String).join(", ") };
     }
     case "object":

@@ -85,21 +85,21 @@ export function DecisionSections() {
     <GuideSection
       id="decisions"
       title="Decisions"
-      description="A Choices artifact asks one mutually exclusive question. When the agent names a recommendation the card leads with it in prose, says how sure it is, and files the rest behind Alternatives — so the reader can accept without reading past the first line. When the agent has no preference the same card lists every option at equal weight, because a surface that leads with one option is making a recommendation and must never make one the agent did not. Backticks in the question and detail render as inline code."
+      description="A Choices artifact asks one mutually exclusive question. When the agent names a recommendation the card leads with it in prose, says how sure it is, and files the rest behind Alternatives, so the reader can accept without reading past the first line. When the agent has no preference the same card lists every option at equal weight, because a surface that leads with one option is making a recommendation and must never make one the agent did not. Backticks in the question and detail render as inline code."
     >
       {/* One column: chat renders a single card at full width, and a squeezed specimen would show
           a wrapped footer the reader will never actually see. */}
       <div className="grid gap-6">
         <Specimen
-          caption="High confidence — three filled bars, and the primary action names what it will do"
+          caption="High confidence, three filled bars, and the primary action names what it will do"
           artifact={RECOMMENDED}
         />
         <Specimen
-          caption="Needs review — the same card, a weaker signal, a different lead"
+          caption="Needs review: the same card, a weaker signal, a different lead"
           artifact={REVIEW}
         />
         <Specimen
-          caption="No recommendation — every option at equal weight, no drawer, no meter"
+          caption="No recommendation, every option at equal weight, no drawer, no meter"
           artifact={NEUTRAL}
         />
       </div>

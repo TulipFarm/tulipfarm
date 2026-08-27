@@ -109,13 +109,13 @@ export function SpaceGraphView({ graph, pages }: { graph: SpaceGraph; pages: Spa
   }, [graph, resolver]);
 
   if (graph.nodes.length === 0) {
-    return <p className="text-muted-foreground">0 pages — nothing to graph</p>;
+    return <p className="text-muted-foreground">0 pages, nothing to graph</p>;
   }
 
   return (
     <div className="flex flex-col gap-2">
       {graph.truncated ? (
-        <p className="text-xs text-muted-foreground">⚠ graph truncated — showing a partial view.</p>
+        <p className="text-xs text-muted-foreground">⚠ graph truncated, showing a partial view.</p>
       ) : null}
       <div className="overflow-hidden rounded-sm border border-border bg-card">
         <svg

@@ -35,7 +35,7 @@ export function writeErrorState(err: unknown): {
     if (err.status === 409) {
       return {
         fieldErrors: {},
-        formError: "this record changed since you loaded it — reload and retry",
+        formError: "this record changed since you loaded it: reload and retry",
       };
     }
     return { fieldErrors: {}, formError: err.message };
@@ -201,7 +201,7 @@ function Field({
   onJson: (v: string) => void;
 }) {
   if (readOnly) {
-    const display = isJsonKind(field) ? (jsonValue ?? "") : String(value ?? "—");
+    const display = isJsonKind(field) ? (jsonValue ?? "") : String(value ?? "-");
     return <input id={field.name} className={inputClass} value={display} disabled readOnly />;
   }
 
@@ -236,7 +236,7 @@ function Field({
           value={String(value ?? "")}
           onChange={(e) => onValue(e.target.value)}
         >
-          <option value="">—</option>
+          <option value="">-</option>
           {(field.enumValues ?? []).map((opt) => (
             <option key={opt} value={opt}>
               {opt}

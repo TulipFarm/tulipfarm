@@ -95,7 +95,7 @@ test("says which crop is missing rather than passing a partial field off as whol
 
   const legend = screen.getByRole("list");
   const knowledge = within(legend).getByRole("link", { name: /Knowledge/ });
-  expect(within(knowledge).getByText("—")).toBeInTheDocument();
+  expect(within(knowledge).getByText("-")).toBeInTheDocument();
   expect(within(knowledge).getByText("could not be loaded")).toBeInTheDocument();
 });
 

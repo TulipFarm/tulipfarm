@@ -192,7 +192,7 @@ export default function FilesIndex() {
           <p className="mt-1 text-sm text-muted-foreground">
             {tab === "shared"
               ? "When someone shares a file with you, or with a role you hold, it appears here. It leaves again the moment they revoke it."
-              : "Attach an image or a PDF to a chat and it will appear here, alongside anything an agent makes for you — so you can find it again without remembering which chat it arrived in."}
+              : "Attach an image or a PDF to a chat and it will appear here, alongside anything an agent makes for you, so you can find it again without remembering which chat it arrived in."}
           </p>
         </div>
       ) : (

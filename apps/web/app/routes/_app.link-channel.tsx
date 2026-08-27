@@ -35,7 +35,7 @@ export default function LinkChannelRoute() {
           {offer.account.email}.
         </p>
         <p className="text-xs text-muted-foreground">
-          Send your message again in {offer.slug} — it will be answered this time.
+          Send your message again in {offer.slug}. It will be answered this time.
         </p>
       </Card>
     );
@@ -44,7 +44,7 @@ export default function LinkChannelRoute() {
   return (
     <Card>
       <p>Bind this channel sender to your account? Messages from it will then act as you.</p>
-      {/* Names exactly what is being bound, and to whom — the page is the consent record. */}
+      {/* Names exactly what is being bound, and to whom. The page is the consent record. */}
       <dl className="grid grid-cols-[8rem_1fr] gap-x-4 gap-y-2 text-xs">
         <dt className="text-muted-foreground">Integration</dt>
         <dd>{offer.slug}</dd>

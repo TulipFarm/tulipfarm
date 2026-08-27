@@ -77,8 +77,8 @@ export function ComponentSections() {
           rather than something running late. Under reduced motion the grid and the word freeze to a
           legible static state while the timer keeps ticking, since that is text rather than
           movement. The grid and the timer are <code>aria-hidden</code> inside a{" "}
-          <code>role="status"</code> region that announces one stable line — a live region
-          re-reading a tenth-second clock would be unusable.
+          <code>role="status"</code> region that announces one stable line. A live region re-reading
+          a tenth-second clock would be unusable.
         </p>
       </GuideSection>
 
@@ -93,7 +93,7 @@ export function ComponentSections() {
         />
         <p className="mt-3 max-w-2xl text-sm text-muted-foreground">
           Always confirm the copy. <code>copyText</code> falls back to <code>execCommand</code> on
-          insecure origins and can fail outright — a button that looks the same either way leaves
+          insecure origins and can fail outright, a button that looks the same either way leaves
           someone pasting stale clipboard contents into a provider's form.
         </p>
       </GuideSection>
@@ -126,7 +126,7 @@ export function ComponentSections() {
       >
         <Panel
           title="Panel"
-          description="The titled container every settings and detail surface is built from. The title is an h2 — the top bar already names the page."
+          description="The titled container every settings and detail surface is built from. The title is an h2, the top bar already names the page."
           footer={
             <div className="flex justify-end">
               <Button size="sm">Save changes</Button>

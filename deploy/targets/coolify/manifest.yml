@@ -1,19 +1,19 @@
 name: coolify
 title: Coolify
 tier: community
-description: Deploy TulipFarm on Coolify as a Docker Compose resource — only the fields its UI needs and where its proxy and backups differ from plain Compose.
+description: Deploy TulipFarm on Coolify as a Docker Compose resource with only the fields its UI needs and where its proxy and backups differ from plain Compose.
 summary: |
   Coolify runs TulipFarm from the **same `docker-compose.yml` as a plain Compose deploy**, so this
-  page is deliberately short: it covers only what Coolify does differently — which resource type to
+  page is deliberately short: it covers only what Coolify does differently, which resource type to
   pick, where its UI wants each value, and how its proxy and backups diverge.
 
-  For everything the two share — what the secrets are, why the data volume matters, how updates and
-  scale-out behave — follow [Docker Compose](/docs/self-hosting/docker-compose). Nothing here
+  For everything the two share (what the secrets are, why the data volume matters, how updates and
+  scale-out behave), follow [Docker Compose](/docs/self-hosting/docker-compose). Nothing here
   repeats it; each step below states the Coolify action and links back for the reasoning.
 
   <Callout type="warn">
     This target is `community`, not `supported`. Coolify consumes the exact Compose artifact CI
-    boots in the `Compose parity` job, so **the file you paste is tested** — but standing Coolify
+    boots in the `Compose parity` job, so **the file you paste is tested**, but standing Coolify
     itself up is not exercised in CI, so the wiring around that file is documented, not booted.
     Booting a plain Compose stack would prove nothing Coolify-specific, so we do not stamp this
     integration verified on that basis.
@@ -23,8 +23,8 @@ steps:
   - id: create-resource
     title: Create a Docker Compose resource
     body: |
-      Coolify has no TulipFarm template yet, so add a new resource and choose **Docker Compose** —
-      it does exactly what a template would. Paste the published
+      Coolify has no TulipFarm template yet, so add a new resource and choose **Docker Compose**.
+      It does exactly what a template would. Paste the published
       [`docker-compose.yml`]({{SITE_URL}}/docker-compose.yml) into the editor. No edits are needed
       to start: every variable has a default, and the app generates its own secrets on first boot.
     verify:
@@ -40,7 +40,7 @@ steps:
 
       | Variable | Value | Why |
       | --- | --- | --- |
-      | `ENCRYPTION_KEY` | `openssl rand -base64 32` | Keeps the key in Coolify, off the data volume. Set it **before the first deploy** — a key introduced after the app has generated its own cannot decrypt existing secrets, and the app refuses to boot rather than orphan them. |
+      | `ENCRYPTION_KEY` | `openssl rand -base64 32` | Keeps the key in Coolify, off the data volume. Set it **before the first deploy**. A key introduced after the app has generated its own cannot decrypt existing secrets, and the app refuses to boot rather than orphan them. |
       | `POSTGRES_PASSWORD` | a password of your own | Replaces the file's `tulipfarm` default. |
       | `PUBLIC_URL` | `https://tulip.example.com` | The public address the app assumes until you save the real one in **Business → About**. |
       | `TULIPFARM_VERSION` | e.g. `v0.1.0` | Optional. Pin a tag instead of tracking `latest`. |
@@ -73,7 +73,7 @@ steps:
   - id: deploy
     title: Deploy and finish setup
     body: |
-      Deploy the resource, then watch the logs until the health check on `/readyz` passes — first
+      Deploy the resource, then watch the logs until the health check on `/readyz` passes. First
       boot runs database migrations, so give it a minute. Open your domain: the app redirects to
       `/setup`, where you create the first admin account. Walk through
       [Finish setup](/docs/self-hosting/install#finish-setup).
@@ -84,7 +84,7 @@ steps:
   - id: backups
     title: Back up the volumes through Coolify
     body: |
-      Coolify manages the four named volumes from the Compose file — `tulipfarm-postgres`,
+      Coolify manages the four Compose file volumes named `tulipfarm-postgres`,
       `tulipfarm-soul`, `tulipfarm-data`, and `tulipfarm-bucket`. Add all four to Coolify's backup
       configuration, or use a [managed database](/docs/self-hosting/managed-database) and back up
       `tulipfarm-soul`, `tulipfarm-data`, and `tulipfarm-bucket` only.
@@ -92,7 +92,7 @@ steps:
       <Callout type="warn">
         `tulipfarm-data` holds the generated `ENCRYPTION_KEY` unless you set one yourself, and
         `tulipfarm-bucket` holds every uploaded and generated file. The database stores only
-        ciphertext, so losing either volume loses the secrets or files it guards — see
+        ciphertext, so losing either volume loses the secrets or files it guards. See
         [what happens to your secrets](/docs/self-hosting/docker-compose#what-happens-to-your-secrets).
       </Callout>
     verify:
@@ -103,8 +103,8 @@ steps:
     title: Update
     body: |
       Redeploy the resource. With `TULIPFARM_VERSION` unset that pulls the newest `latest`; if you
-      pinned a tag, bump it first. Migrations run automatically on boot and have **no down-path** —
-      read [Updating and rollback](/docs/self-hosting/updating) before the first one.
+      pinned a tag, bump it first. Migrations run automatically on boot and have **no down-path**.
+      Read [Updating and rollback](/docs/self-hosting/updating) before the first one.
     verify:
       kind: manual
       look_for: The redeployed resource comes back healthy on the image tag you expected.
@@ -115,7 +115,7 @@ steps:
       Leave `app`, `worker`, and `integration-worker` at **one replica each**. Coolify's scale
       control will corrupt the soul git worktree on `app` or duplicate maintenance work on
       `worker`. Scale vertically; horizontal scaling is a deliberate design constraint. The
-      reasoning is the same everywhere — [Deploy](/docs/self-hosting#what-every-deployment-needs).
+      reasoning is the same everywhere; see [Deploy](/docs/self-hosting#what-every-deployment-needs).
     verify:
       kind: manual
       look_for: Each of app, worker, and integration-worker runs exactly one replica in Coolify.
