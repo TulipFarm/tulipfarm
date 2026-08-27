@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ToolTrace } from "~/components/chat/tool-trace";
+import { LOADER_LABELS } from "~/components/ui/loading-state";
 import type { TimelinePart } from "~/lib/chat/types";
 
 type ToolPart = Extract<TimelinePart, { kind: "tool" }>;
@@ -188,7 +189,9 @@ describe("ToolTrace", () => {
     );
 
     // Every call has landed, but the Turn has not — a column of ticks would read as finished.
-    expect(screen.getByText("Thinking")).toBeInTheDocument();
+    // The fallback label is drawn at random from LOADER_LABELS, so match membership, not a literal.
+    const label = LOADER_LABELS.find((word) => screen.queryByText(word) !== null);
+    expect(label).toBeDefined();
   });
 
   it("folds to its header once the run is no longer the live edge", () => {
@@ -208,7 +211,9 @@ describe("ToolTrace", () => {
       "aria-expanded",
       "false"
     );
-    expect(screen.queryByText("Thinking")).toBeNull();
+    for (const word of LOADER_LABELS) {
+      expect(screen.queryByText(word)).toBeNull();
+    }
   });
 
   it("counts the failures in its settled header, which is what lets a failed run fold", () => {
