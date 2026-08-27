@@ -36,7 +36,7 @@ composition patterns over route-local styling.
   encoding and `code-*` only for inspect/code viewers.
 - Let the top bar own page identity, derive shell chrome from the shared mode map, and do not
   repeat either in the page body.
-- Use Inter for interface copy and JetBrains Mono for code, identifiers, logs, and technical data.
+- Use Instrument Sans for interface copy and JetBrains Mono for code, identifiers, logs, and technical data.
 - Keep primitives app-local under `apps/web/app/components/ui` until a second app needs them.
 - Use Lucide icons; label icon-only actions and preserve a minimum 44px touch target on mobile.
 - In Chat, a participant picks **effort** (Auto/Fast/Balanced/Thorough), never a model; a Model ID

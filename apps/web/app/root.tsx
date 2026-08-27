@@ -7,7 +7,7 @@ import {
   Scripts,
   ScrollRestoration,
 } from "@remix-run/react";
-import "@fontsource-variable/inter";
+import "@fontsource-variable/instrument-sans";
 import "@fontsource-variable/jetbrains-mono";
 import { NuqsAdapter } from "nuqs/adapters/remix";
 import { type ReactNode, useEffect } from "react";

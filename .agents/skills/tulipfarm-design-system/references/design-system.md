@@ -36,7 +36,7 @@
 - Remix SPA, React 19, TypeScript, and Vite.
 - Tailwind CSS v4 with CSS-first semantic tokens and `[data-theme="dark"]`.
 - App-local shadcn-style primitives, CVA variants, `cn()`, and Lucide outline icons.
-- Inter Variable for product UI; JetBrains Mono Variable for technical surfaces.
+- Instrument Sans Variable for product UI; JetBrains Mono Variable for technical surfaces.
 - Vitest, Testing Library, and Remix stubs for component and route tests.
 - Do not add npm/yarn, PostCSS configuration, ESLint, Prettier, Storybook, or a second UI framework.
 
@@ -104,9 +104,9 @@ focus ring, or a status signal — `IntegrationIcon` is the only component that 
 | Heading | 24 / 32 | 600 | Major content heading |
 | Display | 32 / 40 | 600 | Rare empty-state or welcome moment |
 
-Use Inter for headings, controls, navigation, and prose. Use JetBrains Mono for code, paths, IDs,
-logs, timestamps, command output, and dense tabular diagnostics. Keep reading measure near 65–75
-characters and use tabular figures for changing numbers.
+Use Instrument Sans for headings, controls, navigation, and prose. Use JetBrains Mono for code,
+paths, IDs, logs, timestamps, command output, and dense tabular diagnostics. Keep reading measure
+near 65–75 characters and use tabular figures for changing numbers.
 
 Top bar breadcrumbs are navigation chrome and take Label, not Title, even though they name the
 current page. Reserve Title for a heading the content area owns, and only when it says something
