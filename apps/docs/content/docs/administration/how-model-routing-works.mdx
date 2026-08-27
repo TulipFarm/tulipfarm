@@ -3,13 +3,13 @@ title: Model routing
 description: API-key and subscription providers, effort presets, model profile routing, model specs, and ordered fallback behavior.
 ---
 
-TulipFarm routes every model call through a **model profile** — a named set of capability, modality,
+TulipFarm routes every model call through a **model profile**: a named set of capability, modality,
 residency, retention, and budget constraints. Callers ask for an *effort preset*
 (`auto`, `fast`, `balanced`, `thorough`), never a specific model, and the router resolves that into
 a model profile plus an ordered chain of fallbacks that satisfy the *same* constraints.
 
 Constraint-equivalence is the point: a fallback that could not hold the request's context, or could
-not meet its residency terms, is not a fallback — routing to it would answer the request on weaker
+not meet its residency terms, is not a fallback, routing to it would answer the request on weaker
 terms than were asked for. The router denies instead, naming the constraint it could not meet.
 
 ## Providers
@@ -62,7 +62,7 @@ and an explicit environment allowlist. The operator's own CLI session is never r
 process by construction.
 
 **Turns are unpriced.** A subscription turn has no per-token price, so TulipFarm reports **no cost**
-for it rather than a misleading zero or the API-equivalent figure — either of which would corrupt
+for it rather than a misleading zero or the API-equivalent figure, either of which would corrupt
 cost budgets and the `llm_cost_usd_total` metric. Token counts are still reported in full, so token
 budgets and context-window constraints work normally. A cost *ceiling* on a chain that contains only
 subscription providers therefore never binds.
@@ -98,7 +98,7 @@ and new publications can never disagree about which configuration is current.
 ## Denials
 
 If no profile can serve a request on the terms it was asked for, the request is **denied** and the
-reason is named — `tools_unsupported`, `modality_unsupported`, `context_window_exceeded`,
+reason is named: `tools_unsupported`, `modality_unsupported`, `context_window_exceeded`,
 `residency_violation`, `data_retention_violation`, `training_not_permitted`, and the cost, token,
 and latency budget reasons.
 
@@ -110,7 +110,7 @@ dropped by a text-only model, fails in ways nobody sees.
 
 A model profile's `constraints` and its `budgets` do different jobs. `constraints` are checked
 *before* the call: a profile whose cost, token, or latency ceiling the request would violate is
-denied, and another profile is tried. `budgets` bound the call *after* it is chosen — they become
+denied, and another profile is tried. `budgets` bound the call *after* it is chosen. They become
 durable per-Run ceilings on tokens and cost, charged as the run spends them.
 
 Ceilings resolve narrowest-wins across scopes, and a model profile contributes at the narrowest
@@ -136,7 +136,7 @@ the re-authentication step, so an operator sees *what to run* rather than a gene
 
 ## Model specs
 
-Every model TulipFarm knows about carries a record of what it can do — its context window, whether
+Every model TulipFarm knows about carries a record of what it can do. Its context window, whether
 it can call tools, what it may cost, and what it is allowed to retain. Routing checks that record
 before it sends anything, and refuses a model it cannot verify.
 
@@ -150,7 +150,7 @@ The full field list, and every reason routing can refuse a model, is in
 ## Auto selection
 
 `auto` resolves to the deployment's configured default preset, and that resolution is deterministic
-and recorded — so replaying a run reaches the same model, and an audit can reconstruct why.
+and recorded, so replaying a run reaches the same model, and an audit can reconstruct why.
 
 Autonomy no longer influences which model is chosen. It once did, and backwards: a run with `full`
 autonomy was handed the *weakest* model. Risk and effort are orthogonal, and how much human
@@ -162,24 +162,23 @@ A single chat request can override the preset for that turn only; the override i
 
 Because the participant no longer picks a model, every completed reply reports what actually
 answered it: the model, the effort that was asked for, and how long the model call took. Auto is
-only worth trusting if it says what it did — so when Auto answered, the receipt names the rung it
+only worth trusting if it says what it did, so when Auto answered, the receipt names the rung it
 resolved to as well, reading `Auto → Balanced` rather than just `Auto`.
 
-Cost is not shown to participants. Operators can read the full routing decision — the resolved
-model profile, the whole fallback chain, any rejected fallbacks, and the budget ceilings in force —
-from the `model.routed` run event. When a subscription provider answered, that decision reports no
+Cost is not shown to participants. Operators can read the full routing decision (the resolved
+model profile, the whole fallback chain, any rejected fallbacks, and the budget ceilings in force) from the `model.routed` run event. When a subscription provider answered, that decision reports no
 cost at all, because the turn had no per-token price.
 
 ## Try harder
 
-When a reply falls short, a participant can re-run the same message one effort preset higher —
+When a reply falls short, a participant can re-run the same message one effort preset higher:
 `fast` to `balanced`, `balanced` to `thorough`. An `auto` reply escalates from the rung its receipt
 says it actually ran at, so the next step is never skipped on a deployment whose default is not the
 middle rung. At `thorough` there is nothing higher and the action is not offered.
 
 The escalation is a new turn: the original reply is left in place to compare against, and the same
 agent, skills, Resources, and knowledge pages are carried over so only the effort changes.
-Escalation is always the participant's choice — TulipFarm never silently upgrades a turn.
+Escalation is always the participant's choice, TulipFarm never silently upgrades a turn.
 
 With no `soul.yaml#llm` configuration, LLM features are disabled until an admin configures providers. Use
 [Configure LLM providers](/docs/administration/configure-llm-providers) for the UI flow.

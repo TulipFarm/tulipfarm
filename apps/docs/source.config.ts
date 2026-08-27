@@ -23,5 +23,10 @@ export default defineConfig({
     // Prepend our plugins so ```prompt blocks become <PromptBlock> and {{SITE_URL}}
     // resolves before the syntax highlighter runs. Keep fumadocs' built-ins (`v`).
     remarkPlugins: (v) => [remarkPrompt, remarkSiteUrl, ...v],
+    // Pinned rather than left to the default: `github-light` renders keywords at #d73a49
+    // (4.25:1) and constants at #22863a (4.29:1) on our light card, both under WCAG AA.
+    rehypeCodeOptions: {
+      themes: { light: "github-light-default", dark: "github-dark-default" },
+    },
   },
 });

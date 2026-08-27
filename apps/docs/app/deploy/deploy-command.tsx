@@ -100,8 +100,8 @@ export function DeployCommand({ label }: { label: string }) {
               : ""}
         </p>
         <p className="mt-4 text-[13px] leading-6 text-fd-muted-foreground">
-          Every variable, every decision point, and a verification for every step — the same
-          manifest this page reads, written for a model to follow.
+          Every variable, every decision point, and a verification for every step. The same manifest
+          this page reads, written for a model to follow.
         </p>
         <a
           href={OPEN_PROMPT}

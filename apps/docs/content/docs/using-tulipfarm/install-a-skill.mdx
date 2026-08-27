@@ -1,6 +1,6 @@
 ---
 title: Install a skill
-description: Ask for a skill by what it does, review the SkillAudit findings, and install it — from the TulipFarm catalog, skills.sh, or any git repository.
+description: Ask for a skill by what it does, review the SkillAudit findings, and install it, from the TulipFarm catalog, skills.sh, or any git repository.
 ---
 
 {/* tf-page: track: using-tulipfarm  requires: ["soul.skill:*"] */}
@@ -41,7 +41,7 @@ When you already know which skill you want, paste its address:
 Install this skill - https://www.skills.sh/mattpocock/skills/grill-me
 ```
 
-The assistant resolves the address, scans the source and runs SkillAudit on that one package —
+The assistant resolves the address, scans the source and runs SkillAudit on that one package,
 then stops and reports back. Nothing is installed yet. You get the risk rating, the summary and
 every serious finding, and you decide. Say yes and the assistant asks again through an approval
 prompt, which you must approve before anything is written. Three kinds of address work:
@@ -93,11 +93,11 @@ Select the skills you want, then choose **Run SkillAudit**. SkillAudit is an LLM
 review that summarizes intent, risk, tool guidance, and findings for each selected skill.
 
 <Callout type="warn">
-SkillAudit is advice, not a guarantee. Read the findings — and the skill's own source — before you
+SkillAudit is advice, not a guarantee. Read the findings (and the skill's own source) before you
 confirm.
 
-Serious findings — a binary in the package, a symlink pointing out of it, a package large enough to
-bloat the soul's git history — are shown in a red panel above the button, and the button changes to
+Serious findings (a binary in the package, a symlink pointing out of it, a package large enough to
+bloat the soul's git history) are shown in a red panel above the button, and the button changes to
 **Install anyway**. They do not stop you. It is your instance, so it is your call; TulipFarm's job
 is to make sure you saw them.
 
@@ -107,9 +107,9 @@ address, or an executable skill with no entrypoint or no runtime to run it on.
 
 ## Confirm the install
 
-After every selected skill has an audit report, choose **Confirm install** — or **Install anyway**,
+After every selected skill has an audit report, choose **Confirm install**, or **Install anyway**,
 if anything serious turned up. TulipFarm writes the skills into the soul, records the change, and
-pins exactly which version came from where — so what runs later is what you reviewed now.
+pins exactly which version came from where, so what runs later is what you reviewed now.
 
 If the install fails, the reason appears next to **Confirm install** and takes focus, so nothing is
 written and you can correct the selection and try again.

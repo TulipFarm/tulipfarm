@@ -41,7 +41,7 @@ function SecretsPanel({ secrets }: { secrets: WizardSecret[] }) {
           <span className="group-open:hidden">[+]</span>
           <span className="hidden group-open:inline">[−]</span>
         </span>
-        <span>{secrets.length} Secrets — none of them typed on this page</span>
+        <span>{secrets.length} Secrets, none of them typed on this page</span>
       </summary>
       <div className="pb-6">
         <p className="max-w-3xl text-sm leading-6 text-fd-muted-foreground">
@@ -206,14 +206,14 @@ export function StepsStage({
             <span className="text-fd-foreground">That is the whole path.</span>{" "}
             <span className="text-fd-muted-foreground">
               Every step is marked done, so your instance should be answering on the address you
-              configured. Keep the update and backup steps — they are the two you come back for.
+              configured. Keep the update and backup steps, the two you come back for.
             </span>
           </div>
         ) : null}
 
         {artifacts.length > 0 ? (
           <div className="mt-8 border-t border-fd-border pt-6">
-            <SectionLabel>[what your platform consumes]</SectionLabel>
+            <SectionLabel>what your platform consumes</SectionLabel>
             <ul className="mt-3 flex flex-wrap gap-3">
               {artifacts.map((artifact) => (
                 <li key={artifact.id}>

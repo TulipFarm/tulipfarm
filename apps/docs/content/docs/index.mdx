@@ -8,7 +8,7 @@ AI agents do real work: tracking customers, answering support tickets, chasing i
 reviewing code.
 
 You do not configure TulipFarm by editing files or writing code. You describe what you want in
-chat — "track our customers", "create a support agent" — and an agent builds it.
+chat ("track our customers", "create a support agent") and an agent builds it.
 
 ## Pick where to start
 
@@ -35,10 +35,10 @@ chat — "track our customers", "create a support agent" — and an agent builds
 Every TulipFarm instance is made of two parts, and almost everything in these docs sits in one
 or the other.
 
-- **The soul** — the definitions. Your record shapes, agents, skills, routines, and connections
+- **The soul**, the definitions. Your record shapes, agents, skills, routines, and connections
   live here as files in a git repository. When you ask an agent to build something, it writes
   to the soul, so the git history becomes your audit trail.
-- **The runtime** — the working parts. The service and background workers that load the soul,
+- **The runtime**, the working parts. The service and background workers that load the soul,
   store your data, index your knowledge, and run agent turns against the AI models you
   configured.
 
@@ -53,32 +53,32 @@ Once a model is connected, everything below is created by asking for it in chat.
   <Card
     title="Resource types"
     href="/docs/using-tulipfarm/resources"
-    description="The shapes of things your business tracks — a Customer, a Ticket. Describe one and its tables, forms, and list screens appear."
+    description="The shapes of things your business tracks: a Customer, a Ticket. Describe one and its tables, forms, and list screens appear."
   />
   <Card
-    title="agents"
+    title="Agents"
     href="/docs/using-tulipfarm/agents"
     description="Named owners for a job, each with its own instructions, tools, and limits on what it may do."
   />
   <Card
-    title="routines"
+    title="Routines"
     href="/docs/using-tulipfarm/routines"
     description="Repeatable work that runs on a schedule, when something happens, or on request."
   />
   <Card
-    title="knowledge"
+    title="Knowledge"
     href="/docs/using-tulipfarm/knowledge"
     description="A wiki your agents read from and cite, so every answer shows where it came from."
   />
   <Card
-    title="skills"
+    title="Skills"
     href="/docs/using-tulipfarm/skills"
     description="Installable capability packages from a git repository, reviewed before they run."
   />
   <Card
-    title="integrations"
+    title="Integrations"
     href="/docs/administration/how-integrations-work"
-    description="Reach your agents where work already happens — GitHub, Slack, and Google Workspace ship in the box."
+    description="Reach your agents where work already happens: GitHub, Slack, and Google Workspace ship in the box."
   />
 </Cards>
 

@@ -14,7 +14,7 @@ restore, and failover become your provider's problem instead of yours.
 | Requirement | Detail |
 | --- | --- |
 | **PostgreSQL 17** | Earlier majors are not tested. |
-| **`vector` extension** | pgvector. The app runs `CREATE EXTENSION IF NOT EXISTS vector` at boot, so the connecting role needs permission — on managed providers this usually means the extension is *allow-listed*, not that you install it yourself. |
+| **`vector` extension** | pgvector. The app runs `CREATE EXTENSION IF NOT EXISTS vector` at boot, so the connecting role needs permission, on managed providers this usually means the extension is *allow-listed*, not that you install it yourself. |
 | **`citext` extension** | Same. Used for case-insensitive email lookups. |
 | **A dedicated database and role** | The app creates and migrates its own tables. Give it its own database. |
 | **SSL** | Recommended. Append `?sslmode=require` to `DATABASE_URL`. |
@@ -25,7 +25,7 @@ Postgres 17 with pgvector installed.
 
 <Callout type="warn">
   Check pgvector availability **before** you deploy. Without it the app fails at boot on the
-  first migration — knowledge search and every embedding column depend on it. There is no
+  first migration, knowledge search and every embedding column depend on it. There is no
   degraded mode.
 </Callout>
 
@@ -41,14 +41,14 @@ DATABASE_URL=postgresql://tulipfarm:<password>@db.example.com:5432/tulipfarm?ssl
 ```
 
 Naming only `app worker integration-worker` is what keeps the bundled `postgres` service
-from ever being created — it is not skipped by a flag, it simply is not part of the run.
+from ever being created. It is not skipped by a flag, it simply is not part of the run.
 The `app` is still the only migrator; both workers wait for healthy `app`, then refuse to
 boot if the schema floor they need is not present.
 
 `EXTERNAL_DATASTORE=true` documents the intended mode for operators and platform UIs;
 `DATABASE_URL` is the value all three processes use to reach the database.
 
-On Kubernetes and managed app platforms there is no bundled Postgres to begin with —
+On Kubernetes and managed app platforms there is no bundled Postgres to begin with.
 `DATABASE_URL` is all there is.
 
 ## Verify
@@ -60,7 +60,7 @@ curl -fsS http://localhost:8080/readyz
 `/readyz` on `app` runs an actual query against the pool, so a `200` means the app
 reached your database and migrations completed. Then confirm both workers are healthy in
 Compose: they should be running and their logs should not mention a schema-floor refusal.
-A `503` with a connection or extension error means the app did not finish booting — check
+A `503` with a connection or extension error means the app did not finish booting. Check
 the security group, SSL mode, and whether the role can create `vector` and `citext`.
 
 ## Backups

@@ -8,7 +8,7 @@ import { DeployWizard } from "./deploy-wizard";
 import { resolveSiteUrl } from "./model";
 
 export const metadata: Metadata = {
-  title: "Deploy TulipFarm — guided, verified, self-hosted",
+  title: "Deploy TulipFarm: guided, verified, self-hosted",
   alternates: { canonical: "/deploy" },
   description:
     "Answer a few questions and walk deterministic, verified steps to a running TulipFarm instance. No secret is ever entered; the page makes no network request after it loads.",

@@ -5,7 +5,7 @@ description: How TulipFarm encrypts the secrets your instance stores.
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-TulipFarm encrypts the credentials it has to use again later — LLM provider API keys,
+TulipFarm encrypts the credentials it has to use again later: LLM provider API keys,
 integration tokens, and any secret you store. Encryption is reversible by design: when an
 agent calls a provider, the instance must recover the real key to send it. Values that
 only need to be checked, never read back, are [hashed](/docs/security/hashing) instead.
@@ -15,7 +15,7 @@ only need to be checked, never read back, are [hashed](/docs/security/hashing) i
 Every secret is encrypted with **AES-256-GCM**. Each value gets a random 12-byte
 initialization vector (IV) and a 16-byte authentication tag, stored next to the ciphertext
 as a base64 envelope. The IV is what makes two identical secrets encrypt to different
-ciphertext — it does for encryption what a salt does for hashing, so no separate salt is
+ciphertext. It does for encryption what a salt does for hashing, so no separate salt is
 added. The authentication tag means a tampered or corrupted value fails to decrypt rather
 than returning garbage.
 
@@ -45,11 +45,11 @@ On a fresh instance the DEK is provisioned automatically, so nothing extra is ne
 start. To guard against losing `ENCRYPTION_KEY`, mint an offline recovery key once with
 `keys show-recovery`; it is printed a single time and held only by you, never in the
 database or the environment. If `ENCRYPTION_KEY` is later lost, set a fresh one and run
-`keys recover` with the offline key — it unwraps the DEK and rebuilds the everyday wrap.
+`keys recover` with the offline key, it unwraps the DEK and rebuilds the everyday wrap.
 
 <Callout type="warn">
 If both `ENCRYPTION_KEY` and the offline recovery key are lost, the secrets are
-unrecoverable by design — there is no backdoor. Mint and safeguard the recovery key.
+unrecoverable by design. There is no backdoor. Mint and safeguard the recovery key.
 </Callout>
 
 ## Rotation does not re-encrypt your secrets

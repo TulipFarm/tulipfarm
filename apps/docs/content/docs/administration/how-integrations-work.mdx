@@ -7,8 +7,8 @@ Integrations connect TulipFarm to external systems. Five ship bundled: **GitHub*
 **Google Workspace**, **Jira**, and **Linear**. All appear in the integrations UI and store their
 configuration through the soul and secrets store.
 
-You are not limited to those. An integration is a data file — a manifest describing how to
-connect and which provider API calls agents may make — so one can be installed from any git
+You are not limited to those. An integration is a data file (a manifest describing how to
+connect and which provider API calls agents may make) so one can be installed from any git
 repository, and nothing that installs runs code. See
 [Connect an integration](/docs/administration/connect-an-integration#install-from-a-git-repository).
 
@@ -56,8 +56,7 @@ after approval. It uses an Atlassian OAuth access token and Cloud ID that you co
 
 ## Linear
 
-The Linear integration lets agents list teams and issues, read issue details, and—after approval—
-create or update issues and add comments. It uses a scoped Linear API key that you connect through
+The Linear integration lets agents list teams and issues, read issue details, and (after approval), create or update issues and add comments. It uses a scoped Linear API key that you connect through
 **Integrations → Linear**.
 
 Each action is fixed by the integration. Agents provide issue details such as an ID or title, but

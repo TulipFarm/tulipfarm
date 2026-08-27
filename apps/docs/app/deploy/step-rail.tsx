@@ -22,7 +22,7 @@ export function StepIndex({ steps, done }: { steps: WizardStep[]; done: Readonly
 
   return (
     <div className="lg:sticky lg:top-20">
-      <p className="text-xs uppercase tracking-[0.2em] text-fd-muted-foreground">[contents]</p>
+      <p className="text-xs uppercase tracking-[0.2em] text-fd-muted-foreground">contents</p>
       <p className="mt-3 text-2xl font-bold tracking-tight tabular-nums">
         {completed} <span className="text-fd-muted-foreground">/ {steps.length}</span>
       </p>

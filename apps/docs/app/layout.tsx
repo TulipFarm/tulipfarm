@@ -28,7 +28,7 @@ export default function Layout({ children }: LayoutProps<"/">) {
       <body className="flex flex-col min-h-screen font-sans">
         <a
           href="#nd-page"
-          className="sr-only rounded-sm bg-fd-primary px-4 py-2 text-sm font-medium text-fd-primary-foreground focus-visible:not-sr-only focus-visible:absolute focus-visible:start-4 focus-visible:top-4 focus-visible:z-50"
+          className="sr-only rounded-sm bg-tf-fill px-4 py-2 text-sm font-medium text-tf-fill-foreground focus-visible:not-sr-only focus-visible:absolute focus-visible:start-4 focus-visible:top-4 focus-visible:z-50"
         >
           Skip to content
         </a>

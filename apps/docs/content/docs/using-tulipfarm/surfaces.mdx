@@ -6,7 +6,7 @@ description: How the same agent output renders natively in the web app, Slack, o
 {/* tf-page: track: using-tulipfarm  requires: ["surface:*"] */}
 
 An agent does not write a Slack message, a web page, and a GitHub comment separately. It produces
-one **artifact** — a single thing it made, such as a table, a form, a chart, or a message — and
+one **artifact** (a single thing it made, such as a table, a form, a chart, or a message) and
 describes what that thing *is* and what you can do with it.
 
 TulipFarm then renders that artifact natively wherever it is delivered. This is what a **surface**
@@ -25,7 +25,7 @@ reading Slack.
 
 <Callout>
 A surface decides how output **looks** on a channel. Actually reaching that channel is a separate
-thing — an [integration](/docs/administration/how-integrations-work). Slack ships with both, so
+thing. An [integration](/docs/administration/how-integrations-work). Slack ships with both, so
 you can [connect Slack](/docs/administration/connect-slack) today.
 </Callout>
 
@@ -39,13 +39,13 @@ is recorded, the waiting work continues, and the reply lands back in the same Sl
 already reading.
 
 That matters because a decision made in Slack is a real decision. It is not a shortcut that skips
-the record — it appears in the [run](/docs/using-tulipfarm/runs) and the audit trail exactly like
+the record. It appears in the [run](/docs/using-tulipfarm/runs) and the audit trail exactly like
 one made in the app.
 
 ## Your own components
 
 The list of things an agent can show is not fixed. If your business needs a component nobody
-shipped — an invoice summary, a table shaped like your rota — you can ask for it in chat, and it is
+shipped (an invoice summary, a table shaped like your rota) you can ask for it in chat, and it is
 stored in [the soul](/docs/using-tulipfarm/what-a-soul-is) with everything else your agents use.
 
 Surfaces are not a second automation system. They are how the work your agents already do gets

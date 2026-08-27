@@ -13,8 +13,7 @@ references, assets, schemas, and scripts.
 ## Progressive disclosure
 
 Skills load in layers. The name and description are visible so the agent can decide whether the
-skill applies. The `SKILL.md` body is loaded with the `skill` tool when needed. Supporting files —
-references, schemas, assets, and scripts — are loaded later by calling `skill` again with a `file`
+skill applies. The `SKILL.md` body is loaded with the `skill` tool when needed. Supporting files (references, schemas, assets, and scripts) are loaded later by calling `skill` again with a `file`
 path, only when the skill asks for them.
 
 That keeps normal turns small while still allowing deep instructions for specialized work.
@@ -27,8 +26,8 @@ what it does and it searches the official TulipFarm catalog first, then the publ
 catalog, and writes you a new one only when neither has a match. You can also install from a git
 repository directly.
 
-The install flow scans a repository, runs **SkillAudit** — the product's own safety review of what
-a skill would be allowed to do — and then installs only after operator confirmation. Installed
+The install flow scans a repository, runs **SkillAudit** (the product's own safety review of what
+a skill would be allowed to do) and then installs only after operator confirmation. Installed
 skills are written to `soul/skills/{name}/` and pinned in `skills-lock.json` with provenance.
 
 Every skill on your instance has an entry in `skills-lock.json` recording where it came from and
@@ -38,14 +37,14 @@ which version is installed:
 | --- | --- |
 | `bundled` | Shipped with TulipFarm and seeded into your soul at startup. |
 | `marketplace` | Installed from the official TulipFarm skills catalog. |
-| `public` | Installed from any other source — a GitHub repository or git remote. |
+| `public` | Installed from any other source, a GitHub repository or git remote. |
 | `curated` | Authored on this instance, through chat or the UI. |
 
 Editing a skill makes it yours: the entry is rewritten as `curated`, and TulipFarm stops
 refreshing it from wherever it came from.
 
 The complete selected skill directory is preserved. A skill is defined entirely by its
-`SKILL.md` — its frontmatter carries the configuration, including the command declarations and
+`SKILL.md`. Its frontmatter carries the configuration, including the command declarations and
 sandbox-backed tool contracts an executable package needs. No second definition file is written.
 
 ## Executable commands
@@ -79,7 +78,7 @@ configuration, not a setting shown to normal users.
 
 SkillAudit is an LLM safety review that reports what the skill asks agents to do, suspicious
 instructions, and risk level. The audit report is not an authorization boundary: it never installs
-a skill and never refuses one. What it does is make sure you see the risk before you decide — a
+a skill and never refuses one. What it does is make sure you see the risk before you decide. A
 high-risk report is shown to you and the choice stays yours, and a low-risk report still does not
 auto-install. Whether you install from chat or from the skills UI, the audit runs and a human
 approves the write. Executable files also pass deterministic package, runtime, tool Broker,

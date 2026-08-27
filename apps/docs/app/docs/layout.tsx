@@ -6,7 +6,7 @@ import { source } from "@/lib/source";
 
 // Scoped to /docs so the marketing page, which sets its own full title, is not double-suffixed.
 export const metadata: Metadata = {
-  title: { template: `%s — ${appName}`, default: appName },
+  title: { template: `%s | ${appName}`, default: appName },
 };
 
 export default function Layout({ children }: LayoutProps<"/docs">) {
@@ -24,7 +24,7 @@ export default function Layout({ children }: LayoutProps<"/docs">) {
             href="/llms.txt"
             className="cursor-pointer px-2 py-1 text-xs text-fd-muted-foreground transition-colors duration-150 hover:text-fd-foreground"
           >
-            llms.txt — these docs, for your agent
+            llms.txt, these docs for your agent
           </a>
         ),
       }}

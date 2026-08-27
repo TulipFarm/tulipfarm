@@ -7,11 +7,11 @@ description: Understand the kinds of tools agents can use, how names and permiss
 
 An **agent** is a configured persona with its own instructions and authority. It does work by asking
 TulipFarm to run a **tool**, a callable action such as reading business data, writing a page, or
-calling a connected app. It does that work in a **turn** — one back-and-forth: your message, and
+calling a connected app. It does that work in a **turn**, one back-and-forth: your message, and
 everything the agent does in response to it.
 
 This page is not a list of every tool. That list changes when your instance connects apps or changes
-the soul, TulipFarm's git-backed definition store — the versioned folder the app and agents manage
+the soul, TulipFarm's git-backed definition store, the versioned folder the app and agents manage
 for you. The goal here is to help you read what you see during and after work.
 
 Two places carry most of the evidence. An **approval** is a pause that waits for a human decision
@@ -28,7 +28,7 @@ Most tool names fit a small set of jobs.
 | Working with knowledge | Search cited **knowledge**, read pages, write pages, create spaces, and emit citations. knowledge is the cited material TulipFarm can retrieve with access checks. |
 | Remembering useful facts | Edit the **Memory Document**, one Markdown page of stable facts loaded into future turns, or use KV for short-lived saved values. |
 | Building new things | Change soul definitions for agents, skills, Resource types, routines, and surface components. A **skill** is an installable capability package. A **routine** is repeatable automation. A **surface** is structured output shown in a channel. |
-| Coordinating work | Transfer to another agent, delegate a task to another agent, trigger a routine, or mark a **state** — one step inside a routine — or delegated task complete. |
+| Coordinating work | Transfer to another agent, delegate a task to another agent, trigger a routine, or mark a **state** (one step inside a routine) or delegated task complete. |
 | Showing and asking | Present structured output, update a presentation, or ask for input when the current channel can show it. |
 | Reading the web and calling APIs | Fetch a public page, or call an HTTP or GraphQL API with a stored credential. See [reading the web and calling APIs](/docs/using-tulipfarm/read-the-web-and-call-apis). |
 | Calling integrations | Use connected apps through **integrations**, which are third-party connections described by a manifest. Built-in GitHub and Slack tools also live here. |
@@ -50,7 +50,7 @@ Connected app tools add the app slug in front of the operation name:
 ```
 
 The slug is lowercased, punctuation becomes `_`, and the operation name is the one the connected
-app's own settings declare. You do not have to memorise this — the value of knowing it is that when
+app's own settings declare. You do not have to memorise this. The value of knowing it is that when
 an approval asks you about `slack_post_message`, you can read it without looking anything up.
 
 That pattern lets two connected apps publish the same operation name without colliding. When you see

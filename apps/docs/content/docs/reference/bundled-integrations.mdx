@@ -4,7 +4,7 @@ description: The five providers TulipFarm ships manifests for, what agents can d
 ---
 
 An integration is a connected third party. Five arrive with every instance, ready to connect. You
-do not install them — you connect them, which means giving TulipFarm the credentials it needs.
+do not install them. You connect them, which means giving TulipFarm the credentials it needs.
 
 None of them are connected by default. Nothing leaves your instance until you connect one.
 
@@ -16,7 +16,7 @@ None of them are connected by default. Nothing leaves your instance until you co
 | Integration | What agents can do with it |
 | --- | --- |
 | `github` | Triage issues, review and merge pull requests, commit code, and read repositories. |
-| `slack` | Talk to your agents from Slack — direct message them, or mention them in a channel. |
+| `slack` | Talk to your agents from Slack: direct message them, or mention them in a channel. |
 | `jira` | Search, create, estimate, prioritize, and transition Jira Cloud issues. |
 | `linear` | List and read issues, then create, update, or comment on them after approval. |
 | `google` | One Google sign-in for Gmail (search, read, draft), Calendar (list, create, update, delete events), Drive (search), and Docs (read, create, append). |
@@ -31,7 +31,7 @@ somewhere other than the TulipFarm web app. Your team can ask a question without
 **Places agents reach into.** GitHub, Google Workspace, Jira, and Linear are sources and
 destinations. Connecting one means agents can read from it, and in some cases write back to it.
 
-GitHub is both — you can work pull requests from it, and agents can act on them.
+GitHub is both. You can work pull requests from it, and agents can act on them.
 
 ## How you connect them
 
@@ -50,7 +50,7 @@ the soul and not in environment variables.
 ## What an integration is allowed to do
 
 Every integration is defined by a manifest, and the manifest is the whole story. It declares
-**egress** — what your agents may do to the provider — and **ingress** — what the provider may send
+**egress**, what your agents may do to the provider, and **ingress**, what the provider may send
 you. An agent cannot call something the manifest does not declare, so the manifest is a boundary
 rather than a suggestion.
 

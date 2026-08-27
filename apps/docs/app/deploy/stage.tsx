@@ -65,7 +65,7 @@ export function WizardStage({
         {state === "active" ? (
           <div className="py-10">
             <div className="flex items-baseline gap-3">
-              <span className="text-xs tabular-nums text-fd-primary">[{ordinal(index)}]</span>
+              <span className="text-xs tabular-nums text-fd-primary">{ordinal(index)}</span>
               <h2 className="text-xl font-bold tracking-tight">{title}</h2>
             </div>
             <div className="mt-6">{children}</div>
@@ -110,7 +110,7 @@ export function StageAdvance({ children, onClick }: { children: string; onClick:
     <button
       type="button"
       onClick={onClick}
-      className="flex min-h-11 w-max cursor-pointer items-center rounded-sm bg-fd-primary px-5 text-sm font-medium text-fd-primary-foreground transition-colors duration-150 hover:bg-fd-primary/90"
+      className="flex min-h-11 w-max cursor-pointer items-center rounded-sm bg-tf-fill px-5 text-sm font-medium text-tf-fill-foreground transition-colors duration-150 hover:bg-tf-fill-hover"
     >
       {children}
     </button>

@@ -90,5 +90,5 @@ client data loading, schema-driven resource UI, and browser rendering of Surface
 - `HydrateFallback` is prerendered into `index.html`, so it paints before any JS. Keep it static —
   no hooks, no data, no imports — and re-run the build so the CSP hashes stay in sync.
 
-See [`.agents/skills/tulipfarm-design-system`](../../.agents/skills/tulipfarm-design-system) for
-component and design conventions.
+See [`DESIGN.md`](../../DESIGN.md) for component and design conventions. Token values stay
+canonical in `app/tokens.css`.

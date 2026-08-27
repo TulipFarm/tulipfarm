@@ -1,6 +1,6 @@
 ---
 title: Production checklist
-description: What to change before a TulipFarm instance holds real data — TLS, secrets, database, backups, and the constraints you cannot design around.
+description: What to change before a TulipFarm instance holds real data, TLS, secrets, database, backups, and the constraints you cannot design around.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -20,7 +20,7 @@ Set up [TLS](/docs/self-hosting/tls) with a reverse proxy and bind the app to lo
 
 <Callout type="warn">
   On a brand-new instance, **the first visitor to reach `/setup` becomes the admin.** If the
-  installer warned you that it detected a public IP, finish setup immediately — before
+  installer warned you that it detected a public IP, finish setup immediately, before
   anything else on this list.
 </Callout>
 
@@ -44,7 +44,7 @@ signs in.
 openssl rand -base64 32
 ```
 
-Left unset, the app generates one onto the `/data` volume — fine for a personal instance,
+Left unset, the app generates one onto the `/data` volume, fine for a personal instance,
 wrong for production, because the key then lives on the same host as the database it
 protects. Put it in your platform's secret store instead.
 
@@ -83,7 +83,7 @@ Backups, point-in-time restore, and failover stop being yours to build. See
 
 ### 7. Give the soul a git remote
 
-Set `SOUL_GIT_REMOTE_URL` and `SOUL_GIT_CREDENTIAL` (an HTTPS token — SSH remotes are not
+Set `SOUL_GIT_REMOTE_URL` and `SOUL_GIT_CREDENTIAL` (an HTTPS token, SSH remotes are not
 supported). Your resource schemas, agents, and skills then live in a repository you already
 back up, and the commit history becomes a readable audit trail of every change agents made.
 
@@ -95,7 +95,7 @@ Three things, and a provider snapshot only covers the first:
 | --- | --- |
 | The PostgreSQL database | records, chats, knowledge, runs, and queues. |
 | `tulipfarm-data` (`/data`) | Generated bootstrap secrets plus worker credentials. **The database is ciphertext without the encryption key.** |
-| `tulipfarm-soul` (`/opt/tulipfarm/soul`) | Your whole configuration — unless step 7 mirrors it to git. |
+| `tulipfarm-soul` (`/opt/tulipfarm/soul`) | Your whole configuration, unless step 7 mirrors it to git. |
 | `tulipfarm-bucket` (`/var/lib/garage`) | Every uploaded and generated file's bytes. Skip it if you moved storage to an external S3 provider. |
 
 TulipFarm has no built-in scheduled backups. Use your platform's snapshots or your own

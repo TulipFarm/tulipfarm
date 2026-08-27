@@ -6,7 +6,7 @@ import { TOC, TOCPopover, TOCProvider } from "fumadocs-ui/layouts/docs/page/slot
 import type { ComponentProps } from "react";
 import { twMerge } from "tailwind-merge";
 
-type DocsPageProps = ComponentProps<"article"> & {
+type DocsPageProps = ComponentProps<"main"> & {
   full?: boolean;
   toc?: ComponentProps<typeof TOCProvider>["toc"];
 };
@@ -17,7 +17,7 @@ export function DocsPage({ children, className, full = false, toc = [], ...props
       {/* Upstream renders a progress ring with role="progressbar" inside the trigger, so its
           aria-valuenow leaks a decimal into the button's accessible name. */}
       {toc.length > 0 && <TOCPopover trigger={{ "aria-label": "On this page" }} />}
-      <article
+      <main
         id="nd-page"
         data-full={full}
         {...props}
@@ -30,7 +30,7 @@ export function DocsPage({ children, className, full = false, toc = [], ...props
         <Breadcrumb />
         {children}
         <Footer />
-      </article>
+      </main>
       {!full && <TOC />}
     </TOCProvider>
   );
@@ -56,7 +56,7 @@ export function DocsDescription({ children, className, ...props }: ComponentProp
 
 export function DocsTitle({ children, className, ...props }: ComponentProps<"h1">) {
   return (
-    <h1 {...props} className={twMerge("text-[1.75em] font-semibold", className)}>
+    <h1 {...props} className={twMerge("text-3xl font-semibold", className)}>
       {children}
     </h1>
   );

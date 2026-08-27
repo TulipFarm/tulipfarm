@@ -5,7 +5,7 @@ description: How to upgrade a TulipFarm instance, what to back up first, and wha
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Updates are always manual. TulipFarm never updates itself — no background pull, no auto-restart.
+Updates are always manual. TulipFarm never updates itself, no background pull, no auto-restart.
 
 ## Versions
 
@@ -22,8 +22,8 @@ Every update runs migrations, and migrations have no down-path. Take these befor
 | --- | --- |
 | The database | `pg_dump` it, or take your managed provider's snapshot. |
 | `tulipfarm-data` (`/data`) | Volume copy. Holds the generated `ENCRYPTION_KEY` and auto-minted worker credentials if you did not supply your own. |
-| `tulipfarm-soul` | Volume copy — or nothing, if `SOUL_GIT_REMOTE_URL` already mirrors it to git. |
-| `tulipfarm-bucket` | Volume copy. Holds the file bytes — or nothing, if storage points at an external S3 provider. |
+| `tulipfarm-soul` | Volume copy, or nothing, if `SOUL_GIT_REMOTE_URL` already mirrors it to git. |
+| `tulipfarm-bucket` | Volume copy. Holds the file bytes, or nothing, if storage points at an external S3 provider. |
 
 <Callout type="warn">
   A database backup alone is not a recovery plan. Secrets are stored as ciphertext; without
@@ -61,7 +61,7 @@ never migrate; they wait for healthy `app` and then refuse to boot below their s
 So:
 
 - The instance is briefly unavailable during a migration. Health checks report `503` on
-  `/readyz` — that is correct, not a failure.
+  `/readyz`. That is correct, not a failure.
 - A failed migration restart-loops the container. Read the logs; the failing statement is in
   them.
 - First boot after a big schema change can take minutes. Do not shorten your startup probe
@@ -84,7 +84,7 @@ An actual rollback is:
 
 1. Stop `app`, `worker`, and `integration-worker`.
 2. Restore the database backup you took before the update.
-3. Restore the `/data` volume if you also restored an older database — the encryption key
+3. Restore the `/data` volume if you also restored an older database, the encryption key
    must match the ciphertext.
 4. Start all three services on the previous image tag.
 
