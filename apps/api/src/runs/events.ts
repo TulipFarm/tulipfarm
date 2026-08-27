@@ -53,6 +53,11 @@ export interface RunEventStreamDeps {
   readonly pageSize?: number;
   /** Silence budget: an idle stream writes a comment this often so no proxy calls it a dead origin. */
   readonly keepaliveMs?: number;
+  /**
+   * Shortcuts the poll sleep when a new event lands. Optional: without it the stream still works,
+   * just at full `pollIntervalMs` latency — the poll itself always remains the source of truth.
+   */
+  readonly waitForNotify?: (runId: string) => { promise: Promise<void>; cancel: () => void };
   now?(): number;
 }
 
@@ -139,7 +144,14 @@ export async function streamRunEvents(
       sink.write(": keepalive\n\n");
       lastWriteAt = now();
     }
-    await deps.sleep(deps.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
+    const pollWait = deps.sleep(deps.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
+    if (deps.waitForNotify) {
+      const notify = deps.waitForNotify(request.runId);
+      await Promise.race([pollWait, notify.promise]);
+      notify.cancel();
+    } else {
+      await pollWait;
+    }
   }
 }
 
@@ -158,6 +170,7 @@ export interface RunEventRouteDeps {
   readonly authorize: (req: FastifyRequest, runId: string) => Promise<RunStreamGrant | null>;
   readonly pollIntervalMs?: number;
   readonly pageSize?: number;
+  readonly waitForNotify?: RunEventStreamDeps["waitForNotify"];
 }
 
 /** Parses the reconnect cursor: an explicit `?after=` wins, else the SSE `Last-Event-ID` header. */
@@ -263,6 +276,7 @@ export function registerRunEventRoutes(
           pollIntervalMs: deps.pollIntervalMs,
           pageSize: deps.pageSize,
           keepaliveMs: SSE_KEEPALIVE_MS,
+          ...(deps.waitForNotify ? { waitForNotify: deps.waitForNotify } : {}),
         },
         { runId: id, after }
       );

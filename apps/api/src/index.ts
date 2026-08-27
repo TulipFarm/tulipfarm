@@ -216,6 +216,7 @@ import { startDelivery } from "./resources/outbox";
 import { reconcileResourceTables, registerResourceReconcile } from "./resources/reconcile";
 import { PgCounterStore, PgResourceRepoFactory } from "./resources/repo";
 import { runCanceller } from "./runs/cancel";
+import { RunEventNotifyListener } from "./runs/notify-listener";
 import {
   integrationInvoker,
   manualRoutineTrigger,
@@ -335,6 +336,17 @@ async function boot() {
     // invalid by an interrupted build is invisible to the planner but still costs every write.
     await ensureEmbeddingIndexes(migrationPool, (msg) => console.log(msg));
     const pool = await startRuntimePool(migrationPool);
+    const runEventNotifyListener = new RunEventNotifyListener({
+      connectionString: process.env.DATABASE_URL as string,
+      ...(runtimePoolOptions() === undefined ? {} : { options: runtimePoolOptions() as string }),
+    });
+    await runEventNotifyListener
+      .start((msg) => console.error(msg))
+      .catch((err) =>
+        console.error(
+          `run event listener failed to start (falling back to polling only): ${err instanceof Error ? err.message : err}`
+        )
+      );
     const publicOrigins = new PublicOriginsService(
       new PublicOriginStore(pool),
       DEPLOYMENT_BUSINESS_ID
@@ -1182,6 +1194,7 @@ async function boot() {
       runEvents: {
         events: runEventStore,
         runs: runStore,
+        waitForNotify: (runId) => runEventNotifyListener.waitForNotify(runId),
         authorize: async (req) => {
           const principal = req.principal;
           if (!principal) return null;
@@ -1457,6 +1470,7 @@ async function boot() {
         await hookExecutor?.close();
         await resourceSampler.stop();
         await logSink.stop();
+        await runEventNotifyListener.close();
         await pool.end();
       } catch (err) {
         app.log.error(`Shutdown error: ${err instanceof Error ? err.message : String(err)}`);
