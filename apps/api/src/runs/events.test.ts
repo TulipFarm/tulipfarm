@@ -237,6 +237,50 @@ describe("streamRunEvents", () => {
     expect(reader.calls.map((call) => call.after)).toEqual([0, 1]);
   });
 
+  it("shortcuts a slow poll sleep once waitForNotify resolves, and cancels it after", async () => {
+    const sink = new RecordingSink();
+    const events = [record(1)];
+    const reader = new FakeEventReader(events);
+    let polls = 0;
+    let cancelled = false;
+    let resolveNotify: () => void = () => {};
+
+    const outcome = await streamRunEvents(
+      sink,
+      {
+        events: reader,
+        runs: {
+          async find() {
+            polls += 1;
+            if (polls === 1) {
+              events.push(record(2));
+              return { status: "running" };
+            }
+            return { status: "succeeded" };
+          },
+        },
+        authorize: async () => GRANT,
+        // Never resolves on its own: the test fails by timeout if the notify shortcut is not taken.
+        sleep: () => new Promise(() => {}),
+        waitForNotify: () => ({
+          promise: new Promise<void>((resolve) => {
+            resolveNotify = resolve;
+            queueMicrotask(resolve);
+          }),
+          cancel: () => {
+            cancelled = true;
+          },
+        }),
+      },
+      { runId: RUN_ID, after: 0 }
+    );
+
+    expect(outcome).toBe("completed");
+    expect(ids(sink)).toEqual([1, 2, 2]);
+    expect(cancelled).toBe(true);
+    expect(resolveNotify).toBeDefined();
+  });
+
   it("ends the stream when the Run cannot be read, without inventing an outcome", async () => {
     const sink = new RecordingSink();
 

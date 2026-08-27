@@ -37,7 +37,10 @@ export interface ChatRunCanceller {
 
 /** Reads the Run this turn produced. The same reader `GET /runs/:id/events` reconnects against. */
 export interface ChatStreamDeps
-  extends Pick<RunEventStreamDeps, "events" | "runs" | "pollIntervalMs" | "pageSize"> {
+  extends Pick<
+    RunEventStreamDeps,
+    "events" | "runs" | "pollIntervalMs" | "pageSize" | "waitForNotify"
+  > {
   /** Re-evaluated on every poll, so a revoked grant closes the stream mid-turn. */
   authorize(req: FastifyRequest, runId: string): Promise<RunStreamGrant | null>;
 }
@@ -224,6 +227,7 @@ export function registerChatRoutes(
           ...(stream.pollIntervalMs === undefined ? {} : { pollIntervalMs: stream.pollIntervalMs }),
           keepaliveMs: SSE_KEEPALIVE_MS,
           ...(stream.pageSize === undefined ? {} : { pageSize: stream.pageSize }),
+          ...(stream.waitForNotify === undefined ? {} : { waitForNotify: stream.waitForNotify }),
         },
         { runId, after: 0 }
       );
