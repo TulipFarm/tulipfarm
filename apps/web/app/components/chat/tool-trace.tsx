@@ -1,6 +1,7 @@
 import { Link } from "@remix-run/react";
 import { PenLine } from "lucide-react";
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
+import { LOADER_LABELS, pick } from "~/components/ui/loading-state";
 import { Trace, TraceStep } from "~/components/ui/trace";
 import type { TimelinePart } from "~/lib/chat/types";
 import { ApprovalCard } from "./approval-card";
@@ -42,6 +43,7 @@ export function ToolTrace({
   foldable: boolean;
   onApprove: (approvalId: string, decision: "approve" | "deny") => void;
 }) {
+  const [betweenCallsLabel] = useState(() => pick(LOADER_LABELS));
   const settled = parts.filter((part) => part.status === "done").length;
   const failed = parts.filter((part) => part.status === "done" && part.outcome === "error").length;
   const countLabel = `Ran ${parts.length} ${parts.length === 1 ? "tool" : "tools"}`;
@@ -110,7 +112,9 @@ export function ToolTrace({
        * Turn is still working, and a row that says so is the difference between following along
        * and watching a static list of ticks until the next result snaps in already finished.
        */}
-      {pending && running === undefined ? <TraceStep status="running" label="Thinking" /> : null}
+      {pending && running === undefined ? (
+        <TraceStep status="running" label={betweenCallsLabel} />
+      ) : null}
       {/* Progress the reader can check against the rows above, not a claim the trace cannot back. */}
       <span className="sr-only">{`${settled} of ${parts.length} finished`}</span>
     </Trace>

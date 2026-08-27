@@ -4,6 +4,7 @@ import ReactMarkdown, { type Components, defaultUrlTransform, type Options } fro
 import remarkGfm from "remark-gfm";
 import { rehypeCallouts } from "~/lib/rehype-callouts";
 import { rehypeCitations } from "~/lib/rehype-citations";
+import { rehypeStreamWords, type StreamWordCounter } from "~/lib/rehype-stream-words";
 import { rehypeTags } from "~/lib/rehype-tags";
 import { mentionComponents } from "./chat/mention-chip";
 import { rehypeMentions } from "./chat/mention-highlight";
@@ -198,12 +199,15 @@ export function MarkdownView({
   mentions,
   wikiLinks,
   citations,
+  streamWords,
 }: {
   children: string;
   mentions?: MentionEntry[];
   /** Knowledge-wiki mode: render internal `/…` hrefs as client links and `#tag` text as chip links. */
   wikiLinks?: boolean;
   citations?: { ref: number; url: string }[];
+  /** While a Turn streams: blur-reveal words past `from`, and report this pass's count via `counter`. */
+  streamWords?: { from: number; counter: StreamWordCounter };
 }) {
   const list = mentions ?? NO_MENTIONS;
   const active = list.length > 0;
@@ -224,8 +228,9 @@ export function MarkdownView({
     if (active) plugins.push([rehypeMentions, { phrases: list.map((m) => m.phrase) }]);
     if (wikiLinks) plugins.push([rehypeTags, { tagBase: TAG_BASE }]);
     if (citationsOn) plugins.push([rehypeCitations, { refs }]);
+    if (streamWords) plugins.push([rehypeStreamWords, streamWords]);
     return plugins;
-  }, [active, list, wikiLinks, citationsOn, refs]);
+  }, [active, list, wikiLinks, citationsOn, refs, streamWords]);
   const resolvedComponents = useMemo<Components>(() => {
     let resolved: Components = components;
     if (active) resolved = { ...resolved, ...mentionComponents(byPhrase) };

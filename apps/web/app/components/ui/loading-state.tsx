@@ -56,7 +56,7 @@ export const LOADER_LABELS = [
   "Coming up",
 ] as const;
 
-function pick<T>(items: readonly T[]): T {
+export function pick<T>(items: readonly T[]): T {
   return items[Math.floor(Math.random() * items.length)] as T;
 }
 
