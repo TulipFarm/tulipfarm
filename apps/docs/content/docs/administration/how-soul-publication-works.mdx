@@ -3,7 +3,7 @@ title: How soul publication works
 description: TulipFarm compiles each soul commit into a signed bundle and runs that, not live git. Learn about bundles, the active pointer, dead letters, and rollback.
 ---
 
-When an agent builds something, it writes files to the soul — the git repository your instance is
+When an agent builds something, it writes files to the soul. The git repository your instance is
 defined in. But the running system never reads those files directly.
 
 Instead, every successful commit is compiled into a small, signed **bundle**, and the runtime runs
@@ -28,7 +28,7 @@ one known version of your configuration.
 ## What a bundle contains
 
 A bundle carries the commit it came from, the business it belongs to, and every definition and
-asset compiled from that commit — Resource types, agents, skills, routines, integrations, and
+asset compiled from that commit: Resource types, agents, skills, routines, integrations, and
 guardrails.
 
 Signing adds two things: a **digest**, which is a fingerprint of the contents, and a
@@ -51,7 +51,7 @@ Publication is automatic and retried. A publication that keeps failing, or that 
 retrying cannot fix, is set aside as a **dead letter** with the reason recorded.
 
 Dead letters matter because they are silent. The instance keeps running the last good bundle, so
-nothing visibly breaks — but the change an agent just made is not live. Someone asked for
+nothing visibly breaks, but the change an agent just made is not live. Someone asked for
 something, was told it was done, and it was not.
 
 The fix is always to correct the cause and publish again. Do not try to point the active bundle at

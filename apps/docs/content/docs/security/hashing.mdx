@@ -5,7 +5,7 @@ description: How TulipFarm hashes passwords and API tokens.
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Some secrets never need to be read back — the instance only has to check whether a value
+Some secrets never need to be read back. The instance only has to check whether a value
 matches. Those are **hashed**: transformed one-way so the original cannot be recovered,
 even by TulipFarm. The rule is simple. A value that must be used again, like an LLM
 provider key, is [encrypted](/docs/security/encryption); a value that only has to be
@@ -27,7 +27,7 @@ against a dummy hash, so a wrong email and a wrong password take the same time t
 ## API tokens are hashed, and can be peppered
 
 The `tulip_…` API tokens TulipFarm issues are random, high-entropy strings, so by default
-they are stored as a plain **SHA-256** hash — a salt adds nothing when the input is already
+they are stored as a plain **SHA-256** hash. A salt adds nothing when the input is already
 unguessable.
 
 For defense in depth, set `API_TOKEN_PEPPER` (a 32-byte base64 server secret). Token hashes
@@ -48,9 +48,9 @@ These three are easy to confuse. Each breaks predictability for a different oper
 
 | Tool | Used by | Purpose | secret? |
 |---|---|---|---|
-| **IV** | encryption (AES-GCM) | makes identical plaintext encrypt differently | No — stored with the ciphertext |
-| **Salt** | password hashing (Argon2id) | makes identical passwords hash differently | No — stored inside the hash |
-| **Pepper** | API-token hashing (optional) | makes a hash uncomputable without a server-held key | Yes — kept out of the database |
+| **IV** | encryption (AES-GCM) | makes identical plaintext encrypt differently | No, stored with the ciphertext |
+| **Salt** | password hashing (Argon2id) | makes identical passwords hash differently | No, stored inside the hash |
+| **Pepper** | API-token hashing (optional) | makes a hash uncomputable without a server-held key | Yes, kept out of the database |
 
 TulipFarm applies the IV and the salt automatically. The pepper is the one you opt into.
 

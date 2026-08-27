@@ -10,7 +10,7 @@ A **run** is one piece of work, recorded from start to finish.
 
 Every message you send an agent is a run. So is every routine that fires on a schedule, and every
 time a connected app sends TulipFarm something to deal with. If work happened, there is a run for
-it — and you can go and read it afterwards.
+it, and you can go and read it afterwards.
 
 ## Written down before it starts
 
@@ -32,7 +32,7 @@ At any moment a run is in one of a few plain situations:
 | --- | --- |
 | Queued | Accepted, waiting its turn to start. |
 | Running | Being worked on now. |
-| Waiting | Parked on purpose — for a person, a timer, or another job. |
+| Waiting | Parked on purpose, for a person, a timer, or another job. |
 | Succeeded | Finished, and it worked. |
 | Failed | Finished, and it did not. The run says why. |
 | Cancelled | You or someone else stopped it. |
@@ -45,7 +45,7 @@ anything or timing out. It is parked, not frozen.
 
 Open a run and you see events appear as they happen.
 
-If your connection drops, reopening picks up exactly where you left off — you do not miss events in
+If your connection drops, reopening picks up exactly where you left off. You do not miss events in
 the gap, and you do not see the same ones twice. Watching a run never changes it, so it is always
 safe to look.
 
@@ -53,7 +53,7 @@ safe to look.
 
 From the run itself you can **cancel**, **pause**, **resume**, or **retry** it.
 
-Whether you are allowed to do any of those is decided by the server, not the screen — so a button
+Whether you are allowed to do any of those is decided by the server, not the screen, so a button
 you can see is not automatically a button that will work. If you lack the authority, TulipFarm says
 so instead of silently doing nothing.
 

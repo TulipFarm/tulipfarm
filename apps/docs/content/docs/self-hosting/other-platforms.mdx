@@ -1,6 +1,6 @@
 ---
 title: Dokploy, Unraid, Synology, CasaOS
-description: Any platform that accepts a Compose file runs TulipFarm — the same file, with the per-platform details that differ.
+description: Any platform that accepts a Compose file runs TulipFarm, using the same file plus the per-platform details that differ.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -39,12 +39,12 @@ a new stack, paste the file, and deploy.
 
 Unraid specifics:
 
-- Set `HOST_PORT` to something outside Unraid's own range if `8080` is taken — the WebUI and
+- Set `HOST_PORT` to something outside Unraid's own range if `8080` is taken, the WebUI and
   several stock containers cluster around it.
 - The named volumes land under Docker's storage, not `/mnt/user/appdata`. If you want them
   on a share you back up, replace the volume entries with bind mounts to
   `/mnt/user/appdata/tulipfarm/{postgres,soul,data}` and make sure the paths exist first.
-- Set `PUBLIC_URL` to `http://<tower-ip>:<HOST_PORT>`, not `localhost` — a browser on
+- Set `PUBLIC_URL` to `http://<tower-ip>:<HOST_PORT>`, not `localhost`, a browser on
   another machine on the LAN is the whole point, and a mismatched origin blocks login.
 
 ## Synology (Container Manager)
@@ -68,7 +68,7 @@ things they commonly get wrong:
 - They default `PUBLIC_URL`-style settings to `localhost`. Set it to the LAN address you
   browse to.
 - They sometimes offer to publish every port in the file. Only `8080` (via `HOST_PORT`)
-  should be published — **never** `5432`.
+  should be published, **never** `5432`.
 
 ## Managed app platforms
 
@@ -89,7 +89,7 @@ image, but they need two things the Compose file assumes are local:
   empty. If `/data` is not shared with the workers, supply `WORKER_API_CREDENTIAL` and
   `INTEGRATION_WORKER_API_CREDENTIAL` as secrets too.
 
-Combine that with [headless seeding](/docs/self-hosting/headless) — these platforms have no
+Combine that with [headless seeding](/docs/self-hosting/headless). These platforms have no
 browser at first boot.
 
 <Callout type="warn">
@@ -97,7 +97,7 @@ browser at first boot.
   these platforms and none are exercised in CI. Two specifics that bite: soul git auth is
   **HTTPS + token only** (`SOUL_GIT_CREDENTIAL` is injected as
   `https://<token>@host/…`; SSH remotes fail), and a failed clone at boot is **logged, not
-  fatal** — the instance comes up with an empty soul rather than refusing to start. Restart
+  fatal**. The instance comes up with an empty soul rather than refusing to start. Restart
   the app once and confirm your resources and agents are still there.
 </Callout>
 

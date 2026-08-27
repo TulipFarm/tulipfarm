@@ -18,7 +18,7 @@ For what these providers are and how they behave at routing time, see
 
 - A paid plan. A free Claude or ChatGPT account will not work.
 - The vendor CLI installed **on your own machine**, only to mint the credential. It does not need to
-  be installed on the TulipFarm server — the binary that answers turns ships inside TulipFarm.
+  be installed on the TulipFarm server, the binary that answers turns ships inside TulipFarm.
 - Admin access to **Operate → Business → Secrets**.
 
 ## Outcome
@@ -50,7 +50,7 @@ API key configured.
     Open **Operate → Business → Models** and add a row using provider `claude-code` and one of the
     models `opus`, `sonnet`, or `haiku`.
 
-    These are the same three tiers your plan gives you in the CLI — `opus` is the most capable,
+    These are the same three tiers your plan gives you in the CLI. `opus` is the most capable,
     `sonnet` the everyday choice, `haiku` the fastest.
   </Step>
 </Steps>
@@ -83,21 +83,21 @@ writes a session to disk and the CLI reads it back.
   </Step>
   <Step>
     Open **Operate → Business → Models** and add a row using provider `codex` and one of the models
-    `gpt-5.6-sol`, `gpt-5.6-terra`, or `gpt-5.6-luna` — flagship, balanced, and low-latency
+    `gpt-5.6-sol`, `gpt-5.6-terra`, or `gpt-5.6-luna`: flagship, balanced, and low-latency
     respectively.
   </Step>
 </Steps>
 
 <Callout type="warn">
-An API-key `auth.json` — one containing `OPENAI_API_KEY`, written by signing in with a key instead
-of a ChatGPT account — is **rejected on save**. Accepting it would bill your OpenAI account for
+An API-key `auth.json` (one containing `OPENAI_API_KEY`, written by signing in with a key instead
+of a ChatGPT account) is **rejected on save**. Accepting it would bill your OpenAI account for
 turns TulipFarm reports as unpriced. Run `codex login` and choose the ChatGPT sign-in.
 </Callout>
 
 ## Verify
 
 Start a new chat and ask a simple question. The reply receipt names the model that answered. Confirm
-it is your subscription model, and that no cost is reported for the turn — subscription turns are
+it is your subscription model, and that no cost is reported for the turn, subscription turns are
 unpriced by design.
 
 Then ask for something that needs a tool, so you can confirm the governance path is intact:
@@ -107,13 +107,13 @@ Create a customer record for Acme Corp with the email ops@acme.example.
 ```
 
 An [approval](/docs/using-tulipfarm/approvals)-gated tool must still park the turn and wait for a human.
-If it does, the tool Broker is running the effect — which is the point: the CLI itself never
+If it does, the tool Broker is running the effect, which is the point: the CLI itself never
 executes a tool, it only proposes them.
 
 ## Keeping it working
 
 **Credentials expire.** When a plan session lapses, the turn fails as a hard error naming the
-command to run — `claude setup-token` or `codex login`. Re-mint it and save the new value over the
+command to run, `claude setup-token` or `codex login`. Re-mint it and save the new value over the
 old secret. Failure is deliberate rather than silent fallback, because a chain cannot recover from a
 credential another provider does not share.
 

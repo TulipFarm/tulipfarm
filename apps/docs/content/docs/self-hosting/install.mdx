@@ -1,6 +1,6 @@
 ---
 title: Install
-description: Stand up a working TulipFarm instance with one command on Linux, macOS, or Windows — nothing to clone, nothing to compile.
+description: Stand up a working TulipFarm instance with one command on Linux, macOS, or Windows. Nothing to clone, nothing to compile.
 ---
 
 By the end of this you will have TulipFarm running on your own machine or server, with an admin
@@ -40,7 +40,7 @@ irm {{SITE_URL}}/install.ps1 | iex
 The Windows script checks that WSL2 and a Linux distribution are present, then runs the Linux
 installer inside WSL. If WSL is missing it prints the `wsl --install` steps to run first.
 
-**Deploying through a UI** — Portainer, Coolify, Dokploy, Unraid — take the Compose file and run it
+**Deploying through a UI** (Portainer, Coolify, Dokploy, Unraid), take the Compose file and run it
 as-is. No `.env` file, no key generation:
 
 ```bash
@@ -60,7 +60,7 @@ The installer normally asks **zero questions**. It detects your container engine
 for `/health` to answer, and prints a URL.
 
 The one question it may ask is about the port. If port `8080` is already taken it suggests the next
-free one — press Enter to accept.
+free one, press Enter to accept.
 
 </Step>
 
@@ -73,7 +73,7 @@ Because no admin exists yet, the app sends you to the setup wizard at `/setup`.
 <Callout type="warn">
   Until an admin exists, `/setup` is unauthenticated. On an instance reachable from the internet,
   **whoever arrives first claims it**. Do this now, not later. If the installer detected a public
-  IP it prints a TLS warning for exactly this reason — see [put TLS in front](/docs/self-hosting/tls).
+  IP it prints a TLS warning for exactly this reason. See [put TLS in front](/docs/self-hosting/tls).
 </Callout>
 
 </Step>
@@ -95,7 +95,7 @@ one through it, and it hands you to the main workspace.
 
 A running instance, a database, and an admin account that is yours.
 
-It cannot answer questions yet — it has no model. That is the next tutorial, and it takes about
+It cannot answer questions yet. It has no model. That is the next tutorial, and it takes about
 fifteen minutes.
 
 <Cards>
@@ -107,7 +107,7 @@ fifteen minutes.
   <Card
     title="Production checklist"
     href="/docs/self-hosting/production-checklist"
-    description="TLS, your own keys, a pinned tag, and backups — before it holds anything real."
+    description="TLS, your own keys, a pinned tag, and backups, before it holds anything real."
   />
 </Cards>
 
@@ -121,7 +121,7 @@ To remove the stack and all its local data, use the [uninstaller](/docs/self-hos
 ## Before real data
 
 The defaults are tuned for *runs with no setup*, not for production. Work through the
-[production checklist](/docs/self-hosting/production-checklist) — TLS, your own `ENCRYPTION_KEY`, a
+[production checklist](/docs/self-hosting/production-checklist), TLS, your own `ENCRYPTION_KEY`, a
 replaced database password, a pinned image tag, and backups.
 
 ## Overrides
@@ -139,7 +139,7 @@ All optional, set as environment variables before running:
 | `TF_RUNTIME` | auto | Force `docker` or `podman`. |
 | `TF_BASE_URL` / `TF_REF` | `{{SITE_URL}}` / empty | Where compose + `.env.example` are fetched from. |
 
-Example — pin a version on a custom port:
+Example, pin a version on a custom port:
 
 ```bash
 TF_VERSION=v0.1.0 TF_PORT=9000 \
@@ -155,7 +155,7 @@ before running instead.
 A separate `TF_INSTALL_DIR` is **not** enough to separate two installs. Containers and
 volumes are namespaced by the Compose project name, not by the directory, so a second
 install left at the default `tulipfarm` attaches to the first one's database and soul
-repo. Nothing errors — the second instance simply comes up on the first's data.
+repo. Nothing errors. The second instance simply comes up on the first's data.
 
 Give each instance its own project name, install directory, and port:
 
@@ -170,7 +170,7 @@ targets the right stack. Keep the same `TF_PROJECT_NAME` for later re-runs and u
 ### Installing an exact ref
 
 `TF_VERSION` pins the **app image**, but the files above are fetched from this site, which
-serves them from the tip of `main`. That is normally what you want — `docker-compose.yml`
+serves them from the tip of `main`. That is normally what you want. `docker-compose.yml`
 is written so every variable has a default, so it stays compatible across versions.
 
 When you need the compose file from a specific tag too, fetch from GitHub instead. A

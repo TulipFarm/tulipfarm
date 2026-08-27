@@ -38,7 +38,7 @@ Autonomy describes how freely an agent may act. It decides whether runtime actio
 [Approvals](/docs/using-tulipfarm/approvals). Soul edits remain direct and ungated, but actions on records,
 external systems, or other effects can require a human decision.
 
-Autonomy does **not** influence which model an agent gets. It once did, and backwards — a `full`
+Autonomy does **not** influence which model an agent gets. It once did, and backwards. A `full`
 autonomy agent was routed to the *weakest* model. How much oversight an agent has and how much
 capability its work needs are independent; see [Model routing](/docs/administration/how-model-routing-works). The `model`
 field above names an effort preset (`auto`, `fast`, `balanced`, `thorough`) and is the only thing
@@ -53,7 +53,7 @@ Agents use TulipFarm's built-in tools for records, knowledge, soul artifacts, me
 surfaces, and connected integrations. Connected integration tools are broadly available to agents on
 eligible turns.
 
-An agent can also be given **capability restrictions** — hard limits the server checks before a tool
+An agent can also be given **capability restrictions**, hard limits the server checks before a tool
 runs, rather than instructions the model is asked to respect. Describe the limit in chat ("read-only",
 "must never delete a Ticket") and `agent-forge` writes it into the agent's frontmatter:
 
@@ -73,7 +73,7 @@ capabilityRestrictions:
 ```
 
 A restricted tool is not offered to the model, and a call to it is refused at dispatch even if the
-model makes it anyway — including when someone claims in chat to be authorizing an exception. A
+model makes it anyway, including when someone claims in chat to be authorizing an exception. A
 read-only agent also cannot use `delegate_to_agent` or `spawn_subagent` to have a less restricted
 helper do the work, because a helper's authority is the intersection of the two. `present`,
 `request_input`,
@@ -89,7 +89,7 @@ Use it for scoped work that one of your configured agents is already right for.
 
 `spawn_subagent` covers the case where none is. The agent writes the helper's instructions inline
 and gives it a single task, so nothing has to be configured first. The helper gets no chat and no
-history — only the task it was handed — and it answers once. What it was told, what it was allowed
+history (only the task it was handed) and it answers once. What it was told, what it was allowed
 to use, and what it answered are all shown inside that step in the chat.
 
 A helper of either kind can only ever hold a subset of what the agent that started it holds, so

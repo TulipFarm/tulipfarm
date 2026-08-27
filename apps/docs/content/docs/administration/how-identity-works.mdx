@@ -33,7 +33,7 @@ immediately; disabling refuses the credential on the next request.
 
 ## Roles, principals, and grants
 
-A **principal** is whoever is acting — a person, an agent, a routine, an integration, an API
+A **principal** is whoever is acting: a person, an agent, a routine, an integration, an API
 client, or internal machinery. A **role** bundles permissions. A **grant** is one permission,
 optionally with conditions and an expiry.
 
@@ -61,7 +61,7 @@ what the team gave them.
 
 ### Grants can expire
 
-A grant may carry an expiry. Once that moment passes the grant stops counting — nobody has to
+A grant may carry an expiry. Once that moment passes the grant stops counting. Nobody has to
 remember to remove it.
 
 This is how you give temporary access without leaving a permanent hole behind.
@@ -77,7 +77,7 @@ Three things follow, and all three are enforced:
   guest an admin. Everything a guest can do was granted to it explicitly.
 - A guest is refused once it is `revoked` or `expired`.
 - A guest is also refused if its **sponsor** is no longer active. When someone leaves, the guests
-  they vouched for stop working — you do not have to hunt them down.
+  they vouched for stop working. You do not have to hunt them down.
 
 See [roles and permissions](/docs/reference/roles-and-permissions) for the neutral reference.
 

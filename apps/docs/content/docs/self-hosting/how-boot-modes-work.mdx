@@ -52,7 +52,7 @@ means it is in git history rather than only in the database.
 
 ## Headless mode
 
-This is for deployments where configuration is injected before anything boots — a Kubernetes
+This is for deployments where configuration is injected before anything boots: a Kubernetes
 manifest, a CI pipeline, a managed platform.
 
 Setting `ADMIN_EMAIL` and `ADMIN_PASSWORD` seeds the first admin without a browser. Adding
@@ -67,7 +67,7 @@ Seeding is idempotent. Once any user exists it does nothing, so re-running your 
 
 <Callout type="info">
   Headless seeding handles API-key providers only. A Claude or ChatGPT subscription needs an
-  interactive browser sign-in, so those are configured afterwards — see
+  interactive browser sign-in, so those are configured afterwards. See
   [run on a subscription](/docs/administration/run-on-a-subscription).
 </Callout>
 
@@ -82,7 +82,7 @@ the database, the instance treats setup as complete. It trusts the users over th
 reopening first-admin creation on a live instance would be a security hole.
 
 The reverse is not survivable. If the database is lost, then users, records, knowledge, runs,
-secrets, and identity are all lost — **even if the soul survives perfectly**. The soul holds your
+secrets, and identity are all lost, **even if the soul survives perfectly**. The soul holds your
 configuration, not your data.
 
 This is the single most important thing to understand before you design a backup:

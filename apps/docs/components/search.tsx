@@ -29,7 +29,32 @@ export default function DefaultSearchDialog(props: SharedProps) {
           <SearchDialogInput />
           <SearchDialogClose />
         </SearchDialogHeader>
-        <SearchDialogList items={query.data !== "empty" ? query.data : null} />
+        <SearchDialogList
+          items={query.data !== "empty" ? query.data : null}
+          Empty={() => (
+            <div className="py-10 text-center">
+              {search.trim() === "" ? (
+                <p className="text-sm text-fd-muted-foreground">
+                  Search the docs by title or content.
+                </p>
+              ) : (
+                <>
+                  <p className="text-sm font-medium">No results for “{search}”</p>
+                  <p className="mt-1 text-xs text-fd-muted-foreground">
+                    Try a shorter phrase, or browse the sidebar.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setSearch("")}
+                    className="mt-4 min-h-11 cursor-pointer text-sm font-medium text-fd-primary transition-colors duration-150 hover:text-fd-primary/80"
+                  >
+                    Clear search
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        />
       </SearchDialogContent>
     </SearchDialog>
   );

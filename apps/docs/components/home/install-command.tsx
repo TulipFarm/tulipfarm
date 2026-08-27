@@ -32,6 +32,9 @@ type Platform = keyof typeof platforms;
 type CopyState = "idle" | "copied" | "failed";
 const platformKeys = Object.keys(platforms) as Platform[];
 
+/** One string for one event, so the visible hint and the announced hint cannot drift apart. */
+const copyFailedMessage = "Copy failed. Select the command and copy it.";
+
 export function InstallCommand() {
   const [platform, setPlatform] = useState<Platform>("unix");
   const [copyState, setCopyState] = useState<CopyState>("idle");
@@ -82,19 +85,19 @@ export function InstallCommand() {
     []
   );
 
-  const copyLabel =
-    copyState === "copied" ? "[copied]" : copyState === "failed" ? "[copy failed]" : "[copy]";
+  const copyLabel = copyState === "copied" ? "copied" : copyState === "failed" ? "retry" : "copy";
 
   return (
     <div className="min-w-0 max-w-full overflow-hidden rounded-lg border border-fd-border bg-fd-card">
       <div className="flex min-h-12 items-center justify-between gap-3 border-b border-fd-border px-4">
-        <p className="text-xs uppercase tracking-[0.2em] text-fd-muted-foreground">[install]</p>
+        <p className="font-mono text-xs text-fd-muted-foreground">install</p>
         <div className="flex" aria-label="Choose operating system" role="tablist">
           {platformKeys.map((key) => (
             <button
               key={key}
               type="button"
               role="tab"
+              id={`install-tab-${key}`}
               aria-controls="install-command-panel"
               aria-selected={platform === key}
               tabIndex={platform === key ? 0 : -1}
@@ -107,12 +110,23 @@ export function InstallCommand() {
           ))}
         </div>
       </div>
-      <div id="install-command-panel" role="tabpanel" className="min-w-0 p-4 sm:p-5">
+      <div
+        id="install-command-panel"
+        role="tabpanel"
+        aria-labelledby={`install-tab-${platform}`}
+        className="min-w-0 p-4 sm:p-5"
+      >
         <p className="mb-3 text-xs text-fd-muted-foreground">
-          $ <span className="text-fd-foreground">one command. zero config questions.</span>
+          {copyState === "failed" ? (
+            <span className="text-fd-foreground">{copyFailedMessage}</span>
+          ) : (
+            <>
+              $ <span className="text-fd-foreground">one command. zero config questions.</span>
+            </>
+          )}
         </p>
         <div className="relative min-w-0 border border-fd-border bg-fd-background">
-          <pre className="min-h-13 whitespace-pre-wrap px-4 py-3.5 pr-20 text-xs leading-6 tracking-[-0.02em]">
+          <pre className="min-h-13 whitespace-pre-wrap px-4 py-3.5 pr-18 text-xs leading-6 tracking-[-0.02em]">
             <code className="[overflow-wrap:anywhere]">
               {selected.tokens.map((token, index) => (
                 <span key={`${platform}-${index}-${token.value}`} className={token.className}>
@@ -125,7 +139,7 @@ export function InstallCommand() {
             type="button"
             onClick={copyCommand}
             aria-label={`Copy ${selected.label} install command`}
-            className="absolute inset-y-0 right-0 min-h-11 w-[4.5rem] cursor-pointer border-l border-fd-border bg-fd-background/80 text-xs font-medium text-fd-muted-foreground transition-colors duration-150 hover:bg-fd-accent hover:text-fd-foreground focus-visible:bg-fd-accent focus-visible:text-fd-foreground"
+            className="absolute inset-y-0 right-0 min-h-11 w-16 cursor-pointer border-l border-fd-border bg-fd-background/80 text-xs font-medium text-fd-muted-foreground transition-colors duration-150 hover:bg-fd-accent hover:text-fd-foreground focus-visible:bg-fd-accent focus-visible:text-fd-foreground active:bg-fd-muted"
           >
             {copyLabel}
           </button>
@@ -134,7 +148,7 @@ export function InstallCommand() {
           {copyState === "copied"
             ? `${selected.label} install command copied to the clipboard.`
             : copyState === "failed"
-              ? "The install command could not be copied. Select and copy the visible command."
+              ? copyFailedMessage
               : ""}
         </p>
       </div>

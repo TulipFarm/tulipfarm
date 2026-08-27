@@ -1,6 +1,6 @@
 ---
 title: Routine triggers
-description: Every way a routine can start — schedules, webhooks, and manual runs — with the settings each one accepts.
+description: Every way a routine can start (schedules, webhooks, and manual runs) with the settings each one accepts.
 ---
 
 A routine is an automation. A trigger is what starts it. This page lists every trigger a routine can
@@ -16,8 +16,8 @@ you want.
 | --- | --- | --- |
 | `manual` | Someone asks for it, from the app or the API. | Nothing. |
 | `internal_api` | Another part of your instance calls for it. | Nothing. |
-| `datetime` | A single moment arrives. | `at` — the date and time. |
-| `interval` | A fixed amount of time has passed. | `everyMs` — the gap in milliseconds, at least 1. |
+| `datetime` | A single moment arrives. | `at`, the date and time. |
+| `interval` | A fixed amount of time has passed. | `everyMs`: the gap in milliseconds, at least 1. |
 | `cron` | A schedule matches. | `expression`, and optionally `timezone`. |
 | `webhook` | An outside system posts to your instance. | `provider`, and `verification`. |
 
@@ -45,7 +45,7 @@ Times are in `UTC` unless you set `timezone`.
 
 ## When a scheduled run is missed
 
-An instance that was switched off does not silently swallow the runs it slept through — you choose
+An instance that was switched off does not silently swallow the runs it slept through. You choose
 what happens.
 
 | `missedRunPolicy` | What happens after downtime |

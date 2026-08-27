@@ -4,7 +4,7 @@ import Link from "next/link";
 import { baseOptions } from "@/lib/layout.shared";
 
 export const metadata: Metadata = {
-  title: "Page not found — tulipfarm docs",
+  title: "Page not found | tulipfarm docs",
 };
 
 const routes = [
@@ -19,7 +19,10 @@ const routes = [
 export default function NotFound() {
   return (
     <HomeLayout {...baseOptions()}>
-      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center px-4 py-24 sm:px-6">
+      <main
+        id="nd-page"
+        className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center px-4 py-24 sm:px-6"
+      >
         <p className="text-xs uppercase tracking-[0.2em] text-fd-muted-foreground">
           [404 · no such page]
         </p>

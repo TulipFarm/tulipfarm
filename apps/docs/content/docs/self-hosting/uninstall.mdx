@@ -68,9 +68,9 @@ TF_INSTALL_DIR=/srv/tulipfarm TF_RUNTIME=podman \
 ```
 
 `TF_RUNTIME` can be `docker` or `podman`. Without it, the script checks both available
-runtimes. If you installed with a custom `TF_PROJECT_NAME` — as a
+runtimes. If you installed with a custom `TF_PROJECT_NAME` (as a
 [second instance on one machine](/docs/self-hosting/install#running-a-second-instance-on-one-machine)
-requires — pass the same value here, or the script targets the default `tulipfarm` stack
+requires) pass the same value here, or the script targets the default `tulipfarm` stack
 instead of yours.
 
 The script validates the install directory using the marker written by the installer or a

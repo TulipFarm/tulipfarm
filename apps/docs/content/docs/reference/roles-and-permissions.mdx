@@ -1,6 +1,6 @@
 ---
 title: Roles and permissions
-description: How TulipFarm decides who can do what — levels, teams, grants, principals, tokens, clients, sessions, and invites.
+description: How TulipFarm decides who can do what, across levels, teams, grants, principals, tokens, clients, sessions, and invites.
 ---
 
 TulipFarm decides permission in two layers. **User roles** live in the auth database and gate most
@@ -21,7 +21,7 @@ A request is allowed only when **every** layer allows it. If any layer denies it
 rule allowing it, the answer is no. This is why granting someone a new level never quietly expands
 an agent acting on their behalf, and why an agent can never do more than the person who asked it.
 
-If you are unsure what someone can do, do not reason it out — open the **Check** tab and ask.
+If you are unsure what someone can do, do not reason it out. Open the **Check** tab and ask.
 
 ## User roles
 
@@ -46,7 +46,7 @@ Custom levels are proposed through `POST /api/v1/roles/changesets`. Creating one
 
 ## Who can be a principal
 
-A principal is whoever — or whatever — is acting. People are only one kind.
+A principal is whoever (or whatever) is acting. People are only one kind.
 
 | Kind | What it is |
 | --- | --- |

@@ -10,7 +10,7 @@ on anything else: sign-in credentials, session cookies, and every chat message c
 network in the clear.
 
 <Callout type="warn">
-  Until TLS is in front, anyone who can reach the port can read the traffic — and on a
+  Until TLS is in front, anyone who can reach the port can read the traffic, and on a
   brand-new instance, the first visitor to reach `/setup` becomes the admin. If the
   installer detected a public IP, finish setup immediately and add TLS before doing
   anything else.
@@ -36,6 +36,6 @@ the plain-HTTP port is not independently reachable.
 curl -fsS https://your-domain/readyz
 ```
 
-Then sign in and confirm the session sticks across a page reload — a session that vanishes
+Then sign in and confirm the session sticks across a page reload. A session that vanishes
 immediately after login is the signature of a `Secure`/origin mismatch between the public
 address and the URL you actually browsed to. Correct it under **Business → About**.

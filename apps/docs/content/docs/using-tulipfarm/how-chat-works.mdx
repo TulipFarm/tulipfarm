@@ -43,20 +43,20 @@ you want; the chat stays with that agent until a different one is mentioned.
 
 ## Choosing effort, not a model
 
-A participant never picks a model. The composer offers an **effort preset** — Auto, Fast, Balanced,
-or Thorough — and the deployment maps each one to a [model profile](/docs/administration/how-model-routing-works). Auto is the
+A participant never picks a model. The composer offers an **effort preset** (Auto, Fast, Balanced,
+or Thorough) and the deployment maps each one to a [model profile](/docs/administration/how-model-routing-works). Auto is the
 default and lets the deployment decide. Picking effort says how much care a question deserves,
 which is a judgement the person asking is well placed to make; picking a model would ask them to
 know which provider handles their question best, which they are not.
 
 Every finished reply carries a quiet **receipt**: the model that answered, the effort, and how long
-the model call took. When Auto answered, the receipt names the level it resolved to — `Auto →
-Balanced` — so the choice made on the participant's behalf is visible rather than implied. Cost is
+the model call took. When Auto answered, the receipt names the level it resolved to (`Auto →
+Balanced`) so the choice made on the participant's behalf is visible rather than implied. Cost is
 not shown to participants; operators read the full routing decision from the `model.routed` run
 event.
 
 When a reply falls short, **Try harder** re-runs the same message one level higher, escalating from
-the level the receipt says was actually applied. It is always the participant's choice — TulipFarm
+the level the receipt says was actually applied. It is always the participant's choice, TulipFarm
 never silently upgrades a turn. See [Model routing](/docs/administration/how-model-routing-works) for how presets resolve,
 and [Configure LLM providers](/docs/administration/configure-llm-providers) for the admin side.
 
@@ -72,7 +72,7 @@ own. A run starts only after a user submits a turn or a declared trigger invokes
 ## Durable by default
 
 Sending a message creates a [run](/docs/using-tulipfarm/runs) before the agent starts thinking, and
-what you watch on screen is that recorded run playing out — not a live feed that exists only while
+what you watch on screen is that recorded run playing out, not a live feed that exists only while
 you look at it.
 
 So stopping an answer really stops the work. It is not just closing the window on something that

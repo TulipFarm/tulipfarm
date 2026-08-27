@@ -6,7 +6,7 @@ description: Run TulipFarm as a Portainer Stack, from the web editor or a git re
 import { Step, Steps } from "fumadocs-ui/components/steps";
 import { Callout } from "fumadocs-ui/components/callout";
 
-Portainer deploys TulipFarm as a **Stack** — its name for a Compose file. Nothing in the
+Portainer deploys TulipFarm as a **Stack**, its name for a Compose file. Nothing in the
 file needs changing before it runs.
 
 <Callout type="info">
@@ -24,9 +24,9 @@ file needs changing before it runs.
 
 **Stacks → Add stack**, give it the name `tulipfarm`, and choose a build method:
 
-- **Web editor** — paste the contents of
+- **Web editor**. Paste the contents of
   `{{SITE_URL}}/docker-compose.yml`.
-- **Repository** — point at `https://github.com/TulipFarm/tulipfarm` with the Compose path
+- **Repository**. Point at `https://github.com/TulipFarm/tulipfarm` with the Compose path
   `docker-compose.yml`. Portainer can then re-pull on a webhook or a schedule.
 
 <Callout type="warn">
@@ -56,7 +56,7 @@ In the stack's **Environment variables** section:
 
 ### Deploy and finish setup
 
-**Deploy the stack**, then wait for the `app` container to report healthy — Portainer reads
+**Deploy the stack**, then wait for the `app` container to report healthy: Portainer reads
 the Compose healthcheck, which polls `/readyz`. First boot runs database migrations, so
 give it a minute.
 
@@ -78,21 +78,21 @@ with the stack name). All four are visible under **Volumes**.
 
 <Callout type="warn">
   Back up `tulipfarm-data`. It holds the generated `ENCRYPTION_KEY` unless you supplied one,
-  and the database stores only ciphertext — losing the volume loses every secret with it.
+  and the database stores only ciphertext, losing the volume loses every secret with it.
   `tulipfarm-bucket` holds every uploaded and generated file; back that up too.
 </Callout>
 
 ## Do not publish Postgres
 
 The Compose file deliberately leaves port `5432` unpublished, which is what makes the
-default password safe. Portainer makes publishing a port a two-click operation — don't. If
+default password safe. Portainer makes publishing a port a two-click operation, don't. If
 you need external database access, use a [managed database](/docs/self-hosting/managed-database)
 instead.
 
 ## Updating
 
 **Stacks → tulipfarm → Update the stack**, with *Re-pull image* enabled. Read
-[Updating and rollback](/docs/self-hosting/updating) first — migrations run on boot and do not
+[Updating and rollback](/docs/self-hosting/updating) first. Migrations run on boot and do not
 have a down-path.
 
 ## Do not scale it

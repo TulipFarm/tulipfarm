@@ -1,6 +1,6 @@
 ---
 title: The soul repository
-description: For admins — where the soul lives on disk, how to back it up to a git remote, what is inside it, and when to reload it by hand.
+description: For admins, where the soul lives on disk, how to back it up to a git remote, what is inside it, and when to reload it by hand.
 ---
 
 Your instance's [soul](/docs/using-tulipfarm/what-a-soul-is) is a git repository. This page is the
@@ -13,7 +13,7 @@ You need an admin account for everything here.
 By default, `~/.tulipfarm/soul`. Set `SOUL_PATH` to put it somewhere else.
 
 Hosting several businesses on one runtime? Use `SOUL_ROOT` instead, which resolves to
-`<root>/<businessId>/soul`. The two are mutually exclusive — set one or the other, never both.
+`<root>/<businessId>/soul`. The two are mutually exclusive: set one or the other, never both.
 
 ## Back it up to a git remote
 
@@ -28,7 +28,7 @@ single highest-value thing on this page.
     Set the remote URL and the credential it should use.
   </Step>
   <Step>
-    Save. TulipFarm syncs immediately — you do not have to wait for the next change.
+    Save. TulipFarm syncs immediately. You do not have to wait for the next change.
   </Step>
 </Steps>
 
@@ -71,7 +71,7 @@ gave. Below it sit the short commit the soul is on and when it last synced.
 </Files>
 
 Provider chains, effort presets, and model specifications all live under `llm` in `soul.yaml`.
-There is no separate model configuration file and no `models/` directory — if you are looking for
+There is no separate model configuration file and no `models/` directory, if you are looking for
 one, that is why you cannot find it.
 
 ## How changes reach the running instance
@@ -91,7 +91,7 @@ have been hand-edited outside the product and nothing triggered a reconcile.
 
 <Callout type="warn">
   Hand-editing the soul of a real instance is not a supported way to configure TulipFarm. Anything
-  you can configure, you can ask for in chat — and doing it that way keeps the history honest about
+  you can configure, you can ask for in chat, and doing it that way keeps the history honest about
   who changed what.
 </Callout>
 

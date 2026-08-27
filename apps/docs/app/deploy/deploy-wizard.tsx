@@ -74,9 +74,9 @@ export function DeployWizard({ model }: { model: WizardModel }) {
   const platformLabel = active ? active.title : selected === OTHER ? "Somewhere else" : undefined;
 
   return (
-    <main className="flex min-w-0 flex-1 flex-col overflow-x-clip">
+    <main id="nd-page" className="flex min-w-0 flex-1 flex-col overflow-x-clip">
       <section className="mx-auto w-full max-w-6xl px-4 pt-10 pb-8 sm:px-6 sm:pt-12">
-        <SectionLabel>[deploy tulipfarm]</SectionLabel>
+        <SectionLabel>deploy tulipfarm</SectionLabel>
         <h1
           className="mt-4 max-w-3xl text-3xl font-bold tracking-tight sm:text-4xl motion-safe:animate-rise"
           style={{ animationDelay: "120ms" }}
@@ -96,7 +96,7 @@ export function DeployWizard({ model }: { model: WizardModel }) {
         <div className="mx-auto grid w-full max-w-6xl divide-y divide-fd-border px-4 sm:px-6 lg:grid-cols-[1.1fr_0.9fr] lg:divide-x lg:divide-y-0">
           <div className="py-8 lg:pr-14">
             <div className="flex items-baseline gap-3">
-              <SectionLabel>[path 01]</SectionLabel>
+              <SectionLabel>path 01</SectionLabel>
               <p className="text-xs text-fd-muted-foreground">fastest</p>
             </div>
             <h2 className="mt-4 text-xl font-bold tracking-tight">Hand it to your LLM</h2>
@@ -111,7 +111,7 @@ export function DeployWizard({ model }: { model: WizardModel }) {
 
           <div className="flex flex-col py-8 lg:pl-14">
             <div className="flex items-baseline gap-3">
-              <SectionLabel>[path 02]</SectionLabel>
+              <SectionLabel>path 02</SectionLabel>
               <p className="text-xs text-fd-muted-foreground">no model required</p>
             </div>
             <h2 className="mt-4 text-xl font-bold tracking-tight">Walk it yourself</h2>
@@ -131,9 +131,9 @@ export function DeployWizard({ model }: { model: WizardModel }) {
             </ul>
             <a
               href={`#${stageDomId("platform")}`}
-              className="mt-6 flex min-h-11 w-max items-center rounded-sm bg-fd-primary px-5 text-sm font-medium text-fd-primary-foreground transition-colors duration-150 hover:bg-fd-primary/90"
+              className="mt-6 flex min-h-11 w-max items-center rounded-sm bg-tf-fill px-5 text-sm font-medium text-tf-fill-foreground transition-colors duration-150 hover:bg-tf-fill-hover"
             >
-              [+] start the walk ↓
+              start the walk ↓
             </a>
           </div>
         </div>
@@ -190,7 +190,7 @@ export function DeployWizard({ model }: { model: WizardModel }) {
         <WizardStage
           id="steps"
           index={order.indexOf("steps")}
-          title={`Run the steps — ${steps.length} of them`}
+          title={`Run the steps (${steps.length} of them)`}
           state={stateOf("steps")}
         >
           <StepsStage
