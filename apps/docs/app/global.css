@@ -5,12 +5,12 @@
 /*
  * TulipFarm design language (see /DESIGN.md) mapped onto fumadocs-ui tokens.
  * OpenCode terminal-native, but ruby: warm cream canvas + warm near-black ink,
- * JetBrains Mono only, hairline borders, no shadows, ruby reserved for brand.
+ * JetBrains Mono for code and technical surfaces, hairline borders, no shadows, ruby reserved for brand.
  * Canonical oklch values mirror apps/web/app/tokens.css — keep in sync.
  */
 @theme inline {
   --font-mono: "JetBrains Mono Variable", ui-monospace, "SFMono-Regular", Menlo, monospace;
-  --font-sans: var(--font-mono); /* JetBrains Mono is the only font */
+  --font-sans: "Instrument Sans Variable", "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
 
   /* Square-leaning radius scale: interactive ~4px, containers stay near-square. */
   --radius-sm: 0.125rem;

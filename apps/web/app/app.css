@@ -13,7 +13,7 @@
 /* Map CSS vars into Tailwind v4 theme tokens so bg-background / text-foreground etc. exist. */
 @theme inline {
   --font-mono: "JetBrains Mono Variable", ui-monospace, "SFMono-Regular", Menlo, monospace;
-  --font-sans: "Inter Variable", Inter, ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Instrument Sans Variable", "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
 
   /* Crafted easing for enter/emphasis motion (terminal honors quick, decisive curves). */
   --ease-snappy: cubic-bezier(0.23, 1, 0.32, 1);

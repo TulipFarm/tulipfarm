@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Provider } from "@/components/provider";
 import { appName, SITE_URL, siteDescription } from "@/lib/shared";
+import "@fontsource-variable/instrument-sans";
 import "@fontsource-variable/jetbrains-mono";
 import "./global.css";
 

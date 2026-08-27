@@ -68,7 +68,8 @@ it needs, never the one whose topic it resembles.
   the domain in MDX/TS/TSX — use `{{SITE_URL}}` or import `SITE_URL`.
 - Imports in `source.config.ts` must be relative, and `lib/shared.ts` must stay import-free, so
   Fumadocs can evaluate bundled config under plain Node. Restart dev after editing it.
-- Design: JetBrains Mono only, no shadows, hairline borders, warm cream/near-black, ruby accent,
+- Design: Instrument Sans for prose and UI, JetBrains Mono for code and technical surfaces, no
+  shadows, hairline borders, warm cream/near-black, ruby accent,
   no gradients except the prompt block underline; clickable elements need cursor.
 
 ## Checks
