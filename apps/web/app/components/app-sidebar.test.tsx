@@ -179,7 +179,7 @@ test("renders Operate destinations and the live Inbox badge", () => {
   render(<SidebarStub initialEntries={["/inbox"]} />);
   const inbox = screen.getByRole("link", { name: /inbox/i });
   expect(within(inbox).getByText("2")).toBeInTheDocument();
-  for (const label of ["Inbox", "Runs", "Integrations", "Operations"]) {
+  for (const label of ["Inbox", "Activity", "Integrations", "Operations"]) {
     expect(screen.getByRole("link", { name: new RegExp(label, "i") })).toBeInTheDocument();
   }
 });
@@ -192,8 +192,8 @@ test("hides denied destinations and sends Operate to the first allowed page", ()
     "href",
     "/business/activities"
   );
-  expect(screen.getByRole("link", { name: "Activities" })).toBeInTheDocument();
-  for (const label of ["Inbox", "Runs", "Operations", "Soul", "Models"]) {
+  expect(screen.getByRole("link", { name: "Activity" })).toBeInTheDocument();
+  for (const label of ["Inbox", "Operations", "Soul", "Models"]) {
     expect(screen.queryByRole("link", { name: new RegExp(label, "i") })).not.toBeInTheDocument();
   }
   expect(within(rail).queryByRole("link", { name: "Knowledge" })).not.toBeInTheDocument();

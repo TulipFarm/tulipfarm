@@ -44,6 +44,8 @@ export const NAVIGATION_REQUIREMENTS: readonly NavigationRequirement[] = [
   { path: "/knowledge", authorizations: [AUTHENTICATED_NAVIGATION] },
   { path: "/knowledge/files", authorizations: [AUTHENTICATED_NAVIGATION] },
   { path: "/inbox", authorizations: [OPERATIONS_READ] },
+  // No longer a sidebar item: /runs redirects to Activity, which reads this entry to decide
+  // whether to show the Runs lane at all. Removing it would hide Runs from every session.
   { path: "/runs", authorizations: [OPERATIONS_READ] },
   { path: "/business/activities", authorizations: [AUTHENTICATED_NAVIGATION] },
   { path: "/operations", authorizations: [OPERATIONS_READ] },

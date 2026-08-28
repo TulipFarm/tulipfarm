@@ -19,6 +19,7 @@ client data loading, schema-driven resource UI, and browser rendering of Surface
 | `app/app.css`, `app/tokens.css` | Tailwind v4 import, OKLCH tokens, `[data-theme]` variables. |
 | `app/routes/` | Remix SPA routes under `_app`; Chat is `/`. |
 | `app/components/` | App-local layout, state, resource, markdown, chat, and Surface components. |
+| `app/components/activity/` | Filters, timeline, and detail panel for the merged Activity feed. |
 | `app/components/design-guide/` | Section groups and shared wrappers for the development-only `/design-guide` route. |
 | `app/components/settings/` | Panels mounted by `_app.settings.*` routes; the Memory panel is read-only by contract. |
 | `app/components/farm/` | The `/farm` perspective tulip field canvas and its season/legend strips. |
@@ -29,6 +30,7 @@ client data loading, schema-driven resource UI, and browser rendering of Surface
 | `app/lib/surface/` | Tulip Surface Protocol browser integration. |
 | `app/lib/agents.ts`, `app/lib/skills.ts` | Typed API wrappers for Agents and Skills. |
 | `app/lib/farm.ts` | Crop metadata, the parallel Soul read behind `/farm`, and season thresholds. |
+| `app/lib/activity-feed.ts` | Interleaves the Activity log and Runs keyset feeds into one newest-first timeline. |
 | `app/lib/nav.ts`, `app/lib/badges.ts` | Sidebar navigation and mocked V1 badge counts. |
 | `app/lib/kill-switches.ts` | Emergency-stop client; the scope picker is built from the API's enforceable list. |
 | `components.json` | shadcn config. |

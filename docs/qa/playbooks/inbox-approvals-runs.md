@@ -2,7 +2,7 @@
 id: inbox-approvals-runs
 area: Inbox, Approvals, Runs
 suites: [smoke, full]
-routes: ["/inbox", "/runs", "/runs/:id", "/operations"]
+routes: ["/inbox", "/business/activities", "/runs/:id", "/operations"]
 preconditions: [worker running, admin session — every route in this file authorizes only
   principal.kind === "user" && principal.role === "admin"; on a non-admin session S1 still runs
   and verifies the 403 boundary itself, then every other scenario skips with a note]
@@ -22,7 +22,8 @@ smoke_scenarios: [S1]
 # Inbox, Approvals, Runs
 
 This file covers the out-of-band decision surface (`/inbox`), the operational Run browser
-(`/runs`, `/runs/:id`), and the read-only operations console (`/operations`) — the counterpart to
+(`/business/activities?source=run`, `/runs/:id`), and the read-only operations console
+(`/operations`) — the counterpart to
 the in-chat `ApprovalCard` (`apps/web/app/components/chat/approval-card.tsx`), which resolves the
 same underlying Approval without leaving the conversation.
 
@@ -50,7 +51,8 @@ Traced every web call in scope (`apps/web/app/lib/inbox.ts`, `operations.ts`, `a
   `createRuntimeOperationalApi.authorize()` (`apps/api/src/admin/runtime.ts:152-160`) returns a
   grant only when `principal.kind === "user" && principal.role === "admin"`; anything else gets
   `null`, and `requireGrant` (`admin/routes.ts:265-277`) answers every route with a `403 forbidden`
-  envelope. There is no partial or read-only access for a non-admin user — `/inbox`, `/runs`,
+  envelope. There is no partial or read-only access for a non-admin user — `/inbox`, the Runs
+  filter on `/business/activities`,
   `/runs/:id`, and `/operations` are all-or-nothing on the `admin` role. Treat this as a hard
   precondition, not a per-scenario detail.
 
@@ -121,11 +123,11 @@ Traced every web call in scope (`apps/web/app/lib/inbox.ts`, `operations.ts`, `a
   `form`, and `access_request` are declared in the type union and rendered distinctly by
   `InboxItem`'s header, but nothing in this deployment ever produces one. Do not expect to see them.
 
-- **`/runs` has no status filter and no column sort — only pagination.** The brief's coverage list
-  says "status filtering... sorting"; `_app.runs._index.tsx` has neither a search/filter input nor
-  a sortable header, only a plain `<ul>` (status badge, `routineId@version`, id, timestamp) and a
-  keyset `Load more` button. Verify this absence rather than hunting for controls that were assumed
-  to exist but aren't in source.
+- **The standalone `/runs` list is gone.** Runs are one lane of the merged Activity timeline at
+  `/business/activities`; `_app.runs._index.tsx` now only redirects there with `?source=run`.
+  The timeline offers source, time-range, failures-only and page-size filters and a keyset
+  `Load more`, but still no column sort and no free-text search — neither API endpoint supports a
+  query parameter. Verify that absence rather than hunting for controls that are not in source.
 
 - **`h1` presence is per-route, not uniform** (unlike Resources/Auth, where it was uniformly
   absent/present). `_app.inbox.tsx` renders its own `<h1>Inbox</h1>` when non-empty, and
@@ -147,13 +149,13 @@ Traced every web call in scope (`apps/web/app/lib/inbox.ts`, `operations.ts`, `a
   (`apps/web/app/components/shell/states.tsx`), not the browser dialog. Unlike Resources' `Delete`,
   nothing here needs to be skipped for that reason.
 
-## S1 — Smoke: `/inbox` and `/runs` load, and the admin boundary
+## S1 — Smoke: `/inbox` and the Runs timeline load, and the admin boundary
 
 | # | Action | Expected |
 | --- | --- | --- |
 | 1 | `navigate /inbox` | Within 5s: if admin, renders the pending list or `EmptyState` ("Inbox" / "No Approvals, human tasks, form waits, or access requests need attention."); if non-admin, renders whatever the `ErrorBoundary`'s `ErrorState` shows for a 403 |
 | 2 | `expect` if non-admin: the 403 is the **only** new network entry and is not flagged — this step declares it. `note`: `ErrorState`'s copy branches only on `status === 401` ("authentication required"); a 403 falls into its generic `message ?? "request failed"` branch with the connectivity-failure hint ("Check that the API is running on :4010") — misleading for an authorization failure, same pattern Resources flagged for its own 404s. **P3** | Recorded |
-| 3 | `navigate /runs` | Same admin/non-admin branch as above, this time against `EmptyState` "No Runs yet" or the list |
+| 3 | `navigate /runs` | Redirects to `/business/activities?source=run`. Same admin/non-admin branch as above: an admin sees the Runs lane, a non-admin never gets the Runs chip and sees the log-only timeline |
 | 4 | `expect` no console error from either navigation beyond the declared 403s | Clean |
 | 5 | If the signed-in session is **not** admin: `note` and stop here — S2 through S11 need admin authority and none of them can be meaningfully exercised. Confirm the sidebar-badge mismatch from the Reality check instead: `expect` the "Inbox" nav item's badge (if any approvals are pending system-wide) is visible even though `/inbox` itself 403s — this is the concrete defect, not a hypothetical | Recorded, **P2** if a nonzero badge is observed alongside a 403 landing page |
 | 6 | `capture` screenshot, console delta, failed requests for both pages | — |
@@ -206,7 +208,7 @@ Agent available), skip this scenario too with the same note.
 
 | # | Action | Expected |
 | --- | --- | --- |
-| 1 | `navigate /runs` | Within 5s: `EmptyState` "No Runs yet" / "Runs appear here once a Routine, Chat turn, or trigger starts one." if empty, else the list |
+| 1 | `navigate /business/activities?source=run&range=all` | Within 5s: the empty panel "Nothing happened in the all time under runs." if empty, else the Run rows, newest first |
 | 2 | `expect` exactly one `h1` ("Runs" or the `EmptyState` title) | Present — see Reality check, this route is fine |
 | 3 | If non-empty: `expect` each row shows a status pill, `<routineId>@<routineVersion>`, the Run id, and a formatted timestamp, and the whole row is a `Link` to `/runs/<id>` | Present |
 | 4 | `note`: there is no filter or sort control anywhere on this page — see Reality check. Do not search for one | Recorded |
@@ -270,7 +272,7 @@ Use one of this run's own Runs from S3/S5.
 
 | # | Action | Expected |
 | --- | --- | --- |
-| 1 | `navigate /inbox`, `/runs`, and a Run detail page, observing the moment before content paints | `note` whatever appears — SPA-mode `clientLoader` suspends the route until data resolves, so there may be no interstitial at all; acceptable as long as nothing sits in a permanent loading state |
+| 1 | `navigate /inbox`, `/business/activities`, and a Run detail page, observing the moment before content paints | `note` whatever appears. `/inbox` and `/runs/:id` use SPA-mode `clientLoader` and may show no interstitial; `/business/activities` fetches in the component and must show its `LoadingState` then resolve. Nothing may sit in a permanent loading state |
 | 2 | On `/runs/:id`, observe the busy state while clicking any control from S6 | Buttons read their busy label ("saving…"-equivalent is `disabled` + `unavailable` text once settled) and are disabled for the duration |
 | 3 | On `/operations`, observe the Audit table's filter while typing | No loading affordance needed — it filters client-side over already-loaded data, not a fetch |
 | 4 | `capture` screenshot, console delta, failed requests | — |
@@ -284,7 +286,7 @@ Use one of this run's own Runs from S3/S5.
 | 3 | On `/operations`, Tab through the header and Audit table | Reaches `Filter recent activity` (labeled via its `sr-only` span, not a placeholder-only input) and `View all activities`; if the support-bundle button is present, its `DestructivePreview` also traps focus |
 | 4 | Record the current theme, `click` `Toggle dark mode` (wherever the toggle lives in this session — Settings), then revisit all four routes | All text legible in both themes, including the `[system]`-style raw-JSON `<code>` blocks in Effects/Waits/Lineage and the audit table's compact identifiers |
 | 5 | `click` `Toggle dark mode` again | Restored to the recorded baseline — a persisted preference on the operator's real session |
-| 6 | Resize to 375px width | `/inbox` cards, the `/runs` list rows (`grid-cols-4` collapses), the Run controls row (wraps), and `/operations`'s two-column panel grid (`sm:grid-cols-2` collapses to one) all stay usable with no page-level horizontal scroll; the Audit table scrolls inside its own `overflow-x-auto` container |
+| 6 | Resize to 375px width | `/inbox` cards, the Activity timeline rows and filter bar (chips and selects wrap at a 44px hit height), the Run controls row (wraps), and `/operations`'s two-column panel grid (`sm:grid-cols-2` collapses to one) all stay usable with no page-level horizontal scroll; the Audit table scrolls inside its own `overflow-x-auto` container |
 | 7 | `capture` screenshot, console delta, failed requests | — |
 
 ## Notes for the runner

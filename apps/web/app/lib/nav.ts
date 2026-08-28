@@ -93,13 +93,12 @@ export const MODE_SECTIONS: Record<"build" | "operate" | "settings", NavSection[
       heading: "Work",
       items: [
         { to: "/inbox", label: "Inbox", icon: Inbox, badge: true },
-        { to: "/runs", label: "Runs", icon: Activity },
         {
           to: "/business/activities",
-          label: "Activities",
+          label: "Activity",
           icon: History,
           description:
-            "Everything that happened in this workspace: records, chats, jobs, and deliveries.",
+            "One timeline of everything that happened here: Runs, Records, Chats, and Jobs.",
           wide: true,
         },
       ],
@@ -272,7 +271,7 @@ export function modeForPath(pathname: string): ProductMode {
 
 const PAGE_META: Array<{ prefix: string; label: string; icon: LucideIcon }> = [
   { prefix: "/farm", label: "Farm", icon: Flower2 },
-  { prefix: "/business/activities", label: "Activities", icon: History },
+  { prefix: "/business/activities", label: "Activity", icon: History },
   { prefix: "/business/observability", label: "Observability", icon: Gauge },
   { prefix: "/business/profile", label: "Business profile", icon: Building2 },
   { prefix: "/business/models", label: "Models", icon: Cpu },

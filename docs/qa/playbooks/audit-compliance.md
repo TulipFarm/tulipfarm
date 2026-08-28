@@ -9,49 +9,57 @@ est_minutes: 10
 smoke_scenarios: [S1]
 ---
 
-# Activities Audit Feed
+# Activity Audit Feed
 
-The Activities surface in Operate → Work at `/business/activities` records activity across system
-operations (Resources, Chats, Routines, Knowledge, Skills, Integrations, Auth, and admin actions).
+The Activity surface in Operate at `/business/activities` is one merged timeline: the activity log
+(Records, Chats, Routines, Knowledge, Skills, Integrations, Auth, admin actions) interleaved with
+Run executions. `/runs` redirects here; `/runs/:id` is still the Run inspector.
 
 Every scenario stands alone — a failure in one does not block the next.
 
-## S1 — Activity feed and category filtering
+## S1 — Activity feed and source filtering
 
 | # | Action | Expected |
 | --- | --- | --- |
-| 1 | `navigate /business/activities` | Page loads within 5s; heading `Activities` |
-| 2 | `expect` category filter chips render: `All`, `Resources`, `Chats`, `Routines`, `Knowledge`, `Skills`, `Integrations`, `Jobs`, `Soul` | Filter chips visible |
-| 3 | `click` category chip `Resources` | Feed filters instantly to show resource-related audit events |
-| 4 | `click` category chip `All` | Unfiltered feed restored |
-| 5 | `expect` activity entries display summary, actor type, timestamp, and status when present | Entry attributes present |
+| 1 | `navigate /business/activities` | Page loads within 5s; heading `Activity` |
+| 2 | `expect` source radio chips render: `Everything`, `Runs` (admin only), `Records`, `Chats`, `Routines`, `Knowledge`, `Skills`, `Integrations`, `Jobs`, `Soul` | Filter chips visible |
+| 3 | `expect` Time range, Auto refresh, Per page, and Problems only controls render | Filter bar complete |
+| 4 | `click` source chip `Records` | URL gains `?source=resource`; feed filters to Record events |
+| 5 | `click` source chip `Everything` | Unfiltered feed restored; reload the URL and confirm the view survives |
+| 6 | `expect` rows group under day headings and show a status badge, title, and timestamp | Entry attributes present |
+| 7 | Set Time range to `Past hour`, then `All time` | URL gains `?range=`; the row count changes accordingly |
 | 6 | `capture` screenshot, console delta, failed requests | — |
 
 ## S2 — Activity detail inspection
 
 | # | Action | Expected |
 | --- | --- | --- |
-| 1 | `click` any activity row | Detail drawer/sheet opens |
-| 2 | `expect` detail panel displays Action, Category, Actor, Target, Status, When, and optional Details JSON | Detail fields present |
-| 3 | Close detail panel with `Escape` or Close button | Panel closes; focus returns to triggered row |
-| 4 | `capture` screenshot, console delta, failed requests | — |
+| 1 | `click` any non-Run row | Detail sheet opens and the URL gains `?event=log:<id>` |
+| 2 | `expect` detail panel displays a status badge, Action, Category, Actor, Target, Target id, and optional Recorded details JSON | Detail fields present |
+| 3 | Reload the page on that URL | The same sheet reopens |
+| 4 | `click` a Run row | Navigates to `/runs/:id`, not a sheet |
+| 5 | Close detail panel with `Escape` or Close button | Panel closes; focus returns to triggered row |
+| 6 | `capture` screenshot, console delta, failed requests | — |
 
-## S3 — Pagination
+## S3 — Pagination, ranges, and auto refresh
 
 | # | Action | Expected |
 | --- | --- | --- |
 | 1 | Confirm no export control is present on this page | Current UI is read/filter/paginate only |
-| 2 | If `Load more` button exists, `click` it | Additional historical activity records append |
-| 3 | `expect` pagination maintains chronological order without duplicate visible rows | Clean pagination |
+| 2 | If `Load more` exists, `click` it | Older entries append; the footer count rises |
+| 3 | `expect` pagination maintains newest-first order without duplicate visible rows | Clean pagination |
+| 4 | Change `Per page` to 100 | URL gains `?size=100`; the feed re-reads from the top |
+| 5 | Set `Auto refresh` to `Every 15s` | URL gains `?refresh=15`; the footer reports when it last checked |
+| 6 | Visit `/business/activities?event=log:does-not-exist` | Page explains the entry is not in this view and offers to clear the filters |
 | 4 | `capture` screenshot, console delta, failed requests | — |
 
 ## S4 — Accessibility, themes, and mobile viewports
 
 | # | Action | Expected |
 | --- | --- | --- |
-| 1 | Tab through category chips and audit rows | Keyboard focus rings visible on every interactive element |
+| 1 | Tab through source chips, the selects, and the rows | Keyboard focus rings visible on every interactive element |
 | 2 | Toggle between Light and Dark themes | Status text, timestamps, and Details JSON code blocks remain legible |
-| 3 | Resize viewport to 375px mobile width | Category chips wrap; feed rows scale cleanly without page overflow |
+| 3 | Resize viewport to 375px mobile width | Chips and controls wrap at a 44px hit height; rows scale without page overflow |
 | 4 | `capture` screenshot, console delta, failed requests | — |
 
 ## Notes for the runner

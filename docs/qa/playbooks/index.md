@@ -27,7 +27,7 @@ Preflight always runs. It is the only playbook that aborts the run on failure.
 | 06 | Routines | [`routines.md`](routines.md) | `/routines`, `/routines/:slug`, `/routines/:slug/edit`, `/routines/:slug/runs/:runId` | full | — | worker running | 15m |
 | 07 | Knowledge | [`knowledge.md`](knowledge.md) | `/knowledge`, `/knowledge/spaces/*`, `/knowledge/pages/*`, `/knowledge/tags/:tag` | smoke, full | S1 | — | 12m |
 | 08 | Integrations | [`integrations.md`](integrations.md) | `/integrations`, `/integrations/:name`, `/integrations/marketplace`, `/link-channel` | full | — | integration-worker running; **UI-only, no real OAuth** | 10m |
-| 09 | Inbox, approvals, runs | [`inbox-approvals-runs.md`](inbox-approvals-runs.md) | `/inbox`, `/runs`, `/runs/:id`, `/operations` | smoke, full | S1 | worker running | 10m |
+| 09 | Inbox, approvals, runs | [`inbox-approvals-runs.md`](inbox-approvals-runs.md) | `/inbox`, `/business/activities`, `/runs/:id`, `/operations` | smoke, full | S1 | worker running | 10m |
 | 10 | Settings | [`settings.md`](settings.md) | personal `/settings/{profile,appearance,auth,memory}` + business `/business/*` config | smoke, full | S1, S8 | **restore-after required** on any change | 15m |
 | 11 | Admin & RBAC | [`admin-rbac.md`](admin-rbac.md) | `/business/people`, `/business/guardrails` | full | — | signed-in session; admin for People | 10m |
 | 12 | A11y & hygiene | [`a11y-console-hygiene.md`](a11y-console-hygiene.md) | all top-level routes | smoke, full | S1, S2 | preflight baseline captured | 12m |

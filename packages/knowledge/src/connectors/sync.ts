@@ -105,10 +105,13 @@ export async function registerConnectorSync(boss: PgBoss, deps: ConnectorSyncDep
         }
         return results;
       },
-      (results) => ({
-        summary: `Connector sync ran (${results.reduce((n, r) => n + r.synced, 0)} synced)`,
-        metadata: { connectors: results.length },
-      })
+      (results) => {
+        const synced = results.reduce((n, r) => n + r.synced, 0);
+        return {
+          summary: `Connector sync synced ${synced} ${synced === 1 ? "source" : "sources"}`,
+          metadata: { connectors: results.length },
+        };
+      }
     )
   );
   await boss.schedule(CONNECTOR_SYNC_QUEUE, CONNECTOR_SYNC_CRON);

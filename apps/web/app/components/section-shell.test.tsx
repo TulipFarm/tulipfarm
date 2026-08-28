@@ -14,7 +14,7 @@ test.each([
   ["/business/profile", "Business profile"],
   ["/business/models", "Models"],
   ["/business/access", "People & access"],
-  ["/business/activities", "Activities"],
+  ["/business/activities", "Activity"],
   ["/settings/appearance", "Appearance"],
   ["/integrations", "Integrations"],
 ])("%s names itself with exactly one h1", (pathname, label) => {

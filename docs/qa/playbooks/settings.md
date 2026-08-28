@@ -35,7 +35,8 @@ Verified against the current routes and `apps/web/app/lib/nav.ts` before authori
   any editor, Save button, or per-fact control there is a regression. The panel is always present;
   before anything has been written it reads "Nothing yet.". A missing panel means the request
   failed — investigate it, do not record it as expected.
-- Operate > Work contains Inbox, Runs, and Business Activities (`/business/activities`). Operate >
+- Operate > Work contains Inbox and Activity (`/business/activities`, the merged Run + log
+  timeline; `/runs` redirects to it). Operate >
   Health contains Operations and Observability (`/business/observability`, admin-only read).
   Operate > Business contains Business profile, Models, Secrets, Integrations, Soul, Guardrails,
   People (admin-only read), and About.
@@ -142,7 +143,7 @@ message.
 | 2 | If a remote exists, `expect` status badge, remote URL, last sync text, `Sync now`, and admin-only `Edit`; do not click `Sync now` or submit the form | Read-only inspection only |
 | 3 | If the Git form is visible, verify fields `Remote URL` and `Personal access token`; credential field is blank/write-only | Labels are sentence case; value is masked |
 | 4 | Click `soul.yaml` and one artifact file in the tree | Content viewer renders read-only |
-| 5 | `navigate /business/activities` | Heading "Activities"; chips All, Resources, Chats, Routines, Knowledge, Skills, Integrations, Jobs, Soul render; row sheet shows Action, Category, Actor, Target, Status, When, and optional Details |
+| 5 | `navigate /business/activities` | Heading "Activity"; source chips Everything, Runs (admin only), Records, Chats, Routines, Knowledge, Skills, Integrations, Jobs, Soul render alongside Time range, Auto refresh, Per page, and Problems only; a non-Run row opens a sheet showing Action, Category, Actor, Target, and optional Recorded details |
 | 6 | If admin, `navigate /business/observability`; if member, open it directly | Admin sees range buttons, metric cards, reliability panels, Recent turns, and Grafana Cloud export; member sees "Only an admin can see observability." |
 | 7 | `navigate /business/about` | Heading "About"; version text and `Check for updates` button render |
 | 8 | `capture` screenshot, console delta, failed requests | — |
