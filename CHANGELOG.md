@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.17.0](https://github.com/TulipFarm/tulipfarm/compare/v0.16.0...v0.17.0) (2026-08-28)
+
+### Features
+
+* **chat:** planning and todo graph list ([#617](https://github.com/TulipFarm/tulipfarm/issues/617)) ([fa9a570](https://github.com/TulipFarm/tulipfarm/commit/fa9a5707f958ff558b6af795afb927ddcbe6f307))
+* **routines:** run Routines deterministically without an Agent ([#616](https://github.com/TulipFarm/tulipfarm/issues/616)) ([e097c1d](https://github.com/TulipFarm/tulipfarm/commit/e097c1d77433e28db9250d91f2fc9cf536274cf3))
+* **web:** merge Runs into a unified Activity timeline ([#618](https://github.com/TulipFarm/tulipfarm/issues/618)) ([1830ce0](https://github.com/TulipFarm/tulipfarm/commit/1830ce0442686b80141785ed64577b97e35cf9d5))
+
+### Bug Fixes
+
+* **api): Run event notify + feat(web:** word-blur streaming reveal ([#613](https://github.com/TulipFarm/tulipfarm/issues/613)) ([350e2ac](https://github.com/TulipFarm/tulipfarm/commit/350e2ac3da36b0b9ec38380581af65f9343a4bdc))
+* **docs:** resolve interface review accessibility and contrast findings ([#614](https://github.com/TulipFarm/tulipfarm/issues/614)) ([e0628fd](https://github.com/TulipFarm/tulipfarm/commit/e0628fd3b2d0131469af7862e11e67f2fee5d860))
+
+### Styles
+
+* **ui:** adopt Instrument Sans as the product typeface ([#612](https://github.com/TulipFarm/tulipfarm/issues/612)) ([e689605](https://github.com/TulipFarm/tulipfarm/commit/e689605e64156a185ef0105ec24aea57a9bbe26c))
+
+### Maintenance
+
+* **deps:** bump the minor-and-patch group across 1 directory with 3 updates ([#611](https://github.com/TulipFarm/tulipfarm/issues/611)) ([a3640f6](https://github.com/TulipFarm/tulipfarm/commit/a3640f66f8c8fa31f3c655055290132b167b96b2))
+* remove em-dashes from prose across the repo ([#615](https://github.com/TulipFarm/tulipfarm/issues/615)) ([7e3944d](https://github.com/TulipFarm/tulipfarm/commit/7e3944d93d405931ccd6108e8dfb5d47d452bf1d))
+
 ## [0.16.0](https://github.com/TulipFarm/tulipfarm/compare/v0.15.0...v0.16.0) (2026-08-26)
 
 ### Features
