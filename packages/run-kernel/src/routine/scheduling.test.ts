@@ -52,6 +52,7 @@ function state(input: EnsureStateInput): PersistedState {
     finishedAt: null,
     resultArtifactId: null,
     errorEvidenceRef: null,
+    output: null,
   };
 }
 

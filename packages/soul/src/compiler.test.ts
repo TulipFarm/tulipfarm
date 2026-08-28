@@ -343,12 +343,17 @@ describe("compileExecutionBundle", () => {
       compileExecutionBundle(
         request([
           def("Routine", "child", { start: "s", states: [] }, { authoredVersion: 1 }),
-          def("Trigger", "t", { routineRef: { name: "child", version: "9" } }),
+          def("Routine", "parent", {
+            start: "s",
+            states: [
+              { name: "s", type: "child_routine", routineRef: { name: "child", version: "9" } },
+            ],
+          }),
         ])
       )
     );
     expect(error.code).toBe("VERSION_UNSATISFIED");
-    expect(error.field).toBe("/spec/routineRef/version");
+    expect(error.field).toBe("/spec/states/0/routineRef/version");
   });
 
   it("rejects an ID-based reference whose version constraint does not match", () => {
@@ -362,15 +367,22 @@ describe("compileExecutionBundle", () => {
             { start: "s", states: [] },
             { id: routineId, authoredVersion: 2 }
           ),
-          def("Trigger", "t", {
-            routineRef: { id: routineId, name: "child", version: "1" },
+          def("Routine", "parent", {
+            start: "s",
+            states: [
+              {
+                name: "s",
+                type: "child_routine",
+                routineRef: { id: routineId, name: "child", version: "1" },
+              },
+            ],
           }),
         ])
       )
     );
 
     expect(error.code).toBe("VERSION_UNSATISFIED");
-    expect(error.field).toBe("/spec/routineRef/version");
+    expect(error.field).toBe("/spec/states/0/routineRef/version");
   });
 
   it("rejects inline credential material instead of an opaque reference", () => {

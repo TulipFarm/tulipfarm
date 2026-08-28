@@ -33,6 +33,37 @@ export interface ToolGateRequest {
   readonly guardrailRules?: readonly GuardrailRule[];
   /** Replaces {@link CHAT_DLP_RULES} where a deployment compiles real rules. */
   readonly dlpRules?: readonly DlpRule[];
+  /**
+   * A caller-supplied ceiling that may only narrow, never widen.
+   *
+   * A Routine authors `permissionCeiling` to run a State with less than its owner holds. The
+   * compiler already refuses a ceiling that escalates above the Run's identity, so the only thing
+   * left to enforce is the Tool actually called: without this, an authored `maxRiskClass: "low"`
+   * State still reaches a `high` Tool, because authority alone never looks at risk.
+   */
+  readonly permissionCeiling?: ToolGatePermissionCeiling;
+}
+
+/** The narrowing half of an authored `permissionCeiling`; absent means the Run's own authority. */
+export interface ToolGatePermissionCeiling {
+  readonly maxRiskClass?: string;
+}
+
+/** Ordered least to most dangerous; an unknown class outranks every known one, so it denies. */
+const RISK_ORDER: readonly string[] = ["none", "low", "medium", "high", "critical"];
+
+function riskRank(risk: string): number {
+  const index = RISK_ORDER.indexOf(risk);
+  return index === -1 ? RISK_ORDER.length : index;
+}
+
+/** True when the Tool is more dangerous than the ceiling the author asked for. */
+export function exceedsRiskCeiling(
+  riskClass: string,
+  ceiling: ToolGatePermissionCeiling | undefined
+): boolean {
+  if (ceiling?.maxRiskClass === undefined) return false;
+  return riskRank(riskClass) > riskRank(ceiling.maxRiskClass);
 }
 
 /** The Agent bounding a turn: its name, and the Tools its allowlist offered. */
@@ -69,6 +100,12 @@ export class LiveToolGate implements ToolGate {
     const { definition } = request;
     const contract = this.contractFor(definition);
     if (contract === undefined) return { outcome: "denied", reason: "authorization_denied" };
+
+    // Checked before targets and authority: the ceiling is about what the Tool *is*, so a Tool
+    // above it must be refused even when the caller's own grants would have allowed the call.
+    if (exceedsRiskCeiling(definition.riskClass, request.permissionCeiling)) {
+      return { outcome: "denied", reason: "authorization_denied" };
+    }
 
     // `targetsFor` throws `ToolDefinitionError` on arguments it cannot turn into a target — a
     // reserved `"*"` id, or a type that is not a valid name. Those arguments come straight from the

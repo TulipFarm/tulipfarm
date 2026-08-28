@@ -1,4 +1,9 @@
-import type { ChildAuthority, ChildLink, ChildLinkAncestry } from "@tulipfarm/run-kernel";
+import type {
+  ChildAuthority,
+  ChildAuthorityBinding,
+  ChildLink,
+  ChildLinkAncestry,
+} from "@tulipfarm/run-kernel";
 import { describe, expect, it } from "vitest";
 import {
   ChildAuthorityError,
@@ -25,7 +30,11 @@ function authority(overrides: Partial<ChildAuthority> = {}): ChildAuthority {
   };
 }
 
-function linkedTo(granted: ChildAuthority, runId = "child"): ChildLinkAncestry {
+function linkedTo(
+  granted: ChildAuthority,
+  runId = "child",
+  binding: ChildAuthorityBinding = "delegated"
+): ChildLinkAncestry {
   return {
     parentLink: async (_businessId, childRunId): Promise<ChildLink | null> =>
       childRunId !== runId
@@ -34,6 +43,7 @@ function linkedTo(granted: ChildAuthority, runId = "child"): ChildLinkAncestry {
             parentRunId: "parent",
             childRunId,
             authority: granted,
+            authorityBinding: binding,
             resume: null,
             callId: null,
             detachedAt: null,
@@ -68,6 +78,16 @@ describe("resolveDelegatedBound", () => {
     await expect(resolveDelegatedBound(UNREADABLE, BUSINESS, "child")).rejects.toMatchObject({
       code: "link_unreadable",
     });
+  });
+
+  it("reports a lineage link as unlinked so a child Routine keeps its own authority", async () => {
+    const bound = await resolveDelegatedBound(
+      linkedTo(authority(), "child", "lineage"),
+      BUSINESS,
+      "child"
+    );
+
+    expect(bound).toEqual(UNLINKED_RUN);
   });
 });
 

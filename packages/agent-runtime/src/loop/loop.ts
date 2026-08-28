@@ -19,6 +19,7 @@ import type {
   ExposedTool,
   ToolDispatchResult,
 } from "./contract";
+import { isRetryableFailure } from "./contract";
 import {
   deepestErrorMessage,
   EventSinkFailure,
@@ -29,7 +30,7 @@ import {
 import { askFor, distilledPayload, latestAsk } from "./distill";
 import { extractSkillName, narrowToolsToSkill, SKILL_TOOL } from "./narrowing";
 import { capToolResult, MAX_TOOL_RESULT_CHARS } from "./oversize";
-import { callSignature, repeatedCall } from "./repeat";
+import { callSignature, elideRepeatedSkillText, repeatedCall } from "./repeat";
 import {
   extractRereadFile,
   FILE_READ_TOOL,
@@ -123,35 +124,49 @@ export class AgentLoop {
       });
     };
 
+    const resumeState = (
+      pendingCall?: AgentLoopResumeState["pendingCall"]
+    ): AgentLoopResumeState => ({
+      messages: messages.slice(input.messages.length),
+      ...(pendingCall === undefined ? {} : { pendingCall }),
+      ...(activeSkillName === undefined ? {} : { activeSkillName }),
+      ...(reported ? { reported } : {}),
+      ...(reread.length === 0 ? {} : { rereadFiles: reread }),
+      sequence,
+      textIndex,
+    });
+
     const checkpoint = async (pendingCall?: AgentLoopResumeState["pendingCall"]): Promise<void> => {
       const next: AgentLoopCheckpoint = {
         businessId: input.businessId,
         runId: input.runId,
         stateId: input.stateId,
         ...counters,
-        resume: {
-          messages: messages.slice(input.messages.length),
-          ...(pendingCall === undefined ? {} : { pendingCall }),
-          ...(activeSkillName === undefined ? {} : { activeSkillName }),
-          ...(reported ? { reported } : {}),
-          ...(reread.length === 0 ? {} : { rereadFiles: reread }),
-          sequence,
-          textIndex,
-        },
+        resume: resumeState(pendingCall),
       };
       await this.deps.checkpoints.save(next);
     };
 
-    /** A settled loop keeps its counters and drops the transcript it no longer owes anyone. */
+    /**
+     * A settled loop keeps its counters and drops the transcript it no longer owes anyone.
+     *
+     * A transient model failure is the exception: the loop is settled, but the Tool results it
+     * already paid for are exactly what a retry would otherwise buy again. Holding the transcript
+     * is what lets a retry of the same Turn resume instead of re-running every Tool. Failures a
+     * retry cannot fix — a limit, an exhausted budget, a misconfigured provider — still drop it,
+     * so Tool arguments and outputs are not retained past the Turn that could still use them.
+     */
     const finish = async (
       outcome: AgentLoopOutcome,
       type: AgentLoopEventType
     ): Promise<AgentLoopOutcome> => {
+      const retryable = outcome.status === "failed" && isRetryableFailure(outcome.reason);
       await this.deps.checkpoints.save({
         businessId: input.businessId,
         runId: input.runId,
         stateId: input.stateId,
         ...counters,
+        ...(retryable ? { resume: resumeState() } : {}),
       });
       await emit(type);
       return outcome;
@@ -369,6 +384,13 @@ export class AgentLoop {
           const repeatKey = callSignature(call.name, call.arguments);
           const repeats = repeatKey === undefined ? 1 : (repeatCounts.get(repeatKey) ?? 0) + 1;
           if (repeatKey !== undefined) repeatCounts.set(repeatKey, repeats);
+          // A repeated `skill` load answers with a Skill that cannot have changed mid-Turn, so the
+          // second copy of its text is dropped. The Tool still ran, so the broker still re-checked
+          // authorization; only the bytes the model is already holding are left out.
+          const output =
+            repeats > 1 && call.name === SKILL_TOOL
+              ? elideRepeatedSkillText(dispatched.output)
+              : dispatched.output;
           // Distilled here rather than inside the Tool: the Tool stays deterministic and
           // replayable, and the model call that shrinks its result lands where every other model
           // call in this Turn already is — budgeted, logged, and visible as second-hand.
@@ -376,7 +398,7 @@ export class AgentLoop {
             {
               toolName: call.name,
               arguments: call.arguments,
-              output: dispatched.output,
+              output,
               ask: askFor(call.arguments, participantAsk),
               policy: input.modelPolicy ?? {},
             },

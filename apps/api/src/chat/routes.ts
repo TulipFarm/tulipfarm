@@ -6,6 +6,7 @@ import type { SoulLoader } from "@tulipfarm/soul";
 import { DEFAULT_ASSISTANT_NAME } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
+import { chatConversationService } from "../conversations/chat-turns";
 import type { ConversationStore } from "../conversations/service";
 import { MemoryRateLimiter, makeRateLimitHook, type RateLimiter } from "../rate-limit";
 import {
@@ -187,10 +188,11 @@ export function registerChatRoutes(
           .code(409)
           .send({ error: "duplicate chat invocation", runId: submission.runId });
       }
-      const runId = submission.run?.runId;
-      if (!runId) {
+      const claim = submission.run;
+      if (!claim) {
         return reply.code(503).send({ error: "chat turn could not be dispatched" });
       }
+      const runId = claim.runId;
 
       if (attachments.length > 0) {
         // Provenance for the Files library, not part of the send contract: the message is already
@@ -211,6 +213,8 @@ export function registerChatRoutes(
       reply.header("X-Run-Id", runId);
       writeSseHeaders(reply.raw, {
         "X-Run-Id": runId,
+        // The Turn, so a retry can re-enter this one rather than asking the question twice.
+        "X-Turn-Id": claim.turnId,
         "X-Conversation-Id": entry.conversation._id,
         // Only user-selected Soul Agents are exposed; normal chat has no Agent identity.
         ...(entry.agentId === DEFAULT_ASSISTANT_NAME ? {} : { "X-Agent-Id": entry.agentId }),
@@ -228,6 +232,105 @@ export function registerChatRoutes(
           keepaliveMs: SSE_KEEPALIVE_MS,
           ...(stream.pageSize === undefined ? {} : { pageSize: stream.pageSize }),
           ...(stream.waitForNotify === undefined ? {} : { waitForNotify: stream.waitForNotify }),
+        },
+        { runId, after: 0 }
+      );
+    }
+  );
+
+  app.post(
+    "/api/v1/chat/turns/:turnId/retry",
+    {
+      preHandler: [requireAuth, rateLimitHook],
+      schema: {
+        description:
+          "Retry the turn `turnId` as a new attempt and stream the Run that answers it (SSE, the " +
+          "same frames as `POST /api/v1/chat`). Unlike re-sending the message, this reuses the " +
+          "existing Turn: no second copy of the question is written, and the failed attempt's " +
+          "unfinished Tool work is carried forward, so a retry after a provider error does not " +
+          "run every Tool again. 404 if the turn is unknown or not the caller's.",
+        tags: ["chat"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        params: {
+          type: "object",
+          required: ["turnId"],
+          properties: { turnId: { type: "string", minLength: 1 } },
+        },
+        body: ChatBodySchema,
+        response: {
+          401: ErrorSchema,
+          403: ErrorSchema,
+          404: ErrorSchema,
+          429: ErrorSchema,
+          503: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const principal = req.principal;
+      const user = req.user as { _id: string } | undefined;
+      if (!(principal && user)) {
+        return reply.code(401).send({ error: "unauthorized" });
+      }
+      const { turnId } = req.params as { turnId: string };
+      const body = req.body as ChatBody;
+
+      const turn = await options.conversationStore.findTurn(principal.businessId, turnId);
+      // One 404 for absent and for not-yours alike: telling them apart would answer whether a
+      // given Turn id exists in this deployment, which is the question the check exists to deny.
+      const conversation = turn && (await options.repo.findById(turn.conversationId));
+      if (!turn || !conversation || conversation.userId !== user._id) {
+        return reply.code(404).send({ error: "turn not found" });
+      }
+
+      // The Agent is the Conversation's, never the body's: a retry re-runs the question that was
+      // asked, and letting the client re-target it here would be an edit wearing a retry's name.
+      const agentId = conversation.agentId ?? DEFAULT_ASSISTANT_NAME;
+      const conversations = chatConversationService(
+        { store: options.conversationStore, invocations: options.invocations },
+        {
+          principal: { kind: principal.kind, id: principal.id, businessId: principal.businessId },
+          payload: { ...body, conversationId: turn.conversationId, agentId },
+          agentId,
+        }
+      );
+
+      let runId: string;
+      try {
+        // `same_turn`: a new attempt on the Turn that already holds the question. `new_turn` would
+        // append a second copy of it, which is the duplicate the participant sees today.
+        ({ runId } = await conversations.retryTurn({
+          businessId: principal.businessId,
+          turnId,
+          mode: "same_turn",
+        }));
+      } catch (error) {
+        req.log.warn({ err: error, turnId }, "chat turn retry could not be dispatched");
+        return reply.code(503).send({ error: "chat turn could not be dispatched" });
+      }
+
+      const grant = await stream.authorize(req, runId);
+      if (!grant) return reply.code(403).send({ error: "run stream not authorized" });
+
+      reply.header("X-Run-Id", runId);
+      writeSseHeaders(reply.raw, {
+        "X-Run-Id": runId,
+        "X-Turn-Id": turnId,
+        "X-Conversation-Id": turn.conversationId,
+        ...(agentId === DEFAULT_ASSISTANT_NAME ? {} : { "X-Agent-Id": agentId }),
+        ...corsPassthrough(reply),
+      });
+      reply.hijack();
+      await streamRunEvents(
+        sinkFor(reply),
+        {
+          events: stream.events,
+          runs: stream.runs,
+          authorize: () => stream.authorize(req, runId),
+          sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+          ...(stream.pollIntervalMs === undefined ? {} : { pollIntervalMs: stream.pollIntervalMs }),
+          keepaliveMs: SSE_KEEPALIVE_MS,
+          ...(stream.pageSize === undefined ? {} : { pageSize: stream.pageSize }),
         },
         { runId, after: 0 }
       );

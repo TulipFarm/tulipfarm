@@ -1,5 +1,6 @@
-import { contentText } from "@tulipfarm/schema";
+import { contentText, WEB_FETCH_TOOL_DECLARATION } from "@tulipfarm/schema";
 import type { ModelRequirementsPolicy } from "../models/requirements";
+import { charsForTokens, estimateTokens } from "../models/requirements";
 import type { ModelMessage } from "../ports";
 
 /**
@@ -20,15 +21,53 @@ import type { ModelMessage } from "../ports";
  */
 
 /**
- * Result size at which distilling is worth a model call.
+ * Result size at which distilling is worth a model call, in tokens.
  *
  * Below it, distilling costs a round trip and a second chance to be wrong in exchange for saving
- * a few hundred tokens. A full web page is an order of magnitude above it.
+ * context the Turn can afford. Above it, a result is large enough that carrying it into every
+ * remaining iteration costs more than reading it once.
+ *
+ * Measured in tokens, not characters, because tokens are what a result actually spends. The
+ * previous 4,000-character bar was set against full web pages and assumed nothing lived between a
+ * fragment and a page — but a short article or a documentation section does, and one of those is
+ * cheaper to carry whole than to summarise and then have to re-read.
  */
-export const DISTILL_THRESHOLD_CHARS = 4_000;
+export const DISTILL_THRESHOLD_TOKENS = 10_000;
 
-/** Hard ceiling on a result that is never distilled, so a missing port cannot flood the prompt. */
-export const MAX_RAW_RESULT_CHARS = 24_000;
+/**
+ * The one Tool whose results are summarised: a read of a public web page.
+ *
+ * Distillation earns its cost only where the input is prose written for a human — a page whose
+ * useful sentence sits inside a hundred kilobytes of navigation, markup and boilerplate. There the
+ * summariser is exactly the right shape: it fences the input as hostile, ignores instructions
+ * inside it, and demands quotes with URLs.
+ *
+ * `api_request` is deliberately absent. A JSON or GraphQL response is already the compact form, so
+ * a summary is pure loss — the field names an Agent must write code against are the first thing it
+ * drops. Worse, merely *offering* the option cost real calls: the Tool is `mutating` and never
+ * cached, and an Agent told its result would be filtered would re-send a request it had already
+ * paid for to look at a part of the response it feared had been dropped. A response too large to
+ * carry is a request that should be narrowed — with pagination, query parameters or a GraphQL
+ * selection — not a response that should be guessed at second hand. Oversized ones fall to the
+ * same visible cut every other undistilled Tool gets.
+ *
+ * Taken from the declaration rather than spelled again here, so a rename cannot silently drop the
+ * Tool out of the set.
+ */
+export const DISTILLED_TOOLS: ReadonlySet<string> = new Set([WEB_FETCH_TOOL_DECLARATION.name]);
+
+/**
+ * Hard ceiling in tokens on a result that is never distilled, so a missing port cannot flood the
+ * prompt.
+ *
+ * The same number as {@link DISTILL_THRESHOLD_TOKENS} on purpose: one bar for how much of any
+ * result the transcript will carry, whoever produced it. A trusted internal result held to a
+ * tighter bar than an untrusted web page would be the wrong way round.
+ */
+export const MAX_RAW_RESULT_TOKENS = 10_000;
+
+/** {@link MAX_RAW_RESULT_TOKENS} as the character count a cut is actually made at. */
+const MAX_RAW_RESULT_CHARS = charsForTokens(MAX_RAW_RESULT_TOKENS);
 
 /** How long a distillation may take before the Turn stops waiting and keeps the truncated result. */
 export const DISTILL_TIMEOUT_MS = 20_000;
@@ -222,7 +261,7 @@ function linkList(value: unknown): readonly string[] {
 
 /** Nothing to gain from a model call below the threshold. */
 export function shouldDistill(content: string): boolean {
-  return content.length > DISTILL_THRESHOLD_CHARS;
+  return estimateTokens(content) > DISTILL_THRESHOLD_TOKENS;
 }
 
 /**
@@ -237,6 +276,28 @@ export async function distilledPayload(
   port: ToolResultDistillerPort | undefined,
   log?: { warn: (obj: unknown, msg?: string) => void }
 ): Promise<Record<string, unknown>> {
+  // Only a network Tool is summarised. Everything else returns text this instance authored or
+  // owns — a Skill's instructions, Records, a Resource schema, Knowledge — and the distiller is
+  // built for the opposite: it fences its input as hostile, tells the summariser to ignore any
+  // instruction inside it, and asks for quotes with URLs that internal data does not have. Run
+  // over a Skill it replaced the authoring rules with prose *about* them, and its "fetch a
+  // narrower target" note read to the model as an instruction to load the Skill again.
+  //
+  // So the rule is opt-in, matching `docs/architecture/governed-network-tools.md`. A large
+  // trusted result is still bounded, but by a cut it can see, not by a second model's reading.
+  if (!DISTILLED_TOOLS.has(request.toolName)) {
+    const raw = resultText(request.output);
+    if (raw.length <= MAX_RAW_RESULT_CHARS) return { output: request.output };
+    return {
+      output: {
+        truncated: true,
+        tool: request.toolName,
+        content: raw.slice(0, MAX_RAW_RESULT_CHARS),
+        note: `This result was about ${estimateTokens(raw)} tokens and was cut to ${MAX_RAW_RESULT_TOKENS}. Repeating the same call returns the same cut; ask for a narrower target instead.`,
+      },
+    };
+  }
+
   const content = contentEnvelope(request.output);
   if (!shouldDistill(content)) return { output: request.output };
 
@@ -283,7 +344,7 @@ export async function distilledPayload(
       truncated: true,
       tool: request.toolName,
       content: content.slice(0, MAX_RAW_RESULT_CHARS),
-      note: `This result was ${content.length} characters and was cut to ${MAX_RAW_RESULT_CHARS}. Request a narrower target if the part you need is missing.`,
+      note: `This result was about ${estimateTokens(content)} tokens and was cut to ${MAX_RAW_RESULT_TOKENS}. Request a narrower target if the part you need is missing.`,
     },
   };
 }

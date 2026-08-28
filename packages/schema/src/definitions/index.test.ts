@@ -15,7 +15,6 @@ describe("Authored definition registry integration", () => {
       "ToolContract",
       "ModelProfile",
       "Routine",
-      "Trigger",
       "Role",
       "Resource",
       "Guardrail",

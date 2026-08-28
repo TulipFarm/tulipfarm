@@ -36,7 +36,7 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
 | `src/tasks/` | Task routes, ranking. System-created human work items — no user-facing create route. |
 | `src/kill-switches/` | Operator-armed emergency stop over mutating effects; admin-gated routes. |
 | `src/surfaces/`, `src/forms/` | Tulip Surface Protocol and form APIs. |
-| `src/ingress/`, `src/triggers/`, `src/schedule/` | Ingress, triggers, schedules. |
+| `src/ingress/`, `src/triggers/`, `src/schedule/` | Ingress, triggers, schedules. `triggers/event-dispatch.ts` is the only place an internally raised event (Record CRUD, Integration event, Routine `emit`) becomes a Run; a webhook binds in its own route instead, because its URL already names the Trigger — but that route must still run `passesTriggerContentGate`, since the URL says which Trigger, not whether the author wanted this event. |
 | `src/admin/`, `src/setup/`, `src/onboarding/`, `src/system/` | Admin, setup, health. |
 | `src/pg-migrations/` | Boot-applied PostgreSQL schema migrations. |
 | `src/test/` | API test helpers. |

@@ -3,7 +3,11 @@ import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { ParticipantToolCall } from "@tulipfarm/schema";
 import type { FastifyBaseLogger, FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
+import * as ChildRoutineHost from "./child-routine-host";
+import { registerChildRoutineRoutes } from "./child-routine-routes";
 import * as DeliveryHost from "./delivery-host";
+import * as EmitHost from "./emit-host";
+import { registerEmitRoutes } from "./emit-routes";
 import * as RoutineApprovalHost from "./routine-approval-host";
 import { registerRoutineApprovalRoutes } from "./routine-approval-routes";
 import * as InternalSchemas from "./schemas";
@@ -32,6 +36,22 @@ const ROUTINE_APPROVAL_DENIAL_STATUS: Readonly<
   not_a_routine: 400,
 };
 
+const CHILD_ROUTINE_DENIAL_STATUS: Readonly<Record<ChildRoutineHost.ChildRoutineDenial, number>> = {
+  run_not_found: 404,
+  run_not_running: 409,
+  not_a_routine: 400,
+  depth_limit_exceeded: 409,
+  deadline_not_bounded: 400,
+};
+
+const EMIT_DENIAL_STATUS: Readonly<Record<EmitHost.EmitDenial, number>> = {
+  run_not_found: 404,
+  run_not_running: 409,
+  not_a_routine: 400,
+  depth_limit_exceeded: 409,
+  reserved_event_type: 400,
+};
+
 export interface InternalTurnRouteDeps {
   readonly host: TurnHost.InternalTurnHost;
   deliveries?(log: FastifyBaseLogger): DeliveryHost.IngressDeliveryHost;
@@ -48,6 +68,8 @@ export interface InternalTurnRouteDeps {
     | TaskReconcileSignals
     | undefined;
   readonly routineApprovals?: RoutineApprovalHost.InternalRoutineApprovalHost;
+  readonly childRoutines?: ChildRoutineHost.InternalChildRoutineHost;
+  readonly emissions?: EmitHost.InternalEmitHost;
 }
 
 /** Payload for `GET /api/v1/internal/task-reconcile-signals`; see {@link InternalTurnRouteDeps}. */
@@ -86,6 +108,14 @@ export function registerInternalTurnRoutes(
       }
       if (error instanceof RoutineApprovalHost.RoutineApprovalDeniedError) {
         await reply.code(ROUTINE_APPROVAL_DENIAL_STATUS[error.code]).send({ error: error.code });
+        return undefined;
+      }
+      if (error instanceof ChildRoutineHost.ChildRoutineDeniedError) {
+        await reply.code(CHILD_ROUTINE_DENIAL_STATUS[error.code]).send({ error: error.code });
+        return undefined;
+      }
+      if (error instanceof EmitHost.EmitDeniedError) {
+        await reply.code(EMIT_DENIAL_STATUS[error.code]).send({ error: error.code });
         return undefined;
       }
       if (error instanceof DeliveryHost.DeliveryDeniedError) {
@@ -502,6 +532,8 @@ export function registerInternalTurnRoutes(
   );
 
   registerRoutineApprovalRoutes(app, deps.routineApprovals, preHandler, guard);
+  registerChildRoutineRoutes(app, deps.childRoutines, preHandler, guard);
+  registerEmitRoutes(app, deps.emissions, preHandler, guard);
 
   const deliveries = deps.deliveries?.(app.log);
   if (deliveries === undefined) return;

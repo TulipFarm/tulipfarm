@@ -27,6 +27,8 @@ export interface RemoteTurnIdentity {
   readonly turnId: string;
   readonly conversationId: string;
   readonly attempt: number;
+  /** The Run this attempt supersedes, so a retry can reread what the failed attempt already did. */
+  readonly previousRunId?: string;
 }
 
 /** Mirrors `TaskReconcileSignals` in `apps/api/src/internal/routes.ts` across the HTTP boundary. */
@@ -39,7 +41,7 @@ export interface TaskReconcileSignals {
 
 /** A dispatch outcome as the host reports it: the caller already holds the `callId`. */
 type RemoteToolResult =
-  | { readonly status: "succeeded"; readonly output: unknown }
+  | { readonly status: "succeeded"; readonly output: unknown; readonly replayed?: true }
   | { readonly status: "denied"; readonly reason: string; readonly connectUrl?: string }
   | { readonly status: "invalid_arguments"; readonly reason: string }
   | { readonly status: "failed"; readonly reason: string }
@@ -54,7 +56,12 @@ type RemoteToolResult =
 function withCallId(callId: string, result: RemoteToolResult): ToolDispatchResult {
   switch (result.status) {
     case "succeeded":
-      return { status: "succeeded", callId, output: result.output };
+      return {
+        status: "succeeded",
+        callId,
+        output: result.output,
+        ...(result.replayed === true ? { replayed: true as const } : {}),
+      };
     case "awaiting_approval":
       return { status: "awaiting_approval", callId, approvalId: result.approvalId };
     case "awaiting_child":
@@ -186,6 +193,9 @@ export class HttpTurnHost
           ? {}
           : { activeSkillName: request.activeSkillName }),
         ...(request.agentName === undefined ? {} : { agentName: request.agentName }),
+        ...(request.permissionCeiling === undefined
+          ? {}
+          : { permissionCeiling: request.permissionCeiling }),
       }
     );
     return withCallId(request.callId, result);

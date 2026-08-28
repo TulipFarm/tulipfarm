@@ -199,6 +199,29 @@ function execute(
     return { source: "evaluated", output: null, next: outcome, extraMs: 0, effect: null };
   }
 
+  // The resolved input *is* the output: `compute` assigns, so there is nothing left to fixture.
+  if (state.type === "compute") {
+    return {
+      source: "evaluated",
+      output: input,
+      next: stateOutcome(state),
+      extraMs: 0,
+      effect: null,
+    };
+  }
+
+  // Simulation announces nothing. The resolved `input` is already recorded as the step's payload,
+  // so a reader sees what *would* be emitted without any Trigger binding it to a real Run.
+  if (state.type === "emit") {
+    return {
+      source: "evaluated",
+      output: null,
+      next: stateOutcome(state),
+      extraMs: 0,
+      effect: null,
+    };
+  }
+
   if (state.type === "agent") {
     const output = fixtureValue(fixture.model, state);
     return { source: "model", output, next: stateOutcome(state), extraMs: 0, effect: null };

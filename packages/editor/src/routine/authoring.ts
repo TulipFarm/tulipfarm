@@ -183,7 +183,7 @@ function risk(
   if (definition.spec.states.some((state) => state.type === "tool")) return "high";
   if (
     definition.spec.states.some((state) =>
-      ["agent", "child_routine", "compensate"].includes(state.type)
+      ["agent", "child_routine", "compensate", "emit"].includes(state.type)
     )
   ) {
     return "medium";

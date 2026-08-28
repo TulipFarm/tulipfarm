@@ -113,6 +113,54 @@ describe("ingress repos (PGlite)", () => {
       expect(row.payload.channel).toBe("C1");
     });
 
+    it("returns the first event's id when the provider replays the same event", async () => {
+      const repo = new IntegrationEventsRepo(db);
+      const doc = {
+        integrationSlug: "slack",
+        protocol: "slack",
+        eventType: "member_joined_channel",
+        externalId: "Ev123",
+        payload: { channel: "C1" },
+      };
+
+      const first = await repo.insert(doc);
+      const replay = await repo.insert(doc);
+
+      // The id becomes the Trigger envelope's deduplication key, so a fresh one per delivery
+      // would start a second Run for one provider event.
+      expect(replay.id).toBe(first.id);
+      const rows = await db.query(
+        "SELECT id FROM integration_events WHERE integration_slug = $1 AND external_id = $2",
+        ["slack", "Ev123"]
+      );
+      expect(rows.rows).toHaveLength(1);
+    });
+
+    it("keeps distinct event types on one external id apart", async () => {
+      const repo = new IntegrationEventsRepo(db);
+      const base = {
+        integrationSlug: "slack",
+        protocol: "slack",
+        externalId: "Ev123",
+        payload: {},
+      };
+
+      const joined = await repo.insert({ ...base, eventType: "member_joined_channel" });
+      const left = await repo.insert({ ...base, eventType: "member_left_channel" });
+
+      expect(left.id).not.toBe(joined.id);
+    });
+
+    it("does not dedupe across integrations", async () => {
+      const repo = new IntegrationEventsRepo(db);
+      const base = { protocol: "webhook", eventType: "push", externalId: "Ev123", payload: {} };
+
+      const slack = await repo.insert({ ...base, integrationSlug: "slack" });
+      const github = await repo.insert({ ...base, integrationSlug: "github" });
+
+      expect(github.id).not.toBe(slack.id);
+    });
+
     it("allows a missing external id", async () => {
       const repo = new IntegrationEventsRepo(db);
       const event = await repo.insert({
@@ -125,6 +173,21 @@ describe("ingress repos (PGlite)", () => {
         event.id,
       ]);
       expect((r.rows[0] as { external_id: string | null }).external_id).toBeNull();
+    });
+
+    it("still inserts every event that has no external id to dedupe on", async () => {
+      const repo = new IntegrationEventsRepo(db);
+      const doc = {
+        integrationSlug: "slack",
+        protocol: "slack",
+        eventType: "reaction_added",
+        payload: {},
+      };
+
+      const first = await repo.insert(doc);
+      const second = await repo.insert(doc);
+
+      expect(second.id).not.toBe(first.id);
     });
   });
 

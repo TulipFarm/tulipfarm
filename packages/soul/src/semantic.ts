@@ -245,6 +245,42 @@ function checkStableIdVersions(index: DefinitionIndex): SoulSemanticIssue[] {
   return issues;
 }
 
+// ── Trigger names across the tree ───────────────────────────────────────────────
+
+/**
+ * A Trigger `name` is its public address — the `:trigger` of `/api/v1/hooks/:provider/:trigger`
+ * and the `:slug` of `/api/v1/triggers/:slug/invoke`. Containment makes it unique within one
+ * Routine, but two Routines can still claim the same name, and then delivery resolves by load
+ * order and silently starts whichever Routine happened to load first. Publication is the only
+ * layer that sees every Routine, so it is the only layer that can refuse the pair.
+ */
+function checkTriggerNames(index: DefinitionIndex): SoulSemanticIssue[] {
+  const owners = new Map<string, Array<{ def: AuthoredDefinition; field: string }>>();
+  for (const def of index.all) {
+    if (def.kind !== "Routine" || !Array.isArray(def.spec.triggers)) continue;
+    def.spec.triggers.forEach((trigger, i) => {
+      if (!isRecord(trigger) || typeof trigger.name !== "string") return;
+      const claims = owners.get(trigger.name) ?? [];
+      claims.push({ def, field: `/spec/triggers/${i}/name` });
+      owners.set(trigger.name, claims);
+    });
+  }
+
+  const issues: SoulSemanticIssue[] = [];
+  for (const [name, claims] of owners) {
+    if (claims.length < 2) continue;
+    for (const claim of claims) {
+      issues.push({
+        code: "TRIGGER_NAME_CONFLICT",
+        subject: claim.def.subject,
+        ref: name,
+        field: claim.field,
+      });
+    }
+  }
+  return issues;
+}
+
 // ── Public entrypoint ───────────────────────────────────────────────────────────
 
 /** Validate tree-level semantics and throw one payload-safe error containing all issues. */
@@ -255,6 +291,7 @@ export function validateSoulSemantics(documents: readonly VersionedSchemaDocumen
     ...resolveReferences(index),
     ...checkStableIdVersions(index),
     ...checkRoutineGraphs(index),
+    ...checkTriggerNames(index),
     ...checkSkillCommands(index),
     ...checkCycles(index),
     ...analyzeCapabilities(index),

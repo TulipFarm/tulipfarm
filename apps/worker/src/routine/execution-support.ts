@@ -1,6 +1,7 @@
 import {
   type CompiledExpression,
   type CompiledState,
+  inputNodeExpressions,
   isTimerWait,
   RoutineStepError,
   type StateStatus,
@@ -61,11 +62,16 @@ export const SUPPORTED_TYPES: ReadonlySet<string> = new Set([
   "agent",
   "approval",
   "branch",
+  "child_routine",
+  "compute",
+  "emit",
   "tool",
   "wait",
   "parallel",
   "foreach",
   "repeat_until",
+  "script",
+  "action",
 ]);
 
 /** Error reference an expired `wait` raises, so an authored `onError` handler can claim it. */
@@ -76,6 +82,12 @@ export const TOOL_ERROR_PREFIX = "tool_";
 
 /** Prefix an authored `onError` handler claims a refused or failed Agent answer by. */
 export const AGENT_ERROR_PREFIX = "agent_";
+
+/** Prefix an authored `onError` handler claims a failed `script` State by. */
+export const SCRIPT_ERROR_PREFIX = "script_";
+
+/** Prefix an authored `onError` handler claims a refused or failed `action` State by. */
+export const ACTION_ERROR_PREFIX = "action_";
 
 export function artifactId(payloadRef: unknown, state: string): string {
   if (typeof payloadRef !== "string" || !payloadRef.startsWith("artifact:")) {
@@ -119,6 +131,12 @@ export function assertSupportedState(state: CompiledState): void {
     assertSupportedExpression(condition.condition, state.name);
   }
   if (state.iterator !== null) assertSupportedExpression(state.iterator, state.name);
+  // A `compute` State's input mappings are its whole body, so an unbuildable root is refused here
+  // by name rather than surfacing later as an unevaluable input on a State that looks inert.
+  if (state.type === "compute") assertSupportedInput(state);
+  // A `script`'s and an `action`'s inputs are likewise their whole body — the function's arguments
+  // and the Tool's arguments — so an unbuildable root is refused here rather than at dispatch.
+  if (state.type === "script" || state.type === "action") assertSupportedInput(state);
   // An `event` wait is resolved by a signal nothing in this process delivers; parking it is the
   // only honest answer, because opening it would strand the Run on a wait with no signaller.
   if (state.type === "wait" && !isTimerWait(state)) {
@@ -128,7 +146,9 @@ export function assertSupportedState(state: CompiledState): void {
 
 export function assertSupportedInput(state: CompiledState): void {
   for (const mapping of state.inputs) {
-    if (mapping.expression !== null) assertSupportedExpression(mapping.expression, state.name);
+    for (const expression of inputNodeExpressions(mapping.node)) {
+      assertSupportedExpression(expression, state.name);
+    }
   }
 }
 

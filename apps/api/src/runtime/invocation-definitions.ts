@@ -1,4 +1,5 @@
 import {
+  compileTriggerFilter,
   type RegisteredTrigger,
   type ResolvedRoutineInvocation,
   type RoutineInvocationResolver,
@@ -8,7 +9,8 @@ import {
   type WebhookVerificationMethod,
 } from "@tulipfarm/run-kernel";
 import { definitions } from "@tulipfarm/schema";
-import type { BundleVerifier, SoulPublicationCoordinator } from "@tulipfarm/soul";
+import type { BundleDefinition, BundleVerifier, SoulPublicationCoordinator } from "@tulipfarm/soul";
+import { bundleTriggerDefinitions, findBundleTrigger } from "@tulipfarm/soul";
 
 const ROUTINE_DEFINITION_PREFIX = "published:routine:";
 
@@ -92,6 +94,99 @@ export class ActiveRoutineInvocationResolver implements RoutineInvocationResolve
 }
 
 /**
+ * Trigger types bound to an event by matching rather than by name. `webhook` is excluded on
+ * purpose: its route already knows the exact slug from the URL, so matching could only make a
+ * precise binding ambiguous.
+ */
+const EVENT_TRIGGER_TYPES: readonly string[] = ["integration_event", "internal_event", "form"];
+
+function optionalNonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+/**
+ * Decode one bundle definition into the matcher's view, or `null` when any authored field is
+ * malformed. Fails closed: a Trigger that cannot be decoded exactly must never bind an event.
+ */
+function toRegisteredTrigger(slug: string, definition: BundleDefinition): RegisteredTrigger | null {
+  const document = definition.document;
+  const metadata = isRecord(document.metadata) ? document.metadata : undefined;
+  const spec = isRecord(document.spec) ? document.spec : undefined;
+  if (metadata?.lifecycle !== "published" || spec === undefined) return null;
+
+  const type = spec.type;
+  if (typeof type !== "string" || !TRIGGER_TYPES.includes(type)) return null;
+
+  const routineRef = spec.routineRef;
+  if (
+    !isRecord(routineRef) ||
+    typeof routineRef.name !== "string" ||
+    routineRef.name.length === 0 ||
+    typeof routineRef.version !== "string" ||
+    routineRef.version.length === 0
+  ) {
+    return null;
+  }
+
+  const eventType = spec.eventType;
+  const eventVersion = spec.eventVersion;
+  if (typeof eventType !== "string" || eventType.length === 0 || typeof eventVersion !== "number") {
+    return null;
+  }
+
+  const backgroundIdentity = spec.backgroundIdentity;
+  if (
+    !isRecord(backgroundIdentity) ||
+    typeof backgroundIdentity.principalKind !== "string" ||
+    backgroundIdentity.principalKind.length === 0 ||
+    typeof backgroundIdentity.principalId !== "string" ||
+    backgroundIdentity.principalId.length === 0
+  ) {
+    return null;
+  }
+
+  const inputMappings = mapInputMappings(spec.inputMapping);
+  if (inputMappings === null) return null;
+
+  // `integration_event` and `internal_event` declare the event they *listen for* separately from
+  // the event they represent, because the envelope arrives already typed by its source.
+  const matchEventType = optionalNonEmptyString(spec.matchEventType);
+  const matchEventVersion =
+    typeof spec.matchEventVersion === "number" ? spec.matchEventVersion : undefined;
+
+  const filter = optionalNonEmptyString(spec.filter);
+  if (filter !== undefined) {
+    try {
+      compileTriggerFilter(filter);
+    } catch {
+      return null;
+    }
+  }
+
+  return {
+    triggerSlug: slug,
+    authoredVersion: definition.authoredVersion,
+    lifecycle: "published",
+    type: type as TriggerKind,
+    eventType: matchEventType ?? eventType,
+    eventVersion: matchEventVersion ?? eventVersion,
+    routineRef: { name: routineRef.name, version: routineRef.version },
+    backgroundIdentity: {
+      principalKind: backgroundIdentity.principalKind,
+      principalId: backgroundIdentity.principalId,
+    },
+    ...(inputMappings === undefined ? {} : { inputMappings }),
+    ...(optionalNonEmptyString(spec.provider) === undefined
+      ? {}
+      : { provider: spec.provider as string }),
+    ...(optionalNonEmptyString(spec.formRef) === undefined
+      ? {}
+      : { formRef: spec.formRef as string }),
+    ...(filter === undefined ? {} : { filter }),
+  };
+}
+
+/**
  * Resolve Triggers only from verified active bundles; manual/internal_api envelopes stay
  * unverified.
  */
@@ -106,66 +201,24 @@ export class ActiveTriggerInvocationResolver {
     if (slug.length === 0) return null;
 
     const bundle = await this.publications.activeBundle(this.businessId, this.verifier);
-    const definition = bundle?.get("Trigger", slug);
+    const definition = findBundleTrigger(bundle, slug);
     if (!bundle || !definition) return null;
 
-    const document = definition.document;
-    const metadata = isRecord(document.metadata) ? document.metadata : undefined;
-    const spec = isRecord(document.spec) ? document.spec : undefined;
-    if (metadata?.lifecycle !== "published" || spec === undefined) return null;
+    return toRegisteredTrigger(slug, definition);
+  }
 
-    const type = spec.type;
-    if (typeof type !== "string" || !TRIGGER_TYPES.includes(type)) return null;
+  /** Every published Trigger that binds an event by matching. Never throws; an unreadable
+   * publication yields none, so a bad bundle cannot mint Runs. */
+  async listEventTriggers(): Promise<readonly RegisteredTrigger[]> {
+    const bundle = await this.publications.activeBundle(this.businessId, this.verifier);
+    if (!bundle) return [];
 
-    const routineRef = spec.routineRef;
-    if (
-      !isRecord(routineRef) ||
-      typeof routineRef.name !== "string" ||
-      routineRef.name.length === 0 ||
-      typeof routineRef.version !== "string" ||
-      routineRef.version.length === 0
-    ) {
-      return null;
+    const registered: RegisteredTrigger[] = [];
+    for (const definition of bundleTriggerDefinitions(bundle)) {
+      const trigger = toRegisteredTrigger(definition.slug, definition);
+      if (trigger !== null && EVENT_TRIGGER_TYPES.includes(trigger.type)) registered.push(trigger);
     }
-
-    const eventType = spec.eventType;
-    const eventVersion = spec.eventVersion;
-    if (
-      typeof eventType !== "string" ||
-      eventType.length === 0 ||
-      typeof eventVersion !== "number"
-    ) {
-      return null;
-    }
-
-    const backgroundIdentity = spec.backgroundIdentity;
-    if (
-      !isRecord(backgroundIdentity) ||
-      typeof backgroundIdentity.principalKind !== "string" ||
-      backgroundIdentity.principalKind.length === 0 ||
-      typeof backgroundIdentity.principalId !== "string" ||
-      backgroundIdentity.principalId.length === 0
-    ) {
-      return null;
-    }
-
-    const inputMappings = mapInputMappings(spec.inputMapping);
-    if (inputMappings === null) return null;
-
-    return {
-      triggerSlug: slug,
-      authoredVersion: definition.authoredVersion,
-      lifecycle: "published",
-      type: type as TriggerKind,
-      eventType,
-      eventVersion,
-      routineRef: { name: routineRef.name, version: routineRef.version },
-      backgroundIdentity: {
-        principalKind: backgroundIdentity.principalKind,
-        principalId: backgroundIdentity.principalId,
-      },
-      ...(inputMappings === undefined ? {} : { inputMappings }),
-    };
+    return registered;
   }
 }
 
@@ -184,7 +237,7 @@ export class ActiveWebhookTriggerResolver {
     if (provider.length === 0 || triggerSlug.length === 0) return null;
 
     const bundle = await this.publications.activeBundle(this.businessId, this.verifier);
-    const definition = bundle?.get("Trigger", triggerSlug);
+    const definition = findBundleTrigger(bundle, triggerSlug);
     if (!bundle || !definition) return null;
 
     const document = definition.document;

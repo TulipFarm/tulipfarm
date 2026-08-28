@@ -58,7 +58,11 @@ function applyMarks(text: string, marks: PMNode["marks"]): string {
   if (has("italic")) out = `*${out}*`;
   if (has("strike")) out = `~~${out}~~`;
   const href = safeHref(marks.find((m) => m.type === "link")?.attrs?.href);
-  if (href) out = `[${out}](${href})`;
+  // A bare URL is already a link in Markdown, and the editor autolinks one on sight. Wrapping it
+  // as `[url](url)` renders the same but is not idempotent: the visible `[url](url)` gets
+  // autolinked on the next round trip and the serializer wraps the wrapper, so a message that
+  // makes two passes through the composer comes out as `[[url](url](url))]`.
+  if (href && out !== href) out = `[${out}](${href})`;
   return out;
 }
 

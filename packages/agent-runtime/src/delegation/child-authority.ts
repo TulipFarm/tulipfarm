@@ -46,6 +46,11 @@ export class ChildAuthorityError extends Error {
  * `links === undefined` states that the deployment composes no delegation at all, which is the
  * only case where an absent bound is a fact rather than an unanswered question. A read that
  * *fails* is an unanswered question and refuses.
+ *
+ * A `lineage` link is present but grants nothing: it exists for depth, cancellation and audit,
+ * and the child it names is a reviewed definition rather than a task a model wrote. Narrowing
+ * such a child by its caller would make the same Routine behave differently depending on who
+ * called it, so this reports it exactly as it reports a root.
  */
 export async function resolveDelegatedBound(
   links: ChildLinkAncestry | undefined,
@@ -59,7 +64,8 @@ export async function resolveDelegatedBound(
   } catch (cause) {
     throw new ChildAuthorityError("link_unreadable", { cause });
   }
-  return link === null ? UNLINKED_RUN : { linked: true, authority: link.authority };
+  if (link === null || link.authorityBinding === "lineage") return UNLINKED_RUN;
+  return { linked: true, authority: link.authority };
 }
 
 /**

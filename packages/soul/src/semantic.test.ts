@@ -95,14 +95,6 @@ describe("validateSoulSemantics", () => {
           { type: "inject-like", name: "Done", end: true },
         ],
       }),
-      def("Trigger", "on-flow", {
-        type: "manual",
-        routineRef: { name: "flow", version: "1" },
-        eventType: "e",
-        eventVersion: 1,
-        backgroundIdentity: { principalKind: "service", principalId: "svc" },
-        deduplication: { key: "k" },
-      }),
     ];
     expect(() => validateSoulSemantics(docs)).not.toThrow();
   });
@@ -169,13 +161,17 @@ describe("validateSoulSemantics", () => {
         start: "S",
         states: [{ type: "x", name: "S", end: true }],
       }),
-      def("Trigger", "t", {
-        type: "manual",
-        routineRef: { name: "flow", version: "9" },
-        eventType: "e",
-        eventVersion: 1,
-        backgroundIdentity: { principalKind: "service", principalId: "s" },
-        deduplication: { key: "k" },
+      def("Routine", "parent", {
+        owner: "u",
+        start: "S",
+        states: [
+          {
+            type: "child_routine",
+            name: "S",
+            routineRef: { name: "flow", version: "9" },
+            end: true,
+          },
+        ],
       }),
     ];
     expect(codes(() => validateSoulSemantics(docs))).toEqual(["VERSION_UNSATISFIED"]);
@@ -194,13 +190,17 @@ describe("validateSoulSemantics", () => {
         },
         { id: routineId, authoredVersion: 2 }
       ),
-      def("Trigger", "t", {
-        type: "manual",
-        routineRef: { id: routineId, name: "flow", version: "1" },
-        eventType: "e",
-        eventVersion: 1,
-        backgroundIdentity: { principalKind: "service", principalId: "s" },
-        deduplication: { key: "k" },
+      def("Routine", "parent", {
+        owner: "u",
+        start: "S",
+        states: [
+          {
+            type: "child_routine",
+            name: "S",
+            routineRef: { id: routineId, name: "flow", version: "1" },
+            end: true,
+          },
+        ],
       }),
     ];
 
@@ -349,5 +349,43 @@ describe("validateSoulSemantics", () => {
       expect(issue.subject).toBe("Agent:a");
       expect(Object.keys(issue).sort()).toEqual(["code", "field", "ref", "subject"]);
     }
+  });
+});
+
+describe("Trigger names across Routines", () => {
+  function routineWithTrigger(slug: string, triggerName: string): VersionedSchemaDocument {
+    return def("Routine", slug, {
+      owner: "operations",
+      start: "Done",
+      states: [{ name: "Done", type: "branch", conditions: [{ condition: "true", end: true }] }],
+      triggers: [{ name: triggerName, type: "manual" }],
+    });
+  }
+
+  // The name is a URL segment, so two claimants make webhook delivery resolve by load order.
+  it("refuses two Routines claiming one Trigger name, naming both claimants", () => {
+    expect(() =>
+      validateSoulSemantics([
+        routineWithTrigger("daily-report", "shared-hook"),
+        routineWithTrigger("weekly-report", "shared-hook"),
+      ])
+    ).toThrow(SoulSemanticValidationError);
+    expect(
+      codes(() =>
+        validateSoulSemantics([
+          routineWithTrigger("daily-report", "shared-hook"),
+          routineWithTrigger("weekly-report", "shared-hook"),
+        ])
+      )
+    ).toEqual(["TRIGGER_NAME_CONFLICT", "TRIGGER_NAME_CONFLICT"]);
+  });
+
+  it("accepts distinct Trigger names across Routines", () => {
+    expect(() =>
+      validateSoulSemantics([
+        routineWithTrigger("daily-report", "daily-hook"),
+        routineWithTrigger("weekly-report", "weekly-hook"),
+      ])
+    ).not.toThrow();
   });
 });

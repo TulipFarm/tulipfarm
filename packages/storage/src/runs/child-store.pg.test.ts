@@ -93,10 +93,27 @@ describe("ChildLinkStore", () => {
       parentRunId: PARENT_ID,
       childRunId: CHILD_ID,
       authority: AUTHORITY,
+      authorityBinding: "delegated",
       resume: null,
       callId: null,
       detachedAt: null,
       createdAt: CREATED_AT,
+    });
+  });
+
+  it("persists a lineage binding so the child is recorded without being narrowed", async () => {
+    const created = await store.link({
+      businessId: BUSINESS,
+      parentRunId: PARENT_ID,
+      childRunId: CHILD_ID,
+      authority: { tools: [], classifications: [], limits: {} },
+      authorityBinding: "lineage",
+      createdAt: CREATED_AT,
+    });
+
+    expect(created.authorityBinding).toBe("lineage");
+    expect(await ancestry.parentLink(BUSINESS, CHILD_ID)).toMatchObject({
+      authorityBinding: "lineage",
     });
   });
 
@@ -113,6 +130,36 @@ describe("ChildLinkStore", () => {
 
     expect(again.authority).toEqual(AUTHORITY);
     expect(again.createdAt).toBe(CREATED_AT);
+  });
+
+  it("writes an already-detached link in one statement, leaving no open window", async () => {
+    const stored = await store.link({
+      businessId: BUSINESS,
+      parentRunId: PARENT_ID,
+      childRunId: CHILD_ID,
+      authority: AUTHORITY,
+      detachedAt: DETACHED_AT,
+      createdAt: CREATED_AT,
+    });
+
+    // A child that never resumes its parent must not be reachable by a cancel cascade, not even
+    // for the moment between an open insert and the update that closes it.
+    expect(stored.detachedAt).toBe(DETACHED_AT);
+    const links = await store.listChildren(BUSINESS, PARENT_ID);
+    expect(links[0]?.detachedAt).toBe(DETACHED_AT);
+  });
+
+  it("treats detaching an already-detached link as a no-op rather than an error", async () => {
+    await store.link({
+      businessId: BUSINESS,
+      parentRunId: PARENT_ID,
+      childRunId: CHILD_ID,
+      authority: AUTHORITY,
+      detachedAt: DETACHED_AT,
+      createdAt: CREATED_AT,
+    });
+
+    expect(await store.detach(BUSINESS, PARENT_ID, CHILD_ID, DETACHED_AT)).toBe(false);
   });
 
   it("detaches a child once and reports a repeat detach as a no-op", async () => {

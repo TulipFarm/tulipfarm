@@ -43,6 +43,7 @@ export class RunStoreStateTransitions implements StateTransitionPort {
     from: StateStatus;
     to: StateStatus;
     reason?: string;
+    output?: { value: unknown };
   }): Promise<void> {
     const state = await this.runs.findState(input.businessId, input.runId, input.stateKey);
     if (state === null) throw new MissingStateError(input.runId, input.stateKey);
@@ -56,6 +57,7 @@ export class RunStoreStateTransitions implements StateTransitionPort {
       ...(input.reason !== undefined && input.to !== "succeeded"
         ? { errorEvidenceRef: input.reason }
         : {}),
+      ...(input.output === undefined ? {} : { output: input.output }),
     });
 
     if (!moved) {

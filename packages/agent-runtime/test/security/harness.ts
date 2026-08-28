@@ -81,6 +81,7 @@ export class FakeChildLinkStore implements ChildLinkStore {
       parentRunId: input.parentRunId,
       childRunId: input.childRunId,
       authority: input.authority,
+      authorityBinding: "delegated",
       resume: null,
       callId: null,
       detachedAt: null,

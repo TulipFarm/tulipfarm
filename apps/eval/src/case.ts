@@ -37,6 +37,7 @@ export type Expectation =
    * fail on phrasing rather than on behaviour.
    */
   | { readonly kind: "tool_argument_present"; readonly name: string; readonly path: string }
+  | { readonly kind: "tool_argument_absent"; readonly name: string; readonly path: string }
   | { readonly kind: "output_contains"; readonly text: string; readonly ungrounded?: string }
   | { readonly kind: "output_matches"; readonly pattern: string; readonly ungrounded?: string }
   /** The answer does not contain this text. The one way to assert a guard actually removed

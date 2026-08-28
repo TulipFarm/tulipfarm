@@ -1,5 +1,6 @@
 import {
   type ChildAuthority,
+  type ChildAuthorityBinding,
   type ChildLink,
   type ChildLinkAncestry,
   type ChildLinkStore,
@@ -23,6 +24,7 @@ class FakeChildLinkStore implements ChildLinkStore {
     parentRunId: string;
     childRunId: string;
     authority: ChildAuthority;
+    authorityBinding?: ChildAuthorityBinding;
     createdAt: string;
   }): Promise<ChildLink> {
     if (this.failNextLink) throw new Error("link_store_unavailable");
@@ -34,6 +36,7 @@ class FakeChildLinkStore implements ChildLinkStore {
       parentRunId: input.parentRunId,
       childRunId: input.childRunId,
       authority: input.authority,
+      authorityBinding: input.authorityBinding ?? "delegated",
       resume: null,
       callId: null,
       detachedAt: null,
@@ -252,6 +255,24 @@ describe("DelegationCoordinator depth", () => {
       );
     }
   });
+
+  it("counts a lineage link toward depth even though it grants nothing", async () => {
+    const { delegation, store } = coordinator({ maxDepth: 1 });
+    store.links.push({
+      parentRunId: "run-root",
+      childRunId: "run-parent",
+      authority: { tools: [], classifications: [], limits: {} },
+      authorityBinding: "lineage",
+      resume: null,
+      callId: null,
+      detachedAt: null,
+      createdAt: "2026-07-25T09:00:00.000Z",
+    });
+
+    await expect(delegation.delegate(request())).rejects.toThrow(
+      new DelegationError("depth_limit_exceeded", "depth")
+    );
+  });
 });
 
 describe("DelegationCoordinator inherited authority", () => {
@@ -282,5 +303,24 @@ describe("DelegationCoordinator inherited authority", () => {
     expect(grandchild.authority.classifications).toEqual(["confidential", "internal"]);
     expect(grandchild.deadlineAt).toBe("2026-07-25T10:30:00.000Z");
     expect(started.at(-1)?.deadlineAt).toBe("2026-07-25T10:30:00.000Z");
+  });
+
+  it("walks past a lineage link to the caller's own authority", async () => {
+    const { delegation, store } = coordinator({ maxDepth: 3 });
+    store.links.push({
+      parentRunId: "run-root",
+      childRunId: "run-parent",
+      authority: { tools: [], classifications: [], limits: {} },
+      authorityBinding: "lineage",
+      resume: null,
+      callId: null,
+      detachedAt: null,
+      createdAt: "2026-07-25T09:00:00.000Z",
+    });
+
+    const child = await delegation.delegate(request());
+
+    expect(child.authority.tools).toEqual(["github.issue.read", "knowledge.search"]);
+    expect(child.authority.classifications).toEqual(["confidential", "internal"]);
   });
 });

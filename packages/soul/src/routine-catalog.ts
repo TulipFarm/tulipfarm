@@ -1,4 +1,5 @@
 import type { RuntimeBundle } from "./bundle";
+import { bundleTriggerDefinitions } from "./bundle-triggers";
 
 /** Reads the one bundle the Runtime is currently serving, or nothing when none is active. */
 export type ActiveBundleReader = () => Promise<RuntimeBundle | undefined>;
@@ -35,15 +36,56 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+const INTERVAL_UNITS = [
+  { ms: 86_400_000, one: "day", many: "days" },
+  { ms: 3_600_000, one: "hour", many: "hours" },
+  { ms: 60_000, one: "minute", many: "minutes" },
+  { ms: 1_000, one: "second", many: "seconds" },
+] as const;
+
+/**
+ * A schedule interval in the units a person would have said it in.
+ *
+ * `everyMs` is milliseconds because that is what the dispatcher counts down, but nobody asks for a
+ * Routine that way: "every 120000ms" is the same schedule as "every 2 minutes" and strictly harder
+ * to check at a glance. Two units at most — a third is noise at the sizes a schedule uses.
+ */
+function formatInterval(everyMs: number): string {
+  if (!Number.isFinite(everyMs) || everyMs < 1_000) return `${Math.round(everyMs)}ms`;
+  const parts: string[] = [];
+  let remaining = Math.round(everyMs);
+  for (const unit of INTERVAL_UNITS) {
+    const count = Math.floor(remaining / unit.ms);
+    if (count === 0) continue;
+    parts.push(`${count} ${count === 1 ? unit.one : unit.many}`);
+    remaining -= count * unit.ms;
+    if (parts.length === 2) break;
+  }
+  return parts.join(" ");
+}
+
+/**
+ * A one-off schedule instant, to the minute, labelled with the zone it is actually in.
+ *
+ * Rendered here rather than in the browser because this summary is also read where no viewer
+ * exists. UTC is named rather than quietly converted: a scheduled time shown in a zone it was not
+ * written in is worse than one the reader has to convert, because it looks already converted.
+ */
+function formatInstant(at: string): string {
+  const parsed = new Date(at);
+  if (Number.isNaN(parsed.getTime())) return at;
+  return `${parsed.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+}
+
 function triggerSummary(spec: Record<string, unknown>): string {
   if (spec.type === "cron" && typeof spec.expression === "string") {
     return `cron ${spec.expression}`;
   }
   if (spec.type === "interval" && typeof spec.everyMs === "number") {
-    return `every ${spec.everyMs}ms`;
+    return `every ${formatInterval(spec.everyMs)}`;
   }
   if (spec.type === "datetime" && typeof spec.at === "string") {
-    return `at ${spec.at}`;
+    return `at ${formatInstant(spec.at)}`;
   }
   return typeof spec.type === "string" ? spec.type.replaceAll("_", " ") : "unknown";
 }
@@ -98,8 +140,7 @@ export class ActiveRoutineCatalog implements RoutineCatalog {
 
   private triggersByRoutine(bundle: RuntimeBundle): Map<string, RoutineCatalogTrigger[]> {
     const triggersByRoutine = new Map<string, RoutineCatalogTrigger[]>();
-    for (const definition of bundle.definitions) {
-      if (definition.kind !== "Trigger") continue;
+    for (const definition of bundleTriggerDefinitions(bundle)) {
       const metadata = isRecord(definition.document.metadata)
         ? definition.document.metadata
         : undefined;

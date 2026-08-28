@@ -22,6 +22,21 @@ export interface ChildAuthorityRecord {
 }
 
 /**
+ * What a link row claims about the child's authority.
+ *
+ * `delegated` — the row *granted* this authority, so the child's own Tool loop is intersected
+ * with it. That is right when a model invented the child's task at runtime.
+ *
+ * `lineage` — the row only records who called whom, for depth, cancellation and audit. The child
+ * is a published definition whose authority was reviewed when it was authored, so narrowing it
+ * again by the caller would make a Routine behave differently as a child than it does alone.
+ */
+export type ChildAuthorityBinding = "delegated" | "lineage";
+
+/** Absent on rows written before the column existed, all of which granted their authority. */
+export const DEFAULT_CHILD_AUTHORITY_BINDING: ChildAuthorityBinding = "delegated";
+
+/**
  * How a finished child resumes the parent parked on it.
  *
  * The token is minted once by `DurableWaitManager.register` and returned to the registrant only,
@@ -38,6 +53,7 @@ export interface PersistedChildLink {
   readonly parentRunId: string;
   readonly childRunId: string;
   readonly authority: ChildAuthorityRecord;
+  readonly authorityBinding: ChildAuthorityBinding;
   /** Absent for a detached child, which no parent is waiting on. */
   readonly resume: ChildResumeGrant | null;
   /** The parent Tool call that spawned this child; absent when nothing spawned it from a call. */
@@ -51,8 +67,18 @@ export interface LinkChildInput {
   readonly parentRunId: string;
   readonly childRunId: string;
   readonly authority: ChildAuthorityRecord;
+  /** Defaults to `delegated`, so a caller that does not think about this cannot widen a child. */
+  readonly authorityBinding?: ChildAuthorityBinding;
   readonly resume?: ChildResumeGrant;
   readonly callId?: string;
+  /**
+   * Write the link already closed, for a child that is detached from birth.
+   *
+   * `link` then `detach` leaves a window in which the row is open, so a cancel cascade or a crash
+   * in between can reach a child the caller never waits on. Passing it here makes the two one
+   * statement.
+   */
+  readonly detachedAt?: string;
   readonly createdAt: string;
 }
 
@@ -72,10 +98,20 @@ export const CHILD_STORAGE_STATEMENTS: readonly string[] = [
   )`,
   "ALTER TABLE run_child_links ADD COLUMN IF NOT EXISTS resume jsonb",
   "ALTER TABLE run_child_links ADD COLUMN IF NOT EXISTS call_id text",
+  // Backfills to `delegated`, which is what every row written before this column meant.
+  `ALTER TABLE run_child_links
+     ADD COLUMN IF NOT EXISTS authority_binding text NOT NULL DEFAULT 'delegated'`,
+  `ALTER TABLE run_child_links DROP CONSTRAINT IF EXISTS run_child_links_binding_known`,
+  `ALTER TABLE run_child_links
+     ADD CONSTRAINT run_child_links_binding_known
+     CHECK (authority_binding IN ('delegated', 'lineage'))`,
   `CREATE OR REPLACE FUNCTION reject_run_child_link_change()
     RETURNS trigger LANGUAGE plpgsql AS $$
     BEGIN
       IF OLD.authority IS DISTINCT FROM NEW.authority THEN
+        RAISE EXCEPTION 'run_child_link_authority_immutable';
+      END IF;
+      IF OLD.authority_binding IS DISTINCT FROM NEW.authority_binding THEN
         RAISE EXCEPTION 'run_child_link_authority_immutable';
       END IF;
       IF OLD.resume IS DISTINCT FROM NEW.resume THEN
@@ -110,6 +146,7 @@ interface ChildLinkRow {
   parent_run_id: string;
   child_run_id: string;
   authority: ChildAuthorityRecord;
+  authority_binding: string | null;
   resume: ChildResumeGrant | null;
   call_id: string | null;
   detached_at: Date | string | null;
@@ -125,6 +162,8 @@ function persistedChildLink(row: ChildLinkRow): PersistedChildLink {
     parentRunId: row.parent_run_id,
     childRunId: row.child_run_id,
     authority: row.authority,
+    authorityBinding:
+      row.authority_binding === "lineage" ? "lineage" : DEFAULT_CHILD_AUTHORITY_BINDING,
     resume: row.resume ?? null,
     callId: row.call_id ?? null,
     detachedAt: row.detached_at === null ? null : timestamp(row.detached_at),
@@ -133,7 +172,7 @@ function persistedChildLink(row: ChildLinkRow): PersistedChildLink {
 }
 
 const CHILD_LINK_COLUMNS =
-  "parent_run_id, child_run_id, authority, resume, call_id, detached_at, created_at";
+  "parent_run_id, child_run_id, authority, authority_binding, resume, call_id, detached_at, created_at";
 
 /**
  * Reverse lookup over the link table: what one Run was granted when it was delegated.
@@ -231,8 +270,9 @@ export class ChildLinkStore {
     return this.transactions.withTransaction(async (transaction) => {
       const inserted = await transaction.query<ChildLinkRow>(
         `INSERT INTO run_child_links (
-           business_id, parent_run_id, child_run_id, authority, resume, call_id, created_at
-         ) VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7::timestamptz)
+           business_id, parent_run_id, child_run_id, authority, authority_binding,
+           resume, call_id, created_at, detached_at
+         ) VALUES ($1, $2, $3, $4::jsonb, $5, $6::jsonb, $7, $8::timestamptz, $9::timestamptz)
          ON CONFLICT (business_id, parent_run_id, child_run_id) DO NOTHING
          RETURNING ${CHILD_LINK_COLUMNS}`,
         [
@@ -240,9 +280,11 @@ export class ChildLinkStore {
           input.parentRunId,
           input.childRunId,
           JSON.stringify(input.authority),
+          input.authorityBinding ?? DEFAULT_CHILD_AUTHORITY_BINDING,
           input.resume === undefined ? null : JSON.stringify(input.resume),
           input.callId ?? null,
           input.createdAt,
+          input.detachedAt ?? null,
         ]
       );
       const row = inserted.rows[0];

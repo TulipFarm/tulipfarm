@@ -16,6 +16,7 @@ import {
 import type { ChatStreamMeta } from "~/lib/chat/sse-client";
 import {
   postChat,
+  postChatRetry,
   postSurfaceInteraction,
   resumeRun,
   sendApprovalDecision,
@@ -80,7 +81,7 @@ type ChatAction =
   | ChatEvent
   | { type: "user"; text: string; options?: SendOptions }
   | { type: "meta"; meta: ChatStreamMeta }
-  | { type: "regenerate" }
+  | { type: "regenerate"; resume: boolean }
   | { type: "surface-submit" }
   | { type: "stopped" }
   | { type: "reset" };
@@ -132,6 +133,19 @@ function reducer(state: ChatState, action: ChatAction): ChatState {
   if (action.type === "stopped") return rewindLastTurn(state);
   if (action.type === "regenerate") {
     const messages = state.messages.slice();
+    const last = messages[messages.length - 1];
+    if (action.resume && last?.role === "assistant") {
+      // A resumed attempt re-enters the loop holding the failed attempt's tool results, so it
+      // never re-emits those calls. Popping the message would erase them from the transcript for
+      // good; unsealing it instead lets the new answer land under the work it was built on. The
+      // dead attempt's own prose goes, because the fresh model call does not continue it.
+      messages[messages.length - 1] = {
+        ...last,
+        sealed: false,
+        parts: last.parts.filter((part) => part.kind !== "text" && part.kind !== "reasoning"),
+      };
+      return { ...state, messages, status: "submitted", error: undefined, errorDetails: undefined };
+    }
     while (messages.length > 0 && messages[messages.length - 1].role === "assistant") {
       messages.pop();
     }
@@ -160,6 +174,8 @@ export function useChatStream(opts?: UseChatStreamOptions) {
   const [state, dispatch] = useReducer(reducer, opts, seedState);
   const [connectionState, setConnectionState] = useState<"online" | "reconnecting">("online");
   const conversationIdRef = useRef<string | undefined>(opts?.initialConversationId);
+  /** The Turn the last stream answered; Retry re-enters it instead of re-asking. */
+  const turnIdRef = useRef<string | undefined>(undefined);
   const stateRef = useRef(state);
   stateRef.current = state;
   const lastOptsRef = useRef<SendOptions | undefined>(undefined);
@@ -251,50 +267,54 @@ export function useChatStream(opts?: UseChatStreamOptions) {
     };
   }, [initialConversationId, initialTurn, replayInitialTurn]);
 
-  const runStream = useCallback(async (text: string, opts?: SendOptions) => {
+  const runStream = useCallback(async (text: string, opts?: SendOptions, retryTurnId?: string) => {
     const controller = new AbortController();
     abortRef.current = controller;
     stopRequestedRef.current = false;
+    // A fresh send must not inherit the previous Turn's id: if it fails before the server names
+    // its own, a retry would otherwise re-enter the Turn before it.
+    if (retryTurnId === undefined) turnIdRef.current = undefined;
     const idempotencyKey = randomUUID();
     try {
-      await postChat(
-        {
-          message: {
-            role: "user",
-            content: text,
-            ...(opts?.files?.length ? { fileIds: opts.files.map((file) => file.fileId) } : {}),
-          },
-          conversationId: conversationIdRef.current,
-          model: opts?.model,
-          autonomy: opts?.autonomy,
-          agentId: opts?.agentId,
-          skills: opts?.skills,
-          resources: opts?.resources,
-          knowledgePages: opts?.knowledgePages,
-          clientContext: captureClientContext(),
+      const body = {
+        message: {
+          role: "user" as const,
+          content: text,
+          ...(opts?.files?.length ? { fileIds: opts.files.map((file) => file.fileId) } : {}),
         },
-        {
-          signal: controller.signal,
-          onMeta: (meta) => {
-            if (meta.conversationId) {
-              conversationIdRef.current = meta.conversationId;
-              onConversationChangeRef.current?.(meta.conversationId);
-            }
-            dispatch({ type: "meta", meta });
-          },
-          onEvent: (event) => {
-            if (event.type === "client-action") {
-              handleClientAction(event.data, navigateRef.current);
-              return;
-            }
-            dispatch(event);
-            if (event.type === "finish")
-              onConversationChangeRef.current?.(conversationIdRef.current);
-          },
-          onConnectionState: setConnectionState,
+        conversationId: conversationIdRef.current,
+        model: opts?.model,
+        autonomy: opts?.autonomy,
+        agentId: opts?.agentId,
+        skills: opts?.skills,
+        resources: opts?.resources,
+        knowledgePages: opts?.knowledgePages,
+        clientContext: captureClientContext(),
+      };
+      const handlers = {
+        signal: controller.signal,
+        onMeta: (meta: ChatStreamMeta) => {
+          if (meta.conversationId) {
+            conversationIdRef.current = meta.conversationId;
+            onConversationChangeRef.current?.(meta.conversationId);
+          }
+          if (meta.turnId) turnIdRef.current = meta.turnId;
+          dispatch({ type: "meta", meta });
         },
-        idempotencyKey
-      );
+        onEvent: (event: ChatEvent) => {
+          if (event.type === "client-action") {
+            handleClientAction(event.data, navigateRef.current);
+            return;
+          }
+          dispatch(event);
+          if (event.type === "finish") onConversationChangeRef.current?.(conversationIdRef.current);
+        },
+        onConnectionState: setConnectionState,
+      };
+      // A retry re-enters the Turn that already holds the question; only a fresh send writes one.
+      await (retryTurnId === undefined
+        ? postChat(body, handlers, idempotencyKey)
+        : postChatRetry(retryTurnId, body, handlers));
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
         dispatch({ type: "stopped" });
@@ -324,9 +344,12 @@ export function useChatStream(opts?: UseChatStreamOptions) {
     const text = source?.text ?? "";
     if (text.length === 0) return;
     const options = source?.options ?? lastOptsRef.current;
-    dispatch({ type: "regenerate" });
+    const turnId = turnIdRef.current;
+    dispatch({ type: "regenerate", resume: turnId !== undefined });
     lastOptsRef.current = options;
-    await runStream(text, options);
+    // Retrying the Turn reuses the question already in the transcript. Without a Turn id — a
+    // conversation opened from history, which never streamed one — this falls back to re-asking.
+    await runStream(text, options, turnId);
   }, [runStream]);
 
   const tryHarder = useCallback(

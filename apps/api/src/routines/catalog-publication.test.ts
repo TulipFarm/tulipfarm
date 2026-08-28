@@ -46,26 +46,16 @@ const ROUTINE = {
     owner: "operations",
     start: "Decide",
     states: [{ name: "Decide", type: "branch", conditions: [{ condition: "true", end: true }] }],
-  },
-};
-
-const TRIGGER = {
-  apiVersion: "tulipfarm.ai/v1",
-  kind: "Trigger",
-  metadata: {
-    id: "22222222-2222-4222-8222-222222222222",
-    slug: "daily-report-manual",
-    schemaVersion: 1,
-    authoredVersion: 1,
-    lifecycle: "published",
-  },
-  spec: {
-    type: "manual",
-    routineRef: { name: "daily-report", version: "1" },
-    eventType: "routine.manual",
-    eventVersion: 1,
-    backgroundIdentity: { principalKind: "service", principalId: "routine-runner" },
-    deduplication: { key: "daily-report-manual" },
+    triggers: [
+      {
+        name: "daily-report-manual",
+        type: "manual",
+        eventType: "routine.manual",
+        eventVersion: 1,
+        backgroundIdentity: { principalKind: "service", principalId: "routine-runner" },
+        deduplication: { key: "daily-report-manual" },
+      },
+    ],
   },
 };
 
@@ -129,7 +119,7 @@ describe("routine_forge → Soul publication → Routines catalog", () => {
 
   function forge(ctx: PlatformToolContext) {
     return routineForgeTool.handler(
-      { name: "daily-report", definition: ROUTINE, triggers: [TRIGGER] },
+      { name: "daily-report", definition: ROUTINE },
       { routineCatalog: catalog, ...ctx }
     );
   }

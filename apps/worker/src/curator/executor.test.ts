@@ -178,6 +178,7 @@ test("progresses invoke state from pending to succeeded when transitions are pro
       finishedAt: null,
       resultArtifactId: null,
       errorEvidenceRef: null,
+      output: null,
     })),
   };
   const fakeTransitions = {
@@ -220,6 +221,7 @@ test("progresses invoke state from pending to failed when execution fails", asyn
       finishedAt: null,
       resultArtifactId: null,
       errorEvidenceRef: null,
+      output: null,
     })),
   };
   const fakeTransitions = {

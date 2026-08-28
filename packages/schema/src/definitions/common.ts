@@ -109,7 +109,7 @@ export type ModelModality = (typeof MODEL_MODALITIES)[number];
 const ID_PATTERN =
   "^([0-9A-HJKMNP-TV-Z]{26}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$";
 /** Lowercase kebab-case human slug. */
-const SLUG_PATTERN = "^[a-z][a-z0-9]*(-[a-z0-9]+)*$";
+export const SLUG_PATTERN = "^[a-z][a-z0-9]*(-[a-z0-9]+)*$";
 /** Lowercase hex sha-256 digest. */
 const DIGEST_PATTERN = "^[a-f0-9]{64}$";
 

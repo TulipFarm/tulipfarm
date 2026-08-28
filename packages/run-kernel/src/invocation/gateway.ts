@@ -9,6 +9,7 @@ export const INVOCATION_SOURCES = [
   "schedule",
   "channel",
   "integration",
+  "child_routine",
 ] as const;
 
 export type InvocationSource = (typeof INVOCATION_SOURCES)[number];

@@ -5,12 +5,16 @@ import {
   type CompiledRoutine,
   type CompiledState,
   compileRoutine,
+  computeStateOutput,
   decideBranch,
   type IdentityCeiling,
   InMemoryStateConcurrencyStore,
   InMemoryStateContentionStore,
   InMemoryStateRetryStore,
+  planActionDispatch,
   planAgentInvocation,
+  planEmit,
+  planScriptExecution,
   planToolDispatch,
   RoutineInputResolutionError,
   type RoutineStateScheduler,
@@ -32,15 +36,19 @@ import type { RuntimeBundle } from "@tulipfarm/soul";
 import type { PersistedRun, PersistedState, RunStore } from "@tulipfarm/storage";
 import type { StateTransitionPort } from "@tulipfarm/turn-executor";
 import type { RunExecutor } from "../executors";
+import type { RoutineActionPort } from "./action-port";
 import type { RoutineAgentPort } from "./agent-port";
 import type { RoutineApprovalPort } from "./approval-port";
+import type { ChildRoutinePort } from "./child-routine-port";
 import {
   type ConcurrencyGuardContext,
   concurrencyBackoffElapsed,
   underConcurrencyKey,
 } from "./concurrency-guard";
 import type { WorkerRoutineDefinitionLoader } from "./definition-loader";
+import type { EmitPort } from "./emit-port";
 import {
+  ACTION_ERROR_PREFIX,
   AGENT_ERROR_PREFIX,
   artifactId,
   assertSupportedInput,
@@ -52,16 +60,20 @@ import {
   manualRequest,
   progressionFrom,
   RoutineExecutionRefusal,
+  SCRIPT_ERROR_PREFIX,
   type StateOutputs,
   TOOL_ERROR_PREFIX,
 } from "./execution-support";
 import { type FanOutContext, runComposite } from "./fan-out";
+import type { RoutineScriptPort } from "./script-port";
 import type { RoutineToolPort } from "./tool-port";
 import {
   openApproval,
+  openChildRoutine,
   openWait,
   type RoutineWaitPort,
   resumeApproval,
+  resumeChildRoutine,
   resumeWait,
   type WaitGateContext,
 } from "./wait-gate";
@@ -83,10 +95,17 @@ interface RoutineExecutorOptions {
   readonly waits: RoutineWaitPort;
   /** Absent means `tool` States park; there is no second external-effect path. */
   readonly tools?: RoutineToolPort;
+  /** Runs a `script` State's authored TypeScript; absent refuses the State by name. */
+  readonly scripts?: RoutineScriptPort;
+  /** Runs an `action` State's runtime Tool; absent refuses the State by name. */
+  readonly actions?: RoutineActionPort;
   /** Absent means `agent` States park; the executor will not invent answers. */
   readonly agents?: RoutineAgentPort;
   /** Absent means `approval` States park; Runs cannot pass unasked questions. */
   readonly approvals?: RoutineApprovalPort;
+  /** Absent means `child_routine` States park; a Routine cannot skip a call it authored. */
+  readonly childRoutines?: ChildRoutinePort;
+  readonly emissions?: EmitPort;
   /** Fail-closed authority; this process may not mint authority of its own. */
   readonly authority?: (run: PersistedRun, state: CompiledState) => readonly AuthorityLayer[];
   /**
@@ -114,13 +133,59 @@ interface RoutineExecutorOptions {
   readonly identityCeiling?: (run: PersistedRun) => IdentityCeiling;
 }
 
+/**
+ * What a Routine may do when its author narrowed nothing.
+ *
+ * `permissionCeiling` is an opt-in narrowing: a State declares it to run with *less* than the
+ * Run's owner holds, and the compiler refuses one that escalates. Inventing a ceiling here where
+ * the author declared none inverts that — it becomes a cap no Routine can lift, because the
+ * compiler measures an authored ceiling against this very value. Capping at `low` denied every
+ * mutating Tool, so `record_create` — the whole point of a deterministic Routine — could never
+ * run. The widest class is therefore the honest default: authority is still bounded by the Run
+ * subject's own grants, which is the layer that is meant to bound it.
+ */
 function defaultIdentityCeiling(run: PersistedRun): IdentityCeiling {
   return {
     principalKind: run.identity.effectiveSubject.kind,
     principalId: run.identity.effectiveSubject.id,
     grants: [],
-    maxRiskClass: "low",
+    maxRiskClass: "high",
   };
+}
+
+/**
+ * The value a settled State publishes to `states.<name>.output`.
+ *
+ * Only `compute` publishes one today: it is derived from the scope, so it can be recomputed
+ * identically on every read and never has to be persisted. Every other State type reports `null`
+ * rather than a value this process cannot rebuild, because a State whose output silently became
+ * `null` after a resume would be worse than one that never had an output at all.
+ */
+/**
+ * A `compute` State re-derives its value from scope on replay, so it is never stored. Every other
+ * State publishes something a replay cannot reproduce — a model answer, a provider response, an
+ * isolate's return value — and reads it back from `run_states.output` instead.
+ */
+function recomputes(state: CompiledState): boolean {
+  return state.type === "compute";
+}
+
+/** A State output is stored on the Run row, so an unbounded provider response cannot land whole. */
+const MAX_OUTPUT_BYTES = 128 * 1024;
+
+/**
+ * Keeps a State output storable. An oversized value is replaced rather than truncated, because a
+ * half-serialized object would read back as valid JSON and quietly lie to the State downstream.
+ */
+export function boundedOutput(value: unknown): unknown {
+  let encoded: string;
+  try {
+    encoded = JSON.stringify(value ?? null) ?? "null";
+  } catch {
+    return { truncated: true, reason: "unserializable" };
+  }
+  if (Buffer.byteLength(encoded, "utf8") <= MAX_OUTPUT_BYTES) return value ?? null;
+  return { truncated: true, reason: "too_large", bytes: Buffer.byteLength(encoded, "utf8") };
 }
 
 /** Executes deterministic Routine States; persists successors before predecessor success. */
@@ -189,7 +254,35 @@ interface ExecutionContext {
 
 /** One attempt at one Routine Run. Holds no state a replay could not rebuild from the database. */
 class RoutineExecution {
+  /** What a State produced in *this* pass, before its row has been read back. */
+  private readonly produced = new Map<string, unknown>();
+
+  /**
+   * Why a State is about to fail, keyed by State occurrence.
+   *
+   * A refusing port answers with a reason code, but the failure travels back to the caller as the
+   * bare string `"failed"`, which would leave `error_evidence_ref` holding only the State's name.
+   * That is a label, not evidence: it says which step broke and nothing about what broke it, so a
+   * failed Run cannot be diagnosed from its own record. Stashing the reason here lets the
+   * transition write it.
+   */
+  private readonly failureReasons = new Map<string, string>();
+
   constructor(private readonly ctx: ExecutionContext) {}
+
+  /**
+   * What `states.<name>.output` resolves to: recomputed for a pure State, otherwise the value this
+   * pass produced, otherwise the one stored when the State first ran.
+   */
+  private outputFor(
+    state: CompiledState,
+    key: string,
+    scope: Readonly<Record<string, unknown>>
+  ): unknown {
+    if (recomputes(state)) return computeStateOutput(state, scope);
+    if (this.produced.has(key)) return this.produced.get(key) ?? null;
+    return this.ctx.persisted.get(key)?.output ?? null;
+  }
 
   /** Walks one chain; `prefix` addresses durable fan-out rows and `extras` adds unit roots. */
   async runChain(
@@ -216,6 +309,7 @@ class RoutineExecution {
 
       const scope = { input: this.ctx.request.inputs, states: outputs, ...extras };
       let outcome: StepOutcome;
+      let output: unknown = null;
 
       try {
         if (row.status === "succeeded") {
@@ -226,6 +320,11 @@ class RoutineExecution {
           if (settled.kind !== "outcome") return settled.kind;
           outcome = settled.outcome;
         }
+        // A pure State is recomputed so a replayed Run publishes what its first attempt did —
+        // safe only because the expression language is total and side-effect free, and free of a
+        // second failure mode because the fresh path already proved this evaluates before it let
+        // the State settle. Everything else reads back the value stored when it ran.
+        output = this.outputFor(state, key, scope);
       } catch (error) {
         if (!isRefusal(error) && !(error instanceof RoutineInputResolutionError)) throw error;
         // Settled States cannot be parked; claimed States record the refusal on their own row.
@@ -234,7 +333,7 @@ class RoutineExecution {
         return "needs_reconciliation";
       }
 
-      outputs[state.name] = { output: null };
+      outputs[state.name] = { output };
       if (outcome.kind === "end") return "succeeded";
       currentName = outcome.target;
     }
@@ -272,7 +371,9 @@ class RoutineExecution {
       const resumed =
         state.type === "approval"
           ? await resumeApproval(this.waitGate(), state, key, row)
-          : await resumeWait(this.waitGate(), state, key, row);
+          : state.type === "child_routine"
+            ? await resumeChildRoutine(this.waitGate(), state, key, row)
+            : await resumeWait(this.waitGate(), state, key, row);
       if (resumed.kind !== "outcome") return { kind: resumed.kind };
       outcome = resumed.outcome;
     } else {
@@ -283,38 +384,167 @@ class RoutineExecution {
 
       if (state.type === "wait") return openWait(this.waitGate(), state, key);
       if (state.type === "approval") return openApproval(this.waitGate(), state, key);
-
-      outcome = await this.underConcurrencyKey(state, key, () =>
-        state.type === "branch"
-          ? Promise.resolve(decideBranch(state, scope).outcome)
-          : state.type === "tool"
-            ? this.runTool(state, key, scope)
-            : state.type === "agent"
-              ? this.runAgent(state, key, row, scope)
-              : runComposite(this.fanOut(), state, key, scope, outputs, depth)
-      );
+      if (state.type === "child_routine") {
+        // Unlike `wait` and `approval`, a call can continue in the same pass — detached, or with
+        // a child that had already settled — so it falls through to the common tail that
+        // schedules the successor and marks the row succeeded.
+        const called = await openChildRoutine(this.waitGate(), state, key, scope);
+        if (called.kind !== "outcome") return { kind: called.kind };
+        outcome = called.outcome;
+      } else {
+        outcome = await this.underConcurrencyKey(state, key, () =>
+          state.type === "branch"
+            ? Promise.resolve(decideBranch(state, scope).outcome)
+            : state.type === "compute"
+              ? Promise.resolve(this.runCompute(state, scope))
+              : state.type === "script"
+                ? this.runScript(state, key, scope)
+                : state.type === "action"
+                  ? this.runAction(state, key, scope)
+                  : state.type === "tool"
+                    ? this.runTool(state, key, scope)
+                    : state.type === "emit"
+                      ? this.runEmit(state, key, scope)
+                      : state.type === "agent"
+                        ? this.runAgent(state, key, row, scope)
+                        : runComposite(this.fanOut(), state, key, scope, outputs, depth)
+        );
+      }
     }
     if (outcome === null) return { kind: "waiting" };
     if (outcome === "failed") {
-      await this.transition(key, "running", "failed", `routine:${state.name}`);
+      await this.transition(
+        key,
+        "running",
+        "failed",
+        this.failureReasons.get(key) ?? `routine:${state.name}`
+      );
       return { kind: "failed" };
     }
     if (typeof outcome !== "object") return { kind: outcome };
 
     if (outcome.kind === "transition") {
-      await this.scheduleSuccessor(
-        state,
-        outcome.target,
-        prefixOf(key, state.name),
-        scope,
-        outputs
-      );
+      await this.scheduleSuccessor(state, outcome.target, key, scope, outputs);
     }
-    await this.transition(key, "running", "succeeded");
+    await this.settle(key, state);
     return { kind: "outcome", outcome };
   }
 
+  /**
+   * `compute` settles in-process from the scope alone.
+   *
+   * The value is evaluated and discarded here on purpose: it must be proven to evaluate *before*
+   * the State is marked succeeded, or a bad expression would park a row that had already settled.
+   * `runChain` recomputes it from the same immutable scope to publish it.
+   */
+  private runCompute(state: CompiledState, scope: Readonly<Record<string, unknown>>): StepOutcome {
+    computeStateOutput(state, scope);
+    return stateOutcome(state);
+  }
+  /**
+   * `emit` announces an internal event and continues.
+   *
+   * Whether the event bound a Trigger does not settle this State: `emit` is fire-and-forget by
+   * definition, and an emitter that failed because nothing was listening would couple every
+   * Routine to the Triggers other authors happen to have published. Only a refusal to *announce*
+   * — an unreachable API, or a chain already at its depth bound — fails it.
+   */
+  private async runEmit(
+    state: CompiledState,
+    key: string,
+    scope: Readonly<Record<string, unknown>>
+  ): Promise<StepOutcome> {
+    const port = this.ctx.options.emissions;
+    if (port === undefined) throw new RoutineExecutionRefusal("unsupported_state", state.name);
+
+    const planned = planEmit(state, scope);
+    await port.emit({
+      businessId: this.ctx.run.businessId,
+      runId: this.ctx.run.id,
+      stateKey: key,
+      eventType: planned.eventType,
+      eventVersion: planned.eventVersion,
+      data: planned.data,
+    });
+    return stateOutcome(state);
+  }
+
   /** Tool States use the Broker; only confirmed effects succeed, ambiguous cases park. */
+  /**
+   * `script` States run authored TypeScript in the sealed isolate and publish what it returned.
+   *
+   * The value is persisted rather than recomputed on replay. The isolate is deterministic, but an
+   * author's function is opaque in a way an expression is not, and re-entering it would charge a
+   * resumed Run for work it already paid for.
+   */
+  private async runScript(
+    state: CompiledState,
+    key: string,
+    scope: Readonly<Record<string, unknown>>
+  ): Promise<StepOutcome | ChainOutcome | null> {
+    const port = this.ctx.options.scripts;
+    if (port === undefined) throw new RoutineExecutionRefusal("unsupported_state", state.name);
+
+    const result = await this.withRetry(state, key, () =>
+      port.execute({
+        runId: this.ctx.run.id,
+        stateKey: key,
+        plan: planScriptExecution(state, scope),
+      })
+    );
+
+    if (result.kind === "succeeded") {
+      this.produced.set(key, result.output);
+      return stateOutcome(state);
+    }
+    const code = `${SCRIPT_ERROR_PREFIX}${result.reason}`;
+    const decision = resolveErrorPath(state, code, "failed");
+    if (decision.kind === "handled") return decision.outcome;
+    if (decision.kind === "failed") return this.refuse(key, code);
+    await this.park(key, `routine:${code}`);
+    return "needs_reconciliation";
+  }
+
+  /**
+   * `action` States call one runtime Tool with no model deciding to, and publish what it returned.
+   *
+   * This is the path a Routine uses to reach the world deterministically: `api_request`,
+   * `record_create`, `send_slack_message`. Authority is the Run's own recorded subject — the
+   * dispatch names no Agent — so a Routine can do no more than whoever owns it may do.
+   */
+  private async runAction(
+    state: CompiledState,
+    key: string,
+    scope: Readonly<Record<string, unknown>>
+  ): Promise<StepOutcome | ChainOutcome | null> {
+    const port = this.ctx.options.actions;
+    if (port === undefined) throw new RoutineExecutionRefusal("unsupported_state", state.name);
+
+    const result = await this.withRetry(state, key, () =>
+      port.execute({
+        businessId: this.ctx.run.businessId,
+        runId: this.ctx.run.id,
+        stateKey: key,
+        plan: planActionDispatch(state, scope, { runId: this.ctx.run.id, stateKey: key }),
+      })
+    );
+
+    if (result.kind === "succeeded") {
+      this.produced.set(key, result.output);
+      return stateOutcome(state);
+    }
+    if (result.kind !== "failed") {
+      await this.park(key, `routine:${result.reason}`);
+      return "needs_reconciliation";
+    }
+    const code = `${ACTION_ERROR_PREFIX}${result.reason}`;
+    const decision = resolveErrorPath(state, code, "failed");
+    if (decision.kind === "handled") return decision.outcome;
+    if (decision.kind === "failed") return this.refuse(key, code);
+    await this.park(key, `routine:${code}`);
+    return "needs_reconciliation";
+  }
+
   private async runTool(
     state: CompiledState,
     key: string,
@@ -338,16 +568,20 @@ class RoutineExecution {
       })
     );
 
-    if (result.kind === "succeeded") return stateOutcome(state);
+    if (result.kind === "succeeded") {
+      this.produced.set(key, result.output);
+      return stateOutcome(state);
+    }
     if (result.kind !== "failed") {
       await this.park(key, `routine:${result.reason}`);
       return "needs_reconciliation";
     }
 
-    const decision = resolveErrorPath(state, `${TOOL_ERROR_PREFIX}${result.reason}`, "failed");
+    const code = `${TOOL_ERROR_PREFIX}${result.reason}`;
+    const decision = resolveErrorPath(state, code, "failed");
     if (decision.kind === "handled") return decision.outcome;
-    if (decision.kind === "failed") return "failed";
-    await this.park(key, `routine:${TOOL_ERROR_PREFIX}${result.reason}`);
+    if (decision.kind === "failed") return this.refuse(key, code);
+    await this.park(key, `routine:${code}`);
     return "needs_reconciliation";
   }
 
@@ -380,17 +614,21 @@ class RoutineExecution {
       })
     );
 
-    if (result.kind === "succeeded") return stateOutcome(state);
+    if (result.kind === "succeeded") {
+      this.produced.set(key, result.output);
+      return stateOutcome(state);
+    }
     if (result.kind === "cancelled") return "cancelled";
     if (result.kind !== "failed") {
       await this.park(key, `routine:${result.reason}`);
       return "needs_reconciliation";
     }
 
-    const decision = resolveErrorPath(state, `${AGENT_ERROR_PREFIX}${result.reason}`, "failed");
+    const code = `${AGENT_ERROR_PREFIX}${result.reason}`;
+    const decision = resolveErrorPath(state, code, "failed");
     if (decision.kind === "handled") return decision.outcome;
-    if (decision.kind === "failed") return "failed";
-    await this.park(key, `routine:${AGENT_ERROR_PREFIX}${result.reason}`);
+    if (decision.kind === "failed") return this.refuse(key, code);
+    await this.park(key, `routine:${code}`);
     return "needs_reconciliation";
   }
 
@@ -451,6 +689,9 @@ class RoutineExecution {
       ...(this.ctx.options.approvals === undefined
         ? {}
         : { approvals: this.ctx.options.approvals }),
+      ...(this.ctx.options.childRoutines === undefined
+        ? {}
+        : { childRoutines: this.ctx.options.childRoutines }),
       now: this.ctx.now,
       transition: (key, from, to, reason) => this.transition(key, from, to, reason),
       claim: (key, from, progression) => this.claim(key, from, progression),
@@ -514,14 +755,18 @@ class RoutineExecution {
   private async scheduleSuccessor(
     state: CompiledState,
     target: string,
-    prefix: string,
+    key: string,
     scope: Readonly<Record<string, unknown>>,
     outputs: StateOutputs
   ): Promise<void> {
+    const prefix = prefixOf(key, state.name);
     const next = this.ctx.routine.states.get(target);
     if (next === undefined) throw new RoutineExecutionRefusal("missing_state", state.name);
     assertSupportedInput(next);
-    const targetScope = { ...scope, states: { ...outputs, [state.name]: { output: null } } };
+    const targetScope = {
+      ...scope,
+      states: { ...outputs, [state.name]: { output: this.outputFor(state, key, scope) } },
+    };
     const scheduled = await this.ctx.options.scheduler.schedule({
       run: this.ctx.run,
       stateKey: `${prefix}${next.name}`,
@@ -546,6 +791,26 @@ class RoutineExecution {
 
   private async park(key: string, reason: string): Promise<void> {
     await this.transition(key, "running", "needs_reconciliation", reason);
+  }
+
+  /** Records why a State is failing so the transition can write evidence, not just a name. */
+  private refuse(key: string, code: string): "failed" {
+    this.failureReasons.set(key, `routine:${code}`);
+    return "failed";
+  }
+
+  /** Succeed a State, storing what it published so a replay republishes the same value. */
+  private async settle(key: string, state: CompiledState): Promise<void> {
+    await this.ctx.options.transitions.transition({
+      businessId: this.ctx.run.businessId,
+      runId: this.ctx.run.id,
+      stateKey: key,
+      from: "running",
+      to: "succeeded",
+      ...(recomputes(state) || !this.produced.has(key)
+        ? {}
+        : { output: { value: boundedOutput(this.produced.get(key)) } }),
+    });
   }
 
   private async transition(

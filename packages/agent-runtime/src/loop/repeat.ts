@@ -54,3 +54,28 @@ export function repeatedCall(count: number): { readonly count: number; readonly 
       "rather than calling again.",
   };
 }
+
+/** What a repeated `skill` load carries instead of the text it already sent. */
+const REPEATED_SKILL_NOTE =
+  "Already sent earlier in this Turn and omitted here, because a Skill cannot change mid-Turn. " +
+  "Scroll back to the first result rather than loading it again.";
+
+/**
+ * Drop the text a repeated `skill` result would send twice.
+ *
+ * A Skill is immutable for the length of a Turn, so a second identical load returns bytes the
+ * model is already holding — for a large Skill that is tens of kilobytes of context and a model
+ * invocation, spent to learn nothing. The Tool still ran, so the broker still re-checked
+ * authorization; only the redundant copy is dropped, and the structure around it is kept so the
+ * model can still see which Skill answered and what files it carries.
+ *
+ * Confined to `skill` on purpose. Every other Tool reads something that may have moved since the
+ * last call, and the loop has no way to know it did not.
+ */
+export function elideRepeatedSkillText(output: unknown): unknown {
+  if (output === null || typeof output !== "object" || Array.isArray(output)) return output;
+  const record = output as Record<string, unknown>;
+  const field = typeof record.body === "string" ? "body" : "content";
+  if (typeof record[field] !== "string") return output;
+  return { ...record, [field]: REPEATED_SKILL_NOTE, elidedRepeat: true };
+}

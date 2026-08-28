@@ -219,4 +219,33 @@ describe("simulateRoutine", () => {
     expect(first).toBe(second);
     expect(first).toEqual(expect.any(String));
   });
+
+  it("settles a compute State from its own expressions, with no fixture to supply", () => {
+    const derive = {
+      type: "compute",
+      name: "Derive",
+      input: { label: "need-triage", issue: `\${ input.issueId }` },
+      transition: "Label",
+    } as unknown as routineSchema.RoutineState;
+    const applyDerived = {
+      ...standaloneLabel,
+      input: {
+        issue: `\${ states.Derive.output.issue }`,
+        label: `\${ states.Derive.output.label }`,
+      },
+    };
+
+    const result = simulateRoutine(compile([derive, applyDerived], "Derive"), {
+      ...fixture(),
+      model: {},
+    });
+
+    expect(result.status).toBe("completed");
+    expect(result.steps[0]).toMatchObject({
+      stateName: "Derive",
+      source: "evaluated",
+      output: { label: "need-triage", issue: 42 },
+    });
+    expect(result.effects[0]?.input).toEqual({ issue: 42, label: "need-triage" });
+  });
 });

@@ -322,6 +322,8 @@ export type ChatStreamMeta = {
   conversationId?: string;
   runId?: string;
   agentId?: string;
+  /** The Turn answering this stream; Retry re-enters it rather than re-asking the question. */
+  turnId?: string;
 };
 
 export type PostChatHandlers = {
@@ -346,6 +348,20 @@ export async function postChat(
   idempotencyKey?: string
 ): Promise<void> {
   return postTurnStream("/api/v1/chat", body, handlers, idempotencyKey);
+}
+
+/**
+ * Retries an existing Turn instead of re-sending its question.
+ *
+ * The server reuses the Turn, so the transcript gains no second copy of the message and the
+ * failed attempt's unfinished Tool work is carried into the new attempt.
+ */
+export async function postChatRetry(
+  turnId: string,
+  body: ChatRequestBody,
+  handlers: PostChatHandlers
+): Promise<void> {
+  return postTurnStream(`/api/v1/chat/turns/${encodeURIComponent(turnId)}/retry`, body, handlers);
 }
 
 export async function postSurfaceInteraction(
@@ -379,6 +395,7 @@ async function postTurnStream(
     conversationId: res.headers.get("X-Conversation-Id") ?? undefined,
     runId,
     agentId: res.headers.get("X-Agent-Id") ?? undefined,
+    turnId: res.headers.get("X-Turn-Id") ?? undefined,
   });
 
   const map = createRunEventMapper();

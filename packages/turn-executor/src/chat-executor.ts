@@ -34,9 +34,43 @@ import { announceToolCalls } from "./tool-events";
 const INVOKE_STATE_KEY = "invoke";
 
 export interface ChatExecutorHost {
-  findTurn(
-    runId: string
-  ): Promise<{ turnId: string; conversationId: string; attempt: number } | undefined>;
+  findTurn(runId: string): Promise<
+    | {
+        turnId: string;
+        conversationId: string;
+        attempt: number;
+        /** The Run this attempt supersedes; its unfinished work is readable, never writable. */
+        previousRunId?: string;
+      }
+    | undefined
+  >;
+}
+
+/**
+ * Lets a retry read the failed attempt's unfinished work without ever writing back to it.
+ *
+ * A retry runs as a new Run, and checkpoints are keyed by Run, so its own key holds nothing and
+ * the loop would re-run every Tool the failed attempt already paid for. Copying the row forward
+ * instead would race the executor that is already loading it, and a late copy would overwrite
+ * live state with stale state. Reading through is race-free: only the current Run is ever saved.
+ */
+export function resumableFromPreviousRun(
+  inner: LoopCheckpointStore,
+  previousRunId: string | undefined
+): LoopCheckpointStore {
+  if (previousRunId === undefined) return inner;
+  return {
+    save: (checkpoint) => inner.save(checkpoint),
+    load: async (businessId, runId, stateId) => {
+      const own = await inner.load(businessId, runId, stateId);
+      if (own !== undefined) return own;
+      const previous = await inner.load(businessId, previousRunId, stateId);
+      // Counters without a transcript are a settled loop whose work was deliberately dropped.
+      // Adopting that spend would charge this attempt for results it does not receive.
+      if (previous?.resume === undefined) return undefined;
+      return { ...previous, runId };
+    },
+  };
 }
 
 export interface ChatExecutorOptions {
@@ -130,7 +164,7 @@ async function announceTurnFailure(
 async function executeTurn(
   options: ChatExecutorOptions,
   run: PersistedRun,
-  identity: { turnId: string; conversationId: string; attempt: number },
+  identity: { turnId: string; conversationId: string; attempt: number; previousRunId?: string },
   writer: TurnEventWriter
 ): Promise<RunOutcome> {
   const state = await options.runs.findState(run.businessId, run.id, INVOKE_STATE_KEY);
@@ -186,7 +220,10 @@ async function executeTurn(
     model,
     // Guard before announcing; refused Tool calls never ran.
     tools: guardrails.guard(announceToolCalls(options.tools ?? options.host, writer), writer),
-    checkpoints: options.checkpoints ?? new InMemoryLoopCheckpointStore(),
+    checkpoints: resumableFromPreviousRun(
+      options.checkpoints ?? new InMemoryLoopCheckpointStore(),
+      identity.previousRunId
+    ),
     events: writer,
     budget: runBudget(options.budgets, run.businessId, run.id),
     isCancelled: async () => {

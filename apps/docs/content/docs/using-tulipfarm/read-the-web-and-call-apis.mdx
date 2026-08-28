@@ -46,11 +46,11 @@ had to be guessed in advance about which part of the page you would want.
 The agent calls `api_request`. You can describe a `curl` command and it will translate it. The
 command is read as a description, never executed.
 
-As with a page read, the agent sends a short note of what it needs from the response, and the
-whole response comes back either way. The note only matters when the response is large enough to
-be summarised first. A request is never remembered, though, so a second question about the same
-API is a second real request, which is why an agent is told to say everything it needs up front
-rather than to ask again.
+Unlike a page read, an API response is never summarised. The whole thing comes back, headers
+included, exactly as the other site sent it. A response is already compact, and the field names an
+agent needs in order to work with it are the first thing a summary would drop. A request is never
+remembered either, so a second question about the same API is a second real request, which is why
+an agent is told to read the response it already has rather than ask again.
 
 GraphQL works the same way. Queries are treated as reads; mutations are treated as writes and need
 approval. Subscriptions are refused, because a long-lived stream is not something a turn can hold.
@@ -88,9 +88,9 @@ as the other site's decision.
 
 ## Long results, and where summaries come from
 
-Most pages and responses come back small enough to read whole. A large one is summarised once
-before the agent reads it, using the cheapest model configured on your instance, against the note
-the agent sent with the request, or against your own last message, if it sent none.
+Only a page read is ever summarised. Most pages come back small enough to read whole. A large one
+is summarised once before the agent reads it, using the cheapest model configured on your instance,
+against the note the agent sent with the read, or against your own last message, if it sent none.
 
 That summary carries quotes. Every quote is checked against what was actually fetched first, and any quote
 that is not in the page word-for-word is dropped. A summary can therefore be incomplete, but it
@@ -98,6 +98,10 @@ cannot cite something that was never there.
 
 If the summary cannot be produced, the agent gets the raw content instead. A slow or unavailable
 model never fails the turn.
+
+An oversized API response is cut short rather than summarised, and the agent is told it was cut.
+The fix is a narrower request (fewer fields, or one page of results at a time), not a second
+request for the same thing.
 
 ## When a page tries to give orders
 

@@ -43,7 +43,7 @@ const CREDENTIAL_SCHEMA = {
 export const API_REQUEST_TOOL_DECLARATION = {
   name: "api_request",
   description:
-    "Send a governed REST or GraphQL HTTPS request and return the whole response. Use structured arguments; never run curl or wget. GraphQL subscriptions are unsupported. Pass `prompt` to say what you need from the response: a large one is shrunk against it before it reaches you. Unlike a page read, a repeat request is never cached and may change or repeat an effect, so state everything you need the first time rather than planning to ask again.",
+    "Send a governed REST or GraphQL HTTPS request and return the whole response, headers included, exactly as it came back. Use structured arguments; never run curl or wget. GraphQL subscriptions are unsupported. Nothing is summarised or filtered, so read the response you already have rather than repeating the call to look at a different part of it — a repeat request is never cached and may repeat an effect. Narrow the request itself, with query parameters, pagination or a GraphQL selection, when a response is too large.",
   /** Conservative scheduling declaration; the Tool Host classifies each validated call exactly. */
   mutating: true,
   inputSchema: {
@@ -69,13 +69,6 @@ export const API_REQUEST_TOOL_DECLARATION = {
         },
       },
       credential: CREDENTIAL_SCHEMA,
-      prompt: {
-        type: "string",
-        minLength: 1,
-        maxLength: 2_000,
-        description:
-          "What you need from the response, as a self-contained instruction. Name the fields you want: 'list the title and number of every open issue' rather than 'the issues'.",
-      },
     },
   },
 } as const;

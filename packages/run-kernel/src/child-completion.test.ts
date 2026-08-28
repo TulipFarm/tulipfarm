@@ -24,6 +24,7 @@ function link(overrides: Partial<ChildLink> = {}): ChildLink {
     parentRunId: PARENT_ID,
     childRunId: CHILD_ID,
     authority: AUTHORITY,
+    authorityBinding: "delegated",
     callId: null,
     resume: { waitId: WAIT_ID, token: "plaintext-token" },
     detachedAt: null,

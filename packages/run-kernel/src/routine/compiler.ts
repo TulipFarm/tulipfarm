@@ -62,10 +62,37 @@ export interface IdentityCeiling {
   readonly maxRiskClass: RiskClass;
 }
 
+/**
+ * One authored input value, compiled.
+ *
+ * A value is a tree, not a scalar, because the Tools a Routine calls take structured arguments —
+ * `record_create` carries its `fields` one level down. Compiling only the top level would let a
+ * nested `${...}` reach the provider as the literal text of its own expression, which is a silent
+ * wrong value rather than a refusal.
+ */
+export type CompiledInputNode =
+  | { readonly kind: "literal"; readonly value: unknown }
+  | { readonly kind: "expression"; readonly expression: CompiledExpression }
+  | { readonly kind: "object"; readonly entries: readonly (readonly [string, CompiledInputNode])[] }
+  | { readonly kind: "array"; readonly items: readonly CompiledInputNode[] };
+
 export interface CompiledMapping {
   readonly name: string;
-  readonly expression: CompiledExpression | null;
-  readonly literal: unknown;
+  readonly node: CompiledInputNode;
+}
+
+/** Every expression anywhere in a compiled input tree, so callers can vet their roots. */
+export function inputNodeExpressions(node: CompiledInputNode): readonly CompiledExpression[] {
+  switch (node.kind) {
+    case "expression":
+      return [node.expression];
+    case "object":
+      return node.entries.flatMap(([, child]) => inputNodeExpressions(child));
+    case "array":
+      return node.items.flatMap((child) => inputNodeExpressions(child));
+    default:
+      return [];
+  }
 }
 
 export interface CompiledBranchArm {
@@ -474,17 +501,35 @@ export function compileRoutine(
   for (const [index, state] of states.entries()) {
     const path = `/spec/states/${index}`;
 
+    const compileInputNode = (value: unknown, at: string): CompiledInputNode => {
+      if (typeof value === "string") {
+        const match = EXPRESSION_PATTERN.exec(value);
+        if (match === null) return { kind: "literal", value };
+        const expression = compileAt(match[1] as string, at);
+        proveReferences(expression, state.name, at);
+        return { kind: "expression", expression };
+      }
+      if (Array.isArray(value)) {
+        return {
+          kind: "array",
+          items: value.map((item, i) => compileInputNode(item, `${at}/${i}`)),
+        };
+      }
+      if (isRecord(value)) {
+        return {
+          kind: "object",
+          entries: Object.keys(value)
+            .sort()
+            .map((key) => [key, compileInputNode(value[key], `${at}/${key}`)] as const),
+        };
+      }
+      return { kind: "literal", value };
+    };
+
     const inputs: CompiledMapping[] = [];
     for (const name of Object.keys(readRecord(state, "input") ?? {}).sort()) {
       const value = (readRecord(state, "input") as Record<string, unknown>)[name];
-      const match = typeof value === "string" ? EXPRESSION_PATTERN.exec(value) : null;
-      if (match === null) {
-        inputs.push({ name, expression: null, literal: value });
-        continue;
-      }
-      const expression = compileAt(match[1] as string, `${path}/input/${name}`);
-      proveReferences(expression, state.name, `${path}/input/${name}`);
-      inputs.push({ name, expression, literal: undefined });
+      inputs.push({ name, node: compileInputNode(value, `${path}/input/${name}`) });
     }
 
     const conditions: CompiledBranchArm[] = [];

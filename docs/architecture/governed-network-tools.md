@@ -39,22 +39,53 @@ So `web_fetch` returns the page's whole readable content, rendered to Markdown
 deterministically, and `api_request` returns the whole response the destination gave. Neither
 result depends on why it was asked for.
 
-Both Tools do accept an optional `prompt`. Neither Tool reads it. It is the Agent's own
+`web_fetch` alone accepts an optional `prompt`. The Tool does not read it. It is the Agent's own
 statement of what it is looking for, carried past the Tool to the distiller below, and it is
 deliberately kept out of the cached payload — the cache is keyed on the URL alone, so a prompt
-inside the payload would serve one caller's question to the next.
+inside the payload would serve one caller's question to the next. Because a page read is cached,
+the description invites a second read under a new prompt: re-asking costs no network.
 
-The two Tools teach the argument differently, because only one of them is cheap to re-ask.
-`web_fetch` is cached, so its description invites a second read under a new prompt. `api_request`
-is not cached and may be mutating, so its description says the opposite: state everything you need
-the first time. The `prompt` is excluded from the effect ledger's idempotency key
-(`packages/tool-host/src/effect-ledger.ts`), so rewording it can never make a mutating call look
+`api_request` deliberately has no `prompt`, because it has no distiller to carry one to. Offering
+the argument was not free even while it was ignored below the threshold: an Agent told its result
+*might* be filtered budgets for the filter, guesses wrong about what to ask for, and re-sends a
+request to see the part it feared was dropped — on a Tool that is mutating and never cached. The
+description now states plainly that the whole response comes back, headers included, and that an
+oversized response is a request to narrow rather than a result to re-read. The `prompt` remains
+excluded from the effect ledger's idempotency key
+(`packages/tool-host/src/effect-ledger.ts`), so rewording one can never make a mutating call look
 like a different one.
 
 ## Where the summarising went
 
 Long results are distilled once, in the Turn, by `ToolResultDistillerPort`
 (`packages/agent-runtime/src/loop/distill.ts`, implemented in `apps/worker`).
+
+**Only `web_fetch` is distilled.** The set is `DISTILLED_TOOLS`, built from the declaration so a
+rename cannot drop it out, and pinned by `apps/api/src/platform/skill-size.test.ts`. Distillation
+earns its cost only where the input is prose written for a human, whose one useful sentence sits
+inside a hundred kilobytes of navigation and markup. The rule used to be the other way round — every Tool
+whose result passed the threshold was summarised — and that is not a smaller version of this
+design, it is a different one. The summariser fences its input as hostile, is told to ignore any
+instruction inside it, and is asked for quotes with URLs. Pointed at content this instance wrote,
+all three are wrong: a Skill's authoring rules came back as prose *about* the rules, and the
+summary's closing "fetch a narrower target for the exact wording" read to the model as an
+instruction to load the Skill again, which it did.
+
+A large result from any other Tool reaches the model whole, cut at `MAX_RAW_RESULT_TOKENS` if it
+is outsized. A cut is a bound the model can see; a summary is a bound it cannot.
+
+**Both ceilings are set in tokens, and both are 10,000.** Tokens are what a result actually spends,
+and one bar for every Tool keeps the ordering honest — a trusted internal result held tighter than
+an untrusted web page would be the wrong way round. The bar was 4,000 *characters*, calibrated
+against full web pages on the assumption that nothing lived between a fragment and a page. A short
+article or one documentation section does, and carrying it whole is cheaper than summarising it
+and then having to read it again.
+
+An oversized API response takes the same visible cut as any other undistilled Tool. Summarising
+one would be pure loss: it is already the compact form, and the field names an Agent needs in
+order to write code against it are the first thing a summary drops. The honest remedy for a
+response too large to carry is a narrower request — pagination, query parameters, a GraphQL
+selection — not a second-hand reading of the one already paid for.
 
 - A result under the threshold reaches the model untouched. Most do.
 - A larger one is summarised on the cheapest rung against **the prompt the Agent wrote**, falling
@@ -135,7 +166,14 @@ stays `succeeded` and only its content is withheld.
 A Skill may declare `requiredSecrets` and `allowedDomains` in frontmatter. These declarations are
 requirements, not grants. At dispatch, the caller's authority, Agent authority, active Skill
 declarations, destination, and exact-key `secret.use` grant intersect. An absent declaration or
-grant denies.
+grant denies a **credentialed** request.
+
+For an uncredentialed request the same declarations only confine: a Skill that lists
+`allowedDomains` is held to them, and one that lists none has made no claim about the network, so
+the request falls through to the ordinary public-URL guard and the Run's network budget. Reading
+silence as an empty allowlist would make gaining an unrelated Skill *revoke* the Agent's ability to
+read a public URL. An active Skill the Soul cannot resolve is still denied — there is no
+frontmatter to have read.
 
 Secret plaintext is leased only inside the transport callback. It is never placed in model input,
 Tool arguments/results, logs, audit payloads, or caches. Direct Chat use of a Secret requires an

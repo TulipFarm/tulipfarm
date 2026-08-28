@@ -124,7 +124,11 @@ export class DelegationCoordinator {
     const depth = chain.length + 1;
     if (depth > maxDepth) throw new DelegationError("depth_limit_exceeded", "depth");
 
-    const parentAuthority = chain[0]?.authority ?? request.rootAuthority;
+    // Depth counts every ancestor, but authority comes from the nearest link that actually granted
+    // any — a `lineage` link records a call, not a grant. Walking past it is what keeps a helper
+    // spawned inside a called Routine as capable as one spawned inside that Routine run alone.
+    const parentAuthority =
+      chain.find((link) => link.authorityBinding !== "lineage")?.authority ?? request.rootAuthority;
     const parentDeadlineMs = parentAuthority.limits[DELEGATION_DEADLINE_LIMIT_KEY];
     if (parentDeadlineMs === undefined) {
       throw new DelegationError("deadline_unbounded", DELEGATION_DEADLINE_LIMIT_KEY);

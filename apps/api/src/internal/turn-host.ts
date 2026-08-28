@@ -141,6 +141,8 @@ export interface HostedTurnIdentity {
   readonly turnId: string;
   readonly conversationId: string;
   readonly attempt: number;
+  /** The Run this attempt supersedes, so a retry can reread what the failed attempt already did. */
+  readonly previousRunId?: string;
 }
 
 export interface HostedToolCall {
@@ -152,6 +154,8 @@ export interface HostedToolCall {
   readonly activeSkillName?: string;
   /** The Agent a Turnless Run claims to act as; confirmed against the Soul before it is honoured. */
   readonly agentName?: string;
+  /** A Routine State's authored ceiling. Narrowing only — see `HostedToolCall` in tool-host. */
+  readonly permissionCeiling?: { readonly maxRiskClass?: string };
 }
 
 /** Mirrors the loop's `ToolDispatchResult`, minus the `callId` the caller already holds. */
@@ -317,7 +321,15 @@ export class InternalTurnHost {
 
   async describeTurn(businessId: string, runId: string): Promise<HostedTurnIdentity> {
     const { turn } = await this.turnAuthority(businessId, runId);
-    return { turnId: turn.id, conversationId: turn.conversationId, attempt: turn.attempt };
+    // The newest superseded Run is the attempt this one replaces. Older entries are earlier
+    // attempts whose work a later one already had the chance to carry forward.
+    const previousRunId = turn.supersededRunIds.at(-1);
+    return {
+      turnId: turn.id,
+      conversationId: turn.conversationId,
+      attempt: turn.attempt,
+      ...(previousRunId === undefined ? {} : { previousRunId }),
+    };
   }
 
   async resolveContext(businessId: string, runId: string): Promise<HostedTurnContext> {

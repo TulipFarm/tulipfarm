@@ -1,5 +1,10 @@
 import { createHmac } from "node:crypto";
-import type { RawPayloadVault, WebhookEventSink, WebhookTrigger } from "@tulipfarm/run-kernel";
+import type {
+  RawPayloadVault,
+  RegisteredTrigger,
+  WebhookEventSink,
+  WebhookTrigger,
+} from "@tulipfarm/run-kernel";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import { buildApp } from "../app";
@@ -149,5 +154,150 @@ describe("POST /api/v1/hooks/:provider/:trigger", () => {
     expect(keys).toEqual(["rl:hook:127.0.0.1:github:issues-opened"]);
     expect(resolveTrigger).not.toHaveBeenCalled();
     expect(accept).not.toHaveBeenCalled();
+  });
+
+  describe("binding the persisted event to its Routine", () => {
+    const registered: RegisteredTrigger = {
+      triggerSlug: "issues-opened",
+      authoredVersion: 3,
+      lifecycle: "published",
+      type: "webhook",
+      eventType: "github.issues.opened",
+      eventVersion: 1,
+      routineRef: { name: "triage-issue", version: "1.0.0" },
+      backgroundIdentity: { principalKind: "service", principalId: "webhook-ingress" },
+      inputMappings: { issueNumber: "issue.number" },
+    };
+
+    function bindable(overrides: Partial<HookIngressDeps> = {}) {
+      const startRun = vi.fn<NonNullable<HookIngressDeps["startRun"]>>(async () => ({
+        runId: "run-1",
+        outcome: "started" as const,
+      }));
+      return {
+        startRun,
+        deps: {
+          resolveInvocationTrigger: async () => registered,
+          startRun,
+          ...overrides,
+        } satisfies Partial<HookIngressDeps>,
+      };
+    }
+
+    it("starts the Routine Run a verified delivery was received for", async () => {
+      const { startRun, deps } = bindable();
+      await build(deps);
+
+      const response = await post(JSON.stringify({ issue: { number: 42 } }));
+
+      expect(response.statusCode).toBe(202);
+      expect(startRun).toHaveBeenCalledTimes(1);
+      const invocation = startRun.mock.calls[0]?.[0];
+      expect(invocation?.routineRef).toEqual({ name: "triage-issue", version: "1.0.0" });
+      // The Trigger's own declared identity, never the sender's.
+      expect(invocation?.backgroundIdentity).toEqual({
+        principalKind: "service",
+        principalId: "webhook-ingress",
+      });
+      expect(invocation?.input).toEqual({ issueNumber: 42 });
+      // Idempotency is the delivery's, so a redelivery adopts the Run it already made.
+      expect(invocation?.idempotencyKey).toBe("issues-opened:3:issues-opened:delivery-1");
+    });
+
+    it("does not start a Run when the Trigger's filter rejects the payload", async () => {
+      const { startRun, deps } = bindable({
+        resolveInvocationTrigger: async () => ({
+          ...registered,
+          filter: "trigger.payload.issue.number > 100",
+        }),
+      });
+      await build(deps);
+
+      const response = await post(JSON.stringify({ issue: { number: 42 } }));
+
+      // Still 202: the delivery was accepted and stored, it just was not what the author asked for.
+      expect(response.statusCode).toBe(202);
+      expect(startRun).not.toHaveBeenCalled();
+    });
+
+    it("starts a Run when the Trigger's filter accepts the payload", async () => {
+      const { startRun, deps } = bindable({
+        resolveInvocationTrigger: async () => ({
+          ...registered,
+          filter: "trigger.payload.issue.number > 100",
+        }),
+      });
+      await build(deps);
+
+      await post(JSON.stringify({ issue: { number: 420 } }));
+
+      expect(startRun).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not start a Run when the Trigger's match predicate rejects the payload", async () => {
+      const { startRun, deps } = bindable({
+        resolveInvocationTrigger: async () => ({
+          ...registered,
+          match: [{ path: "issue.state", equals: "open" }],
+        }),
+      });
+      await build(deps);
+
+      await post(JSON.stringify({ issue: { number: 42, state: "closed" } }));
+
+      expect(startRun).not.toHaveBeenCalled();
+    });
+
+    it("re-binds a duplicate delivery, so a crash between persistence and the Run heals", async () => {
+      const { startRun, deps } = bindable();
+      await build(deps);
+      accept.mockResolvedValue({ outcome: "duplicate" });
+
+      const response = await post(JSON.stringify({ issue: { number: 42 } }));
+
+      expect(response.json()).toEqual({ status: "duplicate" });
+      expect(startRun).toHaveBeenCalledTimes(1);
+    });
+
+    it("still persists the event when an unresolvable mapping refuses the binding", async () => {
+      const { startRun, deps } = bindable();
+      await build(deps);
+
+      const response = await post(JSON.stringify({ issue: {} }));
+
+      // The event is real and stored; only the authored mapping is wrong, and redelivering it
+      // would never bind any better.
+      expect(response.statusCode).toBe(202);
+      expect(accept).toHaveBeenCalledTimes(1);
+      expect(startRun).not.toHaveBeenCalled();
+    });
+
+    it("fails the delivery when the Run cannot be started, so the sender retries", async () => {
+      const { deps } = bindable({
+        startRun: async () => {
+          throw new Error("invocation gateway unavailable");
+        },
+      });
+      await build(deps);
+
+      const response = await post(JSON.stringify({ issue: { number: 42 } }));
+
+      expect(response.statusCode).toBe(500);
+    });
+
+    it("does not bind an ignored delivery", async () => {
+      const { startRun, deps } = bindable();
+      resolveTrigger = vi.fn();
+      await build(deps);
+      resolveTrigger.mockResolvedValue({
+        ...trigger,
+        filter: { path: "action", equals: "opened" },
+      });
+
+      const response = await post(JSON.stringify({ action: "closed" }));
+
+      expect(response.json()).toEqual({ status: "ignored" });
+      expect(startRun).not.toHaveBeenCalled();
+    });
   });
 });

@@ -169,7 +169,9 @@ import {
 } from "./ingress/repo";
 import { resolveSecretRef } from "./integrations/connection-env";
 import { PgPrincipalProviderTokenRepo } from "./integrations/principal-tokens";
+import { InternalChildRoutineHost } from "./internal/child-routine-host";
 import { IngressDeliveryHost } from "./internal/delivery-host";
+import { InternalEmitHost } from "./internal/emit-host";
 import { ModelSelectorGate, modelGateModeFromEnv } from "./internal/model-authz";
 import { InternalRoutineApprovalHost } from "./internal/routine-approval-host";
 import { SubagentTurnContextResolver } from "./internal/subagent-context";
@@ -218,6 +220,7 @@ import { PgCounterStore, PgResourceRepoFactory } from "./resources/repo";
 import { runCanceller } from "./runs/cancel";
 import { RunEventNotifyListener } from "./runs/notify-listener";
 import {
+  childRoutineTrigger,
   integrationInvoker,
   manualRoutineTrigger,
   scheduledRoutineTrigger,
@@ -241,6 +244,7 @@ import {
 import { ScheduleDispatcher } from "./schedule/dispatcher";
 import { registerScheduleDispatch } from "./schedule/register";
 import { RoutineScheduleStateStore } from "./schedule/state-store";
+import { supersedeRoutineRuns } from "./schedule/supersede";
 import { bootstrapFromEnv } from "./setup/bootstrap";
 import {
   assertNoOrphanedDeks,
@@ -273,6 +277,7 @@ import { composeNetworkTools } from "./tools/network/compose";
 import { buildToolRegistry } from "./tools/setup";
 import { buildSlackTooling } from "./tools/slack/compose";
 import { buildSlackTools } from "./tools/slack/tools";
+import { EventTriggerGateway } from "./triggers/event-dispatch";
 
 config({ path: ".env.local" });
 
@@ -547,6 +552,10 @@ async function boot() {
       activeBundle: activeSoulBundle,
       stateStore: new RoutineScheduleStateStore(pool),
       startRoutine: scheduledRoutineTrigger(invocations),
+      countActiveRuns: ({ routineId }) =>
+        runStore.countActiveByRoutine({ businessId: DEPLOYMENT_BUSINESS_ID, routineId }),
+      supersedeActiveRuns: ({ routineId }) =>
+        supersedeRoutineRuns(runStore, runCancel.cancel, routineId),
       businessId: DEPLOYMENT_BUSINESS_ID,
       log: console,
     });
@@ -562,6 +571,11 @@ async function boot() {
       DEPLOYMENT_BUSINESS_ID
     );
     const webhookRawPayloadVault = new PgRawPayloadVault(pool, activeDek.key);
+    const eventTriggers = new EventTriggerGateway({
+      listTriggers: () => triggerDefinitions.listEventTriggers(),
+      startRun: triggerRunStarter(invocations),
+      nextEventId: randomUUID,
+    });
     const runStore = new RunStore(runTransactions);
     const runEventStore = new RunEventStore(runTransactions);
     const budgetStore = new BudgetStore(runTransactions);
@@ -1016,6 +1030,7 @@ async function boot() {
           }),
           toolRegistry,
           domainEvents: domainEventEmitter,
+          eventTriggers,
           // The link is redeemed inside an authenticated web session, so it must point at the
           bindLinkUrl: (token) =>
             `${publicOrigins.current().webOrigin}/link-channel?token=${encodeURIComponent(token)}`,
@@ -1044,6 +1059,19 @@ async function boot() {
         db: pool,
         withTransaction: (operation) => withTransaction(pool, operation),
         resume: runResume,
+      }),
+      childRoutines: new InternalChildRoutineHost({
+        runs: runStore,
+        links: new ChildLinkStore(runTransactions),
+        ancestry: childLinks,
+        waits: runWaits,
+        start: childRoutineTrigger(invocations),
+      }),
+      emissions: new InternalEmitHost({
+        runs: runStore,
+        links: new ChildLinkStore(runTransactions),
+        ancestry: childLinks,
+        dispatch: (event) => eventTriggers.dispatchInternalEvent(event),
       }),
     };
 
@@ -1247,6 +1275,8 @@ async function boot() {
       hookIngress: {
         resolveTrigger: (provider, trigger) =>
           webhookTriggerDefinitions.resolveTrigger(provider, trigger),
+        resolveInvocationTrigger: (slug) => triggerDefinitions.resolveTrigger(slug),
+        startRun: triggerRunStarter(invocations),
         ingress: {
           secrets: webhookSecretPort(secretsService),
           vault: webhookRawPayloadVault,
@@ -1363,7 +1393,13 @@ async function boot() {
     await registerEmbeddingBackfill(boss, { db: pool, embeddings: embeddingService, log: app.log });
     subscribeKnowledgeIndexing(domainEventEmitter, boss);
     subscribeActivityLogging(domainEventEmitter, activityService);
-    const stopDelivery = await startDelivery(pool, hookExecutor, domainEventEmitter, app.log);
+    const stopDelivery = await startDelivery(
+      pool,
+      hookExecutor,
+      domainEventEmitter,
+      app.log,
+      eventTriggers
+    );
     // the token resolves — the default path loads nothing extra.
     let metricsSink: OtlpMetricsExporter | undefined;
     let tracesSink: OtlpTracesExporter | undefined;

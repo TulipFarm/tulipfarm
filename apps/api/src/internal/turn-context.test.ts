@@ -371,6 +371,7 @@ describe("ChatTurnContextResolver — a delegated Run's granted authority", () =
       classifications: ["business_record"],
       limits: { maxToolCalls: 2, delegationDeadlineEpochMs: Date.parse("2030-01-01T00:00:00Z") },
     },
+    authorityBinding: "delegated" as const,
     resume: null,
     callId: null,
     detachedAt: null,

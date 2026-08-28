@@ -1,7 +1,7 @@
 import type { Dirent } from "node:fs";
 import { readdir, readFile, realpath } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { classifySoulPath } from "@tulipfarm/schema";
+import { artifactLayout, classifySoulPath } from "@tulipfarm/schema";
 
 export type SkillFileErrorCode = "INVALID_PATH" | "NOT_FOUND" | "UNAVAILABLE";
 
@@ -95,6 +95,26 @@ const CLASSIFY_SLUG = "skill";
 
 function classifySkillFile(path: string) {
   return classifySoulPath(`skills/${CLASSIFY_SLUG}/${path}`);
+}
+
+/**
+ * True when the path names the Skill's own definition.
+ *
+ * Every load already returns that text as `body`, so reading it back by path spends a whole model
+ * invocation to receive bytes the caller is holding. `inventory` hides it from `files` for the
+ * same reason; this is what lets the read itself be refused rather than merely unadvertised.
+ */
+export function isSkillDefinitionFile(path: string): boolean {
+  const normalized = path
+    .replaceAll("\\", "/")
+    .split("/")
+    .filter((segment) => segment !== "" && segment !== ".")
+    .join("/");
+  if (classifySkillFile(normalized)?.definition === true) return true;
+  // macOS and Windows both resolve a case-mismatched read to the same file, so a model that
+  // guesses `skill.md` would otherwise walk past a refusal that `SKILL.md` gets.
+  const definitionFile = artifactLayout("Skill")?.definitionFile;
+  return definitionFile !== undefined && definitionFile.toLowerCase() === normalized.toLowerCase();
 }
 
 /**

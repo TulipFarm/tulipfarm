@@ -1,10 +1,13 @@
+import { CHILD_COMPLETION_SCHEMA_REF } from "../../child-completion";
 import type { ChildAuthority, RequestedChildAuthority } from "../../children";
 import { narrowChildAuthority } from "../../children";
 import type { RegisterWaitInput } from "../../waits";
 import type { CompiledState } from "../compiler";
+import { resolveRoutineStateInput } from "../input";
 import { RoutineStepError } from "./step";
 import {
   continueState,
+  deadlineMsOf,
   planStateWait,
   resolveErrorPath,
   type StateResumeDecision,
@@ -33,6 +36,43 @@ export interface ChildRunPlan {
   readonly wait: RegisterWaitInput | null;
 }
 
+/** What a `child_routine` State asks for, once its authored mappings are resolved. */
+export interface ChildRoutineCall {
+  readonly routineRef: { readonly name: string; readonly version: string };
+  readonly mode: "wait" | "detach";
+  readonly input: Record<string, unknown>;
+  /**
+   * How long the caller may stay parked. Required in `wait` mode and refused when absent, so a
+   * Routine can never park on a child forever; `detach` never parks, so it carries none.
+   */
+  readonly deadlineMs: number | null;
+}
+
+/**
+ * Resolves a `child_routine` State into the call the host must make.
+ *
+ * Kept in the kernel rather than the Worker so the callee name, the mode and the caller's
+ * deadline are validated once, on the same terms as every other State's plan.
+ */
+export function planChildRoutineCall(
+  state: CompiledState,
+  scope: Readonly<Record<string, unknown>>
+): ChildRoutineCall {
+  const mode = childRoutineMode(state);
+  return {
+    routineRef: routineRefOf(state),
+    mode,
+    input: resolveRoutineStateInput(state, scope),
+    deadlineMs: mode === "detach" ? null : deadlineMsOf(state),
+  };
+}
+
+function childRoutineMode(state: CompiledState): "wait" | "detach" {
+  return state.definition.type === "child_routine" && state.definition.mode === "detach"
+    ? "detach"
+    : "wait";
+}
+
 function routineRefOf(state: CompiledState): { name: string; version: string } {
   if (state.definition.type !== "child_routine") {
     throw new RoutineStepError("missing_routine_ref", state.name);
@@ -55,10 +95,7 @@ export function planChildRun(
 ): ChildRunPlan {
   const routineRef = routineRefOf(state);
   const authority = narrowChildAuthority(ctx.parentAuthority, requested);
-  const mode =
-    state.definition.type === "child_routine" && state.definition.mode === "detach"
-      ? "detach"
-      : "wait";
+  const mode = childRoutineMode(state);
 
   return {
     command: {
@@ -75,6 +112,10 @@ export function planChildRun(
         : planStateWait(state, ctx, {
             kind: "child_run",
             principals: [`run:${ctx.childRunId}`],
+            // Pinned, not derived: the child reports through `signalChildCompletion`, which always
+            // delivers `CHILD_COMPLETION_SCHEMA_REF`, and `authorizeSignal` refuses any mismatch as
+            // `wrong_schema`. A per-State ref would park the caller on a wait nothing can redeem.
+            schemaRef: CHILD_COMPLETION_SCHEMA_REF,
           }),
   };
 }

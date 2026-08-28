@@ -24,17 +24,47 @@ export type ResourceLookup = (
 ) => Promise<Record<string, unknown> | null>;
 
 /** Deterministic time/random makes hook replay evidence, not a fresh roll. */
-function determinismPreamble(now: number): string {
-  const seed = (now ^ 0xdeadbeef) >>> 0;
+function determinismPreamble(now: number, seed?: string): string {
+  // A seeded caller gets the same stream on every attempt of its occurrence; an unseeded one only
+  // gets a frozen clock, since there is nothing stable to derive a stream from.
+  const rngSeed =
+    seed === undefined
+      ? (now ^ 0xdeadbeef) >>> 0
+      : (Number.parseInt(createHash("sha256").update(seed).digest("hex").slice(0, 8), 16) || 1) >>>
+        0;
   return `
   Date.now = () => ${now};
-  let __rng__ = ${seed};
+  let __rng__ = ${rngSeed === 0 ? 1 : rngSeed};
   Math.random = function() {
     __rng__ ^= __rng__ << 13;
     __rng__ ^= __rng__ >>> 17;
     __rng__ ^= __rng__ << 5;
     return (__rng__ >>> 0) / 4294967296;
   };`;
+}
+
+/**
+ * A uuid generator that repeats itself across attempts of the same occurrence.
+ *
+ * Shaped as a v4 uuid so nothing downstream has to special-case it, but derived from the seed and
+ * a call counter, so the nth `ctx.uuid()` of a retried State is the id the first attempt made.
+ */
+function seededUuids(seed: string): () => string {
+  let counter = 0;
+  return () => {
+    const digest = createHash("sha256").update(`${seed}:${counter}`).digest("hex");
+    counter += 1;
+    const variant = ((Number.parseInt(digest.slice(16, 18), 16) & 0x3f) | 0x80)
+      .toString(16)
+      .padStart(2, "0");
+    return [
+      digest.slice(0, 8),
+      digest.slice(8, 12),
+      `4${digest.slice(13, 16)}`,
+      `${variant}${digest.slice(18, 20)}`,
+      digest.slice(20, 32),
+    ].join("-");
+  };
 }
 
 const IDENTIFIER_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
@@ -54,7 +84,7 @@ function dispose(isolate: ivm.Isolate): void {
 
 /** Evaluate a data-flow expression with scope locals and no host/fs/net reach. */
 export async function runExpression(req: ExpressionRequest): Promise<WorkerResponse> {
-  const { id, code, scope } = req;
+  const { id, code, scope, determinismSeed } = req;
   const isolate = new ivm.Isolate({ memoryLimit: MEMORY_LIMIT_MB });
   try {
     const context = await isolate.createContext();
@@ -62,7 +92,7 @@ export async function runExpression(req: ExpressionRequest): Promise<WorkerRespo
     const values = keys.map((k) => JSON.stringify(scope[k] ?? null));
     const script = await isolate.compileScript(`
 (() => {
-  ${determinismPreamble(Date.now())}
+  ${determinismPreamble(Date.now(), determinismSeed)}
   return ((${keys.join(", ")}) => (${code}))(${values.join(", ")});
 })()
 `);
@@ -77,7 +107,7 @@ export async function runExpression(req: ExpressionRequest): Promise<WorkerRespo
 
 /** Call a Routine hook with hash/uuid helpers but no patch/resource access. */
 export async function runRoutineHook(req: RoutineHookRequest): Promise<WorkerResponse> {
-  const { id, hookSource, fnName, invocation, args, optional } = req;
+  const { id, hookSource, fnName, invocation, args, optional, determinismSeed } = req;
   const isolate = new ivm.Isolate({ memoryLimit: MEMORY_LIMIT_MB });
   try {
     const context = await isolate.createContext();
@@ -88,11 +118,12 @@ export async function runRoutineHook(req: RoutineHookRequest): Promise<WorkerRes
         sync: true,
       })
     );
-    await jail.set("__uuid__", new ivm.Callback(() => randomUUID(), { sync: true }));
+    const uuid = determinismSeed === undefined ? randomUUID : seededUuids(determinismSeed);
+    await jail.set("__uuid__", new ivm.Callback(() => uuid(), { sync: true }));
 
     const script = await isolate.compileScript(`
 (async () => {
-  ${determinismPreamble(Date.now())}
+  ${determinismPreamble(Date.now(), determinismSeed)}
   const ctx = Object.freeze({
     ...(${JSON.stringify(invocation)}),
     hash: __hash__,

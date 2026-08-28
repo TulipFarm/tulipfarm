@@ -125,12 +125,57 @@ describe("loadBundledSkills", () => {
     }
   });
 
-  it("ships Routine Forge with canonical examples references", async () => {
+  it("ships Routine Forge with exactly one examples reference", async () => {
     const routineForge = (await loadBundledSkills(makeLogger())).get("routine-forge");
-    expect(routineForge?.files).toEqual([
-      "references/canonical-examples.md",
-      "references/examples.md",
-    ]);
+    // A second, byte-identical copy shipped here once. Every advertised file is a read the model
+    // may spend a whole invocation on, so a duplicate costs a Turn to learn nothing.
+    expect(routineForge?.files).toEqual(["references/canonical-examples.md"]);
+  });
+
+  it("keeps Routine Forge inside a length budget, with the bulk in its reference", async () => {
+    const routineForge = (await loadBundledSkills(makeLogger())).get("routine-forge");
+    // Every Turn that authors a Routine pays for this whole body up front, whether or not it needs
+    // the detail. At 495 lines it was the slowest Skill to load in the tree, so the per-State
+    // detail lives in the reference and only what every Routine needs stays here.
+    const source = await readFile(join(routineForge?.directory ?? "", "SKILL.md"), "utf8");
+    expect(source.split("\n").length).toBeLessThanOrEqual(200);
+
+    // The reference has to be worth the redirect: it carries every State type the Worker runs.
+    const reference = await readFile(
+      join(routineForge?.directory ?? "", "references", "canonical-examples.md"),
+      "utf8"
+    );
+    for (const state of ["action", "script", "compute", "child_routine", "emit", "approval"]) {
+      expect(reference).toContain(`### \`${state}\``);
+    }
+
+    // Both files must agree on the doctrine, or the reference re-teaches the habit the body just
+    // warned against — which is exactly how a deterministic Routine ended up with an Agent in it.
+    expect(routineForge?.body).toContain("Reach for a model last.");
+    expect(reference).toContain("Reach for a model last.");
+    expect(reference).not.toContain("Almost every Routine should use `agent` States");
+  });
+
+  it("stops Routine Forge minting a manual Trigger for a button that needs none", async () => {
+    // A forged schedule arrived in the Soul beside a second, useless `manual` Trigger, because
+    // both files claimed a manual Trigger was how the Routines UI gets a "run now" entry point.
+    // It is not: that button posts to /api/v1/routines/<slug>/runs, which reads no Trigger at
+    // all. Pin the real endpoints in both files, or the next author re-derives the same litter.
+    const routineForge = (await loadBundledSkills(makeLogger())).get("routine-forge");
+    const reference = await readFile(
+      join(routineForge?.directory ?? "", "references", "canonical-examples.md"),
+      "utf8"
+    );
+
+    for (const source of [routineForge?.body ?? "", reference]) {
+      expect(source).toContain("POST /api/v1/routines/<slug>/runs");
+      expect(source).not.toContain("Add a `manual` Trigger when the user needs a Routines UI");
+    }
+    expect(routineForge?.body).toContain("POST /api/v1/triggers/<slug>/invoke");
+
+    // The scheduler appends each occurrence to the authored key itself, so an interpolated key
+    // is cargo cult that ships a literal `${scheduledTime}` into the Soul.
+    expect(routineForge?.body).toContain("interpolate `${scheduledTime}`");
   });
 
   it("ships Resource Forge with an exact canonical x-links.target example", async () => {
@@ -153,19 +198,26 @@ describe("loadBundledSkills", () => {
     const routineForge = (await loadBundledSkills(makeLogger())).get("routine-forge");
     const body = routineForge?.body ?? "";
 
-    const yamlBlocks = [...body.matchAll(/```yaml\n([\s\S]*?)```/g)].map((match) => match[1]);
-    expect(yamlBlocks).toHaveLength(2);
+    const documents = [...body.matchAll(/```yaml\n([\s\S]*?)```/g)].map(
+      (match) => parseYaml(match[1] as string) as Record<string, unknown>
+    );
+    expect(documents.length).toBeGreaterThanOrEqual(1);
 
-    const [routineDoc, triggerDoc] = yamlBlocks.map((block) => parseYaml(block));
+    // Every example must be a whole document: a fragment is a shape nothing here can check, and an
+    // unchecked shape in an authoring Skill is exactly how an invalid State reaches the Soul.
+    const routines = documents
+      .filter((document) => document.kind === "Routine")
+      .map((document) => definitions.routine.validateRoutineDefinition(document).document);
+    expect(routines).toHaveLength(documents.length);
 
-    const routine = definitions.routine.validateRoutineDefinition(routineDoc).document;
-    const trigger = definitions.trigger.validateTriggerDefinition(triggerDoc).document;
-
-    // Mirrors the cross-document checks `routine_forge` enforces in
-    // apps/api/src/platform/tools.ts beyond per-document schema validation.
-    expect(trigger.metadata.lifecycle).toBe("published");
-    expect(trigger.spec.routineRef.name).toBe(routine.metadata.slug);
-    expect(trigger.spec.routineRef.version).toBe(String(routine.metadata.authoredVersion));
+    // A Trigger is authored inside the Routine it starts, so a standalone Trigger document in the
+    // Skill would teach the model the shape `routine_forge` no longer takes.
+    expect(documents.some((document) => document.kind === "Trigger")).toBe(false);
+    const embedded = routines.flatMap((routine) => routine.spec.triggers ?? []);
+    expect(embedded.length).toBeGreaterThanOrEqual(1);
+    for (const trigger of embedded) {
+      expect(trigger).not.toHaveProperty("routineRef");
+    }
   });
 
   it("ships Skill Forge with the compact description and mandatory authoring section order", async () => {

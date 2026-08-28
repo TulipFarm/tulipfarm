@@ -229,7 +229,7 @@ describe("AgentLoop", () => {
     const tools = dispatcher({
       status: "succeeded",
       callId: "call-1",
-      output: { url: "https://x.example", content: "By Vicent Marti. ".repeat(500) },
+      output: { url: "https://x.example", content: "By Vicent Marti. ".repeat(2_500) },
     });
 
     await loop({
@@ -281,7 +281,7 @@ describe("AgentLoop", () => {
       tools: dispatcher({
         status: "succeeded",
         callId: "call-1",
-        output: { url: "https://x.example", content: "Ships in September. ".repeat(500) },
+        output: { url: "https://x.example", content: "Ships in September. ".repeat(2_200) },
       }),
       distiller,
     }).run(
@@ -1511,6 +1511,59 @@ describe("AgentLoop resume after an approval park", () => {
       .map((message) => contentText(message.content))
       .join("\n");
     expect(transcript).toContain("denied by operator");
+  });
+});
+
+describe("AgentLoop keeping a failed Turn's work for the retry", () => {
+  /** Runs one Tool, then dies on the next model call with `reason`. */
+  async function failAfterOneTool(reason: "model_provider_unavailable" | "budget_exhausted") {
+    const checkpoints = new InMemoryLoopCheckpointStore();
+    let call = 0;
+    const model: ModelPort = {
+      invoke: async () => {
+        call += 1;
+        if (call === 1) {
+          return toolCallResult([
+            { callId: "c1", name: "github.issue.comment", arguments: { body: "hi" } },
+          ]);
+        }
+        throw new ModelInvocationError("model_provider_unavailable", new Error("overloaded"));
+      },
+    };
+    const outcome = await loop({
+      model,
+      tools: dispatcher({ status: "succeeded", callId: "c1", output: { stars: 412 } }),
+      checkpoints,
+      ...(reason === "budget_exhausted"
+        ? {
+            budget: {
+              consume: async (charge: { key: string; amount: number }) => ({
+                outcome: charge.key === "tokens" ? "exhausted" : "allowed",
+              }),
+            },
+          }
+        : {}),
+    }).run(input());
+    return { outcome, saved: await checkpoints.load("biz-1", "run-1", "state-1") };
+  }
+
+  it("keeps the Tool results when the provider had a bad moment, so a retry need not buy them again", async () => {
+    const { outcome, saved } = await failAfterOneTool("model_provider_unavailable");
+
+    expect(outcome).toMatchObject({ status: "failed", reason: "model_provider_unavailable" });
+    // The expensive part of the Turn is the Tool result, not the model call that died after it.
+    // Dropping it here is what made Retry re-run every Tool from the top.
+    expect(saved?.resume).toBeDefined();
+    expect(JSON.stringify(saved?.resume?.messages)).toContain("412");
+  });
+
+  it("drops them when the failure is one a retry cannot fix", async () => {
+    const { outcome, saved } = await failAfterOneTool("budget_exhausted");
+
+    expect(outcome).toMatchObject({ status: "failed", reason: "budget_exhausted" });
+    // Retrying an exhausted budget fails the same way, so holding the Tool arguments and outputs
+    // would retain them for a Turn that can never use them.
+    expect(saved?.resume).toBeUndefined();
   });
 });
 

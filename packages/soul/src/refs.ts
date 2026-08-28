@@ -10,6 +10,7 @@ export type SoulSemanticIssueCode =
   | "ROUTINE_START_UNKNOWN"
   | "ROUTINE_TRANSITION_UNKNOWN"
   | "ROUTINE_DUPLICATE_STATE"
+  | "TRIGGER_NAME_CONFLICT"
   | "SKILL_DUPLICATE_COMMAND"
   | "SKILL_ENTRYPOINT_UNDECLARED"
   | "SKILL_TOOL_ADAPTER_INVALID"
@@ -302,15 +303,6 @@ export function collectReferenceEdges(def: AuthoredDefinition): ReferenceEdge[] 
           form: "plain",
         });
       }
-    });
-  }
-
-  if (def.kind === "Trigger") {
-    edges.push({
-      kind: "Routine",
-      field: "/spec/routineRef",
-      value: def.spec.routineRef,
-      form: "versioned",
     });
   }
 

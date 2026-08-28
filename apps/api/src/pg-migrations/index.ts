@@ -569,6 +569,63 @@ const ROUTINE_SCHEDULE_STATE_STATEMENTS: string[] = [
     ON routine_schedule_state (business_id, next_due_at_ms)`,
 ];
 
+/**
+ * Phase origin for an `interval` Trigger that authored no `schedule.startAt`. Without it
+ * `planSchedule` threw `interval_anchor_missing` and the dispatcher skipped the Trigger on every
+ * tick, so such a Routine never ran and reported nothing.
+ */
+const ROUTINE_SCHEDULE_ANCHOR_STATEMENTS: string[] = [
+  // Guarded because a database restored from a partial schema reaches this migration without the
+  // table; skipping is correct there, since a fire-state table that does not exist has no anchors
+  // to keep, and migration 31 creates the column-complete table on any database that gets it later.
+  `DO $mig79$
+   BEGIN
+     IF to_regclass('public.routine_schedule_state') IS NULL THEN RETURN; END IF;
+     ALTER TABLE routine_schedule_state ADD COLUMN IF NOT EXISTS anchor_ms bigint;
+   END $mig79$`,
+];
+
+/**
+ * Durable published output for a settled State.
+ *
+ * A replayed Run rebuilds `states.*` by walking the chain again, which lets a pure `compute` State
+ * re-derive its value from scope. An `agent`, `action` or `script` State cannot — its result came
+ * from a model, a provider or an isolate — so before this column every such State republished
+ * `null` on replay, and any `${states.X.output.y}` reading one silently resolved to nothing.
+ */
+const RUN_STATE_OUTPUT_STATEMENTS: string[] = [
+  `DO $mig80$
+   BEGIN
+     IF to_regclass('public.run_states') IS NULL THEN RETURN; END IF;
+     ALTER TABLE run_states ADD COLUMN IF NOT EXISTS output jsonb;
+   END $mig80$`,
+];
+
+/**
+ * One row per distinct provider event, so a redelivery cannot mint a second one.
+ *
+ * The event's `id` becomes the Trigger envelope's `deduplicationKey`, so a fresh id per delivery
+ * meant a replayed provider event started a second Run. The unique index is partial because
+ * `external_id` is null for events the provider gives no stable identity for; those keep the
+ * old insert-always behaviour, since there is nothing to dedupe them on.
+ */
+const INTEGRATION_EVENT_DEDUP_STATEMENTS: string[] = [
+  `DO $mig82$
+   BEGIN
+     IF to_regclass('public.integration_events') IS NULL THEN RETURN; END IF;
+     DELETE FROM integration_events a
+       USING integration_events b
+       WHERE a.external_id IS NOT NULL
+         AND a.integration_slug = b.integration_slug
+         AND a.external_id = b.external_id
+         AND a.event_type = b.event_type
+         AND (a.created_at, a.id) > (b.created_at, b.id);
+     CREATE UNIQUE INDEX IF NOT EXISTS integration_events_external_key
+       ON integration_events (integration_slug, event_type, external_id)
+       WHERE external_id IS NOT NULL;
+   END $mig82$`,
+];
+
 /** Durable per-Confluence-tenant resume position for `syncConfluenceKnowledge`. */
 const CONFLUENCE_KNOWLEDGE_CHECKPOINT_STATEMENTS: string[] = [
   `CREATE TABLE IF NOT EXISTS confluence_knowledge_checkpoints (
@@ -2179,4 +2236,29 @@ export const PG_MIGRATIONS: PgMigration[] = [
     up: applyStatements(FILE_KNOWLEDGE_STATEMENTS),
   },
   resourceSideEffectMigration(applyStatements),
+  {
+    version: 79,
+    description: "routine_schedule_state: durable interval anchor, so `everyMs` needs no `startAt`",
+    up: applyStatements(ROUTINE_SCHEDULE_ANCHOR_STATEMENTS),
+  },
+  {
+    version: 80,
+    description: "run_states.output: durable published output, so replay republishes what ran",
+    up: applyStatements(RUN_STATE_OUTPUT_STATEMENTS),
+  },
+  {
+    // `authority_binding` was added to the statement list behind migration 8, which any database
+    // past 8 had already run and never runs again — so the column reached fresh installs only,
+    // while the child-link queries select it unconditionally. The statements are idempotent
+    // (`ADD COLUMN IF NOT EXISTS`), so re-applying them is how an existing install catches up.
+    version: 81,
+    description: "run_child_links.authority_binding: reapply for installs created before it",
+    up: applyStatements(CHILD_STORAGE_STATEMENTS),
+  },
+  {
+    version: 82,
+    description:
+      "integration_events: unique on (slug, type, external_id) so a replay reuses its id",
+    up: applyStatements(INTEGRATION_EVENT_DEDUP_STATEMENTS),
+  },
 ];

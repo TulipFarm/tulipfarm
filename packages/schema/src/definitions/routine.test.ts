@@ -36,6 +36,36 @@ const agentState = {
 };
 
 describe("Routine schema", () => {
+  it("accepts a compute State whose input map is its assignment", () => {
+    const result: RoutineDefinition = validateRoutineDefinition(
+      routine([
+        {
+          type: "compute",
+          name: "Derive",
+          input: { label: "need-triage", isBug: "${ contains(input.title, 'bug') }" },
+          end: true,
+        },
+      ])
+    ).document;
+
+    expect(result.spec.states[0]).toMatchObject({ type: "compute", name: "Derive" });
+    expect(ROUTINE_STATE_TYPES).toContain("compute");
+  });
+
+  it("rejects a compute State that assigns nothing", () => {
+    expect(() =>
+      validateRoutineDefinition(
+        routine([{ type: "compute", name: "Derive", input: {}, end: true }])
+      )
+    ).toThrow(SchemaValidationError);
+  });
+
+  it("rejects a compute State with no input map at all", () => {
+    expect(() =>
+      validateRoutineDefinition(routine([{ type: "compute", name: "Derive", end: true }]))
+    ).toThrow(SchemaValidationError);
+  });
+
   it("accepts a minimal agent+tool routine graph", () => {
     const result: RoutineDefinition = validateRoutineDefinition(
       routine([
@@ -78,16 +108,20 @@ describe("Routine schema", () => {
   it("exposes every SPEC §9.1 typed state type", () => {
     expect([...ROUTINE_STATE_TYPES].sort()).toEqual(
       [
+        "action",
         "agent",
         "approval",
         "branch",
         "child_routine",
         "compensate",
+        "compute",
+        "emit",
         "foreach",
         "form",
         "human_task",
         "parallel",
         "repeat_until",
+        "script",
         "tool",
         "wait",
       ].sort()

@@ -82,12 +82,16 @@ import { PgSpendSink } from "./observability";
 import { waitForSchemaFloor } from "./preflight";
 import { startProbeServer } from "./probe-server";
 import { TaskSignalsGatherer } from "./reconcile/task-signals";
+import { DispatchRoutineActionPort } from "./routine/action-port";
 import { buildGitHubTooling } from "./routine/adapters";
 import { BundleRoutineAgentPort } from "./routine/agent-port";
 import { HttpRoutineApprovalPort } from "./routine/approval-port";
+import { HttpChildRoutinePort } from "./routine/child-routine-port";
 import { WorkerRoutineDefinitionLoader } from "./routine/definition-loader";
+import { HttpEmitPort } from "./routine/emit-port";
 import { createRoutineExecutor } from "./routine/executor";
 import { WorkerPinnedDefinitionReader } from "./routine/pinned-definitions";
+import { SandboxRoutineScriptPort } from "./routine/script-port";
 import { BrokerRoutineToolPort } from "./routine/tool-port";
 import { RunDispatcher } from "./run-dispatcher";
 import { GuardedWorkerSecretsService } from "./secrets-guard";
@@ -456,8 +460,15 @@ export async function main(): Promise<void> {
         credentials: githubTooling.credentials,
         mutationGuard,
       }),
+      // Authored TypeScript, run in the sealed isolate: no network, no host reach, frozen clock.
+      scripts: new SandboxRoutineScriptPort(),
+      // Runtime Tools called with no model in the loop. The dispatch names no Agent, so the
+      // control plane authorizes it as the Run's own recorded subject.
+      actions: new DispatchRoutineActionPort(toolDispatch),
       // Approval resume tokens stay API-side; Worker gets only wait id and later decision.
       approvals: new HttpRoutineApprovalPort(internalApi),
+      childRoutines: new HttpChildRoutinePort(internalApi),
+      emissions: new HttpEmitPort(internalApi),
       // Routine Agent States use the pinned Agent/ModelProfile, and reach Tools through the same
       // routed dispatch a Chat Turn uses, naming the State's Agent so the control plane can
       // confirm it against the Soul before authorizing anything.

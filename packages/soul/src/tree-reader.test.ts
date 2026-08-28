@@ -84,7 +84,7 @@ describe("GitSoulTreeReader", () => {
     const accessGrantPath = definitionPath("AccessGrant", "github-support");
     const rolePath = definitionPath("Role", "ops-reviewer");
     const routinePath = definitionPath("Routine", "daily-briefing");
-    const triggerPath = definitionPath("Trigger", "daily-briefing-manual");
+    const guardrailPath = definitionPath("Guardrail", "daily-briefing-limits");
     await writeFixture(
       accessGrantPath,
       stringifyYaml({
@@ -151,27 +151,20 @@ describe("GitSoulTreeReader", () => {
       })
     );
     await writeFixture(
-      triggerPath,
+      guardrailPath,
       stringifyYaml({
         apiVersion: "tulipfarm.ai/v1",
-        kind: "Trigger",
+        kind: "Guardrail",
         metadata: {
           id: "22222222-2222-2222-2222-222222222222",
-          slug: "daily-briefing-manual",
+          slug: "daily-briefing-limits",
           schemaVersion: 1,
           authoredVersion: 1,
           lifecycle: "published",
         },
         spec: {
-          type: "manual",
-          routineRef: { name: "daily-briefing", version: "latest" },
-          eventType: "routine.manual",
-          eventVersion: 1,
-          backgroundIdentity: {
-            principalKind: "agent",
-            principalId: "11111111-1111-1111-1111-111111111111",
-          },
-          deduplication: { key: "manual" },
+          defaultDecision: "deny",
+          rules: [{ id: "allow-briefing", type: "allow", actions: ["routine.run"] }],
         },
       })
     );
@@ -184,9 +177,9 @@ describe("GitSoulTreeReader", () => {
 
     expect(documents.map(documentSubject)).toEqual([
       "AccessGrant:github-support",
+      "Guardrail:daily-briefing-limits",
       "Role:ops-reviewer",
       "Routine:daily-briefing",
-      "Trigger:daily-briefing-manual",
     ]);
   });
 
@@ -198,15 +191,15 @@ describe("GitSoulTreeReader", () => {
   });
 
   it("fails closed when a bundled definition path does not parse", async () => {
-    const triggerPath = definitionPath("Trigger", "daily-briefing-manual");
+    const guardrailPath = definitionPath("Guardrail", "daily-briefing-limits");
     await writeFixture(
-      triggerPath,
+      guardrailPath,
       stringifyYaml({
         apiVersion: "tulipfarm.ai/v1",
-        kind: "Trigger",
+        kind: "Guardrail",
         metadata: {
           id: "22222222-2222-2222-2222-222222222222",
-          slug: "daily-briefing-manual",
+          slug: "daily-briefing-limits",
           schemaVersion: 1,
           authoredVersion: 1,
           lifecycle: "published",
@@ -219,7 +212,7 @@ describe("GitSoulTreeReader", () => {
     const sha = await git.revparse(["HEAD"]);
 
     await expect(new GitSoulTreeReader(TMP).readDefinitions(sha.trim())).rejects.toThrow(
-      "SOUL_DEFINITION_INVALID: SCHEMA_VALIDATION_FAILED in triggers/daily-briefing-manual/trigger.yaml"
+      "SOUL_DEFINITION_INVALID: SCHEMA_VALIDATION_FAILED in guardrails/daily-briefing-limits/guardrail.yaml"
     );
   });
 

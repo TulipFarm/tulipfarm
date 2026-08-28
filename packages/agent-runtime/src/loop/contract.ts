@@ -67,10 +67,21 @@ export interface ToolDispatchRequest {
    * names its Agent per State. The loop never sets this; a caller wraps the port to add it.
    */
   readonly agentName?: string;
+  /**
+   * A ceiling the call must be held to, from a Routine State's authored `permissionCeiling`.
+   * Narrowing only: the gate refuses a Tool above it and grants nothing.
+   */
+  readonly permissionCeiling?: { readonly maxRiskClass?: string };
 }
 
 export type ToolDispatchResult =
-  | { readonly status: "succeeded"; readonly callId: string; readonly output: unknown }
+  | {
+      readonly status: "succeeded";
+      readonly callId: string;
+      readonly output: unknown;
+      /** `output` is a replay marker, not what the Tool returned. Never feed it to a later step. */
+      readonly replayed?: true;
+    }
   | {
       readonly status: "denied";
       readonly callId: string;
@@ -154,6 +165,23 @@ export type AgentLoopFailureReason =
   | "effect_after_report"
   | ModelInvocationFailureReason
   | "empty_model_output";
+
+/**
+ * Failures where re-running the same Turn could plausibly succeed, so its work is worth keeping.
+ *
+ * Deliberately narrow. A limit, an exhausted budget or a misconfigured provider fails again on
+ * every retry, so holding that Turn's Tool arguments and outputs would retain them for nothing.
+ * These three are the ones that come from the provider having a bad moment.
+ */
+const RETRYABLE_FAILURE_REASONS: ReadonlySet<string> = new Set<AgentLoopFailureReason>([
+  "model_provider_unavailable",
+  "model_rate_limited",
+  "model_error",
+]);
+
+export function isRetryableFailure(reason: AgentLoopFailureReason): boolean {
+  return RETRYABLE_FAILURE_REASONS.has(reason);
+}
 
 /** Participant-safe evidence for a failed model call; provider error bodies never cross this seam. */
 export interface ModelFailureDiagnostic {

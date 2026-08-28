@@ -208,16 +208,6 @@ const ARTIFACT_LAYOUT_ENTRIES = [
     companions: [],
   },
   {
-    kind: "Trigger",
-    temporalClass: "pinned",
-    scope: "collection",
-    directory: "triggers",
-    definitionFile: "trigger.yaml",
-    definitionModes: ["definition"],
-    legacyDefinitionFiles: [],
-    companions: [],
-  },
-  {
     kind: "Role",
     temporalClass: "live",
     scope: "collection",

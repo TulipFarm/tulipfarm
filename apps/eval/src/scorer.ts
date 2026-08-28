@@ -377,6 +377,20 @@ function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: 
         : { passed: false, detail: `${a.name} was called without ${a.path}` };
     }
 
+    case "tool_argument_absent": {
+      const named = obs.toolCalls.filter((c) => c.name === a.name);
+      if (named.length === 0) return { passed: false, detail: `${a.name} was never called` };
+      // Every call, not any call: an argument the Tool no longer declares is one the model must
+      // never send, so a single call carrying it is the regression this asserts against.
+      const carried = named.map((c) => readPath(c.arguments, a.path)).filter((r) => r.found);
+      return carried.length === 0
+        ? { passed: true, detail: `${a.name} carried no ${a.path}` }
+        : {
+            passed: false,
+            detail: `${a.name}.${a.path} was ${carried.map((r) => show(r.value)).join(", ")}, expected absent`,
+          };
+    }
+
     case "tool_call_count":
       return obs.toolCalls.length === a.count
         ? { passed: true, detail: `${a.count} Tool calls` }

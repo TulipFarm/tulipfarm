@@ -18,6 +18,7 @@ export type {
   ToolDispatchRequest,
   ToolDispatchResult,
 } from "./contract";
+export { isRetryableFailure } from "./contract";
 export type {
   DistillBlocked,
   DistillCitation,
@@ -28,18 +29,19 @@ export type {
 } from "./distill";
 export {
   askFor,
-  DISTILL_THRESHOLD_CHARS,
+  DISTILL_THRESHOLD_TOKENS,
   DISTILL_TIMEOUT_MS,
+  DISTILLED_TOOLS,
   distilledPayload,
   isBlocked,
   latestAsk,
-  MAX_RAW_RESULT_CHARS,
+  MAX_RAW_RESULT_TOKENS,
   resultText,
   shouldDistill,
 } from "./distill";
 export { AgentLoop } from "./loop";
 export { capToolResult, MAX_TOOL_RESULT_CHARS } from "./oversize";
-export { callSignature, repeatedCall } from "./repeat";
+export { callSignature, elideRepeatedSkillText, repeatedCall } from "./repeat";
 export {
   extractRereadFile,
   FILE_READ_TOOL,

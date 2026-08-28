@@ -25,6 +25,62 @@ datastore until a timer, event, approval, human task, form wait, or child run re
 States emit a permanent journal of entries, actions, retries, waits, and outcomes. The routines UI
 and run inspector stream that journal from persisted run events.
 
+## Deciding without an agent
+
+Not every step needs a model. A routine can derive values from what it already has (the trigger
+input and the results of earlier states) and then branch on them. Nothing leaves the instance and
+nothing is charged to a model provider, so these steps are fast, free, and give the same answer
+every time.
+
+Ask for it in plain language and say you do not want an agent involved:
+
+```prompt
+When a GitHub issue is opened, set its label to need-triage if the title mentions a bug, and
+otherwise to question. Do it with a rule, not an agent.
+```
+
+The derived fields become the state's result, and later states read them by name. The expressions
+are deliberately small: they read values, compare them, do arithmetic, and call a fixed set of text
+helpers. They cannot call out, read a clock, or change anything, which is why a run that resumes
+after a restart reaches the same answer it did the first time.
+
+## Calling another routine
+
+A routine can hand a step to another routine that is already published, instead of repeating its
+states. Ask for it in plain language:
+
+```prompt
+When a knowledge source changes, run the reindex-knowledge routine and wait for it to finish
+before notifying the owner.
+```
+
+The called routine runs with the permissions it was published with, not a slice of the caller's,
+so it behaves exactly as it does when started on its own. The caller can either wait for the
+answer, under a deadline it must name, so it never waits forever, or start the work and carry on
+without it. A failed callee routes through the caller's failure handling; a cancelled or
+timed-out one pauses the caller for an operator instead of being read as a failure.
+
+Chains are bounded. A call that would nest deeper than the limit is refused rather than run.
+
+## Announcing an event
+
+Sometimes a routine has no particular routine to call. It just wants to say that something
+happened and let whoever cares react. Ask for it in plain language:
+
+```prompt
+After the ticket is classified, announce a ticket.triaged event carrying the ticket id and the
+label that was chosen.
+```
+
+Any trigger that listens for that event starts its own run, and the announcing routine carries on
+without waiting. If nothing is listening, the step still succeeds: announcing is all it promised
+to do. Use this when several unrelated routines may want to react to the same thing, and call a
+routine directly when you need its answer.
+
+Announcements cannot claim to be one of the events the instance raises about your own records,
+and chains of them are bounded the same way calls are, so an announcement that starts a routine
+that announces the same thing again is refused rather than left to loop.
+
 ## Human gates
 
 A routine state can pause for [approvals](/docs/using-tulipfarm/approvals). The item appears in Inbox and,

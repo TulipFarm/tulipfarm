@@ -451,6 +451,81 @@ describe("durable chat submission over HTTP", () => {
     expect(runs.rows[0]?.status).toBe("cancelled");
   });
 
+  /** Fires the retry, lets its Run finish, and returns the response. */
+  async function retry(turnId: string, session = sid) {
+    const response = app.inject({
+      method: "POST",
+      url: `/api/v1/chat/turns/${turnId}/retry`,
+      cookies: { [SESSION_COOKIE]: session, [CSRF_COOKIE]: CSRF },
+      headers: { "x-csrf-token": CSRF },
+      payload: BODY,
+    });
+    const run = await awaitRun();
+    await db.query("UPDATE runs SET status = 'succeeded' WHERE id = $1", [run.id]);
+    return await response;
+  }
+
+  it("names the Turn on the response, so a retry can re-enter it", async () => {
+    const first = await chat();
+
+    expect(first.headers["x-turn-id"]).toEqual(expect.any(String));
+  });
+
+  it("retries a Turn as a new attempt without asking the question twice", async () => {
+    const first = await chat();
+    const turnId = String(first.headers["x-turn-id"]);
+
+    const retried = await retry(turnId);
+
+    expect(retried.headers["x-run-id"]).not.toBe(first.headers["x-run-id"]);
+    // The whole point: one Turn, one question, two attempts. Re-sending the message instead —
+    // which is what Retry used to do — left a duplicate of it in the transcript.
+    expect(await count("messages", "WHERE role = 'user'")).toBe(1);
+    expect(await count("conversation_turns")).toBe(1);
+    expect(await count("runs")).toBe(2);
+  });
+
+  it("records the superseded Run, so the retry can read what the failed attempt did", async () => {
+    const first = await chat();
+    const firstRunId = String(first.headers["x-run-id"]);
+
+    await retry(String(first.headers["x-turn-id"]));
+
+    const turns = await db.query<{ superseded_run_ids: string[] }>(
+      "SELECT superseded_run_ids FROM conversation_turns"
+    );
+    expect(turns.rows[0]?.superseded_run_ids).toContain(firstRunId);
+  });
+
+  it("refuses to retry a Turn belonging to another user", async () => {
+    const first = await chat();
+
+    const retried = await app.inject({
+      method: "POST",
+      url: `/api/v1/chat/turns/${first.headers["x-turn-id"]}/retry`,
+      cookies: { [SESSION_COOKIE]: otherSid, [CSRF_COOKIE]: CSRF },
+      headers: { "x-csrf-token": CSRF },
+      payload: BODY,
+    });
+
+    // 404 rather than 403: the two answers differ only for a Turn that exists, so telling them
+    // apart would confirm the id to someone who may not read it.
+    expect(retried.statusCode).toBe(404);
+    expect(await count("runs")).toBe(1);
+  });
+
+  it("refuses to retry a Turn that does not exist", async () => {
+    const retried = await app.inject({
+      method: "POST",
+      url: `/api/v1/chat/turns/${randomUUID()}/retry`,
+      cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: CSRF },
+      headers: { "x-csrf-token": CSRF },
+      payload: BODY,
+    });
+
+    expect(retried.statusCode).toBe(404);
+  });
+
   it("refuses to stop a Run that is already finished", async () => {
     const first = await chat();
 

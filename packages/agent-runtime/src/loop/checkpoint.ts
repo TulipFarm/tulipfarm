@@ -9,8 +9,10 @@ export interface AgentLoopCheckpoint {
   readonly toolCalls: number;
   readonly repairs: number;
   /**
-   * Present only while the loop is unfinished. A terminal outcome saves it absent, so Tool
-   * arguments and outputs live no longer than the Turn that is still owed an answer.
+   * The unfinished loop's transcript, and the work a failed-but-retryable Turn already paid for.
+   *
+   * Absent once the loop settles for a reason a retry cannot fix, so Tool arguments and outputs
+   * live no longer than the Turn that could still use them.
    */
   readonly resume?: AgentLoopResumeState;
 }

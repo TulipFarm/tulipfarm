@@ -141,7 +141,7 @@ function port(): BrokerRoutineToolPort {
 
 describe("BrokerRoutineToolPort", () => {
   it("authorizes against the Run's pinned policy, reserves the effect, then dispatches", async () => {
-    expect(await port().execute(request())).toEqual({ kind: "succeeded" });
+    expect(await port().execute(request())).toEqual({ kind: "succeeded", output: null });
 
     const effect = await effects.get(BUSINESS_ID, PLAN.effectId);
     expect(effect?.state).toBe("confirmed");
@@ -162,7 +162,7 @@ describe("BrokerRoutineToolPort", () => {
     });
 
     const input = request();
-    expect(await dynamic.execute(input)).toEqual({ kind: "succeeded" });
+    expect(await dynamic.execute(input)).toEqual({ kind: "succeeded", output: null });
     expect(adaptersFor).toHaveBeenCalledWith(input);
     expect(dispatch).toHaveBeenCalledOnce();
   });
@@ -189,13 +189,16 @@ describe("BrokerRoutineToolPort", () => {
   });
 
   it("authorizes from the bundle's own ToolContract alone, even with no external authority layers", async () => {
-    expect(await port().execute(request({ authorityLayers: [] }))).toEqual({ kind: "succeeded" });
+    expect(await port().execute(request({ authorityLayers: [] }))).toEqual({
+      kind: "succeeded",
+      output: null,
+    });
   });
 
   // Contracts that declare no target keep the coarser Tool-granular decision; that is the one
   // legitimate empty target list, and it is not the same as a target we could not work out.
   it("decides at Tool granularity when the contract declares no target of its own", async () => {
-    expect(await port().execute(request())).toEqual({ kind: "succeeded" });
+    expect(await port().execute(request())).toEqual({ kind: "succeeded", output: null });
 
     const dispatched = dispatch.mock.calls[0]?.[0];
     expect(dispatched?.intent.arguments).not.toEqual({});
@@ -258,7 +261,7 @@ describe("BrokerRoutineToolPort", () => {
     const subject = port();
     await subject.execute(request());
 
-    expect(await subject.execute(request())).toEqual({ kind: "succeeded" });
+    expect(await subject.execute(request())).toEqual({ kind: "succeeded", output: null });
     expect(dispatch).toHaveBeenCalledTimes(1);
   });
 
@@ -370,7 +373,7 @@ describe("BrokerRoutineToolPort contract-declared targets", () => {
   }
 
   it("carries the object the arguments name into the intent the gate and ledger see", async () => {
-    expect(await port().execute(targetedRequest())).toEqual({ kind: "succeeded" });
+    expect(await port().execute(targetedRequest())).toEqual({ kind: "succeeded", output: null });
 
     const expected = [{ type: "github.issue", id: "tulip/farm#42" }];
     expect(dispatch.mock.calls[0]?.[0].intent.targetRefs).toEqual(expected);
@@ -380,7 +383,7 @@ describe("BrokerRoutineToolPort contract-declared targets", () => {
   it("lets a grant scoped to exactly that object authorize the call", async () => {
     const scoped = targetedRequest({ authorityLayers: operatorLayer("tulip/farm#42") });
 
-    expect(await port().execute(scoped)).toEqual({ kind: "succeeded" });
+    expect(await port().execute(scoped)).toEqual({ kind: "succeeded", output: null });
   });
 
   it("refuses the same call under a grant scoped to a different object", async () => {

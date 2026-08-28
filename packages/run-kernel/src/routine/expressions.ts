@@ -28,7 +28,16 @@ export class ExpressionError extends Error {
   }
 }
 
-export const DEFAULT_EXPRESSION_ROOTS = ["input", "states", "trigger", "loop", "item"] as const;
+/**
+ * The roots a Routine State expression may read.
+ *
+ * `trigger` is deliberately absent. Trigger data reaches a Routine only through the Trigger's
+ * `inputMapping`, which is an explicit allowlist of the fields an untrusted payload may cross into
+ * a Run — reading the envelope directly would defeat that gate. It stays a root for a Trigger's own
+ * `filter` (see `TRIGGER_FILTER_ROOTS`), which is evaluated before any Run exists. Listing it here
+ * only let an author commit a Routine that parks on its first tick with `unsupported_context`.
+ */
+export const DEFAULT_EXPRESSION_ROOTS = ["input", "states", "loop", "item"] as const;
 
 export const MAX_EXPRESSION_LENGTH = 1_000;
 export const MAX_EXPRESSION_DEPTH = 32;
