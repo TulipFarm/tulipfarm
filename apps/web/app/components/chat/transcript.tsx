@@ -7,6 +7,7 @@ import type { ChatMessage, ChatStatus, ModelReceipt, TimelinePart } from "~/lib/
 import { copyText } from "~/lib/clipboard";
 import { FileAttachment, RemovedAttachment } from "./file-attachment";
 import { MessagePartView } from "./parts";
+import { PlanTrace } from "./plan-trace";
 import { groupTimelineParts } from "./timeline-groups";
 import { ToolTrace } from "./tool-trace";
 import type { MentionEntry } from "./use-mention-catalog";
@@ -347,6 +348,9 @@ function MessageRow({
           // A presentation Tool draws no row, so this is the only sign the reply is still building
           // the thing the reader is about to look at.
           return <LoadingState key="surface-building" label="Rendering" />;
+        }
+        if (node.kind === "plan") {
+          return <PlanTrace key={`plan-${node.index}`} rounds={node.rounds} />;
         }
         if (node.kind === "tool-run") {
           return (

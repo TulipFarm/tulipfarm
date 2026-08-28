@@ -109,6 +109,10 @@ export function MessagePartView({
       );
     case "sources":
       return <SourcesPart sources={part.sources} />;
+    // The transcript draws a plan, because ticking one off needs the sibling Tool parts this
+    // switch cannot see. Handled here only so the union stays exhaustive.
+    case "plan":
+      return null;
     case "agent-handoff":
       return (
         <p className="tf-trace-row flex items-center gap-2 py-1 text-sm">

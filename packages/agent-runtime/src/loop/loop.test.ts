@@ -1437,6 +1437,7 @@ describe("AgentLoop skill-scoped tool narrowing", () => {
     { name: "routine_forge", inputSchema: { type: "object" } },
     { name: "record_search", inputSchema: { type: "object" } },
     { name: "agent_list", inputSchema: { type: "object" } },
+    { name: "plan_declare", inputSchema: { type: "object" } },
   ];
 
   it("offers the full catalog unchanged when no skillToolScopes is given", async () => {
@@ -1472,6 +1473,9 @@ describe("AgentLoop skill-scoped tool narrowing", () => {
     );
     expect(model.toolNamesByRequest[1]).not.toContain("record_search");
     expect(model.toolNamesByRequest[1]).not.toContain("agent_list");
+    // A plan is declared in the Round that loads the Skill and revised in the Rounds after it.
+    // Narrowing it away would leave an Agent unable to correct a plan it had already published.
+    expect(model.toolNamesByRequest[1]).toContain("plan_declare");
   });
 
   it("inspecting a Skill neither narrows nor becomes the active Skill", async () => {

@@ -108,6 +108,7 @@ export class TurnEventWriter implements AgentLoopEventSink {
   private readonly toolCallOrder: string[] = [];
   private readonly toolCallsById = new Map<string, ParticipantToolCall>();
   private readonly surfacesById = new Map<string, TurnSurfaceRef>();
+  private plansDeclared = 0;
 
   constructor(private readonly options: TurnEventWriterOptions) {}
 
@@ -138,6 +139,18 @@ export class TurnEventWriter implements AgentLoopEventSink {
   /** Records a presented Surface so a completed Turn can link it into the transcript. */
   recordSurface(surface: TurnSurfaceRef): void {
     this.surfacesById.set(surface.artifactId, surface);
+  }
+
+  /**
+   * Numbers the next plan this Turn declares.
+   *
+   * Ordinal, not authoritative: a reader takes the last `plan.declared` it received rather than
+   * the highest number, because the Run event sequence already orders them and a Turn that resumes
+   * starts a fresh writer. The number is there to name a revision, not to pick one.
+   */
+  nextPlanRevision(): number {
+    this.plansDeclared += 1;
+    return this.plansDeclared;
   }
 
   /** Append one event; `key` makes redelivery derive the same idempotency key. */

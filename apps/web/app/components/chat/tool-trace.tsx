@@ -1,19 +1,10 @@
-import { Link } from "@remix-run/react";
-import { PenLine } from "lucide-react";
 import { Fragment, useState } from "react";
 import { LOADER_LABELS, pick } from "~/components/ui/loading-state";
 import { Trace, TraceStep } from "~/components/ui/trace";
 import type { TimelinePart } from "~/lib/chat/types";
-import { ApprovalCard } from "./approval-card";
-import { SubagentPanel, traceOf } from "./subagent-panel";
 import { concurrentRuns, largestConcurrentRun } from "./timeline-groups";
-import { ToolInspector, toolHasDetails } from "./tool-inspector";
-import {
-  describeToolCall,
-  describeToolCallActive,
-  describeToolResult,
-  formatDuration,
-} from "./tool-summary";
+import { ToolStepRow } from "./tool-step";
+import { describeToolCallActive, summarizeToolCall } from "./tool-summary";
 
 type ToolPart = Extract<TimelinePart, { kind: "tool" }>;
 
@@ -61,7 +52,7 @@ export function ToolTrace({
   const activeLabel =
     running === undefined
       ? "Working"
-      : (describeToolCallActive(summaryOf(running)) ?? "Running tools");
+      : (describeToolCallActive(summarizeToolCall(running)) ?? "Running tools");
 
   return (
     <Trace
@@ -79,9 +70,6 @@ export function ToolTrace({
       showElapsed={false}
     >
       {parts.map((part, index) => {
-        const label = summaryOf(part);
-        const status = part.status === "running" ? "running" : outcomeOf(part);
-        const approval = part.approval;
         const startsBatch = concurrent.get(index);
         return (
           <Fragment key={part.toolCallId}>
@@ -93,36 +81,7 @@ export function ToolTrace({
             {startsBatch === undefined ? null : (
               <p className="pt-1 text-xs text-muted-foreground">{`${startsBatch} at the same time`}</p>
             )}
-            <TraceStep
-              status={status}
-              label={label}
-              activeLabel={describeToolCallActive(label)}
-              value={part.toolName}
-              mono
-              marker={
-                part.meta?.mutating === true ? (
-                  <PenLine
-                    aria-label="This tool can write"
-                    className="size-3 shrink-0 text-tool-mutating"
-                  />
-                ) : undefined
-              }
-              detail={detailOf(part, status)}
-            />
-            {/*
-             * The one thing a step may not hide behind its own disclosure. Everything else in a
-             * trace is evidence the reader can take or leave; this is a question addressed to them,
-             * and a question they have to click to find is a question they will miss.
-             */}
-            {approval === undefined ? null : (
-              <div className="py-1">
-                <ApprovalCard
-                  toolName={part.toolName}
-                  approval={approval}
-                  onDecide={(decision) => onApprove(approval.approvalId, decision)}
-                />
-              </div>
-            )}
+            <ToolStepRow part={part} onApprove={onApprove} />
           </Fragment>
         );
       })}
@@ -138,73 +97,4 @@ export function ToolTrace({
       <span className="sr-only">{`${settled} of ${parts.length} finished`}</span>
     </Trace>
   );
-}
-
-/**
- * What the step actually did. The one-line facts come from the payload — a step with nothing to
- * report stays silent and non-expandable rather than offering a chevron onto an empty panel — and
- * the verbatim Input/Output panes follow, so a chrome-free step still discloses every fact.
- */
-function detailOf(part: ToolPart, status: "running" | "done" | "error") {
-  const code = status === "error" ? part.meta?.errorCode : undefined;
-  const hint = status === "done" ? describeToolResult(part) : undefined;
-  const duration = formatDuration(part.meta?.durationMs);
-  const inspectable = toolHasDetails(part);
-  const connectUrl = status === "error" ? part.meta?.connectUrl : undefined;
-  const subagent = traceOf(part);
-  if (
-    code === undefined &&
-    hint === undefined &&
-    duration === undefined &&
-    connectUrl === undefined &&
-    subagent === undefined &&
-    !inspectable
-  ) {
-    return undefined;
-  }
-  return (
-    <div className="space-y-2">
-      {code === undefined && hint === undefined && duration === undefined ? null : (
-        <span className="flex items-center gap-2">
-          {code === undefined ? null : <span className="font-mono text-run-error">{code}</span>}
-          {hint === undefined ? null : <span>{hint}</span>}
-          {duration === undefined ? null : (
-            <span className="font-mono tabular-nums">{duration}</span>
-          )}
-        </span>
-      )}
-      {connectUrl === undefined ? null : (
-        <Link to={connectUrl} className="block text-primary hover:underline">
-          {connectUrl.startsWith("/business/secrets")
-            ? "Add the required Credential →"
-            : "Connect your account →"}
-        </Link>
-      )}
-      {/*
-       * Above the verbatim panes, not inside them. A helper's work is the substance of this step,
-       * whereas Input/Output are the evidence behind it, and a reader should not have to read JSON
-       * to find out what ran on their behalf.
-       */}
-      {subagent === undefined ? null : <SubagentPanel part={part} />}
-      {inspectable ? <ToolInspector part={part} /> : null}
-    </div>
-  );
-}
-
-function summaryOf(part: ToolPart): string {
-  return describeToolCall(part.toolName, argsOf(part), part.meta?.summary);
-}
-
-/** The redacted preview is authoritative; the raw arguments are the fallback. */
-function argsOf(part: ToolPart): unknown {
-  if (part.argsPreview === undefined) return part.args;
-  try {
-    return JSON.parse(part.argsPreview.json);
-  } catch {
-    return part.args;
-  }
-}
-
-function outcomeOf(part: ToolPart): "done" | "error" {
-  return part.outcome === "error" ? "error" : "done";
 }

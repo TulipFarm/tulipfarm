@@ -236,7 +236,10 @@ export function TraceStep({
       <TraceStatusGlyph status={status} />
       <span
         className={cn(
-          "shrink-0 truncate text-sm",
+          // `min-w-0` and not `shrink-0`: a flex child cannot truncate unless it is allowed to
+          // shrink below its content, and a plan step carries the Agent's own sentence for the
+          // work, which is far longer than a Tool summary.
+          "min-w-0 truncate text-sm",
           status === "pending" ? "text-muted-foreground" : "text-foreground"
         )}
       >

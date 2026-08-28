@@ -67,3 +67,50 @@ describe("rewindLastTurn", () => {
     expect(rewindLastTurn(state).messages).toEqual([]);
   });
 });
+
+describe("a declared plan", () => {
+  const rounds = [{ calls: [{ tool: "get_memory" }] }, { calls: [{ tool: "routine_forge" }] }];
+
+  test("heads the work it describes, even though it arrives after that work started", () => {
+    // `plan_declare` rides in the same dispatch as the first Round, so its result lands after
+    // those calls were announced. A plan printed below the steps it forecasts is not a plan.
+    let state = chatReducer(initialChatState, {
+      type: "tool-call",
+      data: { toolCallId: "c1", toolName: "get_memory", args: {} },
+    });
+    state = chatReducer(state, { type: "plan", data: { revision: 1, rounds } });
+
+    expect(state.messages[0]?.parts.map((part) => part.kind)).toEqual(["plan", "tool"]);
+  });
+
+  test("never leaps above prose the reader has already read", () => {
+    // A revision declared after the Agent has said something in the transcript must sit with the
+    // Round it forecasts, not jump to the top of a Message whose opening the reader has read.
+    let state = chatReducer(initialChatState, {
+      type: "text",
+      data: { delta: "Here is the plan." },
+    });
+    state = chatReducer(state, {
+      type: "tool-call",
+      data: { toolCallId: "c1", toolName: "get_memory", args: {} },
+    });
+    state = chatReducer(state, { type: "plan", data: { revision: 1, rounds } });
+
+    expect(state.messages[0]?.parts.map((part) => part.kind)).toEqual(["text", "plan", "tool"]);
+  });
+
+  test("is replaced in place by a revision rather than stacked beneath it", () => {
+    const revised = [...rounds, { calls: [{ tool: "update_memory" }] }];
+    let state = chatReducer(initialChatState, { type: "plan", data: { revision: 1, rounds } });
+    state = chatReducer(state, {
+      type: "tool-call",
+      data: { toolCallId: "c1", toolName: "get_memory", args: {} },
+    });
+    state = chatReducer(state, { type: "plan", data: { revision: 2, rounds: revised } });
+
+    expect(state.messages[0]?.parts).toEqual([
+      { kind: "plan", revision: 2, rounds: revised },
+      expect.objectContaining({ kind: "tool" }),
+    ]);
+  });
+});

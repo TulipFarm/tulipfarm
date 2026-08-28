@@ -16,7 +16,7 @@ Routine State reports on completion.
 
 | Path | Owns |
 | --- | --- |
-| `src/tools.ts` | `validate_artifact`, `complete_state`, `complete_task`, `get_current_time` and `PLATFORM_RUNTIME_TOOLS` |
+| `src/tools.ts` | `validate_artifact`, `complete_state`, `complete_task`, `get_current_time`, `plan_declare` and `PLATFORM_RUNTIME_TOOLS` |
 | `src/tool-result.ts` | The `ok`/`err` result shape these Tools return |
 
 ## Rules

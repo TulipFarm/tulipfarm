@@ -402,3 +402,19 @@ test("names a turn the runtime abandoned as such, not as a model failure", () =>
     "The turn stopped before it could answer. Try again."
   );
 });
+
+test("maps a declared plan onto the wire, and drops one that has only a single round", () => {
+  const map = createRunEventMapper();
+  const rounds = [
+    { calls: [{ tool: "resource_type_schema", label: "Read the Ticket schema" }] },
+    { calls: [{ tool: "routine_forge" }] },
+  ];
+
+  expect(map({ seq: 1, type: "plan.declared", data: { revision: 2, rounds } })).toEqual([
+    { type: "plan", data: { revision: 2, rounds } },
+  ]);
+  // A plan of one Round is a list. Dropping it here means no later layer has to decide.
+  expect(
+    map({ seq: 2, type: "plan.declared", data: { revision: 3, rounds: [rounds[0]] } })
+  ).toEqual([]);
+});

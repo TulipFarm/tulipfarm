@@ -19,9 +19,16 @@ export function isPresentationToolPart(part: ToolPart): boolean {
   return PRESENTATION_TOOL_NAMES.has(part.toolName);
 }
 
+/** The Tool an Agent calls to declare its plan for a Turn. */
+export const PLAN_TOOL_NAME = "plan_declare";
+
 /** Whether this Tool row is suppressed because its output already renders as something else. */
 export function isHiddenToolPart(part: ToolPart): boolean {
   if (part.toolName === "cite_sources") return true;
+  // A declared plan renders as the plan, so a row saying the Agent declared one is the same fact
+  // told twice. A *failed* declaration renders as nothing at all, so it keeps its row: the reader
+  // is owed the reason the plan they were about to see never arrived.
+  if (part.toolName === PLAN_TOOL_NAME) return part.status !== "done" || part.outcome !== "error";
   return isPresentationToolPart(part);
 }
 
@@ -307,6 +314,24 @@ const ENVELOPE_KEYS: readonly string[] = ["data", "result", "output", "value"];
 function plural(count: number, noun: string): string {
   const singular = noun.endsWith("s") ? noun.slice(0, -1) : noun;
   return `${count} ${count === 1 ? singular : `${singular}s`}`;
+}
+
+/**
+ * The arguments a Tool row should describe. The redacted preview is authoritative, because it is
+ * what the wire is allowed to show; the raw arguments are the fallback.
+ */
+export function toolCallArgs(part: ToolPart): unknown {
+  if (part.argsPreview === undefined) return part.args;
+  try {
+    return JSON.parse(part.argsPreview.json);
+  } catch {
+    return part.args;
+  }
+}
+
+/** The one-line description of what a Tool call did, from the call side. */
+export function summarizeToolCall(part: ToolPart): string {
+  return describeToolCall(part.toolName, toolCallArgs(part), part.meta?.summary);
 }
 
 /** Output facts come only from explicit preview/result fields; otherwise stay silent. */
