@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { TimelinePart } from "~/lib/chat/types";
-import { groupTimelineParts, MIN_CLUSTER_SIZE } from "./timeline-groups";
+import {
+  concurrentRuns,
+  groupTimelineParts,
+  largestConcurrentRun,
+  MIN_CLUSTER_SIZE,
+} from "./timeline-groups";
 
 function tool(overrides: Partial<Extract<TimelinePart, { kind: "tool" }>> = {}): TimelinePart {
   return {
@@ -102,5 +107,72 @@ describe("the fold boundary", () => {
   it("leaves a single Tool as itself, since `Ran 1 tool` says less than the row", () => {
     const nodes = groupTimelineParts([tool()]);
     expect(run(nodes[0]).foldable).toBe(false);
+  });
+});
+
+describe("which steps the runtime ran at the same time", () => {
+  it("reports a batch at the index of its first step", () => {
+    const parts = [
+      tool({ meta: { batchId: "s:0:0" } }),
+      tool({ meta: { batchId: "s:0:0" } }),
+      tool({ meta: { batchId: "s:0:0" } }),
+    ] as Extract<TimelinePart, { kind: "tool" }>[];
+
+    expect([...concurrentRuns(parts)]).toEqual([[0, 3]]);
+    expect(largestConcurrentRun(parts)).toBe(3);
+  });
+
+  it("says nothing about calls the loop dispatched one at a time", () => {
+    const parts = [tool(), tool(), tool()] as Extract<TimelinePart, { kind: "tool" }>[];
+
+    expect(concurrentRuns(parts).size).toBe(0);
+    expect(largestConcurrentRun(parts)).toBeUndefined();
+  });
+
+  // Adjacency is not evidence: a run gathers calls that merely followed one another, and only the
+  // id the loop stamped says they actually went out together.
+  it("does not read two neighbouring batches as one", () => {
+    const parts = [
+      tool({ meta: { batchId: "s:0:0" } }),
+      tool({ meta: { batchId: "s:0:0" } }),
+      tool({ meta: { batchId: "s:1:0" } }),
+      tool({ meta: { batchId: "s:1:0" } }),
+    ] as Extract<TimelinePart, { kind: "tool" }>[];
+
+    expect([...concurrentRuns(parts)]).toEqual([
+      [0, 2],
+      [2, 2],
+    ]);
+  });
+
+  it("keeps a batch together across a step that left no row", () => {
+    const parts = [
+      tool({ meta: { batchId: "s:0:0" } }),
+      tool(),
+      tool({ meta: { batchId: "s:0:0" } }),
+    ] as Extract<TimelinePart, { kind: "tool" }>[];
+
+    expect([...concurrentRuns(parts)]).toEqual([[0, 2]]);
+  });
+
+  it("stays silent when only one of a batch survived, rather than claiming a missing sibling", () => {
+    const parts = [tool({ meta: { batchId: "s:0:0" } }), tool()] as Extract<
+      TimelinePart,
+      { kind: "tool" }
+    >[];
+
+    expect(concurrentRuns(parts).size).toBe(0);
+  });
+
+  it("reports the widest batch, which is what survives the run folding", () => {
+    const parts = [
+      tool({ meta: { batchId: "s:0:0" } }),
+      tool({ meta: { batchId: "s:0:0" } }),
+      tool({ meta: { batchId: "s:1:0" } }),
+      tool({ meta: { batchId: "s:1:0" } }),
+      tool({ meta: { batchId: "s:1:0" } }),
+    ] as Extract<TimelinePart, { kind: "tool" }>[];
+
+    expect(largestConcurrentRun(parts)).toBe(3);
   });
 });

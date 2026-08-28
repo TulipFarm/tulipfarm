@@ -25,7 +25,7 @@ import { DiffCount, ToolChip } from "./tool-chip";
  * above the answer the reader actually asked for, and buys nothing the rail does not carry.
  */
 
-/** Mirrors `StepStatus` in `~/lib/chat/types` without making a primitive depend on the Chat layer. */
+/** The four states a step can be in. Deliberately local, so a primitive never depends on Chat. */
 export const TRACE_STATUSES = ["pending", "running", "done", "error"] as const;
 export type TraceStatus = (typeof TRACE_STATUSES)[number];
 

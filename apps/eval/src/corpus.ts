@@ -3,7 +3,14 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import type { AssembleContext, ModelMessage } from "@tulipfarm/agent-runtime";
 import { normalizeMessageContent } from "@tulipfarm/schema";
-import { type EvalCase, type Expectation, everyString, isGuardrail, isPersisted } from "./case.ts";
+import {
+  type EvalCase,
+  type Expectation,
+  everyString,
+  isBatching,
+  isGuardrail,
+  isPersisted,
+} from "./case.ts";
 import { type EvalSoul, SOUL_OWNED_CONTEXT_KEYS, soulContext } from "./eval-soul.ts";
 import { expectationShapeError, isKnownExpectationKind } from "./expectation-shape.ts";
 import { platformToolNames, resolvePlatformTool } from "./platform-tools.ts";
@@ -178,6 +185,12 @@ function validate(raw: unknown, file: string): EvalCase {
     require(c.tier !== "l3" ||
       !isGuardrail(a as Expectation), `${file}: expectation "${kind}" reads guardrail decisions, ` +
       `which only tier "l2" collects; move this Case to tier "l2"`);
+    // Same mirror, same reason. L3 reports the Tools a Turn dispatched but not which model
+    // response asked for them, so this would find no batches and fail for the tier's omission
+    // rather than for the model's behaviour.
+    require(c.tier !== "l3" ||
+      !isBatching(a as Expectation), `${file}: expectation "${kind}" reads how the model grouped ` +
+      `its Tool calls, which only tier "l2" observes; move this Case to tier "l2"`);
   }
   if (c.agentRoles !== undefined) {
     require(Array.isArray(c.agentRoles) &&

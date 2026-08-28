@@ -329,3 +329,80 @@ describe("ToolTrace", () => {
     expect(onApprove).toHaveBeenCalledWith("appr_1", "approve");
   });
 });
+
+describe("saying that several things happened at once", () => {
+  it("captions a batch in the reader's words, above the steps that ran together", () => {
+    render(
+      <ToolTrace
+        onApprove={() => undefined}
+        foldable={false}
+        pending={false}
+        parts={[
+          call({ toolCallId: "a", toolName: "list_agents", meta: { batchId: "s:0:0" } }),
+          call({ toolCallId: "b", toolName: "search_docs", meta: { batchId: "s:0:0" } }),
+          call({ toolCallId: "c", toolName: "read_page", meta: { batchId: "s:0:0" } }),
+        ]}
+      />
+    );
+
+    expect(screen.getByText("3 at the same time")).toBeInTheDocument();
+  });
+
+  it("says nothing when the calls merely followed one another", () => {
+    render(
+      <ToolTrace
+        onApprove={() => undefined}
+        foldable={false}
+        pending={false}
+        parts={[
+          call({ toolCallId: "a", toolName: "list_agents" }),
+          call({ toolCallId: "b", toolName: "search_docs" }),
+        ]}
+      />
+    );
+
+    expect(screen.queryByText(/at the same time/)).toBeNull();
+  });
+
+  // Folding hides every row, so a fact that lived only on the rows would vanish with them.
+  it("carries the fact onto the one line that survives folding", () => {
+    render(
+      <ToolTrace
+        onApprove={() => undefined}
+        foldable
+        pending={false}
+        parts={[
+          call({ toolCallId: "a", toolName: "list_agents", meta: { batchId: "s:0:0" } }),
+          call({ toolCallId: "b", toolName: "search_docs", meta: { batchId: "s:0:0" } }),
+        ]}
+      />
+    );
+
+    expect(
+      screen.getByRole("button", { name: /Ran 2 tools · 2 at the same time/ })
+    ).toBeInTheDocument();
+  });
+
+  it("still reports a failure alongside the concurrency on that line", () => {
+    render(
+      <ToolTrace
+        onApprove={() => undefined}
+        foldable
+        pending={false}
+        parts={[
+          call({ toolCallId: "a", toolName: "list_agents", meta: { batchId: "s:0:0" } }),
+          call({
+            toolCallId: "b",
+            toolName: "search_docs",
+            outcome: "error",
+            meta: { batchId: "s:0:0" },
+          }),
+        ]}
+      />
+    );
+
+    expect(
+      screen.getByRole("button", { name: /Ran 2 tools · 2 at the same time · 1 failed/ })
+    ).toBeInTheDocument();
+  });
+});

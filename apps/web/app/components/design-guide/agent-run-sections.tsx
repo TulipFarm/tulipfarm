@@ -2,7 +2,7 @@ import { ApprovalCard } from "~/components/chat/approval-card";
 import { MessagePartView } from "~/components/chat/parts";
 import { ToolTrace } from "~/components/chat/tool-trace";
 import { GuideSection } from "~/components/design-guide/guide-section";
-import type { PlanStep, TimelinePart } from "~/lib/chat/types";
+import type { TimelinePart } from "~/lib/chat/types";
 
 const TOOL_SPECIMENS: { caption: string; part: Extract<TimelinePart, { kind: "tool" }> }[] = [
   {
@@ -140,12 +140,6 @@ const LIVE_SPECIMEN: Extract<TimelinePart, { kind: "tool" }>[] = [
   },
 ];
 
-const PLAN_SPECIMEN: PlanStep[] = [
-  { id: "s1", label: "Read the overdue invoices", status: "done" },
-  { id: "s2", label: "Draft the reminder", status: "running" },
-  { id: "s3", label: "Send to each owner", status: "pending" },
-];
-
 const APPROVAL_SPECIMEN: Extract<TimelinePart, { kind: "tool" }>[] = [
   {
     kind: "tool",
@@ -179,7 +173,7 @@ export function AgentRunSections() {
     <GuideSection
       id="agent-run"
       title="Agent run vocabulary"
-      description="A run of Tool calls draws as one Trace: a rail, no border, a step per call. A step names what it did, whether the Tool can write, and how it ended; expanding it separates Input from Output and names every withheld field. Parts tagged contract-only are typed, reduced and rendered, but no backend event emits them yet."
+      description="A run of Tool calls draws as one Trace: a rail, no border, a step per call. A step names what it did, whether the Tool can write, and how it ended; expanding it separates Input from Output and names every withheld field."
     >
       <div className="mb-6 space-y-4">
         {TOOL_SPECIMENS.map(({ caption, part }) => (
@@ -250,23 +244,6 @@ export function AgentRunSections() {
 
       <div className="grid gap-4 lg:grid-cols-2">
         <div>
-          <p className="mb-1.5 flex items-center gap-2 text-xs text-muted-foreground">
-            Step rail
-            <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide">
-              contract-only
-            </span>
-          </p>
-          <MessagePartView
-            part={{
-              kind: "plan",
-              planId: "plan-1",
-              title: "Chase overdue invoices",
-              steps: PLAN_SPECIMEN,
-            }}
-            onApprove={() => undefined}
-          />
-        </div>
-        <div>
           <p className="mb-1.5 text-xs text-muted-foreground">Sources</p>
           <MessagePartView
             part={{
@@ -286,17 +263,8 @@ export function AgentRunSections() {
         </div>
         <div>
           <p className="mb-1.5 text-xs text-muted-foreground">
-            A step, a handoff and a refusal, all narration, so none of them takes a box
+            A handoff and a refusal, both narration, so neither takes a box
           </p>
-          <MessagePartView
-            part={{
-              kind: "task",
-              taskId: "t-guide",
-              label: "Reconciling the ledger",
-              status: "running",
-            }}
-            onApprove={() => undefined}
-          />
           <MessagePartView
             part={{ kind: "agent-handoff", to: "Billing", reason: "needs invoice authority" }}
             onApprove={() => undefined}

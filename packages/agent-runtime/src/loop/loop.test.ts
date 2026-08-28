@@ -972,6 +972,165 @@ describe("AgentLoop concurrent dispatch", () => {
     expect(tools.maxConcurrent).toBe(2);
   });
 
+  /** Records what each dispatch was told about the batch it belonged to. */
+  function batchRecordingDispatcher(): ToolDispatchPort & {
+    batches: (string | undefined)[];
+  } {
+    const port = {
+      batches: [] as (string | undefined)[],
+      dispatch: async (call: ToolDispatchRequest) => {
+        port.batches.push(call.batchId);
+        return { status: "succeeded" as const, callId: call.callId, output: {} };
+      },
+    };
+    return port;
+  }
+
+  it("stamps one shared name on the calls it dispatched together", async () => {
+    const tools = batchRecordingDispatcher();
+    await loop({
+      model: scriptedModel(
+        toolCallResult([
+          { callId: "c1", name: "github.issue.search", arguments: {} },
+          { callId: "c2", name: "github.pull_request.search", arguments: {} },
+        ]),
+        textResult("done")
+      ),
+      tools,
+    }).run(
+      input({
+        tools: readTools,
+        limits: { maxIterations: 5, maxToolCalls: 5, maxRepairAttempts: 2 },
+      })
+    );
+
+    expect(tools.batches).toHaveLength(2);
+    expect(tools.batches[0]).toBeDefined();
+    expect(tools.batches[1]).toBe(tools.batches[0]);
+  });
+
+  // Presence has to mean concurrency, or a reader downstream cannot tell one from the other.
+  it("leaves a call it dispatched alone unnamed", async () => {
+    const tools = batchRecordingDispatcher();
+    await loop({
+      model: scriptedModel(
+        toolCallResult([{ callId: "c1", name: "github.issue.search", arguments: {} }]),
+        textResult("done")
+      ),
+      tools,
+    }).run(
+      input({
+        tools: readTools,
+        limits: { maxIterations: 5, maxToolCalls: 5, maxRepairAttempts: 2 },
+      })
+    );
+
+    expect(tools.batches).toEqual([undefined]);
+  });
+
+  // Concurrency is what actually ran, not what was asked for. Two identical reads collapse to one
+  // dispatch, so nothing ran beside anything and the trace must not claim a batch.
+  it("leaves a batch unnamed when it collapses to a single dispatch", async () => {
+    const tools = batchRecordingDispatcher();
+    await loop({
+      model: scriptedModel(
+        toolCallResult([
+          { callId: "c1", name: "github.issue.search", arguments: { q: "a" } },
+          { callId: "c2", name: "github.issue.search", arguments: { q: "a" } },
+        ]),
+        textResult("done")
+      ),
+      tools,
+    }).run(
+      input({
+        tools: readTools,
+        limits: { maxIterations: 5, maxToolCalls: 5, maxRepairAttempts: 2 },
+      })
+    );
+
+    expect(tools.batches).toEqual([undefined]);
+  });
+
+  // A replay that produced a different response must not inherit the previous batch's name, or
+  // Chat draws two executions as one wider batch and overstates what ran at once.
+  it("gives a rerun of the same iteration a new name when the response differs", async () => {
+    const namesFor = async (ids: readonly [string, string]): Promise<(string | undefined)[]> => {
+      const tools = batchRecordingDispatcher();
+      await loop({
+        model: scriptedModel(
+          toolCallResult([
+            { callId: ids[0], name: "github.issue.search", arguments: {} },
+            { callId: ids[1], name: "github.pull_request.search", arguments: {} },
+          ]),
+          textResult("done")
+        ),
+        tools,
+      }).run(
+        input({
+          tools: readTools,
+          limits: { maxIterations: 5, maxToolCalls: 5, maxRepairAttempts: 2 },
+        })
+      );
+      return tools.batches;
+    };
+
+    const before = await namesFor(["c1", "c2"]);
+    const afterExactReplay = await namesFor(["c1", "c2"]);
+    const afterDivergentReplay = await namesFor(["c9", "c8"]);
+
+    expect(afterExactReplay).toEqual(before);
+    expect(afterDivergentReplay[0]).not.toBe(before[0]);
+  });
+
+  it("leaves a write unnamed, since a write never shares its dispatch", async () => {
+    const tools = batchRecordingDispatcher();
+    await loop({
+      model: scriptedModel(
+        toolCallResult([
+          { callId: "c1", name: "github.issue.comment", arguments: { body: "hi" } },
+          { callId: "c2", name: "github.issue.comment", arguments: { body: "there" } },
+        ]),
+        textResult("done")
+      ),
+      tools,
+    }).run(
+      input({
+        tools: [{ name: "github.issue.comment", inputSchema: { type: "object" }, mutating: true }],
+        limits: { maxIterations: 5, maxToolCalls: 5, maxRepairAttempts: 2 },
+      })
+    );
+
+    expect(tools.batches).toEqual([undefined, undefined]);
+  });
+
+  it("gives a later batch its own name, so two rounds never read as one", async () => {
+    const tools = batchRecordingDispatcher();
+    await loop({
+      model: scriptedModel(
+        toolCallResult([
+          { callId: "c1", name: "github.issue.search", arguments: { q: "a" } },
+          { callId: "c2", name: "github.pull_request.search", arguments: { q: "a" } },
+        ]),
+        toolCallResult([
+          { callId: "c3", name: "github.issue.search", arguments: { q: "b" } },
+          { callId: "c4", name: "github.pull_request.search", arguments: { q: "b" } },
+        ]),
+        textResult("done")
+      ),
+      tools,
+    }).run(
+      input({
+        tools: readTools,
+        limits: { maxIterations: 5, maxToolCalls: 9, maxRepairAttempts: 2 },
+      })
+    );
+
+    expect(tools.batches).toHaveLength(4);
+    expect(tools.batches[1]).toBe(tools.batches[0]);
+    expect(tools.batches[3]).toBe(tools.batches[2]);
+    expect(tools.batches[2]).not.toBe(tools.batches[0]);
+  });
+
   // A model that batches "load the forge Skill" twice would otherwise be handed the same SKILL.md
   // body twice, at full token cost. Within one batch nothing can have changed between the two, so
   // the second dispatch is pure waste — unlike a repeat in a later iteration, which `repeat.ts`
@@ -996,6 +1155,38 @@ describe("AgentLoop concurrent dispatch", () => {
 
     expect(outcome).toMatchObject({ status: "completed" });
     expect(tools.calls).toEqual(["github.issue.search"]);
+  });
+
+  // The dispatcher never sees the collapsed call, so this event is the only record that the model
+  // asked twice. Without it a reader is shown one call where two were made.
+  it("names the sibling that answered a collapsed repeat", async () => {
+    const events = collector();
+    const outcome = await loop({
+      model: scriptedModel(
+        toolCallResult([
+          { callId: "c1", name: "github.issue.search", arguments: { q: "open" } },
+          { callId: "c2", name: "github.issue.search", arguments: { q: "open" } },
+        ]),
+        textResult("done")
+      ),
+      tools: trackingDispatcher(),
+      events: events.sink,
+    }).run(
+      input({
+        tools: readTools,
+        limits: { maxIterations: 5, maxToolCalls: 5, maxRepairAttempts: 2 },
+      })
+    );
+
+    expect(outcome).toMatchObject({ status: "completed" });
+    expect(
+      events.events
+        .filter((event) => event.type === "tool_call_dispatched")
+        .map((event) => [event.callId, event.answeredFromCallId])
+    ).toEqual([
+      ["c1", undefined],
+      ["c2", "c1"],
+    ]);
   });
 
   // Key order is the provider's choice, not the model's meaning, so it must not decide whether a

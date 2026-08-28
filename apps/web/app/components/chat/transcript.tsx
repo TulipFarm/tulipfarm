@@ -15,10 +15,6 @@ function partKey(part: TimelinePart, i: number): string {
   switch (part.kind) {
     case "tool":
       return `tool-${part.toolCallId}`;
-    case "plan":
-      return `plan-${part.planId}`;
-    case "task":
-      return `task-${part.taskId}`;
     default:
       return `${part.kind}-${i}`;
   }

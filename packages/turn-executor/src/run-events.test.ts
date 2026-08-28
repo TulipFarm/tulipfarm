@@ -223,3 +223,111 @@ describe("TurnEventWriter", () => {
     });
   });
 });
+
+describe("a call the loop collapsed into an identical one", () => {
+  /** Seeds the sibling that actually ran, exactly as the dispatch-port wrapper would. */
+  async function seedSibling(
+    writer: TurnEventWriter,
+    over: { outcome?: "ok" | "error"; errorCode?: string } = {}
+  ): Promise<void> {
+    await writer.emit(
+      "tool.call",
+      {
+        callId: "call-1",
+        name: "github.issue.search",
+        argsDigest: "sha256:args",
+        argsPreview: { json: '{"q":"open"}' },
+        batchId: "state-1:0:0",
+      },
+      "tool:call:call-1"
+    );
+    await writer.emit(
+      "tool.result",
+      {
+        callId: "call-1",
+        status: over.outcome ?? "ok",
+        ...(over.errorCode === undefined ? {} : { errorCode: over.errorCode }),
+      },
+      "tool:result:call-1"
+    );
+  }
+
+  it("still reaches Chat, described from the call that ran, but outside its batch", async () => {
+    const events = new FakeAppendPort();
+    const writer = makeWriter(events);
+    await seedSibling(writer);
+
+    await writer.append(
+      loopEvent({
+        sequence: 1,
+        type: "tool_call_dispatched",
+        callId: "call-2",
+        toolName: "github.issue.search",
+        outcome: "succeeded",
+        answeredFromCallId: "call-1",
+      })
+    );
+
+    const synthesized = events.appended.slice(2);
+    expect(synthesized.map((event) => event.eventType)).toEqual(["tool.call", "tool.result"]);
+    expect(synthesized[0]?.payload).toMatchObject({
+      callId: "call-2",
+      name: "github.issue.search",
+      argsDigest: "sha256:args",
+    });
+    // No Tool ran for it, so counting it towards "N at the same time" would overstate the Run.
+    expect(synthesized[0]?.payload).not.toHaveProperty("batchId");
+    expect(synthesized[1]?.payload).toMatchObject({
+      callId: "call-2",
+      status: "ok",
+      summary: "Asked twice, answered from the identical call",
+    });
+    expect(writer.toolCalls.map((call) => call.callId)).toEqual(["call-1", "call-2"]);
+  });
+
+  it("inherits the failure, so a duplicate of a failed call is not a clean success", async () => {
+    const events = new FakeAppendPort();
+    const writer = makeWriter(events);
+    await seedSibling(writer, { outcome: "error", errorCode: "forbidden" });
+
+    await writer.append(
+      loopEvent({
+        sequence: 1,
+        type: "tool_call_dispatched",
+        callId: "call-2",
+        toolName: "github.issue.search",
+        answeredFromCallId: "call-1",
+      })
+    );
+
+    expect(events.appended.at(-1)?.payload).toMatchObject({
+      callId: "call-2",
+      status: "error",
+      errorCode: "forbidden",
+    });
+  });
+
+  // Understating is the safe direction: a row invented from a call still in flight would describe
+  // an outcome nobody has yet.
+  it("stays silent when the call it was collapsed into has not settled", async () => {
+    const events = new FakeAppendPort();
+    const writer = makeWriter(events);
+    await writer.emit(
+      "tool.call",
+      { callId: "call-1", name: "github.issue.search", argsDigest: "sha256:args" },
+      "tool:call:call-1"
+    );
+
+    await writer.append(
+      loopEvent({
+        sequence: 1,
+        type: "tool_call_dispatched",
+        callId: "call-2",
+        toolName: "github.issue.search",
+        answeredFromCallId: "call-1",
+      })
+    );
+
+    expect(events.appended).toHaveLength(1);
+  });
+});

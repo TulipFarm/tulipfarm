@@ -307,7 +307,8 @@ export class AgentLoop {
       // "keep going", the approval this Turn now waits on, or the failure reason that ends it.
       const applyDispatch = async (
         call: { callId: string; name: string; arguments: unknown },
-        dispatched: ToolDispatchResult
+        dispatched: ToolDispatchResult,
+        answeredFromCallId?: string
       ): Promise<
         | { kind: "continue" }
         | { kind: "approval"; approvalId: string; call: NormalizedToolCall }
@@ -319,6 +320,7 @@ export class AgentLoop {
           toolName: call.name,
           callId: call.callId,
           outcome: dispatched.status,
+          ...(answeredFromCallId === undefined ? {} : { answeredFromCallId }),
         });
 
         if (dispatched.status === "awaiting_approval") {
@@ -533,6 +535,23 @@ export class AgentLoop {
           unique.push(batched);
         }
 
+        // Named only when the batch really is a batch, so that downstream "this ran concurrently"
+        // is read off the loop's own dispatch decision rather than guessed from adjacency. Counted
+        // after collapsing, not before: two identical reads are dispatched once, so a batch of two
+        // that collapses to one ran nothing concurrently and must not claim otherwise.
+        //
+        // Anchored to the first dispatched call's id rather than its position, because position
+        // alone repeats. A crash after these events are emitted but before the checkpoint reruns
+        // the iteration at the same index, and a rerun that produced a *different* response would
+        // then file its calls under the previous batch's name, leaving Chat to draw two executions
+        // as one wider batch. The call ids move with the response, so an exact replay still rebuilds
+        // the identical grouping while a divergent one cannot collide with it.
+        const batchAnchor = unique[0]?.callId;
+        const batchId =
+          unique.length > 1 && batchAnchor !== undefined
+            ? `${input.stateId}:${counters.iterations}:${batchAnchor}`
+            : undefined;
+
         const distinct = await Promise.all(
           unique.map((batched) =>
             this.deps.tools.dispatch({
@@ -543,6 +562,7 @@ export class AgentLoop {
               name: batched.name,
               arguments: batched.arguments,
               ...(activeSkillName === undefined ? {} : { activeSkillName }),
+              ...(batchId === undefined ? {} : { batchId }),
             })
           )
         );
@@ -566,7 +586,14 @@ export class AgentLoop {
           const batchCall = runBatch[i];
           const batchResult = dispatched[i];
           if (batchCall === undefined || batchResult === undefined) continue;
-          const outcome = await applyDispatch(batchCall, batchResult);
+          // Names the sibling that actually ran, when this call was collapsed into it. The
+          // dispatcher never saw this one, so this event is the only record that it was asked.
+          const answeredFrom = unique[resultOf[i] ?? -1];
+          const answeredFromCallId =
+            answeredFrom === undefined || answeredFrom.callId === batchCall.callId
+              ? undefined
+              : answeredFrom.callId;
+          const outcome = await applyDispatch(batchCall, batchResult, answeredFromCallId);
           if (outcome.kind === "continue") continue;
           if (decision !== undefined) {
             // A Turn parks on one approval and fails for one reason, so a second decisive

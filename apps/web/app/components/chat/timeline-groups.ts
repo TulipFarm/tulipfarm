@@ -92,3 +92,41 @@ export function groupTimelineParts(
 
   return nodes;
 }
+
+/**
+ * Where each concurrent dispatch starts, and how many steps it holds.
+ *
+ * Read off `meta.batchId`, which the Tool loop sets only when it genuinely dispatched several
+ * calls together. Never inferred from adjacency and never from two start times that merely look
+ * close: a trace that overstates what happened is worse than one that says less.
+ *
+ * A batch is keyed by the index of its first step rather than by requiring its steps to be
+ * contiguous, because a hidden presentation Tool dispatched alongside them leaves no row. Sizes
+ * count the steps actually present, so a lost event makes the trace understate concurrency — the
+ * safe direction — rather than keep claiming a sibling that never arrived.
+ */
+export function concurrentRuns(parts: readonly ToolPart[]): Map<number, number> {
+  const sizes = new Map<string, number>();
+  const firstAt = new Map<string, number>();
+  parts.forEach((part, index) => {
+    const id = part.meta?.batchId;
+    if (id === undefined) return;
+    sizes.set(id, (sizes.get(id) ?? 0) + 1);
+    if (!firstAt.has(id)) firstAt.set(id, index);
+  });
+
+  const startsAt = new Map<number, number>();
+  for (const [id, size] of sizes) {
+    const at = firstAt.get(id);
+    // One surviving step of a batch ran alone as far as this reader can tell, and saying
+    // otherwise would be a claim the trace cannot back.
+    if (size >= MIN_CLUSTER_SIZE && at !== undefined) startsAt.set(at, size);
+  }
+  return startsAt;
+}
+
+/** The widest concurrent dispatch in a run, so the fact survives the run folding to one line. */
+export function largestConcurrentRun(parts: readonly ToolPart[]): number | undefined {
+  const sizes = [...concurrentRuns(parts).values()];
+  return sizes.length === 0 ? undefined : Math.max(...sizes);
+}

@@ -72,6 +72,20 @@ export interface ToolDispatchRequest {
    * Narrowing only: the gate refuses a Tool above it and grants nothing.
    */
   readonly permissionCeiling?: { readonly maxRiskClass?: string };
+
+  /**
+   * The concurrent dispatch this call belonged to, present only when the loop dispatched more than
+   * one call together.
+   *
+   * Absent on a call dispatched alone — which includes every mutating call, since a write always
+   * dispatches by itself. Presence therefore *means* "this ran at the same time as its siblings",
+   * so nothing downstream can mistake two adjacent calls for two concurrent ones.
+   *
+   * Deliberately an identifier and not a count: a reader that counts the calls sharing an id can
+   * only ever understate concurrency if an event went missing, whereas a size copied onto each
+   * call would keep claiming four where three arrived.
+   */
+  readonly batchId?: string;
 }
 
 export type ToolDispatchResult =
@@ -139,6 +153,15 @@ export interface AgentLoopEvent {
   readonly iteration: number;
   readonly toolName?: string;
   readonly callId?: string;
+  /**
+   * The earlier call in the same batch whose result answered this one, present only when the loop
+   * collapsed two identical reads into a single dispatch.
+   *
+   * The dispatcher never saw this call, so nothing downstream of the dispatch port can report it.
+   * Without this field a reader would see one call where the model asked twice — a quieter record
+   * than what happened, and one that hides a model repeating itself.
+   */
+  readonly answeredFromCallId?: string;
   readonly outcome?: string;
   /** Model text released this chunk. Present only on `text_delta`. */
   readonly text?: string;

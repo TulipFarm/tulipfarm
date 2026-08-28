@@ -131,6 +131,24 @@ describe("loadCorpus", () => {
     await expect(load(dir)).rejects.toThrow(/only tier "l2" collects/);
   });
 
+  it("rejects a batching expectation on an L3 Case, which cannot see how calls were grouped", async () => {
+    const dir = corpusDir({
+      "a.json": {
+        ...valid("alpha"),
+        tier: "l3",
+        expect: [{ kind: "tool_calls_batched", min: 2 }],
+      },
+    });
+    await expect(load(dir)).rejects.toThrow(/only tier "l2" observes/);
+  });
+
+  it("rejects a batch of one, which every model already produces", async () => {
+    const dir = corpusDir({
+      "a.json": { ...valid("alpha"), expect: [{ kind: "tool_calls_batched", min: 1 }] },
+    });
+    await expect(load(dir)).rejects.toThrow(/at least 2/);
+  });
+
   it("rejects a journey on an L2 Case, which has no Conversation to span", async () => {
     const dir = corpusDir({
       "a.json": {
@@ -164,6 +182,7 @@ describe("loadCorpus", () => {
       { kind: "tool_argument_equals", name: "t", path: "a" },
       { kind: "output_field_equals", value: 1 },
       { kind: "tool_call_count" },
+      { kind: "tool_calls_batched" },
       { kind: "tool_call_order", names: [] },
     ];
     for (const expectation of cases) {

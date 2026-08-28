@@ -1,0 +1,48 @@
+{
+  "id": "independent-reads-arrive-in-one-message",
+  "tier": "l2",
+  "agent": "triage",
+  "input": [
+    {
+      "role": "user",
+      "content": "Before you answer anything else: which GitHub repositories can you see, and which Slack channels?"
+    }
+  ],
+  "platformTools": ["github_repository_list", "slack_channel_list"],
+  "toolResults": [
+    {
+      "name": "github_repository_list",
+      "output": {
+        "repositories": [{ "repository": "TulipFarm/tulipfarm", "account": "TulipFarm" }]
+      }
+    },
+    {
+      "name": "slack_channel_list",
+      "output": {
+        "channels": [
+          { "id": "C0123456789", "name": "release-updates" },
+          { "id": "C9876543210", "name": "engineering" }
+        ]
+      }
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        { "callId": "list-repositories", "name": "github_repository_list", "arguments": {} },
+        { "callId": "list-channels", "name": "slack_channel_list", "arguments": {} }
+      ]
+    },
+    {
+      "kind": "text",
+      "text": "One repository, TulipFarm/tulipfarm. Two channels, release-updates and engineering."
+    }
+  ],
+  "expect": [
+    { "kind": "tool_called", "name": "github_repository_list" },
+    { "kind": "tool_called", "name": "slack_channel_list" },
+    { "kind": "tool_calls_batched", "min": 2 },
+    { "kind": "loop_status", "status": "completed" }
+  ]
+}

@@ -179,6 +179,44 @@ export class TurnEventWriter implements AgentLoopEventSink {
       return;
     }
 
+    if (event.type === "tool_call_dispatched" && event.answeredFromCallId !== undefined) {
+      // The loop collapsed this call into an identical one in the same batch, so the dispatcher
+      // never saw it and the wrapper that announces every other call could not announce this one.
+      // It is still a call the model made, and a reader who is shown one row where two were asked
+      // has been told the model was more economical than it was.
+      const answeredFrom = this.toolCallsById.get(event.answeredFromCallId);
+      // Only ever described from the call it was collapsed into — identical arguments are what
+      // made it a duplicate, so that record describes this call exactly. If the sibling has not
+      // settled, or was never recorded, this stays silent rather than invent a row.
+      if (answeredFrom?.argsDigest === undefined || answeredFrom.outcome === undefined) return;
+      await this.emit(
+        "tool.call",
+        {
+          callId: event.callId ?? "",
+          name: event.toolName ?? answeredFrom.name,
+          argsDigest: answeredFrom.argsDigest,
+          ...(answeredFrom.argsPreview === undefined
+            ? {}
+            : { argsPreview: answeredFrom.argsPreview }),
+          // Deliberately not the sibling's `batchId`: no Tool ran for this call, so counting it
+          // towards "N at the same time" would overstate what the Run actually did in parallel.
+        },
+        `${key}:call`
+      );
+      await this.emit(
+        "tool.result",
+        {
+          callId: event.callId ?? "",
+          // Inherited, not assumed: a duplicate of a call that failed must not read as a success.
+          status: answeredFrom.outcome,
+          ...(answeredFrom.errorCode === undefined ? {} : { errorCode: answeredFrom.errorCode }),
+          summary: "Asked twice, answered from the identical call",
+        },
+        `${key}:result`
+      );
+      return;
+    }
+
     if (event.type === "tool_call_rejected") {
       // Rejected before dispatch, so no dispatcher can report it.
       await this.emit(
@@ -204,6 +242,7 @@ export class TurnEventWriter implements AgentLoopEventSink {
         name: call.name,
         ...(call.argsDigest === undefined ? {} : { argsDigest: call.argsDigest }),
         ...(call.argsPreview === undefined ? {} : { argsPreview: call.argsPreview }),
+        ...(call.batchId === undefined ? {} : { batchId: call.batchId }),
       });
       return;
     }

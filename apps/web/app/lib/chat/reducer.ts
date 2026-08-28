@@ -229,40 +229,6 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
       };
     }
 
-    case "plan": {
-      const { messages, target } = ensureAssistant(state.messages);
-      const existing = target.parts.some(
-        (p) => p.kind === "plan" && p.planId === event.data.planId
-      );
-      const next: TimelinePart = {
-        kind: "plan",
-        planId: event.data.planId,
-        title: event.data.title,
-        steps: event.data.steps,
-      };
-      const parts = existing
-        ? target.parts.map((p) => (p.kind === "plan" && p.planId === event.data.planId ? next : p))
-        : [...target.parts, next];
-      return { ...state, status: "streaming", messages: withParts(messages, target, parts) };
-    }
-
-    case "task": {
-      const { messages, target } = ensureAssistant(state.messages);
-      const existing = target.parts.some(
-        (p) => p.kind === "task" && p.taskId === event.data.taskId
-      );
-      const next: TimelinePart = {
-        kind: "task",
-        taskId: event.data.taskId,
-        label: event.data.label,
-        status: event.data.status,
-      };
-      const parts = existing
-        ? target.parts.map((p) => (p.kind === "task" && p.taskId === event.data.taskId ? next : p))
-        : [...target.parts, next];
-      return { ...state, status: "streaming", messages: withParts(messages, target, parts) };
-    }
-
     case "sources": {
       const { messages, target } = ensureAssistant(state.messages);
       const part: TimelinePart = { kind: "sources", sources: event.data.sources };

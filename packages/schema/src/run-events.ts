@@ -92,6 +92,8 @@ export const PARTICIPANT_TOOL_CALL_SCHEMA = {
     durationMs: { type: "integer", minimum: 0 },
     outcome: { type: "string", enum: ["ok", "error"] },
     errorCode: { type: "string", minLength: 1 },
+    /** Carried into the Message so a Turn re-read months later still shows what ran together. */
+    batchId: { type: "string", minLength: 1 },
   },
 } as const;
 
@@ -117,6 +119,8 @@ const TOOL_CALL_SCHEMA = {
     mutating: { type: "boolean" },
     agentId: { type: "string", minLength: 1 },
     stepId: { type: "string", minLength: 1 },
+    /** The concurrent dispatch this call belonged to; absent when it was dispatched alone. */
+    batchId: { type: "string", minLength: 1 },
     startedAt: { type: "string", minLength: 1 },
   },
 } as const;
@@ -460,6 +464,7 @@ export interface ParticipantToolCall {
   readonly durationMs?: number;
   readonly outcome?: "ok" | "error";
   readonly errorCode?: string;
+  readonly batchId?: string;
 }
 
 /** Payloads mirror schemas; optional fields must be omitted, never set to `undefined`. */
@@ -480,6 +485,7 @@ export interface RunEventPayloads {
     readonly mutating?: boolean;
     readonly agentId?: string;
     readonly stepId?: string;
+    readonly batchId?: string;
     readonly startedAt?: string;
   };
   readonly "tool.result": {

@@ -52,6 +52,9 @@ export function announceToolCalls(
           ...(argsPreview === undefined ? {} : { argsPreview }),
           // Group by real State, not event adjacency.
           ...(request.stateId.length === 0 ? {} : { stepId: request.stateId }),
+          // The loop's own dispatch decision. A call it ran alone carries none, so a reader can
+          // never turn two adjacent calls into two concurrent ones.
+          ...(request.batchId === undefined ? {} : { batchId: request.batchId }),
           startedAt: new Date(startedAt).toISOString(),
         },
         `tool:call:${request.callId}`

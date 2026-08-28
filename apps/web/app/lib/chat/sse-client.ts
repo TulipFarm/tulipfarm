@@ -72,6 +72,7 @@ type RunEventData = {
   mutating?: boolean;
   agentId?: string;
   stepId?: string;
+  batchId?: string;
   startedAt?: string;
   durationMs?: number;
   status?: string;
@@ -175,6 +176,7 @@ export function createRunEventMapper(): (frame: ParsedFrame) => ChatEvent[] {
                 mutating: data.mutating,
                 agentId: data.agentId,
                 stepId: data.stepId,
+                batchId: data.batchId,
                 startedAt: data.startedAt,
               }),
             }),

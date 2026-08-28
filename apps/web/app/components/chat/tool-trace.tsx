@@ -6,6 +6,7 @@ import { Trace, TraceStep } from "~/components/ui/trace";
 import type { TimelinePart } from "~/lib/chat/types";
 import { ApprovalCard } from "./approval-card";
 import { SubagentPanel, traceOf } from "./subagent-panel";
+import { concurrentRuns, largestConcurrentRun } from "./timeline-groups";
 import { ToolInspector, toolHasDetails } from "./tool-inspector";
 import {
   describeToolCall,
@@ -47,6 +48,15 @@ export function ToolTrace({
   const settled = parts.filter((part) => part.status === "done").length;
   const failed = parts.filter((part) => part.status === "done" && part.outcome === "error").length;
   const countLabel = `Ran ${parts.length} ${parts.length === 1 ? "tool" : "tools"}`;
+  // The rows carry concurrency, and folding hides the rows — so the header has to carry it too, or
+  // the fact only exists while the run happens to be open.
+  const atOnce = largestConcurrentRun(parts);
+  const settledLabel = [
+    countLabel,
+    ...(atOnce === undefined ? [] : [`${atOnce} at the same time`]),
+    ...(failed === 0 ? [] : [`${failed} failed`]),
+  ].join(" · ");
+  const concurrent = concurrentRuns(parts);
   const running = parts.find((part) => part.status === "running");
   const activeLabel =
     running === undefined
@@ -58,7 +68,7 @@ export function ToolTrace({
       activeLabel={activeLabel}
       // The count is why a failed run is allowed to fold at all: it reports the failure on the one
       // line that survives, so folding costs the reader a click, never the fact.
-      settledLabel={failed === 0 ? countLabel : `${countLabel} · ${failed} failed`}
+      settledLabel={settledLabel}
       tone={failed === 0 ? undefined : "error"}
       working={pending || running !== undefined}
       // Folding is about attention, not evidence. A run below three steps saves nothing by
@@ -68,12 +78,21 @@ export function ToolTrace({
       // second timer beside it would be the same clock twice.
       showElapsed={false}
     >
-      {parts.map((part) => {
+      {parts.map((part, index) => {
         const label = summaryOf(part);
         const status = part.status === "running" ? "running" : outcomeOf(part);
         const approval = part.approval;
+        const startsBatch = concurrent.get(index);
         return (
           <Fragment key={part.toolCallId}>
+            {/*
+             * One caption above the steps the runtime really did run together. Said in the
+             * reader's words rather than the runtime's — nobody has to know what a Tool is to
+             * understand that several things happened at once instead of one after another.
+             */}
+            {startsBatch === undefined ? null : (
+              <p className="pt-1 text-xs text-muted-foreground">{`${startsBatch} at the same time`}</p>
+            )}
             <TraceStep
               status={status}
               label={label}

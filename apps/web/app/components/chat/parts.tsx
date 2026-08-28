@@ -1,14 +1,8 @@
 import { Link } from "@remix-run/react";
 import { ArrowRightLeft, BookOpen, Brain, ExternalLink, ShieldAlert } from "lucide-react";
 import { SurfaceArtifact } from "~/components/surface-artifact";
-import {
-  TraceStatusGlyph as StepGlyph,
-  Trace,
-  TraceNote,
-  TraceSource,
-} from "~/components/ui/trace";
-import type { PlanStep, SourceRef, StepStatus, TimelinePart } from "~/lib/chat/types";
-import { cn } from "~/lib/utils";
+import { Trace, TraceNote, TraceSource } from "~/components/ui/trace";
+import type { SourceRef, TimelinePart } from "~/lib/chat/types";
 import { Response } from "./response";
 import { isHiddenToolPart } from "./tool-summary";
 import { ToolTrace } from "./tool-trace";
@@ -34,58 +28,6 @@ function ReasoningPart({ text, streaming }: { text: string; streaming?: boolean 
         </TraceNote>
       ))}
     </Trace>
-  );
-}
-
-function PlanPart({ title, steps }: { title?: string; steps: PlanStep[] }) {
-  const done = steps.filter((step) => step.status === "done").length;
-
-  return (
-    <div>
-      {/* The counter belongs to the title. Without the box that used to bound it, pushing it to the
-          container edge would read as a caption on whatever sits alongside. */}
-      <div className="flex items-baseline gap-2">
-        <h3 className="text-sm font-medium text-foreground">{title ?? "Plan"}</h3>
-        <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
-          {done}/{steps.length}
-        </span>
-      </div>
-      <ol className="mt-1.5">
-        {steps.map((step, index) => (
-          <li key={step.id} className="flex gap-2.5">
-            <span className="flex flex-col items-center">
-              <span className="flex h-6 shrink-0 items-center">
-                <StepGlyph status={step.status} />
-              </span>
-              {index < steps.length - 1 ? (
-                <span aria-hidden className="w-px flex-1 bg-run-rail" />
-              ) : null}
-            </span>
-            <span
-              className={cn(
-                "text-sm leading-6",
-                index < steps.length - 1 && "pb-2",
-                step.status === "pending" ? "text-muted-foreground" : "text-foreground"
-              )}
-            >
-              {step.label}
-            </span>
-          </li>
-        ))}
-      </ol>
-    </div>
-  );
-}
-
-/** A single step outside a plan. Same vocabulary as a rail row so the two read as one system. */
-function TaskPart({ label, status }: { label: string; status: StepStatus }) {
-  return (
-    <p className="tf-trace-row flex items-center gap-2.5 py-1 text-sm">
-      <StepGlyph status={status} />
-      <span className={cn(status === "pending" ? "text-muted-foreground" : "text-foreground")}>
-        {label}
-      </span>
-    </p>
   );
 }
 
@@ -165,10 +107,6 @@ export function MessagePartView({
           onApprove={onApprove}
         />
       );
-    case "plan":
-      return <PlanPart title={part.title} steps={part.steps} />;
-    case "task":
-      return <TaskPart label={part.label} status={part.status} />;
     case "sources":
       return <SourcesPart sources={part.sources} />;
     case "agent-handoff":

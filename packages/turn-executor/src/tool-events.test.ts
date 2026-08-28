@@ -215,3 +215,44 @@ describe("announceToolCalls", () => {
     expect(events.appended.map((event) => event.eventType)).toEqual(["tool.call"]);
   });
 });
+
+describe("carrying what ran at the same time", () => {
+  it("announces the batch a call belonged to, and keeps it on the durable record", async () => {
+    const events = new FakeAppendPort();
+    const eventWriter = writer(events);
+    const broker = port((request) => ({
+      status: "succeeded",
+      callId: request.callId,
+      output: {},
+    }));
+    const dispatch = announceToolCalls(broker.port, eventWriter, { now: clock() }).dispatch;
+
+    await dispatch({ ...REQUEST, callId: "call-1", batchId: "state-1:0:0" });
+    await dispatch({ ...REQUEST, callId: "call-2", batchId: "state-1:0:0" });
+
+    const announced = events.appended.filter((event) => event.eventType === "tool.call");
+    expect(announced.map((event) => event.payload.batchId)).toEqual(["state-1:0:0", "state-1:0:0"]);
+    // The Message metadata is what a Turn re-read months later hydrates from, so the fact has to
+    // survive the hop out of the event stream and into the durable record.
+    expect(eventWriter.toolCalls.map((call) => call.batchId)).toEqual([
+      "state-1:0:0",
+      "state-1:0:0",
+    ]);
+  });
+
+  it("leaves a solo call unmarked all the way through", async () => {
+    const events = new FakeAppendPort();
+    const eventWriter = writer(events);
+    const broker = port((request) => ({
+      status: "succeeded",
+      callId: request.callId,
+      output: {},
+    }));
+
+    await announceToolCalls(broker.port, eventWriter, { now: clock() }).dispatch(REQUEST);
+
+    const announced = events.appended.find((event) => event.eventType === "tool.call");
+    expect(announced?.payload).not.toHaveProperty("batchId");
+    expect(eventWriter.toolCalls[0]).not.toHaveProperty("batchId");
+  });
+});
