@@ -1,4 +1,13 @@
-import { ingestWebhook, type WebhookIngressDeps, type WebhookTrigger } from "@tulipfarm/run-kernel";
+import {
+  buildInvocation,
+  ingestWebhook,
+  passesTriggerContentGate,
+  type RegisteredTrigger,
+  type RunInvocation,
+  TriggerBindError,
+  type WebhookIngressDeps,
+  type WebhookTrigger,
+} from "@tulipfarm/run-kernel";
 import type { FastifyInstance } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import { makeRateLimitHook, type RateLimiter } from "../rate-limit";
@@ -6,6 +15,14 @@ import { makeRateLimitHook, type RateLimiter } from "../rate-limit";
 export interface HookIngressDeps {
   resolveTrigger(provider: string, triggerSlug: string): Promise<WebhookTrigger | null>;
   ingress: WebhookIngressDeps;
+  /**
+   * The same Trigger in the matcher's view. Separate from `resolveTrigger` because verification
+   * and binding read disjoint halves of the authored spec.
+   */
+  resolveInvocationTrigger?(triggerSlug: string): Promise<RegisteredTrigger | null>;
+  startRun?(
+    invocation: RunInvocation
+  ): Promise<{ runId: string; outcome: "started" | "duplicate" }>;
   now?: () => string;
   rateLimiter?: RateLimiter;
 }
@@ -96,6 +113,36 @@ export async function registerHookIngressRoutes(
         if (result.status !== 202) {
           req.log.warn({ provider, trigger: triggerSlug, code: result.code }, "hook rejected");
           return reply.code(result.status).send({ error: result.code });
+        }
+
+        // A duplicate is re-bound on purpose: `startRun` is idempotent on the event's deduplication
+        // key, so redelivery is what heals a crash between persisting the event and minting its
+        // Run. A failure here is left to propagate for the same reason — a 202 over a lost Run
+        // would strand the delivery, and the sender's retry is the only thing that recovers it.
+        if (result.envelope !== undefined && deps.resolveInvocationTrigger && deps.startRun) {
+          const registered = await deps.resolveInvocationTrigger(triggerSlug);
+          if (registered !== null) {
+            // The URL already said which Trigger this is, so matching is not re-run — but the
+            // author's `filter`/`match` still decide whether they wanted *this* event. Skipping
+            // them would accept a filter at authoring time and then never consult it.
+            if (!passesTriggerContentGate(registered, result.envelope)) {
+              req.log.info(
+                { provider, trigger: triggerSlug },
+                "hook event did not pass the Trigger's filter"
+              );
+              return reply.code(202).send({ status: result.outcome });
+            }
+            try {
+              const { runId } = await deps.startRun(buildInvocation(registered, result.envelope));
+              req.log.info({ provider, trigger: triggerSlug, runId }, "hook started routine run");
+            } catch (error) {
+              if (!(error instanceof TriggerBindError)) throw error;
+              req.log.warn(
+                { provider, trigger: triggerSlug, code: error.code },
+                "hook event did not bind to its Trigger"
+              );
+            }
+          }
         }
         return reply.code(202).send({ status: result.outcome });
       }

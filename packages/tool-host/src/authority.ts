@@ -68,11 +68,27 @@ export interface HostedToolCall {
    * the Run's own Routine, so an unrecognised name resolves to no Agent and narrows the call.
    */
   readonly agentName?: string;
+  /**
+   * A ceiling the caller asks to be held to, from a Routine State's authored `permissionCeiling`.
+   *
+   * Safe to accept from the Worker because it only ever narrows: the gate refuses a Tool above it
+   * and grants nothing, so a forged value can deny a call but never widen one.
+   */
+  readonly permissionCeiling?: { readonly maxRiskClass?: string };
 }
 
 /** Mirrors the loop's `ToolDispatchResult`, minus the `callId` the caller already holds. */
 export type HostedToolResult =
-  | { readonly status: "succeeded"; readonly output: unknown }
+  | {
+      readonly status: "succeeded";
+      readonly output: unknown;
+      /**
+       * The effect had already confirmed, so `output` is a marker rather than what the Tool
+       * returned — the ledger records that a call happened, not what it answered. Chat can say
+       * so in words; a caller that feeds the output to a later step must not treat it as data.
+       */
+      readonly replayed?: true;
+    }
   | { readonly status: "denied"; readonly reason: string; readonly connectUrl?: string }
   | { readonly status: "invalid_arguments"; readonly reason: string }
   | { readonly status: "failed"; readonly reason: string }

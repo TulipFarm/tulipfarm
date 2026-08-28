@@ -13,7 +13,11 @@ import {
   textContent,
 } from "@tulipfarm/schema";
 import type { SoulAgent, SoulIntegration, SoulLoader } from "@tulipfarm/soul";
-import { DOMAIN_EVENTS, MemoryArtifactStore } from "@tulipfarm/storage";
+import {
+  DOMAIN_EVENTS,
+  type IntegrationEventPayload,
+  MemoryArtifactStore,
+} from "@tulipfarm/storage";
 import type { ToolDef } from "@tulipfarm/tool-host";
 import type { FastifyBaseLogger } from "fastify";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -135,6 +139,8 @@ interface Harness {
   lineage: MemoryArtifactStore;
   conversations: ConversationDoc[];
   events: EventEmitter;
+  eventTriggers: { dispatchIntegrationEvent(event: IntegrationEventPayload): Promise<void> };
+  dispatchedIntegrationEvents: IntegrationEventPayload[];
   recordedEvents: Array<Record<string, unknown>>;
   sent: Array<Record<string, unknown>>;
 }
@@ -146,6 +152,7 @@ async function harness(
     resolve?: IngressIdentityResolver["resolve"];
     envelope?: Record<string, unknown>;
     agents?: Map<string, SoulAgent>;
+    triggerDispatchFails?: boolean;
   } = {}
 ): Promise<Harness> {
   const lineage = new MemoryArtifactStore();
@@ -173,6 +180,13 @@ async function harness(
   const recordedEvents: Array<Record<string, unknown>> = [];
   const sent: Array<Record<string, unknown>> = [];
   const events = new EventEmitter();
+  const dispatchedIntegrationEvents: IntegrationEventPayload[] = [];
+  const eventTriggers = {
+    dispatchIntegrationEvent: async (event: IntegrationEventPayload) => {
+      if (options.triggerDispatchFails === true) throw new Error("invocation gateway unavailable");
+      dispatchedIntegrationEvents.push(event);
+    },
+  };
 
   const registry = {
     getAll: () => [
@@ -230,6 +244,7 @@ async function harness(
     },
     toolRegistry: registry,
     domainEvents: events,
+    eventTriggers,
     bindLinkUrl: (token) => `https://web.example/link-channel?token=${token}`,
     log,
     newId: () => {
@@ -247,6 +262,8 @@ async function harness(
     lineage,
     conversations,
     events,
+    eventTriggers,
+    dispatchedIntegrationEvents,
     recordedEvents,
     sent,
   };
@@ -558,7 +575,7 @@ describe("IngressDeliveryHost.attachChat", () => {
 
 describe("IngressDeliveryHost.recordEvent", () => {
   it("records an allowlisted event and fans it out to Routine triggers", async () => {
-    const { host, events, recordedEvents } = await harness();
+    const { host, events, recordedEvents, dispatchedIntegrationEvents } = await harness();
     const emitted: unknown[] = [];
     events.on(DOMAIN_EVENTS.INTEGRATION_EVENT, (payload: unknown) => emitted.push(payload));
 
@@ -575,6 +592,28 @@ describe("IngressDeliveryHost.recordEvent", () => {
     expect(emitted).toEqual([
       expect.objectContaining({ integration: SLUG, event: "member_joined", eventId: "event-1" }),
     ]);
+    // The emit above is fire-and-forget, so it cannot be what starts a Run. This can.
+    expect(dispatchedIntegrationEvents).toEqual([
+      expect.objectContaining({ integration: SLUG, event: "member_joined", eventId: "event-1" }),
+    ]);
+  });
+
+  it("reports the failure when the event cannot reach its Trigger", async () => {
+    const { host } = await harness({ triggerDispatchFails: true });
+
+    // Reporting the event as recorded would strand the Routine it was supposed to start; the
+    // caller's retry is the only thing that recovers it.
+    await expect(
+      host.recordEvent(BUSINESS_ID, RUN_ID, { eventType: "member_joined" })
+    ).rejects.toThrow("invocation gateway unavailable");
+  });
+
+  it("does not dispatch an event the manifest does not name", async () => {
+    const { host, dispatchedIntegrationEvents } = await harness();
+
+    await host.recordEvent(BUSINESS_ID, RUN_ID, { eventType: "message_deleted" });
+
+    expect(dispatchedIntegrationEvents).toEqual([]);
   });
 
   it("ignores an event type the manifest does not name", async () => {

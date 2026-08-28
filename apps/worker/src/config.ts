@@ -4,11 +4,11 @@ import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 /**
  * Refuse to boot below the schema floor the worker's work requires.
  *
- * 63, not 62: the sweep's own query only needs `curator_user_work` from 62, but every mint it
- * posts is served against the job, effect and admission tables from 63. A worker that booted
- * between the two would sweep a real backlog into an API that cannot record the answer.
+ * 81, not 63: the Routine executor now persists State output (80) and writes child links for
+ * `child_routine` and `emit` States, whose `authority_binding` column only reaches an existing
+ * install through 81. A worker below either would settle a State it cannot record the result of.
  */
-export const REQUIRED_SCHEMA_VERSION = 63;
+export const REQUIRED_SCHEMA_VERSION = 81;
 
 export interface WorkerConfig {
   readonly databaseUrl: string;

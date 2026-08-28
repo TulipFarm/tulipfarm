@@ -16,6 +16,8 @@ export interface ChatTurnRequest {
 export interface ChatRunClaim {
   readonly runId: string;
   readonly businessId: string;
+  /** The Turn this Run answers, so a retry can re-enter it instead of asking again. */
+  readonly turnId: string;
 }
 
 export type ChatSubmission =
@@ -70,7 +72,10 @@ export function durableTurnSubmitter(deps: DurableTurnSubmitterDeps): ChatTurnSu
         idempotencyKey: deps.idempotencyKey,
       });
 
-      return { outcome: "submitted", run: { runId: started.runId, businessId } };
+      return {
+        outcome: "submitted",
+        run: { runId: started.runId, businessId, turnId: started.turnId },
+      };
     },
   };
 }

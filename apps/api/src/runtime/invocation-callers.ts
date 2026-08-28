@@ -126,3 +126,33 @@ export function triggerRunStarter(invocations: DurableInvocationGateway) {
     return { runId: result.runId, outcome: result.outcome };
   };
 }
+
+/**
+ * Starts the Run a `child_routine` State calls.
+ *
+ * The child runs as the caller's effective subject, not as a fixed name: a Routine called by
+ * another Routine must authorize its Tool calls exactly as it would when started on its own, and
+ * the caller's subject is the only principal both Runs can agree on.
+ */
+export function childRoutineTrigger(invocations: DurableInvocationGateway) {
+  return async (input: {
+    readonly slug: string;
+    readonly inputs: Record<string, unknown>;
+    readonly idempotencyKey: string;
+    readonly identity: { readonly kind: string; readonly id: string };
+  }): Promise<{ readonly runId: string }> => {
+    const identity = { kind: input.identity.kind, id: input.identity.id };
+    const result = await invocations.start({
+      source: "child_routine",
+      runSource: "routine",
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      initiator: identity,
+      effectiveSubject: identity,
+      definitionRef: `published:routine:${input.slug}`,
+      payload: { slug: input.slug, inputs: input.inputs },
+      payloadSchemaRef: MANUAL_REQUEST_SCHEMA_REF,
+      idempotencyKey: input.idempotencyKey,
+    });
+    return { runId: result.runId };
+  };
+}

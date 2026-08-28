@@ -56,6 +56,7 @@ const CLAIMED_STATE: PersistedState = {
   finishedAt: null,
   resultArtifactId: null,
   errorEvidenceRef: null,
+  output: null,
 };
 
 const WAITING_STATE: PersistedState = { ...CLAIMED_STATE, status: "waiting" };

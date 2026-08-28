@@ -49,7 +49,7 @@ export function makeUntrustedContentGuard(cfg: UntrustedContentConfig): Guard<To
  * How much of one result is screened.
  *
  * Deliberately far above every ceiling on what a result can put in front of a model —
- * `MAX_RAW_RESULT_CHARS` truncates an undistilled result and the distiller caps its own input —
+ * `MAX_RAW_RESULT_TOKENS` truncates an undistilled result and the distiller caps its own input —
  * so no text that can reach the model is left unscreened. Bounded at all only because the shape
  * and size of a result are a destination's choice, not this deployment's.
  */

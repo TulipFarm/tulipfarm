@@ -56,6 +56,11 @@ export const InternalTurnToolCallBodySchema = {
     stateId: { type: "string", minLength: 1, maxLength: 128 },
     activeSkillName: { type: "string", minLength: 1, maxLength: 64 },
     agentName: { type: "string", minLength: 1, maxLength: 128 },
+    permissionCeiling: {
+      type: "object",
+      additionalProperties: false,
+      properties: { maxRiskClass: { type: "string", minLength: 1, maxLength: 32 } },
+    },
   },
 } as const;
 
@@ -171,6 +176,7 @@ export const InternalTurnLookupResponseSchema = {
     turnId: { type: "string" },
     conversationId: { type: "string" },
     attempt: { type: "integer" },
+    previousRunId: { type: "string" },
   },
 } as const;
 
@@ -271,6 +277,8 @@ export const InternalTurnToolResultResponseSchema = {
       enum: ["succeeded", "denied", "invalid_arguments", "failed", "awaiting_approval"],
     },
     output: {},
+    /** Marks `output` as a replay marker rather than the Tool's answer; callers must not use it. */
+    replayed: { type: "boolean" },
     reason: { type: "string" },
     approvalId: { type: "string" },
     connectUrl: { type: "string", minLength: 1 },
@@ -480,4 +488,77 @@ export const InternalRoutineApprovalQuerySchema = {
 export const InternalRoutineApprovalEmptyResponseSchema = {
   type: "null",
   description: "No approval is open for this State occurrence.",
+} as const;
+
+export const InternalChildRoutineStartBodySchema = {
+  type: "object",
+  required: ["stateKey", "stateName", "routineRef", "mode"],
+  additionalProperties: false,
+  properties: {
+    stateKey: { type: "string", minLength: 1 },
+    stateName: { type: "string", minLength: 1 },
+    routineRef: {
+      type: "object",
+      required: ["name", "version"],
+      additionalProperties: false,
+      properties: {
+        name: { type: "string", minLength: 1 },
+        version: { type: "string", minLength: 1 },
+      },
+    },
+    mode: { type: "string", enum: ["wait", "detach"] },
+    input: { type: "object", additionalProperties: true },
+    deadlineMs: { type: "integer", minimum: 1 },
+  },
+} as const;
+
+export const InternalChildRoutineQuerySchema = {
+  type: "object",
+  required: ["stateKey"],
+  additionalProperties: false,
+  properties: { stateKey: { type: "string", minLength: 1 } },
+} as const;
+
+export const InternalChildRoutineResponseSchema = {
+  type: "object",
+  required: ["childRunId", "status", "waitId"],
+  properties: {
+    childRunId: { type: "string" },
+    status: {
+      type: "string",
+      enum: ["pending", "succeeded", "failed", "cancelled", "expired"],
+    },
+    waitId: { type: ["string", "null"] },
+  },
+} as const;
+
+export const InternalChildRoutineEmptyResponseSchema = {
+  type: "null",
+  description: "This State occurrence has called no child Routine.",
+} as const;
+
+export const InternalEmitBodySchema = {
+  type: "object",
+  required: ["stateKey", "eventType", "eventVersion"],
+  additionalProperties: false,
+  properties: {
+    stateKey: { type: "string", minLength: 1 },
+    eventType: { type: "string", minLength: 1 },
+    eventVersion: { type: "integer", minimum: 1 },
+    data: { type: "object", additionalProperties: true },
+  },
+} as const;
+
+export const InternalEmitResponseSchema = {
+  type: "object",
+  required: ["eventId", "outcome"],
+  properties: {
+    eventId: { type: "string" },
+    outcome: {
+      type: "string",
+      enum: ["started", "duplicate", "no_match", "ambiguous", "rejected"],
+    },
+    triggerSlug: { type: "string" },
+    runId: { type: "string" },
+  },
 } as const;

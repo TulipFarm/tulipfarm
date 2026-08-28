@@ -4,7 +4,6 @@ import { compileExpression, ExpressionError } from "./expressions";
 const scope = {
   input: { issue: { id: 42, title: "Crash on save", labels: ["bug", "p1"] } },
   states: { Classify: { output: { label: "bug", score: 0.91 } } },
-  trigger: { provider: "github" },
 };
 
 describe("compileExpression", () => {
@@ -38,6 +37,14 @@ describe("compileExpression", () => {
   it("rejects an unknown root so an expression cannot reach ambient state", () => {
     expect(() => compileExpression("process.env.SECRET")).toThrow(
       new ExpressionError("expression_unknown_root", "process")
+    );
+  });
+
+  // A Trigger's payload crosses into a Run only through its `inputMapping`, so reading the
+  // envelope here would bypass that allowlist — and did nothing but park the Run on its first tick.
+  it("rejects the trigger root, which only an inputMapping may cross into a Run", () => {
+    expect(() => compileExpression("trigger.scheduledTime")).toThrow(
+      new ExpressionError("expression_unknown_root", "trigger")
     );
   });
 

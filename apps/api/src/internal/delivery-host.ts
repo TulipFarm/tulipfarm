@@ -103,6 +103,14 @@ export interface IngressDeliveryHostOptions {
   readonly toolRegistry?: ToolRegistry;
   /** Domain-event bus; recorded Integration events fan out to Routine event triggers. */
   readonly domainEvents?: EventEmitter;
+  /**
+   * Binds a classified Integration event to any matching Trigger. Awaited before the event is
+   * reported as recorded, so a Trigger that cannot start its Run surfaces to the caller instead
+   * of being swallowed by the fire-and-forget domain emit above it.
+   */
+  readonly eventTriggers?: {
+    dispatchIntegrationEvent(event: IntegrationEventPayload): Promise<unknown>;
+  };
   /** Renders the confirmation URL a bind token is offered as. */
   bindLinkUrl(token: string): string;
   readonly log: FastifyBaseLogger;
@@ -313,6 +321,7 @@ export class IngressDeliveryHost {
       payload,
     };
     this.options.domainEvents?.emit(DOMAIN_EVENTS.INTEGRATION_EVENT, emitted);
+    await this.options.eventTriggers?.dispatchIntegrationEvent(emitted);
     return { outcome: "recorded", eventId: record.id };
   }
 

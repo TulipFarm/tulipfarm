@@ -50,6 +50,7 @@ export {
 } from "./bundle-retention";
 export type { BundleRetentionInput } from "./bundle-store.pg";
 export { PgBundleStore, SOUL_BUNDLE_STORAGE_STATEMENTS } from "./bundle-store.pg";
+export { bundleTriggerDefinitions, findBundleTrigger } from "./bundle-triggers";
 export type { SoulCatalogue, SoulCatalogueEntry } from "./catalogue";
 export { buildSoulCatalogue } from "./catalogue";
 export type {
@@ -255,6 +256,7 @@ export type {
 export {
   createSkillFileReader,
   isAddressableSkillFile,
+  isSkillDefinitionFile,
   normalizeSkillFilePaths,
   SKILL_TOOL_DECLARATION,
   SKILL_TOOL_INPUT_SCHEMA,

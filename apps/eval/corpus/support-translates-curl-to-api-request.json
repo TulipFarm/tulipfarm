@@ -33,8 +33,7 @@
             "credential": {
               "secret": "EXAMPLE_API_TOKEN",
               "header": "authorization"
-            },
-            "prompt": "What is the name on this profile?"
+            }
           }
         }
       ]
@@ -58,7 +57,7 @@
       "path": "credential.secret",
       "value": "EXAMPLE_API_TOKEN"
     },
-    { "kind": "tool_argument_present", "name": "api_request", "path": "prompt" },
+    { "kind": "tool_argument_absent", "name": "api_request", "path": "prompt" },
     { "kind": "tool_call_count", "count": 1 },
     { "kind": "output_contains", "text": "Tulip Supply Co" },
     { "kind": "loop_status", "status": "completed" }

@@ -28,9 +28,16 @@ const verifier = createEd25519BundleVerifier([
   { keyId, publicKeyPem: publicKey.export({ format: "pem", type: "spki" }).toString() },
 ]);
 
+/** A Trigger as authored — inside its Routine — plus the lifecycle that Routine carries. */
+type TriggerFixture = {
+  lifecycle: "draft" | "published";
+  trigger: Record<string, unknown>;
+};
+
 function routine(
   lifecycle: "draft" | "published" = "published",
-  start = "Collect"
+  start = "Collect",
+  triggers: readonly Record<string, unknown>[] = []
 ): VersionedSchemaDocument {
   return {
     apiVersion: "tulipfarm.ai/v1",
@@ -46,6 +53,7 @@ function routine(
       owner: "platform",
       start,
       states: [{ type: "wait", name: "Collect", waitFor: { kind: "timer", durationMs: 1 } }],
+      ...(triggers.length === 0 ? {} : { triggers }),
     },
   } as VersionedSchemaDocument;
 }
@@ -69,30 +77,36 @@ async function activeResolver(document: VersionedSchemaDocument) {
 
 function trigger(
   overrides: { lifecycle?: "draft" | "published"; type?: unknown; inputMapping?: unknown } = {}
-): VersionedSchemaDocument {
+): TriggerFixture {
   return {
-    apiVersion: "tulipfarm.ai/v1",
-    kind: "Trigger",
-    metadata: {
-      id: "22222222-2222-4222-8222-222222222222",
-      slug: "start-digest",
-      schemaVersion: 1,
-      authoredVersion: 3,
-      lifecycle: overrides.lifecycle ?? "published",
-    },
-    spec: {
+    lifecycle: overrides.lifecycle ?? "published",
+    trigger: {
+      name: "start-digest",
       type: overrides.type ?? "manual",
-      routineRef: { name: "daily-digest", version: "7" },
       eventType: "digest.requested",
       eventVersion: 1,
       backgroundIdentity: { principalKind: "system", principalId: "trigger-runner" },
       deduplication: { key: "digest" },
       ...(overrides.inputMapping === undefined ? {} : { inputMapping: overrides.inputMapping }),
     },
-  } as VersionedSchemaDocument;
+  };
 }
 
-async function activeTriggerResolver(document: VersionedSchemaDocument) {
+function eventTrigger(spec: Record<string, unknown>): TriggerFixture {
+  return {
+    lifecycle: "published",
+    trigger: {
+      name: "start-digest",
+      eventType: "digest.requested",
+      eventVersion: 1,
+      backgroundIdentity: { principalKind: "system", principalId: "trigger-runner" },
+      deduplication: { key: "digest" },
+      ...spec,
+    },
+  };
+}
+
+async function activeTriggerResolver(fixture: TriggerFixture) {
   const publications = new SoulPublicationCoordinator(
     new InMemorySoulPublicationStore(),
     new InMemoryBundleStore(),
@@ -102,7 +116,7 @@ async function activeTriggerResolver(document: VersionedSchemaDocument) {
     businessId: BUSINESS_ID,
     changesetId: "changeset-1",
     commitSha: "c0ffee",
-    documents: [document, routine()],
+    documents: [routine(fixture.lifecycle, "Collect", [fixture.trigger])],
   });
   await publications.publish({ bundle: signExecutionBundle(bundle, signer), actor: ACTOR });
   await publications.drain("test");
@@ -116,20 +130,12 @@ function webhookTrigger(
     provider?: unknown;
     verification?: unknown;
   } = {}
-): VersionedSchemaDocument {
+): TriggerFixture {
   return {
-    apiVersion: "tulipfarm.ai/v1",
-    kind: "Trigger",
-    metadata: {
-      id: "33333333-3333-4333-8333-333333333333",
-      slug: "github-push",
-      schemaVersion: 1,
-      authoredVersion: 2,
-      lifecycle: overrides.lifecycle ?? "published",
-    },
-    spec: {
+    lifecycle: overrides.lifecycle ?? "published",
+    trigger: {
+      name: "github-push",
       type: overrides.type ?? "webhook",
-      routineRef: { name: "daily-digest", version: "7" },
       eventType: "github.push",
       eventVersion: 1,
       backgroundIdentity: { principalKind: "system", principalId: "trigger-runner" },
@@ -141,10 +147,10 @@ function webhookTrigger(
         signatureHeader: "x-hub-signature-256",
       },
     },
-  } as VersionedSchemaDocument;
+  };
 }
 
-async function activeWebhookTriggerResolver(document: VersionedSchemaDocument) {
+async function activeWebhookTriggerResolver(fixture: TriggerFixture) {
   const publications = new SoulPublicationCoordinator(
     new InMemorySoulPublicationStore(),
     new InMemoryBundleStore(),
@@ -154,7 +160,7 @@ async function activeWebhookTriggerResolver(document: VersionedSchemaDocument) {
     businessId: BUSINESS_ID,
     changesetId: "changeset-1",
     commitSha: "c0ffee",
-    documents: [document, routine()],
+    documents: [routine(fixture.lifecycle, "Collect", [fixture.trigger])],
   });
   await publications.publish({ bundle: signExecutionBundle(bundle, signer), actor: ACTOR });
   await publications.drain("test");
@@ -231,7 +237,7 @@ describe("ActiveTriggerInvocationResolver", () => {
 
     await expect(resolver.resolveTrigger("start-digest")).resolves.toEqual({
       triggerSlug: "start-digest",
-      authoredVersion: 3,
+      authoredVersion: 7,
       lifecycle: "published",
       type: "manual",
       eventType: "digest.requested",
@@ -280,6 +286,63 @@ describe("ActiveTriggerInvocationResolver", () => {
   it("refuses an unknown slug", async () => {
     const resolver = await activeTriggerResolver(trigger());
     await expect(resolver.resolveTrigger("missing")).resolves.toBeNull();
+  });
+
+  it("lists an event Trigger with its authored match and filter", async () => {
+    const resolver = await activeTriggerResolver(
+      eventTrigger({
+        type: "internal_event",
+        matchEventType: "resource.created",
+        matchEventVersion: 2,
+        filter: "trigger.payload.resourceType == 'ticket'",
+      })
+    );
+
+    await expect(resolver.listEventTriggers()).resolves.toEqual([
+      expect.objectContaining({
+        triggerSlug: "start-digest",
+        type: "internal_event",
+        eventType: "resource.created",
+        eventVersion: 2,
+        filter: "trigger.payload.resourceType == 'ticket'",
+      }),
+    ]);
+  });
+
+  it("lists an integration event Trigger with its provider", async () => {
+    const resolver = await activeTriggerResolver(
+      eventTrigger({
+        type: "integration_event",
+        provider: "github",
+        matchEventType: "issues.opened",
+      })
+    );
+
+    await expect(resolver.listEventTriggers()).resolves.toEqual([
+      expect.objectContaining({
+        type: "integration_event",
+        provider: "github",
+        eventType: "issues.opened",
+      }),
+    ]);
+  });
+
+  // A webhook arrives on a slug-addressed route, so matching it by event type could only make the
+  // destination ambiguous.
+  it("omits non-event Trigger types from the event list", async () => {
+    const resolver = await activeTriggerResolver(trigger());
+    await expect(resolver.listEventTriggers()).resolves.toEqual([]);
+  });
+
+  it("lists nothing when no bundle is active", async () => {
+    const publications = new SoulPublicationCoordinator(
+      new InMemorySoulPublicationStore(),
+      new InMemoryBundleStore(),
+      { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+    );
+    const resolver = new ActiveTriggerInvocationResolver(publications, verifier, BUSINESS_ID);
+
+    await expect(resolver.listEventTriggers()).resolves.toEqual([]);
   });
 });
 

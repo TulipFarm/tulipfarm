@@ -107,3 +107,53 @@ describe("network Skill Secret authority", () => {
     expect(send).not.toHaveBeenCalled();
   });
 });
+
+describe("network Skill destination confinement", () => {
+  const uncredentialed = { url: "https://api.github.com/repos/tulipfarm/tulipfarm", method: "GET" };
+
+  // A Skill that never mentions the network is not making a claim about it. Reading its silence as
+  // an empty allowlist meant loading, say, a Routine-authoring Skill revoked the Agent's ability to
+  // read any public URL — a capability *loss* caused by gaining a Skill.
+  it("lets a Skill that declares no domains read a public URL", async () => {
+    const { apiRequest, send } = tools({}, [{ action: "*", resourceType: "*", effect: "allow" }]);
+
+    const result = await apiRequest.execute(uncredentialed, {
+      userId: "user-1",
+      runId: "run-1",
+      activeSkillName: "jira",
+    });
+
+    expect(result).toMatchObject({ success: true });
+    expect(send).toHaveBeenCalled();
+  });
+
+  it("confines a Skill to the domains it did declare", async () => {
+    const { apiRequest, send } = tools({ allowedDomains: ["api.atlassian.com"] }, [
+      { action: "*", resourceType: "*", effect: "allow" },
+    ]);
+
+    const result = await apiRequest.execute(uncredentialed, {
+      userId: "user-1",
+      runId: "run-1",
+      activeSkillName: "jira",
+    });
+
+    expect(result).toMatchObject({ success: false, error: { code: "write_denied" } });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  // Absence of a declaration is permission to fall through; absence of the Skill is not, because
+  // there is no frontmatter to have read.
+  it("denies an active Skill the Soul cannot resolve", async () => {
+    const { apiRequest, send } = tools({}, [{ action: "*", resourceType: "*", effect: "allow" }]);
+
+    const result = await apiRequest.execute(uncredentialed, {
+      userId: "user-1",
+      runId: "run-1",
+      activeSkillName: "vanished",
+    });
+
+    expect(result).toMatchObject({ success: false, error: { code: "write_denied" } });
+    expect(send).not.toHaveBeenCalled();
+  });
+});

@@ -23,26 +23,20 @@ const VALID_ROUTINE = {
   },
 };
 
-function trigger(slug = "daily-report-manual") {
+function trigger(name = "daily-report-manual") {
   return {
-    apiVersion: "tulipfarm.ai/v1",
-    kind: "Trigger",
-    metadata: {
-      id: "22222222-2222-4222-8222-222222222222",
-      slug,
-      schemaVersion: 1,
-      authoredVersion: 1,
-      lifecycle: "published",
-    },
-    spec: {
-      type: "manual",
-      routineRef: { name: "daily-report", version: "1" },
-      eventType: "routine.manual",
-      eventVersion: 1,
-      backgroundIdentity: { principalKind: "service", principalId: "routine-runner" },
-      deduplication: { key: "daily-report-manual" },
-    },
+    name,
+    type: "manual",
+    eventType: "routine.manual",
+    eventVersion: 1,
+    backgroundIdentity: { principalKind: "service", principalId: "routine-runner" },
+    deduplication: { key: name },
   };
+}
+
+/** The canonical Routine, carrying the Triggers it owns. */
+function routineWithTriggers(...triggers: Record<string, unknown>[]) {
+  return { ...VALID_ROUTINE, spec: { ...VALID_ROUTINE.spec, triggers } };
 }
 
 function routineOverRecords(resourceType: string) {
@@ -121,9 +115,9 @@ describe("routine_forge", () => {
     return { soulWriter, onRoutinesChanged };
   }
 
-  it("commits the published Routine and Trigger atomically", async () => {
+  it("commits the Routine and the Triggers it owns as one document", async () => {
     const result = await routineForgeTool.handler(
-      { name: "daily-report", definition: VALID_ROUTINE, triggers: [trigger()] },
+      { name: "daily-report", definition: routineWithTriggers(trigger()) },
       ctx()
     );
 
@@ -136,18 +130,23 @@ describe("routine_forge", () => {
       changes: Array<{ target: Record<string, unknown>; content: string }>;
     };
     expect(request.businessId).toBe(DEPLOYMENT_BUSINESS_ID);
+    // Containment is the point: one file, so a Trigger can never be committed without its Routine.
     expect(request.changes.map((change) => change.target)).toEqual([
       { kind: "Routine", slug: "daily-report" },
-      { kind: "Trigger", slug: "daily-report-manual" },
     ]);
-    expect(parseYaml(request.changes[0]?.content)).toMatchObject(VALID_ROUTINE);
-    expect(parseYaml(request.changes[1]?.content)).toMatchObject(trigger());
+    expect(parseYaml(request.changes[0]?.content)).toMatchObject({
+      ...VALID_ROUTINE,
+      spec: {
+        ...VALID_ROUTINE.spec,
+        triggers: [expect.objectContaining({ name: "daily-report-manual" })],
+      },
+    });
     expect(onRoutinesChanged).toHaveBeenCalledOnce();
   });
 
-  it("stamps the authoring principal onto the Trigger, replacing whatever the model wrote", async () => {
+  it("stamps the authoring principal onto every Trigger, replacing whatever the model wrote", async () => {
     const result = await routineForgeTool.handler(
-      { name: "daily-report", definition: VALID_ROUTINE, triggers: [trigger()] },
+      { name: "daily-report", definition: routineWithTriggers(trigger()) },
       {
         ...ctx(),
         requestContext: {
@@ -164,12 +163,18 @@ describe("routine_forge", () => {
     // The Trigger's background identity is the effective subject of every Run it starts, so an
     // invented `service:routine-runner` would leave the Routine with no grants and every Tool
     // call denied.
-    expect(parseYaml(request.changes[1]?.content)).toMatchObject({
-      spec: { backgroundIdentity: { principalKind: "user", principalId: "user-1" } },
+    expect(parseYaml(request.changes[0]?.content)).toMatchObject({
+      spec: {
+        triggers: [
+          expect.objectContaining({
+            backgroundIdentity: { principalKind: "user", principalId: "user-1" },
+          }),
+        ],
+      },
     });
   });
 
-  it("rejects unpublished, mismatched, and duplicate documents before writing", async () => {
+  it("rejects an unpublished Routine, a mismatched slug, and duplicate Trigger names", async () => {
     const unpublished = await routineForgeTool.handler(
       {
         name: "daily-report",
@@ -177,7 +182,6 @@ describe("routine_forge", () => {
           ...VALID_ROUTINE,
           metadata: { ...VALID_ROUTINE.metadata, lifecycle: "draft" },
         },
-        triggers: [trigger()],
       },
       ctx()
     );
@@ -186,20 +190,15 @@ describe("routine_forge", () => {
     const mismatched = await routineForgeTool.handler(
       {
         name: "daily-report",
-        definition: VALID_ROUTINE,
-        triggers: [
-          {
-            ...trigger(),
-            spec: { ...trigger().spec, routineRef: { name: "other", version: "1" } },
-          },
-        ],
+        definition: { ...VALID_ROUTINE, metadata: { ...VALID_ROUTINE.metadata, slug: "other" } },
       },
       ctx()
     );
     expect(mismatched).toMatchObject({ success: false, error: { code: "validation_error" } });
 
+    // Two Triggers sharing a name would make webhook delivery depend on array order.
     const duplicate = await routineForgeTool.handler(
-      { name: "daily-report", definition: VALID_ROUTINE, triggers: [trigger(), trigger()] },
+      { name: "daily-report", definition: routineWithTriggers(trigger(), trigger()) },
       ctx()
     );
     expect(duplicate).toMatchObject({ success: false, error: { code: "validation_error" } });
@@ -217,101 +216,35 @@ describe("routine_forge", () => {
             authoredVersion: "1",
             displayName: "Daily report",
           },
-          spec: { ...VALID_ROUTINE.spec, states: { Decide: VALID_ROUTINE.spec.states[0] } },
+          spec: {
+            ...VALID_ROUTINE.spec,
+            states: { Decide: VALID_ROUTINE.spec.states[0] },
+            triggers: [{ ...trigger(), type: "unknown-type" }],
+          },
         },
-        triggers: [
-          {
-            ...trigger("daily-report-manual"),
-            metadata: { ...trigger().metadata, authoredVersion: "1" },
-          },
-          {
-            ...trigger("daily-report-nightly"),
-            metadata: {
-              ...trigger("daily-report-nightly").metadata,
-              unknownField: "Nightly",
-            },
-          },
-        ],
       },
       ctx()
     );
 
     expect(result).toMatchObject({ success: false, error: { code: "validation_error" } });
     const message = JSON.stringify(result);
-    expect(message).toContain("Routine definition /metadata");
     expect(message).toContain("Routine definition /metadata/authoredVersion");
     expect(message).toContain("Routine definition /spec/states");
-    expect(message).toContain("Trigger triggers[0] /metadata/authoredVersion");
-    expect(message).toContain("Trigger triggers[1] /metadata");
+    expect(message).toContain("Routine definition /spec/triggers");
     expect(soulWriter.apply).not.toHaveBeenCalled();
   });
 
-  it("returns every cross-document consistency issue in one actionable error", async () => {
+  it("names the offending Trigger by its index in the Routine", async () => {
     const result = await routineForgeTool.handler(
       {
         name: "daily-report",
-        definition: {
-          ...VALID_ROUTINE,
-          metadata: { ...VALID_ROUTINE.metadata, slug: "other-report", lifecycle: "draft" },
-        },
-        triggers: [
-          {
-            ...trigger("daily-report-manual"),
-            metadata: { ...trigger().metadata, lifecycle: "draft" },
-          },
-          {
-            ...trigger("daily-report-nightly"),
-            spec: {
-              ...trigger("daily-report-nightly").spec,
-              routineRef: { name: "other-report", version: "2" },
-            },
-          },
-        ],
+        definition: routineWithTriggers(trigger(), { ...trigger("daily-report-nightly"), type: 7 }),
       },
       ctx()
     );
 
     expect(result).toMatchObject({ success: false, error: { code: "validation_error" } });
-    const message = JSON.stringify(result);
-    expect(message).toContain("Routine definition /metadata/slug");
-    expect(message).toContain("Routine definition /metadata/lifecycle");
-    expect(message).toContain("Trigger triggers[0] /metadata/lifecycle");
-    expect(message).toContain("Trigger triggers[1] /spec/routineRef");
-    expect(soulWriter.apply).not.toHaveBeenCalled();
-  });
-
-  it("returns mixed schema and consistency issues with original Trigger indexes", async () => {
-    const result = await routineForgeTool.handler(
-      {
-        name: "daily-report",
-        definition: {
-          ...VALID_ROUTINE,
-          metadata: { ...VALID_ROUTINE.metadata, lifecycle: "draft" },
-        },
-        triggers: [
-          {
-            ...trigger("daily-report-manual"),
-            metadata: { ...trigger().metadata, authoredVersion: "1" },
-          },
-          {
-            ...trigger("daily-report-nightly"),
-            metadata: { ...trigger("daily-report-nightly").metadata, lifecycle: "draft" },
-            spec: {
-              ...trigger("daily-report-nightly").spec,
-              routineRef: { name: "other-report", version: "2" },
-            },
-          },
-        ],
-      },
-      ctx()
-    );
-
-    const message = JSON.stringify(result);
-    expect(message).toContain("Routine definition /metadata/lifecycle");
-    expect(message).toContain("Trigger triggers[0] /metadata/authoredVersion");
-    expect(message).toContain("Trigger triggers[1] /metadata/lifecycle");
-    expect(message).toContain("Trigger triggers[1] /spec/routineRef/name");
-    expect(message).toContain("Trigger triggers[1] /spec/routineRef/version");
+    expect(JSON.stringify(result)).toContain("Routine definition /spec/triggers/1");
     expect(soulWriter.apply).not.toHaveBeenCalled();
   });
 
@@ -323,7 +256,7 @@ describe("routine_forge", () => {
       )
     );
     const result = await routineForgeTool.handler(
-      { name: "daily-report", definition: VALID_ROUTINE, triggers: [trigger()] },
+      { name: "daily-report", definition: routineWithTriggers(trigger()) },
       ctx()
     );
     expect(result).toMatchObject({ success: false, error: { code: "unavailable" } });
@@ -334,7 +267,7 @@ describe("routine_forge", () => {
     soulWriter.apply.mockRejectedValueOnce(new Error("EACCES: /private/soul/routines"));
 
     const result = await routineForgeTool.handler(
-      { name: "daily-report", definition: VALID_ROUTINE, triggers: [trigger()] },
+      { name: "daily-report", definition: routineWithTriggers(trigger()) },
       ctx()
     );
 
@@ -355,7 +288,7 @@ describe("routine_forge", () => {
       publicationError: "bundle storage unavailable",
     });
     const result = await routineForgeTool.handler(
-      { name: "daily-report", definition: VALID_ROUTINE, triggers: [trigger()] },
+      { name: "daily-report", definition: routineWithTriggers(trigger()) },
       ctx()
     );
     expect(result).toMatchObject({ success: false, error: { code: "internal_error" } });
@@ -370,7 +303,6 @@ describe("routine_forge", () => {
       {
         name: "daily-report",
         definition: routineOverRecords("totally-nonexistent-resource-xyz"),
-        triggers: [trigger()],
       },
       { ...ctx(), soulLoader: { skills: new Map(), agents: new Map(), resources: new Map() } }
     );
@@ -382,7 +314,7 @@ describe("routine_forge", () => {
 
   it("commits a Routine whose referenced Resource type exists", async () => {
     const result = await routineForgeTool.handler(
-      { name: "daily-report", definition: routineOverRecords("ticket"), triggers: [trigger()] },
+      { name: "daily-report", definition: routineOverRecords("ticket") },
       {
         ...ctx(),
         soulLoader: {
@@ -401,7 +333,7 @@ describe("routine_forge", () => {
   // the Soul writer sends it guessing at the reference's shape until its repair budget is gone.
   it("refuses a Routine naming an Agent the Soul does not have, and names agent_create", async () => {
     const result = await routineForgeTool.handler(
-      { name: "daily-report", definition: routineOverAgent("joke-bot"), triggers: [trigger()] },
+      { name: "daily-report", definition: routineOverAgent("joke-bot") },
       {
         ...ctx(),
         soulLoader: {
@@ -420,7 +352,7 @@ describe("routine_forge", () => {
 
   it("commits a Routine whose referenced Agent exists", async () => {
     const result = await routineForgeTool.handler(
-      { name: "daily-report", definition: routineOverAgent("joke-bot"), triggers: [trigger()] },
+      { name: "daily-report", definition: routineOverAgent("joke-bot") },
       {
         ...ctx(),
         soulLoader: {
@@ -442,7 +374,6 @@ describe("routine_forge", () => {
       {
         name: "daily-report",
         definition: routineOverRecords("ticket"),
-        triggers: [trigger()],
       },
       {
         ...ctx(),
@@ -461,9 +392,12 @@ describe("routine_forge", () => {
     expect(soulWriter.apply).not.toHaveBeenCalled();
   });
 
-  it("describes canonical Routine and Trigger requirements", () => {
+  // The model only reads the description before its first call, so the description is the only
+  // place that can stop it inventing the separate Trigger document this Tool no longer takes.
+  it("describes canonical Routine requirements and denies a separate Trigger document", () => {
     expect(routineForgeTool.description).toContain("canonical published Routine");
-    expect(routineForgeTool.description).toContain("canonical published Trigger");
+    expect(routineForgeTool.description).toContain("`definition.spec.triggers`");
+    expect(routineForgeTool.description).toContain("no separate Trigger document");
   });
 });
 
@@ -501,7 +435,7 @@ describe("routine_delete", () => {
     expect(soulWriter.apply).not.toHaveBeenCalled();
   });
 
-  it("deletes a Routine and every Trigger the catalog still lists for it", async () => {
+  it("deletes the Routine alone, and names the Triggers that went with it", async () => {
     routineCatalog.list.mockResolvedValue([
       {
         id: "1",
@@ -523,9 +457,9 @@ describe("routine_delete", () => {
     });
     expect(soulWriter.apply).toHaveBeenCalledOnce();
     const request = soulWriter.apply.mock.calls[0][0] as { changes: unknown[] };
+    // Containment means one delete: a Trigger cannot outlive the Routine that holds it.
     expect(request.changes).toEqual([
       { op: "deleteArtifact", kind: "Routine", slug: "daily-report" },
-      { op: "deleteArtifact", kind: "Trigger", slug: "daily-report-manual" },
     ]);
     expect(onRoutinesChanged).toHaveBeenCalledOnce();
   });

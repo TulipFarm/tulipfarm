@@ -9,7 +9,7 @@
  * `file_read` caps its own text at, so a Tool that already honoured its limit is never shortened a
  * second time.
  *
- * The distiller in `distill.ts` bounds succeeded results far lower, at `MAX_RAW_RESULT_CHARS`. The
+ * The distiller in `distill.ts` bounds succeeded results lower, at `MAX_RAW_RESULT_TOKENS`. The
  * two are not redundant and must not be unified to one number: the distiller never runs on a
  * denied, failed, invalid or superseded result, and it measures only the Tool's own output, not the
  * `callId` envelope `toolMessage` wraps around it. This is the backstop for everything it skips.

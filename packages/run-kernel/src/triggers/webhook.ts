@@ -89,6 +89,8 @@ export type WebhookIngressResult =
       readonly outcome: "accepted" | "duplicate" | "ignored";
       readonly eventId: string | null;
       readonly deduplicationKey: string | null;
+      /** Present only once the event is persisted, so a caller can bind it to a Trigger. */
+      readonly envelope?: eventSchema.EventEnvelope<Record<string, unknown>>;
     }
   | { readonly status: 400 | 401 | 413; readonly code: WebhookDenialCode };
 
@@ -284,5 +286,5 @@ export async function ingestWebhook(
   });
 
   const { outcome } = await deps.sink.accept(envelope);
-  return { status: 202, outcome, eventId, deduplicationKey: envelope.deduplicationKey };
+  return { status: 202, outcome, eventId, deduplicationKey: envelope.deduplicationKey, envelope };
 }

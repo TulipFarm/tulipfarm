@@ -173,6 +173,9 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
       stateId: call.callId,
       authorityLayers: [caller],
       agent: { name: agentId, available },
+      ...(call.permissionCeiling === undefined
+        ? {}
+        : { permissionCeiling: call.permissionCeiling }),
       // Carries Resource domains; without it domain-scoped grants collapse.
       ...(this.options.soulLoader === undefined
         ? {}
@@ -546,6 +549,7 @@ function replayedEffect(toolName: string, state: string): HostedToolResult {
     case "confirmed":
       return {
         status: "succeeded",
+        replayed: true,
         output: { replayed: true, note: "This action already completed; it was not repeated." },
       };
     case "failed":

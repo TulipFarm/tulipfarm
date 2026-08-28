@@ -142,7 +142,14 @@ export async function buildApp(opts: AppOptions = {}) {
       "If-Match",
       "Idempotency-Key",
     ],
-    exposedHeaders: ["X-Conversation-Id", "X-Stream-Id", "X-Message-Id", "X-Agent-Id", "X-Run-Id"],
+    exposedHeaders: [
+      "X-Conversation-Id",
+      "X-Stream-Id",
+      "X-Message-Id",
+      "X-Agent-Id",
+      "X-Run-Id",
+      "X-Turn-Id",
+    ],
   });
 
   await app.register(helmet, {

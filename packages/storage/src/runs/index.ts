@@ -7,12 +7,18 @@ export type {
 } from "./budget-store";
 export { BUDGET_STORAGE_STATEMENTS, BudgetStore } from "./budget-store";
 export type {
+  ChildAuthorityBinding,
   ChildAuthorityRecord,
   ChildResumeGrant,
   LinkChildInput,
   PersistedChildLink,
 } from "./child-store";
-export { CHILD_STORAGE_STATEMENTS, ChildLinkAncestryStore, ChildLinkStore } from "./child-store";
+export {
+  CHILD_STORAGE_STATEMENTS,
+  ChildLinkAncestryStore,
+  ChildLinkStore,
+  DEFAULT_CHILD_AUTHORITY_BINDING,
+} from "./child-store";
 export type {
   ConcurrencyAdmissionAction,
   ConcurrencyAdmitInput,

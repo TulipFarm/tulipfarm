@@ -130,4 +130,11 @@ describe("Trigger schema", () => {
     legacy.metadata = { name: "nightly-triage" };
     expect(() => validateTriggerDefinition(legacy)).toThrow(SchemaValidationError);
   });
+
+  // Nothing substitutes this key, so an authored expression would become part of the literal
+  // dedup identity — every occurrence colliding on one key that looks like it varies.
+  it("refuses an interpolated deduplication key", () => {
+    const interpolated = cron({ deduplication: { key: "nightly-${scheduledTime}" } });
+    expect(() => validateTriggerDefinition(interpolated)).toThrow(SchemaValidationError);
+  });
 });

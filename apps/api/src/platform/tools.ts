@@ -20,6 +20,7 @@ import type { BundledSkill } from "@tulipfarm/soul";
 import {
   createSkillFileReader,
   type GitSyncService,
+  isSkillDefinitionFile,
   lockProvenance,
   type RoutineCatalog,
   readSkillsLock,
@@ -424,6 +425,16 @@ export const skillTool = defineApiTool<PlatformToolContext>({
     }
 
     if (!reader) return err("not_found", missingFileMessage(name, file, files));
+    // The load already returned this text as `body`, and `files` deliberately omits it. Reading it
+    // back costs a whole model invocation to receive bytes the caller is holding, so say so
+    // instead of serving it — the alternative is a Turn that spends its budget re-reading itself.
+    if (isSkillDefinitionFile(file)) {
+      return err(
+        "validation_error",
+        `"${file}" is Skill "${name}"'s own definition — loading the Skill already returned it as ` +
+          "`body`. Use what you have; `file` is for the supporting paths in `files`."
+      );
+    }
     try {
       const content = await reader.read(file);
       return ok({ name, file, content, ...(mode === "inspect" ? { inspected: true } : {}) });
@@ -501,7 +512,7 @@ const ROUTINE_NAME_RE = /^[a-z][a-z0-9-]*$/;
 const ROUTINE_FORGE_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
-  required: ["name", "definition", "triggers"],
+  required: ["name", "definition"],
   properties: {
     name: {
       type: "string",
@@ -511,14 +522,7 @@ const ROUTINE_FORGE_SCHEMA: Record<string, unknown> = {
     definition: {
       type: "object",
       description:
-        "Canonical published Routine definition. metadata.slug must match name. spec.states must be an array of State objects [{ name, type, ... }].",
-    },
-    triggers: {
-      type: "array",
-      minItems: 1,
-      items: { type: "object" },
-      description:
-        "Canonical published Trigger definitions referencing this Routine and its authored version.",
+        "Canonical published Routine definition. metadata.slug must match name. spec.states must be an array of State objects [{ name, type, ... }]. Triggers live in spec.triggers on this same document.",
     },
   },
 };
@@ -535,15 +539,18 @@ const validateRoutineForge = ajv.compile(ROUTINE_FORGE_SCHEMA);
  * authority the Routine is meant to act within.
  */
 function authoredBy(
-  trigger: definitions.trigger.TriggerDefinition,
+  routine: definitions.routine.RoutineDefinition,
   author: { readonly kind: string; readonly id: string } | undefined
-): definitions.trigger.TriggerDefinition {
-  if (author === undefined) return trigger;
+): definitions.routine.RoutineDefinition {
+  if (author === undefined || routine.spec.triggers === undefined) return routine;
   return {
-    ...trigger,
+    ...routine,
     spec: {
-      ...trigger.spec,
-      backgroundIdentity: { principalKind: author.kind, principalId: author.id },
+      ...routine.spec,
+      triggers: routine.spec.triggers.map((trigger) => ({
+        ...trigger,
+        backgroundIdentity: { principalKind: author.kind, principalId: author.id },
+      })),
     },
   };
 }
@@ -557,12 +564,13 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
     "morning do Y' / 'when X happens do Y'. `definition` MUST be a canonical published Routine " +
     "document: apiVersion `tulipfarm.ai/v1`, kind `Routine`, and metadata with id, slug (matching " +
     "name), schemaVersion, authoredVersion, and lifecycle `published`. `definition.spec.states` " +
-    "MUST be an array of State objects with name and type (not an object/map). `triggers` MUST contain " +
-    "canonical published Trigger documents with their own metadata and a spec.routineRef naming this " +
-    "Routine at its authored version. Use a `manual` Trigger when the user needs to run it from the " +
-    "Routines UI; cron, interval, and datetime Triggers schedule themselves. Load the routine-forge " +
-    "Skill for complete canonical examples before calling this. The Tool validates every document and " +
-    "commits the Routine plus all Triggers atomically to the Soul repo.",
+    "MUST be an array of State objects with name and type (not an object/map). Triggers belong to " +
+    "`definition.spec.triggers`, each an object with a slug-shaped `name` and a `type`; there is no " +
+    "separate Trigger document and no `triggers` argument. cron, interval, and datetime Triggers " +
+    "schedule themselves once published, and the Routines UI can already start a Run without any " +
+    "Trigger, so omit `spec.triggers` entirely for a Routine that only runs on demand. Load the " +
+    "routine-forge Skill for complete canonical examples before calling this. The Tool validates the " +
+    "document and commits it to the Soul repo.",
   mutating: true,
   tier: "platform",
   inputSchema: ROUTINE_FORGE_SCHEMA,
@@ -575,14 +583,13 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
   handler: async (args, ctx) => {
     if (!validateRoutineForge(args))
       return err("validation_error", firstError(validateRoutineForge.errors));
-    const { name, definition, triggers } = args as {
+    const { name, definition } = args as {
       name: string;
       definition: Record<string, unknown>;
-      triggers: Record<string, unknown>[];
     };
     if (!ROUTINE_NAME_RE.test(name)) return err("validation_error", "invalid routine name");
 
-    const validation = validateRoutineForgeDefinitions({ name, definition, triggers });
+    const validation = validateRoutineForgeDefinitions({ name, definition });
     if (!validation.ok) return err("validation_error", validation.message);
     const { routine, triggers: triggerDefinitions } = validation;
     const unresolved = unresolvedRoutineResourceTypes(routine.spec, ctx.soulLoader?.resources);
@@ -609,13 +616,8 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
           {
             op: "put",
             target: { kind: "Routine", slug: name },
-            content: stringifyYaml(routine),
+            content: stringifyYaml(authoredBy(routine, ctx.requestContext?.subject)),
           },
-          ...triggerDefinitions.map((trigger) => ({
-            op: "put" as const,
-            target: { kind: "Trigger" as const, slug: trigger.metadata.slug },
-            content: stringifyYaml(authoredBy(trigger, ctx.requestContext?.subject)),
-          })),
         ],
       });
     } catch (e) {
@@ -721,7 +723,9 @@ export const routineDeleteTool = defineApiTool<PlatformToolContext>({
   name: "routine_delete",
   requiresAmbient: ["soul"],
   description:
-    "Delete a routine from the soul repo, along with every Trigger that still references it. Commits atomically to the soul repo.",
+    "Delete a routine from the soul repo. Its Triggers live inside the Routine document, so they " +
+    "go with it, and the response names them, because their webhook URLs stop resolving. " +
+    "Commits atomically to the soul repo.",
   mutating: true,
   tier: "platform",
   inputSchema: ROUTINE_DELETE_SCHEMA,
@@ -755,14 +759,9 @@ export const routineDeleteTool = defineApiTool<PlatformToolContext>({
         source: "agent",
         actor: ctx.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
         businessId: DEPLOYMENT_BUSINESS_ID,
-        changes: [
-          { op: "deleteArtifact", kind: "Routine", slug: name },
-          ...triggerSlugs.map((slug) => ({
-            op: "deleteArtifact" as const,
-            kind: "Trigger" as const,
-            slug,
-          })),
-        ],
+        // Triggers live inside the Routine document, so removing it removes them with it. The
+        // names are still reported, because a caller has to know which webhook URLs just died.
+        changes: [{ op: "deleteArtifact", kind: "Routine", slug: name }],
       });
     } catch (e) {
       if (e instanceof SoulWriteError) return mapSoulWriteError(e);

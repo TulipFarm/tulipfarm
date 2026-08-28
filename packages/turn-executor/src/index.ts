@@ -8,7 +8,7 @@ export type {
 } from "./agent-state";
 export { AgentStateRunner } from "./agent-state";
 export type { ChatExecutorHost, ChatExecutorOptions, ChatModelFactoryInput } from "./chat-executor";
-export { createChatExecutor } from "./chat-executor";
+export { createChatExecutor, resumableFromPreviousRun } from "./chat-executor";
 export type {
   CompleteTurnInput,
   CompleteTurnResult,

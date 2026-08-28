@@ -21,6 +21,8 @@ export interface ExpressionRequest {
   kind: "expression";
   code: string;
   scope: Record<string, unknown>;
+  /** See `RoutineHookRequest.determinismSeed`. */
+  determinismSeed?: string;
 }
 
 /**
@@ -36,6 +38,15 @@ export interface RoutineHookRequest {
   args?: unknown;
   /** Lifecycle hooks (beforeX / afterX) are optional: a missing fn is a no-op, not an error. */
   optional?: boolean;
+  /**
+   * Pins `Math.random` and `ctx.uuid` to the caller's occurrence rather than to this invocation.
+   *
+   * Without it both re-roll on every attempt, so a retried State that stamps a uuid or samples a
+   * random writes different data than the attempt before it — which is the opposite of the
+   * "replay is evidence" the frozen clock exists to give. Pass something stable and unguessable
+   * per occurrence, such as the Run's idempotency key.
+   */
+  determinismSeed?: string;
 }
 
 export type WorkerRequest = ResourceHookRequest | ExpressionRequest | RoutineHookRequest;

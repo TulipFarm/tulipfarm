@@ -19,10 +19,23 @@ export interface ChildResumeGrant {
   readonly token: string;
 }
 
+/**
+ * Whether this link *granted* the child its authority, or only records who called whom.
+ *
+ * `delegated` binds: the child's own Tool loop is intersected with `authority`, which is what a
+ * helper Agent needs, because a model invented its task at runtime.
+ *
+ * `lineage` does not bind: the child is a published definition whose authority was reviewed when
+ * it was authored. Depth, cancellation and audit still follow the link; only the narrowing is
+ * skipped, so a Routine called as a child behaves exactly as it does alone.
+ */
+export type ChildAuthorityBinding = "delegated" | "lineage";
+
 export interface ChildLink {
   readonly parentRunId: string;
   readonly childRunId: string;
   readonly authority: ChildAuthority;
+  readonly authorityBinding: ChildAuthorityBinding;
   /** How this child's completion resumes its parent; absent when nothing is waiting on it. */
   readonly resume: ChildResumeGrant | null;
   /** The parent Tool call that spawned this child; absent when nothing spawned it from a call. */
@@ -61,8 +74,10 @@ export interface ChildLinkStore {
     parentRunId: string;
     childRunId: string;
     authority: ChildAuthority;
+    authorityBinding?: ChildAuthorityBinding;
     resume?: ChildResumeGrant;
     callId?: string;
+    detachedAt?: string;
     createdAt: string;
   }): Promise<ChildLink>;
   detach(
@@ -80,10 +95,19 @@ export interface SpawnChildInput {
   readonly childRunId: string;
   readonly parentAuthority: ChildAuthority;
   readonly requestedAuthority: RequestedChildAuthority;
+  /** Defaults to `delegated`; a caller that does not decide cannot accidentally unbind a child. */
+  readonly authorityBinding?: ChildAuthorityBinding;
   /** Set when the parent parks on this child; omitted for a detached spawn. */
   readonly resume?: ChildResumeGrant;
   /** The parent Tool call this child answers; unique per parent, so a replay adopts this child. */
   readonly callId?: string;
+  /**
+   * Detach the child in the same write that links it, for a child that never resumes its parent.
+   *
+   * `spawn` then `detach` leaves the row briefly open, so a cancel cascade or a crash in that gap
+   * can reach a child the caller was never going to wait on.
+   */
+  readonly detached?: boolean;
   readonly now: string;
 }
 
@@ -174,8 +198,10 @@ export class ChildRunManager {
       parentRunId: input.parentRunId,
       childRunId: input.childRunId,
       authority,
+      ...(input.authorityBinding === undefined ? {} : { authorityBinding: input.authorityBinding }),
       resume: input.resume,
       callId: input.callId,
+      ...(input.detached === true ? { detachedAt: input.now } : {}),
       createdAt: input.now,
     });
   }

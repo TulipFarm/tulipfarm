@@ -1,7 +1,10 @@
 import type { routine as routineSchema } from "@tulipfarm/schema";
+import type { PersistedWait } from "@tulipfarm/storage";
 import { describe, expect, it } from "vitest";
+import { CHILD_COMPLETION_SCHEMA_REF } from "../../child-completion";
 import { ChildRunError } from "../../children";
-import { planChildRun, resolveChildRun } from "./child";
+import { authorizeSignal, type RegisterWaitInput, type SignalWaitInput } from "../../waits";
+import { planChildRoutineCall, planChildRun, resolveChildRun } from "./child";
 import { RoutineStepError } from "./step";
 import { compileWithTargets } from "./test-support";
 
@@ -32,6 +35,32 @@ function child(extra: Record<string, unknown> = {}) {
     ...extra,
   };
   return compileWithTargets(state);
+}
+
+/** The row the wait store would hold, so `authorizeSignal` judges the real registration. */
+function persistedFrom(wait: RegisterWaitInput | null | undefined): PersistedWait {
+  if (wait === null || wait === undefined) throw new Error("expected a planned wait");
+  return {
+    ...wait,
+    status: "pending",
+    resolvedAt: null,
+    version: 1,
+  };
+}
+
+/** Exactly what `signalChildCompletion` delivers when the child reaches a terminal status. */
+function childSignal(): SignalWaitInput {
+  return {
+    id: ctx.waitId,
+    businessId: ctx.businessId,
+    runId: ctx.runId,
+    token: "token",
+    principal: `run:${ctx.childRunId}`,
+    schemaRef: CHILD_COMPLETION_SCHEMA_REF,
+    correlationKey: ctx.childRunId,
+    signalDigest: "succeeded",
+    receivedAt: "2026-07-25T10:05:00.000Z",
+  };
 }
 
 describe("planChildRun", () => {
@@ -73,6 +102,22 @@ describe("planChildRun", () => {
       new RoutineStepError("deadline_not_bounded", "Spawn")
     );
   });
+
+  it("registers the wait under the ref a child's completion is actually delivered with", () => {
+    // `signalChildCompletion` signals with `CHILD_COMPLETION_SCHEMA_REF`, and `authorizeSignal`
+    // returns `wrong_schema` on any mismatch. A per-State ref here parks the caller on a wait no
+    // child could ever redeem, which looks like a hung Run rather than a refusal.
+    const plan = planChildRun(child(), ctx, {});
+
+    expect(plan.wait?.schemaRef).toBe(CHILD_COMPLETION_SCHEMA_REF);
+    expect(authorizeSignal(persistedFrom(plan.wait), childSignal(), false)).toBeNull();
+  });
+
+  it("keeps the completion ref even when the State declares its own output schema", () => {
+    const plan = planChildRun(child({ outputSchemaRef: "app.spawn.output.v1" }), ctx, {});
+
+    expect(plan.wait?.schemaRef).toBe(CHILD_COMPLETION_SCHEMA_REF);
+  });
 });
 
 describe("resolveChildRun", () => {
@@ -109,5 +154,41 @@ describe("resolveChildRun", () => {
       kind: "attention",
       errorRef: "wait_expired",
     });
+  });
+});
+
+describe("planChildRoutineCall", () => {
+  const scope = { input: { sourceSlug: "handbook" } };
+
+  it("resolves the callee, the mode and the authored input map", () => {
+    const call = planChildRoutineCall(
+      child({ input: { source: "${ input.sourceSlug }", fixed: 7 } }),
+      scope
+    );
+
+    expect(call).toEqual({
+      routineRef: { name: "sub-triage", version: "1.0.0" },
+      mode: "wait",
+      input: { source: "handbook", fixed: 7 },
+      deadlineMs: 1_800_000,
+    });
+  });
+
+  it("refuses a `wait` call with no deadline, so no caller can park forever", () => {
+    expect(() => planChildRoutineCall(child({ deadlineMs: undefined }), scope)).toThrow(
+      new RoutineStepError("deadline_not_bounded", "Spawn")
+    );
+  });
+
+  it("carries no deadline when detaching, because a detached caller never parks", () => {
+    const call = planChildRoutineCall(child({ mode: "detach", deadlineMs: undefined }), scope);
+
+    expect(call).toMatchObject({ mode: "detach", deadlineMs: null });
+  });
+
+  it("refuses a State that names no callee", () => {
+    expect(() => planChildRoutineCall(child({ routineRef: undefined }), scope)).toThrow(
+      new RoutineStepError("missing_routine_ref", "Spawn")
+    );
   });
 });

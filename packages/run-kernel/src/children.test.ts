@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   type ChildAuthority,
+  type ChildAuthorityBinding,
   type ChildLink,
   type ChildLinkAncestry,
   type ChildLinkStore,
@@ -28,6 +29,7 @@ class FakeChildLinkStore implements ChildLinkStore {
     parentRunId: string;
     childRunId: string;
     authority: ChildAuthority;
+    authorityBinding?: ChildAuthorityBinding;
     resume?: ChildResumeGrant;
     callId?: string;
     createdAt: string;
@@ -41,6 +43,7 @@ class FakeChildLinkStore implements ChildLinkStore {
       parentRunId: input.parentRunId,
       childRunId: input.childRunId,
       authority: input.authority,
+      authorityBinding: input.authorityBinding ?? "delegated",
       callId: input.callId ?? null,
       resume: input.resume ?? null,
       detachedAt: null,
@@ -272,6 +275,7 @@ describe("ChildRunManager.ancestors", () => {
         parentRunId: chainId(1),
         childRunId: chainId(0),
         authority: PARENT,
+        authorityBinding: "delegated",
         callId: null,
         resume: null,
         detachedAt: null,
@@ -281,6 +285,7 @@ describe("ChildRunManager.ancestors", () => {
         parentRunId: chainId(0),
         childRunId: chainId(1),
         authority: PARENT,
+        authorityBinding: "delegated",
         callId: null,
         resume: null,
         detachedAt: null,

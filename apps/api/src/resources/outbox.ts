@@ -18,10 +18,18 @@ export {
 } from "@tulipfarm/storage";
 
 import type { ResourceSideEffect } from "@tulipfarm/storage";
+
+/** Binds a delivered Record mutation to any matching event Trigger. */
+export interface ResourceTriggerDispatch {
+  dispatchResourceMutation(effect: ResourceSideEffect, outboxId: string): Promise<unknown>;
+}
+
 export async function deliverResourceSideEffect(
   effect: ResourceSideEffect,
   hookExecutor: HookExecutor | undefined,
-  events: EventEmitter | undefined
+  events: EventEmitter | undefined,
+  outboxId?: string,
+  triggers?: ResourceTriggerDispatch
 ): Promise<void> {
   if (effect.afterHook && hookExecutor)
     await hookExecutor.runAfterHook(
@@ -44,18 +52,25 @@ export async function deliverResourceSideEffect(
         : DOMAIN_EVENTS.RESOURCE_DELETED,
     payload
   );
+  // Awaited rather than emitted, so a Trigger that fails to start its Run fails the delivery and
+  // the outbox retries it. The in-process emit above cannot do that: its subscribers are
+  // fire-and-forget, which is correct for indexing and wrong for minting a Run.
+  if (triggers && outboxId !== undefined) {
+    await triggers.dispatchResourceMutation(effect, outboxId);
+  }
 }
 
 export async function startDelivery(
   database: Queryable,
   hookExecutor: HookExecutor | undefined,
   events: EventEmitter,
-  log: { error(message: string): void }
+  log: { error(message: string): void },
+  triggers?: ResourceTriggerDispatch
 ): Promise<() => void> {
   const dispatcher = new ResourceSideEffectDispatcher(
     new ResourceSideEffectOutbox(database),
     `api.resource-side-effects.${process.pid}`,
-    (effect) => deliverResourceSideEffect(effect, hookExecutor, events)
+    (effect, id) => deliverResourceSideEffect(effect, hookExecutor, events, id, triggers)
   );
   const report = (error: unknown) =>
     log.error(

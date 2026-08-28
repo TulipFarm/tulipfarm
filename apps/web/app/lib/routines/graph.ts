@@ -75,6 +75,23 @@ function stateActions(state: RoutineState): RoutineActionSummary[] {
   if (state.type === "child_routine") {
     return [{ name: state.routineRef.name, function: state.routineRef.name, arguments: [] }];
   }
+  if (state.type === "emit") {
+    return [{ name: state.event.type, function: state.event.type, arguments: [] }];
+  }
+  // An `action` names the runtime Tool it calls; the arguments it passes identify the call.
+  if (state.type === "action") {
+    const args = Object.keys((state.input ?? {}) as Record<string, unknown>).sort();
+    return [{ name: state.action, function: state.action, arguments: args }];
+  }
+  // A `script` has no ref either, so its entry point is the most honest label available.
+  if (state.type === "script") {
+    return [{ name: "script", function: state.entry ?? "run", arguments: [] }];
+  }
+  // A `compute` State has no ref to name, so the fields it assigns are what identifies it.
+  if (state.type === "compute") {
+    const assigned = Object.keys((state.input ?? {}) as Record<string, unknown>).sort();
+    return [{ name: "compute", function: "compute", arguments: assigned }];
+  }
   return [];
 }
 

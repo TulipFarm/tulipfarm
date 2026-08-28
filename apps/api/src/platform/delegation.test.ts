@@ -34,6 +34,7 @@ class FakeLinkTable implements Queryable, TransactionPort {
     parent_run_id: string;
     child_run_id: string;
     authority: ChildLink["authority"];
+    authority_binding: string;
     resume: ChildLink["resume"];
     call_id: string | null;
     detached_at: string | null;
@@ -50,10 +51,11 @@ class FakeLinkTable implements Queryable, TransactionPort {
         parent_run_id: String(params[1]),
         child_run_id: String(params[2]),
         authority: JSON.parse(String(params[3])) as ChildLink["authority"],
-        resume: params[4] === null ? null : (JSON.parse(String(params[4])) as ChildLink["resume"]),
-        call_id: params[5] === null ? null : String(params[5]),
+        authority_binding: String(params[4]),
+        resume: params[5] === null ? null : (JSON.parse(String(params[5])) as ChildLink["resume"]),
+        call_id: params[6] === null ? null : String(params[6]),
         detached_at: null,
-        created_at: String(params[6]),
+        created_at: String(params[7]),
       };
       const existing = this.rows.find(
         (r) => r.parent_run_id === row.parent_run_id && r.child_run_id === row.child_run_id

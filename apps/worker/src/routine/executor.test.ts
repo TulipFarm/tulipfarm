@@ -20,8 +20,16 @@ import type {
   RoutineApprovalPort,
   RoutineApprovalRecord,
 } from "./approval-port";
+import type {
+  ChildRoutinePort,
+  ChildRoutineRecord,
+  ChildRoutineStatus,
+  StartChildRoutineInput,
+} from "./child-routine-port";
 import type { LoadedRoutineDefinition } from "./definition-loader";
+import type { EmitEventInput, EmitPort, EmitRecord } from "./emit-port";
 import { createRoutineExecutor } from "./executor";
+import { SandboxRoutineScriptPort } from "./script-port";
 import type { RoutineToolOutcome, RoutineToolRequest } from "./tool-port";
 
 const STARTED_AT = "2026-08-02T00:00:00.000Z";
@@ -83,6 +91,7 @@ function state(key: string, status: PersistedState["status"] = "pending"): Persi
     finishedAt: null,
     resultArtifactId: null,
     errorEvidenceRef: null,
+    output: null,
   };
 }
 
@@ -174,6 +183,7 @@ class StateHarness implements StateTransitionPort {
       status: input.to,
       version: persisted.version + 1,
       errorEvidenceRef: input.reason ?? persisted.errorEvidenceRef,
+      output: input.output === undefined ? persisted.output : input.output.value,
     });
   }
 }
@@ -295,22 +305,86 @@ describe("createRoutineExecutor", () => {
     });
   });
 
-  it("parks a branch that depends on Context the request Artifact cannot reconstruct", async () => {
+  it("derives a value in a compute State and hands it to the next State", async () => {
     const harness = new StateHarness([state("Start")]);
     const execute = executor(
       definition([
         {
-          type: "branch",
+          type: "compute",
           name: "Start",
-          conditions: [{ condition: "trigger.kind == 'manual'", end: true }],
-          default: { end: true },
+          input: { label: "need-triage", region: INPUT_REGION_EXPRESSION },
+          transition: "Route",
         },
-      ]),
+        {
+          type: "branch",
+          name: "Route",
+          input: { carried: "${ states.Start.output.label }" },
+          conditions: [
+            { condition: "states.Start.output.label == 'need-triage'", transition: "Matched" },
+          ],
+          default: { transition: "Missed" },
+        },
+        { type: "compute", name: "Matched", input: { ok: true }, end: true },
+        { type: "compute", name: "Missed", input: { ok: false }, end: true },
+      ] as unknown as routine.RoutineState[]),
+      harness
+    );
+
+    await expect(execute(run())).resolves.toBe("succeeded");
+    expect(harness.states.get("Route")?.resolvedInput).toEqual({ carried: "need-triage" });
+    expect(harness.transitions).toContain("Matched:running->succeeded");
+    expect(harness.states.has("Missed")).toBe(false);
+  });
+
+  it("republishes a settled compute State's value on replay", async () => {
+    const harness = new StateHarness([state("Start", "succeeded"), state("Route")]);
+    const execute = executor(
+      definition([
+        {
+          type: "compute",
+          name: "Start",
+          input: { label: "need-triage" },
+          transition: "Route",
+        },
+        {
+          type: "branch",
+          name: "Route",
+          conditions: [
+            { condition: "states.Start.output.label == 'need-triage'", transition: "Matched" },
+          ],
+          default: { transition: "Missed" },
+        },
+        { type: "compute", name: "Matched", input: { ok: true }, end: true },
+        { type: "compute", name: "Missed", input: { ok: false }, end: true },
+      ] as unknown as routine.RoutineState[]),
+      harness
+    );
+
+    await expect(execute(run())).resolves.toBe("succeeded");
+    expect(harness.transitions).toContain("Matched:running->succeeded");
+    expect(harness.states.has("Missed")).toBe(false);
+  });
+
+  it("parks a compute State whose mapping cannot resolve, without settling it", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const execute = executor(
+      definition([
+        {
+          type: "compute",
+          name: "Start",
+          input: { derived: "${ input.absent }" },
+          end: true,
+        },
+      ] as unknown as routine.RoutineState[]),
       harness
     );
 
     await expect(execute(run())).resolves.toBe("needs_reconciliation");
-    expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:unsupported_context");
+    expect(harness.states.get("Start")).toMatchObject({
+      status: "needs_reconciliation",
+      errorEvidenceRef: "routine:input_not_evaluable",
+    });
+    expect(harness.transitions).not.toContain("Start:running->succeeded");
   });
 });
 
@@ -598,7 +672,12 @@ describe("createRoutineExecutor — tool States", () => {
   it("dispatches a Tool State through the broker port and settles it", async () => {
     const harness = new StateHarness([state("Start")]);
     const calls: RoutineToolRequest[] = [];
-    const execute = toolExecutor(definition([commentState]), harness, { kind: "succeeded" }, calls);
+    const execute = toolExecutor(
+      definition([commentState]),
+      harness,
+      { kind: "succeeded", output: null },
+      calls
+    );
 
     await expect(execute(run())).resolves.toBe("succeeded");
     expect(harness.transitions).toEqual([
@@ -758,6 +837,87 @@ describe("createRoutineExecutor — agent States", () => {
       properties: { category: { type: "string" } },
     });
     expect(calls[0]?.bundle.digest).toBe("bundle-digest");
+  });
+
+  it("publishes the Agent's answer so a later State can read it", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const execute = agentExecutor(
+      definition([
+        {
+          type: "agent",
+          name: "Start",
+          agentRef: { name: "triage", version: "1" },
+          transition: "Record",
+        } as routine.RoutineState,
+        {
+          type: "compute",
+          name: "Record",
+          input: { chosen: "${states.Start.output.category}" },
+          end: true,
+        } as routine.RoutineState,
+      ]),
+      harness,
+      { kind: "succeeded", output: { category: "billing" } },
+      []
+    );
+
+    await expect(execute(run())).resolves.toBe("succeeded");
+    // Before State outputs were durable this resolved to null and the successor never saw a value.
+    expect(harness.states.get("Record")?.resolvedInput).toEqual({ chosen: "billing" });
+    expect(harness.states.get("Start")?.output).toEqual({ category: "billing" });
+  });
+
+  it("republishes a settled Agent's stored answer on replay rather than re-asking", async () => {
+    // The Agent settled on an earlier pass; the States after it had not run yet. Their Context can
+    // only come from the answer that pass stored, because the model is never asked twice.
+    const harness = new StateHarness([
+      { ...state("Start", "succeeded"), output: { category: "billing" } },
+      state("Record"),
+    ]);
+    const execute = createRoutineExecutor({
+      definitions: {
+        load: async () =>
+          ({
+            document: definition([
+              {
+                type: "agent",
+                name: "Start",
+                agentRef: { name: "triage", version: "1" },
+                transition: "Record",
+              } as routine.RoutineState,
+              {
+                type: "compute",
+                name: "Record",
+                input: { chosen: "${states.Start.output.category}" },
+                transition: "Final",
+              } as routine.RoutineState,
+              {
+                type: "compute",
+                name: "Final",
+                input: { echo: "${states.Record.output.chosen}" },
+                end: true,
+              } as routine.RoutineState,
+            ]),
+            bundle,
+          }) as LoadedRoutineDefinition,
+      },
+      artifacts: { read: async () => requestArtifact },
+      runs: { listStates: async () => [...harness.states.values()] },
+      scheduler: harness.scheduler,
+      transitions: harness,
+      waits: harness.waitPort,
+      agents: {
+        execute: async () => {
+          throw new Error("a settled Agent State must never be re-asked on replay");
+        },
+      },
+      now: () => new Date(STARTED_AT),
+    });
+
+    await expect(execute(run())).resolves.toBe("succeeded");
+    // Before State outputs were durable the replayed Agent republished null and this resolved to
+    // nothing, so the whole tail of the Routine ran on empty Context.
+    expect(harness.states.get("Final")?.resolvedInput).toEqual({ echo: "billing" });
   });
 
   it("parks an Agent State when no Agent authority is composed", async () => {
@@ -1489,5 +1649,554 @@ describe("createRoutineExecutor — concurrencyKey", () => {
         expiresAt: "2026-08-02T01:00:00.000Z",
       })
     ).resolves.toEqual({ kind: "acquired" });
+  });
+});
+
+describe("createRoutineExecutor — child_routine States", () => {
+  /** The child surface, as this process sees it: one child Run per State occurrence. */
+  class ChildRoutineHarness {
+    readonly started: StartChildRoutineInput[] = [];
+    private readonly records = new Map<string, ChildRoutineRecord>();
+
+    constructor(private readonly settleImmediately: ChildRoutineStatus = "pending") {}
+
+    readonly port: ChildRoutinePort = {
+      start: async (input) => {
+        const existing = this.records.get(input.stateKey);
+        if (existing !== undefined) return existing;
+        this.started.push(input);
+        const record: ChildRoutineRecord = {
+          childRunId: `child-${this.started.length}`,
+          status: this.settleImmediately,
+          waitId: input.mode === "detach" ? null : routineWaitId(run().id, input.stateKey),
+        };
+        this.records.set(input.stateKey, record);
+        return record;
+      },
+      find: async (input) => this.records.get(input.stateKey),
+    };
+
+    /** Stands in for the child reaching a terminal status, or for the caller's wait expiring. */
+    settle(stateKey: string, status: ChildRoutineStatus): void {
+      const record = this.records.get(stateKey);
+      if (record === undefined) throw new Error(`no child for ${stateKey}`);
+      this.records.set(stateKey, { ...record, status, waitId: null });
+    }
+  }
+
+  function childExecutor(
+    document: routine.RoutineDefinition,
+    harness: StateHarness,
+    childRoutines?: ChildRoutinePort
+  ) {
+    return createRoutineExecutor({
+      definitions: { load: async () => ({ document }) as LoadedRoutineDefinition },
+      artifacts: { read: async () => requestArtifact },
+      runs: { listStates: async () => [...harness.states.values()] },
+      scheduler: harness.scheduler,
+      transitions: harness,
+      waits: harness.waitPort,
+      childRoutines,
+      now: () => new Date(STARTED_AT),
+    });
+  }
+
+  function childDefinition(
+    overrides: Record<string, unknown> = {},
+    rest: readonly routine.RoutineState[] = []
+  ): routine.RoutineDefinition {
+    return definition([
+      {
+        type: "child_routine",
+        name: "Start",
+        routineRef: { name: "reindex-knowledge", version: "3" },
+        mode: "wait",
+        deadlineMs: 60_000,
+        end: true,
+        ...overrides,
+      } as routine.RoutineState,
+      ...rest,
+    ]);
+  }
+
+  const recoveredState: routine.RoutineState = {
+    type: "branch",
+    name: "Recovered",
+    conditions: [{ condition: "true", end: true }],
+    default: { end: true },
+  };
+
+  it("calls the authored Routine and parks the caller on the child it started", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const children = new ChildRoutineHarness();
+
+    await expect(childExecutor(childDefinition(), harness, children.port)(run())).resolves.toBe(
+      "waiting"
+    );
+    expect(harness.transitions).toEqual([
+      "Start:pending->ready",
+      "Start:ready->claimed",
+      "Start:claimed->running",
+      "Start:running->waiting",
+    ]);
+    expect(children.started).toHaveLength(1);
+    expect(children.started[0]).toMatchObject({
+      stateKey: "Start",
+      stateName: "Start",
+      routineRef: { name: "reindex-knowledge", version: "3" },
+      mode: "wait",
+      deadlineMs: 60_000,
+    });
+  });
+
+  it("resolves the authored input mapping into the child's request", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const children = new ChildRoutineHarness();
+
+    await expect(
+      childExecutor(
+        childDefinition({ input: { region: INPUT_REGION_EXPRESSION } }),
+        harness,
+        children.port
+      )(run())
+    ).resolves.toBe("waiting");
+    expect(children.started[0]?.input).toEqual({ region: "west" });
+  });
+
+  it("replays into the child it already started rather than running the callee twice", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const children = new ChildRoutineHarness();
+    const execute = childExecutor(childDefinition(), harness, children.port);
+
+    await expect(execute(run())).resolves.toBe("waiting");
+    await expect(execute(run())).resolves.toBe("waiting");
+    expect(children.started).toHaveLength(1);
+  });
+
+  it("continues through the authored transition once the child succeeds", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const children = new ChildRoutineHarness();
+    const execute = childExecutor(childDefinition(), harness, children.port);
+
+    await expect(execute(run())).resolves.toBe("waiting");
+    children.settle("Start", "succeeded");
+    await expect(execute(run())).resolves.toBe("succeeded");
+    expect(harness.transitions.slice(4)).toEqual([
+      "Start:waiting->ready",
+      "Start:ready->claimed",
+      "Start:claimed->running",
+      "Start:running->succeeded",
+    ]);
+  });
+
+  it("fails a failed child no handler claims", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const children = new ChildRoutineHarness();
+    const execute = childExecutor(childDefinition(), harness, children.port);
+
+    await expect(execute(run())).resolves.toBe("waiting");
+    children.settle("Start", "failed");
+    await expect(execute(run())).resolves.toBe("failed");
+    expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:child_failed");
+  });
+
+  it("lets an authored handler claim a failed child", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const children = new ChildRoutineHarness();
+    const execute = childExecutor(
+      childDefinition(
+        { end: undefined, onError: [{ errorRef: "child_failed", transition: "Recovered" }] },
+        [recoveredState]
+      ),
+      harness,
+      children.port
+    );
+
+    await expect(execute(run())).resolves.toBe("waiting");
+    children.settle("Start", "failed");
+    await expect(execute(run())).resolves.toBe("succeeded");
+    expect(harness.events).toContain("Recovered:scheduled");
+  });
+
+  it("parks a cancelled child rather than reading it as a failure", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const children = new ChildRoutineHarness();
+    const execute = childExecutor(childDefinition(), harness, children.port);
+
+    await expect(execute(run())).resolves.toBe("waiting");
+    children.settle("Start", "cancelled");
+    await expect(execute(run())).resolves.toBe("needs_reconciliation");
+    expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:child_cancelled");
+  });
+
+  it("parks a caller whose child outlived the authored deadline", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const children = new ChildRoutineHarness();
+    const execute = childExecutor(childDefinition(), harness, children.port);
+
+    await expect(execute(run())).resolves.toBe("waiting");
+    children.settle("Start", "expired");
+    await expect(execute(run())).resolves.toBe("needs_reconciliation");
+    expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:wait_expired");
+  });
+
+  it("continues immediately in detach mode, carrying no deadline of the caller's", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const children = new ChildRoutineHarness();
+
+    await expect(
+      childExecutor(
+        childDefinition({ mode: "detach", deadlineMs: undefined }),
+        harness,
+        children.port
+      )(run())
+    ).resolves.toBe("succeeded");
+    expect(children.started[0]).toMatchObject({ mode: "detach" });
+    expect(children.started[0]?.deadlineMs).toBeUndefined();
+    expect(harness.transitions).toEqual([
+      "Start:pending->ready",
+      "Start:ready->claimed",
+      "Start:claimed->running",
+      "Start:running->succeeded",
+    ]);
+  });
+
+  it("answers a child that settled before the caller could be parked on it", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const children = new ChildRoutineHarness("succeeded");
+
+    await expect(childExecutor(childDefinition(), harness, children.port)(run())).resolves.toBe(
+      "succeeded"
+    );
+    expect(harness.transitions).toEqual([
+      "Start:pending->ready",
+      "Start:ready->claimed",
+      "Start:claimed->running",
+      "Start:running->succeeded",
+    ]);
+  });
+
+  it("refuses a `wait` child that names no deadline, rather than parking forever", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const children = new ChildRoutineHarness();
+
+    await expect(
+      childExecutor(childDefinition({ deadlineMs: undefined }), harness, children.port)(run())
+    ).resolves.toBe("needs_reconciliation");
+    expect(children.started).toHaveLength(0);
+  });
+
+  it("parks a child_routine State when no child surface is composed", async () => {
+    const harness = new StateHarness([state("Start")]);
+
+    await expect(childExecutor(childDefinition(), harness)(run())).resolves.toBe(
+      "needs_reconciliation"
+    );
+    expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:unsupported_state");
+  });
+});
+
+describe("createRoutineExecutor — emit States", () => {
+  class EmitHarness {
+    readonly announced: EmitEventInput[] = [];
+
+    constructor(private readonly outcome: EmitRecord["outcome"] = "started") {}
+
+    readonly port: EmitPort = {
+      emit: async (input) => {
+        this.announced.push(input);
+        return {
+          eventId: `emit:${input.runId}:${input.stateKey}`,
+          outcome: this.outcome,
+          ...(this.outcome === "started" ? { runId: "run-started" } : {}),
+        };
+      },
+    };
+  }
+
+  function emitExecutor(
+    document: routine.RoutineDefinition,
+    harness: StateHarness,
+    emissions?: EmitPort
+  ) {
+    return createRoutineExecutor({
+      definitions: { load: async () => ({ document }) as LoadedRoutineDefinition },
+      artifacts: { read: async () => requestArtifact },
+      runs: { listStates: async () => [...harness.states.values()] },
+      scheduler: harness.scheduler,
+      transitions: harness,
+      waits: harness.waitPort,
+      emissions,
+      now: () => new Date(STARTED_AT),
+    });
+  }
+
+  function emitDefinition(overrides: Record<string, unknown> = {}): routine.RoutineDefinition {
+    return definition([
+      {
+        type: "emit",
+        name: "Start",
+        event: { type: "ticket.triaged", version: 2 },
+        input: { ticketId: "t-1" },
+        end: true,
+        ...overrides,
+      } as routine.RoutineState,
+    ]);
+  }
+
+  it("announces the authored event and succeeds without waiting", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const emissions = new EmitHarness();
+
+    await expect(emitExecutor(emitDefinition(), harness, emissions.port)(run())).resolves.toBe(
+      "succeeded"
+    );
+    expect(harness.transitions).toEqual([
+      "Start:pending->ready",
+      "Start:ready->claimed",
+      "Start:claimed->running",
+      "Start:running->succeeded",
+    ]);
+    expect(emissions.announced).toEqual([
+      {
+        businessId: run().businessId,
+        runId: run().id,
+        stateKey: "Start",
+        eventType: "ticket.triaged",
+        eventVersion: 2,
+        data: { ticketId: "t-1" },
+      },
+    ]);
+  });
+
+  it("resolves the payload against the Run's own input", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const emissions = new EmitHarness();
+
+    await expect(
+      emitExecutor(
+        emitDefinition({ input: { region: INPUT_REGION_EXPRESSION } }),
+        harness,
+        emissions.port
+      )(run())
+    ).resolves.toBe("succeeded");
+    expect(emissions.announced[0]?.data).toEqual({ region: "west" });
+  });
+
+  it("succeeds even when no Trigger listened, because emit promises no listener", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const emissions = new EmitHarness("no_match");
+
+    await expect(emitExecutor(emitDefinition(), harness, emissions.port)(run())).resolves.toBe(
+      "succeeded"
+    );
+  });
+
+  it("parks an emit State when no emission surface is composed", async () => {
+    const harness = new StateHarness([state("Start")]);
+
+    await expect(emitExecutor(emitDefinition(), harness)(run())).resolves.toBe(
+      "needs_reconciliation"
+    );
+    expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:unsupported_state");
+  });
+
+  it("parks rather than announcing when the payload cannot be resolved", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const emissions = new EmitHarness();
+
+    await expect(
+      emitExecutor(
+        emitDefinition({ input: { label: "${input.absent}" } }),
+        harness,
+        emissions.port
+      )(run())
+    ).resolves.toBe("needs_reconciliation");
+    expect(emissions.announced).toHaveLength(0);
+  });
+});
+
+describe("createRoutineExecutor — deterministic States", () => {
+  const bundle = { digest: "bundle-digest" } as unknown as LoadedRoutineDefinition["bundle"];
+
+  /**
+   * The Routine the product promise turns on: fetch, transform, write — with no model anywhere in
+   * the chain. Before `script` and `action` existed, an `agent` State was the only way a Routine
+   * could reach an API or create a Record, which is why a schedule that should have been a fixed
+   * cost billed a model turn every tick and let the model improvise whether to append or overwrite.
+   */
+  const starsChain: readonly routine.RoutineState[] = [
+    {
+      type: "action",
+      name: "Start",
+      action: "api_request",
+      input: { method: "GET", url: "https://api.github.com/repos/tulipfarm/tulipfarm" },
+      transition: "Extract",
+    } as routine.RoutineState,
+    {
+      type: "script",
+      name: "Extract",
+      script:
+        "({ run(ctx, input) { return { stars: JSON.parse(input.body).stargazers_count }; } })",
+      input: { body: "${states.Start.output.body}" },
+      transition: "Save",
+    } as routine.RoutineState,
+    {
+      type: "action",
+      name: "Save",
+      action: "record_create",
+      input: { type: "repo_stats", data: { stars: "${states.Extract.output.stars}" } },
+      end: true,
+    } as routine.RoutineState,
+  ];
+
+  it("fetches, transforms and writes with no Agent in the chain", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const dispatched: unknown[] = [];
+    const execute = createRoutineExecutor({
+      definitions: {
+        load: async () =>
+          ({ document: definition([...starsChain]), bundle }) as LoadedRoutineDefinition,
+      },
+      artifacts: { read: async () => requestArtifact },
+      runs: { listStates: async () => [...harness.states.values()] },
+      scheduler: harness.scheduler,
+      transitions: harness,
+      waits: harness.waitPort,
+      actions: {
+        execute: async (request) => {
+          dispatched.push({ action: request.plan.action, args: request.plan.arguments });
+          // `api_request` renders the body to text before returning it, so the script has to
+          // parse it. Handing back a parsed object here would prove a capability the Tool
+          // does not have, which is exactly how the broken example shipped once already.
+          return request.plan.action === "api_request"
+            ? {
+                kind: "succeeded",
+                output: { status: 200, format: "json", body: '{"stargazers_count":4321}' },
+              }
+            : { kind: "succeeded", output: { id: "rec_1" } };
+        },
+      },
+      // The real isolate, not a fake: the point of a `script` State is that authored JavaScript
+      // genuinely runs, so a test that stubs it would prove nothing about the capability.
+      scripts: new SandboxRoutineScriptPort(),
+      now: () => new Date(STARTED_AT),
+    });
+
+    await expect(execute(run())).resolves.toBe("succeeded");
+    expect(harness.states.get("Extract")?.output).toEqual({ stars: 4321 });
+    // A fresh Record each tick carrying the value the script derived — never an Agent's guess.
+    expect(dispatched).toEqual([
+      {
+        action: "api_request",
+        args: { method: "GET", url: "https://api.github.com/repos/tulipfarm/tulipfarm" },
+      },
+      { action: "record_create", args: { type: "repo_stats", data: { stars: 4321 } } },
+    ]);
+  });
+
+  /**
+   * `permissionCeiling` is an opt-in narrowing, so a Routine that declares none must reach every
+   * Tool its owner may reach. Defaulting the ceiling to `low` made that impossible: it denied
+   * every mutating Tool, and no author could lift it, because the compiler measures an authored
+   * ceiling against the same default.
+   */
+  it("lets an action reach a mutating Tool when the author narrowed nothing", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const ceilings: string[] = [];
+    const execute = createRoutineExecutor({
+      definitions: {
+        load: async () =>
+          ({ document: definition([...starsChain]), bundle }) as LoadedRoutineDefinition,
+      },
+      artifacts: { read: async () => requestArtifact },
+      runs: { listStates: async () => [...harness.states.values()] },
+      scheduler: harness.scheduler,
+      transitions: harness,
+      waits: harness.waitPort,
+      actions: {
+        execute: async (request) => {
+          ceilings.push(request.plan.permissionCeiling.maxRiskClass);
+          return request.plan.action === "api_request"
+            ? {
+                kind: "succeeded",
+                output: { status: 200, format: "json", body: '{"stargazers_count":4321}' },
+              }
+            : { kind: "succeeded", output: { id: "rec_1" } };
+        },
+      },
+      scripts: new SandboxRoutineScriptPort(),
+      now: () => new Date(STARTED_AT),
+    });
+
+    await expect(execute(run())).resolves.toBe("succeeded");
+    // `record_create` is `mutating`, so it compiles to `medium`; a `low` ceiling refuses it.
+    expect(ceilings).toEqual(["high", "high"]);
+  });
+
+  /**
+   * A refusing Tool answers with a reason code. Recording only the State's name would say which
+   * step broke and nothing about what broke it, leaving a failed Run undiagnosable from its own
+   * record — which is exactly what a live scheduled Routine did, failing every tick at
+   * `record_create` with no stored trace of why.
+   */
+  it("records why an action failed, not just which State did", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const execute = createRoutineExecutor({
+      definitions: {
+        load: async () =>
+          ({ document: definition([...starsChain]), bundle }) as LoadedRoutineDefinition,
+      },
+      artifacts: { read: async () => requestArtifact },
+      runs: { listStates: async () => [...harness.states.values()] },
+      scheduler: harness.scheduler,
+      transitions: harness,
+      waits: harness.waitPort,
+      actions: {
+        execute: async (request) =>
+          request.plan.action === "api_request"
+            ? {
+                kind: "succeeded",
+                output: { status: 200, format: "json", body: '{"stargazers_count":4321}' },
+              }
+            : { kind: "failed", reason: "unknown_resource_type" },
+      },
+      scripts: new SandboxRoutineScriptPort(),
+      now: () => new Date(STARTED_AT),
+    });
+
+    await expect(execute(run())).resolves.toBe("failed");
+    expect(harness.states.get("Save")?.errorEvidenceRef).toBe(
+      "routine:action_unknown_resource_type"
+    );
+  });
+
+  it("refuses a script that reaches for the host instead of running it", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const execute = createRoutineExecutor({
+      definitions: {
+        load: async () =>
+          ({
+            document: definition([
+              {
+                type: "script",
+                name: "Start",
+                script: "({ run() { return require('fs').readFileSync('/etc/passwd'); } })",
+                end: true,
+              } as routine.RoutineState,
+            ]),
+            bundle,
+          }) as LoadedRoutineDefinition,
+      },
+      artifacts: { read: async () => requestArtifact },
+      runs: { listStates: async () => [...harness.states.values()] },
+      scheduler: harness.scheduler,
+      transitions: harness,
+      waits: harness.waitPort,
+      scripts: new SandboxRoutineScriptPort(),
+      now: () => new Date(STARTED_AT),
+    });
+
+    await expect(execute(run())).resolves.toBe("failed");
   });
 });

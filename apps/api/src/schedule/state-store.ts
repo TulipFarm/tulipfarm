@@ -7,6 +7,8 @@ export interface RoutineScheduleStateRow {
   readonly dedupKey: string;
   readonly lastScheduledForMs: number | null;
   readonly nextDueAtMs: number | null;
+  /** Phase origin for an `interval` Trigger with no authored `schedule.startAt`. */
+  readonly anchorMs: number | null;
 }
 
 export class RoutineScheduleStateStore {
@@ -14,7 +16,7 @@ export class RoutineScheduleStateStore {
 
   async listForBusiness(businessId: string): Promise<RoutineScheduleStateRow[]> {
     const result = await this.db.query(
-      `SELECT routine_slug, trigger_index, dedup_key, last_scheduled_for_ms, next_due_at_ms
+      `SELECT routine_slug, trigger_index, dedup_key, last_scheduled_for_ms, next_due_at_ms, anchor_ms
        FROM routine_schedule_state WHERE business_id = $1`,
       [businessId]
     );
@@ -25,6 +27,8 @@ export class RoutineScheduleStateStore {
       lastScheduledForMs:
         row.last_scheduled_for_ms === null ? null : Number(row.last_scheduled_for_ms),
       nextDueAtMs: row.next_due_at_ms === null ? null : Number(row.next_due_at_ms),
+      anchorMs:
+        row.anchor_ms === null || row.anchor_ms === undefined ? null : Number(row.anchor_ms),
     }));
   }
 
@@ -36,17 +40,19 @@ export class RoutineScheduleStateStore {
       readonly dedupKey: string;
       readonly lastScheduledForMs: number | null;
       readonly nextDueAtMs: number | null;
+      readonly anchorMs: number | null;
     }
   ): Promise<void> {
     await this.db.query(
       `INSERT INTO routine_schedule_state
-         (business_id, routine_slug, trigger_index, dedup_key, last_scheduled_for_ms, next_due_at_ms, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, now())
+         (business_id, routine_slug, trigger_index, dedup_key, last_scheduled_for_ms, next_due_at_ms, anchor_ms, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, now())
        ON CONFLICT (business_id, routine_slug, trigger_index)
        DO UPDATE SET
          dedup_key = EXCLUDED.dedup_key,
          last_scheduled_for_ms = EXCLUDED.last_scheduled_for_ms,
          next_due_at_ms = EXCLUDED.next_due_at_ms,
+         anchor_ms = EXCLUDED.anchor_ms,
          updated_at = now()`,
       [
         businessId,
@@ -55,6 +61,7 @@ export class RoutineScheduleStateStore {
         row.dedupKey,
         row.lastScheduledForMs,
         row.nextDueAtMs,
+        row.anchorMs,
       ]
     );
   }

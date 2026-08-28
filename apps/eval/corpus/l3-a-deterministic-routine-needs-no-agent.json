@@ -1,0 +1,100 @@
+{
+  "id": "l3-a-deterministic-routine-needs-no-agent",
+  "tier": "l3",
+  "agent": "support",
+  "input": [
+    {
+      "role": "user",
+      "content": "Create the published track-repo-stars Routine now, with an interval Trigger named track-repo-stars-every-2m in its spec.triggers. It must fetch https://api.github.com/repos/tulipfarm/tulipfarm, read stargazers_count out of the response, and append a repo_stats record every 2 minutes. Do not use an Agent for any of it. Call soul_write once with definitionMode canonical. Do not ask me to confirm."
+    }
+  ],
+  "tools": [
+    {
+      "name": "soul_write",
+      "description": "Commit one Soul definition. Set definitionMode to canonical for canonical YAML.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "definitionMode": {
+            "type": "string"
+          }
+        },
+        "required": ["kind", "slug", "content", "definitionMode"]
+      }
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "routine",
+          "name": "soul_write",
+          "arguments": {
+            "kind": "Routine",
+            "slug": "track-repo-stars",
+            "definitionMode": "canonical",
+            "content": "apiVersion: tulipfarm.ai/v1\nkind: Routine\nmetadata:\n  id: 33333333-3333-4333-8333-333333333333\n  slug: track-repo-stars\n  schemaVersion: 1\n  authoredVersion: 1\n  lifecycle: published\nspec:\n  owner: ops-team\n  start: Fetch\n  states:\n    - type: action\n      name: Fetch\n      action: api_request\n      input:\n        method: GET\n        url: https://api.github.com/repos/tulipfarm/tulipfarm\n      transition: Extract\n    - type: script\n      name: Extract\n      script: \"({ run(ctx, input) { return { stars: JSON.parse(input.body).stargazers_count }; } })\"\n      input:\n        body: \"${ states.Fetch.output.body }\"\n      transition: Save\n    - type: action\n      name: Save\n      action: record_create\n      input:\n        type: repo_stats\n        data:\n          stars: \"${ states.Extract.output.stars }\"\n      end: true\n  triggers:\n    - name: track-repo-stars-every-2m\n      type: interval\n      everyMs: 120000\n      schedule:\n        missedRunPolicy: skip\n        overlapPolicy: skip\n      eventType: routine.scheduled\n      eventVersion: 1\n      backgroundIdentity:\n        principalKind: service\n        principalId: routine-runner\n      deduplication:\n        key: track-repo-stars-every-2m\n"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "text",
+      "text": "I created track-repo-stars. It calls api_request, parses the body in a script State, and appends a repo_stats record every 2 minutes. No Agent runs in it."
+    }
+  ],
+  "journey": [
+    {
+      "input": [
+        {
+          "role": "user",
+          "content": "Does the track-repo-stars Routine use an Agent anywhere?"
+        }
+      ],
+      "script": [
+        {
+          "kind": "text",
+          "text": "No Agent runs in track-repo-stars. Every State is deterministic: api_request, then a script State, then record_create."
+        }
+      ]
+    }
+  ],
+  "expect": [
+    {
+      "kind": "soul_committed",
+      "path": "routines/track-repo-stars/routine.yaml"
+    },
+    {
+      "kind": "soul_published",
+      "artifact": "Routine:track-repo-stars"
+    },
+    {
+      "kind": "tool_call_count",
+      "count": 1
+    },
+    {
+      "kind": "tool_argument_equals",
+      "name": "soul_write",
+      "path": "definitionMode",
+      "value": "canonical"
+    },
+    {
+      "kind": "output_contains",
+      "text": "track-repo-stars"
+    },
+    {
+      "kind": "run_status",
+      "status": "succeeded"
+    }
+  ]
+}

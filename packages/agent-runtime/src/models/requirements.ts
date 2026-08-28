@@ -6,6 +6,22 @@ import type { ModelRequirements } from "./profile";
 
 const CHARS_PER_TOKEN = 4;
 
+/**
+ * The deployment-wide coarse token estimate: ~4 characters per token.
+ *
+ * Shared rather than re-derived so a ceiling expressed in tokens means the same thing wherever it
+ * is enforced. It is an estimate, not a tokenizer — every ceiling that uses it is a budget, and a
+ * budget that is 20% out is still a budget.
+ */
+export function estimateTokens(text: string): number {
+  return Math.ceil(text.length / CHARS_PER_TOKEN);
+}
+
+/** Characters a ceiling expressed in tokens permits, for cutting text to that ceiling. */
+export function charsForTokens(tokens: number): number {
+  return tokens * CHARS_PER_TOKEN;
+}
+
 const RESPONSE_HEADROOM_TOKENS = 1_024;
 
 export type ModelRequirementsPolicy = Omit<

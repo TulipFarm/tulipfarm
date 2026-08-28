@@ -56,6 +56,9 @@ export class RoutingToolDispatch implements ToolDispatchPort {
       ...(request.activeSkillName === undefined
         ? {}
         : { activeSkillName: request.activeSkillName }),
+      ...(request.permissionCeiling === undefined
+        ? {}
+        : { permissionCeiling: request.permissionCeiling }),
     });
     return withCallId(request.callId, result);
   }
@@ -104,7 +107,12 @@ function authorityKey(runId: string, agentName?: string): string {
 function withCallId(callId: string, result: HostedToolResult): ToolDispatchResult {
   switch (result.status) {
     case "succeeded":
-      return { status: "succeeded", callId, output: result.output };
+      return {
+        status: "succeeded",
+        callId,
+        output: result.output,
+        ...(result.replayed === true ? { replayed: true as const } : {}),
+      };
     case "awaiting_approval":
       return { status: "awaiting_approval", callId, approvalId: result.approvalId };
     case "awaiting_child":

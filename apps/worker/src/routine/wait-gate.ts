@@ -1,9 +1,12 @@
 import {
+  type ChildRunResult,
   type CompiledState,
   planApprovalWait,
+  planChildRoutineCall,
   planTimerWait,
   type RegisterWaitInput,
   resolveApproval,
+  resolveChildRun,
   resolveErrorPath,
   routineWaitId,
   type StateStatus,
@@ -12,6 +15,7 @@ import {
 } from "@tulipfarm/run-kernel";
 import type { PersistedRun, PersistedState, PersistedWait } from "@tulipfarm/storage";
 import type { RoutineApprovalPort } from "./approval-port";
+import type { ChildRoutinePort } from "./child-routine-port";
 import {
   type ChainOutcome,
   CLAIM_PATH,
@@ -42,6 +46,8 @@ export interface WaitGateContext {
   readonly waits: RoutineWaitPort;
   /** Absent means `approval` States park; Runs cannot pass unasked questions. */
   readonly approvals?: RoutineApprovalPort;
+  /** Absent means `child_routine` States park; a Routine cannot silently skip a call it authored. */
+  readonly childRoutines?: ChildRoutinePort;
   readonly now: () => Date;
   readonly transition: (
     key: string,
@@ -168,5 +174,82 @@ export async function resumeWait(
     return { kind: "failed" };
   }
   await ctx.park(key, `routine:${WAIT_TIMED_OUT}`);
+  return { kind: "needs_reconciliation" };
+}
+
+/**
+ * Calls the child Routine this State names, then parks on it — unless it is already over.
+ *
+ * The child Run is claimable the moment the API mints it, so it can reach a terminal status
+ * before the caller is parked. Parking then would be parking on a signal already raised, so a
+ * settled child is answered here instead.
+ */
+export async function openChildRoutine(
+  ctx: WaitGateContext,
+  state: CompiledState,
+  key: string,
+  scope: Readonly<Record<string, unknown>>
+): Promise<{ kind: "outcome"; outcome: StepOutcome } | { kind: ChainOutcome }> {
+  const port = ctx.childRoutines;
+  if (port === undefined) throw new RoutineExecutionRefusal("unsupported_state", state.name);
+
+  const call = planChildRoutineCall(state, scope);
+  const record = await port.start({
+    businessId: ctx.run.businessId,
+    runId: ctx.run.id,
+    stateKey: key,
+    stateName: state.name,
+    routineRef: call.routineRef,
+    mode: call.mode,
+    input: call.input,
+    ...(call.deadlineMs === null ? {} : { deadlineMs: call.deadlineMs }),
+  });
+
+  // A detached caller never learns its child's outcome; it continues once the child exists.
+  if (call.mode === "detach") return { kind: "outcome", outcome: stateOutcome(state) };
+  if (record.status !== "pending") return settleChildRoutine(ctx, state, key, record.status);
+
+  await ctx.transition(key, "running", "waiting");
+  return { kind: "waiting" };
+}
+
+/** A missing child for a parked State is reconciliation-only; nothing here invents an answer. */
+export async function resumeChildRoutine(
+  ctx: WaitGateContext,
+  state: CompiledState,
+  key: string,
+  row: PersistedState
+): Promise<{ kind: "outcome"; outcome: StepOutcome } | { kind: ChainOutcome }> {
+  const port = ctx.childRoutines;
+  if (port === undefined) return { kind: "needs_reconciliation" };
+
+  const record = await port.find({
+    businessId: ctx.run.businessId,
+    runId: ctx.run.id,
+    stateKey: key,
+  });
+  if (record === undefined) return { kind: "needs_reconciliation" };
+  if (record.status === "pending") return { kind: "waiting" };
+
+  await ctx.claim(key, row.status as StateStatus, CLAIM_PATH);
+  return settleChildRoutine(ctx, state, key, record.status);
+}
+
+/** Failed children take `child_failed`; cancelled and expired ones park, they are not failures. */
+async function settleChildRoutine(
+  ctx: WaitGateContext,
+  state: CompiledState,
+  key: string,
+  result: ChildRunResult
+): Promise<{ kind: "outcome"; outcome: StepOutcome } | { kind: ChainOutcome }> {
+  const decision = resolveChildRun(state, result);
+  if (decision.kind === "continue" || decision.kind === "handled") {
+    return { kind: "outcome", outcome: decision.outcome };
+  }
+  if (decision.kind === "failed") {
+    await ctx.transition(key, "running", "failed", `routine:${decision.errorRef}`);
+    return { kind: "failed" };
+  }
+  await ctx.park(key, `routine:${decision.errorRef}`);
   return { kind: "needs_reconciliation" };
 }

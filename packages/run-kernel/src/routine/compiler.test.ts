@@ -83,8 +83,10 @@ describe("compileRoutine", () => {
     const mappings = compiled.states.get("Label")?.inputs ?? [];
 
     expect(mappings.map((m) => m.name)).toEqual(["issue", "label"]);
-    expect(mappings[0]?.expression?.source).toBe(" input.issueId ");
-    expect(mappings[1]?.literal).toBe("bug");
+    const issueNode = mappings[0]?.node;
+    expect(issueNode?.kind === "expression" && issueNode.expression.source).toBe(" input.issueId ");
+    const labelNode = mappings[1]?.node;
+    expect(labelNode?.kind === "literal" && labelNode.value).toBe("bug");
   });
 
   it("registers one output schema reference per state that declares one", () => {

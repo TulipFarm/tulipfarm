@@ -1,6 +1,6 @@
 import { planSchedule, ScheduleError, scheduleSpecFromTrigger } from "@tulipfarm/run-kernel";
 import { definitions } from "@tulipfarm/schema";
-import type { RuntimeBundle } from "@tulipfarm/soul";
+import { bundleTriggerDefinitions, type RuntimeBundle } from "@tulipfarm/soul";
 import type { RoutineScheduleStateStore } from "./state-store";
 
 export interface ScheduleDispatcherLogger {
@@ -18,6 +18,25 @@ export interface ScheduleDispatcherDeps {
     /** The Trigger's authored background identity — the Run's effective subject. */
     readonly identity: { readonly kind: string; readonly id: string };
   }) => Promise<{ readonly runId: string; readonly outcome: "started" | "duplicate" }>;
+  /**
+   * Unfinished Runs of this Routine. `overlapPolicy` is only meaningful against a live count, and
+   * a dispatcher that cannot obtain one must not silently behave as `allow`.
+   */
+  readonly countActiveRuns: (input: {
+    readonly routineId: string;
+    readonly routineSlug: string;
+  }) => Promise<number>;
+  /**
+   * Stop the Runs a superseding occurrence replaces.
+   *
+   * `overlapPolicy: "supersede"` means the newest occurrence takes over from the running one.
+   * Without this the dispatcher starts the replacement and leaves the replaced Run going, which is
+   * `allow` wearing another name — and the author asked for one Run, not two.
+   */
+  readonly supersedeActiveRuns?: (input: {
+    readonly routineId: string;
+    readonly routineSlug: string;
+  }) => Promise<void>;
   readonly businessId: string;
   readonly now?: () => number;
   readonly log?: ScheduleDispatcherLogger;
@@ -32,7 +51,15 @@ export class ScheduleDispatcher {
   }
 
   async tick(): Promise<void> {
-    const { activeBundle, stateStore, startRoutine, businessId, log } = this.deps;
+    const {
+      activeBundle,
+      stateStore,
+      startRoutine,
+      countActiveRuns,
+      supersedeActiveRuns,
+      businessId,
+      log,
+    } = this.deps;
     const nowMs = this.now();
 
     const existingRows = await stateStore.listForBusiness(businessId);
@@ -44,8 +71,7 @@ export class ScheduleDispatcher {
     const bundle = await activeBundle();
     const triggerIndexByRoutine = new Map<string, number>();
 
-    for (const definition of bundle?.definitions ?? []) {
-      if (definition.kind !== "Trigger") continue;
+    for (const definition of bundleTriggerDefinitions(bundle)) {
       let trigger: definitions.trigger.TriggerDefinition;
       try {
         trigger = definitions.trigger.validateTriggerDefinition(definition.document).document;
@@ -66,11 +92,36 @@ export class ScheduleDispatcher {
       liveTriggers.push({ routineSlug: slug, triggerIndex });
       const existing = existingByKey.get(`${slug}:${triggerIndex}`);
 
+      // Runs pin `bundle.routineId`, not the slug, so counting this Routine's active Runs needs
+      // the published Routine's identity. A Trigger naming a Routine this publication does not
+      // carry could not start one either, so skip it rather than plan against an unknown target.
+      const routineId = bundle?.get("Routine", slug)?.id;
+      if (routineId === undefined) {
+        log?.warn(
+          `schedule dispatcher: trigger ${slug}:${triggerIndex} names no published Routine`
+        );
+        continue;
+      }
+
+      // An `interval` Trigger authored without `schedule.startAt` has no phase origin, and
+      // `planSchedule` refuses it. Anchor it once, on first sight, and persist that instant so
+      // every later tick enumerates from the same origin — recomputing it per tick would push the
+      // next occurrence forward forever and the Routine would never run.
+      const anchorMs =
+        spec.type === "interval" && spec.startAt === undefined
+          ? (existing?.anchorMs ?? nowMs)
+          : null;
+      const anchored =
+        anchorMs === null ? spec : { ...spec, startAt: new Date(anchorMs).toISOString() };
+
       let plan: ReturnType<typeof planSchedule>;
       try {
         plan = planSchedule(
-          spec,
-          { lastScheduledForMs: existing?.lastScheduledForMs ?? null, activeRuns: 0 },
+          anchored,
+          {
+            lastScheduledForMs: existing?.lastScheduledForMs ?? null,
+            activeRuns: await countActiveRuns({ routineId, routineSlug: slug }),
+          },
           nowMs
         );
       } catch (error) {
@@ -85,8 +136,19 @@ export class ScheduleDispatcher {
       // startRoutine failure would be recorded as delivered and, under the default 'skip'
       // missedRunPolicy, never reconsidered on a later tick.
       let lastScheduledForMs = existing?.lastScheduledForMs ?? null;
+      if (plan.skipped > 0) {
+        log?.warn(
+          `schedule dispatcher: ${slug}:${triggerIndex} skipped ${plan.skipped} occurrence(s) ` +
+            `under ${spec.overlapPolicy}/${spec.missedRunPolicy}`
+        );
+      }
       for (const fire of plan.fires) {
         try {
+          // Cancel before starting: the replacement must not run alongside what it replaces, and
+          // a failure here must stop the fire rather than produce the overlap `supersede` forbids.
+          if (fire.supersede && supersedeActiveRuns) {
+            await supersedeActiveRuns({ routineId, routineSlug: slug });
+          }
           await startRoutine({
             slug,
             idempotencyKey: fire.deduplicationKey,
@@ -108,6 +170,7 @@ export class ScheduleDispatcher {
         dedupKey: spec.deduplicationKey,
         lastScheduledForMs,
         nextDueAtMs: plan.nextDueAtMs,
+        anchorMs,
       });
     }
 

@@ -23,6 +23,7 @@ function state(overrides: Partial<PersistedState> = {}): PersistedState {
     finishedAt: null,
     resultArtifactId: null,
     errorEvidenceRef: null,
+    output: null,
     ...overrides,
   };
 }

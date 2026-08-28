@@ -36,6 +36,21 @@ describe("serializeDoc — text + marks", () => {
     expect(serializeDoc(mail).text).toBe("[me](mailto:a@b.test)");
   });
 
+  it("leaves an autolinked bare URL bare, so a second pass cannot wrap the wrapper", () => {
+    const url = "http://api.github.com/repos/tulipfarm/tulipfarm";
+    const doc = para(text(url, [{ type: "link", attrs: { href: url } }]));
+
+    // The editor autolinks a bare URL on sight. Emitting `[url](url)` would autolink again on the
+    // next round trip and serialize to `[[url](url](url))]`, which is what the participant saw.
+    expect(serializeDoc(doc).text).toBe(url);
+  });
+
+  it("still labels a link whose text is not its href", () => {
+    const doc = para(text("the repo", [{ type: "link", attrs: { href: "https://x.test" } }]));
+
+    expect(serializeDoc(doc).text).toBe("[the repo](https://x.test)");
+  });
+
   it("drops an unsafe link href, keeping the text unlinked", () => {
     const js = para(text("click", [{ type: "link", attrs: { href: "javascript:alert(1)" } }]));
     expect(serializeDoc(js).text).toBe("click");

@@ -153,6 +153,8 @@ export const MAX_RUN_PAGE_SIZE = 100;
 const RUN_STATUS_SQL =
   "'queued', 'claimed', 'running', 'waiting', 'succeeded', 'failed', " +
   "'cancelling', 'cancelled', 'attention_required', 'needs_reconciliation'";
+/** A Run in one of these has finished; anything else still holds the Routine's overlap slot. */
+const TERMINAL_RUN_STATUS_SQL = "'succeeded', 'failed', 'cancelled'";
 const STATE_STATUS_SQL =
   "'pending', 'ready', 'claimed', 'running', 'waiting', 'succeeded', 'failed', " +
   "'skipped', 'cancelling', 'cancelled', 'needs_reconciliation'";
@@ -218,6 +220,7 @@ export const RUN_STORAGE_STATEMENTS: readonly string[] = [
     finished_at           timestamptz,
     result_artifact_id    text,
     error_evidence_ref    text,
+    output                jsonb,
     PRIMARY KEY (business_id, run_id, state_key),
     FOREIGN KEY (business_id, run_id) REFERENCES runs(business_id, id)
   )`,
@@ -435,6 +438,52 @@ export class RunStore {
       const last = items.at(-1);
       const hasMore = result.rows.length > limit;
       return { items, nextCursor: hasMore && last ? encodeRunCursor(last) : null };
+    });
+  }
+
+  /**
+   * How many Runs of `routineId` have not reached a terminal status, so a scheduler can apply
+   * `overlapPolicy` before starting another. `cancelling` counts as active: its effects are still
+   * in flight, and treating it as finished would let a replacement start alongside the Run it
+   * replaces.
+   */
+  async countActiveByRoutine(input: {
+    readonly businessId: string;
+    readonly routineId: string;
+  }): Promise<number> {
+    return this.transactions.withTransaction(async (transaction) => {
+      const result = await transaction.query<{ active: string }>(
+        `SELECT COUNT(*)::text AS active
+           FROM runs
+          WHERE business_id = $1
+            AND bundle->>'routineId' = $2
+            AND status NOT IN (${TERMINAL_RUN_STATUS_SQL})`,
+        [input.businessId, input.routineId]
+      );
+      return Number(result.rows[0]?.active ?? 0);
+    });
+  }
+
+  /**
+   * The ids behind {@link countActiveByRoutine}, for `overlapPolicy: "supersede"` — which means
+   * the newest occurrence replaces the running one, so the dispatcher needs something to cancel.
+   * Oldest first, so a caller that stops partway leaves the newest Run standing.
+   */
+  async listActiveByRoutine(input: {
+    readonly businessId: string;
+    readonly routineId: string;
+  }): Promise<readonly string[]> {
+    return this.transactions.withTransaction(async (transaction) => {
+      const result = await transaction.query<{ id: string }>(
+        `SELECT id
+           FROM runs
+          WHERE business_id = $1
+            AND bundle->>'routineId' = $2
+            AND status NOT IN (${TERMINAL_RUN_STATUS_SQL})
+          ORDER BY created_at ASC`,
+        [input.businessId, input.routineId]
+      );
+      return result.rows.map((row) => row.id);
     });
   }
 

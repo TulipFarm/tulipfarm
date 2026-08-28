@@ -11,8 +11,8 @@ export interface LoopCheckpoint {
   readonly repairs: number;
   /**
    * The unfinished loop's own transcript — proposed Tool calls, their results, and the approved
-   * call still owed execution. Absent once the loop settles, so Tool arguments and outputs are
-   * not retained past the Turn that still needs them.
+   * call still owed execution. Absent once the loop settles for a reason a retry cannot fix, so
+   * Tool arguments and outputs are not retained past the Turn that could still use them.
    */
   readonly resume?: LoopResumeState;
 }

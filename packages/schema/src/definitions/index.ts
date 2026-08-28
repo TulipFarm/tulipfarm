@@ -17,7 +17,6 @@ import { ROUTINE_DEFINITION } from "./routine";
 import { SETTINGS_DEFINITION } from "./settings";
 import { SKILL_DEFINITION } from "./skill";
 import { TOOL_CONTRACT_DEFINITION } from "./tool";
-import { TRIGGER_DEFINITION } from "./trigger";
 
 export {
   AGENT_DEFINITION,
@@ -71,7 +70,6 @@ export const DEFINITION_REGISTRATIONS: readonly SchemaRegistration[] = [
   TOOL_CONTRACT_DEFINITION,
   MODEL_PROFILE_DEFINITION,
   ROUTINE_DEFINITION,
-  TRIGGER_DEFINITION,
   ROLE_DEFINITION,
   RESOURCE_DEFINITION,
   GUARDRAIL_DEFINITION,
@@ -92,7 +90,6 @@ export const DEFINITION_KINDS = [
   "ToolContract",
   "ModelProfile",
   "Routine",
-  "Trigger",
   "Role",
   "Resource",
   "Guardrail",
@@ -109,4 +106,5 @@ export type DefinitionKind = (typeof DEFINITION_KINDS)[number];
 
 export * as event from "./event";
 export * as routine from "./routine";
+export * as routineTriggers from "./routine-triggers";
 export * as trigger from "./trigger";

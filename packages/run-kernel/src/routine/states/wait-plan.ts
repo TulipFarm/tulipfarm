@@ -22,6 +22,12 @@ export interface StateWaitOptions {
   readonly aggregation?: WaitAggregation;
   readonly expectedSignals?: number;
   readonly quorum?: number | null;
+  /**
+   * Pins the signal contract when the signaller is another part of the runtime rather than a
+   * reader answering this State. `authorizeSignal` compares registration against delivery, so a
+   * wait whose signaller already names a fixed ref must register that ref, not a per-State one.
+   */
+  readonly schemaRef?: string;
 }
 
 /** A State's own output schema when it declared one, else a stable per-wait reference. */
@@ -29,7 +35,8 @@ export function waitSchemaRef(state: CompiledState, kind: PersistedWaitKind): st
   return state.outputSchemaRef ?? `wait:${kind}:${state.name}`;
 }
 
-function deadlineMsOf(state: CompiledState): number {
+/** A State's authored wall-clock bound. Waiting on something unbounded is refused, not defaulted. */
+export function deadlineMsOf(state: CompiledState): number {
   const value = state.definition.deadlineMs;
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
     throw new RoutineStepError("deadline_not_bounded", state.name);
@@ -53,7 +60,7 @@ export function planStateWait(
     stateKey: ctx.stateKey,
     kind: options.kind,
     aggregation: options.aggregation ?? "first",
-    schemaRef: waitSchemaRef(state, options.kind),
+    schemaRef: options.schemaRef ?? waitSchemaRef(state, options.kind),
     allowedPrincipals: options.principals,
     expectedSignals: options.expectedSignals ?? 1,
     quorum: options.quorum ?? null,

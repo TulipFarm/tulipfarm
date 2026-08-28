@@ -1,6 +1,6 @@
 ---
 title: Routine triggers
-description: Every way a routine can start (schedules, webhooks, and manual runs) with the settings each one accepts.
+description: Every way a routine can start (schedules, webhooks, events, and manual runs) with the settings each one accepts.
 ---
 
 A routine is an automation. A trigger is what starts it. This page lists every trigger a routine can
@@ -20,6 +20,8 @@ you want.
 | `interval` | A fixed amount of time has passed. | `everyMs`: the gap in milliseconds, at least 1. |
 | `cron` | A schedule matches. | `expression`, and optionally `timezone`. |
 | `webhook` | An outside system posts to your instance. | `provider`, and `verification`. |
+| `integration_event` | A connected integration reports something. | `provider`, and `matchEventType`. |
+| `internal_event` | Your instance reports something about itself. | `matchEventType`. |
 
 A routine can have more than one trigger. A nightly report that you also want to run on demand takes
 a `cron` trigger and a `manual` one.
@@ -96,12 +98,58 @@ request. Every `webhook` trigger must declare how to check the signature.
 | `missedRunPolicy` | `skip` |
 | `overlapPolicy` | `skip` |
 
+## Starting from an event
+
+An event trigger waits for something to happen rather than for a clock. It names the event in
+`matchEventType`, and it starts a run every time an event of that type is raised.
+
+| Setting | Required | What it is |
+| --- | --- | --- |
+| `matchEventType` | Yes | The event type to wait for. |
+| `matchEventVersion` | No | Only match this version of the event. |
+| `provider` | For `integration_event` | Which integration the event must come from. |
+| `filter` | No | An expression that must be true before the run starts. |
+
+### The events your instance raises
+
+`internal_event` triggers on what your own instance does. Every change to a record raises one:
+
+| Event type | Raised when |
+| --- | --- |
+| `resource.created` | A record is created. |
+| `resource.updated` | A record is changed. |
+| `resource.deleted` | A record is removed. |
+
+The event carries `resourceType`, `resourceId`, and the `record` itself.
+
+### Narrowing with a filter
+
+Without a filter, a `resource.created` trigger starts a run for **every** record of **every** type.
+A filter cuts that down. Write it against `trigger.payload`:
+
+```yaml
+type: internal_event
+matchEventType: resource.created
+filter: "trigger.payload.resourceType == 'ticket'"
+```
+
+An `integration_event` filter reads the provider's own payload the same way:
+
+```yaml
+type: integration_event
+provider: github
+matchEventType: issues.opened
+filter: "trigger.payload.payload.repository.name == 'tulipfarm'"
+```
+
+If the filter is false, no run starts. If more than one trigger matches the same event, the most
+specific one wins.
+
 ## Not wired up yet
 
 <Callout type="warn">
-  Three more trigger types exist in the configuration format but **nothing starts a routine from
-  them yet**: `form`, `integration_event`, and `internal_event`. A routine using one will save
-  without complaint and then never run. Use `webhook` or `manual` instead until they ship.
+  One more trigger type exists in the configuration format but **nothing starts a routine from it
+  yet**: `form`. A routine using it will save without complaint and then never run.
 </Callout>
 
 <Cards>

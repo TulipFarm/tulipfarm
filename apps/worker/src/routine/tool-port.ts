@@ -28,8 +28,14 @@ import { GITHUB_INSTALLATION_SECRET_REF, githubInstallationSecretRef } from "./g
 /** Routine Tool authority: pinned bundle only; authorize, reserve, then dispatch fail-closed. */
 
 export type RoutineToolOutcome =
-  /** Dispatched and confirmed, or recognized as an effect this Run already confirmed. */
-  | { readonly kind: "succeeded" }
+  /**
+   * Dispatched and confirmed, or recognized as an effect this Run already confirmed.
+   *
+   * `output` is `null` for a `tool` State: the Broker settles a ToolContract as a durable *effect*
+   * in the ledger, and a replayed Run reads back only that the effect was confirmed, never what the
+   * provider returned. A State that needs the provider's data uses an `action` State instead.
+   */
+  | { readonly kind: "succeeded"; readonly output: unknown }
   /**
    * A definitive negative the authored `onError` path may claim, named by its reason code.
    *
@@ -133,7 +139,7 @@ function targetsOf(catalog: ToolCatalog, request: RoutineToolRequest): readonly 
 function replayed(state: string): RoutineToolOutcome {
   switch (state) {
     case "confirmed":
-      return { kind: "succeeded" };
+      return { kind: "succeeded", output: null };
     case "denied":
       return { kind: "failed", reason: "effect_denied" };
     case "failed":
@@ -230,7 +236,7 @@ export class BrokerRoutineToolPort implements RoutineToolPort {
     });
     try {
       await dispatcher.dispatch(request.businessId, request.plan.effectId);
-      return { kind: "succeeded" };
+      return { kind: "succeeded", output: null };
     } catch (error) {
       if (!(error instanceof ToolDispatchError)) throw error;
       // Provider write may have landed; park `ambiguous` for reconciliation, never retry here.

@@ -69,7 +69,7 @@ describe("ingestWebhook — accepted delivery", () => {
       deps({ sink: { accept }, vault: { store } })
     );
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       status: 202,
       outcome: "accepted",
       eventId: "event-1",
@@ -78,6 +78,8 @@ describe("ingestWebhook — accepted delivery", () => {
     expect(order).toEqual(["vault", "persist"]);
 
     const envelope = accept.mock.calls[0]?.[0];
+    // The route binds the Trigger from the returned envelope, so it must be the persisted one.
+    expect(result.status === 202 && result.envelope).toBe(envelope);
     expect(envelope).toMatchObject({
       eventId: "event-1",
       type: "github.issues.opened",

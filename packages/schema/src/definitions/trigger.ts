@@ -4,6 +4,7 @@ import {
   DEFINITION_API_VERSION,
   definitionMetadataSchema,
   definitionRegistration,
+  SLUG_PATTERN,
   secretReferenceSchema,
 } from "./common";
 
@@ -89,7 +90,6 @@ const schedulePolicy = Type.Object(
 );
 
 const sharedSpecProps = {
-  routineRef: definitionRef,
   eventType: nonEmptyString,
   eventVersion: positiveInteger,
   filter: Type.Optional(nonEmptyString),
@@ -103,7 +103,10 @@ const sharedSpecProps = {
   ),
   deduplication: Type.Object(
     {
-      key: nonEmptyString,
+      // Static text only. Nothing interpolates this key, and the scheduler already appends each
+      // occurrence's own timestamp, so an authored `${...}` survives verbatim into the dedup
+      // identity — collapsing every fire onto one key that reads like it varies.
+      key: Type.String({ minLength: 1, pattern: "^[^$]*$" }),
       windowMs: Type.Optional(positiveInteger),
     },
     { additionalProperties: false }
@@ -131,70 +134,113 @@ const sharedSpecProps = {
   ),
 } satisfies Record<string, TSchema>;
 
-function variant<
-  const VariantType extends TriggerType,
-  const ExtraProps extends Record<string, TSchema>,
->(type: VariantType, extraProps: ExtraProps) {
-  return Type.Object(
-    {
-      type: Type.Unsafe<VariantType>({ const: type }),
-      ...sharedSpecProps,
-      ...extraProps,
-    },
-    { additionalProperties: false }
-  );
-}
+/**
+ * How a Trigger names the Routine it starts.
+ *
+ * A Trigger authored inside `Routine.spec.triggers` is owned by the document that contains it, so
+ * containment already answers "which Routine?" and it carries a `name` instead. The standalone
+ * shape is what `routineTriggers` projects that back into, for the scheduler and the webhook and
+ * invoke routes, which address one Trigger without knowing what contains it — so `routineRef` is
+ * derived there, never authored, and can never dangle.
+ */
+const OWNERSHIP = {
+  embedded: { name: Type.String({ pattern: SLUG_PATTERN, maxLength: 128 }) },
+  standalone: { routineRef: definitionRef },
+} satisfies Record<string, Record<string, TSchema>>;
 
-const specVariants = [
-  variant("manual", {}),
-  variant("internal_api", {}),
-  variant("datetime", {
-    at: Type.String({ pattern: ISO_DATE_TIME }),
-    schedule: Type.Optional(schedulePolicy),
-  }),
-  variant("interval", {
-    everyMs: positiveInteger,
-    schedule: Type.Optional(schedulePolicy),
-  }),
-  variant("cron", {
-    expression: nonEmptyString,
-    timezone: Type.Optional(nonEmptyString),
-    schedule: Type.Optional(schedulePolicy),
-  }),
-  variant("webhook", {
-    provider: nonEmptyString,
-    verification: Type.Object(
+function variantsFor<const Ownership extends Record<string, TSchema>>(ownership: Ownership) {
+  function variant<
+    const VariantType extends TriggerType,
+    const ExtraProps extends Record<string, TSchema>,
+  >(type: VariantType, extraProps: ExtraProps) {
+    return Type.Object(
       {
-        method: Type.Unsafe<(typeof WEBHOOK_VERIFICATION_METHODS)[number]>({
-          type: "string",
-          enum: [...WEBHOOK_VERIFICATION_METHODS],
-        }),
-        secretRef: secretReferenceSchema,
-        signatureHeader: nonEmptyString,
-        signingTemplate: Type.Optional(nonEmptyString),
-        signatureFormat: Type.Optional(nonEmptyString),
-        timestampHeader: Type.Optional(nonEmptyString),
-        toleranceMs: Type.Optional(positiveInteger),
+        type: Type.Unsafe<VariantType>({ const: type }),
+        ...ownership,
+        ...sharedSpecProps,
+        ...extraProps,
       },
       { additionalProperties: false }
-    ),
-  }),
-  variant("integration_event", {
-    provider: nonEmptyString,
-    matchEventType: nonEmptyString,
-    matchEventVersion: Type.Optional(positiveInteger),
-  }),
-  variant("form", { formRef: nonEmptyString }),
-  variant("internal_event", {
-    matchEventType: nonEmptyString,
-    matchEventVersion: Type.Optional(positiveInteger),
-  }),
-] as const;
+    );
+  }
+
+  return [
+    variant("manual", {}),
+    variant("internal_api", {}),
+    variant("datetime", {
+      at: Type.String({ pattern: ISO_DATE_TIME }),
+      schedule: Type.Optional(schedulePolicy),
+    }),
+    variant("interval", {
+      everyMs: positiveInteger,
+      schedule: Type.Optional(schedulePolicy),
+    }),
+    variant("cron", {
+      expression: nonEmptyString,
+      timezone: Type.Optional(nonEmptyString),
+      schedule: Type.Optional(schedulePolicy),
+    }),
+    variant("webhook", {
+      provider: nonEmptyString,
+      verification: Type.Object(
+        {
+          method: Type.Unsafe<(typeof WEBHOOK_VERIFICATION_METHODS)[number]>({
+            type: "string",
+            enum: [...WEBHOOK_VERIFICATION_METHODS],
+          }),
+          secretRef: secretReferenceSchema,
+          signatureHeader: nonEmptyString,
+          signingTemplate: Type.Optional(nonEmptyString),
+          signatureFormat: Type.Optional(nonEmptyString),
+          timestampHeader: Type.Optional(nonEmptyString),
+          toleranceMs: Type.Optional(positiveInteger),
+        },
+        { additionalProperties: false }
+      ),
+    }),
+    variant("integration_event", {
+      provider: nonEmptyString,
+      matchEventType: nonEmptyString,
+      matchEventVersion: Type.Optional(positiveInteger),
+    }),
+    variant("form", { formRef: nonEmptyString }),
+    variant("internal_event", {
+      matchEventType: nonEmptyString,
+      matchEventVersion: Type.Optional(positiveInteger),
+    }),
+  ] as const;
+}
+
+const specVariants = variantsFor(OWNERSHIP.standalone);
+const embeddedVariants = variantsFor(OWNERSHIP.embedded);
+
+/**
+ * One Trigger as authored inside `Routine.spec.triggers`.
+ *
+ * `name` is the Trigger's address: it is the `:trigger` segment of the webhook URL
+ * `/api/v1/hooks/:provider/:trigger` and the `:slug` of `/api/v1/triggers/:slug/invoke`. Those
+ * URLs are handed to third parties, so the name is unique across the whole Soul, not merely
+ * within its Routine — `assertUniqueTriggerNames` is what enforces that at publish time.
+ */
+export const EmbeddedTriggerSchema = Type.Unsafe<Static<(typeof embeddedVariants)[number]>>({
+  oneOf: embeddedVariants,
+});
+
+export type EmbeddedTrigger = Static<typeof EmbeddedTriggerSchema>;
 
 const specSchema = Type.Unsafe<Static<(typeof specVariants)[number]>>({
   oneOf: specVariants,
 });
 
+/**
+ * The flat, standalone Trigger document.
+ *
+ * This is no longer an *authored* shape — a Trigger is written inside `Routine.spec.triggers`, and
+ * no `triggers/<slug>/trigger.yaml` tree exists any more. It survives as the *projected* shape the
+ * scheduler, the webhook resolver and the invoke route consume, because each of them addresses one
+ * Trigger on its own and has no reason to know which Routine contains it. `routineTriggers`
+ * produces it; nothing should validate an authored document against it.
+ */
 export const TriggerDefinitionSchema = Type.Object(
   {
     apiVersion: Type.Unsafe<typeof apiVersion>({ const: apiVersion }),

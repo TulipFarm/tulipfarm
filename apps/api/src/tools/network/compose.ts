@@ -98,7 +98,17 @@ export function composeNetworkTools(deps: NetworkToolingDeps): readonly ToolDef[
       assertSkillDestination: (destination) => {
         if (context.activeSkillName === undefined) return;
         const skill = deps.soulLoader.skills.get(context.activeSkillName);
-        const domains = declaredStringList(skill?.frontmatter.allowedDomains);
+        // An active Skill that cannot be resolved is denied: its declarations are unreadable, so
+        // there is nothing to intersect against and no safe reading of what it meant to permit.
+        if (skill === undefined) {
+          throw new Error("The active Skill does not declare this destination");
+        }
+        // `allowedDomains` confines a Skill that opts into it; it does not conjure an empty
+        // allowlist for one that never mentioned the network. Reading absence as deny-all made
+        // loading any unrelated Skill silently revoke the Agent's ability to read a public URL.
+        // Credentialed calls stay fail-closed regardless — see `skillAllows`.
+        const domains = declaredStringList(skill.frontmatter.allowedDomains);
+        if (domains.length === 0) return;
         if (!domains.includes(normalizedPublicUrl(destination).host)) {
           throw new Error("The active Skill does not declare this destination");
         }

@@ -50,6 +50,7 @@ const STATE: PersistedState = {
   finishedAt: null,
   resultArtifactId: null,
   errorEvidenceRef: null,
+  output: null,
 };
 
 const CONTEXT: ResolvedTurnContext = {

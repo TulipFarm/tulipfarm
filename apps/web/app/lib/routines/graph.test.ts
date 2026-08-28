@@ -106,6 +106,36 @@ describe("projectRoutineGraph", () => {
     ]);
   });
 
+  it("names a compute State by the fields it assigns, since it has no ref to show", () => {
+    const graph = projectRoutineGraph({
+      ...definition,
+      spec: {
+        ...definition.spec,
+        start: "Derive",
+        states: [
+          {
+            type: "compute",
+            name: "Derive",
+            input: { label: "need-triage", issue: "${ input.issueId }" },
+            end: true,
+          },
+        ] as unknown as routine.RoutineDefinition["spec"]["states"],
+      },
+    });
+
+    expect(graph.nodes.find((node) => node.id === "state:Derive")).toMatchObject({
+      stateType: "compute",
+      actions: [{ name: "compute", function: "compute", arguments: ["issue", "label"] }],
+    });
+    expect(graph.edges).toContainEqual({
+      id: "end:Derive",
+      source: "state:Derive",
+      target: "end",
+      kind: "end",
+      label: "End",
+    });
+  });
+
   it("reaches a contained body State that no transition names", () => {
     const graph = projectRoutineGraph(
       {

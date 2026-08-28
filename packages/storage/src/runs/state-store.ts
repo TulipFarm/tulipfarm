@@ -45,6 +45,15 @@ export interface PersistedState {
   readonly finishedAt: string | null;
   readonly resultArtifactId: string | null;
   readonly errorEvidenceRef: string | null;
+  /**
+   * What the settled State published, for States whose result cannot be recomputed.
+   *
+   * A replayed Run rebuilds `states.*` by walking the chain again, so a pure `compute` State can
+   * re-derive its own value from the scope. An `agent`, `action` or `script` State cannot: its
+   * result came from a model, a provider or an isolate, and re-running it is either impossible or
+   * a second side effect. Those States record the value here instead.
+   */
+  readonly output: unknown;
 }
 
 export interface StateTransitionInput {
@@ -55,6 +64,8 @@ export interface StateTransitionInput {
   readonly finishedAt?: string;
   readonly resultArtifactId?: string;
   readonly errorEvidenceRef?: string;
+  /** Wrapped so an output of `null` stays distinguishable from "this transition sets none". */
+  readonly output?: { readonly value: unknown };
 }
 
 interface StateRow {
@@ -70,6 +81,7 @@ interface StateRow {
   finished_at: string | Date | null;
   result_artifact_id: string | null;
   error_evidence_ref: string | null;
+  output: unknown;
 }
 
 function persistedState(row: StateRow): PersistedState {
@@ -86,11 +98,12 @@ function persistedState(row: StateRow): PersistedState {
     finishedAt: optionalTimestamp(row.finished_at),
     resultArtifactId: row.result_artifact_id,
     errorEvidenceRef: row.error_evidence_ref,
+    output: row.output ?? null,
   };
 }
 
 const STATE_COLUMNS = `business_id, run_id, state_key, definition_ref, resolved_input, status,
-  version, created_at, started_at, finished_at, result_artifact_id, error_evidence_ref`;
+  version, created_at, started_at, finished_at, result_artifact_id, error_evidence_ref, output`;
 
 /** Inserts one scheduled State row within the enclosing Run's `start` transaction. */
 export async function insertStateRow(
@@ -204,7 +217,8 @@ export async function transitionStateRow(
             started_at = COALESCE($7::timestamptz, started_at),
             finished_at = COALESCE($8::timestamptz, finished_at),
             result_artifact_id = COALESCE($9, result_artifact_id),
-            error_evidence_ref = COALESCE($10, error_evidence_ref)
+            error_evidence_ref = COALESCE($10, error_evidence_ref),
+            output = COALESCE($11::jsonb, output)
       WHERE business_id = $1
         AND run_id = $2
         AND state_key = $3
@@ -222,6 +236,7 @@ export async function transitionStateRow(
       transition.finishedAt ?? null,
       transition.resultArtifactId ?? null,
       transition.errorEvidenceRef ?? null,
+      transition.output === undefined ? null : JSON.stringify(transition.output.value ?? null),
     ]
   );
   return result.rows.length === 1;

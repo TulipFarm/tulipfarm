@@ -30,4 +30,9 @@ export type {
 } from "./profile";
 export { checkModelProfile, selectModelProfile } from "./profile";
 export type { ModelRequirementsPolicy } from "./requirements";
-export { deriveModelRequirements, estimateContextTokens } from "./requirements";
+export {
+  charsForTokens,
+  deriveModelRequirements,
+  estimateContextTokens,
+  estimateTokens,
+} from "./requirements";

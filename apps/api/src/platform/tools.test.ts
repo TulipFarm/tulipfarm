@@ -469,19 +469,6 @@ describe("skillTool reading a Skill file", () => {
       soulWriter: makeSoulWriter(),
       bundledSkills: bundled,
     };
-    const examples = await skillTool.handler(
-      { name: "routine-forge", file: "references/examples.md" },
-      ctx
-    );
-    expect(examples).toMatchObject({
-      success: true,
-      data: {
-        name: "routine-forge",
-        file: "references/examples.md",
-        content: expect.stringContaining("Routine & Trigger Canonical Examples"),
-      },
-    });
-
     const canonicalExamples = await skillTool.handler(
       { name: "routine-forge", file: "references/canonical-examples.md" },
       ctx
@@ -494,6 +481,22 @@ describe("skillTool reading a Skill file", () => {
         content: expect.stringContaining("Routine & Trigger Canonical Examples"),
       },
     });
+  });
+
+  it("refuses to serve a Skill's own definition back, naming the body it already sent", async () => {
+    const { loadBundledSkills } = await import("@tulipfarm/soul");
+    const bundled = await loadBundledSkills({ info() {}, warn() {}, error() {} });
+    const ctx: PlatformToolContext = {
+      soulWriter: makeSoulWriter(),
+      bundledSkills: bundled,
+    };
+    for (const file of ["SKILL.md", "./SKILL.md", "skill.md"]) {
+      const refused = await skillTool.handler({ name: "routine-forge", file }, ctx);
+      expect(refused).toMatchObject({
+        success: false,
+        error: { code: "validation_error", message: expect.stringContaining("body") },
+      });
+    }
   });
 });
 

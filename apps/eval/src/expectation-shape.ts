@@ -45,6 +45,10 @@ const EXPECTATION_FIELDS: Record<string, readonly [string, FieldType][]> = {
     ["name", "string"],
     ["path", "string"],
   ],
+  tool_argument_absent: [
+    ["name", "string"],
+    ["path", "string"],
+  ],
   output_contains: [["text", "string"]],
   output_matches: [["pattern", "string"]],
   output_omits: [["text", "string"]],

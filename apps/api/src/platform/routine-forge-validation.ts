@@ -3,7 +3,6 @@ import { definitions, SchemaValidationError } from "@tulipfarm/schema";
 export interface RoutineForgeValidationInput {
   readonly name: string;
   readonly definition: Record<string, unknown>;
-  readonly triggers: readonly Record<string, unknown>[];
 }
 
 export type RoutineForgeValidationResult =
@@ -14,11 +13,6 @@ export type RoutineForgeValidationResult =
     }
   | { readonly ok: false; readonly message: string };
 
-interface IndexedTrigger {
-  readonly index: number;
-  readonly document: definitions.trigger.TriggerDefinition;
-}
-
 function schemaIssues(label: string, error: unknown): string[] {
   if (error instanceof SchemaValidationError) {
     return error.issues.map((issue) => `${label} ${issue.path || "/"}: ${issue.message}`);
@@ -28,39 +22,27 @@ function schemaIssues(label: string, error: unknown): string[] {
 
 function consistencyIssues(
   name: string,
-  routine: definitions.routine.RoutineDefinition | undefined,
-  triggers: readonly IndexedTrigger[]
+  routine: definitions.routine.RoutineDefinition | undefined
 ): string[] {
   const issues: string[] = [];
-  if (routine?.metadata.slug !== undefined && routine.metadata.slug !== name) {
+  if (routine === undefined) return issues;
+  if (routine.metadata.slug !== name) {
     issues.push("Routine definition /metadata/slug: must match the Tool name");
   }
-  if (routine?.metadata.lifecycle !== undefined && routine.metadata.lifecycle !== "published") {
+  if (routine.metadata.lifecycle !== "published") {
     issues.push("Routine definition /metadata/lifecycle: must be published");
   }
 
-  const slugs = new Set<string>();
-  for (const trigger of triggers) {
-    const { document, index } = trigger;
-    if (slugs.has(document.metadata.slug)) {
-      issues.push(`Trigger triggers[${index}] /metadata/slug: must be unique`);
+  // A Trigger name is a public address, so two Triggers sharing one inside a single Routine would
+  // make delivery depend on array order. Collisions *across* Routines are caught by the caller,
+  // which is the only layer that can see the rest of the Soul.
+  const seen = new Set<string>();
+  (routine.spec.triggers ?? []).forEach((trigger, index) => {
+    if (seen.has(trigger.name)) {
+      issues.push(`Routine definition /spec/triggers/${index}/name: must be unique`);
     }
-    slugs.add(document.metadata.slug);
-    if (document.metadata.lifecycle !== "published") {
-      issues.push(`Trigger triggers[${index}] /metadata/lifecycle: must be published`);
-    }
-    if (document.spec.routineRef.name !== name) {
-      issues.push(`Trigger triggers[${index}] /spec/routineRef/name: must match the Tool name`);
-    }
-    if (
-      routine !== undefined &&
-      document.spec.routineRef.version !== String(routine.metadata.authoredVersion)
-    ) {
-      issues.push(
-        `Trigger triggers[${index}] /spec/routineRef/version: must match the Routine authored version`
-      );
-    }
-  }
+    seen.add(trigger.name);
+  });
   return issues;
 }
 
@@ -68,7 +50,6 @@ export function validateRoutineForgeDefinitions(
   input: RoutineForgeValidationInput
 ): RoutineForgeValidationResult {
   let routine: definitions.routine.RoutineDefinition | undefined;
-  const triggers: IndexedTrigger[] = [];
   const issues: string[] = [];
 
   try {
@@ -76,17 +57,7 @@ export function validateRoutineForgeDefinitions(
   } catch (error) {
     issues.push(...schemaIssues("Routine definition", error));
   }
-  for (const [index, trigger] of input.triggers.entries()) {
-    try {
-      triggers.push({
-        index,
-        document: definitions.trigger.validateTriggerDefinition(trigger).document,
-      });
-    } catch (error) {
-      issues.push(...schemaIssues(`Trigger triggers[${index}]`, error));
-    }
-  }
-  issues.push(...consistencyIssues(input.name, routine, triggers));
+  issues.push(...consistencyIssues(input.name, routine));
 
   if (issues.length > 0) {
     return {
@@ -94,8 +65,12 @@ export function validateRoutineForgeDefinitions(
       message: `Canonical definition validation failed:\n- ${issues.join("\n- ")}`,
     };
   }
-  if (routine === undefined || triggers.length !== input.triggers.length) {
+  if (routine === undefined) {
     return { ok: false, message: "Canonical definition validation failed." };
   }
-  return { ok: true, routine, triggers: triggers.map((trigger) => trigger.document) };
+  return {
+    ok: true,
+    routine,
+    triggers: definitions.routineTriggers.routineTriggerDocuments(routine),
+  };
 }

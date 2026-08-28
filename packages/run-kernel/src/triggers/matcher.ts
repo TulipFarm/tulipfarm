@@ -1,4 +1,9 @@
 import type { event as eventSchema } from "@tulipfarm/schema";
+import {
+  type CompiledExpression,
+  compileExpression,
+  evaluateCondition,
+} from "../routine/expressions";
 
 /**
  * Trigger matching requires exact type, version, and predicates; equally specific matches are
@@ -33,6 +38,11 @@ export interface RegisteredTrigger {
   readonly provider?: string;
   readonly formRef?: string;
   readonly match?: readonly TriggerPredicate[];
+  /**
+   * Authored narrowing expression, evaluated against `{ trigger: { payload, type, provider } }`.
+   * A Trigger whose expression does not compile never reaches here — the resolver drops it.
+   */
+  readonly filter?: string;
   readonly routineRef: { readonly name: string; readonly version: string };
   readonly backgroundIdentity: {
     readonly principalKind: string;
@@ -58,6 +68,69 @@ export function dotPath(data: unknown, path: string): unknown {
   return cursor;
 }
 
+/**
+ * The only scope an authored Trigger filter can read. Deliberately narrower than a Routine's:
+ * a Trigger is matched before any Run exists, so there is no `input` or `states` to reference.
+ */
+export const TRIGGER_FILTER_ROOTS = ["trigger"] as const;
+
+const filterCache = new Map<string, CompiledExpression>();
+
+/** Compile an authored Trigger filter. Throws `ExpressionError` so a resolver can fail closed. */
+export function compileTriggerFilter(source: string): CompiledExpression {
+  const cached = filterCache.get(source);
+  if (cached !== undefined) return cached;
+  const compiled = compileExpression(source, { roots: TRIGGER_FILTER_ROOTS });
+  filterCache.set(source, compiled);
+  return compiled;
+}
+
+function triggerFilterScope(
+  envelope: eventSchema.EventEnvelope<Record<string, unknown>>
+): Readonly<Record<string, unknown>> {
+  return {
+    trigger: {
+      payload: envelope.data,
+      type: envelope.type,
+      version: envelope.version,
+      provider: envelope.source.provider,
+    },
+  };
+}
+
+function passesFilter(
+  trigger: RegisteredTrigger,
+  envelope: eventSchema.EventEnvelope<Record<string, unknown>>
+): boolean {
+  if (trigger.filter === undefined) return true;
+  try {
+    return evaluateCondition(compileTriggerFilter(trigger.filter), triggerFilterScope(envelope));
+  } catch {
+    // A filter that cannot be evaluated must never widen the match. Compilation faults are caught
+    // at resolve time; this guards only evaluation faults, which depend on the event's own shape.
+    return false;
+  }
+}
+
+/**
+ * Whether an event clears a Trigger's authored content gate — its `filter` and `match`.
+ *
+ * Identity is deliberately not re-checked. A webhook Trigger is selected by its own URL rather
+ * than by matching, so the route has already established *which* Trigger this is; what it has not
+ * established is whether the author wanted *this* event. Without this the authored `filter` on a
+ * webhook Trigger is accepted at authoring time and then never consulted, which reads to the
+ * author as a filter that silently passes everything.
+ */
+export function passesTriggerContentGate(
+  trigger: RegisteredTrigger,
+  envelope: eventSchema.EventEnvelope<Record<string, unknown>>
+): boolean {
+  if (!passesFilter(trigger, envelope)) return false;
+  return (trigger.match ?? []).every(
+    (predicate) => dotPath(envelope.data, predicate.path) === predicate.equals
+  );
+}
+
 function satisfies(
   trigger: RegisteredTrigger,
   envelope: eventSchema.EventEnvelope<Record<string, unknown>>
@@ -69,16 +142,15 @@ function satisfies(
   if (trigger.formRef !== undefined && dotPath(envelope.data, "formRef") !== trigger.formRef) {
     return false;
   }
-  return (trigger.match ?? []).every(
-    (predicate) => dotPath(envelope.data, predicate.path) === predicate.equals
-  );
+  return passesTriggerContentGate(trigger, envelope);
 }
 
 function specificity(trigger: RegisteredTrigger): number {
   return (
     (trigger.match?.length ?? 0) +
     (trigger.provider === undefined ? 0 : 1) +
-    (trigger.formRef === undefined ? 0 : 1)
+    (trigger.formRef === undefined ? 0 : 1) +
+    (trigger.filter === undefined ? 0 : 1)
   );
 }
 

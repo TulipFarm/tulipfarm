@@ -83,11 +83,13 @@ export {
 export {
   agentAuthorityLayer,
   CHAT_DLP_RULES,
+  exceedsRiskCeiling,
   GUARDRAILS_DECIDED_ELSEWHERE,
   gateAutonomyOf,
   LiveToolGate,
   type ToolGate,
   type ToolGateAgent,
+  type ToolGatePermissionCeiling,
   type ToolGateRequest,
 } from "./gate";
 export {

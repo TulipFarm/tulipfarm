@@ -72,7 +72,7 @@ export class ResourceSideEffectDispatcher {
   constructor(
     private readonly outbox: ResourceSideEffectOutbox,
     private readonly owner: string,
-    private readonly deliver: (effect: ResourceSideEffect) => Promise<void>,
+    private readonly deliver: (effect: ResourceSideEffect, id: string) => Promise<void>,
     private readonly batchSize = 25,
     private readonly leaseMs = 60_000,
     private readonly maxAttempts = 10
@@ -80,7 +80,7 @@ export class ResourceSideEffectDispatcher {
   async dispatchBatch(): Promise<void> {
     for (const message of await this.outbox.claim(this.owner, this.batchSize, this.leaseMs)) {
       try {
-        await this.deliver(message.effect);
+        await this.deliver(message.effect, message.id);
         await this.outbox.complete(message.id, this.owner);
       } catch {
         await this.outbox.fail(message.id, this.owner, this.maxAttempts);

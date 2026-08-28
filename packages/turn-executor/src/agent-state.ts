@@ -23,6 +23,8 @@ export interface StateTransitionPort {
     from: StateStatus;
     to: StateStatus;
     reason?: string;
+    /** Wrapped so an output of `null` stays distinguishable from "this transition sets none". */
+    output?: { value: unknown };
   }): Promise<void>;
 }
 

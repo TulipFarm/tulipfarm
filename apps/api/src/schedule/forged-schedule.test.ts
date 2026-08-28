@@ -28,7 +28,7 @@ import {
   SoulWriter,
   scaffoldSoul,
 } from "@tulipfarm/soul";
-import { ArtifactStore, PgSoulPublicationStore } from "@tulipfarm/storage";
+import { ArtifactStore, PgSoulPublicationStore, RunStore } from "@tulipfarm/storage";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ambientTransactionPort, type Queryable, transactionPort } from "../db";
 import { routineForgeTool } from "../platform/tools";
@@ -66,25 +66,19 @@ const ROUTINE = {
 };
 
 const TRIGGER = {
-  apiVersion: "tulipfarm.ai/v1",
-  kind: "Trigger",
-  metadata: {
-    id: "22222222-2222-4222-8222-222222222222",
-    slug: "qa-task-once-at",
-    schemaVersion: 1,
-    authoredVersion: 1,
-    lifecycle: "published",
-  },
-  spec: {
-    type: "datetime",
-    at: FIRE_AT,
-    routineRef: { name: "qa-task-once", version: "1" },
-    eventType: "routine.scheduled",
-    eventVersion: 1,
-    backgroundIdentity: { principalKind: "service", principalId: "routine-runner" },
-    deduplication: { key: "qa-task-once-at" },
-  },
+  name: "qa-task-once-at",
+  type: "datetime",
+  at: FIRE_AT,
+  eventType: "routine.scheduled",
+  eventVersion: 1,
+  backgroundIdentity: { principalKind: "service", principalId: "routine-runner" },
+  deduplication: { key: "qa-task-once-at" },
 };
+
+/** The canonical Routine, carrying the Triggers it owns. */
+function routineWithTriggers(...triggers: Record<string, unknown>[]) {
+  return { ...ROUTINE, spec: { ...ROUTINE.spec, triggers } };
+}
 
 const commitSigner: CommitSigner = {
   keyId: "test-key",
@@ -179,7 +173,7 @@ describe("routine_forge → publication → schedule dispatch", () => {
 
   it("fires the one-off Routine once its instant passes", async () => {
     const forged = await routineForgeTool.handler(
-      { name: "qa-task-once", definition: ROUTINE, triggers: [TRIGGER] },
+      { name: "qa-task-once", definition: routineWithTriggers(TRIGGER) },
       { soulWriter: writer, routineCatalog: catalog }
     );
     expect(forged).toMatchObject({ success: true, data: { committed: true } });
@@ -190,6 +184,7 @@ describe("routine_forge → publication → schedule dispatch", () => {
       activeBundle: () => coordinator.activeBundle(DEPLOYMENT_BUSINESS_ID, bundleVerifier),
       stateStore: fakeStateStore(),
       startRoutine: scheduledRoutineTrigger(invocations),
+      countActiveRuns,
       businessId: DEPLOYMENT_BUSINESS_ID,
       now: () => nowMs,
       log: {
@@ -211,23 +206,15 @@ describe("routine_forge → publication → schedule dispatch", () => {
 
   it("fires the datetime Trigger even when a manual Trigger shares the Routine", async () => {
     const manual = {
-      ...TRIGGER,
-      metadata: {
-        ...TRIGGER.metadata,
-        id: "33333333-3333-4333-8333-333333333333",
-        slug: "a-qa-task-once-manual",
-      },
-      spec: {
-        type: "manual",
-        routineRef: { name: "qa-task-once", version: "1" },
-        eventType: "routine.manual",
-        eventVersion: 1,
-        backgroundIdentity: { principalKind: "service", principalId: "routine-runner" },
-        deduplication: { key: "a-qa-task-once-manual" },
-      },
+      name: "a-qa-task-once-manual",
+      type: "manual",
+      eventType: "routine.manual",
+      eventVersion: 1,
+      backgroundIdentity: { principalKind: "service", principalId: "routine-runner" },
+      deduplication: { key: "a-qa-task-once-manual" },
     };
     const forged = await routineForgeTool.handler(
-      { name: "qa-task-once", definition: ROUTINE, triggers: [manual, TRIGGER] },
+      { name: "qa-task-once", definition: routineWithTriggers(manual, TRIGGER) },
       { soulWriter: writer, routineCatalog: catalog }
     );
     expect(forged).toMatchObject({ success: true });
@@ -238,6 +225,7 @@ describe("routine_forge → publication → schedule dispatch", () => {
       activeBundle: () => coordinator.activeBundle(DEPLOYMENT_BUSINESS_ID, bundleVerifier),
       stateStore: fakeStateStore(),
       startRoutine: scheduledRoutineTrigger(invocations),
+      countActiveRuns,
       businessId: DEPLOYMENT_BUSINESS_ID,
       now: () => nowMs,
       log: {
@@ -260,5 +248,13 @@ describe("routine_forge → publication → schedule dispatch", () => {
       "SELECT source, status FROM runs"
     );
     return result.rows;
+  }
+
+  /** The real query, against the real schema, so `overlapPolicy` is proven end to end. */
+  function countActiveRuns({ routineId }: { readonly routineId: string }): Promise<number> {
+    return new RunStore(transactionPort(db as unknown as Queryable)).countActiveByRoutine({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      routineId,
+    });
   }
 });

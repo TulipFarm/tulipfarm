@@ -7,6 +7,7 @@ import {
   refListSchema,
   secretReferenceSchema,
 } from "./common";
+import { EmbeddedTriggerSchema } from "./trigger";
 
 /** Routine schema: typed States, immutable outputs, and bounded loops/fan-out/retries. */
 
@@ -16,6 +17,7 @@ const kind = "Routine";
 export const ROUTINE_STATE_TYPES = [
   "agent",
   "tool",
+  "compute",
   "branch",
   "parallel",
   "foreach",
@@ -26,6 +28,9 @@ export const ROUTINE_STATE_TYPES = [
   "form",
   "child_routine",
   "compensate",
+  "emit",
+  "script",
+  "action",
 ] as const;
 export type RoutineStateType = (typeof ROUTINE_STATE_TYPES)[number];
 
@@ -163,6 +168,38 @@ const stateVariants = [
     destination: Type.Optional(nonEmptyString),
     credentialRef: Type.Optional(secretReferenceSchema),
   }),
+  /**
+   * Derives values from expressions alone — no model, no Tool, no effect.
+   *
+   * `input` is the assignment map and is required here, unlike every other State type: a
+   * `compute` that assigns nothing has no reason to exist, and an author who wrote one meant
+   * something else. Each resolved key becomes a field of the State's output, which downstream
+   * States read as `${states.<name>.output.<key>}`.
+   */
+  state("compute", {
+    input: Type.Unknown({ type: "object", additionalProperties: true, minProperties: 1 }),
+  }),
+  /**
+   * Runs authored TypeScript in an isolated VM: no network, no filesystem, no host reach, frozen
+   * clock. Whatever the function returns becomes the State's output.
+   *
+   * The isolate is deliberately sealed, so a `script` State cannot fetch anything itself. Reaching
+   * a provider is an `action` State's job, and this State transforms what that returned.
+   */
+  state("script", {
+    /** A module expression exporting the named function, e.g. `({ run(ctx, input) { ... } })`. */
+    script: nonEmptyString,
+    /** Which exported function to call. Defaults to `run`. */
+    entry: Type.Optional(nonEmptyString),
+  }),
+  /**
+   * Calls one runtime Tool directly — no model in the loop. `action` names the Tool
+   * (`record_create`, `record_search`, `api_request`, `send_slack_message`, ...) and `input` is its
+   * arguments. What the Tool returned becomes the State's output.
+   */
+  state("action", {
+    action: nonEmptyString,
+  }),
   state("branch", {
     conditions: Type.Array(
       Type.Object(
@@ -236,6 +273,21 @@ const stateVariants = [
     targetRef: nonEmptyString,
     forState: Type.Optional(stateName),
   }),
+  /**
+   * Announces an internal event, which any published `internal_event` Trigger may bind to a Run.
+   *
+   * The shared `input` map is the event payload, exactly as it is for `compute`. `emit` starts
+   * Runs; it never waits for one. A Routine that needs an answer calls `child_routine` instead.
+   */
+  state("emit", {
+    event: Type.Object(
+      {
+        type: nonEmptyString,
+        version: Type.Optional(positiveInteger),
+      },
+      { additionalProperties: false }
+    ),
+  }),
 ] as const;
 
 const stateUnionSchema = Type.Unsafe<Static<(typeof stateVariants)[number]>>({
@@ -255,6 +307,7 @@ export const RoutineDefinitionSchema = Type.Object(
         output: Type.Optional(jsonSchemaObject),
         start: stateName,
         states: Type.Array(stateUnionSchema, { minItems: 1 }),
+        triggers: Type.Optional(Type.Array(EmbeddedTriggerSchema)),
         requiredToolAbilities: Type.Optional(Type.Array(nonEmptyString)),
         limits: Type.Optional(stateLimits),
         concurrency: Type.Optional(

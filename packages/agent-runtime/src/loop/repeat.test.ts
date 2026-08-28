@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { callSignature, repeatedCall } from "./repeat";
+import { callSignature, elideRepeatedSkillText, repeatedCall } from "./repeat";
 
 describe("callSignature", () => {
   it("matches the same arguments written in a different key order", () => {
@@ -77,5 +77,34 @@ describe("callSignature when the arguments cannot be walked", () => {
 
   it("still signs ordinary arguments", () => {
     expect(callSignature("q", { a: 1 })).toBeDefined();
+  });
+});
+
+describe("elideRepeatedSkillText", () => {
+  it("replaces the body with a pointer back to the first load", () => {
+    const elided = elideRepeatedSkillText({ name: "routine-forge", body: "x".repeat(20_000) });
+    expect(elided).toMatchObject({ name: "routine-forge", elidedRepeat: true });
+    expect((elided as { body: string }).body).not.toContain("xxxx");
+    expect((elided as { body: string }).body).toContain("Already sent earlier in this Turn");
+  });
+
+  it("elides `content` when the result carries no `body`", () => {
+    const elided = elideRepeatedSkillText({
+      file: "references/canonical-examples.md",
+      content: "y",
+    });
+    expect((elided as { content: string }).content).toContain("Already sent earlier in this Turn");
+  });
+
+  it("leaves the structure around the text intact, so the model still sees which Skill answered", () => {
+    const elided = elideRepeatedSkillText({ name: "routine-forge", files: ["a.md"], body: "b" });
+    expect(elided).toMatchObject({ name: "routine-forge", files: ["a.md"] });
+  });
+
+  it("passes through a result with no text to drop", () => {
+    const output = { name: "routine-forge", files: ["a.md"] };
+    expect(elideRepeatedSkillText(output)).toBe(output);
+    expect(elideRepeatedSkillText(null)).toBeNull();
+    expect(elideRepeatedSkillText(["a"])).toEqual(["a"]);
   });
 });
