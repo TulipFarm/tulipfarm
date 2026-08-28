@@ -13,6 +13,7 @@ import type {
   ChatEventType,
   ChatModelSelector,
   ParsedFrame,
+  PlanRound,
   ToolPreview,
   ToolTier,
 } from "~/lib/chat/types";
@@ -72,6 +73,7 @@ type RunEventData = {
   mutating?: boolean;
   agentId?: string;
   stepId?: string;
+  batchId?: string;
   startedAt?: string;
   durationMs?: number;
   status?: string;
@@ -87,6 +89,8 @@ type RunEventData = {
   effortApplied?: EffortRung;
   modelCallLatencyMs?: number;
   artifactId?: string;
+  revision?: number;
+  rounds?: PlanRound[];
   modelFailure?: { requestId?: string; modelId?: string };
 };
 
@@ -175,6 +179,7 @@ export function createRunEventMapper(): (frame: ParsedFrame) => ChatEvent[] {
                 mutating: data.mutating,
                 agentId: data.agentId,
                 stepId: data.stepId,
+                batchId: data.batchId,
                 startedAt: data.startedAt,
               }),
             }),
@@ -298,6 +303,13 @@ export function createRunEventMapper(): (frame: ParsedFrame) => ChatEvent[] {
       case "surface.emitted": {
         if (!data.artifactId) return [];
         return [{ type: "surface", data: { artifactId: data.artifactId } }];
+      }
+
+      // A plan of one Round is a list, not a plan; drop it here so no later layer has to decide.
+      case "plan.declared": {
+        const rounds = data.rounds;
+        if (!Array.isArray(rounds) || rounds.length < 2) return [];
+        return [{ type: "plan", data: { revision: data.revision ?? 1, rounds } }];
       }
 
       default:

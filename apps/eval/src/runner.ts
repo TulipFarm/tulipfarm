@@ -327,6 +327,10 @@ async function runTrial(
   // What the production prompt splitter actually emitted, not a second opinion about what it
   // should have. A Case asserting confinement has to read the same traversal that sends the bytes.
   const attachedFileIds = new Set<string>();
+  // Counted here rather than off the loop's results because only this seam sees a model response
+  // whole: by the time the loop has dispatched them, four calls from one message and four calls
+  // from four messages are the same flat list.
+  const toolCallBatches: number[] = [];
   const model: ModelPort = {
     invoke: async (request) => {
       for (const id of splitPrompt(request.messages, request.attachments).attached) {
@@ -334,6 +338,7 @@ async function runTrial(
       }
       const result = await port.invoke(request);
       lastOutput = result.output;
+      if (result.output.kind === "tool_calls") toolCallBatches.push(result.output.calls.length);
       spend = addSpend(spend, result.usage);
       return result;
     },
@@ -376,6 +381,7 @@ async function runTrial(
       return await scored(evalCase, trial, vacuous, spend, retries, guards.decisions, judge, {
         systemPrompt,
         toolCalls: [],
+        toolCallBatches: [],
         output: { kind: "text", text: guarded.message },
         status: "completed",
         attachedFileIds: [...attachedFileIds],
@@ -409,6 +415,7 @@ async function runTrial(
       systemPrompt,
       attachedFileIds: [...attachedFileIds],
       toolCalls: tools.calls,
+      toolCallBatches,
       // The output guard is the last thing production runs before an answer becomes durable, so a
       // Case scores the text a participant would actually have received.
       output: await guardOutput(guards, answered),

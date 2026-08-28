@@ -9,22 +9,6 @@ import { MessagePartView } from "./parts";
 /** Every narration part is chrome-free: the Trace rail is the only presentation interior work gets. */
 const NARRATION_PARTS: { name: string; part: TimelinePart }[] = [
   {
-    name: "plan",
-    part: {
-      kind: "plan",
-      planId: "plan-spec",
-      title: "Restock plan",
-      steps: [
-        { id: "s1", label: "Check stock", status: "done" },
-        { id: "s2", label: "Place order", status: "pending" },
-      ],
-    },
-  },
-  {
-    name: "task",
-    part: { kind: "task", taskId: "t1", label: "Reading inventory", status: "running" },
-  },
-  {
     name: "sources",
     part: {
       kind: "sources",

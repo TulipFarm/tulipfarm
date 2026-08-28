@@ -298,6 +298,24 @@
 }
 
 /*
+ * Plan rows (components/chat/plan-trace) are the one place a stagger is earned. A Tool row gets
+ * its pacing from the work — one event, one row, whenever the call actually happened — but a plan
+ * arrives as a single event carrying every row at once, so drawn without a delay the whole list
+ * lands in one paint after a silent model round-trip. The delay is applied to the row's own
+ * reveal and never to its status, so nothing is reported later than it is known.
+ */
+.tf-plan-row {
+  animation: trace-row-in 220ms var(--ease-snappy) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tf-plan-row {
+    animation-delay: 0ms !important;
+    animation-duration: 1ms;
+  }
+}
+
+/*
  * Agent glyph avatars (components/agent-glyph). Stroke-only line art; the component sets
  * `--glyph-stroke` inline to a muted hue (or --primary when active) and `stroke-width` from
  * autonomy. Motion is state-driven via a `glyph-<state>` class. No scale transforms (terminal

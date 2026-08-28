@@ -41,6 +41,7 @@ type PersistedToolCall = {
   durationMs?: number;
   outcome?: "ok" | "error";
   errorCode?: string;
+  batchId?: string;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -74,6 +75,7 @@ function persistedToolCallFrom(value: unknown): PersistedToolCall | undefined {
     ...(typeof value.durationMs === "number" ? { durationMs: value.durationMs } : {}),
     ...(value.outcome === "ok" || value.outcome === "error" ? { outcome: value.outcome } : {}),
     ...(typeof value.errorCode === "string" ? { errorCode: value.errorCode } : {}),
+    ...(typeof value.batchId === "string" ? { batchId: value.batchId } : {}),
   };
 }
 
@@ -87,6 +89,7 @@ function toolPartsFromMetadata(metadata: Record<string, unknown> | undefined): T
       ...(tool.argsDigest === undefined ? {} : { argsDigest: tool.argsDigest }),
       ...(tool.durationMs === undefined ? {} : { durationMs: tool.durationMs }),
       ...(tool.errorCode === undefined ? {} : { errorCode: tool.errorCode }),
+      ...(tool.batchId === undefined ? {} : { batchId: tool.batchId }),
     };
     return [
       {

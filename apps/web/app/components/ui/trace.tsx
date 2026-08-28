@@ -25,7 +25,7 @@ import { DiffCount, ToolChip } from "./tool-chip";
  * above the answer the reader actually asked for, and buys nothing the rail does not carry.
  */
 
-/** Mirrors `StepStatus` in `~/lib/chat/types` without making a primitive depend on the Chat layer. */
+/** The four states a step can be in. Deliberately local, so a primitive never depends on Chat. */
 export const TRACE_STATUSES = ["pending", "running", "done", "error"] as const;
 export type TraceStatus = (typeof TRACE_STATUSES)[number];
 
@@ -236,7 +236,10 @@ export function TraceStep({
       <TraceStatusGlyph status={status} />
       <span
         className={cn(
-          "shrink-0 truncate text-sm",
+          // `min-w-0` and not `shrink-0`: a flex child cannot truncate unless it is allowed to
+          // shrink below its content, and a plan step carries the Agent's own sentence for the
+          // work, which is far longer than a Tool summary.
+          "min-w-0 truncate text-sm",
           status === "pending" ? "text-muted-foreground" : "text-foreground"
         )}
       >

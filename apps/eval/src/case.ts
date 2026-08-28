@@ -50,6 +50,20 @@ export type Expectation =
   | { readonly kind: "output_field_equals"; readonly path: string; readonly value: unknown }
   | { readonly kind: "loop_status"; readonly status: string }
   | { readonly kind: "tool_call_count"; readonly count: number }
+  /**
+   * At least one assistant message asked for this many Tool calls at once.
+   *
+   * The one thing `tool_call_count` cannot see. Four Tools called across four model round-trips and
+   * four Tools called in a single message are indistinguishable by count, by order and by name —
+   * yet the difference between them is most of a Turn's latency, because the loop dispatches a run
+   * of consecutive read-only calls concurrently and a model that asks one question at a time pays
+   * for every round-trip it did not need.
+   *
+   * The batch is measured rather than the loop iterations it saved, because the batch is the
+   * behaviour being asserted. An iteration count also moves with how much work the Turn needed, so
+   * a Case pinning it would report a batching regression whenever its fixture merely grew a step.
+   */
+  | { readonly kind: "tool_calls_batched"; readonly min: number }
   /** A guard refused at this stage. Naming the guard pins *which* rule fired, not merely that one
    *  did — a Case that only asserted "something blocked" would go on passing after the policy was
    *  replaced by a stricter unrelated rule. */
@@ -127,6 +141,18 @@ export function isPersisted(expectation: Expectation): boolean {
  */
 export function isGuardrail(expectation: Expectation): boolean {
   return expectation.kind.startsWith("guardrail_");
+}
+
+/**
+ * Expectations that read how the model grouped its Tool calls, which only the L2 tier observes.
+ *
+ * L2 wraps the Model Port itself, so it sees each response whole and can count the calls in it.
+ * L3 drives the product's Chat executor, which reports the calls a Turn dispatched but not which
+ * response asked for them — so a batching Expectation there would read nothing and pass by
+ * vacuity, which is the failure mode this framework exists to prevent.
+ */
+export function isBatching(expectation: Expectation): boolean {
+  return expectation.kind === "tool_calls_batched";
 }
 
 /** A faked Tool dispatch, matched to a call by Tool name and consumed in order. */

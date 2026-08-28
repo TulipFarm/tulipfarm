@@ -14,10 +14,9 @@ export type ChatEventType =
   | "tool-result"
   | "approval-request"
   | "approval-resolved"
-  | "plan"
-  | "task"
   | "sources"
   | "agent-handoff"
+  | "plan"
   | "surface"
   | "client-action"
   | "guardrail_block"
@@ -25,10 +24,12 @@ export type ChatEventType =
   | "error";
 
 export type ApprovalOutcome = "approved" | "denied" | "timeout";
-export type StepStatus = "pending" | "running" | "done" | "error";
 
 /** Which layer a Tool belongs to. Mirrors the registry's tiering, not a rendering hint. */
 export type ToolTier = "system" | "platform" | "integration";
+
+/** One Round of a declared plan: calls the Agent expects to be able to run at the same time. */
+export type PlanRound = { calls: { tool: string; label?: string }[] };
 
 export type ChatFailureDetails = {
   reason?: string;
@@ -52,6 +53,12 @@ export type ToolMeta = {
   agentId?: string;
   /** The State the call belonged to — real grouping data, not adjacency guessed by the client. */
   stepId?: string;
+  /**
+   * The concurrent dispatch the call belonged to. Present only when the runtime really did run it
+   * alongside others, so the trace can say "at the same time" without ever guessing it from
+   * adjacency or from two timestamps that merely look close.
+   */
+  batchId?: string;
   startedAt?: string;
   durationMs?: number;
   errorCode?: string;
@@ -60,7 +67,6 @@ export type ToolMeta = {
   connectUrl?: string;
 };
 
-export type PlanStep = { id: string; label: string; status: StepStatus };
 export type SourceRef = { id?: string; title?: string; url?: string; ref?: number; path?: string };
 
 export type ChatEvent =
@@ -100,10 +106,9 @@ export type ChatEvent =
       type: "approval-resolved";
       data: { approvalId: string; toolCallId: string; outcome: ApprovalOutcome };
     }
-  | { type: "plan"; data: { planId: string; title?: string; steps: PlanStep[] } }
-  | { type: "task"; data: { taskId: string; label: string; status: StepStatus } }
   | { type: "sources"; data: { sources: SourceRef[] } }
   | { type: "agent-handoff"; data: { from?: string; to: string; reason?: string } }
+  | { type: "plan"; data: { revision: number; rounds: PlanRound[] } }
   | {
       type: "surface";
       data: {
@@ -189,10 +194,19 @@ export type TimelinePart =
       outcome?: "ok" | "error";
     }
   | { kind: "reasoning"; text: string }
-  | { kind: "plan"; planId: string; title?: string; steps: PlanStep[] }
-  | { kind: "task"; taskId: string; label: string; status: StepStatus }
   | { kind: "sources"; sources: SourceRef[] }
   | { kind: "agent-handoff"; to: string; from?: string; reason?: string }
+  /**
+   * The Agent's own forecast of the Rounds ahead.
+   *
+   * The shape is declared by the Agent; the progress is not. Nothing here records what ran — the
+   * renderer ticks these entries off against the real `tool` parts beside them, so a plan can
+   * never claim work the Turn did not do.
+   *
+   * At most one per Message: a revision replaces its predecessor rather than stacking beneath it,
+   * because a plan is a statement of the current intent, not a history of intents.
+   */
+  | { kind: "plan"; revision: number; rounds: PlanRound[] }
   | {
       kind: "surface";
       artifactId: string;

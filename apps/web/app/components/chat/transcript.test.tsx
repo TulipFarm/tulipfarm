@@ -164,29 +164,6 @@ describe("Transcript renders each part from its SSE event", () => {
     expect(screen.getByText("Denied")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
   });
-
-  it("a routine Plan/Task progress view", () => {
-    renderTranscript(
-      fold([
-        {
-          type: "plan",
-          data: {
-            planId: "p1",
-            title: "Onboard lead",
-            steps: [
-              { id: "s1", label: "Create record", status: "done" },
-              { id: "s2", label: "Notify owner", status: "pending" },
-            ],
-          },
-        },
-      ])
-    );
-    expect(screen.getByText("Onboard lead")).toBeInTheDocument();
-    // The step rail reports progress as a count, replacing the old `[ ] [x]` ASCII marks.
-    expect(screen.getByText("1/2")).toBeInTheDocument();
-    expect(screen.getByText("Create record")).toBeInTheDocument();
-    expect(screen.getByText("Notify owner")).toBeInTheDocument();
-  });
 });
 
 describe("Transcript message actions", () => {

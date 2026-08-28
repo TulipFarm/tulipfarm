@@ -139,6 +139,7 @@ const EXPECTED_FAMILY_TOOL_NAMES = [
       "delegate_to_agent",
       "get_current_time",
       "guardrail_forge",
+      "plan_declare",
       "routine_delete",
       "routine_forge",
       "routine_picker",

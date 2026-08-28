@@ -124,6 +124,15 @@ Vocabulary is binding: [`metadata/terminologies.md` → Offline eval](../../meta
   which is vendor strategy: one seat has been seen calling a lookup twice where the other calls it
   once, and neither is a harness defect. Assert `tool_called`, `tool_argument_equals` and `tool_call_order` instead;
   `loop_status` already catches a runaway loop.
+- **`tool_calls_batched` measures the model's grouping, not its total.** `min: 2` asserts that at
+  least one assistant message asked for that many Tools at once. This is the only Expectation that
+  can tell four reads across four model round-trips from four reads in one message — every other
+  Tool Expectation sees the same flat list either way, and the difference is most of a Turn's wall
+  clock, because the loop dispatches a run of consecutive read-only calls concurrently. It is L2
+  only: L3 records the calls a Turn dispatched but not which response asked for them, so it would
+  pass by finding nothing. `min: 1` is refused at load — a batch of one is just a Tool call, so
+  such a Case could never fail. Assert it only where the reads are genuinely independent; asking a
+  model to batch a call whose arguments it cannot know yet is asking it to guess.
 - **A Case must script a result for every Tool it exposes.** An unscripted call fails with a
   message naming the Tool, and a Tool called more often than the Case scripted repeats its last
   result. Neither fabricates an empty success — a payload the author never wrote would drive the

@@ -206,9 +206,112 @@ export const getCurrentTimeTool = defineApiTool<PlatformRuntimeContext>({
   },
 });
 
+export const PLAN_DECLARE_TOOL_NAME = "plan_declare";
+
+const PLAN_DECLARE_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["rounds"],
+  properties: {
+    rounds: {
+      type: "array",
+      minItems: 2,
+      maxItems: 8,
+      description:
+        "The Rounds ahead, in order. Every call in a Round must be able to run without any other " +
+        "call in that same Round, because they are dispatched together. Put a call in a later " +
+        "Round when its arguments depend on an earlier Round's result.",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["calls"],
+        properties: {
+          calls: {
+            type: "array",
+            minItems: 1,
+            maxItems: 12,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["tool"],
+              properties: {
+                tool: {
+                  type: "string",
+                  minLength: 1,
+                  maxLength: 80,
+                  description: "The Tool you expect to call.",
+                },
+                label: {
+                  type: "string",
+                  minLength: 1,
+                  maxLength: 120,
+                  description: "What that call is for, in the reader's words. Keep it short.",
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+};
+const validatePlanDeclare = ajv.compile(PLAN_DECLARE_SCHEMA);
+
+/**
+ * Publishes the Agent's forecast of the work ahead so a reader can see it before it happens.
+ *
+ * Non-mutating on purpose: it touches nothing, which is what lets it ride in the same concurrent
+ * dispatch as the Round it is describing. Declaring the plan therefore costs no model round-trip,
+ * and a round-trip is the only thing that meaningfully costs a Turn its wall clock.
+ */
+export const planDeclareTool = defineApiTool<PlatformRuntimeContext>({
+  name: PLAN_DECLARE_TOOL_NAME,
+  description:
+    "Show the person the shape of the work before you do it. Call it whenever the request needs " +
+    "three or more Tool calls across two or more Rounds — creating a Routine, an Agent or a " +
+    "Resource type usually does. Skip it for anything you can finish in one Round; a plan for " +
+    "trivial work is noise. NEVER call it on its own: put it in the same message as Round 1's " +
+    "calls. A message carrying only this Tool spends a whole model round-trip declaring work it " +
+    "then has to come back to start, so the person watches a plan in which nothing is running for " +
+    "as long as it takes you to think again. Round 1 must therefore list the calls you are making " +
+    "in THAT SAME message. Group calls that can run at the same time into one Round, and put a " +
+    "call in a later Round only when it needs an earlier Round's result. Call this again, with " +
+    "the whole plan, whenever what you learned changes it. Declaring a plan neither reserves nor " +
+    "runs anything.",
+  mutating: false,
+  tier: "platform",
+  inputSchema: PLAN_DECLARE_SCHEMA,
+  authorization: {
+    action: "platform.plan.declare",
+    resources: ["platform.plan"],
+    dataClasses: ["operational"],
+  },
+  handler: async (args) => {
+    if (!validatePlanDeclare(args))
+      return err("validation_error", firstError(validatePlanDeclare.errors));
+    const { rounds } = args as {
+      rounds: { calls: { tool: string; label?: string }[] }[];
+    };
+    // Echoed under `plan` so the announce wrapper can lift it into a `plan.declared` Run event
+    // without knowing which Tool produced it, the same structural match Surfaces already use.
+    return ok({
+      plan: {
+        rounds: rounds.map((round) => ({
+          calls: round.calls.map((call) => ({
+            tool: call.tool,
+            ...(call.label === undefined ? {} : { label: call.label }),
+          })),
+        })),
+      },
+      declared: true,
+    });
+  },
+});
+
 export const PLATFORM_RUNTIME_TOOLS: ApiToolDefinition<PlatformRuntimeContext>[] = [
   validateArtifactTool,
   completeStateTool,
   completeTaskTool,
   getCurrentTimeTool,
+  planDeclareTool,
 ];

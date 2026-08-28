@@ -897,6 +897,7 @@ describe("PLATFORM_TOOLS registry", () => {
       "complete_state",
       "complete_task",
       "get_current_time",
+      "plan_declare",
     ]);
   });
 

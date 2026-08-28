@@ -58,6 +58,7 @@ const EXPECTATION_FIELDS: Record<string, readonly [string, FieldType][]> = {
   ],
   loop_status: [["status", "string"]],
   tool_call_count: [["count", "number"]],
+  tool_calls_batched: [["min", "number"]],
   guardrail_blocked: [
     ["stage", GUARD_STAGES],
     ["guard", GUARD_NAMES],
@@ -126,6 +127,12 @@ export function expectationShapeError(kind: string, record: Record<string, unkno
       return granteeError(grantee);
     }
     if (rest.join(":").length === 0) return granteeError(grantee);
+  }
+  // A batch of one is what every model does anyway, so `min: 1` would pass against the behaviour
+  // the Expectation exists to catch. Refused at load rather than scored, because a Case that
+  // cannot fail is worse than no Case: it reports the gate as covering ground it never walked.
+  if (kind === "tool_calls_batched" && Number(record.min) < 2) {
+    return `expectation "tool_calls_batched" needs "min" of at least 2; a batch of one is a Tool call`;
   }
   return "";
 }

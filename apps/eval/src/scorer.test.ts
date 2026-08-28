@@ -92,6 +92,35 @@ describe("tool expectations", () => {
   });
 });
 
+describe("how the model grouped its Tool calls", () => {
+  const batched = (sizes: number[]): Observation => ({ ...base, toolCallBatches: sizes });
+
+  it("passes when one message asked for at least the required number of calls", () => {
+    expect(only({ kind: "tool_calls_batched", min: 2 }, batched([1, 3])).passed).toBe(true);
+  });
+
+  it("fails when the same calls arrived one message at a time", () => {
+    // The whole point of the kind: this observation is indistinguishable from the one above by
+    // count, by name and by order.
+    const r = only({ kind: "tool_calls_batched", min: 2 }, batched([1, 1, 1, 1]));
+    expect(r.passed).toBe(false);
+    expect(r.detail).toContain("largest batch was 1");
+    expect(r.detail).toContain("1, then 1, then 1, then 1");
+  });
+
+  it("says the model asked for no Tool at all, rather than reporting a batch of zero", () => {
+    const r = only({ kind: "tool_calls_batched", min: 2 }, batched([]));
+    expect(r.passed).toBe(false);
+    expect(r.detail).toContain("no message asked for a Tool");
+  });
+
+  it("fails with the tier's omission named, never by reading nothing and calling it a batch", () => {
+    const r = only({ kind: "tool_calls_batched", min: 2 });
+    expect(r.passed).toBe(false);
+    expect(r.detail).toContain("does not observe");
+  });
+});
+
 describe("output expectations", () => {
   it("matches text output by substring and regex", () => {
     expect(only({ kind: "output_contains", text: "opened a ticket" }).passed).toBe(true);

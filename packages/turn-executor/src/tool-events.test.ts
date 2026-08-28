@@ -174,6 +174,99 @@ describe("announceToolCalls", () => {
     });
   });
 
+  /** The declaring call: `plan_declare` is a pure echo, so the plan lives in its arguments. */
+  function declares(rounds: unknown, callId = "call-1"): ToolDispatchRequest {
+    return { ...REQUEST, callId, name: "plan_declare", arguments: { rounds } };
+  }
+
+  const ECHO = port((request) => ({
+    status: "succeeded" as const,
+    callId: request.callId,
+    output: request.arguments,
+  }));
+
+  it("announces plan.declared before the result, so the Round it forecasts renders in flight", async () => {
+    // Published on the result it still beat the reads dispatched beside it, but by a margin too
+    // small to see: every step in Round 1 went from unstarted to done without ever spinning.
+    const events = new FakeAppendPort();
+
+    await announceToolCalls(ECHO.port, writer(events), { now: clock() }).dispatch(
+      declares([
+        { calls: [{ tool: "resource_type_schema", label: "Read the Ticket schema" }] },
+        { calls: [{ tool: "routine_forge" }] },
+      ])
+    );
+
+    expect(events.appended.map((event) => event.eventType)).toEqual([
+      "tool.call",
+      "plan.declared",
+      "tool.result",
+    ]);
+    expect(events.appended[1]).toEqual({
+      eventType: "plan.declared",
+      payload: {
+        revision: 1,
+        rounds: [
+          { calls: [{ tool: "resource_type_schema", label: "Read the Ticket schema" }] },
+          { calls: [{ tool: "routine_forge" }] },
+        ],
+      },
+      key: "turn-1:1:plan:declared:call-1",
+    });
+  });
+
+  it("declines to announce a plan of one round, which is a list rather than a plan", async () => {
+    const events = new FakeAppendPort();
+
+    await announceToolCalls(ECHO.port, writer(events), { now: clock() }).dispatch(
+      declares([{ calls: [{ tool: "get_memory" }] }])
+    );
+
+    expect(events.appended.map((event) => event.eventType)).toEqual(["tool.call", "tool.result"]);
+  });
+
+  it("refuses a plan from any Tool but the one that declares plans", async () => {
+    // Integration arguments can be attacker-influenced. Matching a plan structurally would let a
+    // third party whose payload carried a `rounds` key rewrite what the Agent said it would do.
+    const events = new FakeAppendPort();
+
+    await announceToolCalls(ECHO.port, writer(events), { now: clock() }).dispatch({
+      ...REQUEST,
+      name: "github_issue_get",
+      arguments: { rounds: [{ calls: [{ tool: "a" }] }, { calls: [{ tool: "b" }] }] },
+    });
+
+    expect(events.appended.map((event) => event.eventType)).toEqual(["tool.call", "tool.result"]);
+  });
+
+  it("drops a plan too large for the event schema rather than failing the Turn on it", async () => {
+    // `emit` validates and throws, so a plan accepted by the extractor and refused by the schema
+    // would fail the Turn outright.
+    const events = new FakeAppendPort();
+
+    await expect(
+      announceToolCalls(ECHO.port, writer(events), { now: clock() }).dispatch(
+        declares(Array.from({ length: 9 }, () => ({ calls: [{ tool: "a" }] })))
+      )
+    ).resolves.toMatchObject({ status: "succeeded" });
+    expect(events.appended.map((event) => event.eventType)).toEqual(["tool.call", "tool.result"]);
+  });
+
+  it("numbers each plan the Turn declares, so a revision can be told from its predecessor", async () => {
+    const events = new FakeAppendPort();
+    const rounds = [{ calls: [{ tool: "a" }] }, { calls: [{ tool: "b" }] }];
+    const announcer = announceToolCalls(ECHO.port, writer(events), { now: clock() });
+
+    await announcer.dispatch(declares(rounds));
+    await announcer.dispatch(declares(rounds, "call-2"));
+
+    expect(
+      events.appended
+        .filter((event) => event.eventType === "plan.declared")
+        .map((event) => event.payload.revision)
+    ).toEqual([1, 2]);
+  });
+
   it("reports a refused call as an error carrying the dispatcher's own reason", async () => {
     const events = new FakeAppendPort();
     const broker = port((request) => ({
@@ -213,5 +306,46 @@ describe("announceToolCalls", () => {
     // The call is announced, the outcome is not: the driver announces the wait, and a `tool.result`
     // here would tell a reader the call finished while it is still pending.
     expect(events.appended.map((event) => event.eventType)).toEqual(["tool.call"]);
+  });
+});
+
+describe("carrying what ran at the same time", () => {
+  it("announces the batch a call belonged to, and keeps it on the durable record", async () => {
+    const events = new FakeAppendPort();
+    const eventWriter = writer(events);
+    const broker = port((request) => ({
+      status: "succeeded",
+      callId: request.callId,
+      output: {},
+    }));
+    const dispatch = announceToolCalls(broker.port, eventWriter, { now: clock() }).dispatch;
+
+    await dispatch({ ...REQUEST, callId: "call-1", batchId: "state-1:0:0" });
+    await dispatch({ ...REQUEST, callId: "call-2", batchId: "state-1:0:0" });
+
+    const announced = events.appended.filter((event) => event.eventType === "tool.call");
+    expect(announced.map((event) => event.payload.batchId)).toEqual(["state-1:0:0", "state-1:0:0"]);
+    // The Message metadata is what a Turn re-read months later hydrates from, so the fact has to
+    // survive the hop out of the event stream and into the durable record.
+    expect(eventWriter.toolCalls.map((call) => call.batchId)).toEqual([
+      "state-1:0:0",
+      "state-1:0:0",
+    ]);
+  });
+
+  it("leaves a solo call unmarked all the way through", async () => {
+    const events = new FakeAppendPort();
+    const eventWriter = writer(events);
+    const broker = port((request) => ({
+      status: "succeeded",
+      callId: request.callId,
+      output: {},
+    }));
+
+    await announceToolCalls(broker.port, eventWriter, { now: clock() }).dispatch(REQUEST);
+
+    const announced = events.appended.find((event) => event.eventType === "tool.call");
+    expect(announced?.payload).not.toHaveProperty("batchId");
+    expect(eventWriter.toolCalls[0]).not.toHaveProperty("batchId");
   });
 });

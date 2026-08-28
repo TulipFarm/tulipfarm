@@ -25,6 +25,7 @@ export const RUN_EVENT_TYPES = [
   "tool.call",
   "tool.result",
   "surface.emitted",
+  "plan.declared",
   "approval.requested",
   "child.started",
   "guardrail.blocked",
@@ -92,6 +93,8 @@ export const PARTICIPANT_TOOL_CALL_SCHEMA = {
     durationMs: { type: "integer", minimum: 0 },
     outcome: { type: "string", enum: ["ok", "error"] },
     errorCode: { type: "string", minLength: 1 },
+    /** Carried into the Message so a Turn re-read months later still shows what ran together. */
+    batchId: { type: "string", minLength: 1 },
   },
 } as const;
 
@@ -117,6 +120,8 @@ const TOOL_CALL_SCHEMA = {
     mutating: { type: "boolean" },
     agentId: { type: "string", minLength: 1 },
     stepId: { type: "string", minLength: 1 },
+    /** The concurrent dispatch this call belonged to; absent when it was dispatched alone. */
+    batchId: { type: "string", minLength: 1 },
     startedAt: { type: "string", minLength: 1 },
   },
 } as const;
@@ -143,6 +148,55 @@ const SURFACE_EMITTED_SCHEMA = {
   properties: {
     artifactId: { type: "string", minLength: 1 },
     componentId: { type: "string", minLength: 1 },
+  },
+} as const;
+
+/**
+ * The Agent's own forecast of the work ahead, grouped into Rounds it expects to dispatch together.
+ *
+ * Declared rather than derived, unlike every other event here, because its whole value is naming
+ * work that has *not* happened yet. Progress over it stays derived: a reader ticks a planned call
+ * off against the `tool.call` and `tool.result` events that actually arrive, so a plan can never
+ * report work the Run did not do.
+ *
+ * Re-declared rather than patched. A revision carries the whole graph, so a reader that missed one
+ * still renders a coherent plan, and the Agent revising Round 3 after Round 1 taught it something
+ * does not have to describe a diff.
+ *
+ * At least two Rounds: one round is a list, not a plan, and is not worth a row in Chat.
+ */
+const PLAN_DECLARED_SCHEMA = {
+  type: "object",
+  required: ["revision", "rounds"],
+  additionalProperties: false,
+  properties: {
+    revision: { type: "integer", minimum: 1 },
+    rounds: {
+      type: "array",
+      minItems: 2,
+      maxItems: 8,
+      items: {
+        type: "object",
+        required: ["calls"],
+        additionalProperties: false,
+        properties: {
+          calls: {
+            type: "array",
+            minItems: 1,
+            maxItems: 12,
+            items: {
+              type: "object",
+              required: ["tool"],
+              additionalProperties: false,
+              properties: {
+                tool: { type: "string", minLength: 1, maxLength: 80 },
+                label: { type: "string", minLength: 1, maxLength: 120 },
+              },
+            },
+          },
+        },
+      },
+    },
   },
 } as const;
 
@@ -410,6 +464,7 @@ export const RUN_EVENT_DEFINITIONS: readonly RunEventDefinition[] = [
   { type: "tool.call", audience: "participant", schema: TOOL_CALL_SCHEMA },
   { type: "tool.result", audience: "participant", schema: TOOL_RESULT_SCHEMA },
   { type: "surface.emitted", audience: "participant", schema: SURFACE_EMITTED_SCHEMA },
+  { type: "plan.declared", audience: "participant", schema: PLAN_DECLARED_SCHEMA },
   { type: "approval.requested", audience: "participant", schema: APPROVAL_REQUESTED_SCHEMA },
   { type: "child.started", audience: "participant", schema: CHILD_STARTED_SCHEMA },
   { type: "guardrail.blocked", audience: "participant", schema: GUARDRAIL_BLOCKED_SCHEMA },
@@ -460,6 +515,7 @@ export interface ParticipantToolCall {
   readonly durationMs?: number;
   readonly outcome?: "ok" | "error";
   readonly errorCode?: string;
+  readonly batchId?: string;
 }
 
 /** Payloads mirror schemas; optional fields must be omitted, never set to `undefined`. */
@@ -480,6 +536,7 @@ export interface RunEventPayloads {
     readonly mutating?: boolean;
     readonly agentId?: string;
     readonly stepId?: string;
+    readonly batchId?: string;
     readonly startedAt?: string;
   };
   readonly "tool.result": {
@@ -493,6 +550,12 @@ export interface RunEventPayloads {
     readonly connectUrl?: string;
   };
   readonly "surface.emitted": { readonly artifactId: string; readonly componentId?: string };
+  readonly "plan.declared": {
+    readonly revision: number;
+    readonly rounds: readonly {
+      readonly calls: readonly { readonly tool: string; readonly label?: string }[];
+    }[];
+  };
   readonly "approval.requested": {
     readonly waitId: string;
     readonly intentId: string;

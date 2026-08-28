@@ -13,15 +13,21 @@ export const SKILL_TOOL = "skill";
 /**
  * Structural Tools cannot be hidden by Skill narrowing.
  *
- * Every name here is a way a Turn *ends* — it answers, asks, or hands the work on. `delegate_to_agent`
+ * Most names here are a way a Turn *ends* — it answers, asks, or hands the work on. `delegate_to_agent`
  * belongs for that reason; `transfer_to_agent` was listed beside it and no host has ever registered
  * it, so the set advertised an exit that could not be taken (#419). A name is admitted here only
  * once some host offers it.
+ *
+ * `plan_declare` is the exception that is not an exit: it narrates the Turn rather than ending it.
+ * It belongs for the same structural reason though — a plan is declared in the Round that also
+ * loads the Skill, and revised in the Rounds after it. Let narrowing take it away and an Agent
+ * could publish a plan it was then unable to correct, which is worse than never having shown one.
  */
 const ALWAYS_EXPOSED_TOOL_NAMES: ReadonlySet<string> = new Set([
   SKILL_TOOL,
   "complete_task",
   "delegate_to_agent",
+  "plan_declare",
   "present",
   "request_input",
   "update_presentation",

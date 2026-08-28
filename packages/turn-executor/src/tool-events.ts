@@ -25,6 +25,62 @@ function surfaceArtifactFrom(
     : { artifactId: artifact.id, revision };
 }
 
+/**
+ * The Tool that declares a plan, and so the only Tool whose output may become one.
+ *
+ * Declared here rather than imported from `@tulipfarm/platform-tools`, which this package does not
+ * depend on; `apps/api/src/tools/contract-coverage.test.ts` pins the registered spelling.
+ */
+const PLAN_TOOL = "plan_declare";
+
+/**
+ * Reads the plan out of a `plan_declare` call's arguments.
+ *
+ * Taken from the arguments at dispatch rather than from the echoed output at completion, so the
+ * plan reaches the reader before the Round it describes has finished. `plan_declare` returns in
+ * microseconds while the reads beside it in the same batch take seconds; publishing on the result
+ * still beat those reads on the wire, but only by a margin too small to see, so every step in
+ * Round 1 went from unstarted to done without ever rendering as in flight. Announcing the
+ * declaration when it is made puts the whole first Round on screen while it is genuinely running.
+ *
+ * The consequence is deliberate: a `plan_declare` that then fails still shows its plan. That is
+ * honest — the plan is what the Agent said it intended, and it did say it — and the failed Tool
+ * row renders beside it rather than being hidden, so the refusal is not lost.
+ *
+ * Matched by Tool name, unlike a Surface. A Surface has several producers, so its structure is the
+ * only thing they share; a plan has exactly one producer, and every other Tool reaching this path
+ * may be an Integration whose arguments an attacker influenced. Matching a plan structurally would
+ * let any third party whose payload carried a `rounds` key rewrite what the Agent told the reader
+ * it was going to do.
+ *
+ * The bounds repeat the event schema's rather than trusting the Tool's own validation, because
+ * `emit` validates and throws: a plan accepted here and rejected there would fail the Turn.
+ */
+function planFrom(
+  name: string,
+  args: unknown
+): { rounds: { calls: { tool: string; label?: string }[] }[] } | undefined {
+  if (name !== PLAN_TOOL) return undefined;
+  const rounds = (args as { rounds?: unknown })?.rounds;
+  if (!Array.isArray(rounds) || rounds.length < 2 || rounds.length > 8) return undefined;
+  const parsed: { calls: { tool: string; label?: string }[] }[] = [];
+  for (const round of rounds) {
+    const calls = (round as { calls?: unknown })?.calls;
+    if (!Array.isArray(calls) || calls.length === 0 || calls.length > 12) return undefined;
+    const parsedCalls: { tool: string; label?: string }[] = [];
+    for (const call of calls) {
+      const tool = (call as { tool?: unknown })?.tool;
+      if (typeof tool !== "string" || tool.length === 0 || tool.length > 80) return undefined;
+      const label = (call as { label?: unknown })?.label;
+      if (label !== undefined && (typeof label !== "string" || label.length > 120))
+        return undefined;
+      parsedCalls.push(typeof label === "string" && label.length > 0 ? { tool, label } : { tool });
+    }
+    parsed.push({ calls: parsedCalls });
+  }
+  return { rounds: parsed };
+}
+
 /** Injectable clock so a test can assert a duration instead of racing the real one. */
 export interface AnnounceToolCallsOptions {
   readonly now?: () => number;
@@ -52,10 +108,22 @@ export function announceToolCalls(
           ...(argsPreview === undefined ? {} : { argsPreview }),
           // Group by real State, not event adjacency.
           ...(request.stateId.length === 0 ? {} : { stepId: request.stateId }),
+          // The loop's own dispatch decision. A call it ran alone carries none, so a reader can
+          // never turn two adjacent calls into two concurrent ones.
+          ...(request.batchId === undefined ? {} : { batchId: request.batchId }),
           startedAt: new Date(startedAt).toISOString(),
         },
         `tool:call:${request.callId}`
       );
+
+      const plan = planFrom(request.name, request.arguments);
+      if (plan !== undefined) {
+        await events.emit(
+          "plan.declared",
+          { revision: events.nextPlanRevision(), rounds: plan.rounds },
+          `plan:declared:${request.callId}`
+        );
+      }
 
       const result = await tools.dispatch(request);
 

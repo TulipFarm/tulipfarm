@@ -14,6 +14,14 @@ export interface Observation {
    */
   readonly attachedFileIds?: readonly string[];
   readonly toolCalls: readonly { readonly name: string; readonly arguments: unknown }[];
+  /**
+   * How many Tool calls each assistant message asked for, in the order the model produced them.
+   *
+   * Messages that asked for none are left out — this counts batches, not responses. Absent rather
+   * than empty on a tier that does not collect it, so a batching Expectation fails with a reason
+   * instead of reading no batches and reporting that as a failure to batch.
+   */
+  readonly toolCallBatches?: readonly number[];
   readonly output: ModelOutput | undefined;
   readonly status: string;
   /** Guard refusals in the order they fired. Empty means the policy let the whole turn through. */
@@ -398,6 +406,22 @@ function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: 
             passed: false,
             detail: `${obs.toolCalls.length} Tool calls, expected ${a.count} — called ${calls(obs.toolCalls)}`,
           };
+
+    case "tool_calls_batched": {
+      if (obs.toolCallBatches === undefined) {
+        return { passed: false, detail: "this tier does not observe how Tool calls were grouped" };
+      }
+      const largest = obs.toolCallBatches.reduce((most, size) => Math.max(most, size), 0);
+      if (largest >= a.min) return { passed: true, detail: `${largest} Tool calls in one message` };
+      const asked =
+        obs.toolCallBatches.length === 0
+          ? "no message asked for a Tool"
+          : `messages asked for ${obs.toolCallBatches.join(", then ")}`;
+      return {
+        passed: false,
+        detail: `largest batch was ${largest}, expected at least ${a.min}; ${asked}`,
+      };
+    }
 
     case "output_contains": {
       const text = outputText(obs.output);

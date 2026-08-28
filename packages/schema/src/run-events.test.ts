@@ -121,6 +121,21 @@ describe("run event vocabulary", () => {
     ).toBe(true);
   });
 
+  it("accepts the name of the concurrent dispatch a Tool call belonged to", () => {
+    expect(
+      accepts("tool.call", {
+        callId: "c1",
+        name: "github.issue.search",
+        argsDigest: "sha",
+        batchId: "state-1:0:0",
+      })
+    ).toBe(true);
+    // An empty name would group calls that had nothing in common, and read as concurrency.
+    expect(accepts("tool.call", { callId: "c1", name: "n", argsDigest: "d", batchId: "" })).toBe(
+      false
+    );
+  });
+
   it("refuses a preview shape a reader was never built to parse", () => {
     // `json` is the only required field, and it is text: a reader parses it or shows it raw.
     expect(

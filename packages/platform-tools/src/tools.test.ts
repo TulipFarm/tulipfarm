@@ -6,6 +6,7 @@ import {
   completeTaskTool,
   getCurrentTimeTool,
   PLATFORM_RUNTIME_TOOLS,
+  planDeclareTool,
   validateArtifactTool,
 } from "./tools";
 
@@ -130,5 +131,32 @@ describe("get_current_time", () => {
   it("is read-only and registered", () => {
     expect(getCurrentTimeTool.mutating).toBe(false);
     expect(PLATFORM_RUNTIME_TOOLS.map((t) => t.name)).toContain("get_current_time");
+  });
+});
+
+describe("planDeclareTool", () => {
+  const rounds = [
+    { calls: [{ tool: "resource_type_schema", label: "Read the Ticket schema" }] },
+    { calls: [{ tool: "routine_forge" }, { tool: "agent_create" }] },
+  ];
+
+  it("echoes the declared plan back under `plan`, where the announcer looks for one", async () => {
+    const res = await planDeclareTool.handler({ rounds }, {});
+    expect(res).toEqual({ success: true, data: { plan: { rounds }, declared: true } });
+  });
+
+  it("rejects a plan of one round, because a single Round is a list and not a plan", async () => {
+    const res = await planDeclareTool.handler({ rounds: [rounds[0]] }, {});
+    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
+  });
+
+  it("rejects a Round with no calls in it", async () => {
+    const res = await planDeclareTool.handler({ rounds: [rounds[0], { calls: [] }] }, {});
+    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
+  });
+
+  it("declares nothing, so it can ride in the same dispatch as the Round it describes", () => {
+    expect(planDeclareTool.mutating).toBe(false);
+    expect(PLATFORM_RUNTIME_TOOLS.map((t) => t.name)).toContain("plan_declare");
   });
 });

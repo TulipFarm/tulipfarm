@@ -229,40 +229,6 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
       };
     }
 
-    case "plan": {
-      const { messages, target } = ensureAssistant(state.messages);
-      const existing = target.parts.some(
-        (p) => p.kind === "plan" && p.planId === event.data.planId
-      );
-      const next: TimelinePart = {
-        kind: "plan",
-        planId: event.data.planId,
-        title: event.data.title,
-        steps: event.data.steps,
-      };
-      const parts = existing
-        ? target.parts.map((p) => (p.kind === "plan" && p.planId === event.data.planId ? next : p))
-        : [...target.parts, next];
-      return { ...state, status: "streaming", messages: withParts(messages, target, parts) };
-    }
-
-    case "task": {
-      const { messages, target } = ensureAssistant(state.messages);
-      const existing = target.parts.some(
-        (p) => p.kind === "task" && p.taskId === event.data.taskId
-      );
-      const next: TimelinePart = {
-        kind: "task",
-        taskId: event.data.taskId,
-        label: event.data.label,
-        status: event.data.status,
-      };
-      const parts = existing
-        ? target.parts.map((p) => (p.kind === "task" && p.taskId === event.data.taskId ? next : p))
-        : [...target.parts, next];
-      return { ...state, status: "streaming", messages: withParts(messages, target, parts) };
-    }
-
     case "sources": {
       const { messages, target } = ensureAssistant(state.messages);
       const part: TimelinePart = { kind: "sources", sources: event.data.sources };
@@ -286,6 +252,34 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
         status: "streaming",
         currentAgent: event.data.to,
         messages: withParts(messages, target, [...target.parts, part]),
+      };
+    }
+
+    case "plan": {
+      const { messages, target } = ensureAssistant(state.messages);
+      const part: TimelinePart = {
+        kind: "plan",
+        revision: event.data.revision,
+        rounds: event.data.rounds,
+      };
+      // A plan heads the Tool rows it forecasts, so it is not appended where it arrived:
+      // `plan_declare` is dispatched alongside the Round it describes, and its result lands after
+      // that Round's calls were already announced. It goes above that trailing run of Tool parts
+      // and no higher, so a revision declared after the Agent has said something in prose cannot
+      // leap over what the reader has already read. A revision replaces its predecessor in place,
+      // because the current plan is the only one worth reading.
+      const existing = target.parts.findIndex((p) => p.kind === "plan");
+      if (existing !== -1) {
+        const replaced = target.parts.map((p, i) => (i === existing ? part : p));
+        return { ...state, status: "streaming", messages: withParts(messages, target, replaced) };
+      }
+      let at = target.parts.length;
+      while (at > 0 && target.parts[at - 1]?.kind === "tool") at -= 1;
+      const parts = [...target.parts.slice(0, at), part, ...target.parts.slice(at)];
+      return {
+        ...state,
+        status: "streaming",
+        messages: withParts(messages, target, parts),
       };
     }
 

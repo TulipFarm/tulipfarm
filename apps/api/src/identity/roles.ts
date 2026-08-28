@@ -217,6 +217,8 @@ export const MEMBER_ALLOWED_SURFACES: readonly {
   /** Delegation routes work to an Agent; it does not edit the Agent definition. */
   { type: "platform.agent", actions: ["*"], enforcedIn: "platform/tools.ts" },
   { type: "platform.artifact", actions: ["*"], enforcedIn: "platform/tools.ts" },
+  /** Declaring a plan states an intention; it reaches nothing and changes nothing. */
+  { type: "platform.plan", actions: ["*"], enforcedIn: "platform/tools.ts" },
   { type: "platform.state", actions: ["*"], enforcedIn: "platform/tools.ts" },
   { type: "platform.task", actions: ["*"], enforcedIn: "platform/tools.ts" },
   { type: "platform.time", actions: ["*"], enforcedIn: "platform/tools.ts" },
