@@ -350,7 +350,13 @@ function MessageRow({
           return <LoadingState key="surface-building" label="Rendering" />;
         }
         if (node.kind === "plan") {
-          return <PlanTrace key={`plan-${node.index}`} rounds={node.rounds} />;
+          return (
+            <PlanTrace
+              key={`plan-${node.index}`}
+              rounds={node.rounds}
+              pending={streaming && nodeIndex === nodes.length - 1}
+            />
+          );
         }
         if (node.kind === "tool-run") {
           return (

@@ -1,4 +1,6 @@
 import { Waypoints } from "lucide-react";
+import { Fragment, useState } from "react";
+import { LOADER_LABELS, pick } from "~/components/ui/loading-state";
 import { Trace, TraceStep } from "~/components/ui/trace";
 import type { PlannedCall, PlannedRound } from "./timeline-groups";
 import { ToolStepRow } from "./tool-step";
@@ -31,15 +33,34 @@ import { ToolStepRow } from "./tool-step";
  * while the work is live, folded to its one-line header once it is over, and whatever the reader
  * chose thereafter.
  */
-export function PlanTrace({ rounds }: { rounds: readonly PlannedRound[] }) {
+export function PlanTrace({
+  rounds,
+  pending,
+}: {
+  rounds: readonly PlannedRound[];
+  pending: boolean;
+}) {
+  const [betweenCallsLabel] = useState(() => pick(LOADER_LABELS));
   const calls = rounds.flatMap((round) => round.calls);
   const planned = calls.filter((call) => call.unplanned !== true);
   const unplanned = calls.length - planned.length;
   const done = calls.filter((call) => call.status === "done").length;
   const failed = calls.filter((call) => call.status === "failed").length;
   const skipped = calls.filter((call) => call.status === "skipped").length;
-  const working = calls.some((call) => call.status === "running" || call.status === "pending");
+  const working =
+    pending || calls.some((call) => call.status === "running" || call.status === "pending");
   const declared = rounds.filter((round) => round.declared).length;
+
+  // The live edge of the plan: the first step that has not started. While the Turn is working but
+  // no call is in flight, a row goes here saying so.
+  //
+  // Without it the list is a column of empty circles for as long as the Agent takes to think, and
+  // the reader cannot tell a Turn that is deciding what to do next from one that has stalled. It
+  // is not decoration for a gap that never happens: an Agent that declares its plan in a message
+  // of its own — which the Tool asks it not to do, but which it still does — spends a whole model
+  // round-trip there, and that is exactly where the reader is left staring at nothing.
+  const liveAt = calls.findIndex((call) => call.status === "pending");
+  const thinking = pending && !calls.some((call) => call.status === "running");
 
   const settledLabel = [
     `Planned ${planned.length} steps in ${declared} rounds`,
@@ -82,15 +103,21 @@ export function PlanTrace({ rounds }: { rounds: readonly PlannedRound[] }) {
               <span className="text-muted-foreground/70">{` · ${round.atOnce} at the same time`}</span>
             )}
           </p>
-          {round.calls.map((call, callIndex) => (
-            <PlanCallRow
-              key={call.part?.toolCallId ?? `${call.tool}-${callIndex}`}
-              call={call}
-              position={(offsets[index] ?? 0) + callIndex}
-            />
-          ))}
+          {round.calls.map((call, callIndex) => {
+            const position = (offsets[index] ?? 0) + callIndex;
+            return (
+              <Fragment key={call.part?.toolCallId ?? `${call.tool}-${callIndex}`}>
+                {thinking && position === liveAt ? (
+                  <TraceStep status="running" label={betweenCallsLabel} />
+                ) : null}
+                <PlanCallRow call={call} position={position} />
+              </Fragment>
+            );
+          })}
         </div>
       ))}
+      {/* Every step has started, so the edge is past the end of the list rather than inside it. */}
+      {thinking && liveAt === -1 ? <TraceStep status="running" label={betweenCallsLabel} /> : null}
       <span className="sr-only">{`${done} of ${calls.length} steps finished`}</span>
     </Trace>
   );
