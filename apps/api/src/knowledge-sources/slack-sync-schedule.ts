@@ -76,10 +76,13 @@ export async function registerSlackKnowledgeSync(
       deps.activity,
       SLACK_KNOWLEDGE_SYNC_QUEUE,
       () => runSlackKnowledgeSync(deps),
-      (results) => ({
-        summary: `Slack Knowledge sync ran (${results.reduce((n, r) => n + r.messagesIndexed, 0)} message(s) indexed)`,
-        metadata: { integrations: results.length },
-      })
+      (results) => {
+        const indexed = results.reduce((n, r) => n + r.messagesIndexed, 0);
+        return {
+          summary: `Slack Knowledge sync indexed ${indexed} ${indexed === 1 ? "message" : "messages"}`,
+          metadata: { integrations: results.length },
+        };
+      }
     )
   );
   await boss.schedule(SLACK_KNOWLEDGE_SYNC_QUEUE, SLACK_KNOWLEDGE_SYNC_CRON);

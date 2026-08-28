@@ -74,7 +74,7 @@ The dev console's noise level is unknown, so it is measured rather than assumed.
 | # | Action | Expected |
 | --- | --- | --- |
 | 1 | `navigate /` and let it settle | — |
-| 2 | `navigate /chats`, `/resources`, `/agents`, `/skills`, `/routines`, `/knowledge`, `/inbox`, `/runs`, `/integrations`, `/operations`, `/settings` | Each renders |
+| 2 | `navigate /chats`, `/resources`, `/agents`, `/skills`, `/routines`, `/knowledge`, `/inbox`, `/business/activities`, `/integrations`, `/operations`, `/settings` | Each renders |
 | 3 | `capture` every console message seen across all of the above into `evidence/console-baseline.txt` | Baseline recorded |
 | 4 | `capture` every failed request seen across all of the above into `evidence/network-baseline.txt` | Baseline recorded |
 

@@ -2,7 +2,7 @@
 id: a11y-console-hygiene
 area: A11y & hygiene
 suites: [smoke, full]
-routes: ["/", "/chats", "/resources", "/agents", "/skills", "/routines", "/knowledge", "/integrations", "/inbox", "/runs", "/operations", "/settings", "/business/profile", "/business/people", "/business/guardrails", "/design-guide"]
+routes: ["/", "/chats", "/resources", "/agents", "/skills", "/routines", "/knowledge", "/integrations", "/inbox", "/business/activities", "/operations", "/settings", "/business/profile", "/business/people", "/business/guardrails", "/design-guide"]
 preconditions: [preflight baseline captured]
 blast_radius: none — read-only sweep
 est_minutes: 12
@@ -68,7 +68,7 @@ Sweep across top-level routes (`/`, `/chats`, `/resources`, `/agents`, `/skills`
 
 | # | Action | Expected |
 | --- | --- | --- |
-| 1 | Sequentially visit all top-level routes: `/`, `/chats`, `/resources`, `/agents`, `/skills`, `/routines`, `/knowledge`, `/integrations`, `/inbox`, `/runs`, `/operations`, `/settings`, `/business/profile`, `/business/people`, `/business/guardrails`, and `/design-guide` (dev server only; it 404s on a built instance by design) | All routes loaded |
+| 1 | Sequentially visit all top-level routes: `/`, `/chats`, `/resources`, `/agents`, `/skills`, `/routines`, `/knowledge`, `/integrations`, `/inbox`, `/business/activities`, `/operations`, `/settings`, `/business/profile`, `/business/people`, `/business/guardrails`, and `/design-guide` (dev server only; it 404s on a built instance by design) | All routes loaded |
 | 2 | Compare all console messages against `evidence/console-baseline.txt` recorded in Preflight | Zero new uncaught exceptions or error logs |
 | 3 | `expect` no React hydration mismatch warnings (`Hydration failed because...`) | Clean React hydration |
 | 4 | `expect` no unhandled promise rejections | Clean console |

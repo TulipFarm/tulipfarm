@@ -109,7 +109,7 @@ false passes.
 | Chat response complete | Streaming terminates | 60s | P1 |
 | Skill install | Installed state shown | 30s | P1 |
 | Knowledge indexing | Page/space searchable or indexed state shown | 30s | P1 |
-| Routine run | Terminal state on `/runs` | 60s | P1 |
+| Routine run | Terminal state on `/business/activities?source=run` | 60s | P1 |
 
 Rules:
 

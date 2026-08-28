@@ -336,8 +336,8 @@ line.
 
 Breakpoints at 375 / 768 / 1024 / 1440px. Scroll tables locally rather than the page.
 
-Product modes: Chat; Build (Resources, Agents, Skills, Routines); Knowledge; Operate (Inbox, Runs,
-Integrations, Operations); Settings as a lower utility destination.
+Product modes: Chat; Build (Resources, Agents, Skills, Routines); Knowledge; Operate (Inbox,
+Activity, Integrations, Operations); Settings as a lower utility destination.
 
 ### Component hierarchy
 

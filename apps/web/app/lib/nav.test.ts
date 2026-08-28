@@ -50,7 +50,7 @@ test("hides every denied destination and collapses its empty groups", () => {
   expect(sections).toEqual([
     expect.objectContaining({
       heading: "Work",
-      items: [expect.objectContaining({ label: "Activities" })],
+      items: [expect.objectContaining({ label: "Activity" })],
     }),
   ]);
 });
