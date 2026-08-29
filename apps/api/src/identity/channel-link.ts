@@ -96,7 +96,7 @@ export interface ChannelBindOffer {
 /** Write the nonce before returning the token so every token has a row to spend. */
 export async function issueChannelBindToken(
   deps: ChannelBindDeps,
-  input: { slug: string; senderId: string }
+  input: { slug: string; senderId: string; channelId?: string; threadId?: string }
 ): Promise<IssuedChannelBind> {
   const now = (deps.now ?? (() => new Date()))();
   const expiresAt = new Date(now.getTime() + (deps.ttlMs ?? CHANNEL_BIND_TTL_MS));
@@ -110,6 +110,8 @@ export async function issueChannelBindToken(
     expiresAt,
     consumedAt: null,
     consumedBy: null,
+    channelId: input.channelId ?? null,
+    threadId: input.threadId ?? null,
   });
 
   const claims: ChannelBindClaims = {
@@ -156,12 +158,18 @@ export async function previewChannelBind(
   return { slug: claims.slug, senderId: claims.senderId, expiresAt: row.expiresAt };
 }
 
+/** The mapping just written, plus the offer's delivery ref, so a caller can reply where it was sent. */
+export interface RedeemedChannelBind extends ExternalIdentityMappingDoc {
+  channelId: string | null;
+  threadId: string | null;
+}
+
 /** Spend the nonce before writing the mapping so concurrent clicks cannot bind twice. */
 export async function redeemChannelBindToken(
   deps: ChannelBindDeps,
   token: string,
   userId: string
-): Promise<ExternalIdentityMappingDoc> {
+): Promise<RedeemedChannelBind> {
   const { claims } = await openOffer(deps, token);
   const spent = await deps.repo.consumeBindToken(hashNonce(claims.nonce), userId);
   if (!spent) {
@@ -176,5 +184,5 @@ export async function redeemChannelBindToken(
     verifiedVia: "bind_link",
   };
   await deps.repo.upsertMapping(mapping);
-  return mapping;
+  return { ...mapping, channelId: spent.channelId, threadId: spent.threadId };
 }

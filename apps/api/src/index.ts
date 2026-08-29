@@ -1093,6 +1093,7 @@ async function boot() {
         apiClientRepo,
         externalIdentityRepo,
         channelBind,
+        channelBindSecrets: secretsService,
       },
       rateLimiter,
       secretsService,

@@ -196,7 +196,7 @@ export function registerChannelInternalRoutes(
       preHandler,
       schema: {
         description:
-          "Answers an unmapped Slack sender with a single-use bind link, posted to Slack from this process. The bind token is a bearer credential and must never cross into a Worker process (see `apps/api/src/internal/delivery-host.ts`'s module doc), so this route resolves the offer and posts the reply itself rather than handing the token back.",
+          "Answers an unmapped Slack sender with a single-use bind link, posted to Slack from this process. The bind token is a bearer credential and must never cross into a Worker process (see `apps/api/src/internal/delivery-host.ts`'s module doc), so this route resolves the offer and posts the reply itself rather than handing the token back. The offer's channel/thread is persisted on the bind token row so `POST /api/v1/identity/channel-links/confirm` can reply into the same place once bound (`apps/api/src/identity/routes.ts`) — the same self-posting exception, for the same reason.",
         tags: ["internal"],
         security: [{ bearerToken: [] }],
         body: ChannelSchemas.ChannelIdentityBindOfferBodySchema,
@@ -214,7 +214,12 @@ export function registerChannelInternalRoutes(
         channelId: string;
         threadId?: string;
       };
-      const resolution = await deps.identity.resolve({ slug: provider, sender: externalSubject });
+      const resolution = await deps.identity.resolve({
+        slug: provider,
+        sender: externalSubject,
+        channelId,
+        ...(threadId === undefined ? {} : { threadId }),
+      });
       if (resolution.outcome === "linked" || resolution.bindOffer === null) {
         return reply.send({ outcome: "no_offer" });
       }
