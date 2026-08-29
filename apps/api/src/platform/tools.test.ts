@@ -2,13 +2,21 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DelegationError } from "@tulipfarm/agent-runtime";
-import type { BundledSkill, SoulAgent, SoulRoutine, SoulSkill, SoulWriter } from "@tulipfarm/soul";
+import type {
+  BundledSkill,
+  RoutineCatalog,
+  SoulAgent,
+  SoulRoutine,
+  SoulSkill,
+  SoulWriter,
+} from "@tulipfarm/soul";
 import { describe, expect, it, vi } from "vitest";
 import { delegateToAgentTool } from "./delegate-tool";
 import {
   PLATFORM_TOOLS,
   type PlatformToolContext,
   routineForgeTool,
+  routineGetTool,
   routinePickerTool,
   skillTool,
   soulRepoPushTool,
@@ -845,6 +853,96 @@ describe("routinePickerTool", () => {
   });
 });
 
+// ── routine_get ───────────────────────────────────────────────────────────────
+
+describe("routineGetTool", () => {
+  const detail = {
+    id: "01ARZ3NDEKTSV4RRFFQ69G5FC2",
+    slug: "send-report",
+    displayName: "Send Report",
+    authoredVersion: 3,
+    triggers: [{ slug: "send-report-daily", type: "cron", summary: "cron 0 9 * * *" }],
+    definition: {
+      apiVersion: "tulipfarm.ai/v1",
+      kind: "Routine",
+      metadata: { slug: "send-report", lifecycle: "published" },
+      spec: { start: "Send", states: [{ type: "action", name: "Send", end: true }] },
+    },
+    bundleDigest: "sha256:deadbeef",
+  };
+
+  function ctxWithCatalog(
+    get: (slug: string) => Promise<typeof detail | undefined>,
+    routines: Record<string, SoulRoutine> = {}
+  ): PlatformToolContext {
+    return {
+      ...makeCtx({}, {}, undefined, routines),
+      routineCatalog: { list: async () => [], get } as unknown as RoutineCatalog,
+    };
+  }
+
+  it("returns the published document, its Triggers and the bundle digest", async () => {
+    const res = await routineGetTool.handler(
+      { name: "send-report" },
+      ctxWithCatalog(async () => detail)
+    );
+    expect(res).toEqual({
+      success: true,
+      data: {
+        name: "send-report",
+        id: detail.id,
+        displayName: "Send Report",
+        authoredVersion: 3,
+        triggers: detail.triggers,
+        definition: detail.definition,
+        bundleDigest: "sha256:deadbeef",
+      },
+    });
+  });
+
+  it("says a Soul-present Routine is unpublished rather than missing", async () => {
+    const res = await routineGetTool.handler(
+      { name: "send-report" },
+      ctxWithCatalog(async () => undefined, { "send-report": makeRoutine("send-report") })
+    );
+    expect(res).toMatchObject({ success: false, error: { code: "not_found" } });
+    if (res.success) throw new Error("expected failure");
+    expect(res.error.message).toContain("not published");
+  });
+
+  it("returns not_found when neither the bundle nor the Soul has it", async () => {
+    const res = await routineGetTool.handler(
+      { name: "nope" },
+      ctxWithCatalog(async () => undefined)
+    );
+    expect(res).toMatchObject({
+      success: false,
+      error: { code: "not_found", message: "routine not found: nope" },
+    });
+  });
+
+  it("returns internal_error when the catalogue read throws", async () => {
+    const res = await routineGetTool.handler(
+      { name: "send-report" },
+      ctxWithCatalog(async () => {
+        throw new Error("bundle unreadable");
+      })
+    );
+    expect(res).toMatchObject({
+      success: false,
+      error: { code: "internal_error", message: "bundle unreadable" },
+    });
+  });
+
+  it("returns validation_error for a missing name", async () => {
+    const res = await routineGetTool.handler(
+      {},
+      ctxWithCatalog(async () => detail)
+    );
+    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
+  });
+});
+
 // ── soul_repo_push ────────────────────────────────────────────────────────────
 
 describe("soulRepoPushTool", () => {
@@ -890,6 +988,7 @@ describe("PLATFORM_TOOLS registry", () => {
       "trigger_routine",
       "routine_forge",
       "routine_picker",
+      "routine_get",
       "routine_delete",
       "guardrail_forge",
       "soul_repo_push",

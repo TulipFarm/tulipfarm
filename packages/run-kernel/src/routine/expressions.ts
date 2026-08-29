@@ -510,3 +510,89 @@ export function evaluateCondition(
 ): boolean {
   return Boolean(expression.evaluate(scope));
 }
+
+/** One piece of an authored string: fixed text, or an expression to evaluate and render into it. */
+export type TemplateSegment =
+  | { readonly kind: "text"; readonly value: string }
+  | { readonly kind: "expression"; readonly source: string };
+
+const TEMPLATE_OPEN = "${";
+
+/**
+ * The index of the `}` that closes an expression opened at `from`.
+ *
+ * Quoted runs are skipped rather than scanned, because `}` is legal inside a string literal —
+ * `${ coalesce(x, '}') }` — and the language has no `{` punctuation, so the first unquoted `}`
+ * is always the right one.
+ */
+function closingBrace(source: string, from: number): number {
+  let index = from;
+  while (index < source.length) {
+    const char = source[index];
+    if (char === "'" || char === '"') {
+      index += 1;
+      while (index < source.length && source[index] !== char) {
+        index += source[index] === "\\" ? 2 : 1;
+      }
+      if (index >= source.length) throw new ExpressionError("expression_syntax", "template");
+      index += 1;
+      continue;
+    }
+    if (char === "}") return index;
+    index += 1;
+  }
+  throw new ExpressionError("expression_syntax", "template");
+}
+
+/**
+ * Split an authored string into its fixed text and its `${ ... }` expressions.
+ *
+ * An expression may sit anywhere in the string, so `"stars: ${ n } today"` is two texts around one
+ * expression rather than one opaque literal. Write `$${` for a literal `${`; nothing else is
+ * escaped, so a lone `$` stays a `$`.
+ *
+ * @throws ExpressionError when a `${` is never closed.
+ */
+export function parseTemplate(source: string): readonly TemplateSegment[] {
+  const segments: TemplateSegment[] = [];
+  let text = "";
+  let index = 0;
+  while (index < source.length) {
+    if (source.startsWith(`$${TEMPLATE_OPEN}`, index)) {
+      text += TEMPLATE_OPEN;
+      index += 3;
+      continue;
+    }
+    if (!source.startsWith(TEMPLATE_OPEN, index)) {
+      text += source[index];
+      index += 1;
+      continue;
+    }
+    const end = closingBrace(source, index + TEMPLATE_OPEN.length);
+    if (text.length > 0) {
+      segments.push({ kind: "text", value: text });
+      text = "";
+    }
+    segments.push({ kind: "expression", source: source.slice(index + TEMPLATE_OPEN.length, end) });
+    index = end + 1;
+  }
+  if (text.length > 0) segments.push({ kind: "text", value: text });
+  return segments;
+}
+
+/**
+ * One interpolated value, rendered into the text around it.
+ *
+ * Only finite scalars render. `null`, `undefined`, objects and arrays are refused rather than
+ * coerced, because `String({})` is `"[object Object]"` and `String(null)` is `"null"` — a Routine
+ * that posts either to a channel has sent a wrong message rather than failed to send one. An
+ * author who wants a placeholder writes one: `${ coalesce(x, 'unknown') }`.
+ *
+ * @throws ExpressionError naming the reason only, never the offending value.
+ */
+export function renderInterpolated(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "boolean") return String(value);
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  throw new ExpressionError("expression_type", "interpolation");
+}

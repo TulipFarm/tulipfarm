@@ -2,12 +2,15 @@
 name: routine-forge
 description: "Forge a canonical Routine and its Triggers."
 category: forge
-tools: [routine_forge, routine_picker, trigger_routine, skill, agent_list, agent_get, api_request, record_search, record_get, send_slack_message, present, request_input]
+tools: [routine_forge, routine_picker, routine_get, trigger_routine, skill, agent_list, agent_get, api_request, record_search, record_get, send_slack_message, present, request_input]
 ---
 # Routine Forge Workflow
 
 Use this Skill to create or change a **Routine** and its **Triggers** through Chat. The output is
 canonical published Soul definitions, not the retired Serverless Workflow format.
+
+**Changing an existing Routine starts with `routine_get`.** `routine_forge` replaces the whole
+document, so an edit written from memory deletes every State and Trigger it did not restate.
 
 {{FORGE_EXECUTION_CONTRACT}}
 
@@ -101,8 +104,9 @@ no `triggers` argument. `interval` counts in **milliseconds**, so every 2 minute
   guessed name fails the Run at that State. Check the Tool's schema rather than inventing one.
 - **`api_request` returns its body as text, never parsed.** `states.X.output.body` is a string, so
   a `script` that reads JSON must `JSON.parse(input.body)` first.
-- Expressions resolve **at any depth** inside `input`, so nested arguments like `record_create`'s
-  `data` may reference earlier States.
+- Expressions resolve **at any depth** inside `input`, and one may sit **inside a longer string** —
+  `"Stars: ${ states.X.output.n } today"` interpolates. A string that is *exactly* one expression
+  instead keeps that value's type, so `stars: "${ states.X.output.n }"` stays a number.
 - **There is no `trigger` root inside a Routine.** `${trigger.scheduledTime}` and friends are
   refused when the Routine compiles. A Trigger's payload crosses into the Run only through that
   Trigger's `inputMapping`, which the States then read as `${input.<key>}`. You almost never need

@@ -142,6 +142,7 @@ const EXPECTED_FAMILY_TOOL_NAMES = [
       "plan_declare",
       "routine_delete",
       "routine_forge",
+      "routine_get",
       "routine_picker",
       "skill",
       "soul_repo_push",

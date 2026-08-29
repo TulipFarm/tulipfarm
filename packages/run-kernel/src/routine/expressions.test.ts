@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { compileExpression, ExpressionError } from "./expressions";
+import {
+  compileExpression,
+  ExpressionError,
+  parseTemplate,
+  renderInterpolated,
+} from "./expressions";
 
 const scope = {
   input: { issue: { id: 42, title: "Crash on save", labels: ["bug", "p1"] } },
@@ -88,6 +93,60 @@ describe("compileExpression", () => {
       throw new Error("expected denial");
     } catch (error) {
       expect((error as ExpressionError).message).toBe("expression_unknown_root:secretRoot");
+    }
+  });
+});
+
+describe("parseTemplate", () => {
+  it("splits text around an embedded expression", () => {
+    expect(parseTemplate("stars: ${ n } today")).toEqual([
+      { kind: "text", value: "stars: " },
+      { kind: "expression", source: " n " },
+      { kind: "text", value: " today" },
+    ]);
+  });
+
+  it("reads every expression in the string, not just the first", () => {
+    expect(parseTemplate("${a} is ${b}")).toEqual([
+      { kind: "expression", source: "a" },
+      { kind: "text", value: " is " },
+      { kind: "expression", source: "b" },
+    ]);
+  });
+
+  it("treats a string with no placeholder as one piece of text", () => {
+    expect(parseTemplate("plain")).toEqual([{ kind: "text", value: "plain" }]);
+  });
+
+  it("unescapes $${ to a literal placeholder that is never evaluated", () => {
+    expect(parseTemplate("$${ n }")).toEqual([{ kind: "text", value: "${ n }" }]);
+  });
+
+  it("ignores a closing brace inside a quoted string", () => {
+    expect(parseTemplate("${ coalesce(x, '}') }")).toEqual([
+      { kind: "expression", source: " coalesce(x, '}') " },
+    ]);
+  });
+
+  it("refuses a placeholder that is never closed", () => {
+    expect(() => parseTemplate("stars: ${ n")).toThrow(
+      new ExpressionError("expression_syntax", "template")
+    );
+  });
+});
+
+describe("renderInterpolated", () => {
+  it("renders the scalars a message can carry", () => {
+    expect(renderInterpolated("tulip")).toBe("tulip");
+    expect(renderInterpolated(7)).toBe("7");
+    expect(renderInterpolated(true)).toBe("true");
+  });
+
+  it("refuses values that would coerce to a wrong-looking message", () => {
+    for (const value of [null, undefined, { a: 1 }, [1, 2], Number.NaN]) {
+      expect(() => renderInterpolated(value)).toThrow(
+        new ExpressionError("expression_type", "interpolation")
+      );
     }
   });
 });

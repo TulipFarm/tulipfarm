@@ -149,6 +149,7 @@ export const SOUL_REMINDER_SECTIONS: readonly SoulReminderSection[] = [
     resourceType: "soul.routine",
     actions: [
       "platform.routine.list",
+      "platform.routine.read",
       "platform.routine.trigger",
       "platform.routine.forge",
       "platform.routine.delete",
