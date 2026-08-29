@@ -71,6 +71,7 @@ config:
   INTERNAL_API_URL: ""
   # Headless seeding
   ADMIN_EMAIL: ""
+  SKIP_ADMIN_BOOTSTRAP: ""
   LLM_PROVIDER: ""
   BUSINESS_NAME: ""
   BUSINESS_DESCRIPTION: ""

@@ -83,6 +83,8 @@ properties:
             value: ""
           - name: ADMIN_PASSWORD
             secretRef: admin-password
+          - name: SKIP_ADMIN_BOOTSTRAP
+            value: ""
           - name: LLM_API_KEY
             secretRef: llm-api-key
           - name: LLM_PROVIDER

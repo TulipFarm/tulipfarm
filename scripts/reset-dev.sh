@@ -127,6 +127,10 @@ if $DB_ONLY; then
   echo ""
   echo "✨ Database reset. Start the app — a fresh admin is bootstrapped from .env.local:"
   echo "   pnpm dev"
+  echo ""
+  echo "   Sign in with ADMIN_EMAIL / ADMIN_PASSWORD from .env.local"
+  echo "   (default: admin@tulipfarm.dev / tulipfarm-dev)."
+  echo "   To get the setup wizard instead: SKIP_ADMIN_BOOTSTRAP=true pnpm dev"
   exit 0
 fi
 
@@ -149,3 +153,7 @@ echo ""
 echo "✨ Reset complete. Start fresh:"
 $KEEP_ENV || echo "   scripts/setup-dev.sh   # recreates DB, soul repo, and .env.local with new keys"
 echo "   pnpm dev"
+echo ""
+echo "   Sign in with ADMIN_EMAIL / ADMIN_PASSWORD from .env.local"
+echo "   (default: admin@tulipfarm.dev / tulipfarm-dev)."
+echo "   To get the setup wizard instead: SKIP_ADMIN_BOOTSTRAP=true pnpm dev"

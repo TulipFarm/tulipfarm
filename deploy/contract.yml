@@ -219,6 +219,16 @@ env:
     description: Password for the first admin account during headless boot.
     consequence: Read once at first boot. Leaving it in the environment afterwards leaves an admin
       credential in plaintext where every process can read it.
+  - name: SKIP_ADMIN_BOOTSTRAP
+    group: Headless seeding
+    zone: set-these
+    consumers: [app]
+    description: Development-only switch that skips headless seeding so the browser setup wizard
+      runs even when ADMIN_EMAIL and ADMIN_PASSWORD are set.
+    consequence: It exists because local development seeds a fixed admin, which would otherwise
+      make the wizard unreachable without editing the environment file. Setting it under
+      NODE_ENV=production refuses to boot rather than leaving a headless deployment waiting at a
+      wizard nobody is watching.
   - name: LLM_API_KEY
     group: Headless seeding
     zone: set-these
