@@ -76,7 +76,13 @@ interface Harness {
 
 const REDIRECT_URI = "https://app.example/api/v1/auth/oidc/callback";
 
-async function makeHarness(options: { withOidc?: boolean; mfa?: MfaVerifier[] } = {}) {
+async function makeHarness(
+  options: {
+    withOidc?: boolean;
+    mfa?: MfaVerifier[];
+    channelBindSecrets?: { get(key: string): Promise<string> };
+  } = {}
+) {
   const store = new MemorySessionStore();
   const users = new FakeUserRepo();
   const admin = await createUser(users, "admin@example.com", PASSWORD, "admin");
@@ -99,6 +105,7 @@ async function makeHarness(options: { withOidc?: boolean; mfa?: MfaVerifier[] } 
       apiClientRepo: apiClients,
       externalIdentityRepo: external,
       channelBind: { repo: external, signingKey: async () => Buffer.alloc(32, 3) },
+      ...(options.channelBindSecrets ? { channelBindSecrets: options.channelBindSecrets } : {}),
       ...(options.withOidc
         ? { oidc: { provider, requestRepo: oidcRequests, redirectUri: REDIRECT_URI } }
         : {}),
@@ -722,5 +729,89 @@ describe("channel identity bind links", () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.json()).toEqual({ error: "bind link is not usable" });
+  });
+});
+
+describe("channel bind confirm: reply into the offer's channel", () => {
+  let harness: Harness;
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+
+  const post = (path: string, token: string, session?: { sid: string; csrf: string }) =>
+    harness.app.inject({
+      method: "POST",
+      url: `/api/v1/identity/channel-links/${path}`,
+      payload: { token },
+      ...(session
+        ? {
+            cookies: { [SESSION_COOKIE]: session.sid, [CSRF_COOKIE]: session.csrf },
+            headers: { [CSRF_HEADER]: session.csrf },
+          }
+        : {}),
+    });
+
+  beforeEach(() => {
+    fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+  });
+
+  afterEach(async () => {
+    fetchSpy.mockRestore();
+    await harness.app.close();
+  });
+
+  it("posts a confirmation to Slack when the offer named a channel", async () => {
+    harness = await makeHarness({
+      channelBindSecrets: { get: async () => "xoxb-test-token" },
+    });
+    const session = await login(harness, "member@example.com");
+    const { token } = await issueChannelBindToken(
+      { repo: harness.external, signingKey: async () => Buffer.alloc(32, 3) },
+      { slug: "slack", senderId: "U1", channelId: "C1", threadId: "T1" }
+    );
+
+    const response = await post("confirm", token, session);
+
+    expect(response.statusCode).toBe(201);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://slack.com/api/chat.postMessage",
+      expect.objectContaining({
+        body: JSON.stringify({
+          channel: "C1",
+          text: "Account connected. You can ask me again.",
+          thread_ts: "T1",
+        }),
+      })
+    );
+  });
+
+  it("skips the reply for a non-Slack provider", async () => {
+    harness = await makeHarness({
+      channelBindSecrets: { get: async () => "xoxb-test-token" },
+    });
+    const session = await login(harness, "member@example.com");
+    const { token } = await issueChannelBindToken(
+      { repo: harness.external, signingKey: async () => Buffer.alloc(32, 3) },
+      { slug: "chatapp", senderId: "EXT1", channelId: "C1" }
+    );
+
+    const response = await post("confirm", token, session);
+
+    expect(response.statusCode).toBe(201);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("still binds when no secret store is configured, skipping the reply", async () => {
+    harness = await makeHarness();
+    const session = await login(harness, "member@example.com");
+    const { token } = await issueChannelBindToken(
+      { repo: harness.external, signingKey: async () => Buffer.alloc(32, 3) },
+      { slug: "slack", senderId: "U1", channelId: "C1" }
+    );
+
+    const response = await post("confirm", token, session);
+
+    expect(response.statusCode).toBe(201);
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

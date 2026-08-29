@@ -70,6 +70,9 @@ export interface ChannelBindTokenDoc {
   expiresAt: Date;
   consumedAt: Date | null;
   consumedBy: string | null;
+  /** Where the offer was sent, so a confirmed bind can reply into the same place. Offer-only. */
+  channelId: string | null;
+  threadId: string | null;
 }
 
 export interface ExternalIdentityRepo {
@@ -122,6 +125,8 @@ function rowToBindToken(row: Record<string, unknown>): ChannelBindTokenDoc {
     expiresAt: row.expires_at as Date,
     consumedAt: (row.consumed_at as Date | null) ?? null,
     consumedBy: (row.consumed_by as string | null) ?? null,
+    channelId: (row.channel_id as string | null) ?? null,
+    threadId: (row.thread_id as string | null) ?? null,
   };
 }
 
@@ -223,8 +228,8 @@ export class PgExternalIdentityRepo implements ExternalIdentityRepo {
   async createBindToken(token: ChannelBindTokenDoc): Promise<void> {
     await this.q.query(
       `INSERT INTO channel_bind_tokens
-         (nonce_hash, integration_slug, external_sender_id, issued_at, expires_at, consumed_at, consumed_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+         (nonce_hash, integration_slug, external_sender_id, issued_at, expires_at, consumed_at, consumed_by, channel_id, thread_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
       [
         token.nonceHash,
         token.integrationSlug,
@@ -233,6 +238,8 @@ export class PgExternalIdentityRepo implements ExternalIdentityRepo {
         token.expiresAt,
         token.consumedAt,
         token.consumedBy,
+        token.channelId,
+        token.threadId,
       ]
     );
   }

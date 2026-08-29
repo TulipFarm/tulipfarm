@@ -86,6 +86,9 @@ export class IngressIdentityResolver {
     registry?: ToolRegistry;
     /** The routed Agent's autonomy ceiling; the identity binding runs no higher than it. */
     autonomy?: ChatAutonomy;
+    /** Where the sender messaged from, so a bind offer can be replied to once confirmed. */
+    channelId?: string;
+    threadId?: string;
   }): Promise<ChannelSenderResolution> {
     const linked = await this.findLinkedUser(opts.slug, opts.sender);
     if (linked) return senderAuthority(linked.user, opts.slug, opts.sender, linked.verifiedVia);
@@ -94,7 +97,10 @@ export class IngressIdentityResolver {
     // Always guest-grade: the row this just wrote is `manifest_email` by construction.
     if (claimed) return senderAuthority(claimed, opts.slug, opts.sender, "manifest_email");
 
-    return { outcome: "unlinked", bindOffer: await this.offerBind(opts.slug, opts.sender) };
+    return {
+      outcome: "unlinked",
+      bindOffer: await this.offerBind(opts.slug, opts.sender, opts.channelId, opts.threadId),
+    };
   }
 
   /** Step 1 — an existing verified mapping, checked by the same guard every other subject faces. */
@@ -196,10 +202,20 @@ export class IngressIdentityResolver {
   }
 
   /** Step 3 — what an unlinked sender is given instead of an answer. */
-  private async offerBind(slug: string, sender: string): Promise<IssuedChannelBind | null> {
+  private async offerBind(
+    slug: string,
+    sender: string,
+    channelId?: string,
+    threadId?: string
+  ): Promise<IssuedChannelBind | null> {
     if (!this.deps.bind) return null;
     try {
-      return await issueChannelBindToken(this.deps.bind, { slug, senderId: sender });
+      return await issueChannelBindToken(this.deps.bind, {
+        slug,
+        senderId: sender,
+        ...(channelId === undefined ? {} : { channelId }),
+        ...(threadId === undefined ? {} : { threadId }),
+      });
     } catch (err) {
       // The denial stands either way; failing to offer a way out must not turn into a failed turn.
       this.deps.log.warn({ err, slug, sender }, "could not issue a channel bind link");

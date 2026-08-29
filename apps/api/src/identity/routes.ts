@@ -11,6 +11,7 @@ import {
 } from "../auth/session-store";
 import { toPublicUser, type UserRepo } from "../auth/users";
 import type { RequireAuthorization, RouteAuthorization } from "../authz/route-gate";
+import { integrationSecretKey } from "../integrations/connection-env";
 import { MemoryRateLimiter, makeRateLimitHook } from "../rate-limit";
 import {
   type ApiClientRepo,
@@ -46,6 +47,10 @@ import * as S from "./schemas";
 import type { MfaVerifierRegistry } from "./step-up";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
+/** Just enough of `SecretsService` to read the sealed Slack bot token (narrow for testability). */
+export interface IdentityBindSecretStore {
+  get(key: string): Promise<string>;
+}
 export interface OidcConfig {
   readonly provider: OidcProvider;
   readonly requestRepo: OidcAuthRequestRepo;
@@ -57,6 +62,8 @@ export interface IdentityRouteDeps {
   apiClientRepo?: ApiClientRepo;
   externalIdentityRepo?: ExternalIdentityRepo;
   channelBind?: ChannelBindDeps;
+  /** Resolves the sealed Slack bot token; absent → confirm still binds, just skips the reply. */
+  channelBindSecrets?: IdentityBindSecretStore;
   oidc?: OidcConfig;
   mfa?: MfaVerifierRegistry;
   ttlSeconds?: number;
@@ -84,6 +91,45 @@ const toLink = (mapping: {
 });
 function isAuthMethod(value: unknown): value is AuthMethod {
   return typeof value === "string" && (AUTH_METHODS as string[]).includes(value);
+}
+
+/**
+ * Best-effort reply into the channel a bind offer was sent to, once the bind is confirmed.
+ *
+ * Mirrors the bind-offer route's self-posting exception (`apps/api/src/internal/channel-routes.ts`):
+ * the offer's channel/thread never leaves this process, so this process posts the confirmation
+ * itself rather than handing the ref to a Worker. Never throws — a failed reply must not undo an
+ * already-successful bind.
+ */
+async function postBindConfirmation(
+  deps: IdentityRouteDeps,
+  mapping: { provider: string; channelId: string | null; threadId: string | null },
+  log: FastifyRequest["log"]
+): Promise<void> {
+  if (mapping.provider !== "slack" || !mapping.channelId || !deps.channelBindSecrets) return;
+  try {
+    const botToken = await deps.channelBindSecrets.get(
+      integrationSecretKey("slack", "SLACK_BOT_TOKEN")
+    );
+    const res = await fetch("https://slack.com/api/chat.postMessage", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${botToken}`,
+        "content-type": "application/json; charset=utf-8",
+      },
+      body: JSON.stringify({
+        channel: mapping.channelId,
+        text: "Account connected. You can ask me again.",
+        ...(mapping.threadId ? { thread_ts: mapping.threadId } : {}),
+      }),
+    });
+    const body = (await res.json()) as { ok: boolean; error?: string };
+    if (!body.ok) {
+      log?.warn({ error: body.error }, "slack bind-confirm reply failed");
+    }
+  } catch (err) {
+    log?.warn({ err }, "slack bind-confirm reply failed");
+  }
 }
 export function registerIdentityRoutes(
   app: FastifyInstance,
@@ -544,7 +590,8 @@ function registerChannelBindRoutes(
       preHandler: chain(deps.credentialRateLimitHook, requireAuth),
       schema: {
         description:
-          "Bind the channel identity named by a bind link to the signed-in account. Single use.",
+          "Bind the channel identity named by a bind link to the signed-in account. Single use. " +
+          "Best-effort posts a confirmation back into the channel the offer came from.",
         ...S.ChannelBindConfirmRouteSchema,
       },
     },
@@ -561,6 +608,7 @@ function registerChannelBindRoutes(
           { event: "identity.bind.confirmed", provider: mapping.provider },
           "channel identity bound"
         );
+        await postBindConfirmation(deps, mapping, req.log);
         return reply.code(201).send({ link: toLink(mapping) });
       } catch (error) {
         if (error instanceof ChannelBindDeniedError) {

@@ -2261,4 +2261,13 @@ export const PG_MIGRATIONS: PgMigration[] = [
       "integration_events: unique on (slug, type, external_id) so a replay reuses its id",
     up: applyStatements(INTEGRATION_EVENT_DEDUP_STATEMENTS),
   },
+  {
+    version: 83,
+    description:
+      "channel_bind_tokens: carry the offer's channel/thread so a confirmed bind can reply there",
+    up: async (q) => {
+      await q.query("ALTER TABLE channel_bind_tokens ADD COLUMN IF NOT EXISTS channel_id text");
+      await q.query("ALTER TABLE channel_bind_tokens ADD COLUMN IF NOT EXISTS thread_id text");
+    },
+  },
 ];
