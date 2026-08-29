@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.1](https://github.com/TulipFarm/tulipfarm/compare/v0.17.0...v0.17.1) (2026-08-29)
+
+### Features
+
+* **agents:** enforce the Agent/Skill boundary end to end ([#620](https://github.com/TulipFarm/tulipfarm/issues/620)) ([86160a9](https://github.com/TulipFarm/tulipfarm/commit/86160a9b868e7a8449ea25b16b4504b31ecc58a2))
+* **routines:** add routine_get and interpolate expressions in strings ([#621](https://github.com/TulipFarm/tulipfarm/issues/621)) ([410bf55](https://github.com/TulipFarm/tulipfarm/commit/410bf55be9d6f33f4290cec264feabe4e6c7d923))
+
 ## [0.17.0](https://github.com/TulipFarm/tulipfarm/compare/v0.16.0...v0.17.0) (2026-08-28)
 
 ### Features
