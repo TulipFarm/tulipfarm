@@ -1,5 +1,5 @@
 import type { CompiledInputNode, CompiledState } from "./compiler";
-import { ExpressionError } from "./expressions";
+import { ExpressionError, renderInterpolated } from "./expressions";
 
 export type RoutineInputResolutionErrorCode = "input_not_evaluable";
 
@@ -28,6 +28,12 @@ export function resolveRoutineStateInput(
         return Object.fromEntries(node.entries.map(([key, child]) => [key, resolve(child)]));
       case "array":
         return node.items.map(resolve);
+      case "interpolation":
+        return node.parts
+          .map((part) =>
+            part.kind === "text" ? part.value : renderInterpolated(part.expression.evaluate(scope))
+          )
+          .join("");
       default: {
         const resolved = node.expression.evaluate(scope);
         // `undefined` is not a value the Context can hold: it would serialize away and reach a

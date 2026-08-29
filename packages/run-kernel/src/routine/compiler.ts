@@ -3,7 +3,13 @@ import { canonicalHash } from "@tulipfarm/schema";
 import { type LimitSet, resolveLimits } from "../limits";
 import type { JsonObject, OutputSchemaRegistration } from "../outputs";
 import { mapAuthoredLimits } from "./authored-limits";
-import { type CompiledExpression, compileExpression, ExpressionError } from "./expressions";
+import {
+  type CompiledExpression,
+  compileExpression,
+  ExpressionError,
+  parseTemplate,
+  type TemplateSegment,
+} from "./expressions";
 import { narrowBoundsByLimits, narrowRetryByLimits } from "./limit-enforcement";
 
 /**
@@ -62,17 +68,24 @@ export interface IdentityCeiling {
   readonly maxRiskClass: RiskClass;
 }
 
+/** One piece of an interpolated string, compiled. */
+export type CompiledInterpolationPart =
+  | { readonly kind: "text"; readonly value: string }
+  | { readonly kind: "expression"; readonly expression: CompiledExpression };
+
 /**
  * One authored input value, compiled.
  *
  * A value is a tree, not a scalar, because the Tools a Routine calls take structured arguments —
  * `record_create` carries its `fields` one level down. Compiling only the top level would let a
  * nested `${...}` reach the provider as the literal text of its own expression, which is a silent
- * wrong value rather than a refusal.
+ * wrong value rather than a refusal. A `${...}` embedded in surrounding text is the same hazard in
+ * one dimension further in, and compiles to `interpolation` for the same reason.
  */
 export type CompiledInputNode =
   | { readonly kind: "literal"; readonly value: unknown }
   | { readonly kind: "expression"; readonly expression: CompiledExpression }
+  | { readonly kind: "interpolation"; readonly parts: readonly CompiledInterpolationPart[] }
   | { readonly kind: "object"; readonly entries: readonly (readonly [string, CompiledInputNode])[] }
   | { readonly kind: "array"; readonly items: readonly CompiledInputNode[] };
 
@@ -86,6 +99,8 @@ export function inputNodeExpressions(node: CompiledInputNode): readonly Compiled
   switch (node.kind) {
     case "expression":
       return [node.expression];
+    case "interpolation":
+      return node.parts.flatMap((part) => (part.kind === "expression" ? [part.expression] : []));
     case "object":
       return node.entries.flatMap(([, child]) => inputNodeExpressions(child));
     case "array":
@@ -205,11 +220,18 @@ function stripUndefined<T>(value: T): T {
   return result as T;
 }
 
-const EXPRESSION_PATTERN = /^\$\{([\s\S]*)\}$/;
-
 function compileAt(source: string, path: string): CompiledExpression {
   try {
     return compileExpression(source);
+  } catch (error) {
+    if (error instanceof ExpressionError) throw new RoutineCompileError("invalid_expression", path);
+    throw error;
+  }
+}
+
+function parseTemplateAt(source: string, path: string): readonly TemplateSegment[] {
+  try {
+    return parseTemplate(source);
   } catch (error) {
     if (error instanceof ExpressionError) throw new RoutineCompileError("invalid_expression", path);
     throw error;
@@ -503,11 +525,31 @@ export function compileRoutine(
 
     const compileInputNode = (value: unknown, at: string): CompiledInputNode => {
       if (typeof value === "string") {
-        const match = EXPRESSION_PATTERN.exec(value);
-        if (match === null) return { kind: "literal", value };
-        const expression = compileAt(match[1] as string, at);
-        proveReferences(expression, state.name, at);
-        return { kind: "expression", expression };
+        const segments = parseTemplateAt(value, at);
+        const expressionAt = (source: string): CompiledExpression => {
+          const expression = compileAt(source, at);
+          proveReferences(expression, state.name, at);
+          return expression;
+        };
+        // A string that is exactly one expression keeps that expression's own type: `${ n }` on a
+        // number must stay a number, or every numeric Tool argument silently becomes a string.
+        const only = segments.length === 1 ? segments[0] : undefined;
+        if (only?.kind === "expression") {
+          return { kind: "expression", expression: expressionAt(only.source) };
+        }
+        if (!segments.some((segment) => segment.kind === "expression")) {
+          // Nothing to interpolate; `parseTemplate` has already unescaped any `$${`.
+          const text = segments.map((segment) => (segment.kind === "text" ? segment.value : ""));
+          return { kind: "literal", value: text.join("") };
+        }
+        return {
+          kind: "interpolation",
+          parts: segments.map((segment) =>
+            segment.kind === "text"
+              ? { kind: "text" as const, value: segment.value }
+              : { kind: "expression" as const, expression: expressionAt(segment.source) }
+          ),
+        };
       }
       if (Array.isArray(value)) {
         return {

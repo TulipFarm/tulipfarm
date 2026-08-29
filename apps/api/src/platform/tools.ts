@@ -23,6 +23,7 @@ import {
   isSkillDefinitionFile,
   lockProvenance,
   type RoutineCatalog,
+  type RoutineCatalogDetail,
   readSkillsLock,
   resolveSkill,
   SKILL_TOOL_DECLARATION,
@@ -561,7 +562,9 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
   description:
     "Create or update a ROUTINE (a scheduled/triggered automation) in the soul repo. Use this, " +
     "not skill_create, whenever the user asks to 'create a routine' / 'automate X' / 'every " +
-    "morning do Y' / 'when X happens do Y'. `definition` MUST be a canonical published Routine " +
+    "morning do Y' / 'when X happens do Y'. Updating an existing Routine replaces its whole " +
+    "document, so call `routine_get` first and forge the full definition back, or every State and " +
+    "Trigger you did not restate is deleted. `definition` MUST be a canonical published Routine " +
     "document: apiVersion `tulipfarm.ai/v1`, kind `Routine`, and metadata with id, slug (matching " +
     "name), schemaVersion, authoredVersion, and lifecycle `published`. `definition.spec.states` " +
     "MUST be an array of State objects with name and type (not an object/map). Triggers belong to " +
@@ -709,6 +712,80 @@ export const routinePickerTool = defineApiTool<PlatformToolContext>({
   },
 });
 
+const ROUTINE_GET_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["name"],
+  properties: {
+    name: {
+      type: "string",
+      minLength: 1,
+      description: "Routine slug, as `routine_picker` lists it.",
+    },
+  },
+};
+const validateRoutineGet = ajv.compile(ROUTINE_GET_SCHEMA);
+
+export const routineGetTool = defineApiTool<PlatformToolContext>({
+  name: "routine_get",
+  requiresAmbient: ["soul"],
+  description:
+    "Read one Routine's full configuration: the canonical Routine document (metadata, spec.states " +
+    "and spec.triggers) plus the Triggers currently scheduling it. `routine_picker` returns only " +
+    "names, so this is the only way to see what a Routine actually does. Call it before every " +
+    "`routine_forge` edit: forge replaces the whole document, so an update written without reading " +
+    "first silently deletes every State and Trigger it did not restate. Reads the verified active " +
+    "Soul bundle, so it returns the Routine a Run would actually execute rather than an authored draft.",
+  mutating: false,
+  tier: "platform",
+  inputSchema: ROUTINE_GET_SCHEMA,
+  authorization: {
+    action: "platform.routine.read",
+    resources: ["soul.routine"],
+    targets: (args) => soulTarget(SOUL_ROUTINE_TARGET, args, "name"),
+    dataClasses: ["soul_definition"],
+  },
+  requiresApproval: false,
+  handler: async (args, ctx) => {
+    if (!validateRoutineGet(args))
+      return err("validation_error", firstError(validateRoutineGet.errors));
+    const { name } = args as { name: string };
+    if (ctx.routineCatalog === undefined)
+      return err(
+        "internal_error",
+        "The Routines surface is unavailable, so no Routine can be read."
+      );
+
+    let detail: RoutineCatalogDetail | undefined;
+    try {
+      detail = await ctx.routineCatalog.get(name);
+    } catch (e) {
+      return err("internal_error", e instanceof Error ? e.message : String(e));
+    }
+
+    if (detail === undefined) {
+      // A Routine that is in the Soul but absent from the active bundle failed publication, and
+      // reporting that as a plain miss makes an Agent forge a duplicate instead of repairing it.
+      return ctx.soulLoader?.routines?.has(name)
+        ? err(
+            "not_found",
+            `Routine ${name} exists in the Soul but is not in the active bundle, so it is not published and cannot run.`
+          )
+        : err("not_found", `routine not found: ${name}`);
+    }
+
+    return ok({
+      name: detail.slug,
+      id: detail.id,
+      displayName: detail.displayName,
+      authoredVersion: detail.authoredVersion,
+      triggers: detail.triggers,
+      definition: detail.definition,
+      bundleDigest: detail.bundleDigest,
+    });
+  },
+});
+
 const ROUTINE_DELETE_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
@@ -822,6 +899,7 @@ export const PLATFORM_TOOLS: ParkableApiToolDefinition<PlatformToolContext>[] = 
   triggerRoutineTool,
   routineForgeTool,
   routinePickerTool,
+  routineGetTool,
   routineDeleteTool,
   guardrailForgeTool,
   soulRepoPushTool,

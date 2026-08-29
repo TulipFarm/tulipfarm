@@ -316,6 +316,33 @@ input:
 end: true
 ```
 
+**An expression may sit inside a longer string.** A value is not limited to being one whole
+expression — text around it, and several expressions in one string, both interpolate:
+
+```yaml
+name: NotifySlack
+type: action
+action: send_slack_message
+input:
+  channel: C0BMFUD0HM5
+  text: "TulipFarm stars: ${states.Extract.output.stars} (up ${states.Extract.output.delta} today)"
+end: true
+```
+
+Four rules govern it:
+
+- **A string that is *exactly* one expression keeps that expression's type.** `stars:
+  "${states.Extract.output.stars}"` stays the **number** `42`, which is what `record_create` needs;
+  `"Stars: ${states.Extract.output.stars}"` becomes the **string** `"Stars: 42"`. Never wrap a
+  numeric or boolean argument in surrounding text unless you mean to send text.
+- **Only scalars render.** A part that evaluates to `null`, a list or an object **fails the State**
+  rather than writing `null` or `[object Object]` into the message. Guard a value that may be
+  missing with `${ coalesce(states.X.output.name, 'unknown') }`.
+- **Write `$${` for a literal `${`.** A `${ … }` you meant as plain text is otherwise compiled,
+  and an unknown root fails the forge with `invalid_expression`.
+- **Prefer interpolation over a `script` that only builds a sentence.** A `compute` or `action`
+  State can format the message itself; do not spend an isolate on string concatenation.
+
 **Appending vs overwriting is yours to author.** A snapshot Routine that should keep history ends
 in `record_create`. Use `record_search` + `record_update` only when you actually mean to mutate one
 existing row.
