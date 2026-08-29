@@ -51,9 +51,15 @@ test("index lists agents with label, domain, and autonomy", () => {
   expect(screen.getByText("supervised")).toBeInTheDocument();
 });
 
-test("index with no agents shows the empty state", () => {
+test("index with no agents explains what an agent is and points at Skills", () => {
   renderWithData(<AgentsIndex />, { agents: [] });
-  expect(screen.getByText(/No agents registered/)).toBeInTheDocument();
+  expect(screen.getByText(/An agent is who does the work/)).toBeInTheDocument();
+  expect(screen.getByText(/add a skill instead/)).toBeInTheDocument();
+});
+
+test("index distinguishes an agent from a Skill and links to Skills", () => {
+  renderWithData(<AgentsIndex />, { agents: [agent] });
+  expect(screen.getByRole("link", { name: "Skills" })).toHaveAttribute("href", "/skills");
 });
 
 test("index ErrorBoundary surfaces 401 as authentication required", () => {

@@ -38,9 +38,18 @@ const agentActionRestrictionsSchema = <T extends readonly string[]>(values: T) =
     { additionalProperties: false }
   );
 
+const agentSkillRestrictionsSchema = Type.Object(
+  {
+    allow: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
+    deny: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
+  },
+  { additionalProperties: false }
+);
+
 const AgentCapabilityRestrictionsSchema = Type.Object(
   {
     tools: Type.Optional(agentToolRestrictionsSchema),
+    skills: Type.Optional(agentSkillRestrictionsSchema),
     records: Type.Optional(
       Type.Object(
         {

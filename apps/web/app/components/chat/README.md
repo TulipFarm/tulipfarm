@@ -36,9 +36,14 @@ separately-named ProseMirror node with its own suggestion `pluginKey`:
 | Trigger | Menu source | On send |
 |---|---|---|
 | `@agent` | `listAgents()` | first one → POST `agentId` (routes the turn; overrides the panel's active agent) |
-| `/skill` | `listSkills()` | POST `skills: string[]` — eagerly injected into the agent's context for the turn |
-| `#resource` | `listResourceTypes()` | POST `resources: string[]` — type schema injected for the turn |
-| `~knowledge` | `searchKnowledge(query)` (async, per keystroke) | POST `knowledgePages: string[]` (pageIds) — full page content pinned into `<pinned-knowledge>` for the turn |
+| `/skill` | `listSkills()` | POST `skills: string[]` — named in the turn's `<participant-pinned>` block |
+| `#resource` | `listResourceTypes()` | POST `resources: string[]` — named in the turn's `<participant-pinned>` block |
+| `~knowledge` | `searchKnowledge(query)` (async, per keystroke) | POST `knowledgePages: string[]` (pageIds) — named in the turn's `<participant-pinned>` block |
+
+A pin **points, it does not grant.** The three lists are narrowed against the Soul reminder's
+already-authority-filtered catalogue and then named back to the agent, which opens what it needs
+with the matching tool. A pinned skill an agent's `capabilityRestrictions.skills` forbids never
+reaches the block, and would still be refused at dispatch if it did. No pin injects content.
 
 `editor/serialize.ts` is the pure, DOM-free core (unit-tested): `serializeDoc(editor.getJSON())` →
 `{ text (markdown, mentions as literal `@/ / /# / ~` tokens), agentId, skills, resources, knowledge }`; link hrefs are

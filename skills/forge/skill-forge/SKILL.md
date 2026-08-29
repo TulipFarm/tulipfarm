@@ -11,7 +11,19 @@ Find, install, or author a Skill: a stateless set of instructions for one repeat
 file carries the rules that bind every one of those jobs; each job's own procedure lives in a
 reference you load when you need it. It does not create Agents or Routines.
 
-## When to Use
+## When to Use — a Skill is a *what*, an Agent is a *who*
+
+A Skill is a procedure: never addressed by a user, loaded only when its description matches the
+task, one active at a time, and it **carries no authority** — it runs under the permissions of the
+Agent that loaded it. Declaring `tools` narrows what the model is *shown*, which is focus, not
+permission. An Agent is the opposite on every count: addressable, owner of the chat across Turns,
+and the only one of the two that can carry an enforced limit. So **a hard limit is never a Skill**
+("must never delete a Ticket" is an Agent's `capabilityRestrictions`, checked before the Tool runs,
+where Skill text is only advice), and **making an existing Agent better at one task is always a
+Skill**, never a second Agent — one Agent uses many Skills, and one Skill serves every Agent whose
+`capabilityRestrictions.skills` does not exclude it.
+
+Use this workflow when:
 
 - The user asks how to do something likely already solved, or whether a Skill exists for it.
 - The user asks whether you *can* do X, where X is a specialised capability.
@@ -20,12 +32,15 @@ reference you load when you need it. It does not create Agents or Routines.
 - A hard multi-step task produced an approach worth reusing.
 - A loaded Skill is wrong, outdated, incomplete, or missing a discovered pitfall.
 
-Do not use this workflow for:
+Switch forge when the user actually wants:
 
-- Persistent identity, persona, or coordination across Turns; use `agent-forge`.
-- Scheduled or event-driven automation; use `routine-forge`.
-- A one-off answer with no likely reuse.
-- General facts without a procedure; store those in the appropriate Knowledge or Memory surface.
+| What they described | Go to | Why it is not a Skill |
+| --- | --- | --- |
+| A worker to talk to, persistent identity, or a hard limit | `agent-forge` | Nobody addresses a Skill, and only an Agent's limit is enforced |
+| Work that starts on a schedule or an event | `routine-forge` | A Skill is loaded, never triggered |
+| A new shape of business data | `resource-forge` | That is a Resource type |
+| A fact or policy with no procedure | Knowledge or Memory | A Skill says *how*, not *what is true* |
+| A one-off answer with no likely reuse | Neither | Answer it; do not write a Skill |
 
 ## Prerequisites
 

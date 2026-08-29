@@ -19,6 +19,13 @@ export default function SkillsIndex() {
   return (
     <ResourcePanel crumbs={[{ label: "skills" }]}>
       <SkillsTabs />
+      <p className="text-xs text-muted-foreground">
+        A skill is <span className="text-foreground">what</span> gets done: a procedure an{" "}
+        <Link to="/agents" className="cursor-pointer underline underline-offset-2">
+          agent
+        </Link>{" "}
+        loads for one task. You never talk to a skill, and a skill grants no permissions of its own.
+      </p>
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">
           {skills.length} {skills.length === 1 ? "skill" : "skills"}

@@ -26,10 +26,12 @@ export type {
   SoulReminderCatalogue,
   SoulReminderEntry,
   SoulReminderPersonal,
+  SoulReminderPinned,
 } from "./soul-reminder";
 export {
   filterSoulCatalogue,
   filterSoulPersonal,
+  filterSoulPinned,
   renderSoulReminder,
   SOUL_REMINDER_SECTIONS,
 } from "./soul-reminder";

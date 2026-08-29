@@ -10,6 +10,12 @@ without loading that material into every turn. It can also publish named tools b
 TypeScript, or Python scripts. Skills follow the agent-skills shape: `SKILL.md` plus optional
 references, assets, schemas, and scripts.
 
+A skill is a *what*, not a *who*. You never talk to a skill; an
+[agent](/docs/using-tulipfarm/agents) loads one when the task calls for it, and the agent keeps
+answering you. A skill grants no authority — it can only ever be followed by an agent that was
+already permitted to do the work. See
+[How agents and skills differ](/docs/using-tulipfarm/how-agents-and-skills-differ).
+
 ## Progressive disclosure
 
 Skills load in layers. The name and description are visible so the agent can decide whether the

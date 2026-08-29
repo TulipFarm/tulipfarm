@@ -1,13 +1,16 @@
 import {
   filterSoulCatalogue,
   filterSoulPersonal,
+  filterSoulPinned,
   renderSoulReminder,
   type SoulBusinessDetails,
   type SoulReminderPersonal,
+  type SoulReminderPinned,
 } from "@tulipfarm/agent-runtime";
 import type { AuthorityLayer } from "@tulipfarm/authz";
+import type { AgentCapabilityRestrictions } from "@tulipfarm/schema";
 import { buildSoulCatalogue, type SoulLoader } from "@tulipfarm/soul";
-import { type AuthorityPrincipal, principalKindOf } from "@tulipfarm/tool-host";
+import { type AuthorityPrincipal, agentCanUseSkill, principalKindOf } from "@tulipfarm/tool-host";
 
 /**
  * The one layer read the Soul reminder needs; `LiveAuthorityLayerResolver` satisfies it.
@@ -34,6 +37,13 @@ export interface SoulReminderInput {
   readonly businessId: string;
   readonly subjectId: string;
   readonly subjectKind: string;
+  /**
+   * This Turn's Agent's authored restrictions, so the catalogue never names a Skill the Agent
+   * would be refused at dispatch. Absent leaves the catalogue unrestricted.
+   */
+  readonly agentRestrictions?: AgentCapabilityRestrictions;
+  /** What the participant pointed at in the composer. Narrowed to the catalogue before rendering. */
+  readonly pinned?: SoulReminderPinned;
   readonly now: Date;
 }
 
@@ -96,6 +106,11 @@ async function personalFor(input: SoulReminderInput): Promise<SoulReminderPerson
  *
  * A subject kind that maps to no principal renders nothing, rather than intersecting an empty set,
  * which a careless reader could take for "allowed".
+ *
+ * The Agent's authored Skill restrictions *are* applied, which is not a contradiction of the
+ * paragraph above: they are configuration on the Agent rather than a granted authority layer, and
+ * omitting a Skill the Agent would be refused at dispatch keeps the catalogue from advertising a
+ * capability this Turn cannot adopt.
  */
 export async function resolveSoulReminder(input: SoulReminderInput): Promise<string> {
   const resolver = input.authorityLayers;
@@ -108,13 +123,17 @@ export async function resolveSoulReminder(input: SoulReminderInput): Promise<str
     kind,
   });
   const business = businessFrom(input.soulLoader);
+  const loaded = buildSoulCatalogue(input.soulLoader);
   const catalogue = {
-    ...buildSoulCatalogue(input.soulLoader),
+    ...loaded,
+    skills: loaded.skills.filter((entry) => agentCanUseSkill(input.agentRestrictions, entry.name)),
     ...(business === undefined ? {} : { business }),
   };
   const personal = await personalFor(input);
+  const narrowed = filterSoulCatalogue(catalogue, [layer], input.now);
   return renderSoulReminder(
-    filterSoulCatalogue(catalogue, [layer], input.now),
-    filterSoulPersonal(personal, [layer], input.now)
+    narrowed,
+    filterSoulPersonal(personal, [layer], input.now),
+    filterSoulPinned(input.pinned ?? {}, narrowed)
   );
 }

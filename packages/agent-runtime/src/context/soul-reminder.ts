@@ -50,6 +50,20 @@ export interface SoulReminderPersonal {
   readonly customInstructions?: string;
 }
 
+/**
+ * What the participant explicitly pointed at in the message they just sent.
+ *
+ * The composer lets someone name a Skill, a Resource type or a Knowledge page inline rather than
+ * describing it in prose. That choice is a *request*, never a grant: it tells the Agent where to
+ * look, and every artifact still opens through a Tool that authorizes the read. An Agent whose
+ * `capabilityRestrictions` forbid a pinned Skill must not gain it because a participant typed it.
+ */
+export interface SoulReminderPinned {
+  readonly skills?: readonly string[];
+  readonly resourceTypes?: readonly string[];
+  readonly knowledgePages?: readonly string[];
+}
+
 /** The authority that admits a singleton block — one that names no artifact to scope a grant to. */
 interface SingletonAuthorization {
   readonly resourceType: string;
@@ -247,6 +261,37 @@ export function filterSoulPersonal(
   return personal;
 }
 
+/**
+ * Narrows the participant's pins to what this Turn can actually reach.
+ *
+ * Skills and Resource types are intersected with the already-narrowed catalogue rather than
+ * re-authorized, so a pin can never disclose more than the catalogue just did — and that inherits
+ * the Agent's own Skill restrictions for free, because the caller applies those to the catalogue
+ * before this runs. A pin is a pointer at something the Agent was already told about.
+ *
+ * Knowledge pages have no catalogue section to intersect against, so they survive as names: the
+ * participant chose them from their own authority-filtered picker, and the Tool that opens one
+ * authorizes the read anyway. Naming a page back to the Agent discloses nothing the participant
+ * did not just select.
+ */
+export function filterSoulPinned(
+  pinned: SoulReminderPinned,
+  catalogue: SoulReminderCatalogue
+): SoulReminderPinned {
+  const within = (
+    names: readonly string[] | undefined,
+    entries: readonly SoulReminderEntry[]
+  ): string[] => (names ?? []).filter((name) => entries.some((entry) => entry.name === name));
+  const skills = within(pinned.skills, catalogue.skills);
+  const resourceTypes = within(pinned.resourceTypes, catalogue.resourceTypes);
+  const knowledgePages = [...(pinned.knowledgePages ?? [])];
+  return {
+    ...(skills.length === 0 ? {} : { skills }),
+    ...(resourceTypes.length === 0 ? {} : { resourceTypes }),
+    ...(knowledgePages.length === 0 ? {} : { knowledgePages }),
+  };
+}
+
 /** Longest description the reminder carries; a Tool reads the whole thing when it matters. */
 const MAX_DESCRIPTION_CHARS = 200;
 
@@ -330,6 +375,30 @@ function renderSection(tag: string, entries: readonly SoulReminderEntry[]): stri
 }
 
 /**
+ * Renders what the participant pointed at, or `""` when they pointed at nothing.
+ *
+ * The one block that is omitted rather than rendered `(none)`. Every other section answers a
+ * question the Agent would otherwise spend a Tool call on, so silence there reads as "unknown".
+ * Here there is no question: most Turns carry no pins, and an empty block every Turn would be
+ * noise the Agent has to re-read and discount. Absence means the participant named nothing.
+ *
+ * The lead line states the semantics, because a bare list of names does not say whether it is a
+ * grant, an order or a hint — and the wrong reading of that is the dangerous one.
+ */
+function renderPinned(pinned: SoulReminderPinned): string {
+  const rows: string[] = [
+    ...(pinned.skills ?? []).map((name) => `skill: ${line(name)}`),
+    ...(pinned.resourceTypes ?? []).map((name) => `resource-type: ${line(name)}`),
+    ...(pinned.knowledgePages ?? []).map((name) => `knowledge-page: ${line(name)}`),
+  ];
+  if (rows.length === 0) return "";
+  const lead =
+    "The participant named these while writing their message. Open the ones the request " +
+    "actually needs with the matching Tool. This is a pointer, not permission.";
+  return `<participant-pinned>\n${lead}\n${rows.join("\n")}\n</participant-pinned>`;
+}
+
+/**
  * Renders the reminder. Always renders every block, empty ones included.
  *
  * Omitting an empty section defeats the point of the block. The Agent cannot tell an absent
@@ -346,7 +415,8 @@ function renderSection(tag: string, entries: readonly SoulReminderEntry[]): stri
  */
 export function renderSoulReminder(
   catalogue: SoulReminderCatalogue,
-  personal: SoulReminderPersonal = {}
+  personal: SoulReminderPersonal = {},
+  pinned: SoulReminderPinned = {}
 ): string {
   const soul = SOUL_REMINDER_SECTIONS.map((section) =>
     renderSection(section.tag, catalogue[section.key] ?? [])
@@ -359,6 +429,7 @@ export function renderSoulReminder(
       "custom-instructions",
       blockText(personal.customInstructions ?? "", MAX_CUSTOM_INSTRUCTIONS_CHARS)
     ),
-  ];
+    renderPinned(pinned),
+  ].filter((block) => block.length > 0);
   return `<system-reminder>\n${blocks.join("\n")}\n</system-reminder>`;
 }

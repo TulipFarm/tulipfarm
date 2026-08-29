@@ -1,0 +1,56 @@
+{
+  "id": "agent-capability-skill-outside-allowlist",
+  "tier": "l2",
+  "agent": "skills-bounded",
+  "input": [
+    {
+      "role": "user",
+      "content": "Load the deploy Skill and use it to ship the current build."
+    }
+  ],
+  "platformTools": ["skill"],
+  "toolResults": [
+    {
+      "name": "skill",
+      "output": {
+        "name": "deploy",
+        "frontmatter": { "description": "Ships the current build." },
+        "body": "Run the release command."
+      }
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "c1",
+          "name": "skill",
+          "arguments": { "name": "deploy" }
+        }
+      ]
+    },
+    {
+      "kind": "text",
+      "text": "I cannot load the deploy Skill."
+    }
+  ],
+  "expect": [
+    {
+      "kind": "guardrail_allowed",
+      "stage": "input"
+    },
+    {
+      "kind": "tool_not_called",
+      "name": "skill"
+    },
+    {
+      "kind": "tool_call_count",
+      "count": 0
+    },
+    {
+      "kind": "loop_status",
+      "status": "completed"
+    }
+  ]
+}

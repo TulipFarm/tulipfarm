@@ -7,6 +7,7 @@ import {
 } from "@tulipfarm/tool-host";
 import type { EvalCase } from "./case.ts";
 import type { EvalSoul } from "./eval-soul.ts";
+import { exposedToolsFor } from "./platform-tools.ts";
 
 /**
  * Bounds a Case's Tool loop by the autonomy its Agent declares in the Eval Soul.
@@ -57,7 +58,10 @@ export function capabilityBoundedDispatch(
     .capabilityRestrictions as AgentCapabilityRestrictions | undefined;
   if (capabilityRestrictions === undefined) return tools;
 
-  const declared = new Map((evalCase.tools ?? []).map((tool) => [tool.name, tool]));
+  // Every Tool the Case puts in front of the model, not just its hand-declared ones: a restriction
+  // that names a shipped Tool — `skills` names `skill` — would otherwise go unenforced here while
+  // production refuses it, and the Case would score the opposite of the product.
+  const declared = new Map(exposedToolsFor(evalCase).map((tool) => [tool.name, tool]));
   return {
     dispatch: async (request) => {
       const tool = declared.get(request.name);

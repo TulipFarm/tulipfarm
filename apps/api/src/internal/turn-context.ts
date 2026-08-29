@@ -5,6 +5,7 @@ import {
   type GuardrailsService,
   type ModelRequirementsPolicy,
   narrowDelegatedTurn,
+  type SoulReminderPinned,
 } from "@tulipfarm/agent-runtime";
 import {
   resolveTurnAttachments,
@@ -20,6 +21,7 @@ import {
   RUN_EXECUTOR_PRINCIPAL_REF,
   requestArtifactId,
 } from "@tulipfarm/run-kernel";
+import type { AgentCapabilityRestrictions } from "@tulipfarm/schema";
 import { canonicalHash, contentText, textContent } from "@tulipfarm/schema";
 import type { BundledSkill, SoulAgent, SoulLoader } from "@tulipfarm/soul";
 import { getDefaultAssistant, resolveAgent } from "@tulipfarm/soul";
@@ -86,6 +88,16 @@ export interface ChatRequestPayload {
   readonly autonomy?: string;
   readonly hasTools?: boolean;
   readonly llmDecision?: boolean;
+  /**
+   * What the participant pinned in the composer while writing the message.
+   *
+   * Each names an artifact the Agent is already told about in the Soul reminder, so a pin points
+   * attention rather than widening reach. `resources` holds Resource type names, matching the
+   * wire schema rather than the reminder's field name.
+   */
+  readonly skills?: readonly string[];
+  readonly resources?: readonly string[];
+  readonly knowledgePages?: readonly string[];
 }
 
 /** Which Run source states its turn parameters directly, rather than through a derived Artifact. */
@@ -188,7 +200,11 @@ export class ChatTurnContextResolver implements TurnContextResolver {
       authority.turn.conversationId
     );
     const system = assembleAgentSystemPrompt({ agent });
-    const soulReminder = await this.soulReminder(authority);
+    const soulReminder = await this.soulReminder(authority, toolAgent?.capabilityRestrictions, {
+      ...(request.skills === undefined ? {} : { skills: request.skills }),
+      ...(request.resources === undefined ? {} : { resourceTypes: request.resources }),
+      ...(request.knowledgePages === undefined ? {} : { knowledgePages: request.knowledgePages }),
+    });
 
     // Every Turn now resolves a presentation target (Channel destination, or the web chat surface
     // keyed by conversation), so the presentation Tools are offered for every channel alike.
@@ -294,8 +310,12 @@ export class ChatTurnContextResolver implements TurnContextResolver {
     };
   }
 
-  /** What this instance's Soul holds, narrowed to what this Turn's subject may reach. */
-  private async soulReminder(authority: TurnAuthority): Promise<string> {
+  /** What this instance's Soul holds, narrowed to what this Turn's subject and Agent may reach. */
+  private async soulReminder(
+    authority: TurnAuthority,
+    agentRestrictions: AgentCapabilityRestrictions | undefined,
+    pinned: SoulReminderPinned
+  ): Promise<string> {
     return resolveSoulReminder({
       ...(this.options.authorityLayers === undefined
         ? {}
@@ -305,6 +325,8 @@ export class ChatTurnContextResolver implements TurnContextResolver {
       ...(this.options.customInstructions === undefined
         ? {}
         : { customInstructions: this.options.customInstructions }),
+      ...(agentRestrictions === undefined ? {} : { agentRestrictions }),
+      pinned,
       businessId: authority.businessId,
       subjectId: authority.subject.id,
       subjectKind: authority.subject.kind,
