@@ -45,7 +45,7 @@ Never let these bleed: UI/URL never say "conversation"; domain/DB never say "cha
 | One user→assistant exchange | **Turn** | `Turn` | — | — | child of Conversation |
 | Atomic message unit | **Message** | `Message` | — | — | roles: system\|user\|**assistant**\|tool |
 | Auth/login session (cookie) | **Session** | `Session` | `/api/v1/auth/...` | — | AUTH ONLY — never the chat thread |
-| Configured AI persona/worker | **Agent** | `Agent` | `/agents`, `/api/v1/agents` | "Agents" | normal chat is the default harness; Agents are user-created |
+| Configured AI persona/worker | **Agent** | `Agent` | `/agents`, `/api/v1/agents` | "Agents" | the *who* — addressable, owns the Conversation across Turns, and the **only** one of Agent/Skill that holds authority (`capabilityRestrictions` is server-enforced). Normal chat is the default harness; Agents are user-created. ⛔ never describe an Agent as "a skill" or author one per task — one Agent uses many Skills |
 | The resource feature | **Resources** | — | `/resources` | "Resources" | umbrella |
 | A user-defined schema (Ticket, Customer) | **Resource type** | `ResourceType` | `/resources/:type` | "Resource type" | has a JSON **schema** |
 | The JSON Schema artifact of a type | **Schema** | `schema` | `/resources/:type/schema` | "Schema" | |
@@ -73,7 +73,7 @@ Never let these bleed: UI/URL never say "conversation"; domain/DB never say "cha
 | Auth material for a provider/integration | **Credential** | `Credential` | — | "Credentials" | API key/token/login; *backed by* a Secret |
 | Encrypted at-rest value (storage primitive) | **Secret** | `Secret` | `/business/secrets` | "Secrets" | the store; ≠ Credential |
 | Boot-time value from `.env`/`process.env` | **Env Config** | — | — | — | restart-required; not all values are secret (e.g. `SOUL_PATH`) — the one genuinely secret value inside it is the KEK (`ENCRYPTION_KEY`), named directly, not by renaming this bucket |
-| An installable agent capability module | **Skill** | `Skill` | `/skills`, `/api/v1/skills` | "Skills" | `plugin`/`capability` → retired as synonyms¹ |
+| An installable agent capability module | **Skill** | `Skill` | `/skills`, `/api/v1/skills` | "Skills" | the *what* — a procedure an Agent loads for one task; never addressed by a user, one active per Turn, and it **grants no authority**. A `tools:` list narrows the model-visible offer only (`narrowing.ts`), never authorization. `plugin`/`capability` → retired as synonyms¹ |
 | Where skills are browsed/installed | **Marketplace** / **Install** | — | `/skills/marketplace`, `/skills/install` | "Marketplace" | |
 | The git-backed config repo | **Soul** | `Soul` | `/api/v1/soul` | "Soul" | holds agents/routines/skills/integrations/resources |
 | Git-tracked YAML settings inside the Soul repo | **Soul Config** | `SoulConfig` | — | — | e.g. `soul.yaml`, `guardrails.yaml`; non-secret, runtime-editable but reload behavior varies (some apply on `soul.synced`, others require restart) |

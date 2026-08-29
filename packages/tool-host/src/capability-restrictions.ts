@@ -17,6 +17,7 @@ import type { ToolDef } from "./types";
 
 type ToolShape = Pick<ToolDef, "name" | "mutating">;
 type ToolRestriction = NonNullable<AgentCapabilityRestrictions["tools"]>;
+type SkillRestriction = NonNullable<AgentCapabilityRestrictions["skills"]>;
 type RecordRestriction = NonNullable<AgentCapabilityRestrictions["records"]>;
 type ResourceTypeRestriction = NonNullable<AgentCapabilityRestrictions["resourceTypes"]>;
 
@@ -59,6 +60,13 @@ const RESOURCE_TYPE_TOOL_ACTIONS: Readonly<Record<string, string>> = {
   create_resource_type: "create",
   resource_type_update: "update",
 };
+
+/**
+ * The Tool that loads a Skill into a Turn. Duplicated from `@tulipfarm/soul`'s `SKILL_TOOL_NAME`
+ * rather than imported, for the same reason the Tool names above are: this package decides
+ * authority for hosts that do not compose a Soul.
+ */
+const SKILL_TOOL_NAME = "skill";
 
 function toolDenied(tool: ToolShape, restriction: ToolRestriction | undefined): string | undefined {
   if (restriction === undefined) return undefined;
@@ -140,6 +148,44 @@ function resourceTypeDenied(
 }
 
 /**
+ * Whether this Agent may load the named Skill.
+ *
+ * Scoped to the one Tool that loads a Skill, because that is the only place a Skill enters a Turn;
+ * `skill_list` and the Soul-authoring Tools are about writing the catalogue, not adopting a
+ * capability, and `tools` already governs those.
+ *
+ * Undecidable at offer: the `skill` Tool is a single Tool that reaches every Skill, so trimming it
+ * from the catalog over one denied Skill would take away the rest. It stays offered and dispatch
+ * answers per call — the split this file's header describes.
+ *
+ * Fails closed at dispatch on an unreadable target, matching `outOfScope`: an `allow` list is a
+ * statement that only named Skills are permitted, so a call that will not say which Skill it wants
+ * cannot be one of them.
+ */
+function skillDenied(
+  toolName: string,
+  args: unknown,
+  restriction: SkillRestriction | undefined,
+  phase: Phase
+): string | undefined {
+  if (toolName !== SKILL_TOOL_NAME || restriction === undefined) return undefined;
+  if (phase === "offer") return undefined;
+  const name = stringArgument(args, "name");
+  if (name === undefined) {
+    return restriction.allow === undefined
+      ? undefined
+      : "this Agent is restricted to named Skills, and this call names none";
+  }
+  if (restriction.deny?.includes(name)) {
+    return `Skill "${name}" is denied by this Agent's capability restrictions`;
+  }
+  if (restriction.allow !== undefined && !restriction.allow.includes(name)) {
+    return `Skill "${name}" is outside this Agent's allowed Skills`;
+  }
+  return undefined;
+}
+
+/**
  * The reason this Agent may not make this call, or `undefined` when nothing forbids it.
  *
  * An Agent that authored no restrictions is unrestricted, so absence returns `undefined` and the
@@ -153,6 +199,7 @@ export function agentCapabilityDenial(
   if (restrictions === undefined) return undefined;
   return (
     toolDenied(tool, restrictions.tools) ??
+    skillDenied(tool.name, args, restrictions.skills, "dispatch") ??
     recordDenied(tool.name, args, restrictions.records, "dispatch") ??
     resourceTypeDenied(tool.name, args, restrictions.resourceTypes, "dispatch")
   );
@@ -168,5 +215,22 @@ export function agentCanBeOfferedTool(
     toolDenied(tool, restrictions.tools) === undefined &&
     recordDenied(tool.name, undefined, restrictions.records, "offer") === undefined &&
     resourceTypeDenied(tool.name, undefined, restrictions.resourceTypes, "offer") === undefined
+  );
+}
+
+/**
+ * Whether this Agent may load one named Skill. Disclosure, not the authorization decision.
+ *
+ * Lets a caller that already knows the Skill's name — the Soul reminder's catalogue — omit what
+ * dispatch would refuse, so the model is not told about a capability it cannot adopt. Dispatch
+ * still decides: this is the same verdict reached early, never a substitute for it.
+ */
+export function agentCanUseSkill(
+  restrictions: AgentCapabilityRestrictions | undefined,
+  skillName: string
+): boolean {
+  return (
+    skillDenied(SKILL_TOOL_NAME, { name: skillName }, restrictions?.skills, "dispatch") ===
+    undefined
   );
 }

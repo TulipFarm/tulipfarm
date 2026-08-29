@@ -10,6 +10,12 @@ Agents are different from the built-in `__tulipfarm_default__` chat harness: the
 front desk, while agents are business-specific specialists you create, select, transfer to, or
 delegate work to.
 
+An agent is a *who*. It is the thing you talk to, and the thing that holds authority. A
+[skill](/docs/using-tulipfarm/skills) is a *what*: a procedure an agent loads for one task, which
+carries no authority of its own. One agent uses many skills over time, so a narrower job is usually
+a new skill rather than a new agent. See
+[How agents and skills differ](/docs/using-tulipfarm/how-agents-and-skills-differ).
+
 ## What the assistant writes
 
 Agents live in the [soul](/docs/using-tulipfarm/what-a-soul-is) as `agents/{name}/AGENT.md`: frontmatter plus a
@@ -79,6 +85,27 @@ helper do the work, because a helper's authority is the intersection of the two.
 `request_input`,
 `complete_task` and `complete_state` are never withdrawn, so a restricted agent can still finish
 its turn and explain itself. An agent with no `capabilityRestrictions` is unrestricted.
+
+### Bounding which skills an agent may use
+
+By default an agent can load every skill the instance holds, which is usually what you want — one
+agent draws on many skills. To keep an agent to a named set, say so in chat ("this agent may only
+use the invoice-audit skill", "never let it run deploy") and `agent-forge` writes it:
+
+```markdown title="soul/agents/billing/AGENT.md"
+---
+label: Billing
+capabilityRestrictions:
+  skills:
+    allow: [invoice-audit]
+---
+```
+
+An excluded skill is left out of the agent's catalogue, so the agent is never told it exists, and
+loading it is refused at dispatch if the agent asks for it anyway. Pointing at it with `/skill` in
+the composer does not change that: naming a skill asks the agent to look there, it never grants
+the agent something it does not have. See
+[how agents and skills differ](/docs/using-tulipfarm/how-agents-and-skills-differ).
 
 Risk is otherwise managed through guardrails, approvals, SkillAudit, and role-based authority.
 

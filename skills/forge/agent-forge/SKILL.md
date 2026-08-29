@@ -11,6 +11,42 @@ frontmatter that define how it operates. Agents use AGENT.md: frontmatter (label
 description, model, autonomy, capabilityRestrictions, placeholder, suggestions) + a markdown body
 that becomes the system prompt.
 
+## When to Use — an Agent is a *who*, a Skill is a *what*
+
+An Agent is someone the user talks to. It is addressable (`@mention`, the Agent picker), it owns the
+chat across Turns, its body loads on **every** Turn it owns, and it is the only one of the two that
+holds authority. A Skill is a procedure an Agent loads for one task: never addressed, loaded only
+when its description matches, one active at a time, and carrying no authority whatsoever.
+
+The consequence that decides most cases: **only an Agent can be given a limit that is enforced.**
+`capabilityRestrictions` is checked by the server before the Tool runs. Nothing written in a Skill
+can restrict, or widen, what an Agent may do.
+
+Use this forge when the user wants:
+
+- A named worker with its own voice, judgement, or standing role.
+- A **boundary** — "read-only", "must never delete a Ticket". That is `capabilityRestrictions`.
+- A different autonomy or Approval posture from the default assistant.
+- A specialist to hand work to, via `@mention` or `delegate_to_agent`.
+
+Switch forge when the user actually wants:
+
+| What they described | Forge | Why it is not an Agent |
+| --- | --- | --- |
+| A repeatable procedure, checklist, or "how we do X" | `skill-forge` | No persona and nothing to address; the Agent that runs it already exists |
+| To make an existing Agent better at one task | `skill-forge` | One Agent uses many Skills; a second Agent is not the fix |
+| Work that starts on a schedule or an event | `routine-forge` | An Agent waits to be asked |
+| A new shape of business data | `resource-forge` | That is a Resource type |
+| A fact, policy, or price list | Knowledge or Memory | A Skill says *how*; Knowledge says *what is true* |
+
+**Do not create an Agent per task.** The commonest mistake this forge sees is a request for six
+near-identical Agents that differ only in the procedure they follow. That is one Agent and six
+Skills. Create a second Agent only when the *authority*, the *autonomy*, or the *person being
+addressed* genuinely differs — not when only the task does.
+
+**Do not answer a "must never" with a Skill.** Skill text is advice a model can be argued out of.
+If the user states a hard limit, it belongs in this forge's Step 2, in frontmatter.
+
 {{FORGE_EXECUTION_CONTRACT}}
 
 ## Create Flow — interview, don't guess
@@ -23,6 +59,11 @@ a question can be answered from the Soul, explore it first (`agent_list`, `resou
 
 What role does the Agent fill (e.g. "support triage", "sprint planner") and its one-sentence
 purpose? Call `agent_list` to show existing Agents.
+
+Before going further, apply the test above to the answer. If the purpose is a *task* rather than a
+role — it names steps, or a finished result, and no boundary or voice — say so in one line, offer
+`skill-forge` instead, and only continue if the user confirms they want a new worker. If an existing
+Agent in `agent_list` already fills the role, propose a Skill for it rather than a near-duplicate.
 
 ### Step 2 — Personality & constraints
 
@@ -43,15 +84,25 @@ enforces it.
 | "may only list and view records" | `records: { actions: { allow: [list, search, read] } }` |
 | "must not define new resource types" | `resourceTypes: { actions: { deny: [create, update] } }` |
 | "must never use `record_delete`" | `tools: { deny: [record_delete] } }` |
+| "may only use the invoice-audit Skill" | `skills: { allow: [invoice-audit] }` |
+| "must never run the deploy Skill" | `skills: { deny: [deploy] }` |
 
 Keys and values, all optional:
 
 - `tools.allow` (Tool names — everything else is refused), `tools.deny` (Tool names),
   `tools.allowMutating: false` (refuses every Tool that writes).
+- `skills.allow` / `skills.deny` (Skill names) bound which Skills this Agent may load or run.
 - `records.actions.allow` / `records.actions.deny` over `list`, `search`, `read`, `create`,
   `update`, `delete`; `records.resourceTypes` narrows those actions to the named types only.
 - `resourceTypes.actions.allow` / `.deny` over `list`, `read`, `create`, `update`;
   `resourceTypes.names` narrows them to the named types only.
+
+**Scope Skills only when the user asks for a boundary.** One Agent draws on many Skills, and the
+default — no `skills` key — lets it reach every Skill the Soul holds, which is usually right. Add
+`skills.allow` when the user wants this Agent kept to a named set, and `skills.deny` to keep one
+Skill away from it. A denied Skill is refused at the Tool and is left out of the Agent's catalogue,
+so it is never advertised and never loadable, however the Turn asks — including when a participant
+pins it in the composer.
 
 `allowMutating: false` never removes the Agent's ability to finish its work — `present`,
 `request_input`, `complete_task` and `complete_state` always stay available. It *does* remove

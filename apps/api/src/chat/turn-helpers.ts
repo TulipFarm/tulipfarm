@@ -16,9 +16,10 @@ export interface ChatBody {
   autonomy?: "full" | "supervised" | "approval-required" | "manual";
   hasTools?: boolean;
   llmDecision?: boolean;
-  // Per-turn `/skill`, `#resource` and `~knowledge` tags from the composer. INERT: they used to be
-  // injected as prompt blocks, and nothing reads them since those blocks were removed. The composer
-  // still sends them, so the shape stays until the tags either reach a Tool or leave the UI.
+  // Per-turn `/skill`, `#resource` and `~knowledge` pins from the composer. Each names something
+  // the Agent was already told about, so the Turn surfaces them as pointers in the Soul reminder
+  // and the Agent opens what it needs with the matching Tool. A pin is never a grant: it is
+  // intersected with the Agent's own catalogue, so it can only narrow attention, never widen reach.
   skills?: string[];
   resources?: string[];
   knowledgePages?: string[];

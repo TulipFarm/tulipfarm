@@ -26,6 +26,7 @@ describe("loadEvalSoul", () => {
     expect([...soul.loader.agents.keys()].sort()).toEqual([
       "finance",
       "records-readonly",
+      "skills-bounded",
       "support",
       "triage",
     ]);

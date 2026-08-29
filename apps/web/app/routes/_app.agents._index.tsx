@@ -21,13 +21,21 @@ export default function AgentsIndex() {
       <EmptyState
         section="agents"
         title="Agents"
-        hint="No agents registered. Agents load from your soul repo (soul/agents/*) at startup."
+        hint="An agent is who does the work: a named worker with its own instructions and its own limits. Ask in chat for one. To make an existing agent better at a single task, add a skill instead."
       />
     );
   }
 
   return (
     <ResourcePanel crumbs={[{ label: "Agents" }]}>
+      <p className="text-xs text-muted-foreground">
+        An agent is <span className="text-foreground">who</span> does the work. It holds its own
+        instructions and limits, and you talk to it.{" "}
+        <Link to="/skills" className="cursor-pointer underline underline-offset-2">
+          Skills
+        </Link>{" "}
+        are the procedures an agent loads for one task.
+      </p>
       <p className="text-xs text-muted-foreground">
         {agents.length} {agents.length === 1 ? "agent" : "agents"}
       </p>

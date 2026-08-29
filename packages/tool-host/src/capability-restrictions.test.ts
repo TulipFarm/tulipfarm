@@ -1,6 +1,10 @@
 import type { AgentCapabilityRestrictions } from "@tulipfarm/schema";
 import { describe, expect, it } from "vitest";
-import { agentCanBeOfferedTool, agentCapabilityDenial } from "./capability-restrictions";
+import {
+  agentCanBeOfferedTool,
+  agentCanUseSkill,
+  agentCapabilityDenial,
+} from "./capability-restrictions";
 
 const readOnly: AgentCapabilityRestrictions = { tools: { allowMutating: false } };
 
@@ -169,5 +173,64 @@ describe("agentCanBeOfferedTool", () => {
         { name: "record_delete", mutating: true }
       )
     ).toBe(false);
+  });
+});
+
+describe("Skill restrictions", () => {
+  const onlyAudit: AgentCapabilityRestrictions = { skills: { allow: ["invoice-audit"] } };
+  const noDeploy: AgentCapabilityRestrictions = { skills: { deny: ["deploy"] } };
+  const skill = { name: "skill", mutating: false };
+
+  it("permits an allowed Skill", () => {
+    expect(agentCapabilityDenial(onlyAudit, skill, { name: "invoice-audit" })).toBeUndefined();
+  });
+
+  it("denies a Skill outside the allow list", () => {
+    expect(agentCapabilityDenial(onlyAudit, skill, { name: "deploy" })).toContain("deploy");
+  });
+
+  it("denies a named Skill even when everything else is permitted", () => {
+    expect(agentCapabilityDenial(noDeploy, skill, { name: "deploy" })).toContain("deploy");
+    expect(agentCapabilityDenial(noDeploy, skill, { name: "invoice-audit" })).toBeUndefined();
+  });
+
+  it("denies a run of a forbidden Skill, not just a read of it", () => {
+    // `mode` raises the authorized action but never changes which Skill is being reached.
+    expect(
+      agentCapabilityDenial(onlyAudit, skill, { name: "deploy", mode: "run", command: "ship" })
+    ).toContain("deploy");
+  });
+
+  it("fails closed when an allow-listed Agent's call names no Skill", () => {
+    expect(agentCapabilityDenial(onlyAudit, skill, {})).toBeDefined();
+  });
+
+  it("stays silent when only a deny list exists and the call names no Skill", () => {
+    // Nothing is forbidden by name here, so there is no verdict to reach without a target.
+    expect(agentCapabilityDenial(noDeploy, skill, {})).toBeUndefined();
+  });
+
+  it("governs only the Tool that loads a Skill", () => {
+    expect(agentCapabilityDenial(onlyAudit, { name: "skill_list", mutating: false }, {})).toBe(
+      undefined
+    );
+  });
+
+  it("keeps the skill Tool offered, since one Tool reaches every Skill", () => {
+    expect(agentCanBeOfferedTool(onlyAudit, skill)).toBe(true);
+  });
+});
+
+describe("agentCanUseSkill", () => {
+  it("treats an Agent with no restrictions as unrestricted", () => {
+    expect(agentCanUseSkill(undefined, "deploy")).toBe(true);
+    expect(agentCanUseSkill({ tools: { deny: ["record_delete"] } }, "deploy")).toBe(true);
+  });
+
+  it("agrees with the dispatch verdict for the same Skill", () => {
+    const restrictions: AgentCapabilityRestrictions = { skills: { allow: ["invoice-audit"] } };
+
+    expect(agentCanUseSkill(restrictions, "invoice-audit")).toBe(true);
+    expect(agentCanUseSkill(restrictions, "deploy")).toBe(false);
   });
 });

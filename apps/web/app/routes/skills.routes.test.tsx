@@ -66,6 +66,13 @@ test("index lists skills with provenance, tab nav, and a marketplace entry", () 
   );
 });
 
+test("index distinguishes a Skill from an Agent and links to Agents", () => {
+  renderWithData(<SkillsIndex />, { skills: [] });
+  expect(screen.getByText(/a procedure an/i)).toBeInTheDocument();
+  expect(screen.getByText(/grants no permissions of its own/i)).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "agent" })).toHaveAttribute("href", "/agents");
+});
+
 test("index with no skills shows the empty message and a marketplace entry", () => {
   renderWithData(<SkillsIndex />, { skills: [] });
   expect(screen.getByText("0 skills")).toBeInTheDocument();

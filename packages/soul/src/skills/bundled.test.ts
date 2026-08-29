@@ -194,6 +194,28 @@ describe("loadBundledSkills", () => {
     expect(body).toMatch(/never|must not|read-only/i);
   });
 
+  it("ships both Forges with the Skill/Agent boundary, so neither can silently misroute", async () => {
+    const skills = await loadBundledSkills(makeLogger());
+    const agentForge = skills.get("agent-forge")?.body ?? "";
+    const skillForge = skills.get("skill-forge")?.body ?? "";
+
+    // The redirect has to be symmetric. A test on one side only lets the other keep building the
+    // wrong artifact, and the wrong artifact is silent: an Agent authored for a task still answers.
+    expect(agentForge, "agent-forge must send procedure requests to skill-forge").toContain(
+      "skill-forge"
+    );
+    expect(skillForge, "skill-forge must send persona requests to agent-forge").toContain(
+      "agent-forge"
+    );
+
+    // The one asymmetry that is not a matter of taste: only an Agent's limit is enforced, so a
+    // "must never" answered with a Skill is a boundary that does not exist.
+    expect(skillForge).toContain("capabilityRestrictions");
+    for (const body of [agentForge, skillForge]) {
+      expect(body).toMatch(/one Agent uses many Skills/i);
+    }
+  });
+
   it("ships Routine Forge with a worked example that round-trips through the canonical schema", async () => {
     const routineForge = (await loadBundledSkills(makeLogger())).get("routine-forge");
     const body = routineForge?.body ?? "";
@@ -246,10 +268,18 @@ describe("loadBundledSkills", () => {
     const source = await readFile(join(skillForge.directory, "SKILL.md"), "utf8");
     expect(source.split("\n").length).toBeGreaterThanOrEqual(90);
     // The ceiling bounds what every Turn carries. This file holds the rules that bind every job —
-    // frontmatter limits, section order, the audit-then-confirm discipline, the search ladder —
-    // and each job's procedure lives in `references/`, loaded with `skill` + `file` on demand.
+    // frontmatter limits, section order, the audit-then-confirm discipline, the search ladder,
+    // and the Skill/Agent boundary that decides whether this is the right forge at all — while
+    // each job's procedure lives in `references/`, loaded with `skill` + `file` on demand.
     // Raise it only for another rule, never for steps that belong in a reference.
-    expect(source.split("\n").length).toBeLessThanOrEqual(185);
+    //
+    // 185 -> 200: `## When to Use` gained the classification rule. `## Procedure` step 1 already
+    // required "confirm this is a Skill and not an Agent" but stated no test for it, so the
+    // judgement was the model's to invent — and it misroutes in one direction far more than the
+    // other, because "make the Agent better at X" and "build an Agent for X" read alike. The
+    // section names the three facts that settle it (a Skill is unaddressable, holds no authority,
+    // and one Agent uses many Skills) and tables the redirect. `agent-forge` carries the mirror.
+    expect(source.split("\n").length).toBeLessThanOrEqual(200);
   });
 
   it("returns an empty map when the bundled tree does not exist", async () => {

@@ -1,0 +1,176 @@
+---
+title: How agents and skills differ
+description: An agent is who does the work and holds the authority. A skill is the procedure it loads for one task. Read this before asking for either.
+---
+
+{/* tf-page: track: using-tulipfarm  requires: ["soul.agent:*", "soul.skill:*"] */}
+
+An **agent** is a *who*: a named worker with its own instructions, its own limits, and the authority
+to act. A **skill** is a *what*: a written procedure for one repeatable task, which an agent reads
+when the task comes up.
+
+The shortest way to tell them apart:
+
+> Ask for an agent when you want a new **someone**.
+> Ask for a skill when you want an existing someone to be **better at something**.
+
+Getting this wrong is the most common early mistake. People ask for an agent when they wanted a
+checklist, and end up with a worker they never talk to. Or they ask for a skill when they wanted a
+specialist with narrower permissions, and get instructions with no boundary behind them.
+
+## The differences that matter
+
+| | Agent | Skill |
+| --- | --- | --- |
+| It is | A worker | A procedure |
+| You | Talk to it | Never talk to it |
+| It holds authority | Yes | No |
+| It is in your chat | For the whole chat | For part of one turn |
+| How many at once | One owns the chat | One is in use |
+| Reviewed by | Limits you set, plus approvals | SkillAudit, before it is installed |
+| Can run code | No, it calls tools | Yes, if it ships commands |
+
+Everything below expands one row of that table.
+
+## Who you talk to
+
+You address agents. They appear in **agents**, they can be picked in the agent picker, and
+mentioning one with `@` re-targets the chat from that message onward. An agent owns the conversation
+until you hand it to another one.
+
+You never address a skill. There is no way to talk to one, because there is nobody there to answer.
+The agent decides a skill is relevant and loads it, and then the agent keeps talking to you, better
+informed than it was a moment ago. When that happens you see the load in the transcript, so the
+change in behavior is never silent.
+
+This is the cleanest test if the table above blurs. If you can imagine saying "hey, can you look at
+this?" to the thing you are describing, you are describing an agent.
+
+## What gets loaded, and when
+
+An agent's instructions are loaded on every turn it owns. That is what makes it consistent, and it
+is also why an agent's instructions should stay short: everything in them is paid for on every
+message, whether the message needed it or not.
+
+A skill is loaded in layers, so a long procedure costs nothing until it is used:
+
+```text
+always visible   name and one-line description of every skill
+   ↓ the agent recognizes the task
+loaded on use    the skill's instructions
+   ↓ the procedure says it needs more
+loaded later     the skill's reference pages, examples, and files
+```
+
+That layering is the whole point of a skill. A forty-page procedure can sit on your instance
+indefinitely, cost almost nothing, and still be exactly right the day someone needs it. The same
+forty pages inside an agent's instructions would be re-read on every "hello".
+
+So the practical rule is: instructions an agent needs *always* belong to the agent, and instructions
+it needs *sometimes* belong in a skill.
+
+## Which one holds the authority
+
+This is the difference with real consequences, and it runs one way only.
+
+**An agent holds authority.** When you tell the assistant an agent must never delete a ticket, that
+becomes an enforced limit, not a sentence of advice. TulipFarm checks it before the tool runs, so
+the call is refused even when the agent is talked into making it, and the agent cannot pass the work
+to a less restricted helper instead. See
+[Agents](/docs/using-tulipfarm/agents#tools-and-current-limits).
+
+**A skill holds none.** A skill is instructions an agent chooses to follow, so it can never widen
+what that agent may do. Loading one changes which tools the agent is *shown*, to keep it focused on
+the task, but that is presentation, not permission. Nothing a skill says grants anything.
+
+Two consequences follow, and both are worth knowing before you ask for either:
+
+- Restricting a skill does not restrict an agent. If you need a boundary, put it on the agent.
+- A risky skill is still risky, because the agent running it may be permitted. That is why every
+  skill is checked by **SkillAudit**, a safety review of what a skill would ask agents to do, before
+  it is installed. The audit reports risk and never decides for you; the decision to install stays
+  a human one. See [Install a skill](/docs/using-tulipfarm/install-a-skill).
+
+## One agent, many skills
+
+An agent is not tied to a fixed set of skills. Every skill on your instance that an agent is allowed
+to read is offered to it by name and description, and it picks the one that fits the task in front
+of it. Over a week, one support agent may use a triage skill on Monday, a refund procedure on
+Tuesday, and a reporting skill on Friday.
+
+It works the other way too. One skill serves every agent, so a procedure written once does not need
+copying into each worker that needs it.
+
+You can narrow that default when a worker should stay in its lane. Ask in chat for an agent to be
+kept to a named set of skills, and everything outside the set is left out of what the agent is told
+about and refused if it asks anyway — see
+[bounding which skills an agent may use](/docs/using-tulipfarm/agents#bounding-which-skills-an-agent-may-use).
+Note which direction that runs in: the limit is written on the agent, never on the skill. The skill
+still carries no authority of its own.
+
+Within a single turn, one skill is in use at a time. If the agent moves to a second skill, the
+second one takes over from the first rather than stacking on top of it. This keeps the agent
+following one procedure instead of blending two, and it is why skills are written as one task each.
+
+```text
+                    ┌── triage skill
+   support agent ───┼── refund skill        one at a time,
+                    └── reporting skill     chosen per task
+
+   support agent ──┐
+   billing agent ──┼──> refund skill        written once,
+   ops agent ──────┘                        used by all
+```
+
+## Ask for the right one
+
+Both are built by chatting. The words you use decide which one you get, so describe the *shape* of
+what you want, not just the topic.
+
+For a worker, name the role and the boundaries:
+
+```prompt
+Create a support agent that answers customer questions from knowledge pages
+and files a ticket when follow-up is needed. It may read records of any type
+but must never delete one.
+```
+
+For a procedure, name the task and the finished result:
+
+```prompt
+Create a skill that captures how we triage an inbound ticket: check the
+customer's plan, set a priority, and write the reason on the ticket. Search
+for an existing skill before writing a new one.
+```
+
+Notice what changes. The agent request describes someone and what they are trusted with. The skill
+request describes steps and when they are done. If your own sentence has both, you probably want
+both — ask for the agent first, then the skill, because the assistant builds them in that order.
+
+## When it is neither
+
+Two nearby things get mistaken for these, often enough to be worth naming.
+
+If the work should start on its own — every morning, or whenever a record changes — you want a
+**routine**, repeatable automation that runs without anyone typing. An agent waits to be asked. See
+[Routines](/docs/using-tulipfarm/routines).
+
+If it is a fact rather than a procedure — a policy, a price list, a definition — it belongs in
+**knowledge**, the cited material TulipFarm retrieves with access checks, or in **memory**, the
+durable facts kept for one person. A skill tells an agent *how*; knowledge tells it *what is true*.
+See [Knowledge](/docs/using-tulipfarm/knowledge) and [Memory](/docs/using-tulipfarm/memory).
+
+## The four questions
+
+If you are still unsure, answer these in order and stop at the first yes.
+
+| Ask yourself | Then you want |
+| --- | --- |
+| Should this start without anyone asking? | A routine |
+| Am I recording something that is true, not something to do? | Knowledge or memory |
+| Do I want someone to talk to, with its own limits? | An agent |
+| Do I want an existing worker to handle one task well? | A skill |
+
+You are not locked in. Both are written into [the soul](/docs/using-tulipfarm/what-a-soul-is), so both can
+be changed by asking, and the history of what changed is kept. Building the wrong one costs a
+conversation, not a rebuild.
