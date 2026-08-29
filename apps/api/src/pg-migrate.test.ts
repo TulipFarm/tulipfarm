@@ -51,6 +51,22 @@ async function seedApprovalsAlterTarget(db: PGlite): Promise<void> {
   )`);
 }
 
+/**
+ * The `channel_bind_tokens` table that migration v17 creates and v83 later alters. Fixtures
+ * whose floor is above v17 must stand it in.
+ */
+async function seedChannelBindTokensAlterTarget(db: PGlite): Promise<void> {
+  await db.query(`CREATE TABLE IF NOT EXISTS channel_bind_tokens (
+    nonce_hash         text PRIMARY KEY,
+    integration_slug   text NOT NULL,
+    external_sender_id text NOT NULL,
+    issued_at          timestamptz NOT NULL,
+    expires_at         timestamptz NOT NULL,
+    consumed_at        timestamptz,
+    consumed_by        uuid
+  )`);
+}
+
 describe("the migration ledger is append-only", () => {
   it("assigns every migration a distinct version", () => {
     const seen = new Map<number, string[]>();
@@ -94,6 +110,7 @@ describe("runPgMigrations", () => {
     await db.query("CREATE TABLE users (id uuid PRIMARY KEY, password_hash text NOT NULL)");
     await seedRunsFkTarget(db);
     await seedApprovalsAlterTarget(db);
+    await seedChannelBindTokensAlterTarget(db);
     await db.query("CREATE TABLE run_events (run_id uuid NOT NULL, sequence bigint NOT NULL)");
     await db.query(`CREATE TABLE api_clients (
       id            uuid PRIMARY KEY,
@@ -385,6 +402,7 @@ describe("runPgMigrations", () => {
       await db.query("INSERT INTO schema_version (id, version) VALUES (true, 48)");
       await seedRunsFkTarget(db);
       await seedApprovalsAlterTarget(db);
+      await seedChannelBindTokensAlterTarget(db);
       await db.query(`INSERT INTO soul_execution_bundles (
         digest, business_id, changeset_id, commit_sha, bundle, signature
       ) VALUES (
@@ -457,6 +475,7 @@ describe("runPgMigrations", () => {
       await db.query("CREATE EXTENSION IF NOT EXISTS vector");
       await seedRunsFkTarget(db);
       await seedApprovalsAlterTarget(db);
+      await seedChannelBindTokensAlterTarget(db);
       await db.query(`INSERT INTO runs (id, bundle)
         VALUES ('00000000-0000-4000-8000-000000000001', '{"routineId":"chat"}'::jsonb)`);
       await db.query(`CREATE TABLE schema_version (
@@ -529,6 +548,7 @@ describe("runPgMigrations", () => {
       await seedEmbeddingTablesAsOf(db, 31);
       await seedRunsFkTarget(db);
       await seedApprovalsAlterTarget(db);
+      await seedChannelBindTokensAlterTarget(db);
 
       await runPgMigrations(db, undefined, () => {});
 
@@ -554,6 +574,7 @@ describe("runPgMigrations", () => {
       await seedEmbeddingTablesAsOf(db, 31);
       await seedRunsFkTarget(db);
       await seedApprovalsAlterTarget(db);
+      await seedChannelBindTokensAlterTarget(db);
 
       await expect(runPgMigrations(db, undefined, () => {})).resolves.not.toThrow();
     });
@@ -791,6 +812,7 @@ describe("runPgMigrations concurrency and atomicity", () => {
       await db.query("INSERT INTO schema_version (id, version) VALUES (true, 49)");
       await seedRunsFkTarget(db);
       await seedApprovalsAlterTarget(db);
+      await seedChannelBindTokensAlterTarget(db);
 
       await runPgMigrations(db, undefined, NOOP_LOG);
 
