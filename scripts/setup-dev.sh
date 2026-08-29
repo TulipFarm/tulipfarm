@@ -162,6 +162,25 @@ else
 fi
 echo "✅ TF_DATA_DIR synchronized ($DATA_DIR)"
 
+# Seed the fixed local-dev admin so `reset:dev` never costs a trip through the setup wizard. Only
+# ADDED when absent, never overwritten: an existing value is a deliberate developer choice.
+DEV_ADMIN_EMAIL="admin@tulipfarm.dev"
+DEV_ADMIN_PASSWORD="tulipfarm-dev"
+if grep -q '^ADMIN_EMAIL=' .env.local; then
+  DEV_ADMIN_EMAIL="$(grep '^ADMIN_EMAIL=' .env.local | head -1 | cut -d= -f2-)"
+  DEV_ADMIN_PASSWORD="$(grep '^ADMIN_PASSWORD=' .env.local | head -1 | cut -d= -f2-)"
+  echo "✅ Reusing ADMIN_EMAIL from .env.local"
+else
+  {
+    echo ""
+    echo "# Fixed local-dev admin, seeded on first boot when no users exist."
+    echo "# Run the setup wizard instead with: SKIP_ADMIN_BOOTSTRAP=true pnpm dev"
+    echo "ADMIN_EMAIL=$DEV_ADMIN_EMAIL"
+    echo "ADMIN_PASSWORD=$DEV_ADMIN_PASSWORD"
+  } >> .env.local
+  echo "✅ Default dev admin written to .env.local"
+fi
+
 # Symlink .env.local into every app started by `pnpm dev` because Turbo runs each command from its
 # package directory and dotenv resolves relative paths from that directory.
 for app in api worker integration-worker; do
@@ -183,7 +202,12 @@ echo ""
 echo "Next steps:"
 echo "  1. Run: pnpm dev"
 echo "  2. Open: http://localhost:4000"
-echo "  3. Complete the setup wizard in the browser (creates your admin account)"
+echo "  3. Sign in with the seeded dev admin:"
+echo "       email:    $DEV_ADMIN_EMAIL"
+echo "       password: $DEV_ADMIN_PASSWORD"
+echo ""
+echo "To exercise the first-run setup wizard instead (no seeded admin):"
+echo "  SKIP_ADMIN_BOOTSTRAP=true pnpm dev"
 echo ""
 echo "To verify the datastore is running:"
 echo "  pg_isready -h localhost -p 5432 -U tulipfarm"

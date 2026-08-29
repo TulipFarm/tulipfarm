@@ -333,17 +333,37 @@ Automated tests may still call routes directly.
 
 ## Local dev credentials
 
-Plain `pnpm dev` seeds no admin. On first boot the web app falls through to the `/setup` wizard
-(`apps/web/app/routes/setup.tsx`) — create the admin there. To headless-seed instead, set
-`ADMIN_EMAIL` + `ADMIN_PASSWORD` (+ `LLM_API_KEY` for the full seed) before starting the API; see
-`apps/api/src/setup/bootstrap.ts`.
+`scripts/setup-dev.sh` writes a **fixed dev admin** into `.env.local`, and the API seeds it on
+first boot whenever the database holds no users (`apps/api/src/setup/bootstrap.ts`). So
+`pnpm reset:dev` costs you nothing — the same account comes back.
+
+```text
+email:    admin@tulipfarm.dev
+password: tulipfarm-dev
+```
+
+These are development credentials in a gitignored file, and nothing outside a local checkout sets
+them. Change `ADMIN_EMAIL` / `ADMIN_PASSWORD` in `.env.local` to use your own; setup-dev only ever
+*adds* them when absent, so your value survives re-running it. Add `LLM_API_KEY` there too and the
+same first boot seeds the model chain, leaving nothing to configure by hand.
+
+**To test the first-run `/setup` wizard** (`apps/web/app/routes/setup.tsx`), skip the seed for one
+run instead of editing the env file:
+
+```bash
+pnpm reset:dev --db-only -y        # empty database, keep soul + .env.local
+SKIP_ADMIN_BOOTSTRAP=true pnpm dev # falls through to the wizard
+```
+
+`SKIP_ADMIN_BOOTSTRAP` is development-only: it refuses to boot under `NODE_ENV=production`, so it
+can never silently strand a headless deployment at a wizard nobody is watching.
 
 ```bash
 pnpm --filter @tulipfarm/api dev
 
 curl -c /tmp/tulip.txt -X POST http://localhost:4010/api/v1/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"email":"<admin-email>","password":"<admin-password>"}'
+  -d '{"email":"admin@tulipfarm.dev","password":"tulipfarm-dev"}'
 
 curl -b /tmp/tulip.txt "http://localhost:4010/api/v1/auth/tokens?limit=2"
 ```

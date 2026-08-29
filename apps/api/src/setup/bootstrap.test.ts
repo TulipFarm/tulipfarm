@@ -1,5 +1,5 @@
 import crypto, { randomBytes, randomUUID } from "node:crypto";
-import { promises as fs } from "node:fs";
+import { existsSync, promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -175,5 +175,37 @@ describe("bootstrapFromEnv", () => {
       setupComplete?: boolean;
     };
     expect(cfg.setupComplete).toBe(true);
+  });
+
+  it("non-production: SKIP_ADMIN_BOOTSTRAP → no seed, so the wizard runs", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("SKIP_ADMIN_BOOTSTRAP", "true");
+    vi.stubEnv("ADMIN_EMAIL", "admin@acme.io");
+    vi.stubEnv("ADMIN_PASSWORD", "supersecret");
+    vi.stubEnv("LLM_API_KEY", "sk-ant-xyz");
+    const d = deps();
+    await bootstrapFromEnv(d);
+    expect(await d.userRepo.count()).toBe(0);
+    await expect(d.secretsService.get("anthropic-api-key")).rejects.toThrow();
+    // setupComplete must stay unwritten, or the wizard this switch exists to reach never shows.
+    expect(existsSync(path.join(dir, "soul", "soul.yaml"))).toBe(false);
+  });
+
+  it("non-production: a non-truthy SKIP_ADMIN_BOOTSTRAP still seeds", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("SKIP_ADMIN_BOOTSTRAP", "false");
+    vi.stubEnv("ADMIN_EMAIL", "admin@acme.io");
+    vi.stubEnv("ADMIN_PASSWORD", "supersecret");
+    const d = deps();
+    await bootstrapFromEnv(d);
+    expect(await d.userRepo.count()).toBe(1);
+  });
+
+  it("production: SKIP_ADMIN_BOOTSTRAP → fail loud rather than strand a headless deploy", async () => {
+    vi.stubEnv("SKIP_ADMIN_BOOTSTRAP", "1");
+    vi.stubEnv("ADMIN_EMAIL", "admin@acme.io");
+    vi.stubEnv("ADMIN_PASSWORD", "supersecret");
+    vi.stubEnv("LLM_API_KEY", "sk-ant-xyz");
+    await expect(bootstrapFromEnv(deps())).rejects.toThrow(/SKIP_ADMIN_BOOTSTRAP/);
   });
 });

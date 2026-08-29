@@ -46,6 +46,16 @@ async function seedLlmConfig(deps: BootstrapDeps, provider: "anthropic" | "opena
   deps.log?.info(`Seeded LLM config: ${provider}/${entry.model} on all tiers`);
 }
 
+/**
+ * Development-only escape hatch. Local `.env.local` ships a seeded dev admin so a reset never costs
+ * a trip through the wizard, which would otherwise make the wizard itself untestable without
+ * hand-editing the env file. Setting this restores the wizard for one run.
+ */
+function skipAdminBootstrap(): boolean {
+  const raw = process.env.SKIP_ADMIN_BOOTSTRAP?.trim().toLowerCase();
+  return raw === "true" || raw === "1";
+}
+
 // Seeds the instance from env vars on first boot. Idempotent (no-op once users exist).
 //
 // Trigger conditions:
@@ -57,6 +67,19 @@ async function seedLlmConfig(deps: BootstrapDeps, provider: "anthropic" | "opena
 //
 // After seeding, marks setupComplete=true in soul.yaml so the wizard never shows.
 export async function bootstrapFromEnv(deps: BootstrapDeps): Promise<void> {
+  if (skipAdminBootstrap()) {
+    // Fail loud rather than silently downgrading a headless production deployment into one that
+    // waits for a human at a browser wizard nobody is watching.
+    if (isProductionMode()) {
+      throw new Error(
+        "SKIP_ADMIN_BOOTSTRAP is set, but it is a development-only escape hatch for exercising the " +
+          "setup wizard. Unset it, or unset NODE_ENV=production."
+      );
+    }
+    deps.log?.info("SKIP_ADMIN_BOOTSTRAP set — skipping headless seed; the setup wizard will run");
+    return;
+  }
+
   const adminEmail = process.env.ADMIN_EMAIL;
   const adminPass = process.env.ADMIN_PASSWORD;
   const llmKey = process.env.LLM_API_KEY;

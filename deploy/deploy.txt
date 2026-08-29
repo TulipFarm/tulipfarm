@@ -49,7 +49,7 @@ Durable state: every path must survive restart and upgrade:
   - postgres data directory: holds Every Record, Run, Turn, audit event, and vector index
       if lost: Losing it loses all business data. Restoring it without TF_DATA_DIR leaves every stored Secret undecryptable.
 
-ENVIRONMENT VARIABLES (full surface: 99 variables)
+ENVIRONMENT VARIABLES (full surface: 100 variables)
 ------------------------------------------------------------
 Zone tells you whether you may change a variable:
   set-these       normal configuration; change it to suit the deployment
@@ -162,6 +162,11 @@ honour it is already a mistake.
     does: Password for the first admin account during headless boot.
     default: none
     if set wrong: Read once at first boot. Leaving it in the environment afterwards leaves an admin credential in plaintext where every process can read it.
+  SKIP_ADMIN_BOOTSTRAP
+    zone: set-these | required: no | consumers: app
+    does: Development-only switch that skips headless seeding so the browser setup wizard runs even when ADMIN_EMAIL and ADMIN_PASSWORD are set.
+    default: none
+    if set wrong: It exists because local development seeds a fixed admin, which would otherwise make the wizard unreachable without editing the environment file. Setting it under NODE_ENV=production refuses to boot rather than leaving a headless deployment waiting at a wizard nobody is watching.
   LLM_API_KEY (secret)
     zone: set-these | required: Required with admin credentials in production | consumers: app
     does: Seeded into the selected provider Secret during headless boot.
