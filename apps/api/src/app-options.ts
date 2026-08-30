@@ -4,7 +4,11 @@ import type { EventEmitter } from "node:events";
 import type { GuardrailsService } from "@tulipfarm/agent-runtime";
 import type { FileService } from "@tulipfarm/files";
 import type { PublicOriginsService } from "@tulipfarm/integrations";
-import type { KnowledgeDenialSink, KnowledgeService } from "@tulipfarm/knowledge";
+import type {
+  KnowledgeDenialSink,
+  KnowledgeService,
+  PageRetrievalService,
+} from "@tulipfarm/knowledge";
 import type { KvService } from "@tulipfarm/kv";
 import type { LlmService } from "@tulipfarm/llm";
 import type { MemoryDocumentRepo } from "@tulipfarm/memory";
@@ -190,6 +194,11 @@ export interface AppOptions {
    * serves Pages without a gate would serve every Page to everybody.
    */
   knowledgePageGate?: PageReadAuthorizer;
+  /**
+   * Page-level lexical retrieval, shared with `knowledgeService`. Absent leaves page search
+   * vector-only, which returns nothing at all on an instance with no embedding provider.
+   */
+  knowledgeRetrieval?: PageRetrievalService;
   /** Records refused Knowledge writes, so path-probing leaves a trail. */
   knowledgeDenialSink?: KnowledgeDenialSink;
   knowledgeAuthorLabeller?: AuthorLabeller;

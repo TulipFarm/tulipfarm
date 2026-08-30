@@ -14,6 +14,7 @@ import {
   enqueueIndex,
   KnowledgeService,
   makeIndexQueueStats,
+  PageRetrievalService,
   PgConnectorStateRepo,
   PgKnowledgeAclRepo,
   PgKnowledgeChunkRepo,
@@ -686,6 +687,11 @@ async function boot() {
     const knowledgeSourceStore = new PgKnowledgeSourceStore(pool);
     const knowledgeIndexStore = new PgKnowledgeIndexStore(pool, embeddingService);
 
+    // The lexical arm of `hybridSearchPages`. Without it `query_knowledge` is vector-only, so an
+    // instance with no embedding provider — or with chunks not yet backfilled — answers every
+    // question "not found" while the page sits indexed and readable.
+    const knowledgeRetrieval = new PageRetrievalService(pool);
+
     const knowledgeService = new KnowledgeService({
       pages: new PgKnowledgePageRepo(pool),
       chunks: new PgKnowledgeChunkRepo(pool),
@@ -694,6 +700,7 @@ async function boot() {
       links: new PgKnowledgeLinksRepo(pool),
       overrides: new PgKnowledgeSpaceOverrideRepo(pool),
       embeddings: embeddingService,
+      retrieval: knowledgeRetrieval,
       acl: new PgKnowledgeAclRepo(pool),
       // Without this the Page-ACL surfaces degrade silently rather than fail: `visibility` 404s,
       // every listing badge reads "business", and a move reports no readership change — so the
@@ -1156,6 +1163,7 @@ async function boot() {
         events: domainEventEmitter,
       }),
       knowledgeService,
+      knowledgeRetrieval,
       knowledgePageGate,
       knowledgeDenialSink,
       knowledgeAuthorLabeller,
