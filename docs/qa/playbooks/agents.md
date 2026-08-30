@@ -39,13 +39,10 @@ Every scenario stands alone — a failure in one does not block the next.
 | 6 | `expect` no console error on either the empty or populated render | Clean |
 | 7 | `capture` screenshot, console delta, failed requests | — |
 
-`note`: when agents exist, this page renders **no `<h1>`** — only the breadcrumb nav and the count
-line (`ResourcePanel` is a shared shell with no heading slot). The empty-state variant *does* render
-an `<h1>` ("Agents"). This asymmetry is real (confirmed in source, not a rendering artifact) and
-matches the same pattern on other `ResourcePanel`-shelled list routes (e.g. Resources) — it is not
-agent-specific. Still assert "one `h1`, no skipped level" per convention; a missing `h1` on the
-populated list is a **P2** a11y finding if reported, but don't file it a second time if
-`a11y-console-hygiene.md` already caught it app-wide.
+`note`: this page renders exactly one `<h1>` ("Agents") from `PageShell`, whether or not any agents
+exist. The populated and empty variants no longer disagree — the earlier asymmetry came from the
+old shell having no heading slot. Assert "one `h1`, no skipped level" per convention and expect it
+to pass; zero, or a second `h1` inside the roster, is a shell regression.
 
 ## S2 — Agent detail: identity, description, model, autonomy
 

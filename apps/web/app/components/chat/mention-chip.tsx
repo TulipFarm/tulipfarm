@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { Components } from "react-markdown";
 import { AgentGlyph } from "~/components/agent-glyph";
+import { AutonomyChip } from "~/components/autonomy-chip";
 import type { MentionEntry } from "./use-mention-catalog";
 
 const KIND_LABEL: Record<MentionEntry["kind"], string> = {
@@ -47,11 +48,7 @@ function MentionChip({ entry, children }: { entry?: MentionEntry; children: Reac
         {showAgentMeta ? (
           <span className="flex items-center gap-2 text-[0.625rem] text-muted-foreground">
             {entry.domain ? <span className="truncate">{entry.domain}</span> : null}
-            {entry.autonomy ? (
-              <span className="shrink-0 rounded-sm bg-muted px-1 py-0.5 uppercase tracking-[0.12em]">
-                {entry.autonomy}
-              </span>
-            ) : null}
+            {entry.autonomy ? <AutonomyChip autonomy={entry.autonomy} size="xs" /> : null}
           </span>
         ) : null}
       </span>

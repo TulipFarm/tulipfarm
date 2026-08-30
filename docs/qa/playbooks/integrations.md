@@ -86,16 +86,16 @@ to assume the happy path the UI code implies.
 
 ## Heading audit
 
-`/integrations` and `/integrations/marketplace` are both `ResourcePanel`-based, which has no `<h1>`
-(same gap `resources.md` documents). `/integrations/:name` **does** have an `<h1>` —
-`{integration.name}`. `/link-channel` has no heading of any level, not even inside its custom card.
-Log this once (S11), not per scenario.
+`/integrations` is a `SectionShell` page, so it renders one visible `<h1>` ("Integrations") from
+`PageShell`. `/integrations/marketplace` and `/integrations/:name` name themselves. `/link-channel`
+has no heading of any level, not even inside its custom card — that one is still a gap. Log it once
+(S11), not per scenario.
 
 ## S1 — Integrations list: connected, available, badges, empty state
 
 | # | Action | Expected |
 | --- | --- | --- |
-| 1 | navigate `/integrations` | Page renders; no `<h1>` (expected — `ResourcePanel`); header shows "N integrations" count and a "Browse marketplace" button |
+| 1 | navigate `/integrations` | Page renders with one `<h1>` ("Integrations"); header shows "N integrations" count and a "Browse marketplace" button |
 | 2 | expect | The "Installed"/"Marketplace" tab pair (`integrations-tabs.tsx`) is present with "Installed" active |
 | 3 | expect | Every bundled integration (github, google, slack) appears as a row with name, description, and a status badge |
 | 4 | note | Status badge tone per row: connected → success tone, connecting → info tone, error → danger tone, disconnected → neutral tone (`STATUS_TONE` map) |
@@ -216,7 +216,7 @@ Run across every page and state visited in S1–S4, including error states and w
 
 | # | Action | Expected |
 | --- | --- | --- |
-| 1 | note | `/integrations` and `/integrations/marketplace`: no `<h1>` (ResourcePanel gap, matches `resources.md`) |
+| 1 | note | `/integrations` has one `<h1>`; only `/link-channel` still lacks a heading |
 | 2 | note | `/integrations/:name`: has `<h1>{integration.name}</h1>` — the one route in this area with a heading |
 | 3 | note | `/link-channel`: no heading of any level |
 | 4 | note | Marketplace scan input: no accessible name (P2) |

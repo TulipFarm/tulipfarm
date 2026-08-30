@@ -23,6 +23,13 @@ export type ResourceTypeSummary = {
   // A YAML string of a JSON Schema; parse with `parseSchema` in lib/schema.ts.
   schema: string;
   hasHooks: boolean;
+  domain?: string;
+};
+
+export type ResourceCatalogEntry = {
+  name: string;
+  count: number;
+  lastUpdatedAt: string | null;
 };
 
 export type ResourceRecord = {
@@ -306,6 +313,15 @@ export async function deleteResourceType(name: string): Promise<void> {
 
 export async function listResourceTypes(): Promise<ResourceTypeSummary[]> {
   const body = await apiGet<{ types: ResourceTypeSummary[] }>("/api/v1/resource-types");
+  return body.types;
+}
+
+/**
+ * Catalog totals per resource type. The API omits any type the caller may not list, so a missing
+ * entry means "no totals for you", not "empty" — render it as unknown, never as zero.
+ */
+export async function listResourceCatalog(): Promise<ResourceCatalogEntry[]> {
+  const body = await apiGet<{ types: ResourceCatalogEntry[] }>("/api/v1/resources");
   return body.types;
 }
 

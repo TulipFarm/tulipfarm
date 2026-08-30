@@ -10,12 +10,67 @@ export interface RoutineCatalogTrigger {
   summary: string;
 }
 
+/**
+ * A kind of consequence a Routine can have, as the catalog can see it from the document alone.
+ *
+ * Coarse on purpose. This answers "what could this thing do to my business" at list density, where
+ * the reader is comparing dozens of Routines; the Routine screen answers which Agent, which Tool
+ * and which arguments. Every kind here is a claim the document makes about itself, never a guess.
+ */
+export type RoutineEffectKind =
+  | "agent"
+  | "tool"
+  | "child_routine"
+  | "event"
+  | "script"
+  | "human"
+  | "wait";
+
+const EFFECT_BY_STATE_TYPE: Readonly<Record<string, RoutineEffectKind>> = {
+  agent: "agent",
+  tool: "tool",
+  action: "tool",
+  child_routine: "child_routine",
+  emit: "event",
+  script: "script",
+  approval: "human",
+  human_task: "human",
+  form: "human",
+  wait: "wait",
+};
+
+/** What the list screen needs to rank and filter a Routine without reading its whole document. */
+export interface RoutineCatalogSummary {
+  /** The Soul principal accountable for this Routine. */
+  owner: string | null;
+  stateCount: number;
+  /** Unique canonical State `type` values, sorted, so a reader can see the shape of the flow. */
+  stateTypes: string[];
+  /** Coarse consequence kinds, sorted. Empty means the Routine only computes. */
+  effects: RoutineEffectKind[];
+  /** `spec.requiredToolAbilities`, verbatim — the abilities a Run must be granted to execute. */
+  toolAbilities: string[];
+  /**
+   * The highest `permissionCeiling.maxRiskClass` any State declares, or `null` when none does.
+   *
+   * `null` is "the author declared no ceiling", never "low". A Routine that names no ceiling is
+   * less constrained than one that names `high`, so showing it as the safest value would invert
+   * the fact.
+   */
+  maxRiskClass: "low" | "medium" | "high" | null;
+  /** A person must act before the Run can finish. */
+  requiresApproval: boolean;
+  concurrencyPolicy: string | null;
+  compensationPolicy: string | null;
+}
+
 export interface RoutineCatalogItem {
   id: string;
   slug: string;
   displayName: string | null;
   authoredVersion: number;
   triggers: RoutineCatalogTrigger[];
+  summary: RoutineCatalogSummary;
 }
 
 /** One published Routine, with the canonical document the browser renders it from. */
@@ -97,6 +152,65 @@ function isPublished(definition: RuntimeBundle["definitions"][number]): boolean 
   return metadata?.lifecycle === "published";
 }
 
+const RISK_ORDER = ["low", "medium", "high"] as const;
+type RiskClass = (typeof RISK_ORDER)[number];
+
+function isRiskClass(value: unknown): value is RiskClass {
+  return typeof value === "string" && (RISK_ORDER as readonly string[]).includes(value);
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string")
+    : [];
+}
+
+/**
+ * Reads a published Routine's own claims about what it does.
+ *
+ * Every field is read, never inferred: an unrecognised State type contributes no effect rather
+ * than a guessed one, because a list that overstates reach is as misleading as one that hides it.
+ */
+function routineSummary(document: Record<string, unknown>): RoutineCatalogSummary {
+  const spec = isRecord(document.spec) ? document.spec : {};
+  const states = Array.isArray(spec.states) ? spec.states.filter(isRecord) : [];
+  const stateTypes = new Set<string>();
+  const effects = new Set<RoutineEffectKind>();
+  let maxRiskClass: RiskClass | null = null;
+  let requiresApproval = false;
+
+  for (const state of states) {
+    if (typeof state.type !== "string") continue;
+    stateTypes.add(state.type);
+    const effect = EFFECT_BY_STATE_TYPE[state.type];
+    if (effect) effects.add(effect);
+    if (state.type === "approval" || state.type === "human_task") requiresApproval = true;
+    const ceiling = isRecord(state.permissionCeiling) ? state.permissionCeiling : undefined;
+    const risk = ceiling?.maxRiskClass;
+    if (
+      isRiskClass(risk) &&
+      (!maxRiskClass || RISK_ORDER.indexOf(risk) > RISK_ORDER.indexOf(maxRiskClass))
+    ) {
+      maxRiskClass = risk;
+    }
+  }
+
+  const concurrency = isRecord(spec.concurrency) ? spec.concurrency : undefined;
+  const compensation = isRecord(spec.compensation) ? spec.compensation : undefined;
+
+  return {
+    owner: typeof spec.owner === "string" ? spec.owner : null,
+    stateCount: states.length,
+    stateTypes: [...stateTypes].sort(),
+    effects: [...effects].sort(),
+    toolAbilities: stringList(spec.requiredToolAbilities).sort(),
+    maxRiskClass,
+    requiresApproval,
+    concurrencyPolicy: typeof concurrency?.policy === "string" ? concurrency.policy : null,
+    compensationPolicy: typeof compensation?.policy === "string" ? compensation.policy : null,
+  };
+}
+
 function catalogItem(
   definition: RuntimeBundle["definitions"][number],
   triggers: RoutineCatalogTrigger[]
@@ -110,6 +224,7 @@ function catalogItem(
     displayName: typeof metadata?.displayName === "string" ? metadata.displayName : null,
     authoredVersion: definition.authoredVersion,
     triggers,
+    summary: routineSummary(definition.document as Record<string, unknown>),
   };
 }
 

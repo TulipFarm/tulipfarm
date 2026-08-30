@@ -1,5 +1,5 @@
 import { useLoaderData, useRouteError } from "@remix-run/react";
-import { ResourcePanel } from "~/components/resource-panel";
+import { PageShell } from "~/components/page-shell";
 import { RoutineAuthoringStudio } from "~/components/routines/routine-authoring-studio";
 import { ErrorState } from "~/components/states";
 import { ApiError } from "~/lib/api";
@@ -12,25 +12,20 @@ export async function clientLoader({ params }: { params: { slug: string } }) {
 export default function RoutineAuthoringRoute() {
   const { definition, baseCommit } = useLoaderData<typeof clientLoader>();
   return (
-    <ResourcePanel
+    <PageShell
       crumbs={[
-        { label: "routines", to: "/routines" },
+        { label: "Routines", to: "/routines" },
         {
           label: definition.metadata.slug,
           to: `/routines/${encodeURIComponent(definition.metadata.slug)}`,
         },
-        { label: "edit" },
+        { label: "Author" },
       ]}
+      title={`Author ${definition.metadata.displayName}`}
+      description={`Draft version ${definition.metadata.authoredVersion + 1}. Publication remains behind validation and Approval.`}
     >
-      <div className="flex flex-col gap-1">
-        <h1 className="font-medium text-foreground">Author {definition.metadata.displayName}</h1>
-        <p className="text-muted-foreground text-sm">
-          Draft version {definition.metadata.authoredVersion + 1}. Publication remains behind
-          validation and Approval.
-        </p>
-      </div>
       <RoutineAuthoringStudio definition={definition} baseCommit={baseCommit} />
-    </ResourcePanel>
+    </PageShell>
   );
 }
 

@@ -7,7 +7,6 @@ import AdminRoles from "./_app.admin.roles";
 import AdminUsers from "./_app.admin.users";
 import BusinessPeople from "./_app.business.people";
 import RunsIndex from "./_app.runs._index";
-import SettingsIndex from "./_app.settings._index";
 import SettingsAbout from "./_app.settings.about";
 import SettingsActivities from "./_app.settings.activities";
 import SettingsLlm from "./_app.settings.llm";
@@ -22,7 +21,6 @@ import SettingsSoul from "./_app.settings.soul";
  */
 
 const MOVES: [string, ComponentType, string][] = [
-  ["/settings", SettingsIndex, "/settings/profile"],
   ["/settings/secrets", SettingsSecrets, "/business/secrets"],
   ["/settings/llm", SettingsLlm, "/business/models"],
   ["/settings/soul", SettingsSoul, "/business/soul"],

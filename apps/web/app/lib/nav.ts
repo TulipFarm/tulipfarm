@@ -26,24 +26,22 @@ import {
   Workflow,
 } from "lucide-react";
 
-export type ProductMode = "chat" | "farm" | "build" | "knowledge" | "operate" | "settings";
-
 export type NavItem = {
   to: string;
   label: string;
   icon: LucideIcon;
   badge?: boolean;
   devOnly?: boolean;
+  /** Reachable regardless of `visiblePaths`. Chat is the product's floor, never a grant. */ always?: boolean;
   /**
    * The one line the top bar cannot say. Rendered by the section shell instead of a second page
    * title, so a page is named once.
    */
   description?: string;
-  wide?: boolean;
 };
 
-export type NavSection = {
-  heading?: string;
+export type NavGroup = {
+  heading: string;
   items: NavItem[];
 };
 
@@ -52,221 +50,192 @@ export type NavigationVisibility = {
   visiblePaths?: readonly string[];
 };
 
-/*
- * One source of truth for a mode's identity. The rail, the context-panel header, and the top-bar
- * breadcrumb all read from here, so a mode can never render under another mode's icon.
+/**
+ * The whole sidebar, in render order. One flat list under three headings, so what a reader can
+ * reach is what they can see — there is no second navigation layer to open.
+ *
+ * The split is by verb, not by subject: this list is what you *do and watch*. Anything you
+ * *configure* lives in `SETTINGS_GROUPS`, because a sidebar carrying every configuration page
+ * stops being scannable at exactly the size this product reaches.
  */
-export const MODE_META: Record<ProductMode, { label: string; to: string; icon: LucideIcon }> = {
-  chat: { label: "Chat", to: "/", icon: MessageSquare },
-  farm: { label: "Farm", to: "/farm", icon: Flower2 },
-  build: { label: "Build", to: "/resources", icon: Boxes },
-  knowledge: { label: "Knowledge", to: "/knowledge", icon: BookOpen },
-  operate: { label: "Operate", to: "/inbox", icon: Activity },
-  settings: { label: "Settings", to: "/settings", icon: Settings },
-};
-
-export const PRIMARY_MODES = ["chat", "build", "knowledge", "operate"] as const;
+export const SIDEBAR_GROUPS: NavGroup[] = [
+  {
+    heading: "Work",
+    items: [
+      { to: "/chats", label: "Chats", icon: MessageSquare, always: true },
+      { to: "/inbox", label: "Inbox", icon: Inbox, badge: true },
+      {
+        to: "/business/activities",
+        label: "Activity",
+        icon: History,
+        description:
+          "One timeline of everything that happened here: Runs, Records, Chats, and Jobs.",
+      },
+      { to: "/farm", label: "Farm", icon: Flower2 },
+    ],
+  },
+  {
+    heading: "Build",
+    items: [
+      { to: "/resources", label: "Resources", icon: Boxes },
+      { to: "/agents", label: "Agents", icon: Bot },
+      { to: "/skills", label: "Skills", icon: Puzzle },
+      { to: "/routines", label: "Routines", icon: Workflow },
+      { to: "/knowledge", label: "Knowledge", icon: BookOpen },
+    ],
+  },
+];
 
 /**
- * Modes whose page is the whole surface. They own the full width and publish their own navigation,
- * so a context panel beside them would only repeat what the page already shows.
+ * Pinned below the scrolling list rather than ending it, so the door to every configuration page
+ * sits at a fixed spot next to the account it belongs beside, instead of drifting with the list.
  */
-export const FULL_BLEED_MODES: readonly ProductMode[] = ["farm"];
+export const SETTINGS_ITEM: NavItem = { to: "/settings", label: "Settings", icon: Settings };
 
-export function hasContextPanel(mode: ProductMode): boolean {
-  return !FULL_BLEED_MODES.includes(mode);
+/**
+ * Everything reached through Settings. Configuration surfaces are visited rarely and
+ * deliberately, so they sit one click below the work they configure instead of competing with it
+ * for sidebar space.
+ */
+export const SETTINGS_GROUPS: NavGroup[] = [
+  {
+    heading: "You",
+    items: [
+      {
+        to: "/settings/profile",
+        label: "Profile",
+        icon: UserRound,
+        description: "Your display name, and the account details an admin manages for you.",
+      },
+      {
+        to: "/settings/appearance",
+        label: "Appearance",
+        icon: Palette,
+        description: "How TulipFarm looks on this device.",
+      },
+      {
+        to: "/settings/auth",
+        label: "Auth",
+        icon: ShieldCheck,
+        description: "Your password and the API tokens that act on your behalf.",
+      },
+      {
+        to: "/settings/instructions",
+        label: "Custom instructions",
+        icon: Brain,
+        description: "Standing guidance every assistant follows, written by you.",
+      },
+    ],
+  },
+  {
+    heading: "Business",
+    items: [
+      {
+        to: "/business/profile",
+        label: "Business profile",
+        icon: Building2,
+        description:
+          "Who this workspace is for. Agents read these values as context on every turn.",
+      },
+      {
+        to: "/business/models",
+        label: "Models",
+        icon: Cpu,
+        description:
+          "Which models back each effort preset, and what happens when the first one is unavailable.",
+      },
+      {
+        to: "/business/secrets",
+        label: "Secrets",
+        icon: KeyRound,
+        description: "Provider credentials and custom secrets. Values are never shown again.",
+      },
+      {
+        to: "/integrations",
+        label: "Integrations",
+        icon: Plug,
+        description:
+          "Connect the tools your business already runs on, and see what each one lets agents reach.",
+      },
+      {
+        to: "/business/guardrails",
+        label: "Guardrails",
+        icon: ShieldCheck,
+        description: "Limits every agent is checked against, before and after it acts.",
+      },
+      {
+        to: "/business/soul",
+        label: "Soul",
+        icon: Sparkles,
+        description: "Browse the version-controlled repository your workspace is defined in.",
+      },
+      {
+        to: "/business/access",
+        label: "People & access",
+        icon: Users,
+        description:
+          "Invite people, turn accounts off, and decide what each person is allowed to do.",
+      },
+      {
+        to: "/business/about",
+        label: "About",
+        icon: Info,
+        description: "Which version this instance runs, and whether a newer one exists.",
+      },
+    ],
+  },
+  {
+    heading: "Operate",
+    items: [
+      {
+        to: "/operations",
+        label: "Operations",
+        icon: ShieldAlert,
+        description:
+          "Instance health, open incidents, and the kill switches that stop every agent.",
+      },
+      {
+        to: "/business/observability",
+        label: "Observability",
+        icon: Gauge,
+        description: "What your agents are spending and doing: cost, tokens, and reliability.",
+      },
+    ],
+  },
+  {
+    heading: "Developer",
+    items: [{ to: "/design-guide", label: "Design guide", icon: Sparkles, devOnly: true }],
+  },
+];
+
+function isVisible(item: NavItem, { isDev, visiblePaths }: NavigationVisibility): boolean {
+  if (item.devOnly && !isDev) return false;
+  if (item.always) return true;
+  return visiblePaths === undefined || visiblePaths.includes(item.to);
 }
 
-export const MODE_SECTIONS: Record<"build" | "operate" | "settings", NavSection[]> = {
-  build: [
-    {
-      items: [
-        { to: "/resources", label: "Resources", icon: Boxes },
-        { to: "/agents", label: "Agents", icon: Bot },
-        { to: "/skills", label: "Skills", icon: Puzzle },
-        { to: "/routines", label: "Routines", icon: Workflow },
-      ],
-    },
-  ],
-  operate: [
-    {
-      heading: "Work",
-      items: [
-        { to: "/inbox", label: "Inbox", icon: Inbox, badge: true },
-        {
-          to: "/business/activities",
-          label: "Activity",
-          icon: History,
-          description:
-            "One timeline of everything that happened here: Runs, Records, Chats, and Jobs.",
-          wide: true,
-        },
-      ],
-    },
-    {
-      heading: "Health",
-      items: [
-        { to: "/operations", label: "Operations", icon: ShieldAlert },
-        {
-          to: "/business/observability",
-          label: "Observability",
-          icon: Gauge,
-          description: "What your agents are spending and doing: cost, tokens, and reliability.",
-          wide: true,
-        },
-      ],
-    },
-    {
-      heading: "Business",
-      items: [
-        {
-          to: "/business/profile",
-          label: "Business profile",
-          icon: Building2,
-          description:
-            "Who this workspace is for. Agents read these values as context on every turn.",
-        },
-        {
-          to: "/business/models",
-          label: "Models",
-          icon: Cpu,
-          description:
-            "Which models back each effort preset, and what happens when the first one is unavailable.",
-        },
-        {
-          to: "/business/secrets",
-          label: "Secrets",
-          icon: KeyRound,
-          description: "Provider credentials and custom secrets. Values are never shown again.",
-        },
-        {
-          to: "/integrations",
-          label: "Integrations",
-          icon: Plug,
-          description:
-            "Connect the tools your business already runs on, and see what each one lets agents reach.",
-        },
-        {
-          to: "/business/soul",
-          label: "Soul",
-          icon: Sparkles,
-          description: "Browse the version-controlled repository your workspace is defined in.",
-          wide: true,
-        },
-        {
-          to: "/business/guardrails",
-          label: "Guardrails",
-          icon: ShieldCheck,
-          description: "Limits every agent is checked against, before and after it acts.",
-        },
-        {
-          to: "/business/access",
-          label: "People & access",
-          icon: Users,
-          description:
-            "Invite people, turn accounts off, and decide what each person is allowed to do.",
-          wide: true,
-        },
-        {
-          to: "/business/about",
-          label: "About",
-          icon: Info,
-          description: "Which version this instance runs, and whether a newer one exists.",
-        },
-      ],
-    },
-  ],
-  settings: [
-    {
-      items: [
-        {
-          to: "/settings/profile",
-          label: "Profile",
-          icon: UserRound,
-          description: "Your display name, and the account details an admin manages for you.",
-        },
-        {
-          to: "/settings/appearance",
-          label: "Appearance",
-          icon: Palette,
-          description: "How TulipFarm looks on this device.",
-        },
-        {
-          to: "/settings/auth",
-          label: "Auth",
-          icon: ShieldCheck,
-          description: "Your password and the API tokens that act on your behalf.",
-        },
-        {
-          to: "/settings/instructions",
-          label: "Custom instructions",
-          icon: Brain,
-          description: "Standing guidance every assistant follows, written by you.",
-        },
-        { to: "/design-guide", label: "Design guide", icon: Sparkles, devOnly: true },
-      ],
-    },
-  ],
-};
-
-export function visibleSections(
-  mode: "build" | "operate" | "settings",
-  { isDev, visiblePaths }: NavigationVisibility
-): NavSection[] {
-  return MODE_SECTIONS[mode]
-    .map((section) => ({
-      ...section,
-      items: section.items.filter(
-        (item) =>
-          (visiblePaths === undefined || visiblePaths.includes(item.to)) && (!item.devOnly || isDev)
-      ),
+function filterGroups(groups: NavGroup[], visibility: NavigationVisibility): NavGroup[] {
+  return groups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => isVisible(item, visibility)),
     }))
-    .filter((section) => section.items.length > 0);
+    .filter((group) => group.items.length > 0);
 }
 
-export function visibleModes({ isDev, visiblePaths }: NavigationVisibility): ProductMode[] {
-  const visible = ["chat"] as ProductMode[];
-  if (visibleSections("build", { isDev, visiblePaths }).length > 0) visible.push("build");
-  if (visiblePaths === undefined || visiblePaths.includes("/knowledge")) visible.push("knowledge");
-  if (visibleSections("operate", { isDev, visiblePaths }).length > 0) visible.push("operate");
-  if (visiblePaths === undefined || visiblePaths.includes("/farm")) visible.push("farm");
-  if (visibleSections("settings", { isDev, visiblePaths }).length > 0) visible.push("settings");
-  return visible;
+export function visibleSettingsGroups(visibility: NavigationVisibility): NavGroup[] {
+  return filterGroups(SETTINGS_GROUPS, visibility);
 }
 
-export function destinationForMode(mode: ProductMode, visibility: NavigationVisibility): string {
-  if (mode !== "build" && mode !== "operate" && mode !== "settings") {
-    return MODE_META[mode].to;
-  }
-  return (
-    visibleSections(mode, visibility).flatMap((section) => section.items)[0]?.to ??
-    MODE_META[mode].to
-  );
+export function visibleSidebarGroups(visibility: NavigationVisibility): NavGroup[] {
+  return filterGroups(SIDEBAR_GROUPS, visibility);
 }
 
-export function modeForPath(pathname: string): ProductMode {
-  if (pathname.startsWith("/settings") || pathname.startsWith("/design-guide")) return "settings";
-  if (pathname.startsWith("/farm")) return "farm";
-  if (pathname.startsWith("/knowledge")) return "knowledge";
-  if (
-    pathname.startsWith("/business") ||
-    pathname.startsWith("/admin") ||
-    pathname.startsWith("/inbox") ||
-    pathname.startsWith("/runs") ||
-    pathname.startsWith("/integrations") ||
-    pathname.startsWith("/operations")
-  ) {
-    return "operate";
-  }
-  if (
-    pathname.startsWith("/resources") ||
-    pathname.startsWith("/agents") ||
-    pathname.startsWith("/skills") ||
-    pathname.startsWith("/routines")
-  ) {
-    return "build";
-  }
-  return "chat";
+/**
+ * Settings is a door, not a page, so it is offered only when something behind it is reachable.
+ */
+export function visibleSettingsItem(visibility: NavigationVisibility): NavItem | undefined {
+  return visibleSettingsGroups(visibility).length > 0 ? SETTINGS_ITEM : undefined;
 }
 
 const PAGE_META: Array<{ prefix: string; label: string; icon: LucideIcon }> = [
@@ -314,10 +283,14 @@ export function iconForPath(pathname: string): LucideIcon {
   return pageForPath(pathname)?.icon ?? MessageSquare;
 }
 
-const ALL_ITEMS: NavItem[] = Object.values(MODE_SECTIONS).flatMap((sections) =>
-  sections.flatMap((section) => section.items)
-);
+const ALL_ITEMS: NavItem[] = [
+  SETTINGS_ITEM,
+  ...[...SIDEBAR_GROUPS, ...SETTINGS_GROUPS].flatMap((group) => group.items),
+];
 
+/**
+ * The nav item a path belongs to.
+ */
 export function sectionForPath(pathname: string): NavItem | undefined {
   return [...ALL_ITEMS]
     .sort((a, b) => b.to.length - a.to.length)

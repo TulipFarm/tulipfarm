@@ -88,7 +88,7 @@ test("a Routine with no Trigger is still startable by hand", () => {
     runs: [],
   });
   expect(screen.getByRole("button", { name: /run now/i })).toBeInTheDocument();
-  expect(screen.getByText(/triggers: none/i)).toBeInTheDocument();
+  expect(screen.getByText(/only runs when started by hand/i)).toBeInTheDocument();
 });
 
 test("Run canvas dedupes SSE into one journal entry", async () => {

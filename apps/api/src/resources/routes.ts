@@ -30,6 +30,16 @@ const RecordSchema = {
   required: ["id", "version", "createdAt", "updatedAt"],
 } as const;
 
+const CatalogEntrySchema = {
+  type: "object",
+  properties: {
+    name: { type: "string" },
+    count: { type: "number" },
+    lastUpdatedAt: { type: "string", nullable: true },
+  },
+  required: ["name", "count", "lastUpdatedAt"],
+} as const;
+
 const ValidationErrorSchema = {
   type: "object",
   properties: {
@@ -105,22 +115,73 @@ export function registerResourceRoutes(
     type: string,
     id?: string
   ): Promise<boolean> {
-    if (recordAuthorizer === undefined) return false;
+    if (await isAuthorized(req, action, type, id)) return false;
+    await reply.code(403).send({ error: "not authorized for this resource" });
+    return true;
+  }
+
+  /** The same decision without a reply, for the catalog loop that skips rather than refuses. */
+  async function isAuthorized(
+    req: FastifyRequest,
+    action: RecordAction,
+    type: string,
+    id?: string
+  ): Promise<boolean> {
+    if (recordAuthorizer === undefined) return true;
     const principal = recordPrincipalOf(req);
-    if (principal === undefined) {
-      await reply.code(403).send({ error: "not authorized for this resource" });
-      return true;
-    }
-    const allowed = await recordAuthorizer.authorize({
+    if (principal === undefined) return false;
+    return recordAuthorizer.authorize({
       principal,
       action,
       type,
       ...(id === undefined ? {} : { id }),
     });
-    if (allowed) return false;
-    await reply.code(403).send({ error: "not authorized for this resource" });
-    return true;
   }
+
+  // ── GET /api/v1/resources ───────────────────────────────────────────────────
+  app.get(
+    "/api/v1/resources",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "Catalog totals per resource type. A type the caller may not list is omitted, so a count never discloses data behind a denied type.",
+        tags: ["resources"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        response: {
+          200: {
+            type: "object",
+            properties: { types: { type: "array", items: CatalogEntrySchema } },
+            required: ["types"],
+          },
+          401: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const names = Array.from(soulLoader.resources.keys());
+      const entries = await Promise.all(
+        names.map(async (name) => {
+          if (!(await isAuthorized(req, "record.list", name))) return null;
+          const repo = repoFactory.forType(name);
+          if (typeof repo.stats !== "function") return null;
+          try {
+            const { count, lastUpdatedAt } = await repo.stats();
+            return {
+              name,
+              count,
+              lastUpdatedAt: lastUpdatedAt === null ? null : lastUpdatedAt.toISOString(),
+            };
+          } catch (error) {
+            // One unreadable table must not blank the whole catalog; that type reports no totals.
+            req.log.warn({ err: error, type: name }, "resource catalog stats failed");
+            return null;
+          }
+        })
+      );
+      return reply.send({ types: entries.filter((entry) => entry !== null) });
+    }
+  );
 
   // ── POST /api/v1/resources/:type ────────────────────────────────────────────
   app.post(

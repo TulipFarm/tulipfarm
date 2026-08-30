@@ -74,6 +74,17 @@ describe("ActiveRoutineCatalog", () => {
         slug: "daily-wait",
         displayName: "Daily wait",
         authoredVersion: 3,
+        summary: {
+          owner: "operations",
+          stateCount: 0,
+          stateTypes: [],
+          effects: [],
+          toolAbilities: [],
+          maxRiskClass: null,
+          requiresApproval: false,
+          concurrencyPolicy: null,
+          compensationPolicy: null,
+        },
         triggers: [
           {
             slug: "daily-wait-cron",

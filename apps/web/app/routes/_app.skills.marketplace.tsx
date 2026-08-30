@@ -1,8 +1,11 @@
 import { Link, type MetaFunction, useLoaderData } from "@remix-run/react";
-import { useEffect, useRef, useState } from "react";
-import { ResourcePanel } from "~/components/resource-panel";
+import { useEffect, useId, useRef, useState } from "react";
+import { PageShell } from "~/components/page-shell";
+import { MarketplaceBrowser } from "~/components/skills/marketplace-browser";
 import { SkillsTabs } from "~/components/skills-tabs";
 import { Button } from "~/components/ui/button";
+import { Input } from "~/components/ui/input";
+import { Panel } from "~/components/ui/panel";
 import { ApiError } from "~/lib/api";
 import {
   auditSkill,
@@ -44,9 +47,6 @@ function InstallBadge({ installed, updateAvailable }: SkillInstallStatus) {
 export async function clientLoader() {
   return { catalog: await marketplaceSkills().catch(() => null) };
 }
-
-const inputClass =
-  "w-full rounded-sm border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50";
 
 const RISK_CLASS: Record<SkillAuditReport["riskRating"], string> = {
   low: "border-border text-muted-foreground",
@@ -189,6 +189,7 @@ export default function SkillsMarketplace() {
   const { catalog } = useLoaderData<typeof clientLoader>() as {
     catalog: MarketplaceCatalog | null;
   };
+  const sourceId = useId();
   const [source, setSource] = useState("");
   const [scan, setScan] = useState<ScanResult | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -208,14 +209,6 @@ export default function SkillsMarketplace() {
   const severeSelected = selectedSkills.flatMap((s) =>
     severeFindings(reports[skillRowKey(s)]).map((finding) => ({ skillName: s.name, finding }))
   );
-  const catalogGroups = new Map<string, MarketplaceCatalog["skills"]>();
-  for (const skill of catalog?.skills ?? []) {
-    const category = skill.category ?? "other";
-    const group = catalogGroups.get(category);
-    if (group) group.push(skill);
-    else catalogGroups.set(category, [skill]);
-  }
-  const updateCount = catalog?.skills.filter((skill) => skill.updateAvailable).length ?? 0;
 
   // The report list is long, so an error rendered beside the confirm button can still be off
   // screen. Focus scrolls it into view and announces it at the point of failure (#444).
@@ -306,7 +299,10 @@ export default function SkillsMarketplace() {
   }
 
   return (
-    <ResourcePanel crumbs={[{ label: "skills", to: "/skills" }, { label: "marketplace" }]}>
+    <PageShell
+      crumbs={[{ label: "Skills", to: "/skills" }, { label: "Marketplace" }]}
+      title="Marketplace"
+    >
       <SkillsTabs />
       {error ? (
         <p className="rounded-sm border border-destructive bg-destructive/10 px-3 py-2 text-destructive">
@@ -331,110 +327,50 @@ export default function SkillsMarketplace() {
           {/* Official marketplace catalog (SKL-V1-005), reviewing feeds the same select → audit →
               confirm pipeline as a manual scan. Hidden once a scan is active. */}
           {catalog && catalog.skills.length > 0 && !scan ? (
-            <div className="flex flex-col gap-3">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                  official marketplace · {catalog.source}
-                </p>
-                <div className="flex items-center gap-2">
-                  {updateCount > 0 ? (
-                    <span className="rounded-sm border border-primary px-2 py-1 text-xs uppercase tracking-[0.15em] text-primary">
-                      {updateCount} {updateCount === 1 ? "update" : "updates"} available
-                    </span>
-                  ) : null}
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={busy !== null}
-                    onClick={() => loadIntoPipeline(catalog.scanId, catalog.skills)}
-                  >
-                    Review all ({catalog.skills.length})
-                  </Button>
-                </div>
-              </div>
-              {/* Groups scroll within the panel so the page itself does not grow with the catalog. */}
-              <div className="flex max-h-96 flex-col gap-3 overflow-y-auto rounded-sm border border-border p-3">
-                {[...catalogGroups].map(([category, skills]) => (
-                  <section key={category} aria-labelledby={`category-${category}`}>
-                    <h2
-                      id={`category-${category}`}
-                      className="mb-1 text-xs uppercase tracking-[0.2em] text-muted-foreground"
-                    >
-                      {category.replaceAll("-", " ")}
-                    </h2>
-                    <ul className="flex flex-col divide-y divide-border rounded-sm border border-border">
-                      {skills.map((s) => (
-                        <li key={skillRowKey(s)} className="flex items-center gap-3 px-3 py-2">
-                          <span className="font-medium text-foreground">{s.name}</span>
-                          {s.description ? (
-                            <span className="min-w-0 flex-1 truncate text-muted-foreground">
-                              {s.description}
-                            </span>
-                          ) : (
-                            <span className="flex-1" />
-                          )}
-                          {s.installs !== undefined ? (
-                            <span className="shrink-0 text-xs text-muted-foreground">
-                              {s.installs} installs
-                            </span>
-                          ) : null}
-                          {s.installed && !s.updateAvailable ? (
-                            <InstallBadge installed updateAvailable={false} />
-                          ) : (
-                            <Button
-                              size="sm"
-                              variant={s.updateAvailable ? "default" : "outline"}
-                              className="shrink-0"
-                              disabled={busy !== null}
-                              // The catalog is ~88 identical actions deep, so the visible text is
-                              // the only thing distinguishing them and it is the same on every row.
-                              // Name the Skill in the label so navigating by role stays usable.
-                              aria-label={`${s.updateAvailable ? "Update" : "Install"} ${s.name}`}
-                              onClick={() => loadIntoPipeline(catalog.scanId, [s])}
-                            >
-                              {s.updateAvailable ? "Update" : "Install"}
-                            </Button>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  </section>
-                ))}
-              </div>
-              <p className="border-t border-border pt-4 text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                or install from any git repo
-              </p>
-            </div>
+            <MarketplaceBrowser
+              catalog={catalog}
+              busy={busy !== null}
+              onReview={loadIntoPipeline}
+            />
           ) : null}
 
           {/* Step 1, scan a git repo for installable skills. */}
-          <form
-            className="flex flex-col gap-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void onScan();
-            }}
-          >
-            <label
-              htmlFor="source"
-              className="text-xs uppercase tracking-[0.2em] text-muted-foreground"
+          {scan ? null : (
+            <Panel
+              title="Install from a git repo"
+              description="Anything outside the catalog is unreviewed. Scanning only reads the repo — nothing is installed until you have seen its audit and confirmed."
             >
-              git url
-            </label>
-            <div className="flex gap-2">
-              <input
-                id="source"
-                className={inputClass}
-                placeholder="owner/repo[#branch]  or  https://github.com/owner/repo"
-                value={source}
-                onChange={(e) => setSource(e.target.value)}
-                disabled={busy !== null}
-              />
-              <Button type="submit" size="sm" disabled={busy !== null || !source.trim()}>
-                {busy === "scan" ? "Scanning…" : "Scan"}
-              </Button>
-            </div>
-          </form>
+              <form
+                className="flex flex-col gap-2"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void onScan();
+                }}
+              >
+                <label htmlFor={sourceId} className="text-xs text-muted-foreground">
+                  Repository
+                </label>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Input
+                    id={sourceId}
+                    className="min-w-0 flex-1"
+                    placeholder="owner/repo#branch or https://github.com/owner/repo"
+                    value={source}
+                    onChange={(e) => setSource(e.target.value)}
+                    disabled={busy !== null}
+                  />
+                  <Button
+                    type="submit"
+                    size="sm"
+                    className="sm:w-28"
+                    disabled={busy !== null || !source.trim()}
+                  >
+                    {busy === "scan" ? "Scanning…" : "Scan"}
+                  </Button>
+                </div>
+              </form>
+            </Panel>
+          )}
 
           {/* Step 2. Pick which discovered skills to review. */}
           {scan ? (
@@ -574,6 +510,6 @@ export default function SkillsMarketplace() {
           ) : null}
         </>
       )}
-    </ResourcePanel>
+    </PageShell>
   );
 }

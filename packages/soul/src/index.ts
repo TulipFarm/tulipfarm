@@ -196,7 +196,9 @@ export type {
   RoutineCatalog,
   RoutineCatalogDetail,
   RoutineCatalogItem,
+  RoutineCatalogSummary,
   RoutineCatalogTrigger,
+  RoutineEffectKind,
 } from "./routine-catalog";
 export { ActiveRoutineCatalog } from "./routine-catalog";
 export type {

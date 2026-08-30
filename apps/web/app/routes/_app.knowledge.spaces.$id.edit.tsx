@@ -9,7 +9,7 @@ import { useState } from "react";
 import { RestrictDialog } from "~/components/knowledge/restrict-dialog";
 import { SpaceDeleteDialog } from "~/components/knowledge/space-delete-dialog";
 import { SpaceForm } from "~/components/knowledge/space-form";
-import { ResourcePanel } from "~/components/resource-panel";
+import { PageShell } from "~/components/page-shell";
 import { ErrorState, NotFoundState } from "~/components/states";
 import { Button } from "~/components/ui/button";
 import { ApiError } from "~/lib/api";
@@ -95,13 +95,13 @@ export default function SpaceEdit() {
   }
 
   const crumbs = [
-    { label: "knowledge", to: "/knowledge" },
+    { label: "Knowledge", to: "/knowledge" },
     { label: space.name, to: detailPath },
     { label: "settings" },
   ];
 
   return (
-    <ResourcePanel crumbs={crumbs}>
+    <PageShell crumbs={crumbs} title={`${space.name} settings`}>
       <SpaceForm
         mode="edit"
         initial={{ name: space.name, description: space.description }}
@@ -162,7 +162,7 @@ export default function SpaceEdit() {
         onConfirm={onDelete}
         onClose={() => setConfirming(false)}
       />
-    </ResourcePanel>
+    </PageShell>
   );
 }
 

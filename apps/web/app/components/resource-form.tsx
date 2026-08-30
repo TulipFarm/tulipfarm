@@ -10,6 +10,26 @@ import type { FieldDescriptor } from "~/lib/schema";
 const inputClass =
   "w-full rounded-sm border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-60";
 
+/**
+ * A `datetime-local` input reads and writes `YYYY-MM-DDTHH:mm`, which JSON Schema's `date-time`
+ * format rejects because RFC 3339 requires seconds and an offset. Without this pair, every type
+ * with a required date-time field is impossible to create from the form.
+ */
+function toRfc3339(local: string): string {
+  if (!local) return "";
+  const parsed = new Date(local);
+  return Number.isNaN(parsed.getTime()) ? local : parsed.toISOString();
+}
+
+function toLocalInputValue(value: unknown): string {
+  const raw = String(value ?? "");
+  if (!raw) return "";
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return raw;
+  const offsetMs = parsed.getTime() - parsed.getTimezoneOffset() * 60_000;
+  return new Date(offsetMs).toISOString().slice(0, 16);
+}
+
 function isJsonKind(field: FieldDescriptor): boolean {
   return field.kind === "array" || field.kind === "object";
 }
@@ -251,8 +271,10 @@ function Field({
           type={field.format === "date-time" ? "datetime-local" : "date"}
           className={inputClass}
           required={field.required}
-          value={String(value ?? "")}
-          onChange={(e) => onValue(e.target.value)}
+          value={field.format === "date-time" ? toLocalInputValue(value) : String(value ?? "")}
+          onChange={(e) =>
+            onValue(field.format === "date-time" ? toRfc3339(e.target.value) : e.target.value)
+          }
         />
       );
     case "link":

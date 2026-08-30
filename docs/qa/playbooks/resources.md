@@ -26,13 +26,12 @@ Every scenario stands alone — a failure in one does not block the next. S3 in 
 assume S2 has already run: in a smoke-only invocation it hasn't, so S3 falls back to any pre-existing
 type and stays entirely read-only.
 
-**Cross-cutting a11y note, checked once here instead of once per scenario:** `ResourcePanel` — the
-shared frame for every route in this file — renders only a breadcrumb `nav` (`aria-label="Breadcrumb"`)
-and a content slot. It contains no `<h1>`, and neither does the app shell around it or the shared
-`ErrorState`/`NotFoundState` frame. Every scenario below still asserts "exactly one `h1`, no skipped
-level" per convention — expect it to fail identically on every page in this file. Log it **once** as
-a single P2 finding covering the whole Resources area ("no page in this section exposes a top-level
-heading"), not once per scenario.
+**Cross-cutting a11y note, checked once here instead of once per scenario:** `PageShell` — the
+shared frame for every route in this file — renders a breadcrumb `nav` (`aria-label="Breadcrumb"`)
+and exactly one `<h1>` from its `title`, with the last crumb dropped because that crumb *is* the
+title. Every scenario below asserts "exactly one `h1`, no skipped level" per convention, and it
+should now **pass** on every page in this section. A page with zero `h1`, or with a second one
+inside the content, is a regression in the shell — report it once for the area, not per scenario.
 
 ## S1 — Resource type list and empty state
 

@@ -1,6 +1,6 @@
 import { Link, type MetaFunction, useNavigate, useRouteError } from "@remix-run/react";
 import { type FormEvent, useState } from "react";
-import { ResourcePanel } from "~/components/resource-panel";
+import { PageShell } from "~/components/page-shell";
 import { ErrorState } from "~/components/states";
 import { Button } from "~/components/ui/button";
 import { ApiError, createResourceType } from "~/lib/api";
@@ -120,10 +120,10 @@ export default function ResourceTypeNew() {
     }
   }
 
-  const crumbs = [{ label: "resources", to: "/resources" }, { label: "new" }];
+  const crumbs = [{ label: "Resources", to: "/resources" }, { label: "New type" }];
 
   return (
-    <ResourcePanel crumbs={crumbs}>
+    <PageShell crumbs={crumbs} title="New resource type">
       <form onSubmit={onSubmit} className="flex max-w-2xl flex-col gap-4">
         {error ? <p className="text-destructive">error: {error}</p> : null}
 
@@ -230,7 +230,7 @@ export default function ResourceTypeNew() {
           </Button>
         </div>
       </form>
-    </ResourcePanel>
+    </PageShell>
   );
 }
 

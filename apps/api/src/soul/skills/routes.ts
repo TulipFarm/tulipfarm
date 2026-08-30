@@ -44,6 +44,8 @@ import {
   SkillAuditResponseSchema,
   SkillDeleteResponseSchema,
   SkillDetailResponseSchema,
+  SkillFileQuerySchema,
+  SkillFileResponseSchema,
   SkillInstallBodySchema,
   SkillInstallResponseSchema,
   SkillListResponseSchema,
@@ -74,10 +76,28 @@ type SkillSummary = {
   /** The Skill's own version, as declared in its `SKILL.md`. */
   version?: string;
   source?: string;
+  category?: string;
+  tools?: string[];
+  allowedDomains?: string[];
+  allowedCommands?: string[];
+  requiredSecrets?: string[];
 };
 const NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+/**
+ * A frontmatter list, normalised.
+ *
+ * Frontmatter is author input validated with `additionalProperties: true`, so a key like `tools`
+ * reaches here as whatever YAML parsed — a string, a map, a list with a number in it. Anything that
+ * is not a non-empty string is dropped rather than coerced, so the UI never renders `[object
+ * Object]` as a Tool the Skill can call.
+ */
+function asStringList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const items = value.filter((item): item is string => typeof item === "string" && item.length > 0);
+  return items.length > 0 ? items : undefined;
 }
 function runtimeStatus(
   runtimeProfile: string,
@@ -147,6 +167,44 @@ async function skillPackageDetail(directory: string | undefined): Promise<SkillP
     })),
   };
 }
+/** Beyond this a reference stops being something anyone reads in a browser panel. */
+const MAX_SKILL_FILE_CHARS = 200_000;
+
+/**
+ * One file out of a Skill package, or `undefined` when the package does not contain it.
+ *
+ * The path is resolved by matching what {@link collectSkillFiles} already listed rather than by
+ * joining it onto the directory. That walker refuses to leave the package root and flags a symlink
+ * that resolves outside it, so reusing its output as the allowlist means no caller-supplied string
+ * ever reaches the filesystem and there is no traversal check here to get wrong.
+ */
+async function readSkillPackageFile(
+  directory: string,
+  requested: string
+): Promise<
+  { path: string; size: number; content: string; truncated: boolean; binary: boolean } | undefined
+> {
+  let files: SkillScanFile[];
+  try {
+    files = await collectSkillFiles(directory);
+  } catch {
+    return undefined;
+  }
+  const file = files.find((candidate) => candidate.path === requested);
+  if (!file || file.symlinkEscapes) return undefined;
+  // `collectSkillFiles` decodes every file as UTF-8, so a binary asset arrives as replacement
+  // characters. Reporting that as text would render a screenful of garbage as if it were content.
+  const binary = file.content.includes("\u0000") || /\uFFFD{4,}/.test(file.content);
+  const truncated = !binary && file.content.length > MAX_SKILL_FILE_CHARS;
+  return {
+    path: file.path,
+    size: file.size ?? Buffer.byteLength(file.content),
+    content: binary ? "" : truncated ? file.content.slice(0, MAX_SKILL_FILE_CHARS) : file.content,
+    truncated,
+    binary,
+  };
+}
+
 function executablePackageBlocker(skill: DiscoveredSkill): string | undefined {
   const { commands, invalid } = packageCommands(skill.name, skill.files);
   if (invalid) return "SKILL.md declares commands but is not a valid Skill definition";
@@ -202,12 +260,18 @@ function toSkillSummary(skill: SoulSkill, lock: SkillsLock, bundledOnly = false)
   const locked = lock.skills[skill.name];
   // A Skill only in the image has no Soul entry yet; the boot sync has not run or it is disabled.
   const provenance: SkillSourceType = bundledOnly ? "bundled" : (locked?.sourceType ?? "curated");
+  const frontmatter = skill.frontmatter;
   return {
     name: skill.name,
-    description: asString(skill.frontmatter.description),
+    description: asString(frontmatter.description),
     provenance,
-    version: locked?.version ?? asString(skill.frontmatter.version),
+    version: locked?.version ?? asString(frontmatter.version),
     source: provenance === "bundled" ? undefined : locked?.sourceUrl,
+    category: asString(frontmatter.category),
+    tools: asStringList(frontmatter.tools),
+    allowedDomains: asStringList(frontmatter.allowedDomains),
+    allowedCommands: asStringList(frontmatter.allowedCommands),
+    requiredSecrets: asStringList(frontmatter.requiredSecrets),
   };
 }
 // The operator sees that the catalog is unreachable, never git's stderr or a server temp path.
@@ -330,9 +394,41 @@ export function registerSkillRoutes(
         : bundled?.directory;
       return {
         ...toSkillSummary(skill, lock, !soulLoader.skills.has(name)),
+        author: asString(skill.frontmatter.author),
+        license: asString(skill.frontmatter.license),
         body: skill.body,
         ...(await skillPackageDetail(directory)),
       };
+    }
+  );
+  app.get(
+    "/api/v1/skills/:name/file",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "Read one file from an installed Skill's package, so references and scripts can be inspected before the Skill is trusted.",
+        tags: ["skills"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        params: SkillNameParamsSchema,
+        querystring: SkillFileQuerySchema,
+        response: { 200: SkillFileResponseSchema, 401: ErrorSchema, 404: ErrorSchema },
+      },
+    },
+    async (req, reply) => {
+      const { name } = req.params as { name: string };
+      const { path: requested } = req.query as { path: string };
+      if (!NAME_RE.test(name)) return reply.code(404).send({ error: `skill not found: ${name}` });
+      const skill = resolveSkill(name, soulLoader, bundledSkills, disabledBundledSkills);
+      if (!skill) return reply.code(404).send({ error: `skill not found: ${name}` });
+      const directory = soulLoader.skills.has(name)
+        ? join(gitSync.path, "skills", name)
+        : bundledSkills.get(name)?.directory;
+      if (directory === undefined)
+        return reply.code(404).send({ error: `skill not found: ${name}` });
+      const file = await readSkillPackageFile(directory, requested);
+      if (!file) return reply.code(404).send({ error: `file not found: ${requested}` });
+      return file;
     }
   );
   app.delete(

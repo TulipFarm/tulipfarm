@@ -1,8 +1,16 @@
+import { AgentGlyph } from "~/components/agent-glyph";
+import { AUTONOMY_RANK, AutonomyChip } from "~/components/autonomy-chip";
 import { ApprovalCard } from "~/components/chat/approval-card";
 import { MessagePartView } from "~/components/chat/parts";
 import { ToolTrace } from "~/components/chat/tool-trace";
 import { GuideSection } from "~/components/design-guide/guide-section";
+import type { Autonomy } from "~/lib/agents";
 import type { TimelinePart } from "~/lib/chat/types";
+
+/* Ordered low to high so the guide shows the ramp climbing, not the object's key order. */
+const AUTONOMY_SPECIMENS = (Object.keys(AUTONOMY_RANK) as Autonomy[]).sort(
+  (a, b) => AUTONOMY_RANK[a] - AUTONOMY_RANK[b]
+);
 
 const TOOL_SPECIMENS: { caption: string; part: Extract<TimelinePart, { kind: "tool" }> }[] = [
   {
@@ -279,6 +287,20 @@ export function AgentRunSections() {
             onApprove={() => undefined}
           />
         </div>
+      </div>
+
+      <h3 className="mb-2 text-sm font-medium">Agent authority</h3>
+      <p className="mb-3 text-xs text-muted-foreground">
+        How much rope an agent holds, low to high, on the sequential <code>heat-*</code> ramp. The
+        glyph beside it encodes the same order as stroke weight.
+      </p>
+      <div className="flex flex-wrap items-center gap-3">
+        {AUTONOMY_SPECIMENS.map((autonomy) => (
+          <span key={autonomy} className="flex items-center gap-1.5 text-xs">
+            <AgentGlyph name={autonomy} autonomy={autonomy} size="sm" decorative />
+            <AutonomyChip autonomy={autonomy} />
+          </span>
+        ))}
       </div>
     </GuideSection>
   );

@@ -101,3 +101,53 @@ test("edit: a 409 surfaces the version-conflict banner and does not navigate", a
   expect(await screen.findByText(/changed since you loaded it/)).toBeInTheDocument();
   expect(navigate).not.toHaveBeenCalled();
 });
+
+const datedParsed = parseSchema(`
+type: object
+x-id-strategy: { sequence: true, field: id }
+properties:
+  id: { type: string }
+  syncedAt: { type: string, format: date-time }
+required: [syncedAt]
+`);
+if (!datedParsed.ok) throw new Error(datedParsed.error);
+const datedFields = formFields(datedParsed.schema);
+
+test("create: a datetime-local field is submitted as RFC 3339, not the browser's local string", async () => {
+  const navigate = vi.fn();
+  vi.mocked(remix.useNavigate).mockReturnValue(navigate);
+  vi.mocked(createRecord).mockResolvedValue({
+    id: "S-1",
+    version: 1,
+    createdAt: "",
+    updatedAt: "",
+  });
+  renderRoute(<ResourceCreate />, { type: "sync", fields: datedFields, schemaError: undefined });
+
+  const input = document.querySelector("input#syncedAt") as HTMLInputElement;
+  expect(input.type).toBe("datetime-local");
+  // What the control actually yields: no seconds, no offset. The API's date-time format rejects it.
+  fireEvent.change(input, { target: { value: "2026-08-29T10:15" } });
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+  await waitFor(() => expect(createRecord).toHaveBeenCalled());
+  const sent = vi.mocked(createRecord).mock.calls[0][1] as { syncedAt: string };
+  expect(sent.syncedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/);
+  expect(new Date(sent.syncedAt).getTime()).toBe(new Date("2026-08-29T10:15").getTime());
+});
+
+test("create: an existing RFC 3339 value round-trips back into the local control", () => {
+  vi.mocked(remix.useNavigate).mockReturnValue(vi.fn());
+  const iso = new Date("2026-08-29T10:15").toISOString();
+  renderRoute(<ResourceEdit />, {
+    type: "sync",
+    id: "S-1",
+    record: { id: "S-1", syncedAt: iso, version: 1, createdAt: "", updatedAt: "" },
+    fields: datedFields,
+    schemaError: undefined,
+  });
+
+  expect((document.querySelector("input#syncedAt") as HTMLInputElement).value).toBe(
+    "2026-08-29T10:15"
+  );
+});

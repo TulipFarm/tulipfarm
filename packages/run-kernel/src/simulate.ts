@@ -115,7 +115,15 @@ const EVENT_STATE_TYPES: ReadonlySet<string> = new Set([
   "form",
   "human_task",
 ]);
-const EFFECT_STATE_TYPES: ReadonlySet<string> = new Set(["compensate", "tool"]);
+/**
+ * States that reach a provider, so simulating one previews a call instead of making it.
+ *
+ * `action` belongs here even though it names its Tool in a plain `action` string rather than a
+ * `toolRef`: it dispatches a runtime Tool directly, which is the whole reason a reader wants to
+ * see it before pressing Run. Leaving it out made every Routine the product's own authoring
+ * writes un-rehearsable.
+ */
+const EFFECT_STATE_TYPES: ReadonlySet<string> = new Set(["action", "compensate", "tool"]);
 const NOT_SIMULABLE: ReadonlySet<string> = new Set(["foreach", "parallel", "repeat_until"]);
 
 function readRecord(value: unknown, key: string): Record<string, unknown> | null {
@@ -150,10 +158,13 @@ function effectPreview(
   input: Record<string, unknown>
 ): EffectPreview {
   const inputHash = canonicalHash(input);
+  // An `action` State names its Tool in `action` itself; there is no separate reference to read.
   const toolRef =
     state.type === "tool"
       ? refLabel(state, "toolRef")
-      : (readString(state.definition, "targetRef") ?? "");
+      : state.type === "action"
+        ? (readString(state.definition, "action") ?? "")
+        : (readString(state.definition, "targetRef") ?? "");
   return {
     stateName: state.name,
     toolRef,
@@ -220,6 +231,14 @@ function execute(
       extraMs: 0,
       effect: null,
     };
+  }
+
+  // A `script` isolate is sealed, so it causes nothing — but its output still has to come from
+  // somewhere, and running the isolate here would make simulation depend on arbitrary authored
+  // code. It is fixtured for the same reason a model response is.
+  if (state.type === "script") {
+    const output = fixtureValue(fixture.model, state);
+    return { source: "evaluated", output, next: stateOutcome(state), extraMs: 0, effect: null };
   }
 
   if (state.type === "agent") {

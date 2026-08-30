@@ -1,5 +1,5 @@
 import { createRemixStub } from "@remix-run/testing";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test, vi } from "vitest";
 
@@ -66,7 +66,7 @@ test("scan → audit → advisory + operator confirm → install", async () => {
 
   renderInstall();
 
-  await user.type(await screen.findByLabelText(/git url/i), "owner/repo");
+  await user.type(await screen.findByLabelText(/repository/i), "owner/repo");
   await user.click(screen.getByRole("button", { name: /^Scan$/ }));
 
   // Discovered, but nothing installed yet and no confirm button until audited.
@@ -129,7 +129,7 @@ test("marketplace catalog feeds the same audit → operator-confirm flow", async
   });
 
   // Catalog is shown with its install count; nothing is scanned yet.
-  expect(await screen.findByText(/official marketplace/i)).toBeInTheDocument();
+  expect(await screen.findByText(/official catalog/i)).toBeInTheDocument();
   expect(screen.getByText(/42 installs/i)).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /confirm install/i })).not.toBeInTheDocument();
 
@@ -148,8 +148,8 @@ test("marketplace catalog feeds the same audit → operator-confirm flow", async
 
 test("a missing marketplace catalog still renders the manual git-url scan form", async () => {
   renderInstall(null);
-  expect(await screen.findByLabelText(/git url/i)).toBeInTheDocument();
-  expect(screen.queryByText(/official marketplace/i)).not.toBeInTheDocument();
+  expect(await screen.findByLabelText(/repository/i)).toBeInTheDocument();
+  expect(screen.queryByText(/official catalog/i)).not.toBeInTheDocument();
 });
 
 test("catalog rows badge installed and update-available skills", async () => {
@@ -181,14 +181,16 @@ test("catalog rows badge installed and update-available skills", async () => {
     ],
   });
 
-  expect(await screen.findByText(/official marketplace/i)).toBeInTheDocument();
+  expect(await screen.findByText(/official catalog/i)).toBeInTheDocument();
   // Current install reads as a badge; not-installed and stale get per-row actions.
-  expect(screen.getByText(/installed ✓/i)).toBeInTheDocument();
+  // Scoped to the catalog: the "Installed" tab in the page header matches the same text.
+  const catalogPanel = screen.getByRole("region", { name: /official catalog/i });
+  expect(within(catalogPanel).getByText(/^installed$/i)).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Install fresh-skill" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Update stale-skill" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "productivity" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "engineering" })).toBeInTheDocument();
-  expect(screen.getByText("1 update available")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "1 update" })).toBeInTheDocument();
 });
 
 test("per-row Install loads only that skill into the audit pipeline", async () => {
@@ -215,7 +217,7 @@ test("a scan failure surfaces an error banner", async () => {
   );
 
   renderInstall();
-  await user.type(await screen.findByLabelText(/git url/i), "owner/empty");
+  await user.type(await screen.findByLabelText(/repository/i), "owner/empty");
   await user.click(screen.getByRole("button", { name: /^Scan$/ }));
 
   expect(await screen.findByText(/scan failed: no SKILL\.md files found/i)).toBeInTheDocument();
@@ -247,7 +249,7 @@ test("two scanned skills sharing a name stay separately selectable", async () =>
   });
 
   renderInstall();
-  await user.type(await screen.findByLabelText(/git url/i), "owner/repo");
+  await user.type(await screen.findByLabelText(/repository/i), "owner/repo");
   await user.click(screen.getByRole("button", { name: /^Scan$/ }));
 
   const boxes = await screen.findAllByRole("checkbox");
@@ -285,7 +287,7 @@ test("an install failure is reported beside the confirm button, not only in the 
   vi.mocked(installSkills).mockRejectedValue(new Error("invalid soul write target"));
 
   renderInstall();
-  await user.type(await screen.findByLabelText(/git url/i), "owner/repo");
+  await user.type(await screen.findByLabelText(/repository/i), "owner/repo");
   await user.click(screen.getByRole("button", { name: /^Scan$/ }));
   await user.click(await screen.findByRole("button", { name: /Run SkillAudit/ }));
   await user.click(await screen.findByRole("button", { name: /confirm install/i }));
@@ -330,7 +332,7 @@ test("two scanned skills sharing a name are audited and reported separately", as
   }));
 
   renderInstall();
-  await user.type(await screen.findByLabelText(/git url/i), "owner/repo");
+  await user.type(await screen.findByLabelText(/repository/i), "owner/repo");
   await user.click(screen.getByRole("button", { name: /^Scan$/ }));
   await user.click(await screen.findByRole("button", { name: /Run SkillAudit \(2\)/ }));
 
@@ -371,7 +373,7 @@ test("the install payload identifies each selected row by its path", async () =>
   vi.mocked(installSkills).mockResolvedValue({ installed: ["review-contract"] });
 
   renderInstall();
-  await user.type(await screen.findByLabelText(/git url/i), "owner/repo");
+  await user.type(await screen.findByLabelText(/repository/i), "owner/repo");
   await user.click(screen.getByRole("button", { name: /^Scan$/ }));
   await user.click(await screen.findByRole("button", { name: /Run SkillAudit \(2\)/ }));
   await user.click(await screen.findByRole("button", { name: /confirm install/i }));
@@ -413,7 +415,7 @@ test("selecting one of two same-named rows installs exactly that row", async () 
   vi.mocked(installSkills).mockResolvedValue({ installed: ["review-contract"] });
 
   renderInstall();
-  await user.type(await screen.findByLabelText(/git url/i), "owner/repo");
+  await user.type(await screen.findByLabelText(/repository/i), "owner/repo");
   await user.click(screen.getByRole("button", { name: /^Scan$/ }));
 
   const boxes = await screen.findAllByRole("checkbox");
@@ -451,7 +453,7 @@ test("the audit action gives way to confirm once the selection is audited", asyn
   });
 
   renderInstall();
-  await user.type(await screen.findByLabelText(/git url/i), "owner/repo");
+  await user.type(await screen.findByLabelText(/repository/i), "owner/repo");
   await user.click(screen.getByRole("button", { name: /^Scan$/ }));
   await user.click(await screen.findByRole("button", { name: /Run SkillAudit/ }));
 
@@ -490,7 +492,7 @@ test("an install failure takes focus so it is seen at the point of failure", asy
   vi.mocked(installSkills).mockRejectedValue(new Error("invalid soul write target"));
 
   renderInstall();
-  await user.type(await screen.findByLabelText(/git url/i), "owner/repo");
+  await user.type(await screen.findByLabelText(/repository/i), "owner/repo");
   await user.click(screen.getByRole("button", { name: /^Scan$/ }));
   await user.click(await screen.findByRole("button", { name: /Run SkillAudit/ }));
   await user.click(await screen.findByRole("button", { name: /confirm install/i }));
@@ -520,4 +522,104 @@ test("each catalog row's action is named for the skill it acts on", async () => 
   for (const name of ["Install kb-article", "Install sql-queries", "Update ticket-triage"]) {
     expect(screen.getAllByRole("button", { name }), name).toHaveLength(1);
   }
+});
+
+// The catalog runs to dozens of packages. Scrolling it answers "what exists" but never "is there
+// one for X", which is the question that brings anyone to this page — so search is the control the
+// catalog is actually browsed by, and it has to reach the description, not just the name.
+test("catalog search narrows the list by name, description and category", async () => {
+  const user = userEvent.setup();
+  renderInstall({
+    scanId: "mkt-5",
+    source: "tulipfarm/skills",
+    skills: [
+      {
+        name: "kb-article",
+        description: "Draft knowledge base pages.",
+        category: "writing",
+        installed: false,
+        updateAvailable: false,
+      },
+      {
+        name: "sql-queries",
+        description: "Query the warehouse.",
+        category: "engineering",
+        installed: false,
+        updateAvailable: false,
+      },
+    ],
+  });
+
+  const search = await screen.findByLabelText(/search the catalog/i);
+  await user.type(search, "warehouse");
+
+  expect(screen.getByRole("button", { name: "Install sql-queries" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Install kb-article" })).not.toBeInTheDocument();
+  expect(screen.getByRole("status")).toHaveTextContent("1 of 2 skills match");
+
+  await user.clear(search);
+  expect(screen.getByRole("button", { name: "Install kb-article" })).toBeInTheDocument();
+});
+
+test("the category filter narrows the catalog to one category", async () => {
+  const user = userEvent.setup();
+  renderInstall({
+    scanId: "mkt-6",
+    source: "tulipfarm/skills",
+    skills: [
+      {
+        name: "kb-article",
+        description: "One.",
+        category: "writing",
+        installed: false,
+        updateAvailable: false,
+      },
+      {
+        name: "sql-queries",
+        description: "Two.",
+        category: "engineering",
+        installed: false,
+        updateAvailable: false,
+      },
+    ],
+  });
+
+  await user.selectOptions(await screen.findByLabelText(/^category$/i), "writing");
+
+  expect(screen.getByRole("button", { name: "Install kb-article" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Install sql-queries" })).not.toBeInTheDocument();
+});
+
+// "Review these" hands the *filtered* set to the audit pipeline, never the whole catalog — an
+// operator who narrowed to one category and then bulk-reviewed 88 packages would be auditing
+// things they never looked at.
+test("bulk review passes only the skills left after filtering", async () => {
+  const user = userEvent.setup();
+  renderInstall({
+    scanId: "mkt-7",
+    source: "tulipfarm/skills",
+    skills: [
+      {
+        name: "kb-article",
+        description: "One.",
+        category: "writing",
+        installed: false,
+        updateAvailable: false,
+      },
+      {
+        name: "sql-queries",
+        description: "Two.",
+        category: "engineering",
+        installed: false,
+        updateAvailable: false,
+      },
+    ],
+  });
+
+  await user.selectOptions(await screen.findByLabelText(/^category$/i), "writing");
+  await user.click(screen.getByRole("button", { name: /review these \(1\)/i }));
+
+  expect(await screen.findByText(/1 discovered, select skills to review/i)).toBeInTheDocument();
+  expect(screen.getByText("kb-article")).toBeInTheDocument();
+  expect(screen.queryByText("sql-queries")).not.toBeInTheDocument();
 });

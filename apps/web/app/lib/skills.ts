@@ -18,6 +18,26 @@ export type SkillSummary = {
   version?: string;
   // The git source (e.g. "owner/repo") for an installed Skill. Undefined for bundled/curated.
   source?: string;
+  /** The author's own grouping, e.g. `forge`. Free text, so never switch on a fixed set. */
+  category?: string;
+  /** Tool names the Skill narrows the model's view to while it is loaded. */
+  tools?: string[];
+  /** Hosts a Skill command may reach. Absent means the sandbox gets no network at all. */
+  allowedDomains?: string[];
+  /** Shell command patterns the Skill will admit. */
+  allowedCommands?: string[];
+  /** Secret names the Skill needs leased to it. */
+  requiredSecrets?: string[];
+};
+
+export type SkillPackageFile = { path: string; size: number };
+
+export type SkillFileContent = {
+  path: string;
+  size: number;
+  content: string;
+  truncated: boolean;
+  binary?: boolean;
 };
 
 export type SkillCommandDetail = {
@@ -31,8 +51,10 @@ export type SkillCommandDetail = {
 };
 
 export type SkillDetail = SkillSummary & {
+  author?: string;
+  license?: string;
   body: string;
-  files: { path: string; size: number }[];
+  files: SkillPackageFile[];
   commands: SkillCommandDetail[];
 };
 
@@ -112,6 +134,13 @@ export async function listSkills(): Promise<SkillSummary[]> {
 
 export async function getSkill(name: string): Promise<SkillDetail> {
   return apiGet<SkillDetail>(`/api/v1/skills/${encodeURIComponent(name)}`);
+}
+
+/** Read one file out of an installed Skill's package, so a reference can be read before it is trusted. */
+export async function getSkillFile(name: string, path: string): Promise<SkillFileContent> {
+  return apiGet<SkillFileContent>(
+    `/api/v1/skills/${encodeURIComponent(name)}/file?path=${encodeURIComponent(path)}`
+  );
 }
 
 // Clone a git repo and discover installable SKILL.md files. Returns a scanId the audit/install steps

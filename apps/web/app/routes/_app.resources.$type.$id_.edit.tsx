@@ -6,8 +6,8 @@ import {
   useRouteError,
 } from "@remix-run/react";
 import { useState } from "react";
+import { PageShell } from "~/components/page-shell";
 import { ResourceForm, writeErrorState } from "~/components/resource-form";
-import { ResourcePanel } from "~/components/resource-panel";
 import { ErrorState, NotFoundState } from "~/components/states";
 import { ApiError, getRecord, listResourceTypes, updateRecord } from "~/lib/api";
 import { type FieldDescriptor, formFields, parseSchema } from "~/lib/schema";
@@ -56,14 +56,14 @@ export default function ResourceEdit() {
   }
 
   const crumbs = [
-    { label: "resources", to: "/resources" },
+    { label: "Resources", to: "/resources" },
     { label: type, to: `/resources/${encodeURIComponent(type)}` },
     { label: record.id, to: detailPath },
     { label: "edit" },
   ];
 
   return (
-    <ResourcePanel crumbs={crumbs}>
+    <PageShell crumbs={crumbs} title={`Edit ${record.id}`}>
       {schemaError ? (
         <p className="text-destructive">error: schema parse failed, {schemaError}</p>
       ) : (
@@ -78,7 +78,7 @@ export default function ResourceEdit() {
           cancelTo={detailPath}
         />
       )}
-    </ResourcePanel>
+    </PageShell>
   );
 }
 

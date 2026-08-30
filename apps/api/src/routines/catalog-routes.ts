@@ -24,15 +24,42 @@ const triggerSchema = {
   },
 } as const;
 
+const summarySchema = {
+  type: "object",
+  required: [
+    "owner",
+    "stateCount",
+    "stateTypes",
+    "effects",
+    "toolAbilities",
+    "maxRiskClass",
+    "requiresApproval",
+    "concurrencyPolicy",
+    "compensationPolicy",
+  ],
+  properties: {
+    owner: { type: ["string", "null"] },
+    stateCount: { type: "integer", minimum: 0 },
+    stateTypes: { type: "array", items: { type: "string" } },
+    effects: { type: "array", items: { type: "string" } },
+    toolAbilities: { type: "array", items: { type: "string" } },
+    maxRiskClass: { type: ["string", "null"], enum: ["low", "medium", "high", null] },
+    requiresApproval: { type: "boolean" },
+    concurrencyPolicy: { type: ["string", "null"] },
+    compensationPolicy: { type: ["string", "null"] },
+  },
+} as const;
+
 export const routineSchema = {
   type: "object",
-  required: ["id", "slug", "displayName", "authoredVersion", "triggers"],
+  required: ["id", "slug", "displayName", "authoredVersion", "triggers", "summary"],
   properties: {
     id: { type: "string" },
     slug: { type: "string" },
     displayName: { type: ["string", "null"] },
     authoredVersion: { type: "integer", minimum: 1 },
     triggers: { type: "array", items: triggerSchema },
+    summary: summarySchema,
   },
 } as const;
 

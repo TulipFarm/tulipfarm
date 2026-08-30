@@ -1,7 +1,7 @@
 import { type MetaFunction, useNavigate, useRouteError } from "@remix-run/react";
 import { useState } from "react";
 import { SpaceForm } from "~/components/knowledge/space-form";
-import { ResourcePanel } from "~/components/resource-panel";
+import { PageShell } from "~/components/page-shell";
 import { ErrorState } from "~/components/states";
 import { ApiError } from "~/lib/api";
 import { createSpace, type SpaceInput } from "~/lib/knowledge-api";
@@ -34,10 +34,10 @@ export default function SpaceNew() {
     }
   }
 
-  const crumbs = [{ label: "knowledge", to: "/knowledge" }, { label: "new space" }];
+  const crumbs = [{ label: "Knowledge", to: "/knowledge" }, { label: "New space" }];
 
   return (
-    <ResourcePanel crumbs={crumbs}>
+    <PageShell crumbs={crumbs} title="New space">
       <SpaceForm
         mode="create"
         onSubmit={onSubmit}
@@ -46,7 +46,7 @@ export default function SpaceNew() {
         formError={formError}
         cancelTo="/knowledge"
       />
-    </ResourcePanel>
+    </PageShell>
   );
 }
 

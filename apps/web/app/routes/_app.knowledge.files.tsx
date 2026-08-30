@@ -3,7 +3,7 @@ import { useRef, useState } from "react";
 import { FileList } from "~/components/files/file-list";
 import { FilePreview } from "~/components/files/file-preview";
 import { ShareDialog } from "~/components/files/file-share";
-import { ResourcePanel } from "~/components/resource-panel";
+import { PageShell } from "~/components/page-shell";
 import { ErrorState } from "~/components/states";
 import { Button } from "~/components/ui/button";
 import { ConfirmModal } from "~/components/ui/modal";
@@ -140,17 +140,14 @@ export default function FilesIndex() {
     }
   }
 
-  const crumbs = [{ label: "knowledge", to: "/knowledge" }, { label: "files" }];
+  const crumbs = [{ label: "Knowledge", to: "/knowledge" }, { label: "Files" }];
 
   return (
-    <ResourcePanel crumbs={crumbs}>
-      <div>
-        <h1 className="text-base font-bold text-foreground">Files</h1>
-        <p className="text-sm text-muted-foreground">
-          Everything you have uploaded or an agent has made for you, in one place.
-        </p>
-      </div>
-
+    <PageShell
+      crumbs={crumbs}
+      title="Files"
+      description="Everything you have uploaded or an agent has made for you, in one place."
+    >
       <div role="tablist" aria-label="Which files to show" className="flex flex-wrap gap-2">
         {TABS.map((candidate, index) => (
           <Button
@@ -227,7 +224,7 @@ export default function FilesIndex() {
         confirmLabel="Delete for good"
         busy={destroying}
       />
-    </ResourcePanel>
+    </PageShell>
   );
 }
 

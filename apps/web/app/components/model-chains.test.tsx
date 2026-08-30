@@ -249,7 +249,9 @@ test("adding a fallback creates a numbered profile the presets can target", asyn
     expect(screen.getAllByText(/fast-fallback-1/).length).toBeGreaterThan(0);
   });
   expect(
-    within(screen.getByLabelText("Fast")).getByRole("option", { name: /fast-fallback-1/ })
+    within(screen.getByLabelText("Fast", { selector: "select" })).getByRole("option", {
+      name: /fast-fallback-1/,
+    })
   ).toBeInTheDocument();
 
   await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
@@ -271,14 +273,18 @@ test("an empty fallback Model ID stays in the sheet and is not offered to preset
   expect(screen.getByText("Enter a Model ID.")).toBeInTheDocument();
   expect(screen.getByLabelText("Model ID")).toBeInTheDocument();
   expect(
-    within(screen.getByLabelText("Fast")).queryByRole("option", { name: /fast-fallback-1/ })
+    within(screen.getByLabelText("Fast", { selector: "select" })).queryByRole("option", {
+      name: /fast-fallback-1/,
+    })
   ).not.toBeInTheDocument();
 
   await userEvent.type(screen.getByLabelText("Model ID"), "gpt-4o-mini");
   await userEvent.click(screen.getByRole("button", { name: /^done$/i }));
 
   expect(
-    within(screen.getByLabelText("Fast")).getByRole("option", { name: /fast-fallback-1/ })
+    within(screen.getByLabelText("Fast", { selector: "select" })).getByRole("option", {
+      name: /fast-fallback-1/,
+    })
   ).toBeInTheDocument();
 });
 
@@ -375,7 +381,7 @@ test("a chain already holding a blank entry never offers it as a preset target",
     },
   });
 
-  const options = within(screen.getByLabelText("Fast"))
+  const options = within(screen.getByLabelText("Fast", { selector: "select" }))
     .getAllByRole("option")
     .map((o) => o.textContent ?? "")
     .join("|");

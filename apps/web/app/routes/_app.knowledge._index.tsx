@@ -7,6 +7,7 @@ import { Button } from "~/components/ui/button";
 import { ApiError } from "~/lib/api";
 import { getKnowledgeOverview } from "~/lib/knowledge-api";
 import { pageHref } from "~/lib/page-href";
+import { timeAgo } from "~/lib/schema";
 
 export const meta: MetaFunction = () => [{ title: "Knowledge · tulipfarm" }];
 
@@ -127,23 +128,6 @@ function NewSpaceLink() {
       </Link>
     </Button>
   );
-}
-
-// "2026-06-22T…" → coarse relative label ("just now" / "5m ago" / "2d ago"). Empty for unparseable input.
-function timeAgo(iso: string): string {
-  const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return "";
-  const secs = Math.max(0, Math.round((Date.now() - then) / 1000));
-  if (secs < 60) return "just now";
-  const mins = Math.round(secs / 60);
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.round(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.round(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  const months = Math.round(days / 30);
-  if (months < 12) return `${months}mo ago`;
-  return `${Math.round(months / 12)}y ago`;
 }
 
 export function ErrorBoundary() {

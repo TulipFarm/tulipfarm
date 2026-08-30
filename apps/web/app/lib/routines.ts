@@ -9,12 +9,39 @@ export type RoutineTrigger = {
   summary: string;
 };
 
+/** A coarse consequence kind, as the catalog reads it from the Routine document. */
+export type RoutineEffectKind =
+  | "agent"
+  | "tool"
+  | "child_routine"
+  | "event"
+  | "script"
+  | "human"
+  | "wait";
+
+export type RiskClass = "low" | "medium" | "high";
+
+/** What the catalog derived from the Routine document, so the list need not fetch each one. */
+export type RoutineCatalogSummary = {
+  owner: string | null;
+  stateCount: number;
+  stateTypes: string[];
+  effects: RoutineEffectKind[];
+  toolAbilities: string[];
+  /** `null` is "no ceiling declared", which is less constrained than `high` — never "low". */
+  maxRiskClass: RiskClass | null;
+  requiresApproval: boolean;
+  concurrencyPolicy: string | null;
+  compensationPolicy: string | null;
+};
+
 export type RoutineSummary = {
   id: string;
   slug: string;
   displayName: string | null;
   authoredVersion: number;
   triggers: RoutineTrigger[];
+  summary: RoutineCatalogSummary;
 };
 
 /** One published Routine, as the verified active bundle carries it. */

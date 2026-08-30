@@ -1,12 +1,32 @@
 import { SKILL_AUDIT_REPORT_SCHEMA } from "@tulipfarm/built-in-agents";
 import { SKILL_SOURCE_TYPES } from "@tulipfarm/soul";
 
+/**
+ * What a Skill reaches, as declared in its own `SKILL.md` frontmatter.
+ *
+ * These ship on the summary as well as the detail because they are what an operator filters and
+ * compares a catalog by — "which of these touch the network" is a list question, and answering it
+ * from the detail route would be one request per Skill.
+ */
+const SkillCapabilityPropertiesSchema = {
+  /** Tool names the Skill narrows the model's view to. Focus, never authority. */
+  tools: { type: "array", items: { type: "string" } },
+  /** Hosts a Skill command may reach; absent means the sandbox runs with no network at all. */
+  allowedDomains: { type: "array", items: { type: "string" } },
+  /** Shell command patterns `SkillBashRunner` will admit. */
+  allowedCommands: { type: "array", items: { type: "string" } },
+  /** Secret names the Skill needs leased to it. */
+  requiredSecrets: { type: "array", items: { type: "string" } },
+} as const;
+
 const SkillSummaryPropertiesSchema = {
   name: { type: "string" },
   description: { type: "string" },
   provenance: { type: "string", enum: SKILL_SOURCE_TYPES },
   version: { type: "string" },
   source: { type: "string" },
+  category: { type: "string" },
+  ...SkillCapabilityPropertiesSchema,
 } as const;
 
 const MarketplaceSkillPropertiesSchema = {
@@ -87,6 +107,8 @@ export const SkillDetailResponseSchema = {
   required: ["name", "provenance", "body", "files", "commands"],
   properties: {
     ...SkillSummaryPropertiesSchema,
+    author: { type: "string" },
+    license: { type: "string" },
     body: { type: "string" },
     files: {
       type: "array",
@@ -116,6 +138,34 @@ export const SkillDetailResponseSchema = {
 
 export const SkillDeleteResponseSchema = {
   type: "null",
+} as const;
+
+/**
+ * Reading one file out of a Skill package.
+ *
+ * The path is a querystring rather than a wildcard route segment because a Skill's own paths
+ * contain slashes (`references/authoring-a-skill.md`), and a client that had to encode them into
+ * the path would be one missed `encodeURIComponent` away from a different route.
+ */
+export const SkillFileQuerySchema = {
+  type: "object",
+  required: ["path"],
+  additionalProperties: false,
+  properties: { path: { type: "string", minLength: 1, maxLength: 1024 } },
+} as const;
+
+export const SkillFileResponseSchema = {
+  type: "object",
+  required: ["path", "size", "content", "truncated"],
+  properties: {
+    path: { type: "string" },
+    size: { type: "integer" },
+    /** UTF-8 text. A file the server judged binary returns `content: ""` with `binary: true`. */
+    content: { type: "string" },
+    /** True when the file exceeded the read ceiling and `content` holds only its head. */
+    truncated: { type: "boolean" },
+    binary: { type: "boolean" },
+  },
 } as const;
 
 export const SkillScanBodySchema = {

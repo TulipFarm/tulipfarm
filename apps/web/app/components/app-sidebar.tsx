@@ -1,15 +1,14 @@
 import { Link, NavLink, useLocation, useNavigate } from "@remix-run/react";
 import {
-  ChevronRight,
+  ChevronsUpDown,
   LogOut,
-  type LucideIcon,
   Menu,
   PanelLeftClose,
   PanelLeftOpen,
-  Paperclip,
   Plus,
+  UserRound,
 } from "lucide-react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import {
   ChatActionsMenu,
   ChatCrumbTitle,
@@ -17,7 +16,6 @@ import {
   DeleteChatModal,
   useChatTitleActions,
 } from "~/components/chat/chat-title-actions";
-import { KnowledgeTree } from "~/components/knowledge/space-tree";
 import { CompanionMobileTrigger } from "~/components/onboarding/companion";
 import { ReportBugButton } from "~/components/report-bug-button";
 import { ThemeToggle } from "~/components/theme-toggle";
@@ -28,252 +26,190 @@ import { logout, type SessionUser } from "~/lib/api";
 import { useApprovals } from "~/lib/approvals-context";
 import { useConversations } from "~/lib/conversations-context";
 import {
-  destinationForMode,
-  hasContextPanel,
   iconForPath,
-  MODE_META,
   type NavigationVisibility,
-  type ProductMode as NavProductMode,
-  modeForPath as navModeForPath,
-  PRIMARY_MODES,
   titleForPath,
-  visibleModes,
-  visibleSections,
+  visibleSettingsItem,
+  visibleSidebarGroups,
 } from "~/lib/nav";
 import { isBusinessAdmin } from "~/lib/use-session-user";
 import { cn } from "~/lib/utils";
 
-type ProductMode = NavProductMode;
-
 const HEADER_ROW = "flex h-[52px] shrink-0 items-center";
+const GROUP_HEADING =
+  "px-3 pb-1 text-[0.6875rem] font-medium uppercase tracking-[0.14em] text-muted-foreground";
 
-function modeForPath(pathname: string): ProductMode {
-  return navModeForPath(pathname);
-}
+/* One row shape for every destination, so a chat in Recent and a page in Build read as peers. */
+/* The transparent border matches New chat's real one, so every icon lands on one vertical spine. */
+const ROW_BASE =
+  "flex min-h-9 items-center gap-2.5 rounded-md border border-transparent px-3 text-sm transition-colors duration-150";
+const ROW_ACTIVE = "bg-sidebar-primary/12 font-medium text-sidebar-primary";
+const ROW_IDLE = "text-sidebar-foreground hover:bg-sidebar-accent";
+/* Collapsed, a row is a square so it matches the avatar chip below it rather than out-widing it. */
+const ROW_NARROW = "size-9 shrink-0 justify-center px-0 mx-auto";
 
-function Logo() {
-  return <img src="/logo-128.png" alt="tulipfarm" width={28} height={28} className="size-7" />;
-}
-
-function SignOutButton({ compact = false }: { compact?: boolean }) {
-  const navigate = useNavigate();
-  const [busy, setBusy] = useState(false);
-  async function onClick() {
-    setBusy(true);
-    try {
-      await logout();
-    } finally {
-      navigate("/login", { replace: true });
-    }
-  }
+function SidebarHeader({ collapsed }: { collapsed: boolean }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={busy}
-      aria-label="Sign out"
+    <div
       className={cn(
-        "flex min-h-9 items-center gap-2 rounded-md text-muted-foreground transition-colors duration-150",
-        "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground disabled:opacity-50",
-        compact ? "size-10 justify-center" : "w-full px-3 text-sm"
+        HEADER_ROW,
+        "gap-2 border-b border-sidebar-border",
+        collapsed ? "justify-center px-2" : "px-4"
       )}
     >
-      <LogOut className="size-4" aria-hidden />
-      {compact ? null : <span>Sign out</span>}
-    </button>
-  );
-}
-
-/*
- * The selected mode carries both a filled surface and a coral edge marker so selection never
- * depends on color alone, and the shared Tooltip replaces the native `title` delay for these
- * icon-only targets.
- */
-function RailLink({ mode, active, to }: { mode: ProductMode; active: boolean; to: string }) {
-  const { label, icon: Icon } = MODE_META[mode];
-  return (
-    <Tooltip content={label}>
-      <Link
-        to={to}
-        aria-label={label}
-        aria-current={active ? "page" : undefined}
-        className={cn(
-          "relative flex size-10 items-center justify-center rounded-md text-muted-foreground",
-          "transition-colors duration-150 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-          active && "bg-sidebar-accent text-primary"
+      <Link to="/" aria-label="TulipFarm home" className="flex min-w-0 items-center gap-2">
+        <img src="/logo-128.png" alt="" width={24} height={24} className="size-6 shrink-0" />
+        {collapsed ? null : (
+          <span className="truncate text-sm font-semibold tracking-tight text-foreground">
+            tulipfarm
+          </span>
         )}
-      >
-        {active ? (
-          <span className="absolute -left-2 h-5 w-0.5 rounded-r-full bg-primary" aria-hidden />
-        ) : null}
-        <Icon className="size-5" aria-hidden />
       </Link>
-    </Tooltip>
-  );
-}
-
-function Rail({
-  mode,
-  modes,
-  visibility,
-}: {
-  mode: ProductMode;
-  modes: readonly ProductMode[];
-  visibility: NavigationVisibility;
-}) {
-  return (
-    <div className="flex w-14 shrink-0 flex-col items-center border-r border-sidebar-border bg-background">
-      <div className={cn(HEADER_ROW, "w-full justify-center border-b border-sidebar-border")}>
-        <Link to="/" aria-label="TulipFarm home" className="rounded-md p-1.5">
-          <Logo />
-        </Link>
-      </div>
-      <nav aria-label="Product modes" className="flex flex-1 flex-col items-center gap-1 py-3">
-        {PRIMARY_MODES.filter((item) => modes.includes(item)).map((item) => (
-          <RailLink
-            key={item}
-            mode={item}
-            to={destinationForMode(item, visibility)}
-            active={mode === item}
-          />
-        ))}
-      </nav>
-      <div className="flex flex-col items-center gap-1 pb-3">
-        <Separator className="mb-2 w-6" />
-        {modes.includes("farm") ? (
-          <RailLink
-            mode="farm"
-            to={destinationForMode("farm", visibility)}
-            active={mode === "farm"}
-          />
-        ) : null}
-        {modes.includes("settings") ? (
-          <RailLink
-            mode="settings"
-            to={destinationForMode("settings", visibility)}
-            active={mode === "settings"}
-          />
-        ) : null}
-        <span className="flex size-10 items-center justify-center">
-          <ThemeToggle iconOnly />
-        </span>
-        <SignOutButton compact />
-      </div>
     </div>
   );
 }
 
-function ContextLink({
+function NewChatButton({ collapsed, onNavigate }: { collapsed: boolean; onNavigate: () => void }) {
+  const { pathname } = useLocation();
+  const { startNewChat } = useConversations();
+  const navigate = useNavigate();
+  const button = (
+    <button
+      type="button"
+      onClick={() => {
+        startNewChat();
+        navigate("/");
+        onNavigate();
+      }}
+      aria-label="New chat"
+      aria-current={pathname === "/" ? "page" : undefined}
+      className={cn(
+        "mt-3 flex min-h-9 items-center rounded-md border border-sidebar-border",
+        "text-sm font-medium transition-colors duration-150",
+        collapsed ? ROW_NARROW : "mx-2 gap-2.5 px-3",
+        pathname === "/"
+          ? "border-primary/50 bg-sidebar-accent text-sidebar-accent-foreground"
+          : "bg-background hover:border-primary/50 hover:bg-sidebar-accent"
+      )}
+    >
+      <Plus className="size-4 shrink-0 text-primary" aria-hidden />
+      {collapsed ? null : "New chat"}
+    </button>
+  );
+  return collapsed ? (
+    <Tooltip content="New chat" placement="right">
+      {button}
+    </Tooltip>
+  ) : (
+    button
+  );
+}
+
+/*
+ * Collapsed, the label moves into a tooltip and the count shrinks to a dot on the icon: a number
+ * that small is unreadable, but its presence is the part a reader is scanning for.
+ */
+function NavRow({
   to,
   label,
   icon: Icon,
   count,
+  collapsed,
   onNavigate,
 }: {
   to: string;
   label: string;
-  icon: LucideIcon;
+  icon: React.ComponentType<{ className?: string }>;
   count?: number;
+  collapsed: boolean;
   onNavigate: () => void;
 }) {
-  return (
+  const row = (
     <NavLink
       to={to}
       onClick={onNavigate}
+      aria-label={collapsed ? (count ? `${label}, ${count} awaiting you` : label) : undefined}
       className={({ isActive }) =>
-        cn(
-          "flex min-h-9 items-center gap-2 rounded-md px-3 text-sm transition-colors duration-150",
-          isActive
-            ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
-            : "text-sidebar-foreground hover:bg-sidebar-accent/60"
-        )
+        cn(ROW_BASE, "group", collapsed && ROW_NARROW, isActive ? ROW_ACTIVE : ROW_IDLE)
       }
     >
-      <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-      <span className="min-w-0 flex-1 truncate">{label}</span>
-      {count ? <Badge variant="info">{count}</Badge> : null}
+      <span className="relative flex shrink-0 items-center">
+        <Icon
+          className="size-4 text-muted-foreground group-aria-[current=page]:text-sidebar-primary"
+          aria-hidden
+        />
+        {collapsed && count ? (
+          <span
+            aria-hidden
+            className="absolute -top-1 -right-1 size-2 rounded-full bg-status-danger"
+          />
+        ) : null}
+      </span>
+      {collapsed ? null : (
+        <>
+          <span className="min-w-0 flex-1 truncate">{label}</span>
+          {count ? (
+            <Badge variant="danger" aria-label={`${count} awaiting you`}>
+              {count}
+            </Badge>
+          ) : null}
+        </>
+      )}
     </NavLink>
+  );
+  return collapsed ? (
+    <Tooltip content={label} placement="right">
+      {row}
+    </Tooltip>
+  ) : (
+    row
   );
 }
 
-function ChatContext({ onNavigate }: { onNavigate: () => void }) {
-  const { conversations, activeChatId, startNewChat } = useConversations();
+function RecentChats({ onNavigate }: { onNavigate: () => void }) {
+  const { conversations, activeChatId } = useConversations();
   const actions = useChatTitleActions();
-
+  if (conversations.length === 0) return null;
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <button
-        type="button"
-        onClick={() => {
-          startNewChat();
-          onNavigate();
-        }}
-        className="mx-3 mb-5 flex min-h-10 items-center gap-2 rounded-md border border-sidebar-border bg-background px-3 text-sm font-medium transition-colors duration-150 hover:border-primary/50 hover:bg-sidebar-accent"
-      >
-        <Plus className="size-4 text-primary" aria-hidden />
-        New chat
-      </button>
-      <div className="mb-2 px-5">
-        <Link
-          to="/chats"
-          onClick={onNavigate}
-          className="text-[0.6875rem] font-medium uppercase tracking-[0.14em] text-muted-foreground transition-colors duration-150 hover:text-foreground"
-        >
-          Recent chats
-        </Link>
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-        {actions.error && !actions.pendingDelete ? (
-          <p role="alert" className="mb-1 px-3 py-1 text-xs text-destructive">
-            {actions.error}
-          </p>
-        ) : null}
-        {conversations.length > 0 ? (
-          conversations.map((chat) =>
-            actions.renamingId === chat.id ? (
-              <div key={chat.id} className="px-1 py-1">
-                <ChatTitleInput
-                  initialTitle={chat.title ?? ""}
-                  onSave={(next) => actions.submitRename(chat.id, next)}
-                  onCancel={actions.cancelRename}
-                  className="h-9 text-sm"
-                />
-              </div>
-            ) : (
-              <div
-                key={chat.id}
-                className={cn(
-                  "group flex items-center rounded-md transition-colors duration-150",
-                  chat.id === activeChatId
-                    ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                    : "hover:bg-sidebar-accent/60"
-                )}
-              >
-                <Link
-                  to={`/chat/${chat.id}`}
-                  onClick={onNavigate}
-                  aria-current={chat.id === activeChatId ? "page" : undefined}
-                  className={cn(
-                    "min-w-0 flex-1 truncate px-3 py-2 text-sm",
-                    chat.id === activeChatId ? "font-medium" : "text-sidebar-foreground"
-                  )}
-                >
-                  {chat.title ?? "New chat"}
-                </Link>
-                <ChatActionsMenu
-                  onStartRename={() => actions.startRename(chat.id)}
-                  onDelete={() => actions.requestDelete(chat)}
-                  triggerClassName="mr-1"
-                />
-              </div>
-            )
-          )
+    <div className="flex flex-col gap-1">
+      <Link to="/chats" onClick={onNavigate} className={cn(GROUP_HEADING, "hover:text-foreground")}>
+        Recent
+      </Link>
+      {actions.error && !actions.pendingDelete ? (
+        <p role="alert" className="px-3 py-1 text-xs text-destructive">
+          {actions.error}
+        </p>
+      ) : null}
+      {conversations.map((chat) =>
+        actions.renamingId === chat.id ? (
+          <div key={chat.id} className="px-1 py-0.5">
+            <ChatTitleInput
+              initialTitle={chat.title ?? ""}
+              onSave={(next) => actions.submitRename(chat.id, next)}
+              onCancel={actions.cancelRename}
+              className="h-9 text-sm"
+            />
+          </div>
         ) : (
-          <p className="px-3 py-2 text-xs leading-relaxed text-muted-foreground">
-            Your chats will appear here.
-          </p>
-        )}
-      </div>
+          <div
+            key={chat.id}
+            className={cn(ROW_BASE, "group pr-1", chat.id === activeChatId ? ROW_ACTIVE : ROW_IDLE)}
+          >
+            <Link
+              to={`/chat/${chat.id}`}
+              onClick={onNavigate}
+              aria-current={chat.id === activeChatId ? "page" : undefined}
+              className="min-w-0 flex-1 truncate"
+            >
+              {chat.title ?? "New chat"}
+            </Link>
+            <ChatActionsMenu
+              onStartRename={() => actions.startRename(chat.id)}
+              onDelete={() => actions.requestDelete(chat)}
+            />
+          </div>
+        )
+      )}
       <DeleteChatModal
         open={actions.pendingDelete !== null}
         onClose={actions.cancelDelete}
@@ -283,165 +219,6 @@ function ChatContext({ onNavigate }: { onNavigate: () => void }) {
         error={actions.error}
       />
     </div>
-  );
-}
-
-function LinkList({
-  mode,
-  onNavigate,
-  visibility,
-}: {
-  mode: "build" | "operate" | "settings";
-  onNavigate: () => void;
-  visibility: NavigationVisibility;
-}) {
-  const { count } = useApprovals();
-  const sections = visibleSections(mode, visibility);
-  return (
-    <nav aria-label={`${mode} navigation`} className="flex flex-col gap-5 px-2">
-      {sections.map((section, index) => (
-        <div key={section.heading ?? `section-${index}`} className="flex flex-col gap-1">
-          {section.heading ? (
-            <h3 className="px-3 pb-1 text-[0.6875rem] font-medium uppercase tracking-[0.14em] text-muted-foreground">
-              {section.heading}
-            </h3>
-          ) : null}
-          {section.items.map((item) => (
-            <ContextLink
-              key={item.to}
-              to={item.to}
-              label={item.label}
-              icon={item.icon}
-              count={item.badge ? count : undefined}
-              onNavigate={onNavigate}
-            />
-          ))}
-        </div>
-      ))}
-    </nav>
-  );
-}
-
-function ContextPanel({
-  mode,
-  onNavigate,
-  visibility,
-}: {
-  mode: ProductMode;
-  onNavigate: () => void;
-  visibility: NavigationVisibility;
-}) {
-  const { label, icon: Icon } = MODE_META[mode];
-  return (
-    <div className="flex h-full min-w-0 flex-1 flex-col bg-sidebar text-sidebar-foreground">
-      <div className={cn(HEADER_ROW, "gap-2 border-b border-sidebar-border px-4")}>
-        <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-        <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{label}</h2>
-        {mode === "knowledge" &&
-        (visibility.visiblePaths === undefined ||
-          visibility.visiblePaths.includes("/knowledge")) ? (
-          <Tooltip content="New space">
-            <Link
-              to="/knowledge/spaces/new"
-              onClick={onNavigate}
-              aria-label="New space"
-              className="flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-            >
-              <Plus className="size-4" aria-hidden />
-            </Link>
-          </Tooltip>
-        ) : null}
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto py-3">
-        {mode === "chat" ? <ChatContext onNavigate={onNavigate} /> : null}
-        {mode === "knowledge" ? (
-          <>
-            {visibility.visiblePaths === undefined ||
-            visibility.visiblePaths.includes("/knowledge/files") ? (
-              <nav aria-label="knowledge navigation" className="flex flex-col gap-1 px-2 pb-3">
-                <ContextLink
-                  to="/knowledge/files"
-                  label="Files"
-                  icon={Paperclip}
-                  onNavigate={onNavigate}
-                />
-              </nav>
-            ) : null}
-            <KnowledgeTree />
-          </>
-        ) : null}
-        {mode === "build" || mode === "operate" || mode === "settings" ? (
-          <LinkList mode={mode} onNavigate={onNavigate} visibility={visibility} />
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-export function AppSidebar({
-  open = false,
-  onClose = () => {},
-  collapsed = false,
-  navigation,
-}: {
-  open?: boolean;
-  onClose?: () => void;
-  collapsed?: boolean;
-  navigation?: SessionUser["navigation"];
-} = {}) {
-  const { pathname } = useLocation();
-  const mode = modeForPath(pathname);
-  const visibility = { isDev: import.meta.env.DEV, visiblePaths: navigation?.visiblePaths };
-  const modes = visibleModes(visibility);
-  const showContext = hasContextPanel(mode) && modes.includes(mode);
-  const [persistent, setPersistent] = useState(true);
-
-  useEffect(() => {
-    const query = window.matchMedia("(min-width: 768px)");
-    const update = () => setPersistent(query.matches);
-    update();
-    query.addEventListener("change", update);
-    return () => query.removeEventListener("change", update);
-  }, []);
-
-  /* `inert` also removes hidden mobile nav links from the tab order. */
-  const hidden = !persistent && !open;
-  return (
-    <>
-      {open ? (
-        <button
-          type="button"
-          aria-label="Close navigation"
-          className="fixed inset-0 z-40 bg-foreground/40 lg:hidden"
-          onClick={onClose}
-        />
-      ) : null}
-      <aside
-        aria-label="Application navigation"
-        inert={hidden}
-        className={cn(
-          "fixed inset-y-0 left-0 z-50 flex h-full border-r border-sidebar-border transition-transform duration-200",
-          "lg:static lg:z-auto lg:translate-x-0",
-          showContext ? "w-[312px]" : "w-14",
-          open ? "translate-x-0" : "-translate-x-full md:static md:w-14 md:translate-x-0",
-          showContext && !collapsed && "lg:w-[312px]",
-          (collapsed || !showContext) && "lg:w-14"
-        )}
-      >
-        <Rail mode={mode} modes={modes} visibility={visibility} />
-        {showContext ? (
-          <div
-            className={cn(
-              "h-full min-w-0 flex-1",
-              !open && "hidden lg:block",
-              collapsed && "lg:hidden"
-            )}
-          >
-            <ContextPanel mode={mode} onNavigate={onClose} visibility={visibility} />
-          </div>
-        ) : null}
-      </aside>
-    </>
   );
 }
 
@@ -458,68 +235,257 @@ function initialsFor(identity: string): string {
   return initials.toUpperCase() || "?";
 }
 
-function AccountChip({ user }: { user?: SessionUser }) {
+/*
+ * The account menu is the only home left for sign-out and the theme now that the icon rail is
+ * gone, so it opens upward from the card rather than living as loose icons in the nav.
+ */
+function UserCard({
+  user,
+  collapsed,
+  onNavigate,
+}: {
+  user?: SessionUser;
+  collapsed: boolean;
+  onNavigate: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuId = useId();
+  const navigate = useNavigate();
+  const [signingOut, setSigningOut] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (!containerRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      setOpen(false);
+      triggerRef.current?.focus();
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
   if (!user) return null;
   const name = user.name?.trim() || user.email;
+  // An account with no name is already identified by its email, so repeating it below the name
+  // would print the same string twice.
+  const secondary = name === user.email ? (isBusinessAdmin(user) ? "Admin" : null) : user.email;
+
+  async function onSignOut() {
+    setSigningOut(true);
+    try {
+      await logout();
+    } finally {
+      navigate("/login", { replace: true });
+    }
+  }
+
   return (
-    <Tooltip content={isBusinessAdmin(user) ? `${name} (Admin)` : name}>
-      <Link
-        to="/settings/profile"
-        aria-label={`Account settings for ${name}`}
-        className="flex size-8 items-center justify-center rounded-md bg-secondary text-[0.625rem] font-semibold text-secondary-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground"
+    <div ref={containerRef} className="relative border-t border-sidebar-border p-2">
+      {open ? (
+        <div
+          id={menuId}
+          className={cn(
+            "absolute bottom-full mb-1 flex flex-col gap-0.5 rounded-md border border-border bg-popover p-1 shadow-lg",
+            collapsed ? "left-2 w-56" : "left-2 right-2"
+          )}
+        >
+          <Link
+            to="/settings/profile"
+            onClick={() => {
+              setOpen(false);
+              onNavigate();
+            }}
+            className={cn(ROW_BASE, ROW_IDLE)}
+          >
+            <UserRound className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+            Profile
+          </Link>
+          <div className={cn(ROW_BASE, "text-muted-foreground")}>
+            <ThemeToggle />
+          </div>
+          <Separator className="my-1" />
+          <button
+            type="button"
+            onClick={onSignOut}
+            disabled={signingOut}
+            className={cn(ROW_BASE, ROW_IDLE, "w-full disabled:opacity-50")}
+          >
+            <LogOut className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+            Sign out
+          </button>
+        </div>
+      ) : null}
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
+        aria-label={`Account menu for ${name}`}
+        className={cn(
+          "flex w-full items-center rounded-md border border-transparent py-1.5 text-left",
+          "transition-colors duration-150 hover:bg-sidebar-accent",
+          collapsed ? "justify-center px-0" : "gap-2.5 px-3"
+        )}
       >
-        {initialsFor(user.name?.trim() || user.email)}
-      </Link>
-    </Tooltip>
+        <span
+          className={cn(
+            "flex shrink-0 items-center justify-center rounded-md bg-secondary",
+            "text-[0.625rem] font-semibold text-secondary-foreground",
+            collapsed ? "size-9" : "size-8"
+          )}
+        >
+          {initialsFor(user.name?.trim() || user.email)}
+        </span>
+        {collapsed ? null : (
+          <>
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="truncate text-sm font-medium text-foreground">{name}</span>
+              {secondary ? (
+                <span className="truncate text-xs text-muted-foreground">{secondary}</span>
+              ) : null}
+            </span>
+            <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+          </>
+        )}
+      </button>
+    </div>
+  );
+}
+
+export function AppSidebar({
+  open = false,
+  onClose = () => {},
+  collapsed = false,
+  user,
+}: {
+  open?: boolean;
+  onClose?: () => void;
+  collapsed?: boolean;
+  user?: SessionUser;
+} = {}) {
+  const visibility: NavigationVisibility = {
+    isDev: import.meta.env.DEV,
+    visiblePaths: user?.navigation?.visiblePaths,
+  };
+  const groups = visibleSidebarGroups(visibility);
+  const settingsItem = visibleSettingsItem(visibility);
+  const { count } = useApprovals();
+  const [persistent, setPersistent] = useState(true);
+
+  useEffect(() => {
+    const query = window.matchMedia("(min-width: 1024px)");
+    const update = () => setPersistent(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+
+  /* `inert` also removes hidden mobile nav links from the tab order. */
+  const hidden = !persistent && !open;
+  // Collapse is a desktop affordance: the mobile drawer has the whole screen and nothing to save.
+  const narrow = collapsed && persistent;
+  return (
+    <>
+      {open ? (
+        <button
+          type="button"
+          aria-label="Close navigation"
+          className="fixed inset-0 z-40 bg-foreground/40 lg:hidden"
+          onClick={onClose}
+        />
+      ) : null}
+      <aside
+        aria-label="Application navigation"
+        inert={hidden}
+        className={cn(
+          "fixed inset-y-0 left-0 z-50 flex h-full w-64 shrink-0 flex-col",
+          "border-r border-sidebar-border bg-sidebar text-sidebar-foreground",
+          "transition-transform duration-200 lg:static lg:z-auto lg:translate-x-0",
+          open ? "translate-x-0" : "-translate-x-full",
+          narrow && "lg:w-14"
+        )}
+      >
+        <SidebarHeader collapsed={narrow} />
+        <NewChatButton collapsed={narrow} onNavigate={onClose} />
+        <div className="min-h-0 flex-1 overflow-y-auto py-4">
+          <nav aria-label="Main" className="flex flex-col gap-5 px-2">
+            {groups.map((group, index) => (
+              <div key={group.heading} className="flex flex-col gap-1">
+                {narrow ? (
+                  index > 0 ? (
+                    <Separator className="mb-1 w-9 self-center" />
+                  ) : null
+                ) : (
+                  <h2 className={GROUP_HEADING}>{group.heading}</h2>
+                )}
+                {group.items.map((item) => (
+                  <NavRow
+                    key={item.to}
+                    to={item.to}
+                    label={item.label}
+                    icon={item.icon}
+                    count={item.badge ? count : undefined}
+                    collapsed={narrow}
+                    onNavigate={onClose}
+                  />
+                ))}
+              </div>
+            ))}
+            {narrow ? null : <RecentChats onNavigate={onClose} />}
+          </nav>
+        </div>
+        {settingsItem ? (
+          <div className="shrink-0 border-t border-sidebar-border px-2 py-2">
+            <NavRow
+              to={settingsItem.to}
+              label={settingsItem.label}
+              icon={settingsItem.icon}
+              collapsed={narrow}
+              onNavigate={onClose}
+            />
+          </div>
+        ) : null}
+        <UserCard user={user} collapsed={narrow} onNavigate={onClose} />
+      </aside>
+    </>
   );
 }
 
 /*
- * The parent crumb only earns its place when it points somewhere else and says something else,
- * so the trail never repeats the page or links to it.
+ * The flat sidebar already shows where a page sits, and `titleForPath` collapses detail routes onto
+ * their section's name, so a parent crumb here could only ever repeat one of the two. The top bar
+ * names the page and nothing else.
  */
-function Breadcrumb({
+function PageTitle({
   pathname,
   pageTitle,
-  visibility,
   titleSlot,
 }: {
   pathname: string;
   pageTitle: string;
-  visibility: NavigationVisibility;
   titleSlot?: ReactNode;
 }) {
-  const mode = modeForPath(pathname);
-  const parent = { ...MODE_META[mode], to: destinationForMode(mode, visibility) };
   const PageIcon = iconForPath(pathname);
-  const showParent = mode !== "chat" && parent.to !== pathname && parent.label !== pageTitle;
   return (
-    <nav aria-label="Breadcrumb" className="flex min-w-0 items-center">
-      <ol className="flex min-w-0 items-center gap-2">
-        {showParent ? (
-          <li className="hidden shrink-0 items-center gap-2 sm:flex">
-            <Link
-              to={parent.to}
-              className="text-sm text-muted-foreground transition-colors duration-150 hover:text-foreground"
-            >
-              {parent.label}
-            </Link>
-            <ChevronRight className="size-3.5 text-muted-foreground/60" aria-hidden />
-          </li>
-        ) : null}
-        <li className="flex min-w-0 items-center gap-2">
-          <PageIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-          {titleSlot ?? (
-            <span
-              aria-current="page"
-              className="min-w-0 truncate text-sm font-medium text-foreground"
-            >
-              {pageTitle}
-            </span>
-          )}
-        </li>
-      </ol>
-    </nav>
+    <div className="flex min-w-0 items-center gap-2">
+      <PageIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+      {titleSlot ?? (
+        <span aria-current="page" className="min-w-0 truncate text-sm font-medium text-foreground">
+          {pageTitle}
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -535,9 +501,6 @@ export function AppShell({ children, user }: { children: ReactNode; user?: Sessi
   const openerRef = useRef<HTMLButtonElement>(null);
   const { activeChatTitle, activeChatId } = useConversations();
   const isConversation = pathname === "/" || pathname.startsWith("/chat/");
-  const currentMode = modeForPath(pathname);
-  const visibility = { isDev: import.meta.env.DEV, visiblePaths: user?.navigation?.visiblePaths };
-  const modes = visibleModes(visibility);
   const pageTitle = isConversation
     ? (activeChatTitle ?? (pathname === "/" ? "New chat" : "Chat"))
     : titleForPath(pathname);
@@ -562,7 +525,7 @@ export function AppShell({ children, user }: { children: ReactNode; user?: Sessi
   function toggleCollapsed() {
     setCollapsed((current) => {
       const next = !current;
-      localStorage.setItem("context-sidebar-collapsed", String(next));
+      localStorage.setItem("sidebar-collapsed", String(next));
       // Keep [data-sidebar] authoritative for the skeleton token and this component's own seed.
       document.documentElement.dataset.sidebar = next ? "collapsed" : "expanded";
       return next;
@@ -571,12 +534,7 @@ export function AppShell({ children, user }: { children: ReactNode; user?: Sessi
 
   return (
     <div className="flex h-svh overflow-hidden bg-background">
-      <AppSidebar
-        open={open}
-        onClose={() => setOpen(false)}
-        collapsed={collapsed}
-        navigation={user?.navigation}
-      />
+      <AppSidebar open={open} onClose={() => setOpen(false)} collapsed={collapsed} user={user} />
       <div className="flex h-svh min-w-0 flex-1 flex-col">
         <header
           className={cn(HEADER_ROW, "gap-2 border-b border-border bg-background px-3 sm:px-4")}
@@ -591,36 +549,27 @@ export function AppShell({ children, user }: { children: ReactNode; user?: Sessi
           >
             <Menu className="size-5" aria-hidden />
           </button>
-          <span className="hidden shrink-0 lg:flex">
-            {hasContextPanel(currentMode) && modes.includes(currentMode) ? (
-              <Tooltip content={collapsed ? "Expand sidebar" : "Collapse sidebar"}>
-                <button
-                  type="button"
-                  aria-label={collapsed ? "Expand context sidebar" : "Collapse context sidebar"}
-                  onClick={toggleCollapsed}
-                  className="flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground"
-                >
-                  {collapsed ? (
-                    <PanelLeftOpen className="size-4" aria-hidden />
-                  ) : (
-                    <PanelLeftClose className="size-4" aria-hidden />
-                  )}
-                </button>
-              </Tooltip>
-            ) : null}
-          </span>
+          <Tooltip content={collapsed ? "Expand sidebar" : "Collapse sidebar"}>
+            <button
+              type="button"
+              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              aria-expanded={!collapsed}
+              onClick={toggleCollapsed}
+              className="hidden size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground lg:flex"
+            >
+              {collapsed ? (
+                <PanelLeftOpen className="size-4" aria-hidden />
+              ) : (
+                <PanelLeftClose className="size-4" aria-hidden />
+              )}
+            </button>
+          </Tooltip>
           <Separator orientation="vertical" className="mx-1 hidden h-5 lg:block" />
-          <Breadcrumb
-            pathname={pathname}
-            pageTitle={pageTitle}
-            visibility={visibility}
-            titleSlot={chatTitleSlot}
-          />
+          <PageTitle pathname={pathname} pageTitle={pageTitle} titleSlot={chatTitleSlot} />
           <div className="ml-auto flex shrink-0 items-center gap-1 pl-2">
             <span className="sm:hidden">
               <CompanionMobileTrigger />
             </span>
-            <AccountChip user={user} />
             <ReportBugButton />
             <span className="flex items-center lg:hidden">
               <ThemeToggle iconOnly />
@@ -635,4 +584,4 @@ export function AppShell({ children, user }: { children: ReactNode; user?: Sessi
   );
 }
 
-export { iconForPath, modeForPath, titleForPath };
+export { iconForPath, titleForPath };

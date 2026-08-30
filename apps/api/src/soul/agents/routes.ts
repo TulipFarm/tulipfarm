@@ -8,6 +8,9 @@ type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 const AUTONOMY_VALUES = ["full", "supervised", "approval-required", "manual"] as const;
 type Autonomy = (typeof AUTONOMY_VALUES)[number];
 
+const RECORD_ACTIONS = ["list", "search", "read", "create", "update", "delete"] as const;
+const RESOURCE_TYPE_ACTIONS = ["list", "read", "create", "update"] as const;
+
 function asString(v: unknown): string | undefined {
   return typeof v === "string" && v.length > 0 ? v : undefined;
 }
@@ -31,6 +34,71 @@ function asAutonomy(v: unknown): Autonomy | undefined {
     : undefined;
 }
 
+function asRecord(v: unknown): Record<string, unknown> | undefined {
+  return typeof v === "object" && v !== null && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : undefined;
+}
+
+function omitEmpty<T extends Record<string, unknown>>(value: T): T | undefined {
+  const kept = Object.entries(value).filter(([, v]) => v !== undefined);
+  return kept.length > 0 ? (Object.fromEntries(kept) as T) : undefined;
+}
+
+function asAllowDeny(v: unknown, values?: readonly string[]) {
+  const source = asRecord(v);
+  if (!source) return undefined;
+  const pick = (key: "allow" | "deny") => {
+    const list = asStringArray(source[key]);
+    if (!list) return undefined;
+    const kept = values ? list.filter((item) => values.includes(item)) : list;
+    return kept.length > 0 ? kept : undefined;
+  };
+  return omitEmpty({ allow: pick("allow"), deny: pick("deny") });
+}
+
+/**
+ * The Soul's capability restrictions are what the runtime actually enforces, so the UI has to be
+ * able to show them; every field is re-checked here because frontmatter reaches the loader
+ * unvalidated.
+ */
+function toCapabilityRestrictions(f: Record<string, unknown>) {
+  const source = asRecord(f.capabilityRestrictions);
+  if (!source) return undefined;
+
+  const toolSource = asRecord(source.tools);
+  const tools = toolSource
+    ? omitEmpty({
+        ...(asAllowDeny(toolSource) ?? {}),
+        allowMutating:
+          typeof toolSource.allowMutating === "boolean" ? toolSource.allowMutating : undefined,
+      })
+    : undefined;
+
+  const recordSource = asRecord(source.records);
+  const records = recordSource
+    ? omitEmpty({
+        actions: asAllowDeny(recordSource.actions, RECORD_ACTIONS),
+        resourceTypes: asStringArray(recordSource.resourceTypes),
+      })
+    : undefined;
+
+  const resourceTypeSource = asRecord(source.resourceTypes);
+  const resourceTypes = resourceTypeSource
+    ? omitEmpty({
+        actions: asAllowDeny(resourceTypeSource.actions, RESOURCE_TYPE_ACTIONS),
+        names: asStringArray(resourceTypeSource.names),
+      })
+    : undefined;
+
+  return omitEmpty({
+    tools,
+    skills: asAllowDeny(source.skills),
+    records,
+    resourceTypes,
+  });
+}
+
 function toSummary(agent: SoulAgent) {
   const f = agent.frontmatter;
   return {
@@ -40,6 +108,7 @@ function toSummary(agent: SoulAgent) {
     description: asString(f.description),
     model: asString(f.model),
     autonomy: asAutonomy(f.autonomy),
+    capabilityRestrictions: toCapabilityRestrictions(f),
   };
 }
 
@@ -90,6 +159,36 @@ function toDetail(agent: SoulAgent) {
   };
 }
 
+const AllowDenyProps = {
+  allow: { type: "array", items: { type: "string" } },
+  deny: { type: "array", items: { type: "string" } },
+} as const;
+
+const CapabilityRestrictionsSchema = {
+  type: "object",
+  properties: {
+    tools: {
+      type: "object",
+      properties: { ...AllowDenyProps, allowMutating: { type: "boolean" } },
+    },
+    skills: { type: "object", properties: AllowDenyProps },
+    records: {
+      type: "object",
+      properties: {
+        actions: { type: "object", properties: AllowDenyProps },
+        resourceTypes: { type: "array", items: { type: "string" } },
+      },
+    },
+    resourceTypes: {
+      type: "object",
+      properties: {
+        actions: { type: "object", properties: AllowDenyProps },
+        names: { type: "array", items: { type: "string" } },
+      },
+    },
+  },
+} as const;
+
 const SummaryProps = {
   name: { type: "string" },
   label: { type: "string" },
@@ -97,6 +196,7 @@ const SummaryProps = {
   description: { type: "string" },
   model: { type: "string" },
   autonomy: { type: "string", enum: AUTONOMY_VALUES },
+  capabilityRestrictions: CapabilityRestrictionsSchema,
 } as const;
 
 export function registerAgentRoutes(

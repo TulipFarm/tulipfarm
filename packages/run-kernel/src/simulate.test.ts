@@ -248,4 +248,50 @@ describe("simulateRoutine", () => {
     });
     expect(result.effects[0]?.input).toEqual({ issue: 42, label: "need-triage" });
   });
+
+  /*
+   * `action` is what the product's own authoring writes, so a simulator that refused it left every
+   * real Routine un-rehearsable. It names its Tool in `action` rather than a `toolRef`.
+   */
+  it("previews an action State's call rather than dispatching it", () => {
+    const post: routineSchema.RoutineState = {
+      type: "action",
+      name: "PostSlackMessage",
+      action: "send_slack_message",
+      input: { channel: "#ops", text: `\${ input.issueId }` },
+      end: true,
+    };
+    const result = simulateRoutine(compile([post], "PostSlackMessage"), {
+      startedAtMs: 0,
+      input: { issueId: 42 },
+      tools: { PostSlackMessage: {} },
+    });
+
+    expect(result.effects).toHaveLength(1);
+    expect(result.effects[0]).toMatchObject({
+      stateName: "PostSlackMessage",
+      toolRef: "send_slack_message",
+      action: "send_slack_message",
+      dispatched: false,
+      secretLeased: false,
+    });
+    expect(result.effects[0]?.input).toEqual({ channel: "#ops", text: 42 });
+  });
+
+  it("takes a script State's output from the fixture rather than running the isolate", () => {
+    const transform: routineSchema.RoutineState = {
+      type: "script",
+      name: "Shape",
+      script: "({ run: () => { throw new Error('never runs'); } })",
+      input: {},
+      end: true,
+    };
+    const result = simulateRoutine(compile([transform], "Shape"), {
+      startedAtMs: 0,
+      model: { Shape: { shaped: true } },
+    });
+
+    expect(result.steps[0]?.output).toEqual({ shaped: true });
+    expect(result.effects).toHaveLength(0);
+  });
 });

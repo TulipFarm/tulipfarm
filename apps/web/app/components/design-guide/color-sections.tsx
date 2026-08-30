@@ -23,7 +23,11 @@ const RUN_TOKENS = [
   ["run-skipped", "bg-run-skipped"],
 ] as const;
 
-/** Categorical encoding for charts and series. Never chrome, never status, never brand. */
+/**
+ * Categorical encoding for charts and series. Never chrome, never status, never brand.
+ * 9 and 10 are the quiet tail, reserved for residual buckets so "Other" cannot outshout a
+ * real category.
+ */
 const DATA_TOKENS = [
   ["data-1", "bg-data-1"],
   ["data-2", "bg-data-2"],
@@ -33,6 +37,25 @@ const DATA_TOKENS = [
   ["data-6", "bg-data-6"],
   ["data-7", "bg-data-7"],
   ["data-8", "bg-data-8"],
+  ["data-9", "bg-data-9"],
+  ["data-10", "bg-data-10"],
+] as const;
+
+/** Filled chips and callout banners: each tone paired with its own ground and hairline. */
+const TINT_TOKENS = [
+  ["neutral", "bg-status-neutral-surface", "text-status-neutral", "border-status-neutral"],
+  ["info", "bg-status-info-surface", "text-status-info", "border-status-info"],
+  ["success", "bg-status-success-surface", "text-status-success", "border-status-success"],
+  ["warning", "bg-status-warning-surface", "text-status-warning", "border-status-warning"],
+  ["danger", "bg-status-danger-surface", "text-status-danger", "border-status-danger"],
+] as const;
+
+/** Sequential magnitude, low to high. Ordered and comparable, which `data-*` must never be. */
+const HEAT_TOKENS = [
+  ["heat-1", "bg-heat-1", "text-heat-ink"],
+  ["heat-2", "bg-heat-2", "text-heat-ink"],
+  ["heat-3", "bg-heat-3", "text-heat-ink"],
+  ["heat-4", "bg-heat-4", "text-heat-ink-peak"],
 ] as const;
 
 /** Which layer a Tool belongs to. Tints the glyph so a system call never reads as an outbound one. */
@@ -91,11 +114,36 @@ export function ColorSections() {
         </div>
 
         <h3 className="mb-2 text-sm font-medium">Categorical data</h3>
-        <div className="grid gap-2 sm:grid-cols-4 lg:grid-cols-8">
+        <div className="mb-6 grid gap-2 sm:grid-cols-4 lg:grid-cols-10">
           {DATA_TOKENS.map(([label, color]) => (
             <div key={label} className="overflow-hidden rounded-md border border-border">
               <div className={`h-10 ${color}`} />
               <div className="border-t border-border bg-background px-2 py-1.5 font-mono text-xs">
+                {label}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <h3 className="mb-2 text-sm font-medium">Tinted grounds</h3>
+        <div className="mb-6 flex flex-wrap gap-2">
+          {TINT_TOKENS.map(([label, surface, ink, edge]) => (
+            <span
+              key={label}
+              className={`rounded-md border px-2.5 py-1 font-mono text-xs ${surface} ${ink} ${edge}`}
+            >
+              status-{label}
+            </span>
+          ))}
+        </div>
+
+        <h3 className="mb-2 text-sm font-medium">Sequential magnitude</h3>
+        <div className="grid gap-2 sm:grid-cols-4">
+          {HEAT_TOKENS.map(([label, surface, ink]) => (
+            <div key={label} className="overflow-hidden rounded-md border border-border">
+              <div
+                className={`flex h-10 items-center justify-center font-mono text-xs ${surface} ${ink}`}
+              >
                 {label}
               </div>
             </div>

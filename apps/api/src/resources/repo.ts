@@ -36,6 +36,12 @@ export interface SearchOpts extends ListOpts {
   filter?: Record<string, unknown>;
 }
 
+/** Catalog-level totals for one resource type. Soft-deleted Records are excluded. */
+export interface ResourceStats {
+  readonly count: number;
+  readonly lastUpdatedAt: Date | null;
+}
+
 /**
  * Every mutation also writes the Record's history snapshot, and the two must land together: a
  * committed Record with no history entry is an audit gap no later write can repair.
@@ -57,6 +63,8 @@ export interface ResourceRepo {
     op: HistoryOp,
     sideEffect?: ResourceSideEffect
   ): Promise<boolean>;
+  /** Optional so in-memory test doubles need not implement it; absent means "no totals". */
+  stats?(): Promise<ResourceStats>;
   readonly durableSideEffects?: true;
 }
 
@@ -208,6 +216,19 @@ export class PgResourceRepo implements ResourceRepo {
       if (sideEffect) await writeResourceSideEffect(tx, randomUUID(), sideEffect);
       return true;
     });
+  }
+
+  async stats(): Promise<ResourceStats> {
+    const { rows } = await this.q.query(
+      `SELECT COUNT(*) AS count, MAX(updated_at) AS last_updated_at
+       FROM ${this.table} WHERE deleted_at IS NULL`
+    );
+    const row = rows[0] as { count: number | string; last_updated_at: Date | string | null };
+    const lastUpdatedAt = row?.last_updated_at ?? null;
+    return {
+      count: Number(row?.count ?? 0),
+      lastUpdatedAt: lastUpdatedAt === null ? null : new Date(lastUpdatedAt),
+    };
   }
 
   private async appendHistory(tx: Queryable, entry: ResourceHistoryDoc): Promise<void> {

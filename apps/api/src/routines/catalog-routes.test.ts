@@ -1,7 +1,20 @@
-import type { RoutineCatalog } from "@tulipfarm/soul";
+import type { RoutineCatalog, RoutineCatalogSummary } from "@tulipfarm/soul";
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { registerRoutineCatalogRoutes } from "./catalog-routes";
+
+/** Everything the list can show, derived server-side by `routineSummary()`. */
+const SUMMARY: RoutineCatalogSummary = {
+  owner: "user:owner",
+  stateCount: 1,
+  stateTypes: ["wait"],
+  effects: ["wait"],
+  toolAbilities: [],
+  maxRiskClass: null,
+  requiresApproval: false,
+  concurrencyPolicy: null,
+  compensationPolicy: null,
+};
 
 describe("Routine catalogue routes", () => {
   let app: FastifyInstance;
@@ -13,6 +26,7 @@ describe("Routine catalogue routes", () => {
         displayName: "Daily wait",
         authoredVersion: 2,
         triggers: [{ slug: "daily-wait-manual", type: "manual", summary: "manual" }],
+        summary: SUMMARY,
       },
     ]),
     get: vi.fn<RoutineCatalog["get"]>(async () => undefined),
@@ -41,6 +55,7 @@ describe("Routine catalogue routes", () => {
           displayName: "Daily wait",
           authoredVersion: 2,
           triggers: [{ slug: "daily-wait-manual", type: "manual", summary: "manual" }],
+          summary: SUMMARY,
         },
       ],
     });

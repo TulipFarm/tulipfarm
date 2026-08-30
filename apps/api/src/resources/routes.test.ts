@@ -45,6 +45,15 @@ class FakeResourceRepo implements ResourceRepo {
     return this.docs.get(id) ?? null;
   }
 
+  async stats(): Promise<{ count: number; lastUpdatedAt: Date | null }> {
+    const live = Array.from(this.docs.values()).filter((d) => d.deletedAt == null);
+    const latest = live.reduce<Date | null>(
+      (acc, d) => (acc === null || d.updatedAt > acc ? d.updatedAt : acc),
+      null
+    );
+    return { count: live.length, lastUpdatedAt: latest };
+  }
+
   async list(opts: ListOpts): Promise<PaginatedResult<ResourceDoc>> {
     let items = Array.from(this.docs.values());
     if (!opts.includeDeleted) items = items.filter((d) => d.deletedAt == null);
@@ -451,6 +460,62 @@ describe("resource routes", () => {
   });
 
   // ── GET list ──────────────────────────────────────────────────────────────
+
+  // ── GET catalog ───────────────────────────────────────────────────────────
+
+  describe("GET /api/v1/resources", () => {
+    it("returns 401 without auth", async () => {
+      const res = await app.inject({ method: "GET", url: "/api/v1/resources" });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("reports a count and last write per type", async () => {
+      const id = randomUUID();
+      const updatedAt = new Date("2026-03-04T05:06:07.000Z");
+      fakeRepo.docs.set(id, {
+        _id: id,
+        version: 1,
+        createdAt: new Date("2026-01-01T00:00:00.000Z"),
+        updatedAt,
+        title: "Bug",
+      });
+
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/resources",
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json<{ types: unknown[] }>().types).toEqual([
+        { name: "ticket", count: 1, lastUpdatedAt: updatedAt.toISOString() },
+      ]);
+    });
+
+    it("counts no soft-deleted Record and reports no last write for an empty type", async () => {
+      const id = randomUUID();
+      fakeRepo.docs.set(id, {
+        _id: id,
+        version: 2,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        deletedAt: new Date(),
+        title: "Deleted",
+      });
+
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/resources",
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+      });
+
+      expect(res.json<{ types: unknown[] }>().types).toEqual([
+        { name: "ticket", count: 0, lastUpdatedAt: null },
+      ]);
+    });
+  });
 
   describe("GET /api/v1/resources/:type", () => {
     it("returns 401 without auth", async () => {
@@ -1094,6 +1159,16 @@ describe("record authority on the REST routes", () => {
       });
       expect([call.method, call.url, res.statusCode]).toEqual([call.method, call.url, 403]);
     }
+    await app.close();
+  });
+
+  it("omits a Resource the caller may not list from the catalog, so its size stays private", async () => {
+    const { app, sid } = await buildGuardedApp();
+    const res = await app.inject({ method: "GET", url: "/api/v1/resources", ...authed(sid) });
+
+    expect(res.statusCode).toBe(200);
+    const names = res.json<{ types: Array<{ name: string }> }>().types.map((t) => t.name);
+    expect(names).toEqual(["ticket"]);
     await app.close();
   });
 

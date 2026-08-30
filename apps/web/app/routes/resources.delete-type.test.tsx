@@ -2,7 +2,13 @@ import * as remix from "@remix-run/react";
 import { createRemixStub } from "@remix-run/testing";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { deriveFields, listColumns, parseSchema } from "~/lib/schema";
+import {
+  availableColumns,
+  deriveFields,
+  detailFields,
+  listColumns,
+  parseSchema,
+} from "~/lib/schema";
 import ResourceList from "./_app.resources.$type._index";
 
 /* Render the route directly because real data navigation creates jsdom-undici AbortSignal issues. */
@@ -27,7 +33,8 @@ properties:
   title: { type: string }
 `);
 if (!parsed.ok) throw new Error(parsed.error);
-const columns = listColumns(deriveFields(parsed.schema), parsed.schema);
+const fields = deriveFields(parsed.schema);
+const columns = availableColumns(fields, parsed.schema);
 
 const navigate = vi.fn();
 let confirmSpy: ReturnType<typeof vi.spyOn>;
@@ -36,10 +43,19 @@ beforeEach(() => {
   vi.mocked(remix.useNavigate).mockReturnValue(navigate);
   vi.mocked(remix.useLoaderData).mockReturnValue({
     type: "ticket",
+    domain: null,
+    hasHooks: false,
+    idStrategy: { field: "id" },
+    schemaFields: detailFields(fields, parsed.schema),
+    idField: "id",
+    linkTargets: [],
     columns,
+    defaultColumns: listColumns(fields, parsed.schema).map((c) => c.name),
     schemaError: undefined,
     items: [],
     nextCursor: null,
+    recordCount: 0,
+    lastUpdatedAt: null,
   });
   vi.mocked(api.deleteResourceType).mockResolvedValue(undefined);
   confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);

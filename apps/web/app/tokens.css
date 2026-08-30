@@ -3,12 +3,12 @@
   --radius: 0.5rem;
 
   /*
-   * Width of the expanded sidebar (rail + context panel) versus the collapsed rail alone. Lives on
-   * the root so the pre-hydration script in root.tsx can pick the right one from localStorage: the
-   * HydrateFallback skeleton is baked into index.html and paints before any JS runs, so it must be
-   * able to size itself without React. Keep in sync with `AppShell`/`AppSidebar`.
+   * Sidebar width, expanded versus collapsed to icons. Lives on the root so the pre-hydration
+   * script in root.tsx can pick the right one from localStorage: the HydrateFallback skeleton is
+   * baked into index.html and paints before any JS runs, so it must size itself without React.
+   * Keep in sync with the `w-64` / `lg:w-14` on `AppSidebar`'s <aside>.
    */
-  --shell-sidebar-width: 312px;
+  --shell-sidebar-width: 16rem;
 
   --background: oklch(1 0 0);
   --foreground: oklch(0.18 0 0);
@@ -47,8 +47,25 @@
   --status-neutral: oklch(0.5 0 0);
   --status-info: oklch(0.52 0.14 250);
   --status-success: oklch(0.5 0.13 150);
-  --status-warning: oklch(0.58 0.14 75);
+  --status-warning: oklch(0.55 0.11 75);
   --status-danger: var(--destructive);
+
+  /*
+   * Tinted companions to the status inks: a chip, pill, or callout that fills itself rather than
+   * relying on a hairline alone. Each is the tone's own hue held at canvas lightness, so the pair
+   * carries the tone twice — once as ink, once as ground — and never needs a neutral fill that
+   * would drop the meaning. Pairs are checked against the matching `status-*` ink at >= 4.5:1;
+   * they are not general surfaces and never sit under body copy.
+   */
+  --status-neutral-surface: oklch(0.965 0 0);
+  --status-info-surface: oklch(0.965 0.03 250);
+  --status-success-surface: oklch(0.965 0.03 150);
+  --status-warning-surface: oklch(0.972 0.028 75);
+  --status-danger-surface: oklch(0.965 0.03 27);
+
+  /* The unfilled half of any proportional bar. `signal-empty` is the confidence meter's own
+     track and stays separate, because that meter draws its denominator as a fixed three bars. */
+  --track: oklch(0.9 0 0);
 
   --glyph-hue-0: oklch(0.52 0.08 240);
   --glyph-hue-1: oklch(0.52 0.08 150);
@@ -61,6 +78,11 @@
   /*
    * Categorical data palette. Data encoding only: chart series, category chips, proportional
    * splits. Never chrome, never status, never brand. Ordered for adjacent-pair separability.
+   *
+   * 1–8 are the loud slots. 9 (sand) and 10 (neutral) are deliberately quiet: they hold the
+   * residual buckets — "Other", "Uncategorised", the long tail — which are usually the largest
+   * slice and would dominate the chart if they were given a hue as saturated as a real category.
+   * They are graphical encoding, not text, so they are held to 3:1 (WCAG 1.4.11), not 4.5:1.
    */
   --data-1: oklch(0.55 0.13 250);
   --data-2: oklch(0.56 0.13 160);
@@ -70,6 +92,22 @@
   --data-6: oklch(0.56 0.14 30);
   --data-7: oklch(0.57 0.11 120);
   --data-8: oklch(0.52 0.1 285);
+  --data-9: oklch(0.62 0.045 75);
+  --data-10: oklch(0.58 0 0);
+
+  /*
+   * Sequential heat. The only axis that encodes *magnitude* rather than kind: a calendar cell, a
+   * density grid, an intensity matrix. Its four steps are ordered and comparable, which is exactly
+   * what `data-*` must never be — reaching for the categorical palette here tells the reader that
+   * two adjacent buckets are different things rather than more and less of one thing. Steps are
+   * cell fills; `heat-ink` reads on 1–3 and `heat-ink-peak` on 4.
+   */
+  --heat-1: oklch(0.972 0.028 85);
+  --heat-2: oklch(0.95 0.055 80);
+  --heat-3: oklch(0.928 0.075 55);
+  --heat-4: oklch(0.905 0.09 30);
+  --heat-ink: oklch(0.5 0.12 55);
+  --heat-ink-peak: oklch(0.48 0.16 27);
 
   /*
    * Tool-run vocabulary. Reports the state of an execution step, which is a different axis from
@@ -79,7 +117,7 @@
   --run-active: oklch(0.52 0.14 250);
   --run-ok: oklch(0.5 0.13 150);
   --run-error: oklch(0.55 0.2 27);
-  --run-blocked: oklch(0.58 0.14 75);
+  --run-blocked: oklch(0.55 0.11 75);
   --run-skipped: oklch(0.68 0.01 250);
 
   /*
@@ -89,7 +127,7 @@
    * `signal-empty` is the unfilled bar, so a meter always shows its own denominator.
    */
   --signal-high: oklch(0.5 0.13 150);
-  --signal-medium: oklch(0.58 0.14 75);
+  --signal-medium: oklch(0.55 0.11 75);
   --signal-low: oklch(0.6 0.01 250);
   --signal-empty: oklch(0.89 0 0);
 
@@ -102,7 +140,7 @@
   --tool-tier-system: oklch(0.5 0.04 220);
   --tool-tier-platform: oklch(0.52 0.08 300);
   --tool-tier-integration: oklch(0.55 0.08 80);
-  --tool-mutating: oklch(0.58 0.14 75);
+  --tool-mutating: oklch(0.55 0.11 75);
 
   /* Inspect surface. Drives the tool input/output panes and the JSON viewer. */
   --code-surface: oklch(0.975 0 0);
@@ -132,103 +170,128 @@
 }
 
 [data-sidebar="collapsed"] {
-  --shell-sidebar-width: 56px;
+  --shell-sidebar-width: 3.5rem;
 }
 
+/*
+ * Dark mode is a near-black surface ladder, not a grey one, so lifting a surface reads as
+ * elevation rather than as a lighter shade of the same grey: sidebar < background < code <
+ * card < popover < accent. Every neutral carries a trace of hue 286 — pure achromatic greys go
+ * green under warm displays, and the faint cool cast is what keeps the darks reading as black.
+ * Accents sit above L 0.68 because a chromatic hue that clears AA on a light background is
+ * illegible against these surfaces; hue anchors match the light theme, only L and C change.
+ */
 [data-theme="dark"] {
-  --background: oklch(0.17 0 0);
-  --foreground: oklch(0.94 0 0);
-  --card: oklch(0.2 0 0);
-  --card-foreground: oklch(0.94 0 0);
-  --popover: oklch(0.2 0 0);
-  --popover-foreground: oklch(0.94 0 0);
+  --background: oklch(0.145 0.002 286);
+  --foreground: oklch(0.946 0 0);
+  --card: oklch(0.178 0.002 286);
+  --card-foreground: oklch(0.946 0 0);
+  --popover: oklch(0.197 0.004 286);
+  --popover-foreground: oklch(0.946 0 0);
 
-  --primary: oklch(0.7 0.15 25);
-  --primary-foreground: oklch(0.17 0 0);
+  --primary: oklch(0.71 0.16 25);
+  --primary-foreground: oklch(0.145 0.002 286);
 
-  --secondary: oklch(0.23 0 0);
-  --secondary-foreground: oklch(0.94 0 0);
-  --muted: oklch(0.23 0 0);
-  --muted-foreground: oklch(0.7 0 0);
-  --accent: oklch(0.27 0 0);
-  --accent-foreground: oklch(0.96 0 0);
+  --secondary: oklch(0.21 0.006 286);
+  --secondary-foreground: oklch(0.946 0 0);
+  --muted: oklch(0.21 0.006 286);
+  --muted-foreground: oklch(0.639 0.01 286);
+  --accent: oklch(0.241 0.008 286);
+  --accent-foreground: oklch(0.97 0 0);
 
-  --destructive: oklch(0.66 0.18 27);
-  --destructive-foreground: oklch(0.17 0 0);
+  --destructive: oklch(0.68 0.18 27);
+  --destructive-foreground: oklch(0.145 0.002 286);
 
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 14%);
-  --ring: oklch(0.7 0.15 25);
+  --border: oklch(1 0 0 / 9%);
+  --input: oklch(1 0 0 / 13%);
+  --ring: oklch(0.71 0.16 25);
 
-  --sidebar: oklch(0.19 0 0);
-  --sidebar-foreground: oklch(0.9 0 0);
-  --sidebar-primary: oklch(0.7 0.15 25);
-  --sidebar-primary-foreground: oklch(0.17 0 0);
-  --sidebar-accent: oklch(0.25 0 0);
-  --sidebar-accent-foreground: oklch(0.96 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.7 0.15 25);
+  --sidebar: oklch(0.129 0.003 286);
+  --sidebar-foreground: oklch(0.871 0.003 286);
+  --sidebar-primary: oklch(0.71 0.16 25);
+  --sidebar-primary-foreground: oklch(0.145 0.002 286);
+  --sidebar-accent: oklch(0.225 0.006 286);
+  --sidebar-accent-foreground: oklch(0.97 0 0);
+  --sidebar-border: oklch(1 0 0 / 9%);
+  --sidebar-ring: oklch(0.71 0.16 25);
 
-  --status-neutral: oklch(0.68 0 0);
-  --status-info: oklch(0.72 0.12 250);
-  --status-success: oklch(0.7 0.12 150);
-  --status-warning: oklch(0.78 0.12 75);
+  --status-neutral: oklch(0.639 0.01 286);
+  --status-info: oklch(0.72 0.14 250);
+  --status-success: oklch(0.76 0.15 150);
+  --status-warning: oklch(0.8 0.13 75);
   --status-danger: var(--destructive);
 
-  --glyph-hue-0: oklch(0.65 0.08 240);
-  --glyph-hue-1: oklch(0.65 0.08 150);
-  --glyph-hue-2: oklch(0.65 0.08 300);
-  --glyph-hue-3: oklch(0.68 0.08 80);
-  --glyph-hue-4: oklch(0.63 0.04 220);
-  --glyph-hue-5: oklch(0.63 0.07 130);
-  --glyph-hue-6: oklch(0.63 0.09 320);
+  --status-neutral-surface: oklch(0.24 0.004 286);
+  --status-info-surface: oklch(0.24 0.05 250);
+  --status-success-surface: oklch(0.24 0.05 150);
+  --status-warning-surface: oklch(0.24 0.05 75);
+  --status-danger-surface: oklch(0.24 0.06 27);
 
-  --data-1: oklch(0.72 0.12 250);
-  --data-2: oklch(0.73 0.12 160);
-  --data-3: oklch(0.78 0.12 65);
-  --data-4: oklch(0.72 0.13 320);
-  --data-5: oklch(0.75 0.11 200);
-  --data-6: oklch(0.72 0.13 30);
-  --data-7: oklch(0.74 0.1 120);
-  --data-8: oklch(0.69 0.1 285);
+  --track: oklch(1 0 0 / 12%);
 
-  --run-pending: oklch(0.6 0.01 250);
-  --run-active: oklch(0.72 0.12 250);
-  --run-ok: oklch(0.7 0.12 150);
-  --run-error: oklch(0.66 0.18 27);
-  --run-blocked: oklch(0.78 0.12 75);
-  --run-skipped: oklch(0.5 0.01 250);
+  --glyph-hue-0: oklch(0.7 0.09 240);
+  --glyph-hue-1: oklch(0.7 0.09 150);
+  --glyph-hue-2: oklch(0.7 0.09 300);
+  --glyph-hue-3: oklch(0.73 0.09 80);
+  --glyph-hue-4: oklch(0.68 0.05 220);
+  --glyph-hue-5: oklch(0.68 0.08 130);
+  --glyph-hue-6: oklch(0.68 0.1 320);
 
-  --signal-high: oklch(0.7 0.12 150);
-  --signal-medium: oklch(0.78 0.12 75);
-  --signal-low: oklch(0.6 0.01 250);
-  --signal-empty: oklch(1 0 0 / 18%);
+  --data-1: oklch(0.72 0.15 250);
+  --data-2: oklch(0.78 0.16 160);
+  --data-3: oklch(0.8 0.15 65);
+  --data-4: oklch(0.72 0.17 320);
+  --data-5: oklch(0.79 0.13 200);
+  --data-6: oklch(0.72 0.16 30);
+  --data-7: oklch(0.78 0.14 120);
+  --data-8: oklch(0.7 0.15 285);
+  --data-9: oklch(0.78 0.05 75);
+  --data-10: oklch(0.86 0 0);
 
-  --run-surface: oklch(0.215 0 0);
-  --run-surface-hover: oklch(0.245 0 0);
-  --run-border: oklch(1 0 0 / 12%);
-  --run-rail: oklch(1 0 0 / 16%);
+  --heat-1: oklch(0.215 0.025 85);
+  --heat-2: oklch(0.265 0.06 80);
+  --heat-3: oklch(0.31 0.09 55);
+  --heat-4: oklch(0.35 0.13 27);
+  --heat-ink: oklch(0.8 0.13 75);
+  --heat-ink-peak: oklch(0.72 0.17 27);
 
-  --tool-tier-system: oklch(0.63 0.04 220);
-  --tool-tier-platform: oklch(0.65 0.08 300);
-  --tool-tier-integration: oklch(0.68 0.08 80);
-  --tool-mutating: oklch(0.78 0.12 75);
+  --run-pending: oklch(0.58 0.01 286);
+  --run-active: oklch(0.72 0.14 250);
+  --run-ok: oklch(0.76 0.15 150);
+  --run-error: oklch(0.68 0.18 27);
+  --run-blocked: oklch(0.8 0.13 75);
+  --run-skipped: oklch(0.46 0.008 286);
 
-  --code-surface: oklch(0.155 0 0);
-  --code-border: oklch(1 0 0 / 10%);
-  --code-key: oklch(0.76 0.1 285);
-  --code-string: oklch(0.74 0.1 150);
-  --code-number: oklch(0.75 0.11 250);
-  --code-boolean: oklch(0.75 0.12 30);
-  --code-null: oklch(0.6 0 0);
-  --code-redacted: oklch(0.72 0.06 75);
+  --signal-high: oklch(0.76 0.15 150);
+  --signal-medium: oklch(0.8 0.13 75);
+  --signal-low: oklch(0.58 0.01 286);
+  --signal-empty: oklch(1 0 0 / 14%);
 
-  --diff-added: oklch(0.74 0.11 150);
-  --diff-removed: oklch(0.7 0.16 27);
-  --diff-added-surface: oklch(0.28 0.05 150);
-  --diff-removed-surface: oklch(0.28 0.06 27);
+  --run-surface: oklch(0.188 0.004 286);
+  --run-surface-hover: oklch(0.223 0.006 286);
+  --run-border: oklch(1 0 0 / 10%);
+  --run-rail: oklch(1 0 0 / 14%);
 
-  --tulip-stem: oklch(0.68 0.1 150);
-  --tulip-seed: oklch(0.62 0.03 75);
-  --tulip-petal-deep: oklch(0.56 0.15 25);
+  --tool-tier-system: oklch(0.68 0.05 220);
+  --tool-tier-platform: oklch(0.7 0.1 300);
+  --tool-tier-integration: oklch(0.74 0.1 80);
+  --tool-mutating: oklch(0.8 0.13 75);
+
+  --code-surface: oklch(0.125 0.003 286);
+  --code-border: oklch(1 0 0 / 9%);
+  --code-key: oklch(0.78 0.13 285);
+  --code-string: oklch(0.78 0.13 150);
+  --code-number: oklch(0.78 0.13 250);
+  --code-boolean: oklch(0.78 0.14 30);
+  --code-null: oklch(0.58 0.008 286);
+  --code-redacted: oklch(0.74 0.08 75);
+
+  --diff-added: oklch(0.78 0.14 150);
+  --diff-removed: oklch(0.72 0.17 27);
+  --diff-added-surface: oklch(0.24 0.05 150);
+  --diff-removed-surface: oklch(0.24 0.06 27);
+
+  --tulip-stem: oklch(0.72 0.12 150);
+  --tulip-seed: oklch(0.64 0.035 75);
+  --tulip-petal-deep: oklch(0.56 0.16 25);
 }

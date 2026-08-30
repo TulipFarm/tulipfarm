@@ -1,5 +1,12 @@
 import type { ReactNode } from "react";
 
+/**
+ * The body of a page that loaded fine and has nothing in it yet.
+ *
+ * It is content, not a frame: the page keeps its own breadcrumb, title and column, so having no
+ * records does not move the page to a different width than having one. `section` names the page
+ * for a screen reader that lands here, since the visible heading is the shell's.
+ */
 export function EmptyState({
   section,
   title,
@@ -12,19 +19,15 @@ export function EmptyState({
   children?: ReactNode;
 }) {
   return (
-    <section className="mx-auto flex h-full max-w-xl flex-col justify-center px-6 py-16">
-      <div className="rounded-sm border border-border bg-card motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-500">
-        <p className="border-b border-border px-4 py-2 text-[0.625rem] font-medium uppercase tracking-[0.2em] text-muted-foreground">
-          {section}
-        </p>
-        <div className="flex flex-col gap-4 px-4 py-6 text-sm">
-          <div>
-            <h1 className="text-base font-bold text-foreground">{title}</h1>
-            <p className="mt-1 text-muted-foreground">{hint}</p>
-          </div>
-          {children}
-        </div>
+    <section
+      aria-label={section}
+      className="flex flex-col items-start gap-4 rounded-sm border border-dashed border-border px-4 py-10 text-sm"
+    >
+      <div>
+        <p className="font-medium text-foreground">{title}</p>
+        <p className="mt-1 text-muted-foreground">{hint}</p>
       </div>
+      {children}
     </section>
   );
 }

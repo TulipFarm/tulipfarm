@@ -1,6 +1,6 @@
 import { execFile, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -1711,6 +1711,216 @@ commands:
       });
       expect(updates.statusCode).toBe(200);
       expect(updates.json().skills).toEqual([]);
+    });
+  });
+
+  describe("skill metadata and package file reads", () => {
+    function routeSkill(name: string, frontmatter: Record<string, unknown> = {}): SoulSkill {
+      return {
+        name,
+        frontmatter: { name, description: "Test Skill.", ...frontmatter },
+        body: `# ${name}\nTest Skill.`,
+      };
+    }
+
+    async function seedPackageSkill(name: string): Promise<string> {
+      const directory = join(soulPath, "skills", name);
+      const content = "# Guide\nUse this.\n";
+      await mkdir(join(directory, "references"), { recursive: true });
+      await writeFile(
+        join(directory, "SKILL.md"),
+        `---\nname: ${name}\ndescription: File Skill.\n---\n# ${name}\n`,
+        "utf8"
+      );
+      await writeFile(join(directory, "references", "guide.md"), content, "utf8");
+      soulLoader.skills.set(name, routeSkill(name, { description: "File Skill." }));
+      return directory;
+    }
+
+    it("returns summary capability fields from the list route response", async () => {
+      soulLoader.skills.set(
+        "capability-skill",
+        routeSkill("capability-skill", {
+          category: "developer-tools",
+          tools: ["skill_read", "skill_update"],
+          allowedDomains: ["docs.example.com"],
+          allowedCommands: ["python3 scripts/check.py"],
+          requiredSecrets: ["DOCS_API_TOKEN"],
+        })
+      );
+
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/skills",
+        cookies: auth(),
+        headers,
+      });
+
+      expect(res.statusCode).toBe(200);
+      const skill = (res.json().skills as { name: string }[]).find(
+        (entry) => entry.name === "capability-skill"
+      );
+      expect(skill).toEqual({
+        name: "capability-skill",
+        description: "Test Skill.",
+        provenance: "curated",
+        category: "developer-tools",
+        tools: ["skill_read", "skill_update"],
+        allowedDomains: ["docs.example.com"],
+        allowedCommands: ["python3 scripts/check.py"],
+        requiredSecrets: ["DOCS_API_TOKEN"],
+      });
+    });
+
+    it("returns author and license from the detail route response", async () => {
+      soulLoader.skills.set(
+        "credited-skill",
+        routeSkill("credited-skill", {
+          author: "TulipFarm",
+          license: "MIT",
+        })
+      );
+
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/skills/credited-skill",
+        cookies: auth(),
+        headers,
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({
+        name: "credited-skill",
+        author: "TulipFarm",
+        license: "MIT",
+      });
+    });
+
+    it("drops non-string capability values without failing the list route", async () => {
+      soulLoader.skills.set("mapped-tools", routeSkill("mapped-tools", { tools: { read: true } }));
+      soulLoader.skills.set(
+        "messy-tools",
+        routeSkill("messy-tools", { tools: ["skill_read", 7, null, "", "skill_update"] })
+      );
+
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/skills",
+        cookies: auth(),
+        headers,
+      });
+
+      expect(res.statusCode).toBe(200);
+      const skills = res.json().skills as { name: string; tools?: string[] }[];
+      expect(skills.find((entry) => entry.name === "mapped-tools")).not.toHaveProperty("tools");
+      expect(skills.find((entry) => entry.name === "messy-tools")?.tools).toEqual([
+        "skill_read",
+        "skill_update",
+      ]);
+    });
+
+    it("keeps responding when a Skill declares none of the optional metadata", async () => {
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/skills/my-skill",
+        cookies: auth(),
+        headers,
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body).toMatchObject({
+        name: "my-skill",
+        description: "Authored by hand.",
+        provenance: "curated",
+      });
+      for (const field of [
+        "category",
+        "tools",
+        "allowedDomains",
+        "allowedCommands",
+        "requiredSecrets",
+        "author",
+        "license",
+      ]) {
+        expect(body).not.toHaveProperty(field);
+      }
+    });
+
+    it("returns a shipped reference file from a Skill package", async () => {
+      const content = "# Guide\nUse this.\n";
+      await seedPackageSkill("file-skill");
+
+      const res = await app.inject({
+        method: "GET",
+        url: `/api/v1/skills/file-skill/file?path=${encodeURIComponent("references/guide.md")}`,
+        cookies: auth(),
+        headers,
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({
+        path: "references/guide.md",
+        size: Buffer.byteLength(content),
+        content,
+        truncated: false,
+        binary: false,
+      });
+    });
+
+    it("returns 404 for package file paths not present in the collected file list", async () => {
+      await seedPackageSkill("missing-file-skill");
+
+      const missing = await app.inject({
+        method: "GET",
+        url: `/api/v1/skills/missing-file-skill/file?path=${encodeURIComponent(
+          "references/missing.md"
+        )}`,
+        cookies: auth(),
+        headers,
+      });
+      const traversal = await app.inject({
+        method: "GET",
+        url: `/api/v1/skills/missing-file-skill/file?path=${encodeURIComponent(
+          "../../../etc/passwd"
+        )}`,
+        cookies: auth(),
+        headers,
+      });
+
+      expect(missing.statusCode).toBe(404);
+      expect(traversal.statusCode).toBe(404);
+    });
+
+    it("refuses package file symlinks whose realpath escapes the Skill root", async () => {
+      const directory = await seedPackageSkill("escaping-link-skill");
+      const outside = join(soulPath, "outside-reference.md");
+      await writeFile(outside, "do not expose\n", "utf8");
+      await symlink(outside, join(directory, "references", "outside.md"));
+
+      const res = await app.inject({
+        method: "GET",
+        url: `/api/v1/skills/escaping-link-skill/file?path=${encodeURIComponent(
+          "references/outside.md"
+        )}`,
+        cookies: auth(),
+        headers,
+      });
+
+      expect(res.statusCode).toBe(404);
+    });
+
+    it("requires a package file path query parameter", async () => {
+      await seedPackageSkill("query-required-skill");
+
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/skills/query-required-skill/file",
+        cookies: auth(),
+        headers,
+      });
+
+      expect(res.statusCode).toBe(400);
     });
   });
 });

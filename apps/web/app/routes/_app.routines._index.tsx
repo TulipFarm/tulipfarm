@@ -1,68 +1,71 @@
 import { Link, useLoaderData, useRouteError } from "@remix-run/react";
 import { EmptyState } from "~/components/empty-state";
-import { ResourcePanel } from "~/components/resource-panel";
+import { PageShell } from "~/components/page-shell";
+import type { LatestRuns } from "~/components/routines/routine-catalog";
+import { RoutineCatalog } from "~/components/routines/routine-catalog";
 import { ErrorState } from "~/components/states";
+import { Button } from "~/components/ui/button";
 import { ApiError } from "~/lib/api";
-import { listRoutines, type RoutineTrigger } from "~/lib/routines";
+import { listOperationalRuns } from "~/lib/operations";
+import { listRoutines, type RunStatus } from "~/lib/routines";
 
-export async function clientLoader() {
-  const routines = await listRoutines();
-  return { routines };
+/**
+ * The newest Run per Routine, from one page of the global Run feed.
+ *
+ * One request rather than one per Routine: the feed is already newest-first, so the first Run seen
+ * for a Routine is its newest, and a catalog of fifty Routines would otherwise cost fifty round
+ * trips to answer a question worth one. A Routine whose newest Run fell outside this page reads as
+ * "never run" — wrong only for a Routine idle longer than the last hundred Runs, and corrected by
+ * opening it.
+ */
+function latestByRoutine(
+  runs: readonly { id: string; routineId: string; status: string; createdAt: string }[]
+): LatestRuns {
+  const latest: LatestRuns = {};
+  for (const run of runs) {
+    if (latest[run.routineId]) continue;
+    latest[run.routineId] = {
+      id: run.id,
+      status: run.status as RunStatus,
+      createdAt: run.createdAt,
+    };
+  }
+  return latest;
 }
 
-function triggerLabel(trigger: RoutineTrigger): string {
-  return trigger.summary;
+export async function clientLoader() {
+  const [routines, runs] = await Promise.all([
+    listRoutines(),
+    // Health is a nicety; a catalog that will not render because the Run feed is down is a worse
+    // answer than one that renders without it.
+    listOperationalRuns(undefined, 100).catch(() => ({ items: [], nextCursor: null })),
+  ]);
+  return { routines, latest: latestByRoutine(runs.items) };
 }
 
 export default function RoutinesIndex() {
-  const { routines } = useLoaderData<typeof clientLoader>();
-
-  if (routines.length === 0) {
-    return (
-      <EmptyState
-        section="routines"
-        title="Routines"
-        hint="No published Routines yet. Ask the assistant to create and publish one."
-      />
-    );
-  }
+  const { routines, latest } = useLoaderData<typeof clientLoader>();
 
   return (
-    <ResourcePanel crumbs={[{ label: "routines" }]}>
-      <p className="text-xs text-muted-foreground">
-        {routines.length} {routines.length === 1 ? "routine" : "routines"}
-      </p>
-      <ul className="flex flex-col divide-y divide-border rounded-sm border border-border">
-        {routines.map((routine) => (
-          <li key={routine.slug}>
-            <div className="flex items-center gap-2.5 px-3 py-2">
-              <div className="min-w-0 flex-1">
-                <p className="font-medium text-foreground">{routine.displayName ?? routine.slug}</p>
-                <p className="text-xs text-muted-foreground">
-                  {routine.slug} · version {routine.authoredVersion}
-                </p>
-              </div>
-              <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
-                {routine.triggers.map((trigger) => (
-                  <span
-                    key={trigger.slug}
-                    className="rounded-sm bg-muted px-1.5 py-0.5 uppercase tracking-[0.15em]"
-                  >
-                    {triggerLabel(trigger)}
-                  </span>
-                ))}
-              </span>
-              <Link
-                to={`/routines/${encodeURIComponent(routine.slug)}/edit`}
-                className="text-xs text-primary hover:underline"
-              >
-                author
-              </Link>
-            </div>
-          </li>
-        ))}
-      </ul>
-    </ResourcePanel>
+    <PageShell
+      crumbs={[{ label: "Routines" }]}
+      title="Routines"
+      actions={
+        <Button asChild size="sm" variant="outline">
+          <Link to="/business/activities?source=run">All runs</Link>
+        </Button>
+      }
+    >
+      {routines.length === 0 ? (
+        <EmptyState
+          section="routines"
+          title="No published routines yet"
+          hint="Ask the assistant to create and publish one."
+        />
+      ) : (
+        <RoutineCatalog routines={routines} latest={latest} />
+      )}
+    </PageShell>
   );
 }
 
