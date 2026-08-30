@@ -100,33 +100,45 @@ ENV NODE_ENV=production \
     SOUL_PATH=/opt/tulipfarm/soul \
     TF_DATA_DIR=/data \
     WEB_DIST=/app/apps/web/build/client
-COPY --from=builder /deploy/node_modules ./node_modules
-COPY --from=builder /app/apps/api/dist/server.cjs ./server.cjs
+COPY --from=builder --chown=node:0 /deploy/node_modules ./node_modules
+COPY --from=builder --chown=node:0 /app/apps/api/dist/server.cjs ./server.cjs
 # Hook sandbox worker — spawned as a sibling file by HookExecutor (worker_threads
 # can't run code out of the server.cjs bundle).
-COPY --from=builder /app/apps/api/dist/hook-worker.cjs ./hook-worker.cjs
+COPY --from=builder --chown=node:0 /app/apps/api/dist/hook-worker.cjs ./hook-worker.cjs
 # Durable worker entrypoint. Not the image CMD — compose runs it as its own service off this
 # same image, so the API and the worker can never drift out of schema agreement.
-COPY --from=builder /app/apps/worker/dist/worker.cjs ./worker.cjs
+COPY --from=builder --chown=node:0 /app/apps/worker/dist/worker.cjs ./worker.cjs
 # The worker's own hook sandbox entrypoint. Deliberately a different basename from the API's: both
 # land in this directory, and sharing one would hand an Integration's classifier the API's grant.
-COPY --from=builder /app/apps/worker/dist/ingress-hook-worker.cjs ./ingress-hook-worker.cjs
+COPY --from=builder --chown=node:0 /app/apps/worker/dist/ingress-hook-worker.cjs ./ingress-hook-worker.cjs
 # Integration worker entrypoint. Not the image CMD — compose runs it as its own service off this
 # same image, mirroring how `worker.cjs` is run.
-COPY --from=builder /app/apps/integration-worker/dist/integration-worker.cjs ./integration-worker.cjs
-COPY --from=builder /app/apps/web/build/client ./apps/web/build/client
-COPY --from=builder /app/skills ./skills
-COPY --from=builder /app/integrations ./integrations
+COPY --from=builder --chown=node:0 /app/apps/integration-worker/dist/integration-worker.cjs ./integration-worker.cjs
+COPY --from=builder --chown=node:0 /app/apps/web/build/client ./apps/web/build/client
+COPY --from=builder --chown=node:0 /app/skills ./skills
+COPY --from=builder --chown=node:0 /app/integrations ./integrations
 # /data holds the bootstrap secrets generated on first boot when the operator supplies none
 # (and, later, backups) — it must be a mounted volume or those keys die with the container.
-RUN mkdir -p /opt/tulipfarm/soul /data
+#
+# Ownership of /app is set by `--chown` on each COPY above rather than by a recursive chown here.
+# A `chown -R` over /app rewrites the metadata of every file in the prod dependency closure, and
+# Docker's copy-on-write then duplicates all ~700MB into a fresh layer — twice over, once per
+# recursive pass. Setting it at copy time costs nothing and is what keeps this image under 2GB.
+#
+# /app is deliberately NOT made group-writable: nothing writes under it at runtime (TF_DATA_DIR
+# and SOUL_PATH point elsewhere), and its 0644/0755 modes already let an arbitrary UID in group 0
+# read and traverse it. Only the two genuinely writable trees get the OpenShift treatment below,
+# and both are empty at this point, so the recursive pass over them is free.
+#
 # Drop root: the app shells out to git (soul sync) and runs isolated-vm — no need for root.
-# node:26.5.0-slim ships a `node` user; give it the app + soul + data dirs it writes to.
-RUN chown -R node:node /app /opt/tulipfarm /data
-# OpenShift (and any platform using `runAsUser` with a random UID) ignores USER and runs as an
-# arbitrary uid in group 0. Making the writable trees group-owned by root and group-writable
-# keeps them writable in that case without granting anything to other users.
-RUN chgrp -R 0 /app /opt/tulipfarm /data && chmod -R g=u /app /opt/tulipfarm /data
+# node:26.5.0-slim ships a `node` user. OpenShift (and any platform using `runAsUser` with a
+# random UID) ignores USER and runs as an arbitrary uid in group 0, so the writable trees are
+# group-owned by root and group-writable — that keeps them writable in that case without
+# granting anything to other users.
+RUN mkdir -p /opt/tulipfarm/soul /data \
+  && chown node:0 /app \
+  && chown -R node:0 /opt/tulipfarm /data \
+  && chmod -R g=u /opt/tulipfarm /data
 USER node
 EXPOSE 8080
 CMD ["node", "server.cjs"]
