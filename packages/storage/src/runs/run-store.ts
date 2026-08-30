@@ -15,6 +15,7 @@ import {
   claimNextQueuedRunRows,
   heartbeatRun,
   reclaimExpiredRunRows,
+  requeueParkedRunRows,
   requeueWaitingRunRow,
 } from "./run-lease-store";
 import { RunPersistenceError } from "./run-persistence-error";
@@ -562,6 +563,16 @@ export class RunStore {
   ): Promise<readonly PersistedRun[]> {
     return this.transactions.withTransaction((transaction) =>
       reclaimExpiredRunRows(transaction, businessId, now, limit)
+    );
+  }
+
+  /**
+   * Requeues Runs parked by a crashed dispatch handler. Bounded to one requeue per Run by the
+   * evidence ref the update itself consumes.
+   */
+  async requeueParkedRuns(businessId: string, limit: number): Promise<readonly PersistedRun[]> {
+    return this.transactions.withTransaction((transaction) =>
+      requeueParkedRunRows(transaction, businessId, limit)
     );
   }
 

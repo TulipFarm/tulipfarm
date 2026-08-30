@@ -1,6 +1,7 @@
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { Queryable, TransactionPort } from "../ports";
+import { DISPATCH_HANDLER_ERROR_REF, DISPATCH_REQUEUED_ONCE_REF } from "./run-lease-store";
 import {
   type AttemptEvidence,
   RUN_STORAGE_STATEMENTS,
@@ -362,6 +363,62 @@ describe("RunStore (PostgreSQL)", () => {
       version: 2,
       leaseOwner: null,
       leaseExpiresAt: null,
+    });
+  });
+
+  it("requeues a Run a crashed dispatch handler parked, exactly once", async () => {
+    await store.start(run());
+    await store.transitionRun("business-1", run().id, {
+      expectedVersion: 0,
+      expectedStatus: "queued",
+      status: "claimed",
+      leaseOwner: "worker-1",
+      leaseExpiresAt: "2026-07-24T10:01:00.000Z",
+    });
+    await store.transitionRun("business-1", run().id, {
+      expectedVersion: 1,
+      expectedStatus: "claimed",
+      status: "needs_reconciliation",
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      errorEvidenceRef: DISPATCH_HANDLER_ERROR_REF,
+    });
+
+    const first = await store.requeueParkedRuns("business-1", 10);
+
+    expect(first).toEqual([
+      expect.objectContaining({
+        id: run().id,
+        status: "queued",
+        errorEvidenceRef: DISPATCH_REQUEUED_ONCE_REF,
+      }),
+    ]);
+    // The update consumes the ref it matches on, so a Run can never be requeued a second time.
+    expect(await store.requeueParkedRuns("business-1", 10)).toEqual([]);
+  });
+
+  it("leaves a Run parked for any reason other than a crashed dispatch handler", async () => {
+    await store.start(run());
+    await store.transitionRun("business-1", run().id, {
+      expectedVersion: 0,
+      expectedStatus: "queued",
+      status: "claimed",
+      leaseOwner: "worker-1",
+      leaseExpiresAt: "2026-07-24T10:01:00.000Z",
+    });
+    // An effect may be in flight, so requeueing this Run could double-apply it.
+    await store.transitionRun("business-1", run().id, {
+      expectedVersion: 1,
+      expectedStatus: "claimed",
+      status: "needs_reconciliation",
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      errorEvidenceRef: "tool:ambiguous_effect",
+    });
+
+    expect(await store.requeueParkedRuns("business-1", 10)).toEqual([]);
+    expect(await store.find("business-1", run().id)).toMatchObject({
+      status: "needs_reconciliation",
     });
   });
 

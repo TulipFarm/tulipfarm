@@ -518,6 +518,7 @@ export async function main(): Promise<void> {
     now: () => new Date(),
     leaseDurationMs: config.leaseDurationMs,
     batchSize: config.batchSize,
+    log: logger,
     onTerminal: async (run, status) => {
       const outcome = await signalChildCompletion(
         { ancestry: childAncestry, waits },

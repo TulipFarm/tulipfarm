@@ -75,6 +75,14 @@ class FakeRunStore implements RunLeaseStore {
     return this.reclaimResult;
   }
 
+  requeueParkedCalls: { businessId: string; limit: number }[] = [];
+  requeueParkedResult: readonly PersistedRun[] = [];
+
+  async requeueParkedRuns(businessId: string, limit: number): Promise<readonly PersistedRun[]> {
+    this.requeueParkedCalls.push({ businessId, limit });
+    return this.requeueParkedResult;
+  }
+
   async claimNextQueued(
     businessId: string,
     owner: string,

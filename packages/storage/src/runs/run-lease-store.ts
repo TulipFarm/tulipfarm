@@ -116,3 +116,57 @@ export async function requeueWaitingRunRow(
   );
   return result.rows.length === 1;
 }
+
+/**
+ * The evidence ref the dispatcher records when a handler throw parks a Run, and the only ref
+ * `requeueParkedRunRows` will act on. A Run parked for any other reason may have an effect in
+ * flight, and requeueing it could double-apply that effect.
+ */
+export const DISPATCH_HANDLER_ERROR_REF = "dispatch:handler_error";
+
+/**
+ * Stamped in place of {@link DISPATCH_HANDLER_ERROR_REF} once a Run has been requeued. It is what
+ * makes the requeue bounded: the sweep's own `WHERE` no longer matches, so a Run can never be
+ * requeued twice, and the dispatcher reads it to fail a second throw outright.
+ */
+export const DISPATCH_REQUEUED_ONCE_REF = "dispatch:requeued_once";
+
+/**
+ * Requeues Runs parked by a crashed dispatch handler so a worker picks them up again.
+ *
+ * Nothing else moves a Run out of `needs_reconciliation`, so before this a handler throw parked
+ * the Run forever. Bounded by construction: the update both requires
+ * `DISPATCH_HANDLER_ERROR_REF` and overwrites it, so a second sweep matches nothing.
+ */
+export async function requeueParkedRunRows(
+  transaction: Queryable,
+  businessId: string,
+  limit: number
+): Promise<readonly PersistedRun[]> {
+  const result = await transaction.query<RunRow>(
+    `WITH candidates AS (
+       SELECT id
+         FROM runs
+        WHERE business_id = $1
+          AND status = 'needs_reconciliation'
+          AND error_evidence_ref = $2
+        ORDER BY created_at
+        FOR UPDATE SKIP LOCKED
+        LIMIT $4
+     )
+     UPDATE runs
+        SET status = 'queued',
+            version = version + 1,
+            error_evidence_ref = $3,
+            lease_owner = NULL,
+            lease_expires_at = NULL
+       FROM candidates
+      WHERE runs.id = candidates.id
+     RETURNING runs.id, runs.business_id, runs.source, runs.bundle, runs.identity,
+               runs.status, runs.version, runs.created_at, runs.started_at, runs.finished_at,
+               runs.result_artifact_id, runs.error_evidence_ref, runs.lease_owner,
+               runs.lease_expires_at`,
+    [businessId, DISPATCH_HANDLER_ERROR_REF, DISPATCH_REQUEUED_ONCE_REF, Math.max(0, limit)]
+  );
+  return result.rows.map(persistedRun);
+}

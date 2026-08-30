@@ -1,4 +1,9 @@
-import type { PersistedRun, PersistedRunStatus } from "@tulipfarm/storage";
+import {
+  DISPATCH_HANDLER_ERROR_REF,
+  DISPATCH_REQUEUED_ONCE_REF,
+  type PersistedRun,
+  type PersistedRunStatus,
+} from "@tulipfarm/storage";
 import type { RunLeaseStore } from "../lease";
 import type { ReconcilableStateStore } from "../reconcile-state";
 import type { RunResumeStore } from "../resume";
@@ -175,6 +180,34 @@ export class SimulatedRunStore implements RunLeaseStore, RunResumeStore, Reconci
     }
     this.guard("reclaimExpiredRuns", "after");
     return reclaimed;
+  }
+
+  async requeueParkedRuns(_businessId: string, limit: number): Promise<readonly PersistedRun[]> {
+    this.guard("requeueParkedRuns", "before");
+    const requeuedRuns: PersistedRun[] = [];
+    for (const run of this.runs.values()) {
+      if (requeuedRuns.length >= limit) break;
+      if (run.status !== "needs_reconciliation") continue;
+      if (run.errorEvidenceRef !== DISPATCH_HANDLER_ERROR_REF) continue;
+      const requeued: PersistedRun = {
+        ...run,
+        status: "queued",
+        version: run.version + 1,
+        errorEvidenceRef: DISPATCH_REQUEUED_ONCE_REF,
+        leaseOwner: null,
+        leaseExpiresAt: null,
+      };
+      this.runs.set(run.id, requeued);
+      this.transitions.push({
+        runId: run.id,
+        from: run.status,
+        to: "queued",
+        version: requeued.version,
+      });
+      requeuedRuns.push(requeued);
+    }
+    this.guard("requeueParkedRuns", "after");
+    return requeuedRuns;
   }
 
   async claimNextQueued(

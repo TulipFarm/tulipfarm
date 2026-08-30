@@ -1,5 +1,10 @@
 import { RunLeaseManager } from "@tulipfarm/run-kernel";
-import type { PersistedRun, PersistedRunStatus } from "@tulipfarm/storage";
+import {
+  DISPATCH_HANDLER_ERROR_REF,
+  DISPATCH_REQUEUED_ONCE_REF,
+  type PersistedRun,
+  type PersistedRunStatus,
+} from "@tulipfarm/storage";
 import { describe, expect, it } from "vitest";
 import { RunDispatcher, type RunOutcome } from "../run-dispatcher";
 
@@ -112,6 +117,27 @@ class DurableRunStore {
     return reclaimed;
   }
 
+  async requeueParkedRuns(_businessId: string, limit: number): Promise<readonly PersistedRun[]> {
+    const requeuedRuns: PersistedRun[] = [];
+    for (const current of this.runs.values()) {
+      if (requeuedRuns.length >= limit) break;
+      if (current.status !== "needs_reconciliation") continue;
+      if (current.errorEvidenceRef !== DISPATCH_HANDLER_ERROR_REF) continue;
+      const requeued: PersistedRun = {
+        ...current,
+        status: "queued",
+        version: current.version + 1,
+        errorEvidenceRef: DISPATCH_REQUEUED_ONCE_REF,
+        leaseOwner: null,
+        leaseExpiresAt: null,
+      };
+      this.runs.set(current.id, requeued);
+      this.commits.push({ from: current.status, to: "queued" });
+      requeuedRuns.push(requeued);
+    }
+    return requeuedRuns;
+  }
+
   async claimNextQueued(
     _businessId: string,
     owner: string,
@@ -168,7 +194,14 @@ describe("Run dispatch recovery", () => {
       throw new Error("effect ambiguous");
     }).dispatchBatch();
 
-    expect(result).toEqual({ reclaimed: 0, claimed: 1, dispatched: 0, waiting: 0, failed: 1 });
+    expect(result).toEqual({
+      reclaimed: 0,
+      requeuedParked: 0,
+      claimed: 1,
+      dispatched: 0,
+      waiting: 0,
+      failed: 1,
+    });
     expect(await store.find(BUSINESS_ID, RUN_ID)).toMatchObject({
       status: "needs_reconciliation",
       leaseOwner: null,
@@ -196,7 +229,14 @@ describe("Run dispatch recovery", () => {
       () => AFTER_LEASE
     ).dispatchBatch();
 
-    expect(recovered).toEqual({ reclaimed: 1, claimed: 1, dispatched: 1, waiting: 0, failed: 0 });
+    expect(recovered).toEqual({
+      reclaimed: 1,
+      requeuedParked: 0,
+      claimed: 1,
+      dispatched: 1,
+      waiting: 0,
+      failed: 0,
+    });
     expect(handled).toEqual([RUN_ID]);
     expect(await store.find(BUSINESS_ID, RUN_ID)).toMatchObject({
       status: "succeeded",
@@ -218,8 +258,22 @@ describe("Run dispatch recovery", () => {
     const current = dispatcher(store, SURVIVOR, handler);
     const [first, second] = [await stale.dispatchBatch(), await current.dispatchBatch()];
 
-    expect(first).toEqual({ reclaimed: 0, claimed: 1, dispatched: 1, waiting: 0, failed: 0 });
-    expect(second).toEqual({ reclaimed: 0, claimed: 0, dispatched: 0, waiting: 0, failed: 0 });
+    expect(first).toEqual({
+      reclaimed: 0,
+      requeuedParked: 0,
+      claimed: 1,
+      dispatched: 1,
+      waiting: 0,
+      failed: 0,
+    });
+    expect(second).toEqual({
+      reclaimed: 0,
+      requeuedParked: 0,
+      claimed: 0,
+      dispatched: 0,
+      waiting: 0,
+      failed: 0,
+    });
     expect(handled).toEqual([OWNER]);
     expect(store.commits.filter((commit) => commit.to === "succeeded")).toHaveLength(1);
   });

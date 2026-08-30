@@ -49,6 +49,10 @@ export {
   RunLoopCheckpointStore,
 } from "./loop-checkpoint-store";
 export { MemoryWaitStore } from "./memory-wait-store";
+export {
+  DISPATCH_HANDLER_ERROR_REF,
+  DISPATCH_REQUEUED_ONCE_REF,
+} from "./run-lease-store";
 export type {
   AppendAttemptInput,
   AppendAttemptResult,
