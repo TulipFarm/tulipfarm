@@ -83,9 +83,13 @@ const CITATIONS = {
   },
 } as const;
 
+// `minItems: 0`, not 1: a model that has nothing to add or remove naturally emits `[]` rather than
+// omitting the key, and an empty list is semantically identical to an absent one — the parser
+// below drops a patch that ends up with neither, so `minItems: 1` here would only ever discard a
+// well-formed sibling entry (e.g. a valid `add`) sharing the same output object.
 const ENTRIES = {
   type: "array",
-  minItems: 1,
+  minItems: 0,
   maxItems: 20,
   items: { type: "string", minLength: 1, maxLength: 500 },
 } as const;
@@ -226,7 +230,11 @@ export function parseCuratorUserOutput(raw: unknown): CuratorParseResult<Curator
     return { ok: false, rejection: { reason: "schema", detail: firstError(validateUser.errors) } };
   }
   const output = value as unknown as Partial<CuratorUserOutput>;
-  const memory = (output.memory ?? []).filter((patch) => patch.add || patch.remove);
+  // `patch.add || patch.remove` would keep a patch whose array is present but empty, since `[]` is
+  // truthy — check length so an empty-both patch is dropped as the no-op it is.
+  const memory = (output.memory ?? []).filter(
+    (patch) => (patch.add?.length ?? 0) > 0 || (patch.remove?.length ?? 0) > 0
+  );
   return {
     ok: true,
     output: {
