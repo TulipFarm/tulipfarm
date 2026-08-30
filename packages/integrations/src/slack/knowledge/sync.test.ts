@@ -7,7 +7,7 @@ import type {
 } from "../../knowledge/source";
 import type { SlackKnowledgeApiPort, SlackKnowledgeChannel, SlackKnowledgeMessage } from "./ports";
 import { InMemorySlackKnowledgeCheckpointStore } from "./ports";
-import { syncSlackKnowledge } from "./sync";
+import { SLACK_KNOWLEDGE_ACL_MAX_AGE_SECONDS, syncSlackKnowledge } from "./sync";
 
 const NOW = new Date("2026-07-26T12:00:00.000Z");
 const now = () => NOW;
@@ -121,7 +121,7 @@ describe("syncSlackKnowledge", () => {
     expect(source?.accessControl).toEqual({
       mode: "snapshot",
       aclRevision: expect.any(String),
-      maximumAgeSeconds: 300,
+      maximumAgeSeconds: SLACK_KNOWLEDGE_ACL_MAX_AGE_SECONDS,
     });
     // The unmapped member is dropped, never turned into an implicit grant.
     expect(source?.acl?.principals).toEqual([{ kind: "user", id: "user-1" }]);

@@ -1,6 +1,7 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import {
   type KnowledgeIdentityMapPort,
+  SLACK_KNOWLEDGE_SYNC_PERIOD_SECONDS,
   type SlackKnowledgeCheckpointStore,
   type SlackKnowledgeSyncResult,
   syncSlackKnowledge,
@@ -15,8 +16,16 @@ import type { PgKnowledgeEmissionSink } from "./emission-sink";
 import { SlackHttpKnowledgeApi } from "./slack-http";
 
 export const SLACK_KNOWLEDGE_SYNC_QUEUE = "slack-knowledge-sync";
-/** Every 15 minutes, matching `CONNECTOR_SYNC_CRON`. */
-export const SLACK_KNOWLEDGE_SYNC_CRON = "*/15 * * * *";
+/**
+ * Derived from `SLACK_KNOWLEDGE_SYNC_PERIOD_SECONDS`, the same constant `syncSlackKnowledge`
+ * uses to size the captured ACL snapshot's max age, so the two can never drift out of the
+ * refresh-within-validity-window relationship that keeps `acl_stale` denials from firing on a
+ * fresh snapshot. Every 5 minutes: this cadence is *also* the revocation window — how long
+ * someone dropped from a Slack channel keeps read access to its indexed content — so the max
+ * age is sized off this constant rather than the other way around, to avoid trading a
+ * staleness fix for a wider security window.
+ */
+export const SLACK_KNOWLEDGE_SYNC_CRON = `*/${SLACK_KNOWLEDGE_SYNC_PERIOD_SECONDS / 60} * * * *`;
 
 export interface SlackKnowledgeSyncScheduleDeps {
   readonly integrations: IntegrationStore;
