@@ -58,13 +58,16 @@ export interface SlackKnowledgeSyncResult {
  * sync job. Defined here, next to the ACL snapshot it refreshes, so the schedule is derived
  * from this value rather than a second hardcoded cron string that can drift out of step with it.
  */
-export const SLACK_KNOWLEDGE_SYNC_PERIOD_SECONDS = 900; // 15 min, matching CONNECTOR_SYNC_CRON
+export const SLACK_KNOWLEDGE_SYNC_PERIOD_SECONDS = 300; // 5 min
 
 /**
  * The captured ACL snapshot must outlive at least one missed sync by a comfortable margin, or a
  * single delayed/failed job run blacks out retrieval for every Slack source until the next one
  * lands (`decideKnowledgeAccess` denies with `acl_stale`, silently, per source). A multiple of
  * the sync period keeps that relationship explicit instead of two constants that happen to agree.
+ * This max age also bounds how long someone removed from a Slack channel keeps read access to
+ * its indexed content, so fix a staleness gap by tightening `SLACK_KNOWLEDGE_SYNC_PERIOD_SECONDS`
+ * (which this derives from), never by raising this multiple alone.
  */
 const ACL_MAX_AGE_SYNC_PERIOD_MULTIPLE = 3;
 

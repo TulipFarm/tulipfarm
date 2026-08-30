@@ -20,7 +20,10 @@ export const SLACK_KNOWLEDGE_SYNC_QUEUE = "slack-knowledge-sync";
  * Derived from `SLACK_KNOWLEDGE_SYNC_PERIOD_SECONDS`, the same constant `syncSlackKnowledge`
  * uses to size the captured ACL snapshot's max age, so the two can never drift out of the
  * refresh-within-validity-window relationship that keeps `acl_stale` denials from firing on a
- * fresh snapshot. Every 15 minutes, matching `CONNECTOR_SYNC_CRON`.
+ * fresh snapshot. Every 5 minutes: this cadence is *also* the revocation window — how long
+ * someone dropped from a Slack channel keeps read access to its indexed content — so the max
+ * age is sized off this constant rather than the other way around, to avoid trading a
+ * staleness fix for a wider security window.
  */
 export const SLACK_KNOWLEDGE_SYNC_CRON = `*/${SLACK_KNOWLEDGE_SYNC_PERIOD_SECONDS / 60} * * * *`;
 
