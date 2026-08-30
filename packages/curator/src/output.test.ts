@@ -97,6 +97,42 @@ describe("parseCuratorUserOutput", () => {
     });
     expect(result.ok && result.output.memory).toHaveLength(1);
   });
+
+  // The prompt tells the model "returning empty arrays is a good answer", so it routinely emits
+  // `"remove": []` alongside a real `add`. `minItems: 1` on that array used to fail the whole
+  // output's schema validation, discarding the valid `add` with it — the staging rejection was
+  // exactly `/memory/0/remove must NOT have fewer than 1 items`. An empty array must be accepted
+  // and treated the same as an absent key.
+  it("keeps a valid add when remove is an empty array, not the whole output", () => {
+    const result = parseCuratorUserOutput({
+      memory: [
+        {
+          section: "identity",
+          add: ["Lives in Bangalore"],
+          remove: [],
+          citations: CITATION,
+        },
+      ],
+    });
+    expect(result).toEqual({
+      ok: true,
+      output: {
+        memory: [
+          { section: "identity", add: ["Lives in Bangalore"], remove: [], citations: CITATION },
+        ],
+        proposals: [],
+        knowledgePromotions: [],
+      },
+    });
+  });
+
+  // Both arrays empty is still a no-op, even though each one is now individually schema-legal.
+  it("drops a patch whose add and remove are both empty arrays", () => {
+    const result = parseCuratorUserOutput({
+      memory: [{ section: "identity", add: [], remove: [], citations: CITATION }],
+    });
+    expect(result.ok && result.output.memory).toHaveLength(0);
+  });
 });
 
 describe("parseCuratorBusinessOutput", () => {
