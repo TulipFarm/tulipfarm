@@ -57,6 +57,10 @@ class FakeRunStore implements RunLeaseStore {
     return [];
   }
 
+  async requeueParkedRuns(): Promise<readonly PersistedRun[]> {
+    return [];
+  }
+
   async claimNextQueued(): Promise<readonly PersistedRun[]> {
     return this.claimBatchResult;
   }

@@ -1,5 +1,9 @@
 import { RunLeaseManager, type RunLeaseStore } from "@tulipfarm/run-kernel";
-import type { PersistedRun, PersistedRunStatus } from "@tulipfarm/storage";
+import {
+  DISPATCH_REQUEUED_ONCE_REF,
+  type PersistedRun,
+  type PersistedRunStatus,
+} from "@tulipfarm/storage";
 import { describe, expect, it } from "vitest";
 import { RunDispatcher, type RunDispatcherOptions, type RunOutcome } from "./run-dispatcher";
 
@@ -34,6 +38,10 @@ class FakeRunStore implements RunLeaseStore {
   releaseResult = true;
   claimBatchResult: readonly PersistedRun[] = [];
   reclaimResult: readonly PersistedRun[] = [];
+  requeueParkedCalls: { businessId: string; limit: number }[] = [];
+  requeueParkedResult: readonly PersistedRun[] = [];
+  /** Applied to whatever `find` returns, so a test can stage the Run the dispatcher re-reads. */
+  findOverrides: Partial<PersistedRun> = {};
 
   async transitionRun(
     _businessId: string,
@@ -44,6 +52,7 @@ class FakeRunStore implements RunLeaseStore {
       status: PersistedRunStatus;
       leaseOwner: string | null;
       leaseExpiresAt: string | null;
+      errorEvidenceRef?: string;
     }
   ): Promise<boolean> {
     if (transition.leaseOwner === null) {
@@ -61,12 +70,17 @@ class FakeRunStore implements RunLeaseStore {
     return this.reclaimResult;
   }
 
+  async requeueParkedRuns(businessId: string, limit: number): Promise<readonly PersistedRun[]> {
+    this.requeueParkedCalls.push({ businessId, limit });
+    return this.requeueParkedResult;
+  }
+
   async claimNextQueued(): Promise<readonly PersistedRun[]> {
     return this.claimBatchResult;
   }
 
   async find(_businessId: string, runId: string): Promise<PersistedRun | null> {
-    return persistedRun({ id: runId, status: "running", version: 2 });
+    return persistedRun({ id: runId, status: "running", version: 2, ...this.findOverrides });
   }
 }
 
@@ -89,7 +103,14 @@ describe("RunDispatcher", () => {
 
     const result = await dispatcher.dispatchBatch();
 
-    expect(result).toEqual({ reclaimed: 0, claimed: 1, dispatched: 1, waiting: 0, failed: 0 });
+    expect(result).toEqual({
+      reclaimed: 0,
+      requeuedParked: 0,
+      claimed: 1,
+      dispatched: 1,
+      waiting: 0,
+      failed: 0,
+    });
     expect(dispatched).toEqual([persistedRun().id]);
     expect(store.releaseCalls).toEqual([
       expect.objectContaining({ status: "succeeded", leaseOwner: null, leaseExpiresAt: null }),
@@ -109,7 +130,14 @@ describe("RunDispatcher", () => {
 
     const result = await dispatcher.dispatchBatch();
 
-    expect(result).toEqual({ reclaimed: 0, claimed: 1, dispatched: 0, waiting: 1, failed: 0 });
+    expect(result).toEqual({
+      reclaimed: 0,
+      requeuedParked: 0,
+      claimed: 1,
+      dispatched: 0,
+      waiting: 1,
+      failed: 0,
+    });
     expect(store.releaseCalls).toEqual([
       expect.objectContaining({ status: "waiting", leaseOwner: null, leaseExpiresAt: null }),
     ]);
@@ -128,30 +156,58 @@ describe("RunDispatcher", () => {
 
     const result = await dispatcher.dispatchBatch();
 
-    expect(result).toEqual({ reclaimed: 0, claimed: 1, dispatched: 0, waiting: 1, failed: 0 });
+    expect(result).toEqual({
+      reclaimed: 0,
+      requeuedParked: 0,
+      claimed: 1,
+      dispatched: 0,
+      waiting: 1,
+      failed: 0,
+    });
     expect(store.releaseCalls).toEqual([]);
   });
 
-  it("releases to needs_reconciliation when the handler throws", async () => {
+  it("releases to needs_reconciliation when the handler throws, logging and recording the reason", async () => {
     const store = new FakeRunStore();
     store.claimBatchResult = [persistedRun()];
     const leases = new RunLeaseManager(store);
+    const logged: Array<{ message: string; error: unknown }> = [];
+    const boom = new Error("boom");
     const dispatcher = new RunDispatcher({
       leases,
       businessId: BUSINESS_ID,
       owner: "worker-1",
       now: () => new Date("2026-07-24T10:00:00.000Z"),
+      log: {
+        error: (message, error) => {
+          logged.push({ message, error });
+        },
+      },
       handler: async () => {
-        throw new Error("boom");
+        throw boom;
       },
     });
 
     const result = await dispatcher.dispatchBatch();
 
-    expect(result).toEqual({ reclaimed: 0, claimed: 1, dispatched: 0, waiting: 0, failed: 1 });
+    expect(result).toEqual({
+      reclaimed: 0,
+      requeuedParked: 0,
+      claimed: 1,
+      dispatched: 0,
+      waiting: 0,
+      failed: 1,
+    });
     expect(store.releaseCalls).toEqual([
-      expect.objectContaining({ status: "needs_reconciliation" }),
+      expect.objectContaining({
+        status: "needs_reconciliation",
+        errorEvidenceRef: "dispatch:handler_error",
+      }),
     ]);
+    expect(logged).toHaveLength(1);
+    expect(logged[0]?.error).toBe(boom);
+    expect(logged[0]?.message).toContain(persistedRun().id);
+    expect(logged[0]?.message).toContain(BUSINESS_ID);
   });
 
   it("skips a Run whose lease was lost before it could advance to running", async () => {
@@ -169,7 +225,14 @@ describe("RunDispatcher", () => {
 
     const result = await dispatcher.dispatchBatch();
 
-    expect(result).toEqual({ reclaimed: 0, claimed: 1, dispatched: 0, waiting: 0, failed: 0 });
+    expect(result).toEqual({
+      reclaimed: 0,
+      requeuedParked: 0,
+      claimed: 1,
+      dispatched: 0,
+      waiting: 0,
+      failed: 0,
+    });
   });
 
   it("does not report success when the terminal compare-and-swap loses the lease", async () => {
@@ -186,6 +249,7 @@ describe("RunDispatcher", () => {
 
     await expect(dispatcher.dispatchBatch()).resolves.toEqual({
       reclaimed: 0,
+      requeuedParked: 0,
       claimed: 1,
       dispatched: 0,
       waiting: 0,
@@ -262,6 +326,7 @@ describe("RunDispatcher", () => {
 
       await expect(dispatcher.dispatchBatch()).resolves.toEqual({
         reclaimed: 0,
+        requeuedParked: 0,
         claimed: 1,
         dispatched: 1,
         waiting: 0,
@@ -341,11 +406,56 @@ describe("RunDispatcher", () => {
 
       await expect(dispatcher.dispatchBatch()).resolves.toEqual({
         reclaimed: 0,
+        requeuedParked: 0,
         claimed: 1,
         dispatched: 0,
         waiting: 1,
         failed: 0,
       });
     });
+  });
+
+  it("returns Runs parked by a crashed handler to the queue before claiming", async () => {
+    const store = new FakeRunStore();
+    store.requeueParkedResult = [persistedRun({ status: "queued", version: 2 })];
+    const dispatcher = new RunDispatcher({
+      leases: new RunLeaseManager(store),
+      businessId: BUSINESS_ID,
+      owner: "worker-1",
+      now: () => new Date("2026-07-24T10:00:00.000Z"),
+      handler: async () => "succeeded",
+    });
+
+    const result = await dispatcher.dispatchBatch();
+
+    // Nothing else moves a Run out of `needs_reconciliation`, so without this sweep the Run is
+    // parked for good.
+    expect(store.requeueParkedCalls).toEqual([{ businessId: BUSINESS_ID, limit: 25 }]);
+    expect(result.requeuedParked).toBe(1);
+  });
+
+  it("fails a Run that throws again after already being requeued once", async () => {
+    const store = new FakeRunStore();
+    store.claimBatchResult = [persistedRun()];
+    store.findOverrides = { errorEvidenceRef: DISPATCH_REQUEUED_ONCE_REF };
+    const dispatcher = new RunDispatcher({
+      leases: new RunLeaseManager(store),
+      businessId: BUSINESS_ID,
+      owner: "worker-1",
+      now: () => new Date("2026-07-24T10:00:00.000Z"),
+      handler: async () => {
+        throw new Error("boom again");
+      },
+    });
+
+    await dispatcher.dispatchBatch();
+
+    // Parking it again would feed it straight back to the sweep it just came from.
+    expect(store.releaseCalls).toEqual([
+      expect.objectContaining({
+        status: "failed",
+        errorEvidenceRef: "dispatch:handler_error_after_requeue",
+      }),
+    ]);
   });
 });
