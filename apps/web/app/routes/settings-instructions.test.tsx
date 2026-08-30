@@ -32,14 +32,14 @@ function renderPage() {
 
 test("shows the saved instructions", async () => {
   renderPage();
-  expect(await screen.findByLabelText("Custom instructions")).toHaveValue(
+  expect(await screen.findByLabelText("Custom instructions", { selector: "textarea" })).toHaveValue(
     "Answer in plain language."
   );
 });
 
 test("saves an edit", async () => {
   renderPage();
-  const box = await screen.findByLabelText("Custom instructions");
+  const box = await screen.findByLabelText("Custom instructions", { selector: "textarea" });
   await userEvent.clear(box);
   await userEvent.type(box, "Be terse.");
   await userEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -53,7 +53,7 @@ test("saves an edit", async () => {
  */
 test("offers no memory list, suggestion queue, or per-fact editing", async () => {
   renderPage();
-  await screen.findByLabelText("Custom instructions");
+  await screen.findByLabelText("Custom instructions", { selector: "textarea" });
 
   expect(screen.queryByText(/suggested memories/i)).toBeNull();
   expect(screen.queryByText(/saved memories/i)).toBeNull();
@@ -64,5 +64,7 @@ test("offers no memory list, suggestion queue, or per-fact editing", async () =>
 test("survives a deployment that serves no instructions yet", async () => {
   mockGet.mockRejectedValue(new Error("not found"));
   renderPage();
-  expect(await screen.findByLabelText("Custom instructions")).toHaveValue("");
+  expect(await screen.findByLabelText("Custom instructions", { selector: "textarea" })).toHaveValue(
+    ""
+  );
 });

@@ -58,10 +58,31 @@ describe("RoutineCanvas", () => {
     expect(screen.getByRole("button", { name: /State Start/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Trigger 0, Manual/ })).toBeInTheDocument();
     expect(screen.getByLabelText(/Condition 1 from Start to End/)).toBeInTheDocument();
-    expect(screen.getByText("Send: send(count)")).toBeInTheDocument();
+    expect(screen.getByText("send(count)")).toBeInTheDocument();
+    // The canvas toolbar precedes the graph, so keyboard focus meets it first.
+    await user.tab();
+    expect(screen.getByRole("button", { name: /expand canvas/i })).toHaveFocus();
     await user.tab();
     await user.keyboard(key);
     expect(screen.getByRole("complementary", { name: /details/i })).toBeInTheDocument();
+  });
+
+  it("names each kind of path in a key rather than by colour alone", () => {
+    render(<RoutineCanvas graph={graph} mode="read" />);
+    expect(screen.getByText("A trigger starts the routine here")).toBeInTheDocument();
+    expect(screen.getByText("Taken when a test passes")).toBeInTheDocument();
+  });
+
+  it("expands and shrinks the canvas", async () => {
+    const user = userEvent.setup();
+    render(<RoutineCanvas graph={graph} mode="read" />);
+    const toggle = screen.getByRole("button", { name: /expand canvas/i });
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    await user.click(toggle);
+    expect(screen.getByRole("button", { name: /shrink canvas/i })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
   });
 
   it("shows Run data and exposes inferred identity with text, not color alone", async () => {

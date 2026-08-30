@@ -36,7 +36,7 @@ export const links = (): HtmlLinkDescriptor[] => [
  * index.html, painted before any JS runs) and AppShell's initial state read — so the shell never
  * snaps from expanded to collapsed on load.
  */
-const themeInit = `(function(){try{var p=localStorage.getItem("theme");var t=(p==="light"||p==="dark")?p:(window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t);document.documentElement.setAttribute("data-sidebar",localStorage.getItem("context-sidebar-collapsed")==="true"?"collapsed":"expanded");}catch(e){}})();`;
+const themeInit = `(function(){try{var p=localStorage.getItem("theme");var t=(p==="light"||p==="dark")?p:(window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t);document.documentElement.setAttribute("data-sidebar",localStorage.getItem("sidebar-collapsed")==="true"?"collapsed":"expanded");}catch(e){}})();`;
 
 function Document({ children }: { children: ReactNode }) {
   return (
@@ -98,9 +98,10 @@ export function HydrateFallback() {
   return (
     <Document>
       <div className="flex h-svh overflow-hidden bg-background">
-        <div className="hidden shrink-0 border-sidebar-border border-r md:block md:w-14 lg:w-[var(--shell-sidebar-width)]">
-          <div className="flex h-[52px] items-center justify-center border-sidebar-border border-b">
-            <span className="size-6 rounded-md bg-muted" />
+        <div className="hidden w-[var(--shell-sidebar-width)] shrink-0 border-sidebar-border border-r bg-sidebar lg:block">
+          <div className="flex h-[52px] items-center gap-2 overflow-hidden border-sidebar-border border-b px-4">
+            <span className="size-6 shrink-0 rounded-md bg-muted" />
+            <span className="h-3.5 w-20 rounded-sm bg-muted" />
           </div>
         </div>
         <div className="flex h-svh min-w-0 flex-1 flex-col">

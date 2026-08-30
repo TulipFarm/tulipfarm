@@ -431,8 +431,8 @@ export function OperationsConsole({
     <div className="flex min-w-0 flex-col gap-4">
       <header className="flex flex-wrap items-start gap-3">
         <div className="min-w-0">
-          <h1 className="text-lg font-semibold">Operations</h1>
-          <p className="mt-0.5 max-w-2xl text-xs text-muted-foreground">
+          {/* The page shell names this page; repeating it here would title it twice. */}
+          <p className="max-w-2xl text-xs text-muted-foreground">
             Authorized operational summaries. Protected payloads remain redacted.
           </p>
           <p

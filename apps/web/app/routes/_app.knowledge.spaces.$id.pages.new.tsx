@@ -7,7 +7,7 @@ import {
 } from "@remix-run/react";
 import { useState } from "react";
 import { PageForm } from "~/components/knowledge/page-form";
-import { ResourcePanel } from "~/components/resource-panel";
+import { PageShell } from "~/components/page-shell";
 import { ErrorState, NotFoundState } from "~/components/states";
 import { ApiError } from "~/lib/api";
 import { getSpace, navigateSpace, writePage } from "~/lib/knowledge-api";
@@ -74,13 +74,13 @@ export default function PageNew() {
   }
 
   const crumbs = [
-    { label: "knowledge", to: "/knowledge" },
+    { label: "Knowledge", to: "/knowledge" },
     { label: space.name, to: detailPath },
     { label: initialPath === "index" ? "front page" : "new page" },
   ];
 
   return (
-    <ResourcePanel crumbs={crumbs}>
+    <PageShell crumbs={crumbs} title={initialPath === "index" ? "Front page" : "New page"}>
       <PageForm
         mode="create"
         spaceId={space.id}
@@ -94,7 +94,7 @@ export default function PageNew() {
         fieldErrors={fieldErrors}
         cancelTo={detailPath}
       />
-    </ResourcePanel>
+    </PageShell>
   );
 }
 

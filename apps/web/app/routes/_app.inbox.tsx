@@ -2,6 +2,7 @@ import { useLoaderData, useRevalidator, useRouteError } from "@remix-run/react";
 import { useState } from "react";
 import { EmptyState } from "~/components/empty-state";
 import { InboxItem } from "~/components/inbox/inbox-item";
+import { PageShell } from "~/components/page-shell";
 import { ErrorState } from "~/components/states";
 import { ApiError } from "~/lib/api";
 import { decideApproval, getInbox } from "~/lib/inbox";
@@ -16,22 +17,18 @@ export default function InboxRoute() {
   const [busyId, setBusyId] = useState<string>();
   if (items.length === 0) {
     return (
-      <EmptyState
-        section="inbox"
-        title="Inbox"
-        hint="No Approvals, human tasks, form waits, or access requests need attention."
-      />
+      <PageShell title="Inbox" description="Exact server-authorized decisions and waiting work.">
+        <EmptyState
+          section="inbox"
+          title="Nothing is waiting on you"
+          hint="Approvals, human tasks, form waits, and access requests appear here."
+        />
+      </PageShell>
     );
   }
   return (
-    <div className="h-full min-h-0 overflow-y-auto">
-      <div className="mx-auto flex max-w-4xl flex-col gap-4 px-4 py-6 sm:px-6">
-        <header>
-          <h1 className="text-lg font-semibold">Inbox</h1>
-          <p className="text-xs text-muted-foreground">
-            Exact server-authorized decisions and waiting work.
-          </p>
-        </header>
+    <PageShell title="Inbox" description="Exact server-authorized decisions and waiting work.">
+      <>
         {items.map((item) => (
           <InboxItem
             key={item.id}
@@ -48,8 +45,8 @@ export default function InboxRoute() {
             }}
           />
         ))}
-      </div>
-    </div>
+      </>
+    </PageShell>
   );
 }
 

@@ -56,6 +56,16 @@
   --color-status-warning: var(--status-warning);
   --color-status-danger: var(--status-danger);
 
+  /* Tinted grounds for the status inks — filled chips, pills, and callout banners. */
+  --color-status-neutral-surface: var(--status-neutral-surface);
+  --color-status-info-surface: var(--status-info-surface);
+  --color-status-success-surface: var(--status-success-surface);
+  --color-status-warning-surface: var(--status-warning-surface);
+  --color-status-danger-surface: var(--status-danger-surface);
+
+  /* The unfilled remainder of any proportional bar. */
+  --color-track: var(--track);
+
   /* Categorical data palette — chart series and category chips only, never chrome. */
   --color-data-1: var(--data-1);
   --color-data-2: var(--data-2);
@@ -65,6 +75,16 @@
   --color-data-6: var(--data-6);
   --color-data-7: var(--data-7);
   --color-data-8: var(--data-8);
+  --color-data-9: var(--data-9);
+  --color-data-10: var(--data-10);
+
+  /* Sequential magnitude ramp — density grids and calendar heatmaps, never categories. */
+  --color-heat-1: var(--heat-1);
+  --color-heat-2: var(--heat-2);
+  --color-heat-3: var(--heat-3);
+  --color-heat-4: var(--heat-4);
+  --color-heat-ink: var(--heat-ink);
+  --color-heat-ink-peak: var(--heat-ink-peak);
 
   /* Tool-run vocabulary — execution state, distinct from the content status-* tones. */
   --color-run-pending: var(--run-pending);

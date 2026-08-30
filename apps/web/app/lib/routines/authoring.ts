@@ -24,7 +24,16 @@ export interface RoutineAuthoringAnalysis {
 export interface RoutineAuthoringBody {
   readonly baseCommit: string;
   readonly yaml: string;
-  readonly fixture: { readonly startedAtMs: number };
+  /** Mirrors the route's `FIXTURE_SCHEMA`: a deterministic clock plus the stubs to replay from. */
+  readonly fixture: {
+    readonly startedAtMs: number;
+    readonly tickMs?: number;
+    readonly input?: Record<string, unknown>;
+    readonly trigger?: Record<string, unknown>;
+    readonly model?: Record<string, unknown>;
+    readonly tools?: Record<string, unknown>;
+    readonly events?: Record<string, unknown>;
+  };
 }
 
 export async function getRoutineAuthoringBase(slug: string): Promise<RoutineAuthoringBase> {

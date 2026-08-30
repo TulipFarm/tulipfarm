@@ -81,6 +81,13 @@ const PLANNER: SoulAgent = {
     autonomy: "supervised",
     placeholder: ["Plan next sprint..."],
     suggestions: ["Plan next sprint"],
+    capabilityRestrictions: {
+      tools: { allow: ["record_search"], allowMutating: false },
+      records: {
+        actions: { allow: ["read", "search", "nonsense"], deny: ["delete"] },
+        resourceTypes: ["sprint"],
+      },
+    },
   },
   body: "# Role\nYou plan sprints.",
 };
@@ -88,12 +95,14 @@ const PLANNER: SoulAgent = {
 describe("agents routes", () => {
   let app: FastifyInstance;
   let store: MemorySessionStore;
+  let userRepo: FakeUserRepo;
+  let tokenRepo: FakeTokenRepo;
   let sid: string;
 
   beforeEach(async () => {
     store = new MemorySessionStore();
-    const userRepo = new FakeUserRepo();
-    const tokenRepo = new FakeTokenRepo();
+    userRepo = new FakeUserRepo();
+    tokenRepo = new FakeTokenRepo();
     const user = await createUser(userRepo, "user@example.com", "pass", "member");
     sid = await store.create(user._id);
     app = await buildApp({
@@ -135,9 +144,38 @@ describe("agents routes", () => {
             description: "Breaks PRDs into sprints.",
             model: "auto",
             autonomy: "supervised",
+            capabilityRestrictions: {
+              tools: { allow: ["record_search"], allowMutating: false },
+              records: {
+                actions: { allow: ["read", "search"], deny: ["delete"] },
+                resourceTypes: ["sprint"],
+              },
+            },
           },
         ],
       });
+    });
+
+    it("drops a record action the schema does not define rather than passing it through", async () => {
+      const res = await app.inject(authed("/api/v1/agents"));
+      expect(res.json().agents[0].capabilityRestrictions.records.actions.allow).not.toContain(
+        "nonsense"
+      );
+    });
+
+    it("omits capabilityRestrictions entirely for an agent that declares none", async () => {
+      const bare: SoulAgent = { name: "bare", frontmatter: {}, body: "x" };
+      const solo = await buildApp({
+        sessionStore: store,
+        userRepo,
+        tokenRepo,
+        gitSync: makeFakeGitSync(),
+        soulLoader: makeSoulLoader([bare]),
+        soulWriter: makeSoulWriterDouble().writer,
+      });
+      const res = await solo.inject(authed("/api/v1/agents"));
+      expect(res.json().agents[0]).not.toHaveProperty("capabilityRestrictions");
+      await solo.close();
     });
   });
 
@@ -154,6 +192,8 @@ describe("agents routes", () => {
       expect(body.body).toContain("You plan sprints");
       expect(body.placeholder).toEqual(["Plan next sprint..."]);
       expect(body.suggestions).toEqual(["Plan next sprint"]);
+      expect(body.capabilityRestrictions.tools.allowMutating).toBe(false);
+      expect(body.capabilityRestrictions.records.resourceTypes).toEqual(["sprint"]);
     });
 
     it("returns 404 for an unknown agent", async () => {

@@ -52,7 +52,7 @@ and every rule in §§3–8. They diverge in three places, deliberately.
 
 | Decision | `apps/web` | `apps/docs` | Why |
 | --- | --- | --- | --- |
-| Canvas | Achromatic: `oklch(1 0 0)` light, `oklch(0.17 0 0)` dark | Warm: cream `oklch(0.992 0.003 60)`, warm near-black `oklch(0.178 0.009 55)` | The app is a work surface and stays out of the way. The docs are a reading surface and are allowed warmth. |
+| Canvas | Cool-neutral: `oklch(1 0 0)` light, near-black `oklch(0.145 0.002 286)` dark | Warm: cream `oklch(0.992 0.003 60)`, warm near-black `oklch(0.178 0.009 55)` | The app is a work surface and stays out of the way. The docs are a reading surface and are allowed warmth. |
 | Radius | `--radius: 0.5rem`, scaled ±4px | Square-leaning: 2px / 4px / 6px, capped at 6px | The docs site is terminal-native by design; the app is a conventional product shell. |
 | Theme selector | `[data-theme="dark"]` on `<html>` | `.dark` on `<html>` (fumadocs' convention) | fumadocs owns its own theme switch. Do not fight it. |
 
@@ -71,7 +71,7 @@ Use semantic variables. **Never** a raw hex or a Tailwind palette class inside a
 
 New token families are mirrored into Tailwind utilities via `@theme inline`, so utilities stay
 semantic too: `bg-run-surface`, `text-run-ok`, `border-run-border`, `text-data-3`, `text-code-key`,
-`bg-tf-fill` are valid. `bg-rose-400` is not.
+`bg-status-warning-surface`, `bg-heat-3`, `bg-track`, `bg-tf-fill` are valid. `bg-rose-400` is not.
 
 ### Product app families (`apps/web/app/tokens.css`)
 
@@ -83,7 +83,10 @@ semantic too: `bg-run-surface`, `text-run-ok`, `border-run-border`, `text-data-3
 | Brand | `primary`, `primary-foreground` | Ruby. Use sparingly |
 | Danger | `destructive`, `destructive-foreground` | Destructive actions and failures only |
 | Status | `status-neutral/info/success/warning/danger` | Content lifecycle (§4.1) |
-| Data | `data-1` … `data-8` | Categorical encoding only (§4.2) |
+| Status tint | `status-*-surface` | Filled chips and callout grounds (§4.7) |
+| Data | `data-1` … `data-10` | Categorical encoding only (§4.2) |
+| Heat | `heat-1` … `heat-4`, `heat-ink`, `heat-ink-peak` | Sequential magnitude (§4.8) |
+| Meter | `track` | Unfilled remainder of a proportional bar |
 | Run | `run-pending/active/ok/error/blocked/skipped`, `run-surface`, `run-surface-hover`, `run-border`, `run-rail` | Execution step state (§4.3) |
 | Signal | `signal-high/medium/low/empty` | Agent confidence (§4.4) |
 | Diff | `diff-added`, `diff-removed`, `+ -surface` pair | Authorship change (§4.5) |
@@ -91,10 +94,11 @@ semantic too: `bg-run-surface`, `text-run-ok`, `border-run-border`, `text-data-3
 | Code | `code-surface`, `code-border`, `code-key/string/number/boolean/null/redacted` | Inspect panes and JSON viewers |
 | Glyph | `glyph-hue-0` … `glyph-hue-6` | Agent identity glyphs |
 | Tulip | `tulip-stem`, `tulip-seed`, `tulip-petal-deep` | `/farm` and onboarding growth |
-| Shell | `sidebar-*` | Rail and context panel layers |
+| Shell | `sidebar-*` | Sidebar surface, border, and selected-row layers |
 
-Light: white canvas, near-black ink, 0.94–0.99 surfaces, 0.90–0.92 borders. Dark: 0.17 canvas,
-0.19–0.23 surfaces, 0.94 ink, 10–14% white borders.
+Light: white canvas, near-black ink, 0.94–0.99 surfaces, 0.90–0.92 borders. Dark: 0.145 near-black
+canvas, 0.13–0.24 surfaces, 0.95 ink, 9–13% white borders. Dark neutrals carry a trace of hue 286;
+see the block comment in `tokens.css` for why they are not achromatic.
 
 ### Docs families (`apps/docs/app/global.css`)
 
@@ -144,10 +148,20 @@ Status is domain-owned and maps to exactly one tone: `neutral`, `info`, `success
 Priority is closed: `low` → neutral, `medium` → info, `high` → warning, `critical` → danger.
 Priority describes urgency; status describes lifecycle. Neither uses ruby.
 
-### 4.2 Categorical data: `data-1` … `data-8`
+### 4.2 Categorical data: `data-1` … `data-10`
 
 Data encoding only: chart series, category chips, proportional splits. The sequence is ordered so
 adjacent pairs stay separable. Never chrome, status, brand, selection, focus, or decoration.
+
+`data-9` (sand) and `data-10` (neutral) are the **quiet tail**, and they are quiet on purpose. They
+hold the residual buckets — "Other", "Uncategorised", the long tail — which are routinely the
+largest slice in a real breakdown. Give the residue a hue as loud as a real category and the chart
+argues that "Other" is the finding. Assign 1–8 first, in order; only a genuine remainder earns 9
+or 10.
+
+The palette is graphical encoding, not text, so it is held to 3:1 against its ground
+(WCAG 1.4.11), not 4.5:1. A number printed *next to* a swatch is text and still owes 4.5:1 — take
+it from `foreground` or `muted-foreground`, not from the series colour.
 
 ### 4.3 Tool-run state: `run-*`
 
@@ -172,6 +186,47 @@ successful edit. Green and red here mean added and removed, nothing else.
 Tier tints the Tool glyph from the server-side `ToolDef.tier`. `--tool-mutating` marks
 `ToolDef.mutating`. Tier says what kind of Tool this is; mutating says it writes. Neither replaces
 run state. Agent identity has no parallel scale; it uses `glyph-hue-*`.
+
+### 4.7 Tinted grounds: `status-*-surface`
+
+A filled chip, pill, or callout banner draws its own ground from its tone: `text-status-warning` on
+`bg-status-warning-surface`, hairline `border-status-warning`. The pair states the tone twice — once
+as ink, once as ground — so the meaning survives when the chip is scanned rather than read.
+
+Three rules keep this from becoming a second surface family:
+
+- **A tint is not elevation.** These sit ~1.15:1 from `card` and carry no depth. Use `card`,
+  `popover`, or `accent` to raise something; use a tint only to tone something.
+- **Never under body copy.** The pairs clear 4.5:1 against *their own* ink only. Arbitrary
+  `foreground` text on a tint is unverified.
+- **The ground never appears alone.** A tint with no matching ink or border reads as an unexplained
+  coloured rectangle. If there is nothing to tone, the surface is `card`.
+
+There is deliberately no `data-*-surface`. A categorical chip is separated by its swatch, and ten
+tinted grounds in one breakdown is a stained-glass window, not a chart.
+
+### 4.8 Sequential magnitude: `heat-1` … `heat-4`
+
+The one axis that encodes **how much**, not **what kind** — a calendar grid, a density matrix, a
+spend heatmap. Its steps are ordered and comparable by design, which is precisely what `data-*`
+must never be: reaching for the categorical palette here tells the reader that two adjacent cells
+are *different things* rather than *more and less of one thing*.
+
+Four steps, low to high. Cells are grounds, so text on them takes `heat-ink` on steps 1–3 and
+`heat-ink-peak` on step 4, where the ramp turns red and the amber ink would fail. A value below the
+ramp's floor gets no fill at all — an empty cell reads as "nothing happened", which a step-1 tint
+does not.
+
+Four steps is the whole scale. A continuous gradient invites the reader to compare two cells they
+cannot actually tell apart, and defeats the legend.
+
+The ramp encodes order wherever order is the fact, not only in a grid. **Agent autonomy is its
+first non-grid use**: `manual` → `heat-1` … `full` → `heat-4`, via `AUTONOMY_RANK` in
+`autonomy-chip.tsx`. It is deliberately not a `status-*` tint, because an agent that acts alone
+holds more authority — it is not in a warning *state*. Because `AgentGlyph` already encodes the
+same order as stroke weight, the two channels are pinned together by a test; a heavier glyph beside
+a cooler chip would be two different claims about one agent. The visible label always carries the
+value too, so the ramp reinforces and never carries the fact alone.
 
 ## 5. Typography
 
@@ -212,9 +267,9 @@ sets ~99 characters, so `apps/docs/app/global.css` caps the *text-level* blocks 
 
 Capping the container instead would shrink code blocks, tables, and cards along with the prose.
 
-### Top bar breadcrumbs
+### Top bar page title
 
-Navigation chrome. They take Label, not Title, even though they name the current page. Reserve
+Navigation chrome. It takes Label, not Title, even though it names the current page. Reserve
 Title for a heading the content area owns, and only when it says something the top bar does not.
 
 ## 6. Shape, depth, and material
@@ -313,6 +368,14 @@ leaves every revealed section (four of six on the home page, plus its only CTA) 
 Body and control text must clear WCAG AA against its actual rendered pair. Two notes from real
 failures:
 
+- **A tinted ground is a new contrast pair, not a free one.** `status-*-surface` is verified against
+  its own `status-*` ink and nothing else. The light amber pair is why `--status-warning` is
+  `oklch(0.55 0.11 75)` and not the lighter value it once held: at L 0.58 it cleared neither its own
+  tint (3.9:1) nor the white canvas (4.37:1). `run-blocked`, `signal-medium`, and `tool-mutating`
+  track it byte-for-byte — an amber that is legible in one token and not in its three twins is the
+  drift this file exists to prevent.
+- **Encoding is 3:1, labels are 4.5:1.** `data-*` and `heat-*` are graphical objects under WCAG
+  1.4.11. The moment a series colour is used for a *numeral*, it is text again and owes 4.5:1.
 - **Verify contrast by rendering, not by parsing.** Chrome returns computed colors as `lab()` /
   `oklab()` on these surfaces, so a naive sRGB parser silently reports nonsense. Resolve the color
   through a canvas pixel instead.
@@ -325,19 +388,53 @@ failures:
 
 ### Layout
 
-Global rail 56px, context panel 256px, top bar 52px. Rail plus panel is 312px, and the mobile
-drawer uses that same 312px so docking it does not change the layout's width. The rail brand band,
-the panel header, and the top bar share one 52px header row so all three columns start on the same
-line.
+One sidebar, 256px, top bar 52px. There is no rail and no second panel: every destination the
+reader may reach is a row in one flat list, under a Work or Build heading, so nothing is
+two clicks from something already visible. Settings is pinned below that list, above the account
+card, so the door to configuration sits at a fixed spot instead of drifting as the list grows.
+The mobile drawer is that same 256px sidebar, so docking
+it does not change the layout's width. The sidebar header and the top bar share one 52px header row
+so both columns start on the same line.
 
-- `>=1024px`: persistent rail and context panel
-- `768–1023px`: persistent rail, overlay context panel
-- `<768px`: one menu opens a combined drawer
+- `>=1024px`: persistent sidebar, collapsible to a 56px icon column
+- `<1024px`: one menu opens it as an overlay drawer, always full width
+
+Collapsing trades each label for a tooltip placed to the *right* of the icon, never above it —
+above the rail there is no room, and a centred label on a 36px icon starts at a negative x, which
+cut the first letter off "Knowledge". Tooltips measure themselves, flip to the opposite side when
+that side is cramped, then clamp to the viewport. It never removes a destination, and a count that
+no longer fits becomes a dot on the icon with the number moved into the row's accessible name. The
+choice persists to `localStorage` and is mirrored onto `[data-sidebar]` before hydration so the
+prerendered skeleton paints at the right width.
+
+**Two verbs, and a door.** Work is what you watch (Chats, Inbox, Activity, Farm); Build is what
+you assemble (Resources, Agents, Skills, Routines, Knowledge). Everything visited rarely and
+deliberately lives behind Settings — including Operations and Observability, which are operator
+surfaces rather than daily work. A group in the sidebar must be a verb a reader performs; when one
+shrinks to a heading nobody can name, its contents belong behind the door, not under a fudge.
+
+**One icon spine.** New chat, every nav row and the account button share one box model — a 1px
+border (transparent on the rows, real on New chat) plus `px-3` — so all three icons land on the
+same x. Add a bordered control to the sidebar and it must join that spine, not sit 1px off it.
+Collapsed, all three become the same 36px square on the centre line, so no block is wider than its
+neighbour. The header mark keeps its own 52px band and is exempt.
+
+**Active is brand, hover is grey.** An active row is `bg-sidebar-primary/12` with
+`text-sidebar-primary`, and its icon follows via `group-aria-[current=page]`. Hover is the full
+`bg-sidebar-accent`. Active must never be a shade of the hover token: the two were once the same
+colour at 100% and 60%, a 4% lightness step that read as smudged grey rather than "you are here".
+Both states clear AA on their own background (5.9:1 light, 6.4:1 dark).
+
+The sidebar carries what you *do and watch*. What you *configure* lives behind Settings, which is a
+hub page rather than a redirect — a sidebar listing every configuration surface stops being
+scannable. A section that needs its own hierarchy (Knowledge's space tree) owns it inside its own
+page, never as a second shell column.
 
 Breakpoints at 375 / 768 / 1024 / 1440px. Scroll tables locally rather than the page.
 
-Product modes: Chat; Build (Resources, Agents, Skills, Routines); Knowledge; Operate (Inbox,
-Activity, Integrations, Operations); Settings as a lower utility destination.
+Destinations: Work (Chats, Inbox, Activity, Farm); Build (Resources, Agents, Skills, Routines,
+Knowledge); Settings, pinned, holding You, Business, Operate (Operations, Observability) and
+Developer.
 
 ### Component hierarchy
 
@@ -352,7 +449,33 @@ Activity, Integrations, Operations); Settings as a lower utility destination.
 Promote a pattern only after it repeats, or when consistency and accessibility make central
 ownership safer. Keep domain fetching and mutations out of primitives.
 
+**A titled `Panel` is a landmark, and that is the shared component's job.** A `<section>` is only
+exposed as a region once it has an accessible name, so `Panel` wires `aria-labelledby` from its own
+heading via `useId()`. Without it every panel on every page is an anonymous `div` to a screen reader
+and none of them can be jumped to. Fix this class of thing in the composite; a per-feature ARIA
+attribute is the step-5 fix where step 3 was available (§1).
+
 ### Shell and headers
+
+**There is one page frame: `PageShell`, and one content column.** Every route in the app renders
+into it — breadcrumb, `h1`, optional description, meta and actions, then the page's own content. A
+second frame is not a style choice, it is a defect: two frames drift on width, on breadcrumb
+treatment, and on whether a page states its own name, and the reader pays that difference on every
+navigation between them.
+
+**The column is `max-w-7xl`, centred, on every page without exception.** It was briefly a per-page
+prop, and that was wrong: the page title landed at 288px on `/agents`, 368px on `/agents/:name` and
+481px on an empty `/routines`, so the title visibly jumped on every navigation and the app read as
+if it had reloaded into something else. Content that wants a narrower measure caps *itself* — a
+form, a paragraph, `max-w-prose` on a description — and never pulls the page in around it. An empty
+state, an error and a 404 sit in the same column as the loaded page, because they are still that
+page.
+
+**Every page states its own name once.** The shell renders the `h1` from `title` and drops the last
+breadcrumb, because that crumb *is* the title and a breadcrumb is a `<nav>`, not a heading. A page
+whose only name is a 10px uppercase crumb has no heading at all — that is an accessibility failure,
+not a minimal aesthetic. Do not add a second `h1` inside the content; pass `title`, `meta` and
+`actions` to the shell instead.
 
 The top bar owns page identity. It names *what is open*, not the route that rendered it, so a
 conversation shows its own title. Show a parent crumb only when it points somewhere else and says
@@ -360,8 +483,9 @@ something the current crumb does not. A record title must come from that record'
 never from a capped sidebar list. A route that also renders its own title band names the page
 twice. Keep in-page headers for what the top bar cannot say.
 
-The rail, panel header, and breadcrumb read mode and page identity from one shared map. No shell
-surface hardcodes another mode's label or icon.
+The sidebar and the top bar read page identity from one shared map (`app/lib/nav.ts`). No shell
+surface hardcodes another destination's label or icon. With the hierarchy flat and visible in the
+sidebar, the top bar carries no parent crumb — it would only repeat the highlighted row.
 
 ### The Trace: the one presentation a run of work gets
 
@@ -462,9 +586,252 @@ the reload the question invites.
 ### Other closed sets
 
 `LOADER_VARIANTS` (`drive`, `dots`, `orbit`, `rain`), `LOADER_LABELS`, `TRACE_STATUSES` (`pending`,
-`running`, `done`, `error`), `DIFF_TONES` (`add`, `remove`, `context`). Each is the whole set.
+`running`, `done`, `error`), `DIFF_TONES` (`add`, `remove`, `context`), `AUTONOMY_RANK` (`manual`,
+`approval-required`, `supervised`, `full` — ordered, see §4.8). Each is the whole set.
 `Trace` is a `ui/` primitive and must stay one: it re-declares its own status union rather than
 importing from the chat layer, so the primitive layer never depends on a feature layer.
+
+### Data grids and the catalog frame
+
+A surface whose job is *reading a lot of rows* — Resources and the record grid inside a type — runs
+in the same `max-w-7xl` column as every other page, and takes all of it. Do not cap a table to a
+reading measure: that is a second, narrower viewport inside the one the reader already has, and the
+columns pay for it. The frame is the shell header plus a stat strip, not a box. No page in this app
+wraps its content in a centred card — a card around a scrolling table gives it two nested frames.
+
+**The stat strip is evidence, not decoration.** A `<dl>` of at most five figures directly under the
+page title, tabular figures throughout, each one a number the reader would otherwise have to count.
+It answers "how big is this" before the reader scrolls. Never put an action in it and never pad it
+to five — a figure that restates the row count of a visible table is chrome.
+
+**A count you do not have is `—`, never `0`.** The catalog omits a type the reader may not list,
+because a count is itself a disclosure: publishing "salary_review: 412" tells someone without
+`record.list` exactly how much data exists. The client therefore carries `recordCount: number | null`
+and renders `null` as an em dash. Rendering it as zero invents a fact and reads as "this is empty",
+which is the opposite of the truth.
+
+**Blanks trail in both directions.** Test blankness *before* applying the sort direction, then
+tie-break by name. The natural `(a ?? -1) - (b ?? -1)` idiom multiplied by a sign puts blanks first
+ascending, so reversing a sort buries the rows with data under the rows without any.
+
+**Exactly one filled action per rendered view, counting empty states.** A page header action and an
+empty-state call to action are visible at the same time, so giving both the accent fill leaves the
+reader two identical primaries for one destination. The header keeps the fill in every state,
+because it is the affordance that never moves; the empty state's copy carries the invitation and its
+button stays `outline`.
+
+**Sticky headers need a bounded scroll container.** `overflow-x-auto` alone gives a sticky `<thead>`
+nothing to stick to. The wrapper owns vertical scroll (`max-h-[70svh] overflow-auto`) so the grid
+scrolls inside the page rather than the page scrolling past its own headers. The header's rule goes
+on each `<th>`, and the table must be `border-separate border-spacing-0`: under `border-collapse` a
+border is painted by the table rather than the cell, so the header loses its rule the moment the
+body scrolls under it. That switch has a consequence worth knowing before it bites — a border on a
+`<tr>` is not painted either, so Tailwind's `divide-y` silently stops working and row separators
+have to move onto the `<td>`s.
+
+**One `SortHeader`, not one per grid.** `app/components/ui/sort-header.tsx` owns the whole pattern —
+the `<th>`, `aria-sort`, the button, the arrow, and the `-my-1 py-1` that buys a 24px target
+(WCAG 2.5.8) without growing the header's visual height. Both the catalog and the record grid render
+it. Omit `onSort` for a column that cannot be sorted and it degrades to plain text with no
+`aria-sort`. A second hand-rolled copy drifts within a release: the two that existed before it
+disagreed on the action hint and on whether sorting shifted the row.
+
+**Column headers are sentence case and sortable columns are buttons.** `uppercase
+tracking-[0.15em]` on a header the reader must scan a dozen of costs legibility for no signal.
+`aria-sort` goes on the `<th>` and only when that column is the active one.
+
+**A sort button's accessible name is the column name, nothing else.** The tempting `aria-label="Sort
+by Type, descending"` also becomes the `<th>`'s accessible name, so every cell in the column is then
+announced under it — "Type, sort descending, github-star". Name the button for the column, let
+`aria-sort` carry the state, and put the action hint in `title`. The arrow keeps its slot in the
+layout when inactive (`opacity-0`, not unmounted) so sorting a column never shifts the row, and it
+is `aria-hidden` because it repeats what `aria-sort` already says.
+
+**Counts and other figures are right-aligned and `tabular-nums`.** Digits that do not line up cannot
+be compared down a column, which is the only reason the column is there.
+
+**A column picker expands in flow.** No overlay, no z-index, no click-outside handler to get wrong —
+a `<details>` block that pushes the grid down. It lists the type's own fields first and marks
+runtime-managed ones; because adjacent inline spans concatenate with no space, the badge must be
+`aria-hidden` with the checkbox carrying an explicit `aria-label`, or it is announced as
+"createdAtsystem". Always offer Reset.
+
+**Every empty state names its own cause.** "No records yet", "no column is visible", "nothing matches
+that filter" and "this schema will not parse" are four different problems with four different exits.
+One shared "No results" for all four tells the reader nothing they can act on.
+
+### The agent roster and profile
+
+An agent is the one object in the product that *acts on its own*, so its pages answer a different
+question from every other catalog: not "what is in here" but "what will this thing do, and what is
+it allowed to do". Both pages are built to answer that in the order people ask it — what it is, how
+to use it, what it may do, who may use it.
+
+**Declared limits are the page, not a footnote.** `capabilityRestrictions` is authored in Soul
+frontmatter and must survive the whole path to the screen: `packages/schema/src/agent.ts` defines
+it, `apps/api/src/soul/agents/routes.ts` must both read it *and* declare it in the response schema —
+Fastify silently strips any field the schema omits, which is how it stayed invisible for so long —
+and `agent-capabilities.ts` derives every fact rendered from it. Adding a restriction kind means
+touching all three or it will not appear.
+
+**An agent with no declared limits is reported as unrestricted, in the warning tone.** The absent
+case is the dangerous one, so it never renders as an empty panel or a blank row. "No limits
+declared" is a finding about the agent, not missing data about the page.
+
+**Reach takes `status-*`; autonomy keeps `heat-*` (§4.8).** They are different questions and must
+not share a ramp. Autonomy is ordered — how much rope the agent has — so the sequential ramp is
+right. Reach is categorical: reads-only, changes-data and unrestricted are three kinds of thing, not
+three amounts of one thing, so they take `status-success` / `status-info` / `status-warning`. Both
+always spell the value out, so neither carries meaning by color alone.
+
+**A roster is a list, not a card grid.** Cards look generous at three agents and collapse at three
+hundred: every row costs a title, a paragraph and two buttons of vertical space, and nothing lines
+up down the page. The roster is a list of rows whose reach, authority and CTA columns are fixed
+width — sized for their longest value, so one wide value can never shunt the column out of line —
+and whose description is the single flexible column, because it is what a scanning reader needs
+least and the profile carries in full. The page runs `wide` for the same reason: the reading-measure
+cap costs alignment more than it buys.
+
+**A row that offers two actions is not a link.** The agent row carries both "read about this" and
+"use this now". Wrapping the row in an anchor makes the button inside it unreachable and
+unannounceable, so the name is the link, the CTA is the button, and `focus-within:` on the row gives
+back the single-target feel. Every CTA takes an `aria-label` that names its agent — three bare
+"Start a chat" links are three identical accessible names. Use `aria-label`, never a trailing
+`sr-only` span: adjacent inline nodes concatenate with no space and announce as "Start a chatwith
+Planner".
+
+**Group only when grouping organizes something.** A domain heading above every single row is
+hierarchy that sorts nothing and doubles the vertical cost. `shouldGroupByDomain` turns headings on
+only once some domain holds two or more agents; below that the list stays flat and the domain moves
+onto the row beside the record types it touches.
+
+**Authored `placeholder` and `suggestions` are first-party documentation.** They are the fastest
+honest answer to "how do I use this", so they render as starters that link to
+`/?agent=<name>&draft=<prompt>` — which drafts the composer and never sends. An agent that ships
+none renders no starter region rather than an empty one.
+
+**Let the agent's own prose own its headings.** `MarkdownView` renders `##` heavier than `Panel`'s
+own title, so a titled panel wrapped around authored markdown inverts the hierarchy — the child
+heading outranks its parent both visually and semantically. The instructions panel is deliberately
+title-less for that reason.
+
+
+### The skills catalog and package
+
+A Skill is a *package*, and the question in front of an install button is "what is in it and what
+does it reach". Both Skills pages exist to answer that before anything is installed, not after.
+
+**What the package ships is the page.** `SKILL.md` frontmatter already declares `category`, `tools`,
+`allowedDomains`, `allowedCommands` and `requiredSecrets` (`packages/schema/src/skill-frontmatter.ts`
+is the canonical list), and every one of them must be declared in
+`apps/api/src/soul/skills/schemas.ts` to survive to the screen — Fastify silently strips undeclared
+response fields, which is the same trap that hid `capabilityRestrictions` on agents. **Any "the UI
+cannot see X" report on this app is a response-schema question first and a UI question second.**
+Capability fields ride on the *summary*, not only the detail, because "which of these touch the
+network" is a list question and answering it per row from the detail route is one request per Skill.
+
+**Reach is what a package brings, never what it permits.** A Skill carries no authority of its own;
+it runs under whatever the agent that loaded it may already do. `SkillReach` — `instructions-only` →
+`runs-code` → `reaches-network` → `needs-secrets` — is therefore ordered by *how far the package
+reaches*, and the badge names the furthest rung, not the first that matched. Because it is ordered it
+takes the `status-*` ramp read as a ladder (success → info → warning → danger), and always spells the
+value out beside the color.
+
+**An empty declaration reads "none declared", never "everything".** This inverts the agent rule
+deliberately (§ *The agent roster and profile*): an agent with no limits really is unrestricted, so
+silence there is a warning. A Skill that declares no domains reaches no domains. Rendering that as
+"unrestricted" would say a Skill widens the agent that loads it, which it cannot do.
+
+**Show the files, or the package is a black box.** `SkillPackagePanel` lists every file the package
+ships, grouped by what the file is *for* — manifest, reference, script, asset — because "does this
+execute" is the risk question and it outranks where the file sits in the tree. Bodies are fetched on
+demand and cached per path, so a package carrying a megabyte of unopened references costs nothing to
+list. What a file *is* beats where it lives: a `.py` under `references/` is a script.
+
+**Search the catalog; do not scroll it.** The marketplace runs to dozens of packages. A list of
+category headings answers "what exists" and never "is there one for X", which is the question that
+brings anyone to the page — so search and the category filter are the primary controls and the list
+is whatever survives them. Search reaches tool names and hosts, not just prose: "which of my Skills
+touch Slack" is asked by typing `slack`, and a Skill whose description never says so still matches.
+Bulk review hands over the *filtered* set, never the whole catalog.
+
+**Discovery may improve; the audit gate may not.** Scan → select → audit → operator-confirm exists
+because installing a Skill writes executable instructions into the Soul. Make finding a package
+easier as often as you like. Never let a row's action skip a step of that pipeline.
+
+**Every row action names its Skill.** A catalog is dozens of rows shipping the identical verb, so
+the accessible name is all a reader navigating by role has to tell them apart. `aria-label` reads
+`Install <name>` — visible word first, so it stays contained in the accessible name (WCAG 2.5.3).
+
+
+### The routines catalog and journey
+
+A Routine is a program a business runs on itself. The question in front of a Run button is
+therefore never "what does this do" in the abstract — it is **"what will happen to the world if I
+press this, and can I find out without pressing it"**. Both Routines pages exist to answer that.
+
+**The graph is the document.** A Routine's steps, its branches and its error paths are a directed
+graph, and a stacked list of YAML keys is a worse rendering of a graph than a graph is. The canvas
+is therefore primary on the detail page — not a tab, not a preview — and the same
+`RoutineCanvas` renders authoring, a live Run and a dry run, so an improvement to legibility lands
+on all three at once.
+
+**Every kind of path is told apart by two channels.** A dashed red line to the error handler and a
+solid grey line to the next step must never be distinguishable by color alone, so `EDGE_STYLE`
+pairs each `RoutineEdgeKind` with a stroke *and* a dash pattern *and* a legend entry that names it
+in words. The legend is rendered, not documented: a reader should not have to know the convention
+to use the page.
+
+**A rehearsal sits beside the real thing.** `POST …/routines/:slug/dry-run` compiles the *published*
+definition and simulates it. Every previewed effect carries `dispatched: false` and
+`secretLeased: false` from the kernel itself — a simulated Run has no live ports to disable — which
+is what makes offering "Dry run" next to "Run now" honest rather than a promise the browser is in
+no position to keep. Putting the rehearsal on a different page is what makes people skip it: the
+moment someone is willing to rehearse is the moment they are already looking at the Run button and
+hesitating. The result paints the path it took back onto the same canvas.
+
+**Rehearsing is its own route, not the authoring one.** `…/authoring/analyze` validates a *draft
+edit*: it refuses any candidate that is not the next authored version in `draft` lifecycle, so it
+can never rehearse the definition that is actually live. Rehearsing takes `routine.trigger` — the
+same right as running — because a reader who may not start a Run has no business seeing what one
+would do.
+
+**A rehearsal that invents an answer says so.** The simulator refuses to walk past a State whose
+output it cannot know: a Tool it will not call, an Agent it will not prompt, a person it will not
+wait for. A button-launched rehearsal has no canned outputs, so the route fills those holes with
+`{}` and returns `stubbedStates`. The UI prints them, because a branch reading a stubbed output may
+take a path a real Run would not — the effect list is the trustworthy part, the path through it is
+only indicative. Silently stubbing would turn a useful preview into a confident lie.
+
+**Consequences are listed per step, never aggregated.** `EffectsPanel` renders one row per
+consequence in state order, keeping repeats apart: "it calls Slack" and "it calls Slack twice" are
+different facts to a person deciding whether to press Run. `routineEffects()` in
+`app/lib/routines/facts.ts` is the single derivation, and a step that waits for a person counts as
+an effect because the Run stops there.
+
+**An undeclared ceiling warns; it never reads as low.** A Routine with no `permissionCeiling.
+maxRiskClass` is *less* constrained than one declaring `high`, so `riskTone(null)` is `warning` and
+`riskLabel(null)` says "No risk ceiling declared". This follows the agent rule, not the skill rule
+(§ *The skills catalog and package*): a Routine's own authority is real, so silence about it is a
+warning.
+
+**The catalog is a list, because routines grow to hundreds.** Grouped by *how it starts* —
+schedule, event, request, person, and the ones nothing triggers — with fixed scan columns so the
+eye tracks down one column rather than re-finding it per row. A Routine with several Triggers is
+filed once, under its first kind in group order: a catalog whose group totals exceed its item count
+cannot be counted by eye, and the row lists every Trigger anyway.
+
+**Health is a fifth column, not a badge on the name.** `runHealth()` reads the newest Run per
+Routine from the keyset-paginated Run feed, and `never-run` is its own state — a Routine that has
+never executed is neither healthy nor failing, and rendering it as either is a lie the reader will
+act on. The feed call is wrapped so a Run-feed outage dims one column rather than blanking the
+catalog.
+
+**What the list can show is decided server-side.** `routineSummary()` in
+`packages/soul/src/routine-catalog.ts` derives owner, step count, effects, tool abilities and risk
+ceiling once, and `catalog-routes.ts` must declare every one of them — Fastify silently strips
+undeclared response fields. This is the third surface where "the UI cannot see X" was a response
+schema. Check the schema first.
 
 ### `/design-guide`
 
@@ -567,6 +934,9 @@ in [`apps/docs/AGENTS.md`](apps/docs/AGENTS.md) and the `tulipfarm-docs` skill, 
 - Judging contrast from a parsed computed color rather than a rendered pixel.
 - Accepting a syntax theme without checking its tokens against the canvas.
 - Tiny icon targets, missing focus, placeholder-only labels, color-only feedback, hover-only UI.
+- A `<section>` with a visible heading but no `aria-labelledby`, so it is a region with no name.
+- Repeating one verb down a list of rows, leaving every row's action the same accessible name.
+- An `aria-label` that drops the visible word, so voice control cannot address the control.
 
 **Motion and material**
 
@@ -576,6 +946,14 @@ in [`apps/docs/AGENTS.md`](apps/docs/AGENTS.md) and the `tulipfarm-docs` skill, 
 - A JS-driven entrance whose hidden start state is not guarded by `@media (scripting: enabled)`.
 - Decorative shadows, gradients, glass, oversized radii, emoji icons, gratuitous animation.
 - Porting the docs grain or ambient wash into the product app.
+
+**Skills**
+
+- Adding a field to a Skill page without declaring it in the API response schema first.
+- Reading an empty `allowedDomains` as unrestricted. A Skill widens no agent.
+- Listing a package's files without saying which of them execute.
+- A catalog of dozens of packages with no search, or bulk-review that ignores the filter.
+- Letting a shortcut into install skip the audit and the operator confirm.
 
 **General**
 

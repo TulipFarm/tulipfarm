@@ -4,6 +4,25 @@ import { apiCommand, apiGet } from "./api";
 
 export type Autonomy = "full" | "supervised" | "approval-required" | "manual";
 
+export type AgentRecordAction = "list" | "search" | "read" | "create" | "update" | "delete";
+export type AgentResourceTypeAction = "list" | "read" | "create" | "update";
+
+export type AllowDeny<T extends string = string> = {
+  allow?: T[];
+  deny?: T[];
+};
+
+/**
+ * What the runtime will and will not let this agent do. Authored in AGENT.md frontmatter and
+ * enforced on every Tool call, so it is the honest answer to "what permissions does it have".
+ */
+export type AgentCapabilityRestrictions = {
+  tools?: AllowDeny & { allowMutating?: boolean };
+  skills?: AllowDeny;
+  records?: { actions?: AllowDeny<AgentRecordAction>; resourceTypes?: string[] };
+  resourceTypes?: { actions?: AllowDeny<AgentResourceTypeAction>; names?: string[] };
+};
+
 export type AgentSummary = {
   name: string;
   label?: string;
@@ -11,6 +30,7 @@ export type AgentSummary = {
   description?: string;
   model?: string;
   autonomy?: Autonomy;
+  capabilityRestrictions?: AgentCapabilityRestrictions;
 };
 
 export type AgentDetail = AgentSummary & {

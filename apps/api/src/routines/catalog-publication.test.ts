@@ -137,6 +137,22 @@ describe("routine_forge → Soul publication → Routines catalog", () => {
         displayName: "Daily report",
         authoredVersion: 1,
         triggers: [{ slug: "daily-report-manual", type: "manual", summary: "manual" }],
+        /*
+         * Asserted whole rather than matched loosely: this is the only test that proves the
+         * derivation survives the forge → bundle → verify → list path, and a `toMatchObject`
+         * here would pass just as happily if the summary arrived empty.
+         */
+        summary: {
+          owner: "operations",
+          stateCount: 1,
+          stateTypes: ["branch"],
+          effects: [],
+          toolAbilities: [],
+          maxRiskClass: null,
+          requiresApproval: false,
+          concurrencyPolicy: null,
+          compensationPolicy: null,
+        },
       },
     ]);
   });

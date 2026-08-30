@@ -22,7 +22,21 @@ import {
 } from "./farm";
 import { listIntegrations } from "./integrations";
 import { listSpaces } from "./knowledge-api";
+import type { RoutineCatalogSummary } from "./routines";
 import { listRoutines } from "./routines";
+
+const NO_EFFECTS: RoutineCatalogSummary = {
+  owner: null,
+  stateCount: 1,
+  stateTypes: ["compute"],
+  effects: [],
+  toolAbilities: [],
+  maxRiskClass: null,
+  requiresApproval: false,
+  concurrencyPolicy: null,
+  compensationPolicy: null,
+};
+
 import { listSkills } from "./skills";
 
 const mocks = {
@@ -194,8 +208,16 @@ describe("fetchFarm", () => {
         displayName: "Nightly",
         authoredVersion: 1,
         triggers: [{ slug: "t", type: "schedule", summary: "daily" }],
+        summary: NO_EFFECTS,
       },
-      { id: "r2", slug: "draft", displayName: null, authoredVersion: 1, triggers: [] },
+      {
+        id: "r2",
+        slug: "draft",
+        displayName: null,
+        authoredVersion: 1,
+        triggers: [],
+        summary: NO_EFFECTS,
+      },
     ]);
     mocks.integrations.mockResolvedValue([
       { name: "github", type: "mcp", installed: true, status: "connected" },

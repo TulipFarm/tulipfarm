@@ -8,7 +8,7 @@ import {
 } from "@remix-run/react";
 import { useState } from "react";
 import { DetailView } from "~/components/detail-view";
-import { ResourcePanel } from "~/components/resource-panel";
+import { PageShell } from "~/components/page-shell";
 import { ErrorState, NotFoundState } from "~/components/states";
 import { Button } from "~/components/ui/button";
 import { ApiError, deleteRecord, getRecord, listResourceTypes } from "~/lib/api";
@@ -74,30 +74,43 @@ export default function ResourceDetail() {
   }
 
   const crumbs = [
-    { label: "resources", to: "/resources" },
+    { label: "Resources", to: "/resources" },
     { label: type, to: listPath },
     { label: record.id },
   ];
+  const label = recordLabel(record);
 
   return (
-    <ResourcePanel crumbs={crumbs}>
-      <div className="flex items-center gap-2">
-        <Button asChild variant="outline" size="sm">
-          <Link to={`/resources/${encodeURIComponent(type)}/${encodeURIComponent(record.id)}/edit`}>
-            Edit
-          </Link>
-        </Button>
-        <Button variant="destructive" size="sm" onClick={onDelete} disabled={deleting}>
-          {deleting ? "Deleting…" : "Delete"}
-        </Button>
-      </div>
+    <PageShell
+      crumbs={crumbs}
+      title={label}
+      meta={
+        label === record.id ? null : (
+          <span className="font-mono text-xs text-muted-foreground">{record.id}</span>
+        )
+      }
+      actions={
+        <>
+          <Button asChild variant="outline" size="sm">
+            <Link
+              to={`/resources/${encodeURIComponent(type)}/${encodeURIComponent(record.id)}/edit`}
+            >
+              Edit
+            </Link>
+          </Button>
+          <Button variant="destructive" size="sm" onClick={onDelete} disabled={deleting}>
+            {deleting ? "Deleting…" : "Delete"}
+          </Button>
+        </>
+      }
+    >
       {deleteError ? <p className="text-destructive">error: {deleteError}</p> : null}
       {schemaError ? (
         <p className="text-destructive">error: schema parse failed, {schemaError}</p>
       ) : (
         <DetailView fields={fields} record={record} linkLabels={linkLabels} />
       )}
-    </ResourcePanel>
+    </PageShell>
   );
 }
 

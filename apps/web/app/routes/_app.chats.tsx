@@ -7,6 +7,7 @@ import {
   DeleteChatModal,
   useChatTitleActions,
 } from "~/components/chat/chat-title-actions";
+import { PageShell } from "~/components/page-shell";
 import { ErrorState } from "~/components/states";
 import { Button } from "~/components/ui/button";
 import { ApiError } from "~/lib/api";
@@ -102,105 +103,98 @@ export default function ChatsRoute() {
   const recent = sorted.filter((chat) => !chat.starred);
 
   return (
-    <div className="h-full min-h-0 overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-5xl flex-col px-4 py-8 sm:px-6 sm:py-10">
-        <header className="flex flex-col gap-5 border-b border-border pb-7 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p className="text-sm font-medium text-primary">Chat history</p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight">Your chats</h1>
-            <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
-              Return to previous work, pin important chats, or rename them for easier scanning.
+    <PageShell
+      title="Your chats"
+      description="Return to previous work, pin important chats, or rename them for easier scanning."
+      actions={
+        <Button asChild>
+          <Link to="/">
+            <Plus aria-hidden />
+            New chat
+          </Link>
+        </Button>
+      }
+    >
+      <section aria-label="Chat history">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <label className="relative block min-w-0 flex-1">
+            <span className="sr-only">Search chats</span>
+            <Search
+              aria-hidden
+              className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+            />
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search by title"
+              aria-label="search chats"
+              className={inputClass}
+            />
+          </label>
+          <p aria-live="polite" className="shrink-0 text-xs text-muted-foreground tabular-nums">
+            {searching
+              ? "Searching…"
+              : `${sorted.length} ${sorted.length === 1 ? "chat" : "chats"}`}
+          </p>
+        </div>
+
+        {pageError ? (
+          <p
+            role="alert"
+            className="mt-4 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive"
+          >
+            Request failed. {pageError}
+          </p>
+        ) : null}
+
+        {sorted.length === 0 ? (
+          <div className="mt-8 flex flex-col items-start rounded-md bg-muted/50 px-5 py-8">
+            <MessageSquare aria-hidden className="size-5 text-muted-foreground" />
+            <h2 className="mt-4 text-base font-semibold">
+              {query.trim() ? "No matching chats" : "No chats yet"}
+            </h2>
+            <p className="mt-1 max-w-md text-sm leading-6 text-muted-foreground">
+              {query.trim()
+                ? "Try a different title or clear the search."
+                : "Start a chat and it will appear here for you to revisit."}
             </p>
+            {!query.trim() ? (
+              <Link to="/" className="mt-4 text-sm font-medium text-primary hover:underline">
+                Start a new chat
+              </Link>
+            ) : null}
           </div>
-          <Button asChild className="self-start sm:self-auto">
-            <Link to="/">
-              <Plus aria-hidden />
-              New chat
-            </Link>
-          </Button>
-        </header>
-
-        <section aria-label="Chat history" className="pt-6">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <label className="relative block min-w-0 flex-1">
-              <span className="sr-only">Search chats</span>
-              <Search
-                aria-hidden
-                className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+        ) : (
+          <div className="mt-8 space-y-8">
+            {starred.length > 0 ? (
+              <ChatGroup
+                title="Starred"
+                items={starred}
+                actions={actions}
+                onToggleStar={onToggleStar}
               />
-              <input
-                type="search"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search by title"
-                aria-label="search chats"
-                className={inputClass}
+            ) : null}
+            {recent.length > 0 ? (
+              <ChatGroup
+                title="Recent"
+                items={recent}
+                actions={actions}
+                onToggleStar={onToggleStar}
               />
-            </label>
-            <p aria-live="polite" className="shrink-0 text-xs text-muted-foreground tabular-nums">
-              {searching
-                ? "Searching…"
-                : `${sorted.length} ${sorted.length === 1 ? "chat" : "chats"}`}
-            </p>
+            ) : null}
           </div>
-
-          {pageError ? (
-            <p
-              role="alert"
-              className="mt-4 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive"
-            >
-              Request failed. {pageError}
-            </p>
-          ) : null}
-
-          {sorted.length === 0 ? (
-            <div className="mt-8 flex flex-col items-start rounded-md bg-muted/50 px-5 py-8">
-              <MessageSquare aria-hidden className="size-5 text-muted-foreground" />
-              <h2 className="mt-4 text-base font-semibold">
-                {query.trim() ? "No matching chats" : "No chats yet"}
-              </h2>
-              <p className="mt-1 max-w-md text-sm leading-6 text-muted-foreground">
-                {query.trim()
-                  ? "Try a different title or clear the search."
-                  : "Start a chat and it will appear here for you to revisit."}
-              </p>
-              {!query.trim() ? (
-                <Link to="/" className="mt-4 text-sm font-medium text-primary hover:underline">
-                  Start a new chat
-                </Link>
-              ) : null}
-            </div>
-          ) : (
-            <div className="mt-8 space-y-8">
-              {starred.length > 0 ? (
-                <ChatGroup
-                  title="Starred"
-                  items={starred}
-                  actions={actions}
-                  onToggleStar={onToggleStar}
-                />
-              ) : null}
-              {recent.length > 0 ? (
-                <ChatGroup
-                  title="Recent"
-                  items={recent}
-                  actions={actions}
-                  onToggleStar={onToggleStar}
-                />
-              ) : null}
-            </div>
-          )}
-        </section>
-        <DeleteChatModal
-          open={actions.pendingDelete !== null}
-          onClose={actions.cancelDelete}
-          onConfirm={actions.confirmDelete}
-          title={actions.pendingDelete?.title ?? null}
-          busy={actions.deleting}
-          error={actions.error}
-        />
-      </div>
-    </div>
+        )}
+      </section>
+      <DeleteChatModal
+        open={actions.pendingDelete !== null}
+        onClose={actions.cancelDelete}
+        onConfirm={actions.confirmDelete}
+        title={actions.pendingDelete?.title ?? null}
+        busy={actions.deleting}
+        error={actions.error}
+      />
+    </PageShell>
   );
 }
 

@@ -7,7 +7,7 @@ import {
 } from "@remix-run/react";
 import { useState } from "react";
 import { PageForm } from "~/components/knowledge/page-form";
-import { ResourcePanel } from "~/components/resource-panel";
+import { PageShell } from "~/components/page-shell";
 import { ErrorState, NotFoundState } from "~/components/states";
 import { ApiError } from "~/lib/api";
 import { getPage, getSpace, writePage } from "~/lib/knowledge-api";
@@ -53,14 +53,14 @@ export default function PageEdit() {
   }
 
   const crumbs = [
-    { label: "knowledge", to: "/knowledge" },
+    { label: "Knowledge", to: "/knowledge" },
     { label: space.name, to: spaceHome },
     { label: doc.title, to: pagePath },
     { label: "edit" },
   ];
 
   return (
-    <ResourcePanel crumbs={crumbs}>
+    <PageShell crumbs={crumbs} title={`Edit ${doc.title}`}>
       <PageForm
         mode="edit"
         spaceId={space.id}
@@ -72,7 +72,7 @@ export default function PageEdit() {
         fieldErrors={fieldErrors}
         cancelTo={pagePath}
       />
-    </ResourcePanel>
+    </PageShell>
   );
 }
 

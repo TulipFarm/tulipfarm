@@ -102,5 +102,5 @@ test("says which crop is missing rather than passing a partial field off as whol
 test("reports a total blackout through the section's error state", () => {
   renderError(<ErrorBoundary />, new ApiError(503, "api unreachable"));
   expect(screen.getByText(/error: 503/)).toBeInTheDocument();
-  expect(screen.getByText("farm")).toBeInTheDocument();
+  expect(screen.getByRole("heading", { level: 1, name: "Farm" })).toBeInTheDocument();
 });

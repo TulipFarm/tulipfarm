@@ -5,6 +5,7 @@ import {
   type OperationAction,
   OperationsConsole,
 } from "~/components/operations/operations-console";
+import { PageShell } from "~/components/page-shell";
 import { getKillSwitches, type KillSwitchModel } from "~/lib/kill-switches";
 import { commandOperation, getOperations } from "~/lib/operations";
 
@@ -32,18 +33,16 @@ export default function OperationsRoute() {
     }
   }
   return (
-    <div className="h-full min-h-0 overflow-y-auto">
-      <div className="mx-auto max-w-6xl space-y-4 px-4 py-6 sm:px-6">
-        {killSwitches ? (
-          <KillSwitchPanel model={killSwitches} onChanged={() => revalidator.revalidate()} />
-        ) : null}
-        <OperationsConsole
-          model={model}
-          busy={busy}
-          onCommand={command}
-          onRefresh={() => revalidator.revalidate()}
-        />
-      </div>
-    </div>
+    <PageShell title="Operations">
+      {killSwitches ? (
+        <KillSwitchPanel model={killSwitches} onChanged={() => revalidator.revalidate()} />
+      ) : null}
+      <OperationsConsole
+        model={model}
+        busy={busy}
+        onCommand={command}
+        onRefresh={() => revalidator.revalidate()}
+      />
+    </PageShell>
   );
 }

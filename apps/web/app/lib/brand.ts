@@ -2,7 +2,7 @@
 
 /** Above this the mark is too pale to read on the white canvas. */
 const LIGHT_CEILING = 0.62;
-/** Below this the mark is too dark to read on the `oklch(0.17 0 0)` dark canvas. */
+/** Below this the mark is too dark to read on the `oklch(0.145 0.002 286)` dark canvas. */
 const DARK_FLOOR = 0.72;
 
 export type BrandInk = {

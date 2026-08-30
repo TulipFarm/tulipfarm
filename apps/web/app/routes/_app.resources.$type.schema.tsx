@@ -7,7 +7,7 @@ import {
   useRouteError,
 } from "@remix-run/react";
 import { type FormEvent, useState } from "react";
-import { ResourcePanel } from "~/components/resource-panel";
+import { PageShell } from "~/components/page-shell";
 import { ErrorState, NotFoundState } from "~/components/states";
 import { Button } from "~/components/ui/button";
 import { ApiError, listResourceTypes, updateResourceType } from "~/lib/api";
@@ -46,13 +46,13 @@ export default function ResourceTypeEdit() {
   }
 
   const crumbs = [
-    { label: "resources", to: "/resources" },
+    { label: "Resources", to: "/resources" },
     { label: type, to: listPath },
     { label: "schema" },
   ];
 
   return (
-    <ResourcePanel crumbs={crumbs}>
+    <PageShell crumbs={crumbs} title={`${type} schema`}>
       <form onSubmit={onSubmit} className="flex flex-col gap-3">
         <p className="text-xs text-muted-foreground">
           The full JSON Schema (YAML). Editing here is lossless: relationships (x-links), id
@@ -76,7 +76,7 @@ export default function ResourceTypeEdit() {
           </Button>
         </div>
       </form>
-    </ResourcePanel>
+    </PageShell>
   );
 }
 

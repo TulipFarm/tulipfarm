@@ -147,3 +147,45 @@ describe("PgResourceRepo", () => {
     expect(page2.nextCursor).toBeNull();
   });
 });
+
+describe("PgResourceRepo.stats", () => {
+  let db: PGlite;
+  let repo: PgResourceRepo;
+
+  beforeEach(async () => {
+    db = await makeMigratedPglite();
+    await db.query(createResourceTableSql(TYPE));
+    await db.query(createHistoryTableSql(TYPE));
+    repo = new PgResourceRepo(db, TYPE);
+  });
+
+  afterEach(async () => {
+    await db.close();
+  });
+
+  it("reports zero and no last write for an empty type", async () => {
+    expect(await repo.stats()).toEqual({ count: 0, lastUpdatedAt: null });
+  });
+
+  it("counts live records and reports the newest updatedAt", async () => {
+    const older = new Date("2026-02-01T00:00:00.000Z");
+    const newer = new Date("2026-05-09T12:30:00.000Z");
+    await repo.insert(doc({ createdAt: older, updatedAt: older }));
+    await repo.insert(doc({ createdAt: older, updatedAt: newer }));
+
+    const stats = await repo.stats();
+    expect(stats.count).toBe(2);
+    expect(stats.lastUpdatedAt?.getTime()).toBe(newer.getTime());
+  });
+
+  it("excludes soft-deleted records from both the count and the last write", async () => {
+    const live = new Date("2026-02-01T00:00:00.000Z");
+    const deleted = new Date("2026-08-01T00:00:00.000Z");
+    await repo.insert(doc({ createdAt: live, updatedAt: live }));
+    await repo.insert(doc({ createdAt: deleted, updatedAt: deleted, deletedAt: deleted }));
+
+    const stats = await repo.stats();
+    expect(stats.count).toBe(1);
+    expect(stats.lastUpdatedAt?.getTime()).toBe(live.getTime());
+  });
+});
