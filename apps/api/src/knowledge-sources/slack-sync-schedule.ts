@@ -1,6 +1,7 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import {
   type KnowledgeIdentityMapPort,
+  SLACK_KNOWLEDGE_SYNC_PERIOD_SECONDS,
   type SlackKnowledgeCheckpointStore,
   type SlackKnowledgeSyncResult,
   syncSlackKnowledge,
@@ -15,8 +16,13 @@ import type { PgKnowledgeEmissionSink } from "./emission-sink";
 import { SlackHttpKnowledgeApi } from "./slack-http";
 
 export const SLACK_KNOWLEDGE_SYNC_QUEUE = "slack-knowledge-sync";
-/** Every 15 minutes, matching `CONNECTOR_SYNC_CRON`. */
-export const SLACK_KNOWLEDGE_SYNC_CRON = "*/15 * * * *";
+/**
+ * Derived from `SLACK_KNOWLEDGE_SYNC_PERIOD_SECONDS`, the same constant `syncSlackKnowledge`
+ * uses to size the captured ACL snapshot's max age, so the two can never drift out of the
+ * refresh-within-validity-window relationship that keeps `acl_stale` denials from firing on a
+ * fresh snapshot. Every 15 minutes, matching `CONNECTOR_SYNC_CRON`.
+ */
+export const SLACK_KNOWLEDGE_SYNC_CRON = `*/${SLACK_KNOWLEDGE_SYNC_PERIOD_SECONDS / 60} * * * *`;
 
 export interface SlackKnowledgeSyncScheduleDeps {
   readonly integrations: IntegrationStore;

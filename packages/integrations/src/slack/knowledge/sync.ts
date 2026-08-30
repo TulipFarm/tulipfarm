@@ -53,11 +53,30 @@ export interface SlackKnowledgeSyncResult {
   readonly failures: readonly { readonly code: SlackSyncFailureCode }[];
 }
 
+/**
+ * How often `apps/api/src/knowledge-sources/slack-sync-schedule.ts` runs the Slack Knowledge
+ * sync job. Defined here, next to the ACL snapshot it refreshes, so the schedule is derived
+ * from this value rather than a second hardcoded cron string that can drift out of step with it.
+ */
+export const SLACK_KNOWLEDGE_SYNC_PERIOD_SECONDS = 900; // 15 min, matching CONNECTOR_SYNC_CRON
+
+/**
+ * The captured ACL snapshot must outlive at least one missed sync by a comfortable margin, or a
+ * single delayed/failed job run blacks out retrieval for every Slack source until the next one
+ * lands (`decideKnowledgeAccess` denies with `acl_stale`, silently, per source). A multiple of
+ * the sync period keeps that relationship explicit instead of two constants that happen to agree.
+ */
+const ACL_MAX_AGE_SYNC_PERIOD_MULTIPLE = 3;
+
+/** Exported so `sync.test.ts` can pin this to `SLACK_KNOWLEDGE_SYNC_PERIOD_SECONDS`. */
+export const SLACK_KNOWLEDGE_ACL_MAX_AGE_SECONDS =
+  SLACK_KNOWLEDGE_SYNC_PERIOD_SECONDS * ACL_MAX_AGE_SYNC_PERIOD_MULTIPLE;
+
 const DEFAULTS = {
   pageLimit: 200,
   publicClassification: ["internal"] as readonly string[],
   restrictedClassification: ["restricted"] as readonly string[],
-  aclMaximumAgeSeconds: 300,
+  aclMaximumAgeSeconds: SLACK_KNOWLEDGE_ACL_MAX_AGE_SECONDS,
   liveMaximumAgeSeconds: 60,
 };
 
