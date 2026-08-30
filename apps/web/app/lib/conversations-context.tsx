@@ -9,7 +9,12 @@ import {
   useRef,
   useState,
 } from "react";
-import { type ConversationSummary, listConversations } from "~/lib/conversations";
+import {
+  type ConversationSummary,
+  deleteConversation,
+  listConversations,
+  renameConversation,
+} from "~/lib/conversations";
 
 /* Route changes refetch; shallow chat id overrides survive index `history.replaceState`. */
 
@@ -33,6 +38,17 @@ type ConversationsContextValue = {
   newChatNonce: number;
   /** Start a fresh chat from anywhere: clear active state, force a remount, and route to "/". */
   startNewChat: () => void;
+  /**
+   * Rename a chat and fold the API's updated summary straight into the list, so the sidebar, the
+   * top bar and the Chats page all show the new title without a refetch. Rejects on failure; the
+   * caller owns telling the user.
+   */
+  renameChat: (id: string, title: string) => Promise<ConversationSummary>;
+  /**
+   * Delete a chat and drop it from the list. Deleting the chat currently on screen routes to the
+   * new-chat surface, since its transcript no longer exists. Rejects on failure.
+   */
+  removeChat: (id: string) => Promise<void>;
 };
 
 const ConversationsContext = createContext<ConversationsContextValue | null>(null);
@@ -136,6 +152,25 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
   // A real /chat/:id route wins; otherwise fall back to the shallow override from a replaceState.
   const routeMatch = pathname.match(/^\/chat\/([^/]+)$/);
   const activeChatId = routeMatch ? decodeURIComponent(routeMatch[1]) : shallowId;
+
+  const renameChat = useCallback(async (id: string, title: string) => {
+    const updated = await renameConversation(id, title);
+    setConversations((prev) => prev.map((c) => (c.id === id ? updated : c)));
+    // A chat older than the list's window is not in `conversations`, so the top bar reads its title
+    // from the loader's publish instead. Keep that in step or the rename looks like it did nothing.
+    setLoadedTitle((prev) => (prev?.id === id ? { id, title: updated.title } : prev));
+    return updated;
+  }, []);
+
+  const removeChat = useCallback(
+    async (id: string) => {
+      await deleteConversation(id);
+      setConversations((prev) => prev.filter((c) => c.id !== id));
+      setLoadedTitle((prev) => (prev?.id === id ? null : prev));
+      if (id === activeChatId) startNewChat();
+    },
+    [activeChatId, startNewChat]
+  );
   // The list is the fresher source (it picks up renames and async-generated titles); the loader's
   // title only fills the gap before the list resolves, and for chats older than the list's window.
   const activeChatTitle = activeChatId
@@ -155,6 +190,8 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
       setActiveChatTitle,
       newChatNonce,
       startNewChat,
+      renameChat,
+      removeChat,
     }),
     [
       conversations,
@@ -167,6 +204,8 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
       setActiveChatTitle,
       newChatNonce,
       startNewChat,
+      renameChat,
+      removeChat,
     ]
   );
   return <ConversationsContext.Provider value={value}>{children}</ConversationsContext.Provider>;
@@ -184,6 +223,12 @@ const INERT: ConversationsContextValue = {
   setActiveChatTitle: () => {},
   newChatNonce: 0,
   startNewChat: () => {},
+  renameChat: async () => {
+    throw new Error("no ConversationsProvider");
+  },
+  removeChat: async () => {
+    throw new Error("no ConversationsProvider");
+  },
 };
 
 export function useConversations(): ConversationsContextValue {

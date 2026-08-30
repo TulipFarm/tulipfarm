@@ -35,21 +35,21 @@ function makeTitleModel(text: string | null): LanguageModel {
 
 describe("buildAndStoreTitle", () => {
   it("persists the generated title", async () => {
-    const setTitle = vi.fn(async () => undefined);
+    const setTitleIfUnset = vi.fn(async () => undefined);
     await buildAndStoreTitle({
-      repo: { setTitle },
+      repo: { setTitleIfUnset },
       getModel: () => makeTitleModel("Q3 Plan"),
       id: "c1",
       prompt: "plan q3",
       log: silentLog,
     });
-    expect(setTitle).toHaveBeenCalledWith("c1", "Q3 Plan");
+    expect(setTitleIfUnset).toHaveBeenCalledWith("c1", "Q3 Plan");
   });
 
   it("persists the fallback title when the quick tier is unavailable (getModel throws)", async () => {
-    const setTitle = vi.fn(async () => undefined);
+    const setTitleIfUnset = vi.fn(async () => undefined);
     await buildAndStoreTitle({
-      repo: { setTitle },
+      repo: { setTitleIfUnset },
       getModel: () => {
         throw new Error("quick tier not configured");
       },
@@ -57,7 +57,7 @@ describe("buildAndStoreTitle", () => {
       prompt: "help me plan inventory",
       log: silentLog,
     });
-    expect(setTitle).toHaveBeenCalledWith("c1", "help me plan inventory");
+    expect(setTitleIfUnset).toHaveBeenCalledWith("c1", "help me plan inventory");
   });
 
   it("swallows a persistence failure (a missing title is non-fatal)", async () => {
@@ -65,7 +65,7 @@ describe("buildAndStoreTitle", () => {
     await expect(
       buildAndStoreTitle({
         repo: {
-          setTitle: async () => {
+          setTitleIfUnset: async () => {
             throw new Error("db down");
           },
         },

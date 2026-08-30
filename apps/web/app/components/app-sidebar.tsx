@@ -10,6 +10,13 @@ import {
   Plus,
 } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import {
+  ChatActionsMenu,
+  ChatCrumbTitle,
+  ChatTitleInput,
+  DeleteChatModal,
+  useChatTitleActions,
+} from "~/components/chat/chat-title-actions";
 import { KnowledgeTree } from "~/components/knowledge/space-tree";
 import { CompanionMobileTrigger } from "~/components/onboarding/companion";
 import { ReportBugButton } from "~/components/report-bug-button";
@@ -191,6 +198,8 @@ function ContextLink({
 
 function ChatContext({ onNavigate }: { onNavigate: () => void }) {
   const { conversations, activeChatId, startNewChat } = useConversations();
+  const actions = useChatTitleActions();
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <button
@@ -214,29 +223,65 @@ function ChatContext({ onNavigate }: { onNavigate: () => void }) {
         </Link>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+        {actions.error && !actions.pendingDelete ? (
+          <p role="alert" className="mb-1 px-3 py-1 text-xs text-destructive">
+            {actions.error}
+          </p>
+        ) : null}
         {conversations.length > 0 ? (
-          conversations.map((chat) => (
-            <Link
-              key={chat.id}
-              to={`/chat/${chat.id}`}
-              onClick={onNavigate}
-              aria-current={chat.id === activeChatId ? "page" : undefined}
-              className={cn(
-                "block truncate rounded-md px-3 py-2 text-sm transition-colors duration-150",
-                chat.id === activeChatId
-                  ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
-                  : "text-sidebar-foreground hover:bg-sidebar-accent/60"
-              )}
-            >
-              {chat.title ?? "New chat"}
-            </Link>
-          ))
+          conversations.map((chat) =>
+            actions.renamingId === chat.id ? (
+              <div key={chat.id} className="px-1 py-1">
+                <ChatTitleInput
+                  initialTitle={chat.title ?? ""}
+                  onSave={(next) => actions.submitRename(chat.id, next)}
+                  onCancel={actions.cancelRename}
+                  className="h-9 text-sm"
+                />
+              </div>
+            ) : (
+              <div
+                key={chat.id}
+                className={cn(
+                  "group flex items-center rounded-md transition-colors duration-150",
+                  chat.id === activeChatId
+                    ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                    : "hover:bg-sidebar-accent/60"
+                )}
+              >
+                <Link
+                  to={`/chat/${chat.id}`}
+                  onClick={onNavigate}
+                  aria-current={chat.id === activeChatId ? "page" : undefined}
+                  className={cn(
+                    "min-w-0 flex-1 truncate px-3 py-2 text-sm",
+                    chat.id === activeChatId ? "font-medium" : "text-sidebar-foreground"
+                  )}
+                >
+                  {chat.title ?? "New chat"}
+                </Link>
+                <ChatActionsMenu
+                  onStartRename={() => actions.startRename(chat.id)}
+                  onDelete={() => actions.requestDelete(chat)}
+                  triggerClassName="mr-1"
+                />
+              </div>
+            )
+          )
         ) : (
           <p className="px-3 py-2 text-xs leading-relaxed text-muted-foreground">
             Your chats will appear here.
           </p>
         )}
       </div>
+      <DeleteChatModal
+        open={actions.pendingDelete !== null}
+        onClose={actions.cancelDelete}
+        onConfirm={actions.confirmDelete}
+        title={actions.pendingDelete?.title ?? null}
+        busy={actions.deleting}
+        error={actions.error}
+      />
     </div>
   );
 }
@@ -437,10 +482,12 @@ function Breadcrumb({
   pathname,
   pageTitle,
   visibility,
+  titleSlot,
 }: {
   pathname: string;
   pageTitle: string;
   visibility: NavigationVisibility;
+  titleSlot?: ReactNode;
 }) {
   const mode = modeForPath(pathname);
   const parent = { ...MODE_META[mode], to: destinationForMode(mode, visibility) };
@@ -462,12 +509,14 @@ function Breadcrumb({
         ) : null}
         <li className="flex min-w-0 items-center gap-2">
           <PageIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-          <span
-            aria-current="page"
-            className="min-w-0 truncate text-sm font-medium text-foreground"
-          >
-            {pageTitle}
-          </span>
+          {titleSlot ?? (
+            <span
+              aria-current="page"
+              className="min-w-0 truncate text-sm font-medium text-foreground"
+            >
+              {pageTitle}
+            </span>
+          )}
         </li>
       </ol>
     </nav>
@@ -484,7 +533,7 @@ export function AppShell({ children, user }: { children: ReactNode; user?: Sessi
   );
   const { pathname } = useLocation();
   const openerRef = useRef<HTMLButtonElement>(null);
-  const { activeChatTitle } = useConversations();
+  const { activeChatTitle, activeChatId } = useConversations();
   const isConversation = pathname === "/" || pathname.startsWith("/chat/");
   const currentMode = modeForPath(pathname);
   const visibility = { isDev: import.meta.env.DEV, visiblePaths: user?.navigation?.visiblePaths };
@@ -492,6 +541,11 @@ export function AppShell({ children, user }: { children: ReactNode; user?: Sessi
   const pageTitle = isConversation
     ? (activeChatTitle ?? (pathname === "/" ? "New chat" : "Chat"))
     : titleForPath(pathname);
+  // Only a persisted chat can be renamed or deleted; the new-chat surface has nothing to act on yet.
+  const chatTitleSlot =
+    isConversation && activeChatId ? (
+      <ChatCrumbTitle key={activeChatId} chatId={activeChatId} title={activeChatTitle ?? null} />
+    ) : undefined;
 
   useEffect(() => {
     if (!open) return;
@@ -556,7 +610,12 @@ export function AppShell({ children, user }: { children: ReactNode; user?: Sessi
             ) : null}
           </span>
           <Separator orientation="vertical" className="mx-1 hidden h-5 lg:block" />
-          <Breadcrumb pathname={pathname} pageTitle={pageTitle} visibility={visibility} />
+          <Breadcrumb
+            pathname={pathname}
+            pageTitle={pageTitle}
+            visibility={visibility}
+            titleSlot={chatTitleSlot}
+          />
           <div className="ml-auto flex shrink-0 items-center gap-1 pl-2">
             <span className="sm:hidden">
               <CompanionMobileTrigger />

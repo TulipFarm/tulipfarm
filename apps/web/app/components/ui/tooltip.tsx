@@ -15,7 +15,7 @@ export function Tooltip({ children, content }: { children: ReactNode; content: s
     // biome-ignore lint/a11y/noStaticElementInteractions: observes its native interactive child so the tooltip can be portalled outside clipping containers.
     <span
       ref={triggerRef}
-      className="inline-flex"
+      className="inline-flex min-w-0"
       onMouseEnter={show}
       onMouseLeave={() => setPosition(null)}
       onFocusCapture={show}

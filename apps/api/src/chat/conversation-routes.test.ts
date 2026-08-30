@@ -1,3 +1,4 @@
+import { CHAT_TITLE_MAX_LENGTH } from "@tulipfarm/schema";
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { UserDoc } from "../auth/users";
@@ -59,6 +60,83 @@ describe("restoring the latest Turn", () => {
       runId: "run-1",
       status: "running",
     });
+  });
+});
+
+describe("conversation rename route", () => {
+  let app: FastifyInstance;
+  let stored: { _id: string; userId: string; title?: string; createdAt: Date; updatedAt: Date };
+  const setTitle = vi.fn<ConversationRepo["setTitle"]>(async (_id, title) => {
+    stored.title = title;
+  });
+
+  beforeEach(async () => {
+    stored = {
+      _id: "chat-1",
+      userId: "user-1",
+      createdAt: new Date("2026-08-21T00:00:00.000Z"),
+      updatedAt: new Date("2026-08-21T00:00:01.000Z"),
+    };
+    app = Fastify();
+    const repo = {
+      findById: async () => stored,
+      setTitle,
+    } as unknown as ConversationRepo;
+    registerConversationRoutes(app, { repo, messageRepo: {} as MessageRepo }, async (request) => {
+      request.user = { _id: "user-1" } as UserDoc;
+    });
+    await app.ready();
+  });
+
+  afterEach(async () => {
+    vi.clearAllMocks();
+    await app.close();
+  });
+
+  it("stores a trimmed title and echoes the updated conversation", async () => {
+    const response = await app.inject({
+      method: "PUT",
+      url: "/api/v1/chats/chat-1",
+      payload: { title: "  Q3 pricing review  " },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(setTitle).toHaveBeenCalledWith("chat-1", "Q3 pricing review");
+    expect(response.json().title).toBe("Q3 pricing review");
+  });
+
+  it("accepts a title exactly at the shared ceiling", async () => {
+    const response = await app.inject({
+      method: "PUT",
+      url: "/api/v1/chats/chat-1",
+      payload: { title: "x".repeat(CHAT_TITLE_MAX_LENGTH) },
+    });
+
+    expect(response.statusCode).toBe(200);
+  });
+
+  // The UI caps its field at the same constant, so a rejection here means the two have drifted.
+  it("rejects a title past the shared ceiling without touching the conversation", async () => {
+    const response = await app.inject({
+      method: "PUT",
+      url: "/api/v1/chats/chat-1",
+      payload: { title: "x".repeat(CHAT_TITLE_MAX_LENGTH + 1) },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(setTitle).not.toHaveBeenCalled();
+  });
+
+  it("rejects a whitespace-only title rather than blanking the name", async () => {
+    const response = await app.inject({
+      method: "PUT",
+      url: "/api/v1/chats/chat-1",
+      payload: { title: "   " },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "title must not be blank" });
+    expect(setTitle).not.toHaveBeenCalled();
   });
 });
 

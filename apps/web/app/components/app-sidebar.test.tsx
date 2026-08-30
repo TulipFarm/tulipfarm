@@ -69,6 +69,8 @@ const CONVERSATIONS = {
   setActiveChatTitle: vi.fn(),
   newChatNonce: 0,
   startNewChat: vi.fn(),
+  renameChat: vi.fn(),
+  removeChat: vi.fn(),
 };
 
 beforeEach(() => {
@@ -256,6 +258,59 @@ test("starts a fresh Chat from the contextual sidebar", async () => {
   expect(startNewChat).toHaveBeenCalledTimes(1);
 });
 
+test("renames a recent chat from the sidebar without following its link", async () => {
+  const user = userEvent.setup();
+  const renameChat = vi.fn(async () => CONVERSATIONS.conversations[0]);
+  useConversations.mockReturnValue({
+    ...CONVERSATIONS,
+    conversations: [
+      {
+        id: "c1",
+        title: "Inventory planning",
+        agentId: null,
+        starred: false,
+        createdAt: "t",
+        updatedAt: "t",
+      },
+    ],
+    renameChat,
+  });
+  render(<SidebarStub initialEntries={["/"]} />);
+  await user.click(screen.getByRole("button", { name: "Chat actions" }));
+  await user.click(await screen.findByRole("menuitem", { name: /rename/i }));
+
+  const input = screen.getByLabelText("Rename chat");
+  await user.clear(input);
+  await user.type(input, "Q3 restock{Enter}");
+  expect(renameChat).toHaveBeenCalledWith("c1", "Q3 restock");
+});
+
+test("deletes a recent chat from the sidebar only after confirmation", async () => {
+  const user = userEvent.setup();
+  const removeChat = vi.fn(async () => {});
+  useConversations.mockReturnValue({
+    ...CONVERSATIONS,
+    conversations: [
+      {
+        id: "c1",
+        title: "Inventory planning",
+        agentId: null,
+        starred: false,
+        createdAt: "t",
+        updatedAt: "t",
+      },
+    ],
+    removeChat,
+  });
+  render(<SidebarStub initialEntries={["/"]} />);
+  await user.click(screen.getByRole("button", { name: "Chat actions" }));
+  await user.click(await screen.findByRole("menuitem", { name: /delete/i }));
+  expect(removeChat).not.toHaveBeenCalled();
+
+  await user.click(screen.getByRole("button", { name: /^delete$/i }));
+  expect(removeChat).toHaveBeenCalledWith("c1");
+});
+
 test("renders the shared top bar and restores focus after Escape closes navigation", async () => {
   const user = userEvent.setup();
   render(<ShellStub initialEntries={["/resources"]} />);
@@ -299,6 +354,92 @@ test("names the chat itself in the top bar, with no self-referential parent crum
   const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumb" });
   expect(within(breadcrumb).queryByRole("link")).not.toBeInTheDocument();
   expect(within(breadcrumb).getByText("Q3 pricing review")).toHaveAttribute("aria-current", "page");
+});
+
+test("renames the open chat by clicking its name in the top bar", async () => {
+  const user = userEvent.setup();
+  const renameChat = vi.fn(async () => CONVERSATIONS.conversations[0]);
+  useConversations.mockReturnValue({
+    ...CONVERSATIONS,
+    activeChatId: "c1",
+    activeChatTitle: "Q3 pricing review",
+    renameChat,
+  });
+  render(<ShellStub initialEntries={["/chat/c1"]} />);
+  await user.click(screen.getByRole("button", { name: "Rename this chat: Q3 pricing review" }));
+
+  const input = screen.getByLabelText("Rename this chat");
+  expect(input).toHaveAttribute("maxlength", "200");
+  await user.clear(input);
+  await user.type(input, "Q3 pricing, final{Enter}");
+  expect(renameChat).toHaveBeenCalledWith("c1", "Q3 pricing, final");
+});
+
+test("deletes the open chat from the top bar only after confirmation", async () => {
+  const user = userEvent.setup();
+  const removeChat = vi.fn(async () => {});
+  useConversations.mockReturnValue({
+    ...CONVERSATIONS,
+    activeChatId: "c1",
+    activeChatTitle: "Q3 pricing review",
+    removeChat,
+  });
+  render(<ShellStub initialEntries={["/chat/c1"]} />);
+  await user.click(screen.getByRole("button", { name: "Chat actions" }));
+  await user.click(await screen.findByRole("menuitem", { name: /delete/i }));
+  expect(removeChat).not.toHaveBeenCalled();
+
+  await user.click(screen.getByRole("button", { name: /^delete$/i }));
+  expect(removeChat).toHaveBeenCalledWith("c1");
+});
+
+test("offers no rename or delete on the new-chat surface, which has nothing to act on", () => {
+  render(<ShellStub initialEntries={["/"]} />);
+  expect(screen.queryByRole("button", { name: "Chat actions" })).not.toBeInTheDocument();
+});
+
+test("keeps the chat actions reachable on touch, where there is no hover to reveal them", () => {
+  useConversations.mockReturnValue({
+    ...CONVERSATIONS,
+    activeChatId: "c1",
+    activeChatTitle: "Q3 pricing review",
+  });
+  render(<ShellStub initialEntries={["/chat/c1"]} />);
+  const trigger = screen.getByRole("button", { name: "Chat actions" });
+  // Hidden only from `sm` up: below it the trigger stays visible at a 44px target.
+  expect(trigger.className).toContain("sm:opacity-0");
+  expect(trigger.className).not.toMatch(/(^|\s)opacity-0(\s|$)/);
+  expect(trigger.className).toContain("size-11");
+});
+
+test("keeps a refused delete inside its dialog, where the backdrop cannot hide it", async () => {
+  const user = userEvent.setup();
+  const removeChat = vi.fn(async () => {
+    throw new Error("This chat has a Turn in progress.");
+  });
+  useConversations.mockReturnValue({
+    ...CONVERSATIONS,
+    activeChatId: "c1",
+    activeChatTitle: "Q3 pricing review",
+    removeChat,
+  });
+  render(<ShellStub initialEntries={["/chat/c1"]} />);
+  await user.click(screen.getByRole("button", { name: "Chat actions" }));
+  await user.click(await screen.findByRole("menuitem", { name: /delete/i }));
+  await user.click(screen.getByRole("button", { name: /^delete$/i }));
+
+  const dialog = await screen.findByRole("dialog");
+  expect(within(dialog).getByRole("alert")).toHaveTextContent("This chat has a Turn in progress.");
+  // The dialog stays open so the user can read the reason and retry or cancel.
+  expect(within(dialog).getByRole("button", { name: /^delete$/i })).toBeEnabled();
+});
+
+test("does not seed the rename field with the placeholder shown before the titler lands", async () => {
+  const user = userEvent.setup();
+  useConversations.mockReturnValue({ ...CONVERSATIONS, activeChatId: "c1", activeChatTitle: null });
+  render(<ShellStub initialEntries={["/chat/c1"]} />);
+  await user.click(screen.getByRole("button", { name: "Rename this chat: New chat" }));
+  expect(screen.getByLabelText("Rename this chat")).toHaveValue("");
 });
 
 test("calls an untitled chat surface a new chat", () => {
