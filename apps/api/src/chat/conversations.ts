@@ -27,6 +27,14 @@ export interface ConversationRepo {
    * (lands after the turn, out of band) and a manual rename (which should not reorder the list).
    */
   setTitle(id: string, title: string): Promise<void>;
+  /**
+   * Persist a generated title, but only while the conversation still has none.
+   *
+   * The async title generator lands after the turn it names. The top bar offers a rename the
+   * moment a chat exists, which is inside that window, so an unconditional write would silently
+   * overwrite a title the user had just typed.
+   */
+  setTitleIfUnset(id: string, title: string): Promise<void>;
   /** Persist the user-pinned flag (Chats page star toggle). Does not bump `updated_at`. */
   setStarred(id: string, starred: boolean): Promise<void>;
   /**
@@ -106,6 +114,13 @@ export class PgConversationRepo implements ConversationRepo {
 
   async setTitle(id: string, title: string): Promise<void> {
     await this.q.query("UPDATE conversations SET title = $2 WHERE id = $1", [id, title]);
+  }
+
+  async setTitleIfUnset(id: string, title: string): Promise<void> {
+    await this.q.query("UPDATE conversations SET title = $2 WHERE id = $1 AND title IS NULL", [
+      id,
+      title,
+    ]);
   }
 
   async setStarred(id: string, starred: boolean): Promise<void> {

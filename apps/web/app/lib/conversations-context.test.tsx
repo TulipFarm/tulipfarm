@@ -1,11 +1,16 @@
 import { createRemixStub } from "@remix-run/testing";
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 import type { ConversationSummary } from "~/lib/conversations";
 import * as conversations from "~/lib/conversations";
 import { ConversationsProvider, useConversations } from "./conversations-context";
 
-vi.mock("~/lib/conversations", () => ({ listConversations: vi.fn() }));
+vi.mock("~/lib/conversations", () => ({
+  listConversations: vi.fn(),
+  renameConversation: vi.fn(),
+  deleteConversation: vi.fn(),
+}));
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -135,4 +140,101 @@ test("coalesces refreshes requested during an in-flight fetch into one trailing 
   });
   expect(conversations.listConversations).toHaveBeenCalledTimes(2);
   expect(screen.getByTestId("count").textContent).toBe("2");
+});
+
+function MutateConsumer() {
+  const { conversations: list, renameChat, removeChat } = useConversations();
+  const [failure, setFailure] = useState("none");
+  return (
+    <>
+      <span data-testid="titles">{list.map((c) => c.title).join(",") || "none"}</span>
+      <span data-testid="failure">{failure}</span>
+      <button
+        type="button"
+        onClick={() => {
+          renameChat("c1", "Renamed").catch((err: Error) => setFailure(err.message));
+        }}
+      >
+        rename
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          removeChat("c1").catch((err: Error) => setFailure(err.message));
+        }}
+      >
+        remove
+      </button>
+    </>
+  );
+}
+
+function renderMutableAt(path: string) {
+  const provider = (
+    <ConversationsProvider>
+      <MutateConsumer />
+    </ConversationsProvider>
+  );
+  const Stub = createRemixStub([
+    { path: "/", Component: () => provider },
+    { path: "/chat/:id", Component: () => provider },
+  ]);
+  render(<Stub initialEntries={[path]} />);
+}
+
+test("a rename folds the API's updated summary into the list without a refetch", async () => {
+  vi.mocked(conversations.listConversations).mockResolvedValue([summary("c1"), summary("c2")]);
+  vi.mocked(conversations.renameConversation).mockResolvedValue({
+    ...summary("c1"),
+    title: "Renamed",
+  });
+  renderMutableAt("/");
+  await act(async () => {});
+  expect(screen.getByTestId("titles").textContent).toBe("c1,c2");
+
+  await act(async () => {
+    fireEvent.click(screen.getByText("rename"));
+  });
+  expect(conversations.renameConversation).toHaveBeenCalledWith("c1", "Renamed");
+  expect(conversations.listConversations).toHaveBeenCalledTimes(1);
+  expect(screen.getByTestId("titles").textContent).toBe("Renamed,c2");
+});
+
+test("a delete drops the chat from the list", async () => {
+  vi.mocked(conversations.listConversations).mockResolvedValue([summary("c1"), summary("c2")]);
+  vi.mocked(conversations.deleteConversation).mockResolvedValue(undefined);
+  renderMutableAt("/");
+  await act(async () => {});
+
+  await act(async () => {
+    fireEvent.click(screen.getByText("remove"));
+  });
+  expect(conversations.deleteConversation).toHaveBeenCalledWith("c1");
+  expect(screen.getByTestId("titles").textContent).toBe("c2");
+});
+
+// Deleting the chat on screen must not leave the user staring at a transcript the API just erased.
+test("deleting the chat currently open routes back to the new-chat surface", async () => {
+  vi.mocked(conversations.listConversations).mockResolvedValue([summary("c1")]);
+  vi.mocked(conversations.deleteConversation).mockResolvedValue(undefined);
+  renderMutableAt("/chat/c1");
+  await act(async () => {});
+
+  await act(async () => {
+    fireEvent.click(screen.getByText("remove"));
+  });
+  expect(window.location.pathname).toBe("/");
+});
+
+test("a failed rename leaves the list untouched and rejects to the caller", async () => {
+  vi.mocked(conversations.listConversations).mockResolvedValue([summary("c1")]);
+  vi.mocked(conversations.renameConversation).mockRejectedValue(new Error("nope"));
+  renderMutableAt("/");
+  await act(async () => {});
+
+  await act(async () => {
+    fireEvent.click(screen.getByText("rename"));
+  });
+  expect(screen.getByTestId("titles").textContent).toBe("c1");
+  expect(screen.getByTestId("failure").textContent).toBe("nope");
 });

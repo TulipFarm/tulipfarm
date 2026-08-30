@@ -1,6 +1,6 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { FileService } from "@tulipfarm/files";
-import { ConversationDetailSchema } from "@tulipfarm/schema";
+import { CHAT_TITLE_MAX_LENGTH, ConversationDetailSchema } from "@tulipfarm/schema";
 import type { SoulLoader } from "@tulipfarm/soul";
 import { resolveAgent } from "@tulipfarm/soul";
 import { parsePaginationQuery } from "@tulipfarm/storage";
@@ -140,7 +140,7 @@ export function registerConversationRoutes(
       schema: {
         description:
           "Update a conversation's title (rename) and/or starred flag. Owner-only. At least one " +
-          "field is required.",
+          `field is required. A title is trimmed and may not exceed ${CHAT_TITLE_MAX_LENGTH} characters.`,
         tags: ["chat"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         params: {
@@ -153,7 +153,7 @@ export function registerConversationRoutes(
           additionalProperties: false,
           minProperties: 1,
           properties: {
-            title: { type: "string", minLength: 1, maxLength: 200 },
+            title: { type: "string", minLength: 1, maxLength: CHAT_TITLE_MAX_LENGTH },
             starred: { type: "boolean" },
           },
         },

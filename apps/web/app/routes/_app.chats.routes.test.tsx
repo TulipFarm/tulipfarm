@@ -1,6 +1,7 @@
 import * as remix from "@remix-run/react";
 import { createRemixStub } from "@remix-run/testing";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { CHAT_TITLE_MAX_LENGTH } from "@tulipfarm/schema/chat";
 import type { ReactElement } from "react";
 import { expect, test, vi } from "vitest";
 import type { ConversationSummary } from "~/lib/conversations";
@@ -20,9 +21,19 @@ vi.mock("~/lib/conversations", () => ({
 
 const contextMocks = vi.hoisted(() => ({ refresh: vi.fn(async () => {}) }));
 
-vi.mock("~/lib/conversations-context", () => ({
-  useConversations: () => ({ refresh: contextMocks.refresh }),
-}));
+// The page renames and deletes through the conversations context so the sidebar and top bar stay in
+// step. The context's own methods are thin wrappers over these client functions, so the stub
+// delegates to them and the assertions below still pin the request that reaches the API.
+vi.mock("~/lib/conversations-context", async () => {
+  const client = await import("~/lib/conversations");
+  return {
+    useConversations: () => ({
+      refresh: contextMocks.refresh,
+      renameChat: client.renameConversation,
+      removeChat: client.deleteConversation,
+    }),
+  };
+});
 
 import {
   deleteConversation,
@@ -102,7 +113,7 @@ test("the three-dots menu renames a chat inline", async () => {
   expect(renameConversation).toHaveBeenCalledWith("c1", "Renamed");
 });
 
-test("deleting a chat requires confirmation, removes it, and refreshes the sidebar", async () => {
+test("deleting a chat requires confirmation and removes it from the list", async () => {
   vi.mocked(deleteConversation).mockResolvedValue(undefined);
   renderWithItems(<ChatsRoute />, [convo()]);
   fireEvent.click(screen.getByRole("button", { name: /chat actions/i }));
@@ -115,8 +126,20 @@ test("deleting a chat requires confirmation, removes it, and refreshes the sideb
 
   fireEvent.click(screen.getByRole("button", { name: /^delete$/i }));
   await waitFor(() => expect(deleteConversation).toHaveBeenCalledWith("c1"));
-  await waitFor(() => expect(contextMocks.refresh).toHaveBeenCalled());
   expect(screen.queryByRole("link", { name: /Inventory Planning/ })).not.toBeInTheDocument();
+});
+
+test("the rename field caps the title at the length the API accepts", async () => {
+  renderWithItems(<ChatsRoute />, [convo()]);
+  fireEvent.click(screen.getByRole("button", { name: /chat actions/i }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: /rename/i }));
+  const input = screen.getByLabelText("Rename chat") as HTMLInputElement;
+  expect(input).toHaveAttribute("maxlength", String(CHAT_TITLE_MAX_LENGTH));
+
+  // A paste is not bound by `maxlength`, so the change handler has to do the capping itself.
+  fireEvent.change(input, { target: { value: "x".repeat(CHAT_TITLE_MAX_LENGTH + 40) } });
+  expect(input.value).toHaveLength(CHAT_TITLE_MAX_LENGTH);
+  expect(screen.getByText("0")).toBeInTheDocument();
 });
 
 test("a failed delete keeps the chat and shows the API error", async () => {

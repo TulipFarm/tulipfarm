@@ -73,6 +73,24 @@ reuse the same id. "+ new chat" links back to `/`. The **Chats** page (`_app.cha
 with server-side title search (`?q=`), and a three-dots menu to **star** (pin) or **rename** a chat
 inline (`PUT /api/v1/chats/:id` → `renameConversation` / `setConversationStarred`).
 
+**Rename and delete** are reachable from three places, all sharing
+`chat/chat-title-actions.tsx` — `ChatTitleInput`, `ChatActionsMenu`, `DeleteChatModal`, the
+`useChatTitleActions` state machine, and `ChatCrumbTitle` itself: the Chats page rows, the sidebar's
+Recent chats rows, and the open chat's name in the top bar. All three go through `renameChat` /
+`removeChat` on `conversations-context.tsx`, so one edit updates every surface without a refetch, and
+deleting the chat on screen routes back to `/`. Keep the state machine in the hook — the three
+surfaces each kept their own copy once and the copies drifted.
+Titles are capped at `CHAT_TITLE_MAX_LENGTH` from `@tulipfarm/schema/chat` (the subpath, never the
+barrel — see `scripts/client-bundle-safety.test.ts`) — the same ceiling `PUT /api/v1/chats/:id`
+enforces, so the field can never submit something the API will reject.
+`DELETE /api/v1/chats/:id` answers 409 while a Turn is pending or running; that message is surfaced
+verbatim **inside** the confirm dialog, because `<dialog>.showModal()` makes everything behind it
+inert. `ChatActionsMenu` owns its own hover reveal and stays visible at a 44px target below `sm`;
+callers pass positioning only, or the actions vanish on touch.
+
+A rename issued from the top bar can race the async titler, so `buildAndStoreTitle` writes through
+`setTitleIfUnset` — it names an untitled chat and loses to anything the user typed.
+
 ## Component → event
 
 | Component | Driven by |

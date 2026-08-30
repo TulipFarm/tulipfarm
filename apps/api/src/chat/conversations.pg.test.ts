@@ -71,6 +71,20 @@ describe("PgConversationRepo", () => {
     expect(found?.updatedAt.getTime()).toBe(old.getTime());
   });
 
+  it("setTitleIfUnset names an untitled conversation but never overwrites a rename", async () => {
+    const untitled = makeConv();
+    await repo.create(untitled);
+    await repo.setTitleIfUnset(untitled._id, "Generated Name");
+    expect((await repo.findById(untitled._id))?.title).toBe("Generated Name");
+
+    // The async titler can land after the user has renamed from the top bar; it must lose that race.
+    const renamed = makeConv();
+    await repo.create(renamed);
+    await repo.setTitle(renamed._id, "What I Called It");
+    await repo.setTitleIfUnset(renamed._id, "Generated Name");
+    expect((await repo.findById(renamed._id))?.title).toBe("What I Called It");
+  });
+
   it("list returns a user's conversations newest-first, scoped to that user", async () => {
     const userId = randomUUID();
     const older = makeConv({ userId, updatedAt: new Date("2021-01-01T00:00:00.000Z") });

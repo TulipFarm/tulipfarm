@@ -7,10 +7,11 @@ import type { ConversationRepo } from "./conversations";
  *
  * The naming itself lives in `@tulipfarm/built-in-agents`; what stays here is the part that needs
  * this app's repository. It is fire-and-forget by design: a model or persistence failure must not
- * block the stream a person is already watching.
+ * block the stream a person is already watching. It writes only while the conversation is still
+ * untitled, so it cannot clobber a rename the user issued while it was in flight.
  */
 export async function buildAndStoreTitle(args: {
-  repo: Pick<ConversationRepo, "setTitle">;
+  repo: Pick<ConversationRepo, "setTitleIfUnset">;
   getModel: () => LanguageModel;
   id: string;
   prompt: string;
@@ -24,7 +25,7 @@ export async function buildAndStoreTitle(args: {
     } catch {
       title = fallbackTitle(prompt);
     }
-    await repo.setTitle(id, title);
+    await repo.setTitleIfUnset(id, title);
   } catch (err) {
     log.warn({ err, conversationId: id }, "title persistence failed");
   }

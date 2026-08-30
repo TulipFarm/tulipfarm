@@ -1,20 +1,21 @@
 import { Link, type MetaFunction, useLoaderData, useRouteError } from "@remix-run/react";
-import { MessageSquare, MoreHorizontal, Pencil, Plus, Search, Star, Trash2 } from "lucide-react";
+import { MessageSquare, Plus, Search, Star } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import {
+  ChatActionsMenu,
+  ChatTitleInput,
+  DeleteChatModal,
+  useChatTitleActions,
+} from "~/components/chat/chat-title-actions";
 import { ErrorState } from "~/components/states";
 import { Button } from "~/components/ui/button";
-import { ConfirmModal } from "~/components/ui/modal";
 import { ApiError } from "~/lib/api";
 import {
   type ConversationSummary,
-  deleteConversation,
   listConversations,
-  renameConversation,
   setConversationStarred,
 } from "~/lib/conversations";
 import { useConversations } from "~/lib/conversations-context";
-import { cn } from "~/lib/utils";
 
 export const meta: MetaFunction = () => [{ title: "Chats · tulipfarm" }];
 
@@ -36,10 +37,12 @@ export default function ChatsRoute() {
   const [items, setItems] = useState<ConversationSummary[]>(initial);
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [renamingId, setRenamingId] = useState<string | null>(null);
-  const [pendingDelete, setPendingDelete] = useState<ConversationSummary | null>(null);
-  const [deleting, setDeleting] = useState(false);
   const [searching, setSearching] = useState(false);
+  const actions = useChatTitleActions({
+    onRenamed: (updated) =>
+      setItems((prev) => prev.map((c) => (c.id === updated.id ? updated : c))),
+    onDeleted: (id) => setItems((prev) => prev.filter((chat) => chat.id !== id)),
+  });
 
   // Server-side search, debounced. The loader already seeded the first render, so skip the initial
   // (empty-query) run; subsequent changes — including clearing the box back to "" — refetch.
@@ -88,32 +91,9 @@ export default function ChatsRoute() {
     }
   }
 
-  async function onRename(id: string, title: string) {
-    const next = title.trim();
-    setRenamingId(null);
-    if (!next) return;
-    try {
-      applyUpdate(await renameConversation(id, next));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "could not rename chat");
-    }
-  }
-
-  async function onDelete() {
-    if (!pendingDelete) return;
-    setDeleting(true);
-    try {
-      await deleteConversation(pendingDelete.id);
-      setItems((previous) => previous.filter((chat) => chat.id !== pendingDelete.id));
-      await refresh();
-      setPendingDelete(null);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "could not delete chat");
-    } finally {
-      setDeleting(false);
-    }
-  }
+  // Search and star failures render at page level; rename/delete failures belong to the hook, and a
+  // delete failure renders inside its own dialog rather than behind the backdrop.
+  const pageError = error ?? (actions.pendingDelete ? null : actions.error);
 
   // Starred chats pinned to the top; recency order (server-sorted) preserved within each group by the
   // stable sort.
@@ -164,12 +144,12 @@ export default function ChatsRoute() {
             </p>
           </div>
 
-          {error ? (
+          {pageError ? (
             <p
               role="alert"
               className="mt-4 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive"
             >
-              Request failed. {error}
+              Request failed. {pageError}
             </p>
           ) : null}
 
@@ -196,36 +176,28 @@ export default function ChatsRoute() {
                 <ChatGroup
                   title="Starred"
                   items={starred}
-                  renamingId={renamingId}
-                  onRename={onRename}
-                  onCancelRename={() => setRenamingId(null)}
+                  actions={actions}
                   onToggleStar={onToggleStar}
-                  onStartRename={setRenamingId}
-                  onDelete={setPendingDelete}
                 />
               ) : null}
               {recent.length > 0 ? (
                 <ChatGroup
                   title="Recent"
                   items={recent}
-                  renamingId={renamingId}
-                  onRename={onRename}
-                  onCancelRename={() => setRenamingId(null)}
+                  actions={actions}
                   onToggleStar={onToggleStar}
-                  onStartRename={setRenamingId}
-                  onDelete={setPendingDelete}
                 />
               ) : null}
             </div>
           )}
         </section>
-        <ConfirmModal
-          open={pendingDelete !== null}
-          onClose={() => setPendingDelete(null)}
-          onConfirm={() => void onDelete()}
-          title="Delete chat"
-          description={`Permanently delete “${pendingDelete?.title ?? "New chat"}” and all of its messages? This cannot be undone.`}
-          busy={deleting}
+        <DeleteChatModal
+          open={actions.pendingDelete !== null}
+          onClose={actions.cancelDelete}
+          onConfirm={actions.confirmDelete}
+          title={actions.pendingDelete?.title ?? null}
+          busy={actions.deleting}
+          error={actions.error}
         />
       </div>
     </div>
@@ -235,21 +207,13 @@ export default function ChatsRoute() {
 function ChatGroup({
   title,
   items,
-  renamingId,
-  onRename,
-  onCancelRename,
+  actions,
   onToggleStar,
-  onStartRename,
-  onDelete,
 }: {
   title: string;
   items: ConversationSummary[];
-  renamingId: string | null;
-  onRename: (id: string, title: string) => void;
-  onCancelRename: () => void;
+  actions: ReturnType<typeof useChatTitleActions>;
   onToggleStar: (chat: ConversationSummary) => void;
-  onStartRename: (id: string) => void;
-  onDelete: (chat: ConversationSummary) => void;
 }) {
   return (
     <section aria-labelledby={`${title.toLowerCase()}-chats`}>
@@ -262,18 +226,20 @@ function ChatGroup({
       <ul className="divide-y divide-border border-y border-border">
         {items.map((chat) => (
           <li key={chat.id}>
-            {renamingId === chat.id ? (
-              <RenameRow
-                initialTitle={chat.title ?? ""}
-                onSave={(nextTitle) => onRename(chat.id, nextTitle)}
-                onCancel={onCancelRename}
-              />
+            {actions.renamingId === chat.id ? (
+              <div className="px-2 py-2 sm:px-3">
+                <ChatTitleInput
+                  initialTitle={chat.title ?? ""}
+                  onSave={(nextTitle) => actions.submitRename(chat.id, nextTitle)}
+                  onCancel={actions.cancelRename}
+                />
+              </div>
             ) : (
               <ChatRow
                 chat={chat}
                 onToggleStar={() => onToggleStar(chat)}
-                onStartRename={() => onStartRename(chat.id)}
-                onDelete={() => onDelete(chat)}
+                onStartRename={() => actions.startRename(chat.id)}
+                onDelete={() => actions.requestDelete(chat)}
               />
             )}
           </li>
@@ -310,171 +276,12 @@ function ChatRow({
           {formatWhen(chat.updatedAt)}
         </span>
       </Link>
-      <ChatRowMenu
+      <ChatActionsMenu
         starred={chat.starred}
         onToggleStar={onToggleStar}
         onStartRename={onStartRename}
         onDelete={onDelete}
-      />
-    </div>
-  );
-}
-
-// Per-row actions, portalled so the scrolling panel never clips the menu (mirrors the composer's
-// ModelSelector). Closes on outside-click, Escape, or any scroll/resize.
-function ChatRowMenu({
-  starred,
-  onToggleStar,
-  onStartRename,
-  onDelete,
-}: {
-  starred: boolean;
-  onToggleStar: () => void;
-  onStartRename: () => void;
-  onDelete: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [rect, setRect] = useState<DOMRect | null>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (!triggerRef.current?.contains(target) && !menuRef.current?.contains(target)) {
-        setOpen(false);
-      }
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    const close = () => setOpen(false);
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    window.addEventListener("scroll", close, true);
-    window.addEventListener("resize", close);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-      window.removeEventListener("scroll", close, true);
-      window.removeEventListener("resize", close);
-    };
-  }, [open]);
-
-  function toggle() {
-    if (!open && triggerRef.current) setRect(triggerRef.current.getBoundingClientRect());
-    setOpen((o) => !o);
-  }
-
-  const itemClass =
-    "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-foreground transition-colors hover:bg-secondary";
-
-  return (
-    <>
-      <button
-        ref={triggerRef}
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label="Chat actions"
-        onClick={toggle}
-        className={cn(
-          "mr-1 inline-flex size-11 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-100 transition hover:bg-accent hover:text-foreground active:scale-95 sm:size-9 sm:opacity-0 sm:focus-visible:opacity-100 sm:group-hover:opacity-100",
-          open && "opacity-100"
-        )}
-      >
-        <MoreHorizontal className="size-4" />
-      </button>
-
-      {open && rect
-        ? createPortal(
-            <div
-              ref={menuRef}
-              role="menu"
-              className="fixed z-50 w-40 rounded-sm border border-border bg-card p-1 text-xs"
-              style={{ top: rect.bottom + 4, right: window.innerWidth - rect.right }}
-            >
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  onToggleStar();
-                  setOpen(false);
-                }}
-                className={itemClass}
-              >
-                <Star className={cn("size-3.5", starred && "fill-primary text-primary")} />
-                {starred ? "Unstar" : "Star"}
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  onStartRename();
-                  setOpen(false);
-                }}
-                className={itemClass}
-              >
-                <Pencil className="size-3.5" />
-                Rename
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  onDelete();
-                  setOpen(false);
-                }}
-                className={`${itemClass} text-destructive hover:bg-destructive/10`}
-              >
-                <Trash2 className="size-3.5" />
-                Delete
-              </button>
-            </div>,
-            document.body
-          )
-        : null}
-    </>
-  );
-}
-
-// Inline rename: Enter saves, Escape cancels, blur saves. Autofocused + text selected on mount.
-function RenameRow({
-  initialTitle,
-  onSave,
-  onCancel,
-}: {
-  initialTitle: string;
-  onSave: (title: string) => void;
-  onCancel: () => void;
-}) {
-  const [value, setValue] = useState(initialTitle);
-  // Enter/Escape commit then unmount the input, which fires a trailing blur — `done` makes that blur
-  // a no-op so we neither save twice nor save after an Escape-cancel.
-  const done = useRef(false);
-  const commit = (fn: () => void) => {
-    if (done.current) return;
-    done.current = true;
-    fn();
-  };
-  return (
-    <div className="px-2 py-2 sm:px-3">
-      <input
-        // biome-ignore lint/a11y/noAutofocus: focus belongs on the field the user just chose to edit
-        autoFocus
-        type="text"
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onFocus={(e) => e.currentTarget.select()}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") commit(() => onSave(value));
-          else if (e.key === "Escape") commit(onCancel);
-        }}
-        onBlur={() => commit(() => onSave(value))}
-        aria-label="Rename chat"
-        maxLength={200}
-        className={inputClass}
+        triggerClassName="mr-1"
       />
     </div>
   );

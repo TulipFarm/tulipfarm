@@ -104,6 +104,7 @@ export function ConfirmModal({
   description,
   confirmLabel = "Delete",
   busy = false,
+  error = null,
 }: {
   open: boolean;
   onClose: () => void;
@@ -112,10 +113,17 @@ export function ConfirmModal({
   description: string;
   confirmLabel?: string;
   busy?: boolean;
+  /** A failed confirm belongs inside the dialog — `showModal` makes the rest of the page inert. */
+  error?: string | null;
 }) {
   return (
     <Modal open={open} onClose={onClose} title={title}>
       <p className="text-muted-foreground">{description}</p>
+      {error ? (
+        <p role="alert" className="mt-3 text-destructive">
+          {error}
+        </p>
+      ) : null}
       <div className="mt-4 flex justify-end gap-2">
         <Button
           type="button"
