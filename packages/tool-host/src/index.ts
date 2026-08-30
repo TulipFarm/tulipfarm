@@ -155,6 +155,7 @@ export {
   type ToolCallResult,
   type ToolDef,
   type ToolErrorCode,
+  type ToolHostLogger,
   type ToolPark,
   type ToolTier,
 } from "./types";

@@ -9,6 +9,7 @@ import {
   type RequestContext,
   refuseParkedResult,
   type ToolCallResult,
+  type ToolHostLogger,
 } from "@tulipfarm/tool-host";
 import { jsonSchema, type ToolSet, tool } from "ai";
 import type { BatchCoordinator } from "../tools/batch-executor";
@@ -69,7 +70,8 @@ export class ToolRegistry {
     fullResultCache?: Map<string, ToolCallResult>,
     approvalGate?: ApprovalGate,
     runToolCallGuard?: RunToolCallGuard,
-    allowedToolNames?: ReadonlySet<string>
+    allowedToolNames?: ReadonlySet<string>,
+    logger?: ToolHostLogger
   ): ToolSet {
     let presentationValidationFailures = 0;
     const authorized = allowedToolNames
@@ -163,7 +165,8 @@ export class ToolRegistry {
                 await (coordinator ? coordinator.schedule(executeTool, t.mutating) : executeTool()),
                 t.name
               );
-            } catch {
+            } catch (error) {
+              logger?.error(`tool "${t.name}" raised during execution`, error);
               full = err(
                 "internal_error",
                 isPresentationTool

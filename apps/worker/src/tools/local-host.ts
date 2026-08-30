@@ -26,6 +26,7 @@ import {
   RegistryToolDispatcher,
   type RequestContext,
   ToolApprovalService,
+  type ToolHostLogger,
   type TurnToolDispatcher,
   toToolDef,
 } from "@tulipfarm/tool-host";
@@ -67,6 +68,7 @@ export interface LocalToolHostOptions {
   readonly blobs: BlobPort;
   /** Defaults to `randomUUID`; present so a test can make an id predictable. */
   readonly newId?: () => string;
+  readonly logger?: ToolHostLogger;
 }
 
 export interface LocalToolHost {
@@ -194,6 +196,7 @@ export function buildLocalToolHost(options: LocalToolHostOptions): LocalToolHost
       // No `agents` resolver: this process has no Soul to resolve one from. The Agent's authored
       // autonomy and capability restrictions ride in on `TurnAuthority.agent`, which the control
       // plane fills in from the Soul when the Worker reads the Run's authority.
+      ...(options.logger === undefined ? {} : { logger: options.logger }),
     })
   );
 

@@ -7,6 +7,7 @@ import type {
   ParkableToolDef,
   RequestContext,
   ToolErrorCode,
+  ToolHostLogger,
 } from "./types";
 import { isIndeterminateFault, isInfrastructureFault, isParked } from "./types";
 
@@ -46,6 +47,7 @@ export interface ToolAttemptInput {
   readonly timeoutMs?: number;
   readonly ledger?: ChatEffectLedger;
   readonly reservation?: EffectReservation;
+  readonly logger?: ToolHostLogger;
 }
 
 /** Retry only infrastructure faults with budget; mutating Tools need explicit `safeToRetry`. */
@@ -93,8 +95,9 @@ export async function runToolAttempts(input: ToolAttemptInput): Promise<HostedTo
         input.context,
         executeTimeoutFor(tool, input.timeoutMs)
       );
-    } catch {
+    } catch (error) {
       // Throws are unknown phase: never retry, and settle ledgered writes as `ambiguous`.
+      input.logger?.error(`tool "${call.name}" raised during execution`, error);
       await settle("ambiguous", "tool_raised");
       return { status: "failed", reason: `tool "${call.name}" raised an internal error` };
     }
