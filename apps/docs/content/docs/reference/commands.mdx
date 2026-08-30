@@ -17,6 +17,7 @@ TulipFarm ships both a self-hosted Docker Compose lane and a pnpm + Turborepo so
 | `curl -fsSLO {{SITE_URL}}/env.example` | Downloads the documented production environment template. |
 | `docker compose up -d` | Starts or updates the self-hosted stack from the current `docker-compose.yml` and `.env`. |
 | `docker compose pull` | Pulls newer images for the stack. run before `docker compose up -d` when updating manually. |
+| `docker image prune -f` | Deletes untagged images, reclaiming the one each update replaced. Run after `docker compose up -d`; tagged images are never touched. |
 | `docker compose logs -f app` | Follows API/app logs for a self-hosted stack. |
 | `docker compose logs -f worker` | Follows durable run worker logs. |
 | `docker compose logs -f integration-worker` | Follows integration-worker logs. |
