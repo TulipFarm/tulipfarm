@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.18.0](https://github.com/TulipFarm/tulipfarm/compare/v0.17.1...v0.18.0) (2026-08-30)
+
+### Features
+
+* **chat:** rename and delete chats from the sidebar and top bar ([#625](https://github.com/TulipFarm/tulipfarm/issues/625)) ([3b66924](https://github.com/TulipFarm/tulipfarm/commit/3b669240fbb977a7220a739a329930858655c525))
+* **identity:** reply into Slack channel once a bind confirms ([#624](https://github.com/TulipFarm/tulipfarm/issues/624)) ([f572014](https://github.com/TulipFarm/tulipfarm/commit/f572014960bb1d5012fcdda8874e887bd3e5d8f1))
+* **setup:** seed a fixed local dev admin with an opt-out ([#623](https://github.com/TulipFarm/tulipfarm/issues/623)) ([9aaeb28](https://github.com/TulipFarm/tulipfarm/commit/9aaeb28788a3ae5d8ed73dec7bb1c4edec040b0d))
+* **web:** redesign resources, agents, skills and routines surfaces ([#626](https://github.com/TulipFarm/tulipfarm/issues/626)) ([21afd18](https://github.com/TulipFarm/tulipfarm/commit/21afd18847eb0fae1eb116e0466e27da533f42f2))
+
+### Bug Fixes
+
+* **curator:** accept empty add/remove arrays in memory patches ([#628](https://github.com/TulipFarm/tulipfarm/issues/628)) ([e48f974](https://github.com/TulipFarm/tulipfarm/commit/e48f97448ca74661682545d1154187ddfbe74c7a))
+* **knowledge:** derive Slack ACL snapshot max age from sync cadence ([#629](https://github.com/TulipFarm/tulipfarm/issues/629)) ([a0a1539](https://github.com/TulipFarm/tulipfarm/commit/a0a1539a5ff3bb1a91130413a1cbc679084af601))
+* **knowledge:** match chunk lexical search on prefix terms ([#630](https://github.com/TulipFarm/tulipfarm/issues/630)) ([e1327bc](https://github.com/TulipFarm/tulipfarm/commit/e1327bc61413a0246d30e118f867ba2f8e825f47))
+* **knowledge:** wire the lexical arm of query_knowledge ([#627](https://github.com/TulipFarm/tulipfarm/issues/627)) ([3146d25](https://github.com/TulipFarm/tulipfarm/commit/3146d2529feed13b00fa0d2f1c4a5710e660f8b6))
+* **observability:** log tool-call and model-call failures that were silently swallowed ([#632](https://github.com/TulipFarm/tulipfarm/issues/632)) ([e5939e8](https://github.com/TulipFarm/tulipfarm/commit/e5939e8ccf395d31fdbfc215041f0e77526e6a22))
+* **worker:** recover Runs parked by a crashed dispatch handler ([#631](https://github.com/TulipFarm/tulipfarm/issues/631)) ([abd2245](https://github.com/TulipFarm/tulipfarm/commit/abd2245de1e9618b423f747a62ea42fc6c93788c))
+
 ## [0.17.1](https://github.com/TulipFarm/tulipfarm/compare/v0.17.0...v0.17.1) (2026-08-29)
 
 ### Features
