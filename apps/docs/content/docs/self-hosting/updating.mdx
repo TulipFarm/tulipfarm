@@ -44,8 +44,14 @@ curl -fsSL {{SITE_URL}}/install.sh | sudo bash
 **Docker Compose:**
 
 ```bash
-docker compose pull && docker compose up -d
+docker compose pull && docker compose up -d && docker image prune -f
 ```
+
+The `docker compose pull` moves the `latest` tag to the new image and leaves the old one
+behind, untagged. Nothing reclaims it on its own, so without the trailing `docker image
+prune -f` each update costs another ~4.5 GB and a regularly updated instance eventually
+fills its disk. The prune removes only *untagged* images, never one another stack still
+references by tag.
 
 **Pinned installs:** bump `TULIPFARM_VERSION` in `.env` first, then pull and up. The
 Compose file uses that one value for `app`, `worker`, and `integration-worker`, keeping the

@@ -210,7 +210,11 @@ steps:
     body: |
       Migrations apply automatically on boot, and there are **no down-migrations**. Read
       [Updating and rollback](/docs/self-hosting/updating) before your first upgrade.
-    run: docker compose pull && docker compose up -d
+
+      The trailing `image prune` reclaims the image this update replaced. Without it every update
+      leaves a whole orphaned image (~4.5 GB) on disk, and a regularly updated instance runs out.
+      It removes only untagged images, so anything else on the same engine keeps its images.
+    run: docker compose pull && docker compose up -d && docker image prune -f
     verify:
       kind: http
       url: http://localhost:8080/readyz

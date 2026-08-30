@@ -450,6 +450,16 @@ bring_up() {
   compose up -d || die "compose up failed — see logs above"
 }
 
+# `compose pull` leaves the image it replaced on disk with its tag moved away, and nothing else
+# ever reclaims it. An instance that updates daily grew by a whole image (~4.5 GB) each time until
+# a later pull ran the disk out. Dangling-only by design: `-f` without `-a` skips every tagged
+# image, so a co-tenant stack on the same engine keeps its images.
+prune_orphaned_images() {
+  log "Removing images orphaned by this update…"
+  $SUDO $ENGINE image prune -f >/dev/null 2>&1 \
+    || warn "could not prune orphaned images — reclaim them later with '${ENGINE} image prune -f'"
+}
+
 wait_health() {
   log "Waiting for TulipFarm to become healthy…"
   local _
@@ -483,6 +493,7 @@ main() {
   write_install_marker
   bring_up
   wait_health
+  prune_orphaned_images
 }
 
 if [[ -z "${BASH_SOURCE[0]:-}" || "${BASH_SOURCE[0]}" = "$0" ]]; then
