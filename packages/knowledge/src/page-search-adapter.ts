@@ -2,7 +2,7 @@
 // and optionally widens recall with pg_trgm. Chunk search stays in search-service.ts.
 
 import type { Queryable } from "@tulipfarm/storage";
-import { pageFilterConditions } from "./chunks-repo";
+import { pageFilterConditions, toPrefixTsQuery } from "./chunks-repo";
 import { DEFAULT_RANKING, type RankingConfig } from "./retrieval-config";
 import type { SearchFilters } from "./types";
 
@@ -34,12 +34,6 @@ export interface PageSearchInput {
 // ts_headline uses unlikely markers; convert them to highlightRanges.
 const SEL_START = "<<";
 const SEL_STOP = ">>";
-
-/** Builds a valid prefix tsquery from alphanumeric terms; empty means skip FTS. */
-export function toPrefixTsQuery(query: string): string {
-  const terms = query.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
-  return terms.map((t) => `${t}:*`).join(" & ");
-}
 
 /** Strip `<<…>>` markers, returning clean text and match ranges. */
 export function extractHighlights(marked: string): {

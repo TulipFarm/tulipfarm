@@ -29,6 +29,12 @@ function parseVector(value: unknown): number[] | null {
     .map((n) => Number(n));
 }
 
+/** Builds a valid prefix tsquery from alphanumeric terms; empty means skip FTS. */
+export function toPrefixTsQuery(query: string): string {
+  const terms = query.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  return terms.map((t) => `${t}:*`).join(" & ");
+}
+
 /** Push `p.*` filter conditions onto `params` and return the SQL fragments. */
 export function pageFilterConditions(filters: SearchFilters, params: unknown[]): string[] {
   const conds: string[] = [];
@@ -192,15 +198,22 @@ export class PgKnowledgeChunkRepo implements KnowledgeChunkRepo {
   }
 
   async searchLexical(query: string, limit: number, filters: SearchFilters): Promise<SearchHit[]> {
-    const params: unknown[] = [query];
+    // Prefix-term tsquery, same semantics as page-level search: "google auth" matches a chunk
+    // containing "authentication" via the `auth:*` prefix, and a single unmatched term no longer
+    // zeroes the whole result the way `websearch_to_tsquery`'s strict AND did.
+    const tsq = toPrefixTsQuery(query);
+    // Empty tsquery means no usable terms (empty/punctuation-only query); `to_tsquery` throws on
+    // an empty string, so short-circuit to zero hits instead of erroring.
+    if (tsq === "") return [];
+    const params: unknown[] = [tsq];
     const conds = pageFilterConditions(filters, params);
     const filterSql = conds.length > 0 ? ` AND ${conds.join(" AND ")}` : "";
     params.push(limit);
     const { rows } = await this.q.query(
       `SELECT c.id AS chunk_id, c.page_id, c.content, p.title, p.source,
-              ts_rank(c.tsv, websearch_to_tsquery('english', $1)) AS rank
+              ts_rank(c.tsv, to_tsquery('english', $1)) AS rank
        FROM knowledge_chunks c JOIN knowledge_pages p ON p.id = c.page_id
-       WHERE c.tsv @@ websearch_to_tsquery('english', $1) AND p.active = true${filterSql}
+       WHERE c.tsv @@ to_tsquery('english', $1) AND p.active = true${filterSql}
        ORDER BY rank DESC
        LIMIT $${params.length}`,
       params

@@ -20,7 +20,12 @@ export {
 } from "./acl-repo";
 export { NOTES_SPACE_NAME } from "./authored-page";
 export { type ChunkOptions, chunkText, type TextChunk } from "./chunk";
-export { type KnowledgeChunkRepo, PgKnowledgeChunkRepo, pageFilterConditions } from "./chunks-repo";
+export {
+  type KnowledgeChunkRepo,
+  PgKnowledgeChunkRepo,
+  pageFilterConditions,
+  toPrefixTsQuery,
+} from "./chunks-repo";
 export { buildDefaultRegistry } from "./connectors/registry";
 export { defaultSampleFixturesPath, SampleConnector } from "./connectors/sample";
 export {
@@ -222,7 +227,6 @@ export {
   PageRetrievalService,
   type PageSearchInput,
   type Principal,
-  toPrefixTsQuery,
 } from "./page-search-adapter";
 export type {
   SynthesisDecision,
