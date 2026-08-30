@@ -20,6 +20,7 @@ export type DelegatedToolDispatchDeps = Pick<
   | "surfaceActionStore"
   | "guardrails"
   | "authorityLayers"
+  | "logger"
 > & {
   readonly links: DelegatedAuthorityGuardDeps["links"];
   readonly catalog: DelegatedAuthorityGuardDeps["catalog"];

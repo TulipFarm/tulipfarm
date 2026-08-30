@@ -9,6 +9,8 @@ import { classifyProviderError } from "./provider-error";
 /** Minimal logger surface for fallback events (pino/console compatible). */
 export interface FallbackLogger {
   warn(msg: string): void;
+  /** Falls back to `warn` when absent, so an existing caller need not be widened to keep compiling. */
+  error?(msg: string): void;
 }
 
 /**
@@ -309,7 +311,9 @@ export class FallbackModel implements LanguageModelV4 {
   }
 
   private logExhausted(err: unknown): void {
-    this.logger.warn(
+    // Terminal for this call, not routine — captured at error level so it reaches the durable log
+    // store instead of vanishing with the rest of `warn`.
+    (this.logger.error ?? this.logger.warn)(
       `[llm] all providers exhausted models=${this.modelId} reason=${errorReason(err)}`
     );
   }

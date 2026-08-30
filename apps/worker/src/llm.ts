@@ -8,7 +8,13 @@ import type {
   ModelResponderRef,
   PrincipalRef,
 } from "@tulipfarm/llm";
-import { isPriceable, LlmService, priceCall, SecretsPrincipalCredentials } from "@tulipfarm/llm";
+import {
+  isPriceable,
+  type LlmLogger,
+  LlmService,
+  priceCall,
+  SecretsPrincipalCredentials,
+} from "@tulipfarm/llm";
 import type { ResolvedLimits } from "@tulipfarm/run-kernel";
 import { resolveModelProfileBudgetLimits } from "@tulipfarm/run-kernel";
 import {
@@ -37,6 +43,8 @@ export interface SoulLlmOptions {
    * corrects only reporting. Failure resolves to no overrides rather than failing the turn.
    */
   pricingOverrides?(): Promise<Record<string, ModelPrice>>;
+  /** Defaults to `console` when absent, same as `LlmService.init`. */
+  logger?: LlmLogger;
 }
 
 export type ModelRoutingPayload = RunEventPayloads["model.routed"];
@@ -375,7 +383,12 @@ export class SoulLlm {
       throw error;
     });
     const secrets = await this.secrets;
-    await this.service.init(config, secrets, undefined, new SecretsPrincipalCredentials(secrets));
+    await this.service.init(
+      config,
+      secrets,
+      this.options.logger,
+      new SecretsPrincipalCredentials(secrets)
+    );
     this.rebuildCatalog(config);
     // Price corrections travel with the config they correct. A failure here must not fail the
     // turn: pricing degrades to the pinned specs and the built-in table, which is what the

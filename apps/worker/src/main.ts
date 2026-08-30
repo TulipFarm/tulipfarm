@@ -270,6 +270,7 @@ export async function main(): Promise<void> {
     source: () => turnHost.llmConfig(),
     secrets,
     pricingOverrides: () => turnHost.pricingOverrides(),
+    logger,
   });
 
   // Built from the same published config the control plane embeds with, and rebuilt before each
@@ -306,6 +307,7 @@ export async function main(): Promise<void> {
     embeddings: localEmbeddings,
     // `file_create` renders here, not in the API: model-authored content is untrusted input.
     blobs,
+    logger,
   });
   const toolDispatch = new RoutingToolDispatch(localTools, turnHost, turnHost, logger);
 

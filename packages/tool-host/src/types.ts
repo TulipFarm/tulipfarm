@@ -126,6 +126,11 @@ export const err = (code: ToolErrorCode, message: string, connectUrl?: string): 
   error: { code, message, ...(connectUrl === undefined ? {} : { connectUrl }) },
 });
 
+/** Reports a Tool-host failure that a `ToolCallResult` cannot carry, e.g. an uncaught throw. */
+export interface ToolHostLogger {
+  error(message: string, error?: unknown): void;
+}
+
 export type ChatAutonomy = "full" | "supervised" | "approval-required" | "manual";
 export interface ClientContext {
   route?: string;

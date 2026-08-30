@@ -1007,6 +1007,7 @@ async function boot() {
           identities: externalIdentityRepo,
           githubInstallationToken: githubTooling.installationToken,
           transactions: runTransactions,
+          logger: { error: (message, error) => app.log.error({ err: error }, message) },
         }),
         approvals: {
           // was minted with — never one the Worker names for itself.

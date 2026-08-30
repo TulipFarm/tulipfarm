@@ -42,7 +42,7 @@ import type {
 import { type AuthorityPrincipal, principalKindOf } from "./principal";
 import { findChatRequest, presentationContextForAuthority } from "./request";
 import type { SurfaceActionStore, SurfaceArtifactStore } from "./surface-ports";
-import type { ParkableToolDef, RequestContext } from "./types";
+import type { ParkableToolDef, RequestContext, ToolHostLogger } from "./types";
 
 /**
  * Used when no `AgentResolver` was composed. It carries no `toolAllowlist`, which means the whole
@@ -91,6 +91,8 @@ export interface RegistryToolDispatcherOptions {
   readonly executeTimeoutMs?: number;
   /** Host cancellation — Run cancellation or drain — delivered to the Tool as `abortSignal`. */
   readonly abortSignal?: AbortSignal;
+  /** Reports an uncaught Tool throw, which a `ToolCallResult` cannot carry on its own. */
+  readonly logger?: ToolHostLogger;
   now?(): Date;
 }
 
@@ -539,6 +541,7 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
         : { timeoutMs: this.options.executeTimeoutMs }),
       ...(ledger === undefined ? {} : { ledger }),
       ...(reservation === undefined ? {} : { reservation }),
+      ...(this.options.logger === undefined ? {} : { logger: this.options.logger }),
     });
   }
 }
