@@ -568,7 +568,7 @@ export async function buildApp(opts: AppOptions = {}) {
         requireAuth,
         requireAuthorization,
         opts.knowledgePageGate,
-        undefined,
+        opts.knowledgeRetrieval,
         opts.activityService,
         opts.knowledgeAuthorLabeller,
         opts.knowledgeReaderDirectory,
