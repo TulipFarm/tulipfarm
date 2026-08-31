@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Transcript } from "~/components/chat/transcript";
@@ -190,6 +190,26 @@ describe("Transcript message actions", () => {
     expect(screen.getAllByRole("button", { name: "copy" }).length).toBeGreaterThanOrEqual(1);
     await user.click(screen.getByRole("button", { name: "regenerate" }));
     expect(onRegenerate).toHaveBeenCalledTimes(1);
+  });
+
+  it("copies the message as it reads, resolving a markdown link to its label", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    const state = fold(
+      [
+        { type: "text", data: { delta: "See [docs](https://example.com/docs) for more." } },
+        { type: "finish", data: { reason: "stop" } },
+      ],
+      "hi"
+    );
+    render(<Transcript messages={state.messages} status={state.status} onApprove={vi.fn()} />);
+
+    const assistantArticle = screen.getByLabelText("Assistant response");
+    await user.click(within(assistantArticle).getByRole("button", { name: "copy" }));
+
+    expect(writeText).toHaveBeenCalledWith("See docs for more.");
+    vi.unstubAllGlobals();
   });
 
   it("hides the assistant action bar while a turn is still streaming", () => {

@@ -1,3 +1,4 @@
+import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
 import { EditorContent, useEditor, useEditorState } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus";
@@ -34,6 +35,15 @@ import {
   ModelSelector,
 } from "./model-selector";
 import { useAttachments } from "./use-attachments";
+
+// `inclusive` is a Mark config field, not a `LinkOptions` field — `StarterKit`'s `link: {...}`
+// forwards to `.configure()`, which cannot reach it. Left at its default (`autolink`, i.e. true),
+// typing at a link's edge extends the mark onto whatever comes next instead of ending it.
+const NonInclusiveLink = Link.extend({
+  inclusive() {
+    return false;
+  },
+});
 
 /** What a composed turn carries to the parent: the effort preset plus the resolved mention tags. */
 export type ComposerSendOptions = {
@@ -94,7 +104,12 @@ export function Composer({
     extensions: [
       StarterKit.configure({
         heading: false,
-        link: { openOnClick: false, autolink: true, HTMLAttributes: { class: "tf-editor-link" } },
+        link: false,
+      }),
+      NonInclusiveLink.configure({
+        openOnClick: false,
+        autolink: true,
+        HTMLAttributes: { class: "tf-editor-link" },
       }),
       Placeholder.configure({ placeholder: "Ask anything…" }),
       ...mentionExtensions,

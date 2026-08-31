@@ -5,6 +5,7 @@ import { LoadingState } from "~/components/ui/loading-state";
 import { nextEffortPreset } from "~/lib/chat/effort-escalation";
 import type { ChatMessage, ChatStatus, ModelReceipt, TimelinePart } from "~/lib/chat/types";
 import { copyText } from "~/lib/clipboard";
+import { markdownLinksToPlainText } from "~/lib/markdown-to-text";
 import { FileAttachment, RemovedAttachment } from "./file-attachment";
 import { MessagePartView } from "./parts";
 import { PlanTrace } from "./plan-trace";
@@ -138,11 +139,12 @@ function IconAction({
   );
 }
 
-// Copy-to-clipboard icon button, shared by the user and assistant toolbars.
+// Copy-to-clipboard icon button, shared by the user and assistant toolbars. `text` is the raw
+// message markdown; copy it as it reads (link syntax resolved to its label), not as source.
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   async function copy() {
-    if (!(await copyText(text))) return;
+    if (!(await copyText(markdownLinksToPlainText(text)))) return;
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   }
