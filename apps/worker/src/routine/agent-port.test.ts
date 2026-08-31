@@ -1,4 +1,5 @@
 import type {
+  ExposedTool,
   ModelInvocationRequest,
   ModelInvocationResult,
   ModelPort,
@@ -231,7 +232,11 @@ describe("BundleRoutineAgentPort", () => {
   it("keys its events by the State occurrence and the attempt that claimed it", async () => {
     await port().execute(request());
 
-    expect(appended.map((event) => event.eventType)).toEqual(["model.routed", "context.assembled"]);
+    expect(appended.map((event) => event.eventType)).toEqual([
+      "model.routed",
+      "context.assembled",
+      "turn.finished",
+    ]);
     expect(appended.every((event) => event.idempotencyKey.startsWith(`${STATE_KEY}:3:`))).toBe(
       true
     );
@@ -463,6 +468,13 @@ describe("BundleRoutineAgentPort", () => {
 
     expect(result).toEqual({ kind: "failed", reason: "guardrail_input_blocked", retryable: false });
     expect(invoke).not.toHaveBeenCalled();
+    expect(appended).toEqual([
+      {
+        eventType: "turn.finished",
+        idempotencyKey: `${STATE_KEY}:3:finished`,
+        payload: { status: "failed", messageId: null, reason: "guardrail_input_blocked" },
+      },
+    ]);
   });
 
   it("blocks an answer carrying regulated content, before any State reads it", async () => {
@@ -474,6 +486,59 @@ describe("BundleRoutineAgentPort", () => {
       kind: "failed",
       reason: "guardrail_output_blocked",
       retryable: false,
+    });
+    expect(appended.at(-1)).toMatchObject({
+      eventType: "turn.finished",
+      payload: { status: "failed", messageId: null, reason: "guardrail_output_blocked" },
+    });
+  });
+
+  it("surfaces hitting the Tool-call ceiling as a legible, attributable failure", async () => {
+    const tools: ExposedTool[] = [
+      {
+        name: "lookup",
+        description: "Looks something up.",
+        inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      },
+    ];
+    let callCount = 0;
+    invoke = vi.fn<ModelPort["invoke"]>(async () => {
+      callCount += 1;
+      // Two calls per iteration, so the 12-call ceiling is reached after 6 iterations — well under
+      // the 12-iteration ceiling — proving this failure is attributed to the Tool-call limit and
+      // not merely to running out of iterations.
+      return {
+        requestId: `req-${callCount}`,
+        output: {
+          kind: "tool_calls",
+          calls: [
+            { callId: `call-${callCount}-a`, name: "lookup", arguments: {} },
+            { callId: `call-${callCount}-b`, name: "lookup", arguments: {} },
+          ],
+        },
+        usage: { inputTokens: 10, outputTokens: 4 },
+      } as ModelInvocationResult;
+    });
+
+    const result = await port({
+      tools: {
+        dispatch: async (call) => ({
+          status: "succeeded",
+          callId: call.callId,
+          output: "ok",
+        }),
+      },
+      catalog: async () => tools,
+    }).execute(request());
+
+    expect(result).toEqual({
+      kind: "failed",
+      reason: "tool_call_limit",
+      retryable: false,
+    });
+    expect(appended.at(-1)).toMatchObject({
+      eventType: "turn.finished",
+      payload: { status: "failed", messageId: null, reason: "tool_call_limit" },
     });
   });
 

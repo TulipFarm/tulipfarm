@@ -12,6 +12,7 @@ import {
   GuardrailsService,
   InMemoryLoopCheckpointStore,
   type LoopCheckpointStore,
+  type ModelFailureDiagnostic,
   type ModelInvocationFailureReason,
   type ModelPort,
   type ModelProfileCatalog,
@@ -306,11 +307,10 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
     );
     const question = canonicalize(plan.input);
 
-    const guardedInput = await guardrails.runInput(question, guardContext);
-    if (guardedInput.blocked) {
-      return { kind: "failed", reason: "guardrail_input_blocked", retryable: false };
-    }
-
+    // Built before the first guard runs so every "failed" outcome below — including a blocked
+    // question — can announce a terminal `turn.finished`. Without it, a Routine Run reaching
+    // `failed` leaves only State-level evidence: the Run event stream never says the Run ended,
+    // let alone why.
     const events = new TurnEventWriter({
       events: this.options.events,
       businessId: request.businessId,
@@ -320,6 +320,15 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
       attempt: request.attempt,
       now: this.now,
     });
+
+    const guardedInput = await guardrails.runInput(question, guardContext);
+    if (guardedInput.blocked) {
+      return this.finished(events, {
+        kind: "failed",
+        reason: "guardrail_input_blocked",
+        retryable: false,
+      });
+    }
 
     // Route through the pinned-bundle catalog; denial parks instead of bypassing profile terms.
     const selection = selectModelProfile(
@@ -345,6 +354,8 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
         { runId: request.runId, profileId: selection.profileId, reason: selection.reason },
         "routine model profile denied"
       );
+      // "unavailable" parks the State for reconciliation rather than failing the Run, so no
+      // terminal event applies here.
       return { kind: "unavailable", reason: `model_${selection.reason}` };
     }
     const primary = selection.chain[0];
@@ -420,32 +431,81 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
 
     if (outcome.status === "cancelled") return { kind: "cancelled" };
     if (outcome.status === "failed") {
-      return {
-        kind: "failed",
-        reason: outcome.reason,
-        retryable: isRetryableAgentFailure(outcome.reason),
-      };
+      return this.finished(
+        events,
+        {
+          kind: "failed",
+          reason: outcome.reason,
+          retryable: isRetryableAgentFailure(outcome.reason),
+        },
+        outcome.modelFailure
+      );
     }
     if (outcome.status === "awaiting_approval") {
       return { kind: "awaiting_approval", reason: "approval_required" };
     }
     if (outcome.status === "input_required") {
       // Routine Agents expose no Surface-capable Tools, so this outcome cannot be resumed here.
-      return { kind: "failed", reason: "input_required_without_surface", retryable: false };
+      return this.finished(events, {
+        kind: "failed",
+        reason: "input_required_without_surface",
+        retryable: false,
+      });
     }
     if (outcome.status === "awaiting_child") {
       // Same impossibility as above: a Routine Agent exposes no Tool that can spawn a child, so
       // reaching here means the Tool surface changed without this State learning how to park.
-      return { kind: "failed", reason: "child_spawn_without_wait_support", retryable: false };
+      return this.finished(events, {
+        kind: "failed",
+        reason: "child_spawn_without_wait_support",
+        retryable: false,
+      });
     }
 
     // Last zero-cost refusal point: no State is settled and no downstream effect has run.
     const guardedOutput = await guardrails.runOutput(answerText(outcome.output), guardContext);
     if (guardedOutput.blocked) {
-      return { kind: "failed", reason: "guardrail_output_blocked", retryable: false };
+      return this.finished(events, {
+        kind: "failed",
+        reason: "guardrail_output_blocked",
+        retryable: false,
+      });
     }
 
-    return { kind: "succeeded", output: outcome.output };
+    return this.finished(events, { kind: "succeeded", output: outcome.output });
+  }
+
+  /**
+   * Announces the terminal `turn.finished` this pseudo-turn never had, then hands the outcome
+   * back unchanged.
+   *
+   * Routine Agent States reuse Chat's `TurnEventWriter` for `context.assembled`/`model.routed`,
+   * but until now nothing closed that stream: a Run that reached terminal `failed` here left the
+   * Run event ledger silently truncated after its last `tool.result`, indistinguishable from a
+   * crash. `cancelled`/`awaiting_*`/`unavailable` outcomes are not terminal for the Run — the
+   * executor either leaves them to the cancellation manager or parks the State — so they announce
+   * nothing here.
+   */
+  private async finished(
+    events: TurnEventWriter,
+    outcome: RoutineAgentOutcome,
+    modelFailure?: ModelFailureDiagnostic
+  ): Promise<RoutineAgentOutcome> {
+    if (outcome.kind === "succeeded") {
+      await events.emit("turn.finished", { status: "succeeded", messageId: null }, "finished");
+    } else if (outcome.kind === "failed") {
+      await events.emit(
+        "turn.finished",
+        {
+          status: "failed",
+          messageId: null,
+          reason: outcome.reason,
+          ...(modelFailure === undefined ? {} : { modelFailure }),
+        },
+        "finished"
+      );
+    }
+    return outcome;
   }
 
   /**

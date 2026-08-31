@@ -3,6 +3,9 @@ import { assertRunTransition, type RunStatus } from "./model";
 
 export type LeasedRunStatus = "claimed" | "running";
 
+/** The only statuses a Run does not leave; anything else can still be requeued or resumed. */
+const TERMINAL_RUN_STATUSES: ReadonlySet<RunStatus> = new Set(["succeeded", "failed", "cancelled"]);
+
 export interface RunLeaseStore {
   transitionRun(
     businessId: string,
@@ -13,6 +16,8 @@ export interface RunLeaseStore {
       status: PersistedRunStatus;
       leaseOwner: string | null;
       leaseExpiresAt: string | null;
+      startedAt?: string;
+      finishedAt?: string;
       errorEvidenceRef?: string;
     }
   ): Promise<boolean>;
@@ -68,6 +73,7 @@ export interface ReleaseInput {
   readonly expectedVersion: number;
   readonly expectedStatus: RunStatus;
   readonly status: Exclude<RunStatus, LeasedRunStatus>;
+  readonly now: Date;
   /** Terse reason code for a non-terminal park (e.g. `needs_reconciliation`); never secrets or model content. */
   readonly errorEvidenceRef?: string;
 }
@@ -99,6 +105,7 @@ export class RunLeaseManager {
       status: input.status,
       leaseOwner: input.owner,
       leaseExpiresAt,
+      ...(input.status === "running" ? { startedAt: input.now.toISOString() } : {}),
     });
     if (!claimed) return { claimed: false, run: null };
     return { claimed: true, run: await this.store.find(input.businessId, input.runId) };
@@ -120,6 +127,7 @@ export class RunLeaseManager {
       status: input.status,
       leaseOwner: null,
       leaseExpiresAt: null,
+      ...(TERMINAL_RUN_STATUSES.has(input.status) ? { finishedAt: input.now.toISOString() } : {}),
       ...(input.errorEvidenceRef === undefined ? {} : { errorEvidenceRef: input.errorEvidenceRef }),
     });
   }

@@ -108,6 +108,7 @@ export class RunDispatcher {
           expectedVersion: started.run.version,
           expectedStatus: "running",
           status: outcome,
+          now: this.options.now(),
         });
         if (!released) {
           failed += 1;
@@ -137,6 +138,7 @@ export class RunDispatcher {
           expectedVersion: started.run.version,
           expectedStatus: "running",
           status,
+          now: this.options.now(),
           errorEvidenceRef: exhausted
             ? "dispatch:handler_error_after_requeue"
             : DISPATCH_HANDLER_ERROR_REF,

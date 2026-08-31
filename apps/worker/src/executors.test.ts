@@ -43,6 +43,8 @@ class FakeRunStore implements RunLeaseStore {
       status: PersistedRunStatus;
       leaseOwner: string | null;
       leaseExpiresAt: string | null;
+      startedAt?: string;
+      finishedAt?: string;
     }
   ): Promise<boolean> {
     if (transition.leaseOwner === null) this.releaseCalls.push(transition);
