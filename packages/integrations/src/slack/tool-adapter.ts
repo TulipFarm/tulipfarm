@@ -8,7 +8,7 @@ import {
   PaginationBoundError,
 } from "../http";
 import { SLACK_TOOL_IDS } from "./contracts";
-import { encodeMentionsInText, type SlackUserLookupPort } from "./mentions";
+import { encodeMentionsInText, encodeRawIdsInText, type SlackUserLookupPort } from "./mentions";
 
 /**
  * Dispatches `slack.message.send`; resolves names to channel ids and uses `client_msg_id` for
@@ -95,7 +95,10 @@ export class SlackToolAdapter implements ToolAdapter {
     const channelId = isChannelId(channel)
       ? channel
       : await this.resolveChannelId(normalizeChannelName(channel), credential);
-    const encodedText = await encodeMentionsInText(text, this.userLookup(credential));
+    const encodedText = await encodeMentionsInText(
+      encodeRawIdsInText(text),
+      this.userLookup(credential)
+    );
     const threadTs = await this.originatingThreadTs(request, channelId, credential);
 
     const response = await this.deps.http.send(

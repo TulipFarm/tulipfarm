@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   encodeMentionsInText,
+  encodeRawIdsInText,
   resolveMentionsInText,
   type SlackMentionResolverPort,
   type SlackUserLookupPort,
@@ -84,5 +85,42 @@ describe("encodeMentionsInText", () => {
   it("is a no-op when there are no @names", async () => {
     const result = await encodeMentionsInText("no mentions here", lookupFrom({}));
     expect(result).toBe("no mentions here");
+  });
+});
+
+describe("encodeRawIdsInText", () => {
+  it("wraps a bare channel id in <#ID> syntax", () => {
+    const result = encodeRawIdsInText("posted in C0BTL0YP4AF for updates");
+    expect(result).toBe("posted in <#C0BTL0YP4AF> for updates");
+  });
+
+  it("wraps a bare user id in <@ID> syntax", () => {
+    const result = encodeRawIdsInText("ping U0AMFGRAKLY about this");
+    expect(result).toBe("ping <@U0AMFGRAKLY> about this");
+  });
+
+  it("leaves an already-correct <#ID> mention untouched", () => {
+    const result = encodeRawIdsInText("posted in <#C0BTL0YP4AF> for updates");
+    expect(result).toBe("posted in <#C0BTL0YP4AF> for updates");
+  });
+
+  it("leaves an already-correct <@ID|label> mention untouched", () => {
+    const result = encodeRawIdsInText("task for <@U0AMFGRAKLY|mohit>");
+    expect(result).toBe("task for <@U0AMFGRAKLY|mohit>");
+  });
+
+  it("leaves an id inside a backtick code span untouched", () => {
+    const result = encodeRawIdsInText("the raw id is `C0BTL0YP4AF`");
+    expect(result).toBe("the raw id is `C0BTL0YP4AF`");
+  });
+
+  it("leaves unrelated text untouched", () => {
+    const result = encodeRawIdsInText("no ids here, just prose");
+    expect(result).toBe("no ids here, just prose");
+  });
+
+  it("is a no-op when there are no bare ids", () => {
+    const result = encodeRawIdsInText("hello world");
+    expect(result).toBe("hello world");
   });
 });

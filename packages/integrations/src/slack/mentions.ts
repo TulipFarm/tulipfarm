@@ -70,3 +70,25 @@ export async function encodeMentionsInText(
     return id ? `<@${id}>` : whole;
   });
 }
+
+// Matches a bare Slack channel or user id sitting as a standalone token in prose — e.g. an id
+// pulled straight from routine/integration config and interpolated into the agent's output text.
+// Excludes ids already inside `<#ID>`/`<@ID|label>` mention syntax (lookbehind rules out the `<`,
+// `@`, `#` that precede an id there; lookahead rules out the trailing `>` or `|`) and ids inside
+// backtick code spans. Channel ids start with C/G/D (public/private/DM, matching `isChannelId` in
+// tool-adapter.ts); user ids start with U. Both require a word boundary so an id embedded in a
+// longer alphanumeric token is left alone.
+const RAW_ID_PATTERN = /(?<![<@#`\w])([CGD][A-Z0-9]{8,}|U[A-Z0-9]{8,})(?![>|\w`])/g;
+
+/**
+ * Wraps bare Slack channel/user ids (as opposed to prose `@name`, handled by
+ * {@link encodeMentionsInText}) in `<#ID>`/`<@ID>` mention syntax, so Slack renders them as
+ * `#channel-name`/`@person` instead of printing the raw id. Ids already in mention syntax, or
+ * inside a code span, are left untouched.
+ */
+export function encodeRawIdsInText(text: string): string {
+  return text.replace(RAW_ID_PATTERN, (whole, id: string) => {
+    const sigil = id.startsWith("U") ? "@" : "#";
+    return `<${sigil}${id}>`;
+  });
+}
