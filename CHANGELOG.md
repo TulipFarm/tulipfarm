@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.18.3](https://github.com/TulipFarm/tulipfarm/compare/v0.18.2...v0.18.3) (2026-08-31)
+
+### Features
+
+* **web:** add drag-and-drop file upload and friendly upload error messages ([#655](https://github.com/TulipFarm/tulipfarm/issues/655)) ([4f8054a](https://github.com/TulipFarm/tulipfarm/commit/4f8054aa67ee40f8bb0240c487cfe2783faab5ef)), closes [#649](https://github.com/TulipFarm/tulipfarm/issues/649)
+
+### Bug Fixes
+
+* **agent-runtime:** stop re-dispatching repeated side-effecting tool calls ([#658](https://github.com/TulipFarm/tulipfarm/issues/658)) ([abe9ad6](https://github.com/TulipFarm/tulipfarm/commit/abe9ad668232171ead51158c037a15e3e243ae34)), references [#646](https://github.com/TulipFarm/tulipfarm/issues/646)
+* **api:** grant member role file, soul.skill, and github.repository.list access ([#656](https://github.com/TulipFarm/tulipfarm/issues/656)) ([e55e993](https://github.com/TulipFarm/tulipfarm/commit/e55e99321e53dc70db136d29f0291c907cf588cf)), references [#650](https://github.com/TulipFarm/tulipfarm/issues/650) [#651](https://github.com/TulipFarm/tulipfarm/issues/651) [#648](https://github.com/TulipFarm/tulipfarm/issues/648)
+* **integrations:** encode bare Slack channel/user IDs as mentions ([#653](https://github.com/TulipFarm/tulipfarm/issues/653)) ([04e5794](https://github.com/TulipFarm/tulipfarm/commit/04e5794c1fb137bbc88c5d1df9e8fe797e7b9e58))
+* **soul:** refresh soulLoader after an agent write so same-Turn refs resolve ([#645](https://github.com/TulipFarm/tulipfarm/issues/645)) ([d9c61f0](https://github.com/TulipFarm/tulipfarm/commit/d9c61f07cc0c4a159b253b8798552eef3e894f1c))
+* **web:** copy plain text from messages and stop links from swallowing adjacent text ([#657](https://github.com/TulipFarm/tulipfarm/issues/657)) ([5dd1670](https://github.com/TulipFarm/tulipfarm/commit/5dd1670e6cefd359e1b0462d5429ecf119727799)), closes [#603](https://github.com/TulipFarm/tulipfarm/issues/603)
+* **web:** show pending state on sidebar nav during route transition ([#654](https://github.com/TulipFarm/tulipfarm/issues/654)) ([4526a63](https://github.com/TulipFarm/tulipfarm/commit/4526a636b0c82be8648bbe08521d20d78d5c933e)), references [#652](https://github.com/TulipFarm/tulipfarm/issues/652)
+* **worker:** resolve real Soul agent for internal Run tool exposure ([#644](https://github.com/TulipFarm/tulipfarm/issues/644)) ([0edf17e](https://github.com/TulipFarm/tulipfarm/commit/0edf17e2c8d404e0fe00ff7ce7eaa6b68e9999e1))
+
 ## [0.18.2](https://github.com/TulipFarm/tulipfarm/compare/v0.18.1...v0.18.2) (2026-08-31)
 
 ### Features
