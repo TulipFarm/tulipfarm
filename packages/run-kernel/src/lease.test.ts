@@ -50,6 +50,8 @@ class FakeRunStore implements RunLeaseStore {
       status: PersistedRunStatus;
       leaseOwner: string | null;
       leaseExpiresAt: string | null;
+      startedAt?: string;
+      finishedAt?: string;
     }
   ): Promise<boolean> {
     this.transitionCalls.push({ businessId, runId, transition });
@@ -154,6 +156,7 @@ describe("RunLeaseManager", () => {
           status: "running",
           leaseOwner: "worker-1",
           leaseExpiresAt: "2026-07-24T10:01:30.000Z",
+          startedAt: "2026-07-24T10:00:30.000Z",
         },
       },
     ]);
@@ -201,12 +204,14 @@ describe("RunLeaseManager", () => {
     const store = new FakeRunStore();
     const manager = new RunLeaseManager(store);
 
+    const now = new Date("2026-07-24T10:02:00.000Z");
     const released = await manager.release({
       businessId: BUSINESS_ID,
       runId: RUN_ID,
       expectedVersion: 2,
       expectedStatus: "running",
       status: "succeeded",
+      now,
     });
 
     expect(released).toBe(true);
@@ -220,6 +225,7 @@ describe("RunLeaseManager", () => {
           status: "succeeded",
           leaseOwner: null,
           leaseExpiresAt: null,
+          finishedAt: now.toISOString(),
         },
       },
     ]);

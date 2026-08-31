@@ -174,6 +174,7 @@ describe("crash while holding a lease", () => {
       expectedVersion: staleVersion,
       expectedStatus: "running",
       status: "succeeded",
+      now: AFTER_LEASE,
     });
     const heartbeat = await leases.heartbeat({
       businessId: BUSINESS_ID,
@@ -199,6 +200,7 @@ describe("crash while holding a lease", () => {
       expectedVersion: 4,
       expectedStatus: "running",
       status: "succeeded",
+      now: T0,
     });
     const replay = await leases.release({
       businessId: BUSINESS_ID,
@@ -206,6 +208,7 @@ describe("crash while holding a lease", () => {
       expectedVersion: 4,
       expectedStatus: "running",
       status: "failed",
+      now: T0,
     });
 
     expect(first).toBe(true);

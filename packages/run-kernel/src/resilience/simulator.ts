@@ -109,6 +109,8 @@ export class SimulatedRunStore implements RunLeaseStore, RunResumeStore, Reconci
       status: PersistedRunStatus;
       leaseOwner: string | null;
       leaseExpiresAt: string | null;
+      startedAt?: string;
+      finishedAt?: string;
     }
   ): Promise<boolean> {
     this.guard("transitionRun", "before");
@@ -126,6 +128,8 @@ export class SimulatedRunStore implements RunLeaseStore, RunResumeStore, Reconci
       version: run.version + 1,
       leaseOwner: transition.leaseOwner,
       leaseExpiresAt: transition.leaseExpiresAt,
+      startedAt: transition.startedAt ?? run.startedAt,
+      finishedAt: transition.finishedAt ?? run.finishedAt,
     });
     this.transitions.push({
       runId,

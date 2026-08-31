@@ -52,6 +52,8 @@ class FakeRunStore implements RunLeaseStore {
       status: PersistedRunStatus;
       leaseOwner: string | null;
       leaseExpiresAt: string | null;
+      startedAt?: string;
+      finishedAt?: string;
       errorEvidenceRef?: string;
     }
   ): Promise<boolean> {

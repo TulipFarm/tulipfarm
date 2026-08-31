@@ -133,6 +133,7 @@ describe("a Curator Run parked for reconciliation", () => {
       expectedVersion: started.run.version,
       expectedStatus: "running",
       status: "needs_reconciliation",
+      now: MINTED_AT,
     });
   };
 

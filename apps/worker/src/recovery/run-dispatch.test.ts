@@ -58,6 +58,8 @@ class DurableRunStore {
       status: PersistedRunStatus;
       leaseOwner: string | null;
       leaseExpiresAt: string | null;
+      startedAt?: string;
+      finishedAt?: string;
     }
   ): Promise<boolean> {
     const current = this.runs.get(runId);
