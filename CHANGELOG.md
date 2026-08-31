@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.18.2](https://github.com/TulipFarm/tulipfarm/compare/v0.18.1...v0.18.2) (2026-08-31)
+
+### Features
+
+* **web:** redesign the Models page and add a connection test ([#642](https://github.com/TulipFarm/tulipfarm/issues/642)) ([fe3d1a2](https://github.com/TulipFarm/tulipfarm/commit/fe3d1a22f7c80252644742f5a6a787724c50132d))
+
+### Bug Fixes
+
+* **worker:** carry semantic failure evidence onto the Run ([#641](https://github.com/TulipFarm/tulipfarm/issues/641)) ([203f176](https://github.com/TulipFarm/tulipfarm/commit/203f1761c68eb018c6a62b202c61d778de6e32a1))
+
 ## [0.18.1](https://github.com/TulipFarm/tulipfarm/compare/v0.18.0...v0.18.1) (2026-08-31)
 
 ### Bug Fixes
