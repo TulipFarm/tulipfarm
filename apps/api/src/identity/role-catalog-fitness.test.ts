@@ -255,6 +255,91 @@ describe("role catalog fitness", () => {
     ).toEqual([]);
   });
 
+  /**
+   * `action:` and `resourceType:`/`resources: [...]` co-occurring in one object is what makes it
+   * a `RouteAuthorization` or Tool `authorization` block rather than incidental data shaped like
+   * one (e.g. `onboarding/catalog.ts`'s unrelated `resources: ["tickets"]` suggestion list).
+   */
+  function authorizationObjects(source: string): string[] {
+    const objects: string[] = [];
+    const actionRe = /\baction:\s*"[a-z0-9_.]+"/g;
+    for (const match of source.matchAll(actionRe)) {
+      const braceStart = source.lastIndexOf("{", match.index);
+      if (braceStart === -1) continue;
+      let depth = 0;
+      let end = -1;
+      for (let i = braceStart; i < source.length; i++) {
+        if (source[i] === "{") depth++;
+        else if (source[i] === "}") {
+          depth--;
+          if (depth === 0) {
+            end = i;
+            break;
+          }
+        }
+      }
+      if (end !== -1) objects.push(source.slice(braceStart, end + 1));
+    }
+    return objects;
+  }
+
+  /**
+   * The checks above only ever look *within* a catalogued type's action list, so a resourceType
+   * a route or Tool authorizer declares that never made it into any catalog at all — the exact
+   * shape of the `file` and `soul.skill` gaps this pins — was invisible to every check above.
+   */
+  it("catalogs every resourceType a route or Tool authorizer declares", () => {
+    const catalogedTypes = new Set([
+      ...ADMIN_ONLY_SURFACES.map((s) => s.type),
+      ...MEMBER_ALLOWED_SURFACES.map((s) => s.type),
+      ...OWNER_SCOPED_SURFACES.map((s) => s.type),
+    ]);
+
+    const declaredTypes = new Set(
+      sourceFiles().flatMap((path) => {
+        const source = withoutComments(readFileSync(resolveCitation(path), "utf8"));
+        return authorizationObjects(source).flatMap((block) => [
+          ...[...block.matchAll(/resourceType:\s*"([a-z0-9_.]+)"/g)].map((m) => m[1]),
+          ...[...block.matchAll(/resources:\s*\[\s*"([a-z0-9_.]+)"/g)].map((m) => m[1]),
+        ]);
+      })
+    );
+
+    // Tracked pre-existing gaps, not introduced by this check and out of its scope to fix: each
+    // resourceType below is a real authorizer declaration with no catalog entry in any role, but
+    // fixing it means deciding a new access policy, not restating an existing one. Shrink this
+    // list by giving the type a real catalog entry, never by loosening the check.
+    const KNOWN_UNCATALOGED_TYPES: ReadonlySet<string> = new Set([
+      // Task authoring has no user-facing create route (see apps/api/AGENTS.md); only system
+      // callers reach `task.create`, so no role has ever needed this cataloged.
+      "task.assignee",
+      // Pre-existing gaps of the same shape as this fix's `file`/`soul.skill`, discovered while
+      // adding this check. Left uncataloged deliberately: closing them is an access-policy call
+      // (e.g. "is Agent/Routine/Surface-component authoring member- or admin-only?") that belongs
+      // to its own issue, not this one.
+      "soul.agent",
+      "soul.routine",
+      "soul.surface_component",
+      "knowledge_page",
+      "knowledge_subject",
+    ]);
+
+    const uncataloged = [...declaredTypes]
+      .filter((type) => type !== "*")
+      .filter((type) => !catalogedTypes.has(type))
+      .filter((type) => !KNOWN_UNCATALOGED_TYPES.has(type))
+      .sort();
+
+    expect(
+      uncataloged,
+      "A resourceType a route or Tool authorizer declares must appear in some role's catalog " +
+        "(ADMIN_ONLY_SURFACES, MEMBER_ALLOWED_SURFACES, or OWNER_SCOPED_SURFACES), or in this " +
+        "test's KNOWN_UNCATALOGED_TYPES if it is a deliberately deferred pre-existing gap. " +
+        "decideEffectivePermission fails closed, so an uncatalogued resourceType silently denies " +
+        "every member even when the intent was to grant it."
+    ).toEqual([]);
+  });
+
   it("grants a member every action the member catalog names", () => {
     const member = DEPLOYMENT_ROLES.find((role) => role.id === "member");
     if (!member) throw new Error("member role missing from the deployment catalog");

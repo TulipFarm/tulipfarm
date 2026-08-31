@@ -108,6 +108,12 @@ export const ADMIN_ONLY_SURFACES: readonly {
     ],
     enforcedIn: "soul/resource-types/routes.ts",
   },
+  /** Skill authoring requires an explicit Team-level grant; members keep read-only listing. */
+  {
+    type: "soul.skill",
+    actions: ["soul.skill.create", "soul.skill.update", "soul.skill.delete"],
+    enforcedIn: "soul/skills/tools.ts",
+  },
   {
     type: "authz",
     actions: [
@@ -158,6 +164,7 @@ export const MEMBER_ALLOWED_SURFACES: readonly {
   { type: "auth_session", actions: ["*"], enforcedIn: "auth/routes.ts; identity/routes.ts" },
   { type: "chat", actions: ["*"], enforcedIn: "chat/routes.ts" },
   { type: "feedback", actions: ["*"], enforcedIn: "feedback/routes.ts" },
+  { type: "file", actions: ["file.create"], enforcedIn: "files/routes.ts" },
   { type: "form", actions: ["*"], enforcedIn: "forms/routes.ts" },
   { type: "platform.frontend", actions: ["*"], enforcedIn: "platform/frontend-tools.ts" },
   {
@@ -212,6 +219,12 @@ export const MEMBER_ALLOWED_SURFACES: readonly {
     ],
     enforcedIn: "soul/resource-types/routes.ts; soul/resource-types/tools.ts",
   },
+  /** Read-only Skill listing so Agents can load guidance; authoring stays a Team-level grant. */
+  {
+    type: "soul.skill",
+    actions: ["soul.skill.list"],
+    enforcedIn: "soul/skills/tools.ts",
+  },
   { type: "surface", actions: ["*"], enforcedIn: "surfaces/routes.ts" },
   { type: "platform.surface", actions: ["*"], enforcedIn: "surfaces/tools.ts" },
   /** Delegation routes work to an Agent; it does not edit the Agent definition. */
@@ -229,7 +242,7 @@ export const MEMBER_ALLOWED_SURFACES: readonly {
    */
   {
     type: "integration.github",
-    actions: ["integration.github.read"],
+    actions: ["integration.github.read", "github.repository.list"],
     enforcedIn: "tools/github/tools.ts",
   },
   /** Explicit vocabulary counterpart; authority already comes from the wildcard grant. */
