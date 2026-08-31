@@ -70,9 +70,17 @@ const CREDENTIAL_HEADERS = new Set([
   "x-goog-api-key",
 ]);
 
-/** The words that make a header name a credential, whatever separator a vendor chose. */
+/**
+ * The words that make a header name a credential, whatever separator a vendor chose.
+ *
+ * Deliberately excludes the bare word "api": it names a namespace or a version
+ * (`X-GitHub-Api-Version`, `X-Api-Version`), not a secret, and every vendor header that actually
+ * carries one pairs "api" with a word already in this list (`x-api-key`, `x-goog-api-key`), so
+ * dropping "api" alone loses no real credential while it stops flagging version/negotiation
+ * headers.
+ */
 const CREDENTIAL_WORDS =
-  /(^|-)(api|access|auth|authentication|authorization|bearer|credential|jwt|key|passwd|password|secret|session|signature|token)(-|$)/;
+  /(^|-)(access|auth|authentication|authorization|bearer|credential|jwt|key|passwd|password|secret|session|signature|token)(-|$)/;
 
 /**
  * Any header whose name reads as a key, token, secret or password, in any vendor's spelling.

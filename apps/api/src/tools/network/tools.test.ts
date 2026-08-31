@@ -281,6 +281,23 @@ describe("network Tool handlers", () => {
     }
   );
 
+  it.each(["X-GitHub-Api-Version", "X-Api-Version"])(
+    "allows %s, since naming an api version is not carrying a credential",
+    async (header) => {
+      const send = vi.fn(async () => ({
+        status: 200,
+        headers: { "content-type": "application/json" },
+        body: { ok: true },
+      }));
+      await apiRequestTool.handler(
+        { url: "https://api.example.com/me", method: "GET", headers: { [header]: "2022-11-28" } },
+        context({ http: { send } })
+      );
+
+      expect(send).toHaveBeenCalled();
+    }
+  );
+
   it.each(["accept", "content-type", "user-agent", "x-request-id", "if-none-match"])(
     "still allows the ordinary header %s",
     async (header) => {
