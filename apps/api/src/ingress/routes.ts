@@ -1,7 +1,8 @@
-import type { SoulLoader } from "@tulipfarm/soul";
+import type { BundledIntegration, SoulLoader } from "@tulipfarm/soul";
 import type { FastifyInstance } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import { isSecretRef } from "../integrations/connection-env";
+import { resolveIngressIntegration } from "../integrations/ingress-integration";
 import type { IngressDeliveriesRepo } from "./repo";
 import { verifyWebhookRequest } from "./signature";
 import { dotPath, matchesBody, renderBodyTemplate } from "./template";
@@ -14,6 +15,8 @@ export interface IngressJobPayload {
 
 export interface IngressRoutesDeps {
   soulLoader: SoulLoader;
+  /** Bundled (code-owned) integrations, merged with live Soul connection state per delivery. */
+  bundled: ReadonlyMap<string, BundledIntegration>;
   deliveries: IngressDeliveriesRepo;
   invoke: (job: IngressJobPayload) => Promise<void>;
   /** Resolves a `secret://` env value to plaintext; plaintext values need no resolver. */
@@ -65,15 +68,26 @@ export async function registerIngressRoutes(
       },
       async (req, reply) => {
         const { name } = req.params as { name: string };
-        const integration = deps.soulLoader.integrations.get(name);
+        const integration = resolveIngressIntegration(deps.soulLoader, deps.bundled, name);
         if (!integration) return reply.code(404).send(NOT_FOUND);
 
         const ingress = integration.manifest?.ingress;
         if (!ingress?.webhook || !ingress.handler || !integration.ingressHandler) {
+          // Never reveal in the response that `name` names a real, installed integration — but
+          // a delivery arriving for one that genuinely has no ingress support is an operator
+          // misconfiguration (a stale provider-side webhook URL, most likely), not a scan. Log it
+          // so it is visible in server logs even though the response must stay a generic 404.
+          req.log.warn({ integration: name }, "ingress delivery received but no ingress declared");
           return reply.code(404).send(NOT_FOUND);
         }
         const connection = integration.connection;
-        if (!connection?.enabled) return reply.code(404).send(NOT_FOUND);
+        if (!connection?.enabled) {
+          req.log.warn(
+            { integration: name },
+            "ingress delivery received but the integration is not connected"
+          );
+          return reply.code(404).send(NOT_FOUND);
+        }
 
         const security = ingress.webhook.security;
         if (security?.type !== "hmac_sha256" && security?.type !== "shared_secret") {

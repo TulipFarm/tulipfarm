@@ -30,6 +30,21 @@ grants:
     description: Read repository names and settings. GitHub requires this for any App.
 egress:
   type: none
+# GitHub is events-only ingress: every verified webhook delivery becomes an integration.event
+# that routines can trigger on; there is no chat surface, so no `chat` block below. The classifier
+# is `ingress.ts`, vendored byte-identical at apps/api/src/ingress/__fixtures__/github-ingress.hook.txt
+# and asserted against the real sandbox by apps/api/src/ingress/github-parity.fixture.test.ts.
+ingress:
+  handler: ingress.ts
+  webhook:
+    security:
+      type: hmac_sha256
+      header: X-Hub-Signature-256
+      secret_env: GITHUB_WEBHOOK_SECRET
+      format: "sha256={hex}"
+    dedup_header: X-GitHub-Delivery
+    context_headers:
+      - X-GitHub-Event
 auth:
   # 1. GitHub creates the App from this definition and hands back every credential for a one-time
   #    code, so nothing is copied by hand. There is no TulipFarm-owned App: the App this creates
@@ -55,7 +70,10 @@ auth:
       # "Not connected" no matter how many times the operator installs the App.
       setup_url: "{callback_url}"
       hook_attributes:
-        url: "{api_url}/api/v1/integrations/github/webhook"
+        # This deployment's real ingress route (apps/api/src/ingress/routes.ts), supplied by the
+        # host. Was previously hand-typed as a path that was never a registered route at all —
+        # every delivery 404'd and nothing was ever ingested.
+        url: "{webhook_url}"
         active: true
       public: false
       # Mirrors the locked base-install set in docs/architecture/github-app-manifest.md.

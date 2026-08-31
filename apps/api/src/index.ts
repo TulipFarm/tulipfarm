@@ -1030,6 +1030,7 @@ async function boot() {
           threads: integrationThreads,
           integrationEvents,
           soulLoader,
+          bundled: bundledIntegrations,
           identity: new IngressIdentityResolver({
             users: userRepo,
             log,
@@ -1272,6 +1273,7 @@ async function boot() {
       }),
       ingress: {
         soulLoader,
+        bundled: bundledIntegrations,
         deliveries: ingressDeliveries,
         invoke: integrationInvoker(invocations),
         resolveSecret: (value) => resolveSecretRef(value, secretsService),

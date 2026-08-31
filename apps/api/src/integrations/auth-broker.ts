@@ -211,7 +211,14 @@ export async function startAuthStep(input: StartAuthStepInput): Promise<AuthStar
     case "app_manifest": {
       const state = await issueState(input, null);
       const org = input.org?.trim();
-      const vars = integrationAuthEndpointVars(input.endpoints, input.env);
+      // `{webhook_url}` is available here too (not just to a `webhook` step) so a provider
+      // manifest that registers its own hook inline — GitHub's `hook_attributes.url` — can point
+      // at this deployment's real ingress route instead of a hand-typed path that can drift from
+      // it (see apps/api/src/ingress/routes.ts's actual route pattern).
+      const vars = {
+        ...integrationAuthEndpointVars(input.endpoints, input.env),
+        webhook_url: ingressWebhookUrl(input.endpoints, input.slug),
+      };
       // An org can only be targeted through a template the step opts into; a step with no
       // create_url_for_org silently falls back to its personal-account create_url.
       const createUrl = org && step.create_url_for_org ? step.create_url_for_org : step.create_url;

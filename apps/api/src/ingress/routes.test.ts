@@ -1,4 +1,4 @@
-import type { SoulIntegration, SoulLoader } from "@tulipfarm/soul";
+import type { BundledIntegration, SoulIntegration, SoulLoader } from "@tulipfarm/soul";
 import type { FastifyInstance, LightMyRequestResponse } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app";
@@ -57,13 +57,15 @@ describe("POST /api/v1/hooks/integrations/:name", () => {
 
   async function build(
     integrations: SoulIntegration[] = [makeIntegration()],
-    resolveSecret?: (value: string) => Promise<string | undefined>
+    resolveSecret?: (value: string) => Promise<string | undefined>,
+    bundled: ReadonlyMap<string, BundledIntegration> = new Map()
   ) {
     enqueue = vi.fn(async (_job: IngressJobPayload) => {});
     seen = new Set();
     app = await buildApp({
       ingress: {
         soulLoader: makeSoulLoader(integrations),
+        bundled,
         deliveries: {
           recordDelivery: async (slug: string, key: string) => {
             const composite = `${slug}:${key}`;
@@ -305,5 +307,97 @@ describe("POST /api/v1/hooks/integrations/:name", () => {
     });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ isBuffer: false, body: { a: 1 } });
+  });
+});
+
+describe("bundled (code-owned) integrations", () => {
+  let app: FastifyInstance;
+  let enqueue: ReturnType<typeof vi.fn>;
+
+  afterEach(async () => {
+    await app.close();
+  });
+
+  /**
+   * A bundled integration (github, slack) writes only `connection.yaml` into Soul on install —
+   * never `manifest.yml` (that stays code-owned). So `soulLoader.integrations.get(slug)` alone
+   * returns `{ slug, sourceIntegration, connection }` with no `manifest` and no `ingressHandler`
+   * at all, regardless of what the bundled manifest declares. Regression: the route used to read
+   * only `soulLoader`, so every bundled integration's ingress 404'd unconditionally — this is
+   * exactly what GitHub hit in production (195 webhooks, all 404, zero rows ever ingested).
+   */
+  it("resolves ingress from the bundled manifest merged with live Soul connection state", async () => {
+    enqueue = vi.fn(async (_job: IngressJobPayload) => {});
+    const bundledManifest: BundledIntegration = {
+      manifest: {
+        name: "github",
+        egress: { type: "none" },
+        ingress: {
+          handler: "ingress.ts",
+          webhook: {
+            security: {
+              type: "hmac_sha256",
+              header: "X-Hub-Signature-256",
+              secret_env: "GITHUB_WEBHOOK_SECRET",
+              format: "sha256={hex}",
+            },
+            dedup_header: "X-GitHub-Delivery",
+            context_headers: ["X-GitHub-Event"],
+          },
+        },
+      },
+      ingressHandlerFile: { file: "ingress.ts", raw: "({ classify() {} })" },
+    };
+    // Soul only ever carries connection state for a bundled slug — no manifest, no ingressHandler.
+    const soulOnlyConnection = {
+      slug: "github",
+      sourceIntegration: "github",
+      connection: { enabled: true, env: { GITHUB_WEBHOOK_SECRET: SECRET } },
+    } as SoulIntegration;
+
+    app = await buildApp({
+      ingress: {
+        soulLoader: makeSoulLoader([soulOnlyConnection]),
+        bundled: new Map([["github", bundledManifest]]),
+        deliveries: { recordDelivery: async () => true } as never,
+        invoke: enqueue as (job: IngressJobPayload) => Promise<void>,
+      },
+    });
+
+    const body = JSON.stringify({ action: "opened" });
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/hooks/integrations/github",
+      headers: {
+        "content-type": "application/json",
+        "x-hub-signature-256": computeHmacSignature(body, { format: "sha256={hex}" }, SECRET),
+        "x-github-delivery": "d-1",
+        "x-github-event": "issues",
+      },
+      payload: body,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(enqueue).toHaveBeenCalledTimes(1);
+  });
+
+  it("still 404s a bundled slug with no matching Soul connection at all", async () => {
+    enqueue = vi.fn(async (_job: IngressJobPayload) => {});
+    app = await buildApp({
+      ingress: {
+        soulLoader: makeSoulLoader([]),
+        bundled: new Map(),
+        deliveries: { recordDelivery: async () => true } as never,
+        invoke: enqueue as (job: IngressJobPayload) => Promise<void>,
+      },
+    });
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/hooks/integrations/github",
+      headers: { "content-type": "application/json" },
+      payload: "{}",
+    });
+    expect(res.statusCode).toBe(404);
+    expect(enqueue).not.toHaveBeenCalled();
   });
 });

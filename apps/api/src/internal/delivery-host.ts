@@ -8,7 +8,12 @@ import {
   requestArtifactId,
 } from "@tulipfarm/run-kernel";
 import { CHAT_REQUEST_SCHEMA_REF, contentText, textContent } from "@tulipfarm/schema";
-import { type ChatIngressConfig, resolveAgent, type SoulLoader } from "@tulipfarm/soul";
+import {
+  type BundledIntegration,
+  type ChatIngressConfig,
+  resolveAgent,
+  type SoulLoader,
+} from "@tulipfarm/soul";
 import { DOMAIN_EVENTS, type IntegrationEventPayload } from "@tulipfarm/storage";
 import { asChatAutonomy, type ChatAutonomy } from "@tulipfarm/tool-host";
 import type { FastifyBaseLogger } from "fastify";
@@ -20,6 +25,7 @@ import type { IntegrationConversationsRepo, IntegrationEventsRepo } from "../ing
 import { postReply } from "../ingress/responder";
 import { dotPath, renderBodyTemplate } from "../ingress/template";
 import { isSecretRef } from "../integrations/connection-env";
+import { resolveIngressIntegration } from "../integrations/ingress-integration";
 import type { HostedRunReader } from "./turn-host";
 
 /** Delivery host: re-derive delivery facts from the Run; never send bind links/text to Worker. */
@@ -98,6 +104,8 @@ export interface IngressDeliveryHostOptions {
   readonly threads: IntegrationConversationsRepo;
   readonly integrationEvents: IntegrationEventsRepo;
   readonly soulLoader: SoulLoader;
+  /** Bundled (code-owned) integrations; see `resolveIngressIntegration`. */
+  readonly bundled: ReadonlyMap<string, BundledIntegration>;
   readonly identity: Pick<IngressIdentityResolver, "resolve">;
   /** The Integration's own MCP tools, used for identity lookups and replies. */
   readonly toolRegistry?: ToolRegistry;
@@ -456,7 +464,11 @@ export class IngressDeliveryHost {
       headers?: Record<string, string>;
     };
 
-    const integration = this.options.soulLoader.integrations.get(envelope.slug);
+    const integration = resolveIngressIntegration(
+      this.options.soulLoader,
+      this.options.bundled,
+      envelope.slug
+    );
     const ingress = integration?.manifest?.ingress;
     const handler = integration?.ingressHandler;
     if (!integration?.connection?.enabled || ingress === undefined || handler === undefined) {
