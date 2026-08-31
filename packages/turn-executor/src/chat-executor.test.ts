@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import { type ChatExecutorHost, createChatExecutor } from "./chat-executor";
 import type { TurnCompletionRecord, TurnCompletionStore } from "./conversation-turn";
 import type { ResolvedTurnContext, TurnContextPort } from "./driver";
+import type { RunOutcomeStatus } from "./ports";
 import type { RunEventAppendPort } from "./run-events";
 
 const RUN: PersistedRun = {
@@ -81,7 +82,7 @@ function harness(
     run?: PersistedRun;
     contextError?: Error;
   } = {}
-): { execute: () => Promise<string>; recorded: Recorded } {
+): { execute: () => Promise<RunOutcomeStatus>; recorded: Recorded } {
   const events: Recorded["events"] = [];
   const messages: string[] = [];
   const completions: Recorded["completions"] = [];
@@ -158,7 +159,7 @@ function harness(
   });
 
   return {
-    execute: () => executor(over.run ?? RUN),
+    execute: async () => (await executor(over.run ?? RUN)).status,
     recorded: {
       events,
       messages,

@@ -9,8 +9,32 @@ import type { PersistedRun } from "@tulipfarm/storage";
  * the offline eval harness — can satisfy them without importing an app.
  */
 
-/** Executor outcome; `waiting` parks, and `cancelled` is left to RunCancellationManager. */
-export type RunOutcome = "succeeded" | "failed" | "waiting" | "needs_reconciliation" | "cancelled";
+/** The terminal or parking status a Run executor settles into. */
+export type RunOutcomeStatus =
+  | "succeeded"
+  | "failed"
+  | "waiting"
+  | "needs_reconciliation"
+  | "cancelled";
+
+/**
+ * Executor outcome; `waiting` parks, and `cancelled` is left to RunCancellationManager.
+ *
+ * An object rather than a bare status so a semantic failure — one the executor detects and
+ * reports itself, as opposed to a thrown error the dispatcher catches — has a channel to say
+ * *why*. Widened deliberately over a discriminated union: every existing call site returned a
+ * bare string, so a plain object with an optional field is the smallest change that still fails
+ * the build at every site that has not been converted to the new shape.
+ *
+ * `errorEvidenceRef` is an operator-facing breadcrumb, not a payload: keep it a terse, bounded,
+ * enumerable code in the existing `namespace:reason` style (`routine:agent_tool_call_limit`,
+ * `dispatch:handler_error`). It is read by operators and travels into audit surfaces, so it must
+ * never carry model output, tool arguments, user content, or a raw exception message.
+ */
+export interface RunOutcome {
+  readonly status: RunOutcomeStatus;
+  readonly errorEvidenceRef?: string;
+}
 
 /** Executes one claimed Run to a terminal outcome. Registered per Run source at composition. */
 export type RunExecutor = (run: PersistedRun, signal?: AbortSignal) => Promise<RunOutcome>;

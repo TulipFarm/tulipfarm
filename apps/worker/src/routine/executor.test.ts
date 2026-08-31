@@ -217,7 +217,7 @@ describe("createRoutineExecutor", () => {
       harness
     );
 
-    await expect(execute(run())).resolves.toBe("succeeded");
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
     expect(harness.transitions).toEqual([
       "Start:pending->ready",
       "Start:ready->claimed",
@@ -247,7 +247,7 @@ describe("createRoutineExecutor", () => {
       harness
     );
 
-    await expect(execute(run())).resolves.toBe("succeeded");
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
     expect(harness.states.get("Finish")?.resolvedInput).toEqual({ copiedRegion: "west" });
     expect(harness.inserted).toBe(1);
     expect(harness.events.indexOf("Finish:scheduled")).toBeLessThan(
@@ -279,7 +279,7 @@ describe("createRoutineExecutor", () => {
     await expect(execute(run())).rejects.toThrow("injected crash");
     expect(harness.states.get("Start")?.status).toBe("running");
     expect(harness.states.get("Finish")?.status).toBe("pending");
-    await expect(execute(run())).resolves.toBe("succeeded");
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
     expect(harness.inserted).toBe(1);
     expect(harness.states.get("Finish")?.status).toBe("succeeded");
   });
@@ -298,7 +298,7 @@ describe("createRoutineExecutor", () => {
       harness
     );
 
-    await expect(execute(run())).resolves.toBe("needs_reconciliation");
+    await expect(execute(run())).resolves.toEqual({ status: "needs_reconciliation" });
     expect(harness.states.get("Start")).toMatchObject({
       status: "needs_reconciliation",
       errorEvidenceRef: "routine:unsupported_state",
@@ -330,7 +330,7 @@ describe("createRoutineExecutor", () => {
       harness
     );
 
-    await expect(execute(run())).resolves.toBe("succeeded");
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
     expect(harness.states.get("Route")?.resolvedInput).toEqual({ carried: "need-triage" });
     expect(harness.transitions).toContain("Matched:running->succeeded");
     expect(harness.states.has("Missed")).toBe(false);
@@ -360,7 +360,7 @@ describe("createRoutineExecutor", () => {
       harness
     );
 
-    await expect(execute(run())).resolves.toBe("succeeded");
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
     expect(harness.transitions).toContain("Matched:running->succeeded");
     expect(harness.states.has("Missed")).toBe(false);
   });
@@ -379,7 +379,7 @@ describe("createRoutineExecutor", () => {
       harness
     );
 
-    await expect(execute(run())).resolves.toBe("needs_reconciliation");
+    await expect(execute(run())).resolves.toEqual({ status: "needs_reconciliation" });
     expect(harness.states.get("Start")).toMatchObject({
       status: "needs_reconciliation",
       errorEvidenceRef: "routine:input_not_evaluable",
@@ -404,7 +404,9 @@ describe("createRoutineExecutor — durable waits", () => {
   it("opens a timer and parks the Run on it", async () => {
     const harness = new StateHarness([state("Start")]);
 
-    await expect(executor(waitDefinition(), harness)(run())).resolves.toBe("waiting");
+    await expect(executor(waitDefinition(), harness)(run())).resolves.toEqual({
+      status: "waiting",
+    });
     expect(harness.transitions).toEqual([
       "Start:pending->ready",
       "Start:ready->claimed",
@@ -420,8 +422,8 @@ describe("createRoutineExecutor — durable waits", () => {
     const harness = new StateHarness([state("Start")]);
     const execute = executor(waitDefinition(), harness);
 
-    await expect(execute(run())).resolves.toBe("waiting");
-    await expect(execute(run())).resolves.toBe("waiting");
+    await expect(execute(run())).resolves.toEqual({ status: "waiting" });
+    await expect(execute(run())).resolves.toEqual({ status: "waiting" });
     expect(harness.waits.size).toBe(1);
     expect(harness.events.filter((event) => event === "Start:wait-opened")).toHaveLength(1);
   });
@@ -446,9 +448,9 @@ describe("createRoutineExecutor — durable waits", () => {
       harness
     );
 
-    await expect(withSuccessor(run())).resolves.toBe("waiting");
+    await expect(withSuccessor(run())).resolves.toEqual({ status: "waiting" });
     harness.resolveWait("Start", "satisfied");
-    await expect(withSuccessor(run())).resolves.toBe("succeeded");
+    await expect(withSuccessor(run())).resolves.toEqual({ status: "succeeded" });
     expect(harness.transitions.slice(4)).toEqual([
       "Start:waiting->ready",
       "Start:ready->claimed",
@@ -468,18 +470,18 @@ describe("createRoutineExecutor — durable waits", () => {
       harness
     );
 
-    await expect(execute(run())).resolves.toBe("waiting");
+    await expect(execute(run())).resolves.toEqual({ status: "waiting" });
     harness.resolveWait("Start", "timed_out");
-    await expect(execute(run())).resolves.toBe("succeeded");
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
   });
 
   it("parks an expired timer the Routine declared no handler for", async () => {
     const harness = new StateHarness([state("Start")]);
     const execute = executor(waitDefinition(), harness);
 
-    await expect(execute(run())).resolves.toBe("waiting");
+    await expect(execute(run())).resolves.toEqual({ status: "waiting" });
     harness.resolveWait("Start", "timed_out");
-    await expect(execute(run())).resolves.toBe("needs_reconciliation");
+    await expect(execute(run())).resolves.toEqual({ status: "needs_reconciliation" });
     expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:wait_timed_out");
   });
 
@@ -490,7 +492,7 @@ describe("createRoutineExecutor — durable waits", () => {
       harness
     );
 
-    await expect(execute(run())).resolves.toBe("needs_reconciliation");
+    await expect(execute(run())).resolves.toEqual({ status: "needs_reconciliation" });
     expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:unsupported_wait");
     expect(harness.waits.size).toBe(0);
   });
@@ -525,7 +527,9 @@ describe("createRoutineExecutor — bounded fan-out", () => {
   it("executes every branch under its own occurrence key", async () => {
     const harness = new StateHarness([state("Start")]);
 
-    await expect(executor(parallelDefinition(), harness)(run())).resolves.toBe("succeeded");
+    await expect(executor(parallelDefinition(), harness)(run())).resolves.toEqual({
+      status: "succeeded",
+    });
     expect(harness.states.get("Start#Left/Left")?.status).toBe("succeeded");
     expect(harness.states.get("Start#Right/Right")?.status).toBe("succeeded");
     expect(harness.inserted).toBe(2);
@@ -538,7 +542,7 @@ describe("createRoutineExecutor — bounded fan-out", () => {
     const harness = new StateHarness([state("Start")]);
     const execute = executor(parallelDefinition({ maxConcurrency: 1 }), harness);
 
-    await expect(execute(run())).resolves.toBe("succeeded");
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
     expect(harness.events.indexOf("Start#Left/Left:running->succeeded")).toBeLessThan(
       harness.events.indexOf("Start#Right/Right:scheduled")
     );
@@ -551,7 +555,7 @@ describe("createRoutineExecutor — bounded fan-out", () => {
 
     await expect(execute(run())).rejects.toThrow("injected crash");
     expect(harness.states.get("Start#Left/Left")?.status).toBe("succeeded");
-    await expect(execute(run())).resolves.toBe("succeeded");
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
     expect(harness.inserted).toBe(2);
   });
 
@@ -579,7 +583,7 @@ describe("createRoutineExecutor — bounded fan-out", () => {
       harness
     );
 
-    await expect(execute(run())).resolves.toBe("succeeded");
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
     expect(harness.states.get("Start#0/Body")?.resolvedInput).toEqual({ tag: "a" });
     expect(harness.states.get("Start#1/Body")?.resolvedInput).toEqual({ tag: "b" });
     expect(harness.inserted).toBe(2);
@@ -603,7 +607,7 @@ describe("createRoutineExecutor — bounded fan-out", () => {
       harness
     );
 
-    await expect(execute(run())).resolves.toBe("succeeded");
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
     expect([...harness.states.keys()]).toEqual(["Start", "Start#0/Body", "Start#1/Body"]);
   });
 
@@ -625,7 +629,7 @@ describe("createRoutineExecutor — bounded fan-out", () => {
       harness
     );
 
-    await expect(execute(run())).resolves.toBe("needs_reconciliation");
+    await expect(execute(run())).resolves.toEqual({ status: "needs_reconciliation" });
     expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:iteration_cap_exceeded");
   });
 });
@@ -679,7 +683,7 @@ describe("createRoutineExecutor — tool States", () => {
       calls
     );
 
-    await expect(execute(run())).resolves.toBe("succeeded");
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
     expect(harness.transitions).toEqual([
       "Start:pending->ready",
       "Start:ready->claimed",
@@ -707,7 +711,7 @@ describe("createRoutineExecutor — tool States", () => {
       now: () => new Date(STARTED_AT),
     });
 
-    await expect(execute(run())).resolves.toBe("needs_reconciliation");
+    await expect(execute(run())).resolves.toEqual({ status: "needs_reconciliation" });
     expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:unsupported_state");
   });
 
@@ -718,7 +722,7 @@ describe("createRoutineExecutor — tool States", () => {
       reason: "approval_required",
     });
 
-    await expect(execute(run())).resolves.toBe("needs_reconciliation");
+    await expect(execute(run())).resolves.toEqual({ status: "needs_reconciliation" });
     expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:approval_required");
   });
 
@@ -729,7 +733,7 @@ describe("createRoutineExecutor — tool States", () => {
       reason: "effect_ambiguous",
     });
 
-    await expect(execute(run())).resolves.toBe("needs_reconciliation");
+    await expect(execute(run())).resolves.toEqual({ status: "needs_reconciliation" });
     expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:effect_ambiguous");
   });
 
@@ -753,7 +757,7 @@ describe("createRoutineExecutor — tool States", () => {
       { kind: "failed", reason: "guardrail_denied" }
     );
 
-    await expect(execute(run())).resolves.toBe("succeeded");
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
     expect(harness.events).toContain("Fallback:scheduled");
   });
 
@@ -764,7 +768,10 @@ describe("createRoutineExecutor — tool States", () => {
       reason: "dispatch_failed",
     });
 
-    await expect(execute(run())).resolves.toBe("failed");
+    await expect(execute(run())).resolves.toEqual({
+      status: "failed",
+      errorEvidenceRef: "routine:tool_dispatch_failed",
+    });
     expect(harness.transitions).toContain("Start:running->failed");
   });
 });
@@ -820,7 +827,7 @@ describe("createRoutineExecutor — agent States", () => {
       calls
     );
 
-    await expect(execute(run())).resolves.toBe("succeeded");
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
     expect(harness.transitions).toEqual([
       "Start:pending->ready",
       "Start:ready->claimed",
@@ -861,7 +868,7 @@ describe("createRoutineExecutor — agent States", () => {
       []
     );
 
-    await expect(execute(run())).resolves.toBe("succeeded");
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
     // Before State outputs were durable this resolved to null and the successor never saw a value.
     expect(harness.states.get("Record")?.resolvedInput).toEqual({ chosen: "billing" });
     expect(harness.states.get("Start")?.output).toEqual({ category: "billing" });
@@ -914,7 +921,7 @@ describe("createRoutineExecutor — agent States", () => {
       now: () => new Date(STARTED_AT),
     });
 
-    await expect(execute(run())).resolves.toBe("succeeded");
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
     // Before State outputs were durable the replayed Agent republished null and this resolved to
     // nothing, so the whole tail of the Routine ran on empty Context.
     expect(harness.states.get("Final")?.resolvedInput).toEqual({ echo: "billing" });
@@ -935,7 +942,7 @@ describe("createRoutineExecutor — agent States", () => {
       now: () => new Date(STARTED_AT),
     });
 
-    await expect(execute(run())).resolves.toBe("needs_reconciliation");
+    await expect(execute(run())).resolves.toEqual({ status: "needs_reconciliation" });
     expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:unsupported_state");
   });
 
@@ -946,7 +953,7 @@ describe("createRoutineExecutor — agent States", () => {
       reason: "agent_not_in_bundle",
     });
 
-    await expect(execute(run())).resolves.toBe("needs_reconciliation");
+    await expect(execute(run())).resolves.toEqual({ status: "needs_reconciliation" });
     expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:agent_not_in_bundle");
   });
 
@@ -957,7 +964,7 @@ describe("createRoutineExecutor — agent States", () => {
       reason: "approval_required",
     });
 
-    await expect(execute(run())).resolves.toBe("needs_reconciliation");
+    await expect(execute(run())).resolves.toEqual({ status: "needs_reconciliation" });
     expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:approval_required");
   });
 
@@ -965,7 +972,7 @@ describe("createRoutineExecutor — agent States", () => {
     const harness = new StateHarness([state("Start")]);
     const execute = agentExecutor(definition([classifyState]), harness, { kind: "cancelled" });
 
-    await expect(execute(run())).resolves.toBe("cancelled");
+    await expect(execute(run())).resolves.toEqual({ status: "cancelled" });
     expect(harness.transitions).not.toContain("Start:running->failed");
   });
 
@@ -989,7 +996,7 @@ describe("createRoutineExecutor — agent States", () => {
       { kind: "failed", reason: "guardrail_output_blocked", retryable: false }
     );
 
-    await expect(execute(run())).resolves.toBe("succeeded");
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
     expect(harness.events).toContain("Fallback:scheduled");
   });
 
@@ -1001,8 +1008,29 @@ describe("createRoutineExecutor — agent States", () => {
       retryable: true,
     });
 
-    await expect(execute(run())).resolves.toBe("failed");
+    await expect(execute(run())).resolves.toEqual({
+      status: "failed",
+      errorEvidenceRef: "routine:agent_model_error",
+    });
     expect(harness.transitions).toContain("Start:running->failed");
+  });
+
+  it("carries a tool-call-limit exhaustion from the State onto the Run's own evidence ref", async () => {
+    // Staging evidence: `run_states.error_evidence_ref` was set to `routine:agent_tool_call_limit`
+    // on 28 failed Runs while `runs.error_evidence_ref` stayed null — a semantic failure (the Agent
+    // loop returns "failed" rather than throwing) that never reached the Run row.
+    const harness = new StateHarness([state("Start")]);
+    const execute = agentExecutor(definition([classifyState]), harness, {
+      kind: "failed",
+      reason: "tool_call_limit",
+      retryable: false,
+    });
+
+    await expect(execute(run())).resolves.toEqual({
+      status: "failed",
+      errorEvidenceRef: "routine:agent_tool_call_limit",
+    });
+    expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:agent_tool_call_limit");
   });
 });
 
@@ -1087,7 +1115,7 @@ describe("createRoutineExecutor — approval States", () => {
 
     await expect(
       approvalExecutor(approvalDefinition(), harness, approvals.port)(run())
-    ).resolves.toBe("waiting");
+    ).resolves.toEqual({ status: "waiting" });
     expect(harness.transitions).toEqual([
       "Start:pending->ready",
       "Start:ready->claimed",
@@ -1110,8 +1138,8 @@ describe("createRoutineExecutor — approval States", () => {
     const approvals = new ApprovalHarness();
     const execute = approvalExecutor(approvalDefinition(), harness, approvals.port);
 
-    await expect(execute(run())).resolves.toBe("waiting");
-    await expect(execute(run())).resolves.toBe("waiting");
+    await expect(execute(run())).resolves.toEqual({ status: "waiting" });
+    await expect(execute(run())).resolves.toEqual({ status: "waiting" });
     expect(approvals.opened).toHaveLength(1);
   });
 
@@ -1120,9 +1148,9 @@ describe("createRoutineExecutor — approval States", () => {
     const approvals = new ApprovalHarness();
     const execute = approvalExecutor(approvalDefinition(), harness, approvals.port);
 
-    await expect(execute(run())).resolves.toBe("waiting");
+    await expect(execute(run())).resolves.toEqual({ status: "waiting" });
     approvals.decide("Start", "approved");
-    await expect(execute(run())).resolves.toBe("succeeded");
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
     expect(harness.transitions.slice(4)).toEqual([
       "Start:waiting->ready",
       "Start:ready->claimed",
@@ -1136,9 +1164,9 @@ describe("createRoutineExecutor — approval States", () => {
     const approvals = new ApprovalHarness();
     const execute = approvalExecutor(approvalDefinition(), harness, approvals.port);
 
-    await expect(execute(run())).resolves.toBe("waiting");
+    await expect(execute(run())).resolves.toEqual({ status: "waiting" });
     approvals.decide("Start", "denied");
-    await expect(execute(run())).resolves.toBe("failed");
+    await expect(execute(run())).resolves.toEqual({ status: "failed" });
     expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:approval_rejected");
   });
 
@@ -1157,9 +1185,9 @@ describe("createRoutineExecutor — approval States", () => {
       approvals.port
     );
 
-    await expect(execute(run())).resolves.toBe("waiting");
+    await expect(execute(run())).resolves.toEqual({ status: "waiting" });
     approvals.decide("Start", "denied");
-    await expect(execute(run())).resolves.toBe("succeeded");
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
     expect(harness.events).toContain("Denied:scheduled");
   });
 
@@ -1168,18 +1196,18 @@ describe("createRoutineExecutor — approval States", () => {
     const approvals = new ApprovalHarness();
     const execute = approvalExecutor(approvalDefinition(), harness, approvals.port);
 
-    await expect(execute(run())).resolves.toBe("waiting");
+    await expect(execute(run())).resolves.toEqual({ status: "waiting" });
     approvals.decide("Start", "expired");
-    await expect(execute(run())).resolves.toBe("needs_reconciliation");
+    await expect(execute(run())).resolves.toEqual({ status: "needs_reconciliation" });
     expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:wait_expired");
   });
 
   it("parks an approval State when no decision surface is composed", async () => {
     const harness = new StateHarness([state("Start")]);
 
-    await expect(approvalExecutor(approvalDefinition(), harness)(run())).resolves.toBe(
-      "needs_reconciliation"
-    );
+    await expect(approvalExecutor(approvalDefinition(), harness)(run())).resolves.toEqual({
+      status: "needs_reconciliation",
+    });
     expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:unsupported_state");
   });
 });
@@ -1240,7 +1268,7 @@ describe("createRoutineExecutor — retry policy", () => {
       retries,
     });
 
-    await expect(execute(run())).resolves.toBe("succeeded");
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
     expect(calls).toBe(2);
     expect((await retries.load("business-1", run().id, "Start"))?.attempts).toBe(2);
     expect(harness.transitions).toContain("Start:running->succeeded");
@@ -1264,7 +1292,10 @@ describe("createRoutineExecutor — retry policy", () => {
       retries,
     });
 
-    await expect(execute(run())).resolves.toBe("failed");
+    await expect(execute(run())).resolves.toEqual({
+      status: "failed",
+      errorEvidenceRef: "routine:agent_model_rate_limited",
+    });
     expect(calls).toBe(2);
     expect((await retries.load("business-1", run().id, "Start"))?.attempts).toBe(2);
     expect(harness.transitions).toContain("Start:running->failed");
@@ -1288,7 +1319,10 @@ describe("createRoutineExecutor — retry policy", () => {
       retries,
     });
 
-    await expect(execute(run())).resolves.toBe("failed");
+    await expect(execute(run())).resolves.toEqual({
+      status: "failed",
+      errorEvidenceRef: "routine:agent_guardrail_output_blocked",
+    });
     expect(calls).toBe(1);
     expect(harness.transitions).toContain("Start:running->failed");
   });
@@ -1317,7 +1351,7 @@ describe("createRoutineExecutor — retry policy", () => {
       },
     });
 
-    await expect(execute(run())).resolves.toBe("succeeded");
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
     expect(calls).toBe(3);
     expect(delays).toEqual([100, 100]);
   });
@@ -1349,7 +1383,10 @@ describe("createRoutineExecutor — retry policy", () => {
     resumed = true;
     // The resumed State must continue from the 2 attempts already spent, not restart at zero:
     // 3 more physical attempts (3rd, 4th, 5th) reach the ceiling — a refund would take 5 more.
-    await expect(execute(run())).resolves.toBe("failed");
+    await expect(execute(run())).resolves.toEqual({
+      status: "failed",
+      errorEvidenceRef: "routine:agent_model_error",
+    });
     expect(calls).toBe(5);
     expect((await retries.load("business-1", run().id, "Start"))?.attempts).toBe(5);
     expect(harness.transitions).toContain("Start:running->failed");
@@ -1423,7 +1460,7 @@ describe("createRoutineExecutor — concurrencyKey", () => {
     };
 
     const execute = keyedExecutor({ harness, agent, concurrency, concurrencyKey: "digest" });
-    await expect(execute(run())).resolves.toBe("succeeded");
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
 
     expect(heldDuringExecution).toBe("busy");
     // Released on settle, so the next Run to want the key gets it immediately.
@@ -1447,7 +1484,10 @@ describe("createRoutineExecutor — concurrencyKey", () => {
     };
 
     const execute = keyedExecutor({ harness, agent, concurrency, concurrencyKey: "digest" });
-    await expect(execute(run())).resolves.toBe("failed");
+    await expect(execute(run())).resolves.toEqual({
+      status: "failed",
+      errorEvidenceRef: "routine:agent_model_error",
+    });
     await expect(
       concurrency.acquire({
         businessId: "business-1",
@@ -1486,7 +1526,7 @@ describe("createRoutineExecutor — concurrencyKey", () => {
       concurrencyKey: "digest",
       delay: async () => {},
     });
-    await expect(execute(run())).resolves.toBe("waiting");
+    await expect(execute(run())).resolves.toEqual({ status: "waiting" });
     expect(calls).toBe(0);
     expect(harness.transitions).toContain("Start:running->waiting");
     expect(harness.transitions).not.toContain("Start:running->needs_reconciliation");
@@ -1525,10 +1565,10 @@ describe("createRoutineExecutor — concurrencyKey", () => {
 
     // Each pass opens one backoff, fires it, and comes back into execution to try the key again.
     for (let pass = 1; pass <= STATE_CONCURRENCY_MAX_WAITS; pass += 1) {
-      await expect(execute(run())).resolves.toBe("waiting");
+      await expect(execute(run())).resolves.toEqual({ status: "waiting" });
       harness.resolveConcurrencyWait("Start", pass);
     }
-    await expect(execute(run())).resolves.toBe("needs_reconciliation");
+    await expect(execute(run())).resolves.toEqual({ status: "needs_reconciliation" });
 
     expect(calls).toBe(0);
     expect(harness.transitions).toContain("Start:running->needs_reconciliation");
@@ -1567,14 +1607,14 @@ describe("createRoutineExecutor — concurrencyKey", () => {
       delay: async () => {},
     });
 
-    await expect(execute(run())).resolves.toBe("waiting");
+    await expect(execute(run())).resolves.toEqual({ status: "waiting" });
     expect(calls).toBe(0);
 
     // Holder releases, sweep fires the timer, contender is requeued.
     await concurrency.release("business-1", "digest", OTHER_RUN, "Start");
     harness.resolveConcurrencyWait("Start", 1);
 
-    await expect(execute(run())).resolves.toBe("succeeded");
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
     // Resuming *into* the State: its effect ran exactly once, it was not skipped as satisfied.
     expect(calls).toBe(1);
     expect(harness.transitions).toContain("Start:waiting->ready");
@@ -1601,10 +1641,10 @@ describe("createRoutineExecutor — concurrencyKey", () => {
       delay: async () => {},
     });
 
-    await expect(execute(run())).resolves.toBe("waiting");
+    await expect(execute(run())).resolves.toEqual({ status: "waiting" });
     // Crash-and-reclaim before the sweep fires: the State is back at `running`, its wait pending.
     harness.states.set("Start", { ...state("Start", "running"), version: 9 });
-    await expect(execute(run())).resolves.toBe("waiting");
+    await expect(execute(run())).resolves.toEqual({ status: "waiting" });
 
     await expect(contention.load("business-1", run().id, "Start")).resolves.toMatchObject({
       waits: 1,
@@ -1630,7 +1670,7 @@ describe("createRoutineExecutor — concurrencyKey", () => {
       concurrency,
       concurrencyKey: "digest",
     });
-    await expect(execute(run())).resolves.toBe("succeeded");
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
   });
 
   it("never touches the store for a State that authored no key", async () => {
@@ -1638,7 +1678,7 @@ describe("createRoutineExecutor — concurrencyKey", () => {
     const concurrency = new InMemoryStateConcurrencyStore();
     const execute = keyedExecutor({ harness, agent: succeedingAgent, concurrency });
 
-    await expect(execute(run())).resolves.toBe("succeeded");
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
     await expect(
       concurrency.acquire({
         businessId: "business-1",
@@ -1730,9 +1770,9 @@ describe("createRoutineExecutor — child_routine States", () => {
     const harness = new StateHarness([state("Start")]);
     const children = new ChildRoutineHarness();
 
-    await expect(childExecutor(childDefinition(), harness, children.port)(run())).resolves.toBe(
-      "waiting"
-    );
+    await expect(childExecutor(childDefinition(), harness, children.port)(run())).resolves.toEqual({
+      status: "waiting",
+    });
     expect(harness.transitions).toEqual([
       "Start:pending->ready",
       "Start:ready->claimed",
@@ -1759,7 +1799,7 @@ describe("createRoutineExecutor — child_routine States", () => {
         harness,
         children.port
       )(run())
-    ).resolves.toBe("waiting");
+    ).resolves.toEqual({ status: "waiting" });
     expect(children.started[0]?.input).toEqual({ region: "west" });
   });
 
@@ -1768,8 +1808,8 @@ describe("createRoutineExecutor — child_routine States", () => {
     const children = new ChildRoutineHarness();
     const execute = childExecutor(childDefinition(), harness, children.port);
 
-    await expect(execute(run())).resolves.toBe("waiting");
-    await expect(execute(run())).resolves.toBe("waiting");
+    await expect(execute(run())).resolves.toEqual({ status: "waiting" });
+    await expect(execute(run())).resolves.toEqual({ status: "waiting" });
     expect(children.started).toHaveLength(1);
   });
 
@@ -1778,9 +1818,9 @@ describe("createRoutineExecutor — child_routine States", () => {
     const children = new ChildRoutineHarness();
     const execute = childExecutor(childDefinition(), harness, children.port);
 
-    await expect(execute(run())).resolves.toBe("waiting");
+    await expect(execute(run())).resolves.toEqual({ status: "waiting" });
     children.settle("Start", "succeeded");
-    await expect(execute(run())).resolves.toBe("succeeded");
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
     expect(harness.transitions.slice(4)).toEqual([
       "Start:waiting->ready",
       "Start:ready->claimed",
@@ -1794,9 +1834,9 @@ describe("createRoutineExecutor — child_routine States", () => {
     const children = new ChildRoutineHarness();
     const execute = childExecutor(childDefinition(), harness, children.port);
 
-    await expect(execute(run())).resolves.toBe("waiting");
+    await expect(execute(run())).resolves.toEqual({ status: "waiting" });
     children.settle("Start", "failed");
-    await expect(execute(run())).resolves.toBe("failed");
+    await expect(execute(run())).resolves.toEqual({ status: "failed" });
     expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:child_failed");
   });
 
@@ -1812,9 +1852,9 @@ describe("createRoutineExecutor — child_routine States", () => {
       children.port
     );
 
-    await expect(execute(run())).resolves.toBe("waiting");
+    await expect(execute(run())).resolves.toEqual({ status: "waiting" });
     children.settle("Start", "failed");
-    await expect(execute(run())).resolves.toBe("succeeded");
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
     expect(harness.events).toContain("Recovered:scheduled");
   });
 
@@ -1823,9 +1863,9 @@ describe("createRoutineExecutor — child_routine States", () => {
     const children = new ChildRoutineHarness();
     const execute = childExecutor(childDefinition(), harness, children.port);
 
-    await expect(execute(run())).resolves.toBe("waiting");
+    await expect(execute(run())).resolves.toEqual({ status: "waiting" });
     children.settle("Start", "cancelled");
-    await expect(execute(run())).resolves.toBe("needs_reconciliation");
+    await expect(execute(run())).resolves.toEqual({ status: "needs_reconciliation" });
     expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:child_cancelled");
   });
 
@@ -1834,9 +1874,9 @@ describe("createRoutineExecutor — child_routine States", () => {
     const children = new ChildRoutineHarness();
     const execute = childExecutor(childDefinition(), harness, children.port);
 
-    await expect(execute(run())).resolves.toBe("waiting");
+    await expect(execute(run())).resolves.toEqual({ status: "waiting" });
     children.settle("Start", "expired");
-    await expect(execute(run())).resolves.toBe("needs_reconciliation");
+    await expect(execute(run())).resolves.toEqual({ status: "needs_reconciliation" });
     expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:wait_expired");
   });
 
@@ -1850,7 +1890,7 @@ describe("createRoutineExecutor — child_routine States", () => {
         harness,
         children.port
       )(run())
-    ).resolves.toBe("succeeded");
+    ).resolves.toEqual({ status: "succeeded" });
     expect(children.started[0]).toMatchObject({ mode: "detach" });
     expect(children.started[0]?.deadlineMs).toBeUndefined();
     expect(harness.transitions).toEqual([
@@ -1865,9 +1905,9 @@ describe("createRoutineExecutor — child_routine States", () => {
     const harness = new StateHarness([state("Start")]);
     const children = new ChildRoutineHarness("succeeded");
 
-    await expect(childExecutor(childDefinition(), harness, children.port)(run())).resolves.toBe(
-      "succeeded"
-    );
+    await expect(childExecutor(childDefinition(), harness, children.port)(run())).resolves.toEqual({
+      status: "succeeded",
+    });
     expect(harness.transitions).toEqual([
       "Start:pending->ready",
       "Start:ready->claimed",
@@ -1882,16 +1922,16 @@ describe("createRoutineExecutor — child_routine States", () => {
 
     await expect(
       childExecutor(childDefinition({ deadlineMs: undefined }), harness, children.port)(run())
-    ).resolves.toBe("needs_reconciliation");
+    ).resolves.toEqual({ status: "needs_reconciliation" });
     expect(children.started).toHaveLength(0);
   });
 
   it("parks a child_routine State when no child surface is composed", async () => {
     const harness = new StateHarness([state("Start")]);
 
-    await expect(childExecutor(childDefinition(), harness)(run())).resolves.toBe(
-      "needs_reconciliation"
-    );
+    await expect(childExecutor(childDefinition(), harness)(run())).resolves.toEqual({
+      status: "needs_reconciliation",
+    });
     expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:unsupported_state");
   });
 });
@@ -1948,9 +1988,9 @@ describe("createRoutineExecutor — emit States", () => {
     const harness = new StateHarness([state("Start")]);
     const emissions = new EmitHarness();
 
-    await expect(emitExecutor(emitDefinition(), harness, emissions.port)(run())).resolves.toBe(
-      "succeeded"
-    );
+    await expect(emitExecutor(emitDefinition(), harness, emissions.port)(run())).resolves.toEqual({
+      status: "succeeded",
+    });
     expect(harness.transitions).toEqual([
       "Start:pending->ready",
       "Start:ready->claimed",
@@ -1979,7 +2019,7 @@ describe("createRoutineExecutor — emit States", () => {
         harness,
         emissions.port
       )(run())
-    ).resolves.toBe("succeeded");
+    ).resolves.toEqual({ status: "succeeded" });
     expect(emissions.announced[0]?.data).toEqual({ region: "west" });
   });
 
@@ -1987,17 +2027,17 @@ describe("createRoutineExecutor — emit States", () => {
     const harness = new StateHarness([state("Start")]);
     const emissions = new EmitHarness("no_match");
 
-    await expect(emitExecutor(emitDefinition(), harness, emissions.port)(run())).resolves.toBe(
-      "succeeded"
-    );
+    await expect(emitExecutor(emitDefinition(), harness, emissions.port)(run())).resolves.toEqual({
+      status: "succeeded",
+    });
   });
 
   it("parks an emit State when no emission surface is composed", async () => {
     const harness = new StateHarness([state("Start")]);
 
-    await expect(emitExecutor(emitDefinition(), harness)(run())).resolves.toBe(
-      "needs_reconciliation"
-    );
+    await expect(emitExecutor(emitDefinition(), harness)(run())).resolves.toEqual({
+      status: "needs_reconciliation",
+    });
     expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:unsupported_state");
   });
 
@@ -2011,7 +2051,7 @@ describe("createRoutineExecutor — emit States", () => {
         harness,
         emissions.port
       )(run())
-    ).resolves.toBe("needs_reconciliation");
+    ).resolves.toEqual({ status: "needs_reconciliation" });
     expect(emissions.announced).toHaveLength(0);
   });
 });
@@ -2083,7 +2123,7 @@ describe("createRoutineExecutor — deterministic States", () => {
       now: () => new Date(STARTED_AT),
     });
 
-    await expect(execute(run())).resolves.toBe("succeeded");
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
     expect(harness.states.get("Extract")?.output).toEqual({ stars: 4321 });
     // A fresh Record each tick carrying the value the script derived — never an Agent's guess.
     expect(dispatched).toEqual([
@@ -2129,7 +2169,7 @@ describe("createRoutineExecutor — deterministic States", () => {
       now: () => new Date(STARTED_AT),
     });
 
-    await expect(execute(run())).resolves.toBe("succeeded");
+    await expect(execute(run())).resolves.toEqual({ status: "succeeded" });
     // `record_create` is `mutating`, so it compiles to `medium`; a `low` ceiling refuses it.
     expect(ceilings).toEqual(["high", "high"]);
   });
@@ -2165,7 +2205,10 @@ describe("createRoutineExecutor — deterministic States", () => {
       now: () => new Date(STARTED_AT),
     });
 
-    await expect(execute(run())).resolves.toBe("failed");
+    await expect(execute(run())).resolves.toEqual({
+      status: "failed",
+      errorEvidenceRef: "routine:action_unknown_resource_type",
+    });
     expect(harness.states.get("Save")?.errorEvidenceRef).toBe(
       "routine:action_unknown_resource_type"
     );
@@ -2197,6 +2240,9 @@ describe("createRoutineExecutor — deterministic States", () => {
       now: () => new Date(STARTED_AT),
     });
 
-    await expect(execute(run())).resolves.toBe("failed");
+    await expect(execute(run())).resolves.toEqual({
+      status: "failed",
+      errorEvidenceRef: "routine:script_rejected_source",
+    });
   });
 });

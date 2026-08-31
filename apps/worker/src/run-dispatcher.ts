@@ -6,7 +6,7 @@ import {
 } from "@tulipfarm/storage";
 import type { RunOutcome } from "@tulipfarm/turn-executor";
 
-export type { RunOutcome } from "@tulipfarm/turn-executor";
+export type { RunOutcome, RunOutcomeStatus } from "@tulipfarm/turn-executor";
 
 export interface RunDispatcherOptions {
   leases: RunLeaseManager;
@@ -97,7 +97,7 @@ export class RunDispatcher {
 
       try {
         const outcome = await this.options.handler(started.run);
-        if (outcome === "cancelled") {
+        if (outcome.status === "cancelled") {
           // Cancellation manager owns this transition; do not race it here.
           waiting += 1;
           continue;
@@ -107,20 +107,23 @@ export class RunDispatcher {
           runId: run.id,
           expectedVersion: started.run.version,
           expectedStatus: "running",
-          status: outcome,
+          status: outcome.status,
           now: this.options.now(),
+          ...(outcome.errorEvidenceRef === undefined
+            ? {}
+            : { errorEvidenceRef: outcome.errorEvidenceRef }),
         });
         if (!released) {
           failed += 1;
           continue;
         }
-        if (outcome === "succeeded") dispatched += 1;
-        else if (outcome === "waiting") waiting += 1;
+        if (outcome.status === "succeeded") dispatched += 1;
+        else if (outcome.status === "waiting") waiting += 1;
         else failed += 1;
-        if (outcome === "succeeded" || outcome === "failed") {
-          await this.notifyTerminal(started.run, outcome);
+        if (outcome.status === "succeeded" || outcome.status === "failed") {
+          await this.notifyTerminal(started.run, outcome.status);
         }
-        if (outcome === "waiting") {
+        if (outcome.status === "waiting") {
           await this.notifyWaiting(started.run);
         }
       } catch (error) {

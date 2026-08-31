@@ -204,7 +204,7 @@ export function createRoutineExecutor(options: RoutineExecutorOptions): RunExecu
       (await options.runs.listStates(run.businessId, run.id)).map((state) => [state.key, state])
     );
     const start = persisted.get(routine.start);
-    if (start === undefined) return "needs_reconciliation";
+    if (start === undefined) return { status: "needs_reconciliation" };
 
     const requestArtifact = await options.artifacts.read({
       businessId: run.businessId,
@@ -214,10 +214,10 @@ export function createRoutineExecutor(options: RoutineExecutorOptions): RunExecu
       now: now(),
     });
     if (requestArtifact.schemaRef !== MANUAL_REQUEST_SCHEMA_REF) {
-      return "needs_reconciliation";
+      return { status: "needs_reconciliation" };
     }
     const request = manualRequest(requestArtifact.content, start.key);
-    if (request.slug !== routine.slug) return "needs_reconciliation";
+    if (request.slug !== routine.slug) return { status: "needs_reconciliation" };
 
     const execution = new RoutineExecution({
       run,
@@ -233,7 +233,11 @@ export function createRoutineExecutor(options: RoutineExecutorOptions): RunExecu
       now,
     });
     // `waiting` holds no lease; replay starts from durable rows after the sweep requeues it.
-    return execution.runChain(routine.start, "", {}, {}, 0);
+    const outcome = await execution.runChain(routine.start, "", {}, {}, 0);
+    if (outcome === "failed") {
+      return { status: "failed", errorEvidenceRef: execution.failureEvidenceRef };
+    }
+    return { status: outcome };
   };
 }
 
@@ -268,7 +272,20 @@ class RoutineExecution {
    */
   private readonly failureReasons = new Map<string, string>();
 
+  /**
+   * The evidence ref of the State that just failed the chain, so `createRoutineExecutor`'s
+   * wrapper can carry it onto the Run's own `error_evidence_ref` rather than leaving it stranded
+   * on the State row. Only one State ever fails a chain per attempt, so last-write is exact, not
+   * approximate.
+   */
+  private lastFailureEvidenceRef: string | undefined;
+
   constructor(private readonly ctx: ExecutionContext) {}
+
+  /** The evidence ref of whichever State most recently failed this chain, if any. */
+  get failureEvidenceRef(): string | undefined {
+    return this.lastFailureEvidenceRef;
+  }
 
   /**
    * What `states.<name>.output` resolves to: recomputed for a pure State, otherwise the value this
@@ -301,7 +318,10 @@ class RoutineExecution {
       const row = this.ctx.persisted.get(key);
       if (state === undefined || row === undefined) return "needs_reconciliation";
 
-      if (row.status === "failed") return "failed";
+      if (row.status === "failed") {
+        this.lastFailureEvidenceRef = row.errorEvidenceRef ?? undefined;
+        return "failed";
+      }
       if (row.status === "cancelled" || row.status === "cancelling") return "cancelled";
       if (row.status === "needs_reconciliation" || row.status === "skipped") {
         return "needs_reconciliation";
@@ -413,12 +433,9 @@ class RoutineExecution {
     }
     if (outcome === null) return { kind: "waiting" };
     if (outcome === "failed") {
-      await this.transition(
-        key,
-        "running",
-        "failed",
-        this.failureReasons.get(key) ?? `routine:${state.name}`
-      );
+      const evidenceRef = this.failureReasons.get(key) ?? `routine:${state.name}`;
+      await this.transition(key, "running", "failed", evidenceRef);
+      this.lastFailureEvidenceRef = evidenceRef;
       return { kind: "failed" };
     }
     if (typeof outcome !== "object") return { kind: outcome };

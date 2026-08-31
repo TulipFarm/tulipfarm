@@ -40,7 +40,7 @@ export function createIntegrationExecutor(options: IntegrationExecutorOptions): 
     const delivery = await options.deliveries.describe(run.id);
     if (delivery === undefined) {
       // No delivery is owed; do not report a channel failure that did not happen.
-      return "succeeded";
+      return { status: "succeeded" };
     }
 
     const writer = new TurnEventWriter({
@@ -100,7 +100,7 @@ async function classify(
   payload: { decision: ClassifiedDecision; reason?: string; eventType?: string }
 ): Promise<RunOutcome> {
   await writer.emit("delivery.classified", payload, "classified");
-  return "succeeded";
+  return { status: "succeeded" };
 }
 
 /** Chat replies are at-least-once; durable Turn inputs are idempotent, but posts can repeat. */
@@ -152,7 +152,7 @@ async function runChat(
 
 /** How the turn ended, as the channel should hear it. `null` means it has not ended. */
 function replyOutcome(outcome: RunOutcome): RemoteReplyOutcome | null {
-  if (outcome === "succeeded") return "answered";
-  if (outcome === "waiting" || outcome === "cancelled") return null;
+  if (outcome.status === "succeeded") return "answered";
+  if (outcome.status === "waiting" || outcome.status === "cancelled") return null;
   return "failed";
 }

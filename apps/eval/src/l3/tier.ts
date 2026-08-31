@@ -340,10 +340,13 @@ async function runOneTurn(
     await database.runs.transitionRun(BUSINESS_ID, runId, {
       expectedVersion: settled?.version ?? run.version,
       expectedStatus: settled?.status ?? run.status,
-      status: outcome,
+      status: outcome.status,
       finishedAt: new Date().toISOString(),
       leaseOwner: null,
       leaseExpiresAt: null,
+      ...(outcome.errorEvidenceRef === undefined
+        ? {}
+        : { errorEvidenceRef: outcome.errorEvidenceRef }),
     });
 
     const curatorTasks = await deliverCurator({

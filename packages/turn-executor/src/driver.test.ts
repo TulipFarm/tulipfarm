@@ -213,7 +213,7 @@ describe("TurnDriver", () => {
     });
     const outcome = await driver.run(request());
 
-    expect(outcome).toBe("succeeded");
+    expect(outcome).toEqual({ status: "succeeded" });
     expect(store.messages).toEqual([{ content: "the answer", attempt: 1 }]);
     // A reader that sees `turn.finished` can fetch the Message it names.
     expect(events.appended.at(-1)).toEqual({
@@ -333,7 +333,7 @@ describe("TurnDriver", () => {
     });
     const outcome = await driver.run(request());
 
-    expect(outcome).toBe("waiting");
+    expect(outcome).toEqual({ status: "waiting" });
     expect(store.messages).toEqual([]);
     expect(store.completed).toEqual([]);
     // The held call is named, so a reader shows the decision against the Tool call it belongs to.
@@ -354,7 +354,7 @@ describe("TurnDriver", () => {
     });
     const outcome = await driver.run(request());
 
-    expect(outcome).toBe("succeeded");
+    expect(outcome).toEqual({ status: "succeeded" });
     expect(store.messages).toEqual([{ attempt: 1, content: "Two things before I start." }]);
     expect(store.completed).toEqual([{ status: "succeeded", cursor: 2, messageId: "msg-1" }]);
     expect(events.appended.at(-1)).toEqual({
@@ -371,7 +371,7 @@ describe("TurnDriver", () => {
     });
     const outcome = await driver.run(request());
 
-    expect(outcome).toBe("failed");
+    expect(outcome).toEqual({ status: "failed", errorEvidenceRef: "agent:iteration_limit" });
     expect(store.messages).toEqual([]);
     expect(store.completed).toEqual([{ status: "failed", cursor: 2, messageId: null }]);
     expect(events.appended.at(-1)).toEqual({
@@ -407,7 +407,7 @@ describe("TurnDriver", () => {
       throw new Error("worker crashed");
     });
 
-    expect(await driver.run(request())).toBe("needs_reconciliation");
+    expect(await driver.run(request())).toEqual({ status: "needs_reconciliation" });
     expect(store.messages).toEqual([]);
     expect(events.appended.at(-1)).toEqual({
       eventType: "turn.finished",
@@ -420,7 +420,7 @@ describe("TurnDriver", () => {
     const before = events.appended.length;
     const outcome = await driver.run(request());
 
-    expect(outcome).toBe("cancelled");
+    expect(outcome).toEqual({ status: "cancelled" });
     expect(store.completed).toEqual([]);
     // Only the two pre-loop events; no terminal event contradicting the manager's transition.
     expect(events.appended.length).toBe(before + 2);
@@ -430,7 +430,7 @@ describe("TurnDriver", () => {
     const { driver, store } = harness({ status: "completed", output: "", ...counters });
     const outcome = await driver.run(request());
 
-    expect(outcome).toBe("failed");
+    expect(outcome).toEqual({ status: "failed", errorEvidenceRef: "agent:empty_model_output" });
     expect(store.messages).toEqual([]);
     expect(store.completed).toEqual([{ status: "failed", cursor: 2, messageId: null }]);
   });
@@ -439,7 +439,7 @@ describe("TurnDriver", () => {
     const { driver, store } = harness({ status: "completed", output: null, ...counters });
     const outcome = await driver.run(request());
 
-    expect(outcome).toBe("failed");
+    expect(outcome).toEqual({ status: "failed", errorEvidenceRef: "agent:empty_model_output" });
     expect(store.messages).toEqual([]);
   });
 
@@ -468,7 +468,7 @@ describe("TurnDriver", () => {
       }
     );
 
-    expect(await driver.run(request())).toBe("succeeded");
+    expect(await driver.run(request())).toEqual({ status: "succeeded" });
     expect(seen).toEqual([]);
     expect(store.messages).toEqual([
       { content: "This request was blocked by a safety guardrail.", attempt: 1 },
@@ -500,7 +500,7 @@ describe("TurnDriver", () => {
       ...counters,
     });
 
-    expect(await driver.run(request())).toBe("succeeded");
+    expect(await driver.run(request())).toEqual({ status: "succeeded" });
     expect(store.messages).toEqual([
       { content: "The response was blocked by a content guardrail.", attempt: 1 },
     ]);
@@ -529,7 +529,7 @@ describe("TurnDriver", () => {
     });
     const outcome = await driver.run(request({ attempt: 1, latestAttempt: 2 }));
 
-    expect(outcome).toBe("succeeded");
+    expect(outcome).toEqual({ status: "succeeded" });
     expect(store.messages).toEqual([]);
     expect(events.appended).toEqual([]);
     // The point of the early check: no Context resolved, so no model call and no Tool dispatch.

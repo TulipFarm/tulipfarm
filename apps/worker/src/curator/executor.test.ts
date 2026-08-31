@@ -45,7 +45,7 @@ test("resolves context, reasons once, and submits under the pinned digest", asyn
   const api = makeApi();
   const outcome = await createCuratorExecutor({ api, models, artifacts: JOB_ARTIFACT })(RUN);
 
-  expect(outcome).toBe("succeeded");
+  expect(outcome).toEqual({ status: "succeeded" });
   expect(api.calls.mock.calls[0]).toEqual(["GET", "/api/v1/internal/curator/jobs/job-1/context"]);
   const [method, path, body] = api.calls.mock.calls[1] ?? [];
   expect(method).toBe("POST");
@@ -56,9 +56,10 @@ test("resolves context, reasons once, and submits under the pinned digest", asyn
 // The request Artifact names a job, never the inputs. Without one there is nothing to point at.
 test("fails a Run whose request Artifact names no job rather than guessing", async () => {
   const api = makeApi();
-  expect(await createCuratorExecutor({ api, models, artifacts: makeArtifacts({}) })(RUN)).toBe(
-    "failed"
-  );
+  expect(await createCuratorExecutor({ api, models, artifacts: makeArtifacts({}) })(RUN)).toEqual({
+    status: "failed",
+    errorEvidenceRef: "curator:missing_job_id",
+  });
   expect(api.calls).not.toHaveBeenCalled();
 });
 
@@ -66,13 +67,19 @@ test("fails a Run whose request Artifact names no job rather than guessing", asy
 test("fails a Run whose request Artifact is not a Curator request", async () => {
   const api = makeApi();
   const artifacts = makeArtifacts({ jobId: "job-1" }, "tulip.invocation.manual-request.v1");
-  expect(await createCuratorExecutor({ api, models, artifacts })(RUN)).toBe("failed");
+  expect(await createCuratorExecutor({ api, models, artifacts })(RUN)).toEqual({
+    status: "failed",
+    errorEvidenceRef: "curator:missing_job_id",
+  });
   expect(api.calls).not.toHaveBeenCalled();
 });
 
 test("fails without submitting when the context carries no digest", async () => {
   const api = makeApi({ jobId: "job-1", scope: "user" });
-  expect(await createCuratorExecutor({ api, models, artifacts: JOB_ARTIFACT })(RUN)).toBe("failed");
+  expect(await createCuratorExecutor({ api, models, artifacts: JOB_ARTIFACT })(RUN)).toEqual({
+    status: "failed",
+    errorEvidenceRef: "curator:missing_context_digest",
+  });
   expect(api.calls).toHaveBeenCalledTimes(1);
 });
 
@@ -109,7 +116,7 @@ test("submits unparsable output verbatim so the API records the rejection", asyn
   const api = makeApi();
   const outcome = await createCuratorExecutor({ api, models, artifacts: JOB_ARTIFACT })(RUN);
 
-  expect(outcome).toBe("succeeded");
+  expect(outcome).toEqual({ status: "succeeded" });
   expect(api.calls.mock.calls[1]?.[2]).toEqual({
     contextDigest: "digest-1",
     output: "I refuse to answer.",
@@ -159,7 +166,7 @@ test("returns failed on transient API failure instead of throwing", async () => 
     }) as never,
   };
   const outcome = await createCuratorExecutor({ api, models, artifacts: JOB_ARTIFACT })(RUN);
-  expect(outcome).toBe("failed");
+  expect(outcome).toEqual({ status: "failed", errorEvidenceRef: "curator:execution_failed" });
 });
 
 test("progresses invoke state from pending to succeeded when transitions are provided", async () => {
@@ -196,7 +203,7 @@ test("progresses invoke state from pending to succeeded when transitions are pro
     transitions: fakeTransitions as never,
   })(RUN);
 
-  expect(outcome).toBe("succeeded");
+  expect(outcome).toEqual({ status: "succeeded" });
   expect(stateTransitions).toEqual([
     { from: "pending", to: "ready", reason: undefined },
     { from: "ready", to: "claimed", reason: undefined },
@@ -244,7 +251,7 @@ test("progresses invoke state from pending to failed when execution fails", asyn
     transitions: fakeTransitions as never,
   })(RUN);
 
-  expect(outcome).toBe("failed");
+  expect(outcome).toEqual({ status: "failed", errorEvidenceRef: "curator:execution_failed" });
   expect(stateTransitions).toEqual([
     { from: "pending", to: "ready", reason: undefined },
     { from: "ready", to: "claimed", reason: undefined },

@@ -179,13 +179,16 @@ describe("createChatExecutor durable loop counters", () => {
     const scenario = harness(checkpoints);
 
     // First dispatch spends the single allowed Tool call and parks awaiting approval.
-    await expect(scenario.park()).resolves.toBe("waiting");
+    await expect(scenario.park()).resolves.toEqual({ status: "waiting" });
     expect(scenario.dispatched).toEqual(["call-1"]);
 
     // Reclaimed after approval: the parked dispatch never executed, so its charge was refunded and
     // the approved call is replayed once — which spends the ceiling for real. The next Tool call is
     // then refused before it reaches the broker, and the loop fails on the limit.
-    await expect(scenario.resume()).resolves.toBe("failed");
+    await expect(scenario.resume()).resolves.toEqual({
+      status: "failed",
+      errorEvidenceRef: "agent:tool_call_limit",
+    });
     expect(scenario.dispatched).toEqual(["call-1", "call-1"]);
   });
 });
