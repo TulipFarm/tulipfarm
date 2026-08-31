@@ -68,6 +68,25 @@ const RESOURCE_TYPE_TOOL_ACTIONS: Readonly<Record<string, string>> = {
  */
 const SKILL_TOOL_NAME = "skill";
 
+/**
+ * Cap on how many allowed Tool names a denial message repeats back. `restriction.allow` is data
+ * an Agent's own author wrote, so the caller was never blind to it, but a long allowlist would
+ * still balloon this message — cap it the same way an unresolved Soul reference is capped.
+ */
+const MAX_DENIAL_HINTS = 20;
+
+/**
+ * The allowlist a denial can safely repeat back — it is exactly what this Agent's author already
+ * granted it, not a wider catalog, so naming it cannot disclose a Tool the caller could not already
+ * see in its own configuration.
+ */
+function describeAllowedTools(allow: readonly string[]): string {
+  if (allow.length === 0) return "(none)";
+  const shown = allow.slice(0, MAX_DENIAL_HINTS);
+  const more = allow.length - shown.length;
+  return more > 0 ? `${shown.join(", ")} (+${more} more)` : shown.join(", ");
+}
+
 function toolDenied(tool: ToolShape, restriction: ToolRestriction | undefined): string | undefined {
   if (restriction === undefined) return undefined;
   if (restriction.deny?.includes(tool.name)) {
@@ -75,7 +94,10 @@ function toolDenied(tool: ToolShape, restriction: ToolRestriction | undefined): 
   }
   if (FLOW_CONTROL_TOOL_NAMES.has(tool.name)) return undefined;
   if (restriction.allow !== undefined && !restriction.allow.includes(tool.name)) {
-    return `tool "${tool.name}" is outside this Agent's allowed Tools`;
+    return (
+      `tool "${tool.name}" is outside this Agent's allowed Tools: ` +
+      `${describeAllowedTools(restriction.allow)}`
+    );
   }
   if (restriction.allowMutating === false && tool.mutating) {
     return `mutating tool "${tool.name}" is denied by this Agent's capability restrictions`;

@@ -1,6 +1,8 @@
 import type { VersionedSchemaDocument } from "@tulipfarm/schema";
 import { describe, expect, it } from "vitest";
 import {
+  MAX_REF_SUGGESTIONS,
+  type SoulSemanticIssue,
   type SoulSemanticIssueCode,
   SoulSemanticValidationError,
   validateSoulSemantics,
@@ -53,6 +55,17 @@ function tool(slug: string, spec: Record<string, unknown> = {}): VersionedSchema
     adapter: { kind: "native", ref: "x" },
     ...spec,
   });
+}
+
+/** Catch and return the thrown error's issues, or fail if nothing was thrown. */
+function issuesOf(fn: () => void): readonly SoulSemanticIssue[] {
+  try {
+    fn();
+  } catch (err) {
+    if (err instanceof SoulSemanticValidationError) return err.issues;
+    throw err;
+  }
+  throw new Error("expected SoulSemanticValidationError");
 }
 
 /** Catch and return the thrown error's issue codes, or fail if nothing was thrown. */
@@ -152,6 +165,74 @@ describe("validateSoulSemantics", () => {
       }),
     ];
     expect(codes(() => validateSoulSemantics(docs))).toEqual(["UNRESOLVED_REF"]);
+  });
+
+  it("suggests the resolvable Skill names on an unresolved reference", () => {
+    const docs = [
+      model("fast"),
+      def("Skill", "invoicing", { instructions: { path: "i.md" } }),
+      def("Skill", "onboarding", { instructions: { path: "i.md" } }),
+      def("Agent", "a", {
+        owner: "u",
+        instructions: { path: "i.md" },
+        modelProfile: "fast",
+        skills: ["invoicng"],
+        autonomy: "answer_only",
+        trustTier: "first_party",
+      }),
+    ];
+    const [issue] = issuesOf(() => validateSoulSemantics(docs));
+    expect(issue.code).toBe("UNRESOLVED_REF");
+    // The closer edit-distance match ("invoicing") sorts ahead of the unrelated "onboarding".
+    expect(issue.candidates).toEqual(["invoicing", "onboarding"]);
+  });
+
+  it("caps unresolved-reference suggestions at MAX_REF_SUGGESTIONS", () => {
+    const skillCount = MAX_REF_SUGGESTIONS + 5;
+    const docs: VersionedSchemaDocument[] = [
+      model("fast"),
+      ...Array.from({ length: skillCount }, (_, i) =>
+        def("Skill", `skill-${i}`, { instructions: { path: "i.md" } })
+      ),
+      def("Agent", "a", {
+        owner: "u",
+        instructions: { path: "i.md" },
+        modelProfile: "fast",
+        skills: ["does-not-exist"],
+        autonomy: "answer_only",
+        trustTier: "first_party",
+      }),
+    ];
+    const [issue] = issuesOf(() => validateSoulSemantics(docs));
+    expect(issue.code).toBe("UNRESOLVED_REF");
+    expect(issue.candidates?.length).toBe(MAX_REF_SUGGESTIONS);
+  });
+
+  it("never suggests a name of a different kind than the unresolved reference", () => {
+    const docs = [
+      model("fast"),
+      def("ModelProfile", "decoy", {
+        provider: "p",
+        model: "m",
+        reasoning: "low",
+        supports: { tools: true, structuredOutput: true, contextWindowTokens: 1 },
+        allowCaching: false,
+      }),
+      def("Agent", "a", {
+        owner: "u",
+        instructions: { path: "i.md" },
+        modelProfile: "fast",
+        // "missing" resolves against no Skill, so the ModelProfile named "decoy" — even one that
+        // exists in the same tree — must never appear in this Skill-kind suggestion list.
+        skills: ["missing"],
+        autonomy: "answer_only",
+        trustTier: "first_party",
+      }),
+    ];
+    const [issue] = issuesOf(() => validateSoulSemantics(docs));
+    expect(issue.code).toBe("UNRESOLVED_REF");
+    expect(issue.candidates).toEqual([]);
+    expect(issue.candidates).not.toContain("decoy");
   });
 
   it("rejects an unsatisfied version constraint", () => {
@@ -344,10 +425,15 @@ describe("validateSoulSemantics", () => {
     }
     const keys = issues.map((i) => `${i.subject} ${i.code} ${i.field ?? ""} ${i.ref ?? ""}`);
     expect(keys).toEqual([...keys].sort());
-    // Payload-safe: no definition content leaks — only authored identifiers/pointers.
+    // Payload-safe: no definition content leaks — only authored identifiers/pointers, plus the
+    // candidates array UNRESOLVED_REF carries (itself only ever authored slugs, never content).
     for (const issue of issues) {
       expect(issue.subject).toBe("Agent:a");
-      expect(Object.keys(issue).sort()).toEqual(["code", "field", "ref", "subject"]);
+      const expectedKeys =
+        issue.code === "UNRESOLVED_REF"
+          ? ["candidates", "code", "field", "ref", "subject"]
+          : ["code", "field", "ref", "subject"];
+      expect(Object.keys(issue).sort()).toEqual(expectedKeys);
     }
   });
 });

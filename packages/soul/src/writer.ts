@@ -577,11 +577,12 @@ function errText(error: unknown): string {
  * What an issue code means for the caller. A pointer alone ("UNRESOLVED_REF at /spec/states/0") says
  * where the writer stopped but not what to do, and an authoring Agent answers that by guessing at
  * the reference's shape until its repair budget is gone. Naming the cause ends the guessing.
+ *
+ * `UNRESOLVED_REF` has no entry here: it is misleading to say once and for all that "the
+ * definition does not exist" when it may simply be misnamed, so {@link describeSemanticIssues}
+ * answers per issue instead, from that issue's own `candidates`.
  */
 const ISSUE_REMEDIES: Partial<Record<SoulSemanticIssue["code"], string>> = {
-  UNRESOLVED_REF:
-    "the referenced definition does not exist in the Soul — create it first, then write the " +
-    "definition that references it",
   VERSION_UNSATISFIED:
     "the referenced definition exists at a different authored version — reference the version it " +
     "actually has",
@@ -589,11 +590,29 @@ const ISSUE_REMEDIES: Partial<Record<SoulSemanticIssue["code"], string>> = {
   ROUTINE_TRANSITION_UNKNOWN: "a transition names a State that does not exist",
 };
 
+/**
+ * `UNRESOLVED_REF` guidance for one issue. Lists what the caller could have meant instead of
+ * repeating the unhelpful "it does not exist" — the reference may well be a plain misnaming — and
+ * only ever from `issue.candidates`, which is already scoped to this same changeset's own tree
+ * (see {@link SoulSemanticIssue.candidates}), never a wider catalog.
+ */
+function unresolvedRefGuidance(issue: SoulSemanticIssue): string {
+  if (issue.candidates === undefined || issue.candidates.length === 0) {
+    return (
+      "no definition of this kind exists in the Soul yet — create it first, then write the " +
+      "definition that references it"
+    );
+  }
+  return `did you mean one of: ${issue.candidates.join(", ")}?`;
+}
+
 function describeSemanticIssues(error: SoulSemanticValidationError): string {
-  const described = error.issues.map(
-    (issue) =>
-      `${issue.subject} ${issue.code}${issue.ref ? ` (${issue.ref})` : ""}${issue.field ? ` at ${issue.field}` : ""}`
-  );
+  const described = error.issues.map((issue) => {
+    const pointer = `${issue.subject} ${issue.code}${issue.ref ? ` (${issue.ref})` : ""}${issue.field ? ` at ${issue.field}` : ""}`;
+    return issue.code === "UNRESOLVED_REF"
+      ? `${pointer} — ${unresolvedRefGuidance(issue)}`
+      : pointer;
+  });
   const remedies = [
     ...new Set(
       error.issues.flatMap((issue) => {

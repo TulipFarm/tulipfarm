@@ -99,6 +99,8 @@ export interface PersistedTurn {
   readonly generatedFiles: readonly GeneratedFile[];
   /** Tasks the Curator delivered after this Turn completed. */
   readonly curatorTasks?: readonly { readonly title: string }[];
+  /** Real Tool dispatches this Turn's writer denied, with the exact reason it gave back. */
+  readonly toolDenials: readonly { readonly name: string; readonly reason: string }[];
   /** The prompt the real Context assembler produced, so `prompt_contains` works at L3 too. */
   readonly systemPrompt: string;
   /**
@@ -187,6 +189,7 @@ async function readBack(
     publishedArtifacts: readonly string[];
     generatedFiles: readonly GeneratedFile[];
     curatorTasks: readonly { readonly title: string }[];
+    toolDenials: readonly { readonly name: string; readonly reason: string }[];
     systemPrompt: string;
     spend: Spend;
   }
@@ -222,6 +225,7 @@ async function readBack(
     publishedArtifacts: observed.publishedArtifacts,
     generatedFiles: observed.generatedFiles,
     curatorTasks: observed.curatorTasks,
+    toolDenials: observed.toolDenials,
     systemPrompt: observed.systemPrompt,
   };
 }
@@ -286,6 +290,7 @@ async function runOneTurn(
     // The writer is shared across a journey so its reset restores the pre-journey commit, which
     // means its `commits` accumulate. Only this Turn's slice belongs to this Turn.
     const committedBefore = soulWrites.commits.length;
+    const deniedBefore = soulWrites.denials.length;
     // The File store is shared across a journey for the same reason, so its `generated` accumulate
     // and only this Turn's slice belongs to this Turn.
     const generatedBefore = files.generated.length;
@@ -354,6 +359,9 @@ async function runOneTurn(
       publishedArtifacts: await soulWrites.published(),
       generatedFiles: files.generated.slice(generatedBefore),
       curatorTasks,
+      toolDenials: soulWrites.denials
+        .slice(deniedBefore)
+        .map((reason) => ({ name: SOUL_WRITE_TOOL, reason })),
       systemPrompt: context.systemPrompt,
       spend,
     });
@@ -468,6 +476,7 @@ export function foldJourney(turns: readonly PersistedTurn[]): PersistedTurn {
     toolCalls: turns.flatMap((turn) => turn.toolCalls),
     soulCommits: turns.flatMap((turn) => turn.soulCommits),
     generatedFiles: turns.flatMap((turn) => turn.generatedFiles),
+    toolDenials: turns.flatMap((turn) => turn.toolDenials),
     spend: turns.reduce<Spend>((total, turn) => mergeSpend(total, turn.spend), NO_SPEND),
   };
 }

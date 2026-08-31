@@ -1,0 +1,147 @@
+{
+  "id": "l3-a-routine-unresolved-toolref-names-what-resolves",
+  "tier": "l3",
+  "agent": "support",
+  "input": [
+    {
+      "role": "user",
+      "content": "Create a published ToolContract named refund-lookup: toolId refund-lookup, toolVersion \"1\", action lookup, riskClass low, mutating false, dryRun true, idempotency strategy none, adapter kind native with ref refund-lookup, empty inputSchema and outputSchema. Call soul_write once with definitionMode canonical. Do not ask me to confirm."
+    }
+  ],
+  "tools": [
+    {
+      "name": "soul_write",
+      "description": "Commit one Soul definition. Set definitionMode to canonical for canonical YAML.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "definitionMode": {
+            "type": "string"
+          }
+        },
+        "required": ["kind", "slug", "content", "definitionMode"]
+      }
+    }
+  ],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "tool-contract",
+          "name": "soul_write",
+          "arguments": {
+            "kind": "ToolContract",
+            "slug": "refund-lookup",
+            "definitionMode": "canonical",
+            "content": "apiVersion: tulipfarm.ai/v1\nkind: ToolContract\nmetadata:\n  id: 33333333-3333-4333-8333-333333333333\n  slug: refund-lookup\n  schemaVersion: 1\n  authoredVersion: 1\n  lifecycle: published\nspec:\n  toolId: refund-lookup\n  toolVersion: \"1\"\n  action: lookup\n  inputSchema: {}\n  outputSchema: {}\n  riskClass: low\n  mutating: false\n  dryRun: true\n  idempotency:\n    strategy: none\n  adapter:\n    kind: native\n    ref: refund-lookup\n"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "text",
+      "text": "Created the refund-lookup ToolContract."
+    }
+  ],
+  "journey": [
+    {
+      "input": [
+        {
+          "role": "user",
+          "content": "Now create a published Routine named refund-follow-up whose one State calls the refund-lokup Tool. Call soul_write once with definitionMode canonical. Do not ask me to confirm."
+        }
+      ],
+      "script": [
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "callId": "routine-bad-ref",
+              "name": "soul_write",
+              "arguments": {
+                "kind": "Routine",
+                "slug": "refund-follow-up",
+                "definitionMode": "canonical",
+                "content": "apiVersion: tulipfarm.ai/v1\nkind: Routine\nmetadata:\n  id: 22222222-2222-4222-8222-222222222222\n  slug: refund-follow-up\n  schemaVersion: 1\n  authoredVersion: 1\n  lifecycle: published\nspec:\n  owner: support\n  input:\n    type: object\n    additionalProperties: false\n  output:\n    type: object\n    additionalProperties: false\n  start: Lookup\n  states:\n    - name: Lookup\n      type: tool\n      toolRef:\n        name: refund-lokup\n        version: latest\n      action: lookup\n      end: true\n  triggers:\n    - name: refund-follow-up-manual\n      type: manual\n      eventType: routine.manual\n      eventVersion: 1\n      backgroundIdentity:\n        principalKind: service\n        principalId: routine-runner\n      deduplication:\n        key: refund-follow-up-manual\n"
+              }
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "text": "That Tool reference didn't resolve. I'll check the ToolContract names and retry."
+        }
+      ]
+    },
+    {
+      "input": [
+        {
+          "role": "user",
+          "content": "The ToolContract slug is refund-lookup. Retry the write once more with that corrected toolRef."
+        }
+      ],
+      "script": [
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "callId": "routine-good-ref",
+              "name": "soul_write",
+              "arguments": {
+                "kind": "Routine",
+                "slug": "refund-follow-up",
+                "definitionMode": "canonical",
+                "content": "apiVersion: tulipfarm.ai/v1\nkind: Routine\nmetadata:\n  id: 22222222-2222-4222-8222-222222222222\n  slug: refund-follow-up\n  schemaVersion: 1\n  authoredVersion: 1\n  lifecycle: published\nspec:\n  owner: support\n  input:\n    type: object\n    additionalProperties: false\n  output:\n    type: object\n    additionalProperties: false\n  start: Lookup\n  states:\n    - name: Lookup\n      type: tool\n      toolRef:\n        name: refund-lookup\n        version: latest\n      action: lookup\n      end: true\n  triggers:\n    - name: refund-follow-up-manual\n      type: manual\n      eventType: routine.manual\n      eventVersion: 1\n      backgroundIdentity:\n        principalKind: service\n        principalId: routine-runner\n      deduplication:\n        key: refund-follow-up-manual\n"
+              }
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "text": "Done — refund-follow-up now calls refund-lookup."
+        }
+      ]
+    }
+  ],
+  "expect": [
+    {
+      "kind": "tool_denial_contains",
+      "name": "soul_write",
+      "text": "did you mean one of: refund-lookup"
+    },
+    {
+      "kind": "soul_committed",
+      "path": "tools/refund-lookup/tool.yaml"
+    },
+    {
+      "kind": "soul_committed",
+      "path": "routines/refund-follow-up/routine.yaml"
+    },
+    {
+      "kind": "soul_published",
+      "artifact": "ToolContract:refund-lookup"
+    },
+    {
+      "kind": "soul_published",
+      "artifact": "Routine:refund-follow-up"
+    },
+    {
+      "kind": "tool_call_count",
+      "count": 3
+    },
+    {
+      "kind": "run_status",
+      "status": "succeeded"
+    }
+  ]
+}

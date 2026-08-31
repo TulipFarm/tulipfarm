@@ -50,6 +50,8 @@ export interface PersistedState {
     readonly readableBy: readonly string[];
   }[];
   readonly curatorTasks?: readonly { readonly title: string }[];
+  /** Real Tool dispatches that were denied, with the reason the dispatcher gave back. */
+  readonly toolDenials?: readonly { readonly name: string; readonly reason: string }[];
 }
 
 export interface ExpectationResult {
@@ -289,6 +291,23 @@ function evaluate(a: Expectation, obs: Observation): { passed: boolean; detail: 
       return (persisted.curatorTasks ?? []).some((task) => task.title === a.title)
         ? { passed: true, detail: `Curator delivered Task "${a.title}"` }
         : { passed: false, detail: `no Curator Task titled "${a.title}"` };
+    }
+
+    case "tool_denial_contains": {
+      const persisted = obs.persisted;
+      if (persisted === undefined) return notPersisted(a.kind);
+      const denials = (persisted.toolDenials ?? []).filter((d) => d.name === a.name);
+      if (denials.length === 0) {
+        return { passed: false, detail: `${a.name} was never denied` };
+      }
+      return denials.some((d) => d.reason.includes(a.text))
+        ? { passed: true, detail: `${a.name} denial mentions ${show(a.text)}` }
+        : {
+            passed: false,
+            detail: `${a.name} denial did not mention ${show(a.text)}; reason was ${denials
+              .map((d) => d.reason)
+              .join(" | ")}`,
+          };
     }
 
     // Answered by a Judge in `scoreJudged`, not here. Reaching this arm means a judged Expectation
