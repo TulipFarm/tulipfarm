@@ -63,6 +63,7 @@ import {
   loadBundledSkills,
   loadDisabledBundledSkills,
   PgBundleStore,
+  resolveAgent,
   resolveAuthSteps,
   resolveSoulPath,
   runSoulMigrations,
@@ -135,7 +136,7 @@ import {
 import { AuthzAdminService } from "./authz/service";
 import { PgConversationRepo } from "./chat/conversations";
 import { PgMessageRepo } from "./chat/messages";
-import { allowedToolNamesFor } from "./chat/turn-helpers";
+import { allowedToolNamesFor, toolAgentFor } from "./chat/turn-helpers";
 import { PgConversationStore } from "./conversations/store.pg";
 import { buildCurator } from "./curator/compose";
 import { CURATOR_SWEEP_QUEUE, registerCuratorSweepSchedule } from "./curator/sweep-schedule";
@@ -941,7 +942,9 @@ async function boot() {
         // No presentation context: a Run that assembles its own context has no surface, so the
         // Tools that require one are filtered out here rather than refused at dispatch.
         agentTools: (agentName) => {
-          const allowed = allowedToolNamesFor(toolRegistry, getDefaultAssistant(agentName ?? ""));
+          const agent = resolveAgent(soulLoader, agentName);
+          const toolAgent = toolAgentFor(getDefaultAssistant(agent.name), agent);
+          const allowed = allowedToolNamesFor(toolRegistry, toolAgent);
           return (toolRegistry?.getAll() ?? [])
             .filter((tool) => allowed === undefined || allowed.has(tool.name))
             .map((tool) => ({
