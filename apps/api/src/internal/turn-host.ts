@@ -116,6 +116,12 @@ export interface HostedTurnContext {
      * write (#419), and the loop cannot tell them apart once this crosses the wire.
      */
     readonly mutating?: boolean;
+    /**
+     * Whether a repeated call performs a genuine new real-world effect rather than reproducing
+     * the same state (#646). Carried for the same reason `mutating` is: the loop cannot tell once
+     * this crosses the wire.
+     */
+    readonly sideEffecting?: boolean;
   }[];
   readonly limits: {
     readonly maxIterations: number;

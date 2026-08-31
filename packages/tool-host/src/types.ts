@@ -192,6 +192,14 @@ export interface ToolDef<Result extends ParkableToolCallResult = ToolCallResult>
   name: string;
   tier: ToolTier;
   mutating: boolean;
+  /**
+   * True when a repeated call with identical arguments performs a genuine new real-world effect
+   * rather than reproducing the same state — a Slack message sent, a GitHub issue filed. The Tool
+   * loop re-runs an ordinary repeated call so the model can see and act on the repetition; a
+   * side-effecting one is short-circuited instead, because "run it again" is never the right
+   * default when running it again is the bug (#646).
+   */
+  sideEffecting?: boolean;
   description: string;
   inputSchema: Record<string, unknown>;
   /** Builds a target-scoped schema without exposing cross-channel component vocabulary. */

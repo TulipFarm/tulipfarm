@@ -30,7 +30,12 @@ import {
 import { askFor, distilledPayload, latestAsk } from "./distill";
 import { extractSkillName, narrowToolsToSkill, SKILL_TOOL } from "./narrowing";
 import { capToolResult, MAX_TOOL_RESULT_CHARS } from "./oversize";
-import { callSignature, elideRepeatedSkillText, repeatedCall } from "./repeat";
+import {
+  callSignature,
+  elideRepeatedSkillText,
+  repeatedCall,
+  shortCircuitedRepeat,
+} from "./repeat";
 import {
   extractRereadFile,
   FILE_READ_TOOL,
@@ -452,6 +457,29 @@ export class AgentLoop {
           // Nothing this Turn does next can correct a report the participant has already read, so
           // the effect that report does not describe must not land (#429).
           if (reported) return barrier(call, "effect_after_report");
+
+          // A side-effecting Tool called again with the exact same arguments is refused rather
+          // than re-dispatched: unlike an ordinary repeat, running it again is not evidence the
+          // model can act on, it is a second real message, issue, or event (#646). Checked before
+          // the dispatch — never after, the way an ordinary repeat is counted — because by the
+          // time a result comes back the duplicate effect has already happened.
+          if (tool.sideEffecting === true) {
+            const repeatKey = callSignature(call.name, call.arguments);
+            const priorRepeats = repeatKey === undefined ? undefined : repeatCounts.get(repeatKey);
+            if (priorRepeats !== undefined) {
+              const repeats = priorRepeats + 1;
+              if (repeatKey !== undefined) repeatCounts.set(repeatKey, repeats);
+              answer(call.callId, { shortCircuitedRepeat: shortCircuitedRepeat(repeats) });
+              await emit("tool_call_rejected", {
+                toolName: call.name,
+                callId: call.callId,
+                outcome: "repeated_side_effect",
+              });
+              index += 1;
+              continue;
+            }
+          }
+
           // A write dispatches alone: the next Tool call must never race the effect it causes.
           // The ceiling is checked before the dispatch, never after: `maxToolCalls` is backed by
           // a durable checkpoint, so a call counted after its effect would let a resume replay

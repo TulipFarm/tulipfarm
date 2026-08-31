@@ -37,6 +37,7 @@ export function toToolDef<Ctx, Result extends ParkableToolCallResult = ToolCallR
     name: definition.name,
     tier: definition.tier,
     mutating: definition.mutating,
+    ...(definition.sideEffecting === undefined ? {} : { sideEffecting: definition.sideEffecting }),
     description: definition.description,
     inputSchema: definition.inputSchema,
     ...(inputSchemaFor === undefined

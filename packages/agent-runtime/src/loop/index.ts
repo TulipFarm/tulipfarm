@@ -41,7 +41,12 @@ export {
 } from "./distill";
 export { AgentLoop } from "./loop";
 export { capToolResult, MAX_TOOL_RESULT_CHARS } from "./oversize";
-export { callSignature, elideRepeatedSkillText, repeatedCall } from "./repeat";
+export {
+  callSignature,
+  elideRepeatedSkillText,
+  repeatedCall,
+  shortCircuitedRepeat,
+} from "./repeat";
 export {
   extractRereadFile,
   FILE_READ_TOOL,
