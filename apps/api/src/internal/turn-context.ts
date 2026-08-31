@@ -238,6 +238,7 @@ export class ChatTurnContextResolver implements TurnContextResolver {
         inputSchema: tool.inputSchemaFor?.(toolContext) ?? tool.inputSchema,
         tier: tool.tier,
         mutating: tool.mutating,
+        sideEffecting: tool.sideEffecting,
       }));
 
     // A deployment that composed no guardrails service still ships the default policy rather than

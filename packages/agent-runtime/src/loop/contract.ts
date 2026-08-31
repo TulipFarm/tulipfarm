@@ -22,6 +22,12 @@ export interface ExposedTool {
   readonly inputSchema: Readonly<Record<string, unknown>>;
   /** Only non-mutating Tools may dispatch concurrently; absent means sequential. */
   readonly mutating?: boolean;
+  /**
+   * True when a repeated call with identical arguments performs a genuine new real-world effect —
+   * a Slack message sent, a GitHub issue filed — rather than reproducing the same state. Absent
+   * means false. See `repeat.ts`'s `shortCircuitedRepeat`.
+   */
+  readonly sideEffecting?: boolean;
 }
 
 export interface AgentLoopInput {

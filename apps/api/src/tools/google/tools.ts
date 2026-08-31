@@ -27,6 +27,17 @@ import { GOOGLE_ACCESS_TOKEN_SECRET_REF } from "./credentials";
 const GOOGLE_CATALOG = ToolCatalog.load(GOOGLE_TOOL_CONTRACTS);
 const GOOGLE_RESOURCE = "integration.google";
 
+/**
+ * Tool ids whose repeat is a second real Google-side event, not a reproduction of existing state
+ * (#646). `calendar_update_event`/`calendar_delete_event` converge on the same end state and
+ * `gmail_draft` never sends, so neither is included.
+ */
+const GOOGLE_SIDE_EFFECTING_TOOL_IDS = new Set<string>([
+  GOOGLE_TOOL_IDS.calendarCreateEvent,
+  GOOGLE_TOOL_IDS.docsCreate,
+  GOOGLE_TOOL_IDS.docsAppend,
+]);
+
 interface GoogleToolSpec {
   readonly name: string;
   readonly description: string;
@@ -173,6 +184,10 @@ function buildToolDef(
     name: spec.name,
     tier: "integration",
     mutating: contract.mutating,
+    // Repeated verbatim, each of these creates a second real event/document rather than
+    // reproducing existing state (#646); update/delete/draft tools are idempotent-in-effect or
+    // never send, so the ordinary repeat-and-self-correct behavior stays for them.
+    ...(GOOGLE_SIDE_EFFECTING_TOOL_IDS.has(toolId) ? { sideEffecting: true } : {}),
     description: spec.description,
     inputSchema: contract.inputSchema,
     outputSchema: contract.outputSchema,

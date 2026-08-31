@@ -93,6 +93,14 @@ export interface DefineToolInput<Ctx, Result> {
   /** Ambient context the handler reads; a process lacking any of these must not execute it. */
   readonly requiresAmbient?: readonly ToolAmbientCapability[];
   readonly idempotency?: ToolDefinitionIdempotency;
+  /**
+   * True when re-running this call performs a genuine new real-world effect — a message sent, an
+   * issue filed — rather than reproducing the same state. `idempotency` says whether a *retried*
+   * dispatch of one call is provider-deduped; this says whether the bounded Tool loop may
+   * dispatch the call again at all when the model repeats it verbatim in a later iteration. Absent
+   * means false: safe to re-run, which is every Tool's behavior before this field existed.
+   */
+  readonly sideEffecting?: boolean;
   readonly retry?: ToolRetryPolicy;
   readonly timeout?: ToolTimeoutPolicy;
   readonly compensation?: ToolCompensationPolicy;

@@ -953,6 +953,7 @@ async function boot() {
               inputSchema: tool.inputSchema as Record<string, unknown>,
               ...(tool.tier === undefined ? {} : { tier: tool.tier }),
               ...(tool.mutating === undefined ? {} : { mutating: tool.mutating }),
+              ...(tool.sideEffecting === undefined ? {} : { sideEffecting: tool.sideEffecting }),
             }));
         },
         messages: messageRepo,

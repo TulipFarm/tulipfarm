@@ -175,6 +175,7 @@ export class SubagentTurnContextResolver implements SubagentContextResolver {
         inputSchema: tool.inputSchema,
         tier: tool.tier,
         mutating: tool.mutating,
+        sideEffecting: tool.sideEffecting,
       }));
   }
 

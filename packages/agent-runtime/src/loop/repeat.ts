@@ -55,6 +55,28 @@ export function repeatedCall(count: number): { readonly count: number; readonly 
   };
 }
 
+/**
+ * What a repeated call to a side-effecting Tool carries back, in place of a second dispatch.
+ *
+ * Unlike `repeatedCall`, the Tool does *not* run: for a Tool flagged `sideEffecting`, a second
+ * identical call is not a harmless echo the model can learn from — it is a second real message,
+ * issue, or event. Refusing without dispatching is the only choice that cannot duplicate the
+ * effect (#646), so the model is told plainly that nothing happened rather than being handed a
+ * second copy of the first result to reason about.
+ */
+export function shortCircuitedRepeat(count: number): {
+  readonly count: number;
+  readonly note: string;
+} {
+  return {
+    count,
+    note:
+      `This is call ${count} with these exact arguments in this Turn. It was NOT run — this Tool ` +
+      "has a real effect each time it runs, so an exact repeat is refused rather than dispatched " +
+      "again. If the earlier call already did what you needed, there is nothing left to do.",
+  };
+}
+
 /** What a repeated `skill` load carries instead of the text it already sent. */
 const REPEATED_SKILL_NOTE =
   "Already sent earlier in this Turn and omitted here, because a Skill cannot change mid-Turn. " +

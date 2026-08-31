@@ -138,6 +138,8 @@ function buildToolDef(
     name: declaration.name,
     tier: "integration",
     mutating: contract.mutating,
+    // A repeated `sendMessage` call is a second real Slack message, not a harmless echo (#646).
+    ...(toolId === SLACK_TOOL_IDS.sendMessage ? { sideEffecting: true } : {}),
     description: declaration.description,
     inputSchema: contract.inputSchema,
     outputSchema: contract.outputSchema,

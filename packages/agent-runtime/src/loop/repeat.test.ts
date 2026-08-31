@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { callSignature, elideRepeatedSkillText, repeatedCall } from "./repeat";
+import {
+  callSignature,
+  elideRepeatedSkillText,
+  repeatedCall,
+  shortCircuitedRepeat,
+} from "./repeat";
 
 describe("callSignature", () => {
   it("matches the same arguments written in a different key order", () => {
@@ -48,6 +53,16 @@ describe("repeatedCall", () => {
     expect(marker.count).toBe(3);
     expect(marker.note).toContain("call 3");
     expect(marker.note).toContain("Nothing was reused");
+  });
+});
+
+describe("shortCircuitedRepeat", () => {
+  it("names the count and says the call was not run", () => {
+    const marker = shortCircuitedRepeat(2);
+
+    expect(marker.count).toBe(2);
+    expect(marker.note).toContain("call 2");
+    expect(marker.note).toContain("NOT run");
   });
 });
 

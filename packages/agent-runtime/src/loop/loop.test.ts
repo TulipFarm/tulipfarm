@@ -2167,6 +2167,62 @@ describe("AgentLoop repeated Tool calls inside one Turn", () => {
 
     expect(tools.calls).toHaveLength(2);
   });
+
+  it("refuses to re-dispatch a repeated call to a side-effecting Tool (#646)", async () => {
+    const tools = dispatcher(
+      { status: "succeeded", callId: "call-1", output: { ok: true } },
+      { status: "succeeded", callId: "call-2", output: { ok: true } }
+    );
+
+    const model = promptRecordingModel(
+      listCall("call-1", { body: "thanks" }),
+      listCall("call-2", { body: "thanks" }),
+      textResult("done")
+    );
+
+    await loop({
+      model,
+      tools,
+    }).run(
+      input({
+        tools: [
+          {
+            name: "github.issue.comment",
+            inputSchema: { type: "object", required: ["body"] },
+            sideEffecting: true,
+          },
+        ],
+      })
+    );
+
+    // The second identical call never reaches the broker: only the first dispatch is real.
+    expect(tools.calls).toHaveLength(1);
+
+    const [first, second] = results(model.prompts[2]);
+    expect(first.shortCircuitedRepeat).toBeUndefined();
+    expect(second.shortCircuitedRepeat).toMatchObject({ count: 2 });
+    expect((second.shortCircuitedRepeat as { note: string }).note).toContain("NOT run");
+  });
+
+  it("still re-dispatches a repeated call to a Tool not flagged side-effecting", async () => {
+    // Same script as the side-effecting case above, minus the flag: existing self-correction
+    // behavior for ordinary (including read) Tools must not regress.
+    const tools = dispatcher(
+      { status: "succeeded", callId: "call-1", output: { ok: true } },
+      { status: "succeeded", callId: "call-2", output: { ok: true } }
+    );
+
+    await loop({
+      model: promptRecordingModel(
+        listCall("call-1", { body: "thanks" }),
+        listCall("call-2", { body: "thanks" }),
+        textResult("done")
+      ),
+      tools,
+    }).run(input());
+
+    expect(tools.calls).toHaveLength(2);
+  });
 });
 
 describe("AgentLoop park-time answers and cancellation accounting", () => {

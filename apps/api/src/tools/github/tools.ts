@@ -39,6 +39,23 @@ const GITHUB_CATALOG = ToolCatalog.load(GITHUB_TOOL_CONTRACTS);
 const GITHUB_ALL_REPOSITORIES_TARGET_ID = "all-repositories";
 const GITHUB_RESOURCE = "integration.github";
 
+/**
+ * Tool ids whose repeat is a second real GitHub event, not a reproduction of existing state
+ * (#646). Read tools and idempotent-in-effect mutations (label/assign/close on an already-set
+ * value) are deliberately excluded, so the Tool loop's ordinary repeat-and-self-correct behavior
+ * still applies to them.
+ */
+const GITHUB_SIDE_EFFECTING_TOOL_IDS = new Set<string>([
+  GITHUB_TOOL_IDS.issueCreate,
+  GITHUB_TOOL_IDS.issueComment,
+  GITHUB_TOOL_IDS.pullRequestCreate,
+  GITHUB_TOOL_IDS.pullRequestComment,
+  GITHUB_TOOL_IDS.pullRequestReview,
+  GITHUB_TOOL_IDS.pullRequestMerge,
+  GITHUB_TOOL_IDS.repoPush,
+  GITHUB_TOOL_IDS.repositoryCreate,
+]);
+
 /** Dresses a digest as an RFC 4122 v4 uuid for durable effect ids. */
 function derivedId(...parts: readonly string[]): string {
   const digest = createHash("sha256").update(parts.join(":")).digest("hex");
@@ -169,6 +186,9 @@ function buildToolDef(
     name: declaration.name,
     tier: "integration",
     mutating: contract.mutating,
+    // Repeated with identical arguments, each of these files a second real GitHub event rather
+    // than reproducing existing state (#646): a second issue, comment, merge, or repository.
+    ...(GITHUB_SIDE_EFFECTING_TOOL_IDS.has(toolId) ? { sideEffecting: true } : {}),
     description: declaration.description,
     inputSchema: contract.inputSchema,
     outputSchema: contract.outputSchema,
