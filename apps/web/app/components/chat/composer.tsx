@@ -156,6 +156,9 @@ export function Composer({
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const { attachments, add, addExisting, remove, clear, readyFiles, uploading } = useAttachments();
+  // Only for the border highlight while a drag is over the composer; `onDrop` re-uses the same
+  // `add` the file input and paste already call, so there is no second upload path to keep in sync.
+  const [dragActive, setDragActive] = useState(false);
 
   // A File the Files library handed over, staged without re-uploading its bytes. The id arrives as
   // a prop rather than being read from the URL here: the composer is rendered outside a router in
@@ -261,7 +264,27 @@ export function Composer({
             </>
           ) : null}
         </div>
-        <div className="overflow-hidden rounded-lg border border-input bg-card transition-[border-color,box-shadow] focus-within:border-primary focus-within:ring-[3px] focus-within:ring-ring/15">
+        {/* biome-ignore lint/a11y/noStaticElementInteractions: a drop target for files, mirroring the paperclip picker; there is no interactive-element equivalent for a drag-and-drop zone. */}
+        <div
+          className={`overflow-hidden rounded-lg border bg-card transition-[border-color,box-shadow] focus-within:border-primary focus-within:ring-[3px] focus-within:ring-ring/15 ${
+            dragActive ? "border-primary ring-[3px] ring-ring/15" : "border-input"
+          }`}
+          onDragEnter={(event) => {
+            event.preventDefault();
+            setDragActive(true);
+          }}
+          onDragLeave={(event) => {
+            event.preventDefault();
+            if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+            setDragActive(false);
+          }}
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={(event) => {
+            event.preventDefault();
+            setDragActive(false);
+            add(Array.from(event.dataTransfer?.files ?? []));
+          }}
+        >
           {editor ? (
             <BubbleMenu
               editor={editor}

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test, vi } from "vitest";
 import { Composer } from "~/components/chat/composer";
@@ -259,6 +259,22 @@ test("a message will not send while an upload is still in flight", async () => {
 
   await user.click(screen.getByRole("button", { name: "Send prompt" }));
   expect(onSend).not.toHaveBeenCalled();
+});
+
+test("dropping a file onto the composer stages and uploads it, same as the file picker", async () => {
+  const onSend = vi.fn();
+  doc = textDoc("what is this?");
+  const { container } = render(<Composer onSend={onSend} />);
+
+  const dropZone = container.querySelector(".rounded-lg.border") as HTMLElement;
+  expect(dropZone).not.toBeNull();
+  const file = new File(["png-bytes"], "dropped.png", { type: "image/png" });
+
+  fireEvent.dragOver(dropZone);
+  fireEvent.drop(dropZone, { dataTransfer: { files: [file] } });
+
+  expect(await screen.findByText("dropped.png")).toBeTruthy();
+  expect(uploadFile).toHaveBeenCalledWith(file, expect.any(Function));
 });
 
 test("a Suggested prompt drafts editable text without sending", async () => {
