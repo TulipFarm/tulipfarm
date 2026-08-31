@@ -104,6 +104,10 @@ async function putAgent(
   const actor = ctx.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR;
   try {
     await ctx.soulWriter.apply(agentWriteRequest(verb, name, frontmatter, body, actor));
+    // Same-Turn tools (e.g. routine_forge) read ctx.soulLoader.agents synchronously right after
+    // this call; without a reload here they'd validate against the pre-write snapshot and reject
+    // an agentRef this Turn just created.
+    await ctx.soulLoader.reload();
     return null;
   } catch (e) {
     if (e instanceof SoulWriteError) return mapSoulWriteError(e, onPrecondition);
