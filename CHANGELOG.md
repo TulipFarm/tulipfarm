@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.18.1](https://github.com/TulipFarm/tulipfarm/compare/v0.18.0...v0.18.1) (2026-08-31)
+
+### Bug Fixes
+
+* **deploy:** reclaim the image each update orphans ([#634](https://github.com/TulipFarm/tulipfarm/issues/634)) ([800d98a](https://github.com/TulipFarm/tulipfarm/commit/800d98a547104fbc710e4b016bff72e745c5c1f4))
+* **integrations:** fix GitHub webhook 404s and wire bundled ingress ([#637](https://github.com/TulipFarm/tulipfarm/issues/637)) ([214af2a](https://github.com/TulipFarm/tulipfarm/commit/214af2a51fd0d7f6e7ecd96f8bc7985bc6c58fde))
+* **soul:** name what resolves when a Routine ref is unresolved ([#639](https://github.com/TulipFarm/tulipfarm/issues/639)) ([c8c298e](https://github.com/TulipFarm/tulipfarm/commit/c8c298e63aca61952ecab38840081a6c65205544))
+* **tools:** stop flagging api-version headers as credentials ([#636](https://github.com/TulipFarm/tulipfarm/issues/636)) ([9a78d21](https://github.com/TulipFarm/tulipfarm/commit/9a78d213fb7b7b10c50f8e58b38969a5e4b495af))
+* **worker:** make routine Run failures visible, from lease to event stream ([#638](https://github.com/TulipFarm/tulipfarm/issues/638)) ([bf0d120](https://github.com/TulipFarm/tulipfarm/commit/bf0d1206bba3a3932d1bf945ce53601a6bc5c0c5))
+
+### Performance Improvements
+
+* **docker:** stop duplicating /app in two recursive chown layers ([#635](https://github.com/TulipFarm/tulipfarm/issues/635)) ([98e22e3](https://github.com/TulipFarm/tulipfarm/commit/98e22e3e6a5a76a85c35630cb8b6f42b3d3e3192))
+
 ## [0.18.0](https://github.com/TulipFarm/tulipfarm/compare/v0.17.1...v0.18.0) (2026-08-30)
 
 ### Features
