@@ -47,16 +47,19 @@ export class UploadFailed extends Error {
   }
 }
 
-function messageFor(status: number, raw: string): string {
-  try {
-    const parsed = JSON.parse(raw) as { error?: string };
-    if (typeof parsed.error === "string") return parsed.error;
-  } catch {
-    // A non-JSON body means the failure came from somewhere above the route.
-  }
+/**
+ * A friendly message for a failed upload, keyed on HTTP status only.
+ *
+ * The server's `error` body is never shown verbatim: it is an internal code meant for logs, not
+ * prose meant for a chat chip, and surfacing it raw leaked implementation detail (and, for a 403,
+ * a confusing permission code) straight into the UI. Every status maps to a fixed sentence.
+ */
+function messageFor(status: number): string {
+  if (status === 401) return "Your session expired — sign in again.";
+  if (status === 403) return "You don't have permission to upload files.";
   if (status === 413) return "That file is too large.";
   if (status === 415) return "That file type is not supported.";
-  return "The upload failed.";
+  return "The upload failed. Try again.";
 }
 
 export function uploadFile(file: File, onProgress?: (fraction: number) => void): UploadHandle {
@@ -87,7 +90,7 @@ export function uploadFile(file: File, onProgress?: (fraction: number) => void):
         resolve(JSON.parse(request.responseText) as UploadedFile);
         return;
       }
-      reject(new UploadFailed(request.status, messageFor(request.status, request.responseText)));
+      reject(new UploadFailed(request.status, messageFor(request.status)));
     });
 
     request.send(file);
