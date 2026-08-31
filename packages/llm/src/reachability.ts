@@ -21,6 +21,15 @@ export interface ModelReachabilityReport {
    * route that accepts anything and returns an empty completion.
    */
   readonly reply?: string;
+  /**
+   * Chat probes only: whether the reply contained the word the probe asked for.
+   *
+   * Deliberately separate from `verdict`. A chatty or verbose model has not degraded the
+   * deployment, so folding this into the verdict would turn a healthy provider amber on the
+   * status page; but an operator who just pressed a button to test one model does want to know
+   * that what came back was not what was asked for.
+   */
+  readonly answeredAsAsked?: boolean;
   /** Round-trip time of the probe call, including a cold provider's handshake. */
   readonly latencyMs?: number;
   /**
@@ -146,21 +155,15 @@ export async function checkModelReachability(
       abortSignal: controller.signal,
     });
     const reply = trimReply(text);
-    const latencyMs = Date.now() - startedAt;
-    // Answering at all proves the credential and the model id; answering with the asked-for word is
-    // what proves something is reading the prompt rather than replaying a canned or cached body.
-    // Those are different facts, so they get different verdicts instead of one optimistic pass.
-    if (!SAID_PONG.test(reply)) {
-      return {
-        verdict: "degraded",
-        detail: reply
-          ? "the provider answered, but not with the word it was asked for"
-          : "the provider answered with an empty reply",
-        reply,
-        latencyMs,
-      };
-    }
-    return { verdict: "reachable", reply, latencyMs };
+    // Answering at all proves the credential, the route and the model id, which is all the
+    // deployment's health depends on. Whether it answered with the asked-for word is a second,
+    // weaker fact — reported alongside rather than folded into the verdict.
+    return {
+      verdict: "reachable",
+      reply,
+      answeredAsAsked: SAID_PONG.test(reply),
+      latencyMs: Date.now() - startedAt,
+    };
   } catch (error) {
     const failure = report(error, controller.signal.aborted, timeoutMs);
     return {

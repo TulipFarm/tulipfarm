@@ -33,11 +33,22 @@ function perMtokValue(cost: number | undefined): string {
 
 export type SheetKind = "chat" | "embedding";
 
-const TEST_TONE: Record<ConnectionTest["verdict"], string> = {
-  reachable: "bg-status-success-surface text-status-success",
-  degraded: "bg-status-warning-surface text-status-warning",
-  unreachable: "bg-status-danger-surface text-status-danger",
+const TEST_TONE = {
+  pass: "bg-status-success-surface text-status-success",
+  warn: "bg-status-warning-surface text-status-warning",
+  fail: "bg-status-danger-surface text-status-danger",
 };
+
+/**
+ * A model that answered, but not with the word it was asked for, is amber here and green on the
+ * status page. Both are right: the deployment is healthy, and the operator standing on this screen
+ * still wants to know the model ignored the simplest instruction it will ever get.
+ */
+function testTone(test: ConnectionTest): string {
+  if (test.verdict === "unreachable") return TEST_TONE.fail;
+  if (test.verdict === "degraded") return TEST_TONE.warn;
+  return test.answeredAsAsked === false ? TEST_TONE.warn : TEST_TONE.pass;
+}
 
 /**
  * The probe's detail is written for the status page, so it names the screen that fixes the
@@ -52,17 +63,16 @@ function localDetail(detail: string | undefined): string | undefined {
 function testSummary(test: ConnectionTest, kind: SheetKind): string {
   const took = test.latencyMs === undefined ? "" : ` in ${test.latencyMs} ms`;
   if (test.verdict === "unreachable") return "No answer from this provider.";
-  // A degraded chat verdict usually means it answered with something other than the word asked
-  // for, and the operator can only judge that if they are shown what it actually said.
-  if (test.verdict === "degraded") {
-    return test.reply
-      ? `Answered “${test.reply}”${took}, not the word it was asked for.`
-      : "The provider answered, but refused this call.";
-  }
+  if (test.verdict === "degraded") return "The provider answered, but refused this call.";
   if (kind === "embedding") {
     return `Embedded a ${test.dimension}-wide vector${took}.`;
   }
-  return test.reply ? `Replied “${test.reply}”${took}.` : `Answered${took}, but wrote nothing.`;
+  if (!test.reply) return `Answered${took}, but wrote nothing.`;
+  // Quoting what it said is the point of the probe: it separates a model that read the prompt from
+  // a route that accepts anything and echoes a canned body.
+  return test.answeredAsAsked === false
+    ? `Answered “${test.reply}”${took}, not the word it was asked for.`
+    : `Replied “${test.reply}”${took}.`;
 }
 
 type SheetRow = Row | EmbeddingRow;
@@ -320,7 +330,7 @@ export function ModelSheet({
               </Button>
             </div>
             {test ? (
-              <div className={`px-3 py-2 text-sm ${TEST_TONE[test.verdict]}`}>
+              <div className={`px-3 py-2 text-sm ${testTone(test)}`}>
                 <p className="font-medium">{testSummary(test, kind)}</p>
                 {localDetail(test.detail) ? (
                   <p className="mt-0.5 text-xs text-muted-foreground">{localDetail(test.detail)}</p>

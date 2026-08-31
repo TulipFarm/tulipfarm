@@ -695,6 +695,25 @@ test("a connection test quotes what the model actually replied", async () => {
   expect(vi.mocked(testLlmConnection).mock.calls[0][1]).toBe("chat");
 });
 
+test("a model that answers with something else is still a pass, but is quoted as one", async () => {
+  // The deployment is healthy, so the probe keeps its green verdict and the status page stays
+  // quiet. The operator standing on this screen still needs to see the model ignored the prompt.
+  vi.mocked(testLlmConnection).mockResolvedValue({
+    verdict: "reachable",
+    reply: "Sure, how can I help?",
+    answeredAsAsked: false,
+    latencyMs: 88,
+  });
+  renderChains();
+
+  await userEvent.click(screen.getByRole("button", { name: "Change the Fast model" }));
+  await userEvent.click(await screen.findByRole("button", { name: /test connection/i }));
+
+  expect(
+    await screen.findByText(/Answered .Sure, how can I help\?. in 88 ms, not the word/)
+  ).toBeInTheDocument();
+});
+
 test("a provider that answers but refuses reads differently from one that never answered", async () => {
   vi.mocked(testLlmConnection).mockResolvedValue({
     verdict: "degraded",

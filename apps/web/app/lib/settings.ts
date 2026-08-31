@@ -78,6 +78,8 @@ export type ConnectionTest = {
   detail?: string;
   /** Chat only: what the model wrote back. */
   reply?: string;
+  /** Chat only: whether that reply was the word the probe asked for. */
+  answeredAsAsked?: boolean;
   latencyMs?: number;
   /** Embedding only: the width of the vector it returned. */
   dimension?: number;

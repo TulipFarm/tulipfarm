@@ -498,7 +498,7 @@ export function registerLlmConfigRoutes(
       preHandler: [requireAuth, requireAuthorization(LLM_CONFIG_RESOLVE)],
       schema: {
         description:
-          "Make one live call to a single provider entry and report what it proved. Admin only. The entry is taken from the body rather than from the saved config, so an operator can prove a model works *before* committing it. `kind: chat` asks the model for a word back and returns its `reply`; `kind: embedding` embeds a short string and returns the `dimension` it got. Credentials are resolved from stored secrets by `api_key_ref` and are never accepted in, or echoed by, this route. `verdict` is `reachable`, `degraded` (the provider answered but refused or throttled) or `unreachable`.",
+          "Make one live call to a single provider entry and report what it proved. Admin only. The entry is taken from the body rather than from the saved config, so an operator can prove a model works *before* committing it. `kind: chat` asks the model for a word back and returns its `reply`, plus `answeredAsAsked` for whether that reply was the word asked for — a chatty model is still `reachable`, because the deployment is healthy; `kind: embedding` embeds a short string and returns the `dimension` it got. Credentials are resolved from stored secrets by `api_key_ref` and are never accepted in, or echoed by, this route. `verdict` is `reachable`, `degraded` (the provider answered but refused or throttled) or `unreachable`.",
         tags: ["soul"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         body: {
@@ -521,6 +521,7 @@ export function registerLlmConfigRoutes(
               verdict: { type: "string", enum: ["reachable", "degraded", "unreachable"] },
               detail: { type: "string" },
               reply: { type: "string" },
+              answeredAsAsked: { type: "boolean" },
               latencyMs: { type: "number" },
               dimension: { type: "number" },
             },

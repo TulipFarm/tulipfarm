@@ -54,10 +54,11 @@ describe("checkModelReachability", () => {
     expect(await checkModelReachability(asModel(model))).toMatchObject({
       verdict: "reachable",
       reply: "Pong!",
+      answeredAsAsked: true,
     });
   });
 
-  it("reports a provider that answers with something else as degraded, quoting it", async () => {
+  it("still reports reachable when the answer is not the asked-for word, but flags it", async () => {
     const model = {
       specificationVersion: "v4" as const,
       provider: "test",
@@ -72,15 +73,17 @@ describe("checkModelReachability", () => {
       doStream: () => Promise.reject(new Error("unused")),
     };
 
-    // Answering at all proves the credential; answering with the asked-for word proves something
-    // read the prompt. A cache or a proxy in front of the model passes the first and fails this.
+    // The deployment is healthy — the call worked — so the verdict stays green and the status page
+    // does not cry wolf over a chatty model. The weaker fact rides alongside for the operator who
+    // pressed Test connection and wants to know the model ignored the instruction.
     expect(await checkModelReachability(asModel(model))).toMatchObject({
-      verdict: "degraded",
+      verdict: "reachable",
       reply: "ok",
+      answeredAsAsked: false,
     });
   });
 
-  it("reports an empty completion as degraded rather than as a pass", async () => {
+  it("flags an empty completion, which a route that accepts anything will return", async () => {
     const model = {
       specificationVersion: "v4" as const,
       provider: "test",
@@ -96,8 +99,9 @@ describe("checkModelReachability", () => {
     };
 
     expect(await checkModelReachability(asModel(model))).toMatchObject({
-      verdict: "degraded",
-      detail: "the provider answered with an empty reply",
+      verdict: "reachable",
+      reply: "",
+      answeredAsAsked: false,
     });
   });
 
