@@ -1,5 +1,5 @@
-import type { LanguageModel } from "ai";
-import { APICallError, generateText, RetryError } from "ai";
+import type { EmbeddingModel, LanguageModel } from "ai";
+import { APICallError, embed, generateText, RetryError } from "ai";
 import { classifyProviderError } from "./provider-error";
 
 /**
@@ -15,6 +15,29 @@ export interface ModelReachabilityReport {
   /** Operator-facing, and deliberately built from classified reasons rather than provider text,
    * so no credential, URL or response body can reach a status page. */
   readonly detail?: string;
+  /**
+   * What the model actually wrote back, truncated. A verdict alone proves the transport worked;
+   * the reply is what proves the configured id is a model that answers rather than, say, a proxy
+   * route that accepts anything and returns an empty completion.
+   */
+  readonly reply?: string;
+  /**
+   * Chat probes only: whether the reply contained the word the probe asked for.
+   *
+   * Deliberately separate from `verdict`. A chatty or verbose model has not degraded the
+   * deployment, so folding this into the verdict would turn a healthy provider amber on the
+   * status page; but an operator who just pressed a button to test one model does want to know
+   * that what came back was not what was asked for.
+   */
+  readonly answeredAsAsked?: boolean;
+  /** Round-trip time of the probe call, including a cold provider's handshake. */
+  readonly latencyMs?: number;
+  /**
+   * Embedding probes only: the width of the vector the model returned. Worth surfacing because it
+   * is the number the operator must record for the index, and guessing it wrong is unrecoverable
+   * without a re-index.
+   */
+  readonly dimension?: number;
 }
 
 /**
@@ -30,6 +53,23 @@ export const MODEL_REACHABILITY_TIMEOUT_MS = 30_000;
  */
 const PROBE_MAX_OUTPUT_TOKENS = 16;
 
+/**
+ * Asks for a specific word rather than sending a bare "ping", so the reply distinguishes a model
+ * that is answering from an endpoint that merely returns 200.
+ */
+const PROBE_PROMPT = 'Reply with the single word "pong" and nothing else.';
+
+/** The reply is shown verbatim, so a model that ignores the instruction cannot flood the page. */
+const MAX_REPLY_CHARS = 200;
+
+/** Matches the asked-for word anywhere, so a model that adds punctuation or a period still passes. */
+const SAID_PONG = /\bpong\b/i;
+
+function trimReply(text: string): string {
+  const clean = text.trim();
+  return clean.length > MAX_REPLY_CHARS ? `${clean.slice(0, MAX_REPLY_CHARS)}…` : clean;
+}
+
 const RECONNECT = "reconnect the provider under Business → Models";
 
 /** An HTTP status proves the provider answered; its absence proves nothing was reached. */
@@ -40,7 +80,7 @@ function httpStatus(error: unknown): number | undefined {
 }
 
 /** The configured model the verdict is about; an operator's first question about a red row. */
-function label(model: LanguageModel): string {
+function label(model: LanguageModel | EmbeddingModel): string {
   return typeof model === "string" ? model : model.modelId;
 }
 
@@ -48,7 +88,7 @@ function report(
   error: unknown,
   timedOut: boolean,
   timeoutMs: number
-): Required<ModelReachabilityReport> {
+): Required<Pick<ModelReachabilityReport, "verdict" | "detail">> {
   if (timedOut) {
     return {
       verdict: "unreachable",
@@ -106,17 +146,73 @@ export async function checkModelReachability(
 ): Promise<ModelReachabilityReport> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const startedAt = Date.now();
   try {
-    await generateText({
+    const { text } = await generateText({
       model,
-      prompt: "ping",
+      prompt: PROBE_PROMPT,
       maxOutputTokens: PROBE_MAX_OUTPUT_TOKENS,
       abortSignal: controller.signal,
     });
-    return { verdict: "reachable" };
+    const reply = trimReply(text);
+    // Answering at all proves the credential, the route and the model id, which is all the
+    // deployment's health depends on. Whether it answered with the asked-for word is a second,
+    // weaker fact — reported alongside rather than folded into the verdict.
+    return {
+      verdict: "reachable",
+      reply,
+      answeredAsAsked: SAID_PONG.test(reply),
+      latencyMs: Date.now() - startedAt,
+    };
   } catch (error) {
     const failure = report(error, controller.signal.aborted, timeoutMs);
-    return { verdict: failure.verdict, detail: `${label(model)} — ${failure.detail}` };
+    return {
+      verdict: failure.verdict,
+      detail: `${label(model)} — ${failure.detail}`,
+      latencyMs: Date.now() - startedAt,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * The embedding equivalent: embeds one short string and reports the width it got back.
+ *
+ * Shares the classifier with the chat probe so the same provider failure reads the same way on
+ * both, and resolves for every outcome for the same reason.
+ */
+export async function checkEmbeddingReachability(
+  model: EmbeddingModel,
+  timeoutMs: number = MODEL_REACHABILITY_TIMEOUT_MS
+): Promise<ModelReachabilityReport> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const startedAt = Date.now();
+  try {
+    const { embedding } = await embed({
+      model,
+      value: "ping",
+      abortSignal: controller.signal,
+    });
+    const latencyMs = Date.now() - startedAt;
+    // A provider that answers with no vector has accepted the request without doing the job, which
+    // would index Knowledge into nothing. That is a failure, not a pass with an odd shape.
+    if (embedding.length === 0) {
+      return {
+        verdict: "degraded",
+        detail: "the provider answered without returning a vector",
+        latencyMs,
+      };
+    }
+    return { verdict: "reachable", dimension: embedding.length, latencyMs };
+  } catch (error) {
+    const failure = report(error, controller.signal.aborted, timeoutMs);
+    return {
+      verdict: failure.verdict,
+      detail: `${label(model)} — ${failure.detail}`,
+      latencyMs: Date.now() - startedAt,
+    };
   } finally {
     clearTimeout(timer);
   }

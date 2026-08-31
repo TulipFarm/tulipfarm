@@ -17,7 +17,7 @@ subscription-CLI model adapters.
 | `src/fallback.ts`, `src/provider-error.ts` | Fallback order and hard/transient failures. |
 | `src/embeddings.ts`, `src/embedding-provider.ts` | Embedding providers and execution. |
 | `src/model-spec.ts`, `src/pricing.ts` | Model metadata and cost helpers. |
-| `src/reachability.ts` | One live call's verdict on a configured model, for health reporting. |
+| `src/reachability.ts` | One live call's verdict on a configured chat or embedding model — health reporting and the Models page **Test connection** button. |
 | `src/prompt-cache.ts` | Whether a prompt prefix asks for provider-side caching. |
 | `src/cli/` | Subscription Provider adapters, jail, transcripts, JSON mode, specs. |
 

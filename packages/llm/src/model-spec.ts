@@ -142,16 +142,26 @@ export function resolveModelSpec(
   return { spec: null, matchedKey: null, candidates: loose };
 }
 
-/** Bare chat-model suggestions for Settings, derived from the LiteLLM catalog. */
-export function litellmModelsForProvider(provider: string, catalog: LiteLlmCatalog): string[] {
+/** Bare model suggestions for Settings, derived from the LiteLLM catalog. `mode` is the catalog's
+ *  own classification: `chat` powers the tier picker, `embedding` the embedding picker. */
+export function litellmModelsForProvider(
+  provider: string,
+  catalog: LiteLlmCatalog,
+  mode: "chat" | "embedding" = "chat"
+): string[] {
   const prefixes = PROVIDER_PREFIXES[provider] ?? [""];
   const out = new Set<string>();
   for (const key of Object.keys(catalog)) {
     if (key === "sample_spec") continue;
     const entry = catalog[key];
-    if (typeof entry?.input_cost_per_token !== "number") continue; // skip cost-less / non-chat
-    const mode = typeof entry.mode === "string" ? entry.mode : undefined;
-    if (mode && mode !== "chat") continue; // embeddings/image/rerank etc. aren't tier models
+    if (typeof entry?.input_cost_per_token !== "number") continue; // skip cost-less entries
+    const entryMode = typeof entry.mode === "string" ? entry.mode : undefined;
+    // An unclassified entry is assumed to be chat, which is what the catalog's untagged bulk is.
+    // Embedding callers must not inherit that assumption: an entry that never says `embedding`
+    // cannot be offered as one, or the picker suggests a chat model that answers no embed call.
+    if (mode === "embedding" ? entryMode !== "embedding" : entryMode && entryMode !== "chat") {
+      continue;
+    }
     for (const prefix of prefixes) {
       if (prefix === "") {
         if (!key.includes("/")) out.add(key); // bare ids only, for the "" prefix

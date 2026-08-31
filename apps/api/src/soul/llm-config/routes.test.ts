@@ -537,6 +537,44 @@ describe("llm-config routes", () => {
     });
   });
 
+  describe("POST /api/v1/llm-config/test-connection", () => {
+    it("is admin-only (403 for a member)", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/llm-config/test-connection",
+        cookies: cookies(memberSid),
+        headers,
+        payload: { provider: "openai", model: "gpt-4o" },
+      });
+      expect(res.statusCode).toBe(403);
+    });
+
+    it("refuses an entry with no model rather than probing nothing", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/llm-config/test-connection",
+        cookies: cookies(adminSid),
+        headers,
+        payload: { provider: "openai", model: "   " },
+      });
+      expect(res.statusCode).toBe(422);
+    });
+
+    it("reports an entry it cannot even build as a verdict, not a 500", async () => {
+      // An unknown provider or a missing secret is the configuration answer the operator pressed
+      // the button to get. Failing the request instead would show them "something went wrong".
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/llm-config/test-connection",
+        cookies: cookies(adminSid),
+        headers,
+        payload: { provider: "not-a-real-provider", model: "whatever" },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ verdict: "unreachable" });
+    });
+  });
+
   describe("GET /api/v1/llm-config/model-options", () => {
     it("is admin-only (403 for a member)", async () => {
       const res = await app.inject({

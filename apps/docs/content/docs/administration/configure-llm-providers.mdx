@@ -1,6 +1,6 @@
 ---
 title: Configure LLM providers
-description: Add provider credentials, assign models behind each effort preset, and verify fallback behavior.
+description: Add provider credentials, choose a model for each effort, test that it answers, and set the embedding model behind Knowledge search.
 ---
 
 This guide configures the model providers TulipFarm uses for chat, agents, skills, and
@@ -10,8 +10,9 @@ becomes a model, see [Model routing](/docs/administration/how-model-routing-work
 
 ## Outcome
 
-At the end, each effort preset has at least one priced, chat-capable model behind it and TulipFarm can
-reload the model service without restarting the app.
+At the end, each effort preset has a priced, chat-capable model behind it, Knowledge has an
+embedding model to index against, and TulipFarm can reload the model service without restarting
+the app.
 
 <Steps>
   <Step>
@@ -42,23 +43,36 @@ reload the model service without restarting the app.
     on the provider form.
   </Step>
   <Step>
-    Open **Operate → Business → Models**. The page has three ordered fallback chains:
-    **Fast**, **Balanced**, and **Thorough**. Add one or more provider rows to each chain.
+    Open **Operate → Business → Models**. **Chat models** lists the three *effort presets* —
+    the named levels of work whoever starts a turn can pick from — with the model behind each
+    and what it costs per million tokens.
 
     See [Model routing](/docs/administration/how-model-routing-works) for how effort presets resolve to model profiles.
   </Step>
   <Step>
-    Pick a provider and model for each row. Models must resolve to priced,
-    chat-capable entries from the LiteLLM catalog. The Models page pins the resolved
-    pricing, context window, and capability metadata into the soul.
+    Choose **Change** on an effort. Pick a provider, then type in **Model** to search the catalog.
+    Anything your provider accepts works, listed or not.
 
-    provider model ids are accepted as follows:
+    provider model identifiers are accepted as follows:
 
     - `anthropic` and `openai`: bare ids or provider-prefixed ids.
     - `azure`: `azure_ai/`, `azure/`, or bare deployment ids.
     - `openai-compatible`: bare ids sent to the configured `base_url`.
     - `claude-code`: `opus`, `sonnet`, or `haiku`.
     - `codex`: `gpt-5.6-sol`, `gpt-5.6-terra`, or `gpt-5.6-luna`.
+  </Step>
+  <Step>
+    Choose **Test connection**. TulipFarm makes one live call and reports what it proved: what
+    the model replied and how long it took, or why it did not answer. Nothing else on this page
+    proves a credential works until a real turn needs it.
+  </Step>
+  <Step>
+    Check **Pricing and limits**. Prices, context window and capabilities resolve from the
+    LiteLLM catalog and are pinned into the soul.
+
+    A private deployment or a self-hosted endpoint is never in that catalog. Choose **Enter these
+    by hand** and type the context window and the two per-million prices, or that model's spend
+    stays invisible in Observability.
 
     The two subscription providers are the exception to the LiteLLM rule above: they have no
     catalog price, so their capability metadata comes from a static table instead and their
@@ -66,29 +80,48 @@ reload the model service without restarting the app.
     [Model routing](/docs/administration/how-model-routing-works#subscription-providers).
   </Step>
   <Step>
-    Put the preferred provider first. Runtime fallback tries rows in order. A hard
-    failure, such as bad credentials, a bad request, a missing model, or cancellation,
-    stops the chain immediately. A transient failure, such as rate limit, timeout,
-    network error, or a 5xx response, falls through to the next row.
+    Back in the table, select **Default** on the effort that should run when nobody picks one.
+    That choice sets what most turns cost.
   </Step>
   <Step>
-    In **What each effort means**, choose which derived model profile each effort uses. **Auto
-    resolves to** is the default for a turn where nobody picks an effort; **Fast**, **Balanced**,
-    and **Thorough** control explicit choices. Pointing a preset at a profile that does not exist
-    is rejected on save rather than failing later at the first turn that needs it.
+    Set an **Embedding model**. It turns Knowledge into vectors so search matches meaning rather
+    than wording; until one is set, Knowledge search falls back to keyword matching. Testing an
+    embedding model reports the vector width it returned, which you can accept as the width to
+    record.
+
+    <Callout type="warn">
+      Changing the embedding model or its width leaves existing vectors unmatchable. Re-index
+      Knowledge after saving.
+    </Callout>
   </Step>
   <Step>
-    Choose **Save changes**. The Models page writes the `llm` block in `soul.yaml`, commits it,
-    and reloads the LLM service live.
+    Open **Advanced** only if you need it. It holds *standby* models — a second model tried when
+    the first fails — and per-effort routing overrides.
+
+    Runtime fallback tries standbys in order. A hard failure, such as bad credentials, a bad
+    request, a missing model, or cancellation, stops the chain immediately. A transient failure,
+    such as rate limit, timeout, network error, or a 5xx response, falls through to the next row.
+
+    **Auto resolves to** names the profile used when nobody picks an effort. Pointing a preset at
+    a profile that does not exist is rejected on save rather than failing later at the first turn
+    that needs it.
+  </Step>
+  <Step>
+    Choose **Save changes**. The bar at the foot of the page names what is unsaved, and
+    **Discard** puts back the config as it was loaded. Saving writes the `llm` block in
+    `soul.yaml`, commits it, and reloads the LLM service live.
   </Step>
 </Steps>
 
 ## Verify
 
-Start a new chat and ask a simple question. If a chain has multiple providers, temporarily
-make the first row return a transient error and confirm the answer comes from the next
-row. Do not use invalid credentials for this test: credential failures are hard failures
-and intentionally stop fallback.
+Choose **Test connection** on each effort. A model that answers reports its reply and the round
+trip time; one that does not reports why.
+
+Then start a new chat and ask a simple question. To check a standby takes over, temporarily make
+the first row return a transient error and confirm the answer comes from the next row. Do not use
+invalid credentials for this test: credential failures are hard failures and intentionally stop
+fallback.
 
 <Callout type="warn">
 If there is no `soul.yaml#llm` configuration, LLM features are disabled. The app does not invent a

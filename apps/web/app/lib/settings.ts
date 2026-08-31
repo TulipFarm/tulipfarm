@@ -27,6 +27,10 @@ export type ProviderEntry = {
   spec?: ModelSpec;
 };
 
+/** An embedding entry also pins its vector width: failover may only cross providers of equal
+ *  `dimension`, since a different width writes vectors the next query can never match. */
+export type EmbeddingEntry = ProviderEntry & { dimension?: number };
+
 export type SpecResolution = {
   spec: ModelSpec | null;
   matchedKey: string | null;
@@ -58,9 +62,41 @@ export type ModelOptions = {
   reason?: string;
 };
 
-export async function getModelOptions(provider: string): Promise<ModelOptions> {
-  const q = new URLSearchParams({ provider });
+export async function getModelOptions(
+  provider: string,
+  mode: "chat" | "embedding" = "chat"
+): Promise<ModelOptions> {
+  const q = new URLSearchParams({ provider, mode });
   return apiGet<ModelOptions>(`/api/v1/llm-config/model-options?${q.toString()}`);
+}
+
+// One live round-trip against a single entry, before it is saved. `verdict: "degraded"` means the
+// provider answered but refused or throttled the call — its credential and network path are fine,
+// which is a different fix from `unreachable`.
+export type ConnectionTest = {
+  verdict: "reachable" | "degraded" | "unreachable";
+  detail?: string;
+  /** Chat only: what the model wrote back. */
+  reply?: string;
+  /** Chat only: whether that reply was the word the probe asked for. */
+  answeredAsAsked?: boolean;
+  latencyMs?: number;
+  /** Embedding only: the width of the vector it returned. */
+  dimension?: number;
+};
+
+export async function testLlmConnection(
+  entry: ProviderEntry,
+  kind: "chat" | "embedding" = "chat"
+): Promise<ConnectionTest> {
+  return apiWrite<ConnectionTest>("POST", "/api/v1/llm-config/test-connection", {
+    kind,
+    provider: entry.provider,
+    model: entry.model,
+    ...(entry.api_key_ref ? { api_key_ref: entry.api_key_ref } : {}),
+    ...(entry.base_url ? { base_url: entry.base_url } : {}),
+    ...(entry.resource_name ? { resource_name: entry.resource_name } : {}),
+  });
 }
 
 // Provider registry (served from @tulipfarm/secrets via GET /api/v1/llm-providers). Each provider
@@ -120,7 +156,7 @@ export type LlmConfig = {
   connections?: Record<string, ProviderConnection>;
   tiers?: { quick: TierConfig; standard: TierConfig; complex: TierConfig };
   presets?: EffortPresetMappings;
-  embeddings?: { providers: ProviderEntry[] };
+  embeddings?: { providers: EmbeddingEntry[] };
 };
 
 export async function getLlmConfig(): Promise<LlmConfig> {
