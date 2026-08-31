@@ -265,4 +265,40 @@ describe("slack manifest", () => {
     // Slack lists its bot scopes twice — in the app manifest and again on the authorize URL.
     expect(new Set(labels).size).toBe(labels.length);
   });
+
+  it("declares ingress with a handler and a secret name the auth flow actually seals", async () => {
+    const bundled = await loadBundledIntegrations(logger);
+    const manifest = bundled.get("github")?.manifest;
+    if (!manifest) throw new Error("github is not bundled");
+
+    expect(manifest.ingress?.handler).toBe("ingress.ts");
+    expect(manifest.ingress?.webhook.security.secret_env).toBe("GITHUB_WEBHOOK_SECRET");
+    // Same posture as the Soul loader: a channel that can't verify a delivery must be rejected at
+    // load, not discovered the first time GitHub retries a webhook forever.
+    expect(validateAuthSteps(manifest)).toEqual([]);
+  });
+
+  it("registers the App's webhook at this deployment's real ingress route", async () => {
+    // Regression: hook_attributes.url used to be hand-typed as
+    // `{api_url}/api/v1/integrations/github/webhook`, which resolved to a URL that was never a
+    // registered route (the real one is `/api/v1/hooks/integrations/:name`). GitHub delivered to
+    // it and got 404 forever — this is what `{webhook_url}` now prevents from drifting again.
+    const bundled = await loadBundledIntegrations(logger);
+    const manifest = bundled.get("github")?.manifest;
+    if (!manifest) throw new Error("github is not bundled");
+
+    const action = await startAuthStep({
+      slug: "github",
+      manifest,
+      stepIndex: 0,
+      env: {},
+      endpoints,
+      repo: new MemoryRepo(),
+    });
+    if (action.action !== "form_post") throw new Error("expected form_post");
+    const submitted = JSON.parse(action.value) as { hook_attributes: { url: string } };
+    expect(submitted.hook_attributes.url).toBe(
+      `${endpoints.apiUrl}/api/v1/hooks/integrations/github`
+    );
+  });
 });

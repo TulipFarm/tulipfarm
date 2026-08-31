@@ -231,6 +231,7 @@ async function harness(
       },
     } as unknown as IntegrationEventsRepo,
     soulLoader: soul,
+    bundled: new Map(),
     identity: {
       resolve:
         options.resolve ??
