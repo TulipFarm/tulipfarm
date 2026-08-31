@@ -45,6 +45,12 @@ export interface SoulWriterTool {
   /** Commits this Trial landed, in order. Empty means the Turn changed no configuration. */
   readonly commits: readonly SoulCommit[];
   /**
+   * Reasons the real writer refused a write, in order — the exact text a `denied` dispatch handed
+   * back, not the shorter one this file also returns to the model. A Case asserting on refusal
+   * wording needs the real thing, or it would only ever be checking this file's own paraphrase.
+   */
+  readonly denials: readonly string[];
+  /**
    * The artifacts the Runtime is actually serving, written `Kind:slug`.
    *
    * Read from the *active* publication, never from the commit. A committed artifact that never
@@ -88,6 +94,7 @@ interface WriteArguments {
  */
 export function soulWriterTool(soul: EvalSoul): SoulWriterTool {
   const commits: SoulCommit[] = [];
+  const denials: string[] = [];
   // `hermeticGitEnv` is not optional. An exported GIT_DIR — which every Git hook, `rebase --exec`
   // and `bisect run` sets — overrides `cwd` entirely, so without it `base` would be the
   // maintainer's own HEAD and `reset` would `git reset --hard` and `git clean -fd` their checkout,
@@ -114,8 +121,11 @@ export function soulWriterTool(soul: EvalSoul): SoulWriterTool {
       publicKeyPem: publicKey.export({ format: "pem", type: "spki" }).toString(),
     },
   ]);
+  // Shared with the writer below: both need the same view of the authored tree, and production
+  // wires the identical reader to each (`apps/api/src/runtime/soul-writer.ts`).
+  const treeReader = new GitSoulTreeReader(soul.path);
   const publisher = new SoulPublisher({
-    treeReader: new GitSoulTreeReader(soul.path),
+    treeReader,
     compiler: compileExecutionBundle,
     signer: createEd25519BundleSigner(
       EVAL_BUNDLE_KEY,
@@ -125,16 +135,22 @@ export function soulWriterTool(soul: EvalSoul): SoulWriterTool {
     logger: SILENT,
     businessId: EVAL_BUSINESS,
   });
+  // Without this, `checkReferences` short-circuits (`SoulWriter` treats a missing `treeReader` as
+  // "cannot check, so don't"), so a bad `agentRef`/`toolRef` would commit here and fail only later,
+  // silently, at publish — the opposite of what production does and exactly the path this Case
+  // exists to cover.
   const writer = new SoulWriter(
     store,
     SILENT,
     undefined,
     { reload: () => soul.loader.load() },
-    publisher
+    publisher,
+    treeReader
   );
 
   return {
     commits,
+    denials,
     published: async () => {
       const bundle = await publications.activeBundle(EVAL_BUSINESS, verifier);
       return bundle?.definitions.map((definition) => `${definition.kind}:${definition.slug}`) ?? [];
@@ -204,14 +220,12 @@ export function soulWriterTool(soul: EvalSoul): SoulWriterTool {
                   : `${issue.code} at ${issue.path}.${issue.field}`
               )
               .join("; ");
-            return {
-              status: "denied",
-              callId: call.callId,
-              reason:
-                issues.length === 0
-                  ? `${cause.code}: ${cause.message}`
-                  : `${cause.code}: ${cause.message} — ${issues}`,
-            };
+            const reason =
+              issues.length === 0
+                ? `${cause.code}: ${cause.message}`
+                : `${cause.code}: ${cause.message} — ${issues}`;
+            denials.push(reason);
+            return { status: "denied", callId: call.callId, reason };
           }
           throw cause;
         }

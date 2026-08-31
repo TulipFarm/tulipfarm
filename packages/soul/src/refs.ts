@@ -28,7 +28,20 @@ export interface SoulSemanticIssue {
   readonly ref?: string;
   /** JSON pointer into the owning definition's document. */
   readonly field?: string;
+  /**
+   * For `UNRESOLVED_REF` only: slugs of the referenced kind that already resolve in this same
+   * proposed tree, nearest-match first, capped at {@link MAX_REF_SUGGESTIONS}. Drawn only from the
+   * definitions already in this changeset's own tree — never a wider or cross-business catalog —
+   * so the list can only repeat back what the caller's own write already made visible to it.
+   */
+  readonly candidates?: readonly string[];
 }
+
+/**
+ * Cap on `SoulSemanticIssue.candidates`. A bundle can hold hundreds of Agents or ToolContracts;
+ * without a cap the error message itself becomes an unbounded catalog dump.
+ */
+export const MAX_REF_SUGGESTIONS = 8;
 
 /** A deterministic, payload-safe semantic rejection suitable for gateway boundary evidence. */
 export class SoulSemanticValidationError extends Error {
@@ -158,6 +171,43 @@ export class DefinitionIndex {
   get(id: string): AuthoredDefinition | undefined {
     return this.byId.get(id);
   }
+
+  /** Every distinct slug already authored for `kind` in this tree, for ref-suggestion purposes. */
+  slugsOfKind(kind: string): string[] {
+    return [...new Set(this.ofKind(kind).map((d) => d.slug))];
+  }
+}
+
+/** Levenshtein edit distance, used only to rank ref-guess suggestions — no external dependency. */
+function editDistance(a: string, b: string): number {
+  const rows = a.length + 1;
+  const cols = b.length + 1;
+  const dp: number[][] = Array.from({ length: rows }, () => new Array<number>(cols).fill(0));
+  for (let i = 0; i < rows; i += 1) dp[i][0] = i;
+  for (let j = 0; j < cols; j += 1) dp[0][j] = j;
+  for (let i = 1; i < rows; i += 1) {
+    for (let j = 1; j < cols; j += 1) {
+      dp[i][j] =
+        a[i - 1] === b[j - 1]
+          ? dp[i - 1][j - 1]
+          : 1 + Math.min(dp[i - 1][j - 1], dp[i - 1][j], dp[i][j - 1]);
+    }
+  }
+  return dp[a.length][b.length];
+}
+
+/**
+ * The slugs of `kind` already resolvable in `index`, nearest-guess first and capped at
+ * {@link MAX_REF_SUGGESTIONS}. The only input is the index the failed lookup itself already
+ * consulted, so this can never surface a name the caller's own changeset could not already see.
+ */
+function suggestSlugs(index: DefinitionIndex, kind: string, guess: string): string[] {
+  return index
+    .slugsOfKind(kind)
+    .map((slug) => ({ slug, distance: editDistance(guess, slug) }))
+    .sort((a, b) => a.distance - b.distance || a.slug.localeCompare(b.slug))
+    .slice(0, MAX_REF_SUGGESTIONS)
+    .map((entry) => entry.slug);
 }
 
 // ── Reference resolution (SPEC §8.2 step 7) ─────────────────────────────────────
@@ -204,7 +254,13 @@ function resolveVersionedRef(
   const candidates = index.candidates(ref.name, kind);
   if (candidates.length === 0) {
     return [
-      { code: "UNRESOLVED_REF", subject: def.subject, ref: ref.name, field: `${field}/name` },
+      {
+        code: "UNRESOLVED_REF",
+        subject: def.subject,
+        ref: ref.name,
+        field: `${field}/name`,
+        candidates: suggestSlugs(index, kind, ref.name),
+      },
     ];
   }
   if (!versionSatisfied(candidates, ref.version)) {
@@ -336,6 +392,7 @@ export function resolveReferences(index: DefinitionIndex): SoulSemanticIssue[] {
             subject: def.subject,
             ref: edge.value,
             field: edge.field,
+            candidates: suggestSlugs(index, edge.kind, edge.value),
           });
         }
         continue;

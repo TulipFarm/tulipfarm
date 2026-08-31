@@ -113,7 +113,16 @@ export type Expectation =
   /** L3 only. The counterpart: the audience widened this far and no further. */
   | { readonly kind: "generated_file_not_readable_by"; readonly grantee: string }
   /** L3 only. A validated Curator Proposal reached its participant as a Task. */
-  | { readonly kind: "curator_task_visible"; readonly title: string };
+  | { readonly kind: "curator_task_visible"; readonly title: string }
+  /**
+   * L3 only. The named Tool's real dispatch was denied, and the reason it gave back contains this
+   * text.
+   *
+   * The one place a Case can measure a real refusal's wording rather than its outcome — `soul_write`
+   * and `file_create` are the only Tools L3 runs for real, so this is the only Expectation that can
+   * tell a rejection that names what would have resolved apart from one that only says no.
+   */
+  | { readonly kind: "tool_denial_contains"; readonly name: string; readonly text: string };
 
 /** Expectations that read persisted state, which only the L3 tier can observe. */
 const PERSISTED_KINDS: ReadonlySet<string> = new Set([
@@ -126,6 +135,7 @@ const PERSISTED_KINDS: ReadonlySet<string> = new Set([
   "generated_file_readable_by",
   "generated_file_not_readable_by",
   "curator_task_visible",
+  "tool_denial_contains",
 ]);
 
 export function isPersisted(expectation: Expectation): boolean {

@@ -172,7 +172,7 @@ export type {
 } from "./publisher";
 export { SoulPublisher } from "./publisher";
 export type { SoulSemanticIssue, SoulSemanticIssueCode } from "./refs";
-export { SoulSemanticValidationError } from "./refs";
+export { MAX_REF_SUGGESTIONS, SoulSemanticValidationError } from "./refs";
 export type { ResourceTypePayload } from "./resource-types/definition";
 export {
   RESOURCE_DOMAIN_RE,

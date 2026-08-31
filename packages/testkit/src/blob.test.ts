@@ -32,9 +32,11 @@ describe("InMemoryBlobPort conformance", () => {
   const make = async (): Promise<BlobPort> => new InMemoryBlobPort();
 
   for (const check of BLOB_CONFORMANCE) {
+    // The large-object checks byte-compare a multi-megabyte payload; under coverage
+    // instrumentation on a loaded CI runner that comfortably clears vitest's 5000ms default.
     it(check.name, async () => {
       await check.run(make);
-    });
+    }, 20_000);
   }
 
   for (const check of TAMPER_CONFORMANCE) {

@@ -343,7 +343,54 @@ describe("SoulWriter.apply — cross-definition reference checking", () => {
           },
         ],
       })
-    ).rejects.toThrow(/does not exist in the Soul — create it first/);
+    ).rejects.toThrow(/no definition of this kind exists in the Soul yet — create it first/);
+  });
+
+  it("suggests an existing Agent slug instead of a bare rejection when one is close", async () => {
+    const withTreeReader = new SoulWriter(
+      store,
+      logger,
+      { hasRemote: true, push: async () => {} },
+      { reload: async () => {} },
+      undefined,
+      new GitSoulTreeReader(soulPath)
+    );
+
+    await withTreeReader.apply({
+      subject: "soul: add agent",
+      source: "api",
+      actor: ACTOR,
+      businessId: "biz-1",
+      changes: [
+        {
+          op: "put",
+          target: { kind: "ModelProfile", slug: "default" },
+          content: modelProfileDoc("default"),
+        },
+        {
+          op: "put",
+          target: { kind: "Agent", slug: "greeter" },
+          content: agentDoc("greeter"),
+        },
+      ],
+    });
+
+    await expect(
+      withTreeReader.apply({
+        subject: "soul: add routine",
+        source: "api",
+        actor: ACTOR,
+        businessId: "biz-1",
+        changes: [
+          {
+            op: "put",
+            // One character off from the Agent that actually exists.
+            target: { kind: "Routine", slug: "greet" },
+            content: routineDoc("greet", "greetre"),
+          },
+        ],
+      })
+    ).rejects.toThrow(/did you mean one of: greeter\?/);
   });
 
   it("accepts the same Routine once its agentRef resolves", async () => {

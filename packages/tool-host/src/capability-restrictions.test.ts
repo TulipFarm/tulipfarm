@@ -63,6 +63,33 @@ describe("agentCapabilityDenial", () => {
     ).toBeUndefined();
   });
 
+  it("names the allowed Tools in the denial, since the author already granted them", () => {
+    const restrictions: AgentCapabilityRestrictions = {
+      tools: { allow: ["record_list", "record_get"] },
+    };
+    const denial = agentCapabilityDenial(restrictions, { name: "record_get", mutating: false }, {});
+    expect(denial).toBeUndefined();
+    const otherDenial = agentCapabilityDenial(
+      restrictions,
+      { name: "record_delete", mutating: true },
+      {}
+    );
+    expect(otherDenial).toContain("record_list, record_get");
+  });
+
+  it("caps how many allowed Tool names a denial repeats back", () => {
+    const allow = Array.from({ length: 25 }, (_, i) => `tool_${i}`);
+    const restrictions: AgentCapabilityRestrictions = { tools: { allow } };
+    const denial = agentCapabilityDenial(
+      restrictions,
+      { name: "not_allowed", mutating: false },
+      {}
+    );
+    expect(denial).toContain("tool_0, tool_1");
+    expect(denial).toContain("+5 more");
+    expect(denial).not.toContain("tool_24");
+  });
+
   it("denies a record action named in the deny list", () => {
     const restrictions: AgentCapabilityRestrictions = {
       records: { actions: { deny: ["delete"] } },
