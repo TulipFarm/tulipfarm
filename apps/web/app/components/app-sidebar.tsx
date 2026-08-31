@@ -1,4 +1,4 @@
-import { Link, NavLink, useLocation, useNavigate } from "@remix-run/react";
+import { Link, NavLink, useLocation, useNavigate, useNavigation } from "@remix-run/react";
 import {
   ChevronsUpDown,
   LogOut,
@@ -45,6 +45,9 @@ const ROW_BASE =
   "flex min-h-9 items-center gap-2.5 rounded-md border border-transparent px-3 text-sm transition-colors duration-150";
 const ROW_ACTIVE = "bg-sidebar-primary/12 font-medium text-sidebar-primary";
 const ROW_IDLE = "text-sidebar-foreground hover:bg-sidebar-accent";
+/* Shown for the row Remix is navigating to but whose loader hasn't resolved: isActive only flips
+ * once the destination's data is in, so without this a click gives no feedback until it lands. */
+const ROW_PENDING = "animate-pulse bg-sidebar-accent text-sidebar-foreground";
 /* Collapsed, a row is a square so it matches the avatar chip below it rather than out-widing it. */
 const ROW_NARROW = "size-9 shrink-0 justify-center px-0 mx-auto";
 
@@ -124,13 +127,20 @@ function NavRow({
   collapsed: boolean;
   onNavigate: () => void;
 }) {
+  const navigation = useNavigation();
+  const isPending = navigation.state === "loading" && navigation.location.pathname.startsWith(to);
   const row = (
     <NavLink
       to={to}
       onClick={onNavigate}
       aria-label={collapsed ? (count ? `${label}, ${count} awaiting you` : label) : undefined}
       className={({ isActive }) =>
-        cn(ROW_BASE, "group", collapsed && ROW_NARROW, isActive ? ROW_ACTIVE : ROW_IDLE)
+        cn(
+          ROW_BASE,
+          "group",
+          collapsed && ROW_NARROW,
+          isActive ? ROW_ACTIVE : isPending ? ROW_PENDING : ROW_IDLE
+        )
       }
     >
       <span className="relative flex shrink-0 items-center">

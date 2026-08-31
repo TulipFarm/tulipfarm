@@ -118,6 +118,25 @@ test("marks the destination matching the current page, and only that one", () =>
   ).toEqual(["Agents"]);
 });
 
+test("shows pending feedback on a nav row while its destination is still loading", async () => {
+  const PendingSidebarStub = createRemixStub([
+    { path: "/chats", Component: AppSidebar },
+    {
+      path: "/routines",
+      Component: AppSidebar,
+      // Never resolves, so the row stays in the pending state for the assertion below.
+      loader: () => new Promise(() => {}),
+    },
+  ]);
+  render(<PendingSidebarStub initialEntries={["/chats"]} />);
+  const nav = screen.getByRole("navigation", { name: "Main" });
+  const routinesLink = within(nav).getByRole("link", { name: /Routines/i });
+
+  expect(routinesLink.className).not.toMatch(/animate-pulse/);
+  await userEvent.click(routinesLink);
+  expect(routinesLink.className).toMatch(/animate-pulse/);
+});
+
 test("carries the live approval count on Inbox", () => {
   useApprovals.mockReturnValue({
     approvals: [],
