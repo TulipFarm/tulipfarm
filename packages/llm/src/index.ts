@@ -62,6 +62,7 @@ export {
   ProviderUnavailableError,
 } from "./provider-error";
 export {
+  checkEmbeddingReachability,
   checkModelReachability,
   MODEL_REACHABILITY_TIMEOUT_MS,
   type ModelReachabilityReport,

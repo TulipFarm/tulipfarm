@@ -142,7 +142,7 @@ export const SETTINGS_GROUPS: NavGroup[] = [
         label: "Models",
         icon: Cpu,
         description:
-          "Which models back each effort preset, and what happens when the first one is unavailable.",
+          "Which models answer a chat turn and index Knowledge, and what each one costs.",
       },
       {
         to: "/business/secrets",

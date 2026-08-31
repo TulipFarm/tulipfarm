@@ -210,11 +210,13 @@ test("llm pane saves the structured config via putLlmConfig", async () => {
     providers: PROVIDERS,
     secretKeys: ["anthropic-api-key"],
   });
+  // The save bar only arms once something has changed, so make the change this asserts.
+  await userEvent.click(screen.getByRole("radio", { name: "Make Thorough the default effort" }));
   await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
   expect(settings.putLlmConfig).toHaveBeenCalledWith({
     ...llmConfig,
     presets: {
-      default: "balanced",
+      default: "thorough",
       fast: "fast",
       balanced: "balanced",
       thorough: "thorough",
@@ -230,6 +232,7 @@ test("a 403 saving the llm config surfaces an admin-only message", async () => {
     providers: PROVIDERS,
     secretKeys: ["anthropic-api-key"],
   });
+  await userEvent.click(screen.getByRole("radio", { name: "Make Thorough the default effort" }));
   await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
   await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/only an admin/i));
 });

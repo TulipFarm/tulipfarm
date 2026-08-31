@@ -1,7 +1,11 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import {
+  checkEmbeddingReachability,
+  checkModelReachability,
   cliModelIds,
   cliModelSpec,
+  createEmbeddingModel,
+  createModel,
   fetchLiteLlmCatalog,
   type LiteLlmCatalog,
   type LlmService,
@@ -96,6 +100,15 @@ const ProviderEntryRouteSchema = {
   },
 } as const;
 
+const EmbeddingEntryRouteSchema = {
+  type: "object",
+  additionalProperties: true,
+  properties: {
+    ...ProviderEntryRouteSchema.properties,
+    dimension: { type: "integer", minimum: 1 },
+  },
+} as const;
+
 const TierConfigRouteSchema = {
   type: "object",
   additionalProperties: true,
@@ -146,7 +159,7 @@ const LlmConfigRouteSchema = {
       type: "object",
       additionalProperties: true,
       properties: {
-        providers: { type: "array", items: ProviderEntryRouteSchema },
+        providers: { type: "array", items: EmbeddingEntryRouteSchema },
       },
     },
   },
@@ -421,13 +434,16 @@ export function registerLlmConfigRoutes(
       preHandler: [requireAuth, requireAuthorization(LLM_CONFIG_RESOLVE)],
       schema: {
         description:
-          "Suggested model ids for a provider, to populate the Settings model picker. Admin only. For `openai-compatible` with a configured base_url, `source: live` lists the proxy's actually-deployed models (via its `GET /models`); otherwise `source: catalog` lists known LiteLLM ids; `source: unavailable` (+ `reason`) means neither could be reached and the UI falls back to free-text entry.",
+          "Suggested model ids for a provider, to populate the Settings model picker. Admin only. `mode` selects which catalog class to suggest (`chat`, the default, or `embedding`). For `openai-compatible` with a configured base_url, `source: live` lists the proxy's actually-deployed models (via its `GET /models`); otherwise `source: catalog` lists known LiteLLM ids; `source: unavailable` (+ `reason`) means neither could be reached and the UI falls back to free-text entry.",
         tags: ["soul"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         querystring: {
           type: "object",
           required: ["provider"],
-          properties: { provider: { type: "string" } },
+          properties: {
+            provider: { type: "string" },
+            mode: { type: "string", enum: ["chat", "embedding"], default: "chat" },
+          },
         },
         response: {
           200: {
@@ -445,7 +461,10 @@ export function registerLlmConfigRoutes(
       },
     },
     async (req, reply) => {
-      const { provider } = req.query as { provider: string };
+      const { provider, mode = "chat" } = req.query as {
+        provider: string;
+        mode?: "chat" | "embedding";
+      };
 
       if (provider === "openai-compatible") {
         const live = await fetchLiveModelOptions(secrets, req.log);
@@ -453,8 +472,9 @@ export function registerLlmConfigRoutes(
       }
 
       // CLI providers (e.g. claude-code) never appear in the LiteLLM catalog — their model ids
-      // come from the same static table `enrichSpecs` uses for spec resolution.
-      const cliModels = cliModelIds(provider);
+      // come from the same static table `enrichSpecs` uses for spec resolution. They are chat
+      // models on a subscription and embed nothing, so an embedding picker gets none of them.
+      const cliModels = mode === "embedding" ? [] : cliModelIds(provider);
       if (cliModels.length > 0) return reply.send({ models: cliModels, source: "catalog" });
 
       const catalog = await getCatalog();
@@ -465,7 +485,95 @@ export function registerLlmConfigRoutes(
           reason: "Couldn't reach the model catalog.",
         });
       }
-      return reply.send({ models: litellmModelsForProvider(provider, catalog), source: "catalog" });
+      return reply.send({
+        models: litellmModelsForProvider(provider, catalog, mode),
+        source: "catalog",
+      });
+    }
+  );
+
+  app.post(
+    "/api/v1/llm-config/test-connection",
+    {
+      preHandler: [requireAuth, requireAuthorization(LLM_CONFIG_RESOLVE)],
+      schema: {
+        description:
+          "Make one live call to a single provider entry and report what it proved. Admin only. The entry is taken from the body rather than from the saved config, so an operator can prove a model works *before* committing it. `kind: chat` asks the model for a word back and returns its `reply`; `kind: embedding` embeds a short string and returns the `dimension` it got. Credentials are resolved from stored secrets by `api_key_ref` and are never accepted in, or echoed by, this route. `verdict` is `reachable`, `degraded` (the provider answered but refused or throttled) or `unreachable`.",
+        tags: ["soul"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        body: {
+          type: "object",
+          required: ["provider", "model"],
+          properties: {
+            kind: { type: "string", enum: ["chat", "embedding"], default: "chat" },
+            provider: { type: "string" },
+            model: { type: "string" },
+            api_key_ref: { type: "string" },
+            base_url: { type: "string" },
+            resource_name: { type: "string" },
+          },
+        },
+        response: {
+          200: {
+            type: "object",
+            required: ["verdict"],
+            properties: {
+              verdict: { type: "string", enum: ["reachable", "degraded", "unreachable"] },
+              detail: { type: "string" },
+              reply: { type: "string" },
+              latencyMs: { type: "number" },
+              dimension: { type: "number" },
+            },
+          },
+          401: ErrorSchema,
+          403: ErrorSchema,
+          422: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const body = req.body as {
+        kind?: "chat" | "embedding";
+        provider: string;
+        model: string;
+        api_key_ref?: string;
+        base_url?: string;
+        resource_name?: string;
+      };
+      if (!body.provider.trim() || !body.model.trim()) {
+        return reply.code(422).send({ error: "provider and model are required" });
+      }
+      const entry = {
+        provider: body.provider.trim(),
+        model: body.model.trim(),
+        ...(body.api_key_ref ? { api_key_ref: body.api_key_ref } : {}),
+        ...(body.base_url ? { base_url: body.base_url } : {}),
+        ...(body.resource_name ? { resource_name: body.resource_name } : {}),
+      };
+      try {
+        // biome-ignore lint/suspicious/noExplicitAny: entry shapes are validated by the body schema.
+        const target = entry as any;
+        const report =
+          body.kind === "embedding"
+            ? await checkEmbeddingReachability(await createEmbeddingModel(target, secrets))
+            : await checkModelReachability(await createModel(target, secrets));
+        return reply.send(report);
+      } catch (err) {
+        // A model that cannot even be constructed — an unknown provider, or a missing secret the
+        // entry names — is a configuration answer, not a 500. It is exactly what the operator
+        // pressed the button to find out.
+        req.log.info(
+          { err, provider: entry.provider },
+          "llm test-connection could not build model"
+        );
+        return reply.send({
+          verdict: "unreachable",
+          detail:
+            err instanceof Error && err.message
+              ? err.message
+              : "this entry could not be turned into a model",
+        });
+      }
     }
   );
 

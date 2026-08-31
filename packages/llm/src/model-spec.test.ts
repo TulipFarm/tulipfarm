@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   fetchLiteLlmCatalog,
   type LiteLlmCatalog,
+  litellmModelsForProvider,
   resolveModelSpec,
   resolveModelSpecCandidate,
 } from "./model-spec";
@@ -130,5 +131,27 @@ describe("resolveModelSpec — document input", () => {
     expect(
       resolveModelSpec("azure", "kimi-k2.5", CATALOG, FETCHED).spec?.supports_pdf_input
     ).toBeUndefined();
+  });
+});
+
+describe("litellmModelsForProvider — mode", () => {
+  const MIXED: LiteLlmCatalog = {
+    sample_spec: { input_cost_per_token: 0 },
+    "gpt-4o": { input_cost_per_token: 0.0000025, mode: "chat" },
+    "gpt-untagged": { input_cost_per_token: 0.000001 },
+    "text-embedding-3-small": { input_cost_per_token: 0.00000002, mode: "embedding" },
+    "dall-e-3": { input_cost_per_token: 0.00001, mode: "image_generation" },
+  };
+
+  it("offers chat models, treating an untagged entry as chat", () => {
+    expect(litellmModelsForProvider("openai", MIXED)).toEqual(["gpt-4o", "gpt-untagged"]);
+  });
+
+  it("offers only entries the catalogue actually calls embedding", () => {
+    // An untagged entry must not be inherited here: suggesting a chat model in the embedding
+    // picker produces a config whose every embed call fails.
+    expect(litellmModelsForProvider("openai", MIXED, "embedding")).toEqual([
+      "text-embedding-3-small",
+    ]);
   });
 });

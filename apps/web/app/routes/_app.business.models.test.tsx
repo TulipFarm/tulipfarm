@@ -83,7 +83,8 @@ function renderPage() {
 
 test("dresses every surface in theme-aware tokens under the light theme", async () => {
   const { container } = renderPage();
-  expect(await screen.findByText("gpt-5")).toBeInTheDocument();
+  // The model shows twice: once on the effort row, once in the Advanced standby list.
+  expect((await screen.findAllByText("gpt-5")).length).toBeGreaterThan(0);
 
   expect(themeBlindStyling(container)).toEqual([]);
 

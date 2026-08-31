@@ -1,50 +1,117 @@
+import { Pencil } from "lucide-react";
 import { useEffect, useId, useState } from "react";
-import { type Row, specFacts } from "~/components/model-chains/chain-data";
+import {
+  capabilityLabels,
+  type EmbeddingRow,
+  isEntryReady,
+  type Row,
+  specFacts,
+} from "~/components/model-chains/chain-data";
+import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
+import { Combobox } from "~/components/ui/combobox";
 import { Field } from "~/components/ui/field";
 import { Input } from "~/components/ui/input";
 import { Select } from "~/components/ui/select";
 import { Sheet } from "~/components/ui/sheet";
 import {
+  type ConnectionTest,
   getModelOptions,
   isProviderConfigured,
   type LlmProviderInfo,
   type ModelOptions,
+  type ModelSpec,
   resolveModelSpec,
+  testLlmConnection,
 } from "~/lib/settings";
-import { cn } from "~/lib/utils";
 
-const CUSTOM_MODEL = "__custom__";
+/** Show a stored per-token cost as the per-million figure the operator typed. */
+function perMtokValue(cost: number | undefined): string {
+  if (cost == null) return "";
+  return String(Number((cost * 1_000_000).toFixed(6)));
+}
+
+export type SheetKind = "chat" | "embedding";
+
+const TEST_TONE: Record<ConnectionTest["verdict"], string> = {
+  reachable: "bg-status-success-surface text-status-success",
+  degraded: "bg-status-warning-surface text-status-warning",
+  unreachable: "bg-status-danger-surface text-status-danger",
+};
+
+/**
+ * The probe's detail is written for the status page, so it names the screen that fixes the
+ * problem. Here the operator is already on that screen, and being sent to where they are standing
+ * reads as the message not knowing what it is attached to.
+ */
+function localDetail(detail: string | undefined): string | undefined {
+  const local = detail?.replace(/\s*—\s*[^—]*under Business . Models\s*$/u, "");
+  return local === "" ? undefined : local;
+}
+
+function testSummary(test: ConnectionTest, kind: SheetKind): string {
+  const took = test.latencyMs === undefined ? "" : ` in ${test.latencyMs} ms`;
+  if (test.verdict === "unreachable") return "No answer from this provider.";
+  // A degraded chat verdict usually means it answered with something other than the word asked
+  // for, and the operator can only judge that if they are shown what it actually said.
+  if (test.verdict === "degraded") {
+    return test.reply
+      ? `Answered “${test.reply}”${took}, not the word it was asked for.`
+      : "The provider answered, but refused this call.";
+  }
+  if (kind === "embedding") {
+    return `Embedded a ${test.dimension}-wide vector${took}.`;
+  }
+  return test.reply ? `Replied “${test.reply}”${took}.` : `Answered${took}, but wrote nothing.`;
+}
+
+type SheetRow = Row | EmbeddingRow;
 
 export function ModelSheet({
   open,
+  kind,
+  title,
   row,
   providers,
   secretKeys,
+  focusPricing = false,
   onCancel,
   onDone,
   onChange,
 }: {
   open: boolean;
-  row: Row | undefined;
+  kind: SheetKind;
+  title: string;
+  row: SheetRow | undefined;
   providers: LlmProviderInfo[];
   secretKeys: string[];
+  /** Opened from a missing-cost cell, so the price fields must already be showing on arrival. */
+  focusPricing?: boolean;
   onCancel: () => void;
   onDone: () => void;
-  onChange: (patch: Partial<Row>) => void;
+  onChange: (patch: Partial<EmbeddingRow>) => void;
 }) {
   const [options, setOptions] = useState<ModelOptions | null>(null);
   const [resolving, setResolving] = useState(false);
   const [candidates, setCandidates] = useState<string[]>([]);
   const [unmatched, setUnmatched] = useState(false);
+  // Opened by the operator, or forced open by a catalogue miss. A private Azure deployment or a
+  // self-hosted endpoint is never in the catalogue, so without a way to type the numbers in, that
+  // model's spend can never be priced at all.
+  const [manual, setManual] = useState(false);
   // Cleared when the sheet closes, so re-opening a row never shows the refusal from a previous
   // visit to a value that has since been discarded.
   const [errors, setErrors] = useState<{ provider?: string; model?: string } | null>(null);
+  const [tested, setTested] = useState<{ key: string; result: ConnectionTest } | null>(null);
+  const [testing, setTesting] = useState(false);
   const provider = row?.provider;
   const model = row?.model;
 
   useEffect(() => {
-    if (!open) setErrors(null);
+    if (!open) {
+      setErrors(null);
+      setManual(false);
+    }
   }, [open]);
 
   useEffect(() => {
@@ -54,7 +121,7 @@ export function ModelSheet({
     }
     let live = true;
     setOptions(null);
-    getModelOptions(provider)
+    getModelOptions(provider, kind)
       .then((next) => {
         if (live) setOptions(next);
       })
@@ -65,7 +132,7 @@ export function ModelSheet({
     return () => {
       live = false;
     };
-  }, [open, provider]);
+  }, [open, provider, kind]);
 
   /** Catalogue misses still need a context window so runtime budgeting can work. */
   async function pinSpec(candidate?: string, modelOverride?: string) {
@@ -93,19 +160,51 @@ export function ModelSheet({
     }
   }
 
-  const info = providers.find((p) => p.id === provider);
-  const ready = info ? isProviderConfigured(info, secretKeys) : false;
+  const ready = isEntryReady(providers, secretKeys, provider);
   const facts = specFacts(row?.spec);
-  const hasSuggestions = !!options && options.models.length > 0;
-  // A suggested id picks the dropdown value directly; anything else (including empty, mid-typing a
-  // custom id) falls to the "Custom…" branch so the free-text input stays in control.
-  const isSuggested = hasSuggestions && !!row?.model && options.models.includes(row.model);
-  const showCustomInput = !hasSuggestions || !isSuggested;
-  // The field renders two conditional controls, so `Field` cannot auto-wire its label — it only
-  // clones a single child. The id therefore has to be placed by hand, on whichever control the
-  // label names: the free-text input when it is showing, otherwise the suggestion dropdown.
+  const capabilities = capabilityLabels(row?.spec);
+  // `Field` wires its label by cloning a single child, which the Combobox's wrapper div is not.
+  // The id and describedby are therefore placed on the inner input by hand.
   const modelFieldId = useId();
   const modelHelpId = `${modelFieldId}-help`;
+  const dimension = kind === "embedding" ? (row as EmbeddingRow | undefined)?.dimension : undefined;
+  // A verdict is only ever about the entry that produced it, so it is tagged with that entry and
+  // read back by match. Clearing it from an effect instead would leave a green tick standing for
+  // one render beside a model that was never tested.
+  const entryKey = `${kind}\u0000${provider ?? ""}\u0000${model ?? ""}`;
+  const test = tested?.key === entryKey ? tested.result : null;
+  const showManual = manual || unmatched || focusPricing;
+
+  /** Write one spec number, dropping the key when the field is cleared so it never saves as 0. */
+  function patchSpec(key: keyof ModelSpec, raw: string, min: number, divisor = 1) {
+    const spec: ModelSpec = { ...row?.spec };
+    const parsed = Number.parseFloat(raw);
+    if (raw.trim() === "" || !Number.isFinite(parsed) || parsed < min) delete spec[key];
+    else Object.assign(spec, { [key]: parsed / divisor });
+    onChange({ spec: Object.keys(spec).length > 0 ? spec : undefined });
+  }
+
+  async function runTest() {
+    if (!row?.model.trim()) return;
+    const key = entryKey;
+    setTesting(true);
+    setTested(null);
+    try {
+      setTested({ key, result: await testLlmConnection(row, kind) });
+    } catch (err) {
+      // The probe route answers with a verdict for every provider outcome, so reaching here means
+      // the request itself failed — a different problem, and it must not read as a model verdict.
+      setTested({
+        key,
+        result: {
+          verdict: "unreachable",
+          detail: err instanceof Error ? err.message : "The test request did not complete.",
+        },
+      });
+    } finally {
+      setTesting(false);
+    }
+  }
 
   function finish() {
     if (!row) return;
@@ -114,7 +213,7 @@ export function ModelSheet({
       return;
     }
     if (!row.model.trim()) {
-      setErrors({ model: "Enter a Model ID." });
+      setErrors({ model: "Enter a model." });
       return;
     }
     setErrors(null);
@@ -122,9 +221,9 @@ export function ModelSheet({
   }
 
   return (
-    <Sheet open={open} onClose={onCancel} title="Model">
+    <Sheet open={open} onClose={onCancel} title={title}>
       {row ? (
-        <div className="space-y-4 p-4">
+        <div className="space-y-5 p-4">
           <Field
             label="Provider"
             error={errors?.provider}
@@ -134,6 +233,8 @@ export function ModelSheet({
               value={row.provider}
               onChange={(e) => {
                 setErrors(null);
+                setCandidates([]);
+                setUnmatched(false);
                 onChange({ provider: e.target.value, model: "", spec: undefined });
               }}
             >
@@ -148,126 +249,230 @@ export function ModelSheet({
           </Field>
 
           <Field
-            label="Model ID"
+            label="Model"
             htmlFor={modelFieldId}
             error={errors?.model}
             help={
               options?.source === "live"
                 ? "Listed from your configured endpoint."
                 : options?.source === "catalog"
-                  ? "Suggested from the model catalog. Any ID your provider accepts will work."
-                  : (options?.reason ?? "Enter the ID exactly as your provider spells it.")
+                  ? "Suggested from the model catalog. Anything your provider accepts will work."
+                  : (options?.reason ?? "Enter it exactly as your provider spells it.")
             }
           >
-            {hasSuggestions ? (
-              <Select
-                id={showCustomInput ? undefined : modelFieldId}
-                aria-label={showCustomInput ? "Model ID suggestions" : undefined}
-                aria-describedby={showCustomInput ? undefined : modelHelpId}
-                value={isSuggested ? row.model : CUSTOM_MODEL}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  setErrors(null);
-                  setCandidates([]);
-                  setUnmatched(false);
-                  if (value === CUSTOM_MODEL) {
-                    onChange({ model: "", spec: undefined });
-                    return;
-                  }
-                  onChange({ model: value, spec: undefined });
-                  void pinSpec(undefined, value);
-                }}
-              >
-                {options.models.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-                <option value={CUSTOM_MODEL}>Custom…</option>
-              </Select>
-            ) : null}
-            {showCustomInput ? (
-              <Input
-                id={modelFieldId}
-                aria-describedby={modelHelpId}
-                value={row.model}
-                onChange={(e) => {
-                  onChange({ model: e.target.value, spec: undefined });
-                  setErrors(null);
-                  setCandidates([]);
-                  setUnmatched(false);
-                }}
-                onBlur={() => {
-                  if (row.model.trim() && !row.spec) void pinSpec();
-                }}
-                placeholder="e.g. gpt-4o-mini"
-                className={cn("font-mono", hasSuggestions && "mt-2")}
-              />
-            ) : null}
+            <Combobox
+              id={modelFieldId}
+              aria-describedby={modelHelpId}
+              value={row.model}
+              options={options?.models ?? []}
+              onValueChange={(next) => {
+                onChange({ model: next, spec: undefined });
+                setErrors(null);
+                setCandidates([]);
+                setUnmatched(false);
+              }}
+              onCommit={(next) => {
+                if (next.trim()) void pinSpec(undefined, next);
+              }}
+              placeholder="e.g. gpt-4o-mini"
+              emptyLabel="Not in the catalogue. It is still saved as typed."
+              inputClassName="font-mono"
+            />
           </Field>
 
-          <div className="rounded-md border border-border p-3">
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-sm font-medium text-foreground">Pricing and limits</p>
+          {kind === "embedding" ? (
+            <Field
+              label="Vector width"
+              help="The dimension this model returns. A standby may only take over from a model of the same width — a different one writes vectors no later query can match."
+            >
+              <Input
+                type="number"
+                inputMode="numeric"
+                min={1}
+                value={dimension ?? ""}
+                onChange={(e) => {
+                  const parsed = Number.parseInt(e.target.value, 10);
+                  onChange({ dimension: Number.isFinite(parsed) ? parsed : undefined });
+                }}
+                placeholder="1536"
+                className="tabular-nums"
+              />
+            </Field>
+          ) : null}
+
+          <section className="rounded-md border border-border">
+            <div className="flex items-center justify-between gap-3 border-b border-border px-3 py-2">
+              <div className="min-w-0">
+                <h3 className="text-sm font-medium text-foreground">Connection</h3>
+                <p className="text-xs text-muted-foreground">
+                  {kind === "embedding"
+                    ? "Embeds one word and reports the vector width it got back."
+                    : "Asks the model for one word back."}
+                </p>
+              </div>
               <Button
                 variant="outline"
+                size="sm"
+                onClick={runTest}
+                disabled={testing || !row.model.trim()}
+              >
+                {testing ? "Testing…" : "Test connection"}
+              </Button>
+            </div>
+            {test ? (
+              <div className={`px-3 py-2 text-sm ${TEST_TONE[test.verdict]}`}>
+                <p className="font-medium">{testSummary(test, kind)}</p>
+                {localDetail(test.detail) ? (
+                  <p className="mt-0.5 text-xs text-muted-foreground">{localDetail(test.detail)}</p>
+                ) : null}
+                {kind === "embedding" && test.dimension && test.dimension !== dimension ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="mt-1 -ml-2 h-7 px-2"
+                    onClick={() => onChange({ dimension: test.dimension })}
+                  >
+                    Use {test.dimension} as the vector width
+                  </Button>
+                ) : null}
+              </div>
+            ) : (
+              <p className="px-3 py-2 text-xs text-muted-foreground">
+                Not tested. Nothing else here proves the credential works until a real turn needs
+                it.
+              </p>
+            )}
+          </section>
+
+          <section className="rounded-md border border-border">
+            <div className="flex items-center justify-between gap-3 border-b border-border px-3 py-2">
+              <h3 className="text-sm font-medium text-foreground">Pricing and limits</h3>
+              <Button
+                variant="ghost"
                 size="sm"
                 onClick={() => void pinSpec()}
                 disabled={resolving || !row.model.trim()}
               >
-                {resolving ? "Looking up…" : row.spec ? "Refresh" : "Look up"}
+                {resolving ? "Looking up…" : "Refresh"}
               </Button>
             </div>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {facts.length > 0
-                ? facts.join(" · ")
-                : "Not pinned. Costs will be unknown in Observability until you look this up."}
-            </p>
-
-            {candidates.length > 0 ? (
-              <div className="mt-3 space-y-2">
-                <p className="text-xs text-muted-foreground">
-                  Several catalogue entries match “{row.model}”. Pick the one you are actually
-                  calling.
-                </p>
-                <div className="flex flex-wrap gap-1.5">
-                  {candidates.map((candidate) => (
-                    <Button
-                      key={candidate}
-                      variant="outline"
-                      size="sm"
-                      className="font-mono text-xs"
-                      onClick={() => void pinSpec(candidate)}
-                    >
-                      {candidate}
-                    </Button>
+            <div className="p-3">
+              {facts.length > 0 ? (
+                <dl className="grid grid-cols-2 gap-x-4 gap-y-2">
+                  {facts.map((fact) => (
+                    <div key={fact.term}>
+                      <dt className="text-xs text-muted-foreground">{fact.term}</dt>
+                      <dd className="mt-0.5 text-sm tabular-nums text-foreground">{fact.value}</dd>
+                    </div>
                   ))}
-                </div>
-              </div>
-            ) : null}
+                </dl>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  {resolving
+                    ? "Looking this model up in the catalog…"
+                    : "Looked up automatically once a model is chosen. Until then, spend on this model is unknown in Observability."}
+                </p>
+              )}
 
-            {unmatched ? (
-              <div className="mt-3">
-                <Field
-                  label="Context window"
-                  help="Not in the catalogue. Enter the model's max input tokens so the runtime can budget against it."
+              {capabilities.length > 0 ? (
+                <ul className="mt-3 flex flex-wrap gap-1">
+                  {capabilities.map((capability) => (
+                    <li key={capability}>
+                      <Badge>{capability}</Badge>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+
+              {candidates.length > 0 ? (
+                <div className="mt-3 space-y-2">
+                  <p className="text-xs text-muted-foreground">
+                    Several catalogue entries match “{row.model}”. Pick the one you are actually
+                    calling.
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {candidates.map((candidate) => (
+                      <Button
+                        key={candidate}
+                        variant="outline"
+                        size="sm"
+                        className="font-mono text-xs"
+                        onClick={() => void pinSpec(candidate)}
+                      >
+                        {candidate}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {showManual ? (
+                <div className="mt-3 space-y-3 border-t border-border pt-3">
+                  <p className="text-xs text-muted-foreground">
+                    {unmatched
+                      ? "Not in the catalogue — a private deployment or a self-hosted endpoint. Enter what your provider charges so this model's spend is not invisible."
+                      : "Override what the catalogue reported."}
+                  </p>
+                  {kind === "chat" ? (
+                    <Field
+                      label="Context window"
+                      help="Max input tokens, so the runtime can budget a turn against it."
+                    >
+                      <Input
+                        type="number"
+                        inputMode="numeric"
+                        min={1}
+                        value={row.spec?.max_input_tokens ?? ""}
+                        onChange={(e) => patchSpec("max_input_tokens", e.target.value, 1)}
+                        placeholder="131072"
+                        className="tabular-nums"
+                      />
+                    </Field>
+                  ) : null}
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="Input $ / 1M tokens">
+                      <Input
+                        type="number"
+                        inputMode="decimal"
+                        min={0}
+                        step="0.01"
+                        value={perMtokValue(row.spec?.input_cost_per_token)}
+                        onChange={(e) =>
+                          patchSpec("input_cost_per_token", e.target.value, 0, 1_000_000)
+                        }
+                        placeholder="0.25"
+                        className="tabular-nums"
+                      />
+                    </Field>
+                    <Field label="Output $ / 1M tokens">
+                      <Input
+                        type="number"
+                        inputMode="decimal"
+                        min={0}
+                        step="0.01"
+                        value={perMtokValue(row.spec?.output_cost_per_token)}
+                        onChange={(e) =>
+                          patchSpec("output_cost_per_token", e.target.value, 0, 1_000_000)
+                        }
+                        placeholder="2.00"
+                        className="tabular-nums"
+                      />
+                    </Field>
+                  </div>
+                </div>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-3"
+                  onClick={() => setManual(true)}
                 >
-                  <Input
-                    type="number"
-                    inputMode="numeric"
-                    value={row.spec?.max_input_tokens ?? ""}
-                    onChange={(e) => {
-                      const parsed = Number.parseInt(e.target.value, 10);
-                      onChange({
-                        spec: Number.isFinite(parsed) ? { max_input_tokens: parsed } : undefined,
-                      });
-                    }}
-                    placeholder="131072"
-                  />
-                </Field>
-              </div>
-            ) : null}
-          </div>
+                  <Pencil aria-hidden />
+                  Enter these by hand
+                </Button>
+              )}
+            </div>
+          </section>
 
           <details className="rounded-md border border-border">
             <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-foreground">
@@ -298,7 +503,7 @@ export function ModelSheet({
             </div>
           </details>
 
-          <div className={cn("flex justify-end")}>
+          <div className="flex justify-end">
             <Button size="sm" onClick={finish}>
               Done
             </Button>
