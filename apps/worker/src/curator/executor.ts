@@ -131,7 +131,7 @@ export function createCuratorExecutor(
             reason: "missing_job_id",
           });
         }
-        return "failed";
+        return { status: "failed", errorEvidenceRef: "curator:missing_job_id" };
       }
 
       const context = await api.require<ResolvedContext>(
@@ -150,7 +150,7 @@ export function createCuratorExecutor(
             reason: "missing_context_digest",
           });
         }
-        return "failed";
+        return { status: "failed", errorEvidenceRef: "curator:missing_context_digest" };
       }
 
       const prompt =
@@ -190,7 +190,7 @@ ${OUTPUT_INSTRUCTION}`,
         });
       }
 
-      return "succeeded";
+      return { status: "succeeded" };
     } catch (error) {
       log?.error?.(`curator run failed for runId=${run.id}`, error);
       if (transitions && stateRunning) {
@@ -207,7 +207,9 @@ ${OUTPUT_INSTRUCTION}`,
           // Failure to transition state on error should still return "failed"
         }
       }
-      return "failed";
+      // The exception message went to the State's own reason above; the Run-level evidence ref
+      // stays a fixed, terse code so a provider or SDK error message never reaches this column.
+      return { status: "failed", errorEvidenceRef: "curator:execution_failed" };
     }
   };
 }

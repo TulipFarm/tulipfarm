@@ -118,7 +118,7 @@ export function createChatExecutor(options: ChatExecutorOptions): RunExecutor {
     const identity = await options.host.findTurn(run.id);
     if (identity === undefined) {
       // No Turn means superseded or already answered; nothing is owed.
-      return "succeeded";
+      return { status: "succeeded" };
     }
 
     const writer = new TurnEventWriter({
@@ -158,7 +158,7 @@ async function announceTurnFailure(
   } catch (error) {
     log.warn({ error }, "chat turn failure could not be announced");
   }
-  return "needs_reconciliation";
+  return { status: "needs_reconciliation" };
 }
 
 async function executeTurn(

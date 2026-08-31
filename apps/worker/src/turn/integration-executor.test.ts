@@ -6,7 +6,7 @@ import type {
   RemoteDelivery,
   RemoteEventResult,
 } from "../internal/delivery-host";
-import type { RunOutcome } from "../run-dispatcher";
+import type { RunOutcome, RunOutcomeStatus } from "../run-dispatcher";
 import { createIntegrationExecutor, type IntegrationExecutorOptions } from "./integration-executor";
 
 const RUN: PersistedRun = {
@@ -64,7 +64,7 @@ function harness(
     classifyThrows?: Error;
     attach?: RemoteAttachResult;
     event?: RemoteEventResult;
-    outcome?: RunOutcome;
+    outcome?: RunOutcomeStatus;
   } = {}
 ): { execute: () => Promise<RunOutcome>; recorded: Recorded } {
   const events: Recorded["events"] = [];
@@ -113,7 +113,7 @@ function harness(
     } satisfies RunEventAppendPort,
     turn: async () => {
       turns += 1;
-      return over.outcome ?? "succeeded";
+      return { status: over.outcome ?? "succeeded" };
     },
     now: () => new Date("2026-01-01T00:00:00.000Z"),
   });
@@ -159,7 +159,7 @@ describe("createIntegrationExecutor", () => {
   it("answers a chat decision on this same Run and replies to the channel", async () => {
     const { execute, recorded } = harness();
 
-    await expect(execute()).resolves.toBe("succeeded");
+    await expect(execute()).resolves.toEqual({ status: "succeeded" });
 
     expect(recorded.attached).toEqual([
       {
@@ -199,7 +199,7 @@ describe("createIntegrationExecutor", () => {
   it("closes an ignored delivery with the classifier's reason and runs no turn", async () => {
     const { execute, recorded } = harness({ decision: { kind: "ignore", reason: "bot message" } });
 
-    await expect(execute()).resolves.toBe("succeeded");
+    await expect(execute()).resolves.toEqual({ status: "succeeded" });
 
     expect(recorded.turns).toBe(0);
     expect(recorded.replies).toEqual([]);
@@ -211,7 +211,7 @@ describe("createIntegrationExecutor", () => {
       decision: { kind: "event", eventType: "member_joined", payload: { user: "U2" } },
     });
 
-    await expect(execute()).resolves.toBe("succeeded");
+    await expect(execute()).resolves.toEqual({ status: "succeeded" });
 
     expect(recorded.recordedEvents).toEqual([
       { eventType: "member_joined", payload: { user: "U2" } },
@@ -241,7 +241,7 @@ describe("createIntegrationExecutor", () => {
     // Malformed output is deterministic: a retry reproduces it, so the Run is closed on the record.
     const { execute, recorded } = harness({ decision: { kind: "chat", sender: 42 } });
 
-    await expect(execute()).resolves.toBe("succeeded");
+    await expect(execute()).resolves.toEqual({ status: "succeeded" });
 
     expect(recorded.events[0]?.payload).toEqual({ decision: "invalid" });
     expect(recorded.turns).toBe(0);
@@ -258,7 +258,7 @@ describe("createIntegrationExecutor", () => {
   it("runs no turn for an unlinked sender and never learns the bind link", async () => {
     const { execute, recorded } = harness({ attach: { outcome: "unlinked" } });
 
-    await expect(execute()).resolves.toBe("succeeded");
+    await expect(execute()).resolves.toEqual({ status: "succeeded" });
 
     expect(recorded.turns).toBe(0);
     expect(recorded.replies).toEqual([]);
@@ -287,7 +287,7 @@ describe("createIntegrationExecutor", () => {
       delivery: { ...DELIVERY, chatEnabled: false },
     });
 
-    await expect(execute()).resolves.toBe("succeeded");
+    await expect(execute()).resolves.toEqual({ status: "succeeded" });
 
     expect(recorded.attached).toEqual([]);
     expect(recorded.events[0]?.payload).toEqual({
@@ -299,15 +299,15 @@ describe("createIntegrationExecutor", () => {
   it("posts nothing while the turn is still open, and the failure reply when it broke", async () => {
     // A parked approval has not answered anything yet; replying would answer an open question.
     const waiting = harness({ outcome: "waiting" });
-    await expect(waiting.execute()).resolves.toBe("waiting");
+    await expect(waiting.execute()).resolves.toEqual({ status: "waiting" });
     expect(waiting.recorded.replies).toEqual([]);
 
     const cancelled = harness({ outcome: "cancelled" });
-    await expect(cancelled.execute()).resolves.toBe("cancelled");
+    await expect(cancelled.execute()).resolves.toEqual({ status: "cancelled" });
     expect(cancelled.recorded.replies).toEqual([]);
 
     const failed = harness({ outcome: "failed" });
-    await expect(failed.execute()).resolves.toBe("failed");
+    await expect(failed.execute()).resolves.toEqual({ status: "failed" });
     expect(failed.recorded.replies).toEqual([
       { attempt: 1, outcome: "failed", binding: "default", vars: { channel: "C1" } },
     ]);
@@ -316,7 +316,7 @@ describe("createIntegrationExecutor", () => {
   it("succeeds without a record when the Run is no longer a live delivery", async () => {
     const { execute, recorded } = harness({ delivery: undefined });
 
-    await expect(execute()).resolves.toBe("succeeded");
+    await expect(execute()).resolves.toEqual({ status: "succeeded" });
 
     expect(recorded.classified).toEqual([]);
     expect(recorded.events).toEqual([]);

@@ -44,6 +44,7 @@ export type {
   ModelCallReceiptSource,
   RunExecutor,
   RunOutcome,
+  RunOutcomeStatus,
   SpendSink,
   TurnRecord,
 } from "./ports";

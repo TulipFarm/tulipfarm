@@ -226,7 +226,7 @@ describe("Run dispatch recovery", () => {
       SURVIVOR,
       async (dispatched) => {
         handled.push(dispatched.id);
-        return "succeeded";
+        return { status: "succeeded" };
       },
       () => AFTER_LEASE
     ).dispatchBatch();
@@ -252,7 +252,7 @@ describe("Run dispatch recovery", () => {
     const handled: string[] = [];
     const handler = async (dispatched: PersistedRun): Promise<RunOutcome> => {
       handled.push(dispatched.leaseOwner ?? "");
-      return "succeeded";
+      return { status: "succeeded" };
     };
 
     // Both workers claim the same batch; only the first `claimed`->`running` CAS can win.

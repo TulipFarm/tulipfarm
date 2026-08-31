@@ -132,7 +132,7 @@ export class TurnDriver {
   async run(request: TurnRequest): Promise<RunOutcome> {
     if (this.options.completer.isStale(request)) {
       // Superseded attempts must not spend model/tool work.
-      return "succeeded";
+      return { status: "succeeded" };
     }
 
     const startedAt = Date.now();
@@ -225,7 +225,7 @@ export class TurnDriver {
 
     if (result.status === "cancelled") {
       // Cancellation manager owns this Run; do not record another outcome.
-      return "cancelled";
+      return { status: "cancelled" };
     }
 
     if (result.status === "needs_reconciliation") {
@@ -235,7 +235,7 @@ export class TurnDriver {
         { status: "failed", messageId: null, reason: "needs_reconciliation" },
         "finished"
       );
-      return "needs_reconciliation";
+      return { status: "needs_reconciliation" };
     }
 
     if (result.status === "waiting") {
@@ -245,14 +245,14 @@ export class TurnDriver {
           { waitId: result.waitId, childRunId: result.childRunId, callId: result.callId },
           "child"
         );
-        return "waiting";
+        return { status: "waiting" };
       }
       await events.emit(
         "approval.requested",
         { waitId: result.waitId, intentId: result.approvalId, callId: result.callId },
         "approval"
       );
-      return "waiting";
+      return { status: "waiting" };
     }
 
     return this.complete(request, events, result, spend);
@@ -352,7 +352,7 @@ export class TurnDriver {
   ): Promise<RunOutcome> {
     if (completion.status === "stale") {
       // A newer attempt already answered; do not announce this one.
-      return "succeeded";
+      return { status: "succeeded" };
     }
 
     if (completion.status === "succeeded") {
@@ -363,7 +363,7 @@ export class TurnDriver {
         "finished"
       );
       this.reportTurn(spend, "ok");
-      return "succeeded";
+      return { status: "succeeded" };
     }
 
     if (completion.status === "failed") {
@@ -380,7 +380,10 @@ export class TurnDriver {
         "finished"
       );
       this.reportTurn(spend, "error");
-      return "failed";
+      // `completion.reason` is always an `AgentLoopFailureReason` (or `"empty_model_output"`) —
+      // the same bounded value `AgentStateRunner` already writes as the State's own
+      // `error_evidence_ref` — never model output or a raw exception message.
+      return { status: "failed", errorEvidenceRef: `agent:${completion.reason}` };
     }
 
     // `waiting` cannot appear after completion is attempted.

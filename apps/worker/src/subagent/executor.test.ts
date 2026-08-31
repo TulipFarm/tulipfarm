@@ -144,7 +144,7 @@ describe("createSubagentExecutor", () => {
   it("answers into an Artifact rather than a Conversation Message", async () => {
     const { execute, published } = harness();
 
-    await expect(execute()).resolves.toBe("succeeded");
+    await expect(execute()).resolves.toEqual({ status: "succeeded" });
 
     expect(published).toHaveLength(1);
     expect(published[0]?.id).toBe(subagentAnswerArtifactId(RUN_ID));
@@ -187,7 +187,7 @@ describe("createSubagentExecutor", () => {
   it("does not answer twice when a redelivered attempt finds an answer already published", async () => {
     const { execute, published } = harness({ answered: true });
 
-    await expect(execute()).resolves.toBe("succeeded");
+    await expect(execute()).resolves.toEqual({ status: "succeeded" });
 
     expect(published).toEqual([]);
   });
@@ -195,7 +195,7 @@ describe("createSubagentExecutor", () => {
   it("fails closed when the Run carries no invoke State to run on", async () => {
     const { execute, published } = harness({ state: null });
 
-    await expect(execute()).resolves.toBe("needs_reconciliation");
+    await expect(execute()).resolves.toEqual({ status: "needs_reconciliation" });
     expect(published).toEqual([]);
   });
 });

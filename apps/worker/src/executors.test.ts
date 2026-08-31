@@ -78,18 +78,18 @@ describe("RunExecutorRegistry", () => {
     const seen: string[] = [];
     registry.register("chat", async (run) => {
       seen.push(run.id);
-      return "succeeded";
+      return { status: "succeeded" };
     });
 
-    await expect(registry.execute(persistedRun())).resolves.toBe("succeeded");
+    await expect(registry.execute(persistedRun())).resolves.toEqual({ status: "succeeded" });
     expect(seen).toEqual([persistedRun().id]);
     expect(registry.size).toBe(1);
   });
 
   it("rejects a duplicate registration rather than silently replacing an executor", () => {
     const registry = new RunExecutorRegistry();
-    registry.register("chat", async () => "succeeded");
-    expect(() => registry.register("chat", async () => "failed")).toThrow(
+    registry.register("chat", async () => ({ status: "succeeded" }));
+    expect(() => registry.register("chat", async () => ({ status: "failed" }))).toThrow(
       'duplicate executor registered for Run source "chat"'
     );
   });

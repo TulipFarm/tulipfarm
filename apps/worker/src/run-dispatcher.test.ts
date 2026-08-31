@@ -4,6 +4,7 @@ import {
   type PersistedRun,
   type PersistedRunStatus,
 } from "@tulipfarm/storage";
+import type { RunOutcomeStatus } from "@tulipfarm/turn-executor";
 import { describe, expect, it } from "vitest";
 import { RunDispatcher, type RunDispatcherOptions, type RunOutcome } from "./run-dispatcher";
 
@@ -99,7 +100,7 @@ describe("RunDispatcher", () => {
       now: () => new Date("2026-07-24T10:00:00.000Z"),
       handler: async (run) => {
         dispatched.push(run.id);
-        return "succeeded";
+        return { status: "succeeded" };
       },
     });
 
@@ -127,7 +128,7 @@ describe("RunDispatcher", () => {
       businessId: BUSINESS_ID,
       owner: "worker-1",
       now: () => new Date("2026-07-24T10:00:00.000Z"),
-      handler: async () => "waiting",
+      handler: async () => ({ status: "waiting" }),
     });
 
     const result = await dispatcher.dispatchBatch();
@@ -153,7 +154,7 @@ describe("RunDispatcher", () => {
       businessId: BUSINESS_ID,
       owner: "worker-1",
       now: () => new Date("2026-07-24T10:00:00.000Z"),
-      handler: async () => "cancelled",
+      handler: async () => ({ status: "cancelled" }),
     });
 
     const result = await dispatcher.dispatchBatch();
@@ -222,7 +223,7 @@ describe("RunDispatcher", () => {
       businessId: BUSINESS_ID,
       owner: "worker-1",
       now: () => new Date("2026-07-24T10:00:00.000Z"),
-      handler: async () => "succeeded",
+      handler: async () => ({ status: "succeeded" }),
     });
 
     const result = await dispatcher.dispatchBatch();
@@ -246,7 +247,7 @@ describe("RunDispatcher", () => {
       businessId: BUSINESS_ID,
       owner: "worker-1",
       now: () => new Date("2026-07-24T10:00:00.000Z"),
-      handler: async () => "succeeded",
+      handler: async () => ({ status: "succeeded" }),
     });
 
     await expect(dispatcher.dispatchBatch()).resolves.toEqual({
@@ -261,7 +262,7 @@ describe("RunDispatcher", () => {
 
   describe("onTerminal", () => {
     function dispatcherWith(
-      outcome: RunOutcome,
+      status: RunOutcomeStatus,
       onTerminal: RunDispatcherOptions["onTerminal"],
       releaseResult = true
     ) {
@@ -273,7 +274,7 @@ describe("RunDispatcher", () => {
         businessId: BUSINESS_ID,
         owner: "worker-1",
         now: () => new Date("2026-07-24T10:00:00.000Z"),
-        handler: async () => outcome,
+        handler: async (): Promise<RunOutcome> => ({ status }),
         onTerminal,
       });
     }
@@ -339,7 +340,7 @@ describe("RunDispatcher", () => {
 
   describe("onWaiting", () => {
     function dispatcherWith(
-      outcome: RunOutcome,
+      status: RunOutcomeStatus,
       onWaiting: RunDispatcherOptions["onWaiting"],
       releaseResult = true
     ) {
@@ -353,7 +354,7 @@ describe("RunDispatcher", () => {
           businessId: BUSINESS_ID,
           owner: "worker-1",
           now: () => new Date("2026-07-24T10:00:00.000Z"),
-          handler: async () => outcome,
+          handler: async (): Promise<RunOutcome> => ({ status }),
           onWaiting,
         }),
       };
@@ -425,7 +426,7 @@ describe("RunDispatcher", () => {
       businessId: BUSINESS_ID,
       owner: "worker-1",
       now: () => new Date("2026-07-24T10:00:00.000Z"),
-      handler: async () => "succeeded",
+      handler: async () => ({ status: "succeeded" }),
     });
 
     const result = await dispatcher.dispatchBatch();
