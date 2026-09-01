@@ -8,6 +8,10 @@
 # installing it clones that repo. Operators can also install any repo by URL without it being
 # listed here; this file is curation, not an allowlist.
 #
+# `availability: coming_soon` means the manifest is in the image but the connect flow is not
+# something an operator should be handed yet. The catalog lists the entry so the roadmap is
+# visible, and refuses to open it, rather than offering a setup that ends in a dead end.
+#
 # Third-party integrations must be purely declarative. A manifest that runs code — `ts-code`
 # egress, a stdio MCP server, or an `ingress.handler` — is rejected at install
 # (packages/soul/src/integration-trust.ts).
@@ -17,10 +21,14 @@ version: 1
 integrations:
   - name: slack
     title: Slack
-    # No `icon`: Slack asked to be removed from Simple Icons, so there is no mark to name and the
-    # catalog falls back to a monogram. Do not point this at a lookalike slug.
-    # `color` is Slack's own aubergine, so the monogram still reads as Slack rather than as the one
-    # grey row in a catalog of coloured logos.
+    # `slack` is not a Simple Icons slug — Slack asked to be removed from that set, so the API's
+    # lookup misses and `iconPath` stays empty. It resolves instead against the vendored full-colour
+    # marks in apps/web/app/components/integrations/brand-logo.tsx, which carry Slack's official
+    # unmodified four-colour mark to identify a Slack integration, the use Slack's brand guidelines
+    # allow. Still do not point this at a *lookalike* Simple Icons slug.
+    # `color` remains Slack's aubergine, so a client without the vendored mark degrades to a
+    # monogram that still reads as Slack rather than as the one grey row in a coloured catalog.
+    icon: slack
     color: "4A154B"
     category: chat
     homepage: https://slack.com
@@ -34,6 +42,7 @@ integrations:
     description: Read and write repositories, issues, and pull requests.
 
   - name: jira
+    availability: coming_soon
     title: Jira
     icon: jira
     category: productivity
@@ -41,12 +50,14 @@ integrations:
     description: Search, create, estimate, prioritize, and transition Jira Cloud issues.
 
   - name: linear
+    availability: coming_soon
     title: Linear
     icon: linear
     category: productivity
     homepage: https://linear.app
     description: Read, create, update, and comment on issues with approval for changes.
   - name: google
+    availability: coming_soon
     title: Google Workspace
     icon: google
     category: productivity

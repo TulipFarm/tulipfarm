@@ -36,7 +36,9 @@ Terminology is binding: [`metadata/terminologies.md`](metadata/terminologies.md)
 - **Neutral by default.** Achromatic surfaces, quiet hairlines. Ruby is for brand, selection,
   focus, links, and primary actions. Destructive red is for danger. Nothing else.
 - **Structure before decoration.** Hierarchy comes from layout, type, and spacing. Not from
-  gradients, glass, shadows, or card grids without a content reason.
+  gradients, glass, shadows, or card grids without a content reason. The integrations catalog is
+  the one place both a card grid and a hairline lift are sanctioned, on grounds named in §6 and in
+  "The integrations catalog".
 - **Color never carries meaning alone.** Every tone ships with a label, an icon, or a shape.
 - **Motion must report real state.** An animation that runs regardless of what is happening is
   decoration, and decoration is not permitted. See §7.
@@ -274,8 +276,15 @@ Title for a heading the content area owns, and only when it says something the t
 
 ## 6. Shape, depth, and material
 
-- **No shadows, anywhere.** Both apps zero the entire Tailwind shadow scale. Depth comes from
-  hairline borders and lifted surfaces.
+- **No shadows, anywhere, with one named exception.** Both apps zero the entire Tailwind shadow
+  scale. Depth comes from hairline borders and lifted surfaces. The exception is
+  **catalog elevation**: a grid of third-party brand tiles, where each tile is a separate
+  destination and the marks are supplied by other people. There, and only there, a tile may carry
+  a 1-2px, ≤8% black hairline lift, and a segmented control's active pill may carry the same. It
+  is a *seam*, not a glow — if it reads as a drop shadow at 100% zoom it is too big. Everything
+  else in the product app stays flat.
+- **Do not reach for an arbitrary `shadow-[…]` value elsewhere.** The scale is zeroed on purpose;
+  an arbitrary value is a circumvention, not an exemption. Widen this rule in this file first.
 - **Radius**: app 4/6/8px; docs 2/4/6px capped. Prefer the restrained end. Oversized radii are a
   smell.
 - **Icons** at 14/16/20/24px, Lucide outline. Never emoji.
@@ -701,6 +710,33 @@ runtime-managed ones; because adjacent inline spans concatenate with no space, t
 **Every empty state names its own cause.** "No records yet", "no column is visible", "nothing matches
 that filter" and "this schema will not parse" are four different problems with four different exits.
 One shared "No results" for all four tells the reader nothing they can act on.
+
+### The integrations catalog
+
+**This is the sanctioned card grid.** §1 bans card grids "without a content reason"; §6 lists the
+one place elevation is allowed. Both exemptions point here, and the reason is the same. Every other
+roster in this app lists objects *the operator authored* — agents, skills, routines — where the name
+is the identity and a list column aligns cleanly. The integrations catalog lists **other people's
+brands**, which an operator recognises by mark before name. A tile that leads with the logo is
+faster to scan than a row that leads with text, and the set is small and slow-growing, so the
+vertical cost cards pay at three hundred rows is never charged. Grid at `sm:2 / xl:3`.
+
+**One tile design for every entry.** The logo is the only place brand colour is allowed to land —
+the tile behind it is the same neutral surface at every tier, whether the mark is a vendored
+full-colour SVG, a monochrome glyph, or a fallback monogram. Tinting the tile to match the brand
+produces as many card designs as there are cards.
+
+**Coming-soon is a state, not a dimming.** An entry that is not available yet keeps its logo at full
+strength and says so in words and a badge. Fading the mark to signal unavailability makes the
+best-known brands the hardest ones to find, and communicates nothing to a reader who cannot compare
+it against an undimmed neighbour.
+
+**Connection state is a badge and is never implied.** `connected`, `connecting`, `error` and
+`disconnected` are four different claims and keep four tones — collapsing `error` into "Not
+connected" reports a fault as a choice. `disconnected` stays neutral rather than warning: an
+integration nobody has set up is not broken, and the warning tone carries an alert icon that would
+render a healthy instance as a wall of problems. A second badge such as "Update available" sits
+beside the connection badge, never in place of it.
 
 ### The agent roster and profile
 

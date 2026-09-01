@@ -1,16 +1,25 @@
 import type { CSSProperties } from "react";
 import { brandInk } from "~/lib/brand";
 import { cn } from "~/lib/utils";
+import { brandLogo } from "./brand-logo";
 
 /*
- * An integration's mark: the brand's Simple Icons glyph when it has one, a derived monogram
- * when it does not — both in the brand's own colour. The fallback is not an edge case.
+ * An integration's mark, in descending order of fidelity: the brand's own full-colour logo when one
+ * is vendored, the Simple Icons monochrome glyph in the brand's hex when it is not, and a derived
+ * monogram when the brand has neither. The fallbacks are not edge cases — an uncurated entry
+ * installed from git reaches the last one.
+ *
+ * Every mark sits on the same neutral tile, whichever tier it came from. Tinting the tile per brand
+ * was worse than it sounds: a grid then reads as five different card designs rather than one, and
+ * the brands that do have a vendored full-colour logo cannot be tinted at all without muddying
+ * colours the brand chose — so the tint was only ever applied to some tiles, which is exactly what
+ * made the row look unfinished. The colour lives in the mark; the tile stays out of its way.
  */
 
 const SIZE = {
   sm: { box: "size-5", mark: "size-3", text: "text-[0.5rem]" },
-  md: { box: "size-8", mark: "size-4", text: "text-[0.625rem]" },
-  lg: { box: "size-11", mark: "size-6", text: "text-sm" },
+  md: { box: "size-8", mark: "size-5", text: "text-[0.625rem]" },
+  lg: { box: "size-11", mark: "size-7", text: "text-sm" },
 } as const;
 
 export type IntegrationIconSize = keyof typeof SIZE;
@@ -24,12 +33,15 @@ export function monogram(label: string): string {
 
 export function IntegrationIcon({
   label,
+  iconSlug,
   iconPath,
   iconColor,
   size = "md",
   className,
 }: {
   label: string;
+  /** Manifest icon slug, used to look up a vendored full-colour mark. */
+  iconSlug?: string;
   /** Simple Icons path data from the API; absent when the brand has no mark. */
   iconPath?: string;
   iconColor?: string;
@@ -37,41 +49,39 @@ export function IntegrationIcon({
   className?: string;
 }) {
   const style = SIZE[size];
-  const ink = brandInk(iconColor);
+  const logo = brandLogo(iconSlug);
+  // The tile is always light, so the glyph always wants the light-background variant.
+  const ink = brandInk(iconColor)?.light;
+
   return (
     <span
       aria-hidden
       className={cn(
-        "flex shrink-0 items-center justify-center rounded-md border",
+        "flex shrink-0 items-center justify-center rounded-lg border border-black/[0.07] bg-white",
+        "shadow-[0_1px_2px_rgb(0_0_0/0.06)] dark:border-white/10 dark:bg-white/95",
         style.box,
-        ink
-          ? cn(
-              "[--brand:var(--brand-light)] dark:[--brand:var(--brand-dark)]",
-              "border-[color-mix(in_oklab,var(--brand)_25%,transparent)]",
-              "bg-[color-mix(in_oklab,var(--brand)_12%,transparent)]",
-              "text-[var(--brand)]"
-            )
-          : "border-border bg-muted text-muted-foreground",
         className
       )}
-      style={
-        ink
-          ? ({ "--brand-light": ink.light, "--brand-dark": ink.dark } as CSSProperties)
-          : undefined
-      }
+      style={ink ? ({ "--brand": ink } as CSSProperties) : undefined}
     >
-      {iconPath ? (
+      {logo ? (
+        <svg viewBox={logo.viewBox} aria-hidden="true" focusable="false" className={style.mark}>
+          {logo.paths.map((p) => (
+            <path key={p.d} fill={p.fill} d={p.d} />
+          ))}
+        </svg>
+      ) : iconPath ? (
         <svg
           viewBox="0 0 24 24"
           fill="currentColor"
           aria-hidden="true"
           focusable="false"
-          className={style.mark}
+          className={cn(style.mark, ink ? "text-[var(--brand)]" : "text-foreground/80")}
         >
           <path d={iconPath} />
         </svg>
       ) : (
-        <span className={cn("font-semibold", style.text)}>{monogram(label)}</span>
+        <span className={cn("font-semibold text-neutral-500", style.text)}>{monogram(label)}</span>
       )}
     </span>
   );

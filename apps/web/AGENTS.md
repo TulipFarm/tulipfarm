@@ -25,6 +25,7 @@ data loading, schema-driven resource UI, and browser rendering of Surface Artifa
 | `app/components/skills/` | Catalog, reach badge, capability/package/audience panels, marketplace browser. |
 | `app/components/resources/` | Stat strip, catalog table, schema summary for `/resources`. |
 | `app/components/routines/` | Catalog, row, canvas, run/dry-run, effects and bounds panels for `/routines`. |
+| `app/components/integrations/` | Brand-tile card grid, vendored colour logos, the `···` menu, and the `?view=` preview sheet for `/integrations`. The one sanctioned card grid — see DESIGN.md "The integrations catalog". |
 | `app/components/ui/` | Vendored shadcn primitives for this app only, plus `combobox.tsx` — hand-rolled, because `cmdk` forces its own input `id` and breaks `<label htmlFor>`. |
 | `app/lib/api.ts` | API client with cookies, CSRF header, optional bearer token, `ApiError`. |
 | `app/lib/schema.ts` | JSON-Schema field detection, list/detail/form metadata, value rendering, shared formatters. |

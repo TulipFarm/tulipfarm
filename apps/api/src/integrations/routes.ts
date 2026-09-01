@@ -116,14 +116,24 @@ async function toCatalog(
             installed: false,
             status: "disconnected" as ConnectionStatus,
           };
-      const mark = await brandIcon(entry?.manifest.icon ?? listing?.icon);
+      const slug = entry?.manifest.icon ?? listing?.icon;
+      const mark = await brandIcon(slug);
       return {
         ...base,
+        // How much work connecting is, answered on the card rather than one click later. Absent for
+        // an entry with no manifest yet, where the honest answer is that nobody knows.
+        setupSteps: entry ? resolveAuthSteps(entry.manifest).length : undefined,
         title: listing?.title,
+        // An entry the registry has not opened yet is listed but not offered. Absent listing means
+        // an uncurated local install, which nobody is holding back.
+        availability: listing?.availability ?? "available",
         description: base.description ?? listing?.description,
         category: listing?.category,
         homepage: listing?.homepage,
         source: listing?.source,
+        // Forwarded so the client can prefer a vendored full-colour mark for brands whose colour is
+        // the identity; Simple Icons only carries a monochrome silhouette.
+        iconSlug: slug,
         iconPath: mark?.path,
         // The registry's colour is the fallback, not an override: it exists for brands the icon
         // set does not carry, so a resolved mark always keeps its own.
@@ -139,14 +149,17 @@ async function toDetail(
   personalConnected = false
 ) {
   const steps = resolveAuthSteps(entry.manifest);
-  const mark = await brandIcon(entry.manifest.icon ?? listing?.icon);
+  const slug = entry.manifest.icon ?? listing?.icon;
+  const mark = await brandIcon(slug);
   return {
     ...toSummary(entry),
     // The same brand identity the catalog row showed. Landing on a detail page that drops back to
     // a bare slug reads as a different product than the one that was clicked.
     title: listing?.title,
+    availability: listing?.availability ?? "available",
     category: listing?.category,
     homepage: listing?.homepage,
+    iconSlug: slug,
     iconPath: mark?.path,
     iconColor: mark?.hex ?? listing?.color,
     capabilities: entry.manifest.capabilities,
@@ -188,16 +201,19 @@ const IntegrationSummarySchema = {
   properties: {
     name: { type: "string" },
     title: { type: "string" },
+    availability: { type: "string", enum: ["available", "coming_soon"] },
     type: { type: "string" },
     description: { type: "string" },
     category: { type: "string" },
     homepage: { type: "string" },
+    iconSlug: { type: "string" },
     iconPath: { type: "string" },
     iconColor: { type: "string" },
     version: { type: "string" },
     maintainer: { type: "string" },
     source: { type: "string" },
     installed: { type: "boolean" },
+    setupSteps: { type: "number" },
     status: { type: "string", enum: ["connected", "disconnected"] },
     updateAvailable: { type: "boolean" },
   },
