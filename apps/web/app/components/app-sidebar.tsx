@@ -1,14 +1,17 @@
 import { Link, NavLink, useLocation, useNavigate, useNavigation } from "@remix-run/react";
 import {
+  ChevronDown,
   ChevronsUpDown,
   LogOut,
   Menu,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
+  Star,
   UserRound,
+  X,
 } from "lucide-react";
-import { type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react";
 import {
   ChatActionsMenu,
   ChatCrumbTitle,
@@ -18,8 +21,8 @@ import {
 } from "~/components/chat/chat-title-actions";
 import { CompanionMobileTrigger } from "~/components/onboarding/companion";
 import { ReportBugButton } from "~/components/report-bug-button";
+import { SidebarCommand } from "~/components/sidebar-command";
 import { ThemeToggle } from "~/components/theme-toggle";
-import { Badge } from "~/components/ui/badge";
 import { Separator } from "~/components/ui/separator";
 import { Tooltip } from "~/components/ui/tooltip";
 import { logout, type SessionUser } from "~/lib/api";
@@ -27,17 +30,19 @@ import { useApprovals } from "~/lib/approvals-context";
 import { useConversations } from "~/lib/conversations-context";
 import {
   iconForPath,
+  type NavGroup,
   type NavigationVisibility,
   titleForPath,
   visibleSettingsItem,
   visibleSidebarGroups,
 } from "~/lib/nav";
+import { type SidebarCounts, useSidebarCounts } from "~/lib/sidebar-counts";
 import { isBusinessAdmin } from "~/lib/use-session-user";
 import { cn } from "~/lib/utils";
 
 const HEADER_ROW = "flex h-[52px] shrink-0 items-center";
 const GROUP_HEADING =
-  "px-3 pb-1 text-[0.6875rem] font-medium uppercase tracking-[0.14em] text-muted-foreground";
+  "text-[0.6875rem] font-medium uppercase tracking-[0.14em] text-muted-foreground";
 
 /* One row shape for every destination, so a chat in Recent and a page in Build read as peers. */
 /* The transparent border matches New chat's real one, so every icon lands on one vertical spine. */
@@ -50,17 +55,103 @@ const ROW_IDLE = "text-sidebar-foreground hover:bg-sidebar-accent";
 const ROW_PENDING = "animate-pulse bg-sidebar-accent text-sidebar-foreground";
 /* Collapsed, a row is a square so it matches the avatar chip below it rather than out-widing it. */
 const ROW_NARROW = "size-9 shrink-0 justify-center px-0 mx-auto";
+/* Trailing controls appear on hover or keyboard focus, and stay put on the row you are on. */
+const ROW_AFFORDANCE =
+  "flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity duration-150 hover:bg-sidebar-border hover:text-foreground focus-visible:opacity-100 group-hover/row:opacity-100 group-focus-within/row:opacity-100";
 
-function SidebarHeader({ collapsed }: { collapsed: boolean }) {
+/**
+ * Remembers which groups a reader closed. A closed group is a preference, not a permission, so it
+ * is stored per browser and never travels with the account.
+ */
+function useGroupOpen(key: string): [boolean, () => void] {
+  const storageKey = `sidebar-group:${key}`;
+  const [open, setOpen] = useState(() => {
+    try {
+      return localStorage.getItem(storageKey) !== "closed";
+    } catch {
+      return true;
+    }
+  });
+  const toggle = useCallback(() => {
+    setOpen((current) => {
+      const next = !current;
+      try {
+        localStorage.setItem(storageKey, next ? "open" : "closed");
+      } catch {
+        /* A browser refusing storage costs the memory of the choice, never the choice. */
+      }
+      return next;
+    });
+  }, [storageKey]);
+  return [open, toggle];
+}
+
+/**
+ * A heading that is also its own disclosure. The `h2` stays a heading so the section is still
+ * announced and reachable by heading navigation; the button inside it carries the state.
+ *
+ * `to` splits the chevron off into its own control, for the one group whose name is also a
+ * destination — a label that both navigates and collapses can only do one of them per click.
+ */
+/** Every group heading is the disclosure — a reader who clicks the word expects the word to obey. */
+function GroupHeading({
+  heading,
+  open,
+  onToggle,
+}: {
+  heading: string;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-0.5 pr-1 pl-1.5">
+      <h2 className="min-w-0 flex-1">
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={open}
+          className={cn(
+            GROUP_HEADING,
+            "flex w-full items-center gap-1 rounded py-1 text-left transition-colors duration-150 hover:text-foreground"
+          )}
+        >
+          <ChevronDown
+            className={cn(
+              "size-3 shrink-0 transition-transform duration-150",
+              open ? "" : "-rotate-90"
+            )}
+            aria-hidden
+          />
+          <span className="min-w-0 truncate">{heading}</span>
+        </button>
+      </h2>
+    </div>
+  );
+}
+
+function SidebarHeader({
+  collapsed,
+  onToggleCollapsed,
+}: {
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
+}) {
   return (
     <div
       className={cn(
         HEADER_ROW,
         "gap-2 border-b border-sidebar-border",
-        collapsed ? "justify-center px-2" : "px-4"
+        collapsed ? "justify-center px-2" : "px-3"
       )}
     >
-      <Link to="/" aria-label="TulipFarm home" className="flex min-w-0 items-center gap-2">
+      <Link
+        to="/"
+        aria-label="TulipFarm home"
+        className={cn(
+          "flex min-w-0 flex-1 items-center gap-2 rounded-md transition-colors duration-150",
+          collapsed ? "justify-center" : "px-1 py-1 hover:bg-sidebar-accent"
+        )}
+      >
         <img src="/logo-128.png" alt="" width={24} height={24} className="size-6 shrink-0" />
         {collapsed ? null : (
           <span className="truncate text-sm font-semibold tracking-tight text-foreground">
@@ -68,6 +159,19 @@ function SidebarHeader({ collapsed }: { collapsed: boolean }) {
           </span>
         )}
       </Link>
+      {collapsed ? null : (
+        <Tooltip content="Collapse sidebar">
+          <button
+            type="button"
+            aria-label="Collapse sidebar"
+            aria-expanded
+            onClick={onToggleCollapsed}
+            className="hidden size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-sidebar-accent hover:text-foreground lg:flex"
+          >
+            <PanelLeftClose className="size-4" aria-hidden />
+          </button>
+        </Tooltip>
+      )}
     </div>
   );
 }
@@ -87,7 +191,7 @@ function NewChatButton({ collapsed, onNavigate }: { collapsed: boolean; onNaviga
       aria-label="New chat"
       aria-current={pathname === "/" ? "page" : undefined}
       className={cn(
-        "mt-3 flex min-h-9 items-center rounded-md border border-sidebar-border",
+        "mt-0 flex min-h-9 items-center rounded-md border border-sidebar-border",
         "text-sm font-medium transition-colors duration-150",
         collapsed ? ROW_NARROW : "mx-2 gap-2.5 px-3",
         pathname === "/"
@@ -117,6 +221,8 @@ function NavRow({
   label,
   icon: Icon,
   count,
+  tone = "quiet",
+  create,
   collapsed,
   onNavigate,
 }: {
@@ -124,21 +230,26 @@ function NavRow({
   label: string;
   icon: React.ComponentType<{ className?: string }>;
   count?: number;
+  /** `alert` is something waiting on the reader; `quiet` is just how much is in there. */
+  tone?: "alert" | "quiet";
+  create?: { to: string; label: string };
   collapsed: boolean;
   onNavigate: () => void;
 }) {
   const navigation = useNavigation();
   const isPending = navigation.state === "loading" && navigation.location.pathname.startsWith(to);
+  const alerting = tone === "alert" && Boolean(count);
   const row = (
     <NavLink
       to={to}
       onClick={onNavigate}
-      aria-label={collapsed ? (count ? `${label}, ${count} awaiting you` : label) : undefined}
+      aria-label={collapsed ? (alerting ? `${label}, ${count} awaiting you` : label) : undefined}
       className={({ isActive }) =>
         cn(
           ROW_BASE,
           "group",
           collapsed && ROW_NARROW,
+          !collapsed && create && "pr-9",
           isActive ? ROW_ACTIVE : isPending ? ROW_PENDING : ROW_IDLE
         )
       }
@@ -148,7 +259,7 @@ function NavRow({
           className="size-4 text-muted-foreground group-aria-[current=page]:text-sidebar-primary"
           aria-hidden
         />
-        {collapsed && count ? (
+        {collapsed && alerting ? (
           <span
             aria-hidden
             className="absolute -top-1 -right-1 size-2 rounded-full bg-status-danger"
@@ -158,68 +269,106 @@ function NavRow({
       {collapsed ? null : (
         <>
           <span className="min-w-0 flex-1 truncate">{label}</span>
+          {/* A count reads as a bare numeral, not a pill: the row is already the alarm, and a
+           * section total is furniture. Only the alarm earns the rule beneath it. */}
           {count ? (
-            <Badge variant="danger" aria-label={`${count} awaiting you`}>
+            <span
+              className={cn(
+                "shrink-0 text-xs tabular-nums",
+                alerting
+                  ? "text-status-danger underline decoration-status-danger/40 underline-offset-4"
+                  : "text-muted-foreground/70"
+              )}
+            >
               {count}
-            </Badge>
+            </span>
           ) : null}
+          {alerting ? <span className="sr-only">awaiting you</span> : null}
         </>
       )}
     </NavLink>
   );
-  return collapsed ? (
-    <Tooltip content={label} placement="right">
+  if (collapsed) {
+    return (
+      <Tooltip content={label} placement="right">
+        {row}
+      </Tooltip>
+    );
+  }
+  if (!create) return row;
+  /* The Tooltip renders an in-flow wrapper around whatever it observes, so the absolute
+   * positioning has to sit outside it — on the Tooltip itself the `+` would still take a row's
+   * worth of height and push the next destination down. */
+  return (
+    <div className="group/row relative">
       {row}
-    </Tooltip>
-  ) : (
-    row
+      <span className="absolute top-1/2 right-1.5 -translate-y-1/2">
+        <Tooltip content={create.label} placement="right">
+          <Link
+            to={create.to}
+            onClick={onNavigate}
+            aria-label={create.label}
+            className={ROW_AFFORDANCE}
+          >
+            <Plus className="size-3.5" aria-hidden />
+          </Link>
+        </Tooltip>
+      </span>
+    </div>
   );
 }
 
 function RecentChats({ onNavigate }: { onNavigate: () => void }) {
   const { conversations, activeChatId } = useConversations();
   const actions = useChatTitleActions();
+  const [open, toggle] = useGroupOpen("recent");
   if (conversations.length === 0) return null;
   return (
     <div className="flex flex-col gap-1">
-      <Link to="/chats" onClick={onNavigate} className={cn(GROUP_HEADING, "hover:text-foreground")}>
-        Recent
-      </Link>
-      {actions.error && !actions.pendingDelete ? (
-        <p role="alert" className="px-3 py-1 text-xs text-destructive">
-          {actions.error}
-        </p>
+      <GroupHeading heading="Recent" open={open} onToggle={toggle} />
+      {open ? (
+        <>
+          {actions.error && !actions.pendingDelete ? (
+            <p role="alert" className="px-3 py-1 text-xs text-destructive">
+              {actions.error}
+            </p>
+          ) : null}
+          {conversations.map((chat) =>
+            actions.renamingId === chat.id ? (
+              <div key={chat.id} className="px-1 py-0.5">
+                <ChatTitleInput
+                  initialTitle={chat.title ?? ""}
+                  onSave={(next) => actions.submitRename(chat.id, next)}
+                  onCancel={actions.cancelRename}
+                  className="h-9 text-sm"
+                />
+              </div>
+            ) : (
+              <div
+                key={chat.id}
+                className={cn(
+                  ROW_BASE,
+                  "group pr-1",
+                  chat.id === activeChatId ? ROW_ACTIVE : ROW_IDLE
+                )}
+              >
+                <Link
+                  to={`/chat/${chat.id}`}
+                  onClick={onNavigate}
+                  aria-current={chat.id === activeChatId ? "page" : undefined}
+                  className="min-w-0 flex-1 truncate"
+                >
+                  {chat.title ?? "New chat"}
+                </Link>
+                <ChatActionsMenu
+                  onStartRename={() => actions.startRename(chat.id)}
+                  onDelete={() => actions.requestDelete(chat)}
+                />
+              </div>
+            )
+          )}
+        </>
       ) : null}
-      {conversations.map((chat) =>
-        actions.renamingId === chat.id ? (
-          <div key={chat.id} className="px-1 py-0.5">
-            <ChatTitleInput
-              initialTitle={chat.title ?? ""}
-              onSave={(next) => actions.submitRename(chat.id, next)}
-              onCancel={actions.cancelRename}
-              className="h-9 text-sm"
-            />
-          </div>
-        ) : (
-          <div
-            key={chat.id}
-            className={cn(ROW_BASE, "group pr-1", chat.id === activeChatId ? ROW_ACTIVE : ROW_IDLE)}
-          >
-            <Link
-              to={`/chat/${chat.id}`}
-              onClick={onNavigate}
-              aria-current={chat.id === activeChatId ? "page" : undefined}
-              className="min-w-0 flex-1 truncate"
-            >
-              {chat.title ?? "New chat"}
-            </Link>
-            <ChatActionsMenu
-              onStartRename={() => actions.startRename(chat.id)}
-              onDelete={() => actions.requestDelete(chat)}
-            />
-          </div>
-        )
-      )}
       <DeleteChatModal
         open={actions.pendingDelete !== null}
         onClose={actions.cancelDelete}
@@ -228,6 +377,54 @@ function RecentChats({ onNavigate }: { onNavigate: () => void }) {
         busy={actions.deleting}
         error={actions.error}
       />
+    </div>
+  );
+}
+
+/**
+ * A one-time ask, dismissed forever on this browser. It is not an upsell — the product is
+ * self-hosted and there is nothing to buy — so it must never come back to ask twice.
+ */
+const STAR_DISMISSED_KEY = "star-card-dismissed";
+
+function StarCard() {
+  const [dismissed, setDismissed] = useState(() => {
+    try {
+      return localStorage.getItem(STAR_DISMISSED_KEY) === "true";
+    } catch {
+      return true;
+    }
+  });
+  if (dismissed) return null;
+  function dismiss() {
+    try {
+      localStorage.setItem(STAR_DISMISSED_KEY, "true");
+    } catch {
+      /* Refused storage means it returns next visit, which is better than swallowing the click. */
+    }
+    setDismissed(true);
+  }
+  return (
+    <div className="relative mx-2 mb-2 shrink-0 rounded-md border border-sidebar-border bg-background p-3">
+      <button
+        type="button"
+        onClick={dismiss}
+        aria-label="Dismiss the star request"
+        className="absolute top-1.5 right-1.5 flex size-6 items-center justify-center rounded text-muted-foreground transition-colors duration-150 hover:bg-sidebar-accent hover:text-foreground"
+      >
+        <X className="size-3.5" aria-hidden />
+      </button>
+      <p className="pr-6 text-sm font-medium text-foreground">Enjoying TulipFarm?</p>
+      <p className="mt-0.5 text-xs text-muted-foreground">Star the repo so other people find it.</p>
+      <a
+        href="https://github.com/TulipFarm/tulipfarm"
+        target="_blank"
+        rel="noreferrer"
+        className="mt-2.5 flex min-h-8 items-center justify-center gap-1.5 rounded-md bg-foreground px-3 text-xs font-medium text-background transition-opacity duration-150 hover:opacity-90"
+      >
+        <Star className="size-3.5" aria-hidden />
+        Star on GitHub
+      </a>
     </div>
   );
 }
@@ -320,9 +517,7 @@ function UserCard({
             <UserRound className="size-4 shrink-0 text-muted-foreground" aria-hidden />
             Profile
           </Link>
-          <div className={cn(ROW_BASE, "text-muted-foreground")}>
-            <ThemeToggle />
-          </div>
+          <ThemeToggle className={cn(ROW_BASE, ROW_IDLE, "w-full")} />
           <Separator className="my-1" />
           <button
             type="button"
@@ -373,15 +568,72 @@ function UserCard({
   );
 }
 
+/**
+ * One heading and its rows. Collapsed to the icon column the disclosure disappears entirely —
+ * a group you cannot read the name of is not one you can meaningfully close.
+ */
+function NavGroupSection({
+  group,
+  approvals,
+  totals,
+  chatCount,
+  narrow,
+  isFirst,
+  onNavigate,
+}: {
+  group: NavGroup;
+  approvals: number;
+  totals: SidebarCounts;
+  chatCount: number;
+  narrow: boolean;
+  isFirst: boolean;
+  onNavigate: () => void;
+}) {
+  const [open, toggle] = useGroupOpen(group.heading);
+  const showRows = narrow || open;
+  return (
+    <div className="flex flex-col gap-1">
+      {narrow ? (
+        isFirst ? null : (
+          <Separator className="mb-1 w-9 self-center" />
+        )
+      ) : (
+        <GroupHeading heading={group.heading} open={open} onToggle={toggle} />
+      )}
+      {showRows
+        ? group.items.map((item) => {
+            const alerting = Boolean(item.badge) && approvals > 0;
+            const quiet = item.to === "/chats" ? chatCount : totals[item.to];
+            return (
+              <NavRow
+                key={item.to}
+                to={item.to}
+                label={item.label}
+                icon={item.icon}
+                count={alerting ? approvals : quiet}
+                tone={alerting ? "alert" : "quiet"}
+                create={item.create}
+                collapsed={narrow}
+                onNavigate={onNavigate}
+              />
+            );
+          })
+        : null}
+    </div>
+  );
+}
+
 export function AppSidebar({
   open = false,
   onClose = () => {},
   collapsed = false,
+  onToggleCollapsed = () => {},
   user,
 }: {
   open?: boolean;
   onClose?: () => void;
   collapsed?: boolean;
+  onToggleCollapsed?: () => void;
   user?: SessionUser;
 } = {}) {
   const visibility: NavigationVisibility = {
@@ -391,6 +643,8 @@ export function AppSidebar({
   const groups = visibleSidebarGroups(visibility);
   const settingsItem = visibleSettingsItem(visibility);
   const { count } = useApprovals();
+  const { conversations } = useConversations();
+  const totals = useSidebarCounts(user?.navigation?.visiblePaths);
   const [persistent, setPersistent] = useState(true);
 
   useEffect(() => {
@@ -426,35 +680,29 @@ export function AppSidebar({
           narrow && "lg:w-14"
         )}
       >
-        <SidebarHeader collapsed={narrow} />
-        <NewChatButton collapsed={narrow} onNavigate={onClose} />
+        <SidebarHeader collapsed={narrow} onToggleCollapsed={onToggleCollapsed} />
+        <div className="flex shrink-0 flex-col gap-2 border-b border-sidebar-border py-3">
+          <SidebarCommand visibility={visibility} collapsed={narrow} />
+          <NewChatButton collapsed={narrow} onNavigate={onClose} />
+        </div>
         <div className="min-h-0 flex-1 overflow-y-auto py-4">
           <nav aria-label="Main" className="flex flex-col gap-5 px-2">
             {groups.map((group, index) => (
-              <div key={group.heading} className="flex flex-col gap-1">
-                {narrow ? (
-                  index > 0 ? (
-                    <Separator className="mb-1 w-9 self-center" />
-                  ) : null
-                ) : (
-                  <h2 className={GROUP_HEADING}>{group.heading}</h2>
-                )}
-                {group.items.map((item) => (
-                  <NavRow
-                    key={item.to}
-                    to={item.to}
-                    label={item.label}
-                    icon={item.icon}
-                    count={item.badge ? count : undefined}
-                    collapsed={narrow}
-                    onNavigate={onClose}
-                  />
-                ))}
-              </div>
+              <NavGroupSection
+                key={group.heading}
+                group={group}
+                approvals={count}
+                totals={totals}
+                chatCount={conversations.length}
+                narrow={narrow}
+                isFirst={index === 0}
+                onNavigate={onClose}
+              />
             ))}
             {narrow ? null : <RecentChats onNavigate={onClose} />}
           </nav>
         </div>
+        {narrow ? null : <StarCard />}
         {settingsItem ? (
           <div className="shrink-0 border-t border-sidebar-border px-2 py-2">
             <NavRow
@@ -544,7 +792,13 @@ export function AppShell({ children, user }: { children: ReactNode; user?: Sessi
 
   return (
     <div className="flex h-svh overflow-hidden bg-background">
-      <AppSidebar open={open} onClose={() => setOpen(false)} collapsed={collapsed} user={user} />
+      <AppSidebar
+        open={open}
+        onClose={() => setOpen(false)}
+        collapsed={collapsed}
+        onToggleCollapsed={toggleCollapsed}
+        user={user}
+      />
       <div className="flex h-svh min-w-0 flex-1 flex-col">
         <header
           className={cn(HEADER_ROW, "gap-2 border-b border-border bg-background px-3 sm:px-4")}
@@ -559,22 +813,25 @@ export function AppShell({ children, user }: { children: ReactNode; user?: Sessi
           >
             <Menu className="size-5" aria-hidden />
           </button>
-          <Tooltip content={collapsed ? "Expand sidebar" : "Collapse sidebar"}>
-            <button
-              type="button"
-              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-              aria-expanded={!collapsed}
-              onClick={toggleCollapsed}
-              className="hidden size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground lg:flex"
-            >
-              {collapsed ? (
-                <PanelLeftOpen className="size-4" aria-hidden />
-              ) : (
-                <PanelLeftClose className="size-4" aria-hidden />
-              )}
-            </button>
-          </Tooltip>
-          <Separator orientation="vertical" className="mx-1 hidden h-5 lg:block" />
+          {/* Expanded, the collapse control lives in the sidebar's own header, next to the thing
+           * it resizes. Collapsed, that header has room for the mark alone, so the way back out
+           * moves here — one control, never two claiming the same job. */}
+          {collapsed ? (
+            <>
+              <Tooltip content="Expand sidebar">
+                <button
+                  type="button"
+                  aria-label="Expand sidebar"
+                  aria-expanded={false}
+                  onClick={toggleCollapsed}
+                  className="hidden size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground lg:flex"
+                >
+                  <PanelLeftOpen className="size-4" aria-hidden />
+                </button>
+              </Tooltip>
+              <Separator orientation="vertical" className="mx-1 hidden h-5 lg:block" />
+            </>
+          ) : null}
           <PageTitle pathname={pathname} pageTitle={pageTitle} titleSlot={chatTitleSlot} />
           <div className="ml-auto flex shrink-0 items-center gap-1 pl-2">
             <span className="sm:hidden">

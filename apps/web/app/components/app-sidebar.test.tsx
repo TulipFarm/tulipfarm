@@ -6,12 +6,16 @@ import { beforeEach, expect, test, vi } from "vitest";
 import { AppShell, AppSidebar, iconForPath, titleForPath } from "~/components/app-sidebar";
 import * as approvalsContext from "~/lib/approvals-context";
 import * as conversationsContext from "~/lib/conversations-context";
+import * as sidebarCounts from "~/lib/sidebar-counts";
 
 vi.mock("~/lib/approvals-context", () => ({ useApprovals: vi.fn() }));
 const useApprovals = vi.mocked(approvalsContext.useApprovals);
 
 vi.mock("~/lib/conversations-context", () => ({ useConversations: vi.fn() }));
 const useConversations = vi.mocked(conversationsContext.useConversations);
+
+vi.mock("~/lib/sidebar-counts", () => ({ useSidebarCounts: vi.fn() }));
+const useSidebarCounts = vi.mocked(sidebarCounts.useSidebarCounts);
 
 const USER = {
   id: "u1",
@@ -73,6 +77,7 @@ beforeEach(() => {
     refresh: vi.fn(),
   });
   useConversations.mockReturnValue(CONVERSATIONS);
+  useSidebarCounts.mockReturnValue({});
 });
 
 test("maps deep routes to stable top-bar titles", () => {
@@ -224,7 +229,40 @@ test("renders recent chats and highlights the active one", () => {
     "page"
   );
   expect(screen.getByRole("link", { name: "New chat" })).toHaveAttribute("href", "/chat/c2");
-  expect(screen.getByRole("link", { name: "Recent" })).toHaveAttribute("href", "/chats");
+});
+
+/* Three group headings, one behaviour: the word is the disclosure, in every group. */
+test("collapses every group by its own heading, Recent included", async () => {
+  const user = userEvent.setup();
+  useConversations.mockReturnValue({
+    ...CONVERSATIONS,
+    conversations: [
+      {
+        id: "c1",
+        title: "Inventory planning",
+        agentId: null,
+        starred: false,
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+    ],
+  });
+  render(<SidebarStub initialEntries={["/chats"]} />);
+
+  for (const heading of ["Work", "Build", "Recent"]) {
+    const button = within(screen.getByRole("heading", { level: 2, name: heading })).getByRole(
+      "button"
+    );
+    expect(button).toHaveAttribute("aria-expanded", "true");
+    await user.click(button);
+    expect(
+      within(screen.getByRole("heading", { level: 2, name: heading })).getByRole("button")
+    ).toHaveAttribute("aria-expanded", "false");
+  }
+
+  expect(screen.queryByRole("link", { name: "Inbox" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Agents" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Inventory planning" })).not.toBeInTheDocument();
 });
 
 test("starts a fresh Chat from the sidebar", async () => {
@@ -519,4 +557,161 @@ test("gives every row the same box model as the bordered New chat button", () =>
   for (const name of ["Agents", "Skills", "Inbox"]) {
     expect(screen.getByRole("link", { name }).className).toContain("border border-transparent");
   }
+});
+
+/* A closed group is a preference, so it has to survive the next render of the sidebar. */
+test("closes a group, hides its rows, and remembers the choice", async () => {
+  const user = userEvent.setup();
+  const { unmount } = render(<SidebarStub initialEntries={["/agents"]} />);
+
+  expect(screen.getByRole("link", { name: "Agents" })).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Build" }));
+  expect(screen.queryByRole("link", { name: "Agents" })).not.toBeInTheDocument();
+  expect(screen.getByRole("heading", { level: 2, name: "Build" })).toBeInTheDocument();
+
+  unmount();
+  render(<SidebarStub initialEntries={["/agents"]} />);
+  expect(screen.queryByRole("link", { name: "Agents" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Build" })).toHaveAttribute("aria-expanded", "false");
+});
+
+/* A `+` that opens nothing teaches a reader to distrust every other `+`. */
+test("offers quick create only on the rows that own a create route", () => {
+  render(<SidebarStub initialEntries={["/agents"]} />);
+
+  expect(screen.getByRole("link", { name: "New resource type" })).toHaveAttribute(
+    "href",
+    "/resources/new"
+  );
+  expect(screen.getByRole("link", { name: "New space" })).toHaveAttribute(
+    "href",
+    "/knowledge/spaces/new"
+  );
+  for (const label of ["New agent", "New skill", "New routine"]) {
+    expect(screen.queryByRole("link", { name: label })).not.toBeInTheDocument();
+  }
+});
+
+test("reads the approval count as a quiet numeral rather than a pill", () => {
+  useApprovals.mockReturnValue({
+    approvals: [],
+    count: 3,
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
+  });
+  render(<SidebarStub initialEntries={["/inbox"]} />);
+
+  const row = screen.getByRole("link", { name: /Inbox\s*3\s*awaiting you/ });
+  const numeral = within(row).getByText("3");
+  expect(numeral.className).toContain("text-status-danger");
+  expect(numeral.className).not.toContain("border");
+});
+
+test("opens the command menu with / and reaches a destination through it", async () => {
+  const user = userEvent.setup();
+  render(<SidebarStub initialEntries={["/agents"]} />);
+
+  await user.keyboard("/");
+  const dialog = screen.getByRole("dialog", { name: "Command menu" });
+  await user.type(within(dialog).getByRole("combobox"), "routi");
+
+  expect(within(dialog).getByRole("button", { name: /Routines/ })).toBeInTheDocument();
+  expect(within(dialog).queryByRole("button", { name: /Agents/ })).not.toBeInTheDocument();
+});
+
+test("keeps / for the page when the reader is already typing", async () => {
+  const user = userEvent.setup();
+  render(
+    <>
+      <input aria-label="Composer" />
+      <SidebarStub initialEntries={["/agents"]} />
+    </>
+  );
+
+  await user.click(screen.getByLabelText("Composer"));
+  await user.keyboard("/");
+  expect(screen.queryByRole("dialog", { name: "Command menu" })).not.toBeInTheDocument();
+});
+
+/* Nothing here is for sale, so the ask must never come back once it is turned down. */
+test("dismisses the star request for good", async () => {
+  const user = userEvent.setup();
+  const { unmount } = render(<SidebarStub initialEntries={["/agents"]} />);
+
+  await user.click(screen.getByRole("button", { name: "Dismiss the star request" }));
+  expect(screen.queryByRole("link", { name: /Star on GitHub/ })).not.toBeInTheDocument();
+
+  unmount();
+  render(<SidebarStub initialEntries={["/agents"]} />);
+  expect(screen.queryByRole("link", { name: /Star on GitHub/ })).not.toBeInTheDocument();
+});
+
+/* Two controls claiming the same job is one control too many. */
+test("shows one collapse control at a time, moving it out of the sidebar when it narrows", async () => {
+  const user = userEvent.setup();
+  render(<ShellStub initialEntries={["/agents"]} />);
+
+  expect(screen.getAllByRole("button", { name: "Collapse sidebar" })).toHaveLength(1);
+  expect(screen.queryByRole("button", { name: "Expand sidebar" })).not.toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+  expect(screen.getAllByRole("button", { name: "Expand sidebar" })).toHaveLength(1);
+  expect(screen.queryByRole("button", { name: "Collapse sidebar" })).not.toBeInTheDocument();
+});
+
+/*
+ * The sidebar is a transformed element, which makes it the containing block for anything
+ * `position: fixed` inside it. Rendered in place the palette was trapped at 256px, so it has to
+ * leave the aside entirely.
+ */
+test("escapes the transformed sidebar by portalling the command menu to the body", async () => {
+  const user = userEvent.setup();
+  render(<SidebarStub initialEntries={["/agents"]} />);
+
+  await user.keyboard("{Meta>}k{/Meta}");
+  const dialog = screen.getByRole("dialog", { name: "Command menu" });
+  expect(screen.getByRole("navigation", { name: "Main" }).contains(dialog)).toBe(false);
+  expect(document.body.contains(dialog)).toBe(true);
+});
+
+test("leads the command menu with what a reader can do, not only where they can go", async () => {
+  const user = userEvent.setup();
+  render(<SidebarStub initialEntries={["/agents"]} />);
+
+  await user.keyboard("{Control>}k{/Control}");
+  const dialog = screen.getByRole("dialog", { name: "Command menu" });
+  const options = within(dialog).getAllByRole("button");
+
+  expect(options[0]).toHaveAccessibleName(/New chat/);
+  expect(within(dialog).getByRole("button", { name: /New resource type/ })).toBeInTheDocument();
+  expect(within(dialog).getByText("Actions")).toBeInTheDocument();
+});
+
+/* A section total is furniture; only something waiting on the reader earns the alarm colour. */
+test("tells a section total apart from something waiting on the reader", () => {
+  useApprovals.mockReturnValue({
+    approvals: [],
+    count: 2,
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
+  });
+  useSidebarCounts.mockReturnValue({ "/agents": 7 });
+  render(<SidebarStub initialEntries={["/agents"]} />);
+
+  const quiet = within(screen.getByRole("link", { name: /Agents/ })).getByText("7");
+  expect(quiet.className).toContain("text-muted-foreground");
+
+  const alert = within(screen.getByRole("link", { name: /awaiting you/ })).getByText("2");
+  expect(alert.className).toContain("text-status-danger");
+});
+
+/* A source that cannot answer for the whole set is absent, never rendered as zero. */
+test("says nothing at all for a section whose total is unknown", () => {
+  useSidebarCounts.mockReturnValue({ "/agents": 7 });
+  render(<SidebarStub initialEntries={["/agents"]} />);
+
+  expect(screen.getByRole("link", { name: "Skills" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Routines" })).toBeInTheDocument();
 });

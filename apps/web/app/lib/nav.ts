@@ -38,6 +38,11 @@ export type NavItem = {
    * title, so a page is named once.
    */
   description?: string;
+  /**
+   * A create page this row can jump straight to. Only a destination that owns a real create route
+   * may declare one — a `+` that opens nothing teaches the reader to distrust every other `+`.
+   */
+  create?: { to: string; label: string };
 };
 
 export type NavGroup = {
@@ -77,11 +82,21 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
   {
     heading: "Build",
     items: [
-      { to: "/resources", label: "Resources", icon: Boxes },
+      {
+        to: "/resources",
+        label: "Resources",
+        icon: Boxes,
+        create: { to: "/resources/new", label: "New resource type" },
+      },
       { to: "/agents", label: "Agents", icon: Bot },
       { to: "/skills", label: "Skills", icon: Puzzle },
       { to: "/routines", label: "Routines", icon: Workflow },
-      { to: "/knowledge", label: "Knowledge", icon: BookOpen },
+      {
+        to: "/knowledge",
+        label: "Knowledge",
+        icon: BookOpen,
+        create: { to: "/knowledge/spaces/new", label: "New space" },
+      },
     ],
   },
 ];
