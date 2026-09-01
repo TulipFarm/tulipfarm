@@ -20,6 +20,7 @@ data loading, schema-driven resource UI, and browser rendering of Surface Artifa
 | `app/components/settings/` | Panels for `_app.settings.*`; the Memory panel is read-only by contract. |
 | `app/components/farm/`, `app/lib/farm.ts` | `/farm` tulip canvas, season/legend strips, crop metadata, its parallel Soul read. |
 | `app/components/page-shell.tsx` | The one page frame: breadcrumb, `h1`, meta, actions, width. Every route uses it. |
+| `app/components/app-sidebar.tsx`, `app/components/sidebar-command.tsx` | The shell's one nav column and its ⌘K/`/` destination finder. |
 | `app/components/agents/` | Roster list, row, capability panel, and starters for `/agents`. |
 | `app/components/skills/` | Catalog, reach badge, capability/package/audience panels, marketplace browser. |
 | `app/components/resources/` | Stat strip, catalog table, schema summary for `/resources`. |
@@ -54,7 +55,11 @@ data loading, schema-driven resource UI, and browser rendering of Surface Artifa
   danger only. `app/components/ui` is app-local shadcn until a second app needs it.
 - The sidebar is one flat list: `SIDEBAR_GROUPS` is what a reader *does*, `SETTINGS_GROUPS` what
   they *configure* via `/settings`. Never add a rail or second shell column; a section needing
-  hierarchy owns it in-page, as `/knowledge` does, and collapsing hides no destination.
+  hierarchy owns it in-page, as `/knowledge` does. Headings are disclosures persisted under
+  `sidebar-group:<heading>`, and that is the only thing allowed to hide a destination — the 56px
+  width collapse still hides none. `sidebar-command.tsx` searches destinations and open chats only;
+  a row shows `+` only where `NavItem.create` names a real create route, and the link sits outside
+  the `NavLink` so the row's accessible name stays the destination's.
 - Resource list/detail/create/edit are zero-code from JSON Schema; a new field kind means
   `resolveKind`, `resource-form.tsx`, and `renderValue`. A count the caller may not read is `null`
   and renders `—`, never `0`. See DESIGN.md §9, *Data grids*. Never call secure-context-only browser

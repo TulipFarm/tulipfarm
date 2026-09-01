@@ -407,6 +407,35 @@ no longer fits becomes a dot on the icon with the number moved into the row's ac
 choice persists to `localStorage` and is mirrored onto `[data-sidebar]` before hydration so the
 prerendered skeleton paints at the right width.
 
+**One collapse control, and it moves.** Expanded, it sits in the sidebar's own header beside the
+mark, next to the thing it resizes. Collapsed, that header only has room for the mark, so the way
+back out is the top bar's. Never both: two controls claiming one job make a reader wonder which is
+authoritative.
+
+**Groups close, the width does not.** Each heading is a disclosure — an `h2` wrapping the button,
+so heading navigation still reaches a closed section — and the state persists per browser under
+`sidebar-group:<heading>`. This is the one place the sidebar hides a destination, and it is a
+choice the reader made and can see they made, unlike the width collapse, which hides nothing. The
+disclosure is dropped entirely in the 56px column: a group whose name you cannot read is not one
+you can meaningfully close.
+
+**Search is a destination finder, not a search engine.** The sidebar's command menu (`⌘K`, `Ctrl+K`
+or `/`) matches the reader's visible destinations and open chats, and nothing else. `/` is ignored
+while focus is in an input, textarea, select or contenteditable, so it never swallows a slash meant
+for the composer. An input that promises records and returns navigation is worse than one that
+promises navigation.
+
+**The command menu is a dialog, not a dropdown.** It is centred over a scrim and portalled to
+`document.body`. That is not a preference: the sidebar carries a `transform`, which makes it the
+containing block for every `position: fixed` descendant, so an overlay rendered in place is trapped
+inside the 256px column. Anything overlaying the app from inside the sidebar must portal out.
+
+**A `+` must open something.** Only a row whose section owns a real create route declares
+`create` in `app/lib/nav.ts` — today Resources and Knowledge. Agents, Skills and Routines are built
+by chatting, so they get no `+`, and group headings get none either: one fake affordance teaches a
+reader to distrust every real one. The quick-create link sits outside the `NavLink`, so the row's
+accessible name stays the destination's name.
+
 **Two verbs, and a door.** Work is what you watch (Chats, Inbox, Activity, Farm); Build is what
 you assemble (Resources, Agents, Skills, Routines, Knowledge). Everything visited rarely and
 deliberately lives behind Settings — including Operations and Observability, which are operator
@@ -424,6 +453,19 @@ neighbour. The header mark keeps its own 52px band and is exempt.
 `bg-sidebar-accent`. Active must never be a shade of the hover token: the two were once the same
 colour at 100% and 60%, a 4% lightness step that read as smudged grey rather than "you are here".
 Both states clear AA on their own background (5.9:1 light, 6.4:1 dark).
+
+**A count is a numeral, not a pill.** The row is already the alarm; boxing the number makes two.
+An alert count renders as a `text-status-danger` numeral with a hairline rule beneath it, followed
+by an `sr-only` "awaiting you" so the link still reads as a sentence. Collapsed it becomes the dot.
+
+**Two counts, two voices.** A section total is furniture — how many Agents exist — so it is a bare
+muted numeral you read past. Only something *waiting on the reader* takes the alarm colour and the
+rule, and today only Inbox qualifies. Give both the same red and the sidebar stops being able to
+raise its voice.
+
+**A count is measured or absent.** Never rendered as a guessed `0`. A source that errors, or that
+can only answer for one page of a longer list, contributes nothing at all — a wrong number is worse
+than no number, because the reader stops opening the page.
 
 The sidebar carries what you *do and watch*. What you *configure* lives behind Settings, which is a
 hub page rather than a redirect — a sidebar listing every configuration surface stops being
