@@ -4,14 +4,21 @@ import { apiDelete, apiGet, apiWrite } from "./api";
 
 export type McpConnectionStatus = "connected" | "connecting" | "error" | "disconnected";
 
+/** Whether the curated registry has opened this entry for connection yet. */
+export type IntegrationAvailability = "available" | "coming_soon";
+
 export type IntegrationSummary = {
   name: string;
   /** Brand name from the curated registry; falls back to the slug when uncurated. */
   title?: string;
+  /** `coming_soon` is listed but not openable — there is no setup to hand an operator yet. */
+  availability?: IntegrationAvailability;
   type: string;
   description?: string;
   category?: string;
   homepage?: string;
+  /** Manifest icon slug, resolved server-side. Keys the vendored full-colour brand marks. */
+  iconSlug?: string;
   /** Simple Icons path data, resolved server-side. Absent when the brand has no mark. */
   iconPath?: string;
   /** Brand hex without `#`. Not canvas-safe as given — pass through `brandInk` before rendering. */
@@ -22,6 +29,8 @@ export type IntegrationSummary = {
   source?: string;
   /** False for a curated entry that has not been cloned into the soul repo yet. */
   installed: boolean;
+  /** How many setup steps connecting takes. Absent when nothing is installed to count. */
+  setupSteps?: number;
   status: McpConnectionStatus;
   errorMessage?: string;
   updateAvailable?: boolean;

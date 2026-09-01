@@ -122,7 +122,7 @@ export {
 export { validateThirdPartyManifest } from "./integration-trust";
 export type { BundledIntegration } from "./integrations/bundled";
 export { bundledIntegrationsDir, loadBundledIntegrations } from "./integrations/bundled";
-export type { RegistryEntry } from "./integrations/registry";
+export type { RegistryAvailability, RegistryEntry } from "./integrations/registry";
 export { loadIntegrationRegistry } from "./integrations/registry";
 export {
   deleteLlmConfigFromSoulYaml,

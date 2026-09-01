@@ -32,7 +32,28 @@ describe("loadIntegrationRegistry", () => {
       source: "acme/linear",
       description: undefined,
       homepage: undefined,
+      // An entry says nothing about availability, so it is open — curation closes a door, never
+      // the absence of curation.
+      availability: "available",
     });
+  });
+
+  it("keeps a curated entry closed when it is marked coming soon", async () => {
+    const dir = await withRegistry(
+      "version: 1\nintegrations:\n  - name: jira\n    availability: coming_soon\n"
+    );
+    expect((await loadIntegrationRegistry(logger, dir)).get("jira")?.availability).toBe(
+      "coming_soon"
+    );
+  });
+
+  it("treats an unreadable availability as open rather than guessing it is closed", async () => {
+    const dir = await withRegistry(
+      "version: 1\nintegrations:\n  - name: jira\n    availability: 7\n"
+    );
+    expect((await loadIntegrationRegistry(logger, dir)).get("jira")?.availability).toBe(
+      "available"
+    );
   });
 
   // The marketplace page is more useful bare than broken, so neither absence nor malformed YAML

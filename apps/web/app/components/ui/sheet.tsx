@@ -8,12 +8,15 @@ export function Sheet({
   open,
   onClose,
   title,
+  headerActions,
   children,
   className,
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
+  /** Extra controls seated left of Close, for a sheet that also opens somewhere fuller. */
+  headerActions?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
 }) {
@@ -70,16 +73,19 @@ export function Sheet({
       )}
     >
       <div className="flex h-full flex-col">
-        <div className="flex shrink-0 items-center justify-between border-border border-b px-4 py-3">
-          <h2 className="text-sm font-medium text-foreground">{title}</h2>
-          <button
-            type="button"
-            aria-label="Close"
-            onClick={onClose}
-            className="cursor-pointer rounded-sm p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
-            <X className="size-4" aria-hidden />
-          </button>
+        <div className="flex shrink-0 items-center justify-between gap-2 border-border border-b px-4 py-3">
+          <h2 className="min-w-0 truncate text-sm font-medium text-foreground">{title}</h2>
+          <div className="flex shrink-0 items-center gap-1">
+            {headerActions}
+            <button
+              type="button"
+              aria-label="Close"
+              onClick={onClose}
+              className="cursor-pointer rounded-sm p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <X className="size-4" aria-hidden />
+            </button>
+          </div>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 text-sm">{children}</div>
       </div>

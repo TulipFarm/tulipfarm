@@ -6,8 +6,13 @@ import { bundledIntegrationsDir } from "./bundled";
 
 /* Curated registry only decorates bundled integrations or points at third-party repos. */
 
+/** Whether an operator may connect this entry yet. Unset reads as `available`. */
+export type RegistryAvailability = "available" | "coming_soon";
+
 export interface RegistryEntry {
   name: string;
+  /** `coming_soon` keeps the entry listed but closed: no detail page, no connect flow. */
+  availability: RegistryAvailability;
   title?: string;
   description?: string;
   category?: string;
@@ -30,6 +35,11 @@ function asHex(value: unknown): string | undefined {
 
 function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+/* An unreadable value must not silently open a flow the curator meant to keep closed. */
+function asAvailability(value: unknown): RegistryAvailability {
+  return value === "coming_soon" ? "coming_soon" : "available";
 }
 
 /** Missing or malformed registry is non-fatal; marketplace falls back to discovery. */
@@ -55,6 +65,7 @@ export async function loadIntegrationRegistry(
       if (!name || entries.has(name)) continue;
       entries.set(name, {
         name,
+        availability: asAvailability(record.availability),
         title: asString(record.title),
         description: asString(record.description),
         category: asString(record.category),

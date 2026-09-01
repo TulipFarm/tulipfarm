@@ -22,6 +22,7 @@ vi.mock("~/lib/use-session-user", () => ({
 vi.mock("~/lib/integrations", async (importOriginal) => ({
   ...(await importOriginal<typeof import("~/lib/integrations")>()),
   listIntegrations: vi.fn(),
+  getIntegration: vi.fn(),
   inspectIntegrationSource: vi.fn(),
   installIntegration: vi.fn(),
   updateIntegration: vi.fn(),
@@ -29,6 +30,7 @@ vi.mock("~/lib/integrations", async (importOriginal) => ({
 
 import type { IntegrationSummary } from "~/lib/integrations";
 import {
+  getIntegration,
   inspectIntegrationSource,
   installIntegration,
   updateIntegration,
@@ -46,7 +48,7 @@ function integration(over: Partial<IntegrationSummary> = {}): IntegrationSummary
   };
 }
 
-function renderCatalog(integrations: IntegrationSummary[]) {
+function renderCatalog(integrations: IntegrationSummary[], initialEntry = "/") {
   const Stub = createRemixStub([
     {
       path: "/",
@@ -55,13 +57,36 @@ function renderCatalog(integrations: IntegrationSummary[]) {
     },
     { path: "/integrations/:name", Component: () => <p>detail</p> },
   ]);
-  render(<Stub initialEntries={["/"]} />);
+  render(<Stub initialEntries={[initialEntry]} />);
 }
 
 test("shows the registry's brand name rather than the slug", async () => {
-  renderCatalog([integration({ name: "github", title: "GitHub" })]);
+  renderCatalog([integration({ name: "github", title: "GitHub", homepage: "https://github.com" })]);
   expect(await screen.findByText("GitHub")).toBeInTheDocument();
   expect(screen.queryByText("github")).not.toBeInTheDocument();
+});
+
+test("names the provider behind the brand, not the slug, when a homepage is curated", async () => {
+  renderCatalog([integration({ title: "GitHub", homepage: "https://www.github.com" })]);
+  expect(await screen.findByText("By github.com")).toBeInTheDocument();
+});
+
+test("lists a coming-soon entry without offering a way to connect it", async () => {
+  renderCatalog([
+    integration({ name: "github", title: "GitHub" }),
+    integration({ name: "jira", title: "Jira", availability: "coming_soon" }),
+  ]);
+
+  const headings = await screen.findAllByRole("heading", { level: 2 });
+  expect(headings.map((h) => h.textContent)).toEqual(["All integrations", "Coming soon"]);
+  const soon = headings[1].closest("section") as HTMLElement;
+  expect(within(soon).getByText("Jira")).toBeInTheDocument();
+  // The group heading and the card footer both say it: the section names it, the card states it.
+  expect(within(soon).getAllByText("Coming soon")).toHaveLength(2);
+  // It may preview — a card that does nothing reads as broken — but it must never link at the
+  // detail page, which is where a connection would be offered.
+  const preview = within(soon).getByRole("link", { name: /view details for jira/i });
+  expect(preview).toHaveAttribute("href", "/?view=jira");
 });
 
 test("falls back to the slug when nothing has curated a title", async () => {
@@ -90,12 +115,14 @@ test("titles the single group plainly when nothing is connected", async () => {
   expect(headings[0].textContent).toContain("All integrations");
 });
 
-test("an installed integration opens its detail page from anywhere in the row", async () => {
+test("an installed integration opens its preview panel from its card action", async () => {
   renderCatalog([integration({ name: "github", title: "GitHub", description: "Repos." })]);
-  const link = await screen.findByRole("link", { name: /GitHub/ });
-  expect(link).toHaveAttribute("href", "/integrations/github");
-  // The description is inside the link, not beside it: the whole row is the target.
-  expect(within(link).getByText("Repos.")).toBeInTheDocument();
+  const link = await screen.findByRole("link", { name: /view details for github/i });
+  // `?view=` and not a click handler: the preview has an address, so Back closes it and the link
+  // can be opened in a new tab or shared.
+  expect(link).toHaveAttribute("href", "/?view=github");
+  // One anchor per card, stretched over the tile — the description sits beside it, not inside it.
+  expect(screen.getByText("Repos.")).toBeInTheDocument();
 });
 
 test("a curated entry that is not installed yet is not a link to a detail page", async () => {
@@ -231,4 +258,83 @@ test("shows update available badge and update button on catalog row", async () =
 
   await user.click(updateButton);
   expect(updateIntegration).toHaveBeenCalledWith("linear", "acme/linear");
+});
+
+test("opens the preview panel straight from a ?view= URL, so the link is shareable", async () => {
+  vi.mocked(getIntegration).mockResolvedValue({
+    ...integration({ name: "github", title: "GitHub", homepage: "https://github.com" }),
+    grants: [{ label: "issues", access: "read and write", description: "Triage and comment." }],
+    capabilities: ["Review pull requests"],
+    manifest: {},
+    auth: [{ index: 0, kind: "fields", title: "Add a token", satisfied: false, producesEnv: true }],
+    connected: false,
+  });
+
+  renderCatalog([integration({ name: "github", title: "GitHub" })], "/?view=github");
+
+  const sheet = await screen.findByRole("dialog");
+  expect(within(sheet).getByText("Integrations / GitHub")).toBeInTheDocument();
+  // The panel previews; it never performs the write itself, so its action leaves for the page
+  // that does.
+  expect(within(sheet).getByRole("link", { name: /^set up/i })).toHaveAttribute(
+    "href",
+    "/integrations/github"
+  );
+  expect(within(sheet).getByText("Review pull requests")).toBeInTheDocument();
+  expect(within(sheet).getByText("issues")).toBeInTheDocument();
+  // The integration's own status, and separately the state of one setup step — a step is "to do",
+  // never "not connected", or the two read as the same fact reported twice.
+  expect(within(sheet).getByText("Not connected")).toBeInTheDocument();
+  expect(within(sheet).getByText("To do")).toBeInTheDocument();
+});
+
+test("the panel colours connection state, so a card and its panel agree", async () => {
+  vi.mocked(getIntegration).mockResolvedValue({
+    ...integration({ name: "github", title: "GitHub", status: "connected" }),
+    grants: [],
+    manifest: {},
+    auth: [],
+    connected: true,
+  });
+
+  renderCatalog(
+    [integration({ name: "github", title: "GitHub", status: "connected" })],
+    "/?view=github"
+  );
+
+  const sheet = await screen.findByRole("dialog");
+  // A green "Connected" on the card must not turn grey the moment the panel opens — same fact,
+  // same tone, or the colour stops meaning anything.
+  expect(within(sheet).getByText("Connected")).toHaveClass("text-status-success");
+});
+
+test("a coming-soon preview offers no way to connect", async () => {
+  vi.mocked(getIntegration).mockResolvedValue({
+    ...integration({ name: "jira", title: "Jira", availability: "coming_soon" }),
+    grants: [],
+    manifest: {},
+    auth: [],
+    connected: false,
+  });
+
+  renderCatalog(
+    [integration({ name: "jira", title: "Jira", availability: "coming_soon" })],
+    "/?view=jira"
+  );
+
+  const sheet = await screen.findByRole("dialog");
+  expect(within(sheet).queryByRole("link", { name: /set up|manage/i })).not.toBeInTheDocument();
+  // Not even the header shortcut: the detail page is where a connection would be offered.
+  expect(within(sheet).queryByRole("link", { name: /open the full/i })).not.toBeInTheDocument();
+});
+
+test("offers asking an agent for an integration the catalog does not carry", async () => {
+  const user = userEvent.setup();
+  renderCatalog([integration({ name: "github", title: "GitHub" })]);
+
+  await user.click(await screen.findByRole("button", { name: /more integration actions/i }));
+  // A chat draft, because chat is how an agent is asked to build anything here — not a request
+  // form that files into a queue nobody owns.
+  const request = screen.getByRole("menuitem", { name: /request an integration/i });
+  expect(request.getAttribute("href")).toMatch(/^\/\?draft=/);
 });

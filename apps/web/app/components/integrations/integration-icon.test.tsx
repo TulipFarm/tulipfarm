@@ -45,33 +45,65 @@ describe("IntegrationIcon", () => {
     expect(container.firstElementChild).toHaveAttribute("aria-hidden");
   });
 
-  test("wears the brand's colour, corrected for each canvas", () => {
+  test("wears the brand's colour, corrected for the tile it sits on", () => {
     const { container } = render(
       <IntegrationIcon label="GitHub" iconPath="M0 0h24v24H0z" iconColor="181717" />
     );
     const tile = container.firstElementChild as HTMLElement;
-    // Both corrections are published so the `dark:` variant can switch between them without
-    // JavaScript — GitHub's near-black is unreadable on the dark canvas as authored.
-    expect(tile.style.getPropertyValue("--brand-light")).toBe("oklch(0.206 0.0016 17.3)");
-    expect(tile.style.getPropertyValue("--brand-dark")).toBe("oklch(0.720 0.0016 17.3)");
+    // One correction, not two: the tile is light in both themes, so the dark-canvas variant of the
+    // brand colour would only ever wash the mark out.
+    expect(tile.style.getPropertyValue("--brand")).toBe("oklch(0.206 0.0016 17.3)");
+    expect(container.querySelector("svg")?.getAttribute("class")).toContain("text-[var(--brand)]");
   });
 
-  test("colours the monogram too, so a brand without a mark is still that brand", () => {
-    // The whole reason the registry carries a colour: one grey tile among coloured logos reads as
-    // a failed image rather than as a brand that has no logo to show.
+  test("leaves a monogram neutral, because a two-letter word is not a logo", () => {
+    // A coloured monogram claims to be a brand mark. It is a placeholder, and reading as one is
+    // the honest outcome — the colour belongs to marks the brand actually authored.
     const { container } = render(<IntegrationIcon label="Slack" iconColor="4A154B" />);
-    const tile = container.firstElementChild as HTMLElement;
     expect(screen.getByText("SL")).toBeInTheDocument();
-    expect(tile.style.getPropertyValue("--brand-light")).toContain("oklch(");
-    expect(tile.className).toContain("text-[var(--brand)]");
+    expect(screen.getByText("SL").className).toContain("text-neutral-500");
+    expect(container.querySelector("svg")).toBeNull();
   });
 
-  test("falls back to the muted treatment when no colour is curated", () => {
+  test("needs no colour at all when none is curated", () => {
     // An integration installed from a URL has no registry entry, so inventing a colour for it
     // would be inventing a brand.
     const { container } = render(<IntegrationIcon label="Acme CRM" />);
     const tile = container.firstElementChild as HTMLElement;
-    expect(tile.style.getPropertyValue("--brand-light")).toBe("");
-    expect(tile.className).toContain("text-muted-foreground");
+    expect(tile.style.getPropertyValue("--brand")).toBe("");
+    expect(screen.getByText("AC")).toBeInTheDocument();
+  });
+
+  test("prefers the vendored full-colour mark over the monochrome glyph", () => {
+    // Slack is the case this exists for: it is absent from Simple Icons, so without the vendored
+    // mark the catalog shows an "SL" monogram where every other tile shows a logo.
+    const { container } = render(<IntegrationIcon label="Slack" iconSlug="slack" />);
+    const fills = [...container.querySelectorAll("path")].map((p) => p.getAttribute("fill"));
+    expect(fills).toEqual(["#E01E5A", "#36C5F0", "#2EB67D", "#ECB22E"]);
+    expect(screen.queryByText("SL")).not.toBeInTheDocument();
+  });
+
+  test("keeps the tile neutral behind a full-colour mark", () => {
+    // Tinting the tile with one of the brand's four colours would fight the other three, and
+    // tinting only *some* tiles is what makes a grid read as several card designs rather than one.
+    // So every tier gets the same tile, whatever mark ends up on it.
+    const tiles = [
+      render(<IntegrationIcon label="Slack" iconSlug="slack" iconColor="4A154B" />),
+      render(<IntegrationIcon label="GitHub" iconPath="M12 0z" iconColor="181717" />),
+      render(<IntegrationIcon label="Acme CRM" />),
+    ].map((r) => (r.container.firstElementChild as HTMLElement).className);
+    for (const tile of tiles) {
+      expect(tile).toContain("bg-white");
+      expect(tile).not.toContain("--brand)_12%");
+    }
+  });
+
+  test("still uses the monochrome glyph for a brand with no vendored mark", () => {
+    // GitHub's own logo is monochrome, so the Simple Icons path is the real mark, not a fallback.
+    const { container } = render(
+      <IntegrationIcon label="GitHub" iconSlug="github" iconPath="M12 0z" iconColor="181717" />
+    );
+    expect(container.querySelector("path")?.getAttribute("d")).toBe("M12 0z");
+    expect(container.querySelector("svg")?.getAttribute("class")).toContain("text-[var(--brand)]");
   });
 });

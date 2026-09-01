@@ -1,18 +1,18 @@
 import {
-  Link,
   type MetaFunction,
   useLoaderData,
   useRevalidator,
   useRouteError,
+  useSearchParams,
 } from "@remix-run/react";
-import { ChevronRight, Search } from "lucide-react";
-import { type ReactNode, useId, useMemo, useState } from "react";
+import { Search } from "lucide-react";
+import { type ReactNode, useCallback, useId, useMemo, useState } from "react";
+import { CatalogActionsMenu } from "~/components/integrations/catalog-actions-menu";
 import { InstallFromSource } from "~/components/integrations/install-from-source";
-import { IntegrationIcon } from "~/components/integrations/integration-icon";
+import { displayName, IntegrationCard } from "~/components/integrations/integration-card";
+import { IntegrationPanel } from "~/components/integrations/integration-panel";
 import { ErrorState } from "~/components/states";
-import { StatusBadge } from "~/components/status-badge";
 import { Badge } from "~/components/ui/badge";
-import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Panel, PanelEmpty } from "~/components/ui/panel";
 import { ApiError } from "~/lib/api";
@@ -20,7 +20,7 @@ import { type IntegrationSummary, listIntegrations, updateIntegration } from "~/
 import { useIsAdmin } from "~/lib/use-session-user";
 import { cn } from "~/lib/utils";
 
-/* Connection state is a row property; install is only for curated entries not yet cloned. */
+/* Connection state is a card property; install is only for curated entries not yet cloned. */
 
 export const meta: MetaFunction = () => [{ title: "Integrations · tulipfarm" }];
 
@@ -28,14 +28,22 @@ export async function clientLoader() {
   return { integrations: await listIntegrations() };
 }
 
-/** Uncurated entries carry no registry title, so the slug is the honest display name. */
-function displayName(integration: IntegrationSummary): string {
-  return integration.title ?? integration.name;
-}
-
 export default function IntegrationsIndex() {
   const { integrations } = useLoaderData<typeof clientLoader>();
   const revalidator = useRevalidator();
+  // The open preview lives in the URL, so Back closes it and a link to it can be shared.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const viewing = searchParams.get("view") ?? undefined;
+  const closePanel = useCallback(() => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("view");
+        return next;
+      },
+      { replace: true, preventScrollReset: true }
+    );
+  }, [setSearchParams]);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<string>();
   const searchId = useId();
@@ -74,37 +82,40 @@ export default function IntegrationsIndex() {
     });
   }, [integrations, query, category]);
 
-  // Connected first: it is the smaller group and the one an operator returns to check on. Within a
-  // group the server's alphabetical order stands, so rows do not move as connections change.
-  const connected = visible.filter((i) => i.status === "connected");
-  const rest = visible.filter((i) => i.status !== "connected");
+  // Three groups, in the order an operator needs them: what already works, what they can turn on
+  // today, and what is only announced. Within a group the server's alphabetical order stands, so
+  // cards do not move as connections change.
+  const soon = visible.filter((i) => i.availability === "coming_soon");
+  const ready = visible.filter((i) => i.availability !== "coming_soon");
+  const connected = ready.filter((i) => i.status === "connected");
+  const rest = ready.filter((i) => i.status !== "connected");
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-col gap-3">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <div className="relative flex-1">
-            <label className="sr-only" htmlFor={searchId}>
-              Search integrations
-            </label>
-            <Search
-              aria-hidden
-              className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-            />
-            <Input
-              id={searchId}
-              type="search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search integrations"
-              className="pl-8"
-            />
-          </div>
-          <InstallFromSource onInstalled={() => revalidator.revalidate()} />
+    <div className="flex flex-col gap-5">
+      {/* One toolbar, not three stacked rows. A search field stretched the full width of a page
+          holding five results announces itself as the main event; capped, it reads as the utility
+          it is and lets the catalog be what the eye lands on. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <div className="relative w-full sm:w-64">
+          <label className="sr-only" htmlFor={searchId}>
+            Search integrations
+          </label>
+          <Search
+            aria-hidden
+            className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+          />
+          <Input
+            id={searchId}
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search integrations"
+            className="pl-8"
+          />
         </div>
 
         {categories.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1">
+          <div className="flex flex-wrap items-center gap-0.5 rounded-lg bg-muted/60 p-0.5">
             <CategoryChip active={!category} onClick={() => setCategory(undefined)}>
               All
             </CategoryChip>
@@ -119,6 +130,11 @@ export default function IntegrationsIndex() {
             ))}
           </div>
         )}
+
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          <InstallFromSource onInstalled={() => revalidator.revalidate()} />
+          <CatalogActionsMenu />
+        </div>
       </div>
 
       {updateError && (
@@ -138,7 +154,7 @@ export default function IntegrationsIndex() {
       ) : (
         <>
           {connected.length > 0 && (
-            <Section
+            <Group
               title="Connected"
               items={connected}
               onUpdate={handleUpdate}
@@ -147,7 +163,7 @@ export default function IntegrationsIndex() {
             />
           )}
           {rest.length > 0 && (
-            <Section
+            <Group
               title={connected.length > 0 ? "Available" : "All integrations"}
               items={rest}
               onUpdate={handleUpdate}
@@ -155,8 +171,20 @@ export default function IntegrationsIndex() {
               isAdmin={isAdmin}
             />
           )}
+          {soon.length > 0 && (
+            <Group
+              title="Coming soon"
+              description="Listed so the roadmap is visible. There is nothing to connect yet."
+              items={soon}
+              onUpdate={handleUpdate}
+              updatingName={updatingName}
+              isAdmin={isAdmin}
+            />
+          )}
         </>
       )}
+
+      <IntegrationPanel name={viewing} onClose={closePanel} />
     </div>
   );
 }
@@ -176,10 +204,10 @@ function CategoryChip({
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        "rounded-sm border px-2 py-1 text-xs capitalize transition-colors",
+        "rounded-md px-2.5 py-1 text-xs font-medium capitalize transition-colors duration-150",
         active
-          ? "border-border bg-muted text-foreground"
-          : "border-transparent text-muted-foreground hover:bg-accent hover:text-foreground"
+          ? "bg-card text-foreground shadow-[0_1px_2px_rgb(0_0_0/0.08)] ring-1 ring-black/[0.06] dark:ring-white/10"
+          : "text-muted-foreground hover:text-foreground"
       )}
     >
       {children}
@@ -187,24 +215,40 @@ function CategoryChip({
   );
 }
 
-function Section({
+/**
+ * A named group of cards. Deliberately not a `Panel`: a bordered container around bordered cards
+ * frames the same content twice, so the heading names the group and the cards carry the only edge.
+ */
+function Group({
   title,
+  description,
   items,
   onUpdate,
   updatingName,
   isAdmin,
 }: {
   title: string;
+  description?: string;
   items: IntegrationSummary[];
   onUpdate: (name: string, source?: string) => void;
   updatingName?: string;
   isAdmin: boolean;
 }) {
+  const headingId = useId();
   return (
-    <Panel title={title} actions={<Badge>{items.length}</Badge>} flush>
-      <ul className="flex flex-col divide-y divide-border">
+    <section aria-labelledby={headingId} className="flex flex-col gap-3">
+      <div className="flex items-baseline gap-2">
+        <h2 id={headingId} className="text-sm font-semibold text-foreground">
+          {title}
+        </h2>
+        <Badge>{items.length}</Badge>
+        {description ? (
+          <p className="hidden text-xs text-muted-foreground sm:block">{description}</p>
+        ) : null}
+      </div>
+      <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {items.map((integration) => (
-          <IntegrationRow
+          <IntegrationCard
             key={integration.name}
             integration={integration}
             onUpdate={onUpdate}
@@ -213,100 +257,7 @@ function Section({
           />
         ))}
       </ul>
-    </Panel>
-  );
-}
-
-function RowBody({ integration }: { integration: IntegrationSummary }) {
-  const name = displayName(integration);
-  return (
-    <>
-      <IntegrationIcon
-        label={name}
-        iconPath={integration.iconPath}
-        iconColor={integration.iconColor}
-      />
-      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="flex items-center gap-2">
-          <span className="truncate font-medium text-foreground">{name}</span>
-          {integration.category && (
-            <Badge className="hidden capitalize sm:inline-flex">{integration.category}</Badge>
-          )}
-        </span>
-        {integration.description && (
-          <span className="line-clamp-1 text-xs text-muted-foreground">
-            {integration.description}
-          </span>
-        )}
-      </span>
-    </>
-  );
-}
-
-function IntegrationRow({
-  integration,
-  onUpdate,
-  updating,
-  isAdmin,
-}: {
-  integration: IntegrationSummary;
-  onUpdate: (name: string, source?: string) => void;
-  updating?: boolean;
-  isAdmin?: boolean;
-}) {
-  // A curated entry that has not been cloned has no detail page to open — linking there would 404.
-  // It is a row about a repository, not about an integration this deployment has.
-  if (!integration.installed) {
-    return (
-      <li className="flex items-center gap-3 px-4 py-3">
-        <RowBody integration={integration} />
-        <span className="shrink-0 text-xs text-muted-foreground">Not installed</span>
-      </li>
-    );
-  }
-
-  return (
-    <li className="flex flex-col">
-      {/* The row is the link. A catalog is scanned and clicked, so the target should be the row
-          the pointer is already over, not the few characters of its title. */}
-      <Link
-        to={`/integrations/${encodeURIComponent(integration.name)}`}
-        className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-accent"
-      >
-        <RowBody integration={integration} />
-        <span className="flex shrink-0 items-center gap-2">
-          {integration.updateAvailable && (
-            <span className="shrink-0 rounded-sm border border-primary px-1.5 py-0.5 text-xs uppercase tracking-[0.15em] text-primary">
-              update available
-            </span>
-          )}
-          {integration.updateAvailable && isAdmin && (
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={updating}
-              aria-label={`Update ${displayName(integration)}`}
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                onUpdate(integration.name, integration.source);
-              }}
-            >
-              {updating ? "Updating…" : "Update"}
-            </Button>
-          )}
-          {integration.status === "connected" ? (
-            <StatusBadge label="connected" tone="success" />
-          ) : (
-            <span className="text-xs text-muted-foreground">Set up</span>
-          )}
-          <ChevronRight aria-hidden className="size-4 text-muted-foreground" />
-        </span>
-      </Link>
-      {integration.errorMessage && (
-        <p className="px-4 pb-2 text-xs text-destructive">{integration.errorMessage}</p>
-      )}
-    </li>
+    </section>
   );
 }
 

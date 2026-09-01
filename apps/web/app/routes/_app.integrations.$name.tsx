@@ -10,6 +10,7 @@ import {
 import { ArrowLeft, ExternalLink, MoreHorizontal, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { IntegrationAuthFlow, startHandoff } from "~/components/integrations/auth-flow";
+import { ComingSoonState } from "~/components/integrations/coming-soon-state";
 import { GitHubPersonalAccount } from "~/components/integrations/github-personal-account";
 import { IntegrationIcon } from "~/components/integrations/integration-icon";
 import { MarkdownView } from "~/components/markdown-view";
@@ -36,10 +37,23 @@ import { useIsAdmin } from "~/lib/use-session-user";
 
 export const meta: MetaFunction = () => [{ title: "Integration · tulipfarm" }];
 
+/**
+ * A registry entry that is listed but not opened yet. Thrown rather than rendered so the page
+ * never mounts a connect flow this deployment will not honor, however the URL was reached.
+ */
+class ComingSoonError extends Error {
+  constructor(readonly integrationName: string) {
+    super(`integration not available yet: ${integrationName}`);
+  }
+}
+
 export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
   const name = params.name;
   if (!name) throw new ApiError(404, "missing integration name");
   const integration = await getIntegration(name);
+  if (integration.availability === "coming_soon") {
+    throw new ComingSoonError(integration.title ?? integration.name);
+  }
   let routesError: string | undefined;
   if (name === "slack" && integration.connected) {
     try {
@@ -339,6 +353,7 @@ export default function IntegrationDetailPage() {
           <div className="flex min-w-0 gap-3">
             <IntegrationIcon
               label={name}
+              iconSlug={integration.iconSlug}
               iconPath={integration.iconPath}
               iconColor={integration.iconColor}
               size="lg"
@@ -637,6 +652,9 @@ export default function IntegrationDetailPage() {
 
 export function ErrorBoundary() {
   const error = useRouteError();
+  if (error instanceof ComingSoonError) {
+    return <ComingSoonState name={error.integrationName} />;
+  }
   if (error instanceof ApiError && error.status === 404) {
     return <NotFoundState section="integrations" />;
   }
