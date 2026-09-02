@@ -9,7 +9,7 @@ import {
 } from "@tulipfarm/agent-runtime";
 import type { AuthorityLayer } from "@tulipfarm/authz";
 import type { AgentCapabilityRestrictions } from "@tulipfarm/schema";
-import { buildSoulCatalogue, type SoulLoader } from "@tulipfarm/soul";
+import { buildSoulCatalogue, type RegistryEntry, type SoulLoader } from "@tulipfarm/soul";
 import { type AuthorityPrincipal, agentCanUseSkill, principalKindOf } from "@tulipfarm/tool-host";
 
 /**
@@ -27,6 +27,16 @@ export interface MemoryDocumentReader {
   render(businessId: string, userId: string): Promise<string>;
 }
 
+/**
+ * The marketplace catalog read the reminder needs; `loadIntegrationRegistry` satisfies it.
+ *
+ * Every business reads the same registry, so this takes no arguments — unlike `MemoryDocumentReader`,
+ * which is scoped per subject.
+ */
+export interface IntegrationRegistryReader {
+  load(): Promise<ReadonlyMap<string, RegistryEntry>>;
+}
+
 export interface SoulReminderInput {
   readonly authorityLayers?: SubjectAuthorityLayers;
   readonly soulLoader?: SoulLoader;
@@ -34,6 +44,8 @@ export interface SoulReminderInput {
   readonly memory?: MemoryDocumentReader;
   /** Absent leaves `<custom-instructions>` empty rather than failing the Turn. */
   readonly customInstructions?: (userId: string) => Promise<string | undefined>;
+  /** Absent leaves `<available-integrations>` naming only what this Soul has connected. */
+  readonly integrationRegistry?: IntegrationRegistryReader;
   readonly businessId: string;
   readonly subjectId: string;
   readonly subjectKind: string;
@@ -123,7 +135,8 @@ export async function resolveSoulReminder(input: SoulReminderInput): Promise<str
     kind,
   });
   const business = businessFrom(input.soulLoader);
-  const loaded = buildSoulCatalogue(input.soulLoader);
+  const registry = await input.integrationRegistry?.load().catch(() => undefined);
+  const loaded = buildSoulCatalogue(input.soulLoader, registry);
   const catalogue = {
     ...loaded,
     skills: loaded.skills.filter((entry) => agentCanUseSkill(input.agentRestrictions, entry.name)),

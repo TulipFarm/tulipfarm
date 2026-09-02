@@ -262,6 +262,43 @@ describe("renderSoulReminder", () => {
   });
 });
 
+describe("renderSoulReminder — integrations", () => {
+  // #663: an Agent that only ever saw connected Integrations told a user a catalogued-but-
+  // unconnected Integration had no native support, then invented a raw API-key path. The status
+  // label is what lets it tell "connected" apart from "exists, but not set up yet".
+  it("renders a connected Integration exactly as before — bare name and description", () => {
+    const out = renderSoulReminder(
+      catalogue({
+        integrations: [{ name: "slack", description: "Team chat", status: "connected" }],
+      })
+    );
+
+    expect(out).toContain("<available-integrations>\nslack: Team chat\n</available-integrations>");
+  });
+
+  it("labels an available-but-unconnected Integration and points at the Integrations page", () => {
+    const out = renderSoulReminder(
+      catalogue({
+        integrations: [{ name: "github", description: "Code hosting", status: "available" }],
+      })
+    );
+
+    expect(out).toContain(
+      "github: not connected — set up from the Integrations page — Code hosting"
+    );
+  });
+
+  it("labels a coming-soon Integration as not yet available", () => {
+    const out = renderSoulReminder(
+      catalogue({
+        integrations: [{ name: "linear", description: "Issue tracking", status: "coming_soon" }],
+      })
+    );
+
+    expect(out).toContain("linear: coming soon, not yet available to connect — Issue tracking");
+  });
+});
+
 describe("renderSoulReminder — the business", () => {
   it("labels each field and omits only the ones that are unset", () => {
     const out = renderSoulReminder(

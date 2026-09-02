@@ -76,7 +76,7 @@ import type { RoutineDetailDeps } from "./routines/detail-routes";
 import type { RunEventRouteDeps } from "./runs/events";
 import type { RunReplayDeps } from "./runs/replay";
 import type { SetupAdminCreator } from "./setup/first-admin";
-import type { SubjectAuthorityLayers } from "./soul/reminder";
+import type { IntegrationRegistryReader, SubjectAuthorityLayers } from "./soul/reminder";
 import type { SurfaceActionStore } from "./surfaces/action-store";
 import type { SurfaceArtifactStore } from "./surfaces/artifact-store";
 import type { SystemRoutesDeps } from "./system/routes";
@@ -85,6 +85,12 @@ import type { TriggerInvokeDeps } from "./triggers/routes";
 export interface AppOptions {
   /** Backs the read-only Memory panel on `/settings/profile`. */
   readonly memoryDocuments?: MemoryDocumentRepo;
+  /**
+   * The marketplace catalog for the Soul reminder's `<available-integrations>` block, so an Agent
+   * can tell a connected Integration apart from one that merely exists but is not set up yet.
+   * Absent leaves that block naming only what this Soul has already connected.
+   */
+  readonly integrationRegistry?: IntegrationRegistryReader;
   sessionStore?: SessionStore;
   userRepo?: UserRepo;
   userAdminRepo?: UserAdminRepo;

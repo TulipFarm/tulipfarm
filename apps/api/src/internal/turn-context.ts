@@ -34,6 +34,7 @@ import { assembleAgentSystemPrompt } from "../chat/system-prompt";
 import { availableToolsFor, toolAgentFor } from "../chat/turn-helpers";
 import type { ConversationStore, PersistedMessage } from "../conversations/service";
 import {
+  type IntegrationRegistryReader,
   type MemoryDocumentReader,
   resolveSoulReminder,
   type SubjectAuthorityLayers,
@@ -122,7 +123,7 @@ export async function readChatRequest(
   return artifact.content as ChatRequestPayload;
 }
 
-export type { SubjectAuthorityLayers } from "../soul/reminder";
+export type { IntegrationRegistryReader, SubjectAuthorityLayers } from "../soul/reminder";
 export interface ChatTurnContextResolverOptions {
   readonly artifacts: ArtifactService;
   readonly store: ConversationStore;
@@ -161,6 +162,14 @@ export interface ChatTurnContextResolverOptions {
    */
   readonly memory?: MemoryDocumentReader;
   readonly customInstructions?: (userId: string) => Promise<string | undefined>;
+  /**
+   * The marketplace catalog for the reminder's `<available-integrations>` block.
+   *
+   * Absent leaves that block naming only what this Soul has already connected, exactly as before
+   * this existed — an Agent still learns of the rest only by being told, or by a Tool this package
+   * does not have.
+   */
+  readonly integrationRegistry?: IntegrationRegistryReader;
   readonly telemetry?: TelemetryPort;
   /**
    * Reads the Files this Turn attached, so their authorization can be checked again here.
@@ -326,6 +335,9 @@ export class ChatTurnContextResolver implements TurnContextResolver {
       ...(this.options.customInstructions === undefined
         ? {}
         : { customInstructions: this.options.customInstructions }),
+      ...(this.options.integrationRegistry === undefined
+        ? {}
+        : { integrationRegistry: this.options.integrationRegistry }),
       ...(agentRestrictions === undefined ? {} : { agentRestrictions }),
       pinned,
       businessId: authority.businessId,

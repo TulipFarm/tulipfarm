@@ -51,7 +51,12 @@ export {
 export type { BundleRetentionInput } from "./bundle-store.pg";
 export { PgBundleStore, SOUL_BUNDLE_STORAGE_STATEMENTS } from "./bundle-store.pg";
 export { bundleTriggerDefinitions, findBundleTrigger } from "./bundle-triggers";
-export type { SoulCatalogue, SoulCatalogueEntry } from "./catalogue";
+export type {
+  IntegrationCatalogueEntry,
+  IntegrationCatalogueStatus,
+  SoulCatalogue,
+  SoulCatalogueEntry,
+} from "./catalogue";
 export { buildSoulCatalogue } from "./catalogue";
 export type {
   SoulChangeset,

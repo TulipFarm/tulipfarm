@@ -25,6 +25,7 @@ export type {
   SoulBusinessDetails,
   SoulReminderCatalogue,
   SoulReminderEntry,
+  SoulReminderIntegrationEntry,
   SoulReminderPersonal,
   SoulReminderPinned,
 } from "./soul-reminder";

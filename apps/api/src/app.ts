@@ -503,6 +503,9 @@ export async function buildApp(opts: AppOptions = {}) {
                 customInstructions: (userId: string) =>
                   readCustomInstructions(kvForInstructions, userId),
               }),
+          ...(opts.integrationRegistry === undefined
+            ? {}
+            : { integrationRegistry: opts.integrationRegistry }),
           ...(opts.fileService === undefined ? {} : { files: opts.fileService }),
         },
         requireAuth
