@@ -62,6 +62,7 @@ import {
   loadBundledIntegrations,
   loadBundledSkills,
   loadDisabledBundledSkills,
+  loadIntegrationRegistry,
   PgBundleStore,
   resolveAgent,
   resolveAuthSteps,
@@ -991,6 +992,9 @@ async function boot() {
           // about what is on file for this person.
           memory: memoryDocuments,
           customInstructions: (userId: string) => readCustomInstructions(kvService, userId),
+          // Same marketplace catalog the Integrations page reads, so the reminder never claims a
+          // catalogued Integration does not exist.
+          integrationRegistry: { load: () => loadIntegrationRegistry(app.log) },
         }),
         files: fileService,
         tools: buildDelegatedToolDispatch({
@@ -1155,6 +1159,9 @@ async function boot() {
       surfaceArtifactStore,
       surfaceActionStore,
       memoryDocuments,
+      // Same marketplace catalog the Integrations page reads, so the chat drawer's reminder
+      // preview never claims a catalogued Integration does not exist.
+      integrationRegistry: { load: () => loadIntegrationRegistry(app.log) },
       kvService,
       taskStore: taskRepo,
       fileService,

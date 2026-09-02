@@ -9,6 +9,7 @@ import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
 import type { ConversationStore } from "../conversations/service";
 import {
+  type IntegrationRegistryReader,
   type MemoryDocumentReader,
   resolveSoulReminder,
   type SubjectAuthorityLayers,
@@ -55,6 +56,8 @@ export interface ConversationRoutesDeps {
   /** Fed to the reminder so the drawer shows the same personal blocks the Turn sends. */
   memory?: MemoryDocumentReader;
   customInstructions?: (userId: string) => Promise<string | undefined>;
+  /** Fed to the reminder so the drawer shows the same `<available-integrations>` a Turn sends. */
+  integrationRegistry?: IntegrationRegistryReader;
 }
 
 export function registerConversationRoutes(
@@ -71,6 +74,7 @@ export function registerConversationRoutes(
     authorityLayers,
     memory,
     customInstructions,
+    integrationRegistry,
   } = deps;
 
   app.get(
@@ -402,6 +406,7 @@ export function registerConversationRoutes(
           ...(soulLoader === undefined ? {} : { soulLoader }),
           ...(memory === undefined ? {} : { memory }),
           ...(customInstructions === undefined ? {} : { customInstructions }),
+          ...(integrationRegistry === undefined ? {} : { integrationRegistry }),
           businessId: DEPLOYMENT_BUSINESS_ID,
           subjectId: user._id,
           subjectKind: "user",

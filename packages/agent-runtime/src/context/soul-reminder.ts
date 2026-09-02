@@ -19,6 +19,19 @@ export interface SoulReminderEntry {
   readonly description: string;
 }
 
+/**
+ * An Integration as the reminder names it, plus whether this business has it connected yet.
+ *
+ * Distinct from `SoulReminderEntry` because an Integration is the one artifact kind the catalogue
+ * names before it exists here: `available` and `coming_soon` describe the marketplace, not
+ * anything in this Soul. Without `status` the reminder cannot tell an Agent "not connected, go set
+ * it up" apart from "connected, use it" — which is exactly the gap that let an Agent claim no
+ * integration existed and invent a raw API-key path instead.
+ */
+export interface SoulReminderIntegrationEntry extends SoulReminderEntry {
+  readonly status: "connected" | "available" | "coming_soon";
+}
+
 /** Who the business is, as `soul.yaml` states it. Every field is optional and often unset. */
 export interface SoulBusinessDetails {
   readonly name?: string;
@@ -33,7 +46,7 @@ export interface SoulReminderCatalogue {
   readonly skills: readonly SoulReminderEntry[];
   readonly resourceTypes: readonly SoulReminderEntry[];
   readonly routines: readonly SoulReminderEntry[];
-  readonly integrations: readonly SoulReminderEntry[];
+  readonly integrations: readonly SoulReminderIntegrationEntry[];
 }
 
 /**
@@ -243,6 +256,9 @@ export function filterSoulCatalogue(
   return {
     ...EMPTY_CATALOGUE,
     ...filtered,
+    // `filtered` is widened to the common `SoulReminderEntry` shape for the loop above; the
+    // filter never touches `status`, so the narrower type is safe to restore here.
+    integrations: filtered.integrations as readonly SoulReminderIntegrationEntry[],
     ...(business === undefined ? {} : { business }),
   };
 }
@@ -375,6 +391,44 @@ function renderSection(tag: string, entries: readonly SoulReminderEntry[]): stri
   return `<${tag}>\n${body}\n</${tag}>`;
 }
 
+/** How `renderIntegrationsSection` labels a status other than `connected`, which needs no label. */
+const INTEGRATION_STATUS_LABEL: Record<
+  Exclude<SoulReminderIntegrationEntry["status"], "connected">,
+  string
+> = {
+  available: "not connected — set up from the Integrations page",
+  coming_soon: "coming soon, not yet available to connect",
+};
+
+/**
+ * Renders `<available-integrations>`, one line per Integration, connected or not.
+ *
+ * This is the one section carrying `status` alongside a name and description, so an Agent can
+ * tell "connected, call its Tools" apart from "listed but not connected" without a Tool round
+ * trip — the gap that let an Agent claim a catalogued Integration had no native support and
+ * invent a raw API-key path instead. Naming a `coming_soon` entry as such stops the same wrong
+ * guess in the other direction, where an Agent could point someone at a "Set up" flow that is
+ * not actually open yet.
+ */
+function renderIntegrationsSection(entries: readonly SoulReminderIntegrationEntry[]): string {
+  const body =
+    entries.length === 0
+      ? EMPTY_SECTION
+      : entries
+          .map((entry) => {
+            const name = line(entry.name);
+            const description = line(entry.description);
+            const label =
+              entry.status === "connected" ? undefined : INTEGRATION_STATUS_LABEL[entry.status];
+            const detail = [label, description]
+              .filter((part) => (part ?? "").length > 0)
+              .join(" — ");
+            return detail.length === 0 ? name : `${name}: ${detail}`;
+          })
+          .join("\n");
+  return `<available-integrations>\n${body}\n</available-integrations>`;
+}
+
 /**
  * Renders what the participant pointed at, or `""` when they pointed at nothing.
  *
@@ -420,7 +474,9 @@ export function renderSoulReminder(
   pinned: SoulReminderPinned = {}
 ): string {
   const soul = SOUL_REMINDER_SECTIONS.map((section) =>
-    renderSection(section.tag, catalogue[section.key] ?? [])
+    section.key === "integrations"
+      ? renderIntegrationsSection(catalogue.integrations ?? [])
+      : renderSection(section.tag, catalogue[section.key] ?? [])
   ).join("\n");
   const blocks = [
     renderBusiness(catalogue.business),
