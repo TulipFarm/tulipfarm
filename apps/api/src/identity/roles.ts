@@ -219,11 +219,14 @@ export const MEMBER_ALLOWED_SURFACES: readonly {
     ],
     enforcedIn: "soul/resource-types/routes.ts; soul/resource-types/tools.ts",
   },
-  /** Read-only Skill listing so Agents can load guidance; authoring stays a Team-level grant. */
+  /**
+   * Listing, loading and running Skills so Agents can follow guidance; authoring stays a
+   * Team-level grant.
+   */
   {
     type: "soul.skill",
-    actions: ["soul.skill.list"],
-    enforcedIn: "soul/skills/tools.ts",
+    actions: ["soul.skill.list", "platform.skill.load", "platform.skill.run"],
+    enforcedIn: "soul/skills/tools.ts; platform/tools.ts",
   },
   { type: "surface", actions: ["*"], enforcedIn: "surfaces/routes.ts" },
   { type: "platform.surface", actions: ["*"], enforcedIn: "surfaces/tools.ts" },
