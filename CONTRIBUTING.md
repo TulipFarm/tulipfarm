@@ -33,7 +33,12 @@ pnpm install
 pnpm dev                    # api :4010, web :4000, worker :4020, integration-worker :4030
 ```
 
-Open `http://localhost:4000` and create an admin account at the `/setup` wizard.
+Open `http://localhost:4000` and log in with the dev admin `setup-dev.sh` seeds:
+
+```text
+email:    admin@tulipfarm.dev
+password: tulipfarm-dev
+```
 
 Run a single app with `pnpm dev:api`, `pnpm dev:web`, `pnpm dev:worker`, or
 `pnpm dev:integration-worker`. Start over from a clean slate with `pnpm reset:dev`.

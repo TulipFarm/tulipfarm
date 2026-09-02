@@ -2,7 +2,7 @@ import { Bug, Check, Copy, RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CodeBlock, CollapsibleSection } from "~/components/chat/debug-code";
 import { copyText } from "~/lib/clipboard";
-import { type DebugContext, getDebugContext } from "~/lib/conversations";
+import { type DebugContext, type DebugTool, getDebugContext } from "~/lib/conversations";
 import { cn } from "~/lib/utils";
 
 /** A line that is nothing but one `<block>` or `</block>` tag, which is how prompt blocks open. */
@@ -65,6 +65,7 @@ function tokenCount(text: string): string {
 
 const TABS = [
   { id: "prompt", label: "Prompt" },
+  { id: "tools", label: "Tools" },
   { id: "json", label: "JSON" },
 ] as const;
 
@@ -91,6 +92,7 @@ function DebugDrawer({ conversationId }: { conversationId?: string }) {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [toolFilter, setToolFilter] = useState("");
   const panelRef = useRef<HTMLElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
@@ -161,7 +163,8 @@ function DebugDrawer({ conversationId }: { conversationId?: string }) {
   const promptText = data
     ? [data.systemPrompt, data.soulReminder].filter((part) => part.length > 0).join("\n")
     : "";
-  const copyPayload = tab === "prompt" ? promptText : json;
+  const toolsJson = data ? JSON.stringify(data.tools, null, 2) : "";
+  const copyPayload = tab === "prompt" ? promptText : tab === "tools" ? toolsJson : json;
 
   async function copy() {
     if (!(await copyText(copyPayload))) return;
@@ -255,6 +258,12 @@ function DebugDrawer({ conversationId }: { conversationId?: string }) {
               <p className="p-3 text-xs text-destructive">[error] {err}</p>
             ) : tab === "prompt" ? (
               <PromptView data={data} />
+            ) : tab === "tools" ? (
+              <ToolsView
+                tools={data?.tools ?? []}
+                filter={toolFilter}
+                onFilterChange={setToolFilter}
+              />
             ) : (
               <JsonView conversationId={data?.conversationId ?? ""} rows={rows} />
             )}
@@ -290,6 +299,53 @@ function PromptView({ data }: { data: DebugContext | null }) {
         <p className="px-2 py-1.5 text-[0.6875rem] text-muted-foreground">
           No Soul reminder for this reader.
         </p>
+      )}
+    </div>
+  );
+}
+
+/** Each Tool exactly as it was sent to the model this Turn: name, description, resolved schema. */
+function ToolsView({
+  tools,
+  filter,
+  onFilterChange,
+}: {
+  tools: readonly DebugTool[];
+  filter: string;
+  onFilterChange: (value: string) => void;
+}) {
+  const matched = tools.filter((t) => t.name.toLowerCase().includes(filter.trim().toLowerCase()));
+  return (
+    <div>
+      <div className="sticky top-0 z-10 border-b border-border bg-card px-2 py-1.5">
+        <input
+          type="text"
+          value={filter}
+          onChange={(e) => onFilterChange(e.target.value)}
+          placeholder="Filter tools by name…"
+          className="w-full rounded-sm border border-border bg-background px-2 py-1 text-[0.6875rem] outline-none focus:border-primary/60"
+        />
+      </div>
+      {matched.length === 0 ? (
+        <p className="px-2 py-1.5 text-[0.6875rem] text-muted-foreground">
+          {tools.length === 0
+            ? "No Tools available to this Agent for this channel."
+            : "No Tools match."}
+        </p>
+      ) : (
+        matched.map((t) => (
+          <CollapsibleSection
+            key={t.name}
+            title={t.name}
+            meta={tokenCount(JSON.stringify(t.inputSchema))}
+            defaultOpen={false}
+          >
+            <p className="px-2 pt-1.5 pb-1 text-[0.6875rem] text-muted-foreground">
+              {t.description}
+            </p>
+            <CodeBlock code={JSON.stringify(t.inputSchema, null, 2)} lang="json" />
+          </CollapsibleSection>
+        ))
       )}
     </div>
   );

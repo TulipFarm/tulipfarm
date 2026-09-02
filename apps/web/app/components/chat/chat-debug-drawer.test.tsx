@@ -31,6 +31,13 @@ const DEBUG: DebugContext = {
       createdAt: "t1",
     },
   ],
+  tools: [
+    {
+      name: "search",
+      description: "TOOL_DESCRIPTION_MARKER",
+      inputSchema: { type: "object", properties: { q: { type: "string" } } },
+    },
+  ],
 };
 
 beforeEach(() => {
