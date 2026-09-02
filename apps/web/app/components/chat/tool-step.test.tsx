@@ -1,8 +1,17 @@
+import { createRemixStub } from "@remix-run/testing";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TimelinePart } from "~/lib/chat/types";
+import * as useSessionUser from "~/lib/use-session-user";
 import { ToolTrace } from "./tool-trace";
+
+vi.mock("~/lib/use-session-user", async () => {
+  const actual =
+    await vi.importActual<typeof import("~/lib/use-session-user")>("~/lib/use-session-user");
+  return { ...actual, useIsAdmin: vi.fn(() => true) };
+});
+const useIsAdmin = vi.mocked(useSessionUser.useIsAdmin);
 
 type ToolPart = Extract<TimelinePart, { kind: "tool" }>;
 
@@ -18,21 +27,36 @@ function toolPart(overrides: Partial<ToolPart> = {}): ToolPart {
   };
 }
 
-/** One call still draws as a run of one, so this is the step's contract, not the run's. */
+/**
+ * One call still draws as a run of one, so this is the step's contract, not the run's.
+ *
+ * Routed through a stub router (rather than a bare `render`) because a step can render a `<Link>`
+ * to the secrets page, which requires router context.
+ */
 function renderStep(part: ToolPart, options?: { pending?: boolean }) {
-  return render(
-    <ToolTrace
-      parts={[part]}
-      pending={options?.pending === true}
-      foldable={false}
-      onApprove={vi.fn()}
-    />
-  );
+  const Stub = createRemixStub([
+    {
+      path: "/",
+      Component: () => (
+        <ToolTrace
+          parts={[part]}
+          pending={options?.pending === true}
+          foldable={false}
+          onApprove={vi.fn()}
+        />
+      ),
+    },
+  ]);
+  return render(<Stub />);
 }
 
 const step = () => screen.getByRole("button", { name: /github_issue_comment/i });
 
 describe("A Tool step on the trace", () => {
+  beforeEach(() => {
+    useIsAdmin.mockReturnValue(true);
+  });
+
   it("summarises the call in words instead of printing the tool name alone", () => {
     renderStep(
       toolPart({
@@ -120,6 +144,34 @@ describe("A Tool step on the trace", () => {
 
     await userEvent.click(step());
     expect(screen.getByText("Input")).toBeInTheDocument();
+  });
+
+  it("offers a member the required Credential link when they are an admin", () => {
+    useIsAdmin.mockReturnValue(true);
+    renderStep(
+      toolPart({
+        outcome: "error",
+        meta: { errorCode: "missing_credential", connectUrl: "/business/secrets?required=FOO" },
+      })
+    );
+
+    expect(screen.getByRole("link", { name: "Add the required Credential →" })).toHaveAttribute(
+      "href",
+      "/business/secrets?required=FOO"
+    );
+  });
+
+  it("tells a non-admin to ask an administrator instead of linking to the admin-only page", () => {
+    useIsAdmin.mockReturnValue(false);
+    renderStep(
+      toolPart({
+        outcome: "error",
+        meta: { errorCode: "missing_credential", connectUrl: "/business/secrets?required=FOO" },
+      })
+    );
+
+    expect(screen.queryByRole("link", { name: /Add the required Credential/i })).toBeNull();
+    expect(screen.getByText("Ask an administrator to add this Credential.")).toBeInTheDocument();
   });
 
   it("renders the running state while the call is still in flight", () => {

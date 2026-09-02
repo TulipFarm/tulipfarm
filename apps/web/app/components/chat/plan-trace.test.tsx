@@ -1,9 +1,15 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { LOADER_LABELS } from "~/components/ui/loading-state";
 import type { TimelinePart } from "~/lib/chat/types";
 import { PlanTrace } from "./plan-trace";
 import type { PlannedRound } from "./timeline-groups";
+
+vi.mock("~/lib/use-session-user", async () => {
+  const actual =
+    await vi.importActual<typeof import("~/lib/use-session-user")>("~/lib/use-session-user");
+  return { ...actual, useIsAdmin: vi.fn(() => true) };
+});
 
 type ToolPart = Extract<TimelinePart, { kind: "tool" }>;
 
