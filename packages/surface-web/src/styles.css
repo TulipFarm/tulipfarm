@@ -808,6 +808,17 @@ ol[data-surface-list] li::before {
   opacity: 0.75;
 }
 
+/* Provenance/context for a field, e.g. which connected account a picker's options came from.
+   Own line under the label so it reads as an explanation, not a badge like `required`. */
+[data-surface-field-description] {
+  display: block;
+  margin-left: 0;
+  color: var(--muted-foreground);
+  font-size: 0.6875rem;
+  font-weight: 400;
+  line-height: 1.4;
+}
+
 [data-surface-field] input,
 [data-surface-field] textarea,
 [data-surface-field] select {
