@@ -8,6 +8,17 @@ beforeAll(() => {
   Element.prototype.scrollIntoView = vi.fn();
 });
 
+// The transcript and the composer are code-split, so rendering the guide fetches and transforms
+// both chunks from inside the test body. On a loaded CI runner that costs more than Testing
+// Library's `asyncUtilTimeout`, which failed the assertion below while the test still had most of
+// its own budget left. Pull the cost into a hook so the test measures the render, not the compiler.
+beforeAll(async () => {
+  await Promise.all([
+    import("~/components/chat/transcript"),
+    import("~/components/chat/composer-editor"),
+  ]);
+}, 60_000);
+
 afterEach(() => {
   vi.unstubAllEnvs();
 });
@@ -75,12 +86,15 @@ test("showcases the live token, status, action, form, and composition vocabulary
   expect(screen.getByText("critical")).toBeInTheDocument();
   // The Chat model vocabulary: effort is chosen, a Model ID is only reported, and Auto names the
   // rung it resolved to. Rendered from the real Transcript/Composer, so it cannot drift from prod.
-  // Both are code-split, so the first assertion has to wait for the chunk.
-  expect(await screen.findByText("claude-sonnet-5")).toBeInTheDocument();
+  // Both are code-split, so this still waits on a Suspense boundary even with the chunks warmed.
+  // Measured at 11.5s on a cold cache with the whole suite running in parallel, which is why the
+  // 5s `asyncUtilTimeout` the rest of the suite wants is not a budget this one assertion can meet.
+  expect(await screen.findByText("claude-sonnet-5", {}, { timeout: 25_000 })).toBeInTheDocument();
   expect(screen.getByText("· Auto → Balanced effort")).toBeInTheDocument();
   expect(
     screen.getByRole("button", { name: "Try harder with Thorough effort" })
   ).toBeInTheDocument();
   // Mounting the whole component vocabulary, both code-split Chat chunks included, makes this the
-  // slowest test in the suite; it needs headroom over the 10s the rest of the repo gets.
-}, 30_000);
+  // slowest test in the suite by an order of magnitude; it needs headroom over the 10s the rest of
+  // the repo gets, and over the inner wait above so a real miss still names the element.
+}, 60_000);
