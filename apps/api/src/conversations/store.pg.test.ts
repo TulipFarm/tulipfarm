@@ -220,6 +220,38 @@ describe("PgConversationStore", () => {
     ]);
   });
 
+  it("surfaces a reply that was written but never completed (#662)", async () => {
+    // appendAssistantMessage and completeTurn are two separate writes; a crash in between (a
+    // guard timeout, a killed process) leaves exactly this: the reply row exists, but no
+    // turn_completions row was ever written for it. Existence-gating on that row would hide the
+    // reply from every reload forever even though the reader already watched it stream in.
+    await store.saveTurn(turn());
+    await store.appendMessage({
+      id: REPLY_ID,
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      conversationId: CONVERSATION_ID,
+      turnId: TURN_ID,
+      role: "assistant",
+      content: textContent("revoke this key"),
+      attempt: 1,
+      createdAt: CREATED_AT,
+    });
+
+    const messages = await store.listMessages(DEPLOYMENT_BUSINESS_ID, CONVERSATION_ID);
+    expect(messages).toEqual([
+      {
+        id: REPLY_ID,
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        conversationId: CONVERSATION_ID,
+        turnId: TURN_ID,
+        role: "assistant",
+        content: textContent("revoke this key"),
+        attempt: 1,
+        createdAt: CREATED_AT,
+      },
+    ]);
+  });
+
   it("round-trips assistant Message metadata without changing text content", async () => {
     await store.saveTurn(turn());
     await store.appendMessage({

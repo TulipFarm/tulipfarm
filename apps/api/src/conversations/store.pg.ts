@@ -211,6 +211,14 @@ export class PgConversationStore implements ConversationStore {
     // Only Turn messages: rows predating migration 16 have a NULL turn_id. `content` stays raw
     // jsonb because a row may hold a bare string or parts; filtering to one shape here would
     // silently drop every Message carrying a File.
+    //
+    // `appendAssistantMessage` and `completeTurn` are two separate writes; a crash between them
+    // (a guard timeout, a killed process) leaves a real, already-shown reply with no completion
+    // row. Gating existence on that row would hide it from every reload forever — the reply is
+    // not "not yet decided", it is durable and simply never got its completion recorded. So an
+    // assistant Message also surfaces when its own Turn has no completion at or after its
+    // attempt and it is the latest attempt the Turn has: exactly the orphaned case, without
+    // resurrecting an earlier attempt's abandoned draft once a later attempt went on to complete.
     const { rows } = await this.q.query(
       `SELECT m.id, m.conversation_id, m.turn_id, m.role,
               m.content, m.metadata, m.attempt, m.created_at
@@ -219,9 +227,23 @@ export class PgConversationStore implements ConversationStore {
           AND m.turn_id IS NOT NULL
           AND (
             m.role = 'user'
-            OR (m.role = 'assistant' AND EXISTS (
-                 SELECT 1 FROM turn_completions c
-                  WHERE c.turn_id = m.turn_id AND c.message_id = m.id))
+            OR (m.role = 'assistant' AND (
+                 EXISTS (
+                   SELECT 1 FROM turn_completions c
+                    WHERE c.turn_id = m.turn_id AND c.message_id = m.id
+                 )
+                 OR (
+                   m.attempt IS NOT NULL
+                   AND NOT EXISTS (
+                     SELECT 1 FROM turn_completions c2
+                      WHERE c2.turn_id = m.turn_id AND c2.attempt >= m.attempt
+                   )
+                   AND m.attempt = (
+                     SELECT MAX(m2.attempt) FROM messages m2
+                      WHERE m2.turn_id = m.turn_id AND m2.role = 'assistant'
+                   )
+                 )
+               ))
           )
         ORDER BY m.created_at, m.id`,
       [conversationId]
