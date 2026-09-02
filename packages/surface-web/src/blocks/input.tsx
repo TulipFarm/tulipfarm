@@ -306,6 +306,7 @@ export function SurfaceForm({
           const input = String(field.input);
           const label = String(field.label);
           const required = field.required === true;
+          const description = typeof field.description === "string" ? field.description : undefined;
           const options = Array.isArray(field.options)
             ? field.options.filter((option): option is string => typeof option === "string")
             : [];
@@ -323,6 +324,7 @@ export function SurfaceForm({
                 <span>
                   {label}
                   {required ? <small data-surface-required>required</small> : null}
+                  {description ? <small data-surface-field-description>{description}</small> : null}
                 </span>
               </label>
             );
@@ -334,6 +336,7 @@ export function SurfaceForm({
                 <legend data-surface-field-label>
                   {label}
                   {required ? <small data-surface-required>required</small> : null}
+                  {description ? <small data-surface-field-description>{description}</small> : null}
                 </legend>
                 {options.map((option) => (
                   <label key={option} htmlFor={`${fieldId}-${option}`} data-surface-radio>
@@ -358,6 +361,7 @@ export function SurfaceForm({
                 <span data-surface-field-label>
                   {label}
                   {required ? <small data-surface-required>required</small> : null}
+                  {description ? <small data-surface-field-description>{description}</small> : null}
                 </span>
                 <select
                   id={fieldId}
@@ -439,6 +443,7 @@ export function SurfaceForm({
               <span data-surface-field-label>
                 {label}
                 {required ? <small data-surface-required>required</small> : null}
+                {description ? <small data-surface-field-description>{description}</small> : null}
               </span>
               {control}
             </label>

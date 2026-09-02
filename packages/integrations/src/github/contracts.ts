@@ -156,7 +156,12 @@ export const GITHUB_REPOSITORY_LIST_DECLARATION = {
     "first when the user names no repository, or names one you're not sure is installed. This " +
     "reports only which repositories the workspace's GitHub App can see — it does not mean " +
     "you personally can act on them. Every other GitHub Tool also requires the calling person " +
-    "to have connected their own GitHub account, separately from that App installation.",
+    "to have connected their own GitHub account, separately from that App installation. Each " +
+    "result carries the `account` it was installed under; when you build a repository picker " +
+    "(e.g. a Form field) from this output, set the field's `description` to name that account " +
+    '(for example "Using the GitHub connection for account: <account>") so the person choosing ' +
+    "knows whose repositories they're looking at, especially if more than one installation or " +
+    "account is in play.",
   inputSchema: {
     type: "object",
     additionalProperties: false,

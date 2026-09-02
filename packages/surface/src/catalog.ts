@@ -233,6 +233,9 @@ const definitions = [
           ]),
           required: Type.Optional(Type.Boolean()),
           options: Type.Optional(Type.Array(Type.String({ maxLength: 200 }), { maxItems: 100 })),
+          // Provenance/context for the field, e.g. which connected account a picker's options
+          // came from. Rendered under the label, before the control.
+          description: Type.Optional(Type.String({ maxLength: 300 })),
         }),
         { minItems: 1, maxItems: 50 }
       ),
