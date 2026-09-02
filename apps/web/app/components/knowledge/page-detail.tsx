@@ -1,4 +1,3 @@
-import { Link } from "@remix-run/react";
 import { FileText, History, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AgentAuthoredBadge } from "~/components/knowledge/agent-authored-badge";
@@ -7,6 +6,7 @@ import { HistoryDrawer } from "~/components/knowledge/history-panel";
 import { VisibilityBadge } from "~/components/knowledge/visibility-badge";
 import { MarkdownView } from "~/components/markdown-view";
 import { Button } from "~/components/ui/button";
+import { Link } from "~/components/ui/link";
 import type { Backlink, KnowledgePage } from "~/lib/knowledge-api";
 import { parseOkf } from "~/lib/okf";
 import { rewriteWikiLinks } from "~/lib/okf-listing";

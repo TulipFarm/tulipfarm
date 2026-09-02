@@ -1,5 +1,5 @@
-import { Link } from "@remix-run/react";
 import type { ReactNode } from "react";
+import { Link } from "~/components/ui/link";
 
 export type Crumb = { label: string; to?: string };
 

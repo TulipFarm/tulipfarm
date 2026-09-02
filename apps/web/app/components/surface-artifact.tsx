@@ -3,8 +3,8 @@ import {
   type SurfaceArtifact as SurfaceArtifactValue,
   surfaceActionKey,
   surfaceActionsForArtifact,
-} from "@tulipfarm/surface";
-import { SurfaceCompositionView, SurfaceView } from "@tulipfarm/surface-web";
+} from "@tulipfarm/surface/client";
+import { SurfaceCompositionView, SurfaceView } from "@tulipfarm/surface-web/view";
 import { useEffect, useState } from "react";
 import { apiGet } from "~/lib/api";
 

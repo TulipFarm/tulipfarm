@@ -13,8 +13,8 @@ Run event/request vocabularies, canonical hashes, Secret references, and resourc
 | Path | Owns |
 | --- | --- |
 | `src/index.ts` | Public exports; do not mirror the list here. |
-| `src/chat.ts` | Chat metadata and resumable Turn wire contracts. |
-| `src/definitions/` | TypeBox Soul definition schemas and file snapshots. |
+| `src/chat.ts`, `src/chat-limits.ts` | Chat wire contracts; the limits leaf carries no TypeBox. |
+| `src/definitions/` | TypeBox Soul schemas and snapshots; `enums.ts` is its TypeBox-free leaf. |
 | `src/artifacts.ts` | `ARTIFACT_LAYOUTS`: Soul paths, companions, temporal class. |
 | `src/registry.ts` | Strict `apiVersion`/`kind` dispatch and fail-closed YAML parsing. |
 | `src/run-events.ts` | Channel-neutral Run event types, audiences, payload schemas. |

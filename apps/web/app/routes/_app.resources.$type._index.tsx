@@ -1,6 +1,5 @@
 import {
   type ClientLoaderFunctionArgs,
-  Link,
   type MetaFunction,
   useLoaderData,
   useNavigate,
@@ -16,6 +15,7 @@ import { ErrorState } from "~/components/states";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
+import { Link } from "~/components/ui/link";
 import { ConfirmModal } from "~/components/ui/modal";
 import {
   ApiError,

@@ -1,5 +1,5 @@
-import { Link } from "@remix-run/react";
 import { PenLine } from "lucide-react";
+import { Link } from "~/components/ui/link";
 import { TraceStep } from "~/components/ui/trace";
 import type { TimelinePart } from "~/lib/chat/types";
 import { ApprovalCard } from "./approval-card";

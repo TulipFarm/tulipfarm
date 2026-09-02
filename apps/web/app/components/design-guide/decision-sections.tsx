@@ -1,5 +1,5 @@
-import { createSurfaceArtifact, surfaceActionKey } from "@tulipfarm/surface";
-import { SurfaceView } from "@tulipfarm/surface-web";
+import { type SurfaceArtifact, surfaceActionKey } from "@tulipfarm/surface/client";
+import { SurfaceView } from "@tulipfarm/surface-web/view";
 import { GuideSection } from "~/components/design-guide/guide-section";
 
 const ACTION = { event: "restock.choose" };
@@ -42,15 +42,20 @@ const HANDLES = Object.fromEntries([
   ]),
 ]);
 
-function choices(id: string, props: Record<string, unknown>) {
-  return createSurfaceArtifact({
+function choices(id: string, props: Record<string, unknown>): SurfaceArtifact {
+  return {
+    protocol: "tsp",
+    protocolVersion: "1.0",
     id,
+    revision: 1,
     component: { name: "Choices", version: "1.0" },
     props: { question: "Want me to place this restock order?", action: ACTION, ...props },
     target: { channel: "web", surface: "chat" },
     audience: ["user:guide"],
     classification: "internal",
-  });
+    catalogRevision: "tsp-1.2-data-display-1",
+    lineage: [],
+  };
 }
 
 const RECOMMENDED = choices("guide-recommend", { choices: CHOICES, recommend: "reorder" });
@@ -61,13 +66,7 @@ const NEUTRAL = choices("guide-neutral", {
   action: NEUTRAL_ACTION,
 });
 
-function Specimen({
-  caption,
-  artifact,
-}: {
-  caption: string;
-  artifact: ReturnType<typeof choices>;
-}) {
+function Specimen({ caption, artifact }: { caption: string; artifact: SurfaceArtifact }) {
   return (
     <div>
       <p className="mb-1.5 text-xs text-muted-foreground">{caption}</p>

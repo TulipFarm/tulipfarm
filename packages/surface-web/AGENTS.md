@@ -11,7 +11,8 @@ Renders validated `SurfaceArtifact` values as trusted React components for the w
 
 | Path | Owns |
 | --- | --- |
-| `src/index.tsx` | React renderer implementation and node dispatch. |
+| `src/index.tsx` | Validating React renderer entry point. |
+| `src/view.tsx` | Browser-safe React view and node dispatch without validation imports. |
 | `src/blocks/` | One file per component family; `input.tsx` owns Choices, MultiChoice and Form. |
 | `src/primitives.tsx` | Shared leaves: `ActionButton`, `inlineMarkup`. |
 | `src/manifest.ts` | Renderer manifest metadata. |

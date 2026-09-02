@@ -1,9 +1,10 @@
-import { Link, type MetaFunction, useLoaderData, useRouteError } from "@remix-run/react";
+import { type MetaFunction, useLoaderData, useRouteError } from "@remix-run/react";
 import { BookText, FileText, Plus, Waypoints } from "lucide-react";
 import { AgentAuthoredBadge } from "~/components/knowledge/agent-authored-badge";
 import { VisibilityBadge } from "~/components/knowledge/visibility-badge";
 import { ErrorState } from "~/components/states";
 import { Button } from "~/components/ui/button";
+import { Link } from "~/components/ui/link";
 import { ApiError } from "~/lib/api";
 import { getKnowledgeOverview } from "~/lib/knowledge-api";
 import { pageHref } from "~/lib/page-href";

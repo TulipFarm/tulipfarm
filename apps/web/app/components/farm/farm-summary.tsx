@@ -1,4 +1,4 @@
-import { Link } from "@remix-run/react";
+import { Link } from "~/components/ui/link";
 import { CROPS, type CropKind, cropFor, type Season } from "~/lib/farm";
 
 /**

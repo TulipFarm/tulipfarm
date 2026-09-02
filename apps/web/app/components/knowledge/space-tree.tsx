@@ -1,6 +1,7 @@
-import { Link, useParams } from "@remix-run/react";
+import { useParams } from "@remix-run/react";
 import { ChevronRight, FileText, Folder, Library, Plus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "~/components/ui/link";
 import {
   type KnowledgeSpace,
   listAllPages,

@@ -16,6 +16,8 @@ renderer interfaces, and declarative Soul component validation.
 | `src/artifact.ts` | Artifact model and validation. |
 | `src/catalog.ts` | Semantic component catalog. |
 | `src/catalog-data-display.ts` | Data-display component family (Metric, Timeline, Comparison, Breakdown, Gauge, Chart, ForceGraph). |
+| `src/action-constraints.ts` | Action key/pattern limits both the schema and the browser read. |
+| `src/client.ts` | Browser-safe action helpers and type-only Surface contracts. |
 | `src/contracts.ts` | Renderer and interaction contracts. |
 | `src/forms.ts` | Form component contracts. |
 | `src/registry.ts` | Component registry helpers. |

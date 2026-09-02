@@ -1,6 +1,7 @@
 import { type ClientLoaderFunctionArgs, Outlet, redirect, useLoaderData } from "@remix-run/react";
 import { AppShell } from "~/components/app-sidebar";
 import { OnboardingCompanion } from "~/components/onboarding/companion";
+import { GlobalPending } from "~/components/shell/global-pending";
 import { GlobalConnectionStatus } from "~/components/shell/states";
 import { ApiError, getSession } from "~/lib/api";
 import { ApprovalsProvider } from "~/lib/approvals-context";
@@ -48,6 +49,7 @@ export default function AppLayout() {
     <ApprovalsProvider>
       <ConversationsProvider>
         <CompanionProvider>
+          <GlobalPending />
           <AppShell user={user}>
             <a
               href="#main-content"

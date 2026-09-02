@@ -1,5 +1,5 @@
-import { Link } from "@remix-run/react";
 import type { ReactNode } from "react";
+import { Link } from "~/components/ui/link";
 import { Panel } from "~/components/ui/panel";
 import type { CapabilityFacts } from "~/lib/agent-capabilities";
 import { ReachBadge } from "./reach-badge";

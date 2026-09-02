@@ -1,4 +1,4 @@
-import type { FormSubmissionResult, GovernedForm } from "@tulipfarm/surface";
+import type { FormSubmissionResult, GovernedForm } from "@tulipfarm/surface/client";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "~/components/ui/button";
 import { type FormSubmissionBody, submitGovernedForm } from "~/lib/forms";

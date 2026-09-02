@@ -1,7 +1,7 @@
-import { Link } from "@remix-run/react";
 import { StatusBadge } from "~/components/status-badge";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
+import { Link } from "~/components/ui/link";
 import type { RoutineSummary, RunStatus } from "~/lib/routines";
 import {
   type RunHealth,

@@ -1,4 +1,4 @@
-import type { SurfaceRenderIssue } from "@tulipfarm/surface";
+import type { SurfaceRenderIssue } from "@tulipfarm/surface/client";
 import {
   AlertCircle,
   AlertTriangle,

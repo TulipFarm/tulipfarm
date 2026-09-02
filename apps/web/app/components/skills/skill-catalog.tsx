@@ -1,7 +1,7 @@
-import { Link } from "@remix-run/react";
 import { useId, useMemo, useState } from "react";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
+import { Link } from "~/components/ui/link";
 import { Select } from "~/components/ui/select";
 import {
   groupByCategory,

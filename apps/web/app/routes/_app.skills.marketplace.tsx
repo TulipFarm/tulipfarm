@@ -1,10 +1,11 @@
-import { Link, type MetaFunction, useLoaderData } from "@remix-run/react";
+import { type MetaFunction, useLoaderData } from "@remix-run/react";
 import { useEffect, useId, useRef, useState } from "react";
 import { PageShell } from "~/components/page-shell";
 import { MarketplaceBrowser } from "~/components/skills/marketplace-browser";
 import { SkillsTabs } from "~/components/skills-tabs";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
+import { Link } from "~/components/ui/link";
 import { Panel } from "~/components/ui/panel";
 import { ApiError } from "~/lib/api";
 import {

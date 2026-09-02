@@ -1,4 +1,4 @@
-import type { SurfaceRendererManifest } from "@tulipfarm/surface";
+import type { SurfaceRendererManifest } from "@tulipfarm/surface/client";
 
 const commonComponents = {
   Text: ["1.0"],

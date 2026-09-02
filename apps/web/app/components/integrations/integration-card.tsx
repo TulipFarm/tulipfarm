@@ -1,8 +1,8 @@
-import { Link } from "@remix-run/react";
 import { ChevronRight } from "lucide-react";
 import { StatusBadge, type StatusTone } from "~/components/status-badge";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
+import { Link } from "~/components/ui/link";
 import type { IntegrationSummary, McpConnectionStatus } from "~/lib/integrations";
 import { cn } from "~/lib/utils";
 import { IntegrationIcon } from "./integration-icon";

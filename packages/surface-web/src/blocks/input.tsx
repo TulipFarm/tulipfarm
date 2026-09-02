@@ -1,6 +1,6 @@
 /** Interactive blocks: every one collects operator input and posts it back through `onInteraction`. */
 
-import type { SurfaceAction, SurfaceArtifact } from "@tulipfarm/surface";
+import type { SurfaceAction, SurfaceArtifact } from "@tulipfarm/surface/client";
 import type { ChangeEvent, FormEvent, ReactElement } from "react";
 import { useId, useState } from "react";
 import { ActionButton, inlineMarkup, type SurfaceWebProps } from "../primitives";

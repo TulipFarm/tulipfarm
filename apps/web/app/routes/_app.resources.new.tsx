@@ -1,8 +1,9 @@
-import { Link, type MetaFunction, useNavigate, useRouteError } from "@remix-run/react";
+import { type MetaFunction, useNavigate, useRouteError } from "@remix-run/react";
 import { type FormEvent, useState } from "react";
 import { PageShell } from "~/components/page-shell";
 import { ErrorState } from "~/components/states";
 import { Button } from "~/components/ui/button";
+import { Link } from "~/components/ui/link";
 import { ApiError, createResourceType } from "~/lib/api";
 import { randomUUID } from "~/lib/uuid";
 

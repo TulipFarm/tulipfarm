@@ -1,4 +1,3 @@
-import { Link } from "@remix-run/react";
 import {
   Activity,
   AlertTriangle,
@@ -12,6 +11,7 @@ import {
 import { type ReactNode, useState } from "react";
 import { DestructivePreview } from "~/components/shell/states";
 import { StatusBadge as SemanticStatusBadge, type StatusTone } from "~/components/status-badge";
+import { Link } from "~/components/ui/link";
 import type { OperationsModel } from "~/lib/operations";
 import { formatIso } from "~/lib/schema";
 import { cn } from "~/lib/utils";

@@ -1,6 +1,5 @@
 import {
   type ClientLoaderFunctionArgs,
-  Link,
   type MetaFunction,
   useLoaderData,
   useNavigate,
@@ -16,6 +15,7 @@ import { SkillReachBadge } from "~/components/skills/reach-badge";
 import { ErrorState, NotFoundState } from "~/components/states";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
+import { Link } from "~/components/ui/link";
 import { Panel, PanelEmpty } from "~/components/ui/panel";
 import { listAgents } from "~/lib/agents";
 import { ApiError } from "~/lib/api";

@@ -1,4 +1,4 @@
-import { Link, type MetaFunction, useLoaderData, useRouteError } from "@remix-run/react";
+import { type MetaFunction, useLoaderData, useRouteError } from "@remix-run/react";
 import { MessageSquare, Plus, Search, Star } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -10,6 +10,7 @@ import {
 import { PageShell } from "~/components/page-shell";
 import { ErrorState } from "~/components/states";
 import { Button } from "~/components/ui/button";
+import { Link } from "~/components/ui/link";
 import { ApiError } from "~/lib/api";
 import {
   type ConversationSummary,

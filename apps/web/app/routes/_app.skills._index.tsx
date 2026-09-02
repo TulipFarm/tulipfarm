@@ -1,9 +1,10 @@
-import { Link, type MetaFunction, useLoaderData, useRouteError } from "@remix-run/react";
+import { type MetaFunction, useLoaderData, useRouteError } from "@remix-run/react";
 import { PageShell } from "~/components/page-shell";
 import { SkillCatalog } from "~/components/skills/skill-catalog";
 import { SkillsTabs } from "~/components/skills-tabs";
 import { ErrorState } from "~/components/states";
 import { Button } from "~/components/ui/button";
+import { Link } from "~/components/ui/link";
 import { ApiError } from "~/lib/api";
 import { listSkills } from "~/lib/skills";
 

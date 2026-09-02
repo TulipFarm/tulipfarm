@@ -54,15 +54,33 @@ export function CompanionProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     mounted.current = true;
     void refresh();
-    const id = setInterval(() => void refresh(), POLL_INTERVAL_MS);
-    const onWake = () => {
-      if (document.visibilityState !== "hidden") void refresh();
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const start = () => {
+      if (timer === null) timer = setInterval(() => void refresh(), POLL_INTERVAL_MS);
     };
+    const stop = () => {
+      if (timer !== null) {
+        clearInterval(timer);
+        timer = null;
+      }
+    };
+    // A hidden tab renders no Companion, so ticking on it only spends request budget and battery.
+    // Returning refreshes at once rather than waiting out a tick, so the list is never stale at the
+    // moment it is looked at. `start` is guarded because `focus` and `visibilitychange` both fire.
+    const onWake = () => {
+      if (document.visibilityState === "hidden") {
+        stop();
+        return;
+      }
+      void refresh();
+      start();
+    };
+    if (document.visibilityState !== "hidden") start();
     window.addEventListener("focus", onWake);
     document.addEventListener("visibilitychange", onWake);
     return () => {
       mounted.current = false;
-      clearInterval(id);
+      stop();
       window.removeEventListener("focus", onWake);
       document.removeEventListener("visibilitychange", onWake);
     };

@@ -1,4 +1,22 @@
-import { createSurfaceArtifact, type SurfaceArtifact } from "@tulipfarm/surface";
+import type { SurfaceArtifact } from "@tulipfarm/surface/client";
+
+const CATALOG_REVISION = "tsp-1.2-data-display-1";
+
+function presetArtifact(
+  input: Omit<
+    SurfaceArtifact,
+    "catalogRevision" | "lineage" | "protocol" | "protocolVersion" | "revision"
+  >
+): SurfaceArtifact {
+  return {
+    protocol: "tsp",
+    protocolVersion: "1.0",
+    revision: 1,
+    catalogRevision: CATALOG_REVISION,
+    lineage: [],
+    ...input,
+  };
+}
 
 export interface SandboxPreset {
   readonly id: string;
@@ -12,7 +30,7 @@ export const PRESETS: readonly SandboxPreset[] = [
     id: "form-card",
     name: "Form Card",
     description: "Titled summary card with status and customer information.",
-    artifact: createSurfaceArtifact({
+    artifact: presetArtifact({
       id: "form-card-specimen",
       component: { name: "Card", version: "1.0" },
       props: {
@@ -29,7 +47,7 @@ export const PRESETS: readonly SandboxPreset[] = [
     id: "status-widget",
     name: "Status Widget",
     description: "Compact operational health badge.",
-    artifact: createSurfaceArtifact({
+    artifact: presetArtifact({
       id: "status-widget-specimen",
       component: { name: "Status", version: "1.0" },
       props: {
@@ -45,7 +63,7 @@ export const PRESETS: readonly SandboxPreset[] = [
     id: "table-artifact",
     name: "Table Artifact",
     description: "Multi-row tabular record artifact with column headers.",
-    artifact: createSurfaceArtifact({
+    artifact: presetArtifact({
       id: "table-artifact-specimen",
       component: { name: "RecordTable", version: "1.0" },
       props: {
@@ -66,7 +84,7 @@ export const PRESETS: readonly SandboxPreset[] = [
     id: "interactive-form",
     name: "Interactive Form",
     description: "Rich multi-field input form with validation and submit action.",
-    artifact: createSurfaceArtifact({
+    artifact: presetArtifact({
       id: "interactive-form-specimen",
       component: { name: "Form", version: "1.0" },
       props: {
@@ -96,7 +114,7 @@ export const PRESETS: readonly SandboxPreset[] = [
     id: "error-banner",
     name: "Error Banner",
     description: "Warning and error alert banner for operational incidents.",
-    artifact: createSurfaceArtifact({
+    artifact: presetArtifact({
       id: "error-banner-specimen",
       component: { name: "Alert", version: "1.0" },
       props: {
@@ -114,7 +132,7 @@ export const PRESETS: readonly SandboxPreset[] = [
     id: "choices-actions",
     name: "Choices & Actions",
     description: "Mutually exclusive decision choices with confidence and recommendation.",
-    artifact: createSurfaceArtifact({
+    artifact: presetArtifact({
       id: "choices-specimen",
       component: { name: "Choices", version: "1.0" },
       props: {
@@ -151,7 +169,7 @@ export const PRESETS: readonly SandboxPreset[] = [
     id: "metrics-kpis",
     name: "Metric & KPIs",
     description: "Key performance indicator metrics with trend directions and captions.",
-    artifact: createSurfaceArtifact({
+    artifact: presetArtifact({
       id: "metric-specimen",
       component: { name: "Metric", version: "1.0" },
       props: {
@@ -185,7 +203,7 @@ export const PRESETS: readonly SandboxPreset[] = [
     id: "timeline",
     name: "Timeline Sequence",
     description: "Ordered chronological event log with timestamps and statuses.",
-    artifact: createSurfaceArtifact({
+    artifact: presetArtifact({
       id: "timeline-specimen",
       component: { name: "Timeline", version: "1.0" },
       props: {

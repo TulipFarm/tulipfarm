@@ -1,8 +1,8 @@
-import { Link } from "@remix-run/react";
 import { ArrowUpRight, Check, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { StatusBadge } from "~/components/status-badge";
 import { Badge } from "~/components/ui/badge";
+import { Link } from "~/components/ui/link";
 import { Sheet } from "~/components/ui/sheet";
 import { getIntegration, type IntegrationDetail } from "~/lib/integrations";
 import { cn } from "~/lib/utils";

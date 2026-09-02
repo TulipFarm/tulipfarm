@@ -37,11 +37,15 @@ data loading, schema-driven resource UI, and browser rendering of Surface Artifa
 | `app/lib/nav.ts`, `app/lib/badges.ts` | Flat sidebar/settings destinations, page titles, and mocked V1 badge counts. |
 | `app/lib/kill-switches.ts` | Emergency-stop client; scope picker comes from the API's enforceable list. |
 | `vite.config.ts`, `vitest.config.ts`, `components.json` | SPA Remix/Vite, jsdom Vitest, shadcn. |
+| `scripts/` | Post-build steps, in order: app-shell modulepreload injection, CSP hashing, precompression. |
 
 ## Rules
 
 - Remix runs in SPA mode (`remix({ ssr: false })`): no server `loader`/`action`, use
-  `clientLoader` and `useLoaderData<typeof clientLoader>()`, and navigate with `<Link>`/`<NavLink>`.
+  `clientLoader` and `useLoaderData<typeof clientLoader>()`, and navigate with `<Link>`/`<NavLink>`
+  from `~/components/ui/link`, never `@remix-run/react` — it prefetches on intent, and a
+  `clientLoader` sits inside its route module, so module weight delays data, not just paint. Keep
+  heavy leaves (Tiptap, transcript) split; assert on them with `findBy*`.
 - API calls go through `app/lib/api.ts`, never ad-hoc `fetch`. `apiWrite` sends cookies,
   `x-csrf-token` from the `csrf_token` cookie, and optional `Authorization: Bearer` from
   `VITE_API_TOKEN`. Render `ApiError.path` as field errors and map `409` to a concurrency banner.
@@ -81,6 +85,8 @@ data loading, schema-driven resource UI, and browser rendering of Surface Artifa
 - Production serves `build/client/` with a history-API fallback to `/index.html`; `pnpm build`
   writes the `.br`/`.gz` siblings `@fastify/static` serves via `preCompressed`, so order any new
   build step after `remix vite:build`. `HydrateFallback` is prerendered into `index.html` — keep it
-  static (no hooks, data, imports) and rebuild so the CSP hashes stay in sync.
+  static (no hooks, data, imports) and rebuild so the CSP hashes stay in sync. Anything editing
+  `index.html` runs before `generate-csp-header.ts`, whose hashes would otherwise describe a stale
+  file and refuse to boot.
 
 See [`DESIGN.md`](../../DESIGN.md); tokens stay canonical in `app/tokens.css`.

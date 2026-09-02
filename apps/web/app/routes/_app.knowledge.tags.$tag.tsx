@@ -1,12 +1,12 @@
 import {
   type ClientLoaderFunctionArgs,
-  Link,
   type MetaFunction,
   useLoaderData,
   useRouteError,
 } from "@remix-run/react";
 import { AgentAuthoredBadge } from "~/components/knowledge/agent-authored-badge";
 import { ErrorState } from "~/components/states";
+import { Link } from "~/components/ui/link";
 import { ApiError } from "~/lib/api";
 import { listPages } from "~/lib/knowledge-api";
 import { pageHref } from "~/lib/page-href";

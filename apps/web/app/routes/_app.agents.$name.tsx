@@ -1,6 +1,5 @@
 import {
   type ClientLoaderFunctionArgs,
-  Link,
   type MetaFunction,
   useLoaderData,
   useRouteError,
@@ -15,6 +14,7 @@ import { MarkdownView } from "~/components/markdown-view";
 import { PageShell } from "~/components/page-shell";
 import { ErrorState, NotFoundState } from "~/components/states";
 import { Button } from "~/components/ui/button";
+import { Link } from "~/components/ui/link";
 import { Panel } from "~/components/ui/panel";
 import { agentDisplayName, capabilityFacts } from "~/lib/agent-capabilities";
 import { getAgent, proposeAgentCandidate } from "~/lib/agents";

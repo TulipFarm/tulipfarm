@@ -1,6 +1,5 @@
 import {
   type ClientLoaderFunctionArgs,
-  Link,
   type MetaFunction,
   useLoaderData,
   useNavigate,
@@ -10,6 +9,7 @@ import { Network, Pencil, Plus, Settings, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { MarkdownView } from "~/components/markdown-view";
 import { Button } from "~/components/ui/button";
+import { Link } from "~/components/ui/link";
 import { ApiError } from "~/lib/api";
 import { deleteSpace, listAllPages, navigateSpace } from "~/lib/knowledge-api";
 import { rewriteOkfLinks } from "~/lib/okf-listing";

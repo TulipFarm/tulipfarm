@@ -35,7 +35,7 @@ test("404s the guide on a built instance rather than exposing it", () => {
   expect((thrown as Response).status).toBe(404);
 });
 
-test("showcases the live token, status, action, form, and composition vocabulary", () => {
+test("showcases the live token, status, action, form, and composition vocabulary", async () => {
   const Stub = createRemixStub([{ path: "/design-guide", Component: DesignGuideRoute }]);
   render(<Stub initialEntries={["/design-guide"]} />);
   expect(screen.getByRole("heading", { name: "TulipFarm design guide" })).toBeInTheDocument();
@@ -75,9 +75,12 @@ test("showcases the live token, status, action, form, and composition vocabulary
   expect(screen.getByText("critical")).toBeInTheDocument();
   // The Chat model vocabulary: effort is chosen, a Model ID is only reported, and Auto names the
   // rung it resolved to. Rendered from the real Transcript/Composer, so it cannot drift from prod.
-  expect(screen.getByText("claude-sonnet-5")).toBeInTheDocument();
+  // Both are code-split, so the first assertion has to wait for the chunk.
+  expect(await screen.findByText("claude-sonnet-5")).toBeInTheDocument();
   expect(screen.getByText("· Auto → Balanced effort")).toBeInTheDocument();
   expect(
     screen.getByRole("button", { name: "Try harder with Thorough effort" })
   ).toBeInTheDocument();
-}, 10_000);
+  // Mounting the whole component vocabulary, both code-split Chat chunks included, makes this the
+  // slowest test in the suite; it needs headroom over the 10s the rest of the repo gets.
+}, 30_000);

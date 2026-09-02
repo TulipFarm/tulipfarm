@@ -1,6 +1,5 @@
 import {
   type ClientLoaderFunctionArgs,
-  Link,
   type MetaFunction,
   useLoaderData,
   useOutletContext,
@@ -8,6 +7,7 @@ import {
 } from "@remix-run/react";
 import { SpaceGraphView } from "~/components/knowledge/space-graph";
 import { ErrorState, NotFoundState } from "~/components/states";
+import { Link } from "~/components/ui/link";
 import { ApiError } from "~/lib/api";
 import { getSpaceGraph, listAllPages } from "~/lib/knowledge-api";
 import type { SpaceOutletContext } from "~/routes/_app.knowledge.spaces.$id";

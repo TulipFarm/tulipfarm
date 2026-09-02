@@ -1,4 +1,4 @@
-import { Link, type MetaFunction, useLoaderData, useRouteError } from "@remix-run/react";
+import { type MetaFunction, useLoaderData, useRouteError } from "@remix-run/react";
 import { Plus, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { PageShell } from "~/components/page-shell";
@@ -7,6 +7,7 @@ import { StatStrip } from "~/components/resources/stat-strip";
 import { ErrorState } from "~/components/states";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
+import { Link } from "~/components/ui/link";
 import { Select } from "~/components/ui/select";
 import { ApiError, listResourceCatalog, listResourceTypes } from "~/lib/api";
 import {

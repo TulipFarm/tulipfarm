@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { GovernedForm } from "@tulipfarm/surface";
+import type { GovernedForm } from "@tulipfarm/surface/client";
 import { describe, expect, it, vi } from "vitest";
 import { GovernedFormView } from "./governed-form";
 

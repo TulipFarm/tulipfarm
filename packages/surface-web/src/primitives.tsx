@@ -1,6 +1,10 @@
 /** Shared web-renderer props, value formatting, and the panel/alert/action chrome every block reuses. */
 
-import type { ResolvedSurfaceViewNode, SurfaceAction, SurfaceArtifact } from "@tulipfarm/surface";
+import type {
+  ResolvedSurfaceViewNode,
+  SurfaceAction,
+  SurfaceArtifact,
+} from "@tulipfarm/surface/client";
 import type { ReactNode } from "react";
 
 export interface SurfaceWebProps {

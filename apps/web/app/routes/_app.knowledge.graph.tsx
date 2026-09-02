@@ -1,6 +1,7 @@
-import { Link, type MetaFunction, useLoaderData, useRouteError } from "@remix-run/react";
+import { type MetaFunction, useLoaderData, useRouteError } from "@remix-run/react";
 import { KnowledgeGraphView } from "~/components/knowledge/knowledge-graph";
 import { ErrorState, NotFoundState } from "~/components/states";
+import { Link } from "~/components/ui/link";
 import { ApiError } from "~/lib/api";
 import { getKnowledgeGraph } from "~/lib/knowledge-api";
 

@@ -65,10 +65,35 @@ export function ApprovalsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     mounted.current = true;
     void refresh();
-    const id = setInterval(() => void refresh(), POLL_INTERVAL_MS);
+
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const start = () => {
+      if (timer === null) timer = setInterval(() => void refresh(), POLL_INTERVAL_MS);
+    };
+    const stop = () => {
+      if (timer !== null) {
+        clearInterval(timer);
+        timer = null;
+      }
+    };
+    // A hidden tab shows no approvals UI, so polling it every 4s forever only burns request budget
+    // and battery. Coming back visible refreshes immediately rather than waiting out a tick, so the
+    // badge is never stale at the moment it is looked at.
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        stop();
+      } else {
+        void refresh();
+        start();
+      }
+    };
+    if (document.visibilityState !== "hidden") start();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
     return () => {
       mounted.current = false;
-      clearInterval(id);
+      stop();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [refresh]);
 

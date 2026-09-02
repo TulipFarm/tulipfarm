@@ -1,8 +1,9 @@
-import { Link, useLoaderData, useRevalidator, useRouteError } from "@remix-run/react";
+import { useLoaderData, useRevalidator, useRouteError } from "@remix-run/react";
 import { useState } from "react";
 import { FormStatus } from "~/components/form-status";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
+import { Link } from "~/components/ui/link";
 import { Panel, PanelEmpty } from "~/components/ui/panel";
 import { getGuardrails, proposeGuardrailToggle } from "~/lib/admin";
 import { ApiError } from "~/lib/api";

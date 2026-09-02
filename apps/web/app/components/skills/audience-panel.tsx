@@ -1,5 +1,5 @@
-import { Link } from "@remix-run/react";
 import { Badge } from "~/components/ui/badge";
+import { Link } from "~/components/ui/link";
 import { Panel, PanelEmpty } from "~/components/ui/panel";
 import { agentDisplayName, capabilityFacts } from "~/lib/agent-capabilities";
 import type { AgentSummary } from "~/lib/agents";

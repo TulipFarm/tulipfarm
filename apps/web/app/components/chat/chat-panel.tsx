@@ -1,6 +1,7 @@
-import { Link } from "@remix-run/react";
+import { lazy, Suspense, useEffect } from "react";
 import { AgentGlyph } from "~/components/agent-glyph";
 import { ConnectionStatus } from "~/components/shell/states";
+import { Link } from "~/components/ui/link";
 import type { ChatMessage, ChatModelSelector } from "~/lib/chat/types";
 import { useChatStream } from "~/lib/chat/use-chat-stream";
 import type { ConversationTurn } from "~/lib/conversations";
@@ -11,8 +12,14 @@ import { ChatDebugDrawer } from "./chat-debug-drawer";
 import { Composer } from "./composer";
 import { asPickerPreset, DEFAULT_CHAT_MODEL_SELECTOR } from "./model-selector";
 import { TasksPreviewCard } from "./tasks-preview-card";
-import { Transcript } from "./transcript";
 import { useMentionCatalog } from "./use-mention-catalog";
+
+/*
+ * The transcript drags in the markdown renderer (react-markdown + remark + micromark, 34KB gz) on
+ * top of its own 24KB — none of which a new chat has anything to render with. Splitting it out keeps
+ * both off the landing route's critical path, where they were blocking the first API call.
+ */
+const Transcript = lazy(() => import("./transcript").then((m) => ({ default: m.Transcript })));
 
 function EmptyState({
   businessName,
@@ -118,6 +125,11 @@ export function ChatPanel({
     onConversationChange,
   });
   const busy = status === "submitted" || status === "streaming";
+  // Fetch the transcript's chunk as soon as the panel exists rather than when the first turn needs
+  // it — off the critical path, but resident well before anyone has finished typing.
+  useEffect(() => {
+    void import("./transcript");
+  }, []);
   // Prefer the live agent from a handoff; fall back to the restored conversation's persisted agent.
   const routedAgentName = currentAgent || agentId;
   const activeAgentName = routedAgentName === "TulipFarm" ? undefined : routedAgentName;
@@ -163,16 +175,18 @@ export function ChatPanel({
         </header>
       ) : null}
       {hasMessages ? (
-        <Transcript
-          messages={messages}
-          status={status}
-          mentions={entries}
-          onApprove={approve}
-          onRegenerate={regenerate}
-          onTryHarder={tryHarder}
-          onFeedback={sendFeedback}
-          onSurfaceInteraction={sendSurfaceInteraction}
-        />
+        <Suspense fallback={<div className="min-h-0 flex-1" />}>
+          <Transcript
+            messages={messages}
+            status={status}
+            mentions={entries}
+            onApprove={approve}
+            onRegenerate={regenerate}
+            onTryHarder={tryHarder}
+            onFeedback={sendFeedback}
+            onSurfaceInteraction={sendSurfaceInteraction}
+          />
+        </Suspense>
       ) : (
         <EmptyState
           businessName={businessName}

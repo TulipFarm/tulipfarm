@@ -1,4 +1,4 @@
-import { Link } from "@remix-run/react";
+import { Link } from "~/components/ui/link";
 import { Panel } from "~/components/ui/panel";
 
 function chatHref(agentName: string, draft?: string): string {

@@ -1,6 +1,6 @@
-import { Link } from "@remix-run/react";
 import { ArrowRightLeft, BookOpen, Brain, ExternalLink, ShieldAlert } from "lucide-react";
 import { SurfaceArtifact } from "~/components/surface-artifact";
+import { Link } from "~/components/ui/link";
 import { Trace, TraceNote, TraceSource } from "~/components/ui/trace";
 import type { SourceRef, TimelinePart } from "~/lib/chat/types";
 import { Response } from "./response";

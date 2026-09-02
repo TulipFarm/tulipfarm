@@ -1,7 +1,7 @@
-import { Link } from "@remix-run/react";
 import { ArrowUpRight, BookOpen, MessageSquarePlus, MoreHorizontal, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { Link } from "~/components/ui/link";
 import { GITHUB_REPO_URL } from "~/lib/report-bug";
 import { cn } from "~/lib/utils";
 

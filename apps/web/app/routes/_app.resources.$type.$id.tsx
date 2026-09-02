@@ -1,6 +1,5 @@
 import {
   type ClientLoaderFunctionArgs,
-  Link,
   type MetaFunction,
   useLoaderData,
   useNavigate,
@@ -11,6 +10,7 @@ import { DetailView } from "~/components/detail-view";
 import { PageShell } from "~/components/page-shell";
 import { ErrorState, NotFoundState } from "~/components/states";
 import { Button } from "~/components/ui/button";
+import { Link } from "~/components/ui/link";
 import { ApiError, deleteRecord, getRecord, listResourceTypes } from "~/lib/api";
 import { deriveFields, detailFields, parseSchema, recordLabel } from "~/lib/schema";
 

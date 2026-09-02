@@ -1,7 +1,8 @@
-import { Link, type MetaFunction, Outlet, useParams } from "@remix-run/react";
+import { type MetaFunction, Outlet, useParams } from "@remix-run/react";
 import { Paperclip, Plus } from "lucide-react";
 import { CommandPalette } from "~/components/knowledge/command-palette";
 import { KnowledgeTree } from "~/components/knowledge/space-tree";
+import { Link } from "~/components/ui/link";
 import { Tooltip } from "~/components/ui/tooltip";
 
 export const meta: MetaFunction = () => [{ title: "Knowledge · tulipfarm" }];

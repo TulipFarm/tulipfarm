@@ -62,9 +62,12 @@ const SUGGESTIONS: Suggestion[] = [
   { id: "leads", label: "Track sales leads?", prompt: "Help me track sales leads." },
 ];
 
-test("renders one chip per adaptive suggestion using its label (ONB-V1-002)", () => {
+test("renders one chip per adaptive suggestion using its label (ONB-V1-002)", async () => {
   render(<ChatPanel suggestions={SUGGESTIONS} />);
-  expect(screen.getByRole("button", { name: "Set up ticket management?" })).toBeInTheDocument();
+  // The composer is code-split, so its chips arrive with its chunk rather than on first render.
+  expect(
+    await screen.findByRole("button", { name: "Set up ticket management?" })
+  ).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Track sales leads?" })).toBeInTheDocument();
 });
 
@@ -72,7 +75,7 @@ test("tapping a Suggested prompt does not immediately start a Turn", async () =>
   const user = userEvent.setup();
   render(<ChatPanel suggestions={SUGGESTIONS} />);
 
-  await user.click(screen.getByRole("button", { name: "Set up ticket management?" }));
+  await user.click(await screen.findByRole("button", { name: "Set up ticket management?" }));
 
   expect(send).not.toHaveBeenCalled();
 });

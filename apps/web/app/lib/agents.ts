@@ -1,4 +1,4 @@
-import { apiCommand, apiGet } from "./api";
+import { apiCommand, apiGet, shareInFlight } from "./api";
 
 /* Cookie-first read client for soul-backed Agents; non-2xx responses throw `ApiError`. */
 
@@ -60,10 +60,10 @@ export type AgentGovernance = {
   };
 };
 
-export async function listAgents(): Promise<AgentSummary[]> {
+export const listAgents = shareInFlight(async (): Promise<AgentSummary[]> => {
   const body = await apiGet<{ agents: AgentSummary[] }>("/api/v1/agents");
   return body.agents;
-}
+});
 
 export async function getAgent(name: string): Promise<AgentDetail> {
   return apiGet<AgentDetail>(`/api/v1/agents/${encodeURIComponent(name)}`);
