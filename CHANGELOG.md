@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.18.4](https://github.com/TulipFarm/tulipfarm/compare/v0.18.3...v0.18.4) (2026-09-02)
+
+### Features
+
+* **web:** add a sidebar command menu, collapsible groups and section counts ([#664](https://github.com/TulipFarm/tulipfarm/issues/664)) ([ef6b66a](https://github.com/TulipFarm/tulipfarm/commit/ef6b66a73733844e68ff40b5456002a49d310190))
+* **web:** redesign the integrations catalog as a brand tile grid ([#665](https://github.com/TulipFarm/tulipfarm/issues/665)) ([9b75cde](https://github.com/TulipFarm/tulipfarm/commit/9b75cde66b7585ea604f4859a1ff2419a42dbf41))
+
+### Bug Fixes
+
+* **agent-runtime:** make agent aware of marketplace integrations ([#671](https://github.com/TulipFarm/tulipfarm/issues/671)) ([1a90efd](https://github.com/TulipFarm/tulipfarm/commit/1a90efdcc03ad597529243f79e5db578fdb445c9)), closes [#663](https://github.com/TulipFarm/tulipfarm/issues/663)
+* **agent-runtime:** tell the model not to work around a denied Tool ([#668](https://github.com/TulipFarm/tulipfarm/issues/668)) ([6e20fd5](https://github.com/TulipFarm/tulipfarm/commit/6e20fd5d3e6226bd1eecc16844216434d711a682)), references [#648](https://github.com/TulipFarm/tulipfarm/issues/648)
+* **api:** grant members platform.skill.load and .run ([#666](https://github.com/TulipFarm/tulipfarm/issues/666)) ([78d9adc](https://github.com/TulipFarm/tulipfarm/commit/78d9adc76375e633c14b1fa2c89b256d5b9137ce)), closes [#651](https://github.com/TulipFarm/tulipfarm/issues/651)
+* **api:** stop hiding a completed reply that never got its completion row ([#670](https://github.com/TulipFarm/tulipfarm/issues/670)) ([e9cf66a](https://github.com/TulipFarm/tulipfarm/commit/e9cf66a6b969228b02af3ace68e6c90d3c63de9e)), references [#662](https://github.com/TulipFarm/tulipfarm/issues/662)
+* **surface:** surface provenance in Form field pickers ([#667](https://github.com/TulipFarm/tulipfarm/issues/667)) ([f883a80](https://github.com/TulipFarm/tulipfarm/commit/f883a8004d1c8c40684cf07f1395e4fa98aa3502)), closes [#659](https://github.com/TulipFarm/tulipfarm/issues/659)
+* **web:** clarify secrets 403 and hide dead-end Credential link for members ([#669](https://github.com/TulipFarm/tulipfarm/issues/669)) ([49cc982](https://github.com/TulipFarm/tulipfarm/commit/49cc9822cf62da62c54855601524c44b9e8b22ef)), closes [#661](https://github.com/TulipFarm/tulipfarm/issues/661)
+
 ## [0.18.3](https://github.com/TulipFarm/tulipfarm/compare/v0.18.2...v0.18.3) (2026-08-31)
 
 ### Features
