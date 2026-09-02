@@ -1,6 +1,6 @@
-import { Link } from "@remix-run/react";
 import { type FormEvent, useState } from "react";
 import { Button } from "~/components/ui/button";
+import { Link } from "~/components/ui/link";
 import type { SpaceInput } from "~/lib/knowledge-api";
 
 /*

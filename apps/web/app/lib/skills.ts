@@ -1,4 +1,4 @@
-import { apiDelete, apiGet, apiWrite } from "./api";
+import { apiDelete, apiGet, apiWrite, shareInFlight } from "./api";
 
 /* Skill installs publish executable commands only after server-side package/runtime gates pass. */
 
@@ -127,10 +127,10 @@ export type SkillAuditReport = {
   };
 };
 
-export async function listSkills(): Promise<SkillSummary[]> {
+export const listSkills = shareInFlight(async (): Promise<SkillSummary[]> => {
   const body = await apiGet<{ skills: SkillSummary[] }>("/api/v1/skills");
   return body.skills;
-}
+});
 
 export async function getSkill(name: string): Promise<SkillDetail> {
   return apiGet<SkillDetail>(`/api/v1/skills/${encodeURIComponent(name)}`);

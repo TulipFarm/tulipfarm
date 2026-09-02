@@ -45,6 +45,28 @@ export type RecordPage = {
   nextCursor: string | null;
 };
 
+/**
+ * Shares one in-flight read between callers that ask for the same list in the same tick.
+ *
+ * The chat composer's mention data and the transcript's mention catalog are independent hooks that
+ * both want agents, skills and resource types, and both mount on the same render — so each list was
+ * fetched twice on every chat open. Only the *in-flight* promise is shared: it is dropped as soon as
+ * it settles, so the next caller still gets a fresh read and nothing is ever served stale.
+ */
+export function shareInFlight<T>(load: () => Promise<T>): () => Promise<T> {
+  let inFlight: Promise<T> | null = null;
+  return () => {
+    if (inFlight) return inFlight;
+    const started = load();
+    inFlight = started;
+    const clear = () => {
+      if (inFlight === started) inFlight = null;
+    };
+    void started.then(clear, clear);
+    return started;
+  };
+}
+
 export async function apiGet<T>(path: string): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json" };
   applyAuth(headers);
@@ -311,10 +333,10 @@ export async function deleteResourceType(name: string): Promise<void> {
   return apiDelete(`/api/v1/resource-types/${encodeURIComponent(name)}`);
 }
 
-export async function listResourceTypes(): Promise<ResourceTypeSummary[]> {
+export const listResourceTypes = shareInFlight(async (): Promise<ResourceTypeSummary[]> => {
   const body = await apiGet<{ types: ResourceTypeSummary[] }>("/api/v1/resource-types");
   return body.types;
-}
+});
 
 /**
  * Catalog totals per resource type. The API omits any type the caller may not list, so a missing

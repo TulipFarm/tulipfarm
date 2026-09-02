@@ -1,7 +1,7 @@
-import { Link } from "@remix-run/react";
 import { AgentGlyph } from "~/components/agent-glyph";
 import { AutonomyChip } from "~/components/autonomy-chip";
 import { Button } from "~/components/ui/button";
+import { Link } from "~/components/ui/link";
 import { agentDisplayName, capabilityFacts } from "~/lib/agent-capabilities";
 import type { AgentSummary } from "~/lib/agents";
 import { ReachBadge } from "./reach-badge";

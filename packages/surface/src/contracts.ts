@@ -1,6 +1,12 @@
 import type { Static, TSchema } from "@sinclair/typebox";
 import { Type } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
+import {
+  SURFACE_ACTION_EVENT_MAX_LENGTH,
+  SURFACE_ACTION_EVENT_MIN_LENGTH,
+  SURFACE_ACTION_EVENT_PATTERN,
+  SURFACE_ACTION_KEYS,
+} from "./action-constraints";
 
 export const TSP_PROTOCOL_VERSION = "1.0" as const;
 
@@ -39,7 +45,11 @@ export type SurfaceClassification = Static<typeof SurfaceClassificationSchema>;
 
 export const SurfaceActionSchema = Type.Object(
   {
-    event: Type.String({ minLength: 1, maxLength: 128, pattern: "^[a-z][a-z0-9_.-]*$" }),
+    event: Type.String({
+      minLength: SURFACE_ACTION_EVENT_MIN_LENGTH,
+      maxLength: SURFACE_ACTION_EVENT_MAX_LENGTH,
+      pattern: SURFACE_ACTION_EVENT_PATTERN,
+    }),
     payload: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
     disabled: Type.Optional(Type.Boolean()),
     stepUp: Type.Optional(Type.Boolean()),
@@ -48,6 +58,10 @@ export const SurfaceActionSchema = Type.Object(
 );
 
 export type SurfaceAction = Static<typeof SurfaceActionSchema>;
+
+/** Fails to compile if `SURFACE_ACTION_KEYS` drifts from the schema's properties. */
+const _surfaceActionKeysAreExhaustive: readonly (keyof SurfaceAction)[] = SURFACE_ACTION_KEYS;
+void _surfaceActionKeysAreExhaustive;
 
 export interface SurfaceEventDefinition {
   readonly name: string;

@@ -1,7 +1,7 @@
-import { Link } from "@remix-run/react";
 import { type FormEvent, useRef, useState } from "react";
 import { LinkCombobox } from "~/components/link-combobox";
 import { Button } from "~/components/ui/button";
+import { Link } from "~/components/ui/link";
 import { ApiError } from "~/lib/api";
 import type { FieldDescriptor } from "~/lib/schema";
 

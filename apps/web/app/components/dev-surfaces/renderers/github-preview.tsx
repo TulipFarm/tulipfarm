@@ -1,4 +1,4 @@
-import type { SurfaceArtifact, SurfaceRenderContext } from "@tulipfarm/surface";
+import type { SurfaceArtifact, SurfaceRenderContext } from "@tulipfarm/surface/client";
 import {
   type GitHubCheckRunPayload,
   type GitHubCommentPayload,

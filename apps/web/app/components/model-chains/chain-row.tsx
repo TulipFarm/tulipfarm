@@ -1,4 +1,3 @@
-import { Link } from "@remix-run/react";
 import { ArrowDown, ArrowUp, KeyRound, Trash2 } from "lucide-react";
 import type { ReactNode } from "react";
 import {
@@ -10,6 +9,7 @@ import {
 } from "~/components/model-chains/chain-data";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
+import { Link } from "~/components/ui/link";
 import { Panel } from "~/components/ui/panel";
 import type { LlmProviderInfo, ModelSpec } from "~/lib/settings";
 

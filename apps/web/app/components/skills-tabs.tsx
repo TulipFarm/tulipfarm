@@ -1,4 +1,4 @@
-import { NavLink } from "@remix-run/react";
+import { NavLink } from "~/components/ui/link";
 import { cn } from "~/lib/utils";
 
 // Tab nav shared by the Installed (/skills) and Marketplace (/skills/marketplace) panes. Mirrors the

@@ -1,6 +1,5 @@
 import {
   type ClientLoaderFunctionArgs,
-  Link,
   type MetaFunction,
   useLoaderData,
   useRouteError,
@@ -9,6 +8,7 @@ import { useCallback, useState } from "react";
 import { CropLegend, SeasonStrip } from "~/components/farm/farm-summary";
 import { type FieldFocus, TulipField } from "~/components/farm/tulip-field";
 import { ErrorState } from "~/components/states";
+import { Link } from "~/components/ui/link";
 import { ApiError } from "~/lib/api";
 import { CROPS, cropFor, farmSeason, loadFarm } from "~/lib/farm";
 import { mockCountFromUrl, mockFarm } from "~/lib/farm.mock";

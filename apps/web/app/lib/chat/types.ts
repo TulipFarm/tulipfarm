@@ -248,4 +248,4 @@ export type ChatState = {
   errorDetails?: ChatFailureDetails;
 };
 
-import type { ResolvedSurfaceViewNode, SurfaceArtifact } from "@tulipfarm/surface";
+import type { ResolvedSurfaceViewNode, SurfaceArtifact } from "@tulipfarm/surface/client";

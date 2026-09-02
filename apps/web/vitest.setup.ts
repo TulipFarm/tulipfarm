@@ -1,4 +1,11 @@
 import "@testing-library/jest-dom/vitest";
+import { configure } from "@testing-library/react";
+
+// The composer and the transcript are code-split, so a test that renders either waits on a real
+// dynamic import. Resolving one costs well over Testing Library's 1s default when the whole suite
+// runs in parallel, which turned every `findBy*` on those trees into a load-dependent flake. Keep
+// this under Vitest's `testTimeout` so a genuine miss still reports which element was not found.
+configure({ asyncUtilTimeout: 5_000 });
 
 // vitest 4.x jsdom: --localstorage-file path can be invalid, leaving localStorage without clear().
 // Override with a reliable in-memory implementation for all tests.

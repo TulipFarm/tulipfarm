@@ -18,6 +18,15 @@ transcript on first send. `composer.tsx` is a **Tiptap rich-text editor** (see b
 with **no attachment affordance** (no blob storage in V1). User messages render as markdown in their own
 bubble (`transcript.tsx` → `MarkdownView`), so formatting + the literal mention tokens show.
 
+Both `composer.tsx` and `transcript.tsx` are **code-split**. Tiptap/ProseMirror and the markdown
+renderer are the two heaviest chunks in the app and sat on the landing route's critical path, where —
+because a SPA-mode `clientLoader` lives inside its route module — they delayed the first API call.
+`composer.tsx` is a thin lazy wrapper whose fallback is a *working* plain-text box, not a skeleton;
+the real editor lives in `composer-editor.tsx` and is tested directly as `composer-editor.test.tsx`.
+`chat-panel.tsx` warms the transcript chunk on mount, and `_app.chat.$id`'s `clientLoader` warms it
+alongside its data fetch, so neither surface waits on a discovery round trip. Tests that assert on
+composer or transcript output must use `findBy*`, not `getBy*`.
+
 The composer uses the design-system interaction language precisely: a **Suggested prompt** drafts
 editable text and never sends on selection; an **Action** is explicitly started by the person; an
 **Auto action** is Agent-started work operating within configured authority. Adaptive onboarding
@@ -27,7 +36,7 @@ Normal Chat uses the default harness and does not label it as an Agent. The Agen
 only when a user-created Agent is explicitly selected or takes over the Chat. Product identity,
 business identity, and Agent identity are separate UI layers and must not reuse the TulipFarm name.
 
-## Composer editor (`composer.tsx` + `editor/`)
+## Composer editor (`composer-editor.tsx` + `editor/`)
 
 A Tiptap (`@tiptap/*` v3) editor replacing the old textarea. It supports markdown formatting
 (bold/italic/code/link via Cmd shortcuts + a selection `BubbleMenu`) and four mention triggers, each a
@@ -57,7 +66,7 @@ Enter sends (deferred to the suggestion menu while one is open); Shift+Enter
 newlines. The backend eager-injection lives in `apps/api/src/chat/turn.ts` (`buildSystemFor`) +
 `packages/agent-runtime/src/context/assemble.ts` (`<skills>` + `<eager-resources>` + `<pinned-knowledge>` blocks); the tags are ephemeral per turn.
 Note: ProseMirror can't be driven under jsdom — the editor's behavior is covered by `serialize.test.ts`
-(pure) + a mocked `composer.test.tsx`; the live flow is Playwright-verified.
+(pure) + a mocked `composer-editor.test.tsx`; the live flow is Playwright-verified.
 
 ## Persistence & history
 
@@ -301,7 +310,7 @@ Set the composer mode to **Approval** → a mutating tool suspends server-side a
 ## Testing
 
 Component tests fold synthetic `ChatEvent`s through the **real reducer** (no network); see
-`transcript.test.tsx`, `composer.test.tsx`, `approval-card.test.tsx`. The live end-to-end round-trip is
+`transcript.test.tsx`, `composer-editor.test.tsx`, `approval-card.test.tsx`. The live end-to-end round-trip is
 covered in `apps/api/src/chat/routes.test.ts`.
 
 ## A run folds at two calls

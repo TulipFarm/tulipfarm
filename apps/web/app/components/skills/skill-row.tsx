@@ -1,5 +1,5 @@
-import { Link } from "@remix-run/react";
 import { Badge } from "~/components/ui/badge";
+import { Link } from "~/components/ui/link";
 import { skillFacts } from "~/lib/skill-facts";
 import type { SkillSummary } from "~/lib/skills";
 import { SkillReachBadge } from "./reach-badge";

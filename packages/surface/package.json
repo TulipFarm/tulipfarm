@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./catalog": "./src/catalog.ts",
+    "./client": "./src/client.ts",
     "./soul": "./src/soul.ts"
   },
   "scripts": {

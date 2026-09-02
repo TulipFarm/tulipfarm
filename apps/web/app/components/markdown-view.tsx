@@ -1,7 +1,7 @@
-import { Link } from "@remix-run/react";
 import { useMemo } from "react";
 import ReactMarkdown, { type Components, defaultUrlTransform, type Options } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { Link } from "~/components/ui/link";
 import { rehypeCallouts } from "~/lib/rehype-callouts";
 import { rehypeCitations } from "~/lib/rehype-citations";
 import { rehypeStreamWords, type StreamWordCounter } from "~/lib/rehype-stream-words";

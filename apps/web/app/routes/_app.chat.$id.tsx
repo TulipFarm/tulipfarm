@@ -23,23 +23,27 @@ export const meta: MetaFunction = () => [{ title: "Chat · tulipfarm" }];
 // effort preset is derived from the conversation's agent, mirroring the index route.
 export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
   const id = params.id as string;
+  // A deep link renders a full transcript on arrival, so start its lazily-split chunk now rather
+  // than after the data resolves — the two then land together instead of end to end.
+  void import("~/components/chat/transcript");
   let convo: Awaited<ReturnType<typeof getConversation>>;
   let messages: Awaited<ReturnType<typeof getConversationMessages>>;
+  // Votes are best-effort: the caller's prior thumbs seed the transcript, and a feedback API hiccup
+  // just means no votes are shown. It rides in this batch rather than after it because it depends on
+  // nothing the batch returns — awaiting it separately cost a whole round trip before first paint.
+  let votes: Map<string, "up" | "down"> | undefined;
   try {
-    [convo, messages] = await Promise.all([getConversation(id), getConversationMessages(id)]);
+    const [conversation, messageList, feedback] = await Promise.all([
+      getConversation(id),
+      getConversationMessages(id),
+      getConversationFeedback(id).catch(() => null),
+    ]);
+    convo = conversation;
+    messages = messageList;
+    votes = feedback ? new Map(feedback.map((f) => [f.messageId, f.rating])) : undefined;
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) throw redirect("/");
     throw err;
-  }
-
-  // Best-effort: the caller's prior thumbs votes seed the transcript. A failure (feedback API hiccup)
-  // just means no votes are shown — never block the chat restore on it.
-  let votes: Map<string, "up" | "down"> | undefined;
-  try {
-    const feedback = await getConversationFeedback(id);
-    votes = new Map(feedback.map((f) => [f.messageId, f.rating]));
-  } catch {
-    votes = undefined;
   }
 
   const agentId = convo.agentId ?? undefined;

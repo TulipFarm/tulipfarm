@@ -1,4 +1,3 @@
-import { Link } from "@remix-run/react";
 import { isExtractableMediaType } from "@tulipfarm/files/limits";
 import {
   BookOpen,
@@ -16,6 +15,7 @@ import {
 import { useState } from "react";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
+import { Link } from "~/components/ui/link";
 import { fetchFileObjectUrl, formatFileSize, type LibraryFile } from "~/lib/files";
 import { isPreviewable } from "./file-preview";
 

@@ -1,4 +1,4 @@
-import { MODEL_MODALITIES, type ModelModality } from "./definitions/common";
+import { MODEL_MODALITIES, type ModelModality } from "./definitions/enums";
 import type { ModelProfileSpec } from "./definitions/model";
 import type { LlmConfig, ModelSpec, ProviderConnection, ProviderEntry } from "./llm";
 

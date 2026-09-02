@@ -4,7 +4,7 @@ import {
   type SurfaceRenderIssue,
   validateSurfaceArtifact,
 } from "@tulipfarm/surface";
-import { SurfaceView } from "@tulipfarm/surface-web";
+import { SurfaceView } from "@tulipfarm/surface-web/view";
 import {
   AlertTriangle,
   Boxes,

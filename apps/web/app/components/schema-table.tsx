@@ -1,5 +1,5 @@
-import { Link } from "@remix-run/react";
 import type * as React from "react";
+import { Link } from "~/components/ui/link";
 import type { ResourceRecord } from "~/lib/api";
 import { type FieldDescriptor, type RenderedCell, renderValue, type SortState } from "~/lib/schema";
 import { cn } from "~/lib/utils";

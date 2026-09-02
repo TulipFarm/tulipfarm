@@ -1,6 +1,5 @@
 import {
   type ClientLoaderFunctionArgs,
-  Link,
   type MetaFunction,
   redirect,
   useLoaderData,
@@ -13,6 +12,7 @@ import { PageDetail } from "~/components/knowledge/page-detail";
 import { RestrictDialog } from "~/components/knowledge/restrict-dialog";
 import { ErrorState, NotFoundState } from "~/components/states";
 import { Button } from "~/components/ui/button";
+import { Link } from "~/components/ui/link";
 import { ApiError } from "~/lib/api";
 import {
   deletePage,

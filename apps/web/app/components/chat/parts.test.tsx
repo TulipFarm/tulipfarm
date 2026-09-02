@@ -1,7 +1,8 @@
 import { createRemixStub } from "@remix-run/testing";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { createSurfaceArtifact, surfaceActionKey } from "@tulipfarm/surface";
+import { createSurfaceArtifact } from "@tulipfarm/surface";
+import { surfaceActionKey } from "@tulipfarm/surface/client";
 import { expect, test, vi } from "vitest";
 import type { TimelinePart } from "~/lib/chat/types";
 import { MessagePartView } from "./parts";

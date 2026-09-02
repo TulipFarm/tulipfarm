@@ -8,6 +8,7 @@
     "./ajv": "./src/ajv.ts",
     "./canonicalize": "./src/canonicalize.ts",
     "./chat": "./src/chat.ts",
+    "./chat-limits": "./src/chat-limits.ts",
     "./message-content": "./src/message-content.ts",
     "./model-catalog": "./src/model-catalog.ts"
   },

@@ -1,5 +1,5 @@
-import { Link } from "@remix-run/react";
 import { AlertTriangle, ArrowRight, CornerDownLeft, Zap } from "lucide-react";
+import { Link } from "~/components/ui/link";
 import type { CatalogSort, CatalogSortKey, CatalogType } from "~/lib/resource-catalog";
 import { formatCount, timeAgo } from "~/lib/schema";
 import { cn } from "~/lib/utils";

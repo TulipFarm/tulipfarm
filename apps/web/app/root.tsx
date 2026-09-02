@@ -9,6 +9,7 @@ import {
 } from "@remix-run/react";
 import "@fontsource-variable/instrument-sans";
 import "@fontsource-variable/jetbrains-mono";
+import instrumentSansLatin from "@fontsource-variable/instrument-sans/files/instrument-sans-latin-wght-normal.woff2?url";
 import { NuqsAdapter } from "nuqs/adapters/remix";
 import { type ReactNode, useEffect } from "react";
 import { readThemePreference, resolveTheme } from "~/lib/theme";
@@ -27,6 +28,18 @@ export const links = (): HtmlLinkDescriptor[] => [
   { rel: "icon", href: "/favicon.ico", sizes: "any" },
   { rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
   { rel: "manifest", href: "/manifest.webmanifest" },
+  // The UI font is otherwise only discovered once the CSS bundle has parsed *and* a glyph that
+  // needs it has been laid out — measured at ~1.3s on a cold load, so the whole shell paints in the
+  // fallback face and then reflows. Preloading the Latin subset starts it in the first request wave.
+  // Only the sans face is preloaded: the mono face is used by code blocks, which are below the fold
+  // on first paint and rightly stay lazy.
+  {
+    rel: "preload",
+    href: instrumentSansLatin,
+    as: "font",
+    type: "font/woff2",
+    crossOrigin: "anonymous",
+  },
 ];
 
 /*

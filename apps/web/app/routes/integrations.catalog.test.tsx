@@ -323,6 +323,10 @@ test("a coming-soon preview offers no way to connect", async () => {
   );
 
   const sheet = await screen.findByRole("dialog");
+  // The panel cannot know an integration is coming soon until its detail lands, so it renders the
+  // header shortcut while loading. Wait for the loaded body before asserting on what it withholds,
+  // or this passes only on a machine fast enough to settle the fetch within the same tick.
+  await within(sheet).findByText("Coming soon");
   expect(within(sheet).queryByRole("link", { name: /set up|manage/i })).not.toBeInTheDocument();
   // Not even the header shortcut: the detail page is where a connection would be offered.
   expect(within(sheet).queryByRole("link", { name: /open the full/i })).not.toBeInTheDocument();

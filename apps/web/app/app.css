@@ -232,6 +232,40 @@
 }
 
 /*
+ * Top-of-viewport navigation progress (components/shell/global-pending). In SPA mode a click has to
+ * fetch the destination's route module before its clientLoader can start, so the old screen sits
+ * there unchanged and the click reads as ignored. The curve eases toward 92% and stops: it never
+ * claims to have finished, because only the route swap can say that.
+ */
+@keyframes nav-progress {
+  0% {
+    transform: scaleX(0.02);
+  }
+  40% {
+    transform: scaleX(0.45);
+  }
+  75% {
+    transform: scaleX(0.75);
+  }
+  100% {
+    transform: scaleX(0.92);
+  }
+}
+
+.tf-nav-progress {
+  transform-origin: left;
+  animation: nav-progress 2.4s var(--ease-snappy) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tf-nav-progress {
+    animation: none;
+    transform: scaleX(1);
+    opacity: 0.5;
+  }
+}
+
+/*
  * Pixel-grid loader (components/ui/loading-state). The wavefront reports that work is in flight,
  * which is the only thing that earns a loop here. Cells carry their own duration and delay as
  * custom properties so one keyframe serves every variant. Under reduced motion both the grid and

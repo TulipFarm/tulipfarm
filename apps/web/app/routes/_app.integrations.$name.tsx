@@ -1,6 +1,5 @@
 import {
   type ClientLoaderFunctionArgs,
-  Link,
   type MetaFunction,
   useLoaderData,
   useRevalidator,
@@ -19,6 +18,7 @@ import { StatusBadge } from "~/components/status-badge";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { CopyField } from "~/components/ui/copy-field";
+import { Link } from "~/components/ui/link";
 import { Modal } from "~/components/ui/modal";
 import { ApiError } from "~/lib/api";
 import {

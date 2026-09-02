@@ -1,5 +1,5 @@
-import { Link } from "@remix-run/react";
 import { PageShell } from "~/components/page-shell";
+import { Link } from "~/components/ui/link";
 
 /**
  * A catalog entry the registry lists but has not opened. It renders the page frame rather than an

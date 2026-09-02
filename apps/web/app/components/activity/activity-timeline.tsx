@@ -1,5 +1,5 @@
-import { Link } from "@remix-run/react";
 import { ChevronRight } from "lucide-react";
+import { Link } from "~/components/ui/link";
 import type { ActivityEntry } from "~/lib/activity-feed";
 import { cn } from "~/lib/utils";
 import { EntryBadge } from "./entry-badge";

@@ -1,11 +1,6 @@
 import { type Static, Type } from "@sinclair/typebox";
 
-/**
- * Longest title a Chat may carry. Shared so the API's rename schema and every UI that offers a
- * rename enforce the same ceiling — a client-side `maxLength` that disagreed with the route would
- * turn a typo into a 400 the user cannot see the cause of.
- */
-export const CHAT_TITLE_MAX_LENGTH = 200;
+export * from "./chat-limits";
 
 export const CONVERSATION_TURN_STATUSES = [
   "pending",

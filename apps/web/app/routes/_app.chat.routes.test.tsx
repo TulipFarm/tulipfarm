@@ -65,7 +65,7 @@ test("clientLoader redirects to / when the conversation is missing (404)", async
   await expect(clientLoader(loaderArgs("missing"))).rejects.toMatchObject({ status: 302 });
 });
 
-test("renders the rehydrated transcript", () => {
+test("renders the rehydrated transcript", async () => {
   const messages: ChatMessage[] = [
     { id: "x", role: "user", parts: [{ kind: "text", text: "hello world" }], sealed: true },
   ];
@@ -77,5 +77,6 @@ test("renders the rehydrated transcript", () => {
   });
   const Stub = createRemixStub([{ path: "/", Component: () => <ChatConversationRoute /> }]);
   render(<Stub initialEntries={["/"]} />);
-  expect(screen.getByText("hello world")).toBeInTheDocument();
+  // The transcript is code-split, so it resolves a tick after the route renders.
+  expect(await screen.findByText("hello world")).toBeInTheDocument();
 });

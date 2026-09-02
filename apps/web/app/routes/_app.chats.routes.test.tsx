@@ -1,7 +1,7 @@
 import * as remix from "@remix-run/react";
 import { createRemixStub } from "@remix-run/testing";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { CHAT_TITLE_MAX_LENGTH } from "@tulipfarm/schema/chat";
+import { CHAT_TITLE_MAX_LENGTH } from "@tulipfarm/schema/chat-limits";
 import type { ReactElement } from "react";
 import { expect, test, vi } from "vitest";
 import type { ConversationSummary } from "~/lib/conversations";

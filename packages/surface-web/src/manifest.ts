@@ -1,4 +1,4 @@
-import type { SurfaceRendererManifest } from "@tulipfarm/surface";
+import type { SurfaceRendererManifest } from "@tulipfarm/surface/client";
 
 export const surfaceWebManifest: SurfaceRendererManifest = Object.freeze({
   renderer: "@tulipfarm/surface-web",

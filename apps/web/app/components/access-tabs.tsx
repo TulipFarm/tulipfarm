@@ -1,4 +1,4 @@
-import { NavLink } from "@remix-run/react";
+import { NavLink } from "~/components/ui/link";
 import { cn } from "~/lib/utils";
 
 /* `end` keeps People inactive on sibling routes. */

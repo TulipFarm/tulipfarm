@@ -1,8 +1,9 @@
-import { Link, type MetaFunction, useLoaderData, useRouteError } from "@remix-run/react";
+import { type MetaFunction, useLoaderData, useRouteError } from "@remix-run/react";
 import { AgentRoster } from "~/components/agents/roster";
 import { EmptyState } from "~/components/empty-state";
 import { PageShell } from "~/components/page-shell";
 import { ErrorState } from "~/components/states";
+import { Link } from "~/components/ui/link";
 import { listAgents } from "~/lib/agents";
 import { ApiError } from "~/lib/api";
 

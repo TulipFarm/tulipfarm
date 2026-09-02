@@ -1,5 +1,5 @@
-import { Link } from "@remix-run/react";
 import { ChevronRight } from "lucide-react";
+import { Link } from "~/components/ui/link";
 import { visibleSettingsGroups } from "~/lib/nav";
 import { useSessionUser } from "~/lib/use-session-user";
 

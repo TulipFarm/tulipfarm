@@ -1,8 +1,9 @@
-import { Link, useBlocker } from "@remix-run/react";
+import { useBlocker } from "@remix-run/react";
 import { PageEditor } from "@tulipfarm/editor";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useWikiMentionExtensions } from "~/components/knowledge/use-wiki-mention-data";
 import { Button } from "~/components/ui/button";
+import { Link } from "~/components/ui/link";
 import { mergeTags } from "~/lib/inline-tags";
 import { EMPTY_OKF_FIELDS, type OkfFields, parseOkf, serializeOkf } from "~/lib/okf";
 

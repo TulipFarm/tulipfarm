@@ -1,4 +1,4 @@
-import { Link, NavLink, useLocation, useNavigate, useNavigation } from "@remix-run/react";
+import { useLocation, useNavigate, useNavigation } from "@remix-run/react";
 import {
   ChevronDown,
   ChevronsUpDown,
@@ -23,6 +23,7 @@ import { CompanionMobileTrigger } from "~/components/onboarding/companion";
 import { ReportBugButton } from "~/components/report-bug-button";
 import { SidebarCommand } from "~/components/sidebar-command";
 import { ThemeToggle } from "~/components/theme-toggle";
+import { Link, NavLink } from "~/components/ui/link";
 import { Separator } from "~/components/ui/separator";
 import { Tooltip } from "~/components/ui/tooltip";
 import { logout, type SessionUser } from "~/lib/api";

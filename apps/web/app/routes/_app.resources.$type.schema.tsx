@@ -1,6 +1,5 @@
 import {
   type ClientLoaderFunctionArgs,
-  Link,
   type MetaFunction,
   useLoaderData,
   useNavigate,
@@ -10,6 +9,7 @@ import { type FormEvent, useState } from "react";
 import { PageShell } from "~/components/page-shell";
 import { ErrorState, NotFoundState } from "~/components/states";
 import { Button } from "~/components/ui/button";
+import { Link } from "~/components/ui/link";
 import { ApiError, listResourceTypes, updateResourceType } from "~/lib/api";
 
 export const meta: MetaFunction = () => [{ title: "Edit type · Resources · tulipfarm" }];

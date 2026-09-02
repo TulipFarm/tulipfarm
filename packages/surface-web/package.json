@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.tsx",
     "./manifest": "./src/manifest.ts",
+    "./view": "./src/view.tsx",
     "./styles.css": "./src/styles.css"
   },
   "scripts": {

@@ -1,6 +1,5 @@
 import {
   type ClientLoaderFunctionArgs,
-  Link,
   type MetaFunction,
   useLoaderData,
   useNavigate,
@@ -18,6 +17,7 @@ import { RunStatusBadge } from "~/components/routines/run-status-badge";
 import { TriggerList } from "~/components/routines/trigger-chip";
 import { ErrorState, NotFoundState } from "~/components/states";
 import { Button } from "~/components/ui/button";
+import { Link } from "~/components/ui/link";
 import { Panel } from "~/components/ui/panel";
 import { ApiError } from "~/lib/api";
 import { getRoutine, listRuns, type RoutineInputsSchema, triggerRun } from "~/lib/routines";

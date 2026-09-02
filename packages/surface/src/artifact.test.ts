@@ -3,6 +3,8 @@ import {
   createSurfaceArtifact,
   createSurfaceRegistry,
   SurfaceValidationError,
+  surfaceActionKey,
+  surfaceActionsForArtifact,
   updateSurfaceArtifact,
 } from "./index";
 
@@ -60,5 +62,30 @@ describe("SurfaceArtifact", () => {
         rendererManifest: manifest,
       })
     ).toThrow("does not support this target");
+  });
+
+  it("finds Artifact actions and expands Choices payloads", () => {
+    const action = { event: "record.choose", payload: { source: "test" } };
+    const artifact = createSurfaceArtifact({
+      id: "choices",
+      component: { name: "Choices", version: "1.0" },
+      props: {
+        question: "Pick one",
+        choices: [
+          { label: "Open", value: "open" },
+          { label: "Closed", value: "closed" },
+        ],
+        action,
+      },
+      target: web,
+      audience: ["user:1"],
+      classification: "internal",
+    });
+
+    expect(surfaceActionsForArtifact(artifact).map(surfaceActionKey)).toEqual([
+      surfaceActionKey(action),
+      surfaceActionKey({ ...action, payload: { source: "test", value: "open" } }),
+      surfaceActionKey({ ...action, payload: { source: "test", value: "closed" } }),
+    ]);
   });
 });

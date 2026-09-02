@@ -2,8 +2,6 @@ import { Value } from "@sinclair/typebox/value";
 import { canonicalHash } from "@tulipfarm/schema/canonicalize";
 import { SHIPPED_CATALOG_REVISION, surfaceComponentFor } from "./catalog";
 import {
-  type SurfaceAction,
-  SurfaceActionSchema,
   type SurfaceArtifact,
   SurfaceArtifactSchema,
   type SurfaceClassification,
@@ -160,42 +158,4 @@ export function surfaceArtifactHash(artifact: SurfaceArtifact): string {
   return canonicalHash(artifact);
 }
 
-export function surfaceActionKey(action: SurfaceAction): string {
-  return canonicalHash({
-    event: action.event,
-    payload: action.payload ?? {},
-    stepUp: action.stepUp ?? false,
-  });
-}
-
-export function surfaceActionsForArtifact(artifact: SurfaceArtifact): readonly SurfaceAction[] {
-  const props = artifact.props as Record<string, unknown>;
-  if (artifact.component.name === "Choices") {
-    const action = props.action;
-    const choices = props.choices;
-    if (!Value.Check(SurfaceActionSchema, action) || !Array.isArray(choices)) return [];
-    return [
-      action,
-      ...choices.flatMap((choice) => {
-        if (typeof choice !== "object" || choice === null || !("value" in choice)) return [];
-        return [{ ...action, payload: { ...action.payload, value: choice.value } }];
-      }),
-    ];
-  }
-
-  const actions: SurfaceAction[] = [];
-  const visit = (value: unknown): void => {
-    if (Value.Check(SurfaceActionSchema, value)) {
-      actions.push(value);
-      return;
-    }
-    if (Array.isArray(value)) {
-      value.forEach(visit);
-      return;
-    }
-    if (typeof value !== "object" || value === null) return;
-    Object.values(value).forEach(visit);
-  };
-  visit(props);
-  return actions;
-}
+export { surfaceActionKey, surfaceActionsForArtifact } from "./client";

@@ -1,4 +1,4 @@
-import { CHAT_TITLE_MAX_LENGTH } from "@tulipfarm/schema/chat";
+import { CHAT_TITLE_MAX_LENGTH } from "@tulipfarm/schema/chat-limits";
 import { MoreHorizontal, Pencil, Star, Trash2 } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";

@@ -1,10 +1,17 @@
 import { Check, Search, Settings } from "lucide-react";
+import { lazy, Suspense } from "react";
 import { Composer } from "~/components/chat/composer";
 import { RemovedAttachment } from "~/components/chat/file-attachment";
-import { Transcript } from "~/components/chat/transcript";
 import { GuideSection } from "~/components/design-guide/guide-section";
 import { FileList } from "~/components/files/file-list";
 import type { ChatMessage } from "~/lib/chat/types";
+
+// Matches how Chat loads the transcript. A static import here would defeat that split entirely:
+// Rollup hoists a module with any static importer into a shared chunk, putting the markdown
+// renderer back on the landing route's critical path.
+const Transcript = lazy(() =>
+  import("~/components/chat/transcript").then((m) => ({ default: m.Transcript }))
+);
 
 /**
  * A finished reply carrying a receipt. Auto is a request, not an outcome, so the receipt names the
@@ -80,12 +87,14 @@ export function CompositionSections() {
         description="Panels, navigation, and feedback use the same spacing and hierarchy."
       >
         <div className="mb-6 overflow-hidden rounded-md border border-border bg-background px-4 py-4">
-          <Transcript
-            messages={TRANSCRIPT_MESSAGES}
-            status="idle"
-            onApprove={() => undefined}
-            onTryHarder={() => undefined}
-          />
+          <Suspense fallback={null}>
+            <Transcript
+              messages={TRANSCRIPT_MESSAGES}
+              status="idle"
+              onApprove={() => undefined}
+              onTryHarder={() => undefined}
+            />
+          </Suspense>
         </div>
         <div className="mb-6 overflow-hidden rounded-md border border-border bg-background">
           <Composer

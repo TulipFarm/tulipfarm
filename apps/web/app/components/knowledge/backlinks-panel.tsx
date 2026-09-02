@@ -1,4 +1,4 @@
-import { Link } from "@remix-run/react";
+import { Link } from "~/components/ui/link";
 import type { Backlink } from "~/lib/knowledge-api";
 import { pageHref } from "~/lib/page-href";
 
