@@ -8,17 +8,6 @@ beforeAll(() => {
   Element.prototype.scrollIntoView = vi.fn();
 });
 
-// The transcript and the composer are code-split, so rendering the guide fetches and transforms
-// both chunks from inside the test body. On a loaded CI runner that costs more than Testing
-// Library's `asyncUtilTimeout`, which failed the assertion below while the test still had most of
-// its own budget left. Pull the cost into a hook so the test measures the render, not the compiler.
-beforeAll(async () => {
-  await Promise.all([
-    import("~/components/chat/transcript"),
-    import("~/components/chat/composer-editor"),
-  ]);
-}, 60_000);
-
 afterEach(() => {
   vi.unstubAllEnvs();
 });
@@ -46,7 +35,7 @@ test("404s the guide on a built instance rather than exposing it", () => {
   expect((thrown as Response).status).toBe(404);
 });
 
-test("showcases the live token, status, action, form, and composition vocabulary", async () => {
+test("showcases the live token, status, action, form, and composition vocabulary", () => {
   const Stub = createRemixStub([{ path: "/design-guide", Component: DesignGuideRoute }]);
   render(<Stub initialEntries={["/design-guide"]} />);
   expect(screen.getByRole("heading", { name: "TulipFarm design guide" })).toBeInTheDocument();
@@ -84,17 +73,8 @@ test("showcases the live token, status, action, form, and composition vocabulary
     screen.getAllByRole("status").some((el) => el.textContent?.includes("Profile updated."))
   ).toBe(true);
   expect(screen.getByText("critical")).toBeInTheDocument();
-  // The Chat model vocabulary: effort is chosen, a Model ID is only reported, and Auto names the
-  // rung it resolved to. Rendered from the real Transcript/Composer, so it cannot drift from prod.
-  // Both are code-split, so this still waits on a Suspense boundary even with the chunks warmed.
-  // Measured at 11.5s on a cold cache with the whole suite running in parallel, which is why the
-  // 5s `asyncUtilTimeout` the rest of the suite wants is not a budget this one assertion can meet.
-  expect(await screen.findByText("claude-sonnet-5", {}, { timeout: 25_000 })).toBeInTheDocument();
-  expect(screen.getByText("· Auto → Balanced effort")).toBeInTheDocument();
-  expect(
-    screen.getByRole("button", { name: "Try harder with Thorough effort" })
-  ).toBeInTheDocument();
-  // Mounting the whole component vocabulary, both code-split Chat chunks included, makes this the
-  // slowest test in the suite by an order of magnitude; it needs headroom over the 10s the rest of
-  // the repo gets, and over the inner wait above so a real miss still names the element.
-}, 60_000);
+  // The Chat model vocabulary is asserted against the real component in
+  // `~/components/chat/transcript.test.tsx`. Repeating it here would mean waiting on the guide's
+  // `Suspense` boundary for a code-split chunk — no extra coverage, and the one assertion in this
+  // file that cannot be made deterministic on a loaded runner.
+}, 10_000);
