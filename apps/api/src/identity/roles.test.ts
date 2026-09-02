@@ -126,6 +126,26 @@ describe("describeDeploymentRoles", () => {
     expect(decision.allowed).toBe(false);
   });
 
+  /** #651: the `skill` Tool's load/run modes fell through to default-deny for every member. */
+  it("lets a member load and run Skills, not just list them", () => {
+    const memberRole = DEPLOYMENT_ROLES.find((role) => role.id === "member");
+    if (!memberRole) throw new Error("member role missing from the deployment catalog");
+    const layers = [{ name: "member", grants: memberRole.grants }];
+
+    expect(
+      decideEffectivePermission(layers, {
+        action: "platform.skill.load",
+        resourceType: "soul.skill",
+      }).allowed
+    ).toBe(true);
+    expect(
+      decideEffectivePermission(layers, {
+        action: "platform.skill.run",
+        resourceType: "soul.skill",
+      }).allowed
+    ).toBe(true);
+  });
+
   it("keeps member record access for resource types with no domain", () => {
     const memberRole = DEPLOYMENT_ROLES.find((role) => role.id === "member");
     if (!memberRole) throw new Error("member role missing from the deployment catalog");
