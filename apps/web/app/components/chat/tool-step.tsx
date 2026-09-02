@@ -2,6 +2,7 @@ import { Link } from "@remix-run/react";
 import { PenLine } from "lucide-react";
 import { TraceStep } from "~/components/ui/trace";
 import type { TimelinePart } from "~/lib/chat/types";
+import { useIsAdmin } from "~/lib/use-session-user";
 import { ApprovalCard } from "./approval-card";
 import { SubagentPanel, traceOf } from "./subagent-panel";
 import { ToolInspector, toolHasDetails } from "./tool-inspector";
@@ -41,6 +42,7 @@ export function ToolStepRow({
   const ran = summarizeToolCall(part);
   const status = part.status === "running" ? "running" : outcomeOf(part);
   const approval = part.approval;
+  const isAdmin = useIsAdmin();
   return (
     <>
       <TraceStep
@@ -60,7 +62,7 @@ export function ToolStepRow({
             />
           ) : undefined
         }
-        detail={detailOf(part, status, label === undefined ? undefined : ran)}
+        detail={detailOf(part, status, isAdmin, label === undefined ? undefined : ran)}
       />
       {/*
        * The one thing a step may not hide behind its own disclosure. Everything else in a trace is
@@ -88,7 +90,12 @@ export function ToolStepRow({
  * `ran` is passed only when the row's label came from somewhere other than the call, in which case
  * the call's own summary leads the disclosure.
  */
-function detailOf(part: ToolPart, status: "running" | "done" | "error", ran?: string) {
+function detailOf(
+  part: ToolPart,
+  status: "running" | "done" | "error",
+  isAdmin: boolean,
+  ran?: string
+) {
   const code = status === "error" ? part.meta?.errorCode : undefined;
   const hint = status === "done" ? describeToolResult(part) : undefined;
   const duration = formatDuration(part.meta?.durationMs);
@@ -125,11 +132,11 @@ function detailOf(part: ToolPart, status: "running" | "done" | "error", ran?: st
           )}
         </span>
       )}
-      {connectUrl === undefined ? null : (
+      {connectUrl === undefined ? null : isSecretsUrl(connectUrl) && !isAdmin ? (
+        <p className="text-muted-foreground">Ask an administrator to add this Credential.</p>
+      ) : (
         <Link to={connectUrl} className="block text-primary hover:underline">
-          {connectUrl.startsWith("/business/secrets")
-            ? "Add the required Credential →"
-            : "Connect your account →"}
+          {isSecretsUrl(connectUrl) ? "Add the required Credential →" : "Connect your account →"}
         </Link>
       )}
       {/*
@@ -145,4 +152,8 @@ function detailOf(part: ToolPart, status: "running" | "done" | "error", ran?: st
 
 function outcomeOf(part: ToolPart): "done" | "error" {
   return part.outcome === "error" ? "error" : "done";
+}
+
+function isSecretsUrl(connectUrl: string): boolean {
+  return connectUrl.startsWith("/business/secrets");
 }

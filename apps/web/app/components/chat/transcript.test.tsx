@@ -5,6 +5,12 @@ import { Transcript } from "~/components/chat/transcript";
 import { appendUserMessage, chatReducer, initialChatState } from "~/lib/chat/reducer";
 import type { ChatEvent, ChatState, ChatTurnOptions } from "~/lib/chat/types";
 
+vi.mock("~/lib/use-session-user", async () => {
+  const actual =
+    await vi.importActual<typeof import("~/lib/use-session-user")>("~/lib/use-session-user");
+  return { ...actual, useIsAdmin: vi.fn(() => true) };
+});
+
 // jsdom has no layout engine; the transcript's auto-scroll calls scrollIntoView.
 beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn();

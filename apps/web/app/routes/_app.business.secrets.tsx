@@ -2,6 +2,7 @@ import { useLoaderData, useRevalidator, useRouteError, useSearchParams } from "@
 import { ChevronRight, Trash2 } from "lucide-react";
 import { type FormEvent, useMemo, useState } from "react";
 import { FormStatus } from "~/components/form-status";
+import { PageShell } from "~/components/page-shell";
 import { ErrorState } from "~/components/states";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
@@ -343,5 +344,20 @@ export function ErrorBoundary() {
   const error = useRouteError();
   const status = error instanceof ApiError ? error.status : undefined;
   const message = error instanceof Error ? error.message : undefined;
+
+  if (status === 403) {
+    return (
+      <PageShell title="Credentials">
+        <div className="flex flex-col gap-2 text-sm">
+          <p className="text-destructive">error: 403 forbidden</p>
+          <p className="text-muted-foreground">
+            Only a workspace administrator can view or change stored Credentials. Ask an admin to
+            add or update one for you.
+          </p>
+        </div>
+      </PageShell>
+    );
+  }
+
   return <ErrorState section="business" status={status} message={message} />;
 }

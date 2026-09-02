@@ -6,6 +6,12 @@ import { ToolTrace } from "~/components/chat/tool-trace";
 import { LOADER_LABELS } from "~/components/ui/loading-state";
 import type { TimelinePart } from "~/lib/chat/types";
 
+vi.mock("~/lib/use-session-user", async () => {
+  const actual =
+    await vi.importActual<typeof import("~/lib/use-session-user")>("~/lib/use-session-user");
+  return { ...actual, useIsAdmin: vi.fn(() => true) };
+});
+
 type ToolPart = Extract<TimelinePart, { kind: "tool" }>;
 
 function call(overrides: Partial<ToolPart> & { toolCallId: string; toolName: string }): ToolPart {
