@@ -464,6 +464,66 @@ describe("authz admin routes", () => {
       expect(await groups.getGroup(BUSINESS, "ops")).toBeUndefined();
     });
 
+    it("returns every group's members and held Roles from one list read", async () => {
+      // The Access screens render N teams; a list that omitted members forced N detail reads.
+      for (const id of ["ops", "finance"]) {
+        await app.inject({
+          method: "POST",
+          url: "/api/v1/authz/groups",
+          ...write(adminSid),
+          payload: { id },
+        });
+      }
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/authz/groups/ops/members",
+        ...write(adminSid),
+        payload: { principalId: "p-user" },
+      });
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/authz/groups/ops/roles",
+        ...write(adminSid),
+        payload: { roleId: "support" },
+      });
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/authz/groups/finance/members",
+        ...write(adminSid),
+        payload: { principalId: "p-two" },
+      });
+
+      // Expired links are seeded through the repo because the route rejects a past expiry.
+      await groups.addMember({
+        businessId: BUSINESS,
+        groupId: "finance",
+        principalId: "p-gone",
+        expiresAt: new Date("2000-01-01T00:00:00.000Z"),
+      });
+      await groups.assignRole({
+        businessId: BUSINESS,
+        groupId: "finance",
+        roleId: "support",
+        expiresAt: new Date("2000-01-01T00:00:00.000Z"),
+      });
+
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/authz/groups",
+        cookies: { [SESSION_COOKIE]: adminSid },
+      });
+      expect(res.statusCode).toBe(200);
+
+      const byId = new Map(res.json().groups.map((g: { id: string }) => [g.id, g] as const)) as Map<
+        string,
+        { members: { principalId: string }[]; roles: { roleId: string }[] }
+      >;
+      expect(byId.get("ops")?.members.map((m) => m.principalId)).toEqual(["p-user"]);
+      expect(byId.get("ops")?.roles.map((r) => r.roleId)).toEqual(["support"]);
+      expect(byId.get("finance")?.members.map((m) => m.principalId)).toEqual(["p-two"]);
+      expect(byId.get("finance")?.roles).toEqual([]);
+    });
+
     it("re-stating a group answers 200 and records the expiry it overwrote", async () => {
       // Full upsert without `expiresAt` clears expiry; report 200, not created.
       const created = await app.inject({

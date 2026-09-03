@@ -184,8 +184,8 @@ export function listRoleAssignees(roleId: string): Promise<{ assignees: RoleAssi
   );
 }
 
-export function listGroups(): Promise<{ groups: AuthzGroup[] }> {
-  return apiGet<{ groups: AuthzGroup[] }>("/api/v1/authz/groups");
+export function listGroups(): Promise<{ groups: AuthzGroupDetail[] }> {
+  return apiGet<{ groups: AuthzGroupDetail[] }>("/api/v1/authz/groups");
 }
 
 export function getGroup(groupId: string): Promise<AuthzGroupDetail> {

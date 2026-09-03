@@ -142,6 +142,43 @@ export class AuthzAdminService {
     return groups.map((group) => ({ id: group.id, expiresAt: iso(group.expiresAt) }));
   }
 
+  /**
+   * Every group with its unexpired members and held Roles, in a fixed number of reads.
+   *
+   * The access screens need all of it at once, and asking per group cost one `getGroup` — three
+   * reads — per team, over its own HTTP request. This collects the same rows business-wide and
+   * groups them in memory instead.
+   */
+  async listGroupDetails(): Promise<readonly GroupDetailView[]> {
+    const now = this.now();
+    const [groups, members, roles] = await Promise.all([
+      this.deps.groups.listGroups(this.deps.businessId),
+      this.deps.groups.listAllMembers(this.deps.businessId, now),
+      this.deps.groups.listAllGroupRoles(this.deps.businessId, now),
+    ]);
+
+    const membersByGroup = new Map<string, GroupDetailView["members"][number][]>();
+    for (const member of members) {
+      const bucket = membersByGroup.get(member.groupId) ?? [];
+      bucket.push({ principalId: member.principalId, expiresAt: iso(member.expiresAt) });
+      membersByGroup.set(member.groupId, bucket);
+    }
+
+    const rolesByGroup = new Map<string, GroupDetailView["roles"][number][]>();
+    for (const held of roles) {
+      const bucket = rolesByGroup.get(held.groupId) ?? [];
+      bucket.push({ roleId: held.roleId, expiresAt: iso(held.expiresAt) });
+      rolesByGroup.set(held.groupId, bucket);
+    }
+
+    return groups.map((group) => ({
+      id: group.id,
+      expiresAt: iso(group.expiresAt),
+      members: membersByGroup.get(group.id) ?? [],
+      roles: rolesByGroup.get(group.id) ?? [],
+    }));
+  }
+
   /** Includes non-human principals that have no users-list source. */
   async listPrincipals(): Promise<readonly PrincipalView[]> {
     const principals = await this.deps.principals.list(this.deps.businessId);
