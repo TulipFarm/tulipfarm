@@ -1,4 +1,4 @@
-import { apiDelete, apiGet, apiWrite, shareInFlight } from "./api";
+import { apiDelete, apiGet, apiWrite, CATALOG_TTL_MS, shareInFlight } from "./api";
 
 /* Skill installs publish executable commands only after server-side package/runtime gates pass. */
 
@@ -130,7 +130,7 @@ export type SkillAuditReport = {
 export const listSkills = shareInFlight(async (): Promise<SkillSummary[]> => {
   const body = await apiGet<{ skills: SkillSummary[] }>("/api/v1/skills");
   return body.skills;
-});
+}, CATALOG_TTL_MS);
 
 export async function getSkill(name: string): Promise<SkillDetail> {
   return apiGet<SkillDetail>(`/api/v1/skills/${encodeURIComponent(name)}`);
@@ -178,7 +178,9 @@ export async function installSkills(
     paths.length === skills.length
       ? { scanId, paths }
       : { scanId, names: skills.map((skill) => skill.name) };
-  return apiWrite<{ installed: string[] }>("POST", "/api/v1/skills/install", body);
+  const installed = await apiWrite<{ installed: string[] }>("POST", "/api/v1/skills/install", body);
+  listSkills.invalidate();
+  return installed;
 }
 
 export async function marketplaceSkills(): Promise<MarketplaceCatalog> {
@@ -186,5 +188,6 @@ export async function marketplaceSkills(): Promise<MarketplaceCatalog> {
 }
 
 export async function removeSkill(name: string): Promise<void> {
-  return apiDelete(`/api/v1/skills/${encodeURIComponent(name)}`);
+  await apiDelete(`/api/v1/skills/${encodeURIComponent(name)}`);
+  listSkills.invalidate();
 }

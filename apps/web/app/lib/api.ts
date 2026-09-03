@@ -46,25 +46,57 @@ export type RecordPage = {
 };
 
 /**
- * Shares one in-flight read between callers that ask for the same list in the same tick.
- *
- * The chat composer's mention data and the transcript's mention catalog are independent hooks that
- * both want agents, skills and resource types, and both mount on the same render — so each list was
- * fetched twice on every chat open. Only the *in-flight* promise is shared: it is dropped as soon as
- * it settles, so the next caller still gets a fresh read and nothing is ever served stale.
+ * How long a settled catalog read stays reusable. Long enough to cover consumers that mount a few
+ * hundred milliseconds apart during one page load, short enough that a catalog changed by an agent
+ * in the background surfaces on the reader's next visit rather than on a later one.
  */
-export function shareInFlight<T>(load: () => Promise<T>): () => Promise<T> {
+export const CATALOG_TTL_MS = 5_000;
+
+/**
+ * Shares one read of a rarely-changing catalog between unrelated callers.
+ *
+ * Two things share a list here. Callers in the same tick share the in-flight promise: the composer's
+ * mention data and the transcript's mention catalog are independent hooks that both want agents,
+ * skills and resource types on the same render. Callers that arrive *after* it settles reuse the
+ * value for `ttlMs`, which in-flight sharing alone cannot do — the sidebar's counts and the chat
+ * mention picker mount about 150ms apart, so the first read had already resolved by the time the
+ * second asked and every catalog was fetched twice on each load.
+ *
+ * A rejection is never cached, and every write to a catalog calls `invalidate`, so the window can
+ * only ever serve a value the reader had no way to have changed.
+ */
+export function shareInFlight<T>(
+  load: () => Promise<T>,
+  ttlMs = 0
+): (() => Promise<T>) & { invalidate: () => void } {
   let inFlight: Promise<T> | null = null;
-  return () => {
+  let settled: { value: T; at: number } | null = null;
+
+  const read = () => {
     if (inFlight) return inFlight;
+    if (settled && ttlMs > 0 && Date.now() - settled.at < ttlMs) {
+      return Promise.resolve(settled.value);
+    }
     const started = load();
     inFlight = started;
-    const clear = () => {
-      if (inFlight === started) inFlight = null;
-    };
-    void started.then(clear, clear);
+    started.then(
+      (value) => {
+        if (inFlight === started) {
+          inFlight = null;
+          settled = { value, at: Date.now() };
+        }
+      },
+      () => {
+        if (inFlight === started) inFlight = null;
+      }
+    );
     return started;
   };
+
+  read.invalidate = () => {
+    settled = null;
+  };
+  return read;
 }
 
 export async function apiGet<T>(path: string): Promise<T> {
@@ -312,7 +344,12 @@ export async function createResourceType(
   name: string,
   schema: string
 ): Promise<ResourceTypeSummary> {
-  return apiWrite<ResourceTypeSummary>("POST", "/api/v1/resource-types", { name, schema });
+  const created = await apiWrite<ResourceTypeSummary>("POST", "/api/v1/resource-types", {
+    name,
+    schema,
+  });
+  listResourceTypes.invalidate();
+  return created;
 }
 
 // Replace a resource type's schema (full schema string, JSON or YAML). 404 if the type is gone.
@@ -320,23 +357,26 @@ export async function updateResourceType(
   name: string,
   schema: string
 ): Promise<ResourceTypeSummary> {
-  return apiWrite<ResourceTypeSummary>(
+  const updated = await apiWrite<ResourceTypeSummary>(
     "PUT",
     `/api/v1/resource-types/${encodeURIComponent(name)}`,
     { schema }
   );
+  listResourceTypes.invalidate();
+  return updated;
 }
 
 // Remove a resource type's definition from the soul. Non-destructive: the Postgres table (records)
 // is left intact. Returns 204 (void).
 export async function deleteResourceType(name: string): Promise<void> {
-  return apiDelete(`/api/v1/resource-types/${encodeURIComponent(name)}`);
+  await apiDelete(`/api/v1/resource-types/${encodeURIComponent(name)}`);
+  listResourceTypes.invalidate();
 }
 
 export const listResourceTypes = shareInFlight(async (): Promise<ResourceTypeSummary[]> => {
   const body = await apiGet<{ types: ResourceTypeSummary[] }>("/api/v1/resource-types");
   return body.types;
-});
+}, CATALOG_TTL_MS);
 
 /**
  * Catalog totals per resource type. The API omits any type the caller may not list, so a missing
