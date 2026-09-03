@@ -78,11 +78,18 @@ export async function getConversationMessages(id: string): Promise<ConversationM
   return body.messages;
 }
 
+export type DebugTool = {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+};
+
 export type DebugContext = {
   conversationId: string;
   systemPrompt: string;
   soulReminder: string;
   messages: ConversationMessage[];
+  tools: DebugTool[];
 };
 
 export function getDebugContext(id: string): Promise<DebugContext> {

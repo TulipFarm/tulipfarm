@@ -2,11 +2,12 @@ import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { FileService } from "@tulipfarm/files";
 import { CHAT_TITLE_MAX_LENGTH, ConversationDetailSchema } from "@tulipfarm/schema";
 import type { SoulLoader } from "@tulipfarm/soul";
-import { resolveAgent } from "@tulipfarm/soul";
+import { getDefaultAssistant, resolveAgent } from "@tulipfarm/soul";
 import { parsePaginationQuery } from "@tulipfarm/storage";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
+import type { ToolRegistry } from "../broker/tool-adapter";
 import type { ConversationStore } from "../conversations/service";
 import {
   type IntegrationRegistryReader,
@@ -14,10 +15,17 @@ import {
   resolveSoulReminder,
   type SubjectAuthorityLayers,
 } from "../soul/reminder";
+import {
+  presentationContextFor,
+  surfaceCatalogFor,
+  surfaceCatalogRevisionFor,
+  surfaceRendererRegistry,
+} from "../surfaces/renderer-registry";
 import type { ConversationDoc, ConversationRepo } from "./conversations";
 import { type MessageRepo, referencedFileIds, withUnavailableFiles } from "./messages";
 import { MessageSchema } from "./schemas";
 import { assembleAgentSystemPrompt } from "./system-prompt";
+import { allowedToolNamesFor, toolAgentFor } from "./turn-helpers";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -58,6 +66,8 @@ export interface ConversationRoutesDeps {
   customInstructions?: (userId: string) => Promise<string | undefined>;
   /** Fed to the reminder so the drawer shows the same `<available-integrations>` a Turn sends. */
   integrationRegistry?: IntegrationRegistryReader;
+  /** Lets `debug-context` list the same Tools a Turn would offer, narrowed the same way. */
+  toolRegistry?: ToolRegistry;
 }
 
 export function registerConversationRoutes(
@@ -75,6 +85,7 @@ export function registerConversationRoutes(
     memory,
     customInstructions,
     integrationRegistry,
+    toolRegistry,
   } = deps;
 
   app.get(
@@ -384,8 +395,20 @@ export function registerConversationRoutes(
                 systemPrompt: { type: "string" },
                 soulReminder: { type: "string" },
                 messages: { type: "array", items: MessageSchema },
+                tools: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      name: { type: "string" },
+                      description: { type: "string" },
+                      inputSchema: { type: "object", additionalProperties: true },
+                    },
+                    required: ["name", "description", "inputSchema"],
+                  },
+                },
               },
-              required: ["conversationId", "systemPrompt", "soulReminder", "messages"],
+              required: ["conversationId", "systemPrompt", "soulReminder", "messages", "tools"],
             },
             401: ErrorSchema,
             404: ErrorSchema,
@@ -413,11 +436,40 @@ export function registerConversationRoutes(
           now: new Date(),
         });
         const history = await messageRepo.listByConversation(id, 1000);
+        const platformAgent = getDefaultAssistant(agent.name);
+        const toolAgent = toolAgentFor(platformAgent, agent);
+        const presentationContext = presentationContextFor(
+          { channel: "web", surface: "chat" },
+          `conversation:${id}`
+        );
+        const surfaceComponents = [...(soulLoader?.surfaceComponents.values() ?? [])];
+        const toolContext = {
+          userId: user._id,
+          conversationId: id,
+          presentationContext,
+          surfaceCatalog: surfaceCatalogFor(presentationContext.target, surfaceComponents),
+          surfaceCatalogRevision: surfaceCatalogRevisionFor(
+            presentationContext.target,
+            surfaceComponents
+          ),
+          surfaceRendererManifest: surfaceRendererRegistry.manifestFor(presentationContext.target),
+          surfaceComponents,
+        };
+        const allowedNames = allowedToolNamesFor(toolRegistry, toolAgent, presentationContext);
+        const tools = (toolRegistry?.getAll() ?? [])
+          .filter((tool) => !allowedNames || allowedNames.has(tool.name))
+          .map((tool) => ({
+            name: tool.name,
+            description: tool.description,
+            inputSchema: tool.inputSchemaFor?.(toolContext) ?? tool.inputSchema,
+          }))
+          .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
         return reply.send({
           conversationId: id,
           systemPrompt,
           soulReminder,
           messages: history.items,
+          tools,
         });
       }
     );

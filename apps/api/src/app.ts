@@ -507,6 +507,7 @@ export async function buildApp(opts: AppOptions = {}) {
             ? {}
             : { integrationRegistry: opts.integrationRegistry }),
           ...(opts.fileService === undefined ? {} : { files: opts.fileService }),
+          toolRegistry,
         },
         requireAuth
       );
