@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.18.5](https://github.com/TulipFarm/tulipfarm/compare/v0.18.4...v0.18.5) (2026-09-02)
+
+### Performance Improvements
+
+* **web:** split heavy chunks and prefetch routes to cut first load ([#673](https://github.com/TulipFarm/tulipfarm/issues/673)) ([4cbf2e3](https://github.com/TulipFarm/tulipfarm/commit/4cbf2e3aa32285104dd276817db3f596783b0fd1))
+
 ## [0.18.4](https://github.com/TulipFarm/tulipfarm/compare/v0.18.3...v0.18.4) (2026-09-02)
 
 ### Features
