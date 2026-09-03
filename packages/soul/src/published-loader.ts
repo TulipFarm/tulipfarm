@@ -3,6 +3,7 @@ import { readdir } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
   DEFINITION_REGISTRATIONS,
+  isRecord,
   parseFrontmatter,
   type ResourceDefinition,
   type RoleDefinition,
@@ -66,10 +67,6 @@ async function fileExists(rootPath: string, path: string): Promise<boolean> {
 function artifactLoadError(kind: string, name: string, err: unknown): Error {
   const detail = err instanceof Error ? err.message : String(err);
   return new Error(`Soul: failed to load published ${kind} "${name}": ${detail}`);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** Canonical Resource envelopes must validate; otherwise legacy fallback would drop `spec.domain`. */

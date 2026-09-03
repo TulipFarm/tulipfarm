@@ -1,5 +1,6 @@
 import {
   DEFINITION_API_VERSION,
+  isRecord,
   parseFrontmatter,
   SchemaRegistry,
   SKILL_DEFINITION,
@@ -46,10 +47,6 @@ const SKILL_FRONTMATTER_ALLOWLIST = [
  * resolution. Guessing upward here would silently widen what an Agent may load.
  */
 const DEFAULT_TRUST_TIER = "third_party";
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 /**
  * The canonical view of one `SKILL.md`, or `undefined` when the file does not yield a valid Skill.

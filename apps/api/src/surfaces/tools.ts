@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { type TSchema, Type } from "@sinclair/typebox";
+import { isRecord } from "@tulipfarm/schema";
 import {
   createSurfaceArtifact,
   type PresentationContext,
@@ -142,10 +143,6 @@ type SurfaceComponentInput = {
   version: string;
   props: Readonly<Record<string, unknown>>;
 };
-
-function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function normalizeComponentInput(
   raw: unknown

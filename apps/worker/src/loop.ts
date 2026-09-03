@@ -1,3 +1,5 @@
+import { setTimeout as delay } from "node:timers/promises";
+
 /** Cap on the backoff a failing loop reaches, so a recovered dependency is picked up promptly. */
 export const MAX_BACKOFF_MS = 30_000;
 
@@ -20,17 +22,7 @@ export interface RunLoopOptions {
 
 export function defaultWait(delayMs: number, signal: AbortSignal): Promise<void> {
   if (signal.aborted) return Promise.resolve();
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, delayMs);
-    signal.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        resolve();
-      },
-      { once: true }
-    );
-  });
+  return delay(delayMs, undefined, { signal }).catch(() => undefined);
 }
 
 /** Exponential backoff with jitter, so restarted fleets do not retry in lockstep. */

@@ -1,3 +1,4 @@
+import { noEmbeddings } from "./test-support";
 /**
  * Refused writes are recorded, so path-probing is detectable.
  *
@@ -16,11 +17,7 @@
 import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
-import type {
-  EmbeddingPort,
-  KnowledgeToolContext,
-  KnowledgeWriteDenial,
-} from "@tulipfarm/knowledge";
+import type { KnowledgeToolContext, KnowledgeWriteDenial } from "@tulipfarm/knowledge";
 import {
   BLANKET_READ_PRINCIPAL,
   KNOWLEDGE_TOOLS,
@@ -39,17 +36,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeRequireAuthorization } from "../authz/route-gate";
 import { makeMigratedPglite } from "../test/pglite";
 import { registerKnowledgeRoutes } from "./routes";
-
-function noEmbeddings(): EmbeddingPort {
-  return {
-    isAvailable: () => false,
-    embedMany: async (values) => ({ embeddings: values.map(() => [0, 0, 0]), dimension: 3 }),
-    getActive: () => null,
-    getDimension: () => null,
-    pendingReindex: () => false,
-    clearPendingReindex: () => {},
-  };
-}
 
 const base = "/api/v1/knowledge";
 const SECRET = "ORCHIDBANK";

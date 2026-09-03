@@ -1,6 +1,6 @@
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { Queryable, TransactionPort } from "../ports";
+import { transactionPort } from "../pg/test-support";
 import {
   CONCURRENCY_STORAGE_STATEMENTS,
   ConcurrencyStore,
@@ -14,13 +14,6 @@ const CREATED_AT = "2026-07-25T10:00:00.000Z";
 const RUN_A = "00000000-0000-4000-8000-00000000000a";
 const RUN_B = "00000000-0000-4000-8000-00000000000b";
 const RUN_C = "00000000-0000-4000-8000-00000000000c";
-
-function transactionPort(database: PGlite): TransactionPort {
-  return {
-    withTransaction: (operation) =>
-      database.transaction((transaction) => operation(transaction as Queryable)),
-  };
-}
 
 function run(id: string): StartRunInput {
   return {

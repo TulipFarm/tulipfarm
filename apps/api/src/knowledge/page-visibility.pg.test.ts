@@ -1,3 +1,4 @@
+import { noEmbeddings } from "./test-support";
 /**
  * "Who can see this?" — the question the whole spec exists to answer, asked directly.
  *
@@ -15,7 +16,6 @@
 import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
-import type { EmbeddingPort } from "@tulipfarm/knowledge";
 import {
   KnowledgeService,
   PageRetrievalService,
@@ -36,17 +36,6 @@ import { AuthorLabeller } from "./author-label";
 import { PageReadGate } from "./page-access";
 import { ReaderDirectory } from "./reader-directory";
 import { registerKnowledgeRoutes } from "./routes";
-
-function noEmbeddings(): EmbeddingPort {
-  return {
-    isAvailable: () => false,
-    embedMany: async (values) => ({ embeddings: values.map(() => [0, 0, 0]), dimension: 3 }),
-    getActive: () => null,
-    getDimension: () => null,
-    pendingReindex: () => false,
-    clearPendingReindex: () => {},
-  };
-}
 
 const base = "/api/v1/knowledge";
 

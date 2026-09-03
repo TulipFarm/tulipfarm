@@ -1,3 +1,4 @@
+import { noEmbeddings } from "./test-support";
 /**
  * Inheritance resolves an ancestor by *path*, and paths are only unique within a Space
  * (`knowledge_pages_space_path_idx` is UNIQUE on `(space_id, path)`). Two Spaces are expected to
@@ -13,7 +14,6 @@
 import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
-import type { EmbeddingPort } from "@tulipfarm/knowledge";
 import {
   BLANKET_READ_PRINCIPAL,
   KnowledgeService,
@@ -29,17 +29,6 @@ import {
 } from "@tulipfarm/knowledge";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeMigratedPglite } from "../test/pglite";
-
-function noEmbeddings(): EmbeddingPort {
-  return {
-    isAvailable: () => false,
-    embedMany: async (values) => ({ embeddings: values.map(() => [0, 0, 0]), dimension: 3 }),
-    getActive: () => null,
-    getDimension: () => null,
-    pendingReindex: () => false,
-    clearPendingReindex: () => {},
-  };
-}
 
 describe("inheritance does not cross Space boundaries", () => {
   let db: PGlite;

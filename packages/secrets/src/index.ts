@@ -54,7 +54,7 @@ export {
   SecretLeaseDeniedError,
   SecretNotSerializableError,
 } from "./lease";
-export type { KmsPort, MasterKeyRef, WrappedKey } from "./ports";
+export type { KmsPort, MasterKeyRef, WrappedKey } from "./ports/kms";
 export type { CredentialPrincipal } from "./principal-keys";
 export { PRINCIPAL_MODEL_API_KEY, principalSecretKey } from "./principal-keys";
 export type { InMemorySecretProvider, ResolvedSecret, SecretProvider } from "./providers";

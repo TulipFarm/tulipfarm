@@ -1,6 +1,6 @@
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { Queryable, TransactionPort } from "../ports";
+import { transactionPort } from "../pg/test-support";
 import { DISPATCH_HANDLER_ERROR_REF, DISPATCH_REQUEUED_ONCE_REF } from "./run-lease-store";
 import {
   type AttemptEvidence,
@@ -11,13 +11,6 @@ import {
 } from "./run-store";
 
 const CREATED_AT = "2026-07-24T10:00:00.000Z";
-
-function transactionPort(database: PGlite): TransactionPort {
-  return {
-    withTransaction: (operation) =>
-      database.transaction((transaction) => operation(transaction as Queryable)),
-  };
-}
 
 function run(overrides: Partial<StartRunInput> = {}): StartRunInput {
   return {

@@ -1,3 +1,4 @@
+import { isRecord } from "@tulipfarm/schema";
 /** Browser-safe Surface helpers; keep this entry point free of TypeBox and Ajv imports. */
 import { canonicalHash } from "@tulipfarm/schema/canonicalize";
 
@@ -48,10 +49,6 @@ export type {
 
 const SURFACE_ACTION_KEY_SET = new Set<string>(SURFACE_ACTION_KEYS);
 const SURFACE_ACTION_EVENT_REGEX = new RegExp(SURFACE_ACTION_EVENT_PATTERN);
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function isSurfaceAction(value: unknown): value is SurfaceAction {
   if (!isRecord(value)) return false;

@@ -1,6 +1,7 @@
 import { type Static, Type } from "@sinclair/typebox";
 import { ajv } from "./ajv";
 import { TulipFarmValidationError } from "./error";
+import { isRecord } from "./guards";
 
 /** routine.yaml schema; deferred V1 constructs are pre-rejected before AJV union errors. */
 
@@ -257,10 +258,6 @@ export type RoutineRetryPolicy = Static<typeof RetryPolicy>;
 export type RoutineOnError = Static<typeof OnError>;
 
 const check = ajv.compile(RoutineDefinitionSchema);
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
-}
 
 /** Reject deferred CNCF SW constructs with JSON pointers before AJV union errors. */
 function rejectDeferredConstructs(data: unknown): void {

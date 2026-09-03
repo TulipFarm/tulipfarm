@@ -1,3 +1,4 @@
+import { isRecord } from "@tulipfarm/schema";
 /** How a Tool result too large for the transcript is shortened before the model reads it back. */
 
 /**
@@ -33,10 +34,6 @@ function width(value: unknown): number {
   } catch {
     return Number.POSITIVE_INFINITY;
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 interface Fitted {

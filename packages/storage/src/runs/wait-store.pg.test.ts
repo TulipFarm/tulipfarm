@@ -1,6 +1,6 @@
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { Queryable, TransactionPort } from "../ports";
+import { transactionPort } from "../pg/test-support";
 import { RUN_STORAGE_STATEMENTS, RunStore, type StartRunInput } from "./run-store";
 import {
   type CreateWaitInput,
@@ -15,13 +15,6 @@ const BUSINESS = "business-1";
 const RUN_ID = "00000000-0000-4000-8000-000000000001";
 const CREATED_AT = "2026-07-25T10:00:00.000Z";
 const DEADLINE = "2026-07-25T10:05:00.000Z";
-
-function transactionPort(database: PGlite): TransactionPort {
-  return {
-    withTransaction: (operation) =>
-      database.transaction((transaction) => operation(transaction as Queryable)),
-  };
-}
 
 function run(): StartRunInput {
   return {

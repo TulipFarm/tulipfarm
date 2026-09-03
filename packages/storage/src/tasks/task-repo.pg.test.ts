@@ -1,17 +1,10 @@
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { Queryable, TransactionPort } from "../ports";
+import { transactionPort } from "../pg/test-support";
 import { TASK_STORAGE_STATEMENTS, TaskRepo, TaskStoreError } from "./task-repo";
 
 const BUSINESS = "business-1";
 const OTHER_BUSINESS = "business-2";
-
-function transactionPort(database: PGlite): TransactionPort {
-  return {
-    withTransaction: (operation) =>
-      database.transaction((transaction) => operation(transaction as Queryable)),
-  };
-}
 
 describe("TaskRepo (PostgreSQL)", () => {
   let database: PGlite;

@@ -1,15 +1,8 @@
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { Queryable, TransactionPort } from "../ports";
+import { transactionPort } from "../pg/test-support";
 import { PgPrincipalRepo, type PrincipalRecord } from "./principal-repo";
 import { AUTHORIZATION_STORAGE_STATEMENTS } from "./role-repo";
-
-function transactionPort(database: PGlite): TransactionPort {
-  return {
-    withTransaction: (operation) =>
-      database.transaction((transaction) => operation(transaction as Queryable)),
-  };
-}
 
 function record(overrides: Partial<PrincipalRecord> = {}): PrincipalRecord {
   return {

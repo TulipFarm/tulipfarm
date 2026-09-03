@@ -108,6 +108,7 @@ export {
   guardrailStageFor,
   validateGuardrailsConfig,
 } from "./guardrails";
+export { isRecord } from "./guards";
 export type { LegacyIntegrationManifest } from "./integration-manifest";
 export {
   LegacyIntegrationManifestSchema,

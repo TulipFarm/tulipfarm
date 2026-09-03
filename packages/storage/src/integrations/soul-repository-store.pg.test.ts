@@ -1,19 +1,12 @@
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { Queryable, TransactionPort } from "../ports";
+import { transactionPort } from "../pg/test-support";
 import { INTEGRATION_STORAGE_STATEMENTS, IntegrationStore } from "./integration-store";
 import { SOUL_REPOSITORY_STORAGE_STATEMENTS, SoulRepositoryStore } from "./soul-repository-store";
 
 const BUSINESS_ID = "business-1";
 const APP_ID = "00000000-0000-4000-8000-000000000001";
 const INTEGRATION_ID = "00000000-0000-4000-8000-000000000002";
-
-function transactionPort(database: PGlite): TransactionPort {
-  return {
-    withTransaction: (operation) =>
-      database.transaction((transaction) => operation(transaction as Queryable)),
-  };
-}
 
 describe("SoulRepositoryStore", () => {
   let database: PGlite;

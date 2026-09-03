@@ -1,6 +1,6 @@
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { Queryable, TransactionPort } from "../ports";
+import { transactionPort } from "../pg/test-support";
 import { RUN_STORAGE_STATEMENTS, RunStore, type StartRunInput } from "./run-store";
 import {
   RunStateConcurrencyStore,
@@ -17,13 +17,6 @@ const NOW = "2026-07-25T10:00:00.000Z";
 const EXPIRES = "2026-07-25T10:01:00.000Z";
 const AFTER_EXPIRY = "2026-07-25T10:02:00.000Z";
 const KEY = "invoice-sync";
-
-function transactionPort(database: PGlite): TransactionPort {
-  return {
-    withTransaction: (operation) =>
-      database.transaction((transaction) => operation(transaction as Queryable)),
-  };
-}
 
 function run(id: string, businessId: string): StartRunInput {
   return {

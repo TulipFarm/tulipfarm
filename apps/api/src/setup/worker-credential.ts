@@ -24,9 +24,6 @@ export interface ServiceCredentialResult {
   file?: string;
 }
 
-/** @deprecated Same as {@link ServiceCredentialResult}; kept for existing callers. */
-export type WorkerCredentialResult = ServiceCredentialResult;
-
 export class WorkerCredentialError extends Error {}
 
 interface ServiceCredentialConfig {

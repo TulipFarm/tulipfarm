@@ -1,6 +1,6 @@
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { Queryable, TransactionPort } from "../ports";
+import { transactionPort } from "../pg/test-support";
 import {
   LOOP_CHECKPOINT_STORAGE_STATEMENTS,
   RunLoopCheckpointStore,
@@ -12,13 +12,6 @@ const OTHER_BUSINESS = "business-2";
 const RUN_ID = "00000000-0000-4000-8000-000000000001";
 const OTHER_RUN_ID = "00000000-0000-4000-8000-000000000002";
 const CREATED_AT = "2026-07-25T10:00:00.000Z";
-
-function transactionPort(database: PGlite): TransactionPort {
-  return {
-    withTransaction: (operation) =>
-      database.transaction((transaction) => operation(transaction as Queryable)),
-  };
-}
 
 function run(id: string, businessId: string): StartRunInput {
   return {

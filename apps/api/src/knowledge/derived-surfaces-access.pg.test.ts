@@ -1,3 +1,4 @@
+import { noEmbeddings } from "./test-support";
 /**
  * Ticket 18 — every Page-disclosing surface obeys the gate.
  *
@@ -10,7 +11,6 @@
 import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
-import type { EmbeddingPort } from "@tulipfarm/knowledge";
 import {
   BLANKET_READ_PRINCIPAL,
   KnowledgeService,
@@ -29,17 +29,6 @@ import { makeRequireAuthorization } from "../authz/route-gate";
 import { makeMigratedPglite } from "../test/pglite";
 import { PageReadGate } from "./page-access";
 import { registerKnowledgeRoutes } from "./routes";
-
-function noEmbeddings(): EmbeddingPort {
-  return {
-    isAvailable: () => false,
-    embedMany: async (values) => ({ embeddings: values.map(() => [0, 0, 0]), dimension: 3 }),
-    getActive: () => null,
-    getDimension: () => null,
-    pendingReindex: () => false,
-    clearPendingReindex: () => {},
-  };
-}
 
 const base = "/api/v1/knowledge";
 /** The string that must never reach an excluded reader, on any surface. */

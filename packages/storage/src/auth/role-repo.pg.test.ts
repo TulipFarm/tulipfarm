@@ -1,18 +1,11 @@
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { Queryable, TransactionPort } from "../ports";
+import { transactionPort } from "../pg/test-support";
 import { PgGroupRepo } from "./group-repo";
 import { PgPrincipalRepo } from "./principal-repo";
 import { AUTHORIZATION_STORAGE_STATEMENTS, PgRoleRepo, type RoleRecord } from "./role-repo";
 
 const NOW = new Date("2026-08-12T12:00:00Z");
-
-function transactionPort(database: PGlite): TransactionPort {
-  return {
-    withTransaction: (operation) =>
-      database.transaction((transaction) => operation(transaction as Queryable)),
-  };
-}
 
 function roleRecord(overrides: Partial<RoleRecord> = {}): RoleRecord {
   return {

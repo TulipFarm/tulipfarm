@@ -1,16 +1,9 @@
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { Queryable, TransactionPort } from "../ports";
+import { transactionPort } from "../pg/test-support";
 import { CHANNEL_INBOUND_STORAGE_STATEMENTS, ChannelInboundStore } from "./channel-inbound-store";
 
 const BUSINESS_ID = "business-1";
-
-function transactionPort(database: PGlite): TransactionPort {
-  return {
-    withTransaction: (operation) =>
-      database.transaction((transaction) => operation(transaction as Queryable)),
-  };
-}
 
 describe("ChannelInboundStore", () => {
   let database: PGlite;

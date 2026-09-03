@@ -1,6 +1,6 @@
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { Queryable, TransactionPort } from "../ports";
+import { transactionPort } from "../pg/test-support";
 import {
   CHANNEL_DELIVERY_STORAGE_STATEMENTS,
   ChannelDeliveryStore,
@@ -15,13 +15,6 @@ const BUSINESS_ID = "business-1";
 const APP_ID = "00000000-0000-4000-8000-000000000001";
 const INTEGRATION_ID = "00000000-0000-4000-8000-000000000002";
 const NOW = "2026-07-26T10:00:00.000Z";
-
-function transactionPort(database: PGlite): TransactionPort {
-  return {
-    withTransaction: (operation) =>
-      database.transaction((transaction) => operation(transaction as Queryable)),
-  };
-}
 
 const app: PersistedIntegrationApp = {
   id: APP_ID,

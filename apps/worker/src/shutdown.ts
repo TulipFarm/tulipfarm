@@ -1,3 +1,5 @@
+import { setTimeout } from "node:timers/promises";
+
 export interface DrainableLoop {
   readonly name: string;
   /** Resolves when the loop's in-flight tick has settled and the loop has exited. */
@@ -16,11 +18,7 @@ export interface DrainOptions {
   readonly sleep?: (ms: number) => Promise<void>;
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms).unref?.();
-  });
-}
+const delay = (ms: number): Promise<void> => setTimeout(ms, undefined, { ref: false });
 
 /** Waits for claimed work to finish; timed-out drains exit non-zero and leases expire later. */
 export async function drain(options: DrainOptions): Promise<DrainOutcome> {

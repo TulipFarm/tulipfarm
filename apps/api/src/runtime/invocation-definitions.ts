@@ -8,7 +8,7 @@ import {
   type WebhookTrigger,
   type WebhookVerificationMethod,
 } from "@tulipfarm/run-kernel";
-import { definitions } from "@tulipfarm/schema";
+import { definitions, isRecord } from "@tulipfarm/schema";
 import type { BundleDefinition, BundleVerifier, SoulPublicationCoordinator } from "@tulipfarm/soul";
 import { bundleTriggerDefinitions, findBundleTrigger } from "@tulipfarm/soul";
 
@@ -21,10 +21,6 @@ const WEBHOOK_VERIFICATION_METHODS: readonly string[] =
   definitions.trigger.WEBHOOK_VERIFICATION_METHODS;
 
 type ActiveBundleReader = Pick<SoulPublicationCoordinator, "activeBundle">;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 /** undefined: no mapping authored. null: malformed mapping; callers must fail closed. */
 function mapInputMappings(raw: unknown): Record<string, string> | undefined | null {
