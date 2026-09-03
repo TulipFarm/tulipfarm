@@ -227,6 +227,11 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
     let usage: Awaited<ReturnType<typeof streamText>["usage"]>;
     let result: ReturnType<typeof streamText>;
 
+    const providerOptions = reasoningProviderOptions(
+      resolution.provider,
+      resolution.routing.outcome === "selected" ? appliedRung(resolution.routing) : undefined
+    );
+
     try {
       result = streamText({
         model: resolution.model,
@@ -238,6 +243,7 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
         ...(request.maxOutputTokens === undefined
           ? {}
           : { maxOutputTokens: request.maxOutputTokens }),
+        ...(providerOptions === undefined ? {} : { providerOptions }),
         abortSignal: watchdog.signal,
       });
 
@@ -489,6 +495,40 @@ function routedModelId(routing: RunEventPayloads["model.routed"]): string | unde
 function pricingModelId(routing: RunEventPayloads["model.routed"]): string | undefined {
   if (routing.outcome === "selected") return routing.chain[0]?.modelId;
   return undefined;
+}
+
+/** Effort rung to `reasoning_effort` value; only providers exposing that OpenAI-shaped knob use it. */
+const REASONING_EFFORT_BY_RUNG: Readonly<Record<EffortRung, string>> = {
+  fast: "low",
+  balanced: "medium",
+  thorough: "high",
+};
+
+/**
+ * Explicit `providerOptions.reasoningEffort` for the applied rung, keyed to the AI SDK provider
+ * that resolved the call.
+ *
+ * Left unset, every provider falls back to its own default reasoning depth — for at least one
+ * production DeepSeek deployment behind Azure, that default nearly doubled time-to-first-token
+ * versus an explicit value on the same prompt, even on a `fast`-rung "hey". Anthropic, the
+ * subscription CLI providers, and any other family use different reasoning knobs (or none), so
+ * they are left alone rather than guessing at an equivalent.
+ */
+function reasoningProviderOptions(
+  provider: string | undefined,
+  rung: EffortRung | undefined
+): Record<string, Record<string, string>> | undefined {
+  if (rung === undefined) return undefined;
+  const reasoningEffort = REASONING_EFFORT_BY_RUNG[rung];
+  switch (provider) {
+    case "openai":
+    case "azure":
+      return { openai: { reasoningEffort } };
+    case "openai-compatible":
+      return { "openai-compatible": { reasoningEffort } };
+    default:
+      return undefined;
+  }
 }
 
 /** Actual rung, including inferred routes that name the rung before profile resolution. */
