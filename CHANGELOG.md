@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.18.7](https://github.com/TulipFarm/tulipfarm/compare/v0.18.6...v0.18.7) (2026-09-03)
+
+### Performance Improvements
+
+* **api,web:** return group members and roles in one list read ([#679](https://github.com/TulipFarm/tulipfarm/issues/679)) ([5b2a8a2](https://github.com/TulipFarm/tulipfarm/commit/5b2a8a206c016d70ea40e8ef917d7c16a720e439))
+
+### Code Refactoring
+
+* drop duplicated test fakes and unused code ([#680](https://github.com/TulipFarm/tulipfarm/issues/680)) ([6c74adc](https://github.com/TulipFarm/tulipfarm/commit/6c74adc63334b99ee82fbd9f61c33fbc8dea4ac0))
+
 ## [0.18.6](https://github.com/TulipFarm/tulipfarm/compare/v0.18.5...v0.18.6) (2026-09-03)
 
 ### Features
