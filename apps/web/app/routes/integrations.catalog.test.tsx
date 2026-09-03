@@ -273,7 +273,9 @@ test("opens the preview panel straight from a ?view= URL, so the link is shareab
   renderCatalog([integration({ name: "github", title: "GitHub" })], "/?view=github");
 
   const sheet = await screen.findByRole("dialog");
-  expect(within(sheet).getByText("Integrations / GitHub")).toBeInTheDocument();
+  // The sheet opens on the URL param alone, so its title is the slug until `getIntegration`
+  // resolves. Await the resolved name rather than reading the placeholder.
+  expect(await within(sheet).findByText("Integrations / GitHub")).toBeInTheDocument();
   // The panel previews; it never performs the write itself, so its action leaves for the page
   // that does.
   expect(within(sheet).getByRole("link", { name: /^set up/i })).toHaveAttribute(
@@ -305,7 +307,7 @@ test("the panel colours connection state, so a card and its panel agree", async 
   const sheet = await screen.findByRole("dialog");
   // A green "Connected" on the card must not turn grey the moment the panel opens — same fact,
   // same tone, or the colour stops meaning anything.
-  expect(within(sheet).getByText("Connected")).toHaveClass("text-status-success");
+  expect(await within(sheet).findByText("Connected")).toHaveClass("text-status-success");
 });
 
 test("a coming-soon preview offers no way to connect", async () => {
