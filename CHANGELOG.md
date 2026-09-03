@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.18.6](https://github.com/TulipFarm/tulipfarm/compare/v0.18.5...v0.18.6) (2026-09-03)
+
+### Features
+
+* **web,api:** show Tools sent to the model in the debug drawer ([#675](https://github.com/TulipFarm/tulipfarm/issues/675)) ([59e78a2](https://github.com/TulipFarm/tulipfarm/commit/59e78a2543c59e2e2699d00091e87a27e29c5be1))
+
+### Performance Improvements
+
+* **web:** reuse settled catalog reads across staggered consumers ([#676](https://github.com/TulipFarm/tulipfarm/issues/676)) ([284145f](https://github.com/TulipFarm/tulipfarm/commit/284145fc62b174fb25c9f0fabeed71c148ad84f0))
+* **worker:** send explicit reasoning_effort on model calls ([#677](https://github.com/TulipFarm/tulipfarm/issues/677)) ([e01e321](https://github.com/TulipFarm/tulipfarm/commit/e01e3215452603d6d5d3099aeba2c9c5b90692b9))
+
 ## [0.18.5](https://github.com/TulipFarm/tulipfarm/compare/v0.18.4...v0.18.5) (2026-09-02)
 
 ### Performance Improvements

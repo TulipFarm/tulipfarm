@@ -512,7 +512,7 @@ jobs:
       - name: Test packages with coverage
         run: |
           set -o pipefail
-          pnpm exec turbo test --filter='./packages/*' -- \
+          pnpm exec turbo test --filter='./packages/*' --concurrency=4 -- \
             --coverage \
             --coverage.reporter=json \
             --reporter=default \
