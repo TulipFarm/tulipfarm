@@ -1,3 +1,4 @@
+import { isRecord } from "@tulipfarm/schema";
 import type { ChatMessage, SourceRef, TimelinePart, ToolPreview } from "~/lib/chat/types";
 import type { ConversationMessage, WireMessagePart } from "~/lib/conversations";
 import { randomUUID } from "~/lib/uuid";
@@ -43,10 +44,6 @@ type PersistedToolCall = {
   errorCode?: string;
   batchId?: string;
 };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function previewFrom(value: unknown): ToolPreview | undefined {
   if (!isRecord(value) || typeof value.json !== "string") return undefined;

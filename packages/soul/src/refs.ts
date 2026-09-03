@@ -1,4 +1,5 @@
 import type { VersionedSchemaDocument } from "@tulipfarm/schema";
+import { isRecord } from "@tulipfarm/schema";
 
 /** Semantic reference validation over the proposed Soul tree; issues carry no content or secrets. */
 
@@ -78,10 +79,6 @@ export interface AuthoredDefinition {
   readonly spec: Record<string, unknown>;
   /** `Kind:slug`, the payload-safe subject used in issues. */
   readonly subject: string;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** Narrow validated documents to semantic fields; skip impossible malformed shapes. */

@@ -11,6 +11,7 @@ import {
   UnknownSchemaError,
   YamlParseError,
 } from "./errors";
+import { isRecord } from "./guards";
 
 export interface SchemaRegistration {
   apiVersion: string;
@@ -32,10 +33,6 @@ export interface ValidatedSchemaDocument {
 }
 
 type JsonSchema = boolean | Record<string, unknown>;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function schemaPath(path: string, segment: string): string {
   const escaped = segment.replaceAll("~", "~0").replaceAll("/", "~1");

@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import {
   err,
   type ParkableToolCallResult,
@@ -35,10 +36,6 @@ export interface CancellationOptions<T> {
 }
 
 const EXPIRED = Symbol("expired");
-
-function delay(ms: number): Promise<typeof EXPIRED> {
-  return new Promise((resolve) => setTimeout(() => resolve(EXPIRED), ms));
-}
 
 /**
  * Runs an operation under a deadline, aborts it when the deadline expires, and then reports
@@ -85,7 +82,7 @@ export async function runWithCancellation<T>(
     return { kind: "settled", value: first.value };
   }
 
-  const grace = delay(options.graceMs ?? CANCELLATION_GRACE_MS);
+  const grace = delay(options.graceMs ?? CANCELLATION_GRACE_MS, EXPIRED);
   const acknowledged = await Promise.race([observed, grace]);
   release();
   if (acknowledged === EXPIRED) {

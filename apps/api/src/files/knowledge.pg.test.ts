@@ -1,3 +1,4 @@
+import { noEmbeddings } from "../knowledge/test-support";
 /**
  * A File in Knowledge, over real Postgres.
  *
@@ -81,17 +82,6 @@ class FakeTokenRepo implements TokenRepo {
   async findByUserIdPaginated() {
     return { items: [], nextCursor: null };
   }
-}
-
-function noEmbeddings(): EmbeddingPort {
-  return {
-    isAvailable: () => false,
-    embedMany: async (values) => ({ embeddings: values.map(() => [0, 0, 0]), dimension: 3 }),
-    getActive: () => null,
-    getDimension: () => null,
-    pendingReindex: () => false,
-    clearPendingReindex: () => {},
-  };
 }
 
 interface Enqueued {

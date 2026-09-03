@@ -1,5 +1,5 @@
 import type { routine as routineSchema } from "@tulipfarm/schema";
-import { canonicalHash } from "@tulipfarm/schema";
+import { canonicalHash, isRecord } from "@tulipfarm/schema";
 import { type LimitSet, resolveLimits } from "../limits";
 import type { JsonObject, OutputSchemaRegistration } from "../outputs";
 import { mapAuthoredLimits } from "./authored-limits";
@@ -178,10 +178,6 @@ export interface CompiledRoutine {
 
 export interface CompileRoutineOptions {
   readonly identityCeiling: IdentityCeiling;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** Runtime key reads intentionally opt out of the index-signature-free `RoutineState` union. */

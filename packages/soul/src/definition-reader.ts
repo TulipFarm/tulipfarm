@@ -3,6 +3,7 @@ import {
   type ArtifactKind,
   artifactLayout,
   definitionPath,
+  isRecord,
   legacyDefinitionCandidates,
   parseFrontmatter,
 } from "@tulipfarm/schema";
@@ -64,10 +65,6 @@ export async function resolveDefinition(
 export interface FrontmatterArtifact {
   readonly frontmatter: Record<string, unknown>;
   readonly body: string;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** Inverse of conversion: spec fields become frontmatter, instructions path becomes body. */

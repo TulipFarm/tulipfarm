@@ -1,12 +1,9 @@
+import { isRecord } from "@tulipfarm/schema";
 import type { AuthoredDefinition, DefinitionIndex, SoulSemanticIssue } from "./refs";
 
 /** Reject static authority widening through Agent ceilings or Routine Tool destinations. */
 
 const RISK_RANK: Record<string, number> = { low: 0, medium: 1, high: 2 };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function stringList(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];

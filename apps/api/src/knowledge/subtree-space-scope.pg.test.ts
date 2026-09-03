@@ -1,3 +1,4 @@
+import { noEmbeddings } from "./test-support";
 /**
  * A subtree is bounded by its Space.
  *
@@ -14,7 +15,6 @@
 import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
-import type { EmbeddingPort } from "@tulipfarm/knowledge";
 import {
   KnowledgeService,
   PageRetrievalService,
@@ -29,17 +29,6 @@ import {
 } from "@tulipfarm/knowledge";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeMigratedPglite } from "../test/pglite";
-
-function noEmbeddings(): EmbeddingPort {
-  return {
-    isAvailable: () => false,
-    embedMany: async (values) => ({ embeddings: values.map(() => [0, 0, 0]), dimension: 3 }),
-    getActive: () => null,
-    getDimension: () => null,
-    pendingReindex: () => false,
-    clearPendingReindex: () => {},
-  };
-}
 
 describe("a subtree is bounded by its Space", () => {
   let db: PGlite;

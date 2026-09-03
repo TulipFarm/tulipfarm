@@ -1,4 +1,5 @@
 import type { VersionedSchemaDocument } from "@tulipfarm/schema";
+import { isRecord } from "@tulipfarm/schema";
 import { analyzeCapabilities } from "./capability-analysis";
 import {
   type AuthoredDefinition,
@@ -12,10 +13,6 @@ import {
 } from "./refs";
 
 /** Public semantic validation entrypoint; accepts plain documents for focused tests. */
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function stringList(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];

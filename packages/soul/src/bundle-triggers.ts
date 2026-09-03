@@ -1,4 +1,4 @@
-import { canonicalHash, definitions } from "@tulipfarm/schema";
+import { canonicalHash, definitions, isRecord } from "@tulipfarm/schema";
 import type { BundleDefinition, RuntimeBundle } from "./bundle";
 
 /**
@@ -13,10 +13,6 @@ import type { BundleDefinition, RuntimeBundle } from "./bundle";
  * runs on every scheduler tick and the tree reader already refused any document that does not
  * validate before it could reach a bundle.
  */
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 /** Every Trigger in the bundle, shaped like the standalone definition the resolvers consume. */
 export function bundleTriggerDefinitions(

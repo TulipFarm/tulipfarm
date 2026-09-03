@@ -1,3 +1,4 @@
+import { isRecord } from "@tulipfarm/schema";
 import type { RuntimeBundle } from "./bundle";
 import { bundleTriggerDefinitions } from "./bundle-triggers";
 
@@ -85,10 +86,6 @@ export interface RoutineCatalog {
   list(): Promise<RoutineCatalogItem[]>;
   /** `undefined` when no bundle is active, or the bundle publishes no such Routine. */
   get(slug: string): Promise<RoutineCatalogDetail | undefined>;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 const INTERVAL_UNITS = [

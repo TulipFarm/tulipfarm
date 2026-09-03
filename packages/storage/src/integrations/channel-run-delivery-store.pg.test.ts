@@ -1,6 +1,6 @@
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { Queryable, TransactionPort } from "../ports";
+import { transactionPort } from "../pg/test-support";
 import {
   CHANNEL_RUN_DELIVERY_STORAGE_STATEMENTS,
   ChannelRunDeliveryStore,
@@ -8,13 +8,6 @@ import {
 
 const BUSINESS_ID = "business-1";
 const NOW = "2026-07-26T10:00:00.000Z";
-
-function transactionPort(database: PGlite): TransactionPort {
-  return {
-    withTransaction: (operation) =>
-      database.transaction((transaction) => operation(transaction as Queryable)),
-  };
-}
 
 const delivery = {
   businessId: BUSINESS_ID,

@@ -1,6 +1,6 @@
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { Queryable, TransactionPort } from "../ports";
+import { transactionPort } from "../pg/test-support";
 import {
   ARTIFACT_STORAGE_STATEMENTS,
   ArtifactPersistenceError,
@@ -10,13 +10,6 @@ import {
 
 const CREATED_AT = "2026-07-24T10:00:00.000Z";
 const RUN_ID = "00000000-0000-4000-8000-000000000001";
-
-function transactionPort(database: PGlite): TransactionPort {
-  return {
-    withTransaction: (operation) =>
-      database.transaction((transaction) => operation(transaction as Queryable)),
-  };
-}
 
 function artifact(overrides: Partial<PutArtifactInput> = {}): PutArtifactInput {
   return {

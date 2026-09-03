@@ -1,3 +1,4 @@
+import { noEmbeddings } from "./test-support";
 /**
  * Deleting a Space takes everything under it with it.
  *
@@ -17,7 +18,6 @@
 import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
-import type { EmbeddingPort } from "@tulipfarm/knowledge";
 import {
   KnowledgeService,
   PageRetrievalService,
@@ -36,17 +36,6 @@ import { makeRequireAuthorization } from "../authz/route-gate";
 import { makeMigratedPglite } from "../test/pglite";
 import { PageReadGate } from "./page-access";
 import { registerKnowledgeRoutes } from "./routes";
-
-function noEmbeddings(): EmbeddingPort {
-  return {
-    isAvailable: () => false,
-    embedMany: async (values) => ({ embeddings: values.map(() => [0, 0, 0]), dimension: 3 }),
-    getActive: () => null,
-    getDimension: () => null,
-    pendingReindex: () => false,
-    clearPendingReindex: () => {},
-  };
-}
 
 const base = "/api/v1/knowledge";
 

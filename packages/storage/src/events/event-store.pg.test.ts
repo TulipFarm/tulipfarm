@@ -1,5 +1,6 @@
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { transactionPort } from "../pg/test-support";
 import type { Queryable, TransactionPort } from "../ports";
 import {
   EVENT_STORAGE_STATEMENTS,
@@ -34,13 +35,6 @@ function event(overrides: Partial<StoreEventInput> = {}): StoreEventInput {
     rawPayloadHash: "sha256:abc",
     verification: { status: "verified", method: "hmac-sha256" },
     ...overrides,
-  };
-}
-
-function transactionPort(database: PGlite): TransactionPort {
-  return {
-    withTransaction: (operation) =>
-      database.transaction((transaction) => operation(transaction as Queryable)),
   };
 }
 

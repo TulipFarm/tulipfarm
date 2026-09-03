@@ -1,19 +1,12 @@
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { Queryable, TransactionPort } from "../ports";
+import { transactionPort } from "../pg/test-support";
 import {
   CHANNEL_MENTIONED_THREAD_STORAGE_STATEMENTS,
   ChannelMentionedThreadStore,
 } from "./channel-mentioned-thread-store";
 
 const BUSINESS_ID = "business-1";
-
-function transactionPort(database: PGlite): TransactionPort {
-  return {
-    withTransaction: (operation) =>
-      database.transaction((transaction) => operation(transaction as Queryable)),
-  };
-}
 
 describe("ChannelMentionedThreadStore", () => {
   let database: PGlite;

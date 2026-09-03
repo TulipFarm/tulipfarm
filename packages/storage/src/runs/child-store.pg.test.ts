@@ -1,6 +1,6 @@
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { Queryable, TransactionPort } from "../ports";
+import { transactionPort } from "../pg/test-support";
 import { CHILD_STORAGE_STATEMENTS, ChildLinkAncestryStore, ChildLinkStore } from "./child-store";
 import { RUN_STORAGE_STATEMENTS, RunStore, type StartRunInput } from "./run-store";
 import { WAIT_STORAGE_STATEMENTS, WaitStore } from "./wait-store";
@@ -17,13 +17,6 @@ const AUTHORITY = {
   classifications: ["internal"],
   limits: { tokens: 100 },
 };
-
-function transactionPort(database: PGlite): TransactionPort {
-  return {
-    withTransaction: (operation) =>
-      database.transaction((transaction) => operation(transaction as Queryable)),
-  };
-}
 
 function run(id: string): StartRunInput {
   return {

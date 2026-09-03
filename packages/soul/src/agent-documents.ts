@@ -3,6 +3,7 @@ import {
   type AgentAutonomyCeiling,
   DEFINITION_API_VERSION,
   deriveModelProfiles,
+  isRecord,
   type LlmConfig,
   parseFrontmatter,
   resolveEffortPreset,
@@ -68,10 +69,6 @@ export function defaultModelProfile(config: LlmConfig | undefined): string | und
   const available = new Set(deriveModelProfiles(config).map((profile) => profile.profileId));
   if (available.size === 0) return undefined;
   return resolveEffortPreset("auto", config, (profileId) => available.has(profileId));
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**

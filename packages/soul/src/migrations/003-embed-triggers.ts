@@ -1,5 +1,6 @@
 import { readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { isRecord } from "@tulipfarm/schema";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type { SoulMigration } from "./index";
 
@@ -10,10 +11,6 @@ interface LegacyTrigger {
   readonly slug: string;
   readonly routineSlug: string;
   readonly spec: Record<string, unknown>;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** Read one `triggers/<slug>/trigger.yaml`, or refuse a shape this migration cannot fold. */

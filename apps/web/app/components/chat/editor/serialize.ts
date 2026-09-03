@@ -97,10 +97,6 @@ function serializeInline(nodes: PMNode[] | undefined, collected: Collected): str
 }
 
 /** Ordered de-duplication, preserving first occurrence. */
-function uniq(values: string[]): string[] {
-  return Array.from(new Set(values));
-}
-
 /** Prefixes the first line with `first` and every later line with `rest`, keeping blank lines bare. */
 function prefixLines(text: string, first: string, rest: string): string {
   return text
@@ -172,9 +168,9 @@ export function serializeDoc(doc: PMNode): SerializedMessage {
   return {
     text,
     agentId: collected.agent[0],
-    skills: uniq(collected.skill),
-    resources: uniq(collected.resource),
-    knowledge: uniq(collected.knowledge),
+    skills: Array.from(new Set(collected.skill)),
+    resources: Array.from(new Set(collected.resource)),
+    knowledge: Array.from(new Set(collected.knowledge)),
   };
 }
 

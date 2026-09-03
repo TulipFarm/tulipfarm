@@ -77,7 +77,7 @@ export type {
   IdentityPort,
   IdentityResolution,
   IdentityResolutionRequest,
-} from "./ports";
+} from "./ports/identity";
 export type {
   Principal,
   PrincipalDenialReason,
