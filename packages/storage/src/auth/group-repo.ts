@@ -45,6 +45,13 @@ export interface GroupRepo {
   ): Promise<GroupMembershipRecord[]>;
   /** Every unexpired member of a group. */
   listMembers(businessId: string, groupId: string, now: Date): Promise<GroupMembershipRecord[]>;
+  /**
+   * Every unexpired membership in the business, for callers that need all groups at once.
+   *
+   * Listing groups with their members otherwise costs one `listMembers` per group, which the
+   * access screens paid over HTTP — one request per team on every load.
+   */
+  listAllMembers(businessId: string, now: Date): Promise<GroupMembershipRecord[]>;
   /** Grants a Role to a group; members inherit it. */
   assignRole(record: GroupRoleAssignmentRecord): Promise<void>;
   /** Removes one Role from a group; a no-op when it does not hold it. */
@@ -55,6 +62,8 @@ export interface GroupRepo {
     groupId: string,
     now: Date
   ): Promise<GroupRoleAssignmentRecord[]>;
+  /** Every unexpired group-held Role in the business; the `listAllMembers` counterpart. */
+  listAllGroupRoles(businessId: string, now: Date): Promise<GroupRoleAssignmentRecord[]>;
 }
 
 export class InMemoryGroupRepo implements GroupRepo {
@@ -138,6 +147,14 @@ export class InMemoryGroupRepo implements GroupRepo {
     );
   }
 
+  async listAllMembers(businessId: string, now: Date): Promise<GroupMembershipRecord[]> {
+    return this.memberships.filter(
+      (membership) =>
+        membership.businessId === businessId &&
+        (!membership.expiresAt || membership.expiresAt > now)
+    );
+  }
+
   async assignRole(record: GroupRoleAssignmentRecord): Promise<void> {
     await this.revokeRole(record.businessId, record.groupId, record.roleId);
     this.groupRoles.push(Object.freeze({ ...record }));
@@ -162,6 +179,12 @@ export class InMemoryGroupRepo implements GroupRepo {
         held.businessId === businessId &&
         held.groupId === groupId &&
         (!held.expiresAt || held.expiresAt > now)
+    );
+  }
+
+  async listAllGroupRoles(businessId: string, now: Date): Promise<GroupRoleAssignmentRecord[]> {
+    return this.groupRoles.filter(
+      (held) => held.businessId === businessId && (!held.expiresAt || held.expiresAt > now)
     );
   }
 }
@@ -326,6 +349,20 @@ export class PgGroupRepo implements GroupRepo {
     });
   }
 
+  async listAllMembers(businessId: string, now: Date): Promise<GroupMembershipRecord[]> {
+    return this.transactions.withTransaction(async (transaction) => {
+      const result = await transaction.query<MembershipRow>(
+        `SELECT business_id, principal_id, group_id, expires_at
+           FROM principal_group_members
+          WHERE business_id = $1
+            AND (expires_at IS NULL OR expires_at > $2)
+          ORDER BY group_id, principal_id`,
+        [businessId, now]
+      );
+      return result.rows.map(membershipFromRow);
+    });
+  }
+
   async assignRole(record: GroupRoleAssignmentRecord): Promise<void> {
     await this.transactions.withTransaction(async (transaction) => {
       await transaction.query(
@@ -363,6 +400,20 @@ export class PgGroupRepo implements GroupRepo {
             AND (expires_at IS NULL OR expires_at > $3)
           ORDER BY role_id`,
         [businessId, groupId, now]
+      );
+      return result.rows.map(groupRoleFromRow);
+    });
+  }
+
+  async listAllGroupRoles(businessId: string, now: Date): Promise<GroupRoleAssignmentRecord[]> {
+    return this.transactions.withTransaction(async (transaction) => {
+      const result = await transaction.query<GroupRoleRow>(
+        `SELECT business_id, group_id, role_id, expires_at
+           FROM group_role_assignments
+          WHERE business_id = $1
+            AND (expires_at IS NULL OR expires_at > $2)
+          ORDER BY group_id, role_id`,
+        [businessId, now]
       );
       return result.rows.map(groupRoleFromRow);
     });

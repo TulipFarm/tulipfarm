@@ -18,7 +18,6 @@ import {
   type AuthzGroupDetail,
   type AuthzRole,
   createGroup,
-  getGroup,
   listCapabilities,
   listGroups,
   listRoles,
@@ -31,13 +30,12 @@ type TeamFilter = "all" | "no-access" | "empty";
 type TeamSort = "name-asc" | "name-desc" | "members-desc" | "members-asc";
 
 export async function clientLoader() {
-  const [{ groups }, { roles }, users, catalog] = await Promise.all([
+  const [{ groups: teams }, { roles }, users, catalog] = await Promise.all([
     listGroups(),
     listRoles(),
     listUsers(),
     listCapabilities().catch(() => null),
   ]);
-  const teams = await Promise.all(groups.map((group) => getGroup(group.id)));
   return { teams, roles, users, catalog };
 }
 

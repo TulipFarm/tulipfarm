@@ -228,7 +228,7 @@ export const GroupListResponseSchema = {
   type: "object",
   additionalProperties: false,
   required: ["groups"],
-  properties: { groups: { type: "array", items: GroupViewSchema } },
+  properties: { groups: { type: "array", items: GroupDetailSchema } },
 } as const;
 
 export const GroupIdParamsSchema = {

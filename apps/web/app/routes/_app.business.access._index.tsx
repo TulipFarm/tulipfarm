@@ -36,7 +36,6 @@ import {
   type AuthzRole,
   type EffectiveGrants,
   getEffectiveGrants,
-  getGroup,
   listCapabilities,
   listGroups,
   listRoleAssignees,
@@ -56,7 +55,7 @@ export type SelectedAccess =
 export async function clientLoader({ request }: ClientLoaderFunctionArgs) {
   const selectedId = new URL(request.url).searchParams.get("person")?.trim() ?? "";
 
-  const [users, { roles }, { groups }, catalog] = await Promise.all([
+  const [users, { roles }, { groups: teams }, catalog] = await Promise.all([
     listUsers(),
     listRoles(),
     listGroups(),
@@ -65,14 +64,13 @@ export async function clientLoader({ request }: ClientLoaderFunctionArgs) {
     // simply is not offered, rather than the whole page failing.
     listCapabilities().catch(() => null),
   ]);
-  const [assignments, teams, selectedAccess] = await Promise.all([
+  const [assignments, selectedAccess] = await Promise.all([
     Promise.all(
       roles.map(async (role) => ({
         roleId: role.id,
         assignees: (await listRoleAssignees(role.id)).assignees,
       }))
     ),
-    Promise.all(groups.map((group) => getGroup(group.id))),
     loadSelected(selectedId),
   ]);
 

@@ -148,7 +148,8 @@ export function registerAuthzRoutes(
     {
       preHandler: gate(authz("authz.group.read")),
       schema: {
-        description: "List every principal group.",
+        description:
+          "List every principal group, each with its unexpired members and the Roles it holds.",
         tags: ["authz"],
         security: AUTHZ_SECURITY,
         response: {
@@ -159,7 +160,7 @@ export function registerAuthzRoutes(
         },
       },
     },
-    async () => ({ groups: await service.listGroups() })
+    async () => ({ groups: await service.listGroupDetails() })
   );
 
   app.get(
