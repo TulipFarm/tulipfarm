@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
   ApiError,
+  CATALOG_TTL_MS,
   createRecord,
+  createResourceType,
   getRecord,
   getSession,
   listRecords,
@@ -25,6 +27,9 @@ beforeEach(() => {
   vi.unstubAllEnvs();
   // Baseline: no token, independent of any ambient apps/web/.env.local. Tests opt in explicitly.
   vi.stubEnv("VITE_API_TOKEN", "");
+  // The catalog readers hold a settled value across calls, so without this a test would be served
+  // the previous test's mock instead of its own.
+  listResourceTypes.invalidate();
 });
 
 afterEach(() => {
@@ -78,6 +83,56 @@ test("listResourceTypes unwraps the types array", async () => {
   const types = await listResourceTypes();
   expect(types).toHaveLength(1);
   expect(types[0].name).toBe("ticket");
+});
+
+// The sidebar's counts and the chat mention picker want the same catalogs but mount a few hundred
+// milliseconds apart, so sharing only the in-flight promise still fetched each list twice per load.
+test("serves a second caller from the settled catalog read instead of refetching", async () => {
+  const fetchFn = mockFetch(200, {
+    types: [{ name: "ticket", schema: "type: object", hasHooks: false }],
+  });
+  const first = await listResourceTypes();
+  const second = await listResourceTypes();
+  expect(fetchFn).toHaveBeenCalledTimes(1);
+  expect(second).toEqual(first);
+});
+
+test("refetches the catalog once the reuse window has passed", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    const fetchFn = mockFetch(200, { types: [] });
+    await listResourceTypes();
+    vi.setSystemTime(Date.now() + CATALOG_TTL_MS + 1);
+    await listResourceTypes();
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("writing a resource type drops the cached catalog so the next read sees it", async () => {
+  mockFetch(200, { types: [] });
+  expect(await listResourceTypes()).toHaveLength(0);
+
+  mockFetch(201, { name: "ticket", schema: "type: object", hasHooks: false });
+  await createResourceType("ticket", "type: object");
+
+  const refetch = mockFetch(200, {
+    types: [{ name: "ticket", schema: "type: object", hasHooks: false }],
+  });
+  expect(await listResourceTypes()).toHaveLength(1);
+  expect(refetch).toHaveBeenCalledTimes(1);
+});
+
+test("does not cache a failed catalog read", async () => {
+  mockFetch(500, { error: "boom" });
+  await expect(listResourceTypes()).rejects.toBeInstanceOf(ApiError);
+
+  const retry = mockFetch(200, {
+    types: [{ name: "ticket", schema: "type: object", hasHooks: false }],
+  });
+  expect(await listResourceTypes()).toHaveLength(1);
+  expect(retry).toHaveBeenCalledTimes(1);
 });
 
 test("listRecords builds a query string with limit + includeDeleted, omitting an absent cursor", async () => {
