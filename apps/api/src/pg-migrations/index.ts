@@ -2270,4 +2270,12 @@ export const PG_MIGRATIONS: PgMigration[] = [
       await q.query("ALTER TABLE channel_bind_tokens ADD COLUMN IF NOT EXISTS thread_id text");
     },
   },
+  {
+    version: 84,
+    description: "turn_completions: bounded failure reason and participant-safe model diagnostic",
+    up: async (q) => {
+      await q.query("ALTER TABLE turn_completions ADD COLUMN IF NOT EXISTS reason text");
+      await q.query("ALTER TABLE turn_completions ADD COLUMN IF NOT EXISTS model_failure jsonb");
+    },
+  },
 ];

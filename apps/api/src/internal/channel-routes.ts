@@ -421,7 +421,10 @@ export function registerChannelInternalRoutes(
       );
       if (completion === undefined) return reply.send({ status: "pending" });
       if (completion.status !== "succeeded" || completion.messageId === null) {
-        return reply.send({ status: "failed" });
+        return reply.send({
+          status: "failed",
+          ...(completion.reason === undefined ? {} : { reason: completion.reason }),
+        });
       }
 
       const messages = await deps.store.listMessages(businessId, turn.conversationId);

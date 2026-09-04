@@ -42,6 +42,38 @@ export interface FallbackCallGate {
 
 const noopLogger: FallbackLogger = { warn() {} };
 
+/**
+ * Bounds retries against the *same* link for a rate-limited call, before it counts as a breaker
+ * failure and the chain advances. A 1-strike breaker (see `apps/worker/src/model-gate.ts`) turns a
+ * single 429 into a full 30s shutout of a provider that is otherwise healthy; a short backoff here
+ * gives a transient throttle a chance to clear without burning the link's one strike.
+ */
+const RATE_LIMIT_MAX_RETRIES = 2;
+const RATE_LIMIT_BASE_DELAY_MS = 1_000;
+const RATE_LIMIT_MAX_DELAY_MS = 8_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Seconds or an HTTP-date, per RFC 9110 §10.2.3; only the seconds form is common in practice. */
+function retryAfterMs(err: unknown): number | undefined {
+  if (!APICallError.isInstance(err)) return undefined;
+  const header = err.responseHeaders?.["retry-after"];
+  if (header === undefined) return undefined;
+  const seconds = Number(header);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1_000);
+  const dateMs = Date.parse(header);
+  return Number.isNaN(dateMs) ? undefined : Math.max(0, dateMs - Date.now());
+}
+
+function rateLimitBackoffMs(err: unknown, attempt: number): number {
+  const fromHeader = retryAfterMs(err);
+  if (fromHeader !== undefined) return Math.min(fromHeader, RATE_LIMIT_MAX_DELAY_MS);
+  const exponential = RATE_LIMIT_BASE_DELAY_MS * 2 ** attempt;
+  return Math.min(exponential, RATE_LIMIT_MAX_DELAY_MS) + Math.random() * 250;
+}
+
 function isAbortError(err: unknown): boolean {
   return err instanceof Error && err.name === "AbortError";
 }
@@ -141,7 +173,7 @@ export class FallbackModel implements LanguageModelV4 {
         if ((lease !== undefined || this.gate === undefined) && this.attempted !== undefined) {
           this.attempted.modelId = model.modelId;
         }
-        const generated = await model.doGenerate(options);
+        const generated = await this.callWithRateLimitRetry(model, () => model.doGenerate(options));
         lease?.succeeded();
         this.commit(model);
         return generated;
@@ -158,6 +190,35 @@ export class FallbackModel implements LanguageModelV4 {
     throw lastError;
   }
 
+  /**
+   * Retries a rate-limited call against the same link before it is treated as a link failure.
+   * Any other error, or exhausting the retry budget, is rethrown unchanged for the caller's
+   * existing failure handling (breaker strike + advance to the next link).
+   */
+  private async callWithRateLimitRetry<T>(
+    model: LanguageModelV4,
+    call: () => PromiseLike<T>
+  ): Promise<T> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await call();
+      } catch (err) {
+        if (isHardFailure(err)) throw err;
+        if (
+          classifyProviderError(err) !== "model_rate_limited" ||
+          attempt >= RATE_LIMIT_MAX_RETRIES
+        ) {
+          throw err;
+        }
+        const delayMs = rateLimitBackoffMs(err, attempt);
+        this.logger.warn(
+          `[llm] rate limited, retrying provider=${model.provider} model=${model.modelId} attempt=${attempt + 1}/${RATE_LIMIT_MAX_RETRIES} delayMs=${Math.round(delayMs)}`
+        );
+        await sleep(delayMs);
+      }
+    }
+  }
+
   async doStream(options: LanguageModelV4CallOptions) {
     let lastError: unknown;
     for (const [index, model] of this.models.entries()) {
@@ -168,7 +229,7 @@ export class FallbackModel implements LanguageModelV4 {
         if ((lease !== undefined || this.gate === undefined) && this.attempted !== undefined) {
           this.attempted.modelId = model.modelId;
         }
-        result = await model.doStream(options);
+        result = await this.callWithRateLimitRetry(model, () => model.doStream(options));
       } catch (err) {
         if (isHardFailure(err)) {
           lease?.release();

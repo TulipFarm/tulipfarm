@@ -92,6 +92,57 @@ describe("FallbackModel.doGenerate", () => {
     await expect(fallback.doGenerate(opts)).rejects.toBe(abort);
     expect(m2.doGenerate).not.toHaveBeenCalled();
   });
+
+  it("retries a rate-limited link in place instead of advancing to fallback", async () => {
+    vi.useFakeTimers();
+    try {
+      const result = {
+        text: "recovered",
+        finishReason: "stop",
+        usage: {},
+        rawCall: { rawPrompt: null, rawSettings: {} },
+      };
+      const doGenerate = vi
+        .fn()
+        .mockRejectedValueOnce(apiError(429, true))
+        .mockResolvedValueOnce(result);
+      const m1 = makeModel({ doGenerate });
+      const m2 = makeModel();
+      const fallback = new FallbackModel([m1, m2]);
+
+      const promise = fallback.doGenerate(opts);
+      await vi.runAllTimersAsync();
+      await expect(promise).resolves.toBe(result);
+      expect(doGenerate).toHaveBeenCalledTimes(2);
+      expect(m2.doGenerate).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("advances to fallback once rate-limit retries are exhausted", async () => {
+    vi.useFakeTimers();
+    try {
+      const result = {
+        text: "fallback",
+        finishReason: "stop",
+        usage: {},
+        rawCall: { rawPrompt: null, rawSettings: {} },
+      };
+      const doGenerate = vi.fn().mockRejectedValue(apiError(429, true));
+      const m1 = makeModel({ doGenerate });
+      const m2 = makeModel({ doGenerate: vi.fn().mockResolvedValue(result) });
+      const fallback = new FallbackModel([m1, m2]);
+
+      const promise = fallback.doGenerate(opts);
+      await vi.runAllTimersAsync();
+      await expect(promise).resolves.toBe(result);
+      // 1 initial attempt + 2 retries against the same link, then advance.
+      expect(doGenerate).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("FallbackModel.doStream", () => {

@@ -1,3 +1,4 @@
+import type { ModelFailureDiagnostic } from "@tulipfarm/agent-runtime";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { normalizeMessageContent } from "@tulipfarm/schema";
 import { findLatestConversationTurn, recordCuratorWork } from "@tulipfarm/storage";
@@ -56,6 +57,8 @@ interface CompletionRow {
   message_id: string | null;
   cursor: string | number;
   created_at: Date;
+  reason: string | null;
+  model_failure: unknown | null;
 }
 
 const TURN_COLUMNS = `id, conversation_id, idempotency_key, request_message_id, status, attempt,
@@ -130,6 +133,10 @@ function toCompletion(row: CompletionRow): TurnCompletion {
     messageId: row.message_id,
     cursor: Number(row.cursor),
     createdAt: row.created_at,
+    ...(row.reason === null ? {} : { reason: row.reason }),
+    ...(row.model_failure === null
+      ? {}
+      : { modelFailure: row.model_failure as ModelFailureDiagnostic }),
   };
 }
 
@@ -258,7 +265,7 @@ export class PgConversationStore implements ConversationStore {
   ): Promise<TurnCompletion | undefined> {
     assertDeploymentBusiness(businessId);
     const { rows } = await this.q.query(
-      `SELECT turn_id, attempt, status, message_id, cursor, created_at
+      `SELECT turn_id, attempt, status, message_id, cursor, created_at, reason, model_failure
          FROM turn_completions WHERE turn_id = $1 AND attempt = $2`,
       [turnId, attempt]
     );
@@ -272,8 +279,10 @@ export class PgConversationStore implements ConversationStore {
     return withTransaction(this.q, async (tx) => {
       // must leave the recorded answer — and the Message it names — exactly as it stands.
       const inserted = await tx.query(
-        `INSERT INTO turn_completions (turn_id, attempt, status, message_id, cursor, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6)
+        `INSERT INTO turn_completions (
+           turn_id, attempt, status, message_id, cursor, created_at, reason, model_failure
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
          ON CONFLICT (turn_id, attempt) DO NOTHING
          RETURNING turn_id`,
         [
@@ -283,6 +292,10 @@ export class PgConversationStore implements ConversationStore {
           input.completion.messageId,
           input.completion.cursor,
           input.completion.createdAt,
+          input.completion.reason ?? null,
+          input.completion.modelFailure === undefined
+            ? null
+            : JSON.stringify(input.completion.modelFailure),
         ]
       );
       const completionInserted = inserted.rows.length > 0;

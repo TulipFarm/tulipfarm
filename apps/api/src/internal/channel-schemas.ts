@@ -102,6 +102,7 @@ export const ChannelRunReplyResponseSchema = {
     text: { type: "string" },
     agentDisplayName: { type: "string" },
     blocks: { type: "array", items: { type: "object", additionalProperties: true } },
+    reason: { type: "string" },
   },
 } as const;
 

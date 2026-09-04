@@ -1,5 +1,6 @@
 /** SPEC §10/§18: persist the Turn before dispatch; stream resumes from its durable cursor. */
 
+import type { ModelFailureDiagnostic } from "@tulipfarm/agent-runtime";
 import {
   type ConversationTurn,
   contentText,
@@ -36,6 +37,9 @@ export interface TurnCompletion {
   /** Last Run event sequence this attempt wrote; readers resume strictly after it. */
   readonly cursor: number;
   readonly createdAt: Date;
+  /** Bounded, participant-safe failure evidence; absent for a succeeded completion. */
+  readonly reason?: string;
+  readonly modelFailure?: ModelFailureDiagnostic;
 }
 
 export interface PersistedTurn {

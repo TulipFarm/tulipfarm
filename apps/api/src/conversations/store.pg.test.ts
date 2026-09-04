@@ -170,6 +170,26 @@ describe("PgConversationStore", () => {
     await expect(store.findCompletion(DEPLOYMENT_BUSINESS_ID, TURN_ID, 2)).resolves.toBeUndefined();
   });
 
+  it("round-trips a failed completion's reason and model diagnostic through jsonb", async () => {
+    await store.saveTurn(turn());
+    const completion = {
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      turnId: TURN_ID,
+      attempt: 1,
+      status: "failed" as const,
+      messageId: null,
+      cursor: 4,
+      createdAt: CREATED_AT,
+      reason: "model_rate_limited",
+      modelFailure: { requestId: "req-1", modelId: "gpt-x" },
+    };
+    await store.completeTurn({ completion });
+
+    await expect(store.findCompletion(DEPLOYMENT_BUSINESS_ID, TURN_ID, 1)).resolves.toEqual(
+      completion
+    );
+  });
+
   it("replays only the assistant Message that completed the Turn", async () => {
     await store.saveTurn(turn());
     // What a Worker killed after writing its reply leaves behind.

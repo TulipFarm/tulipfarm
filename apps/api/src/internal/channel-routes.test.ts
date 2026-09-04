@@ -693,6 +693,41 @@ describe("/api/v1/internal/channels", () => {
       });
       expect(res.statusCode).toBe(404);
     });
+
+    it("returns the recorded failure reason for a failed attempt", async () => {
+      store.turns.push({
+        id: "turn-1",
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        conversationId: "conversation-1",
+        idempotencyKey: "key-1",
+        requestMessageId: "message-1",
+        status: "failed",
+        attempt: 1,
+        runId: "run-1",
+        cursor: 0,
+        supersededRunIds: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      store.completions.push({
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        turnId: "turn-1",
+        attempt: 1,
+        status: "failed",
+        messageId: null,
+        cursor: 0,
+        createdAt: new Date(),
+        reason: "model_rate_limited",
+      });
+
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/internal/channels/runs/run-1/reply",
+        headers: asWorker(),
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ status: "failed", reason: "model_rate_limited" });
+    });
   });
 
   describe("GET /runs/:runId/pending-approval", () => {
