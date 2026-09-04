@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { buildAudit, SKILL_AUDIT } from "@tulipfarm/built-in-agents";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
@@ -77,6 +76,8 @@ type SkillSummary = {
   version?: string;
   source?: string;
   category?: string;
+  author?: string;
+  updatedAt?: string;
   tools?: string[];
   allowedDomains?: string[];
   allowedCommands?: string[];
@@ -256,7 +257,12 @@ export function createSkillMarketplaceFlow(deps: {
     },
   });
 }
-function toSkillSummary(skill: SoulSkill, lock: SkillsLock, bundledOnly = false): SkillSummary {
+function toSkillSummary(
+  skill: SoulSkill,
+  lock: SkillsLock,
+  bundledOnly = false,
+  updatedAt?: string
+): SkillSummary {
   const locked = lock.skills[skill.name];
   // A Skill only in the image has no Soul entry yet; the boot sync has not run or it is disabled.
   const provenance: SkillSourceType = bundledOnly ? "bundled" : (locked?.sourceType ?? "curated");
@@ -268,6 +274,8 @@ function toSkillSummary(skill: SoulSkill, lock: SkillsLock, bundledOnly = false)
     version: locked?.version ?? asString(frontmatter.version),
     source: provenance === "bundled" ? undefined : locked?.sourceUrl,
     category: asString(frontmatter.category),
+    author: asString(frontmatter.author),
+    updatedAt,
     tools: asStringList(frontmatter.tools),
     allowedDomains: asStringList(frontmatter.allowedDomains),
     allowedCommands: asStringList(frontmatter.allowedCommands),
@@ -322,9 +330,22 @@ export function registerSkillRoutes(
     },
     async () => {
       const lock = await readSkillsLock(gitSync.path);
-      const skills = Array.from(
+      const merged = Array.from(
         mergedSkills(soulLoader, bundledSkills, disabledBundledSkills).values()
-      ).map((skill) => toSkillSummary(skill, lock, !soulLoader.skills.has(skill.name)));
+      );
+      const paths = merged
+        .filter((skill) => soulLoader.skills.has(skill.name))
+        .map((skill) => `skills/${skill.name}/SKILL.md`);
+      const updatedAt = await gitSync.lastCommitDates(paths);
+      const skills = merged.map((skill) => {
+        const inSoul = soulLoader.skills.has(skill.name);
+        return toSkillSummary(
+          skill,
+          lock,
+          !inSoul,
+          inSoul ? updatedAt.get(`skills/${skill.name}/SKILL.md`) : undefined
+        );
+      });
       return { skills };
     }
   );
@@ -394,7 +415,6 @@ export function registerSkillRoutes(
         : bundled?.directory;
       return {
         ...toSkillSummary(skill, lock, !soulLoader.skills.has(name)),
-        author: asString(skill.frontmatter.author),
         license: asString(skill.frontmatter.license),
         body: skill.body,
         ...(await skillPackageDetail(directory)),

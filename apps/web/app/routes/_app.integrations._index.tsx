@@ -5,17 +5,14 @@ import {
   useRouteError,
   useSearchParams,
 } from "@remix-run/react";
-import { useCallback, useId, useMemo, useState } from "react";
-import { Search } from "~/components/icons";
-import { CatalogActionsMenu } from "~/components/integrations/catalog-actions-menu";
-import { InstallFromSource } from "~/components/integrations/install-from-source";
+import { type ReactNode, useCallback, useId, useMemo, useState } from "react";
+import { CheckCircle2, Plug, Search } from "~/components/icons";
 import { displayName, IntegrationCard } from "~/components/integrations/integration-card";
+import { IntegrationOverview } from "~/components/integrations/integration-overview";
 import { IntegrationPanel } from "~/components/integrations/integration-panel";
 import { ErrorState } from "~/components/states";
-import { Badge } from "~/components/ui/badge";
 import { Input } from "~/components/ui/input";
 import { Panel, PanelEmpty } from "~/components/ui/panel";
-import { Segmented, SegmentedButton } from "~/components/ui/segmented";
 import { ApiError } from "~/lib/api";
 import { type IntegrationSummary, listIntegrations, updateIntegration } from "~/lib/integrations";
 import { useIsAdmin } from "~/lib/use-session-user";
@@ -46,6 +43,7 @@ export default function IntegrationsIndex() {
   }, [setSearchParams]);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<string>();
+  const [scope, setScope] = useState<"all" | "connected">("all");
   const searchId = useId();
   const isAdmin = useIsAdmin();
   const [updatingName, setUpdatingName] = useState<string>();
@@ -72,6 +70,7 @@ export default function IntegrationsIndex() {
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return integrations.filter((i) => {
+      if (scope === "connected" && i.status !== "connected") return false;
       if (category && i.category !== category) return false;
       if (!needle) return true;
       // Slug included alongside the title: an operator who knows an integration as "github" should
@@ -80,114 +79,151 @@ export default function IntegrationsIndex() {
         .filter((field): field is string => Boolean(field))
         .some((field) => field.toLowerCase().includes(needle));
     });
-  }, [integrations, query, category]);
+  }, [integrations, query, category, scope]);
 
-  // Three groups, in the order an operator needs them: what already works, what they can turn on
-  // today, and what is only announced. Within a group the server's alphabetical order stands, so
-  // cards do not move as connections change.
-  const soon = visible.filter((i) => i.availability === "coming_soon");
-  const ready = visible.filter((i) => i.availability !== "coming_soon");
-  const connected = ready.filter((i) => i.status === "connected");
-  const rest = ready.filter((i) => i.status !== "connected");
+  const groups = useMemo(() => {
+    const grouped = new Map<string, IntegrationSummary[]>();
+    for (const integration of visible) {
+      const key = integration.category ?? "Other";
+      grouped.set(key, [...(grouped.get(key) ?? []), integration]);
+    }
+    return [...grouped.entries()];
+  }, [visible]);
 
   return (
-    <div className="flex flex-col gap-5">
-      {/* One toolbar, not three stacked rows. A search field stretched the full width of a page
-          holding five results announces itself as the main event; capped, it reads as the utility
-          it is and lets the catalog be what the eye lands on. */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <div className="relative w-full sm:w-64">
-          <label className="sr-only" htmlFor={searchId}>
-            Search integrations
-          </label>
-          <Search
-            aria-hidden
-            className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-          />
-          <Input
-            id={searchId}
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search integrations"
-            className="pl-8"
-          />
-        </div>
+    <div className="grid gap-8 lg:grid-cols-[12rem_minmax(0,1fr)] lg:gap-10">
+      <aside>
+        <div className="sticky top-0 flex flex-col gap-5">
+          <div className="relative">
+            <label className="sr-only" htmlFor={searchId}>
+              Search integrations
+            </label>
+            <Search
+              aria-hidden
+              className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+            />
+            <Input
+              id={searchId}
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search"
+              className="pl-8"
+            />
+          </div>
 
-        {categories.length > 0 && (
-          <Segmented>
-            <SegmentedButton selected={!category} onClick={() => setCategory(undefined)}>
+          <nav aria-label="Integration filters" className="flex flex-col gap-1">
+            <FilterButton
+              selected={scope === "all" && !category}
+              onClick={() => {
+                setScope("all");
+                setCategory(undefined);
+              }}
+              icon={<Plug aria-hidden className="size-4" />}
+            >
               All
-            </SegmentedButton>
-            {categories.map((name) => (
-              <SegmentedButton
-                key={name}
-                className="capitalize"
-                selected={category === name}
-                onClick={() => setCategory(category === name ? undefined : name)}
-              >
-                {name}
-              </SegmentedButton>
-            ))}
-          </Segmented>
+            </FilterButton>
+            <FilterButton
+              selected={scope === "connected" && !category}
+              onClick={() => {
+                setScope("connected");
+                setCategory(undefined);
+              }}
+              icon={<CheckCircle2 aria-hidden className="size-4" />}
+            >
+              Connected
+            </FilterButton>
+
+            {categories.length > 0 ? (
+              <div className="mt-4 flex flex-col gap-1">
+                <p className="mb-2 px-2 text-xs text-muted-foreground">Categories</p>
+                {categories.map((name) => (
+                  <FilterButton
+                    key={name}
+                    selected={scope === "all" && category === name}
+                    onClick={() => {
+                      setScope("all");
+                      setCategory(name);
+                    }}
+                  >
+                    <span className="capitalize">{name}</span>
+                  </FilterButton>
+                ))}
+              </div>
+            ) : null}
+          </nav>
+        </div>
+      </aside>
+
+      <div className="min-w-0">
+        <IntegrationOverview integrations={integrations} />
+
+        {updateError && (
+          <p className="mt-5 rounded-sm border border-destructive bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {updateError}
+          </p>
         )}
 
-        <div className="ml-auto flex shrink-0 items-center gap-2">
-          <InstallFromSource onInstalled={() => revalidator.revalidate()} />
-          <CatalogActionsMenu />
+        <div className="mt-8">
+          {visible.length === 0 ? (
+            <Panel>
+              <PanelEmpty>
+                {integrations.length === 0
+                  ? "No integrations are available yet. Install one from a git repository to get started."
+                  : "Nothing matches that search."}
+              </PanelEmpty>
+            </Panel>
+          ) : (
+            <div className="flex flex-col gap-8">
+              {groups.map(([title, items]) => (
+                <Group
+                  key={title}
+                  title={categoryLabel(title)}
+                  items={items}
+                  onUpdate={handleUpdate}
+                  updatingName={updatingName}
+                  isAdmin={isAdmin}
+                />
+              ))}
+            </div>
+          )}
         </div>
+
+        <IntegrationPanel name={viewing} onClose={closePanel} />
       </div>
-
-      {updateError && (
-        <p className="rounded-sm border border-destructive bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          {updateError}
-        </p>
-      )}
-
-      {visible.length === 0 ? (
-        <Panel>
-          <PanelEmpty>
-            {integrations.length === 0
-              ? "No integrations are available yet. Install one from a git repository to get started."
-              : "Nothing matches that search."}
-          </PanelEmpty>
-        </Panel>
-      ) : (
-        <>
-          {connected.length > 0 && (
-            <Group
-              title="Connected"
-              items={connected}
-              onUpdate={handleUpdate}
-              updatingName={updatingName}
-              isAdmin={isAdmin}
-            />
-          )}
-          {rest.length > 0 && (
-            <Group
-              title={connected.length > 0 ? "Available" : "All integrations"}
-              items={rest}
-              onUpdate={handleUpdate}
-              updatingName={updatingName}
-              isAdmin={isAdmin}
-            />
-          )}
-          {soon.length > 0 && (
-            <Group
-              title="Coming soon"
-              description="Listed so the roadmap is visible. There is nothing to connect yet."
-              items={soon}
-              onUpdate={handleUpdate}
-              updatingName={updatingName}
-              isAdmin={isAdmin}
-            />
-          )}
-        </>
-      )}
-
-      <IntegrationPanel name={viewing} onClose={closePanel} />
     </div>
   );
+}
+
+function FilterButton({
+  selected,
+  onClick,
+  icon,
+  children,
+}: {
+  selected: boolean;
+  onClick: () => void;
+  icon?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors ${
+        selected
+          ? "bg-muted font-medium text-foreground"
+          : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+      }`}
+    >
+      {icon}
+      {children}
+    </button>
+  );
+}
+
+function categoryLabel(category: string): string {
+  return category.replace(/[-_]/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 /**
@@ -196,14 +232,12 @@ export default function IntegrationsIndex() {
  */
 function Group({
   title,
-  description,
   items,
   onUpdate,
   updatingName,
   isAdmin,
 }: {
   title: string;
-  description?: string;
   items: IntegrationSummary[];
   onUpdate: (name: string, source?: string) => void;
   updatingName?: string;
@@ -211,17 +245,11 @@ function Group({
 }) {
   const headingId = useId();
   return (
-    <section aria-labelledby={headingId} className="flex flex-col gap-3">
-      <div className="flex items-baseline gap-2">
-        <h2 id={headingId} className="text-sm font-semibold text-foreground">
-          {title}
-        </h2>
-        <Badge>{items.length}</Badge>
-        {description ? (
-          <p className="hidden text-xs text-muted-foreground sm:block">{description}</p>
-        ) : null}
-      </div>
-      <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+    <section aria-labelledby={headingId}>
+      <h2 id={headingId} className="mb-2 text-sm font-medium text-muted-foreground">
+        {title}
+      </h2>
+      <ul className="divide-y divide-border">
         {items.map((integration) => (
           <IntegrationCard
             key={integration.name}

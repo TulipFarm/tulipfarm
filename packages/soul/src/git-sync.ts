@@ -317,6 +317,33 @@ export class GitSyncService extends EventEmitter {
       .catch(() => undefined);
   }
 
+  /** Latest commit date for each requested file, read from the local Soul history in one git call. */
+  async lastCommitDates(relativePaths: readonly string[]): Promise<ReadonlyMap<string, string>> {
+    const dates = new Map<string, string>();
+    if (relativePaths.length === 0) return dates;
+
+    const git = await this.gitAt();
+    if (!(await this.hasCommits(git))) return dates;
+
+    const requested = new Set(relativePaths);
+    const output = await git.raw([
+      "log",
+      "--format=__TULIP_COMMIT__%cI",
+      "--name-only",
+      "--",
+      ...relativePaths,
+    ]);
+    let committedAt: string | undefined;
+    for (const line of output.split("\n")) {
+      if (line.startsWith("__TULIP_COMMIT__")) {
+        committedAt = line.slice("__TULIP_COMMIT__".length);
+      } else if (committedAt && requested.has(line) && !dates.has(line)) {
+        dates.set(line, committedAt);
+      }
+    }
+    return dates;
+  }
+
   /** Whether `sha` still resolves to a commit object in this repo. */
   async hasCommit(sha: string): Promise<boolean> {
     const git = await this.gitAt();

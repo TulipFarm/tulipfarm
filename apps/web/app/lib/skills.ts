@@ -20,6 +20,8 @@ export type SkillSummary = {
   source?: string;
   /** The author's own grouping, e.g. `forge`. Free text, so never switch on a fixed set. */
   category?: string;
+  author?: string;
+  updatedAt?: string;
   /** Tool names the Skill narrows the model's view to while it is loaded. */
   tools?: string[];
   /** Hosts a Skill command may reach. Absent means the sandbox gets no network at all. */

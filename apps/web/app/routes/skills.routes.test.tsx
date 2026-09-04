@@ -48,6 +48,8 @@ const SKILLS: SkillSummary[] = [
     provenance: "marketplace",
     source: "owner/repo",
     category: "forge",
+    author: "Muskan Vijayvargiya",
+    updatedAt: "2026-09-04T12:00:00.000Z",
     tools: ["record_search", "present"],
   },
   {
@@ -56,6 +58,14 @@ const SKILLS: SkillSummary[] = [
     provenance: "curated",
     category: "core",
     allowedDomains: ["example.com"],
+  },
+];
+
+const AGENTS = [
+  {
+    name: "reviewer",
+    label: "Review agent",
+    capabilityRestrictions: { skills: { allow: ["demo-skill"] } },
   },
 ];
 
@@ -75,75 +85,59 @@ function detail(overrides: Partial<SkillDetailData> = {}): { skill: SkillDetailD
   };
 }
 
-test("index offers the tabs and links each row to its detail page", () => {
-  renderWithData(<SkillsIndex />, { skills: SKILLS });
+test("index shows starter packs and links each installed skill to its detail page", () => {
+  renderWithData(<SkillsIndex />, { skills: SKILLS, agents: AGENTS });
 
   expect(screen.getByRole("link", { name: /demo-skill/ })).toHaveAttribute(
     "href",
     "/skills/demo-skill"
   );
-  expect(screen.getByRole("link", { name: /^Installed$/ })).toHaveAttribute("href", "/skills");
-  expect(screen.getByRole("link", { name: /^Marketplace$/ })).toHaveAttribute(
-    "href",
-    "/skills/marketplace"
-  );
+  expect(screen.getByRole("heading", { name: "Starter packs" })).toBeInTheDocument();
+  expect(screen.getByText("Product design kit")).toBeInTheDocument();
+  expect(screen.getByText("Frontend engineer")).toBeInTheDocument();
+  expect(screen.getByText("Backend and infra")).toBeInTheDocument();
+  expect(screen.getAllByText("Coming soon")).toHaveLength(4);
   expect(screen.getByRole("link", { name: /browse marketplace/i })).toHaveAttribute(
     "href",
     "/skills/marketplace"
   );
 });
 
-test("index names what each skill reaches, so a scan answers it without opening a row", () => {
-  renderWithData(<SkillsIndex />, { skills: SKILLS });
-
-  // Scoped to each row: the reach filter lists the same words as its options.
-  const demo = screen.getByRole("link", { name: /demo-skill/ });
-  expect(within(demo).getByText("Instructions only")).toBeInTheDocument();
-  expect(within(demo).getByText(/2 tools · record_search, present/)).toBeInTheDocument();
-
-  const mine = screen.getByRole("link", { name: /my-skill/ });
-  expect(within(mine).getByText("Reaches network")).toBeInTheDocument();
-  expect(within(mine).getByText("1 host")).toBeInTheDocument();
-});
-
-test("index groups by the author's category and can filter down to one", async () => {
+test("index shows useful installed-skill columns and searches across them", async () => {
   const user = userEvent.setup();
-  renderWithData(<SkillsIndex />, { skills: SKILLS });
+  renderWithData(<SkillsIndex />, { skills: SKILLS, agents: AGENTS });
 
-  expect(screen.getByRole("heading", { name: /forge/i, level: 2 })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: /core/i, level: 2 })).toBeInTheDocument();
+  expect(screen.getByRole("columnheader", { name: "Name" })).toBeInTheDocument();
+  expect(screen.getByRole("columnheader", { name: "Description" })).toBeInTheDocument();
+  expect(screen.getByRole("columnheader", { name: "Type" })).toBeInTheDocument();
+  expect(screen.getByRole("columnheader", { name: "Agents" })).toBeInTheDocument();
+  expect(screen.getByRole("columnheader", { name: "Author" })).toBeInTheDocument();
+  expect(screen.getByRole("columnheader", { name: "Updated" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Review agent" })).toHaveAttribute(
+    "href",
+    "/agents/reviewer"
+  );
+  expect(screen.getByText("Muskan Vijayvargiya")).toBeInTheDocument();
 
-  await user.selectOptions(screen.getByLabelText("Category"), "forge");
-  expect(screen.getByText("1 of 2 skills match")).toBeInTheDocument();
-  expect(screen.queryByRole("link", { name: /my-skill/ })).not.toBeInTheDocument();
-});
-
-test("index search matches a tool name, not just the description", async () => {
-  const user = userEvent.setup();
-  renderWithData(<SkillsIndex />, { skills: SKILLS });
-
-  await user.type(screen.getByLabelText("Search skills"), "record_search");
+  await user.type(screen.getByLabelText("Search installed skills"), "review agent");
   expect(screen.getByRole("link", { name: /demo-skill/ })).toBeInTheDocument();
   expect(screen.queryByRole("link", { name: /my-skill/ })).not.toBeInTheDocument();
 });
 
-test("index distinguishes a Skill from an Agent and links to Agents", () => {
-  renderWithData(<SkillsIndex />, { skills: [] });
-  expect(screen.getByText(/a procedure an/i)).toBeInTheDocument();
-  expect(screen.getByText(/grants no permissions of its own/i)).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "agent" })).toHaveAttribute("href", "/agents");
+test("index search matches the skill type", async () => {
+  const user = userEvent.setup();
+  renderWithData(<SkillsIndex />, { skills: SKILLS, agents: AGENTS });
+
+  await user.type(screen.getByLabelText("Search installed skills"), "forge");
+  expect(screen.getByRole("link", { name: /demo-skill/ })).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: /my-skill/ })).not.toBeInTheDocument();
 });
 
-test("index with no skills explains what a skill is for and offers the marketplace", () => {
-  renderWithData(<SkillsIndex />, { skills: [] });
+test("index with no skills keeps the starter previews and shows an empty installed section", () => {
+  renderWithData(<SkillsIndex />, { skills: [], agents: [] });
   expect(screen.getByText(/no skills installed yet/i)).toBeInTheDocument();
-  // One route to the marketplace, in the header. The empty state offers the other way to get a
-  // skill instead of repeating it.
   expect(screen.getAllByRole("link", { name: /browse marketplace/i })).toHaveLength(1);
-  expect(screen.getByRole("link", { name: /ask an agent to write one/i })).toHaveAttribute(
-    "href",
-    "/?agent=skill-forge"
-  );
+  expect(screen.getByText("Product design kit")).toBeInTheDocument();
 });
 
 test("detail renders the SKILL.md body and its provenance facts", () => {

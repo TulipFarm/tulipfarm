@@ -760,5 +760,38 @@ describe("GitSyncService", () => {
       mockGit.raw.mockRejectedValueOnce(new Error("Not a valid object name"));
       expect(await svc.hasCommit("nope")).toBe(false);
     });
+
+    it("reads the latest commit date for several paths in one git call", async () => {
+      mockGit.raw.mockResolvedValueOnce(
+        [
+          "__TULIP_COMMIT__2026-09-04T12:30:00+00:00",
+          "",
+          "skills/alpha/SKILL.md",
+          "skills/beta/SKILL.md",
+          "",
+          "__TULIP_COMMIT__2026-08-01T09:00:00+00:00",
+          "",
+          "skills/alpha/SKILL.md",
+        ].join("\n")
+      );
+      const svc = new GitSyncService(SOUL, undefined, async () => undefined, logger);
+
+      await expect(
+        svc.lastCommitDates(["skills/alpha/SKILL.md", "skills/beta/SKILL.md"])
+      ).resolves.toEqual(
+        new Map([
+          ["skills/alpha/SKILL.md", "2026-09-04T12:30:00+00:00"],
+          ["skills/beta/SKILL.md", "2026-09-04T12:30:00+00:00"],
+        ])
+      );
+      expect(mockGit.raw).toHaveBeenCalledWith([
+        "log",
+        "--format=__TULIP_COMMIT__%cI",
+        "--name-only",
+        "--",
+        "skills/alpha/SKILL.md",
+        "skills/beta/SKILL.md",
+      ]);
+    });
   });
 });
