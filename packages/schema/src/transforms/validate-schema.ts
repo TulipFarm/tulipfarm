@@ -60,4 +60,34 @@ export function validateResourceSchema(schema: Record<string, unknown>): void {
       );
     }
   }
+
+  // Validate x-unique: an array of non-empty field-name arrays, each naming declared properties.
+  const uniqueRaw = schema["x-unique"];
+  if (uniqueRaw !== undefined) {
+    if (!Array.isArray(uniqueRaw)) {
+      throw new TulipFarmValidationError("resource", "/x-unique", "x-unique must be an array");
+    }
+    for (const [i, spec] of uniqueRaw.entries()) {
+      if (
+        !Array.isArray(spec) ||
+        spec.length === 0 ||
+        !spec.every((f) => typeof f === "string" && f.length > 0)
+      ) {
+        throw new TulipFarmValidationError(
+          "resource",
+          `/x-unique/${i}`,
+          "each x-unique entry must be a non-empty array of field names"
+        );
+      }
+      for (const field of spec) {
+        if (!(field in properties)) {
+          throw new TulipFarmValidationError(
+            "resource",
+            `/x-unique/${i}`,
+            `unknown field in x-unique: "${field}"`
+          );
+        }
+      }
+    }
+  }
 }

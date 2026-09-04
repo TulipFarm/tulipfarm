@@ -8,6 +8,7 @@ export {
   type ResourceDoc,
   type ResourceRepo,
   type ResourceRepoFactory,
+  ResourceUniqueViolationError,
   type ResourceWriteError,
   type ResourceWritePorts,
   type ResourceWriteResult,

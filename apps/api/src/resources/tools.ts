@@ -109,6 +109,14 @@ const CREATE_SCHEMA = {
   properties: {
     type: { type: "string", minLength: 1, description: "Resource type name (e.g. 'ticket')." },
     data: { type: "object", additionalProperties: true, description: "Record fields." },
+    idempotencyKey: {
+      type: "string",
+      minLength: 1,
+      description:
+        "Stable dedupe key, e.g. a hash of the record's identifying fields. A repeat call with " +
+        "the same type + idempotencyKey returns the existing record instead of creating a " +
+        "duplicate. Use this for any record an Agent creates on a repeating schedule.",
+    },
   },
 } as const;
 
@@ -174,12 +182,39 @@ const SEARCH_SCHEMA = {
   },
 } as const;
 
+const SIMILAR_SCHEMA = {
+  type: "object",
+  required: ["type", "field", "text"],
+  additionalProperties: false,
+  properties: {
+    type: { type: "string", minLength: 1 },
+    field: {
+      type: "string",
+      minLength: 1,
+      description: "Data field to compare (e.g. 'quoteText').",
+    },
+    text: {
+      type: "string",
+      minLength: 1,
+      description: "Candidate text to check for near-duplicates against existing records.",
+    },
+    threshold: {
+      type: "number",
+      minimum: 0,
+      maximum: 1,
+      description: "Similarity cutoff, 0-1 (default 0.35). Lower catches more paraphrasing.",
+    },
+    limit: { type: "number", minimum: 1, maximum: 50 },
+  },
+} as const;
+
 const validateCreate = ajv.compile(CREATE_SCHEMA);
 const validateList = ajv.compile(LIST_SCHEMA);
 const validateGet = ajv.compile(GET_SCHEMA);
 const validateUpdate = ajv.compile(UPDATE_SCHEMA);
 const validateDelete = ajv.compile(DELETE_SCHEMA);
 const validateSearch = ajv.compile(SEARCH_SCHEMA);
+const validateSimilar = ajv.compile(SIMILAR_SCHEMA);
 
 const resourceCreate = defineApiTool<ResourceToolContext>({
   name: "record_create",
@@ -196,16 +231,26 @@ const resourceCreate = defineApiTool<ResourceToolContext>({
   },
   handler: async (args, ctx) => {
     if (!validateCreate(args)) return err("validation_error", firstError(validateCreate.errors));
-    const { type, data: rawData } = args as { type: string; data: Record<string, unknown> };
+    const {
+      type,
+      data: rawData,
+      idempotencyKey,
+    } = args as {
+      type: string;
+      data: Record<string, unknown>;
+      idempotencyKey?: string;
+    };
 
     const resourceDef = ctx.soulLoader.resources.get(type);
     if (!resourceDef) return err("not_found", `resource type not found: ${type}`);
 
     try {
       const created = await createRecord(
-        { type, resource: resourceDef, data: rawData },
+        { type, resource: resourceDef, data: rawData, idempotencyKey },
         resourceWritePorts(ctx)
       );
+      // No dedicated ToolErrorCode for 409: a unique-constraint violation is still "change your
+      // input and retry", so it maps onto validation_error like the 422 case beside it.
       if (!created.ok) return err("validation_error", created.err.body.error);
       if (!created.replayed) {
         await deliverImmediatelyWhenUndurable(
@@ -423,6 +468,52 @@ const resourceSearch = defineApiTool<ResourceToolContext>({
   },
 });
 
+const resourceFindSimilar = defineApiTool<ResourceToolContext>({
+  name: "record_find_similar",
+  description:
+    "Find records of a resource type whose given field is textually similar to the given text " +
+    "(fuzzy match, not exact). Call this before creating a record on a repeating or scheduled " +
+    "task to catch near-duplicates that differ only in spelling, phrasing, or word order — " +
+    "record_search only matches exact field values and will miss those.",
+  mutating: false,
+  tier: "system",
+  inputSchema: SIMILAR_SCHEMA,
+  authorization: {
+    // Deliberately same authority as record_list/record_search: all reveal records of one type.
+    action: "record.list",
+    resources: ["record"],
+    targets: recordTypeTargets,
+    dataClasses: ["business_record"],
+  },
+  handler: async (args, ctx) => {
+    if (!validateSimilar(args)) return err("validation_error", firstError(validateSimilar.errors));
+    const a = args as {
+      type: string;
+      field: string;
+      text: string;
+      threshold?: number;
+      limit?: number;
+    };
+
+    if (!ctx.soulLoader.resources.has(a.type))
+      return err("not_found", `resource type not found: ${a.type}`);
+
+    try {
+      const repo = ctx.repoFactory.forType(a.type);
+      if (!repo.similar) return err("internal_error", "similarity search not supported");
+      const matches = await repo.similar(a.field, a.text, {
+        threshold: a.threshold,
+        limit: a.limit,
+      });
+      return ok({
+        items: matches.map((m) => ({ ...toApiRecord(m.doc), similarity: m.score })),
+      });
+    } catch (e) {
+      return err("internal_error", reason(e));
+    }
+  },
+});
+
 export const RESOURCE_TOOLS: ApiToolDefinition<ResourceToolContext>[] = [
   resourceCreate,
   resourceList,
@@ -430,4 +521,5 @@ export const RESOURCE_TOOLS: ApiToolDefinition<ResourceToolContext>[] = [
   resourceUpdate,
   resourceDelete,
   resourceSearch,
+  resourceFindSimilar,
 ];

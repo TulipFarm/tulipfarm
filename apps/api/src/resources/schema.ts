@@ -1,12 +1,23 @@
+import { createHash } from "node:crypto";
 import type { ResourceDoc } from "./repo";
 
-// Re-check type names before SQL interpolation and quote them; resources live in their own schema.
+// Re-check type and field names before SQL interpolation and quote them; resources live in their
+// own schema, and `x-unique` field names come from Soul-authored YAML, not a trusted constant.
 
 const TYPE_RE = /^[a-z][a-z0-9-]*$/;
+const FIELD_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
 export function assertValidType(type: string): void {
   if (!TYPE_RE.test(type)) {
     throw new Error(`invalid resource type name: ${JSON.stringify(type)}`);
+  }
+}
+
+export function assertValidFields(fields: readonly string[]): void {
+  for (const field of fields) {
+    if (!FIELD_RE.test(field)) {
+      throw new Error(`invalid unique field name: ${JSON.stringify(field)}`);
+    }
   }
 }
 
@@ -40,6 +51,24 @@ export function createHistoryTableSql(type: string): string {
     snapshot    jsonb NOT NULL,
     at          timestamptz NOT NULL
   )`;
+}
+
+/** Deterministic, length-safe index name; field names are not embedded (avoids ident limits). */
+function uniqueIndexName(type: string, fields: readonly string[]): string {
+  const hash = createHash("sha256").update(fields.join(" ")).digest("hex").slice(0, 12);
+  return `uniq_${type.replace(/-/g, "_")}_${hash}`;
+}
+
+/**
+ * Idempotent DDL enforcing one `x-unique` entry: a partial unique index over the named `data`
+ * fields, live rows only. A real constraint, unlike `idempotencyKey` — it holds across callers.
+ */
+export function uniqueIndexSql(type: string, fields: readonly string[]): string {
+  assertValidType(type);
+  assertValidFields(fields);
+  const name = uniqueIndexName(type, fields);
+  const expr = fields.map((f) => `(data->>'${f}')`).join(", ");
+  return `CREATE UNIQUE INDEX IF NOT EXISTS "${name}" ON ${tableName(type)} (${expr}) WHERE deleted_at IS NULL`;
 }
 
 /** Spread data first so row system columns remain authoritative. */
