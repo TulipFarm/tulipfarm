@@ -316,6 +316,17 @@ export const InternalTurnCompletionQuerySchema = {
   properties: { attempt: { type: "integer", minimum: 1 } },
 } as const;
 
+/** Bounded, participant-safe evidence for a failed model call; provider error bodies never cross this seam. */
+const MODEL_FAILURE_SCHEMA = {
+  type: "object",
+  required: ["requestId"],
+  additionalProperties: false,
+  properties: {
+    requestId: { type: "string" },
+    modelId: { type: "string" },
+  },
+} as const;
+
 export const InternalTurnCompletionResponseSchema = {
   type: "object",
   required: ["turnId", "attempt", "status", "messageId", "cursor"],
@@ -325,6 +336,8 @@ export const InternalTurnCompletionResponseSchema = {
     status: { type: "string", enum: ["succeeded", "failed"] },
     messageId: { type: ["string", "null"] },
     cursor: { type: "integer" },
+    reason: { type: "string" },
+    modelFailure: MODEL_FAILURE_SCHEMA,
   },
 } as const;
 
@@ -372,6 +385,9 @@ export const InternalTurnCompletionRecordBodySchema = {
     cursor: { type: "integer", minimum: 0 },
     messageId: { type: ["string", "null"] },
     surfaces: { type: "array", items: SURFACE_LINK_SCHEMA },
+    // Bounded `AgentLoopFailureReason` (or a handful of driver-level reasons); never raw provider text.
+    reason: { type: "string" },
+    modelFailure: MODEL_FAILURE_SCHEMA,
   },
 } as const;
 

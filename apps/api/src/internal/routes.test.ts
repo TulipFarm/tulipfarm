@@ -428,6 +428,38 @@ describe("/api/v1/internal/turns", () => {
     expect(store.turns[0]).toMatchObject({ businessId: BUSINESS_ID, status: "succeeded" });
   });
 
+  it("records and replays a failure reason and model diagnostic for a failed attempt", async () => {
+    const completed = await app.inject({
+      method: "POST",
+      url: `/api/v1/internal/turns/${RUN_ID}/completion`,
+      headers: asWorker(),
+      payload: {
+        attempt: 1,
+        status: "failed",
+        cursor: 3,
+        messageId: null,
+        reason: "model_rate_limited",
+        modelFailure: { requestId: "req-1", modelId: "gpt-x" },
+      },
+    });
+    expect(completed.statusCode).toBe(200);
+
+    const recorded = await app.inject({
+      method: "GET",
+      url: `/api/v1/internal/turns/${RUN_ID}/completion?attempt=1`,
+      headers: asWorker(),
+    });
+    expect(recorded.json()).toEqual({
+      turnId: TURN_ID,
+      attempt: 1,
+      status: "failed",
+      messageId: null,
+      cursor: 3,
+      reason: "model_rate_limited",
+      modelFailure: { requestId: "req-1", modelId: "gpt-x" },
+    });
+  });
+
   it("hands the Worker the Agent's capability restrictions with the Run's authority", async () => {
     hostedAgent = {
       name: "reporter",

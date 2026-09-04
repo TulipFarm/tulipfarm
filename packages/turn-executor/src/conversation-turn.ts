@@ -44,6 +44,9 @@ export interface TurnCompletionStore {
       messageId: string | null;
       conversationId?: string;
       surfaces?: readonly TurnSurfaceLink[];
+      /** Bounded, participant-safe failure evidence; absent for a succeeded completion. */
+      reason?: string;
+      modelFailure?: ModelFailureDiagnostic;
     }
   ): Promise<void>;
 }
@@ -135,6 +138,10 @@ export class ConversationTurnCompleter {
         status: "failed",
         cursor: input.cursor,
         messageId: null,
+        reason: input.outcome.reason,
+        ...(input.outcome.modelFailure === undefined
+          ? {}
+          : { modelFailure: input.outcome.modelFailure }),
       });
       return {
         status: "failed",

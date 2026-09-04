@@ -232,7 +232,10 @@ describe("startDeliveryPollLoop", () => {
     } as unknown as RunStore;
     const deliver = vi.fn().mockResolvedValue(undefined);
     const delivery = { setStatus: vi.fn(), deliver } as unknown as SlackDeliveryAdapter;
-    const internalApi = { require: vi.fn() } as unknown as InternalApiClient;
+    const internalApi = {
+      require: vi.fn(),
+      find: vi.fn().mockResolvedValue(undefined),
+    } as unknown as InternalApiClient;
 
     await runOneTick({
       businessId: "business-1",
@@ -245,10 +248,86 @@ describe("startDeliveryPollLoop", () => {
     });
 
     expect(deliver).toHaveBeenCalledWith(
-      expect.objectContaining({ destination: "C1", threadId: "1785000000.0001" }),
+      expect.objectContaining({
+        destination: "C1",
+        threadId: "1785000000.0001",
+        text: "Something went wrong answering this — please try again.",
+      }),
       "xoxb-leased"
     );
+    expect(internalApi.find).toHaveBeenCalledWith(
+      "GET",
+      "/api/v1/internal/channels/runs/run-1/reply",
+      [404]
+    );
     expect(internalApi.require).not.toHaveBeenCalled();
+    expect(runDeliveries.markStatus).toHaveBeenCalledWith("business-1", "run-1", "failed");
+  });
+
+  it("uses the reason-specific failure copy recovered from the reply route", async () => {
+    const runDeliveries = {
+      listPending: vi.fn().mockResolvedValue([row({ threadId: "1785000000.0001" })]),
+      markStatus: vi.fn().mockResolvedValue(undefined),
+    } as unknown as ChannelRunDeliveryStore;
+    const runs = {
+      find: vi.fn().mockResolvedValue(persistedRun({ status: "failed" })),
+    } as unknown as RunStore;
+    const deliver = vi.fn().mockResolvedValue(undefined);
+    const delivery = { setStatus: vi.fn(), deliver } as unknown as SlackDeliveryAdapter;
+    const internalApi = {
+      require: vi.fn(),
+      find: vi.fn().mockResolvedValue({ status: "failed", reason: "model_rate_limited" }),
+    } as unknown as InternalApiClient;
+
+    await runOneTick({
+      businessId: "business-1",
+      runDeliveries,
+      runs,
+      internalApi,
+      delivery,
+      credential: "xoxb-leased",
+      log: { warn: vi.fn() },
+    });
+
+    expect(deliver).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: "The model provider is rate-limiting us right now. I retried automatically but it's still throttled — please try again shortly.",
+      }),
+      "xoxb-leased"
+    );
+  });
+
+  it("falls back to the generic failure message when recovering the reason errors", async () => {
+    const runDeliveries = {
+      listPending: vi.fn().mockResolvedValue([row({ threadId: "1785000000.0001" })]),
+      markStatus: vi.fn().mockResolvedValue(undefined),
+    } as unknown as ChannelRunDeliveryStore;
+    const runs = {
+      find: vi.fn().mockResolvedValue(persistedRun({ status: "cancelled" })),
+    } as unknown as RunStore;
+    const deliver = vi.fn().mockResolvedValue(undefined);
+    const delivery = { setStatus: vi.fn(), deliver } as unknown as SlackDeliveryAdapter;
+    const internalApi = {
+      require: vi.fn(),
+      find: vi.fn().mockRejectedValue(new Error("internal api unreachable")),
+    } as unknown as InternalApiClient;
+
+    await runOneTick({
+      businessId: "business-1",
+      runDeliveries,
+      runs,
+      internalApi,
+      delivery,
+      credential: "xoxb-leased",
+      log: { warn: vi.fn() },
+    });
+
+    expect(deliver).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: "Something went wrong answering this — please try again.",
+      }),
+      "xoxb-leased"
+    );
     expect(runDeliveries.markStatus).toHaveBeenCalledWith("business-1", "run-1", "failed");
   });
 

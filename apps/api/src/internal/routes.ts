@@ -1,4 +1,5 @@
 import { Readable } from "node:stream";
+import type { ModelFailureDiagnostic } from "@tulipfarm/agent-runtime";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { ParticipantToolCall } from "@tulipfarm/schema";
 import type { FastifyBaseLogger, FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -444,6 +445,8 @@ export function registerInternalTurnRoutes(
         status: completion.status,
         messageId: completion.messageId,
         cursor: completion.cursor,
+        ...(completion.reason === undefined ? {} : { reason: completion.reason }),
+        ...(completion.modelFailure === undefined ? {} : { modelFailure: completion.modelFailure }),
       });
     }
   );
@@ -514,6 +517,8 @@ export function registerInternalTurnRoutes(
         cursor: number;
         messageId?: string | null;
         surfaces?: { artifactId: string; revision: number }[];
+        reason?: string;
+        modelFailure?: ModelFailureDiagnostic;
       };
       const recorded = await guard(reply, async () => {
         await deps.host.completeTurn({
@@ -524,6 +529,8 @@ export function registerInternalTurnRoutes(
           cursor: body.cursor,
           messageId: body.messageId ?? null,
           surfaces: body.surfaces ?? [],
+          ...(body.reason === undefined ? {} : { reason: body.reason }),
+          ...(body.modelFailure === undefined ? {} : { modelFailure: body.modelFailure }),
         });
         return true;
       });

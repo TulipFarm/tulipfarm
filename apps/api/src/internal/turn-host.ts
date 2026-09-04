@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { ModelRequirementsPolicy } from "@tulipfarm/agent-runtime";
+import type { ModelFailureDiagnostic, ModelRequirementsPolicy } from "@tulipfarm/agent-runtime";
 import { readTurnAttachment, type TurnAttachmentStore } from "@tulipfarm/files";
 import { type InvocationPrincipal, SUBAGENT_RUN_SOURCE } from "@tulipfarm/run-kernel";
 import { type MessageContent, type ParticipantToolCall, textContent } from "@tulipfarm/schema";
@@ -435,6 +435,8 @@ export class InternalTurnHost {
     cursor: number;
     messageId: string | null;
     surfaces?: readonly { artifactId: string; revision: number }[];
+    reason?: string;
+    modelFailure?: ModelFailureDiagnostic;
   }): Promise<void> {
     const { turn, subject } = await this.turnAuthority(input.businessId, input.runId);
     const now = this.now();
@@ -464,6 +466,8 @@ export class InternalTurnHost {
         messageId: input.messageId,
         cursor: input.cursor,
         createdAt: now,
+        ...(input.reason === undefined ? {} : { reason: input.reason }),
+        ...(input.modelFailure === undefined ? {} : { modelFailure: input.modelFailure }),
       },
       ...(current
         ? {

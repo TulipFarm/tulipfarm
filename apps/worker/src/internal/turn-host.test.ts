@@ -117,4 +117,44 @@ describe("HttpTurnHost", () => {
       messageId: "message-1",
     });
   });
+
+  it("forwards the failure reason and model diagnostic on a failed completion", async () => {
+    const bodies: string[] = [];
+    const { turns } = host((_url, init) => {
+      bodies.push(typeof init?.body === "string" ? init.body : "");
+      return json({});
+    });
+
+    await turns.completeTurn({
+      ...REF,
+      status: "failed",
+      cursor: 7,
+      messageId: null,
+      reason: "model_rate_limited",
+      modelFailure: { requestId: "req-1", modelId: "gpt-x" },
+    });
+
+    expect(JSON.parse(bodies[0] as string)).toEqual({
+      attempt: 2,
+      status: "failed",
+      cursor: 7,
+      messageId: null,
+      reason: "model_rate_limited",
+      modelFailure: { requestId: "req-1", modelId: "gpt-x" },
+    });
+  });
+
+  it("omits reason and modelFailure from the completion body when absent", async () => {
+    const bodies: string[] = [];
+    const { turns } = host((_url, init) => {
+      bodies.push(typeof init?.body === "string" ? init.body : "");
+      return json({});
+    });
+
+    await turns.completeTurn({ ...REF, status: "failed", cursor: 7, messageId: null });
+
+    const body = JSON.parse(bodies[0] as string);
+    expect(body).not.toHaveProperty("reason");
+    expect(body).not.toHaveProperty("modelFailure");
+  });
 });

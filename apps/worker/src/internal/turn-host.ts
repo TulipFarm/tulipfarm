@@ -1,5 +1,6 @@
 import type {
   ExposedTool,
+  ModelFailureDiagnostic,
   ToolDispatchPort,
   ToolDispatchRequest,
   ToolDispatchResult,
@@ -242,6 +243,8 @@ export class HttpTurnHost
       cursor: number;
       messageId: string | null;
       surfaces?: readonly { artifactId: string; revision: number }[];
+      reason?: string;
+      modelFailure?: ModelFailureDiagnostic;
     }
   ): Promise<void> {
     await this.client.require("POST", turnPath(input.runId, "/completion"), {
@@ -250,6 +253,8 @@ export class HttpTurnHost
       cursor: input.cursor,
       messageId: input.messageId,
       ...(input.surfaces?.length ? { surfaces: input.surfaces } : {}),
+      ...(input.reason === undefined ? {} : { reason: input.reason }),
+      ...(input.modelFailure === undefined ? {} : { modelFailure: input.modelFailure }),
     });
   }
 }
