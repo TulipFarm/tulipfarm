@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.18.9](https://github.com/TulipFarm/tulipfarm/compare/v0.18.8...v0.18.9) (2026-09-04)
+
+### Features
+
+* **resources:** dedup Records via idempotency key, fuzzy match, and x-unique ([#686](https://github.com/TulipFarm/tulipfarm/issues/686)) ([54e1d32](https://github.com/TulipFarm/tulipfarm/commit/54e1d3272aa1f48218160df78e932d4d9977b3bb))
+
+### Bug Fixes
+
+* Slack agent silently failing on LLM rate limits ([#685](https://github.com/TulipFarm/tulipfarm/issues/685)) ([3a01aa5](https://github.com/TulipFarm/tulipfarm/commit/3a01aa5ac7226f0249272d7045a426739eb1ac6a))
+
 ## [0.18.8](https://github.com/TulipFarm/tulipfarm/compare/v0.18.7...v0.18.8) (2026-09-04)
 
 ### Features
