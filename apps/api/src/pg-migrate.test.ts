@@ -67,6 +67,25 @@ async function seedChannelBindTokensAlterTarget(db: PGlite): Promise<void> {
   )`);
 }
 
+/**
+ * The `conversation_turns` (v16) and `turn_completions` (v17) tables that v84 later alters.
+ * Fixtures whose floor is above v17 must stand both in.
+ */
+async function seedTurnCompletionsAlterTarget(db: PGlite): Promise<void> {
+  await db.query(`CREATE TABLE IF NOT EXISTS conversation_turns (
+    id uuid PRIMARY KEY
+  )`);
+  await db.query(`CREATE TABLE IF NOT EXISTS turn_completions (
+    turn_id    uuid NOT NULL REFERENCES conversation_turns(id),
+    attempt    integer NOT NULL CHECK (attempt >= 0),
+    status     text NOT NULL,
+    message_id uuid,
+    cursor     bigint NOT NULL DEFAULT 0,
+    created_at timestamptz NOT NULL,
+    PRIMARY KEY (turn_id, attempt)
+  )`);
+}
+
 describe("the migration ledger is append-only", () => {
   it("assigns every migration a distinct version", () => {
     const seen = new Map<number, string[]>();
@@ -403,6 +422,7 @@ describe("runPgMigrations", () => {
       await seedRunsFkTarget(db);
       await seedApprovalsAlterTarget(db);
       await seedChannelBindTokensAlterTarget(db);
+      await seedTurnCompletionsAlterTarget(db);
       await db.query(`INSERT INTO soul_execution_bundles (
         digest, business_id, changeset_id, commit_sha, bundle, signature
       ) VALUES (
@@ -476,6 +496,7 @@ describe("runPgMigrations", () => {
       await seedRunsFkTarget(db);
       await seedApprovalsAlterTarget(db);
       await seedChannelBindTokensAlterTarget(db);
+      await seedTurnCompletionsAlterTarget(db);
       await db.query(`INSERT INTO runs (id, bundle)
         VALUES ('00000000-0000-4000-8000-000000000001', '{"routineId":"chat"}'::jsonb)`);
       await db.query(`CREATE TABLE schema_version (
@@ -549,6 +570,7 @@ describe("runPgMigrations", () => {
       await seedRunsFkTarget(db);
       await seedApprovalsAlterTarget(db);
       await seedChannelBindTokensAlterTarget(db);
+      await seedTurnCompletionsAlterTarget(db);
 
       await runPgMigrations(db, undefined, () => {});
 
@@ -575,6 +597,7 @@ describe("runPgMigrations", () => {
       await seedRunsFkTarget(db);
       await seedApprovalsAlterTarget(db);
       await seedChannelBindTokensAlterTarget(db);
+      await seedTurnCompletionsAlterTarget(db);
 
       await expect(runPgMigrations(db, undefined, () => {})).resolves.not.toThrow();
     });
@@ -813,6 +836,7 @@ describe("runPgMigrations concurrency and atomicity", () => {
       await seedRunsFkTarget(db);
       await seedApprovalsAlterTarget(db);
       await seedChannelBindTokensAlterTarget(db);
+      await seedTurnCompletionsAlterTarget(db);
 
       await runPgMigrations(db, undefined, NOOP_LOG);
 

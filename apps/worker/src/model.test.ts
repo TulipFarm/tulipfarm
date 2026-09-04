@@ -1263,7 +1263,7 @@ describe("LlmModelPort — a call the provider gate refused", () => {
       }),
     });
 
-  /** Not retryable, so the call fails once and opens the breaker at a known count. */
+  /** Rate-limited: retried in-process a bounded number of times before the breaker counts it. */
   const rateLimited = (): APICallError =>
     new APICallError({
       message: "http 429",
@@ -1329,7 +1329,10 @@ describe("LlmModelPort — a call the provider gate refused", () => {
     await expect(port().invoke(request())).resolves.toBeDefined();
     await expect(port().invoke(request())).resolves.toBeDefined();
 
-    expect(sonnet.doStreamCalls).toHaveLength(1);
+    // First invoke retries the rate-limited primary in-process (bounded) before the breaker
+    // counts one failure and the chain advances; the second invoke finds the breaker already
+    // open and never calls the primary again.
+    expect(sonnet.doStreamCalls).toHaveLength(3);
     expect(terra.doStreamCalls).toHaveLength(2);
   });
 
