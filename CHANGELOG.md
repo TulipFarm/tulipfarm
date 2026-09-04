@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.18.8](https://github.com/TulipFarm/tulipfarm/compare/v0.18.7...v0.18.8) (2026-09-04)
+
+### Features
+
+* **ui:** redesign product experience ([#683](https://github.com/TulipFarm/tulipfarm/issues/683)) ([c68760c](https://github.com/TulipFarm/tulipfarm/commit/c68760c391fae738434d77e53c994d9095ca5de8))
+
+### Maintenance
+
+* **test:** upgrade to Vitest 5 ([#682](https://github.com/TulipFarm/tulipfarm/issues/682)) ([7273e57](https://github.com/TulipFarm/tulipfarm/commit/7273e572fc2fb8dc859183c9ebbccc54d34b11a8))
+
 ## [0.18.7](https://github.com/TulipFarm/tulipfarm/compare/v0.18.6...v0.18.7) (2026-09-03)
 
 ### Performance Improvements
