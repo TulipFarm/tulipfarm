@@ -1,12 +1,17 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import type { PGlite } from "@electric-sql/pglite";
+import type { SoulResource } from "@tulipfarm/soul";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeMigratedPglite } from "../test/pglite";
 import { reconcileResourceTables, registerResourceReconcile } from "./reconcile";
 
-function soulOf(...types: string[]): { resources: Map<string, unknown> } {
-  return { resources: new Map(types.map((t) => [t, {}])) };
+function fakeResource(schema: Record<string, unknown> = {}): SoulResource {
+  return { name: "test", schema, hasHooks: false, hooksEnabled: false };
+}
+
+function soulOf(...types: string[]): { resources: Map<string, SoulResource> } {
+  return { resources: new Map(types.map((t) => [t, fakeResource()])) };
 }
 
 async function insertResource(db: PGlite, type: string): Promise<void> {
@@ -62,6 +67,15 @@ describe("reconcileResourceTables", () => {
     await insertResource(db, "ticket");
     expect(await count(db, "ticket")).toBe(1);
   });
+
+  it("materializes an x-unique index that rejects a duplicate on the named field", async () => {
+    const soul = {
+      resources: new Map([["ticket", fakeResource({ "x-unique": [["title"]] })]]),
+    };
+    await reconcileResourceTables(db, soul);
+    await insertResource(db, "ticket");
+    await expect(insertResource(db, "ticket")).rejects.toThrow(/unique/i);
+  });
 });
 
 describe("registerResourceReconcile", () => {
@@ -76,9 +90,9 @@ describe("registerResourceReconcile", () => {
   it("reloads soul and reconciles tables on soul.synced", async () => {
     const gitSync = new EventEmitter();
     const soul = {
-      resources: new Map<string, unknown>(),
+      resources: new Map<string, SoulResource>(),
       reload: vi.fn(async () => {
-        soul.resources.set("ticket", {});
+        soul.resources.set("ticket", fakeResource());
       }),
     };
     const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };

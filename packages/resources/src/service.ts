@@ -57,6 +57,9 @@ export interface ResourceBeforeHook {
 /** A hook adapter uses this only for a controlled hook rejection. */
 export class ResourceBeforeHookError extends Error {}
 
+/** A repo throws this when a write violates a schema-declared `x-unique` constraint. */
+export class ResourceUniqueViolationError extends Error {}
+
 export interface ResourceWritePorts {
   readonly catalog: ResourceCatalog;
   readonly repositories: ResourceRepoFactory;
@@ -89,7 +92,7 @@ type CreateRecordResult =
       replayed: boolean;
       repo: ResourceRepo;
     }
-  | { ok: false; err: ResourceWriteError<422> };
+  | { ok: false; err: ResourceWriteError<409 | 422> };
 
 export async function createRecord(
   input: {
@@ -113,12 +116,17 @@ export async function createRecord(
   };
   const repo = ports.repositories.forType(input.type);
   const sideEffect = resourceSideEffect("create", input.resource, input.type, doc, input.actorId);
-  if (input.idempotencyKey !== undefined && repo.createIdempotently) {
-    const outcome = await repo.createIdempotently(doc, input.idempotencyKey, sideEffect);
-    return { ok: true, doc: outcome.doc, sideEffect, replayed: !outcome.created, repo };
+  try {
+    if (input.idempotencyKey !== undefined && repo.createIdempotently) {
+      const outcome = await repo.createIdempotently(doc, input.idempotencyKey, sideEffect);
+      return { ok: true, doc: outcome.doc, sideEffect, replayed: !outcome.created, repo };
+    }
+    await repo.insert(doc, sideEffect);
+    return { ok: true, doc, sideEffect, replayed: false, repo };
+  } catch (err) {
+    if (err instanceof ResourceUniqueViolationError) return uniqueViolation(err);
+    throw err;
   }
-  await repo.insert(doc, sideEffect);
-  return { ok: true, doc, sideEffect, replayed: false, repo };
 }
 
 export async function updateRecord(
@@ -149,7 +157,13 @@ export async function updateRecord(
     ...prepared.data,
   };
   const sideEffect = resourceSideEffect("update", input.resource, input.type, doc, input.actorId);
-  const updated = await repo.replaceOne(input.id, existing.doc.version, doc, "update", sideEffect);
+  let updated: boolean;
+  try {
+    updated = await repo.replaceOne(input.id, existing.doc.version, doc, "update", sideEffect);
+  } catch (err) {
+    if (err instanceof ResourceUniqueViolationError) return uniqueViolation(err);
+    throw err;
+  }
   if (!updated) return conflict();
   return { ok: true, doc, sideEffect, replayed: false, repo };
 }
@@ -418,4 +432,11 @@ function validationError(error: TulipFarmValidationError): ResourceWriteError["b
 
 function conflict(): { ok: false; err: ResourceWriteError<409> } {
   return { ok: false, err: { code: 409, body: { error: "version conflict" } } };
+}
+
+function uniqueViolation(err: ResourceUniqueViolationError): {
+  ok: false;
+  err: ResourceWriteError<409>;
+} {
+  return { ok: false, err: { code: 409, body: { error: err.message } } };
 }

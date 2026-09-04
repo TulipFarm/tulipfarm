@@ -1,10 +1,11 @@
 import type { EventEmitter } from "node:events";
-import type { Logger } from "@tulipfarm/soul";
+import { getUniqueKeySpecs } from "@tulipfarm/schema";
+import type { Logger, SoulResource } from "@tulipfarm/soul";
 import type { Queryable } from "../db";
-import { createHistoryTableSql, createResourceTableSql } from "./schema";
+import { createHistoryTableSql, createResourceTableSql, uniqueIndexSql } from "./schema";
 
 interface ResourceTypes {
-  resources: Map<string, unknown>;
+  resources: Map<string, SoulResource>;
 }
 interface ReloadableResourceTypes extends ResourceTypes {
   reload(): Promise<void>;
@@ -20,12 +21,22 @@ export async function reconcileResourceTables(
   soul: ResourceTypes,
   logger?: Pick<Logger, "warn">
 ): Promise<void> {
-  for (const type of soul.resources.keys()) {
+  for (const [type, resource] of soul.resources) {
     try {
       await q.query(createResourceTableSql(type));
       await q.query(createHistoryTableSql(type));
     } catch (err) {
       logger?.warn(`[resources] reconcile skipped type "${type}": ${msg(err)}`);
+      continue;
+    }
+    for (const fields of getUniqueKeySpecs(resource.schema)) {
+      try {
+        await q.query(uniqueIndexSql(type, fields));
+      } catch (err) {
+        logger?.warn(
+          `[resources] x-unique index skipped for "${type}" (${fields.join(", ")}): ${msg(err)}`
+        );
+      }
     }
   }
 }

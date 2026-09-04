@@ -204,6 +204,7 @@ export function registerResourceRoutes(
           400: ErrorSchema,
           403: ErrorSchema,
           404: ErrorSchema,
+          409: ErrorSchema,
           422: ValidationErrorSchema,
           401: ErrorSchema,
         },

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { ResourceUniqueViolationError } from "@tulipfarm/resources";
 import type { CounterFn } from "@tulipfarm/schema";
 import { type PaginatedResult, toPage, withTransaction } from "@tulipfarm/storage";
 import type { Queryable } from "../db";
@@ -65,6 +66,16 @@ export interface ResourceRepo {
   ): Promise<boolean>;
   /** Optional so in-memory test doubles need not implement it; absent means "no totals". */
   stats?(): Promise<ResourceStats>;
+  /**
+   * Fuzzy text match on one `data` field (Postgres `pg_trgm` similarity), for catching
+   * near-duplicates an exact filter or `idempotencyKey` would miss (paraphrase, spelling drift).
+   * Optional so in-memory test doubles need not implement it.
+   */
+  similar?(
+    field: string,
+    text: string,
+    opts?: { threshold?: number; limit?: number }
+  ): Promise<{ doc: ResourceDoc; score: number }[]>;
   readonly durableSideEffects?: true;
 }
 
@@ -94,15 +105,17 @@ export class PgResourceRepo implements ResourceRepo {
 
   async insert(doc: ResourceDoc, sideEffect?: ResourceSideEffect): Promise<void> {
     const { _id, version, createdAt, updatedAt, deletedAt, ...data } = doc;
-    await withTransaction(this.q, async (tx) => {
-      await tx.query(
-        `INSERT INTO ${this.table} (id, version, created_at, updated_at, deleted_at, data)
-         VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
-        [_id, version, createdAt, updatedAt, deletedAt ?? null, JSON.stringify(data)]
-      );
-      await this.appendHistory(tx, historyEntry(_id, "create", doc));
-      if (sideEffect) await writeResourceSideEffect(tx, randomUUID(), sideEffect);
-    });
+    await withUniqueTranslation(() =>
+      withTransaction(this.q, async (tx) => {
+        await tx.query(
+          `INSERT INTO ${this.table} (id, version, created_at, updated_at, deleted_at, data)
+           VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+          [_id, version, createdAt, updatedAt, deletedAt ?? null, JSON.stringify(data)]
+        );
+        await this.appendHistory(tx, historyEntry(_id, "create", doc));
+        if (sideEffect) await writeResourceSideEffect(tx, randomUUID(), sideEffect);
+      })
+    );
   }
 
   async createIdempotently(
@@ -110,39 +123,41 @@ export class PgResourceRepo implements ResourceRepo {
     idempotencyKey: string,
     sideEffect: ResourceSideEffect
   ): Promise<{ readonly created: boolean; readonly doc: ResourceDoc }> {
-    return withTransaction(this.q, async (tx) => {
-      const claimed = await tx.query<{ resource_id: string }>(
-        `INSERT INTO resource_create_requests (resource_type, caller_id, idempotency_key, resource_id)
+    return withUniqueTranslation(() =>
+      withTransaction(this.q, async (tx) => {
+        const claimed = await tx.query<{ resource_id: string }>(
+          `INSERT INTO resource_create_requests (resource_type, caller_id, idempotency_key, resource_id)
          VALUES ($1, $2, $3, $4)
          ON CONFLICT (resource_type, caller_id, idempotency_key) DO NOTHING
          RETURNING resource_id`,
-        [this.type, sideEffect.actorId ?? "system", idempotencyKey, doc._id]
-      );
-      if (claimed.rows.length === 0) {
-        const existing = await tx.query(
-          `SELECT id, version, created_at, updated_at, deleted_at, data
+          [this.type, sideEffect.actorId ?? "system", idempotencyKey, doc._id]
+        );
+        if (claimed.rows.length === 0) {
+          const existing = await tx.query(
+            `SELECT id, version, created_at, updated_at, deleted_at, data
              FROM ${this.table}
             WHERE id = (
               SELECT resource_id FROM resource_create_requests
                WHERE resource_type = $1 AND caller_id = $2 AND idempotency_key = $3
             )`,
-          [this.type, sideEffect.actorId ?? "system", idempotencyKey]
-        );
-        const row = existing.rows[0];
-        if (!row) throw new Error("resource_idempotency_conflict_without_record");
-        return { created: false, doc: rowToResourceDoc(row) };
-      }
+            [this.type, sideEffect.actorId ?? "system", idempotencyKey]
+          );
+          const row = existing.rows[0];
+          if (!row) throw new Error("resource_idempotency_conflict_without_record");
+          return { created: false, doc: rowToResourceDoc(row) };
+        }
 
-      const { _id, version, createdAt, updatedAt, deletedAt, ...data } = doc;
-      await tx.query(
-        `INSERT INTO ${this.table} (id, version, created_at, updated_at, deleted_at, data)
+        const { _id, version, createdAt, updatedAt, deletedAt, ...data } = doc;
+        await tx.query(
+          `INSERT INTO ${this.table} (id, version, created_at, updated_at, deleted_at, data)
          VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
-        [_id, version, createdAt, updatedAt, deletedAt ?? null, JSON.stringify(data)]
-      );
-      await this.appendHistory(tx, historyEntry(_id, "create", doc));
-      await writeResourceSideEffect(tx, randomUUID(), sideEffect);
-      return { created: true, doc };
-    });
+          [_id, version, createdAt, updatedAt, deletedAt ?? null, JSON.stringify(data)]
+        );
+        await this.appendHistory(tx, historyEntry(_id, "create", doc));
+        await writeResourceSideEffect(tx, randomUUID(), sideEffect);
+        return { created: true, doc };
+      })
+    );
   }
 
   async findById(id: string): Promise<ResourceDoc | null> {
@@ -203,19 +218,43 @@ export class PgResourceRepo implements ResourceRepo {
   ): Promise<boolean> {
     if (!UUID_RE.test(id)) return false;
     const { _id, version, createdAt, updatedAt, deletedAt, ...data } = doc;
-    return withTransaction(this.q, async (tx) => {
-      const { rows } = await tx.query(
-        `UPDATE ${this.table}
-         SET version = $1, created_at = $2, updated_at = $3, deleted_at = $4, data = $5::jsonb
-         WHERE id = $6 AND version = $7
-         RETURNING id`,
-        [version, createdAt, updatedAt, deletedAt ?? null, JSON.stringify(data), id, expected]
-      );
-      if (rows.length !== 1) return false;
-      await this.appendHistory(tx, historyEntry(id, op, doc));
-      if (sideEffect) await writeResourceSideEffect(tx, randomUUID(), sideEffect);
-      return true;
-    });
+    return withUniqueTranslation(() =>
+      withTransaction(this.q, async (tx) => {
+        const { rows } = await tx.query(
+          `UPDATE ${this.table}
+           SET version = $1, created_at = $2, updated_at = $3, deleted_at = $4, data = $5::jsonb
+           WHERE id = $6 AND version = $7
+           RETURNING id`,
+          [version, createdAt, updatedAt, deletedAt ?? null, JSON.stringify(data), id, expected]
+        );
+        if (rows.length !== 1) return false;
+        await this.appendHistory(tx, historyEntry(id, op, doc));
+        if (sideEffect) await writeResourceSideEffect(tx, randomUUID(), sideEffect);
+        return true;
+      })
+    );
+  }
+
+  async similar(
+    field: string,
+    text: string,
+    opts?: { threshold?: number; limit?: number }
+  ): Promise<{ doc: ResourceDoc; score: number }[]> {
+    const threshold = opts?.threshold ?? 0.35;
+    const limit = opts?.limit ?? 10;
+    const { rows } = await this.q.query(
+      `SELECT id, version, created_at, updated_at, deleted_at, data,
+              similarity(data->>$1, $2) AS score
+         FROM ${this.table}
+        WHERE deleted_at IS NULL AND similarity(data->>$1, $2) >= $3
+        ORDER BY score DESC
+        LIMIT $4`,
+      [field, text, threshold, limit]
+    );
+    return rows.map((row) => ({
+      doc: rowToResourceDoc(row),
+      score: Number((row as { score: number | string }).score),
+    }));
   }
 
   async stats(): Promise<ResourceStats> {
@@ -281,4 +320,16 @@ export function toApiRecord(doc: ResourceDoc): Record<string, unknown> {
 
 function historyEntry(resourceId: string, operation: HistoryOp, snapshot: ResourceDoc) {
   return { _id: randomUUID(), resourceId, operation, snapshot, at: new Date() };
+}
+
+/** Runs `fn`, translating a Postgres unique_violation (23505) into `ResourceUniqueViolationError`. */
+async function withUniqueTranslation<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    if (err instanceof Error && (err as { code?: string }).code === "23505") {
+      throw new ResourceUniqueViolationError("duplicate value violates a unique constraint");
+    }
+    throw err;
+  }
 }

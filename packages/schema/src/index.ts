@@ -287,10 +287,11 @@ export {
 } from "./skill-tool-schemas";
 export type { FilesConfig, SoulConfig } from "./soul-config";
 export { FilesConfigSchema, SoulConfigSchema, validateSoulConfig } from "./soul-config";
-export type { CounterFn } from "./transforms";
+export type { CounterFn, UniqueKeySpec } from "./transforms";
 export {
   applyTransforms,
   COMPUTED_FN_KEYS,
+  getUniqueKeySpecs,
   NORMALIZER_KEYS,
   validateResourceSchema,
 } from "./transforms";

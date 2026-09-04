@@ -176,6 +176,46 @@ describe("validateResourceSchema", () => {
     ).toThrow(TulipFarmValidationError);
   });
 
+  it("accepts x-unique naming declared fields, single and combined", () => {
+    expect(() =>
+      validateResourceSchema({
+        "x-unique": [["email"], ["firstName", "lastName"]],
+        properties: {
+          email: { type: "string" },
+          firstName: { type: "string" },
+          lastName: { type: "string" },
+        },
+      })
+    ).not.toThrow();
+  });
+
+  it("rejects x-unique naming an undeclared field", () => {
+    expect(() =>
+      validateResourceSchema({
+        "x-unique": [["ghost"]],
+        properties: { email: { type: "string" } },
+      })
+    ).toThrow(TulipFarmValidationError);
+  });
+
+  it("rejects an empty x-unique entry", () => {
+    expect(() =>
+      validateResourceSchema({
+        "x-unique": [[]],
+        properties: {},
+      })
+    ).toThrow(TulipFarmValidationError);
+  });
+
+  it("rejects x-unique that is not an array", () => {
+    expect(() =>
+      validateResourceSchema({
+        "x-unique": "email",
+        properties: { email: { type: "string" } },
+      })
+    ).toThrow(TulipFarmValidationError);
+  });
+
   it("error carries boundary=resource", () => {
     try {
       validateResourceSchema({
