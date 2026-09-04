@@ -126,6 +126,7 @@ describe("skills routes", () => {
   let soulPath: string;
   let soulWriter: SoulWriter;
   let commitPaths: ReturnType<typeof vi.fn>;
+  let lastCommitDates: ReturnType<typeof vi.fn>;
   /** Commit subjects the gateway accepted, in order. */
   let commits: string[];
   let reload: ReturnType<typeof vi.fn>;
@@ -180,9 +181,11 @@ describe("skills routes", () => {
     disabledBundledSkills = new Set();
 
     commitPaths = vi.fn().mockResolvedValue({ sha: "abc1234", filesChanged: 1 });
+    lastCommitDates = vi.fn().mockResolvedValue(new Map());
     const gitSync = {
       path: soulPath,
       commitPaths,
+      lastCommitDates,
       commit: vi.fn(),
       push: vi.fn(),
     } as unknown as GitSyncService;
@@ -282,6 +285,40 @@ describe("skills routes", () => {
         description: "Bundled Resource forge.",
         provenance: "bundled",
       });
+    });
+
+    it("lists authored metadata and the latest Skill commit date", async () => {
+      soulLoader.skills.set("my-skill", {
+        ...skill("my-skill", "Authored by hand."),
+        frontmatter: {
+          name: "my-skill",
+          description: "Authored by hand.",
+          author: "Muskan Vijayvargiya",
+        },
+      });
+      lastCommitDates.mockResolvedValue(
+        new Map([["skills/my-skill/SKILL.md", "2026-09-04T12:30:00+00:00"]])
+      );
+
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/skills",
+        cookies: auth(),
+        headers,
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json().skills).toContainEqual({
+        name: "my-skill",
+        description: "Authored by hand.",
+        provenance: "curated",
+        author: "Muskan Vijayvargiya",
+        updatedAt: "2026-09-04T12:30:00+00:00",
+      });
+      expect(lastCommitDates).toHaveBeenCalledWith([
+        "skills/installed-skill/SKILL.md",
+        "skills/my-skill/SKILL.md",
+      ]);
     });
 
     it("does not crash when skills-lock.json is an empty object", async () => {

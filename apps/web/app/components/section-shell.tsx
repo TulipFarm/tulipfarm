@@ -1,4 +1,5 @@
 import { Outlet, useLocation } from "@remix-run/react";
+import type { ReactNode } from "react";
 import { sectionForPath } from "~/lib/nav";
 import { cn } from "~/lib/utils";
 import { PAGE_COLUMN, PAGE_SCROLLER, PageShell } from "./page-shell";
@@ -13,7 +14,13 @@ import { PAGE_COLUMN, PAGE_SCROLLER, PageShell } from "./page-shell";
  * The description belongs to the section's own page, not to whatever is drilled into from it: on a
  * detail page it would describe the list the reader has already left.
  */
-export function SectionShell({ contentClassName }: { contentClassName?: string } = {}) {
+export function SectionShell({
+  contentClassName,
+  actions,
+}: {
+  contentClassName?: string;
+  actions?: ReactNode;
+} = {}) {
   const { pathname } = useLocation();
   const section = sectionForPath(pathname);
 
@@ -23,6 +30,7 @@ export function SectionShell({ contentClassName }: { contentClassName?: string }
         title={section.label}
         description={section.description}
         contentClassName={contentClassName}
+        actions={actions}
       >
         <Outlet />
       </PageShell>

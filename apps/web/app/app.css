@@ -218,6 +218,26 @@
   * {
     @apply border-border outline-ring/50;
   }
+
+  @keyframes integration-capability-float {
+    0%,
+    100% {
+      transform: translate3d(0, 0, 0);
+    }
+    50% {
+      transform: translate3d(0, -5px, 0);
+    }
+  }
+
+  .integration-capability-bubble {
+    animation: integration-capability-float 6s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .integration-capability-bubble {
+      animation: none;
+    }
+  }
   html,
   body {
     height: 100%;

@@ -26,6 +26,8 @@ const SkillSummaryPropertiesSchema = {
   version: { type: "string" },
   source: { type: "string" },
   category: { type: "string" },
+  author: { type: "string" },
+  updatedAt: { type: "string", format: "date-time" },
   ...SkillCapabilityPropertiesSchema,
 } as const;
 
@@ -107,7 +109,6 @@ export const SkillDetailResponseSchema = {
   required: ["name", "provenance", "body", "files", "commands"],
   properties: {
     ...SkillSummaryPropertiesSchema,
-    author: { type: "string" },
     license: { type: "string" },
     body: { type: "string" },
     files: {

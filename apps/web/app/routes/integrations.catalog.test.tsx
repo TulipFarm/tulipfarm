@@ -23,18 +23,11 @@ vi.mock("~/lib/integrations", async (importOriginal) => ({
   ...(await importOriginal<typeof import("~/lib/integrations")>()),
   listIntegrations: vi.fn(),
   getIntegration: vi.fn(),
-  inspectIntegrationSource: vi.fn(),
-  installIntegration: vi.fn(),
   updateIntegration: vi.fn(),
 }));
 
 import type { IntegrationSummary } from "~/lib/integrations";
-import {
-  getIntegration,
-  inspectIntegrationSource,
-  installIntegration,
-  updateIntegration,
-} from "~/lib/integrations";
+import { getIntegration, updateIntegration } from "~/lib/integrations";
 import IntegrationsIndex from "./_app.integrations._index";
 
 function integration(over: Partial<IntegrationSummary> = {}): IntegrationSummary {
@@ -66,9 +59,10 @@ test("shows the registry's brand name rather than the slug", async () => {
   expect(screen.queryByText("github")).not.toBeInTheDocument();
 });
 
-test("names the provider behind the brand, not the slug, when a homepage is curated", async () => {
+test("keeps provider metadata out of the minimal catalog row", async () => {
   renderCatalog([integration({ title: "GitHub", homepage: "https://www.github.com" })]);
-  expect(await screen.findByText("By github.com")).toBeInTheDocument();
+  expect(await screen.findByText("GitHub")).toBeInTheDocument();
+  expect(screen.queryByText("By github.com")).not.toBeInTheDocument();
 });
 
 test("lists a coming-soon entry without offering a way to connect it", async () => {
@@ -78,15 +72,10 @@ test("lists a coming-soon entry without offering a way to connect it", async () 
   ]);
 
   const headings = await screen.findAllByRole("heading", { level: 2 });
-  expect(headings.map((h) => h.textContent)).toEqual(["All integrations", "Coming soon"]);
-  const soon = headings[1].closest("section") as HTMLElement;
-  expect(within(soon).getByText("Jira")).toBeInTheDocument();
-  // The group heading and the card footer both say it: the section names it, the card states it.
-  expect(within(soon).getAllByText("Coming soon")).toHaveLength(2);
-  // It may preview — a card that does nothing reads as broken — but it must never link at the
-  // detail page, which is where a connection would be offered.
-  const preview = within(soon).getByRole("link", { name: /view details for jira/i });
-  expect(preview).toHaveAttribute("href", "/?view=jira");
+  expect(headings.map((h) => h.textContent)).toEqual(["Other"]);
+  expect(screen.getByText("Jira")).toBeInTheDocument();
+  expect(screen.getByText("Coming soon")).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: /view details for jira/i })).not.toBeInTheDocument();
 });
 
 test("falls back to the slug when nothing has curated a title", async () => {
@@ -94,25 +83,36 @@ test("falls back to the slug when nothing has curated a title", async () => {
   expect(await screen.findByText("acme-crm")).toBeInTheDocument();
 });
 
-test("groups connected integrations ahead of the rest", async () => {
+test("filters the catalog to connected integrations", async () => {
+  const user = userEvent.setup();
   renderCatalog([
     integration({ name: "github", title: "GitHub", status: "disconnected" }),
     integration({ name: "slack", title: "Slack", status: "connected" }),
   ]);
 
-  const headings = await screen.findAllByRole("heading", { level: 2 });
-  expect(headings.map((h) => h.textContent)).toEqual(["Connected", "Available"]);
-  const connected = headings[0].closest("section") as HTMLElement;
-  expect(within(connected).getByText("Slack")).toBeInTheDocument();
-  // The group's size is a badge beside its title, so an operator can see how much is connected
-  // without counting rows.
-  expect(within(connected).getByText("1")).toBeInTheDocument();
+  await user.click(await screen.findByRole("button", { name: "Connected" }));
+  expect(screen.queryByText("GitHub")).not.toBeInTheDocument();
+  expect(screen.getByText("Slack")).toBeInTheDocument();
 });
 
-test("titles the single group plainly when nothing is connected", async () => {
+test("shows static capability examples in the visual banner", async () => {
+  renderCatalog([
+    integration({ name: "github", title: "GitHub", status: "connected" }),
+    integration({ name: "slack", title: "Slack", status: "disconnected" }),
+  ]);
+
+  const overview = await screen.findByRole("region", {
+    name: "Integration capability examples",
+  });
+  expect(within(overview).getByText("Reviewed 14 pull requests before merge")).toBeInTheDocument();
+  expect(within(overview).getByText("Updated 23 tasks after the last run")).toBeInTheDocument();
+  expect(within(overview).getByText("Sent 8 updates to team channels")).toBeInTheDocument();
+});
+
+test("groups entries without a category under Other", async () => {
   renderCatalog([integration({ status: "disconnected" })]);
   const headings = await screen.findAllByRole("heading", { level: 2 });
-  expect(headings[0].textContent).toContain("All integrations");
+  expect(headings[0].textContent).toBe("Other");
 });
 
 test("an installed integration opens its preview panel from its card action", async () => {
@@ -121,8 +121,7 @@ test("an installed integration opens its preview panel from its card action", as
   // `?view=` and not a click handler: the preview has an address, so Back closes it and the link
   // can be opened in a new tab or shared.
   expect(link).toHaveAttribute("href", "/?view=github");
-  // One anchor per card, stretched over the tile — the description sits beside it, not inside it.
-  expect(screen.getByText("Repos.")).toBeInTheDocument();
+  expect(screen.getByText("Browse repositories and review pull requests")).toBeInTheDocument();
 });
 
 test("a curated entry that is not installed yet is not a link to a detail page", async () => {
@@ -162,7 +161,7 @@ test("filters by category and clears back to everything", async () => {
   expect(screen.queryByText("GitHub")).not.toBeInTheDocument();
   expect(screen.getByText("Slack")).toBeInTheDocument();
 
-  await user.click(screen.getByRole("button", { name: "chat" }));
+  await user.click(screen.getByRole("button", { name: "All" }));
   expect(screen.getByText("GitHub")).toBeInTheDocument();
 });
 
@@ -174,67 +173,7 @@ test("says nothing matched rather than looking empty", async () => {
   expect(screen.getByText(/nothing matches that search/i)).toBeInTheDocument();
 });
 
-test("inspects a repository before anything is written, then installs the chosen integration", async () => {
-  const user = userEvent.setup();
-  vi.mocked(inspectIntegrationSource).mockResolvedValue({
-    source: "acme/repo",
-    ref: "main",
-    integrations: [
-      {
-        name: "linear",
-        description: "Track issues.",
-        installed: false,
-        installable: true,
-        issues: [],
-      },
-    ],
-  });
-  vi.mocked(installIntegration).mockResolvedValue({
-    name: "linear",
-    source: "acme/repo",
-    ref: "main",
-  });
-
-  renderCatalog([integration()]);
-
-  await user.click(await screen.findByRole("button", { name: /install from git/i }));
-  await user.type(screen.getByLabelText("Repository"), "acme/repo");
-  await user.click(screen.getByRole("button", { name: /read repository/i }));
-
-  expect(await screen.findByText("Track issues.")).toBeInTheDocument();
-  // Reading a repo must not install from it — that is the whole point of the two steps.
-  expect(installIntegration).not.toHaveBeenCalled();
-
-  await user.click(screen.getByRole("button", { name: /^Install$/ }));
-  expect(installIntegration).toHaveBeenCalledWith("acme/repo", "linear");
-});
-
-test("names why a repo's integration was refused instead of just disabling it", async () => {
-  const user = userEvent.setup();
-  vi.mocked(inspectIntegrationSource).mockResolvedValue({
-    source: "acme/repo",
-    ref: "main",
-    integrations: [
-      {
-        name: "sneaky",
-        installed: false,
-        installable: false,
-        issues: ['egress.type "ts-code" runs a handler module in the host process'],
-      },
-    ],
-  });
-
-  renderCatalog([integration()]);
-
-  await user.click(await screen.findByRole("button", { name: /install from git/i }));
-  await user.type(screen.getByLabelText("Repository"), "acme/repo");
-  await user.click(screen.getByRole("button", { name: /read repository/i }));
-
-  expect(await screen.findByText(/runs a handler module in the host process/)).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: /^Install$/ })).toBeDisabled();
-});
-
-test("shows update available badge and update button on catalog row", async () => {
+test("offers an update action without adding another status badge", async () => {
   const user = userEvent.setup();
   vi.mocked(updateIntegration).mockResolvedValue({
     name: "linear",
@@ -252,9 +191,9 @@ test("shows update available badge and update button on catalog row", async () =
     }),
   ]);
 
-  expect(await screen.findByText(/update available/i)).toBeInTheDocument();
-  const updateButton = screen.getByRole("button", { name: /update linear/i });
+  const updateButton = await screen.findByRole("button", { name: /update linear/i });
   expect(updateButton).toBeInTheDocument();
+  expect(screen.queryByText(/update available/i)).not.toBeInTheDocument();
 
   await user.click(updateButton);
   expect(updateIntegration).toHaveBeenCalledWith("linear", "acme/linear");
@@ -332,15 +271,4 @@ test("a coming-soon preview offers no way to connect", async () => {
   expect(within(sheet).queryByRole("link", { name: /set up|manage/i })).not.toBeInTheDocument();
   // Not even the header shortcut: the detail page is where a connection would be offered.
   expect(within(sheet).queryByRole("link", { name: /open the full/i })).not.toBeInTheDocument();
-});
-
-test("offers asking an agent for an integration the catalog does not carry", async () => {
-  const user = userEvent.setup();
-  renderCatalog([integration({ name: "github", title: "GitHub" })]);
-
-  await user.click(await screen.findByRole("button", { name: /more integration actions/i }));
-  // A chat draft, because chat is how an agent is asked to build anything here — not a request
-  // form that files into a queue nobody owns.
-  const request = screen.getByRole("menuitem", { name: /request an integration/i });
-  expect(request.getAttribute("href")).toMatch(/^\/\?draft=/);
 });
