@@ -78,6 +78,7 @@ const EXPECTED_FAMILY_TOOL_NAMES = [
     names: [
       "record_create",
       "record_delete",
+      "record_find_similar",
       "record_get",
       "record_list",
       "record_search",
