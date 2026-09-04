@@ -21,11 +21,11 @@ export function EmptyState({
   return (
     <section
       aria-label={section}
-      className="flex flex-col items-start gap-4 rounded-sm border border-dashed border-border px-4 py-10 text-sm"
+      className="flex flex-col items-start gap-4 rounded-sm border border-dashed border-border px-4 py-10"
     >
       <div>
-        <p className="font-medium text-foreground">{title}</p>
-        <p className="mt-1 text-muted-foreground">{hint}</p>
+        <p className="text-sm font-medium text-foreground">{title}</p>
+        <p className="mt-1 text-base text-muted-foreground">{hint}</p>
       </div>
       {children}
     </section>

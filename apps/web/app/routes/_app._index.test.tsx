@@ -1,6 +1,6 @@
 import * as remix from "@remix-run/react";
 import { createRemixStub } from "@remix-run/testing";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { CompanionProvider } from "~/lib/companion-context";
 import ChatRoute, { clientLoader } from "~/routes/_app._index";
@@ -62,12 +62,15 @@ test("default view is the live chat empty state with adaptive suggestions", asyn
   render(<Stub initialEntries={["/"]} />);
 
   // Normal Chat is the default harness, not a user-created Agent.
-  expect(screen.getByRole("heading", { name: "What can I help with?" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "What’s on your mind?" })).toBeInTheDocument();
   expect(screen.queryByText("ready")).not.toBeInTheDocument();
   expect(screen.queryByText("TulipFarm")).not.toBeInTheDocument();
 
   // Chat is usable immediately — the composer does not wait on onboarding.
   expect(screen.getByLabelText("Message")).toBeInTheDocument();
+  const start = screen.getByRole("region", { name: "What’s on your mind?" });
+  expect(within(start).getByLabelText("Message")).toBeInTheDocument();
+  expect(screen.queryByText("Add context as you write")).not.toBeInTheDocument();
 
   // Adaptive soul-derived suggestion chip (replaces the former hardcoded set), filled in async.
   expect(
@@ -95,7 +98,7 @@ test("a failed onboarding fetch leaves chat usable", async () => {
 
   render(<Stub initialEntries={["/"]} />);
 
-  expect(screen.getByRole("heading", { name: "What can I help with?" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "What’s on your mind?" })).toBeInTheDocument();
   expect(await screen.findByLabelText("Message")).toBeInTheDocument();
 });
 

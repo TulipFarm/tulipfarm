@@ -1,6 +1,6 @@
 import { type MetaFunction, redirect, useNavigate } from "@remix-run/react";
-import { AlertCircle, ArrowLeft, Loader2 } from "lucide-react";
 import { type FormEvent, useRef, useState } from "react";
+import { AlertCircle, ArrowLeft, Loader2 } from "~/components/icons";
 import { PromptField } from "~/components/onboarding/prompt-field";
 import { TulipGrowth, type TulipStage } from "~/components/onboarding/tulip-growth";
 import { Button } from "~/components/ui/button";

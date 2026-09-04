@@ -9,6 +9,7 @@
       "!**/.next",
       "!**/out",
       "!**/coverage",
+      "!**/.vitest-reports",
       "!**/.source",
       "!**/next-env.d.ts",
       "!**/.turbo",

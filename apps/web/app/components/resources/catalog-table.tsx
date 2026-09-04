@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowRight, CornerDownLeft, Zap } from "lucide-react";
+import { AlertTriangle, ArrowRight, CornerDownLeft, Zap } from "~/components/icons";
 import { Link } from "~/components/ui/link";
 import type { CatalogSort, CatalogSortKey, CatalogType } from "~/lib/resource-catalog";
 import { formatCount, timeAgo } from "~/lib/schema";
@@ -55,7 +55,7 @@ export function CatalogTable({
   return (
     /* The grid owns its vertical scroll so the header can stick to it; scrolling the page instead
        would carry the header off-screen and leave a wide table with unlabelled columns. */
-    <div className="max-h-[70svh] overflow-auto rounded-md border border-border">
+    <div className="max-h-[70svh] overflow-auto rounded-lg border border-border bg-card">
       {/* border-separate, not collapse: a collapsed border is painted by the table rather than the
           cell, so the sticky header loses its rule the moment the body scrolls under it. */}
       <table className="w-full min-w-[44rem] border-separate border-spacing-0 text-sm">
@@ -77,8 +77,8 @@ export function CatalogTable({
             cells. The last row leans on the container's own border instead. */}
         <tbody className="[&>tr:last-child>td]:border-b-0 [&>tr>td]:border-b [&>tr>td]:border-border">
           {rows.map((row) => (
-            <tr key={row.name} className="group transition-colors duration-150 hover:bg-accent">
-              <td className="px-3 py-2.5 align-top">
+            <tr key={row.name} className="group transition-colors hover:bg-muted/60">
+              <td className="px-3 py-1.5 align-top">
                 <Link
                   to={`/resources/${encodeURIComponent(row.name)}`}
                   className="font-medium text-foreground underline-offset-4 group-hover:underline"
@@ -99,7 +99,7 @@ export function CatalogTable({
                 </p>
               </td>
 
-              <td className="px-3 py-2.5 align-top">
+              <td className="px-3 py-1.5 align-top">
                 {row.domain ? (
                   <span className="text-foreground">{row.domain}</span>
                 ) : (
@@ -118,7 +118,7 @@ export function CatalogTable({
 
               <td
                 className={cn(
-                  "px-3 py-2.5 text-end align-top tabular-nums",
+                  "px-3 py-1.5 text-end align-top tabular-nums",
                   row.recordCount === null && "text-muted-foreground"
                 )}
                 title={row.recordCount === null ? "You cannot list this type" : undefined}
@@ -126,7 +126,7 @@ export function CatalogTable({
                 {formatCount(row.recordCount)}
               </td>
 
-              <td className="px-3 py-2.5 text-end align-top tabular-nums">
+              <td className="px-3 py-1.5 text-end align-top tabular-nums">
                 {row.fieldCount}
                 {row.requiredCount > 0 ? (
                   <span
@@ -139,7 +139,7 @@ export function CatalogTable({
                 ) : null}
               </td>
 
-              <td className="max-w-[18rem] px-3 py-2.5 align-top text-xs">
+              <td className="max-w-[18rem] px-3 py-1.5 align-top text-xs">
                 {row.links.length === 0 && row.linkedBy.length === 0 ? (
                   <span className="text-muted-foreground">None</span>
                 ) : (
@@ -150,7 +150,7 @@ export function CatalogTable({
                 )}
               </td>
 
-              <td className="whitespace-nowrap px-3 py-2.5 text-end align-top text-xs text-muted-foreground">
+              <td className="whitespace-nowrap px-3 py-1.5 text-end align-top text-xs text-muted-foreground">
                 {row.lastUpdatedAt ? (
                   <span title={new Date(row.lastUpdatedAt).toLocaleString()}>
                     {timeAgo(row.lastUpdatedAt)}

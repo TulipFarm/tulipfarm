@@ -80,9 +80,7 @@ export default function AcceptInvite() {
   return (
     <div className="h-full min-h-0 overflow-y-auto">
       <section className="mx-auto flex min-h-full max-w-sm flex-col justify-center px-6 py-16">
-        <p className="text-[0.625rem] font-medium uppercase tracking-[0.2em] text-primary">
-          [ ACCEPT INVITE ]
-        </p>
+        <p className="text-xs font-medium text-primary">Accept invite</p>
         <h1 className="mt-1 text-2xl font-semibold text-foreground">Choose your password</h1>
 
         {loading ? (

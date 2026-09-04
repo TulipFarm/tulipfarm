@@ -1,4 +1,5 @@
 import { isExtractableMediaType } from "@tulipfarm/files/limits";
+import { useState } from "react";
 import {
   BookOpen,
   Bot,
@@ -11,8 +12,7 @@ import {
   Share2,
   Trash2,
   Upload,
-} from "lucide-react";
-import { useState } from "react";
+} from "~/components/icons";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Link } from "~/components/ui/link";
@@ -99,7 +99,7 @@ function FileRow({
             <button
               type="button"
               onClick={() => onPreview(file)}
-              className="min-w-0 max-w-full cursor-pointer truncate rounded-sm text-left text-sm font-medium text-foreground transition-colors hover:text-primary"
+              className="min-h-6 min-w-0 max-w-full cursor-pointer truncate rounded-sm px-1 text-left text-sm font-medium text-foreground transition-colors hover:text-primary"
             >
               {file.filename}
             </button>

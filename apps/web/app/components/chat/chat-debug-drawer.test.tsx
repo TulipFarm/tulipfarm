@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
@@ -43,6 +45,12 @@ const DEBUG: DebugContext = {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getDebugContext).mockResolvedValue(DEBUG);
+});
+
+test("keeps Shiki outside the initial Chat module graph", () => {
+  const source = readFileSync(resolve(process.cwd(), "app/lib/use-highlighted.ts"), "utf8");
+  expect(source).not.toContain('from "./shiki"');
+  expect(source).toContain('import("./shiki")');
 });
 
 async function openDrawer() {

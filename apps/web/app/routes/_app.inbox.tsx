@@ -28,24 +28,22 @@ export default function InboxRoute() {
   }
   return (
     <PageShell title="Inbox" description="Exact server-authorized decisions and waiting work.">
-      <>
-        {items.map((item) => (
-          <InboxItem
-            key={item.id}
-            item={item}
-            busy={busyId === item.id}
-            onDecision={async (decision) => {
-              setBusyId(item.id);
-              try {
-                await decideApproval(item, decision);
-                revalidator.revalidate();
-              } finally {
-                setBusyId(undefined);
-              }
-            }}
-          />
-        ))}
-      </>
+      {items.map((item) => (
+        <InboxItem
+          key={item.id}
+          item={item}
+          busy={busyId === item.id}
+          onDecision={async (decision) => {
+            setBusyId(item.id);
+            try {
+              await decideApproval(item, decision);
+              revalidator.revalidate();
+            } finally {
+              setBusyId(undefined);
+            }
+          }}
+        />
+      ))}
     </PageShell>
   );
 }

@@ -5,6 +5,12 @@ import {
   validateSurfaceArtifact,
 } from "@tulipfarm/surface";
 import { SurfaceView } from "@tulipfarm/surface-web/view";
+import { useId, useMemo, useState } from "react";
+import { EventInspector, type LoggedInteraction } from "~/components/dev-surfaces/event-inspector";
+import { JsonEditor } from "~/components/dev-surfaces/json-editor";
+import { DEFAULT_PRESET, PRESETS } from "~/components/dev-surfaces/presets";
+import { GitHubPreview } from "~/components/dev-surfaces/renderers/github-preview";
+import { SlackPreview } from "~/components/dev-surfaces/renderers/slack-preview";
 import {
   AlertTriangle,
   Boxes,
@@ -14,13 +20,7 @@ import {
   RotateCcw,
   Smartphone,
   Tablet,
-} from "lucide-react";
-import { useId, useMemo, useState } from "react";
-import { EventInspector, type LoggedInteraction } from "~/components/dev-surfaces/event-inspector";
-import { JsonEditor } from "~/components/dev-surfaces/json-editor";
-import { DEFAULT_PRESET, PRESETS } from "~/components/dev-surfaces/presets";
-import { GitHubPreview } from "~/components/dev-surfaces/renderers/github-preview";
-import { SlackPreview } from "~/components/dev-surfaces/renderers/slack-preview";
+} from "~/components/icons";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Select } from "~/components/ui/select";

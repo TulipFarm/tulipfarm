@@ -53,7 +53,7 @@ export function CropLegend({
           <li key={crop.kind}>
             <Link
               to={crop.to}
-              className="flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-xs transition-colors duration-150 hover:bg-accent"
+              className="flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-xs transition-colors hover:bg-accent"
             >
               <span
                 aria-hidden

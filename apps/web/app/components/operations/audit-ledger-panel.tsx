@@ -6,8 +6,8 @@
  * the only way to answer "who repointed the Soul git remote" was `psql`.
  */
 
-import { FileClock, ShieldCheck, ShieldX } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { FileClock, ShieldCheck, ShieldX } from "~/components/icons";
 import { StatusBadge, type StatusTone } from "~/components/status-badge";
 import {
   type AuditEvent,
@@ -124,7 +124,7 @@ export function AuditLedgerPanel() {
           <div className="max-w-full overflow-x-auto">
             <table aria-label="Audit ledger" className="w-full min-w-[52rem] text-left">
               <thead>
-                <tr className="border-b border-border text-[0.625rem] uppercase tracking-wider text-muted-foreground">
+                <tr className="border-b border-border text-xs text-muted-foreground">
                   <th className="px-3 py-2 font-medium">#</th>
                   <th className="px-3 py-2 font-medium">Action</th>
                   <th className="px-3 py-2 font-medium">Actor</th>

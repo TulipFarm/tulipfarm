@@ -1,5 +1,5 @@
 /* Opens the shared CommandPalette instead of duplicating search state. */
-import { Search } from "lucide-react";
+import { Search } from "~/components/icons";
 import { OPEN_SEARCH_EVENT } from "./command-palette";
 
 export function SidebarSearch() {

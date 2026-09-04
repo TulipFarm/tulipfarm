@@ -93,6 +93,7 @@ export default function OperationalRunRoute() {
 
   return (
     <div className="h-full min-h-0 overflow-y-auto">
+      <h1 className="sr-only">Run {run.id}</h1>
       <div className="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-6 sm:px-6">
         {connection === "reconnecting" ? <ConnectionStatus state="reconnecting" /> : null}
         <RunInspector run={run} busy={busy} unavailable={unavailable} onCommand={submit} />

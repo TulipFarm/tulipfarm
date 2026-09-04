@@ -254,7 +254,7 @@ test("detail names the record in its heading and still lists every field", () =>
   expect(screen.getByRole("heading", { level: 1, name: "Login 500" })).toBeInTheDocument();
   // The heading is a label for the record; the field list stays complete regardless.
   expect(screen.getAllByText("Login 500")).toHaveLength(2);
-  expect(screen.getByText("system")).toBeInTheDocument();
+  expect(screen.getByText("System")).toBeInTheDocument();
 });
 
 test("detail ErrorBoundary renders 404 not found for a missing record", () => {

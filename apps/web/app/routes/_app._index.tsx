@@ -6,6 +6,7 @@ import type { ChatModelSelector } from "~/lib/chat/types";
 import { useCompanion } from "~/lib/companion-context";
 import { useConversations } from "~/lib/conversations-context";
 import { listOnboardingSuggestions, type Suggestion } from "~/lib/onboarding";
+import { useSessionUser } from "~/lib/use-session-user";
 
 export const meta: MetaFunction = () => [{ title: "Chat · tulipfarm" }];
 
@@ -64,6 +65,7 @@ export default function ChatRoute() {
   const { refresh, setActiveChatId, newChatNonce } = useConversations();
   const suggestions = useOnboardingSuggestions(newChatNonce);
   const { tasks } = useCompanion();
+  const user = useSessionUser();
   // First turn of a fresh chat: refresh the Recent chats sidebar AND reflect the new conversation in
   // the URL so a reload restores it. We use `history.replaceState` rather than a router navigate so the
   // in-flight stream keeps streaming on this mounted route — no remount, no message re-fetch race.
@@ -89,6 +91,8 @@ export default function ChatRoute() {
       defaultModel={defaultModel}
       suggestions={suggestions}
       tasks={tasks}
+      userName={user?.name ?? undefined}
+      greetingIndex={newChatNonce}
       onConversationChange={onConversationChange}
       initialDraft={draft}
       attachFileId={attach}

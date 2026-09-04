@@ -6,8 +6,8 @@ import {
   useNavigate,
   useRouteError,
 } from "@remix-run/react";
-import { Users } from "lucide-react";
 import { useState } from "react";
+import { Users } from "~/components/icons";
 import { PageDetail } from "~/components/knowledge/page-detail";
 import { RestrictDialog } from "~/components/knowledge/restrict-dialog";
 import { ErrorState, NotFoundState } from "~/components/states";
@@ -103,7 +103,7 @@ export default function PageDetailRoute() {
       <article className="flex w-full flex-col gap-4 px-6 py-8">
         <nav
           aria-label="Breadcrumb"
-          className="flex items-center gap-1 text-[0.625rem] font-medium uppercase tracking-[0.2em] text-muted-foreground"
+          className="flex items-center gap-1 text-xs font-medium text-muted-foreground"
         >
           <Link to={base} className="transition-colors hover:text-foreground">
             {space.name}

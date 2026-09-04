@@ -49,7 +49,7 @@ export function OnboardingCompanion() {
           ref={panelRef}
           role="dialog"
           aria-label="Onboarding companion"
-          className="absolute bottom-14 right-0 max-h-[70vh] w-80 overflow-y-auto rounded-md border border-border bg-card shadow-lg"
+          className="absolute bottom-14 right-0 max-h-[70vh] w-80 overflow-y-auto rounded-lg border border-border bg-card shadow-lg"
         >
           <CompanionPanel
             tasks={tasks}
@@ -116,7 +116,7 @@ export function CompanionMobileTrigger() {
         }
         aria-expanded={open}
         onClick={() => setOpen(true)}
-        className="relative flex size-10 shrink-0 items-center justify-center rounded-md transition-colors duration-150 hover:bg-accent"
+        className="relative flex size-10 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-accent"
       >
         <img src={AVATAR_SRC} alt="" width={22} height={22} className="size-[22px]" />
         {tasks.length > 0 ? (

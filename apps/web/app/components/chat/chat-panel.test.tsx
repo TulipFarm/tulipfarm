@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test, vi } from "vitest";
 import { ChatPanel } from "~/components/chat/chat-panel";
+import type { ChatMessage } from "~/lib/chat/types";
 import type { Suggestion } from "~/lib/onboarding";
 
 // ChatPanel drives the conversation through useChatStream; mock it so the empty-state surface
@@ -9,7 +10,7 @@ import type { Suggestion } from "~/lib/onboarding";
 const send = vi.fn();
 const regenerate = vi.fn();
 let stream: {
-  messages: [];
+  messages: ChatMessage[];
   status: string;
   error: string | null;
   errorDetails?: {
@@ -83,13 +84,61 @@ test("tapping a Suggested prompt does not immediately start a Turn", async () =>
 test("with no suggestions, renders no chips but the composer stays interactive (default = [])", () => {
   render(<ChatPanel />);
   expect(screen.queryByRole("button", { name: /set up|track|manage/i })).toBeNull();
-  expect(screen.getByLabelText("Message")).toBeInTheDocument();
+  expect(screen.getByLabelText("Message").closest("[data-composer-placement]")).toHaveAttribute(
+    "data-composer-placement",
+    "centered"
+  );
+});
+
+test("rotates generic greetings when no profile name is set", () => {
+  render(<ChatPanel greetingIndex={1} />);
+  expect(screen.getByRole("heading", { name: "Where should we start?" })).toBeInTheDocument();
+  expect(
+    screen.queryByText("Describe what you want to do, build, or understand.")
+  ).not.toBeInTheDocument();
+});
+
+test("uses the profile's first name in personalized greetings", () => {
+  render(<ChatPanel userName="Muskan Vijayvargiya" greetingIndex={1} />);
+  expect(
+    screen.getByRole("heading", { name: "Where should we start, Muskan?" })
+  ).toBeInTheDocument();
+});
+
+test("does not personalize greetings for a blank profile name", () => {
+  render(<ChatPanel userName="   " greetingIndex={2} />);
+  expect(screen.getByRole("heading", { name: "What needs sorting out?" })).toBeInTheDocument();
+});
+
+test("docks one composer beneath the transcript after the first message", async () => {
+  stream = {
+    ...stream,
+    messages: [
+      {
+        id: "message-1",
+        role: "user",
+        parts: [{ kind: "text", text: "Hello" }],
+        sealed: true,
+      },
+    ],
+  };
+
+  render(<ChatPanel suggestions={SUGGESTIONS} />);
+
+  expect(await screen.findByText("Hello")).toBeInTheDocument();
+  expect(screen.queryByRole("region", { name: "What’s on your mind?" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Set up ticket management?" })).toBeNull();
+  expect(screen.getAllByLabelText("Message")).toHaveLength(1);
+  expect(screen.getByLabelText("Message").closest("[data-composer-placement]")).toHaveAttribute(
+    "data-composer-placement",
+    "docked"
+  );
 });
 
 test("normal Chat does not present the default harness as a user-created Agent", () => {
   render(<ChatPanel businessName="Acme Tulips" />);
   expect(
-    screen.getByRole("heading", { name: "What can I help Acme Tulips with?" })
+    screen.getByRole("heading", { name: "Where should we start with Acme Tulips?" })
   ).toBeInTheDocument();
   expect(screen.queryByText("TulipFarm")).not.toBeInTheDocument();
 });

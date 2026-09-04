@@ -16,15 +16,6 @@ import {
 import type { SkillSummary } from "~/lib/skills";
 import { SkillRow } from "./skill-row";
 
-function Stat({ value, label }: { value: number; label: string }) {
-  return (
-    <div>
-      <p className="font-mono text-lg tabular-nums text-foreground">{value}</p>
-      <p className="text-xs text-muted-foreground">{label}</p>
-    </div>
-  );
-}
-
 function SkillList({
   skills,
   headingLevel,
@@ -78,10 +69,6 @@ export function SkillCatalog({ skills }: { skills: readonly SkillSummary[] }) {
 
   const groups = useMemo(() => groupByCategory(visible), [visible]);
   const grouped = useMemo(() => shouldGroupByCategory(groups), [groups]);
-  const reaching = useMemo(
-    () => skills.filter((skill) => skillFacts(skill).reach !== "instructions-only").length,
-    [skills]
-  );
   const filtered = visible.length !== skills.length;
 
   if (skills.length === 0) {
@@ -105,15 +92,6 @@ export function SkillCatalog({ skills }: { skills: readonly SkillSummary[] }) {
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex flex-wrap items-end gap-x-8 gap-y-4 border-b border-border pb-5">
-        <Stat value={skills.length} label={skills.length === 1 ? "skill" : "skills"} />
-        <Stat
-          value={categories.length}
-          label={categories.length === 1 ? "category" : "categories"}
-        />
-        <Stat value={reaching} label="reach beyond text" />
-      </div>
-
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
         <div className="min-w-0 flex-1">
           <label htmlFor={searchId} className="mb-1 block text-xs text-muted-foreground">
@@ -181,7 +159,7 @@ export function SkillCatalog({ skills }: { skills: readonly SkillSummary[] }) {
             <div className="flex items-baseline gap-2">
               <h2
                 id={`${searchId}-category-${index}`}
-                className="text-[0.625rem] font-medium uppercase tracking-[0.2em] text-muted-foreground"
+                className="text-xs font-medium text-muted-foreground"
               >
                 {name.replaceAll("-", " ")}
               </h2>

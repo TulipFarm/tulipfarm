@@ -1,9 +1,16 @@
 import type { ClientLoaderFunctionArgs } from "@remix-run/react";
+import * as remix from "@remix-run/react";
+import { render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import * as api from "~/lib/api";
 import { ApiError } from "~/lib/api";
 import * as setup from "~/lib/setup";
-import { clientLoader } from "./_app";
+import { clientLoader, ErrorBoundary } from "./_app";
+
+vi.mock("@remix-run/react", async () => {
+  const actual = await vi.importActual<typeof import("@remix-run/react")>("@remix-run/react");
+  return { ...actual, useRouteError: vi.fn() };
+});
 
 vi.mock("~/lib/setup", () => ({ getSetupStatus: vi.fn() }));
 vi.mock("~/lib/api", async (importOriginal) => ({
@@ -70,4 +77,16 @@ test("rethrows a non-401 session failure instead of masking it as a login bounce
   getSession.mockRejectedValue(new ApiError(503, "api unreachable"));
 
   await expect(runGate("/chats", "/chats")).rejects.toThrow("api unreachable");
+});
+
+test("renders an API recovery state instead of Remix's raw Application Error", () => {
+  vi.mocked(remix.useRouteError).mockReturnValue(new TypeError("Failed to fetch"));
+
+  render(<ErrorBoundary />);
+
+  expect(screen.getByRole("heading", { level: 1, name: "TulipFarm" })).toBeInTheDocument();
+  expect(screen.getByText("error: Failed to fetch")).toBeInTheDocument();
+  expect(
+    screen.getByText("The API could not be reached. Check that it is running on :4010.")
+  ).toBeInTheDocument();
 });

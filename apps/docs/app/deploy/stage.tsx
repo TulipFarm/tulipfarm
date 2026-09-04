@@ -92,7 +92,7 @@ export function WizardStage({
               <button
                 type="button"
                 onClick={onReopen}
-                className="ml-auto min-h-11 cursor-pointer text-xs text-fd-muted-foreground transition-colors duration-150 hover:text-fd-primary"
+                className="ml-auto min-h-11 cursor-pointer text-xs text-fd-muted-foreground transition-colors hover:text-fd-primary"
               >
                 [change]
               </button>
@@ -110,7 +110,7 @@ export function StageAdvance({ children, onClick }: { children: string; onClick:
     <button
       type="button"
       onClick={onClick}
-      className="flex min-h-11 w-max cursor-pointer items-center rounded-sm bg-tf-fill px-5 text-sm font-medium text-tf-fill-foreground transition-colors duration-150 hover:bg-tf-fill-hover"
+      className="flex min-h-11 w-max cursor-pointer items-center rounded-sm bg-tf-fill px-5 text-sm font-medium text-tf-fill-foreground transition-colors hover:bg-tf-fill-hover"
     >
       {children}
     </button>

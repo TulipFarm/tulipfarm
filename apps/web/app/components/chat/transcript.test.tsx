@@ -101,7 +101,7 @@ describe("Transcript renders each part from its SSE event", () => {
 
     expect(screen.getByText('"maddhruv/tulipfarm"')).toBeInTheDocument();
     // A withheld field is shown as an explicit gap, never silently dropped.
-    expect(screen.getByText("redacted")).toBeInTheDocument();
+    expect(screen.getByText("Redacted")).toBeInTheDocument();
     expect(screen.getByText("1 field withheld")).toBeInTheDocument();
     expect(screen.getByLabelText("This tool can write")).toBeInTheDocument();
   });

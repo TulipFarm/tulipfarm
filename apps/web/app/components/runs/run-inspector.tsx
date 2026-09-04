@@ -11,9 +11,7 @@ function EvidenceList({
 }) {
   return (
     <section className="border border-border bg-card">
-      <h2 className="border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-[0.2em]">
-        {title}
-      </h2>
+      <h2 className="border-b border-border px-3 py-2 text-xs font-medium ">{title}</h2>
       {items.length === 0 ? (
         <p className="px-3 py-3 text-xs text-muted-foreground">none</p>
       ) : (
@@ -104,9 +102,7 @@ export function RunInspector({
       ) : null}
 
       <section className="border border-border bg-card">
-        <h2 className="border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-[0.2em]">
-          States
-        </h2>
+        <h2 className="border-b border-border px-3 py-2 text-xs font-medium ">States</h2>
         <ol className="divide-y divide-border">
           {run.states.map((state) => (
             <li key={state.key} className="grid gap-2 px-3 py-2 text-xs sm:grid-cols-4">

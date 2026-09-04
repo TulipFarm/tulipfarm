@@ -2,6 +2,8 @@
 
 import { buttonVariants } from "fumadocs-ui/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "fumadocs-ui/components/ui/popover";
+import { usePathname } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 import {
   Check,
   ChevronDown,
@@ -12,9 +14,7 @@ import {
   MessageSquare,
   Sparkles,
   Text,
-} from "lucide-react";
-import { usePathname } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+} from "@/components/icons";
 
 type PageActionsProps = {
   githubUrl: string;

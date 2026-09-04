@@ -58,11 +58,11 @@ export function IntegrationIcon({
       aria-hidden
       className={cn(
         "flex shrink-0 items-center justify-center rounded-lg border border-black/[0.07] bg-white",
-        "shadow-[0_1px_2px_rgb(0_0_0/0.06)] dark:border-white/10 dark:bg-white/95",
+        "shadow-xs dark:border-white/10 dark:bg-white/95",
         style.box,
         className
       )}
-      style={ink ? ({ "--brand": ink } as CSSProperties) : undefined}
+      style={ink ? ({ "--integration-ink": ink } as CSSProperties) : undefined}
     >
       {logo ? (
         <svg viewBox={logo.viewBox} aria-hidden="true" focusable="false" className={style.mark}>
@@ -76,7 +76,7 @@ export function IntegrationIcon({
           fill="currentColor"
           aria-hidden="true"
           focusable="false"
-          className={cn(style.mark, ink ? "text-[var(--brand)]" : "text-foreground/80")}
+          className={cn(style.mark, ink ? "text-[var(--integration-ink)]" : "text-foreground/80")}
         >
           <path d={iconPath} />
         </svg>

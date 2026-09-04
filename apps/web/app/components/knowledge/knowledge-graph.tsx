@@ -167,7 +167,7 @@ export function KnowledgeGraphView({ graph }: { graph: KnowledgeGraph }) {
         </ul>
       ) : null}
 
-      <div className="overflow-hidden rounded-md border border-border bg-card">
+      <div className="overflow-hidden rounded-lg border border-border bg-card">
         <svg
           viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
           className="h-auto w-full"
@@ -231,7 +231,7 @@ export function KnowledgeGraphView({ graph }: { graph: KnowledgeGraph }) {
         Not a fallback — the same graph, as text. A picture-only view is one a keyboard or screen
         reader user does not have, and the list is also the fastest way to reach a specific Page.
       */}
-      <details className="rounded-md border border-border bg-card p-3">
+      <details className="rounded-lg border border-border bg-card p-3">
         <summary className="cursor-pointer text-sm font-medium text-foreground">
           List every page and its links
         </summary>

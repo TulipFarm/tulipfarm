@@ -1,5 +1,5 @@
-import { ChevronRight } from "lucide-react";
 import { type ReactNode, useState } from "react";
+import { ChevronRight } from "~/components/icons";
 import type { ToolPreview } from "~/lib/chat/types";
 import { cn } from "~/lib/utils";
 import { formatBytes } from "./tool-summary";
@@ -26,7 +26,7 @@ function Scalar({ value }: { value: string | number | boolean | null }) {
     return (
       <span className="inline-flex items-center gap-1 rounded-sm bg-code-redacted/15 px-1.5 py-px text-code-redacted">
         <span aria-hidden>••••••</span>
-        <span className="text-[10px] uppercase tracking-wide">redacted</span>
+        <span className="text-xs">Redacted</span>
       </span>
     );
   }
@@ -64,12 +64,12 @@ function Branch({
         type="button"
         onClick={() => setOpen((previous) => !previous)}
         aria-expanded={open}
-        className="inline-flex items-center gap-0.5 rounded-sm text-muted-foreground transition-colors hover:text-foreground"
+        className="inline-flex min-h-6 items-center gap-0.5 rounded-sm px-1 text-muted-foreground transition-colors hover:text-foreground"
       >
         <ChevronRight
           aria-hidden
           className={cn(
-            "size-3 transition-transform duration-150 ease-snappy",
+            "size-3 transition-transform duration-100 ease-snappy",
             open && "rotate-90"
           )}
         />

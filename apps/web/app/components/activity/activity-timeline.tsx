@@ -1,4 +1,4 @@
-import { ChevronRight } from "lucide-react";
+import { ChevronRight } from "~/components/icons";
 import { Link } from "~/components/ui/link";
 import type { ActivityEntry } from "~/lib/activity-feed";
 import { cn } from "~/lib/utils";
@@ -64,7 +64,7 @@ export function ActivityTimeline({
   onOpen: (entry: ActivityEntry) => void;
 }) {
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4">
       {groupByDay(entries).map((group) => (
         <section key={group.key} aria-labelledby={`day-${group.key}`}>
           <h2
@@ -73,9 +73,9 @@ export function ActivityTimeline({
           >
             {group.day}
           </h2>
-          <ol className="divide-y divide-border rounded-md border border-border">
+          <ol className="divide-y divide-border border-y border-border">
             {group.entries.map((entry) => (
-              <li key={entry.id} className="first:rounded-t-md last:rounded-b-md">
+              <li key={entry.id}>
                 {entry.href === undefined ? (
                   <button
                     type="button"

@@ -77,7 +77,7 @@ export function Tooltip({
               role="tooltip"
               className={cn(
                 "pointer-events-none fixed z-[100] max-w-[min(16rem,calc(100vw-1rem))]",
-                "rounded-md border border-border bg-popover px-2 py-1 text-xs",
+                "rounded-md border border-border bg-popover px-2 py-1 text-xs shadow-md",
                 "text-popover-foreground",
                 position ? "opacity-100" : "opacity-0"
               )}

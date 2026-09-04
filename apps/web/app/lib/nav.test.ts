@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import {
+  isSettingsPath,
   type NavItem,
   SETTINGS_GROUPS,
   SIDEBAR_GROUPS,
@@ -34,6 +35,23 @@ test("a nav item's declared label is the one the top bar shows", () => {
 test("a child route keeps its parent page's identity", () => {
   expect(titleForPath("/business/access/teams")).toBe("People & access");
   expect(titleForPath("/business/access/check")).toBe("People & access");
+});
+
+test("identifies every route that swaps the app sidebar into Settings mode", () => {
+  for (const path of [
+    "/settings",
+    "/settings/profile",
+    "/business/models",
+    "/business/access/teams",
+    "/integrations/github",
+    "/operations",
+    "/design-guide",
+  ]) {
+    expect(isSettingsPath(path)).toBe(true);
+  }
+  for (const path of ["/", "/resources", "/business/activities", "/farm"]) {
+    expect(isSettingsPath(path)).toBe(false);
+  }
 });
 
 /* `/business/people` redirects in-shell, so its transient label must stay explicit. */

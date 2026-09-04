@@ -87,7 +87,7 @@ export function DeployCommand({ label }: { label: string }) {
             type="button"
             onClick={copyCommand}
             aria-label="Copy the deployment prompt"
-            className="absolute right-0 top-0 min-h-11 w-[4.5rem] cursor-pointer border-b border-l border-fd-border bg-fd-background/80 text-xs font-medium text-fd-muted-foreground transition-colors duration-150 hover:bg-fd-accent hover:text-fd-foreground focus-visible:bg-fd-accent focus-visible:text-fd-foreground"
+            className="absolute right-0 top-0 min-h-11 w-[4.5rem] cursor-pointer border-b border-l border-fd-border bg-fd-background/80 text-xs font-medium text-fd-muted-foreground transition-colors hover:bg-fd-accent hover:text-fd-foreground focus-visible:bg-fd-accent focus-visible:text-fd-foreground"
           >
             {copyLabel}
           </button>
@@ -105,7 +105,7 @@ export function DeployCommand({ label }: { label: string }) {
         </p>
         <a
           href={OPEN_PROMPT}
-          className="mt-1 flex min-h-11 w-max items-center text-xs text-fd-primary transition-colors duration-150 hover:text-fd-primary/80"
+          className="mt-1 flex min-h-11 w-max items-center text-xs text-fd-primary transition-colors hover:text-fd-primary/80"
         >
           read it yourself →
         </a>

@@ -73,7 +73,7 @@ export function FieldAction({ children, className }: { children: ReactNode; clas
 }
 
 /**
- * Labels stay sentence case — uppercase tracking on a normal label is not part of the type
+ * Labels stay sentence case — micro-label styling on a normal label is not part of the type
  * scale.
  */
 export function ReadonlyField({

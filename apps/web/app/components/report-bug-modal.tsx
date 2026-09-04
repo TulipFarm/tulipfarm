@@ -1,5 +1,5 @@
-import { Check, Copy, Download, ExternalLink, Image as ImageIcon } from "lucide-react";
 import { useEffect, useState } from "react";
+import { Check, Copy, Download, ExternalLink, Image as ImageIcon } from "~/components/icons";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Modal } from "~/components/ui/modal";

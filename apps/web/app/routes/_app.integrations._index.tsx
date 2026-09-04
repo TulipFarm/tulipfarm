@@ -5,8 +5,8 @@ import {
   useRouteError,
   useSearchParams,
 } from "@remix-run/react";
-import { Search } from "lucide-react";
-import { type ReactNode, useCallback, useId, useMemo, useState } from "react";
+import { useCallback, useId, useMemo, useState } from "react";
+import { Search } from "~/components/icons";
 import { CatalogActionsMenu } from "~/components/integrations/catalog-actions-menu";
 import { InstallFromSource } from "~/components/integrations/install-from-source";
 import { displayName, IntegrationCard } from "~/components/integrations/integration-card";
@@ -15,10 +15,10 @@ import { ErrorState } from "~/components/states";
 import { Badge } from "~/components/ui/badge";
 import { Input } from "~/components/ui/input";
 import { Panel, PanelEmpty } from "~/components/ui/panel";
+import { Segmented, SegmentedButton } from "~/components/ui/segmented";
 import { ApiError } from "~/lib/api";
 import { type IntegrationSummary, listIntegrations, updateIntegration } from "~/lib/integrations";
 import { useIsAdmin } from "~/lib/use-session-user";
-import { cn } from "~/lib/utils";
 
 /* Connection state is a card property; install is only for curated entries not yet cloned. */
 
@@ -115,20 +115,21 @@ export default function IntegrationsIndex() {
         </div>
 
         {categories.length > 0 && (
-          <div className="flex flex-wrap items-center gap-0.5 rounded-lg bg-muted/60 p-0.5">
-            <CategoryChip active={!category} onClick={() => setCategory(undefined)}>
+          <Segmented>
+            <SegmentedButton selected={!category} onClick={() => setCategory(undefined)}>
               All
-            </CategoryChip>
+            </SegmentedButton>
             {categories.map((name) => (
-              <CategoryChip
+              <SegmentedButton
                 key={name}
-                active={category === name}
+                className="capitalize"
+                selected={category === name}
                 onClick={() => setCategory(category === name ? undefined : name)}
               >
                 {name}
-              </CategoryChip>
+              </SegmentedButton>
             ))}
-          </div>
+          </Segmented>
         )}
 
         <div className="ml-auto flex shrink-0 items-center gap-2">
@@ -186,32 +187,6 @@ export default function IntegrationsIndex() {
 
       <IntegrationPanel name={viewing} onClose={closePanel} />
     </div>
-  );
-}
-
-function CategoryChip({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={cn(
-        "rounded-md px-2.5 py-1 text-xs font-medium capitalize transition-colors duration-150",
-        active
-          ? "bg-card text-foreground shadow-[0_1px_2px_rgb(0_0_0/0.08)] ring-1 ring-black/[0.06] dark:ring-white/10"
-          : "text-muted-foreground hover:text-foreground"
-      )}
-    >
-      {children}
-    </button>
   );
 }
 

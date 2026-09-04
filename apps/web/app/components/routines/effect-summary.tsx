@@ -1,4 +1,4 @@
-import { Bot, Braces, GitBranch, Hand, Radio, Wrench } from "lucide-react";
+import { Bot, Braces, GitBranch, Hand, Radio, Wrench } from "~/components/icons";
 import { Link } from "~/components/ui/link";
 import type { RoutineEffectKind } from "~/lib/routines";
 import { EFFECT_LABEL, EFFECT_NOUN, EFFECT_ORDER } from "~/lib/routines/facts";

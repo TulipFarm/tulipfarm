@@ -27,4 +27,11 @@ describe("SPA-mode route exports", () => {
       "export function HydrateFallback"
     );
   });
+
+  it("uses one honest boot indicator instead of a fake shell skeleton", () => {
+    const root = readFileSync(resolve(__dirname, "../root.tsx"), "utf8");
+    expect(root).toContain('aria-label="Loading TulipFarm"');
+    expect(root).toContain('src="/logo-128.png"');
+    expect(root).not.toContain("h-[52px]");
+  });
 });

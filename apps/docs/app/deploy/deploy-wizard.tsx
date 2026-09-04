@@ -131,7 +131,7 @@ export function DeployWizard({ model }: { model: WizardModel }) {
             </ul>
             <a
               href={`#${stageDomId("platform")}`}
-              className="mt-6 flex min-h-11 w-max items-center rounded-sm bg-tf-fill px-5 text-sm font-medium text-tf-fill-foreground transition-colors duration-150 hover:bg-tf-fill-hover"
+              className="mt-6 flex min-h-11 w-max items-center rounded-sm bg-tf-fill px-5 text-sm font-medium text-tf-fill-foreground transition-colors hover:bg-tf-fill-hover"
             >
               start the walk ↓
             </a>

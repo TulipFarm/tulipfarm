@@ -87,8 +87,9 @@ function Card({ children }: { children: React.ReactNode }) {
   return (
     <div className="h-full min-h-0 overflow-y-auto">
       <section className="mx-auto flex min-h-full max-w-xl flex-col justify-center px-6 py-16">
+        <h1 className="sr-only">Link channel</h1>
         <div className="rounded-sm border border-border bg-card">
-          <p className="border-b border-border px-4 py-2 text-[0.625rem] font-medium uppercase tracking-[0.2em] text-muted-foreground">
+          <p className="border-b border-border px-4 py-2 text-xs font-medium text-muted-foreground">
             link channel
           </p>
           <div className="flex flex-col gap-4 px-4 py-6 text-sm">{children}</div>

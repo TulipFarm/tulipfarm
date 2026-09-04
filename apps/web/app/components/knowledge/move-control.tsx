@@ -1,5 +1,5 @@
-import { FolderInput } from "lucide-react";
 import { useState } from "react";
+import { FolderInput } from "~/components/icons";
 import { Button } from "~/components/ui/button";
 import { Modal } from "~/components/ui/modal";
 import {

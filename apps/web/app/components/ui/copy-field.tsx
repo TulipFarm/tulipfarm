@@ -1,5 +1,5 @@
-import { Check, Copy } from "lucide-react";
 import { useEffect, useState } from "react";
+import { Check, Copy } from "~/components/icons";
 import { Button } from "~/components/ui/button";
 import { copyText } from "~/lib/clipboard";
 import { cn } from "~/lib/utils";

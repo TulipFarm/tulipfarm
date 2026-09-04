@@ -1,4 +1,4 @@
-import type { MetaFunction } from "@remix-run/react";
+import { type MetaFunction, useLocation } from "@remix-run/react";
 import { SectionShell } from "~/components/section-shell";
 
 export const meta: MetaFunction = () => [{ title: "Business · tulipfarm" }];
@@ -8,5 +8,14 @@ export const meta: MetaFunction = () => [{ title: "Business · tulipfarm" }];
  * different: these pages change what the whole business runs on, not one person's preferences.
  */
 export default function BusinessLayout() {
-  return <SectionShell />;
+  const { pathname } = useLocation();
+  const focused = [
+    "/business/profile",
+    "/business/models",
+    "/business/secrets",
+    "/business/guardrails",
+    "/business/about",
+  ].some((path) => pathname === path || pathname.startsWith(`${path}/`));
+
+  return <SectionShell contentClassName={focused ? "mx-auto max-w-4xl" : undefined} />;
 }

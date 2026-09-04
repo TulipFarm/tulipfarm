@@ -66,7 +66,7 @@ export function BrandOnboardingSections() {
             <span className="text-sm">Small</span>
           </div>
         </div>
-        <p className="mt-3 max-w-2xl text-sm text-muted-foreground">
+        <p className="mt-3 max-w-2xl text-base text-muted-foreground">
           A brand hex is the one colour that cannot be a token. It belongs to someone else and
           arrives as runtime data. It is never rendered as authored: <code>brandInk</code> clamps
           its OKLCH lightness per canvas, because GitHub&rsquo;s <code>#181717</code> is invisible
@@ -88,13 +88,13 @@ export function BrandOnboardingSections() {
             </div>
           ))}
         </div>
-        <p className="mt-4 max-w-2xl text-sm text-muted-foreground">
+        <p className="mt-4 max-w-2xl text-base text-muted-foreground">
           Pre-login (<code>/setup</code>) drives this with answered-question count, no step number
           shown. In-app, stage 3 is fixed. It is the Companion's collapsed glyph, bottom right on{" "}
           <code>sm</code>+ and a top-bar icon below it, with a pulsing dot badge (never a popup)
           when a Task is pending.
         </p>
-        <div className="mt-5 max-w-sm rounded-md border border-border bg-card">
+        <div className="mt-5 max-w-sm rounded-lg border border-border bg-card">
           <CompanionPanel
             tasks={GUIDE_TASKS}
             loading={false}

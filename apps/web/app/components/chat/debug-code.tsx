@@ -1,5 +1,5 @@
-import { ChevronRight } from "lucide-react";
 import { type ReactNode, useState } from "react";
+import { ChevronRight } from "~/components/icons";
 import { useHighlighted } from "~/lib/use-highlighted";
 import { cn } from "~/lib/utils";
 

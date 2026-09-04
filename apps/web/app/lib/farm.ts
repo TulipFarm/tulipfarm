@@ -1,4 +1,4 @@
-import { BookOpen, Bot, Boxes, type LucideIcon, Plug, Puzzle, Workflow } from "lucide-react";
+import { BookOpen, Bot, Boxes, type Icon, Plug, Puzzle, Workflow } from "~/components/icons";
 import { listAgents } from "./agents";
 import { listResourceTypes } from "./api";
 import { listIntegrations } from "./integrations";
@@ -28,7 +28,7 @@ export type Crop = {
   colorVar: string;
   /** Where the legend row and a clicked tulip send the reader. */
   to: string;
-  icon: LucideIcon;
+  icon: Icon;
   /**
    * A complete clause naming what a planted-but-inert artifact of this kind looks like, so callers
    * can list it verbatim. Absent when the kind has no such state.

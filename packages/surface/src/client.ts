@@ -1,6 +1,6 @@
-import { isRecord } from "@tulipfarm/schema";
 /** Browser-safe Surface helpers; keep this entry point free of TypeBox and Ajv imports. */
 import { canonicalHash } from "@tulipfarm/schema/canonicalize";
+import { isRecord } from "@tulipfarm/schema/guards";
 
 import {
   SURFACE_ACTION_EVENT_MAX_LENGTH,

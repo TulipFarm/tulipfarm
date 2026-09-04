@@ -1,6 +1,6 @@
-import { Lock, TriangleAlert } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { FormStatus } from "~/components/form-status";
+import { Lock, TriangleAlert } from "~/components/icons";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Field } from "~/components/ui/field";

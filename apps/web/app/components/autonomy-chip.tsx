@@ -22,6 +22,13 @@ const RANK_TONE: Record<1 | 2 | 3 | 4, string> = {
   4: "bg-heat-4 text-heat-ink-peak",
 };
 
+const AUTONOMY_LABEL: Record<Autonomy, string> = {
+  manual: "Manual",
+  "approval-required": "Approval required",
+  supervised: "Supervised",
+  full: "Full",
+};
+
 type Props = {
   autonomy: Autonomy;
   /** `sm` matches the agents list; `xs` matches the chat mention chip. */
@@ -37,14 +44,14 @@ export function AutonomyChip({ autonomy, size = "sm", className }: Props) {
   return (
     <span
       className={cn(
-        "shrink-0 rounded-sm uppercase",
-        size === "sm" ? "px-1.5 py-0.5 tracking-[0.15em]" : "px-1 py-0.5 tracking-[0.12em]",
+        "shrink-0 rounded-sm",
+        size === "sm" ? "px-1.5 py-0.5" : "px-1 py-0.5",
         RANK_TONE[AUTONOMY_RANK[autonomy]],
         className
       )}
     >
       <span className="sr-only">authority: </span>
-      {autonomy}
+      {AUTONOMY_LABEL[autonomy]}
     </span>
   );
 }

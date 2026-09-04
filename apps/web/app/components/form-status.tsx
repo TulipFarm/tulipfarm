@@ -1,5 +1,5 @@
-import { AlertCircle, CheckCircle2 } from "lucide-react";
 import type { ReactNode } from "react";
+import { AlertCircle, CheckCircle2 } from "~/components/icons";
 import { cn } from "~/lib/utils";
 
 /**

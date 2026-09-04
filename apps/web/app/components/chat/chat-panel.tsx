@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, type ReactNode, Suspense, useEffect } from "react";
 import { AgentGlyph } from "~/components/agent-glyph";
 import { ConnectionStatus } from "~/components/shell/states";
 import { Link } from "~/components/ui/link";
@@ -21,67 +21,94 @@ import { useMentionCatalog } from "./use-mention-catalog";
  */
 const Transcript = lazy(() => import("./transcript").then((m) => ({ default: m.Transcript })));
 
+const GENERIC_GREETINGS = [
+  "What’s on your mind?",
+  "Where should we start?",
+  "What needs sorting out?",
+  "What are you thinking through?",
+  "What should we tackle?",
+  "Where do you want to begin?",
+  "What can we make easier?",
+  "Ready when you are.",
+] as const;
+
+function greetingFor(userName: string | undefined, greetingIndex: number) {
+  const firstName = userName?.trim().split(/\s+/)[0];
+  const greetings = firstName
+    ? [
+        `What’s on your mind, ${firstName}?`,
+        `Where should we start, ${firstName}?`,
+        `What needs sorting out, ${firstName}?`,
+        `What are you thinking through, ${firstName}?`,
+        `What should we tackle, ${firstName}?`,
+        `Where do you want to begin, ${firstName}?`,
+        `What can we make easier, ${firstName}?`,
+        `Ready when you are, ${firstName}.`,
+      ]
+    : GENERIC_GREETINGS;
+  return greetings[greetingIndex % greetings.length];
+}
+
 function EmptyState({
   businessName,
+  userName,
+  greetingIndex,
   agent,
   label,
   tasks,
   onPick,
+  composer,
 }: {
   businessName?: string;
+  userName?: string;
+  greetingIndex: number;
   agent?: string;
   label?: string;
   tasks: Task[];
   onPick: (text: string) => void;
+  composer: ReactNode;
 }) {
+  const title = agent
+    ? `Chat with ${label ?? agent}`
+    : businessName
+      ? `Where should we start with ${businessName}?`
+      : greetingFor(userName, greetingIndex);
+
   return (
-    <div className="flex flex-1 min-h-0 overflow-y-auto">
-      <section className="mx-auto flex w-full max-w-4xl flex-col justify-start gap-7 px-4 py-8 sm:px-6 sm:py-14 md:justify-center">
-        <div className="grid gap-7 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-500 md:grid-cols-[minmax(0,1fr)_12rem] md:items-end">
-          <div>
-            <p className="mb-3 text-sm font-medium text-primary">Chat</p>
-            <h1 className="max-w-2xl text-balance text-3xl font-semibold leading-tight tracking-tight sm:text-4xl">
-              {agent
-                ? `Chat with ${label ?? agent}`
-                : businessName
-                  ? `What can I help ${businessName} with?`
-                  : "What can I help with?"}
-            </h1>
-            <p className="mt-3 max-w-xl text-pretty text-base leading-7 text-muted-foreground">
-              {agent
-                ? "This Chat is using a user-created Agent."
-                : "Ask about your business, build your system, or start with a suggested prompt."}
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      <section
+        aria-labelledby="new-chat-title"
+        className="mx-auto flex min-h-full w-full max-w-2xl flex-col justify-center px-4 py-10 sm:px-6"
+      >
+        <div className="text-center">
+          <h1
+            id="new-chat-title"
+            className="text-balance text-xl font-semibold tracking-tight text-foreground"
+          >
+            {title}
+          </h1>
+          {agent ? (
+            <p className="mt-2 text-sm text-muted-foreground">
+              This Chat is using a user-created Agent.
             </p>
-          </div>
-          <aside className="border-l border-border pl-4 text-xs leading-6 text-muted-foreground">
-            <p className="font-medium text-foreground">Add context as you write</p>
-            <p>
-              <kbd className="font-mono text-primary">@</kbd> Agent
-            </p>
-            <p>
-              <kbd className="font-mono text-primary">/</kbd> Skill
-            </p>
-            <p>
-              <kbd className="font-mono text-primary">#</kbd> Resource type
-            </p>
-            <p>
-              <kbd className="font-mono text-primary">~</kbd> Knowledge page
-            </p>
-          </aside>
+          ) : null}
         </div>
+        <div className="mt-5">{composer}</div>
         {!agent && tasks.length > 0 ? <TasksPreviewCard tasks={tasks} onPick={onPick} /> : null}
       </section>
     </div>
   );
 }
 
-/** Layer-1 chat surface: empty state → live transcript, with the composer pinned to the bottom. */
+/** Layer-1 Chat surface: centered first prompt → live transcript with a docked composer. */
 export function ChatPanel({
   agentId,
   defaultModel = DEFAULT_CHAT_MODEL_SELECTOR,
   suggestions = [],
   tasks = [],
   businessName,
+  userName,
+  greetingIndex = 0,
   initialConversationId,
   initialMessages,
   initialTurn,
@@ -94,6 +121,8 @@ export function ChatPanel({
   suggestions?: Suggestion[];
   tasks?: Task[];
   businessName?: string;
+  userName?: string;
+  greetingIndex?: number;
   initialConversationId?: string;
   initialMessages?: ChatMessage[];
   initialTurn?: ConversationTurn | null;
@@ -150,6 +179,30 @@ export function ChatPanel({
     errorDetails?.reason === "model_rate_limited" ||
     errorDetails?.reason === "model_provider_unavailable" ||
     errorDetails?.reason === "model_error";
+  const composer = (
+    <Composer
+      placement={hasMessages ? "docked" : "centered"}
+      busy={busy}
+      defaultModel={defaultModel}
+      onStop={stop}
+      activeAgentPreset={activeAgentPreset}
+      presetById={presetById}
+      activeAgent={
+        activeAgentName
+          ? {
+              name: activeAgentName,
+              label: agentInfo?.label,
+              domain: agentInfo?.domain,
+              autonomy: agentInfo?.autonomy,
+            }
+          : undefined
+      }
+      suggestions={hasMessages ? [] : suggestions}
+      initialDraft={initialDraft}
+      attachFileId={attachFileId}
+      onSend={(text, opts) => send(text, { ...opts, agentId: opts.agentId ?? agentId })}
+    />
+  );
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
@@ -190,10 +243,13 @@ export function ChatPanel({
       ) : (
         <EmptyState
           businessName={businessName}
+          userName={userName}
+          greetingIndex={greetingIndex}
           agent={activeAgentName}
           label={agentInfo?.label}
           tasks={tasks}
           onPick={(text) => send(text, { model: activeAgentPreset ?? defaultModel, agentId })}
+          composer={composer}
         />
       )}
       {status === "error" ? (
@@ -237,28 +293,7 @@ export function ChatPanel({
           <ConnectionStatus state="reconnecting" />
         </div>
       ) : null}
-      <Composer
-        busy={busy}
-        defaultModel={defaultModel}
-        onStop={stop}
-        activeAgentPreset={activeAgentPreset}
-        presetById={presetById}
-        activeAgent={
-          activeAgentName
-            ? {
-                name: activeAgentName,
-                label: agentInfo?.label,
-                domain: agentInfo?.domain,
-                autonomy: agentInfo?.autonomy,
-              }
-            : undefined
-        }
-        suggestions={hasMessages ? [] : suggestions}
-        initialDraft={initialDraft}
-        attachFileId={attachFileId}
-        // A `@agent` mention in the composer overrides the panel's active agent for that turn.
-        onSend={(text, opts) => send(text, { ...opts, agentId: opts.agentId ?? agentId })}
-      />
+      {hasMessages ? composer : null}
       <ChatDebugDrawer conversationId={conversationId} />
     </div>
   );

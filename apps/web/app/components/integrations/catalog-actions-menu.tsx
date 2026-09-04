@@ -1,9 +1,16 @@
-import { ArrowUpRight, BookOpen, MessageSquarePlus, MoreHorizontal, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import {
+  ArrowUpRight,
+  BookOpen,
+  MessageSquarePlus,
+  MoreHorizontal,
+  Sparkles,
+} from "~/components/icons";
 import { Link } from "~/components/ui/link";
 import { GITHUB_REPO_URL } from "~/lib/report-bug";
 import { cn } from "~/lib/utils";
+import { docsRoute, SITE_URL } from "../../../../docs/lib/shared";
 
 /*
  * The catalog's overflow menu. Every item resolves to something this instance can actually do:
@@ -11,7 +18,7 @@ import { cn } from "~/lib/utils";
  * anything here — not a request form that files into a queue nobody owns.
  */
 
-const DOCS = "https://tulipfarm.site/docs";
+const DOCS = `${SITE_URL}${docsRoute}`;
 
 /** Seeds the composer on the new-chat route, which strips the param once applied. */
 const REQUEST_DRAFT =
@@ -131,7 +138,7 @@ export function CatalogActionsMenu() {
             <div
               ref={menuRef}
               role="menu"
-              className="fixed z-50 rounded-md border border-border bg-card p-1 shadow-lg"
+              className="fixed z-50 rounded-lg border border-border bg-card p-1 shadow-lg"
               style={{ top: rect.bottom + 6, left: menuLeft(rect), width: MENU_WIDTH }}
             >
               {ITEMS.map((item, i) =>

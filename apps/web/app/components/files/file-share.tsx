@@ -1,5 +1,5 @@
-import { Loader2, Trash2, UserRound, UsersRound } from "lucide-react";
 import { useEffect, useId, useState } from "react";
+import { Loader2, Trash2, UserRound, UsersRound } from "~/components/icons";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";

@@ -1,4 +1,4 @@
-import { isRecord } from "@tulipfarm/schema";
+import { isRecord } from "@tulipfarm/schema/guards";
 import type { ChatMessage, SourceRef, TimelinePart, ToolPreview } from "~/lib/chat/types";
 import type { ConversationMessage, WireMessagePart } from "~/lib/conversations";
 import { randomUUID } from "~/lib/uuid";

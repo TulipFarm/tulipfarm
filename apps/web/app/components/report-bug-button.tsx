@@ -1,5 +1,5 @@
-import { Bug } from "lucide-react";
 import { useState } from "react";
+import { Bug } from "~/components/icons";
 import { ReportBugModal } from "~/components/report-bug-modal";
 import { Button } from "~/components/ui/button";
 import { Tooltip } from "~/components/ui/tooltip";
@@ -35,8 +35,8 @@ export function ReportBugButton({ iconOnly = true }: { iconOnly?: boolean }) {
       aria-label="Report a bug"
       className={
         iconOnly
-          ? "size-8 rounded-sm text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground"
-          : "gap-2 rounded-sm text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground"
+          ? "size-8 rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          : "gap-2 rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
       }
     >
       <Bug className="size-4" aria-hidden />

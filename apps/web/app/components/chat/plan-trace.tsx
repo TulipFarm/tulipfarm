@@ -1,5 +1,5 @@
-import { Waypoints } from "lucide-react";
 import { Fragment, useState } from "react";
+import { Waypoints } from "~/components/icons";
 import { LOADER_LABELS, pick } from "~/components/ui/loading-state";
 import { Trace, TraceStep } from "~/components/ui/trace";
 import type { PlannedCall, PlannedRound } from "./timeline-groups";

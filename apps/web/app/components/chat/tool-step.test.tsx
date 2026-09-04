@@ -73,7 +73,7 @@ describe("A Tool step on the trace", () => {
 
     // A completed call is reported by `status`, not by whether a verbatim result was streamed —
     // on a live stream the verbatim result never arrives.
-    expect(container.querySelector(".tf-trace-row .lucide-check")).not.toBeNull();
+    expect(container.querySelector(".tf-trace-row svg.text-run-ok")).not.toBeNull();
   });
 
   it("separates Input from Output and names every withheld field", async () => {
@@ -92,7 +92,7 @@ describe("A Tool step on the trace", () => {
 
     expect(screen.getByText("Input")).toBeInTheDocument();
     expect(screen.getByText("Output")).toBeInTheDocument();
-    expect(screen.getByText("redacted")).toBeInTheDocument();
+    expect(screen.getByText("Redacted")).toBeInTheDocument();
     expect(screen.getByText("1 field withheld")).toBeInTheDocument();
   });
 
@@ -179,7 +179,7 @@ describe("A Tool step on the trace", () => {
       pending: true,
     });
 
-    expect(container.querySelector(".tf-trace-row .lucide-loader-circle")).not.toBeNull();
+    expect(container.querySelector(".tf-trace-row svg.text-run-active")).not.toBeNull();
     expect(container.querySelector(".text-run-active")).not.toBeNull();
   });
 });

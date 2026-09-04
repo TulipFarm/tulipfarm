@@ -1,9 +1,9 @@
 import { createRemixStub } from "@remix-run/testing";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { BookOpen, Inbox, MessageSquare } from "lucide-react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { AppShell, AppSidebar, iconForPath, titleForPath } from "~/components/app-sidebar";
+import { BookOpen, Inbox, MessageSquare } from "~/components/icons";
 import * as approvalsContext from "~/lib/approvals-context";
 import * as conversationsContext from "~/lib/conversations-context";
 import * as sidebarCounts from "~/lib/sidebar-counts";
@@ -103,9 +103,12 @@ test("renders every destination in one flat list, with no rail or second panel",
   for (const heading of ["Work", "Build"]) {
     expect(within(nav).getByRole("heading", { level: 2, name: heading })).toBeInTheDocument();
   }
-  for (const label of ["Chats", "Inbox", "Activity", "Resources", "Agents", "Knowledge", "Farm"]) {
+  for (const label of ["Chats", "Inbox", "Activity", "Resources", "Agents", "Knowledge"]) {
     expect(within(nav).getByRole("link", { name: new RegExp(label, "i") })).toBeInTheDocument();
   }
+  const utilities = screen.getByRole("navigation", { name: "Utilities" });
+  expect(within(utilities).getByRole("link", { name: "Farm" })).toBeInTheDocument();
+  expect(within(utilities).getByRole("link", { name: "Settings" })).toBeInTheDocument();
 
   expect(screen.queryByRole("navigation", { name: "Product modes" })).not.toBeInTheDocument();
   expect(within(nav).queryByRole("heading", { name: "Knowledge" })).not.toBeInTheDocument();
@@ -155,6 +158,18 @@ test("carries the live approval count on Inbox", () => {
   expect(within(screen.getByRole("link", { name: /inbox/i })).getByText("2")).toBeInTheDocument();
 });
 
+test("aligns every expanded count on the same trailing slot", () => {
+  useSidebarCounts.mockReturnValue({ "/resources": 1, "/skills": 7 });
+  render(<SidebarStub initialEntries={["/skills"]} />);
+
+  const counts = screen.getAllByText(/^[17]$/);
+  expect(counts).toHaveLength(2);
+  for (const count of counts) {
+    expect(count).toHaveAttribute("data-sidebar-count");
+    expect(count).toHaveClass("ms-auto", "w-5", "text-right", "leading-none");
+  }
+});
+
 /* Collapsed, the count shrinks to a dot — so the row's own label has to carry the number. */
 test("still announces the approval count when the sidebar is collapsed", async () => {
   const user = userEvent.setup();
@@ -184,25 +199,46 @@ test("hides denied destinations and the groups they empty", () => {
   expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument();
 });
 
-/* Business configuration moved behind Settings, so the sidebar must not grow it back. */
-test("keeps business configuration out of the sidebar", () => {
+test("replaces the app destinations with Settings navigation on a Settings-owned route", () => {
   render(<SidebarStub initialEntries={["/business/models"]} />);
-  const nav = screen.getByRole("navigation", { name: "Main" });
+  const nav = screen.getByRole("navigation", { name: "Settings" });
 
-  for (const label of ["Models", "Secrets", "Soul", "Guardrails", "Business profile", "Profile"]) {
-    expect(within(nav).queryByRole("link", { name: label })).not.toBeInTheDocument();
+  for (const heading of ["You", "Business", "Operate", "Developer"]) {
+    expect(within(nav).getByRole("heading", { name: heading })).toBeInTheDocument();
   }
-  expect(within(nav).queryByRole("link", { name: "Settings" })).not.toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute("href", "/settings");
+  expect(within(nav).getByRole("link", { name: "Models" })).toHaveAttribute("aria-current", "page");
+  expect(screen.getByRole("link", { name: "Back to app" })).toHaveAttribute("href", "/");
+  expect(screen.queryByRole("navigation", { name: "Main" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("navigation", { name: "Utilities" })).not.toBeInTheDocument();
 });
 
-/* Operator surfaces followed business configuration behind the Settings door. */
-test("keeps Operations and Observability out of the sidebar", () => {
+test("keeps operator destinations inside the same Settings navigation", () => {
   render(<SidebarStub initialEntries={["/operations"]} />);
+  const nav = screen.getByRole("navigation", { name: "Settings" });
 
   for (const label of ["Operations", "Observability"]) {
-    expect(screen.queryByRole("link", { name: label })).not.toBeInTheDocument();
+    expect(within(nav).getByRole("link", { name: label })).toBeInTheDocument();
   }
+});
+
+test("filters Settings destinations without leaving the current page", async () => {
+  const user = userEvent.setup();
+  render(<SidebarStub initialEntries={["/settings/profile"]} />);
+
+  await user.type(screen.getByRole("searchbox", { name: "Search settings" }), "model");
+
+  const nav = screen.getByRole("navigation", { name: "Settings" });
+  expect(within(nav).getByRole("link", { name: "Models" })).toBeInTheDocument();
+  expect(within(nav).queryByRole("link", { name: "Profile" })).not.toBeInTheDocument();
+});
+
+test("keeps a nested Settings page attached to its parent destination", () => {
+  render(<SidebarStub initialEntries={["/business/access/teams"]} />);
+
+  expect(screen.getByRole("link", { name: "People & access" })).toHaveAttribute(
+    "aria-current",
+    "page"
+  );
 });
 
 test("renders recent chats and highlights the active one", () => {
@@ -229,6 +265,7 @@ test("renders recent chats and highlights the active one", () => {
     "page"
   );
   expect(screen.getByRole("link", { name: "New chat" })).toHaveAttribute("href", "/chat/c2");
+  expect(screen.getAllByRole("button", { name: "Chat actions" })[0]).toHaveClass("size-7");
 });
 
 /* Three group headings, one behaviour: the word is the disclosure, in every group. */
@@ -373,9 +410,14 @@ test("collapses to icons without losing a destination, and persists the choice",
   await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
   const nav = screen.getByRole("navigation", { name: "Main" });
 
-  for (const label of ["Chats", "Inbox", "Resources", "Agents", "Farm"]) {
+  for (const label of ["Chats", "Inbox", "Resources", "Agents"]) {
     expect(within(nav).getByRole("link", { name: label })).toBeInTheDocument();
   }
+  expect(
+    within(screen.getByRole("navigation", { name: "Utilities" })).getByRole("link", {
+      name: "Farm",
+    })
+  ).toBeInTheDocument();
   expect(within(nav).queryByRole("heading", { name: "Work" })).not.toBeInTheDocument();
   expect(screen.getByRole("complementary", { name: "Application navigation" }).className).toContain(
     "lg:w-14"
@@ -413,7 +455,12 @@ test("renders the shared top bar and restores focus after Escape closes navigati
   expect(screen.getAllByText("Resources")).toHaveLength(2);
   expect(screen.getByText("Page content")).toBeInTheDocument();
   expect(screen.getAllByRole("main")).toHaveLength(1);
-  expect(screen.getByRole("main")).toHaveAttribute("id", "main-content");
+  const main = screen.getByRole("main");
+  expect(main).toHaveAttribute("id", "main-content");
+  expect(main.parentElement).toHaveClass("lg:rounded-lg", "lg:border");
+  expect(screen.getByRole("complementary", { name: "Application navigation" })).not.toHaveClass(
+    "border-r"
+  );
 
   const opener = screen.getByRole("button", { name: "Open navigation" });
   await user.click(opener);
@@ -532,21 +579,32 @@ test("renders the report a bug button in the top bar", () => {
 });
 
 /*
- * Active used to be `bg-sidebar-accent` and hover the same token at 60% — a 4% lightness step that
- * read as "slightly dirty grey" rather than "you are here". Pin the brand tint so it cannot drift
- * back, and pin the shared box model that keeps every icon on one vertical spine.
+ * Two treatments were tried and rejected before this one.
+ *
+ * A filled ruby band read as an error banner: a saturated fill at row size is the same signal the
+ * destructive tone uses. Brand *ink* on a neutral ground was tried next, and on a sidebar this
+ * quiet it became the loudest thing on the screen — the row was shouting a fact the reader
+ * already knew.
+ *
+ * Selection is now carried by ground and weight alone, with no colour at all. Colour in this
+ * system marks what a reader can act on; the row they are already on is not that.
  */
-test("marks the active destination with the brand tint, not the hover grey", () => {
+test("marks the active destination with weight on a neutral ground, never colour", () => {
   render(<SidebarStub initialEntries={["/agents"]} />);
 
   const active = screen.getByRole("link", { name: "Agents" });
   const idle = screen.getByRole("link", { name: "Skills" });
 
   expect(active).toHaveAttribute("aria-current", "page");
-  expect(active.className).toContain("bg-sidebar-primary/12");
-  expect(active.className).toContain("text-sidebar-primary");
+  expect(active.className).toContain("font-medium");
+  expect(active.className).toContain("bg-sidebar-accent");
+  expect(active.className).toContain("text-sidebar-accent-foreground");
+  // No brand colour, as ink or as ground: both reads were rejected above.
+  expect(active.className).not.toContain("text-brand");
+  expect(active.className).not.toContain("bg-brand");
+  expect(active.className).not.toContain("bg-sidebar-primary");
 
-  expect(idle.className).not.toContain("bg-sidebar-primary");
+  expect(idle.className).not.toContain("text-brand");
   expect(idle.className).toContain("hover:bg-sidebar-accent");
   expect(idle.className).not.toContain("hover:bg-sidebar-accent/");
 });
@@ -634,19 +692,6 @@ test("keeps / for the page when the reader is already typing", async () => {
   expect(screen.queryByRole("dialog", { name: "Command menu" })).not.toBeInTheDocument();
 });
 
-/* Nothing here is for sale, so the ask must never come back once it is turned down. */
-test("dismisses the star request for good", async () => {
-  const user = userEvent.setup();
-  const { unmount } = render(<SidebarStub initialEntries={["/agents"]} />);
-
-  await user.click(screen.getByRole("button", { name: "Dismiss the star request" }));
-  expect(screen.queryByRole("link", { name: /Star on GitHub/ })).not.toBeInTheDocument();
-
-  unmount();
-  render(<SidebarStub initialEntries={["/agents"]} />);
-  expect(screen.queryByRole("link", { name: /Star on GitHub/ })).not.toBeInTheDocument();
-});
-
 /* Two controls claiming the same job is one control too many. */
 test("shows one collapse control at a time, moving it out of the sidebar when it narrows", async () => {
   const user = userEvent.setup();
@@ -662,7 +707,7 @@ test("shows one collapse control at a time, moving it out of the sidebar when it
 
 /*
  * The sidebar is a transformed element, which makes it the containing block for anything
- * `position: fixed` inside it. Rendered in place the palette was trapped at 256px, so it has to
+ * `position: fixed` inside it. Rendered in place the palette was trapped at 248px, so it has to
  * leave the aside entirely.
  */
 test("escapes the transformed sidebar by portalling the command menu to the body", async () => {

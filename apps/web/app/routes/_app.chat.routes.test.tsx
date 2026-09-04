@@ -31,8 +31,9 @@ beforeEach(() => {
 afterEach(() => vi.clearAllMocks());
 
 test("clientLoader hydrates the conversation transcript", async () => {
+  const conversationId = "11111111-1111-4111-8111-111111111111";
   vi.mocked(conversations.getConversation).mockResolvedValue({
-    id: "c1",
+    id: conversationId,
     title: "Inventory",
     agentId: "GeneralAssistant",
     userId: "u1",
@@ -43,16 +44,28 @@ test("clientLoader hydrates the conversation transcript", async () => {
     latestTurn: null,
   });
   vi.mocked(conversations.getConversationMessages).mockResolvedValue([
-    { _id: "m1", conversationId: "c1", role: "user", content: "hello world", createdAt: "t" },
-    { _id: "m2", conversationId: "c1", role: "assistant", content: "hi back", createdAt: "t" },
+    {
+      _id: "m1",
+      conversationId,
+      role: "user",
+      content: "hello world",
+      createdAt: "t",
+    },
+    {
+      _id: "m2",
+      conversationId,
+      role: "assistant",
+      content: "hi back",
+      createdAt: "t",
+    },
   ]);
   vi.mocked(agents.getAgent).mockResolvedValue({
     name: "GeneralAssistant",
     model: "balanced",
   } as unknown as Awaited<ReturnType<typeof agents.getAgent>>);
 
-  const data = await clientLoader(loaderArgs("c1"));
-  expect(data.id).toBe("c1");
+  const data = await clientLoader(loaderArgs(conversationId));
+  expect(data.id).toBe(conversationId);
   expect(data.agentId).toBe("GeneralAssistant");
   expect(data.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
 });
@@ -62,7 +75,15 @@ test("clientLoader redirects to / when the conversation is missing (404)", async
   vi.mocked(conversations.getConversationMessages).mockRejectedValue(
     new ApiError(404, "not found")
   );
-  await expect(clientLoader(loaderArgs("missing"))).rejects.toMatchObject({ status: 302 });
+  await expect(
+    clientLoader(loaderArgs("00000000-0000-4000-8000-000000000000"))
+  ).rejects.toMatchObject({ status: 302 });
+});
+
+test("clientLoader redirects malformed conversation ids before calling the API", async () => {
+  await expect(clientLoader(loaderArgs("not-a-uuid"))).rejects.toMatchObject({ status: 302 });
+  expect(conversations.getConversation).not.toHaveBeenCalled();
+  expect(conversations.getConversationMessages).not.toHaveBeenCalled();
 });
 
 test("renders the rehydrated transcript", async () => {
@@ -71,6 +92,7 @@ test("renders the rehydrated transcript", async () => {
   ];
   vi.mocked(remix.useLoaderData).mockReturnValue({
     id: "c1",
+    title: "Inventory",
     agentId: "GeneralAssistant",
     defaultModel: "auto",
     messages,
@@ -78,5 +100,6 @@ test("renders the rehydrated transcript", async () => {
   const Stub = createRemixStub([{ path: "/", Component: () => <ChatConversationRoute /> }]);
   render(<Stub initialEntries={["/"]} />);
   // The transcript is code-split, so it resolves a tick after the route renders.
+  expect(screen.getByRole("heading", { level: 1, name: "Inventory" })).toBeInTheDocument();
   expect(await screen.findByText("hello world")).toBeInTheDocument();
 });

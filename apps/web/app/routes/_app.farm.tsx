@@ -68,7 +68,7 @@ export default function Farm() {
               </p>
               <Link
                 to="/"
-                className="mt-3 inline-block text-xs font-medium text-primary transition-colors duration-150 hover:underline"
+                className="mt-3 inline-block text-xs font-medium text-brand transition-colors hover:underline"
               >
                 Ask in chat to plant the first one
               </Link>

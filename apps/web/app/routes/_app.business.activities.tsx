@@ -1,6 +1,5 @@
 import type { MetaFunction } from "@remix-run/node";
 import { useRouteError } from "@remix-run/react";
-import { AlertTriangle, Inbox, Search } from "lucide-react";
 import {
   parseAsBoolean,
   parseAsInteger,
@@ -17,6 +16,7 @@ import {
 } from "~/components/activity/activity-filters";
 import { ActivityTimeline } from "~/components/activity/activity-timeline";
 import { formatAge } from "~/components/activity/presentation";
+import { AlertTriangle, Inbox, Search } from "~/components/icons";
 import { ErrorState } from "~/components/states";
 import { Button } from "~/components/ui/button";
 import { LoadingState } from "~/components/ui/loading-state";
@@ -63,7 +63,7 @@ function messageFor(cause: unknown): string {
 
 function Panel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex flex-col items-center gap-3 rounded-md border border-border bg-card px-6 py-12 text-center">
+    <div className="flex flex-col items-center gap-3 rounded-lg border border-border bg-card px-6 py-12 text-center">
       {children}
     </div>
   );
@@ -287,7 +287,7 @@ export default function BusinessActivities() {
       ) : null}
 
       {phase === "loading" ? (
-        <div className="flex justify-center rounded-md border border-border bg-card px-6 py-12">
+        <div className="flex justify-center rounded-lg border border-border bg-card px-6 py-12">
           <LoadingState label="Reading the log" />
         </div>
       ) : error !== null ? (

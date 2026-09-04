@@ -1,6 +1,6 @@
-import { X } from "lucide-react";
 import type * as React from "react";
 import { useEffect, useRef } from "react";
+import { X } from "~/components/icons";
 import { cn } from "~/lib/utils";
 
 /* Native <dialog> is re-pinned full-height to the right instead of centered. */
@@ -68,7 +68,7 @@ export function Sheet({
       ref={ref}
       onClick={onBackdropClick}
       className={cn(
-        "tf-sheet my-0 mr-0 ml-auto h-dvh max-h-dvh w-full max-w-md rounded-none border-border border-l bg-card p-0 text-foreground",
+        "tf-sheet my-0 mr-0 ml-auto h-dvh max-h-dvh w-full max-w-md rounded-none border-border border-l bg-card p-0 text-foreground shadow-lg",
         className
       )}
     >
@@ -81,7 +81,7 @@ export function Sheet({
               type="button"
               aria-label="Close"
               onClick={onClose}
-              className="cursor-pointer rounded-sm p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              className="cursor-pointer rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
               <X className="size-4" aria-hidden />
             </button>

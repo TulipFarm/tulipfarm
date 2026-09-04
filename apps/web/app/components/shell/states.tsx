@@ -81,7 +81,7 @@ export function DestructivePreview({
     >
       <h2
         id="destructive-preview-title"
-        className="border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-[0.2em]"
+        className="border-b border-border px-3 py-2 text-xs font-medium "
       >
         Confirm {action}
       </h2>

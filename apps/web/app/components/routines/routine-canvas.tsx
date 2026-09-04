@@ -1,5 +1,6 @@
 import "@xyflow/react/dist/style.css";
 import { Controls, type Edge, Handle, type Node, Position, ReactFlow } from "@xyflow/react";
+import { useMemo, useState } from "react";
 import {
   Bot,
   Braces,
@@ -15,8 +16,7 @@ import {
   TriangleAlert,
   Wrench,
   Zap,
-} from "lucide-react";
-import { useMemo, useState } from "react";
+} from "~/components/icons";
 import { Button } from "~/components/ui/button";
 import {
   layoutRoutineGraph,
@@ -226,7 +226,7 @@ export function RoutineCanvas({ graph, mode, overlay, caption }: Props) {
             <NodeIcon node={node} status={run?.status} />
             <span className="min-w-0">
               <span className="block truncate text-xs font-medium">{node.label}</span>
-              <span className="block font-mono text-[0.625rem] uppercase tracking-[0.12em] text-muted-foreground">
+              <span className="block font-mono text-xs text-muted-foreground">
                 {node.kind === "state"
                   ? `${node.stateType}${run?.status ? ` · ${statusText(run.status)}` : ""}`
                   : node.kind}
@@ -274,7 +274,7 @@ export function RoutineCanvas({ graph, mode, overlay, caption }: Props) {
          gutter beside every graph reads as a panel that failed to load. */
       className={`grid gap-4 ${selected ? "lg:grid-cols-[minmax(0,1fr)_18rem]" : ""}`}
     >
-      <div className="min-w-0 overflow-hidden rounded-md border border-border bg-background">
+      <div className="min-w-0 overflow-hidden rounded-lg border border-border bg-background">
         <div className="flex items-center justify-between gap-2 border-b border-border">
           <Legend kinds={kinds} />
           <Button
@@ -342,11 +342,9 @@ export function RoutineCanvas({ graph, mode, overlay, caption }: Props) {
       {selected && (
         <aside
           aria-label="State details"
-          className="min-h-44 rounded-md border border-border bg-card p-4 text-xs"
+          className="min-h-44 rounded-lg border border-border bg-card p-4 text-xs"
         >
-          <h3 className="mb-3 font-mono text-[0.625rem] uppercase tracking-[0.16em] text-muted-foreground">
-            State details
-          </h3>
+          <h3 className="mb-3 font-mono text-xs text-muted-foreground">State details</h3>
           <p className="mb-3 font-medium">{selectedNode?.label ?? selected}</p>
           {selectedNode?.stateType && (
             <p className="mb-3 font-mono text-[0.625rem] text-muted-foreground">

@@ -301,6 +301,9 @@ conforming code so it is a no-op.
 - **TypeScript everywhere**, extending `@tulipfarm/tsconfig`.
 - **Surgical edits** — touch only what the task needs; never reformat adjacent code.
 - **No new deps** without need; check `package.json` first.
+- Use **Muskan Vijayvargiya** for new generic person-name placeholders and examples.
+- Describe TulipFarm's design rules on their own terms; do not name external design inspirations
+  in product code, comments, tests, or design documentation.
 - Migrations live in `apps/api/src/pg-migrations/` and run on boot.
 - Env: copy `.env.local.example` → `.env.local`; never commit secrets.
 

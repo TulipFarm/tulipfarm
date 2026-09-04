@@ -3,6 +3,44 @@
   --radius: 0.5rem;
 
   /*
+   * The surface ramp. Every ground in the app is one of four levels, and the whole point is that
+   * the steps are *tiny* and decelerating — light descends 2.1%, then 1.2%, then 1.2% in
+   * lightness; dark ascends 3.3%, 2.3%, 2.2%. A reader should never be able to name the boundary
+   * between two levels, only feel that one sits above the other.
+   *
+   * Two rules make it cohere, and breaking either is what makes a surface ramp look muddy:
+   *   1. Chroma and hue are IDENTICAL across all four levels. Only lightness moves.
+   *   2. Light mode descends from white; dark mode ascends from near-black. Elevation is "further
+   *      from the canvas", which means darker on light and lighter on dark.
+   *
+   * Light is exactly achromatic (C = 0). A neutral that carries a violet cast reads as a colour
+   * decision nobody made; the faint cool cast in dark is deliberate, because pure achromatic
+   * near-blacks go green on warm displays.
+   *
+   * Do not add a level-4. If something needs to sit above level-3 it needs a shadow, not a fifth
+   * grey — at these step sizes a fifth would be indistinguishable from the fourth anyway.
+   */
+  --level-0: oklch(1 0 0); /* #ffffff */
+  --level-1: oklch(0.979 0 0); /* #f8f8f8 */
+  --level-2: oklch(0.967 0 0); /* #f4f4f4 */
+  --level-3: oklch(0.955 0 0); /* #f0f0f0 */
+
+  /*
+   * Elevation. Depth is a *seam* between a layer and its ground, never a glow. The ladder is far
+   * fainter than it used to be and is now reserved for things that genuinely float over content
+   * and can be dismissed: popover, menu, tooltip, modal, sheet.
+   *
+   * Resting chrome — button, input, card, table, panel — carries NO shadow at all. It separates on
+   * a hairline and its own level. A page where every control is lifted has no hierarchy left to
+   * spend, and `xs` on forty controls at once is most of what reads as visual noise. `--elevation-xs`
+   * is kept only for the rare genuinely-raised chip.
+   */
+  --elevation-xs: 0 1px 1px oklch(0 0 0 / 0.09);
+  --elevation-sm: 0 1px 4px -1px oklch(0 0 0 / 0.09);
+  --elevation-md: 0 3px 12px oklch(0 0 0 / 0.09);
+  --elevation-lg: 0 7px 24px oklch(0 0 0 / 0.06);
+
+  /*
    * Sidebar width, expanded versus collapsed to icons. Lives on the root so the pre-hydration
    * script in root.tsx can pick the right one from localStorage: the HydrateFallback skeleton is
    * baked into index.html and paints before any JS runs, so it must size itself without React.
@@ -10,44 +48,86 @@
    */
   --shell-sidebar-width: 16rem;
 
-  --background: oklch(1 0 0);
+  --background: var(--level-0);
   --foreground: oklch(0.18 0 0);
-  --card: oklch(0.995 0 0);
+  --card: var(--level-1);
   --card-foreground: oklch(0.18 0 0);
-  --popover: oklch(1 0 0);
+  --popover: var(--level-2);
   --popover-foreground: oklch(0.18 0 0);
 
-  /* Existing TulipFarm coral brand values remain unchanged. */
-  --primary: oklch(0.46 0.17 25);
-  --primary-foreground: oklch(0.99 0 0);
+  /*
+   * The committing action is neutral ink, not brand. A page carries at most one of these, so its
+   * job is to be the single darkest thing on the screen — a ruby fill competed with every status
+   * tone and every brand mark for the same attention.
+   */
+  --primary: oklch(0.21 0 0);
+  --primary-foreground: oklch(0.985 0 0);
 
-  --secondary: oklch(0.965 0 0);
+  /*
+   * TulipFarm's ruby. It is the product's identity AND its accent — the wordmark, but also focus,
+   * links, and selection. Those three are the only places an interface can afford a saturated
+   * hue: each marks exactly one thing at a time, and each answers a question the reader is
+   * actively asking ("where am I?", "what can I click?", "what did I pick?").
+   *
+   * It still never fills a button, a status, or a chart series. A call to action is neutral ink
+   * (`--primary`) precisely so that when ruby does appear, it means one of those three things.
+   */
+  --brand: oklch(0.46 0.17 25);
+  --brand-foreground: oklch(0.99 0 0);
+  /* Ruby held at canvas lightness — the ground under a selected row, paired with `--brand` ink. */
+  --brand-surface: oklch(0.965 0.018 25);
+
+  --secondary: var(--level-2);
   --secondary-foreground: oklch(0.24 0 0);
-  --muted: oklch(0.965 0 0);
-  --muted-foreground: oklch(0.48 0 0);
-  --accent: oklch(0.945 0 0);
+  --muted: var(--level-2);
+  --muted-foreground: oklch(0.505 0 0);
+  --accent: var(--level-3);
   --accent-foreground: oklch(0.22 0 0);
+
+  /*
+   * The one surface that means "lifted above its own ground": a segmented control's active pill,
+   * a switch's thumb, a drag handle. It cannot be `--background`, because "lifted" is a different
+   * direction in each theme — lighter than the ramp in dark, but the ramp's own white in light —
+   * and a raised chip painted with `--background` in dark comes out *darker* than the track it is
+   * supposed to sit on top of.
+   */
+  --raised: var(--level-0);
 
   --destructive: oklch(0.55 0.2 27);
   --destructive-foreground: oklch(0.99 0 0);
 
-  --border: oklch(0.91 0 0);
+  /*
+   * Two border tiers, because "structure should be felt, not seen". The default is deliberately
+   * almost invisible — it is the line between a table row and the next, and it should register as
+   * rhythm rather than as a drawn rule. `--border-strong` is for the rare place a boundary has to
+   * be asserted: a focused field, a selected cell, a divider that separates two different kinds of
+   * thing rather than two instances of the same one.
+   *
+   * Reach for the default first. If a layout only reads correctly with `--border-strong`
+   * everywhere, the levels are doing too little work and the fix is a level, not a darker line.
+   */
+  --border: oklch(0.937 0 0);
+  --border-strong: oklch(0.87 0 0);
   --input: oklch(0.9 0 0);
-  --ring: oklch(0.46 0.17 25);
+  --ring: var(--brand);
 
-  --sidebar: oklch(0.98 0 0);
-  --sidebar-foreground: oklch(0.24 0 0);
-  --sidebar-primary: oklch(0.46 0.17 25);
-  --sidebar-primary-foreground: oklch(0.99 0 0);
-  --sidebar-accent: oklch(0.94 0 0);
+  --sidebar: var(--level-2);
+  --sidebar-foreground: oklch(0.42 0 0);
+  --sidebar-primary: oklch(0.21 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.91 0 0);
   --sidebar-accent-foreground: oklch(0.2 0 0);
-  --sidebar-border: oklch(0.91 0 0);
-  --sidebar-ring: oklch(0.46 0.17 25);
+  --sidebar-border: oklch(0.937 0 0);
+  --sidebar-ring: var(--brand);
 
   --status-neutral: oklch(0.5 0 0);
   --status-info: oklch(0.52 0.14 250);
   --status-success: oklch(0.5 0.13 150);
-  --status-warning: oklch(0.55 0.11 75);
+  /*
+   * Amber is shared by status-warning, run-blocked, signal-medium, and tool-mutating. L 0.54 keeps
+   * the weakest light pair (`accent`) at 4.53:1 and its own tint pair at 4.73:1.
+   */
+  --status-warning: oklch(0.54 0.11 75);
   --status-danger: var(--destructive);
 
   /*
@@ -57,7 +137,7 @@
    * would drop the meaning. Pairs are checked against the matching `status-*` ink at >= 4.5:1;
    * they are not general surfaces and never sit under body copy.
    */
-  --status-neutral-surface: oklch(0.965 0 0);
+  --status-neutral-surface: var(--level-2);
   --status-info-surface: oklch(0.965 0.03 250);
   --status-success-surface: oklch(0.965 0.03 150);
   --status-warning-surface: oklch(0.972 0.028 75);
@@ -113,12 +193,16 @@
    * Tool-run vocabulary. Reports the state of an execution step, which is a different axis from
    * the status-* tones that report the state of content. Do not substitute one for the other.
    */
-  --run-pending: oklch(0.6 0.01 250);
+  /*
+   * Low-emphasis run inks are still text: L 0.535 keeps their weakest light pair (`accent`) at
+   * 4.53:1 without moving them out of the cool-neutral family.
+   */
+  --run-pending: oklch(0.535 0.01 250);
   --run-active: oklch(0.52 0.14 250);
   --run-ok: oklch(0.5 0.13 150);
   --run-error: oklch(0.55 0.2 27);
-  --run-blocked: oklch(0.55 0.11 75);
-  --run-skipped: oklch(0.68 0.01 250);
+  --run-blocked: oklch(0.54 0.11 75);
+  --run-skipped: oklch(0.535 0.008 250);
 
   /*
    * Recommendation confidence. A third axis: not how an execution ended (run-*) and not the state
@@ -127,24 +211,25 @@
    * `signal-empty` is the unfilled bar, so a meter always shows its own denominator.
    */
   --signal-high: oklch(0.5 0.13 150);
-  --signal-medium: oklch(0.55 0.11 75);
-  --signal-low: oklch(0.6 0.01 250);
+  --signal-medium: oklch(0.54 0.11 75);
+  --signal-low: oklch(0.535 0.01 250);
   --signal-empty: oklch(0.89 0 0);
 
-  --run-surface: oklch(0.985 0 0);
-  --run-surface-hover: oklch(0.965 0 0);
-  --run-border: oklch(0.9 0 0);
-  --run-rail: oklch(0.88 0 0);
+  --run-surface: var(--level-1);
+  --run-surface-hover: var(--level-2);
+  --run-border: var(--border);
+  --run-rail: var(--border-strong);
 
   /* Tool identity. Mirrors ToolDef.tier and ToolDef.mutating, both already known server-side. */
   --tool-tier-system: oklch(0.5 0.04 220);
   --tool-tier-platform: oklch(0.52 0.08 300);
-  --tool-tier-integration: oklch(0.55 0.08 80);
-  --tool-mutating: oklch(0.55 0.11 75);
+  /* Integration glyphs land on every neutral surface; L 0.535 clears light `accent` at 4.57:1. */
+  --tool-tier-integration: oklch(0.535 0.08 80);
+  --tool-mutating: oklch(0.54 0.11 75);
 
   /* Inspect surface. Drives the tool input/output panes and the JSON viewer. */
-  --code-surface: oklch(0.975 0 0);
-  --code-border: oklch(0.91 0 0);
+  --code-surface: var(--level-2);
+  --code-border: var(--border);
   --code-key: oklch(0.42 0.09 285);
   --code-string: oklch(0.45 0.11 150);
   --code-number: oklch(0.47 0.12 250);
@@ -174,54 +259,86 @@
 }
 
 /*
- * Dark mode is a near-black surface ladder, not a grey one, so lifting a surface reads as
- * elevation rather than as a lighter shade of the same grey: sidebar < background < code <
- * card < popover < accent. Every neutral carries a trace of hue 286 — pure achromatic greys go
- * green under warm displays, and the faint cool cast is what keeps the darks reading as black.
+ * Dark mode ascends the same ramp in the opposite direction: level-0 is the darkest thing on the
+ * screen and each step up is *lighter*, so "elevated" still means "further from the canvas". The
+ * sidebar sits at level-0 and the content at level-1, which is the inverse of light mode — in both
+ * themes the chrome is one step away from the content, so it recedes either way.
+ *
+ * Every neutral carries a trace of hue 248. Pure achromatic near-blacks go green under warm
+ * displays, and the faint cool cast is what keeps the darks reading as black. Light mode does the
+ * opposite and stays at exactly zero chroma, because at those lightnesses any cast reads as a
+ * colour decision rather than as a neutral.
+ *
  * Accents sit above L 0.68 because a chromatic hue that clears AA on a light background is
  * illegible against these surfaces; hue anchors match the light theme, only L and C change.
  */
 [data-theme="dark"] {
-  --background: oklch(0.145 0.002 286);
+  --level-0: oklch(0.139 0.003 248); /* #08090a */
+  --level-1: oklch(0.172 0.003 248); /* #0f1011 */
+  --level-2: oklch(0.195 0.003 248); /* #141516 */
+  --level-3: oklch(0.217 0.003 248); /* #191a1b */
+
+  /*
+   * Dark shadows are heavier in alpha but no larger in spread: on a near-black ground a shadow has
+   * almost no lightness range left to work with, so the separation has to come from the level ramp
+   * and the hairline. The same "resting chrome carries no shadow" rule applies.
+   */
+  --elevation-xs: 0 1px 1px oklch(0 0 0 / 0.2);
+  --elevation-sm: 0 2px 4px oklch(0 0 0 / 0.1);
+  --elevation-md: 0 4px 24px oklch(0 0 0 / 0.2);
+  --elevation-lg: 0 7px 32px oklch(0 0 0 / 0.35);
+
+  --background: var(--level-1);
   --foreground: oklch(0.946 0 0);
-  --card: oklch(0.178 0.002 286);
+  --card: var(--level-2);
   --card-foreground: oklch(0.946 0 0);
-  --popover: oklch(0.197 0.004 286);
+  --popover: var(--level-3);
   --popover-foreground: oklch(0.946 0 0);
 
-  --primary: oklch(0.71 0.16 25);
-  --primary-foreground: oklch(0.145 0.002 286);
+  /*
+   * On a near-black canvas an ink-dark button disappears into its own ground, so the committing
+   * action inverts to near-white. It is still the single lightest fill on the screen — the same
+   * job, read the other way up.
+   */
+  --primary: oklch(0.946 0 0);
+  --primary-foreground: oklch(0.19 0.003 248);
 
-  --secondary: oklch(0.21 0.006 286);
+  --brand: oklch(0.71 0.16 25);
+  --brand-foreground: oklch(0.139 0.003 248);
+  --brand-surface: oklch(0.245 0.035 25);
+
+  --secondary: var(--level-2);
   --secondary-foreground: oklch(0.946 0 0);
-  --muted: oklch(0.21 0.006 286);
-  --muted-foreground: oklch(0.639 0.01 286);
-  --accent: oklch(0.241 0.008 286);
+  --muted: var(--level-2);
+  --muted-foreground: oklch(0.639 0.008 248);
+  --accent: var(--level-3);
   --accent-foreground: oklch(0.97 0 0);
+  --raised: var(--level-3);
 
   --destructive: oklch(0.68 0.18 27);
-  --destructive-foreground: oklch(0.145 0.002 286);
+  --destructive-foreground: oklch(0.139 0.003 248);
 
-  --border: oklch(1 0 0 / 9%);
-  --input: oklch(1 0 0 / 13%);
-  --ring: oklch(0.71 0.16 25);
+  --border: oklch(0.247 0.002 248);
+  --border-strong: oklch(0.343 0.003 248);
+  --input: oklch(0.28 0.003 248);
+  --ring: var(--brand);
 
-  --sidebar: oklch(0.129 0.003 286);
-  --sidebar-foreground: oklch(0.871 0.003 286);
-  --sidebar-primary: oklch(0.71 0.16 25);
-  --sidebar-primary-foreground: oklch(0.145 0.002 286);
-  --sidebar-accent: oklch(0.225 0.006 286);
+  --sidebar: oklch(0.145 0 0);
+  --sidebar-foreground: oklch(0.72 0.004 248);
+  --sidebar-primary: oklch(0.946 0 0);
+  --sidebar-primary-foreground: oklch(0.19 0.003 248);
+  --sidebar-accent: oklch(0.26 0.003 248);
   --sidebar-accent-foreground: oklch(0.97 0 0);
-  --sidebar-border: oklch(1 0 0 / 9%);
-  --sidebar-ring: oklch(0.71 0.16 25);
+  --sidebar-border: oklch(0.247 0.002 248);
+  --sidebar-ring: var(--brand);
 
-  --status-neutral: oklch(0.639 0.01 286);
+  --status-neutral: oklch(0.639 0.008 248);
   --status-info: oklch(0.72 0.14 250);
   --status-success: oklch(0.76 0.15 150);
   --status-warning: oklch(0.8 0.13 75);
   --status-danger: var(--destructive);
 
-  --status-neutral-surface: oklch(0.24 0.004 286);
+  --status-neutral-surface: oklch(0.24 0.004 248);
   --status-info-surface: oklch(0.24 0.05 250);
   --status-success-surface: oklch(0.24 0.05 150);
   --status-warning-surface: oklch(0.24 0.05 75);
@@ -255,35 +372,39 @@
   --heat-ink: oklch(0.8 0.13 75);
   --heat-ink-peak: oklch(0.72 0.17 27);
 
-  --run-pending: oklch(0.58 0.01 286);
+  /*
+   * Low-emphasis run inks are still text: L 0.61 keeps their weakest dark pair (`popover`) at
+   * 4.60:1 without moving them out of the cool-neutral family.
+   */
+  --run-pending: oklch(0.61 0.01 248);
   --run-active: oklch(0.72 0.14 250);
   --run-ok: oklch(0.76 0.15 150);
   --run-error: oklch(0.68 0.18 27);
   --run-blocked: oklch(0.8 0.13 75);
-  --run-skipped: oklch(0.46 0.008 286);
+  --run-skipped: oklch(0.61 0.008 248);
 
   --signal-high: oklch(0.76 0.15 150);
   --signal-medium: oklch(0.8 0.13 75);
-  --signal-low: oklch(0.58 0.01 286);
+  --signal-low: oklch(0.61 0.01 248);
   --signal-empty: oklch(1 0 0 / 14%);
 
-  --run-surface: oklch(0.188 0.004 286);
-  --run-surface-hover: oklch(0.223 0.006 286);
-  --run-border: oklch(1 0 0 / 10%);
-  --run-rail: oklch(1 0 0 / 14%);
+  --run-surface: var(--level-2);
+  --run-surface-hover: var(--level-3);
+  --run-border: var(--border);
+  --run-rail: var(--border-strong);
 
   --tool-tier-system: oklch(0.68 0.05 220);
   --tool-tier-platform: oklch(0.7 0.1 300);
   --tool-tier-integration: oklch(0.74 0.1 80);
   --tool-mutating: oklch(0.8 0.13 75);
 
-  --code-surface: oklch(0.125 0.003 286);
-  --code-border: oklch(1 0 0 / 9%);
+  --code-surface: var(--level-0);
+  --code-border: var(--border);
   --code-key: oklch(0.78 0.13 285);
   --code-string: oklch(0.78 0.13 150);
   --code-number: oklch(0.78 0.13 250);
   --code-boolean: oklch(0.78 0.14 30);
-  --code-null: oklch(0.58 0.008 286);
+  --code-null: oklch(0.58 0.008 248);
   --code-redacted: oklch(0.74 0.08 75);
 
   --diff-added: oklch(0.78 0.14 150);

@@ -26,7 +26,7 @@ export function Response({
   });
 
   return (
-    <div className="text-sm">
+    <div>
       {text ? (
         <MarkdownView
           citations={citations}

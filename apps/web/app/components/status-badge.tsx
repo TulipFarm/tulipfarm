@@ -1,4 +1,4 @@
-import { Circle, CircleAlert, CircleCheck, CircleDot, TriangleAlert } from "lucide-react";
+import { Circle, CircleAlert, CircleCheck, CircleDot, TriangleAlert } from "~/components/icons";
 import { Badge } from "~/components/ui/badge";
 
 export type StatusTone = "neutral" | "info" | "success" | "warning" | "danger";

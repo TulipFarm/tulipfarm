@@ -114,9 +114,7 @@ export function RestrictDialog({
         {groups.map((g) =>
           g.items.length === 0 ? null : (
             <div key={g.heading} className="mb-3">
-              <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                {g.heading}
-              </p>
+              <p className="mb-1 text-xs font-medium text-muted-foreground">{g.heading}</p>
               <ul>
                 {g.items.map((s) => (
                   <li key={key(s)}>
@@ -139,9 +137,7 @@ export function RestrictDialog({
 
       {visibility.readers.length > 0 && (
         <div data-testid="who-can-see" className="mt-2 border-t border-border pt-3">
-          <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Can read this today
-          </p>
+          <p className="mb-1 text-xs font-medium text-muted-foreground">Can read this today</p>
           <ul className="text-muted-foreground">
             {visibility.readers.map((r: NamedReader) => (
               <li key={r.id}>

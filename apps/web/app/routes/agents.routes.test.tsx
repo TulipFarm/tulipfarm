@@ -71,7 +71,7 @@ test("index lists agents with label, domain, and autonomy", () => {
   );
   const card = cardFor("Sprint Planner");
   expect(within(card).getByText("engineering")).toBeInTheDocument();
-  expect(within(card).getByText("supervised")).toBeInTheDocument();
+  expect(within(card).getByText("Supervised")).toBeInTheDocument();
 });
 
 test("index gives every agent a chat shortcut that preselects it", () => {
@@ -86,13 +86,6 @@ test("index states whether each agent can change anything", () => {
   renderWithData(<AgentsIndex />, { agents: [agent, stargazer] });
   expect(within(cardFor("Sprint Planner")).getByText("Reads only")).toBeInTheDocument();
   expect(within(cardFor("GitHub Stargazer Sync")).getByText("Changes data")).toBeInTheDocument();
-});
-
-test("index counts agents, domains, and read-only agents", () => {
-  renderWithData(<AgentsIndex />, { agents: [agent, stargazer] });
-  expect(screen.getByText("agents").previousSibling).toHaveTextContent("2");
-  expect(screen.getByText("domains").previousSibling).toHaveTextContent("2");
-  expect(screen.getByText("read only").previousSibling).toHaveTextContent("1");
 });
 
 test("index search narrows the roster by the record type an agent is pointed at", async () => {

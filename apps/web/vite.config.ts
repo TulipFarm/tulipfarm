@@ -23,6 +23,9 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
+    // Reicon's barrel becomes a 16.6 MB dev prebundle and takes ~18 seconds to optimize. The app
+    // imports its native-ESM per-icon modules, so serving those directly avoids the cold reload.
+    exclude: ["reicon-react"],
     // The TipTap stack reaches the client through the @tulipfarm/editor workspace package, so Vite
     // discovers these only at runtime and re-optimizes mid-session (a one-time page reload when the
     // editor first opens). Pre-bundling them at startup avoids that flash.

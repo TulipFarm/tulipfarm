@@ -1,16 +1,4 @@
 import { useLocation, useNavigate, useNavigation } from "@remix-run/react";
-import {
-  ChevronDown,
-  ChevronsUpDown,
-  LogOut,
-  Menu,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Plus,
-  Star,
-  UserRound,
-  X,
-} from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react";
 import {
   ChatActionsMenu,
@@ -19,10 +7,24 @@ import {
   DeleteChatModal,
   useChatTitleActions,
 } from "~/components/chat/chat-title-actions";
+import {
+  ArrowLeft,
+  ChevronDown,
+  ChevronsUpDown,
+  LogOut,
+  Menu,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Plus,
+  Search,
+  UserRound,
+} from "~/components/icons";
 import { CompanionMobileTrigger } from "~/components/onboarding/companion";
 import { ReportBugButton } from "~/components/report-bug-button";
 import { SidebarCommand } from "~/components/sidebar-command";
 import { ThemeToggle } from "~/components/theme-toggle";
+import { Avatar } from "~/components/ui/avatar";
+import { Input } from "~/components/ui/input";
 import { Link, NavLink } from "~/components/ui/link";
 import { Separator } from "~/components/ui/separator";
 import { Tooltip } from "~/components/ui/tooltip";
@@ -31,34 +33,60 @@ import { useApprovals } from "~/lib/approvals-context";
 import { useConversations } from "~/lib/conversations-context";
 import {
   iconForPath,
+  isSettingsPath,
   type NavGroup,
   type NavigationVisibility,
   titleForPath,
+  visibleFarmItem,
+  visibleSettingsGroups,
   visibleSettingsItem,
   visibleSidebarGroups,
 } from "~/lib/nav";
+import { usePageChromeTitle, useSetActionSlot } from "~/lib/page-chrome-context";
 import { type SidebarCounts, useSidebarCounts } from "~/lib/sidebar-counts";
 import { isBusinessAdmin } from "~/lib/use-session-user";
 import { cn } from "~/lib/utils";
 
-const HEADER_ROW = "flex h-[52px] shrink-0 items-center";
-const GROUP_HEADING =
-  "text-[0.6875rem] font-medium uppercase tracking-[0.14em] text-muted-foreground";
+/**
+ * The height the app header and the sidebar's own header share, so the two line up across the
+ * seam between them. 40px leaves 6px of air around a 28px control, so the chrome reads as an edge
+ * of the frame rather than a band laid on the page.
+ */
+const HEADER_ROW = "flex h-10 shrink-0 items-center";
+/**
+ * A nav group's label. Sentence case at body-adjacent size, not the old micro-label
+ * treatment it replaced: shouting a word the reader is not meant to act on is the clearest case
+ * of chrome competing for attention it has not earned. The disclosure caret beside it already
+ * says the group is a group.
+ */
+const GROUP_HEADING = "text-xs font-medium text-muted-foreground";
 
 /* One row shape for every destination, so a chat in Recent and a page in Build read as peers. */
 /* The transparent border matches New chat's real one, so every icon lands on one vertical spine. */
 const ROW_BASE =
-  "flex min-h-9 items-center gap-2.5 rounded-md border border-transparent px-3 text-sm transition-colors duration-150";
-const ROW_ACTIVE = "bg-sidebar-primary/12 font-medium text-sidebar-primary";
+  "flex min-h-7 items-center gap-2 rounded-md border border-transparent px-2 text-sm transition-colors [&_svg:not([class*='size-'])]:size-3.5";
+/* Ruby marks the current row as *ink*, not as a filled band: a saturated ground down the side
+ * of every screen is the loudest thing in the app, and it reads as an alert rather than as
+ * "you are here". The ground stays neutral and does the same job one step quieter. */
+/**
+ * The row you are on. A raised ground and full-strength ink, not a coloured one.
+ *
+ * This was brand ruby text, and ruby text on a quiet neutral sidebar was the loudest thing on the
+ * screen — the current row was shouting a fact the reader already knew, which is the clearest case
+ * of chrome competing for attention it has not earned. Ruby is still the accent, but it earns its
+ * place on focus rings and links, where it marks something the reader can act on rather than
+ * something already true.
+ */
+const ROW_ACTIVE = "bg-sidebar-accent font-medium text-sidebar-accent-foreground";
 const ROW_IDLE = "text-sidebar-foreground hover:bg-sidebar-accent";
 /* Shown for the row Remix is navigating to but whose loader hasn't resolved: isActive only flips
  * once the destination's data is in, so without this a click gives no feedback until it lands. */
 const ROW_PENDING = "animate-pulse bg-sidebar-accent text-sidebar-foreground";
 /* Collapsed, a row is a square so it matches the avatar chip below it rather than out-widing it. */
-const ROW_NARROW = "size-9 shrink-0 justify-center px-0 mx-auto";
+const ROW_NARROW = "size-7 shrink-0 justify-center px-0 mx-auto";
 /* Trailing controls appear on hover or keyboard focus, and stay put on the row you are on. */
 const ROW_AFFORDANCE =
-  "flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity duration-150 hover:bg-sidebar-border hover:text-foreground focus-visible:opacity-100 group-hover/row:opacity-100 group-focus-within/row:opacity-100";
+  "flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-sidebar-border hover:text-foreground focus-visible:opacity-100 group-hover/row:opacity-100 group-focus-within/row:opacity-100";
 
 /**
  * Remembers which groups a reader closed. A closed group is a preference, not a permission, so it
@@ -113,12 +141,12 @@ function GroupHeading({
           aria-expanded={open}
           className={cn(
             GROUP_HEADING,
-            "flex w-full items-center gap-1 rounded py-1 text-left transition-colors duration-150 hover:text-foreground"
+            "flex w-full items-center gap-1 rounded py-1 text-left transition-colors hover:text-foreground"
           )}
         >
           <ChevronDown
             className={cn(
-              "size-3 shrink-0 transition-transform duration-150",
+              "size-3 shrink-0 transition-transform duration-100",
               open ? "" : "-rotate-90"
             )}
             aria-hidden
@@ -132,28 +160,26 @@ function GroupHeading({
 
 function SidebarHeader({
   collapsed,
+  visibility,
+  onNavigate,
   onToggleCollapsed,
 }: {
   collapsed: boolean;
+  visibility: NavigationVisibility;
+  onNavigate: () => void;
   onToggleCollapsed: () => void;
 }) {
   return (
-    <div
-      className={cn(
-        HEADER_ROW,
-        "gap-2 border-b border-sidebar-border",
-        collapsed ? "justify-center px-2" : "px-3"
-      )}
-    >
+    <div className={cn(HEADER_ROW, "gap-1", collapsed ? "justify-center px-2" : "px-4")}>
       <Link
         to="/"
         aria-label="TulipFarm home"
         className={cn(
-          "flex min-w-0 flex-1 items-center gap-2 rounded-md transition-colors duration-150",
+          "flex min-w-0 flex-1 items-center gap-2 rounded-md transition-colors",
           collapsed ? "justify-center" : "px-1 py-1 hover:bg-sidebar-accent"
         )}
       >
-        <img src="/logo-128.png" alt="" width={24} height={24} className="size-6 shrink-0" />
+        <img src="/logo-128.png" alt="" width={20} height={20} className="size-5 shrink-0" />
         {collapsed ? null : (
           <span className="truncate text-sm font-semibold tracking-tight text-foreground">
             tulipfarm
@@ -161,23 +187,50 @@ function SidebarHeader({
         )}
       </Link>
       {collapsed ? null : (
-        <Tooltip content="Collapse sidebar">
-          <button
-            type="button"
-            aria-label="Collapse sidebar"
-            aria-expanded
-            onClick={onToggleCollapsed}
-            className="hidden size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-sidebar-accent hover:text-foreground lg:flex"
-          >
-            <PanelLeftClose className="size-4" aria-hidden />
-          </button>
-        </Tooltip>
+        <>
+          <SidebarCommand visibility={visibility} collapsed={false} compact />
+          <NewChatButton collapsed={false} compact onNavigate={onNavigate} />
+          <Tooltip content="Collapse sidebar">
+            <button
+              type="button"
+              aria-label="Collapse sidebar"
+              aria-expanded
+              onClick={onToggleCollapsed}
+              className="hidden size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground lg:flex"
+            >
+              <PanelLeftClose className="size-4" aria-hidden />
+            </button>
+          </Tooltip>
+        </>
       )}
     </div>
   );
 }
 
-function NewChatButton({ collapsed, onNavigate }: { collapsed: boolean; onNavigate: () => void }) {
+function SettingsSidebarHeader({ onNavigate }: { onNavigate: () => void }) {
+  return (
+    <div className={cn(HEADER_ROW, "px-3")}>
+      <Link
+        to="/"
+        onClick={onNavigate}
+        className="flex min-h-7 items-center gap-2 rounded-md px-2 text-sm text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+      >
+        <ArrowLeft className="size-3.5" aria-hidden />
+        Back to app
+      </Link>
+    </div>
+  );
+}
+
+function NewChatButton({
+  collapsed,
+  compact = false,
+  onNavigate,
+}: {
+  collapsed: boolean;
+  compact?: boolean;
+  onNavigate: () => void;
+}) {
   const { pathname } = useLocation();
   const { startNewChat } = useConversations();
   const navigate = useNavigate();
@@ -192,19 +245,27 @@ function NewChatButton({ collapsed, onNavigate }: { collapsed: boolean; onNaviga
       aria-label="New chat"
       aria-current={pathname === "/" ? "page" : undefined}
       className={cn(
-        "mt-0 flex min-h-9 items-center rounded-md border border-sidebar-border",
-        "text-sm font-medium transition-colors duration-150",
-        collapsed ? ROW_NARROW : "mx-2 gap-2.5 px-3",
+        "mt-0 flex min-h-7 items-center rounded-md border border-sidebar-border",
+        "text-sm font-medium transition-colors",
+        collapsed
+          ? ROW_NARROW
+          : compact
+            ? "size-7 shrink-0 justify-center border-transparent px-0"
+            : "mx-2 gap-2.5 px-3",
         pathname === "/"
-          ? "border-primary/50 bg-sidebar-accent text-sidebar-accent-foreground"
-          : "bg-background hover:border-primary/50 hover:bg-sidebar-accent"
+          ? compact
+            ? "bg-sidebar-accent text-sidebar-accent-foreground"
+            : "border-primary/50 bg-sidebar-accent text-sidebar-accent-foreground"
+          : compact
+            ? "bg-transparent hover:bg-sidebar-accent"
+            : "bg-background hover:border-primary/50 hover:bg-sidebar-accent"
       )}
     >
       <Plus className="size-4 shrink-0 text-primary" aria-hidden />
-      {collapsed ? null : "New chat"}
+      {collapsed || compact ? null : "New chat"}
     </button>
   );
-  return collapsed ? (
+  return collapsed || compact ? (
     <Tooltip content="New chat" placement="right">
       {button}
     </Tooltip>
@@ -250,14 +311,13 @@ function NavRow({
           ROW_BASE,
           "group",
           collapsed && ROW_NARROW,
-          !collapsed && create && "pr-9",
           isActive ? ROW_ACTIVE : isPending ? ROW_PENDING : ROW_IDLE
         )
       }
     >
       <span className="relative flex shrink-0 items-center">
         <Icon
-          className="size-4 text-muted-foreground group-aria-[current=page]:text-sidebar-primary"
+          className="size-4 text-sidebar-foreground group-aria-[current=page]:text-sidebar-primary"
           aria-hidden
         />
         {collapsed && alerting ? (
@@ -274,8 +334,10 @@ function NavRow({
            * section total is furniture. Only the alarm earns the rule beneath it. */}
           {count ? (
             <span
+              data-sidebar-count
               className={cn(
-                "shrink-0 text-xs tabular-nums",
+                "ms-auto w-5 shrink-0 text-right text-xs leading-none tabular-nums transition-opacity",
+                create && "group-hover/row:opacity-0 group-focus-within/row:opacity-0",
                 alerting
                   ? "text-status-danger underline decoration-status-danger/40 underline-offset-4"
                   : "text-muted-foreground/70"
@@ -303,7 +365,7 @@ function NavRow({
   return (
     <div className="group/row relative">
       {row}
-      <span className="absolute top-1/2 right-1.5 -translate-y-1/2">
+      <span className="absolute top-1/2 right-2 -translate-y-1/2">
         <Tooltip content={create.label} placement="right">
           <Link
             to={create.to}
@@ -341,7 +403,7 @@ function RecentChats({ onNavigate }: { onNavigate: () => void }) {
                   initialTitle={chat.title ?? ""}
                   onSave={(next) => actions.submitRename(chat.id, next)}
                   onCancel={actions.cancelRename}
-                  className="h-9 text-sm"
+                  className="h-7 text-sm"
                 />
               </div>
             ) : (
@@ -349,7 +411,7 @@ function RecentChats({ onNavigate }: { onNavigate: () => void }) {
                 key={chat.id}
                 className={cn(
                   ROW_BASE,
-                  "group pr-1",
+                  "group relative pr-8",
                   chat.id === activeChatId ? ROW_ACTIVE : ROW_IDLE
                 )}
               >
@@ -364,6 +426,8 @@ function RecentChats({ onNavigate }: { onNavigate: () => void }) {
                 <ChatActionsMenu
                   onStartRename={() => actions.startRename(chat.id)}
                   onDelete={() => actions.requestDelete(chat)}
+                  compact
+                  triggerClassName="absolute top-1/2 right-0.5 -translate-y-1/2"
                 />
               </div>
             )
@@ -380,67 +444,6 @@ function RecentChats({ onNavigate }: { onNavigate: () => void }) {
       />
     </div>
   );
-}
-
-/**
- * A one-time ask, dismissed forever on this browser. It is not an upsell — the product is
- * self-hosted and there is nothing to buy — so it must never come back to ask twice.
- */
-const STAR_DISMISSED_KEY = "star-card-dismissed";
-
-function StarCard() {
-  const [dismissed, setDismissed] = useState(() => {
-    try {
-      return localStorage.getItem(STAR_DISMISSED_KEY) === "true";
-    } catch {
-      return true;
-    }
-  });
-  if (dismissed) return null;
-  function dismiss() {
-    try {
-      localStorage.setItem(STAR_DISMISSED_KEY, "true");
-    } catch {
-      /* Refused storage means it returns next visit, which is better than swallowing the click. */
-    }
-    setDismissed(true);
-  }
-  return (
-    <div className="relative mx-2 mb-2 shrink-0 rounded-md border border-sidebar-border bg-background p-3">
-      <button
-        type="button"
-        onClick={dismiss}
-        aria-label="Dismiss the star request"
-        className="absolute top-1.5 right-1.5 flex size-6 items-center justify-center rounded text-muted-foreground transition-colors duration-150 hover:bg-sidebar-accent hover:text-foreground"
-      >
-        <X className="size-3.5" aria-hidden />
-      </button>
-      <p className="pr-6 text-sm font-medium text-foreground">Enjoying TulipFarm?</p>
-      <p className="mt-0.5 text-xs text-muted-foreground">Star the repo so other people find it.</p>
-      <a
-        href="https://github.com/TulipFarm/tulipfarm"
-        target="_blank"
-        rel="noreferrer"
-        className="mt-2.5 flex min-h-8 items-center justify-center gap-1.5 rounded-md bg-foreground px-3 text-xs font-medium text-background transition-opacity duration-150 hover:opacity-90"
-      >
-        <Star className="size-3.5" aria-hidden />
-        Star on GitHub
-      </a>
-    </div>
-  );
-}
-
-function initialsFor(identity: string): string {
-  const local = identity.includes("@") ? (identity.split("@")[0] ?? identity) : identity;
-  const words = local.split(/[\s._+-]+/).filter(Boolean);
-  const initials =
-    words.length > 1
-      ? words
-          .slice(0, 2)
-          .map((word) => word.slice(0, 1))
-          .join("")
-      : local.slice(0, 2);
-  return initials.toUpperCase() || "?";
 }
 
 /*
@@ -498,7 +501,7 @@ function UserCard({
   }
 
   return (
-    <div ref={containerRef} className="relative border-t border-sidebar-border p-2">
+    <div ref={containerRef} className="relative p-2">
       {open ? (
         <div
           id={menuId}
@@ -540,19 +543,14 @@ function UserCard({
         aria-label={`Account menu for ${name}`}
         className={cn(
           "flex w-full items-center rounded-md border border-transparent py-1.5 text-left",
-          "transition-colors duration-150 hover:bg-sidebar-accent",
+          "transition-colors hover:bg-sidebar-accent",
           collapsed ? "justify-center px-0" : "gap-2.5 px-3"
         )}
       >
-        <span
-          className={cn(
-            "flex shrink-0 items-center justify-center rounded-md bg-secondary",
-            "text-[0.625rem] font-semibold text-secondary-foreground",
-            collapsed ? "size-9" : "size-8"
-          )}
-        >
-          {initialsFor(user.name?.trim() || user.email)}
-        </span>
+        <Avatar
+          identity={user.name?.trim() || user.email}
+          className={cn("text-[0.625rem]", collapsed ? "size-9" : "size-8")}
+        />
         {collapsed ? null : (
           <>
             <span className="flex min-w-0 flex-1 flex-col">
@@ -624,6 +622,70 @@ function NavGroupSection({
   );
 }
 
+function SettingsNavigation({
+  groups,
+  onNavigate,
+}: {
+  groups: NavGroup[];
+  onNavigate: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const normalized = query.trim().toLowerCase();
+  const filtered = groups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) =>
+        `${item.label} ${item.description ?? ""}`.toLowerCase().includes(normalized)
+      ),
+    }))
+    .filter((group) => group.items.length > 0);
+
+  return (
+    <>
+      <div className="px-3 pb-2">
+        <div className="relative">
+          <Search
+            className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
+            aria-hidden
+          />
+          <Input
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            aria-label="Search settings"
+            placeholder="Search settings"
+            className="h-7 border-sidebar-border bg-sidebar pl-8 text-sm"
+          />
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto pb-3">
+        <nav aria-label="Settings" className="flex flex-col gap-5 px-3">
+          {filtered.map((group) => (
+            <section key={group.heading} className="flex flex-col gap-1">
+              <h2 className="px-2 py-1 text-xs font-medium text-muted-foreground">
+                {group.heading}
+              </h2>
+              {group.items.map((item) => (
+                <NavRow
+                  key={item.to}
+                  to={item.to}
+                  label={item.label}
+                  icon={item.icon}
+                  collapsed={false}
+                  onNavigate={onNavigate}
+                />
+              ))}
+            </section>
+          ))}
+          {filtered.length === 0 ? (
+            <p className="px-2 text-xs text-muted-foreground">No settings match “{query}”.</p>
+          ) : null}
+        </nav>
+      </div>
+    </>
+  );
+}
+
 export function AppSidebar({
   open = false,
   onClose = () => {},
@@ -642,11 +704,15 @@ export function AppSidebar({
     visiblePaths: user?.navigation?.visiblePaths,
   };
   const groups = visibleSidebarGroups(visibility);
+  const settingsGroups = visibleSettingsGroups(visibility);
+  const farmItem = visibleFarmItem(visibility);
   const settingsItem = visibleSettingsItem(visibility);
   const { count } = useApprovals();
   const { conversations } = useConversations();
   const totals = useSidebarCounts(user?.navigation?.visiblePaths);
   const [persistent, setPersistent] = useState(true);
+  const { pathname } = useLocation();
+  const settingsMode = isSettingsPath(pathname);
 
   useEffect(() => {
     const query = window.matchMedia("(min-width: 1024px)");
@@ -659,7 +725,7 @@ export function AppSidebar({
   /* `inert` also removes hidden mobile nav links from the tab order. */
   const hidden = !persistent && !open;
   // Collapse is a desktop affordance: the mobile drawer has the whole screen and nothing to save.
-  const narrow = collapsed && persistent;
+  const narrow = collapsed && persistent && !settingsMode;
   return (
     <>
       {open ? (
@@ -674,46 +740,71 @@ export function AppSidebar({
         aria-label="Application navigation"
         inert={hidden}
         className={cn(
-          "fixed inset-y-0 left-0 z-50 flex h-full w-64 shrink-0 flex-col",
-          "border-r border-sidebar-border bg-sidebar text-sidebar-foreground",
+          "fixed inset-y-0 left-0 z-50 flex h-full w-62 shrink-0 flex-col",
+          "bg-sidebar text-sidebar-foreground",
           "transition-transform duration-200 lg:static lg:z-auto lg:translate-x-0",
           open ? "translate-x-0" : "-translate-x-full",
           narrow && "lg:w-14"
         )}
       >
-        <SidebarHeader collapsed={narrow} onToggleCollapsed={onToggleCollapsed} />
-        <div className="flex shrink-0 flex-col gap-2 border-b border-sidebar-border py-3">
-          <SidebarCommand visibility={visibility} collapsed={narrow} />
-          <NewChatButton collapsed={narrow} onNavigate={onClose} />
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto py-4">
-          <nav aria-label="Main" className="flex flex-col gap-5 px-2">
-            {groups.map((group, index) => (
-              <NavGroupSection
-                key={group.heading}
-                group={group}
-                approvals={count}
-                totals={totals}
-                chatCount={conversations.length}
-                narrow={narrow}
-                isFirst={index === 0}
+        {settingsMode ? (
+          <SettingsSidebarHeader onNavigate={onClose} />
+        ) : (
+          <SidebarHeader
+            collapsed={narrow}
+            visibility={visibility}
+            onNavigate={onClose}
+            onToggleCollapsed={onToggleCollapsed}
+          />
+        )}
+        {narrow && !settingsMode ? (
+          <div className="flex shrink-0 flex-col gap-1 py-2">
+            <SidebarCommand visibility={visibility} collapsed />
+            <NewChatButton collapsed onNavigate={onClose} />
+          </div>
+        ) : null}
+        {settingsMode ? (
+          <SettingsNavigation groups={settingsGroups} onNavigate={onClose} />
+        ) : (
+          <div className="min-h-0 flex-1 overflow-y-auto py-3">
+            <nav aria-label="Main" className="flex flex-col gap-5 px-3">
+              {groups.map((group, index) => (
+                <NavGroupSection
+                  key={group.heading}
+                  group={group}
+                  approvals={count}
+                  totals={totals}
+                  chatCount={conversations.length}
+                  narrow={narrow}
+                  isFirst={index === 0}
+                  onNavigate={onClose}
+                />
+              ))}
+              {narrow ? null : <RecentChats onNavigate={onClose} />}
+            </nav>
+          </div>
+        )}
+        {!settingsMode && (farmItem || settingsItem) ? (
+          <nav aria-label="Utilities" className="flex shrink-0 flex-col gap-0.5 px-3 py-1">
+            {farmItem ? (
+              <NavRow
+                to={farmItem.to}
+                label={farmItem.label}
+                icon={farmItem.icon}
+                collapsed={narrow}
                 onNavigate={onClose}
               />
-            ))}
-            {narrow ? null : <RecentChats onNavigate={onClose} />}
+            ) : null}
+            {settingsItem ? (
+              <NavRow
+                to={settingsItem.to}
+                label={settingsItem.label}
+                icon={settingsItem.icon}
+                collapsed={narrow}
+                onNavigate={onClose}
+              />
+            ) : null}
           </nav>
-        </div>
-        {narrow ? null : <StarCard />}
-        {settingsItem ? (
-          <div className="shrink-0 border-t border-sidebar-border px-2 py-2">
-            <NavRow
-              to={settingsItem.to}
-              label={settingsItem.label}
-              icon={settingsItem.icon}
-              collapsed={narrow}
-              onNavigate={onClose}
-            />
-          </div>
         ) : null}
         <UserCard user={user} collapsed={narrow} onNavigate={onClose} />
       </aside>
@@ -757,12 +848,17 @@ export function AppShell({ children, user }: { children: ReactNode; user?: Sessi
     () => document.documentElement.dataset.sidebar === "collapsed"
   );
   const { pathname } = useLocation();
+  const settingsMode = isSettingsPath(pathname);
   const openerRef = useRef<HTMLButtonElement>(null);
   const { activeChatTitle, activeChatId } = useConversations();
   const isConversation = pathname === "/" || pathname.startsWith("/chat/");
+  // A page that renders `PageShell` publishes its own name, so a detail route is titled by the
+  // record it is showing rather than by the section it sits under.
+  const publishedTitle = usePageChromeTitle();
+  const setActionSlot = useSetActionSlot();
   const pageTitle = isConversation
     ? (activeChatTitle ?? (pathname === "/" ? "New chat" : "Chat"))
-    : titleForPath(pathname);
+    : (publishedTitle ?? titleForPath(pathname));
   // Only a persisted chat can be renamed or deleted; the new-chat surface has nothing to act on yet.
   const chatTitleSlot =
     isConversation && activeChatId ? (
@@ -800,7 +896,7 @@ export function AppShell({ children, user }: { children: ReactNode; user?: Sessi
         onToggleCollapsed={toggleCollapsed}
         user={user}
       />
-      <div className="flex h-svh min-w-0 flex-1 flex-col">
+      <div className="flex h-svh min-w-0 flex-1 flex-col bg-background lg:my-1 lg:mr-1 lg:h-[calc(100svh-0.5rem)] lg:overflow-hidden lg:rounded-lg lg:border lg:border-border">
         <header
           className={cn(HEADER_ROW, "gap-2 border-b border-border bg-background px-3 sm:px-4")}
         >
@@ -810,14 +906,14 @@ export function AppShell({ children, user }: { children: ReactNode; user?: Sessi
             aria-label="Open navigation"
             aria-expanded={open}
             onClick={() => setOpen(true)}
-            className="flex size-10 shrink-0 items-center justify-center rounded-md transition-colors duration-150 hover:bg-accent lg:hidden"
+            className="flex size-10 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-accent lg:hidden"
           >
             <Menu className="size-5" aria-hidden />
           </button>
           {/* Expanded, the collapse control lives in the sidebar's own header, next to the thing
            * it resizes. Collapsed, that header has room for the mark alone, so the way back out
            * moves here — one control, never two claiming the same job. */}
-          {collapsed ? (
+          {collapsed && !settingsMode ? (
             <>
               <Tooltip content="Expand sidebar">
                 <button
@@ -825,7 +921,7 @@ export function AppShell({ children, user }: { children: ReactNode; user?: Sessi
                   aria-label="Expand sidebar"
                   aria-expanded={false}
                   onClick={toggleCollapsed}
-                  className="hidden size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground lg:flex"
+                  className="hidden size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground lg:flex"
                 >
                   <PanelLeftOpen className="size-4" aria-hidden />
                 </button>
@@ -835,6 +931,9 @@ export function AppShell({ children, user }: { children: ReactNode; user?: Sessi
           ) : null}
           <PageTitle pathname={pathname} pageTitle={pageTitle} titleSlot={chatTitleSlot} />
           <div className="ml-auto flex shrink-0 items-center gap-1 pl-2">
+            {/* Page actions land left of the shell's own controls, so the reader meets what this
+             * page can do before what the app can do. */}
+            <div ref={setActionSlot} className="flex items-center gap-1.5 empty:hidden" />
             <span className="sm:hidden">
               <CompanionMobileTrigger />
             </span>

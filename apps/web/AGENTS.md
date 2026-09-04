@@ -19,7 +19,7 @@ data loading, schema-driven resource UI, and browser rendering of Surface Artifa
 | `app/components/activity/` | Filters, timeline, detail panel for the merged Activity feed. |
 | `app/components/settings/` | Panels for `_app.settings.*`; the Memory panel is read-only by contract. |
 | `app/components/farm/`, `app/lib/farm.ts` | `/farm` tulip canvas, season/legend strips, crop metadata, its parallel Soul read. |
-| `app/components/page-shell.tsx` | The one page frame: breadcrumb, `h1`, meta, actions, width. Every route uses it. |
+| `app/components/page-shell.tsx`, `app/lib/page-chrome-context.tsx` | The one page frame; publishes its title and portals actions into the shell's single chrome bar. |
 | `app/components/app-sidebar.tsx`, `app/components/sidebar-command.tsx` | The shell's one nav column and its ⌘K/`/` destination finder. |
 | `app/components/agents/` | Roster list, row, capability panel, and starters for `/agents`. |
 | `app/components/skills/` | Catalog, reach badge, capability/package/audience panels, marketplace browser. |
@@ -51,18 +51,30 @@ data loading, schema-driven resource UI, and browser rendering of Surface Artifa
   `VITE_API_TOKEN`. Render `ApiError.path` as field errors and map `409` to a concurrency banner.
 - Gate admin UI on `isBusinessAdmin`/`useIsAdmin`, never `user.role` — People & access grants admin
   authority without rewriting the role. Operator items except Inbox are `adminOnly`.
-- Every route renders `PageShell` and names itself once via `title`; never a second `h1`. One
-  column, `max-w-7xl`, on every page — empty, error and 404 included, which is why `EmptyState` is
-  content and `ErrorState` renders the shell. Content caps its measure, never the page. A titled
-  `Panel` names its own `<section>`; do not re-add `aria-labelledby` per feature.
+- Every route renders `PageShell` and names itself once via `title`; the shell publishes that
+  string into the one 40px chrome bar and keeps one `sr-only` `h1`. Actions portal into the bar and
+  must render in place when no slot exists. Never add a second bar or visible `h1`. The workspace
+  is full-width with one shared set of gutters — empty, error and 404 included. Reading text,
+  forms and focused tasks cap their own measure; dense lists, grids and canvases do not. Empty
+  Chat centres its composer; after the first message, the same composer docks below the transcript.
 - Theme is `[data-theme="dark"]` on `<html>`, not shadcn `.dark`; keep the no-flash init script.
-  Keep design neutral, flat, compact, hairline; coral `--primary` is brand only, `--destructive`
-  danger only. `app/components/ui` is app-local shadcn until a second app needs it.
-- The sidebar is one flat list: `SIDEBAR_GROUPS` is what a reader *does*, `SETTINGS_GROUPS` what
-  they *configure* via `/settings`. Never add a rail or second shell column; a section needing
-  hierarchy owns it in-page, as `/knowledge` does. Headings are disclosures persisted under
-  `sidebar-group:<heading>`, and that is the only thing allowed to hide a destination — the 56px
-  width collapse still hides none. `sidebar-command.tsx` searches destinations and open chats only;
+  Keep design neutral, compact, hairline; depth is the four-step `--elevation-*` ladder and never
+  an arbitrary `shadow-[…]`. `--primary` is near-black ink for the one committing action, coral
+  `--brand` is identity only, `--destructive` danger only. `app/components/ui` is app-local shadcn until a second app needs it.
+- Import icons through `components/icons.tsx`; that module must use `reicon-react/icons/*`, never
+  the package barrel, which becomes a 16.6MB Vite dev prebundle. Keep Shiki behind the dynamic
+  `import("./shiki")` boundary so blank Chat never optimizes syntax grammars.
+- The sidebar has two contextual modes: `SIDEBAR_GROUPS` is what a reader *does*;
+  `SETTINGS_GROUPS` replaces it on Settings-owned routes. Settings mode keeps the same shell,
+  adds Back to app and local filtering, and `/settings` redirects to its first visible
+  destination. Never add a rail or second shell column; deeper hierarchy stays in-page.
+  Product headings are disclosures persisted under `sidebar-group:<heading>`, and that is the
+  only thing allowed to hide a product destination — the 56px width collapse still hides none.
+  No promotion or growth card interrupts either navigation mode.
+  On desktop the sidebar is the quiet outer frame around one inset, rounded work surface; Search
+  and New chat are icon controls in its header, Farm is pinned directly above Settings, and
+  divider bands must not split its sections.
+  `sidebar-command.tsx` searches destinations and open chats only;
   a row shows `+` only where `NavItem.create` names a real create route, and the link sits outside
   the `NavLink` so the row's accessible name stays the destination's.
 - Resource list/detail/create/edit are zero-code from JSON Schema; a new field kind means
@@ -85,7 +97,8 @@ data loading, schema-driven resource UI, and browser rendering of Surface Artifa
 - Production serves `build/client/` with a history-API fallback to `/index.html`; `pnpm build`
   writes the `.br`/`.gz` siblings `@fastify/static` serves via `preCompressed`, so order any new
   build step after `remix vite:build`. `HydrateFallback` is prerendered into `index.html` — keep it
-  static (no hooks, data, imports) and rebuild so the CSP hashes stay in sync. Anything editing
+  static (no hooks, data, imports), with only the outer frame and centered TulipFarm mark; never
+  restore fake shell controls. Rebuild so the CSP hashes stay in sync. Anything editing
   `index.html` runs before `generate-csp-header.ts`, whose hashes would otherwise describe a stale
   file and refuse to boot.
 

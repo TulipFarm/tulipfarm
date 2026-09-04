@@ -6,6 +6,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { SessionUser } from "~/lib/api";
 import * as apiLib from "~/lib/api";
 import { ApiError } from "~/lib/api";
+import SettingsIndex from "./_app.settings._index";
 import AppearanceSettings from "./_app.settings.appearance";
 import ProfileSettings from "./_app.settings.profile";
 
@@ -51,12 +52,23 @@ afterEach(() => {
 
 test("shows administered identity as facts, not as editable inputs", () => {
   renderRoute(<ProfileSettings />);
+  expect(screen.getByPlaceholderText("e.g. Muskan Vijayvargiya")).toBeInTheDocument();
   expect(screen.getByText("rhea@acme.dev")).toBeInTheDocument();
   expect(screen.getByText("member")).toBeInTheDocument();
   // Email and role are administered — offering an input the server would refuse is worse than
   // showing the value plainly.
   expect(screen.queryByLabelText(/email/i)).not.toBeInTheDocument();
   expect(screen.queryByLabelText(/role/i)).not.toBeInTheDocument();
+});
+
+test("Settings opens its first visible destination instead of repeating the sidebar as cards", async () => {
+  const Stub = createRemixStub([
+    { path: "/settings", Component: SettingsIndex },
+    { path: "/settings/profile", Component: () => <p>Profile destination</p> },
+  ]);
+  render(<Stub initialEntries={["/settings"]} />);
+
+  expect(await screen.findByText("Profile destination")).toBeInTheDocument();
 });
 
 test("saving an empty display name clears it rather than storing whitespace", async () => {

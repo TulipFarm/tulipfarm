@@ -28,15 +28,15 @@ export const meta: MetaFunction = () => [{ title: "Marketplace · tulipfarm" }];
 function InstallBadge({ installed, updateAvailable }: SkillInstallStatus) {
   if (updateAvailable) {
     return (
-      <span className="shrink-0 rounded-sm border border-primary px-1.5 py-0.5 text-xs uppercase tracking-[0.15em] text-primary">
-        update available
+      <span className="shrink-0 rounded-sm border border-primary px-1.5 py-0.5 text-xs text-primary">
+        Update available
       </span>
     );
   }
   if (installed) {
     return (
-      <span className="shrink-0 rounded-sm border border-border px-1.5 py-0.5 text-xs uppercase tracking-[0.15em] text-muted-foreground">
-        installed ✓
+      <span className="shrink-0 rounded-sm border border-border px-1.5 py-0.5 text-xs text-muted-foreground">
+        Installed ✓
       </span>
     );
   }
@@ -103,7 +103,7 @@ function AuditReportCard({ name, report }: { name: string; report: SkillAuditRep
       <div className="flex items-center gap-2">
         <span className="font-medium text-foreground">{name}</span>
         <span
-          className={`ml-auto rounded-sm border px-1.5 py-0.5 text-xs uppercase tracking-[0.15em] ${RISK_CLASS[report.riskRating]}`}
+          className={`ml-auto rounded-sm border px-1.5 py-0.5 text-xs capitalize ${RISK_CLASS[report.riskRating]}`}
         >
           {report.riskRating} risk
         </span>
@@ -111,8 +111,7 @@ function AuditReportCard({ name, report }: { name: string; report: SkillAuditRep
       <p className="text-muted-foreground">{report.summary}</p>
       {report.toolsReach.length > 0 ? (
         <p className="text-xs text-muted-foreground">
-          <span className="uppercase tracking-[0.15em]">tool reach:</span>{" "}
-          {report.toolsReach.join(", ")}
+          <span>Tool reach:</span> {report.toolsReach.join(", ")}
         </p>
       ) : null}
       {report.findings.length > 0 ? (
@@ -133,10 +132,8 @@ function AuditReportCard({ name, report }: { name: string; report: SkillAuditRep
       )}
       <div className="flex flex-col gap-2 border-t border-border pt-3">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs uppercase tracking-[0.15em] text-foreground">
-            Deterministic pre-scan
-          </span>
-          <span className="rounded-sm border border-border px-1.5 py-0.5 text-xs uppercase tracking-[0.15em] text-muted-foreground">
+          <span className="text-xs text-foreground">Deterministic pre-scan</span>
+          <span className="rounded-sm border border-border px-1.5 py-0.5 text-xs capitalize text-muted-foreground">
             {report.deterministicScan.verdict}
           </span>
           <span className="text-xs text-muted-foreground">
@@ -149,7 +146,7 @@ function AuditReportCard({ name, report }: { name: string; report: SkillAuditRep
         {guardGroups.size > 0 ? (
           [...guardGroups].map(([category, findings]) => (
             <section key={category} className="flex flex-col gap-1">
-              <h3 className="text-xs uppercase tracking-[0.15em] text-foreground">{category}</h3>
+              <h3 className="text-xs capitalize text-foreground">{category}</h3>
               <ul className="flex flex-col gap-2">
                 {findings.map((finding) => (
                   <li
@@ -158,7 +155,7 @@ function AuditReportCard({ name, report }: { name: string; report: SkillAuditRep
                   >
                     <div className="flex flex-wrap items-center gap-2">
                       <span
-                        className={`rounded-sm border px-1.5 py-0.5 uppercase tracking-[0.15em] ${GUARD_SEVERITY_CLASS[finding.severity]}`}
+                        className={`rounded-sm border px-1.5 py-0.5 capitalize ${GUARD_SEVERITY_CLASS[finding.severity]}`}
                       >
                         {finding.severity}
                       </span>
@@ -417,7 +414,7 @@ export default function SkillsMarketplace() {
                         <InstallBadge installed={s.installed} updateAvailable={s.updateAvailable} />
                         {reports[skillRowKey(s)] ? (
                           <span
-                            className={`rounded-sm border px-1.5 py-0.5 text-xs uppercase tracking-[0.15em] ${RISK_CLASS[reports[skillRowKey(s)].riskRating]}`}
+                            className={`rounded-sm border px-1.5 py-0.5 text-xs capitalize ${RISK_CLASS[reports[skillRowKey(s)].riskRating]}`}
                           >
                             {reports[skillRowKey(s)].riskRating}
                           </span>
@@ -466,8 +463,8 @@ export default function SkillsMarketplace() {
                   <ul className="flex flex-col gap-1 text-xs">
                     {severeSelected.map(({ skillName, finding }) => (
                       <li key={`${skillName}-${finding.patternId}-${finding.file}-${finding.line}`}>
-                        <span className="uppercase tracking-[0.15em]">{finding.severity}</span>{" "}
-                        {skillName}: {finding.description} ({finding.file}:{finding.line})
+                        <span className="capitalize">{finding.severity}</span> {skillName}:{" "}
+                        {finding.description} ({finding.file}:{finding.line})
                       </li>
                     ))}
                   </ul>

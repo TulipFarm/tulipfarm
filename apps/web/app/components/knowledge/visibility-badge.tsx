@@ -1,4 +1,4 @@
-import { Globe, Lock, LockKeyhole } from "lucide-react";
+import { Globe, Lock, LockKeyhole } from "~/components/icons";
 
 /** What a reader needs to tell apart before they act on a Page. */
 export type Visibility = "business" | "own" | "inherited";

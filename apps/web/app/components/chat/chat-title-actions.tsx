@@ -1,7 +1,7 @@
 import { CHAT_TITLE_MAX_LENGTH } from "@tulipfarm/schema/chat-limits";
-import { MoreHorizontal, Pencil, Star, Trash2 } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { MoreHorizontal, Pencil, Star, Trash2 } from "~/components/icons";
 import { ConfirmModal } from "~/components/ui/modal";
 import { Tooltip } from "~/components/ui/tooltip";
 import type { ConversationSummary } from "~/lib/conversations";
@@ -66,7 +66,7 @@ export function ChatTitleInput({
         aria-describedby={showCounter ? counterId : undefined}
         maxLength={CHAT_TITLE_MAX_LENGTH}
         className={cn(
-          "h-10 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25",
+          "h-7 pointer-coarse:h-8 min-w-0 flex-1 rounded-md border border-input bg-background px-2.5 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25",
           className
         )}
       />
@@ -94,6 +94,7 @@ export function ChatTitleInput({
  * The hover reveal is owned here, not by callers: touch devices have no hover, so below `sm` the
  * trigger stays visible at a 44px target. A caller that supplied its own reveal could silently make
  * rename and delete unreachable on a phone, which is exactly what happened once already.
+ * `compact` is reserved for dense navigation rows; it follows the app's 28px/32px pointer rhythm.
  * `triggerClassName` is for positioning only.
  */
 export function ChatActionsMenu({
@@ -101,6 +102,7 @@ export function ChatActionsMenu({
   onToggleStar,
   onStartRename,
   onDelete,
+  compact = false,
   triggerClassName,
   align = "right",
 }: {
@@ -108,6 +110,7 @@ export function ChatActionsMenu({
   onToggleStar?: () => void;
   onStartRename: () => void;
   onDelete: () => void;
+  compact?: boolean;
   /** Positioning only — sizing and reveal are fixed, see above. */
   triggerClassName?: string;
   align?: "left" | "right";
@@ -171,7 +174,10 @@ export function ChatActionsMenu({
         aria-label="Chat actions"
         onClick={toggle}
         className={cn(
-          "inline-flex size-11 shrink-0 items-center justify-center rounded-md text-muted-foreground transition hover:bg-accent hover:text-foreground active:scale-95 sm:size-9 sm:opacity-0 sm:focus-visible:opacity-100 sm:group-hover:opacity-100",
+          "inline-flex shrink-0 items-center justify-center rounded-md text-muted-foreground transition hover:bg-accent hover:text-foreground active:scale-95",
+          compact
+            ? "size-7 opacity-0 pointer-coarse:opacity-100 focus-visible:opacity-100 group-hover:opacity-100"
+            : "size-11 sm:size-9 sm:opacity-0 sm:focus-visible:opacity-100 sm:group-hover:opacity-100",
           triggerClassName,
           open && "opacity-100"
         )}
@@ -372,7 +378,7 @@ export function ChatCrumbTitle({ chatId, title }: { chatId: string; title: strin
           onClick={() => actions.startRename(chatId)}
           aria-current="page"
           aria-label={`Rename this chat: ${display}`}
-          className="min-w-0 truncate rounded-md px-1 text-left text-sm font-medium text-foreground transition-colors duration-150 hover:bg-accent"
+          className="min-w-0 truncate rounded-md px-1 text-left text-sm font-medium text-foreground transition-colors hover:bg-accent"
         >
           {display}
         </button>

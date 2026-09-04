@@ -147,7 +147,7 @@ export default function HomePage() {
             >
               <a
                 href="#how-it-works"
-                className="group min-h-11 content-center font-medium text-fd-primary transition-colors duration-150 hover:text-fd-primary/80 active:text-fd-primary/70"
+                className="group min-h-11 content-center font-medium text-fd-primary transition-colors hover:text-fd-primary/80 active:text-fd-primary/70"
               >
                 see how it works{" "}
                 <span
@@ -159,7 +159,7 @@ export default function HomePage() {
               </a>
               <Link
                 href="/docs"
-                className="group min-h-11 content-center text-fd-muted-foreground transition-colors duration-150 hover:text-fd-foreground"
+                className="group min-h-11 content-center text-fd-muted-foreground transition-colors hover:text-fd-foreground"
               >
                 read the docs{" "}
                 <span
@@ -391,7 +391,7 @@ export default function HomePage() {
               <Link
                 key={link.href}
                 href={link.href}
-                className="min-h-11 content-center transition-colors duration-150 hover:text-fd-foreground"
+                className="min-h-11 content-center transition-colors hover:text-fd-foreground"
               >
                 {link.label}
               </Link>
@@ -400,13 +400,13 @@ export default function HomePage() {
               href={`https://github.com/${gitConfig.user}/${gitConfig.repo}`}
               rel="noreferrer noopener"
               target="_blank"
-              className="min-h-11 content-center transition-colors duration-150 hover:text-fd-foreground"
+              className="min-h-11 content-center transition-colors hover:text-fd-foreground"
             >
               github ↗
             </a>
             <a
               href="/llms.txt"
-              className="min-h-11 content-center transition-colors duration-150 hover:text-fd-foreground"
+              className="min-h-11 content-center transition-colors hover:text-fd-foreground"
             >
               llms.txt
             </a>

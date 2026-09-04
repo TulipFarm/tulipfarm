@@ -1,4 +1,4 @@
-import { ChevronRight } from "lucide-react";
+import { ChevronRight } from "~/components/icons";
 import { StatusBadge, type StatusTone } from "~/components/status-badge";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
@@ -32,11 +32,9 @@ function Frame({ muted, children }: { muted?: boolean; children: React.ReactNode
     <li
       className={cn(
         "relative flex flex-col overflow-hidden rounded-lg border border-border bg-card",
-        "transition-[border-color,box-shadow] duration-150",
+        "transition-[border-color,box-shadow]",
         "has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring",
-        muted
-          ? "bg-muted/20"
-          : "hover:border-foreground/20 hover:shadow-[0_1px_3px_rgb(0_0_0/0.06)]"
+        muted ? "bg-muted/20 shadow-none" : "hover:border-foreground/15 hover:shadow-sm"
       )}
     >
       {children}
@@ -74,9 +72,9 @@ function Head({ integration }: { integration: IntegrationSummary }) {
 /** A fact about the integration, sized to read as metadata rather than as content. */
 function Meta({ children }: { children: React.ReactNode }) {
   return (
-    <span className="inline-flex h-[18px] shrink-0 items-center rounded bg-muted px-1.5 text-[10px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">
+    <Badge caps className="capitalize">
       {children}
-    </span>
+    </Badge>
   );
 }
 
@@ -88,7 +86,7 @@ function Body({ integration }: { integration: IntegrationSummary }) {
       <Head integration={integration} />
       <p
         className={cn(
-          "line-clamp-2 text-[13px] leading-[1.5]",
+          "line-clamp-2 text-base leading-[1.45]",
           integration.description ? "text-muted-foreground" : "text-muted-foreground/70"
         )}
       >
@@ -157,8 +155,8 @@ function PreviewLink({ integration, label }: { integration: IntegrationSummary; 
       preventScrollReset
       aria-label={`${label} for ${displayName(integration)}`}
       className={cn(
-        "flex items-center gap-1 rounded-sm font-medium text-foreground",
-        "transition-colors duration-150 hover:text-primary",
+        "flex items-center gap-1 rounded-md font-medium text-foreground",
+        "transition-colors hover:text-muted-foreground",
         // The card carries the focus ring, because the stretched hit area is the card.
         "focus-visible:outline-none",
         "after:absolute after:inset-0 after:content-['']"

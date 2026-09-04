@@ -3,13 +3,13 @@ import {
   BookOpen,
   Box,
   Cog,
-  type LucideIcon,
+  type Icon,
   MessageSquare,
   Plug,
   Sparkles,
   Workflow,
   Wrench,
-} from "lucide-react";
+} from "~/components/icons";
 import type { ActivityEntry } from "~/lib/activity-feed";
 
 /*
@@ -19,7 +19,7 @@ import type { ActivityEntry } from "~/lib/activity-feed";
 
 const FALLBACK_ICON = Box;
 
-const CATEGORY_ICONS: Record<string, LucideIcon> = {
+const CATEGORY_ICONS: Record<string, Icon> = {
   run: Activity,
   resource: Box,
   chat: MessageSquare,
@@ -31,7 +31,7 @@ const CATEGORY_ICONS: Record<string, LucideIcon> = {
   soul: Sparkles,
 };
 
-export function entryIcon(entry: ActivityEntry): LucideIcon {
+export function entryIcon(entry: ActivityEntry): Icon {
   return CATEGORY_ICONS[entry.category] ?? FALLBACK_ICON;
 }
 

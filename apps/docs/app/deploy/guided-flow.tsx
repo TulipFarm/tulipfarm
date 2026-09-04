@@ -22,10 +22,7 @@ function UnverifiedNotice({ target }: { target: WizardTarget }) {
       <span className="text-fd-foreground">Not verified end to end.</span> These steps come from the
       same manifest as every other target, but we do not boot {target.title} in CI, so nothing here
       is proven by a build. Read them as a starting point and expect to adapt.{" "}
-      <a
-        href={OPEN_PROMPT}
-        className="text-fd-primary transition-colors duration-150 hover:text-fd-primary/80"
-      >
+      <a href={OPEN_PROMPT} className="text-fd-primary transition-colors hover:text-fd-primary/80">
         The single-file prompt →
       </a>{" "}
       carries the fuller configuration surface.
@@ -185,7 +182,7 @@ export function StepsStage({
           <h3 className="text-lg font-bold tracking-tight">{target.title}</h3>
           <Link
             href={targetDocHref(target)}
-            className="min-h-11 content-center text-xs text-fd-muted-foreground transition-colors duration-150 hover:text-fd-primary"
+            className="min-h-11 content-center text-xs text-fd-muted-foreground transition-colors hover:text-fd-primary"
           >
             the full written guide →
           </Link>
@@ -220,7 +217,7 @@ export function StepsStage({
                   <a
                     href={artifactHref(artifact)}
                     download
-                    className="flex min-h-11 items-center rounded-sm border border-fd-border px-4 text-xs transition-colors duration-150 hover:border-fd-primary hover:text-fd-primary"
+                    className="flex min-h-11 items-center rounded-sm border border-fd-border px-4 text-xs transition-colors hover:border-fd-primary hover:text-fd-primary"
                   >
                     {artifactName(artifact)} ↓
                   </a>

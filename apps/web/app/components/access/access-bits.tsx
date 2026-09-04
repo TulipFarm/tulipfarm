@@ -3,8 +3,9 @@
  * debugging a policy is never blocked by copy written for an owner.
  */
 
-import { ChevronDown, ShieldCheck, ShieldOff, ShieldQuestion, User } from "lucide-react";
 import type * as React from "react";
+import { ChevronDown, ShieldCheck, ShieldOff, ShieldQuestion, User } from "~/components/icons";
+import { Avatar } from "~/components/ui/avatar";
 import { Badge } from "~/components/ui/badge";
 import type { Party } from "~/lib/access-directory";
 import { describeGrant, type RoleSummary } from "~/lib/access-language";
@@ -12,20 +13,21 @@ import type { AuthzGrant } from "~/lib/authz";
 import { cn } from "~/lib/utils";
 
 export function PartyAvatar({ party, className }: { party: Party; className?: string }) {
-  return (
-    <span
-      aria-hidden
-      className={cn(
-        "flex size-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold",
-        party.isPerson
-          ? "bg-primary/10 text-primary"
-          : "border border-border bg-muted text-muted-foreground",
-        className
-      )}
-    >
-      {party.isPerson ? party.initials : <User className="size-4" />}
-    </span>
-  );
+  if (!party.isPerson) {
+    return (
+      <span
+        aria-hidden
+        className={cn(
+          "flex size-8 shrink-0 items-center justify-center rounded-full border border-border bg-muted text-muted-foreground",
+          className
+        )}
+      >
+        <User className="size-4" />
+      </span>
+    );
+  }
+
+  return <Avatar identity={party.name || party.initials} className={className} />;
 }
 
 export function PartyLine({ party }: { party: Party }) {

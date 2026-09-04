@@ -1,5 +1,5 @@
-import { Pencil } from "lucide-react";
 import { useEffect, useId, useState } from "react";
+import { Pencil } from "~/components/icons";
 import {
   capabilityLabels,
   type EmbeddingRow,

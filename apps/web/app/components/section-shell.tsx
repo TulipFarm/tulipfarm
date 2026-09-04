@@ -1,5 +1,6 @@
 import { Outlet, useLocation } from "@remix-run/react";
 import { sectionForPath } from "~/lib/nav";
+import { cn } from "~/lib/utils";
 import { PAGE_COLUMN, PAGE_SCROLLER, PageShell } from "./page-shell";
 
 /**
@@ -12,22 +13,28 @@ import { PAGE_COLUMN, PAGE_SCROLLER, PageShell } from "./page-shell";
  * The description belongs to the section's own page, not to whatever is drilled into from it: on a
  * detail page it would describe the list the reader has already left.
  */
-export function SectionShell() {
+export function SectionShell({ contentClassName }: { contentClassName?: string } = {}) {
   const { pathname } = useLocation();
   const section = sectionForPath(pathname);
 
   if (section && pathname === section.to) {
     return (
-      <PageShell title={section.label} description={section.description}>
+      <PageShell
+        title={section.label}
+        description={section.description}
+        contentClassName={contentClassName}
+      >
         <Outlet />
       </PageShell>
     );
   }
 
   return (
-    <div className={PAGE_SCROLLER}>
-      <div className={PAGE_COLUMN}>
-        <Outlet />
+    <div className="flex h-full min-h-0 flex-col">
+      <div className={PAGE_SCROLLER}>
+        <div className={cn(PAGE_COLUMN, contentClassName)}>
+          <Outlet />
+        </div>
       </div>
     </div>
   );

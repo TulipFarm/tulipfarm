@@ -1,4 +1,4 @@
-import { ShieldCheck, TriangleAlert } from "lucide-react";
+import { ShieldCheck, TriangleAlert } from "~/components/icons";
 import { Badge } from "~/components/ui/badge";
 import { Panel } from "~/components/ui/panel";
 import type { DryRunResult } from "~/lib/routines/dry-run";

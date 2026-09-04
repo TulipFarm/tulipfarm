@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { highlight } from "./shiki";
 
 function readTheme(): "light" | "dark" {
   if (typeof document === "undefined") return "light";
@@ -29,7 +28,8 @@ export function useHighlighted(code: string | null, lang: string): string | null
       return;
     }
     let cancelled = false;
-    highlight(code, lang, theme)
+    import("./shiki")
+      .then(({ highlight }) => highlight(code, lang, theme))
       .then((out) => {
         if (!cancelled) setHtml(out);
       })

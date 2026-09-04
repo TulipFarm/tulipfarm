@@ -117,7 +117,7 @@ export function HistoryDrawer({
                   {it.label} · {formatWhen(it.when)}
                 </button>
                 {it.isCurrent ? (
-                  <span className="rounded-sm bg-muted px-1.5 py-0.5 text-[0.6rem] font-medium uppercase tracking-[0.15em] text-muted-foreground">
+                  <span className="rounded-sm bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
                     current
                   </span>
                 ) : confirmId === it.id ? (

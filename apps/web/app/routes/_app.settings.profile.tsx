@@ -1,11 +1,10 @@
 import { useRevalidator } from "@remix-run/react";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useId, useState } from "react";
 import { FormStatus } from "~/components/form-status";
 import { MemoryDocumentPanel } from "~/components/settings/memory-document-panel";
 import { Button } from "~/components/ui/button";
-import { Field, ReadonlyField } from "~/components/ui/field";
 import { Input } from "~/components/ui/input";
-import { Panel } from "~/components/ui/panel";
+import { Panel, SettingRow } from "~/components/ui/panel";
 import { ApiError, updateProfile } from "~/lib/api";
 import { useSessionUser } from "~/lib/use-session-user";
 
@@ -14,6 +13,7 @@ const MAX_NAME_CHARS = 80;
 /** Email and Role are administered elsewhere, so this page shows why they are fixed. */
 export default function ProfileSettings() {
   const user = useSessionUser();
+  const nameId = useId();
   const revalidator = useRevalidator();
   const [name, setName] = useState(user?.name ?? "");
   const [busy, setBusy] = useState(false);
@@ -44,8 +44,9 @@ export default function ProfileSettings() {
   return (
     <div className="space-y-6">
       <Panel
-        title="Display name"
-        description="Used wherever you are shown to other people. Leave it empty to be shown by email."
+        title="Profile"
+        description="Your display name is yours to change. Email, role and status are administered for you — ask an admin if either needs to change."
+        flush
         footer={
           <>
             <span className="text-xs text-muted-foreground">
@@ -62,37 +63,53 @@ export default function ProfileSettings() {
           </>
         }
       >
-        <form id="profile-form" onSubmit={onSubmit} className="space-y-4">
-          {error ? <FormStatus tone="error">{error}</FormStatus> : null}
-          {saved && !dirty ? <FormStatus tone="success">Display name updated.</FormStatus> : null}
+        <form id="profile-form" onSubmit={onSubmit} className="px-4">
+          {error || (saved && !dirty) ? (
+            <div className="pt-4">
+              {error ? <FormStatus tone="error">{error}</FormStatus> : null}
+              {saved && !dirty ? (
+                <FormStatus tone="success">Display name updated.</FormStatus>
+              ) : null}
+            </div>
+          ) : null}
 
-          <Field
+          <SettingRow
             label="Name"
-            help="Your real name or whatever you go by."
-            error={tooLong ? `Names are limited to ${MAX_NAME_CHARS} characters.` : undefined}
+            description="Used wherever you are shown to other people. Leave it empty to be shown by email."
+            htmlFor={nameId}
           >
             <Input
+              id={nameId}
               value={name}
               onChange={(e) => setName(e.target.value)}
               autoComplete="name"
-              placeholder="e.g. Priya Raghunathan"
+              placeholder="e.g. Muskan Vijayvargiya"
+              aria-invalid={tooLong || undefined}
+              aria-describedby={tooLong ? `${nameId}-error` : undefined}
             />
-          </Field>
-        </form>
-      </Panel>
+            {tooLong ? (
+              <p id={`${nameId}-error`} className="mt-1.5 text-xs text-destructive">
+                Names are limited to {MAX_NAME_CHARS} characters.
+              </p>
+            ) : null}
+          </SettingRow>
 
-      <Panel
-        title="Account"
-        description="Administered for you. Ask an admin if either needs to change."
-      >
-        <dl className="grid gap-4 sm:grid-cols-2">
-          <ReadonlyField label="Email">{user?.email ?? "-"}</ReadonlyField>
-          <ReadonlyField label="Role">{user?.role ?? "-"}</ReadonlyField>
-          <ReadonlyField label="Status">{user?.status ?? "-"}</ReadonlyField>
-          <ReadonlyField label="User ID">
-            <span className="font-mono text-xs">{user?.id ?? "-"}</span>
-          </ReadonlyField>
-        </dl>
+          <SettingRow label="Email" description="The address you sign in with.">
+            <p className="text-sm text-foreground">{user?.email ?? "-"}</p>
+          </SettingRow>
+
+          <SettingRow label="Role" description="What the business has granted you.">
+            <p className="text-sm text-foreground">{user?.role ?? "-"}</p>
+          </SettingRow>
+
+          <SettingRow label="Status" description="Whether this account may sign in.">
+            <p className="text-sm text-foreground">{user?.status ?? "-"}</p>
+          </SettingRow>
+
+          <SettingRow label="User ID" description="Quote it when reporting a problem.">
+            <p className="font-mono text-xs break-all text-foreground">{user?.id ?? "-"}</p>
+          </SettingRow>
+        </form>
       </Panel>
 
       <MemoryDocumentPanel />

@@ -1,5 +1,5 @@
-import { ChevronRight, Plus } from "lucide-react";
 import { useId } from "react";
+import { ChevronRight, Plus } from "~/components/icons";
 import {
   EFFORTS,
   type EmbeddingRow,
@@ -126,14 +126,14 @@ export function AdvancedPanel({
   return (
     <details
       open={defaultOpen}
-      className="group overflow-hidden rounded-md border border-border bg-card"
+      className="group overflow-hidden rounded-lg border border-border bg-card"
     >
       {/* The default marker is suppressed so the chevron can carry the state; without one this
           reads as a dead panel rather than something that opens. */}
       <summary className="flex cursor-pointer list-none items-start gap-2 px-4 py-3 transition-colors hover:bg-accent/50 focus-visible:-outline-offset-2">
         <ChevronRight
           aria-hidden
-          className="mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform duration-150 group-open:rotate-90"
+          className="mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform duration-100 group-open:rotate-90"
         />
         <span className="min-w-0">
           <h2 className="text-sm font-semibold text-foreground">Advanced</h2>

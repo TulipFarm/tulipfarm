@@ -6,8 +6,8 @@ import {
   useRouteError,
   useSearchParams,
 } from "@remix-run/react";
-import { ArrowLeft, ExternalLink, MoreHorizontal, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { ArrowLeft, ExternalLink, MoreHorizontal, Trash2 } from "~/components/icons";
 import { IntegrationAuthFlow, startHandoff } from "~/components/integrations/auth-flow";
 import { ComingSoonState } from "~/components/integrations/coming-soon-state";
 import { GitHubPersonalAccount } from "~/components/integrations/github-personal-account";

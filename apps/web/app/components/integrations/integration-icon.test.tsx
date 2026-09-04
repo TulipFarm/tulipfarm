@@ -52,8 +52,10 @@ describe("IntegrationIcon", () => {
     const tile = container.firstElementChild as HTMLElement;
     // One correction, not two: the tile is light in both themes, so the dark-canvas variant of the
     // brand colour would only ever wash the mark out.
-    expect(tile.style.getPropertyValue("--brand")).toBe("oklch(0.206 0.0016 17.3)");
-    expect(container.querySelector("svg")?.getAttribute("class")).toContain("text-[var(--brand)]");
+    expect(tile.style.getPropertyValue("--integration-ink")).toBe("oklch(0.206 0.0016 17.3)");
+    expect(container.querySelector("svg")?.getAttribute("class")).toContain(
+      "text-[var(--integration-ink)]"
+    );
   });
 
   test("leaves a monogram neutral, because a two-letter word is not a logo", () => {
@@ -70,7 +72,7 @@ describe("IntegrationIcon", () => {
     // would be inventing a brand.
     const { container } = render(<IntegrationIcon label="Acme CRM" />);
     const tile = container.firstElementChild as HTMLElement;
-    expect(tile.style.getPropertyValue("--brand")).toBe("");
+    expect(tile.style.getPropertyValue("--integration-ink")).toBe("");
     expect(screen.getByText("AC")).toBeInTheDocument();
   });
 
@@ -94,7 +96,7 @@ describe("IntegrationIcon", () => {
     ].map((r) => (r.container.firstElementChild as HTMLElement).className);
     for (const tile of tiles) {
       expect(tile).toContain("bg-white");
-      expect(tile).not.toContain("--brand)_12%");
+      expect(tile).not.toContain("--integration-ink)_12%");
     }
   });
 
@@ -104,6 +106,8 @@ describe("IntegrationIcon", () => {
       <IntegrationIcon label="GitHub" iconSlug="github" iconPath="M12 0z" iconColor="181717" />
     );
     expect(container.querySelector("path")?.getAttribute("d")).toBe("M12 0z");
-    expect(container.querySelector("svg")?.getAttribute("class")).toContain("text-[var(--brand)]");
+    expect(container.querySelector("svg")?.getAttribute("class")).toContain(
+      "text-[var(--integration-ink)]"
+    );
   });
 });

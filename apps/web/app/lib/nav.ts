@@ -9,10 +9,10 @@ import {
   Flower2,
   Gauge,
   History,
+  type Icon,
   Inbox,
   Info,
   KeyRound,
-  type LucideIcon,
   MessageSquare,
   Palette,
   Plug,
@@ -24,12 +24,12 @@ import {
   UserRound,
   Users,
   Workflow,
-} from "lucide-react";
+} from "~/components/icons";
 
 export type NavItem = {
   to: string;
   label: string;
-  icon: LucideIcon;
+  icon: Icon;
   badge?: boolean;
   devOnly?: boolean;
   /** Reachable regardless of `visiblePaths`. Chat is the product's floor, never a grant. */ always?: boolean;
@@ -55,9 +55,11 @@ export type NavigationVisibility = {
   visiblePaths?: readonly string[];
 };
 
+export const FARM_ITEM: NavItem = { to: "/farm", label: "Farm", icon: Flower2 };
+
 /**
- * The whole sidebar, in render order. One flat list under three headings, so what a reader can
- * reach is what they can see — there is no second navigation layer to open.
+ * The grouped working destinations, in render order. Farm and Settings stay in the fixed utility
+ * area below these groups; there is no second navigation layer to open.
  *
  * The split is by verb, not by subject: this list is what you *do and watch*. Anything you
  * *configure* lives in `SETTINGS_GROUPS`, because a sidebar carrying every configuration page
@@ -76,7 +78,6 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
         description:
           "One timeline of everything that happened here: Runs, Records, Chats, and Jobs.",
       },
-      { to: "/farm", label: "Farm", icon: Flower2 },
     ],
   },
   {
@@ -242,6 +243,15 @@ export function visibleSettingsGroups(visibility: NavigationVisibility): NavGrou
   return filterGroups(SETTINGS_GROUPS, visibility);
 }
 
+export function isSettingsPath(pathname: string): boolean {
+  return (
+    pathname === "/settings" ||
+    SETTINGS_GROUPS.some((group) =>
+      group.items.some((item) => pathname === item.to || pathname.startsWith(`${item.to}/`))
+    )
+  );
+}
+
 export function visibleSidebarGroups(visibility: NavigationVisibility): NavGroup[] {
   return filterGroups(SIDEBAR_GROUPS, visibility);
 }
@@ -253,7 +263,11 @@ export function visibleSettingsItem(visibility: NavigationVisibility): NavItem |
   return visibleSettingsGroups(visibility).length > 0 ? SETTINGS_ITEM : undefined;
 }
 
-const PAGE_META: Array<{ prefix: string; label: string; icon: LucideIcon }> = [
+export function visibleFarmItem(visibility: NavigationVisibility): NavItem | undefined {
+  return isVisible(FARM_ITEM, visibility) ? FARM_ITEM : undefined;
+}
+
+const PAGE_META: Array<{ prefix: string; label: string; icon: Icon }> = [
   { prefix: "/farm", label: "Farm", icon: Flower2 },
   { prefix: "/business/activities", label: "Activity", icon: History },
   { prefix: "/business/observability", label: "Observability", icon: Gauge },
@@ -294,12 +308,13 @@ export function titleForPath(pathname: string): string {
   return pageForPath(pathname)?.label ?? "Chat";
 }
 
-export function iconForPath(pathname: string): LucideIcon {
+export function iconForPath(pathname: string): Icon {
   return pageForPath(pathname)?.icon ?? MessageSquare;
 }
 
 const ALL_ITEMS: NavItem[] = [
   SETTINGS_ITEM,
+  FARM_ITEM,
   ...[...SIDEBAR_GROUPS, ...SETTINGS_GROUPS].flatMap((group) => group.items),
 ];
 

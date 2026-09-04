@@ -4,8 +4,8 @@ import {
   slackMessageRenderer,
   slackModalRenderer,
 } from "@tulipfarm/surface-slack";
-import { Check, Copy, MessageSquare, Terminal } from "lucide-react";
 import { useMemo, useState } from "react";
+import { Check, Copy, MessageSquare, Terminal } from "~/components/icons";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { copyText } from "~/lib/clipboard";
