@@ -525,7 +525,7 @@ jobs:
             package="${report#packages/}"
             package="${package%%/*}"
             cp "$report" "coverage-blobs/package-${package}.json"
-          done < <(find packages -path '*/.vitest-reports/blob.json' -type f)
+          done < <(find packages -path '*/.vitest/blob/blob.json' -type f)
       - name: Job summary
         if: always()
         env:
@@ -595,7 +595,7 @@ jobs:
             app="${report#apps/}"
             app="${app%%/*}"
             cp "$report" "coverage-blobs/app-${app}.json"
-          done < <(find apps -path '*/.vitest-reports/blob.json' -type f)
+          done < <(find apps -path '*/.vitest/blob/blob.json' -type f)
       - name: Job summary
         if: always()
         env:
