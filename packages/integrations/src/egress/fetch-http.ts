@@ -1,4 +1,4 @@
-import { Agent } from "undici";
+import { Agent, fetch as undiciFetch } from "undici";
 import type { IntegrationHttpResponse } from "../http";
 import type { EgressHttpPort, EgressHttpRequest } from "./openapi-adapter";
 
@@ -24,22 +24,26 @@ const MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
  */
 const DEFAULT_USER_AGENT = "TulipFarm (+https://github.com/maddhruv/tulipfarm)";
 
+type EgressFetch = (input: string, init: RequestInit) => Promise<Response>;
+
 export interface EgressHttpOptions {
-  readonly fetch?: typeof globalThis.fetch;
+  readonly fetch?: EgressFetch;
   readonly userAgent?: string;
   readonly timeoutMs?: number;
   readonly maxResponseBytes?: number;
 }
 
 export class FetchEgressHttp implements EgressHttpPort {
-  private readonly fetchImpl: typeof globalThis.fetch;
+  private readonly fetchImpl: EgressFetch;
   private readonly timeoutMs: number;
   private readonly maxResponseBytes: number;
   private readonly userAgent: string;
 
   constructor(options: EgressHttpOptions = {}) {
     this.userAgent = options.userAgent ?? DEFAULT_USER_AGENT;
-    this.fetchImpl = options.fetch ?? globalThis.fetch;
+    this.fetchImpl =
+      options.fetch ??
+      ((input, init) => undiciFetch(input, init as Parameters<typeof undiciFetch>[1]));
     this.timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
     this.maxResponseBytes = options.maxResponseBytes ?? MAX_RESPONSE_BYTES;
   }

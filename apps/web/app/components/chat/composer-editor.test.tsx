@@ -34,13 +34,20 @@ vi.mock("@tiptap/react", () => ({
 vi.mock("@tiptap/react/menus", () => ({ BubbleMenu: () => null }));
 vi.mock("@tiptap/starter-kit", () => ({ default: { configure: () => ({}) } }));
 vi.mock("@tiptap/extension-placeholder", () => ({ default: { configure: () => ({}) } }));
-const linkExtendConfig = vi.hoisted(() => vi.fn());
-const linkConfigure = vi.hoisted(() => vi.fn().mockReturnValue({}));
+const linkConfig = vi.hoisted<{
+  extend?: { inclusive: () => boolean };
+  configure?: { autolink?: boolean };
+}>(() => ({}));
 vi.mock("@tiptap/extension-link", () => ({
   default: {
     extend: (config: { inclusive: () => boolean }) => {
-      linkExtendConfig(config);
-      return { configure: linkConfigure };
+      linkConfig.extend = config;
+      return {
+        configure: (options: { autolink?: boolean }) => {
+          linkConfig.configure = options;
+          return {};
+        },
+      };
     },
   },
 }));
@@ -91,9 +98,8 @@ test("the Link mark does not extend when typing at its edge", () => {
   // `inclusive` defaults to `autolink`'s value (true) in @tiptap/extension-link — left at that
   // default, typing at a link's boundary extends the mark onto the new text instead of ending it
   // (#603). It is a Mark config field, not a `LinkOptions` field, so it must come from `.extend()`.
-  expect(linkExtendConfig).toHaveBeenCalledTimes(1);
-  expect(linkExtendConfig.mock.calls[0][0].inclusive()).toBe(false);
-  expect(linkConfigure).toHaveBeenCalledWith(expect.objectContaining({ autolink: true }));
+  expect(linkConfig.extend?.inclusive()).toBe(false);
+  expect(linkConfig.configure).toEqual(expect.objectContaining({ autolink: true }));
 });
 
 test("Model Selector sets the per-message effort preset override on send", async () => {

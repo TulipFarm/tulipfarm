@@ -2,7 +2,7 @@ node_modules/
 dist/
 build/
 coverage/
-.vitest-reports/
+.vitest/
 .turbo/
 *.local
 .DS_Store
